@@ -110,9 +110,7 @@ async function main() {
 
   // Create streams to communicate with the agent
   const input = Writable.toWeb(agentProcess.stdin!);
-  const output = Readable.toWeb(
-    agentProcess.stdout!,
-  ) as ReadableStream<Uint8Array>;
+  const output = Readable.toWeb(agentProcess.stdout!) as ReadableStream<Uint8Array>;
 
   // Create the client connection
   const client = new ExampleClient();
@@ -131,9 +129,7 @@ async function main() {
       },
     });
 
-    console.log(
-      `✅ Connected to agent (protocol v${initResult.protocolVersion})`,
-    );
+    console.log(`✅ Connected to agent (protocol v${initResult.protocolVersion})`);
 
     // Create a new session
     const sessionResult = await connection.newSession({

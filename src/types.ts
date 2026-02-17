@@ -18,11 +18,7 @@ export type ExitCode = (typeof EXIT_CODES)[keyof typeof EXIT_CODES];
 export const OUTPUT_FORMATS = ["text", "json", "quiet"] as const;
 export type OutputFormat = (typeof OUTPUT_FORMATS)[number];
 
-export const PERMISSION_MODES = [
-  "approve-all",
-  "approve-reads",
-  "deny-all",
-] as const;
+export const PERMISSION_MODES = ["approve-all", "approve-reads", "deny-all"] as const;
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
 export type PermissionStats = {

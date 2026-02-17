@@ -49,7 +49,7 @@ const TOP_LEVEL_VERBS = new Set(["prompt", "exec", "sessions", "help"]);
 function parseOutputFormat(value: string): OutputFormat {
   if (!OUTPUT_FORMATS.includes(value as OutputFormat)) {
     throw new InvalidArgumentError(
-      `Invalid format \"${value}\". Expected one of: ${OUTPUT_FORMATS.join(", ")}`,
+      `Invalid format "${value}". Expected one of: ${OUTPUT_FORMATS.join(", ")}`,
     );
   }
   return value as OutputFormat;
@@ -207,10 +207,7 @@ function resolveAgentInvocation(
   };
 }
 
-function printSessionsByFormat(
-  sessions: SessionRecord[],
-  format: OutputFormat,
-): void {
+function printSessionsByFormat(sessions: SessionRecord[], format: OutputFormat): void {
   if (format === "json") {
     process.stdout.write(`${JSON.stringify(sessions)}\n`);
     return;
@@ -235,10 +232,7 @@ function printSessionsByFormat(
   }
 }
 
-function printClosedSessionByFormat(
-  record: SessionRecord,
-  format: OutputFormat,
-): void {
+function printClosedSessionByFormat(record: SessionRecord, format: OutputFormat): void {
   if (format === "json") {
     process.stdout.write(
       `${JSON.stringify({
@@ -287,7 +281,7 @@ async function handlePrompt(
     });
 
     if (globalFlags.verbose) {
-      const scope = flags.session ? `named session \"${flags.session}\"` : "cwd session";
+      const scope = flags.session ? `named session "${flags.session}"` : "cwd session";
       process.stderr.write(`[acpx] created ${scope}: ${record.id}\n`);
     }
   }
@@ -361,13 +355,11 @@ async function handleSessionsClose(
   if (!record) {
     if (sessionName) {
       throw new Error(
-        `No named session \"${sessionName}\" for cwd ${agent.cwd} and agent ${agent.agentName}`,
+        `No named session "${sessionName}" for cwd ${agent.cwd} and agent ${agent.agentName}`,
       );
     }
 
-    throw new Error(
-      `No cwd session for ${agent.cwd} and agent ${agent.agentName}`,
-    );
+    throw new Error(`No cwd session for ${agent.cwd} and agent ${agent.agentName}`);
   }
 
   const closed = await closeSession(record.id);
@@ -559,30 +551,31 @@ async function main(): Promise<void> {
     registerAgentCommand(program, scan.token);
   }
 
-  program
-    .argument("[prompt...]", "Prompt text")
-    .action(async function (this: Command, promptParts: string[]) {
-      if (promptParts.length === 0 && process.stdin.isTTY) {
-        this.outputHelp();
-        return;
-      }
+  program.argument("[prompt...]", "Prompt text").action(async function (
+    this: Command,
+    promptParts: string[],
+  ) {
+    if (promptParts.length === 0 && process.stdin.isTTY) {
+      this.outputHelp();
+      return;
+    }
 
-      await handlePrompt(undefined, promptParts, {}, this);
-    });
+    await handlePrompt(undefined, promptParts, {}, this);
+  });
 
   program.addHelpText(
     "after",
     `
 Examples:
-  acpx codex \"fix the tests\"
-  acpx codex prompt \"fix the tests\"
-  acpx codex exec \"what does this repo do\"
-  acpx codex -s backend \"fix the API\"
+  acpx codex "fix the tests"
+  acpx codex prompt "fix the tests"
+  acpx codex exec "what does this repo do"
+  acpx codex -s backend "fix the API"
   acpx codex sessions
   acpx codex sessions close backend
-  acpx claude \"refactor auth\"
-  acpx gemini \"add logging\"
-  acpx --agent ./my-custom-server \"do something\"`,
+  acpx claude "refactor auth"
+  acpx gemini "add logging"
+  acpx --agent ./my-custom-server "do something"`,
   );
 
   program.exitOverride((error) => {

@@ -69,14 +69,19 @@ function resolveToolKindForPermission(
   params: RequestPermissionRequest,
   toolName: string | undefined,
 ): string | undefined {
-  const toolCall = params.toolCall as unknown as { kind?: unknown; title?: unknown } | undefined;
-  const kindRaw = typeof toolCall?.kind === "string" ? toolCall.kind.trim().toLowerCase() : "";
+  const toolCall = params.toolCall as unknown as
+    | { kind?: unknown; title?: unknown }
+    | undefined;
+  const kindRaw =
+    typeof toolCall?.kind === "string" ? toolCall.kind.trim().toLowerCase() : "";
   if (kindRaw) {
     return kindRaw;
   }
   const name =
     toolName ??
-    parseToolNameFromTitle(typeof toolCall?.title === "string" ? toolCall.title : undefined);
+    parseToolNameFromTitle(
+      typeof toolCall?.title === "string" ? toolCall.title : undefined,
+    );
   if (!name) {
     return undefined;
   }
@@ -98,7 +103,11 @@ function resolveToolKindForPermission(
   if (normalized.includes("fetch") || normalized.includes("http")) {
     return "fetch";
   }
-  if (normalized.includes("write") || normalized.includes("edit") || normalized.includes("patch")) {
+  if (
+    normalized.includes("write") ||
+    normalized.includes("edit") ||
+    normalized.includes("patch")
+  ) {
     return "edit";
   }
   if (normalized.includes("delete") || normalized.includes("remove")) {
@@ -107,19 +116,30 @@ function resolveToolKindForPermission(
   if (normalized.includes("move") || normalized.includes("rename")) {
     return "move";
   }
-  if (normalized.includes("exec") || normalized.includes("run") || normalized.includes("bash")) {
+  if (
+    normalized.includes("exec") ||
+    normalized.includes("run") ||
+    normalized.includes("bash")
+  ) {
     return "execute";
   }
   return "other";
 }
 
-function resolveToolNameForPermission(params: RequestPermissionRequest): string | undefined {
+function resolveToolNameForPermission(
+  params: RequestPermissionRequest,
+): string | undefined {
   const toolCall = params.toolCall;
   const toolMeta = asRecord(toolCall?._meta);
   const rawInput = asRecord(toolCall?.rawInput);
 
   const fromMeta = readFirstStringValue(toolMeta, ["toolName", "tool_name", "name"]);
-  const fromRawInput = readFirstStringValue(rawInput, ["tool", "toolName", "tool_name", "name"]);
+  const fromRawInput = readFirstStringValue(rawInput, [
+    "tool",
+    "toolName",
+    "tool_name",
+    "name",
+  ]);
   const fromTitle = parseToolNameFromTitle(toolCall?.title);
   return normalizeToolName(fromMeta ?? fromRawInput ?? fromTitle ?? "");
 }
@@ -145,9 +165,14 @@ function cancelledPermission(): RequestPermissionResponse {
   return { outcome: { outcome: "cancelled" } };
 }
 
-function promptUserPermission(toolName: string | undefined, toolTitle?: string): Promise<boolean> {
+function promptUserPermission(
+  toolName: string | undefined,
+  toolTitle?: string,
+): Promise<boolean> {
   if (!process.stdin.isTTY || !process.stderr.isTTY) {
-    console.error(`[permission denied] ${toolName ?? "unknown"}: non-interactive terminal`);
+    console.error(
+      `[permission denied] ${toolName ?? "unknown"}: non-interactive terminal`,
+    );
     return Promise.resolve(false);
   }
   return new Promise((resolve) => {
@@ -179,7 +204,9 @@ function promptUserPermission(toolName: string | undefined, toolTitle?: string):
       : (toolName ?? "unknown tool");
     rl.question(`\n[permission] Allow "${label}"? (y/N) `, (answer) => {
       const approved = answer.trim().toLowerCase() === "y";
-      console.error(`[permission ${approved ? "approved" : "denied"}] ${toolName ?? "unknown"}`);
+      console.error(
+        `[permission ${approved ? "approved" : "denied"}] ${toolName ?? "unknown"}`,
+      );
       finish(approved);
     });
   });
@@ -317,17 +344,23 @@ function printSessionUpdate(notification: SessionNotification): void {
   }
 }
 
-export async function createAcpClient(opts: AcpClientOptions = {}): Promise<AcpClientHandle> {
+export async function createAcpClient(
+  opts: AcpClientOptions = {},
+): Promise<AcpClientHandle> {
   const cwd = opts.cwd ?? process.cwd();
   const verbose = Boolean(opts.verbose);
-  const log = verbose ? (msg: string) => console.error(`[acp-client] ${msg}`) : () => {};
+  const log = verbose
+    ? (msg: string) => console.error(`[acp-client] ${msg}`)
+    : () => {};
 
   ensureOpenClawCliOnPath();
   const serverArgs = buildServerArgs(opts);
 
   const entryPath = resolveSelfEntryPath();
-  const serverCommand = opts.serverCommand ?? (entryPath ? process.execPath : "openclaw");
-  const effectiveArgs = opts.serverCommand || !entryPath ? serverArgs : [entryPath, ...serverArgs];
+  const serverCommand =
+    opts.serverCommand ?? (entryPath ? process.execPath : "openclaw");
+  const effectiveArgs =
+    opts.serverCommand || !entryPath ? serverArgs : [entryPath, ...serverArgs];
 
   log(`spawning: ${serverCommand} ${effectiveArgs.join(" ")}`);
 
@@ -379,7 +412,9 @@ export async function createAcpClient(opts: AcpClientOptions = {}): Promise<AcpC
   };
 }
 
-export async function runAcpClientInteractive(opts: AcpClientOptions = {}): Promise<void> {
+export async function runAcpClientInteractive(
+  opts: AcpClientOptions = {},
+): Promise<void> {
   const { client, agent, sessionId } = await createAcpClient(opts);
 
   const rl = readline.createInterface({

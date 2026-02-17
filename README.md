@@ -1,138 +1,59 @@
 # acpx
 
-Headless CLI client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com) — talk to coding agents from the command line.
+Headless CLI client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com).
 
-```bash
-# Conversational prompt (persistent session, auto-resume by agent+cwd)
-acpx codex "fix the tests"
-
-# Explicit prompt verb (same behavior)
-acpx codex prompt "fix the tests"
-
-# One-shot execution (no saved session)
-acpx codex exec "what does this repo do"
-
-# Named session
-acpx codex -s backend "fix the API"
-
-# Session management
-acpx codex sessions
-acpx codex sessions close
-acpx codex sessions close backend
-```
-
-## Why?
-
-ACP adapters exist for every major coding agent ([Codex](https://github.com/zed-industries/codex-acp), [Claude Code](https://github.com/zed-industries/claude-code-acp), [Gemini CLI](https://github.com/google-gemini/gemini-cli), etc.) but every ACP client is a GUI app or editor plugin.
-
-`acpx` is the missing piece: a simple CLI that lets **agents talk to agents** (or humans script agents) over structured ACP instead of scraping terminal output.
+`acpx` is built for scriptable, session-aware agent usage from the terminal.
 
 ## Install
 
 ```bash
-npm install -g acpx
-# or
-npx acpx codex "hello"
+npm i -g acpx
 ```
 
-### Prerequisites
+`acpx` manages persistent sessions, so prefer a global install. Avoid `npx acpx ...` for normal use.
 
-You need an ACP-compatible agent installed:
+## Agent prerequisites
+
+Install at least one ACP-compatible agent adapter:
 
 ```bash
-# Codex ACP adapter
 npm install -g @zed-industries/codex-acp
-
-# Claude ACP adapter
 npm install -g @zed-industries/claude-agent-acp
-
-# Gemini CLI (native ACP support)
 npm install -g @google/gemini-cli
 ```
 
-## Usage
-
-### Command grammar
+## Core usage
 
 ```bash
-acpx <agent> [prompt] <text>
-acpx <agent> exec <text>
-acpx <agent> sessions [list|close]
+acpx codex 'fix the tests'               # implicit prompt, auto-resume session
+acpx codex prompt 'fix the tests'        # same, explicit
+acpx codex exec 'what does this repo do' # one-shot, no session
+acpx codex -s backend 'fix the API'      # named session
+acpx codex sessions                      # list sessions
+acpx claude 'refactor auth'              # different agent
 ```
 
-`prompt` is the default verb, so `acpx codex "..."` and `acpx codex prompt "..."` are equivalent.
+## Session behavior
 
-### Built-in agent registry
+- Default mode is conversational: prompts use a saved session scoped to `(agent command, cwd)`.
+- `-s <name>` switches to a named session scoped to `(agent command, cwd, name)`.
+- `exec` is fire-and-forget: temporary session, prompt once, then discard.
 
-Friendly names are resolved automatically:
+Session files are stored in `~/.acpx/sessions/`.
 
-- `codex` -> `npx @zed-industries/codex-acp`
-- `claude` -> `npx @zed-industries/claude-agent-acp`
-- `gemini` -> `gemini`
+## Built-in agents and custom servers
 
-Unknown agent names are treated as raw commands. You can also use the explicit escape hatch:
+Built-ins:
+
+- `codex`
+- `claude`
+- `gemini`
+
+Use `--agent` as an escape hatch for custom ACP servers:
 
 ```bash
-acpx --agent ./my-custom-server "do something"
+acpx --agent ./my-custom-acp-server 'do something'
 ```
-
-### Session behavior
-
-- `prompt` always uses a saved session.
-- Sessions auto-resume by `(agent command, cwd)`.
-- `-s, --session <name>` uses a named session for that `(agent command, cwd)`.
-- `exec` is fire-and-forget (temporary session, not saved).
-
-Examples:
-
-```bash
-acpx codex "fix the tests"
-acpx codex -s backend "fix the API"
-acpx claude "refactor auth"
-acpx gemini "add logging"
-```
-
-### Default agent shortcuts
-
-If agent is omitted, default agent is `codex`:
-
-```bash
-acpx prompt "fix tests"
-acpx exec "summarize this repo"
-acpx sessions
-```
-
-### Global options (before agent name)
-
-```text
---agent <command>     Raw ACP agent command (escape hatch)
---cwd <dir>           Working directory (default: .)
---approve-all         Auto-approve all permission requests
---approve-reads       Auto-approve reads/searches, prompt for writes
---deny-all            Deny all permission requests
---format <fmt>        Output format: text (default), json, quiet
---timeout <seconds>   Maximum time to wait for agent response
---verbose             Enable debug output on stderr
-```
-
-### Output formats
-
-| Format | Flag | Description |
-|--------|------|-------------|
-| text | `--format text` | Human-readable streaming (default) |
-| json | `--format json` | Structured ndjson for machines |
-| quiet | `--format quiet` | Final text output only |
-
-## How it works
-
-```
-┌─────────┐     stdio/ndjson     ┌──────────────┐     wraps      ┌─────────┐
-│  acpx   │ ◄──────────────────► │  ACP adapter │ ◄───────────► │  Agent  │
-│ (client)│     ACP protocol     │ (codex-acp)  │               │ (Codex) │
-└─────────┘                      └──────────────┘               └─────────┘
-```
-
-acpx spawns the ACP adapter as a child process, communicates over JSON-RPC/ndjson over stdio, and streams structured events (tool calls, text, permissions).
 
 ## License
 

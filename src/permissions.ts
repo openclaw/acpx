@@ -77,9 +77,7 @@ function isAutoApprovedReadKind(kind: ToolKind | undefined): boolean {
   return kind === "read" || kind === "search";
 }
 
-async function promptForPermission(
-  params: RequestPermissionRequest,
-): Promise<boolean> {
+async function promptForPermission(params: RequestPermissionRequest): Promise<boolean> {
   if (!process.stdin.isTTY || !process.stderr.isTTY) {
     return false;
   }
@@ -160,10 +158,7 @@ export function classifyPermissionDecision(
     return "cancelled";
   }
 
-  if (
-    selectedOption.kind === "allow_once" ||
-    selectedOption.kind === "allow_always"
-  ) {
+  if (selectedOption.kind === "allow_once" || selectedOption.kind === "allow_always") {
     return "approved";
   }
 

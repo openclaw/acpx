@@ -66,10 +66,7 @@ async function ensureSessionDir(): Promise<void> {
   await fs.mkdir(SESSION_BASE_DIR, { recursive: true });
 }
 
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs?: number,
-): Promise<T> {
+async function withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
   if (!timeoutMs || timeoutMs <= 0) {
     return promise;
   }
@@ -309,10 +306,7 @@ function isProcessAlive(pid: number | undefined): boolean {
   }
 }
 
-async function waitForProcessExit(
-  pid: number,
-  timeoutMs: number,
-): Promise<boolean> {
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + Math.max(0, timeoutMs);
   while (Date.now() <= deadline) {
     if (!isProcessAlive(pid)) {

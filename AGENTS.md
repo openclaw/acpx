@@ -63,13 +63,14 @@ Built-in friendly names map to commands:
 
 ```ts
 const AGENT_REGISTRY: Record<string, string> = {
-  codex:  'npx @zed-industries/codex-acp',
-  claude: 'npx @zed-industries/claude-agent-acp',
-  gemini: 'gemini',
+  codex: "npx @zed-industries/codex-acp",
+  claude: "npx @zed-industries/claude-agent-acp",
+  gemini: "gemini",
 };
 ```
 
 Rules:
+
 - Known names resolve automatically.
 - Unknown names are treated as raw commands.
 - Escape hatch: `--agent <command>` sets a raw command explicitly.
@@ -140,14 +141,14 @@ Refactored the auth module to use async/await. All 42 tests passing.
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0    | Success |
-| 1    | Agent/protocol error |
-| 2    | CLI usage error |
-| 3    | Timeout |
+| Code | Meaning                                  |
+| ---- | ---------------------------------------- |
+| 0    | Success                                  |
+| 1    | Agent/protocol error                     |
+| 2    | CLI usage error                          |
+| 3    | Timeout                                  |
 | 4    | Permission denied (all options rejected) |
-| 130  | Interrupted (Ctrl+C) |
+| 130  | Interrupted (Ctrl+C)                     |
 
 ## Tech Stack
 

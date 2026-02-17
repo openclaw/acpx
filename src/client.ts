@@ -22,11 +22,7 @@ import {
   type WriteTextFileRequest,
   type WriteTextFileResponse,
 } from "@agentclientprotocol/sdk";
-import {
-  spawn,
-  type ChildProcess,
-  type ChildProcessByStdio,
-} from "node:child_process";
+import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -145,9 +141,7 @@ function asAbsoluteCwd(cwd: string): string {
   return path.resolve(cwd);
 }
 
-function toEnvObject(
-  env: CreateTerminalRequest["env"],
-): NodeJS.ProcessEnv | undefined {
+function toEnvObject(env: CreateTerminalRequest["env"]): NodeJS.ProcessEnv | undefined {
   if (!env || env.length === 0) {
     return undefined;
   }
@@ -488,7 +482,8 @@ export class AcpClient {
       throw new Error(`Unknown terminal: ${params.terminalId}`);
     }
 
-    const hasExitStatus = terminal.exitCode !== undefined || terminal.signal !== undefined;
+    const hasExitStatus =
+      terminal.exitCode !== undefined || terminal.signal !== undefined;
 
     return {
       output: terminal.output.toString("utf8"),
