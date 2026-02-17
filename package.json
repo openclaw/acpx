@@ -30,7 +30,7 @@
     "ai"
   ],
   "author": "Janitr AI",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/janitrai/acpx.git"
