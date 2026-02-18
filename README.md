@@ -54,7 +54,7 @@ I want you to use acpx to run coding agents over the Agent Client Protocol
 (ACP) instead of scraping PTY sessions. Please do the following:
 
 1. Install acpx (global is recommended for frequent use, but npx works fine too):
-   npm i -g acpx
+   npm i -g acpx@latest
 
    Or, run without installing:
    npx acpx@latest
@@ -79,10 +79,16 @@ instead of spawning raw terminal sessions. For example:
 ## Install
 
 ```bash
-npm i -g acpx
+npm i -g acpx@latest
 ```
 
-`acpx` manages persistent sessions in `~/.acpx/`, so global install is a little faster and easier to debug, but `npx acpx@latest ...` works fine if you don't want a global install.
+Or run without installing:
+
+```bash
+npx acpx@latest codex "fix the tests"
+```
+
+Session state lives in `~/.acpx/` either way. Global install is a little faster, but `npx acpx@latest` works fine.
 
 ## Agent prerequisites
 
