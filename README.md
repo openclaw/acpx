@@ -4,7 +4,15 @@ Your agents love acpx! 🎉 They hate having to scrape characters from a PTY ses
 
 `acpx` is a headless CLI client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com), so AI agents and orchestrators can talk to coding agents over a structured protocol instead of PTY scraping.
 
-One command surface for Codex, Claude, Gemini, OpenCode, Pi, or custom ACP servers — with persistent sessions, prompt queueing, and structured output. Built for agent-to-agent communication over the command line.
+One command surface for Codex, Claude, Gemini, OpenCode, Pi, or custom ACP servers. Built for agent-to-agent communication over the command line.
+
+- 🔄 **Persistent sessions** — multi-turn conversations that survive across invocations, scoped per repo
+- 📛 **Named sessions** — run parallel workstreams in the same repo (`-s backend`, `-s frontend`)
+- 📬 **Prompt queueing** — submit prompts while one is already running, they execute in order
+- 🔥 **Fire-and-forget** — `--no-wait` queues a prompt and returns immediately
+- 📡 **Structured output** — typed ACP messages (thinking, tool calls, diffs) instead of ANSI scraping
+- 🔌 **Any ACP agent** — built-in registry + `--agent` escape hatch for custom servers
+- ⚡ **One-shot mode** — `exec` for stateless fire-and-forget tasks
 
 ```bash
 $ acpx codex "find the flaky test and fix it"
