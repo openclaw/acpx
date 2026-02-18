@@ -276,12 +276,12 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
-function normalizeQueueOwnerTtlMs(ttlMs: number | undefined): number {
+export function normalizeQueueOwnerTtlMs(ttlMs: number | undefined): number {
   if (ttlMs == null) {
     return DEFAULT_QUEUE_OWNER_TTL_MS;
   }
 
-  if (!Number.isFinite(ttlMs) || ttlMs < 0) {
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
     return DEFAULT_QUEUE_OWNER_TTL_MS;
   }
 

@@ -2,6 +2,7 @@
 
 import { Command, CommanderError, InvalidArgumentError } from "commander";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { findSkillsRoot, maybeHandleSkillflag } from "skillflag/dist/index.js";
 import {
   DEFAULT_AGENT_NAME,
@@ -71,7 +72,7 @@ function parseTimeoutSeconds(value: string): number {
   return Math.round(parsed * 1000);
 }
 
-function parseTtlSeconds(value: string): number {
+export function parseTtlSeconds(value: string): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
     throw new InvalidArgumentError("TTL must be a non-negative number of seconds");
@@ -172,7 +173,7 @@ function addGlobalFlags(command: Command): Command {
     )
     .option(
       "--ttl <seconds>",
-      "Queue owner idle TTL before shutdown (0 disables TTL)",
+      "Queue owner idle TTL before shutdown (0 uses default TTL)",
       parseTtlSeconds,
       DEFAULT_QUEUE_OWNER_TTL_MS,
     )
@@ -670,8 +671,8 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
   return { hasAgentOverride };
 }
 
-async function main(): Promise<void> {
-  await maybeHandleSkillflag(process.argv, {
+export async function main(argv: string[] = process.argv): Promise<void> {
+  await maybeHandleSkillflag(argv, {
     skillsRoot: findSkillsRoot(import.meta.url),
     includeBundledSkill: false,
   });
@@ -692,7 +693,7 @@ async function main(): Promise<void> {
 
   registerDefaultCommands(program);
 
-  const scan = detectAgentToken(process.argv.slice(2));
+  const scan = detectAgentToken(argv.slice(2));
   if (
     !scan.hasAgentOverride &&
     scan.token &&
@@ -737,7 +738,7 @@ Examples:
   });
 
   try {
-    await program.parseAsync(process.argv);
+    await program.parseAsync(argv);
   } catch (error) {
     if (error instanceof CommanderError) {
       if (
@@ -764,4 +765,19 @@ Examples:
   }
 }
 
-void main();
+function isCliEntrypoint(argv: string[]): boolean {
+  const entry = argv[1];
+  if (!entry) {
+    return false;
+  }
+
+  try {
+    return import.meta.url === pathToFileURL(entry).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isCliEntrypoint(process.argv)) {
+  void main(process.argv);
+}
