@@ -2,6 +2,7 @@
 
 import { Command, CommanderError, InvalidArgumentError } from "commander";
 import path from "node:path";
+import { findSkillsRoot, maybeHandleSkillflag } from "skillflag/dist/index.js";
 import {
   DEFAULT_AGENT_NAME,
   listBuiltInAgents,
@@ -562,6 +563,11 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
 }
 
 async function main(): Promise<void> {
+  await maybeHandleSkillflag(process.argv, {
+    skillsRoot: findSkillsRoot(import.meta.url),
+    includeBundledSkill: false,
+  });
+
   const program = new Command();
 
   program

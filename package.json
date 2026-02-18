@@ -5,6 +5,7 @@
   "type": "module",
   "files": [
     "dist",
+    "skills",
     "README.md",
     "LICENSE"
   ],
@@ -44,7 +45,8 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",
-    "commander": "^13.0.0"
+    "commander": "^13.0.0",
+    "skillflag": "^0.1.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
