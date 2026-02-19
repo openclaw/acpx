@@ -11,6 +11,10 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { AcpClient, type AgentLifecycleSnapshot } from "./client.js";
+import {
+  QueueOwnerTurnController,
+  type QueueOwnerActiveSessionController,
+} from "./queue-owner-turn-controller.js";
 import type {
   ClientOperation,
   OutputFormatter,
@@ -835,74 +839,10 @@ type RunSessionPromptOptions = {
   verbose?: boolean;
   onClientAvailable?: (controller: ActiveSessionController) => void;
   onClientClosed?: () => void;
-  onPromptIssued?: () => Promise<void> | void;
+  onPromptActive?: () => Promise<void> | void;
 };
 
-type ActiveSessionController = {
-  hasActivePrompt: () => boolean;
-  requestCancelActivePrompt: () => Promise<boolean>;
-  setSessionMode: (modeId: string) => Promise<void>;
-  setSessionConfigOption: (
-    configId: string,
-    value: string,
-  ) => Promise<SetSessionConfigOptionResponse>;
-};
-
-type CancelCapableController = Pick<
-  ActiveSessionController,
-  "hasActivePrompt" | "requestCancelActivePrompt"
->;
-
-export class QueueOwnerCancelCoordinator {
-  private turnInFlight = false;
-  private pendingCancel = false;
-
-  beginTurn(): void {
-    this.turnInFlight = true;
-  }
-
-  endTurn(): void {
-    this.turnInFlight = false;
-    this.pendingCancel = false;
-  }
-
-  async requestCancel(
-    controller: CancelCapableController | undefined,
-  ): Promise<boolean> {
-    if (controller?.hasActivePrompt()) {
-      const cancelled = await controller.requestCancelActivePrompt();
-      if (cancelled) {
-        this.pendingCancel = false;
-      }
-      return cancelled;
-    }
-
-    if (this.turnInFlight) {
-      this.pendingCancel = true;
-      return true;
-    }
-
-    return false;
-  }
-
-  async applyPendingCancel(
-    controller: CancelCapableController | undefined,
-  ): Promise<boolean> {
-    if (!this.pendingCancel || !controller || !controller.hasActivePrompt()) {
-      return false;
-    }
-
-    const cancelled = await controller.requestCancelActivePrompt();
-    if (cancelled) {
-      this.pendingCancel = false;
-    }
-    return cancelled;
-  }
-
-  get hasPendingCancel(): boolean {
-    return this.pendingCancel;
-  }
-}
+type ActiveSessionController = QueueOwnerActiveSessionController;
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -2243,7 +2183,7 @@ async function runQueuedTask(
     authCredentials?: Record<string, string>;
     onClientAvailable?: (controller: ActiveSessionController) => void;
     onClientClosed?: () => void;
-    onPromptIssued?: () => Promise<void> | void;
+    onPromptActive?: () => Promise<void> | void;
   },
 ): Promise<void> {
   const outputFormatter = task.waitForCompletion
@@ -2261,7 +2201,7 @@ async function runQueuedTask(
       verbose: options.verbose,
       onClientAvailable: options.onClientAvailable,
       onClientClosed: options.onClientClosed,
-      onPromptIssued: options.onPromptIssued,
+      onPromptActive: options.onPromptActive,
     });
 
     if (task.waitForCompletion) {
@@ -2395,13 +2335,13 @@ async function runSessionPrompt(
         let response;
         try {
           const promptPromise = client.prompt(activeSessionId, options.message);
-          if (options.onPromptIssued) {
+          if (options.onPromptActive) {
             try {
-              await options.onPromptIssued();
+              await options.onPromptActive();
             } catch (error) {
               if (options.verbose) {
                 process.stderr.write(
-                  `[acpx] onPromptIssued hook failed: ${formatError(error)}\n`,
+                  `[acpx] onPromptActive hook failed: ${formatError(error)}\n`,
                 );
               }
             }
@@ -2828,11 +2768,36 @@ export async function sendSession(
     }
 
     let owner: SessionQueueOwner | undefined;
-    let activeController: ActiveSessionController | undefined;
-    const cancelCoordinator = new QueueOwnerCancelCoordinator();
+    const turnController = new QueueOwnerTurnController({
+      withTimeout: async (run, timeoutMs) => await withTimeout(run(), timeoutMs),
+      setSessionModeFallback: async (modeId: string, timeoutMs?: number) => {
+        await runSessionSetModeDirect({
+          sessionRecordId: options.sessionId,
+          modeId,
+          authCredentials: options.authCredentials,
+          timeoutMs,
+          verbose: options.verbose,
+        });
+      },
+      setSessionConfigOptionFallback: async (
+        configId: string,
+        value: string,
+        timeoutMs?: number,
+      ) => {
+        const result = await runSessionSetConfigOptionDirect({
+          sessionRecordId: options.sessionId,
+          configId,
+          value,
+          authCredentials: options.authCredentials,
+          timeoutMs,
+          verbose: options.verbose,
+        });
+        return result.response;
+      },
+    });
 
     const applyPendingCancel = async (): Promise<boolean> => {
-      return await cancelCoordinator.applyPendingCancel(activeController);
+      return await turnController.applyPendingCancel();
     };
 
     const scheduleApplyPendingCancel = (): void => {
@@ -2846,26 +2811,26 @@ export async function sendSession(
     };
 
     const setActiveController = (controller: ActiveSessionController) => {
-      activeController = controller;
+      turnController.setActiveController(controller);
       scheduleApplyPendingCancel();
     };
     const clearActiveController = () => {
-      activeController = undefined;
+      turnController.clearActiveController();
     };
 
     const runPromptTurn = async <T>(run: () => Promise<T>): Promise<T> => {
-      cancelCoordinator.beginTurn();
+      turnController.beginTurn();
       try {
         return await run();
       } finally {
-        cancelCoordinator.endTurn();
+        turnController.endTurn();
       }
     };
 
     try {
       owner = await SessionQueueOwner.start(lease, {
         cancelPrompt: async () => {
-          const accepted = await cancelCoordinator.requestCancel(activeController);
+          const accepted = await turnController.requestCancel();
           if (!accepted) {
             return false;
           }
@@ -2873,38 +2838,18 @@ export async function sendSession(
           return true;
         },
         setSessionMode: async (modeId: string, timeoutMs?: number) => {
-          if (activeController) {
-            await withTimeout(activeController.setSessionMode(modeId), timeoutMs);
-            return;
-          }
-          await runSessionSetModeDirect({
-            sessionRecordId: options.sessionId,
-            modeId,
-            authCredentials: options.authCredentials,
-            timeoutMs,
-            verbose: options.verbose,
-          });
+          await turnController.setSessionMode(modeId, timeoutMs);
         },
         setSessionConfigOption: async (
           configId: string,
           value: string,
           timeoutMs?: number,
         ) => {
-          if (activeController) {
-            return await withTimeout(
-              activeController.setSessionConfigOption(configId, value),
-              timeoutMs,
-            );
-          }
-          const result = await runSessionSetConfigOptionDirect({
-            sessionRecordId: options.sessionId,
+          return await turnController.setSessionConfigOption(
             configId,
             value,
-            authCredentials: options.authCredentials,
             timeoutMs,
-            verbose: options.verbose,
-          });
-          return result.response;
+          );
         },
       });
 
@@ -2919,7 +2864,8 @@ export async function sendSession(
           verbose: options.verbose,
           onClientAvailable: setActiveController,
           onClientClosed: clearActiveController,
-          onPromptIssued: async () => {
+          onPromptActive: async () => {
+            turnController.markPromptActive();
             await applyPendingCancel();
           },
         });
@@ -2944,7 +2890,8 @@ export async function sendSession(
             authCredentials: options.authCredentials,
             onClientAvailable: setActiveController,
             onClientClosed: clearActiveController,
-            onPromptIssued: async () => {
+            onPromptActive: async () => {
+              turnController.markPromptActive();
               await applyPendingCancel();
             },
           });
@@ -2953,6 +2900,7 @@ export async function sendSession(
 
       return localResult;
     } finally {
+      turnController.beginClosing();
       if (owner) {
         await owner.close();
       }
