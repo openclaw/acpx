@@ -6,7 +6,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 import fs from "node:fs/promises";
 import path from "node:path";
-import readline from "node:readline/promises";
+import { promptForPermission } from "./permission-prompt.js";
 import type { ClientOperation, PermissionMode } from "./types.js";
 
 const WRITE_PREVIEW_MAX_LINES = 16;
@@ -51,27 +51,11 @@ async function defaultConfirmWrite(
   filePath: string,
   preview: string,
 ): Promise<boolean> {
-  if (!process.stdin.isTTY || !process.stderr.isTTY) {
-    return false;
-  }
-
-  process.stderr.write(`\n[permission] Allow write to ${filePath}?\n`);
-  if (preview.trim().length > 0) {
-    process.stderr.write(`${preview}\n`);
-  }
-
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr,
+  return await promptForPermission({
+    header: `[permission] Allow write to ${filePath}?`,
+    details: preview,
+    prompt: "Allow write? (y/N) ",
   });
-
-  try {
-    const answer = await rl.question("Allow write? (y/N) ");
-    const normalized = answer.trim().toLowerCase();
-    return normalized === "y" || normalized === "yes";
-  } finally {
-    rl.close();
-  }
 }
 
 export class FileSystemHandlers {
