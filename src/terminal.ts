@@ -12,8 +12,8 @@ import type {
 } from "@agentclientprotocol/sdk";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import readline from "node:readline/promises";
 import type { Readable } from "node:stream";
+import { promptForPermission } from "./permission-prompt.js";
 import type { ClientOperation, PermissionMode } from "./types.js";
 
 const DEFAULT_TERMINAL_OUTPUT_LIMIT_BYTES = 64 * 1024;
@@ -97,23 +97,9 @@ function waitForSpawn(
 }
 
 async function defaultConfirmExecute(commandLine: string): Promise<boolean> {
-  if (!process.stdin.isTTY || !process.stderr.isTTY) {
-    return false;
-  }
-
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr,
+  return await promptForPermission({
+    prompt: `\n[permission] Allow terminal command "${commandLine}"? (y/N) `,
   });
-  try {
-    const answer = await rl.question(
-      `\n[permission] Allow terminal command "${commandLine}"? (y/N) `,
-    );
-    const normalized = answer.trim().toLowerCase();
-    return normalized === "y" || normalized === "yes";
-  } finally {
-    rl.close();
-  }
 }
 
 function waitMs(ms: number): Promise<void> {

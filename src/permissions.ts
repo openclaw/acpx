@@ -4,7 +4,7 @@ import {
   type RequestPermissionResponse,
   type ToolKind,
 } from "@agentclientprotocol/sdk";
-import readline from "node:readline/promises";
+import { promptForPermission } from "./permission-prompt.js";
 import type { PermissionMode } from "./types.js";
 
 type PermissionDecision = "approved" | "denied" | "cancelled";
@@ -77,27 +77,14 @@ function isAutoApprovedReadKind(kind: ToolKind | undefined): boolean {
   return kind === "read" || kind === "search";
 }
 
-async function promptForPermission(params: RequestPermissionRequest): Promise<boolean> {
-  if (!process.stdin.isTTY || !process.stderr.isTTY) {
-    return false;
-  }
-
+async function promptForToolPermission(
+  params: RequestPermissionRequest,
+): Promise<boolean> {
   const toolName = params.toolCall.title ?? "tool";
   const toolKind = inferToolKind(params) ?? "other";
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr,
+  return await promptForPermission({
+    prompt: `\n[permission] Allow ${toolName} [${toolKind}]? (y/N) `,
   });
-
-  try {
-    const answer = await rl.question(
-      `\n[permission] Allow ${toolName} [${toolKind}]? (y/N) `,
-    );
-    const normalized = answer.trim().toLowerCase();
-    return normalized === "y" || normalized === "yes";
-  } finally {
-    rl.close();
-  }
 }
 
 export async function resolvePermissionRequest(
@@ -131,7 +118,7 @@ export async function resolvePermissionRequest(
     return selected(allowOption.optionId);
   }
 
-  const approved = await promptForPermission(params);
+  const approved = await promptForToolPermission(params);
   if (approved && allowOption) {
     return selected(allowOption.optionId);
   }
