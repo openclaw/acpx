@@ -281,6 +281,53 @@ function addSessionNameOption(command: Command): Command {
   );
 }
 
+function resolveSessionNameFromFlags(
+  flags: StatusFlags,
+  command: Command,
+): string | undefined {
+  if (flags.session) {
+    return flags.session;
+  }
+
+  // Commander parses options on the parent command when flags appear before the
+  // subcommand (e.g. `acpx codex -s foo cancel`). Use optsWithGlobals() so
+  // subcommands can still access those values.
+  const allOpts = (
+    command as unknown as { optsWithGlobals?: () => unknown }
+  ).optsWithGlobals?.();
+  if (allOpts && typeof (allOpts as { session?: unknown }).session === "string") {
+    return parseSessionName((allOpts as { session: string }).session);
+  }
+
+  const parentOpts = command.parent?.opts?.();
+  if (parentOpts && typeof (parentOpts as { session?: unknown }).session === "string") {
+    return parseSessionName((parentOpts as { session: string }).session);
+  }
+
+  // Final fallback: parse argv directly. This catches cases where Commander
+  // consumes the option on a parent command but does not expose it via opts().
+  for (let i = process.argv.length - 2; i >= 0; i -= 1) {
+    const token = process.argv[i];
+    if (token !== "-s" && token !== "--session") {
+      continue;
+    }
+    const value = process.argv[i + 1];
+    if (
+      typeof value === "string" &&
+      value.trim().length > 0 &&
+      !value.startsWith("-")
+    ) {
+      try {
+        return parseSessionName(value);
+      } catch {
+        return undefined;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 function addPromptInputOption(command: Command): Command {
   return command.option(
     "-f, --file <path>",
@@ -689,7 +736,7 @@ async function handleCancel(
   const record = await findSessionByDirectoryWalk({
     agentCommand: agent.agentCommand,
     cwd: agent.cwd,
-    name: flags.session,
+    name: resolveSessionNameFromFlags(flags, command),
     boundary: walkBoundary,
   });
 
@@ -724,7 +771,7 @@ async function handleSetMode(
     agent.agentCommand,
     agent.agentName,
     agent.cwd,
-    flags.session,
+    resolveSessionNameFromFlags(flags, command),
   );
   const result = await setSessionMode({
     sessionId: record.id,
@@ -757,7 +804,7 @@ async function handleSetConfigOption(
     agent.agentCommand,
     agent.agentName,
     agent.cwd,
-    flags.session,
+    resolveSessionNameFromFlags(flags, command),
   );
   const result = await setSessionConfigOption({
     sessionId: record.id,
@@ -1020,7 +1067,7 @@ async function handleStatus(
   const record = await findSession({
     agentCommand: agent.agentCommand,
     cwd: agent.cwd,
-    name: flags.session,
+    name: resolveSessionNameFromFlags(flags, command),
   });
 
   if (!record) {
