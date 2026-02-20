@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { SessionNotFoundError, SessionResolutionError } from "./errors.js";
 import type { SessionHistoryEntry, SessionRecord } from "./types.js";
 
 export const DEFAULT_HISTORY_LIMIT = 20;
@@ -227,7 +228,7 @@ export async function resolveSessionRecord(sessionId: string): Promise<SessionRe
     return exact[0];
   }
   if (exact.length > 1) {
-    throw new Error(`Multiple sessions match id: ${sessionId}`);
+    throw new SessionResolutionError(`Multiple sessions match id: ${sessionId}`);
   }
 
   const suffixMatches = sessions.filter(
@@ -238,10 +239,10 @@ export async function resolveSessionRecord(sessionId: string): Promise<SessionRe
     return suffixMatches[0];
   }
   if (suffixMatches.length > 1) {
-    throw new Error(`Session id is ambiguous: ${sessionId}`);
+    throw new SessionResolutionError(`Session id is ambiguous: ${sessionId}`);
   }
 
-  throw new Error(`Session not found: ${sessionId}`);
+  throw new SessionNotFoundError(sessionId);
 }
 
 function hasGitDirectory(dir: string): boolean {

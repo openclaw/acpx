@@ -123,6 +123,20 @@ test("--ttl flag is parsed for sessions commands", async () => {
   });
 });
 
+test("--auth-policy flag validates supported values", async () => {
+  await withTempHome(async (homeDir) => {
+    const ok = await runCli(
+      ["--auth-policy", "skip", "--format", "json", "sessions"],
+      homeDir,
+    );
+    assert.equal(ok.code, 0, ok.stderr);
+
+    const invalid = await runCli(["--auth-policy", "bad", "sessions"], homeDir);
+    assert.equal(invalid.code, 2);
+    assert.match(invalid.stderr, /Invalid auth policy/);
+  });
+});
+
 test("prompt exits with NO_SESSION when no session exists (no auto-create)", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace", "packages", "app");

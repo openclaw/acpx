@@ -13,6 +13,7 @@ import type {
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { Readable } from "node:stream";
+import { PermissionDeniedError } from "./errors.js";
 import { promptForPermission } from "./permission-prompt.js";
 import type { ClientOperation, PermissionMode } from "./types.js";
 
@@ -140,7 +141,7 @@ export class TerminalManager {
 
     try {
       if (!(await this.isExecuteApproved(commandLine))) {
-        throw new Error("Permission denied for terminal/create");
+        throw new PermissionDeniedError("Permission denied for terminal/create");
       }
 
       const outputByteLimit = Math.max(

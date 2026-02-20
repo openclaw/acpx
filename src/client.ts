@@ -27,6 +27,7 @@ import {
 import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
+import { AgentSpawnError, AuthPolicyError } from "./errors.js";
 import { FileSystemHandlers } from "./filesystem.js";
 import { classifyPermissionDecision, resolvePermissionRequest } from "./permissions.js";
 import { TerminalManager } from "./terminal.js";
@@ -258,6 +259,7 @@ export class AcpClient {
     this.options = {
       ...options,
       cwd: asAbsoluteCwd(options.cwd),
+      authPolicy: options.authPolicy ?? "skip",
     };
 
     const emitOperation = this.options.onClientOperation;
@@ -328,7 +330,11 @@ export class AcpClient {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    await waitForSpawn(child);
+    try {
+      await waitForSpawn(child);
+    } catch (error) {
+      throw new AgentSpawnError(this.options.agentCommand, error);
+    }
     this.closing = false;
     this.agentStartedAt = isoNow();
     this.lastAgentExit = undefined;
@@ -646,6 +652,12 @@ export class AcpClient {
 
     const selected = this.selectAuthMethod(methods);
     if (!selected) {
+      if (this.options.authPolicy === "fail") {
+        throw new AuthPolicyError(
+          `agent advertised auth methods [${methods.map((m) => m.id).join(", ")}] but no matching credentials found`,
+        );
+      }
+
       this.log(
         `agent advertised auth methods [${methods.map((m) => m.id).join(", ")}] but no matching credentials found — skipping (agent may handle auth internally)`,
       );

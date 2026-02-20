@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DEFAULT_AGENT_NAME, normalizeAgentName } from "./agent-registry.js";
-import type { OutputFormat, PermissionMode } from "./types.js";
+import type { AuthPolicy, OutputFormat, PermissionMode } from "./types.js";
 
 type ConfigAgentEntry = {
   command: string;
@@ -11,6 +11,7 @@ type ConfigAgentEntry = {
 type ConfigFileShape = {
   defaultAgent?: unknown;
   defaultPermissions?: unknown;
+  authPolicy?: unknown;
   ttl?: unknown;
   timeout?: unknown;
   format?: unknown;
@@ -21,6 +22,7 @@ type ConfigFileShape = {
 export type ResolvedAcpxConfig = {
   defaultAgent: string;
   defaultPermissions: PermissionMode;
+  authPolicy: AuthPolicy;
   ttlMs: number;
   timeoutMs?: number;
   format: OutputFormat;
@@ -40,12 +42,14 @@ type ConfigFileLoadResult = {
 const DEFAULT_TIMEOUT_MS = undefined;
 const DEFAULT_TTL_MS = 300_000;
 const DEFAULT_PERMISSION_MODE: PermissionMode = "approve-reads";
+const DEFAULT_AUTH_POLICY: AuthPolicy = "skip";
 const DEFAULT_OUTPUT_FORMAT: OutputFormat = "text";
 const VALID_PERMISSION_MODES = new Set<PermissionMode>([
   "approve-all",
   "approve-reads",
   "deny-all",
 ]);
+const VALID_AUTH_POLICIES = new Set<AuthPolicy>(["skip", "fail"]);
 const VALID_OUTPUT_FORMATS = new Set<OutputFormat>(["text", "json", "quiet"]);
 
 function defaultGlobalConfigPath(): string {
@@ -100,6 +104,18 @@ function parsePermissionMode(
     );
   }
   return value as PermissionMode;
+}
+
+function parseAuthPolicy(value: unknown, sourcePath: string): AuthPolicy | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  if (typeof value !== "string" || !VALID_AUTH_POLICIES.has(value as AuthPolicy)) {
+    throw new Error(
+      `Invalid config authPolicy in ${sourcePath}: expected skip or fail`,
+    );
+  }
+  return value as AuthPolicy;
 }
 
 function parseOutputFormat(
@@ -252,6 +268,11 @@ export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfi
     parsePermissionMode(globalConfig?.defaultPermissions, globalPath) ??
     DEFAULT_PERMISSION_MODE;
 
+  const authPolicy =
+    parseAuthPolicy(projectConfig?.authPolicy, projectPath) ??
+    parseAuthPolicy(globalConfig?.authPolicy, globalPath) ??
+    DEFAULT_AUTH_POLICY;
+
   const ttlMs =
     parseTtlMs(projectConfig?.ttl, projectPath) ??
     parseTtlMs(globalConfig?.ttl, globalPath) ??
@@ -287,6 +308,7 @@ export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfi
   return {
     defaultAgent,
     defaultPermissions,
+    authPolicy,
     ttlMs,
     timeoutMs,
     format,
@@ -302,6 +324,7 @@ export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfi
 export function toConfigDisplay(config: ResolvedAcpxConfig): {
   defaultAgent: string;
   defaultPermissions: PermissionMode;
+  authPolicy: AuthPolicy;
   ttl: number;
   timeout: number | null;
   format: OutputFormat;
@@ -316,6 +339,7 @@ export function toConfigDisplay(config: ResolvedAcpxConfig): {
   return {
     defaultAgent: config.defaultAgent,
     defaultPermissions: config.defaultPermissions,
+    authPolicy: config.authPolicy,
     ttl: Math.round(config.ttlMs / 1_000),
     timeout: config.timeoutMs == null ? null : config.timeoutMs / 1_000,
     format: config.format,
@@ -344,6 +368,7 @@ export async function initGlobalConfigFile(): Promise<{
   const payload = {
     defaultAgent: DEFAULT_AGENT_NAME,
     defaultPermissions: "approve-all",
+    authPolicy: "skip",
     ttl: 300,
     timeout: null,
     format: "text",

@@ -6,6 +6,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { PermissionDeniedError } from "./errors.js";
 import { promptForPermission } from "./permission-prompt.js";
 import type { ClientOperation, PermissionMode } from "./types.js";
 
@@ -87,7 +88,9 @@ export class FileSystemHandlers {
 
     try {
       if (this.permissionMode === "deny-all") {
-        throw new Error("Permission denied for fs/read_text_file (--deny-all)");
+        throw new PermissionDeniedError(
+          "Permission denied for fs/read_text_file (--deny-all)",
+        );
       }
 
       const content = await fs.readFile(filePath, "utf8");
@@ -129,7 +132,7 @@ export class FileSystemHandlers {
 
     try {
       if (!(await this.isWriteApproved(filePath, preview))) {
-        throw new Error("Permission denied for fs/write_text_file");
+        throw new PermissionDeniedError("Permission denied for fs/write_text_file");
       }
 
       await fs.mkdir(path.dirname(filePath), { recursive: true });

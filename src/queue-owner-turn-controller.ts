@@ -1,4 +1,5 @@
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
+import { QueueConnectionError } from "./errors.js";
 
 export type QueueOwnerTurnState = "idle" | "starting" | "active" | "closing";
 
@@ -72,7 +73,7 @@ export class QueueOwnerTurnController {
 
   private assertCanHandleControlRequest(): void {
     if (this.state === "closing") {
-      throw new Error("Queue owner is closing");
+      throw new QueueConnectionError("Queue owner is closing");
     }
   }
 

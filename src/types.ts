@@ -23,6 +23,9 @@ export type OutputFormat = (typeof OUTPUT_FORMATS)[number];
 export const PERMISSION_MODES = ["approve-all", "approve-reads", "deny-all"] as const;
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
+export const AUTH_POLICIES = ["skip", "fail"] as const;
+export type AuthPolicy = (typeof AUTH_POLICIES)[number];
+
 export type PermissionStats = {
   requested: number;
   approved: number;
@@ -107,6 +110,7 @@ export type AcpClientOptions = {
   cwd: string;
   permissionMode: PermissionMode;
   authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
   verbose?: boolean;
   onSessionUpdate?: (notification: SessionNotification) => void;
   onClientOperation?: (operation: ClientOperation) => void;

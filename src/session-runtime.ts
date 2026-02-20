@@ -40,6 +40,7 @@ import {
   writeSessionRecord,
 } from "./session-persistence.js";
 import type {
+  AuthPolicy,
   ClientOperation,
   OutputFormatter,
   PermissionMode,
@@ -81,6 +82,7 @@ export type RunOnceOptions = {
   message: string;
   permissionMode: PermissionMode;
   authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
   outputFormatter: OutputFormatter;
   verbose?: boolean;
 } & TimedRunOptions;
@@ -91,6 +93,7 @@ export type SessionCreateOptions = {
   name?: string;
   permissionMode: PermissionMode;
   authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
   verbose?: boolean;
 } & TimedRunOptions;
 
@@ -99,6 +102,7 @@ export type SessionSendOptions = {
   message: string;
   permissionMode: PermissionMode;
   authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
   outputFormatter: OutputFormatter;
   verbose?: boolean;
   waitForCompletion?: boolean;
@@ -119,6 +123,7 @@ export type SessionSetModeOptions = {
   sessionId: string;
   modeId: string;
   authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
   verbose?: boolean;
 } & TimedRunOptions;
 
@@ -127,6 +132,7 @@ export type SessionSetConfigOptionOptions = {
   configId: string;
   value: string;
   authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
   verbose?: boolean;
 } & TimedRunOptions;
 
@@ -207,6 +213,7 @@ type RunSessionPromptOptions = {
   message: string;
   permissionMode: PermissionMode;
   authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
   outputFormatter: OutputFormatter;
   timeoutMs?: number;
   verbose?: boolean;
@@ -514,6 +521,7 @@ async function runQueuedTask(
   options: {
     verbose?: boolean;
     authCredentials?: Record<string, string>;
+    authPolicy?: AuthPolicy;
     onClientAvailable?: (controller: ActiveSessionController) => void;
     onClientClosed?: () => void;
     onPromptActive?: () => Promise<void> | void;
@@ -529,6 +537,7 @@ async function runQueuedTask(
       message: task.message,
       permissionMode: task.permissionMode,
       authCredentials: options.authCredentials,
+      authPolicy: options.authPolicy,
       outputFormatter,
       timeoutMs: task.timeoutMs,
       verbose: options.verbose,
@@ -574,6 +583,7 @@ async function runSessionPrompt(
     cwd: absolutePath(record.cwd),
     permissionMode: options.permissionMode,
     authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
     verbose: options.verbose,
     onSessionUpdate: (notification) => {
       output.onSessionUpdate(notification);
@@ -721,6 +731,7 @@ type WithConnectedSessionOptions<T> = {
   sessionRecordId: string;
   permissionMode?: PermissionMode;
   authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
   timeoutMs?: number;
   verbose?: boolean;
   onClientAvailable?: (controller: ActiveSessionController) => void;
@@ -744,6 +755,7 @@ async function withConnectedSession<T>(
     cwd: absolutePath(record.cwd),
     permissionMode: options.permissionMode ?? "approve-reads",
     authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
     verbose: options.verbose,
   });
   let activeSessionIdForControl = record.sessionId;
@@ -829,6 +841,7 @@ type RunSessionSetModeDirectOptions = {
   sessionRecordId: string;
   modeId: string;
   authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
   timeoutMs?: number;
   verbose?: boolean;
   onClientAvailable?: (controller: ActiveSessionController) => void;
@@ -840,6 +853,7 @@ type RunSessionSetConfigOptionDirectOptions = {
   configId: string;
   value: string;
   authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
   timeoutMs?: number;
   verbose?: boolean;
   onClientAvailable?: (controller: ActiveSessionController) => void;
@@ -852,6 +866,7 @@ async function runSessionSetModeDirect(
   const result = await withConnectedSession({
     sessionRecordId: options.sessionRecordId,
     authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
     onClientAvailable: options.onClientAvailable,
@@ -877,6 +892,7 @@ async function runSessionSetConfigOptionDirect(
   const result = await withConnectedSession({
     sessionRecordId: options.sessionRecordId,
     authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
     onClientAvailable: options.onClientAvailable,
@@ -904,6 +920,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
     cwd: absolutePath(options.cwd),
     permissionMode: options.permissionMode,
     authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
     verbose: options.verbose,
     onSessionUpdate: (notification) => output.onSessionUpdate(notification),
     onClientOperation: (operation) => output.onClientOperation(operation),
@@ -943,6 +960,7 @@ export async function createSession(
     cwd: absolutePath(options.cwd),
     permissionMode: options.permissionMode,
     authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
     verbose: options.verbose,
   });
 
@@ -1032,6 +1050,7 @@ export async function sendSession(
           sessionRecordId: options.sessionId,
           modeId,
           authCredentials: options.authCredentials,
+          authPolicy: options.authPolicy,
           timeoutMs,
           verbose: options.verbose,
         });
@@ -1046,6 +1065,7 @@ export async function sendSession(
           configId,
           value,
           authCredentials: options.authCredentials,
+          authPolicy: options.authPolicy,
           timeoutMs,
           verbose: options.verbose,
         });
@@ -1116,6 +1136,7 @@ export async function sendSession(
           message: options.message,
           permissionMode: options.permissionMode,
           authCredentials: options.authCredentials,
+          authPolicy: options.authPolicy,
           outputFormatter: options.outputFormatter,
           timeoutMs: options.timeoutMs,
           verbose: options.verbose,
@@ -1145,6 +1166,7 @@ export async function sendSession(
           await runQueuedTask(options.sessionId, task, {
             verbose: options.verbose,
             authCredentials: options.authCredentials,
+            authPolicy: options.authPolicy,
             onClientAvailable: setActiveController,
             onClientClosed: clearActiveController,
             onPromptActive: async () => {
@@ -1196,6 +1218,7 @@ export async function setSessionMode(
     sessionRecordId: options.sessionId,
     modeId: options.modeId,
     authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
   });
@@ -1224,6 +1247,7 @@ export async function setSessionConfigOption(
     configId: options.configId,
     value: options.value,
     authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
   });

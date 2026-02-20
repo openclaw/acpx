@@ -37,8 +37,10 @@ import {
   sendSession,
 } from "./session.js";
 import {
+  AUTH_POLICIES,
   EXIT_CODES,
   OUTPUT_FORMATS,
+  type AuthPolicy,
   type OutputFormat,
   type PermissionMode,
   type SessionRecord,
@@ -60,6 +62,7 @@ type PermissionFlags = {
 type GlobalFlags = PermissionFlags & {
   agent?: string;
   cwd: string;
+  authPolicy?: AuthPolicy;
   timeout?: number;
   ttl: number;
   verbose?: boolean;
@@ -107,6 +110,15 @@ function parseOutputFormat(value: string): OutputFormat {
     );
   }
   return value as OutputFormat;
+}
+
+function parseAuthPolicy(value: string): AuthPolicy {
+  if (!AUTH_POLICIES.includes(value as AuthPolicy)) {
+    throw new InvalidArgumentError(
+      `Invalid auth policy "${value}". Expected one of: ${AUTH_POLICIES.join(", ")}`,
+    );
+  }
+  return value as AuthPolicy;
 }
 
 function parseTimeoutSeconds(value: string): number {
@@ -240,6 +252,11 @@ function addGlobalFlags(command: Command): Command {
   return command
     .option("--agent <command>", "Raw ACP agent command (escape hatch)")
     .option("--cwd <dir>", "Working directory", process.cwd())
+    .option(
+      "--auth-policy <policy>",
+      "Authentication policy: skip or fail when auth is required",
+      parseAuthPolicy,
+    )
     .option("--approve-all", "Auto-approve all permission requests")
     .option(
       "--approve-reads",
@@ -319,6 +336,7 @@ function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig): Globa
   return {
     agent: opts.agent,
     cwd: opts.cwd ?? process.cwd(),
+    authPolicy: opts.authPolicy ?? config.authPolicy,
     timeout: opts.timeout ?? config.timeoutMs,
     ttl: opts.ttl ?? config.ttlMs ?? DEFAULT_QUEUE_OWNER_TTL_MS,
     verbose: opts.verbose === true,
@@ -580,6 +598,7 @@ async function handlePrompt(
     message: prompt,
     permissionMode,
     authCredentials: config.auth,
+    authPolicy: globalFlags.authPolicy,
     outputFormatter,
     timeoutMs: globalFlags.timeout,
     ttlMs: globalFlags.ttl,
@@ -620,6 +639,7 @@ async function handleExec(
     message: prompt,
     permissionMode,
     authCredentials: config.auth,
+    authPolicy: globalFlags.authPolicy,
     outputFormatter,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
@@ -756,6 +776,7 @@ async function handleSetMode(
     sessionId: record.id,
     modeId,
     authCredentials: config.auth,
+    authPolicy: globalFlags.authPolicy,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
   });
@@ -790,6 +811,7 @@ async function handleSetConfigOption(
     configId,
     value,
     authCredentials: config.auth,
+    authPolicy: globalFlags.authPolicy,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
   });
@@ -872,6 +894,7 @@ async function handleSessionsNew(
     name: flags.name,
     permissionMode,
     authCredentials: config.auth,
+    authPolicy: globalFlags.authPolicy,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
   });
@@ -1424,6 +1447,7 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
 
     if (
       token === "--cwd" ||
+      token === "--auth-policy" ||
       token === "--format" ||
       token === "--timeout" ||
       token === "--ttl" ||
@@ -1435,6 +1459,7 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
 
     if (
       token.startsWith("--cwd=") ||
+      token.startsWith("--auth-policy=") ||
       token.startsWith("--format=") ||
       token.startsWith("--timeout=") ||
       token.startsWith("--ttl=") ||

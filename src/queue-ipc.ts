@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { QueueConnectionError, QueueProtocolError } from "./errors.js";
 import {
   parseQueueOwnerMessage,
   parseQueueRequest,
@@ -714,13 +715,13 @@ async function submitToQueueOwner(
       try {
         parsed = JSON.parse(line);
       } catch {
-        finishReject(new Error("Queue owner sent invalid JSON payload"));
+        finishReject(new QueueProtocolError("Queue owner sent invalid JSON payload"));
         return;
       }
 
       const message = parseQueueOwnerMessage(parsed);
       if (!message || message.requestId !== requestId) {
-        finishReject(new Error("Queue owner sent malformed message"));
+        finishReject(new QueueProtocolError("Queue owner sent malformed message"));
         return;
       }
 
@@ -738,7 +739,9 @@ async function submitToQueueOwner(
       }
 
       if (!acknowledged) {
-        finishReject(new Error("Queue owner did not acknowledge request"));
+        finishReject(
+          new QueueConnectionError("Queue owner did not acknowledge request"),
+        );
         return;
       }
 
@@ -768,11 +771,11 @@ async function submitToQueueOwner(
       }
 
       if (message.type === "error") {
-        finishReject(new Error(message.message));
+        finishReject(new QueueConnectionError(message.message));
         return;
       }
 
-      finishReject(new Error("Queue owner returned unexpected response"));
+      finishReject(new QueueProtocolError("Queue owner returned unexpected response"));
     };
 
     socket.on("data", (chunk: string) => {
@@ -802,7 +805,9 @@ async function submitToQueueOwner(
 
       if (!acknowledged) {
         finishReject(
-          new Error("Queue owner disconnected before acknowledging request"),
+          new QueueConnectionError(
+            "Queue owner disconnected before acknowledging request",
+          ),
         );
         return;
       }
@@ -817,7 +822,9 @@ async function submitToQueueOwner(
         return;
       }
 
-      finishReject(new Error("Queue owner disconnected before prompt completion"));
+      finishReject(
+        new QueueConnectionError("Queue owner disconnected before prompt completion"),
+      );
     });
 
     socket.write(`${JSON.stringify(request)}\n`);
@@ -870,13 +877,13 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
       try {
         parsed = JSON.parse(line);
       } catch {
-        finishReject(new Error("Queue owner sent invalid JSON payload"));
+        finishReject(new QueueProtocolError("Queue owner sent invalid JSON payload"));
         return;
       }
 
       const message = parseQueueOwnerMessage(parsed);
       if (!message || message.requestId !== request.requestId) {
-        finishReject(new Error("Queue owner sent malformed message"));
+        finishReject(new QueueProtocolError("Queue owner sent malformed message"));
         return;
       }
 
@@ -886,17 +893,21 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
       }
 
       if (!acknowledged) {
-        finishReject(new Error("Queue owner did not acknowledge request"));
+        finishReject(
+          new QueueConnectionError("Queue owner did not acknowledge request"),
+        );
         return;
       }
 
       if (message.type === "error") {
-        finishReject(new Error(message.message));
+        finishReject(new QueueConnectionError(message.message));
         return;
       }
 
       if (!isExpectedResponse(message)) {
-        finishReject(new Error("Queue owner returned unexpected response"));
+        finishReject(
+          new QueueProtocolError("Queue owner returned unexpected response"),
+        );
         return;
       }
 
@@ -929,11 +940,15 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
       }
       if (!acknowledged) {
         finishReject(
-          new Error("Queue owner disconnected before acknowledging request"),
+          new QueueConnectionError(
+            "Queue owner disconnected before acknowledging request",
+          ),
         );
         return;
       }
-      finishReject(new Error("Queue owner disconnected before responding"));
+      finishReject(
+        new QueueConnectionError("Queue owner disconnected before responding"),
+      );
     });
 
     socket.write(`${JSON.stringify(request)}\n`);
@@ -957,7 +972,7 @@ async function submitCancelToQueueOwner(
     return undefined;
   }
   if (response.requestId !== request.requestId) {
-    throw new Error("Queue owner returned mismatched cancel response");
+    throw new QueueProtocolError("Queue owner returned mismatched cancel response");
   }
   return response.cancelled;
 }
@@ -983,7 +998,7 @@ async function submitSetModeToQueueOwner(
     return undefined;
   }
   if (response.requestId !== request.requestId) {
-    throw new Error("Queue owner returned mismatched set_mode response");
+    throw new QueueProtocolError("Queue owner returned mismatched set_mode response");
   }
   return true;
 }
@@ -1011,7 +1026,9 @@ async function submitSetConfigOptionToQueueOwner(
     return undefined;
   }
   if (response.requestId !== request.requestId) {
-    throw new Error("Queue owner returned mismatched set_config_option response");
+    throw new QueueProtocolError(
+      "Queue owner returned mismatched set_config_option response",
+    );
   }
   return response.response;
 }
@@ -1044,7 +1061,9 @@ export async function trySubmitToRunningOwner(
     return undefined;
   }
 
-  throw new Error("Session queue owner is running but not accepting queue requests");
+  throw new QueueConnectionError(
+    "Session queue owner is running but not accepting queue requests",
+  );
 }
 
 export async function tryCancelOnRunningOwner(options: {
@@ -1076,7 +1095,9 @@ export async function tryCancelOnRunningOwner(options: {
     return undefined;
   }
 
-  throw new Error("Session queue owner is running but not accepting cancel requests");
+  throw new QueueConnectionError(
+    "Session queue owner is running but not accepting cancel requests",
+  );
 }
 
 export async function trySetModeOnRunningOwner(
@@ -1110,7 +1131,9 @@ export async function trySetModeOnRunningOwner(
     return undefined;
   }
 
-  throw new Error("Session queue owner is running but not accepting set_mode requests");
+  throw new QueueConnectionError(
+    "Session queue owner is running but not accepting set_mode requests",
+  );
 }
 
 export async function trySetConfigOptionOnRunningOwner(
@@ -1150,7 +1173,7 @@ export async function trySetConfigOptionOnRunningOwner(
     return undefined;
   }
 
-  throw new Error(
+  throw new QueueConnectionError(
     "Session queue owner is running but not accepting set_config_option requests",
   );
 }
