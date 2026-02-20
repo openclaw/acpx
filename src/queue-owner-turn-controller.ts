@@ -70,6 +70,12 @@ export class QueueOwnerTurnController {
     this.activeController = undefined;
   }
 
+  private assertCanHandleControlRequest(): void {
+    if (this.state === "closing") {
+      throw new Error("Queue owner is closing");
+    }
+  }
+
   async requestCancel(): Promise<boolean> {
     const activeController = this.activeController;
     if (activeController?.hasActivePrompt()) {
@@ -106,6 +112,7 @@ export class QueueOwnerTurnController {
   }
 
   async setSessionMode(modeId: string, timeoutMs?: number): Promise<void> {
+    this.assertCanHandleControlRequest();
     const activeController = this.activeController;
     if (activeController) {
       await this.options.withTimeout(
@@ -123,6 +130,7 @@ export class QueueOwnerTurnController {
     value: string,
     timeoutMs?: number,
   ): Promise<SetSessionConfigOptionResponse> {
+    this.assertCanHandleControlRequest();
     const activeController = this.activeController;
     if (activeController) {
       return await this.options.withTimeout(

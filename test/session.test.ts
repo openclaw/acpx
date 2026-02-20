@@ -652,6 +652,33 @@ test("QueueOwnerTurnController routes setSessionConfigOption through fallback wh
   assert.deepEqual(response, { configOptions: [] });
 });
 
+test("QueueOwnerTurnController rejects control requests while closing", async () => {
+  let setModeFallbackCalls = 0;
+  let setConfigFallbackCalls = 0;
+  const controller = createQueueOwnerTurnController({
+    setSessionModeFallback: async () => {
+      setModeFallbackCalls += 1;
+    },
+    setSessionConfigOptionFallback: async () => {
+      setConfigFallbackCalls += 1;
+      return { configOptions: [] };
+    },
+  });
+
+  controller.beginClosing();
+
+  await assert.rejects(
+    async () => await controller.setSessionMode("plan"),
+    /Queue owner is closing/,
+  );
+  await assert.rejects(
+    async () => await controller.setSessionConfigOption("k", "v"),
+    /Queue owner is closing/,
+  );
+  assert.equal(setModeFallbackCalls, 0);
+  assert.equal(setConfigFallbackCalls, 0);
+});
+
 type QueueOwnerTurnControllerOverrides = Partial<{
   withTimeout: <T>(run: () => Promise<T>, timeoutMs?: number) => Promise<T>;
   setSessionModeFallback: (modeId: string, timeoutMs?: number) => Promise<void>;
