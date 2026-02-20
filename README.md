@@ -4,6 +4,12 @@
 
 # acpx
 
+[![npm version](https://img.shields.io/npm/v/acpx.svg)](https://www.npmjs.com/package/acpx)
+[![npm downloads](https://img.shields.io/npm/dm/acpx.svg)](https://www.npmjs.com/package/acpx)
+[![CI](https://github.com/janitrai/acpx/actions/workflows/ci.yml/badge.svg)](https://github.com/janitrai/acpx/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/node/v/acpx.svg)](https://nodejs.org)
+
 Your agents love acpx! 🤖❤️ They hate having to scrape characters from a PTY session 😤
 
 `acpx` is a headless CLI client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com), so AI agents and orchestrators can talk to coding agents over a structured protocol instead of PTY scraping.
