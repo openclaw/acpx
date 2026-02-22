@@ -799,6 +799,11 @@ async function submitToQueueOwner(
 
       if (message.type === "accepted") {
         acknowledged = true;
+        options.outputFormatter.setContext({
+          sessionId: options.sessionId,
+          requestId: message.requestId,
+          stream: "prompt",
+        });
         if (!options.waitForCompletion) {
           const queued: SessionEnqueueResult = {
             queued: true,
@@ -807,6 +812,24 @@ async function submitToQueueOwner(
           };
           finishResolve(queued);
         }
+        return;
+      }
+
+      if (message.type === "error") {
+        options.outputFormatter.setContext({
+          sessionId: options.sessionId,
+          requestId: message.requestId,
+          stream: "prompt",
+        });
+        finishReject(
+          new QueueConnectionError(message.message, {
+            outputCode: message.code,
+            detailCode: message.detailCode,
+            origin: message.origin ?? "queue",
+            retryable: message.retryable,
+            acp: message.acp,
+          }),
+        );
         return;
       }
 
@@ -843,19 +866,6 @@ async function submitToQueueOwner(
         }
         options.outputFormatter.flush();
         finishResolve(message.result);
-        return;
-      }
-
-      if (message.type === "error") {
-        finishReject(
-          new QueueConnectionError(message.message, {
-            outputCode: message.code,
-            detailCode: message.detailCode,
-            origin: message.origin ?? "queue",
-            retryable: message.retryable,
-            acp: message.acp,
-          }),
-        );
         return;
       }
 
@@ -1003,17 +1013,6 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
         return;
       }
 
-      if (!acknowledged) {
-        finishReject(
-          new QueueConnectionError("Queue owner did not acknowledge request", {
-            detailCode: "QUEUE_ACK_MISSING",
-            origin: "queue",
-            retryable: true,
-          }),
-        );
-        return;
-      }
-
       if (message.type === "error") {
         finishReject(
           new QueueConnectionError(message.message, {
@@ -1022,6 +1021,17 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
             origin: message.origin ?? "queue",
             retryable: message.retryable,
             acp: message.acp,
+          }),
+        );
+        return;
+      }
+
+      if (!acknowledged) {
+        finishReject(
+          new QueueConnectionError("Queue owner did not acknowledge request", {
+            detailCode: "QUEUE_ACK_MISSING",
+            origin: "queue",
+            retryable: true,
           }),
         );
         return;

@@ -1652,7 +1652,9 @@ function detectRequestedOutputFormat(
   argv: string[],
   fallback: OutputFormat,
 ): OutputFormat {
-  for (const token of argv) {
+  let detectedFormat = fallback;
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
     if (token === "--") {
       break;
     }
@@ -1660,32 +1662,24 @@ function detectRequestedOutputFormat(
     if (token === "--json-strict" || token.startsWith("--json-strict=")) {
       return "json";
     }
-  }
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index];
-    if (token === "--") {
-      break;
-    }
 
     if (token === "--format") {
       const raw = argv[index + 1];
       if (raw && OUTPUT_FORMATS.includes(raw as OutputFormat)) {
-        return raw as OutputFormat;
+        detectedFormat = raw as OutputFormat;
       }
-      break;
+      continue;
     }
 
     if (token.startsWith("--format=")) {
       const raw = token.slice("--format=".length).trim();
       if (OUTPUT_FORMATS.includes(raw as OutputFormat)) {
-        return raw as OutputFormat;
+        detectedFormat = raw as OutputFormat;
       }
-      break;
     }
   }
 
-  return fallback;
+  return detectedFormat;
 }
 
 function detectJsonStrict(argv: string[]): boolean {
