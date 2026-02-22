@@ -114,17 +114,85 @@ test("integration: terminal kill leaves no orphan sleep process", async () => {
   });
 });
 
+test("integration: cancel yields cancelled stopReason without queue error", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const created = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+
+      const promptChild = spawn(
+        process.execPath,
+        [CLI_PATH, ...baseAgentArgs(cwd), "--format", "json", "prompt", "sleep 5000"],
+        {
+          env: {
+            ...process.env,
+            HOME: homeDir,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+
+      try {
+        const doneEventPromise = waitForPromptDoneEvent(promptChild, 20_000, "prompt");
+
+        let cancelled = false;
+        for (let attempt = 0; attempt < 80; attempt += 1) {
+          const cancelResult = await runCli(
+            [...baseAgentArgs(cwd), "--format", "json", "cancel"],
+            homeDir,
+          );
+          assert.equal(cancelResult.code, 0, cancelResult.stderr);
+
+          const payload = JSON.parse(cancelResult.stdout.trim()) as {
+            cancelled: boolean;
+          };
+          cancelled = payload.cancelled === true;
+          if (cancelled) {
+            break;
+          }
+
+          await sleep(100);
+        }
+
+        assert.equal(
+          cancelled,
+          true,
+          "cancel command never reached active queue owner",
+        );
+
+        const promptResult = await doneEventPromise;
+        assert.equal(
+          promptResult.events.some(
+            (event) => event.type === "done" && event.stopReason === "cancelled",
+          ),
+          true,
+          promptResult.stdout,
+        );
+        assert.equal(
+          promptResult.events.some((event) => event.type === "error"),
+          false,
+          promptResult.stdout,
+        );
+      } finally {
+        await stopChildProcess(promptChild, 5_000, "prompt");
+      }
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+function baseAgentArgs(cwd: string): string[] {
+  return ["--agent", MOCK_AGENT_COMMAND, "--approve-all", "--cwd", cwd];
+}
+
 function baseExecArgs(cwd: string): string[] {
-  return [
-    "--agent",
-    MOCK_AGENT_COMMAND,
-    "--approve-all",
-    "--format",
-    "quiet",
-    "--cwd",
-    cwd,
-    "exec",
-  ];
+  return [...baseAgentArgs(cwd), "--format", "quiet", "exec"];
 }
 
 async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {
@@ -185,6 +253,163 @@ async function runCli(
         stdout,
         stderr,
       });
+    });
+  });
+}
+
+type PromptEvent = {
+  type?: string;
+  stopReason?: string;
+};
+
+type PromptDoneResult = {
+  events: PromptEvent[];
+  stdout: string;
+  stderr: string;
+};
+
+async function waitForPromptDoneEvent(
+  child: ReturnType<typeof spawn>,
+  timeoutMs: number,
+  label: string,
+): Promise<PromptDoneResult> {
+  return await new Promise<PromptDoneResult>((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    let lineBuffer = "";
+    const events: PromptEvent[] = [];
+    let settled = false;
+
+    const finish = (run: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      child.stdout?.off("data", onStdoutData);
+      child.stderr?.off("data", onStderrData);
+      child.off("close", onClose);
+      child.off("error", onError);
+      run();
+    };
+
+    const parseLine = (line: string): void => {
+      const trimmed = line.trim();
+      if (trimmed.length === 0) {
+        return;
+      }
+
+      let event: PromptEvent;
+      try {
+        event = JSON.parse(trimmed) as PromptEvent;
+      } catch {
+        finish(() => {
+          reject(
+            new Error(
+              `${label} emitted invalid JSON line: ${trimmed}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+            ),
+          );
+        });
+        return;
+      }
+
+      events.push(event);
+      if (event.type === "done") {
+        finish(() => {
+          resolve({
+            events,
+            stdout,
+            stderr,
+          });
+        });
+      }
+    };
+
+    const flushLineBuffer = (): void => {
+      const remainder = lineBuffer.trim();
+      if (remainder.length > 0) {
+        parseLine(remainder);
+      }
+      lineBuffer = "";
+    };
+
+    const onStdoutData = (chunk: string): void => {
+      stdout += chunk;
+      lineBuffer += chunk;
+
+      for (;;) {
+        const newline = lineBuffer.indexOf("\n");
+        if (newline < 0) {
+          break;
+        }
+        const line = lineBuffer.slice(0, newline);
+        lineBuffer = lineBuffer.slice(newline + 1);
+        parseLine(line);
+        if (settled) {
+          return;
+        }
+      }
+    };
+
+    const onStderrData = (chunk: string): void => {
+      stderr += chunk;
+    };
+
+    const onClose = (code: number | null, signal: NodeJS.Signals | null): void => {
+      flushLineBuffer();
+      if (settled) {
+        return;
+      }
+      finish(() => {
+        reject(
+          new Error(
+            `${label} exited before done event (code=${code}, signal=${signal})\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+          ),
+        );
+      });
+    };
+
+    const onError = (error: Error): void => {
+      finish(() => reject(error));
+    };
+
+    const timer = setTimeout(() => {
+      finish(() => {
+        reject(new Error(`${label} process timed out waiting for done event`));
+      });
+    }, timeoutMs);
+
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", onStdoutData);
+    child.stderr?.on("data", onStderrData);
+    child.on("close", onClose);
+    child.on("error", onError);
+  });
+}
+
+async function stopChildProcess(
+  child: ReturnType<typeof spawn>,
+  timeoutMs: number,
+  label: string,
+): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  child.kill("SIGKILL");
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} did not exit after SIGKILL within ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.once("close", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
     });
   });
 }

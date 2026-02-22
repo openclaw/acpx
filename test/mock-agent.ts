@@ -321,6 +321,21 @@ class MockAgent implements Agent {
       return await this.runTerminalCommand(sessionId, rawCommand, signal);
     }
 
+    if (text.startsWith("sleep ")) {
+      const rawMs = text.slice("sleep ".length).trim();
+      if (!rawMs) {
+        throw new Error("Usage: sleep <milliseconds>");
+      }
+
+      const ms = Number(rawMs);
+      if (!Number.isFinite(ms) || ms < 0) {
+        throw new Error("Usage: sleep <milliseconds>");
+      }
+
+      await sleepWithCancel(Math.round(ms), signal);
+      return `slept ${Math.round(ms)}ms`;
+    }
+
     if (text.startsWith("kill-terminal ")) {
       const rawCommand = text.slice("kill-terminal ".length).trim();
       if (!rawCommand) {
