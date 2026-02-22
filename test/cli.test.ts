@@ -249,6 +249,77 @@ test("--non-interactive-permissions validates supported values", async () => {
   });
 });
 
+test("--json-strict requires --format json", async () => {
+  await withTempHome(async (homeDir) => {
+    const result = await runCli(["--json-strict", "sessions"], homeDir);
+    assert.equal(result.code, 2);
+    assert.equal(result.stderr.trim(), "");
+    const payload = JSON.parse(result.stdout.trim()) as {
+      type: string;
+      code: string;
+      message: string;
+    };
+    assert.equal(payload.type, "error");
+    assert.equal(payload.code, "USAGE");
+    assert.match(payload.message, /--json-strict requires --format json/);
+  });
+});
+
+test("--json-strict rejects --verbose", async () => {
+  await withTempHome(async (homeDir) => {
+    const result = await runCli(
+      ["--format", "json", "--json-strict", "--verbose", "sessions"],
+      homeDir,
+    );
+    assert.equal(result.code, 2);
+    assert.equal(result.stderr.trim(), "");
+    const payload = JSON.parse(result.stdout.trim()) as {
+      type: string;
+      code: string;
+      message: string;
+    };
+    assert.equal(payload.type, "error");
+    assert.equal(payload.code, "USAGE");
+    assert.match(payload.message, /--json-strict cannot be combined with --verbose/);
+  });
+});
+
+test("--json-strict suppresses session banners on stderr", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_COMMAND,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "json", "--json-strict", "codex", "sessions", "new"],
+      homeDir,
+    );
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stderr.trim(), "");
+    const payload = JSON.parse(result.stdout.trim()) as {
+      type: string;
+      id: string;
+    };
+    assert.equal(payload.type, "session_created");
+    assert.equal(typeof payload.id, "string");
+  });
+});
+
 test("prompt exits with NO_SESSION when no session exists (no auto-create)", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace", "packages", "app");

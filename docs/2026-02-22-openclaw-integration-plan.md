@@ -47,6 +47,11 @@ Use a two-layer error contract (fully specified in `docs/ACPX_ERROR_STRATEGY.md`
 - preserve ACP-native error details (numeric JSON-RPC `code`, `message`, optional `data`) when available
 - expose stable `acpx` machine error codes for orchestrators
 
+## Resolved decisions
+
+- Keep top-level `AUTH_REQUIRED` under `code=RUNTIME` with `detailCode=AUTH_REQUIRED` and preserve raw ACP details (`acp.code=-32000` etc.) when available.
+- Add `--json-strict` for orchestrators that require JSON-only output channels; it requires `--format json` and suppresses non-JSON stderr output.
+
 ## Required changes
 
 ### 1. Correlation-safe JSON event envelope
@@ -76,10 +81,23 @@ Adopt the permanent contract in `docs/ACPX_ERROR_STRATEGY.md`:
 - optional `detailCode` for fine-grained diagnostics (especially queue IPC)
 - optional raw ACP error payload for protocol-native failures
 - additive JSON fields, unchanged text mode and exit codes
+- auth-required behavior represented as `code=RUNTIME` plus `detailCode=AUTH_REQUIRED`
 
 ### 3. Error normalization and mapping strategy
 
 Implement one shared normalization path consumed by CLI, runtime, and queue layers, as specified in `docs/ACPX_ERROR_STRATEGY.md`.
+
+### 3.1 Strict JSON mode for orchestrators
+
+Add:
+
+- `--json-strict`
+
+Behavior:
+
+- requires `--format json`
+- rejects `--verbose` (to avoid debug stderr noise)
+- suppresses non-JSON stderr output paths (for example Commander usage/help banners)
 
 ### 4. Explicit non-interactive permission policy
 
@@ -225,12 +243,9 @@ Regression tests:
 - every JSON event in streamed prompt mode includes `eventVersion`, `sessionId`, and `seq`
 - queue-submitted turns include `requestId` on all events
 - JSON mode failures emit at least one structured `error` event before exit, with stable `code`
+- auth-required failures include `detailCode=AUTH_REQUIRED` and preserve ACP payload when present
 - `sessions ensure` is idempotent and returns deterministic JSON
+- `--json-strict` enforces JSON-only output behavior
 - non-interactive permission behavior is explicitly configurable
 - queue failures include machine-readable typed error fields (not message-only)
 - ACP error details are preserved when available
-
-## Open questions
-
-- Should we add a first-class top-level `AUTH_REQUIRED` `acpx` code, or keep it under `RUNTIME` + `acp.code=-32000`?
-- Should we add `--json-strict` that suppresses all non-JSON stderr output?

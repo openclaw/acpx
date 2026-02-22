@@ -40,7 +40,7 @@ In JSON mode, fatal failures should emit:
 {
   "type": "error",
   "code": "NO_SESSION|TIMEOUT|PERMISSION_DENIED|PERMISSION_PROMPT_UNAVAILABLE|RUNTIME|USAGE",
-  "detailCode": "QUEUE_PROTOCOL_INVALID_JSON|QUEUE_OWNER_CLOSED|...",
+  "detailCode": "AUTH_REQUIRED|QUEUE_PROTOCOL_INVALID_JSON|QUEUE_OWNER_CLOSED|...",
   "origin": "cli|runtime|queue|acp",
   "message": "...",
   "retryable": true,
@@ -71,6 +71,12 @@ Field rules:
 - `PERMISSION_PROMPT_UNAVAILABLE`: non-interactive prompt policy is `fail` and prompt cannot be shown.
 - `USAGE`: CLI/config invocation errors.
 - `RUNTIME`: all other failures.
+
+Auth-required policy:
+
+- keep top-level `code` as `RUNTIME` for compatibility
+- use `detailCode=AUTH_REQUIRED` for deterministic machine handling
+- include raw ACP payload in `acp` when available (for example `acp.code=-32000`)
 
 ## Queue detail codes (initial set)
 
@@ -104,6 +110,7 @@ Cancellation is a normal completion path, not an error path:
 - Queue error parsing should accept both old (`message` only) and new (`code/detailCode/message`) payload shapes during migration.
 - Text mode output and existing exit codes stay unchanged.
 - New JSON fields remain additive.
+- `--json-strict` is the recommended mode for orchestrators that need JSON-only output channels.
 
 ## Implementation notes
 

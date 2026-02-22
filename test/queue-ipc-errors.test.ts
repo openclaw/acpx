@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import net from "node:net";
 import readline from "node:readline";
 import test from "node:test";
-import { QueueConnectionError } from "../src/errors.js";
+import { QueueConnectionError, QueueProtocolError } from "../src/errors.js";
 import {
   SessionQueueOwner,
   releaseQueueOwnerLease,
@@ -194,6 +194,263 @@ test("trySetModeOnRunningOwner propagates typed queue control errors", async () 
           assert.match(error.message, /mode switch rejected by owner/);
           return true;
         },
+      );
+    } finally {
+      await closeServer(server);
+      await cleanupOwnerArtifacts({ socketPath, lockPath });
+      stopProcess(keeper);
+    }
+  });
+});
+
+test("trySubmitToRunningOwner surfaces protocol invalid JSON detail code", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "submit-invalid-json-session";
+    const keeper = await startKeeperProcess();
+    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
+    await writeQueueOwnerLock({
+      lockPath,
+      pid: keeper.pid,
+      sessionId,
+      socketPath,
+    });
+
+    const server = net.createServer((socket) => {
+      socket.setEncoding("utf8");
+      let buffer = "";
+      socket.on("data", (chunk: string) => {
+        buffer += chunk;
+        const newlineIndex = buffer.indexOf("\n");
+        if (newlineIndex < 0) {
+          return;
+        }
+        const line = buffer.slice(0, newlineIndex).trim();
+        if (!line) {
+          return;
+        }
+        const request = JSON.parse(line) as { requestId: string; type: string };
+        assert.equal(request.type, "submit_prompt");
+        socket.write(
+          `${JSON.stringify({
+            type: "accepted",
+            requestId: request.requestId,
+          })}\n`,
+        );
+        socket.write("{invalid-json\n");
+      });
+    });
+
+    await listenServer(server, socketPath);
+
+    try {
+      await assert.rejects(
+        async () =>
+          await trySubmitToRunningOwner({
+            sessionId,
+            message: "hello",
+            permissionMode: "approve-reads",
+            outputFormatter: NOOP_OUTPUT_FORMATTER,
+            waitForCompletion: true,
+          }),
+        (error: unknown) => {
+          assert(error instanceof QueueProtocolError);
+          assert.equal(error.detailCode, "QUEUE_PROTOCOL_INVALID_JSON");
+          assert.equal(error.origin, "queue");
+          assert.equal(error.retryable, true);
+          return true;
+        },
+      );
+    } finally {
+      await closeServer(server);
+      await cleanupOwnerArtifacts({ socketPath, lockPath });
+      stopProcess(keeper);
+    }
+  });
+});
+
+test("trySubmitToRunningOwner surfaces disconnect-before-ack detail code", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "submit-disconnect-before-ack";
+    const keeper = await startKeeperProcess();
+    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
+    await writeQueueOwnerLock({
+      lockPath,
+      pid: keeper.pid,
+      sessionId,
+      socketPath,
+    });
+
+    const server = net.createServer((socket) => {
+      socket.setEncoding("utf8");
+      socket.once("data", () => {
+        socket.end();
+      });
+    });
+
+    await listenServer(server, socketPath);
+
+    try {
+      await assert.rejects(
+        async () =>
+          await trySubmitToRunningOwner({
+            sessionId,
+            message: "hello",
+            permissionMode: "approve-reads",
+            outputFormatter: NOOP_OUTPUT_FORMATTER,
+            waitForCompletion: true,
+          }),
+        (error: unknown) => {
+          assert(error instanceof QueueConnectionError);
+          assert.equal(error.detailCode, "QUEUE_DISCONNECTED_BEFORE_ACK");
+          assert.equal(error.origin, "queue");
+          assert.equal(error.retryable, true);
+          return true;
+        },
+      );
+    } finally {
+      await closeServer(server);
+      await cleanupOwnerArtifacts({ socketPath, lockPath });
+      stopProcess(keeper);
+    }
+  });
+});
+
+test("trySubmitToRunningOwner streams queued lifecycle and returns result", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "queued-lifecycle-session";
+    const keeper = await startKeeperProcess();
+    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
+    await writeQueueOwnerLock({
+      lockPath,
+      pid: keeper.pid,
+      sessionId,
+      socketPath,
+    });
+
+    const events: string[] = [];
+    const formatter: OutputFormatter = {
+      setContext(context) {
+        events.push(`context:${context.sessionId}:${context.requestId ?? "-"}`);
+      },
+      onSessionUpdate(notification) {
+        events.push(`session_update:${notification.update.sessionUpdate}`);
+      },
+      onClientOperation() {
+        events.push("client_operation");
+      },
+      onDone(stopReason) {
+        events.push(`done:${stopReason}`);
+      },
+      onError(params) {
+        events.push(`error:${params.code}`);
+      },
+      flush() {
+        events.push("flush");
+      },
+    };
+
+    const server = net.createServer((socket) => {
+      socket.setEncoding("utf8");
+      let buffer = "";
+      socket.on("data", (chunk: string) => {
+        buffer += chunk;
+        const newlineIndex = buffer.indexOf("\n");
+        if (newlineIndex < 0) {
+          return;
+        }
+        const line = buffer.slice(0, newlineIndex).trim();
+        if (!line) {
+          return;
+        }
+        const request = JSON.parse(line) as { requestId: string; type: string };
+        assert.equal(request.type, "submit_prompt");
+        socket.write(
+          `${JSON.stringify({
+            type: "accepted",
+            requestId: request.requestId,
+          })}\n`,
+        );
+        socket.write(
+          `${JSON.stringify({
+            type: "session_update",
+            requestId: request.requestId,
+            notification: {
+              sessionId: "agent-session",
+              update: {
+                sessionUpdate: "agent_message_chunk",
+                content: {
+                  type: "text",
+                  text: "queued response",
+                },
+              },
+            },
+          })}\n`,
+        );
+        socket.write(
+          `${JSON.stringify({
+            type: "done",
+            requestId: request.requestId,
+            stopReason: "end_turn",
+          })}\n`,
+        );
+        socket.write(
+          `${JSON.stringify({
+            type: "result",
+            requestId: request.requestId,
+            result: {
+              stopReason: "end_turn",
+              sessionId: "agent-session",
+              permissionStats: {
+                requested: 1,
+                approved: 1,
+                denied: 0,
+                cancelled: 0,
+              },
+              resumed: true,
+              record: {
+                id: sessionId,
+                sessionId: "agent-session",
+                agentCommand: "mock-agent",
+                cwd: "/tmp/project",
+                createdAt: "2026-01-01T00:00:00.000Z",
+                lastUsedAt: "2026-01-01T00:00:00.000Z",
+              },
+            },
+          })}\n`,
+        );
+        socket.end();
+      });
+    });
+
+    await listenServer(server, socketPath);
+
+    try {
+      const result = await trySubmitToRunningOwner({
+        sessionId,
+        message: "hello",
+        permissionMode: "approve-reads",
+        outputFormatter: formatter,
+        waitForCompletion: true,
+      });
+
+      assert(result);
+      assert.equal("queued" in result, false);
+      if ("queued" in result) {
+        assert.fail("expected completed result, received queued response");
+      }
+      assert.equal(result.sessionId, "agent-session");
+      assert.equal(result.stopReason, "end_turn");
+      assert.equal(result.resumed, true);
+      assert.equal(
+        events.some((entry) => entry.startsWith(`context:${sessionId}:`)),
+        true,
+      );
+      assert.equal(events.includes("session_update:agent_message_chunk"), true);
+      assert.equal(events.includes("done:end_turn"), true);
+      assert.equal(events.includes("flush"), true);
+      assert.equal(
+        events.some((entry) => entry.startsWith("error:")),
+        false,
       );
     } finally {
       await closeServer(server);

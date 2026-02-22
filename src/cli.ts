@@ -71,6 +71,7 @@ type GlobalFlags = PermissionFlags & {
   cwd: string;
   authPolicy?: AuthPolicy;
   nonInteractivePermissions: NonInteractivePermissionPolicy;
+  jsonStrict?: boolean;
   timeout?: number;
   ttl: number;
   verbose?: boolean;
@@ -293,6 +294,10 @@ function addGlobalFlags(command: Command): Command {
     )
     .option("--format <fmt>", "Output format: text, json, quiet", parseOutputFormat)
     .option(
+      "--json-strict",
+      "Strict JSON mode: requires --format json and suppresses non-JSON stderr output",
+    )
+    .option(
       "--timeout <seconds>",
       "Maximum time to wait for agent response",
       parseTimeoutSeconds,
@@ -361,16 +366,29 @@ function addPromptInputOption(command: Command): Command {
 
 function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig): GlobalFlags {
   const opts = command.optsWithGlobals() as Partial<GlobalFlags>;
+  const format = opts.format ?? config.format ?? "text";
+  const jsonStrict = opts.jsonStrict === true;
+  const verbose = opts.verbose === true;
+
+  if (jsonStrict && format !== "json") {
+    throw new InvalidArgumentError("--json-strict requires --format json");
+  }
+
+  if (jsonStrict && verbose) {
+    throw new InvalidArgumentError("--json-strict cannot be combined with --verbose");
+  }
+
   return {
     agent: opts.agent,
     cwd: opts.cwd ?? process.cwd(),
     authPolicy: opts.authPolicy ?? config.authPolicy,
     nonInteractivePermissions:
       opts.nonInteractivePermissions ?? config.nonInteractivePermissions,
+    jsonStrict,
     timeout: opts.timeout ?? config.timeoutMs,
     ttl: opts.ttl ?? config.ttlMs ?? DEFAULT_QUEUE_OWNER_TTL_MS,
-    verbose: opts.verbose === true,
-    format: opts.format ?? config.format ?? "text",
+    verbose,
+    format,
     approveAll: opts.approveAll ? true : undefined,
     approveReads: opts.approveReads ? true : undefined,
     denyAll: opts.denyAll ? true : undefined,
@@ -578,8 +596,9 @@ function printPromptSessionBanner(
   record: SessionRecord,
   currentCwd: string,
   format: OutputFormat,
+  jsonStrict = false,
 ): void {
-  if (format === "quiet") {
+  if (format === "quiet" || (jsonStrict && format === "json")) {
     return;
   }
 
@@ -590,8 +609,9 @@ function printCreatedSessionBanner(
   record: SessionRecord,
   agentName: string,
   format: OutputFormat,
+  jsonStrict = false,
 ): void {
-  if (format === "quiet") {
+  if (format === "quiet" || (jsonStrict && format === "json")) {
     return;
   }
 
@@ -653,8 +673,12 @@ async function handlePrompt(
     },
   });
 
-  printPromptSessionBanner(record, agent.cwd, globalFlags.format);
-
+  printPromptSessionBanner(
+    record,
+    agent.cwd,
+    globalFlags.format,
+    globalFlags.jsonStrict,
+  );
   const result = await sendSession({
     sessionId: record.id,
     message: prompt,
@@ -966,7 +990,12 @@ async function handleSessionsNew(
     verbose: globalFlags.verbose,
   });
 
-  printCreatedSessionBanner(created, agent.agentName, globalFlags.format);
+  printCreatedSessionBanner(
+    created,
+    agent.agentName,
+    globalFlags.format,
+    globalFlags.jsonStrict,
+  );
 
   if (globalFlags.verbose) {
     const scope = flags.name ? `named session "${flags.name}"` : "cwd session";
@@ -998,7 +1027,12 @@ async function handleSessionsEnsure(
   });
 
   if (result.created) {
-    printCreatedSessionBanner(result.record, agent.agentName, globalFlags.format);
+    printCreatedSessionBanner(
+      result.record,
+      agent.agentName,
+      globalFlags.format,
+      globalFlags.jsonStrict,
+    );
   }
 
   printEnsuredSessionByFormat(result.record, result.created, globalFlags.format);
@@ -1566,6 +1600,7 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
       token.startsWith("--auth-policy=") ||
       token.startsWith("--non-interactive-permissions=") ||
       token.startsWith("--format=") ||
+      token.startsWith("--json-strict=") ||
       token.startsWith("--timeout=") ||
       token.startsWith("--ttl=") ||
       token.startsWith("--file=")
@@ -1577,6 +1612,7 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
       token === "--approve-all" ||
       token === "--approve-reads" ||
       token === "--deny-all" ||
+      token === "--json-strict" ||
       token === "--verbose"
     ) {
       continue;
@@ -1616,6 +1652,16 @@ function detectRequestedOutputFormat(
   argv: string[],
   fallback: OutputFormat,
 ): OutputFormat {
+  for (const token of argv) {
+    if (token === "--") {
+      break;
+    }
+
+    if (token === "--json-strict" || token.startsWith("--json-strict=")) {
+      return "json";
+    }
+  }
+
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === "--") {
@@ -1642,6 +1688,22 @@ function detectRequestedOutputFormat(
   return fallback;
 }
 
+function detectJsonStrict(argv: string[]): boolean {
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === "--") {
+      break;
+    }
+    if (token === "--json-strict") {
+      return true;
+    }
+    if (token.startsWith("--json-strict=")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function emitJsonErrorEvent(error: NormalizedOutputError): void {
   const formatter = createOutputFormatter("json", {
     jsonContext: {
@@ -1660,6 +1722,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
   });
 
   const config = await loadResolvedConfig(detectInitialCwd(argv.slice(2)));
+  const requestedJsonStrict = detectJsonStrict(argv.slice(2));
   const requestedOutputFormat = detectRequestedOutputFormat(
     argv.slice(2),
     config.format,
@@ -1672,6 +1735,14 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     .description("Headless CLI client for the Agent Client Protocol")
     .enablePositionalOptions()
     .showHelpAfterError();
+
+  if (requestedJsonStrict) {
+    program.configureOutput({
+      writeErr: () => {
+        // json-strict intentionally suppresses non-JSON stderr output.
+      },
+    });
+  }
 
   addGlobalFlags(program);
 

@@ -27,7 +27,7 @@ acpx [global_options] cancel [-s <name>]
 acpx [global_options] set-mode <mode> [-s <name>]
 acpx [global_options] set <key> <value> [-s <name>]
 acpx [global_options] status [-s <name>]
-acpx [global_options] sessions [list | new [--name <name>] | close [name] | show [name] | history [name] [--limit <count>]]
+acpx [global_options] sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>]]
 acpx [global_options] config [show | init]
 
 acpx [global_options] <agent> [prompt_options] [prompt_text...]
@@ -37,7 +37,7 @@ acpx [global_options] <agent> cancel [-s <name>]
 acpx [global_options] <agent> set-mode <mode> [-s <name>]
 acpx [global_options] <agent> set <key> <value> [-s <name>]
 acpx [global_options] <agent> status [-s <name>]
-acpx [global_options] <agent> sessions [list | new [--name <name>] | close [name] | show [name] | history [name] [--limit <count>]]
+acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>]]
 ```
 
 `<agent>` can be:
@@ -65,17 +65,19 @@ Notes:
 
 All global options:
 
-| Option                | Description                                    | Details                                                             |
-| --------------------- | ---------------------------------------------- | ------------------------------------------------------------------- |
-| `--agent <command>`   | Raw ACP agent command (escape hatch)           | Do not combine with positional agent token.                         |
-| `--cwd <dir>`         | Working directory                              | Defaults to current directory. Stored as absolute path for scoping. |
-| `--approve-all`       | Auto-approve all permissions                   | Permission mode `approve-all`.                                      |
-| `--approve-reads`     | Auto-approve reads/searches, prompt for others | Default permission mode.                                            |
-| `--deny-all`          | Deny all permissions                           | Permission mode `deny-all`.                                         |
-| `--format <fmt>`      | Output format                                  | `text` (default), `json`, `quiet`.                                  |
-| `--timeout <seconds>` | Max wait time for agent response               | Must be positive. Decimal seconds allowed.                          |
-| `--ttl <seconds>`     | Queue owner idle TTL before shutdown           | Default `300`. `0` disables TTL.                                    |
-| `--verbose`           | Enable verbose logs                            | Prints ACP/debug details to stderr.                                 |
+| Option                                   | Description                                    | Details                                                             |
+| ---------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------- |
+| `--agent <command>`                      | Raw ACP agent command (escape hatch)           | Do not combine with positional agent token.                         |
+| `--cwd <dir>`                            | Working directory                              | Defaults to current directory. Stored as absolute path for scoping. |
+| `--approve-all`                          | Auto-approve all permissions                   | Permission mode `approve-all`.                                      |
+| `--approve-reads`                        | Auto-approve reads/searches, prompt for others | Default permission mode.                                            |
+| `--deny-all`                             | Deny all permissions                           | Permission mode `deny-all`.                                         |
+| `--format <fmt>`                         | Output format                                  | `text` (default), `json`, `quiet`.                                  |
+| `--json-strict`                          | Strict JSON mode                               | Requires `--format json`; suppresses non-JSON stderr output.        |
+| `--non-interactive-permissions <policy>` | Non-TTY prompt policy                          | `deny` (default) or `fail` when approval prompt cannot be shown.    |
+| `--timeout <seconds>`                    | Max wait time for agent response               | Must be positive. Decimal seconds allowed.                          |
+| `--ttl <seconds>`                        | Queue owner idle TTL before shutdown           | Default `300`. `0` disables TTL.                                    |
+| `--verbose`                              | Enable verbose logs                            | Prints ACP/debug details to stderr.                                 |
 
 Permission flags are mutually exclusive. Using more than one of `--approve-all`, `--approve-reads`, `--deny-all` is a usage error.
 
@@ -85,9 +87,11 @@ Permission flags are mutually exclusive. Using more than one of `--approve-all`,
 acpx --approve-all codex 'apply this patch and run tests'
 acpx --approve-reads codex 'inspect the repo and propose a plan'
 acpx --deny-all codex 'summarize this code without running tools'
+acpx --non-interactive-permissions fail codex 'fail fast when prompt cannot be shown'
 
 acpx --cwd ~/repos/api codex 'review auth middleware'
 acpx --format json codex exec 'summarize open TODO items'
+acpx --format json --json-strict codex exec 'machine-safe JSON output'
 acpx --timeout 120 codex 'investigate flaky test failures'
 acpx --ttl 30 codex 'keep queue owner warm for quick follow-up'
 acpx --verbose codex 'debug adapter startup issues'
@@ -103,7 +107,7 @@ Each agent command supports the same shape.
 acpx [global_options] codex [prompt_options] [prompt_text...]
 acpx [global_options] codex prompt [prompt_options] [prompt_text...]
 acpx [global_options] codex exec [prompt_text...]
-acpx [global_options] codex sessions [list | new [--name <name>] | close [name]]
+acpx [global_options] codex sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
 Built-in command mapping: `codex -> npx @zed-industries/codex-acp`
@@ -114,7 +118,7 @@ Built-in command mapping: `codex -> npx @zed-industries/codex-acp`
 acpx [global_options] claude [prompt_options] [prompt_text...]
 acpx [global_options] claude prompt [prompt_options] [prompt_text...]
 acpx [global_options] claude exec [prompt_text...]
-acpx [global_options] claude sessions [list | new [--name <name>] | close [name]]
+acpx [global_options] claude sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
 Built-in command mapping: `claude -> npx @zed-industries/claude-agent-acp`
@@ -125,7 +129,7 @@ Built-in command mapping: `claude -> npx @zed-industries/claude-agent-acp`
 acpx [global_options] gemini [prompt_options] [prompt_text...]
 acpx [global_options] gemini prompt [prompt_options] [prompt_text...]
 acpx [global_options] gemini exec [prompt_text...]
-acpx [global_options] gemini sessions [list | new [--name <name>] | close [name]]
+acpx [global_options] gemini sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
 Built-in command mapping: `gemini -> gemini`
@@ -226,6 +230,8 @@ acpx [global_options] <agent> sessions
 acpx [global_options] <agent> sessions list
 acpx [global_options] <agent> sessions new
 acpx [global_options] <agent> sessions new --name <name>
+acpx [global_options] <agent> sessions ensure
+acpx [global_options] <agent> sessions ensure --name <name>
 acpx [global_options] <agent> sessions close
 acpx [global_options] <agent> sessions close <name>
 acpx [global_options] <agent> sessions show
@@ -243,6 +249,8 @@ Behavior:
 - `sessions new` creates a fresh cwd-scoped default session
 - `sessions new --name <name>` creates a fresh named session for cwd
 - creating a fresh session soft-closes the previous open session in that scope (if present)
+- `sessions ensure` returns the nearest matching active session or creates one for cwd
+- `sessions ensure --name <name>` does the same for named sessions
 - `sessions close` soft-closes the current cwd default session
 - `sessions close <name>` soft-closes current cwd named session
 - `sessions show [name]` displays stored session metadata
@@ -289,6 +297,8 @@ Supported keys:
 {
   "defaultAgent": "codex",
   "defaultPermissions": "approve-all",
+  "nonInteractivePermissions": "deny",
+  "authPolicy": "skip",
   "ttl": 300,
   "timeout": null,
   "format": "text",
@@ -339,7 +349,8 @@ For prompt commands:
 5. If found, use that session record for prompt queueing and resume attempts.
 6. If not found, exit with code `4` and print guidance to create one via `sessions new`.
 
-`sessions new [--name <name>]` is the explicit creation point for saved session records.
+Use `sessions new [--name <name>]` when you explicitly want a fresh scoped session.
+Use `sessions ensure [--name <name>]` when you want idempotent "get-or-create" behavior.
 
 If a saved session PID is dead, `acpx` respawns the agent, tries `session/load`, and transparently falls back to `session/new` when loading fails.
 
@@ -376,12 +387,28 @@ When a prompt is already in flight for a session, `acpx` uses a per-session queu
 - `text` (default): human-readable stream
 - `json`: NDJSON event stream for automation
 - `quiet`: assistant text only
+- `--format json --json-strict`: same NDJSON stream, with non-JSON stderr output suppressed
 
 ### Prompt/exec output behavior
 
 - `text`: assistant text, tool status blocks, client-operation logs, plan updates, and `[done] <reason>`
-- `json`: one JSON object per line with event types like `text`, `thought`, `tool_call`, `client_operation`, `plan`, `update`, `done`
+- `json`: one JSON object per line with event types like `text`, `thought`, `tool_call`, `client_operation`, `plan`, `update`, `done`, `error`
 - `quiet`: concatenated assistant text only
+
+JSON events include a stable envelope for correlation:
+
+```json
+{
+  "eventVersion": 1,
+  "sessionId": "abc123",
+  "requestId": "req-42",
+  "seq": 7,
+  "stream": "prompt",
+  "type": "tool_call"
+}
+```
+
+JSON error events include stable top-level `code`, optional `detailCode`, and optional `acp` payload.
 
 ### Sessions command output behavior
 
@@ -391,6 +418,9 @@ When a prompt is already in flight for a session, `acpx` uses a per-session queu
 - `sessions new` with `text`: new session id (and replaced id when applicable)
 - `sessions new` with `json`: `{"type":"session_created",...}`
 - `sessions new` with `quiet`: new session id
+- `sessions ensure` with `text`: ensured session id (created or reused)
+- `sessions ensure` with `json`: `{"type":"session_ensured","created":true|false,...}`
+- `sessions ensure` with `quiet`: ensured session id
 - `sessions close` with `text`: closed record id
 - `sessions close` with `json`: `{"type":"session_closed",...}`
 - `sessions close` with `quiet`: no output
@@ -413,6 +443,11 @@ Prompting behavior in `--approve-reads`:
 
 - interactive TTY: asks `Allow <tool>? (y/N)` for non-read/search requests
 - non-interactive (no TTY): non-read/search requests are not approved
+
+Non-interactive prompt policy:
+
+- `--non-interactive-permissions deny`: deny non-read/search prompts when no TTY (default)
+- `--non-interactive-permissions fail`: fail with `PERMISSION_PROMPT_UNAVAILABLE`
 
 ## Exit codes
 

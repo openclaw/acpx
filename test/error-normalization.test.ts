@@ -8,6 +8,7 @@ import {
 import {
   PermissionPromptUnavailableError,
   QueueConnectionError,
+  AuthPolicyError,
 } from "../src/errors.js";
 
 test("normalizeOutputError maps permission prompt unavailable errors", () => {
@@ -85,6 +86,32 @@ test("normalizeOutputError preserves queue metadata from typed queue errors", ()
   assert.equal(normalized.detailCode, "QUEUE_CONTROL_REQUEST_FAILED");
   assert.equal(normalized.origin, "queue");
   assert.equal(normalized.retryable, false);
+});
+
+test("normalizeOutputError maps AuthPolicyError to AUTH_REQUIRED detail", () => {
+  const normalized = normalizeOutputError(
+    new AuthPolicyError("missing credentials for auth method token"),
+  );
+
+  assert.equal(normalized.code, "RUNTIME");
+  assert.equal(normalized.detailCode, "AUTH_REQUIRED");
+  assert.equal(normalized.origin, "acp");
+});
+
+test("normalizeOutputError infers AUTH_REQUIRED detail from ACP payload", () => {
+  const normalized = normalizeOutputError({
+    error: {
+      code: -32000,
+      message: "Authentication required",
+      data: {
+        methodId: "token",
+      },
+    },
+  });
+
+  assert.equal(normalized.code, "RUNTIME");
+  assert.equal(normalized.detailCode, "AUTH_REQUIRED");
+  assert.equal(normalized.acp?.code, -32000);
 });
 
 test("exitCodeForOutputErrorCode maps machine codes to stable exits", () => {

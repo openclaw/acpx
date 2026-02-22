@@ -1,4 +1,8 @@
-import { PermissionDeniedError, PermissionPromptUnavailableError } from "./errors.js";
+import {
+  AuthPolicyError,
+  PermissionDeniedError,
+  PermissionPromptUnavailableError,
+} from "./errors.js";
 import {
   EXIT_CODES,
   OUTPUT_ERROR_CODES,
@@ -10,6 +14,7 @@ import {
 } from "./types.js";
 
 const RESOURCE_NOT_FOUND_ACP_CODES = new Set([-32001, -32002]);
+const AUTH_REQUIRED_ACP_CODES = new Set([-32000]);
 
 type ErrorMeta = {
   outputCode?: OutputErrorCode;
@@ -41,6 +46,55 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     return undefined;
   }
   return value as Record<string, unknown>;
+}
+
+function isAuthRequiredMessage(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  const normalized = value.toLowerCase();
+  return (
+    normalized.includes("auth required") ||
+    normalized.includes("authentication required") ||
+    normalized.includes("authorization required") ||
+    normalized.includes("credential required") ||
+    normalized.includes("credentials required") ||
+    normalized.includes("token required") ||
+    normalized.includes("login required")
+  );
+}
+
+function isAcpAuthRequiredPayload(acp: OutputErrorAcpPayload | undefined): boolean {
+  if (!acp) {
+    return false;
+  }
+  if (!AUTH_REQUIRED_ACP_CODES.has(acp.code)) {
+    return false;
+  }
+  if (isAuthRequiredMessage(acp.message)) {
+    return true;
+  }
+
+  const data = asRecord(acp.data);
+  if (!data) {
+    return false;
+  }
+
+  if (data.authRequired === true) {
+    return true;
+  }
+
+  const methodId = data.methodId;
+  if (typeof methodId === "string" && methodId.trim().length > 0) {
+    return true;
+  }
+
+  const methods = data.methods;
+  if (Array.isArray(methods) && methods.length > 0) {
+    return true;
+  }
+
+  return false;
 }
 
 function isOutputErrorCode(value: unknown): value is OutputErrorCode {
@@ -234,10 +288,16 @@ export function normalizeOutputError(
   }
 
   const acp = options.acp ?? meta.acp ?? extractAcpError(error);
+  const detailCode =
+    options.detailCode ??
+    meta.detailCode ??
+    (error instanceof AuthPolicyError || isAcpAuthRequiredPayload(acp)
+      ? "AUTH_REQUIRED"
+      : undefined);
   return {
     code,
     message: formatErrorMessage(error),
-    detailCode: options.detailCode ?? meta.detailCode,
+    detailCode,
     origin: options.origin ?? meta.origin,
     retryable: options.retryable ?? meta.retryable,
     acp,

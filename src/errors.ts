@@ -52,7 +52,16 @@ export class AgentSpawnError extends AcpxOperationalError {
   }
 }
 
-export class AuthPolicyError extends AcpxOperationalError {}
+export class AuthPolicyError extends AcpxOperationalError {
+  constructor(message: string, options?: AcpxErrorOptions) {
+    super(message, {
+      outputCode: "RUNTIME",
+      detailCode: "AUTH_REQUIRED",
+      origin: "acp",
+      ...options,
+    });
+  }
+}
 
 export class QueueConnectionError extends AcpxOperationalError {}
 

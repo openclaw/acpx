@@ -143,6 +143,8 @@ acpx codex sessions show         # inspect cwd session metadata
 acpx codex sessions history      # show recent turn history
 acpx codex sessions new          # create fresh cwd-scoped default session
 acpx codex sessions new --name api # create fresh named session
+acpx codex sessions ensure       # return existing scoped session or create one
+acpx codex sessions ensure --name api # ensure named scoped session
 acpx codex sessions close        # close cwd-scoped default session
 acpx codex sessions close api    # close cwd-scoped named session
 acpx codex status                # local process status for current session
@@ -175,10 +177,12 @@ acpx codex -s release 'draft release notes from recent commits'
 acpx --approve-all codex 'apply the patch and run tests'
 acpx --approve-reads codex 'inspect repo structure and suggest plan' # default mode
 acpx --deny-all codex 'explain what you can do without tool access'
+acpx --non-interactive-permissions fail codex 'fail instead of deny in non-TTY'
 
 acpx --cwd ~/repos/backend codex 'review recent auth changes'
 acpx --format text codex 'summarize your findings'
 acpx --format json codex exec 'review changed files'
+acpx --format json --json-strict codex exec 'machine-safe JSON only'
 acpx --format quiet codex 'final recommendation only'
 
 acpx --timeout 90 codex 'investigate intermittent test timeout'
@@ -201,6 +205,8 @@ Supported keys:
 {
   "defaultAgent": "codex",
   "defaultPermissions": "approve-all",
+  "nonInteractivePermissions": "deny",
+  "authPolicy": "skip",
   "ttl": 300,
   "timeout": null,
   "format": "text",
@@ -225,8 +231,24 @@ acpx codex 'review this PR'
 acpx --format json codex exec 'review this PR' \
   | jq -r 'select(.type=="tool_call") | [.status, .title] | @tsv'
 
+# json-strict: suppresses non-JSON stderr output (requires --format json)
+acpx --format json --json-strict codex exec 'review this PR'
+
 # quiet: final assistant text only
 acpx --format quiet codex 'give me a 3-line summary'
+```
+
+JSON events include a stable envelope for correlation:
+
+```json
+{
+  "eventVersion": 1,
+  "sessionId": "abc123",
+  "requestId": "req-42",
+  "seq": 7,
+  "stream": "prompt",
+  "type": "tool_call"
+}
 ```
 
 ## Built-in agents and custom servers
@@ -249,11 +271,12 @@ acpx --agent ./my-custom-acp-server 'do something'
 
 ## Session behavior
 
-- Prompt commands require an existing saved session record (created via `sessions new`).
+- Prompt commands require an existing saved session record (created via `sessions new` or `sessions ensure`).
 - Prompts route by walking up from `cwd` (or `--cwd`) to the nearest git root (inclusive) and selecting the nearest active session matching `(agent command, dir, optional name)`.
 - If no git root is found, prompts only match an exact `cwd` session (no parent-directory walk).
 - `-s <name>` selects a parallel named session during that directory walk.
 - `sessions new [--name <name>]` creates a fresh session for that scope and soft-closes the prior one.
+- `sessions ensure [--name <name>]` is idempotent: it returns an existing scoped session or creates one when missing.
 - `sessions close [name]` soft-closes the session: queue owner/processes are terminated, record is kept with `closed: true`.
 - Auto-resume for cwd scope skips sessions marked closed.
 - Prompt submissions are queue-aware per session. If a prompt is already running, new prompts are queued and drained by the running `acpx` process.
