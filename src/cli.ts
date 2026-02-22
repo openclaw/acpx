@@ -17,12 +17,16 @@ import {
   toConfigDisplay,
   type ResolvedAcpxConfig,
 } from "./config.js";
+import {
+  exitCodeForOutputErrorCode,
+  normalizeOutputError,
+  type NormalizedOutputError,
+} from "./error-normalization.js";
 import { createOutputFormatter } from "./output.js";
 import {
   DEFAULT_HISTORY_LIMIT,
   DEFAULT_QUEUE_OWNER_TTL_MS,
   InterruptedError,
-  TimeoutError,
   cancelSessionPrompt,
   closeSession,
   createSession,
@@ -37,14 +41,12 @@ import {
   setSessionMode,
   sendSession,
 } from "./session.js";
-import { PermissionDeniedError, PermissionPromptUnavailableError } from "./errors.js";
 import {
   AUTH_POLICIES,
   EXIT_CODES,
   NON_INTERACTIVE_PERMISSION_POLICIES,
   OUTPUT_FORMATS,
   type NonInteractivePermissionPolicy,
-  type OutputErrorCode,
   type AuthPolicy,
   type OutputFormat,
   type PermissionMode,
@@ -1640,14 +1642,14 @@ function detectRequestedOutputFormat(
   return fallback;
 }
 
-function emitJsonErrorEvent(code: OutputErrorCode, message: string): void {
+function emitJsonErrorEvent(error: NormalizedOutputError): void {
   const formatter = createOutputFormatter("json", {
     jsonContext: {
       sessionId: "unknown",
       stream: "control",
     },
   });
-  formatter.onError({ code, message });
+  formatter.onError(error);
   formatter.flush();
 }
 
@@ -1741,59 +1743,31 @@ Examples:
       ) {
         process.exit(EXIT_CODES.SUCCESS);
       }
+      const normalized = normalizeOutputError(error, {
+        defaultCode: "USAGE",
+        origin: "cli",
+      });
       if (requestedOutputFormat === "json") {
-        emitJsonErrorEvent("USAGE", error.message);
+        emitJsonErrorEvent(normalized);
+      } else {
+        process.stderr.write(`${normalized.message}\n`);
       }
-      process.exit(EXIT_CODES.USAGE);
+      process.exit(exitCodeForOutputErrorCode(normalized.code));
     }
 
     if (error instanceof InterruptedError) {
       process.exit(EXIT_CODES.INTERRUPTED);
     }
 
-    if (error instanceof TimeoutError) {
-      if (requestedOutputFormat === "json") {
-        emitJsonErrorEvent("TIMEOUT", error.message);
-      } else {
-        process.stderr.write(`${error.message}\n`);
-      }
-      process.exit(EXIT_CODES.TIMEOUT);
-    }
-
-    if (error instanceof NoSessionError) {
-      if (requestedOutputFormat === "json") {
-        emitJsonErrorEvent("NO_SESSION", error.message);
-      } else {
-        process.stderr.write(`${error.message}\n`);
-      }
-      process.exit(EXIT_CODES.NO_SESSION);
-    }
-
-    if (error instanceof PermissionDeniedError) {
-      if (requestedOutputFormat === "json") {
-        emitJsonErrorEvent("PERMISSION_DENIED", error.message);
-      } else {
-        process.stderr.write(`${error.message}\n`);
-      }
-      process.exit(EXIT_CODES.PERMISSION_DENIED);
-    }
-
-    if (error instanceof PermissionPromptUnavailableError) {
-      if (requestedOutputFormat === "json") {
-        emitJsonErrorEvent("PERMISSION_PROMPT_UNAVAILABLE", error.message);
-      } else {
-        process.stderr.write(`${error.message}\n`);
-      }
-      process.exit(EXIT_CODES.PERMISSION_DENIED);
-    }
-
-    const message = error instanceof Error ? error.message : String(error);
+    const normalized = normalizeOutputError(error, {
+      origin: "cli",
+    });
     if (requestedOutputFormat === "json") {
-      emitJsonErrorEvent("RUNTIME", message);
+      emitJsonErrorEvent(normalized);
     } else {
-      process.stderr.write(`${message}\n`);
+      process.stderr.write(`${normalized.message}\n`);
     }
-    process.exit(EXIT_CODES.ERROR);
+    process.exit(exitCodeForOutputErrorCode(normalized.code));
   }
 }
 

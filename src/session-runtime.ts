@@ -7,6 +7,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { AcpClient, type AgentLifecycleSnapshot } from "./client.js";
 import {
+  formatErrorMessage,
+  isAcpResourceNotFoundError,
+  normalizeOutputError,
+} from "./error-normalization.js";
+import {
   QueueOwnerTurnController,
   type QueueOwnerActiveSessionController,
 } from "./queue-owner-turn-controller.js";
@@ -43,7 +48,9 @@ import type {
   AuthPolicy,
   ClientOperation,
   NonInteractivePermissionPolicy,
+  OutputErrorAcpPayload,
   OutputErrorCode,
+  OutputErrorOrigin,
   OutputFormatter,
   PermissionMode,
   RunPromptResult,
@@ -284,14 +291,22 @@ class QueueTaskOutputFormatter implements OutputFormatter {
 
   onError(params: {
     code: OutputErrorCode;
+    detailCode?: string;
+    origin?: OutputErrorOrigin;
     message: string;
     retryable?: boolean;
+    acp?: OutputErrorAcpPayload;
     timestamp?: string;
   }): void {
     this.send({
       type: "error",
       requestId: this.requestId,
-      message: `${params.code}: ${params.message}`,
+      code: params.code,
+      detailCode: params.detailCode,
+      origin: params.origin,
+      message: params.message,
+      retryable: params.retryable,
+      acp: params.acp,
     });
   }
 
@@ -331,27 +346,6 @@ export function normalizeQueueOwnerTtlMs(ttlMs: number | undefined): number {
 
   // 0 means keep alive forever (no TTL)
   return Math.round(ttlMs);
-}
-
-function formatError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (error && typeof error === "object") {
-    const maybeMessage = (error as { message?: unknown }).message;
-    if (typeof maybeMessage === "string" && maybeMessage.length > 0) {
-      return maybeMessage;
-    }
-
-    try {
-      return JSON.stringify(error);
-    } catch {
-      // fall through
-    }
-  }
-
-  return String(error);
 }
 
 function collapseWhitespace(value: string): string {
@@ -457,23 +451,7 @@ function shouldFallbackToNewSession(error: unknown): boolean {
   if (error instanceof TimeoutError || error instanceof InterruptedError) {
     return false;
   }
-
-  const message = formatError(error).toLowerCase();
-  if (
-    message.includes("resource_not_found") ||
-    message.includes("resource not found") ||
-    message.includes("session not found") ||
-    message.includes("unknown session") ||
-    message.includes("invalid session")
-  ) {
-    return true;
-  }
-
-  const code =
-    error && typeof error === "object" && "code" in error
-      ? (error as { code?: unknown }).code
-      : undefined;
-  return code === -32001 || code === -32002;
+  return isAcpResourceNotFoundError(error);
 }
 
 type ConnectAndLoadSessionOptions = {
@@ -535,7 +513,7 @@ async function connectAndLoadSession(
       );
       resumed = true;
     } catch (error) {
-      loadError = formatError(error);
+      loadError = formatErrorMessage(error);
       if (!shouldFallbackToNewSession(error)) {
         throw error;
       }
@@ -601,12 +579,20 @@ async function runQueuedTask(
       });
     }
   } catch (error) {
-    const message = formatError(error);
+    const normalizedError = normalizeOutputError(error, {
+      origin: "runtime",
+      detailCode: "QUEUE_RUNTIME_PROMPT_FAILED",
+    });
     if (task.waitForCompletion) {
       task.send({
         type: "error",
         requestId: task.requestId,
-        message,
+        code: normalizedError.code,
+        detailCode: normalizedError.detailCode,
+        origin: normalizedError.origin,
+        message: normalizedError.message,
+        retryable: normalizedError.retryable,
+        acp: normalizedError.acp,
       });
     }
 
@@ -699,7 +685,7 @@ async function runSessionPrompt(
             } catch (error) {
               if (options.verbose) {
                 process.stderr.write(
-                  `[acpx] onPromptActive hook failed: ${formatError(error)}\n`,
+                  `[acpx] onPromptActive hook failed: ${formatErrorMessage(error)}\n`,
                 );
               }
             }
@@ -1186,7 +1172,7 @@ export async function sendSession(
       void applyPendingCancel().catch((error) => {
         if (options.verbose) {
           process.stderr.write(
-            `[acpx] failed to apply deferred cancel: ${formatError(error)}\n`,
+            `[acpx] failed to apply deferred cancel: ${formatErrorMessage(error)}\n`,
           );
         }
       });

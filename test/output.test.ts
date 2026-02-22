@@ -160,21 +160,43 @@ test("json formatter emits structured error events", () => {
 
   formatter.onError({
     code: "PERMISSION_PROMPT_UNAVAILABLE",
+    detailCode: "QUEUE_CONTROL_REQUEST_FAILED",
+    origin: "queue",
     message: "Permission prompt unavailable in non-interactive mode",
+    retryable: false,
+    acp: {
+      code: -32000,
+      message: "Authentication required",
+      data: {
+        method: "token",
+      },
+    },
   });
 
   const line = writer.toString().trim();
   const parsed = JSON.parse(line) as {
     type: string;
     code: string;
+    detailCode?: string;
+    origin?: string;
     message: string;
     stream: string;
     sessionId: string;
     seq: number;
+    retryable?: boolean;
+    acp?: {
+      code: number;
+      message: string;
+      data?: unknown;
+    };
   };
   assert.equal(parsed.type, "error");
   assert.equal(parsed.code, "PERMISSION_PROMPT_UNAVAILABLE");
+  assert.equal(parsed.detailCode, "QUEUE_CONTROL_REQUEST_FAILED");
+  assert.equal(parsed.origin, "queue");
   assert.equal(parsed.message, "Permission prompt unavailable in non-interactive mode");
+  assert.equal(parsed.retryable, false);
+  assert.equal(parsed.acp?.code, -32000);
   assert.equal(parsed.stream, "control");
   assert.equal(parsed.sessionId, "session-error");
   assert.equal(parsed.seq, 0);

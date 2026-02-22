@@ -4,12 +4,14 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { normalizeOutputError } from "./error-normalization.js";
 import { QueueConnectionError, QueueProtocolError } from "./errors.js";
 import {
   parseQueueOwnerMessage,
   parseQueueRequest,
   type QueueCancelRequest,
   type QueueOwnerCancelResultMessage,
+  type QueueOwnerErrorMessage,
   type QueueOwnerMessage,
   type QueueOwnerSetConfigOptionResultMessage,
   type QueueOwnerSetModeResultMessage,
@@ -35,25 +37,50 @@ function queueBaseDir(): string {
   return path.join(os.homedir(), ".acpx", "queues");
 }
 
-function formatError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
+function makeQueueOwnerError(
+  requestId: string,
+  message: string,
+  detailCode: string,
+  options: {
+    retryable?: boolean;
+  } = {},
+): QueueOwnerErrorMessage {
+  return {
+    type: "error",
+    requestId,
+    code: "RUNTIME",
+    detailCode,
+    origin: "queue",
+    retryable: options.retryable,
+    message,
+  };
+}
 
-  if (error && typeof error === "object") {
-    const maybeMessage = (error as { message?: unknown }).message;
-    if (typeof maybeMessage === "string" && maybeMessage.length > 0) {
-      return maybeMessage;
-    }
+function makeQueueOwnerErrorFromUnknown(
+  requestId: string,
+  error: unknown,
+  detailCode: string,
+  options: {
+    retryable?: boolean;
+  } = {},
+): QueueOwnerErrorMessage {
+  const normalized = normalizeOutputError(error, {
+    defaultCode: "RUNTIME",
+    origin: "queue",
+    detailCode,
+    retryable: options.retryable,
+  });
 
-    try {
-      return JSON.stringify(error);
-    } catch {
-      // fall through
-    }
-  }
-
-  return String(error);
+  return {
+    type: "error",
+    requestId,
+    code: normalized.code,
+    detailCode: normalized.detailCode,
+    origin: normalized.origin,
+    message: normalized.message,
+    retryable: normalized.retryable,
+    acp: normalized.acp,
+  };
 }
 
 export function isProcessAlive(pid: number | undefined): boolean {
@@ -397,11 +424,16 @@ export class SessionQueueOwner {
 
     for (const task of this.pending.splice(0)) {
       if (task.waitForCompletion) {
-        task.send({
-          type: "error",
-          requestId: task.requestId,
-          message: "Queue owner shutting down before prompt execution",
-        });
+        task.send(
+          makeQueueOwnerError(
+            task.requestId,
+            "Queue owner shutting down before prompt execution",
+            "QUEUE_OWNER_SHUTTING_DOWN",
+            {
+              retryable: true,
+            },
+          ),
+        );
       }
       task.close();
     }
@@ -448,11 +480,16 @@ export class SessionQueueOwner {
   private enqueue(task: QueueTask): void {
     if (this.closed) {
       if (task.waitForCompletion) {
-        task.send({
-          type: "error",
-          requestId: task.requestId,
-          message: "Queue owner is shutting down",
-        });
+        task.send(
+          makeQueueOwnerError(
+            task.requestId,
+            "Queue owner is shutting down",
+            "QUEUE_OWNER_SHUTTING_DOWN",
+            {
+              retryable: true,
+            },
+          ),
+        );
       }
       task.close();
       return;
@@ -471,11 +508,12 @@ export class SessionQueueOwner {
     socket.setEncoding("utf8");
 
     if (this.closed) {
-      writeQueueMessage(socket, {
-        type: "error",
-        requestId: "unknown",
-        message: "Queue owner is closed",
-      });
+      writeQueueMessage(
+        socket,
+        makeQueueOwnerError("unknown", "Queue owner is closed", "QUEUE_OWNER_CLOSED", {
+          retryable: true,
+        }),
+      );
       socket.end();
       return;
     }
@@ -483,12 +521,13 @@ export class SessionQueueOwner {
     let buffer = "";
     let handled = false;
 
-    const fail = (requestId: string, message: string): void => {
-      writeQueueMessage(socket, {
-        type: "error",
-        requestId,
-        message,
-      });
+    const fail = (requestId: string, message: string, detailCode: string): void => {
+      writeQueueMessage(
+        socket,
+        makeQueueOwnerError(requestId, message, detailCode, {
+          retryable: false,
+        }),
+      );
       socket.end();
     };
 
@@ -502,13 +541,17 @@ export class SessionQueueOwner {
       try {
         parsed = JSON.parse(line);
       } catch {
-        fail("unknown", "Invalid queue request payload");
+        fail(
+          "unknown",
+          "Invalid queue request payload",
+          "QUEUE_REQUEST_PAYLOAD_INVALID_JSON",
+        );
         return;
       }
 
       const request = parseQueueRequest(parsed);
       if (!request) {
-        fail("unknown", "Invalid queue request");
+        fail("unknown", "Invalid queue request", "QUEUE_REQUEST_INVALID");
         return;
       }
 
@@ -527,12 +570,14 @@ export class SessionQueueOwner {
             });
           })
           .catch((error) => {
-            const message = formatError(error);
-            writeQueueMessage(socket, {
-              type: "error",
-              requestId: request.requestId,
-              message,
-            });
+            writeQueueMessage(
+              socket,
+              makeQueueOwnerErrorFromUnknown(
+                request.requestId,
+                error,
+                "QUEUE_CONTROL_REQUEST_FAILED",
+              ),
+            );
           })
           .finally(() => {
             if (!socket.destroyed) {
@@ -557,12 +602,14 @@ export class SessionQueueOwner {
             });
           })
           .catch((error) => {
-            const message = formatError(error);
-            writeQueueMessage(socket, {
-              type: "error",
-              requestId: request.requestId,
-              message,
-            });
+            writeQueueMessage(
+              socket,
+              makeQueueOwnerErrorFromUnknown(
+                request.requestId,
+                error,
+                "QUEUE_CONTROL_REQUEST_FAILED",
+              ),
+            );
           })
           .finally(() => {
             if (!socket.destroyed) {
@@ -587,12 +634,14 @@ export class SessionQueueOwner {
             });
           })
           .catch((error) => {
-            const message = formatError(error);
-            writeQueueMessage(socket, {
-              type: "error",
-              requestId: request.requestId,
-              message,
-            });
+            writeQueueMessage(
+              socket,
+              makeQueueOwnerErrorFromUnknown(
+                request.requestId,
+                error,
+                "QUEUE_CONTROL_REQUEST_FAILED",
+              ),
+            );
           })
           .finally(() => {
             if (!socket.destroyed) {
@@ -726,13 +775,25 @@ async function submitToQueueOwner(
       try {
         parsed = JSON.parse(line);
       } catch {
-        finishReject(new QueueProtocolError("Queue owner sent invalid JSON payload"));
+        finishReject(
+          new QueueProtocolError("Queue owner sent invalid JSON payload", {
+            detailCode: "QUEUE_PROTOCOL_INVALID_JSON",
+            origin: "queue",
+            retryable: true,
+          }),
+        );
         return;
       }
 
       const message = parseQueueOwnerMessage(parsed);
       if (!message || message.requestId !== requestId) {
-        finishReject(new QueueProtocolError("Queue owner sent malformed message"));
+        finishReject(
+          new QueueProtocolError("Queue owner sent malformed message", {
+            detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
+            origin: "queue",
+            retryable: true,
+          }),
+        );
         return;
       }
 
@@ -751,7 +812,11 @@ async function submitToQueueOwner(
 
       if (!acknowledged) {
         finishReject(
-          new QueueConnectionError("Queue owner did not acknowledge request"),
+          new QueueConnectionError("Queue owner did not acknowledge request", {
+            detailCode: "QUEUE_ACK_MISSING",
+            origin: "queue",
+            retryable: true,
+          }),
         );
         return;
       }
@@ -782,11 +847,25 @@ async function submitToQueueOwner(
       }
 
       if (message.type === "error") {
-        finishReject(new QueueConnectionError(message.message));
+        finishReject(
+          new QueueConnectionError(message.message, {
+            outputCode: message.code,
+            detailCode: message.detailCode,
+            origin: message.origin ?? "queue",
+            retryable: message.retryable,
+            acp: message.acp,
+          }),
+        );
         return;
       }
 
-      finishReject(new QueueProtocolError("Queue owner returned unexpected response"));
+      finishReject(
+        new QueueProtocolError("Queue owner returned unexpected response", {
+          detailCode: "QUEUE_PROTOCOL_UNEXPECTED_RESPONSE",
+          origin: "queue",
+          retryable: true,
+        }),
+      );
     };
 
     socket.on("data", (chunk: string) => {
@@ -818,6 +897,11 @@ async function submitToQueueOwner(
         finishReject(
           new QueueConnectionError(
             "Queue owner disconnected before acknowledging request",
+            {
+              detailCode: "QUEUE_DISCONNECTED_BEFORE_ACK",
+              origin: "queue",
+              retryable: true,
+            },
           ),
         );
         return;
@@ -834,7 +918,11 @@ async function submitToQueueOwner(
       }
 
       finishReject(
-        new QueueConnectionError("Queue owner disconnected before prompt completion"),
+        new QueueConnectionError("Queue owner disconnected before prompt completion", {
+          detailCode: "QUEUE_DISCONNECTED_BEFORE_COMPLETION",
+          origin: "queue",
+          retryable: true,
+        }),
       );
     });
 
@@ -888,13 +976,25 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
       try {
         parsed = JSON.parse(line);
       } catch {
-        finishReject(new QueueProtocolError("Queue owner sent invalid JSON payload"));
+        finishReject(
+          new QueueProtocolError("Queue owner sent invalid JSON payload", {
+            detailCode: "QUEUE_PROTOCOL_INVALID_JSON",
+            origin: "queue",
+            retryable: true,
+          }),
+        );
         return;
       }
 
       const message = parseQueueOwnerMessage(parsed);
       if (!message || message.requestId !== request.requestId) {
-        finishReject(new QueueProtocolError("Queue owner sent malformed message"));
+        finishReject(
+          new QueueProtocolError("Queue owner sent malformed message", {
+            detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
+            origin: "queue",
+            retryable: true,
+          }),
+        );
         return;
       }
 
@@ -905,19 +1005,35 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
 
       if (!acknowledged) {
         finishReject(
-          new QueueConnectionError("Queue owner did not acknowledge request"),
+          new QueueConnectionError("Queue owner did not acknowledge request", {
+            detailCode: "QUEUE_ACK_MISSING",
+            origin: "queue",
+            retryable: true,
+          }),
         );
         return;
       }
 
       if (message.type === "error") {
-        finishReject(new QueueConnectionError(message.message));
+        finishReject(
+          new QueueConnectionError(message.message, {
+            outputCode: message.code,
+            detailCode: message.detailCode,
+            origin: message.origin ?? "queue",
+            retryable: message.retryable,
+            acp: message.acp,
+          }),
+        );
         return;
       }
 
       if (!isExpectedResponse(message)) {
         finishReject(
-          new QueueProtocolError("Queue owner returned unexpected response"),
+          new QueueProtocolError("Queue owner returned unexpected response", {
+            detailCode: "QUEUE_PROTOCOL_UNEXPECTED_RESPONSE",
+            origin: "queue",
+            retryable: true,
+          }),
         );
         return;
       }
@@ -953,12 +1069,21 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
         finishReject(
           new QueueConnectionError(
             "Queue owner disconnected before acknowledging request",
+            {
+              detailCode: "QUEUE_DISCONNECTED_BEFORE_ACK",
+              origin: "queue",
+              retryable: true,
+            },
           ),
         );
         return;
       }
       finishReject(
-        new QueueConnectionError("Queue owner disconnected before responding"),
+        new QueueConnectionError("Queue owner disconnected before responding", {
+          detailCode: "QUEUE_DISCONNECTED_BEFORE_COMPLETION",
+          origin: "queue",
+          retryable: true,
+        }),
       );
     });
 
@@ -983,7 +1108,11 @@ async function submitCancelToQueueOwner(
     return undefined;
   }
   if (response.requestId !== request.requestId) {
-    throw new QueueProtocolError("Queue owner returned mismatched cancel response");
+    throw new QueueProtocolError("Queue owner returned mismatched cancel response", {
+      detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
+      origin: "queue",
+      retryable: true,
+    });
   }
   return response.cancelled;
 }
@@ -1009,7 +1138,11 @@ async function submitSetModeToQueueOwner(
     return undefined;
   }
   if (response.requestId !== request.requestId) {
-    throw new QueueProtocolError("Queue owner returned mismatched set_mode response");
+    throw new QueueProtocolError("Queue owner returned mismatched set_mode response", {
+      detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
+      origin: "queue",
+      retryable: true,
+    });
   }
   return true;
 }
@@ -1039,6 +1172,11 @@ async function submitSetConfigOptionToQueueOwner(
   if (response.requestId !== request.requestId) {
     throw new QueueProtocolError(
       "Queue owner returned mismatched set_config_option response",
+      {
+        detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
+        origin: "queue",
+        retryable: true,
+      },
     );
   }
   return response.response;
@@ -1074,6 +1212,11 @@ export async function trySubmitToRunningOwner(
 
   throw new QueueConnectionError(
     "Session queue owner is running but not accepting queue requests",
+    {
+      detailCode: "QUEUE_NOT_ACCEPTING_REQUESTS",
+      origin: "queue",
+      retryable: true,
+    },
   );
 }
 
@@ -1108,6 +1251,11 @@ export async function tryCancelOnRunningOwner(options: {
 
   throw new QueueConnectionError(
     "Session queue owner is running but not accepting cancel requests",
+    {
+      detailCode: "QUEUE_NOT_ACCEPTING_REQUESTS",
+      origin: "queue",
+      retryable: true,
+    },
   );
 }
 
@@ -1144,6 +1292,11 @@ export async function trySetModeOnRunningOwner(
 
   throw new QueueConnectionError(
     "Session queue owner is running but not accepting set_mode requests",
+    {
+      detailCode: "QUEUE_NOT_ACCEPTING_REQUESTS",
+      origin: "queue",
+      retryable: true,
+    },
   );
 }
 
@@ -1186,6 +1339,11 @@ export async function trySetConfigOptionOnRunningOwner(
 
   throw new QueueConnectionError(
     "Session queue owner is running but not accepting set_config_option requests",
+    {
+      detailCode: "QUEUE_NOT_ACCEPTING_REQUESTS",
+      origin: "queue",
+      retryable: true,
+    },
   );
 }
 

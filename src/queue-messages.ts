@@ -3,6 +3,13 @@ import type {
   SessionNotification,
   StopReason,
 } from "@agentclientprotocol/sdk";
+import {
+  OUTPUT_ERROR_CODES,
+  OUTPUT_ERROR_ORIGINS,
+  type OutputErrorAcpPayload,
+  type OutputErrorCode,
+  type OutputErrorOrigin,
+} from "./types.js";
 import type {
   ClientOperation,
   NonInteractivePermissionPolicy,
@@ -96,7 +103,12 @@ export type QueueOwnerSetConfigOptionResultMessage = {
 export type QueueOwnerErrorMessage = {
   type: "error";
   requestId: string;
+  code?: OutputErrorCode;
+  detailCode?: string;
+  origin?: OutputErrorOrigin;
   message: string;
+  retryable?: boolean;
+  acp?: OutputErrorAcpPayload;
 };
 
 export type QueueOwnerMessage =
@@ -125,6 +137,38 @@ function isNonInteractivePermissionPolicy(
   value: unknown,
 ): value is NonInteractivePermissionPolicy {
   return value === "deny" || value === "fail";
+}
+
+function isOutputErrorCode(value: unknown): value is OutputErrorCode {
+  return (
+    typeof value === "string" && OUTPUT_ERROR_CODES.includes(value as OutputErrorCode)
+  );
+}
+
+function isOutputErrorOrigin(value: unknown): value is OutputErrorOrigin {
+  return (
+    typeof value === "string" &&
+    OUTPUT_ERROR_ORIGINS.includes(value as OutputErrorOrigin)
+  );
+}
+
+function parseAcpError(value: unknown): OutputErrorAcpPayload | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  if (typeof record.code !== "number" || !Number.isFinite(record.code)) {
+    return undefined;
+  }
+  if (typeof record.message !== "string" || record.message.length === 0) {
+    return undefined;
+  }
+
+  return {
+    code: record.code,
+    message: record.message,
+    data: record.data,
+  };
 }
 
 export function parseQueueRequest(raw: unknown): QueueRequest | null {
@@ -369,10 +413,25 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
     if (typeof message.message !== "string") {
       return null;
     }
+    const code = isOutputErrorCode(message.code) ? message.code : undefined;
+    const detailCode =
+      typeof message.detailCode === "string" && message.detailCode.trim().length > 0
+        ? message.detailCode
+        : undefined;
+    const origin = isOutputErrorOrigin(message.origin) ? message.origin : undefined;
+    const retryable =
+      typeof message.retryable === "boolean" ? message.retryable : undefined;
+    const acp = parseAcpError(message.acp);
+
     return {
       type: "error",
       requestId: message.requestId,
+      code,
+      detailCode,
+      origin,
       message: message.message,
+      retryable,
+      acp,
     };
   }
 

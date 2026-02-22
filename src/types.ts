@@ -43,6 +43,32 @@ export const OUTPUT_ERROR_CODES = [
 ] as const;
 export type OutputErrorCode = (typeof OUTPUT_ERROR_CODES)[number];
 
+export const OUTPUT_ERROR_ORIGINS = ["cli", "runtime", "queue", "acp"] as const;
+export type OutputErrorOrigin = (typeof OUTPUT_ERROR_ORIGINS)[number];
+
+export const QUEUE_ERROR_DETAIL_CODES = [
+  "QUEUE_OWNER_CLOSED",
+  "QUEUE_OWNER_SHUTTING_DOWN",
+  "QUEUE_REQUEST_INVALID",
+  "QUEUE_REQUEST_PAYLOAD_INVALID_JSON",
+  "QUEUE_ACK_MISSING",
+  "QUEUE_DISCONNECTED_BEFORE_ACK",
+  "QUEUE_DISCONNECTED_BEFORE_COMPLETION",
+  "QUEUE_PROTOCOL_INVALID_JSON",
+  "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
+  "QUEUE_PROTOCOL_UNEXPECTED_RESPONSE",
+  "QUEUE_NOT_ACCEPTING_REQUESTS",
+  "QUEUE_CONTROL_REQUEST_FAILED",
+  "QUEUE_RUNTIME_PROMPT_FAILED",
+] as const;
+export type QueueErrorDetailCode = (typeof QUEUE_ERROR_DETAIL_CODES)[number];
+
+export type OutputErrorAcpPayload = {
+  code: number;
+  message: string;
+  data?: unknown;
+};
+
 export type PermissionStats = {
   requested: number;
   approved: number;
@@ -169,8 +195,11 @@ export type OutputEvent =
       stream: OutputStream;
       type: "error";
       code: OutputErrorCode;
+      detailCode?: string;
+      origin?: OutputErrorOrigin;
       message: string;
       retryable?: boolean;
+      acp?: OutputErrorAcpPayload;
       timestamp: string;
     };
 
@@ -186,8 +215,11 @@ export interface OutputFormatter {
   onClientOperation(operation: ClientOperation): void;
   onError(params: {
     code: OutputErrorCode;
+    detailCode?: string;
+    origin?: OutputErrorOrigin;
     message: string;
     retryable?: boolean;
+    acp?: OutputErrorAcpPayload;
     timestamp?: string;
   }): void;
   onDone(stopReason: StopReason): void;

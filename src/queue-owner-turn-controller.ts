@@ -73,7 +73,11 @@ export class QueueOwnerTurnController {
 
   private assertCanHandleControlRequest(): void {
     if (this.state === "closing") {
-      throw new QueueConnectionError("Queue owner is closing");
+      throw new QueueConnectionError("Queue owner is closing", {
+        detailCode: "QUEUE_OWNER_SHUTTING_DOWN",
+        origin: "queue",
+        retryable: true,
+      });
     }
   }
 

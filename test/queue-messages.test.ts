@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseQueueRequest } from "../src/queue-messages.js";
+import { parseQueueOwnerMessage, parseQueueRequest } from "../src/queue-messages.js";
 
 test("parseQueueRequest accepts submit_prompt with nonInteractivePermissions", () => {
   const parsed = parseQueueRequest({
@@ -35,4 +35,59 @@ test("parseQueueRequest rejects invalid nonInteractivePermissions value", () => 
   });
 
   assert.equal(parsed, null);
+});
+
+test("parseQueueOwnerMessage accepts typed queue error payload", () => {
+  const parsed = parseQueueOwnerMessage({
+    type: "error",
+    requestId: "req-err-1",
+    code: "RUNTIME",
+    detailCode: "QUEUE_OWNER_CLOSED",
+    origin: "queue",
+    retryable: true,
+    message: "Queue owner is closed",
+    acp: {
+      code: -32002,
+      message: "Resource not found",
+      data: {
+        sessionId: "abc",
+      },
+    },
+  });
+
+  assert.deepEqual(parsed, {
+    type: "error",
+    requestId: "req-err-1",
+    code: "RUNTIME",
+    detailCode: "QUEUE_OWNER_CLOSED",
+    origin: "queue",
+    retryable: true,
+    message: "Queue owner is closed",
+    acp: {
+      code: -32002,
+      message: "Resource not found",
+      data: {
+        sessionId: "abc",
+      },
+    },
+  });
+});
+
+test("parseQueueOwnerMessage keeps backward compatibility for legacy error payload", () => {
+  const parsed = parseQueueOwnerMessage({
+    type: "error",
+    requestId: "req-err-legacy",
+    message: "legacy message only",
+  });
+
+  assert.deepEqual(parsed, {
+    type: "error",
+    requestId: "req-err-legacy",
+    code: undefined,
+    detailCode: undefined,
+    origin: undefined,
+    retryable: undefined,
+    message: "legacy message only",
+    acp: undefined,
+  });
 });

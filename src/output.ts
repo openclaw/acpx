@@ -10,11 +10,13 @@ import type {
 } from "@agentclientprotocol/sdk";
 import type {
   ClientOperation,
+  OutputErrorAcpPayload,
   OutputErrorCode,
   OutputEvent,
   OutputFormatterContext,
   OutputFormat,
   OutputFormatter,
+  OutputErrorOrigin,
   OutputStream,
 } from "./types.js";
 
@@ -543,8 +545,11 @@ class TextOutputFormatter implements OutputFormatter {
 
   onError(params: {
     code: OutputErrorCode;
+    detailCode?: string;
+    origin?: OutputErrorOrigin;
     message: string;
     retryable?: boolean;
+    acp?: OutputErrorAcpPayload;
     timestamp?: string;
   }): void {
     this.flushThoughtBuffer();
@@ -891,15 +896,21 @@ class JsonOutputFormatter implements OutputFormatter {
 
   onError(params: {
     code: OutputErrorCode;
+    detailCode?: string;
+    origin?: OutputErrorOrigin;
     message: string;
     retryable?: boolean;
+    acp?: OutputErrorAcpPayload;
     timestamp?: string;
   }): void {
     this.emit({
       type: "error",
       code: params.code,
+      detailCode: params.detailCode,
+      origin: params.origin,
       message: params.message,
       retryable: params.retryable,
+      acp: params.acp,
       timestamp: params.timestamp ?? nowIso(),
     });
   }
@@ -962,8 +973,11 @@ class QuietOutputFormatter implements OutputFormatter {
 
   onError(_params: {
     code: OutputErrorCode;
+    detailCode?: string;
+    origin?: OutputErrorOrigin;
     message: string;
     retryable?: boolean;
+    acp?: OutputErrorAcpPayload;
     timestamp?: string;
   }): void {
     // no-op in quiet mode
