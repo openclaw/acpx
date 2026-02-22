@@ -1709,6 +1709,13 @@ function emitJsonErrorEvent(error: NormalizedOutputError): void {
   formatter.flush();
 }
 
+function isOutputAlreadyEmitted(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  return (error as { outputAlreadyEmitted?: unknown }).outputAlreadyEmitted === true;
+}
+
 export async function main(argv: string[] = process.argv): Promise<void> {
   await maybeHandleSkillflag(argv, {
     skillsRoot: findSkillsRoot(import.meta.url),
@@ -1827,10 +1834,12 @@ Examples:
     const normalized = normalizeOutputError(error, {
       origin: "cli",
     });
-    if (requestedOutputFormat === "json") {
-      emitJsonErrorEvent(normalized);
-    } else {
-      process.stderr.write(`${normalized.message}\n`);
+    if (!isOutputAlreadyEmitted(error)) {
+      if (requestedOutputFormat === "json") {
+        emitJsonErrorEvent(normalized);
+      } else {
+        process.stderr.write(`${normalized.message}\n`);
+      }
     }
     process.exit(exitCodeForOutputErrorCode(normalized.code));
   }

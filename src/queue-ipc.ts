@@ -830,7 +830,7 @@ async function submitToQueueOwner(
           acp: message.acp,
         });
         options.outputFormatter.flush();
-        finishReject(
+        const emittedError = Object.assign(
           new QueueConnectionError(message.message, {
             outputCode: message.code,
             detailCode: message.detailCode,
@@ -838,7 +838,9 @@ async function submitToQueueOwner(
             retryable: message.retryable,
             acp: message.acp,
           }),
+          { outputAlreadyEmitted: true as const },
         );
+        finishReject(emittedError);
         return;
       }
 
