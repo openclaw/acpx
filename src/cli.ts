@@ -1716,6 +1716,21 @@ function isOutputAlreadyEmitted(error: unknown): boolean {
   return (error as { outputAlreadyEmitted?: unknown }).outputAlreadyEmitted === true;
 }
 
+function emitRequestedError(
+  error: unknown,
+  normalized: NormalizedOutputError,
+  outputFormat: OutputFormat,
+): void {
+  if (isOutputAlreadyEmitted(error)) {
+    return;
+  }
+  if (outputFormat === "json") {
+    emitJsonErrorEvent(normalized);
+  } else {
+    process.stderr.write(`${normalized.message}\n`);
+  }
+}
+
 export async function main(argv: string[] = process.argv): Promise<void> {
   await maybeHandleSkillflag(argv, {
     skillsRoot: findSkillsRoot(import.meta.url),
@@ -1819,11 +1834,7 @@ Examples:
         defaultCode: "USAGE",
         origin: "cli",
       });
-      if (requestedOutputFormat === "json") {
-        emitJsonErrorEvent(normalized);
-      } else {
-        process.stderr.write(`${normalized.message}\n`);
-      }
+      emitRequestedError(error, normalized, requestedOutputFormat);
       process.exit(exitCodeForOutputErrorCode(normalized.code));
     }
 
@@ -1834,13 +1845,7 @@ Examples:
     const normalized = normalizeOutputError(error, {
       origin: "cli",
     });
-    if (!isOutputAlreadyEmitted(error)) {
-      if (requestedOutputFormat === "json") {
-        emitJsonErrorEvent(normalized);
-      } else {
-        process.stderr.write(`${normalized.message}\n`);
-      }
-    }
+    emitRequestedError(error, normalized, requestedOutputFormat);
     process.exit(exitCodeForOutputErrorCode(normalized.code));
   }
 }

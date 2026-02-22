@@ -284,6 +284,92 @@ test("--json-strict rejects --verbose", async () => {
   });
 });
 
+test("queued prompt failures emit exactly one JSON error event", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_COMMAND,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const session = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "sessions", "new"],
+      homeDir,
+    );
+    assert.equal(session.code, 0, session.stderr);
+
+    const blocker = spawn(
+      process.execPath,
+      [CLI_PATH, "--cwd", cwd, "codex", "prompt", "sleep 1500"],
+      {
+        env: { ...process.env, HOME: homeDir },
+        stdio: ["ignore", "ignore", "ignore"],
+      },
+    );
+
+    try {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 200);
+      });
+
+      const writeResult = await runCli(
+        [
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "--non-interactive-permissions",
+          "fail",
+          "codex",
+          "prompt",
+          `write ${path.join(cwd, "x.txt")} hi`,
+        ],
+        homeDir,
+      );
+
+      assert.equal(writeResult.code, 5, writeResult.stderr);
+
+      const events = writeResult.stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              type: string;
+              stream?: string;
+              sessionId?: string;
+            },
+        );
+
+      const errors = events.filter((event) => event.type === "error");
+      assert.equal(errors.length, 1, writeResult.stdout);
+      assert.equal(errors[0]?.stream, "prompt");
+      assert.notEqual(errors[0]?.sessionId, "unknown");
+    } finally {
+      if (blocker.exitCode === null) {
+        blocker.kill("SIGKILL");
+      }
+      await new Promise<void>((resolve) => {
+        blocker.once("close", () => resolve());
+      });
+    }
+  });
+});
+
 test("--json-strict suppresses session banners on stderr", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");

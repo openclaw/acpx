@@ -830,17 +830,16 @@ async function submitToQueueOwner(
           acp: message.acp,
         });
         options.outputFormatter.flush();
-        const emittedError = Object.assign(
+        finishReject(
           new QueueConnectionError(message.message, {
             outputCode: message.code,
             detailCode: message.detailCode,
             origin: message.origin ?? "queue",
             retryable: message.retryable,
             acp: message.acp,
+            outputAlreadyEmitted: true,
           }),
-          { outputAlreadyEmitted: true as const },
         );
-        finishReject(emittedError);
         return;
       }
 

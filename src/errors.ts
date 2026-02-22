@@ -10,6 +10,7 @@ type AcpxErrorOptions = ErrorOptions & {
   origin?: OutputErrorOrigin;
   retryable?: boolean;
   acp?: OutputErrorAcpPayload;
+  outputAlreadyEmitted?: boolean;
 };
 
 export class AcpxOperationalError extends Error {
@@ -18,6 +19,7 @@ export class AcpxOperationalError extends Error {
   readonly origin?: OutputErrorOrigin;
   readonly retryable?: boolean;
   readonly acp?: OutputErrorAcpPayload;
+  readonly outputAlreadyEmitted?: boolean;
 
   constructor(message: string, options?: AcpxErrorOptions) {
     super(message, options);
@@ -27,6 +29,7 @@ export class AcpxOperationalError extends Error {
     this.origin = options?.origin;
     this.retryable = options?.retryable;
     this.acp = options?.acp;
+    this.outputAlreadyEmitted = options?.outputAlreadyEmitted;
   }
 }
 
