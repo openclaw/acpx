@@ -1760,6 +1760,12 @@ async function runWithOutputPolicy<T>(
     return await run();
   }
 
+  if (process.stdin.isTTY && process.stderr.isTTY) {
+    // Keep interactive prompts visible in TTY sessions. json-strict stderr
+    // suppression is only enforced in non-interactive runs.
+    return await run();
+  }
+
   const originalWrite = process.stderr.write;
   process.stderr.write = (() => true) as typeof process.stderr.write;
   try {
