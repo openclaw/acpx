@@ -257,6 +257,9 @@ JSON events include a stable envelope for correlation:
 }
 ```
 
+Session-control JSON payloads (`sessions new|ensure`, `status`) may also include
+`runtimeSessionId` when the adapter exposes a provider-native session ID.
+
 ## Built-in agents and custom servers
 
 Built-ins:

@@ -8,6 +8,7 @@ import {
   type InitializeResponse,
   type KillTerminalCommandRequest,
   type KillTerminalCommandResponse,
+  type LoadSessionResponse,
   type PromptResponse,
   type ReadTextFileRequest,
   type ReadTextFileResponse,
@@ -34,6 +35,7 @@ import {
 } from "./errors.js";
 import { FileSystemHandlers } from "./filesystem.js";
 import { classifyPermissionDecision, resolvePermissionRequest } from "./permissions.js";
+import { extractRuntimeSessionId } from "./runtime-session-id.js";
 import { TerminalManager } from "./terminal.js";
 import type { AcpClientOptions, PermissionStats } from "./types.js";
 
@@ -50,6 +52,15 @@ type LoadSessionOptions = {
   suppressReplayUpdates?: boolean;
   replayIdleMs?: number;
   replayDrainTimeoutMs?: number;
+};
+
+export type SessionCreateResult = {
+  sessionId: string;
+  runtimeSessionId?: string;
+};
+
+export type SessionLoadResult = {
+  runtimeSessionId?: string;
 };
 
 type AgentDisconnectReason =
@@ -472,32 +483,40 @@ export class AcpClient {
     }
   }
 
-  async createSession(cwd = this.options.cwd): Promise<string> {
+  async createSession(cwd = this.options.cwd): Promise<SessionCreateResult> {
     const connection = this.getConnection();
     const result = await connection.newSession({
       cwd: asAbsoluteCwd(cwd),
       mcpServers: [],
     });
-    return result.sessionId;
+    return {
+      sessionId: result.sessionId,
+      runtimeSessionId: extractRuntimeSessionId(result._meta),
+    };
   }
 
-  async loadSession(sessionId: string, cwd = this.options.cwd): Promise<void> {
+  async loadSession(
+    sessionId: string,
+    cwd = this.options.cwd,
+  ): Promise<SessionLoadResult> {
     this.getConnection();
-    await this.loadSessionWithOptions(sessionId, cwd, {});
+    return await this.loadSessionWithOptions(sessionId, cwd, {});
   }
 
   async loadSessionWithOptions(
     sessionId: string,
     cwd = this.options.cwd,
     options: LoadSessionOptions = {},
-  ): Promise<void> {
+  ): Promise<SessionLoadResult> {
     const connection = this.getConnection();
     const previousSuppression = this.suppressSessionUpdates;
     this.suppressSessionUpdates =
       previousSuppression || Boolean(options.suppressReplayUpdates);
 
+    let response: LoadSessionResponse | undefined;
+
     try {
-      await connection.loadSession({
+      response = await connection.loadSession({
         sessionId,
         cwd: asAbsoluteCwd(cwd),
         mcpServers: [],
@@ -510,6 +529,10 @@ export class AcpClient {
     } finally {
       this.suppressSessionUpdates = previousSuppression;
     }
+
+    return {
+      runtimeSessionId: extractRuntimeSessionId(response?._meta),
+    };
   }
 
   async prompt(sessionId: string, text: string): Promise<PromptResponse> {

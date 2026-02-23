@@ -262,6 +262,7 @@ export type SessionHistoryEntry = {
 export type SessionRecord = {
   id: string;
   sessionId: string;
+  runtimeSessionId?: string;
   agentCommand: string;
   cwd: string;
   name?: string;

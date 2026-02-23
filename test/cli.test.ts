@@ -12,6 +12,9 @@ import type { SessionRecord } from "../src/types.js";
 const CLI_PATH = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
 const MOCK_AGENT_COMMAND = `node ${JSON.stringify(MOCK_AGENT_PATH)}`;
+const MOCK_CODEX_AGENT_WITH_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --codex-session-id codex-runtime-session`;
+const MOCK_CLAUDE_AGENT_WITH_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --claude-session-id claude-runtime-session`;
+const MOCK_AGENT_WITH_LOAD_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --supports-load-session --load-runtime-session-id loaded-runtime-session`;
 
 type CliRunResult = {
   code: number | null;
@@ -192,6 +195,155 @@ test("sessions ensure resolves existing session by directory walk", async () => 
     };
     assert.equal(payload.id, "parent-session");
     assert.equal(payload.created, false);
+  });
+});
+
+test("sessions and status surface runtimeSessionId for codex and claude in JSON mode", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_CODEX_AGENT_WITH_RUNTIME_SESSION_ID,
+            },
+            claude: {
+              command: MOCK_CLAUDE_AGENT_WITH_RUNTIME_SESSION_ID,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const codexCreated = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "sessions", "new"],
+      homeDir,
+    );
+    assert.equal(codexCreated.code, 0, codexCreated.stderr);
+    const codexCreatedPayload = JSON.parse(codexCreated.stdout.trim()) as {
+      type: string;
+      runtimeSessionId?: string;
+    };
+    assert.equal(codexCreatedPayload.type, "session_created");
+    assert.equal(codexCreatedPayload.runtimeSessionId, "codex-runtime-session");
+
+    const codexEnsured = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "sessions", "ensure"],
+      homeDir,
+    );
+    assert.equal(codexEnsured.code, 0, codexEnsured.stderr);
+    const codexEnsuredPayload = JSON.parse(codexEnsured.stdout.trim()) as {
+      type: string;
+      created: boolean;
+      runtimeSessionId?: string;
+    };
+    assert.equal(codexEnsuredPayload.type, "session_ensured");
+    assert.equal(codexEnsuredPayload.created, false);
+    assert.equal(codexEnsuredPayload.runtimeSessionId, "codex-runtime-session");
+
+    const codexStatus = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "status"],
+      homeDir,
+    );
+    assert.equal(codexStatus.code, 0, codexStatus.stderr);
+    const codexStatusPayload = JSON.parse(codexStatus.stdout.trim()) as {
+      runtimeSessionId?: string;
+    };
+    assert.equal(codexStatusPayload.runtimeSessionId, "codex-runtime-session");
+
+    const claudeCreated = await runCli(
+      ["--cwd", cwd, "--format", "json", "claude", "sessions", "new"],
+      homeDir,
+    );
+    assert.equal(claudeCreated.code, 0, claudeCreated.stderr);
+    const claudeCreatedPayload = JSON.parse(claudeCreated.stdout.trim()) as {
+      type: string;
+      runtimeSessionId?: string;
+    };
+    assert.equal(claudeCreatedPayload.type, "session_created");
+    assert.equal(claudeCreatedPayload.runtimeSessionId, "claude-runtime-session");
+
+    const claudeEnsured = await runCli(
+      ["--cwd", cwd, "--format", "json", "claude", "sessions", "ensure"],
+      homeDir,
+    );
+    assert.equal(claudeEnsured.code, 0, claudeEnsured.stderr);
+    const claudeEnsuredPayload = JSON.parse(claudeEnsured.stdout.trim()) as {
+      type: string;
+      created: boolean;
+      runtimeSessionId?: string;
+    };
+    assert.equal(claudeEnsuredPayload.type, "session_ensured");
+    assert.equal(claudeEnsuredPayload.created, false);
+    assert.equal(claudeEnsuredPayload.runtimeSessionId, "claude-runtime-session");
+
+    const claudeStatus = await runCli(
+      ["--cwd", cwd, "--format", "json", "claude", "status"],
+      homeDir,
+    );
+    assert.equal(claudeStatus.code, 0, claudeStatus.stderr);
+    const claudeStatusPayload = JSON.parse(claudeStatus.stdout.trim()) as {
+      runtimeSessionId?: string;
+    };
+    assert.equal(claudeStatusPayload.runtimeSessionId, "claude-runtime-session");
+  });
+});
+
+test("prompt reconciles runtimeSessionId from loadSession metadata", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_WITH_LOAD_RUNTIME_SESSION_ID,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const sessionId = "resume-runtime-session";
+    await writeSessionRecord(homeDir, {
+      id: sessionId,
+      sessionId,
+      agentCommand: MOCK_AGENT_WITH_LOAD_RUNTIME_SESSION_ID,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+    });
+
+    const prompt = await runCli(
+      ["--cwd", cwd, "--ttl", "0.01", "codex", "prompt", "echo hello"],
+      homeDir,
+    );
+    assert.equal(prompt.code, 0, prompt.stderr);
+
+    const storedRecordPath = path.join(
+      homeDir,
+      ".acpx",
+      "sessions",
+      `${encodeURIComponent(sessionId)}.json`,
+    );
+    const storedRecord = JSON.parse(
+      await fs.readFile(storedRecordPath, "utf8"),
+    ) as SessionRecord;
+    assert.equal(storedRecord.runtimeSessionId, "loaded-runtime-session");
   });
 });
 
@@ -615,10 +767,12 @@ test("status resolves named session when -s is before subcommand", async () => {
     const payload = JSON.parse(result.stdout.trim()) as {
       sessionId: string | null;
       status: string;
+      runtimeSessionId?: string | null;
     };
     assert.equal(payload.sessionId, "named-status-session");
     assert.equal(payload.status, "dead");
     assert.notEqual(payload.status, "no-session");
+    assert.equal("runtimeSessionId" in payload, false);
   });
 });
 

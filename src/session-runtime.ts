@@ -452,6 +452,22 @@ function applyLifecycleSnapshotToRecord(
   record.lastAgentDisconnectReason = undefined;
 }
 
+function reconcileRuntimeSessionId(
+  record: SessionRecord,
+  runtimeSessionId: string | undefined,
+): void {
+  if (typeof runtimeSessionId !== "string") {
+    return;
+  }
+
+  const trimmed = runtimeSessionId.trim();
+  if (trimmed.length === 0) {
+    return;
+  }
+
+  record.runtimeSessionId = trimmed;
+}
+
 function shouldFallbackToNewSession(error: unknown): boolean {
   if (error instanceof TimeoutError || error instanceof InterruptedError) {
     return false;
@@ -472,6 +488,7 @@ type ConnectAndLoadSessionOptions = {
 
 type ConnectAndLoadSessionResult = {
   sessionId: string;
+  runtimeSessionId?: string;
   resumed: boolean;
   loadError?: string;
 };
@@ -510,33 +527,42 @@ async function connectAndLoadSession(
 
   if (client.supportsLoadSession()) {
     try {
-      await withTimeout(
+      const loadResult = await withTimeout(
         client.loadSessionWithOptions(record.sessionId, record.cwd, {
           suppressReplayUpdates: true,
         }),
         options.timeoutMs,
       );
+      reconcileRuntimeSessionId(record, loadResult.runtimeSessionId);
       resumed = true;
     } catch (error) {
       loadError = formatErrorMessage(error);
       if (!shouldFallbackToNewSession(error)) {
         throw error;
       }
-      sessionId = await withTimeout(
+      const createdSession = await withTimeout(
         client.createSession(record.cwd),
         options.timeoutMs,
       );
+      sessionId = createdSession.sessionId;
       record.sessionId = sessionId;
+      reconcileRuntimeSessionId(record, createdSession.runtimeSessionId);
     }
   } else {
-    sessionId = await withTimeout(client.createSession(record.cwd), options.timeoutMs);
+    const createdSession = await withTimeout(
+      client.createSession(record.cwd),
+      options.timeoutMs,
+    );
+    sessionId = createdSession.sessionId;
     record.sessionId = sessionId;
+    reconcileRuntimeSessionId(record, createdSession.runtimeSessionId);
   }
 
   options.onSessionIdResolved?.(sessionId);
 
   return {
     sessionId,
+    runtimeSessionId: record.runtimeSessionId,
     resumed,
     loadError,
   };
@@ -985,10 +1011,11 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
     return await withInterrupt(
       async () => {
         await withTimeout(client.start(), options.timeoutMs);
-        const sessionId = await withTimeout(
+        const createdSession = await withTimeout(
           client.createSession(absolutePath(options.cwd)),
           options.timeoutMs,
         );
+        const sessionId = createdSession.sessionId;
         output.setContext({
           sessionId,
           stream: "prompt",
@@ -1028,16 +1055,18 @@ export async function createSession(
     return await withInterrupt(
       async () => {
         await withTimeout(client.start(), options.timeoutMs);
-        const sessionId = await withTimeout(
+        const createdSession = await withTimeout(
           client.createSession(absolutePath(options.cwd)),
           options.timeoutMs,
         );
+        const sessionId = createdSession.sessionId;
         const lifecycle = client.getAgentLifecycleSnapshot();
 
         const now = isoNow();
         const record: SessionRecord = {
           id: sessionId,
           sessionId,
+          runtimeSessionId: createdSession.runtimeSessionId,
           agentCommand: options.agentCommand,
           cwd: absolutePath(options.cwd),
           name: normalizeName(options.name),

@@ -77,6 +77,13 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
   }
 
   const record = raw as Partial<SessionRecord>;
+  const runtimeSessionId =
+    record.runtimeSessionId == null
+      ? undefined
+      : typeof record.runtimeSessionId === "string" &&
+          record.runtimeSessionId.trim().length > 0
+        ? record.runtimeSessionId.trim()
+        : null;
   const name =
     record.name == null
       ? undefined
@@ -154,6 +161,7 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
     typeof record.sessionId !== "string" ||
     typeof record.agentCommand !== "string" ||
     typeof record.cwd !== "string" ||
+    runtimeSessionId === null ||
     name === null ||
     typeof record.createdAt !== "string" ||
     typeof record.lastUsedAt !== "string" ||
@@ -175,6 +183,7 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
     ...record,
     id: record.id,
     sessionId: record.sessionId,
+    runtimeSessionId,
     agentCommand: record.agentCommand,
     cwd: record.cwd,
     name,
