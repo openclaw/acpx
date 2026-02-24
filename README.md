@@ -10,6 +10,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/node/v/acpx.svg)](https://nodejs.org)
 
+> Alpha notice: `acpx` is in alpha and the CLI/runtime interfaces are likely to change.
+> ACP coverage status: see [ACP Spec Coverage Roadmap](docs/2026-02-19-acp-coverage-roadmap.md).
+
 Your agents love acpx! 🤖❤️ They hate having to scrape characters from a PTY session 😤
 
 `acpx` is a headless CLI client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com), so AI agents and orchestrators can talk to coding agents over a structured protocol instead of PTY scraping.
