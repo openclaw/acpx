@@ -1,11 +1,13 @@
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import net from "node:net";
 import readline from "node:readline";
 import test from "node:test";
 import { QueueConnectionError, QueueProtocolError } from "../src/errors.js";
 import {
   SessionQueueOwner,
+  isProcessAlive,
   releaseQueueOwnerLease,
   tryAcquireQueueOwnerLease,
   trySetModeOnRunningOwner,
@@ -43,6 +45,41 @@ const NOOP_OUTPUT_FORMATTER: OutputFormatter = {
     // no-op
   },
 };
+
+test("trySubmitToRunningOwner reclaims stale owner heartbeat locks", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "stale-heartbeat-owner";
+    const keeper = await startKeeperProcess();
+    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
+    await writeQueueOwnerLock({
+      lockPath,
+      pid: keeper.pid,
+      sessionId,
+      socketPath,
+      createdAt: "2000-01-01T00:00:00.000Z",
+      heartbeatAt: "2000-01-01T00:00:00.000Z",
+    });
+
+    try {
+      const result = await trySubmitToRunningOwner({
+        sessionId,
+        message: "hello",
+        permissionMode: "approve-reads",
+        outputFormatter: NOOP_OUTPUT_FORMATTER,
+        waitForCompletion: true,
+      });
+      assert.equal(result, undefined);
+      assert.equal(await waitForProcessExit(keeper.pid, 3_000), true);
+      await assert.rejects(async () => await fs.readFile(lockPath, "utf8"), {
+        code: "ENOENT",
+      });
+      assert.equal(isProcessAlive(keeper.pid), false);
+    } finally {
+      await cleanupOwnerArtifacts({ socketPath, lockPath });
+      stopProcess(keeper);
+    }
+  });
+});
 
 test("trySubmitToRunningOwner propagates typed queue prompt errors", async () => {
   await withTempHome(async (homeDir) => {
@@ -602,4 +639,23 @@ async function nextJsonLine(
   })();
 
   return await Promise.race([next, timeout]);
+}
+
+async function waitForProcessExit(
+  pid: number | undefined,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (!pid) {
+    return true;
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) {
+      return true;
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+  }
+  return !isProcessAlive(pid);
 }

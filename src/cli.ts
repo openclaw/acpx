@@ -38,6 +38,7 @@ import {
   listSessionsForAgent,
   runOnce,
   runQueueOwnerProcess,
+  readSessionQueueOwnerStatus,
   setSessionConfigOption,
   setSessionMode,
   sendSession,
@@ -1320,6 +1321,11 @@ async function handleStatus(
       lastPromptTime: null,
       exitCode: null,
       signal: null,
+      ownerPid: null,
+      ownerStatus: null,
+      ownerGeneration: null,
+      ownerHeartbeatAt: null,
+      ownerQueueDepth: null,
     } as const;
 
     if (globalFlags.format === "json") {
@@ -1337,10 +1343,13 @@ async function handleStatus(
     process.stdout.write(`status: no-session\n`);
     process.stdout.write(`uptime: -\n`);
     process.stdout.write(`lastPromptTime: -\n`);
+    process.stdout.write(`ownerStatus: -\n`);
     return;
   }
 
   const running = isProcessAlive(record.pid);
+  const owner = await readSessionQueueOwnerStatus(record.id);
+  const ownerStatus = owner ? (owner.stale ? "stale" : "active") : "inactive";
   const payload = {
     ...canonicalSessionIdentity(record),
     agentCommand: record.agentCommand,
@@ -1350,6 +1359,11 @@ async function handleStatus(
     lastPromptTime: record.lastPromptAt ?? null,
     exitCode: running ? null : (record.lastAgentExitCode ?? null),
     signal: running ? null : (record.lastAgentExitSignal ?? null),
+    ownerPid: owner?.pid ?? null,
+    ownerStatus,
+    ownerGeneration: owner?.ownerGeneration ?? null,
+    ownerHeartbeatAt: owner?.heartbeatAt ?? null,
+    ownerQueueDepth: owner?.queueDepth ?? null,
   };
 
   if (globalFlags.format === "json") {
@@ -1370,6 +1384,11 @@ async function handleStatus(
   process.stdout.write(`status: ${payload.status}\n`);
   process.stdout.write(`uptime: ${payload.uptime ?? "-"}\n`);
   process.stdout.write(`lastPromptTime: ${payload.lastPromptTime ?? "-"}\n`);
+  process.stdout.write(`ownerStatus: ${payload.ownerStatus}\n`);
+  process.stdout.write(`ownerPid: ${payload.ownerPid ?? "-"}\n`);
+  process.stdout.write(`ownerGeneration: ${payload.ownerGeneration ?? "-"}\n`);
+  process.stdout.write(`ownerHeartbeatAt: ${payload.ownerHeartbeatAt ?? "-"}\n`);
+  process.stdout.write(`ownerQueueDepth: ${payload.ownerQueueDepth ?? "-"}\n`);
   if (payload.status === "dead") {
     process.stdout.write(`exitCode: ${payload.exitCode ?? "-"}\n`);
     process.stdout.write(`signal: ${payload.signal ?? "-"}\n`);

@@ -32,6 +32,7 @@ import type {
 const PROCESS_EXIT_GRACE_MS = 1_500;
 const PROCESS_POLL_MS = 50;
 const QUEUE_CONNECT_ATTEMPTS = 40;
+const QUEUE_OWNER_STALE_HEARTBEAT_MS = 15_000;
 export const QUEUE_CONNECT_RETRY_MS = 50;
 
 function queueBaseDir(): string {
@@ -140,11 +141,18 @@ type QueueOwnerRecord = {
   pid: number;
   sessionId: string;
   socketPath: string;
+  createdAt: string;
+  heartbeatAt: string;
+  ownerGeneration: number;
+  queueDepth: number;
 };
 
 export type QueueOwnerLease = {
+  sessionId: string;
   lockPath: string;
   socketPath: string;
+  createdAt: string;
+  ownerGeneration: number;
 };
 
 export type { QueueOwnerMessage, QueueSubmitRequest } from "./queue-messages.js";
@@ -171,7 +179,13 @@ function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
     !Number.isInteger(record.pid) ||
     (record.pid as number) <= 0 ||
     typeof record.sessionId !== "string" ||
-    typeof record.socketPath !== "string"
+    typeof record.socketPath !== "string" ||
+    typeof record.createdAt !== "string" ||
+    typeof record.heartbeatAt !== "string" ||
+    !Number.isInteger(record.ownerGeneration) ||
+    (record.ownerGeneration as number) <= 0 ||
+    !Number.isInteger(record.queueDepth) ||
+    (record.queueDepth as number) < 0
   ) {
     return null;
   }
@@ -180,7 +194,27 @@ function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
     pid: record.pid as number,
     sessionId: record.sessionId,
     socketPath: record.socketPath,
+    createdAt: record.createdAt,
+    heartbeatAt: record.heartbeatAt,
+    ownerGeneration: record.ownerGeneration as number,
+    queueDepth: record.queueDepth as number,
   };
+}
+
+function createOwnerGeneration(): number {
+  return Date.now() * 1_000 + Math.floor(Math.random() * 1_000);
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function isQueueOwnerHeartbeatStale(owner: QueueOwnerRecord): boolean {
+  const heartbeatMs = Date.parse(owner.heartbeatAt);
+  if (!Number.isFinite(heartbeatMs)) {
+    return true;
+  }
+  return Date.now() - heartbeatMs > QUEUE_OWNER_STALE_HEARTBEAT_MS;
 }
 
 function queueKeyForSession(sessionId: string): string {
@@ -230,6 +264,58 @@ async function readQueueOwnerRecord(
   }
 }
 
+export async function readQueueOwnerStatus(sessionId: string): Promise<
+  | {
+      pid: number;
+      socketPath: string;
+      heartbeatAt: string;
+      ownerGeneration: number;
+      queueDepth: number;
+      alive: boolean;
+      stale: boolean;
+    }
+  | undefined
+> {
+  const owner = await readQueueOwnerRecord(sessionId);
+  if (!owner) {
+    return undefined;
+  }
+
+  const alive = await ensureOwnerIsUsable(sessionId, owner);
+  if (!alive) {
+    return undefined;
+  }
+
+  return {
+    pid: owner.pid,
+    socketPath: owner.socketPath,
+    heartbeatAt: owner.heartbeatAt,
+    ownerGeneration: owner.ownerGeneration,
+    queueDepth: owner.queueDepth,
+    alive,
+    stale: isQueueOwnerHeartbeatStale(owner),
+  };
+}
+
+async function ensureOwnerIsUsable(
+  sessionId: string,
+  owner: QueueOwnerRecord,
+): Promise<boolean> {
+  const alive = isProcessAlive(owner.pid);
+  const stale = isQueueOwnerHeartbeatStale(owner);
+  if (alive && !stale) {
+    return true;
+  }
+
+  if (alive) {
+    await terminateProcess(owner.pid).catch(() => {
+      // best effort stale owner termination
+    });
+  }
+  await cleanupStaleQueueOwner(sessionId, owner);
+  return false;
+}
+
 async function cleanupStaleQueueOwner(
   sessionId: string,
   owner: QueueOwnerRecord | undefined,
@@ -250,17 +336,22 @@ async function cleanupStaleQueueOwner(
 
 export async function tryAcquireQueueOwnerLease(
   sessionId: string,
-  nowIso: () => string = () => new Date().toISOString(),
+  nowIsoFactory: () => string = nowIso,
 ): Promise<QueueOwnerLease | undefined> {
   await ensureQueueDir();
   const lockPath = queueLockFilePath(sessionId);
   const socketPath = queueSocketPath(sessionId);
+  const createdAt = nowIsoFactory();
+  const ownerGeneration = createOwnerGeneration();
   const payload = JSON.stringify(
     {
       pid: process.pid,
       sessionId,
       socketPath,
-      createdAt: nowIso(),
+      createdAt,
+      heartbeatAt: createdAt,
+      ownerGeneration,
+      queueDepth: 0,
     },
     null,
     2,
@@ -274,18 +365,59 @@ export async function tryAcquireQueueOwnerLease(
     await removeSocketFile(socketPath).catch(() => {
       // best-effort stale socket cleanup after ownership is acquired
     });
-    return { lockPath, socketPath };
+    return {
+      sessionId,
+      lockPath,
+      socketPath,
+      createdAt,
+      ownerGeneration,
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
       throw error;
     }
 
     const owner = await readQueueOwnerRecord(sessionId);
-    if (!owner || !isProcessAlive(owner.pid)) {
+    if (!owner) {
+      await cleanupStaleQueueOwner(sessionId, owner);
+      return undefined;
+    }
+
+    if (!isProcessAlive(owner.pid) || isQueueOwnerHeartbeatStale(owner)) {
+      if (isProcessAlive(owner.pid)) {
+        await terminateProcess(owner.pid).catch(() => {
+          // best effort stale owner termination
+        });
+      }
       await cleanupStaleQueueOwner(sessionId, owner);
     }
     return undefined;
   }
+}
+
+export async function refreshQueueOwnerLease(
+  lease: QueueOwnerLease,
+  options: {
+    queueDepth: number;
+  },
+  nowIsoFactory: () => string = nowIso,
+): Promise<void> {
+  const payload = JSON.stringify(
+    {
+      pid: process.pid,
+      sessionId: lease.sessionId,
+      socketPath: lease.socketPath,
+      createdAt: lease.createdAt,
+      heartbeatAt: nowIsoFactory(),
+      ownerGeneration: lease.ownerGeneration,
+      queueDepth: Math.max(0, Math.round(options.queueDepth)),
+    },
+    null,
+    2,
+  );
+  await fs.writeFile(lease.lockPath, `${payload}\n`, {
+    encoding: "utf8",
+  });
 }
 
 export async function releaseQueueOwnerLease(lease: QueueOwnerLease): Promise<void> {
@@ -477,6 +609,10 @@ export class SessionQueueOwner {
 
       this.waiters.push(waiter);
     });
+  }
+
+  queueDepth(): number {
+    return this.pending.length;
   }
 
   private enqueue(task: QueueTask): void {
@@ -1218,8 +1354,7 @@ export async function trySubmitToRunningOwner(
     return undefined;
   }
 
-  if (!isProcessAlive(owner.pid)) {
-    await cleanupStaleQueueOwner(options.sessionId, owner);
+  if (!(await ensureOwnerIsUsable(options.sessionId, owner))) {
     return undefined;
   }
 
@@ -1233,8 +1368,7 @@ export async function trySubmitToRunningOwner(
     return submitted;
   }
 
-  if (!isProcessAlive(owner.pid)) {
-    await cleanupStaleQueueOwner(options.sessionId, owner);
+  if (!(await ensureOwnerIsUsable(options.sessionId, owner))) {
     return undefined;
   }
 
@@ -1257,8 +1391,7 @@ export async function tryCancelOnRunningOwner(options: {
     return undefined;
   }
 
-  if (!isProcessAlive(owner.pid)) {
-    await cleanupStaleQueueOwner(options.sessionId, owner);
+  if (!(await ensureOwnerIsUsable(options.sessionId, owner))) {
     return undefined;
   }
 
@@ -1272,8 +1405,7 @@ export async function tryCancelOnRunningOwner(options: {
     return cancelled;
   }
 
-  if (!isProcessAlive(owner.pid)) {
-    await cleanupStaleQueueOwner(options.sessionId, owner);
+  if (!(await ensureOwnerIsUsable(options.sessionId, owner))) {
     return undefined;
   }
 
@@ -1298,8 +1430,7 @@ export async function trySetModeOnRunningOwner(
     return undefined;
   }
 
-  if (!isProcessAlive(owner.pid)) {
-    await cleanupStaleQueueOwner(sessionId, owner);
+  if (!(await ensureOwnerIsUsable(sessionId, owner))) {
     return undefined;
   }
 
@@ -1313,8 +1444,7 @@ export async function trySetModeOnRunningOwner(
     return true;
   }
 
-  if (!isProcessAlive(owner.pid)) {
-    await cleanupStaleQueueOwner(sessionId, owner);
+  if (!(await ensureOwnerIsUsable(sessionId, owner))) {
     return undefined;
   }
 
@@ -1340,8 +1470,7 @@ export async function trySetConfigOptionOnRunningOwner(
     return undefined;
   }
 
-  if (!isProcessAlive(owner.pid)) {
-    await cleanupStaleQueueOwner(sessionId, owner);
+  if (!(await ensureOwnerIsUsable(sessionId, owner))) {
     return undefined;
   }
 
@@ -1360,8 +1489,7 @@ export async function trySetConfigOptionOnRunningOwner(
     return response;
   }
 
-  if (!isProcessAlive(owner.pid)) {
-    await cleanupStaleQueueOwner(sessionId, owner);
+  if (!(await ensureOwnerIsUsable(sessionId, owner))) {
     return undefined;
   }
 

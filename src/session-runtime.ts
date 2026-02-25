@@ -20,6 +20,8 @@ import {
   QUEUE_CONNECT_RETRY_MS,
   SessionQueueOwner,
   isProcessAlive,
+  readQueueOwnerStatus,
+  refreshQueueOwnerLease,
   releaseQueueOwnerLease,
   terminateProcess,
   terminateQueueOwnerForSession,
@@ -72,6 +74,7 @@ import type {
 
 export const DEFAULT_QUEUE_OWNER_TTL_MS = 300_000;
 const INTERRUPT_CANCEL_WAIT_MS = 2_500;
+const QUEUE_OWNER_HEARTBEAT_INTERVAL_MS = 2_000;
 const QUEUE_OWNER_STARTUP_TIMEOUT_MS = 10_000;
 const QUEUE_OWNER_RESPAWN_BACKOFF_MS = 250;
 
@@ -1080,8 +1083,28 @@ export async function runQueueOwnerProcess(
 
   const runtime = createQueueOwnerTurnRuntime(options);
   let owner: SessionQueueOwner | undefined;
+  let heartbeatTimer: NodeJS.Timeout | undefined;
+  const refreshHeartbeat = async () => {
+    if (!owner) {
+      return;
+    }
+    await refreshQueueOwnerLease(lease, {
+      queueDepth: owner.queueDepth(),
+    }).catch((error) => {
+      if (options.verbose) {
+        process.stderr.write(
+          `[acpx] queue owner heartbeat update failed: ${formatErrorMessage(error)}\n`,
+        );
+      }
+    });
+  };
   try {
     owner = await SessionQueueOwner.start(lease, runtime.controlHandlers);
+    await refreshHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      void refreshHeartbeat();
+    }, QUEUE_OWNER_HEARTBEAT_INTERVAL_MS);
+    heartbeatTimer.unref();
     const idleWaitMs = queueOwnerTtlMs === 0 ? undefined : Math.max(0, queueOwnerTtlMs);
 
     while (true) {
@@ -1107,8 +1130,12 @@ export async function runQueueOwnerProcess(
           onPromptActive: runtime.onPromptActive,
         });
       });
+      await refreshHeartbeat();
     }
   } finally {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+    }
     runtime.beginClosing();
     if (owner) {
       await owner.close();
@@ -1254,6 +1281,21 @@ export async function sendSession(
 
     await waitMs(QUEUE_CONNECT_RETRY_MS);
   }
+}
+
+export async function readSessionQueueOwnerStatus(sessionId: string): Promise<
+  | {
+      pid: number;
+      socketPath: string;
+      heartbeatAt: string;
+      ownerGeneration: number;
+      queueDepth: number;
+      alive: boolean;
+      stale: boolean;
+    }
+  | undefined
+> {
+  return await readQueueOwnerStatus(sessionId);
 }
 
 export async function cancelSessionPrompt(
