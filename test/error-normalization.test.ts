@@ -61,6 +61,26 @@ test("normalizeOutputError maps legacy ACP -32001 resource errors to NO_SESSION"
   assert.equal(normalized.acp?.code, -32001);
 });
 
+test("normalizeOutputError maps ACP -32603 with session-not-found details to NO_SESSION", () => {
+  const error = {
+    error: {
+      code: -32603,
+      message: "Internal error",
+      data: {
+        details: "Session not found",
+      },
+    },
+  };
+
+  const normalized = normalizeOutputError(error, {
+    origin: "acp",
+  });
+
+  assert.equal(normalized.code, "NO_SESSION");
+  assert.equal(normalized.origin, "acp");
+  assert.equal(isAcpResourceNotFoundError(error), true);
+});
+
 test("normalizeOutputError falls back to message-based resource detection", () => {
   const normalized = normalizeOutputError(
     new Error("session not found while reconnecting"),

@@ -15,6 +15,8 @@ const MOCK_AGENT_COMMAND = `node ${JSON.stringify(MOCK_AGENT_PATH)}`;
 const MOCK_CODEX_AGENT_WITH_AGENT_SESSION_ID = `${MOCK_AGENT_COMMAND} --agent-session-id codex-runtime-session`;
 const MOCK_CLAUDE_AGENT_WITH_AGENT_SESSION_ID = `${MOCK_AGENT_COMMAND} --agent-session-id claude-runtime-session`;
 const MOCK_AGENT_WITH_LOAD_AGENT_SESSION_ID = `${MOCK_AGENT_COMMAND} --supports-load-session --load-agent-session-id loaded-runtime-session`;
+const MOCK_AGENT_WITH_LOAD_INTERNAL_NOT_FOUND = `${MOCK_AGENT_COMMAND} --load-internal-session-not-found`;
+const MOCK_AGENT_REQUIRING_LOAD_AGENT_SESSION_ID = `${MOCK_AGENT_COMMAND} --require-load-session-id loaded-agent-session`;
 
 type CliRunResult = {
   code: number | null;
@@ -341,6 +343,113 @@ test("prompt reconciles agentSessionId from loadSession metadata", async () => {
       await fs.readFile(storedRecordPath, "utf8"),
     ) as SessionRecord;
     assert.equal(storedRecord.agentSessionId, "loaded-runtime-session");
+  });
+});
+
+test("prompt falls back to new session when loadSession returns internal session-not-found", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_WITH_LOAD_INTERNAL_NOT_FOUND,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const staleSessionId = "stale-runtime-session";
+    await writeSessionRecord(homeDir, {
+      id: staleSessionId,
+      sessionId: staleSessionId,
+      agentCommand: MOCK_AGENT_WITH_LOAD_INTERNAL_NOT_FOUND,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+    });
+
+    const prompt = await runCli(
+      ["--cwd", cwd, "--ttl", "0.01", "codex", "prompt", "echo hello"],
+      homeDir,
+    );
+    assert.equal(prompt.code, 0, prompt.stderr);
+    assert.match(prompt.stdout, /hello/);
+
+    const storedRecordPath = path.join(
+      homeDir,
+      ".acpx",
+      "sessions",
+      `${encodeURIComponent(staleSessionId)}.json`,
+    );
+    const storedRecord = JSON.parse(
+      await fs.readFile(storedRecordPath, "utf8"),
+    ) as SessionRecord;
+    assert.notEqual(storedRecord.sessionId, staleSessionId);
+  });
+});
+
+test("prompt prefers agentSessionId when reconnecting loadSession", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_REQUIRING_LOAD_AGENT_SESSION_ID,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const recordId = "local-record-id";
+    const acpxSessionId = "local-runtime-session";
+    await writeSessionRecord(homeDir, {
+      id: recordId,
+      sessionId: acpxSessionId,
+      agentSessionId: "loaded-agent-session",
+      agentCommand: MOCK_AGENT_REQUIRING_LOAD_AGENT_SESSION_ID,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+    });
+
+    const prompt = await runCli(
+      ["--cwd", cwd, "--ttl", "0.01", "codex", "prompt", "echo hello"],
+      homeDir,
+    );
+    assert.equal(prompt.code, 0, prompt.stderr);
+    assert.match(prompt.stdout, /hello/);
+
+    const storedRecordPath = path.join(
+      homeDir,
+      ".acpx",
+      "sessions",
+      `${encodeURIComponent(recordId)}.json`,
+    );
+    const storedRecord = JSON.parse(
+      await fs.readFile(storedRecordPath, "utf8"),
+    ) as SessionRecord;
+    assert.equal(storedRecord.sessionId, acpxSessionId);
+    assert.equal(storedRecord.agentSessionId, "loaded-agent-session");
   });
 });
 
