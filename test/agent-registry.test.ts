@@ -11,7 +11,7 @@ test("resolveAgentCommand maps known agents to commands", () => {
     ["codex", "npx @zed-industries/codex-acp"],
     ["claude", "npx -y @zed-industries/claude-agent-acp"],
     ["gemini", "gemini"],
-    ["opencode", "npx opencode-ai"],
+    ["opencode", "npx -y opencode-ai acp"],
     ["pi", "npx pi-acp"],
   ]);
 
