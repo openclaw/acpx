@@ -291,7 +291,8 @@ This keeps owner spawn fast and removes first-run package-install stalls.
 - implement detached owner mode as the only owner mode
 - remove foreground owner loop in the same change set
 - keep CLI/API command surface stable (`prompt`, `--no-wait`, `cancel`, `set-mode`, `set`, `sessions`)
-- keep existing session files and queue lock paths; reclaim stale records on first contact
+- replace session record and queue lease formats with the new schema
+- no backward compatibility shims for legacy files, locks, or IPC payloads
 - no feature flag and no parallel legacy path
 
 ## Implementation plan (single-pass)
@@ -301,7 +302,7 @@ This keeps owner spawn fast and removes first-run package-install stalls.
 - add dedicated internal owner command entrypoint
 - add detached spawn helper and owner readiness handshake
 
-2. Queue IPC protocol v2
+2. Queue IPC protocol
 
 - add explicit request envelope (`requestId`, `deadline`, request kind)
 - add owner hello/ready frame and request terminal frame guarantees
@@ -329,7 +330,7 @@ This keeps owner spawn fast and removes first-run package-install stalls.
 7. Cleanup
 
 - remove caller-side idle wait loop and foreground-owner-only branches
-- preserve `sessions close` and reconnect semantics on top of detached owners
+- implement `sessions close` and reconnect semantics directly on detached owners only
 
 ## Test plan
 
