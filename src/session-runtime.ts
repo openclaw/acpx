@@ -472,6 +472,20 @@ function shouldFallbackToNewSession(error: unknown): boolean {
   return isAcpResourceNotFoundError(error);
 }
 
+function loadSessionCandidates(record: SessionRecord): string[] {
+  const candidates = [normalizeAgentSessionId(record.agentSessionId), record.sessionId];
+  const unique: string[] = [];
+
+  for (const candidate of candidates) {
+    if (!candidate || unique.includes(candidate)) {
+      continue;
+    }
+    unique.push(candidate);
+  }
+
+  return unique;
+}
+
 type ConnectAndLoadSessionOptions = {
   client: AcpClient;
   record: SessionRecord;
@@ -523,20 +537,38 @@ async function connectAndLoadSession(
   let sessionId = record.sessionId;
 
   if (client.supportsLoadSession()) {
-    try {
-      const loadResult = await withTimeout(
-        client.loadSessionWithOptions(record.sessionId, record.cwd, {
-          suppressReplayUpdates: true,
-        }),
-        options.timeoutMs,
-      );
-      reconcileAgentSessionId(record, loadResult.agentSessionId);
-      resumed = true;
-    } catch (error) {
-      loadError = formatErrorMessage(error);
-      if (!shouldFallbackToNewSession(error)) {
-        throw error;
+    const candidates = loadSessionCandidates(record);
+    for (const candidate of candidates) {
+      if (options.verbose && candidates.length > 1) {
+        process.stderr.write(`[acpx] attempting session/load with ${candidate}\n`);
       }
+
+      try {
+        const loadResult = await withTimeout(
+          client.loadSessionWithOptions(candidate, record.cwd, {
+            suppressReplayUpdates: true,
+          }),
+          options.timeoutMs,
+        );
+        reconcileAgentSessionId(record, loadResult.agentSessionId);
+        resumed = true;
+        sessionId = candidate;
+        loadError = undefined;
+        break;
+      } catch (error) {
+        loadError = formatErrorMessage(error);
+        if (!shouldFallbackToNewSession(error)) {
+          throw error;
+        }
+        if (options.verbose) {
+          process.stderr.write(
+            `[acpx] session/load failed for ${candidate}: ${loadError}\n`,
+          );
+        }
+      }
+    }
+
+    if (!resumed) {
       const createdSession = await withTimeout(
         client.createSession(record.cwd),
         options.timeoutMs,

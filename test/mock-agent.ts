@@ -27,6 +27,8 @@ type MockAgentOptions = {
   newSessionMeta?: Record<string, string>;
   loadSessionMeta?: Record<string, string>;
   supportsLoadSession: boolean;
+  loadSessionInternalNotFound?: boolean;
+  requireLoadSessionId?: string;
 };
 
 type SessionState = {
@@ -223,12 +225,27 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   const newSessionMeta: Record<string, string> = {};
   const loadSessionMeta: Record<string, string> = {};
   let supportsLoadSession = false;
+  let loadSessionInternalNotFound = false;
+  let requireLoadSessionId: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
 
     if (token === "--supports-load-session") {
       supportsLoadSession = true;
+      continue;
+    }
+
+    if (token === "--load-internal-session-not-found") {
+      supportsLoadSession = true;
+      loadSessionInternalNotFound = true;
+      continue;
+    }
+
+    if (token === "--require-load-session-id") {
+      supportsLoadSession = true;
+      requireLoadSessionId = parseOptionValue(argv, index + 1, token);
+      index += 1;
       continue;
     }
 
@@ -256,6 +273,8 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     loadSessionMeta:
       Object.keys(loadSessionMeta).length > 0 ? { ...loadSessionMeta } : undefined,
     supportsLoadSession,
+    loadSessionInternalNotFound,
+    requireLoadSessionId,
   };
 }
 
@@ -298,6 +317,17 @@ class MockAgent implements Agent {
   async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
     if (!this.options.supportsLoadSession) {
       throw new Error("loadSession is not supported");
+    }
+
+    if (
+      this.options.requireLoadSessionId &&
+      params.sessionId !== this.options.requireLoadSessionId
+    ) {
+      throw new Error(JSON.stringify({ details: "Session not found" }));
+    }
+
+    if (this.options.loadSessionInternalNotFound) {
+      throw new Error(JSON.stringify({ details: "Session not found" }));
     }
 
     this.sessions.set(params.sessionId, this.sessions.get(params.sessionId) ?? {});

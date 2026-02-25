@@ -200,6 +200,43 @@ function isNoSessionLike(error: unknown): boolean {
   return error instanceof Error && error.name === "NoSessionError";
 }
 
+function isSessionNotFoundText(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const normalized = value.toLowerCase();
+  return (
+    normalized.includes("resource_not_found") ||
+    normalized.includes("resource not found") ||
+    normalized.includes("session not found") ||
+    normalized.includes("unknown session")
+  );
+}
+
+function hasSessionNotFoundHint(value: unknown, depth = 0): boolean {
+  if (depth > 4) {
+    return false;
+  }
+
+  if (isSessionNotFoundText(value)) {
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasSessionNotFoundHint(entry, depth + 1));
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    return false;
+  }
+
+  return Object.values(record).some((entry) =>
+    hasSessionNotFoundHint(entry, depth + 1),
+  );
+}
+
 function isUsageLike(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -242,13 +279,16 @@ export function isAcpResourceNotFoundError(error: unknown): boolean {
     return true;
   }
 
-  const message = formatErrorMessage(error).toLowerCase();
-  return (
-    message.includes("resource_not_found") ||
-    message.includes("resource not found") ||
-    message.includes("session not found") ||
-    message.includes("unknown session")
-  );
+  if (acp) {
+    if (isSessionNotFoundText(acp.message)) {
+      return true;
+    }
+    if (hasSessionNotFoundHint(acp.data)) {
+      return true;
+    }
+  }
+
+  return isSessionNotFoundText(formatErrorMessage(error));
 }
 
 function mapErrorCode(error: unknown): OutputErrorCode | undefined {
