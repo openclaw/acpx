@@ -24,26 +24,26 @@ test("SessionRecord allows optional closed and closedAt fields", () => {
   assert.equal(record.closedAt, undefined);
 });
 
-test("listSessions ignores legacy thread message shapes", async () => {
+test("listSessions ignores unsupported thread message shapes", async () => {
   await withTempHome(async (homeDir) => {
     const sessionDir = path.join(homeDir, ".acpx", "sessions");
     await fs.mkdir(sessionDir, { recursive: true });
 
-    const legacy = makeSessionRecord({
-      acpxRecordId: "legacy-shape",
-      acpSessionId: "legacy-shape",
+    const malformed = makeSessionRecord({
+      acpxRecordId: "malformed-shape",
+      acpSessionId: "malformed-shape",
       agentCommand: "agent",
       cwd: path.join(homeDir, "workspace"),
     });
 
-    (legacy as unknown as { thread: Record<string, unknown> }).thread = {
+    (malformed as unknown as { thread: Record<string, unknown> }).thread = {
       version: "0.3.0",
       title: null,
       messages: [
         {
           kind: "user",
           id: "user_1",
-          content: [{ type: "text", text: "legacy" }],
+          content: [{ type: "text", text: "invalid" }],
         },
       ],
       updated_at: "2026-01-01T00:00:00.000Z",
@@ -61,15 +61,15 @@ test("listSessions ignores legacy thread message shapes", async () => {
     };
 
     await fs.writeFile(
-      path.join(sessionDir, "legacy-shape.json"),
-      JSON.stringify(serializeSessionRecordForDisk(legacy), null, 2) + "\n",
+      path.join(sessionDir, "malformed-shape.json"),
+      JSON.stringify(serializeSessionRecordForDisk(malformed), null, 2) + "\n",
       "utf8",
     );
 
     const session = await loadSessionModule();
     const sessions = await session.listSessions();
     assert.equal(
-      sessions.some((entry) => entry.acpxRecordId === "legacy-shape"),
+      sessions.some((entry) => entry.acpxRecordId === "malformed-shape"),
       false,
     );
   });

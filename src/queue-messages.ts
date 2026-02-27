@@ -373,15 +373,18 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
   }
 
   if (message.type === "error") {
-    if (typeof message.message !== "string") {
+    if (
+      typeof message.message !== "string" ||
+      !isOutputErrorCode(message.code) ||
+      !isOutputErrorOrigin(message.origin)
+    ) {
       return null;
     }
-    const code = isOutputErrorCode(message.code) ? message.code : undefined;
+
     const detailCode =
       typeof message.detailCode === "string" && message.detailCode.trim().length > 0
         ? message.detailCode
         : undefined;
-    const origin = isOutputErrorOrigin(message.origin) ? message.origin : undefined;
     const retryable =
       typeof message.retryable === "boolean" ? message.retryable : undefined;
     const acp = parseAcpError(message.acp);
@@ -393,9 +396,9 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
     return {
       type: "error",
       requestId: message.requestId,
-      code,
+      code: message.code,
       detailCode,
-      origin,
+      origin: message.origin,
       message: message.message,
       retryable,
       acp,

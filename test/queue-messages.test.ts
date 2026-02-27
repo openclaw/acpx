@@ -73,21 +73,12 @@ test("parseQueueOwnerMessage accepts typed queue error payload", () => {
   });
 });
 
-test("parseQueueOwnerMessage keeps backward compatibility for legacy error payload", () => {
+test("parseQueueOwnerMessage rejects untyped queue error payload", () => {
   const parsed = parseQueueOwnerMessage({
     type: "error",
-    requestId: "req-err-legacy",
-    message: "legacy message only",
+    requestId: "req-err-untyped",
+    message: "message only",
   });
 
-  assert.deepEqual(parsed, {
-    type: "error",
-    requestId: "req-err-legacy",
-    code: undefined,
-    detailCode: undefined,
-    origin: undefined,
-    retryable: undefined,
-    message: "legacy message only",
-    acp: undefined,
-  });
+  assert.equal(parsed, null);
 });

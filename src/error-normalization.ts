@@ -13,7 +13,7 @@ import {
   type OutputErrorOrigin,
 } from "./types.js";
 
-const RESOURCE_NOT_FOUND_ACP_CODES = new Set([-32001, -32002]);
+const RESOURCE_NOT_FOUND_ACP_CODES = new Set([-32002]);
 const AUTH_REQUIRED_ACP_CODES = new Set([-32000]);
 
 type ErrorMeta = {
@@ -238,17 +238,7 @@ export function extractAcpError(error: unknown): OutputErrorAcpPayload | undefin
 
 export function isAcpResourceNotFoundError(error: unknown): boolean {
   const acp = extractAcpError(error);
-  if (acp && RESOURCE_NOT_FOUND_ACP_CODES.has(acp.code)) {
-    return true;
-  }
-
-  const message = formatErrorMessage(error).toLowerCase();
-  return (
-    message.includes("resource_not_found") ||
-    message.includes("resource not found") ||
-    message.includes("session not found") ||
-    message.includes("unknown session")
-  );
+  return Boolean(acp && RESOURCE_NOT_FOUND_ACP_CODES.has(acp.code));
 }
 
 function mapErrorCode(error: unknown): OutputErrorCode | undefined {

@@ -46,33 +46,12 @@ test("normalizeOutputError maps ACP resource not found errors to NO_SESSION", ()
   assert.equal(isAcpResourceNotFoundError(error), true);
 });
 
-test("normalizeOutputError maps legacy ACP -32001 resource errors to NO_SESSION", () => {
-  const error = {
-    code: -32001,
-    message: "Resource not found",
-  };
-
-  const normalized = normalizeOutputError(error, {
-    origin: "acp",
-  });
-
-  assert.equal(normalized.code, "NO_SESSION");
-  assert.equal(normalized.origin, "acp");
-  assert.equal(normalized.acp?.code, -32001);
-});
-
-test("normalizeOutputError falls back to message-based resource detection", () => {
-  const normalized = normalizeOutputError(
-    new Error("session not found while reconnecting"),
-    {
-      origin: "runtime",
-    },
+test("isAcpResourceNotFoundError requires typed ACP error payload", () => {
+  assert.equal(
+    isAcpResourceNotFoundError(new Error("session not found while reconnecting")),
+    false,
   );
-
-  assert.equal(normalized.code, "NO_SESSION");
-  assert.equal(normalized.origin, "runtime");
 });
-
 test("normalizeOutputError preserves queue metadata from typed queue errors", () => {
   const error = new QueueConnectionError("Queue denied control request", {
     outputCode: "PERMISSION_DENIED",
