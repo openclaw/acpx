@@ -13,7 +13,9 @@ import {
   truncateInputPreview,
 } from "./events.js";
 import {
+  extractAcpError,
   formatErrorMessage,
+  isAcpQueryClosedBeforeResponseError,
   isAcpResourceNotFoundError,
   normalizeOutputError,
 } from "./error-normalization.js";
@@ -340,11 +342,35 @@ function reconcileAgentSessionId(
   record.agentSessionId = normalized;
 }
 
-function shouldFallbackToNewSession(error: unknown): boolean {
+function sessionHasAgentMessages(record: SessionRecord): boolean {
+  return record.thread.messages.some(
+    (message) => typeof message === "object" && message !== null && "Agent" in message,
+  );
+}
+
+function shouldFallbackToNewSession(error: unknown, record: SessionRecord): boolean {
   if (error instanceof TimeoutError || error instanceof InterruptedError) {
     return false;
   }
-  return isAcpResourceNotFoundError(error);
+
+  if (isAcpResourceNotFoundError(error)) {
+    return true;
+  }
+
+  // Some adapters return JSON-RPC internal errors when trying to
+  // load sessions that have never produced an agent turn yet.
+  if (!sessionHasAgentMessages(record)) {
+    if (isAcpQueryClosedBeforeResponseError(error)) {
+      return true;
+    }
+
+    const acp = extractAcpError(error);
+    if (acp?.code === -32603) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 type ConnectAndLoadSessionOptions = {
@@ -409,7 +435,7 @@ async function connectAndLoadSession(
       resumed = true;
     } catch (error) {
       loadError = formatErrorMessage(error);
-      if (!shouldFallbackToNewSession(error)) {
+      if (!shouldFallbackToNewSession(error, record)) {
         throw error;
       }
       const createdSession = await withTimeout(

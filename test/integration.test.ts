@@ -273,6 +273,97 @@ test("integration: prompt reuses warm queue owner pid across turns", async () =>
   });
 });
 
+test("integration: prompt recovers when loadSession fails on empty session", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const flakyLoadAgentCommand = `${MOCK_AGENT_COMMAND} --load-session-fails-on-empty`;
+
+    try {
+      const created = await runCli(
+        [
+          "--agent",
+          flakyLoadAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "sessions",
+          "new",
+        ],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+      const createdEvent = JSON.parse(created.stdout.trim()) as {
+        session_id?: string;
+      };
+      const originalSessionId = createdEvent.session_id;
+      assert.equal(typeof originalSessionId, "string");
+
+      const prompt = await runCli(
+        [
+          "--agent",
+          flakyLoadAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "prompt",
+          "echo recovered",
+        ],
+        homeDir,
+      );
+      assert.equal(prompt.code, 0, prompt.stderr);
+
+      const payloads = prompt.stdout
+        .trim()
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as { type?: string });
+      assert.equal(
+        payloads.some((payload) => payload.type === "error"),
+        false,
+        prompt.stdout,
+      );
+      assert.equal(
+        payloads.some((payload) => payload.type === "turn_done"),
+        true,
+        prompt.stdout,
+      );
+
+      const storedRecordPath = path.join(
+        homeDir,
+        ".acpx",
+        "sessions",
+        `${encodeURIComponent(originalSessionId as string)}.json`,
+      );
+      const storedRecord = JSON.parse(await fs.readFile(storedRecordPath, "utf8")) as {
+        acp_session_id?: string;
+        thread?: {
+          messages?: unknown[];
+        };
+      };
+
+      assert.notEqual(storedRecord.acp_session_id, originalSessionId);
+      const messages = Array.isArray(storedRecord.thread?.messages)
+        ? storedRecord.thread?.messages
+        : [];
+      assert.equal(
+        messages.some(
+          (message) =>
+            typeof message === "object" &&
+            message !== null &&
+            "Agent" in (message as Record<string, unknown>),
+        ),
+        true,
+      );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: cancel yields cancelled stopReason without queue error", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

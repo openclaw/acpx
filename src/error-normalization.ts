@@ -15,6 +15,7 @@ import {
 
 const RESOURCE_NOT_FOUND_ACP_CODES = new Set([-32002]);
 const AUTH_REQUIRED_ACP_CODES = new Set([-32000]);
+const QUERY_CLOSED_BEFORE_RESPONSE_DETAIL = "query closed before response received";
 
 type ErrorMeta = {
   outputCode?: OutputErrorCode;
@@ -239,6 +240,21 @@ export function extractAcpError(error: unknown): OutputErrorAcpPayload | undefin
 export function isAcpResourceNotFoundError(error: unknown): boolean {
   const acp = extractAcpError(error);
   return Boolean(acp && RESOURCE_NOT_FOUND_ACP_CODES.has(acp.code));
+}
+
+export function isAcpQueryClosedBeforeResponseError(error: unknown): boolean {
+  const acp = extractAcpError(error);
+  if (!acp || acp.code !== -32603) {
+    return false;
+  }
+
+  const data = asRecord(acp.data);
+  const details = data?.details;
+  if (typeof details !== "string") {
+    return false;
+  }
+
+  return details.toLowerCase().includes(QUERY_CLOSED_BEFORE_RESPONSE_DETAIL);
 }
 
 function mapErrorCode(error: unknown): OutputErrorCode | undefined {

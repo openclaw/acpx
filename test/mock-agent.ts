@@ -27,10 +27,12 @@ type MockAgentOptions = {
   newSessionMeta?: Record<string, string>;
   loadSessionMeta?: Record<string, string>;
   supportsLoadSession: boolean;
+  loadSessionFailsOnEmpty: boolean;
 };
 
 type SessionState = {
   pendingPrompt?: AbortController;
+  hasCompletedPrompt: boolean;
 };
 
 class CancelledError extends Error {
@@ -250,12 +252,19 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   const newSessionMeta: Record<string, string> = {};
   const loadSessionMeta: Record<string, string> = {};
   let supportsLoadSession = false;
+  let loadSessionFailsOnEmpty = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
 
     if (token === "--supports-load-session") {
       supportsLoadSession = true;
+      continue;
+    }
+
+    if (token === "--load-session-fails-on-empty") {
+      supportsLoadSession = true;
+      loadSessionFailsOnEmpty = true;
       continue;
     }
 
@@ -283,6 +292,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     loadSessionMeta:
       Object.keys(loadSessionMeta).length > 0 ? { ...loadSessionMeta } : undefined,
     supportsLoadSession,
+    loadSessionFailsOnEmpty,
   };
 }
 
@@ -310,7 +320,7 @@ class MockAgent implements Agent {
 
   async newSession(): Promise<NewSessionResponse> {
     const sessionId = randomUUID();
-    this.sessions.set(sessionId, {});
+    this.sessions.set(sessionId, { hasCompletedPrompt: false });
 
     if (this.options.newSessionMeta) {
       return {
@@ -327,7 +337,25 @@ class MockAgent implements Agent {
       throw new Error("loadSession is not supported");
     }
 
-    this.sessions.set(params.sessionId, this.sessions.get(params.sessionId) ?? {});
+    const existing = this.sessions.get(params.sessionId);
+    if (
+      this.options.loadSessionFailsOnEmpty &&
+      (!existing || !existing.hasCompletedPrompt)
+    ) {
+      const error = new Error("Internal error") as Error & {
+        code: number;
+        data: {
+          details: string;
+        };
+      };
+      error.code = -32603;
+      error.data = {
+        details: "Query closed before response received",
+      };
+      throw error;
+    }
+
+    this.sessions.set(params.sessionId, existing ?? { hasCompletedPrompt: false });
 
     if (this.options.loadSessionMeta) {
       return {
@@ -355,6 +383,7 @@ class MockAgent implements Agent {
         text,
         promptAbort.signal,
       );
+      session.hasCompletedPrompt = true;
       await this.sendAssistantMessage(params.sessionId, response);
       return { stopReason: "end_turn" };
     } catch (error) {
