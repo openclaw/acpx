@@ -53,9 +53,9 @@ test("integration: timeout emits structured TIMEOUT json error", async () => {
         .trim()
         .split("\n")
         .filter((line) => line.trim().length > 0)
-        .map((line) => JSON.parse(line) as { kind?: string; data?: { code?: string } });
+        .map((line) => JSON.parse(line) as { type?: string; data?: { code?: string } });
       assert(payloads.length > 0, "expected at least one JSON payload");
-      const timeoutError = payloads.find((payload) => payload.kind === "error");
+      const timeoutError = payloads.find((payload) => payload.type === "error");
       assert(timeoutError, `expected error event in output:\n${result.stdout}`);
       assert.equal(timeoutError.data?.code, "TIMEOUT");
     } finally {
@@ -92,9 +92,9 @@ test("integration: non-interactive fail emits structured permission error", asyn
         .trim()
         .split("\n")
         .filter((line) => line.trim().length > 0)
-        .map((line) => JSON.parse(line) as { kind?: string; data?: { code?: string } });
+        .map((line) => JSON.parse(line) as { type?: string; data?: { code?: string } });
       assert(payloads.length > 0, "expected at least one JSON payload");
-      const permissionError = payloads.find((payload) => payload.kind === "error");
+      const permissionError = payloads.find((payload) => payload.type === "error");
       assert(permissionError, `expected error event in output:\n${result.stdout}`);
       assert.equal(permissionError.data?.code, "PERMISSION_PROMPT_UNAVAILABLE");
     } finally {
@@ -134,9 +134,9 @@ test("integration: json-strict suppresses runtime stderr diagnostics", async () 
         .trim()
         .split("\n")
         .filter((line) => line.trim().length > 0)
-        .map((line) => JSON.parse(line) as { kind?: string; data?: { code?: string } });
+        .map((line) => JSON.parse(line) as { type?: string; data?: { code?: string } });
       assert(payloads.length > 0, "expected at least one JSON payload");
-      const permissionError = payloads.find((payload) => payload.kind === "error");
+      const permissionError = payloads.find((payload) => payload.type === "error");
       assert(permissionError, `expected error event in output:\n${result.stdout}`);
       assert.equal(permissionError.data?.code, "PERMISSION_PROMPT_UNAVAILABLE");
     } finally {
@@ -283,13 +283,13 @@ test("integration: cancel yields cancelled stopReason without queue error", asyn
         assert.equal(
           promptResult.events.some(
             (event) =>
-              event.kind === "turn_done" && event.data?.stop_reason === "cancelled",
+              event.type === "turn_done" && event.data?.stop_reason === "cancelled",
           ),
           true,
           promptResult.stdout,
         );
         assert.equal(
-          promptResult.events.some((event) => event.kind === "error"),
+          promptResult.events.some((event) => event.type === "error"),
           false,
           promptResult.stdout,
         );
@@ -373,7 +373,7 @@ async function runCli(
 }
 
 type PromptEvent = {
-  kind?: string;
+  type?: string;
   data?: {
     stop_reason?: string;
     code?: string;
@@ -432,7 +432,7 @@ async function waitForPromptDoneEvent(
       }
 
       events.push(event);
-      if (event.kind === "turn_done") {
+      if (event.type === "turn_done") {
         finish(() => {
           resolve({
             events,

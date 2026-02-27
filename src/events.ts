@@ -3,6 +3,9 @@ import type { SessionNotification } from "@agentclientprotocol/sdk";
 import {
   ACPX_EVENT_OUTPUT_STREAMS,
   ACPX_EVENT_SCHEMA,
+  ACPX_EVENT_STATUS_SNAPSHOT_STATUSES,
+  ACPX_EVENT_TURN_MODES,
+  ACPX_EVENT_TYPES,
   OUTPUT_ERROR_CODES,
   OUTPUT_ERROR_ORIGINS,
   type AcpxEvent,
@@ -66,7 +69,7 @@ export function createAcpxEvent(
     request_id: trimNonEmpty(draft.request_id ?? identity.requestId),
     seq: identity.seq,
     ts: identity.ts ?? isoNow(),
-    kind: draft.kind,
+    type: draft.type,
     data: draft.data,
   } as AcpxEvent;
 }
@@ -83,7 +86,7 @@ export function sessionUpdateToEventDrafts(
       }
       return [
         {
-          kind: "output_delta",
+          type: ACPX_EVENT_TYPES.OUTPUT_DELTA,
           data: {
             stream: "output",
             text: update.content.text,
@@ -97,7 +100,7 @@ export function sessionUpdateToEventDrafts(
       }
       return [
         {
-          kind: "output_delta",
+          type: ACPX_EVENT_TYPES.OUTPUT_DELTA,
           data: {
             stream: "thought",
             text: update.content.text,
@@ -109,7 +112,7 @@ export function sessionUpdateToEventDrafts(
     case "tool_call_update": {
       return [
         {
-          kind: "tool_call",
+          type: ACPX_EVENT_TYPES.TOOL_CALL,
           data: {
             tool_call_id: update.toolCallId,
             title: update.title ?? undefined,
@@ -121,7 +124,7 @@ export function sessionUpdateToEventDrafts(
     case "plan": {
       return [
         {
-          kind: "plan",
+          type: ACPX_EVENT_TYPES.PLAN,
           data: {
             entries: update.entries.map((entry) => ({
               content: entry.content,
@@ -135,7 +138,7 @@ export function sessionUpdateToEventDrafts(
     default: {
       return [
         {
-          kind: "update",
+          type: ACPX_EVENT_TYPES.UPDATE,
           data: {
             update: update.sessionUpdate,
           },
@@ -149,7 +152,7 @@ export function clientOperationToEventDraft(
   operation: ClientOperation,
 ): AcpxEventDraft {
   return {
-    kind: "client_operation",
+    type: ACPX_EVENT_TYPES.CLIENT_OPERATION,
     data: {
       method: operation.method,
       status: operation.status,
@@ -168,7 +171,7 @@ export function errorToEventDraft(params: {
   acp?: OutputErrorAcpPayload;
 }): AcpxEventDraft {
   return {
-    kind: "error",
+    type: ACPX_EVENT_TYPES.ERROR,
     data: {
       code: params.code,
       detail_code: params.detailCode,
@@ -224,7 +227,7 @@ export function isAcpxEvent(value: unknown): value is AcpxEvent {
     !Number.isInteger(event.seq) ||
     event.seq < 0 ||
     typeof event.ts !== "string" ||
-    typeof event.kind !== "string"
+    typeof event.type !== "string"
   ) {
     return false;
   }
@@ -249,26 +252,32 @@ export function isAcpxEvent(value: unknown): value is AcpxEvent {
     return false;
   }
 
-  switch (event.kind) {
-    case "turn_started":
-      return data.mode === "prompt" && typeof data.resumed === "boolean";
-    case "output_delta":
+  switch (event.type) {
+    case ACPX_EVENT_TYPES.TURN_STARTED:
+      return (
+        typeof data.mode === "string" &&
+        ACPX_EVENT_TURN_MODES.includes(
+          data.mode as (typeof ACPX_EVENT_TURN_MODES)[number],
+        ) &&
+        typeof data.resumed === "boolean"
+      );
+    case ACPX_EVENT_TYPES.OUTPUT_DELTA:
       return isAcpxEventOutputStream(data.stream) && typeof data.text === "string";
-    case "tool_call":
+    case ACPX_EVENT_TYPES.TOOL_CALL:
       return true;
-    case "plan":
+    case ACPX_EVENT_TYPES.PLAN:
       return Array.isArray(data.entries);
-    case "update":
+    case ACPX_EVENT_TYPES.UPDATE:
       return typeof data.update === "string";
-    case "client_operation":
+    case ACPX_EVENT_TYPES.CLIENT_OPERATION:
       return (
         typeof data.method === "string" &&
         typeof data.status === "string" &&
         typeof data.summary === "string"
       );
-    case "turn_done":
+    case ACPX_EVENT_TYPES.TURN_DONE:
       return typeof data.stop_reason === "string";
-    case "error":
+    case ACPX_EVENT_TYPES.ERROR:
       return (
         isOutputErrorCode(data.code) &&
         (data.detail_code === undefined || typeof data.detail_code === "string") &&
@@ -277,23 +286,24 @@ export function isAcpxEvent(value: unknown): value is AcpxEvent {
         (data.retryable === undefined || typeof data.retryable === "boolean") &&
         (data.acp_error === undefined || isAcpError(data.acp_error))
       );
-    case "session_ensured":
+    case ACPX_EVENT_TYPES.SESSION_ENSURED:
       return typeof data.created === "boolean";
-    case "cancel_requested":
+    case ACPX_EVENT_TYPES.CANCEL_REQUESTED:
       return true;
-    case "cancel_result":
+    case ACPX_EVENT_TYPES.CANCEL_RESULT:
       return typeof data.cancelled === "boolean";
-    case "mode_set":
+    case ACPX_EVENT_TYPES.MODE_SET:
       return typeof data.mode_id === "string";
-    case "config_set":
+    case ACPX_EVENT_TYPES.CONFIG_SET:
       return typeof data.config_id === "string" && typeof data.value === "string";
-    case "status_snapshot":
+    case ACPX_EVENT_TYPES.STATUS_SNAPSHOT:
       return (
-        data.status === "alive" ||
-        data.status === "dead" ||
-        data.status === "no-session"
+        typeof data.status === "string" &&
+        ACPX_EVENT_STATUS_SNAPSHOT_STATUSES.includes(
+          data.status as (typeof ACPX_EVENT_STATUS_SNAPSHOT_STATUSES)[number],
+        )
       );
-    case "session_closed":
+    case ACPX_EVENT_TYPES.SESSION_CLOSED:
       return data.reason === "close";
     default:
       return false;

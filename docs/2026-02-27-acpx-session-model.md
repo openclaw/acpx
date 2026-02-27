@@ -67,7 +67,7 @@ Each NDJSON line is exactly one object:
   "request_id": "req_123",
   "seq": 412,
   "ts": "2026-02-27T12:10:00.000Z",
-  "kind": "output_delta",
+  "type": "output_delta",
   "data": {
     "stream": "output",
     "text": "hello"
@@ -85,10 +85,10 @@ Field contract:
 - `request_id`: optional for session lifecycle events.
 - `seq`: strict monotonic integer per session; never resets.
 - `ts`: ISO-8601 UTC emit timestamp.
-- `kind`: event discriminator.
-- `data`: kind-specific payload.
+- `type`: event discriminator.
+- `data`: type-specific payload.
 
-## Canonical Event Kinds
+## Canonical Event Types
 
 ### Prompt/Turn Flow
 
@@ -96,7 +96,7 @@ Field contract:
 
 ```json
 {
-  "kind": "turn_started",
+  "type": "turn_started",
   "data": {
     "mode": "prompt",
     "resumed": true,
@@ -109,7 +109,7 @@ Field contract:
 
 ```json
 {
-  "kind": "output_delta",
+  "type": "output_delta",
   "data": {
     "stream": "output",
     "text": "chunk"
@@ -126,7 +126,7 @@ Field contract:
 
 ```json
 {
-  "kind": "tool_call",
+  "type": "tool_call",
   "data": {
     "tool_call_id": "call_1",
     "title": "run_command",
@@ -147,7 +147,7 @@ Field contract:
 
 ```json
 {
-  "kind": "turn_done",
+  "type": "turn_done",
   "data": {
     "stop_reason": "end_turn",
     "permission_stats": {
@@ -164,7 +164,7 @@ Field contract:
 
 ```json
 {
-  "kind": "error",
+  "type": "error",
   "data": {
     "code": "RUNTIME",
     "detail_code": "QUEUE_RUNTIME_PROMPT_FAILED",
@@ -202,7 +202,7 @@ Field contract:
 
 ```json
 {
-  "kind": "session_ensured",
+  "type": "session_ensured",
   "data": {
     "created": true,
     "name": "my-session"
@@ -214,7 +214,7 @@ Field contract:
 
 ```json
 {
-  "kind": "cancel_requested",
+  "type": "cancel_requested",
   "data": {}
 }
 ```
@@ -223,7 +223,7 @@ Field contract:
 
 ```json
 {
-  "kind": "cancel_result",
+  "type": "cancel_result",
   "data": {
     "cancelled": true
   }
@@ -234,7 +234,7 @@ Field contract:
 
 ```json
 {
-  "kind": "mode_set",
+  "type": "mode_set",
   "data": {
     "mode_id": "code"
   }
@@ -245,7 +245,7 @@ Field contract:
 
 ```json
 {
-  "kind": "config_set",
+  "type": "config_set",
   "data": {
     "config_id": "model",
     "value": "gpt-5.3-codex"
@@ -257,7 +257,7 @@ Field contract:
 
 ```json
 {
-  "kind": "status_snapshot",
+  "type": "status_snapshot",
   "data": {
     "status": "alive",
     "pid": 1234,
@@ -270,7 +270,7 @@ Field contract:
 
 ```json
 {
-  "kind": "session_closed",
+  "type": "session_closed",
   "data": {
     "reason": "close"
   }
@@ -429,7 +429,7 @@ Required:
 - `tool_call` / `tool_call_update` -> `tool_call`
 - runtime/queue/acp failures -> `error`
 - completion -> `turn_done`
-- ensure/status/set/cancel/close control paths -> matching control/lifecycle kinds
+- ensure/status/set/cancel/close control paths -> matching control/lifecycle types
 
 ## Non-Goals
 

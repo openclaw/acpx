@@ -37,6 +37,33 @@ export type OutputStream = (typeof OUTPUT_STREAMS)[number];
 export const ACPX_EVENT_SCHEMA = "acpx.event.v1" as const;
 export const ACPX_EVENT_OUTPUT_STREAMS = ["output", "thought"] as const;
 export type AcpxEventOutputStream = (typeof ACPX_EVENT_OUTPUT_STREAMS)[number];
+export const ACPX_EVENT_TYPES = {
+  TURN_STARTED: "turn_started",
+  OUTPUT_DELTA: "output_delta",
+  TOOL_CALL: "tool_call",
+  PLAN: "plan",
+  UPDATE: "update",
+  CLIENT_OPERATION: "client_operation",
+  TURN_DONE: "turn_done",
+  ERROR: "error",
+  SESSION_ENSURED: "session_ensured",
+  CANCEL_REQUESTED: "cancel_requested",
+  CANCEL_RESULT: "cancel_result",
+  MODE_SET: "mode_set",
+  CONFIG_SET: "config_set",
+  STATUS_SNAPSHOT: "status_snapshot",
+  SESSION_CLOSED: "session_closed",
+} as const;
+export type AcpxEventType = (typeof ACPX_EVENT_TYPES)[keyof typeof ACPX_EVENT_TYPES];
+export const ACPX_EVENT_TURN_MODES = ["prompt"] as const;
+export type AcpxEventTurnMode = (typeof ACPX_EVENT_TURN_MODES)[number];
+export const ACPX_EVENT_STATUS_SNAPSHOT_STATUSES = [
+  "alive",
+  "dead",
+  "no-session",
+] as const;
+export type AcpxEventStatusSnapshotStatus =
+  (typeof ACPX_EVENT_STATUS_SNAPSHOT_STATUSES)[number];
 
 export const OUTPUT_ERROR_CODES = [
   "NO_SESSION",
@@ -100,23 +127,6 @@ export type ClientOperation = {
   timestamp: string;
 };
 
-export type AcpxEventKind =
-  | "turn_started"
-  | "output_delta"
-  | "tool_call"
-  | "plan"
-  | "update"
-  | "client_operation"
-  | "turn_done"
-  | "error"
-  | "session_ensured"
-  | "cancel_requested"
-  | "cancel_result"
-  | "mode_set"
-  | "config_set"
-  | "status_snapshot"
-  | "session_closed";
-
 type AcpxEventEnvelope = {
   schema: typeof ACPX_EVENT_SCHEMA;
   event_id: string;
@@ -130,22 +140,22 @@ type AcpxEventEnvelope = {
 
 export type AcpxEvent =
   | (AcpxEventEnvelope & {
-      kind: "turn_started";
+      type: typeof ACPX_EVENT_TYPES.TURN_STARTED;
       data: {
-        mode: "prompt";
+        mode: AcpxEventTurnMode;
         resumed: boolean;
         input_preview?: string;
       };
     })
   | (AcpxEventEnvelope & {
-      kind: "output_delta";
+      type: typeof ACPX_EVENT_TYPES.OUTPUT_DELTA;
       data: {
         stream: AcpxEventOutputStream;
         text: string;
       };
     })
   | (AcpxEventEnvelope & {
-      kind: "tool_call";
+      type: typeof ACPX_EVENT_TYPES.TOOL_CALL;
       data: {
         tool_call_id?: string;
         title?: string;
@@ -153,7 +163,7 @@ export type AcpxEvent =
       };
     })
   | (AcpxEventEnvelope & {
-      kind: "plan";
+      type: typeof ACPX_EVENT_TYPES.PLAN;
       data: {
         entries: Array<{
           content: string;
@@ -163,13 +173,13 @@ export type AcpxEvent =
       };
     })
   | (AcpxEventEnvelope & {
-      kind: "update";
+      type: typeof ACPX_EVENT_TYPES.UPDATE;
       data: {
         update: string;
       };
     })
   | (AcpxEventEnvelope & {
-      kind: "client_operation";
+      type: typeof ACPX_EVENT_TYPES.CLIENT_OPERATION;
       data: {
         method: ClientOperationMethod;
         status: ClientOperationStatus;
@@ -178,14 +188,14 @@ export type AcpxEvent =
       };
     })
   | (AcpxEventEnvelope & {
-      kind: "turn_done";
+      type: typeof ACPX_EVENT_TYPES.TURN_DONE;
       data: {
         stop_reason: StopReason;
         permission_stats?: PermissionStats;
       };
     })
   | (AcpxEventEnvelope & {
-      kind: "error";
+      type: typeof ACPX_EVENT_TYPES.ERROR;
       data: {
         code: OutputErrorCode;
         detail_code?: string;
@@ -196,45 +206,45 @@ export type AcpxEvent =
       };
     })
   | (AcpxEventEnvelope & {
-      kind: "session_ensured";
+      type: typeof ACPX_EVENT_TYPES.SESSION_ENSURED;
       data: {
         created: boolean;
         name?: string;
       };
     })
   | (AcpxEventEnvelope & {
-      kind: "cancel_requested";
+      type: typeof ACPX_EVENT_TYPES.CANCEL_REQUESTED;
       data: Record<string, never>;
     })
   | (AcpxEventEnvelope & {
-      kind: "cancel_result";
+      type: typeof ACPX_EVENT_TYPES.CANCEL_RESULT;
       data: {
         cancelled: boolean;
       };
     })
   | (AcpxEventEnvelope & {
-      kind: "mode_set";
+      type: typeof ACPX_EVENT_TYPES.MODE_SET;
       data: {
         mode_id: string;
       };
     })
   | (AcpxEventEnvelope & {
-      kind: "config_set";
+      type: typeof ACPX_EVENT_TYPES.CONFIG_SET;
       data: {
         config_id: string;
         value: string;
       };
     })
   | (AcpxEventEnvelope & {
-      kind: "status_snapshot";
+      type: typeof ACPX_EVENT_TYPES.STATUS_SNAPSHOT;
       data: {
-        status: "alive" | "dead" | "no-session";
+        status: AcpxEventStatusSnapshotStatus;
         pid?: number;
         summary?: string;
       };
     })
   | (AcpxEventEnvelope & {
-      kind: "session_closed";
+      type: typeof ACPX_EVENT_TYPES.SESSION_CLOSED;
       data: {
         reason: "close";
       };

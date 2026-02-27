@@ -107,11 +107,11 @@ test("json formatter emits canonical NDJSON", () => {
   assert.equal(parsed[0]?.seq, 0);
   assert.equal(parsed[1]?.seq, 1);
   assert.equal(parsed[2]?.seq, 2);
-  assert.equal(parsed[0]?.kind, "output_delta");
+  assert.equal(parsed[0]?.type, "output_delta");
   assert.equal(parsed[0]?.data?.stream, "output");
-  assert.equal(parsed[1]?.kind, "output_delta");
+  assert.equal(parsed[1]?.type, "output_delta");
   assert.equal(parsed[1]?.data?.stream, "thought");
-  assert.equal(parsed[2]?.kind, "turn_done");
+  assert.equal(parsed[2]?.type, "turn_done");
 });
 
 test("text formatter renders client operation updates", () => {
@@ -144,10 +144,10 @@ test("json formatter emits client operation canonical events", () => {
 
   const line = writer.toString().trim();
   const parsed = JSON.parse(line) as {
-    kind: string;
+    type: string;
     data: { method: string; status: string };
   };
-  assert.equal(parsed.kind, "client_operation");
+  assert.equal(parsed.type, "client_operation");
   assert.equal(parsed.data.method, "terminal/create");
   assert.equal(parsed.data.status, "running");
 });
@@ -179,7 +179,7 @@ test("json formatter emits structured canonical error events", () => {
 
   const line = writer.toString().trim();
   const parsed = JSON.parse(line) as {
-    kind: string;
+    type: string;
     data: {
       code: string;
       detail_code?: string;
@@ -195,7 +195,7 @@ test("json formatter emits structured canonical error events", () => {
     session_id: string;
     seq: number;
   };
-  assert.equal(parsed.kind, "error");
+  assert.equal(parsed.type, "error");
   assert.equal(parsed.data.code, "PERMISSION_PROMPT_UNAVAILABLE");
   assert.equal(parsed.data.detail_code, "QUEUE_CONTROL_REQUEST_FAILED");
   assert.equal(parsed.data.origin, "queue");

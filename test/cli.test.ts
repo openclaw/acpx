@@ -372,7 +372,7 @@ test("--non-interactive-permissions validates supported values", async () => {
     );
     assert.equal(invalid.code, 2);
     const payload = JSON.parse(invalid.stdout.trim()) as AcpxEvent;
-    assert.equal(payload.kind, "error");
+    assert.equal(payload.type, "error");
     assert.equal(payload.data.code, "USAGE");
     assert.match(payload.data.message, /Invalid non-interactive permission policy/);
   });
@@ -384,7 +384,7 @@ test("--json-strict requires --format json", async () => {
     assert.equal(result.code, 2);
     assert.equal(result.stderr.trim(), "");
     const payload = JSON.parse(result.stdout.trim()) as AcpxEvent;
-    assert.equal(payload.kind, "error");
+    assert.equal(payload.type, "error");
     assert.equal(payload.data.code, "USAGE");
     assert.match(payload.data.message, /--json-strict requires --format json/);
   });
@@ -399,7 +399,7 @@ test("--json-strict rejects --verbose", async () => {
     assert.equal(result.code, 2);
     assert.equal(result.stderr.trim(), "");
     const payload = JSON.parse(result.stdout.trim()) as AcpxEvent;
-    assert.equal(payload.kind, "error");
+    assert.equal(payload.type, "error");
     assert.equal(payload.data.code, "USAGE");
     assert.match(
       payload.data.message,
@@ -472,7 +472,7 @@ test("queued prompt failures emit exactly one JSON error event", async () => {
         .filter((line) => line.length > 0)
         .map((line) => JSON.parse(line) as AcpxEvent);
 
-      const errors = events.filter((event) => event.kind === "error");
+      const errors = events.filter((event) => event.type === "error");
       assert.equal(errors.length, 1, writeResult.stdout);
       assert.equal(errors[0]?.data.code, "PERMISSION_PROMPT_UNAVAILABLE");
       assert.notEqual(errors[0]?.session_id, "unknown");
@@ -625,7 +625,7 @@ test("json format emits structured no-session error event", async () => {
     );
     assert.equal(result.code, 4);
     const payload = JSON.parse(result.stdout.trim()) as AcpxEvent;
-    assert.equal(payload.kind, "error");
+    assert.equal(payload.type, "error");
     assert.equal(payload.data.code, "NO_SESSION");
     assert.match(payload.data.message, /No acpx session found/);
   });

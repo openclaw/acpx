@@ -14,6 +14,7 @@ import {
   errorToEventDraft,
   sessionUpdateToEventDrafts,
 } from "./events.js";
+import { ACPX_EVENT_TYPES } from "./types.js";
 import type {
   AcpxEvent,
   AcpxEventDraft,
@@ -490,7 +491,7 @@ class TextOutputFormatter implements OutputFormatter {
   }
 
   onEvent(event: AcpxEvent): void {
-    if (event.kind === "output_delta") {
+    if (event.type === ACPX_EVENT_TYPES.OUTPUT_DELTA) {
       if (event.data.stream === "output") {
         this.flushThoughtBuffer();
         this.writeAssistantChunk(event.data.text);
@@ -501,7 +502,7 @@ class TextOutputFormatter implements OutputFormatter {
       return;
     }
 
-    if (event.kind === "tool_call") {
+    if (event.type === ACPX_EVENT_TYPES.TOOL_CALL) {
       this.flushThoughtBuffer();
       this.renderToolUpdate({
         sessionUpdate: "tool_call_update",
@@ -512,7 +513,7 @@ class TextOutputFormatter implements OutputFormatter {
       return;
     }
 
-    if (event.kind === "plan") {
+    if (event.type === ACPX_EVENT_TYPES.PLAN) {
       this.flushThoughtBuffer();
       this.beginSection("plan");
       this.writeLine(this.bold("[plan]"));
@@ -522,7 +523,7 @@ class TextOutputFormatter implements OutputFormatter {
       return;
     }
 
-    if (event.kind === "client_operation") {
+    if (event.type === ACPX_EVENT_TYPES.CLIENT_OPERATION) {
       this.onClientOperation({
         method: event.data.method,
         status: event.data.status,
@@ -533,12 +534,12 @@ class TextOutputFormatter implements OutputFormatter {
       return;
     }
 
-    if (event.kind === "turn_done") {
+    if (event.type === ACPX_EVENT_TYPES.TURN_DONE) {
       this.onDone(event.data.stop_reason);
       return;
     }
 
-    if (event.kind === "error") {
+    if (event.type === ACPX_EVENT_TYPES.ERROR) {
       this.onError({
         code: event.data.code,
         detailCode: event.data.detail_code,
@@ -891,7 +892,7 @@ class JsonOutputFormatter implements OutputFormatter {
 
   onDone(stopReason: StopReason): void {
     this.emitDraft({
-      kind: "turn_done",
+      type: ACPX_EVENT_TYPES.TURN_DONE,
       data: {
         stop_reason: stopReason,
       },
@@ -956,7 +957,7 @@ class QuietOutputFormatter implements OutputFormatter {
   }
 
   onEvent(event: AcpxEvent): void {
-    if (event.kind !== "output_delta") {
+    if (event.type !== ACPX_EVENT_TYPES.OUTPUT_DELTA) {
       return;
     }
     if (event.data.stream !== "output") {

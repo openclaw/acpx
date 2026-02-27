@@ -65,6 +65,7 @@ import {
   resolveSessionRecord,
   writeSessionRecord,
 } from "./session-persistence.js";
+import { ACPX_EVENT_TYPES } from "./types.js";
 import {
   SESSION_RECORD_SCHEMA,
   type AuthPolicy,
@@ -620,7 +621,7 @@ async function runSessionPrompt(
         });
 
         emitEvent({
-          kind: "turn_started",
+          type: ACPX_EVENT_TYPES.TURN_STARTED,
           data: {
             mode: "prompt",
             resumed,
@@ -697,7 +698,7 @@ async function runSessionPrompt(
         }
 
         emitEvent({
-          kind: "turn_done",
+          type: ACPX_EVENT_TYPES.TURN_DONE,
           data: {
             stop_reason: response.stopReason,
             permission_stats: client.getPermissionStats(),
@@ -997,7 +998,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
               seq: 0,
             },
             {
-              kind: "turn_started",
+              type: ACPX_EVENT_TYPES.TURN_STARTED,
               data: {
                 mode: "prompt",
                 resumed: false,

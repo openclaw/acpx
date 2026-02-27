@@ -336,7 +336,7 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
         events.push(`context:${context.sessionId}:${context.requestId ?? "-"}`);
       },
       onEvent(event) {
-        events.push(`event:${event.kind}`);
+        events.push(`event:${event.type}`);
       },
       onSessionUpdate() {
         // queue transport forwards canonical events only
@@ -387,7 +387,7 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
               acp_session_id: "agent-session",
               seq: 1,
               ts: "2026-01-01T00:00:00.000Z",
-              kind: "turn_started",
+              type: "turn_started",
               data: {
                 mode: "prompt",
                 resumed: true,
