@@ -702,7 +702,6 @@ async function handlePrompt(
   const outputFormatter = createOutputFormatter(outputPolicy.format, {
     jsonContext: {
       sessionId: record.acpxRecordId,
-      stream: "prompt",
     },
   });
 
@@ -1835,7 +1834,6 @@ function emitJsonErrorEvent(error: NormalizedOutputError): void {
   const formatter = createOutputFormatter("json", {
     jsonContext: {
       sessionId: "unknown",
-      stream: "control",
     },
   });
   formatter.onError(error);

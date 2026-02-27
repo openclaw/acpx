@@ -743,7 +743,6 @@ async function submitToQueueOwner(
   options.outputFormatter.setContext({
     sessionId: options.sessionId,
     requestId,
-    stream: "prompt",
   });
 
   return await new Promise<SessionSendOutcome>((resolve, reject) => {
@@ -808,7 +807,6 @@ async function submitToQueueOwner(
         options.outputFormatter.setContext({
           sessionId: options.sessionId,
           requestId: message.requestId,
-          stream: "prompt",
         });
         if (!options.waitForCompletion) {
           const queued: SessionEnqueueResult = {
@@ -825,19 +823,24 @@ async function submitToQueueOwner(
         options.outputFormatter.setContext({
           sessionId: options.sessionId,
           requestId: message.requestId,
-          stream: "prompt",
         });
-        options.outputFormatter.onError({
-          code: message.code ?? "RUNTIME",
-          detailCode: message.detailCode,
-          origin: message.origin ?? "queue",
-          message: message.message,
-          retryable: message.retryable,
-          acp: message.acp,
-        });
-        options.outputFormatter.flush();
+
         const queueErrorAlreadyEmitted =
           options.errorEmissionPolicy?.queueErrorAlreadyEmitted ?? true;
+        const outputAlreadyEmitted = message.outputAlreadyEmitted === true;
+        const shouldEmitInFormatter =
+          !outputAlreadyEmitted || !queueErrorAlreadyEmitted;
+        if (shouldEmitInFormatter) {
+          options.outputFormatter.onError({
+            code: message.code ?? "RUNTIME",
+            detailCode: message.detailCode,
+            origin: message.origin ?? "queue",
+            message: message.message,
+            retryable: message.retryable,
+            acp: message.acp,
+          });
+          options.outputFormatter.flush();
+        }
         finishReject(
           new QueueConnectionError(message.message, {
             outputCode: message.code,
@@ -859,6 +862,11 @@ async function submitToQueueOwner(
             retryable: true,
           }),
         );
+        return;
+      }
+
+      if (message.type === "event") {
+        options.outputFormatter.onEvent(message.event);
         return;
       }
 

@@ -27,6 +27,9 @@ const NOOP_OUTPUT_FORMATTER: OutputFormatter = {
   setContext() {
     // no-op
   },
+  onEvent() {
+    // no-op
+  },
   onSessionUpdate() {
     // no-op
   },
@@ -332,6 +335,9 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
       setContext(context) {
         events.push(`context:${context.sessionId}:${context.requestId ?? "-"}`);
       },
+      onEvent(event) {
+        events.push(`event:${event.kind}`);
+      },
       onSessionUpdate(notification) {
         events.push(`session_update:${notification.update.sessionUpdate}`);
       },
@@ -415,6 +421,15 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
                 cwd: "/tmp/project",
                 createdAt: "2026-01-01T00:00:00.000Z",
                 lastUsedAt: "2026-01-01T00:00:00.000Z",
+                lastSeq: 2,
+                eventLog: {
+                  active_path: "/tmp/session.events.ndjson",
+                  segment_count: 1,
+                  max_segment_bytes: 1024,
+                  max_segments: 1,
+                  last_write_at: "2026-01-01T00:00:00.000Z",
+                  last_write_error: null,
+                },
                 thread: {
                   version: "0.3.0",
                   title: null,

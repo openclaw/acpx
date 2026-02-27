@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import {
-  SESSION_ACPX_AUDIT_MAX_ENTRIES,
   createSessionThread,
   recordClientOperation,
   recordPromptSubmission,
@@ -186,27 +185,22 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
 
   assert.equal(acpxState?.current_mode_id, "code");
   assert.deepEqual(acpxState?.available_commands, ["create_plan"]);
-  assert.equal(acpxState?.audit_events?.length, 9);
 });
 
-test("thread model caps audit events", () => {
-  const thread = createSessionThread();
-  let state = undefined;
+test("recordClientOperation keeps state and advances timestamp", () => {
+  const thread = createSessionThread("2026-02-27T10:00:00.000Z");
+  const state = recordClientOperation(
+    thread,
+    { current_mode_id: "code" },
+    {
+      method: "terminal/output",
+      status: "running",
+      summary: "tail -f",
+      timestamp: "2026-02-27T10:00:05.000Z",
+    },
+    "2026-02-27T10:00:05.000Z",
+  );
 
-  for (let index = 0; index < SESSION_ACPX_AUDIT_MAX_ENTRIES + 10; index += 1) {
-    state = recordClientOperation(
-      thread,
-      state,
-      {
-        method: "terminal/output",
-        status: "running",
-        summary: `event-${index}`,
-        timestamp: `2026-02-27T10:00:${String(index % 60).padStart(2, "0")}.000Z`,
-      },
-      `2026-02-27T10:00:${String(index % 60).padStart(2, "0")}.000Z`,
-    );
-  }
-
-  assert.equal(state?.audit_events?.length, SESSION_ACPX_AUDIT_MAX_ENTRIES);
-  assert.equal(state?.audit_events?.[0]?.type, "client_operation");
+  assert.equal(state?.current_mode_id, "code");
+  assert.equal(thread.updated_at, "2026-02-27T10:00:05.000Z");
 });

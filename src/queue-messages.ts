@@ -3,6 +3,7 @@ import type {
   SessionNotification,
   StopReason,
 } from "@agentclientprotocol/sdk";
+import { isAcpxEvent } from "./events.js";
 import {
   OUTPUT_ERROR_CODES,
   OUTPUT_ERROR_ORIGINS,
@@ -11,6 +12,7 @@ import {
   type OutputErrorOrigin,
 } from "./types.js";
 import type {
+  AcpxEvent,
   ClientOperation,
   NonInteractivePermissionPolicy,
   PermissionMode,
@@ -57,6 +59,12 @@ export type QueueRequest =
 export type QueueOwnerAcceptedMessage = {
   type: "accepted";
   requestId: string;
+};
+
+export type QueueOwnerEventMessage = {
+  type: "event";
+  requestId: string;
+  event: AcpxEvent;
 };
 
 export type QueueOwnerSessionUpdateMessage = {
@@ -110,10 +118,12 @@ export type QueueOwnerErrorMessage = {
   message: string;
   retryable?: boolean;
   acp?: OutputErrorAcpPayload;
+  outputAlreadyEmitted?: boolean;
 };
 
 export type QueueOwnerMessage =
   | QueueOwnerAcceptedMessage
+  | QueueOwnerEventMessage
   | QueueOwnerSessionUpdateMessage
   | QueueOwnerClientOperationMessage
   | QueueOwnerDoneMessage
@@ -301,7 +311,11 @@ function parseSessionSendResult(raw: unknown): SessionSendResult | null {
     typeof record.createdAt === "string" &&
     typeof record.lastUsedAt === "string" &&
     !!record.thread &&
-    typeof record.thread === "object";
+    typeof record.thread === "object" &&
+    typeof record.lastSeq === "number" &&
+    Number.isInteger(record.lastSeq) &&
+    !!record.eventLog &&
+    typeof record.eventLog === "object";
   if (!recordValid) {
     return null;
   }
@@ -323,6 +337,18 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
     return {
       type: "accepted",
       requestId: message.requestId,
+    };
+  }
+
+  if (message.type === "event") {
+    if (!isAcpxEvent(message.event)) {
+      return null;
+    }
+
+    return {
+      type: "event",
+      requestId: message.requestId,
+      event: message.event,
     };
   }
 
@@ -433,6 +459,10 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
     const retryable =
       typeof message.retryable === "boolean" ? message.retryable : undefined;
     const acp = parseAcpError(message.acp);
+    const outputAlreadyEmitted =
+      typeof message.outputAlreadyEmitted === "boolean"
+        ? message.outputAlreadyEmitted
+        : undefined;
 
     return {
       type: "error",
@@ -443,6 +473,7 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
       message: message.message,
       retryable,
       acp,
+      ...(outputAlreadyEmitted === undefined ? {} : { outputAlreadyEmitted }),
     };
   }
 

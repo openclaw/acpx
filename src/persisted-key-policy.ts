@@ -24,8 +24,6 @@ const OPAQUE_VALUE_PATHS = new Set([
   "thread.profile",
   "thread.messages.Agent.content.ToolUse.input",
   "acpx.config_options",
-  "acpx.audit_events.update",
-  "acpx.audit_events._meta",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -38,10 +36,6 @@ function joinPath(path: string[]): string {
 
 function isAllowedKey(path: string[], key: string): boolean {
   if (ZED_TAG_KEYS.has(key)) {
-    return true;
-  }
-
-  if (key === "_meta" && joinPath(path) === "acpx.audit_events") {
     return true;
   }
 

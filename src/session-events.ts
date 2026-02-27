@@ -1,0 +1,331 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createAcpxEvent, isAcpxEvent } from "./events.js";
+import { assertPersistedKeyPolicy } from "./persisted-key-policy.js";
+import { writeSessionRecord } from "./session-persistence.js";
+import type { AcpxEvent, AcpxEventDraft, SessionRecord } from "./types.js";
+
+const LOCK_RETRY_MS = 15;
+
+export const DEFAULT_EVENT_SEGMENT_MAX_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_EVENT_MAX_SEGMENTS = 5;
+
+function sessionBaseDir(): string {
+  return path.join(os.homedir(), ".acpx", "sessions");
+}
+
+async function ensureSessionDir(): Promise<void> {
+  await fs.mkdir(sessionBaseDir(), { recursive: true });
+}
+
+function safeSessionId(sessionId: string): string {
+  return encodeURIComponent(sessionId);
+}
+
+function activeEventPath(sessionId: string): string {
+  return path.join(sessionBaseDir(), `${safeSessionId(sessionId)}.events.ndjson`);
+}
+
+function segmentEventPath(sessionId: string, segment: number): string {
+  return path.join(
+    sessionBaseDir(),
+    `${safeSessionId(sessionId)}.events.${segment}.ndjson`,
+  );
+}
+
+function eventsLockPath(sessionId: string): string {
+  return path.join(sessionBaseDir(), `${safeSessionId(sessionId)}.events.lock`);
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function statSize(filePath: string): Promise<number> {
+  try {
+    const stats = await fs.stat(filePath);
+    return stats.size;
+  } catch {
+    return 0;
+  }
+}
+
+async function rotateSegments(sessionId: string, maxSegments: number): Promise<void> {
+  const active = activeEventPath(sessionId);
+
+  const overflow = segmentEventPath(sessionId, maxSegments);
+  await fs.unlink(overflow).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  });
+
+  for (let segment = maxSegments - 1; segment >= 1; segment -= 1) {
+    const from = segmentEventPath(sessionId, segment);
+    const to = segmentEventPath(sessionId, segment + 1);
+    if (!(await pathExists(from))) {
+      continue;
+    }
+    await fs.rename(from, to);
+  }
+
+  if (await pathExists(active)) {
+    await fs.rename(active, segmentEventPath(sessionId, 1));
+  }
+}
+
+type LockHandle = {
+  filePath: string;
+};
+
+async function acquireEventsLock(sessionId: string): Promise<LockHandle> {
+  await ensureSessionDir();
+  const lockPath = eventsLockPath(sessionId);
+  const payload = JSON.stringify(
+    {
+      pid: process.pid,
+      created_at: new Date().toISOString(),
+    },
+    null,
+    2,
+  );
+
+  for (;;) {
+    try {
+      await fs.writeFile(lockPath, `${payload}\n`, {
+        encoding: "utf8",
+        flag: "wx",
+      });
+      return { filePath: lockPath };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST") {
+        throw error;
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, LOCK_RETRY_MS);
+      });
+    }
+  }
+}
+
+async function releaseEventsLock(lock: LockHandle): Promise<void> {
+  await fs.unlink(lock.filePath).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  });
+}
+
+type SessionEventWriterOptions = {
+  maxSegmentBytes?: number;
+  maxSegments?: number;
+};
+
+type AppendOptions = {
+  checkpoint?: boolean;
+};
+
+export class SessionEventWriter {
+  private readonly record: SessionRecord;
+  private readonly lock: LockHandle;
+  private readonly maxSegmentBytes: number;
+  private readonly maxSegments: number;
+  private nextSeq: number;
+  private closed = false;
+
+  private constructor(
+    record: SessionRecord,
+    lock: LockHandle,
+    options: Required<SessionEventWriterOptions>,
+  ) {
+    this.record = record;
+    this.lock = lock;
+    this.maxSegmentBytes = options.maxSegmentBytes;
+    this.maxSegments = options.maxSegments;
+    this.nextSeq = record.lastSeq + 1;
+  }
+
+  static async open(
+    record: SessionRecord,
+    options: SessionEventWriterOptions = {},
+  ): Promise<SessionEventWriter> {
+    const lock = await acquireEventsLock(record.acpxRecordId);
+    return new SessionEventWriter(record, lock, {
+      maxSegmentBytes:
+        options.maxSegmentBytes ??
+        record.eventLog.max_segment_bytes ??
+        DEFAULT_EVENT_SEGMENT_MAX_BYTES,
+      maxSegments:
+        options.maxSegments ??
+        record.eventLog.max_segments ??
+        DEFAULT_EVENT_MAX_SEGMENTS,
+    });
+  }
+
+  getRecord(): SessionRecord {
+    return this.record;
+  }
+
+  createEvent(draft: AcpxEventDraft): AcpxEvent {
+    const event = createAcpxEvent(
+      {
+        sessionId: this.record.acpxRecordId,
+        acpSessionId: this.record.acpSessionId,
+        agentSessionId: this.record.agentSessionId,
+        requestId: draft.request_id,
+        seq: this.nextSeq,
+      },
+      draft,
+    );
+    this.nextSeq += 1;
+    return event;
+  }
+
+  async appendEvent(event: AcpxEvent, options: AppendOptions = {}): Promise<void> {
+    await this.appendEvents([event], options);
+  }
+
+  async appendEvents(events: AcpxEvent[], options: AppendOptions = {}): Promise<void> {
+    if (this.closed) {
+      throw new Error("SessionEventWriter is closed");
+    }
+
+    if (events.length === 0) {
+      return;
+    }
+
+    await ensureSessionDir();
+    let activePath = activeEventPath(this.record.acpxRecordId);
+
+    for (const event of events) {
+      if (!isAcpxEvent(event)) {
+        throw new Error("Attempted to persist invalid acpx.event.v1 payload");
+      }
+
+      if (event.seq !== this.record.lastSeq + 1) {
+        throw new Error(
+          `acpx event sequence mismatch: expected ${this.record.lastSeq + 1}, got ${event.seq}`,
+        );
+      }
+
+      assertPersistedKeyPolicy(event);
+
+      const line = `${JSON.stringify(event)}\n`;
+      const lineBytes = Buffer.byteLength(line);
+      const currentSize = await statSize(activePath);
+      if (currentSize > 0 && currentSize + lineBytes > this.maxSegmentBytes) {
+        await rotateSegments(this.record.acpxRecordId, this.maxSegments);
+        activePath = activeEventPath(this.record.acpxRecordId);
+      }
+
+      await fs.appendFile(activePath, line, "utf8");
+
+      this.record.lastSeq = event.seq;
+      if (event.seq >= this.nextSeq) {
+        this.nextSeq = event.seq + 1;
+      }
+      this.record.lastRequestId = event.request_id ?? this.record.lastRequestId;
+      this.record.lastUsedAt = event.ts;
+      this.record.eventLog = {
+        active_path: activePath,
+        segment_count: this.maxSegments,
+        max_segment_bytes: this.maxSegmentBytes,
+        max_segments: this.maxSegments,
+        last_write_at: event.ts,
+        last_write_error: null,
+      };
+    }
+
+    if (options.checkpoint === true) {
+      await writeSessionRecord(this.record);
+    }
+  }
+
+  async appendDraft(
+    draft: AcpxEventDraft,
+    options: AppendOptions = {},
+  ): Promise<AcpxEvent> {
+    const event = this.createEvent(draft);
+    await this.appendEvent(event, options);
+    return event;
+  }
+
+  async appendDrafts(
+    drafts: AcpxEventDraft[],
+    options: AppendOptions = {},
+  ): Promise<AcpxEvent[]> {
+    const events = drafts.map((draft) => this.createEvent(draft));
+    await this.appendEvents(events, options);
+    return events;
+  }
+
+  async checkpoint(): Promise<void> {
+    if (this.closed) {
+      throw new Error("SessionEventWriter is closed");
+    }
+    await writeSessionRecord(this.record);
+  }
+
+  async close(options: AppendOptions = {}): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+
+    try {
+      if (options.checkpoint !== false) {
+        await writeSessionRecord(this.record);
+      }
+    } finally {
+      this.closed = true;
+      await releaseEventsLock(this.lock);
+    }
+  }
+}
+
+export function defaultSessionEventLog(sessionId: string) {
+  return {
+    active_path: activeEventPath(sessionId),
+    segment_count: DEFAULT_EVENT_MAX_SEGMENTS,
+    max_segment_bytes: DEFAULT_EVENT_SEGMENT_MAX_BYTES,
+    max_segments: DEFAULT_EVENT_MAX_SEGMENTS,
+    last_write_at: undefined,
+    last_write_error: null,
+  } as const;
+}
+
+export async function listSessionEvents(sessionId: string): Promise<AcpxEvent[]> {
+  const files: string[] = [];
+
+  for (let segment = DEFAULT_EVENT_MAX_SEGMENTS; segment >= 1; segment -= 1) {
+    const filePath = segmentEventPath(sessionId, segment);
+    if (await pathExists(filePath)) {
+      files.push(filePath);
+    }
+  }
+
+  const active = activeEventPath(sessionId);
+  if (await pathExists(active)) {
+    files.push(active);
+  }
+
+  const events: AcpxEvent[] = [];
+  for (const filePath of files) {
+    const payload = await fs.readFile(filePath, "utf8");
+    const lines = payload.split("\n").filter((line) => line.trim().length > 0);
+    for (const line of lines) {
+      const parsed = JSON.parse(line);
+      if (isAcpxEvent(parsed)) {
+        events.push(parsed);
+      }
+    }
+  }
+
+  return events;
+}

@@ -4,11 +4,30 @@ import os from "node:os";
 import path from "node:path";
 import { SessionNotFoundError, SessionResolutionError } from "./errors.js";
 import { normalizeRuntimeSessionId } from "./runtime-session-id.js";
-import type { SessionAcpxState, SessionRecord, SessionThread } from "./types.js";
+import type {
+  SessionAcpxState,
+  SessionEventLog,
+  SessionRecord,
+  SessionThread,
+} from "./types.js";
 import { SESSION_RECORD_SCHEMA } from "./types.js";
 import { assertPersistedKeyPolicy } from "./persisted-key-policy.js";
 
 export const DEFAULT_HISTORY_LIMIT = 20;
+const DEFAULT_EVENT_SEGMENT_MAX_BYTES = 64 * 1024 * 1024;
+const DEFAULT_EVENT_MAX_SEGMENTS = 5;
+
+function defaultSessionEventLog(sessionId: string): SessionEventLog {
+  const safeId = encodeURIComponent(sessionId);
+  return {
+    active_path: path.join(sessionBaseDir(), `${safeId}.events.ndjson`),
+    segment_count: DEFAULT_EVENT_MAX_SEGMENTS,
+    max_segment_bytes: DEFAULT_EVENT_SEGMENT_MAX_BYTES,
+    max_segments: DEFAULT_EVENT_MAX_SEGMENTS,
+    last_write_at: undefined,
+    last_write_error: null,
+  };
+}
 
 type FindSessionOptions = {
   agentCommand: string;
@@ -399,16 +418,42 @@ function parseAcpxState(raw: unknown): SessionAcpxState | undefined {
     state.config_options = record.config_options as SessionAcpxState["config_options"];
   }
 
-  if (Array.isArray(record.audit_events)) {
-    state.audit_events = record.audit_events.filter((entry) => {
-      const audit = asRecord(entry);
-      return (
-        !!audit && typeof audit.type === "string" && typeof audit.timestamp === "string"
-      );
-    }) as SessionAcpxState["audit_events"];
+  return state;
+}
+
+function parseEventLog(raw: unknown, sessionId: string): SessionEventLog {
+  const record = asRecord(raw);
+  if (!record) {
+    return defaultSessionEventLog(sessionId);
   }
 
-  return state;
+  if (
+    typeof record.active_path !== "string" ||
+    typeof record.segment_count !== "number" ||
+    !Number.isInteger(record.segment_count) ||
+    record.segment_count < 1 ||
+    typeof record.max_segment_bytes !== "number" ||
+    !Number.isInteger(record.max_segment_bytes) ||
+    record.max_segment_bytes < 1 ||
+    typeof record.max_segments !== "number" ||
+    !Number.isInteger(record.max_segments) ||
+    record.max_segments < 1
+  ) {
+    return defaultSessionEventLog(sessionId);
+  }
+
+  return {
+    active_path: record.active_path,
+    segment_count: record.segment_count,
+    max_segment_bytes: record.max_segment_bytes,
+    max_segments: record.max_segments,
+    last_write_at:
+      typeof record.last_write_at === "string" ? record.last_write_at : undefined,
+    last_write_error:
+      record.last_write_error == null || typeof record.last_write_error === "string"
+        ? (record.last_write_error as string | null | undefined)
+        : null,
+  };
 }
 
 function normalizeOptionalName(value: unknown): string | undefined | null {
@@ -508,6 +553,9 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
     typeof record.cwd !== "string" ||
     typeof record.created_at !== "string" ||
     typeof record.last_used_at !== "string" ||
+    typeof record.last_seq !== "number" ||
+    !Number.isInteger(record.last_seq) ||
+    record.last_seq < 0 ||
     name === null ||
     pid === null ||
     closed === null ||
@@ -527,6 +575,12 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
     return null;
   }
 
+  const eventLog = parseEventLog(record.event_log, record.acpx_record_id);
+  const lastRequestId = normalizeOptionalString(record.last_request_id);
+  if (lastRequestId === null) {
+    return null;
+  }
+
   return {
     schema: SESSION_RECORD_SCHEMA,
     acpxRecordId: record.acpx_record_id,
@@ -537,6 +591,9 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
     name,
     createdAt: record.created_at,
     lastUsedAt: record.last_used_at,
+    lastSeq: record.last_seq,
+    lastRequestId,
+    eventLog,
     closed,
     closedAt,
     pid,
@@ -577,6 +634,9 @@ export function serializeSessionRecordForDisk(
     name: canonical.name,
     created_at: canonical.createdAt,
     last_used_at: canonical.lastUsedAt,
+    last_seq: canonical.lastSeq,
+    last_request_id: canonical.lastRequestId,
+    event_log: canonical.eventLog,
     closed: canonical.closed,
     closed_at: canonical.closedAt,
     pid: canonical.pid,

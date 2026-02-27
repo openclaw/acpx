@@ -2,7 +2,6 @@ import type {
   AgentCapabilities,
   SessionConfigOption,
   SessionNotification,
-  SessionUpdate,
   SetSessionConfigOptionResponse,
   StopReason,
 } from "@agentclientprotocol/sdk";
@@ -34,6 +33,10 @@ export type NonInteractivePermissionPolicy =
 
 export const OUTPUT_STREAMS = ["prompt", "control"] as const;
 export type OutputStream = (typeof OUTPUT_STREAMS)[number];
+
+export const ACPX_EVENT_SCHEMA = "acpx.event.v1" as const;
+export const ACPX_EVENT_OUTPUT_STREAMS = ["output", "thought"] as const;
+export type AcpxEventOutputStream = (typeof ACPX_EVENT_OUTPUT_STREAMS)[number];
 
 export const OUTPUT_ERROR_CODES = [
   "NO_SESSION",
@@ -97,118 +100,166 @@ export type ClientOperation = {
   timestamp: string;
 };
 
-export type OutputEventEnvelope = {
-  eventVersion: 1;
-  sessionId: string;
-  requestId?: string;
+export type AcpxEventKind =
+  | "turn_started"
+  | "output_delta"
+  | "tool_call"
+  | "plan"
+  | "update"
+  | "client_operation"
+  | "turn_done"
+  | "error"
+  | "session_ensured"
+  | "cancel_requested"
+  | "cancel_result"
+  | "mode_set"
+  | "config_set"
+  | "status_snapshot"
+  | "session_closed";
+
+type AcpxEventEnvelope = {
+  schema: typeof ACPX_EVENT_SCHEMA;
+  event_id: string;
+  session_id: string;
+  acp_session_id?: string;
+  agent_session_id?: string;
+  request_id?: string;
   seq: number;
-  stream: OutputStream;
+  ts: string;
 };
 
-export type BaseOutputEvent = OutputEventEnvelope & {
-  timestamp: string;
-};
+export type AcpxEvent =
+  | (AcpxEventEnvelope & {
+      kind: "turn_started";
+      data: {
+        mode: "prompt";
+        resumed: boolean;
+        input_preview?: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      kind: "output_delta";
+      data: {
+        stream: AcpxEventOutputStream;
+        text: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      kind: "tool_call";
+      data: {
+        tool_call_id?: string;
+        title?: string;
+        status?: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      kind: "plan";
+      data: {
+        entries: Array<{
+          content: string;
+          status: string;
+          priority: string;
+        }>;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      kind: "update";
+      data: {
+        update: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      kind: "client_operation";
+      data: {
+        method: ClientOperationMethod;
+        status: ClientOperationStatus;
+        summary: string;
+        details?: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      kind: "turn_done";
+      data: {
+        stop_reason: StopReason;
+        permission_stats?: PermissionStats;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      kind: "error";
+      data: {
+        code: OutputErrorCode;
+        detail_code?: string;
+        origin?: OutputErrorOrigin;
+        message: string;
+        retryable?: boolean;
+        acp_error?: OutputErrorAcpPayload;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      kind: "session_ensured";
+      data: {
+        created: boolean;
+        name?: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      kind: "cancel_requested";
+      data: Record<string, never>;
+    })
+  | (AcpxEventEnvelope & {
+      kind: "cancel_result";
+      data: {
+        cancelled: boolean;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      kind: "mode_set";
+      data: {
+        mode_id: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      kind: "config_set";
+      data: {
+        config_id: string;
+        value: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      kind: "status_snapshot";
+      data: {
+        status: "alive" | "dead" | "no-session";
+        pid?: number;
+        summary?: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      kind: "session_closed";
+      data: {
+        reason: "close";
+      };
+    });
 
-export type OutputEvent =
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "text";
-      content: string;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "thought";
-      content: string;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "tool_call";
-      toolCallId?: string;
-      title?: string;
-      status?: string;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "client_operation";
-      method: ClientOperationMethod;
-      status: ClientOperationStatus;
-      summary: string;
-      details?: string;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "plan";
-      entries: Array<{
-        content: string;
-        status: string;
-        priority: string;
-      }>;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "update";
-      update: string;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "done";
-      stopReason: StopReason;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "error";
-      code: OutputErrorCode;
-      detailCode?: string;
-      origin?: OutputErrorOrigin;
-      message: string;
-      retryable?: boolean;
-      acp?: OutputErrorAcpPayload;
-      timestamp: string;
-    };
+export type AcpxEventDraft = Omit<
+  AcpxEvent,
+  "schema" | "event_id" | "session_id" | "seq" | "ts"
+>;
+
+export type SessionEventLog = {
+  active_path: string;
+  segment_count: number;
+  max_segment_bytes: number;
+  max_segments: number;
+  last_write_at?: string;
+  last_write_error?: string | null;
+};
 
 export type OutputFormatterContext = {
   sessionId: string;
+  acpSessionId?: string;
+  agentSessionId?: string;
   requestId?: string;
-  stream?: OutputStream;
+  nextSeq?: number;
 };
 
 export type OutputPolicy = {
@@ -225,6 +276,7 @@ export type OutputErrorEmissionPolicy = {
 
 export interface OutputFormatter {
   setContext(context: OutputFormatterContext): void;
+  onEvent(event: AcpxEvent): void;
   onSessionUpdate(notification: SessionNotification): void;
   onClientOperation(operation: ClientOperation): void;
   onError(params: {
@@ -368,24 +420,10 @@ export type SessionThread = {
   thinking_effort?: string | null;
 };
 
-export type SessionAcpxAuditEvent =
-  | {
-      type: "session_update";
-      timestamp: string;
-      update: SessionUpdate;
-      _meta?: Record<string, unknown> | null;
-    }
-  | {
-      type: "client_operation";
-      timestamp: string;
-      operation: ClientOperation;
-    };
-
 export type SessionAcpxState = {
   current_mode_id?: string;
   available_commands?: string[];
   config_options?: SessionConfigOption[];
-  audit_events?: SessionAcpxAuditEvent[];
 };
 
 export type SessionRecord = {
@@ -398,6 +436,9 @@ export type SessionRecord = {
   name?: string;
   createdAt: string;
   lastUsedAt: string;
+  lastSeq: number;
+  lastRequestId?: string;
+  eventLog: SessionEventLog;
   closed?: boolean;
   closedAt?: string;
   pid?: number;

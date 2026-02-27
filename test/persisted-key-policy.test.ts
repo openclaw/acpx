@@ -17,6 +17,16 @@ function makeRecord(): SessionRecord {
     cwd: "/tmp/project",
     createdAt: "2026-02-27T00:00:00.000Z",
     lastUsedAt: "2026-02-27T00:00:00.000Z",
+    lastSeq: 4,
+    lastRequestId: "req-1",
+    eventLog: {
+      active_path: "/tmp/record-1.events.ndjson",
+      segment_count: 2,
+      max_segment_bytes: 1024,
+      max_segments: 2,
+      last_write_at: "2026-02-27T00:00:00.000Z",
+      last_write_error: null,
+    },
     closed: false,
     thread: {
       version: "0.3.0",
@@ -81,22 +91,6 @@ function makeRecord(): SessionRecord {
     acpx: {
       current_mode_id: "code",
       available_commands: ["run"],
-      audit_events: [
-        {
-          type: "session_update",
-          timestamp: "2026-02-27T00:00:00.000Z",
-          update: {
-            sessionUpdate: "agent_message_chunk",
-            content: {
-              type: "text",
-              text: "ok",
-            },
-          },
-          _meta: {
-            providerSessionId: "runtime-1",
-          },
-        },
-      ],
     },
   };
 }

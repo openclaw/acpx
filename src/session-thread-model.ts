@@ -9,7 +9,6 @@ import type {
 } from "@agentclientprotocol/sdk";
 import type {
   ClientOperation,
-  SessionAcpxAuditEvent,
   SessionAcpxState,
   SessionThread,
   SessionThreadAgentContent,
@@ -22,8 +21,6 @@ import type {
   SessionThreadUserContent,
 } from "./types.js";
 import { SESSION_THREAD_VERSION } from "./types.js";
-
-export const SESSION_ACPX_AUDIT_MAX_ENTRIES = 10_000;
 
 export type LegacyHistoryEntry = {
   role: "user" | "assistant";
@@ -45,13 +42,6 @@ function deepClone<T>(value: T): T {
 
 function hasOwn(source: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(source, key);
-}
-
-function trimToMax<T>(entries: T[], max: number): T[] {
-  if (entries.length <= max) {
-    return entries;
-  }
-  return entries.slice(entries.length - max);
 }
 
 function normalizeAgentName(value: unknown): string | undefined {
@@ -416,16 +406,6 @@ function usageToTokenUsage(update: UsageUpdate): SessionThreadTokenUsage | undef
   return normalized;
 }
 
-function appendAuditEvent(
-  state: SessionAcpxState,
-  event: SessionAcpxAuditEvent,
-): SessionAcpxState {
-  const next = state.audit_events ? [...state.audit_events] : [];
-  next.push(event);
-  state.audit_events = trimToMax(next, SESSION_ACPX_AUDIT_MAX_ENTRIES);
-  return state;
-}
-
 function ensureAcpxState(state: SessionAcpxState | undefined): SessionAcpxState {
   return state ?? {};
 }
@@ -497,7 +477,6 @@ export function cloneSessionAcpxState(
       ? [...state.available_commands]
       : undefined,
     config_options: state.config_options ? deepClone(state.config_options) : undefined,
-    audit_events: state.audit_events ? deepClone(state.audit_events) : undefined,
   };
 }
 
@@ -557,17 +536,6 @@ export function recordSessionUpdate(
   timestamp = isoNow(),
 ): SessionAcpxState {
   const acpx = ensureAcpxState(state);
-  appendAuditEvent(acpx, {
-    type: "session_update",
-    timestamp,
-    update: deepClone(notification.update),
-    _meta:
-      notification._meta === undefined
-        ? undefined
-        : notification._meta === null
-          ? null
-          : deepClone(notification._meta),
-  });
 
   const update: SessionUpdate = notification.update;
   switch (update.sessionUpdate) {
@@ -654,11 +622,6 @@ export function recordClientOperation(
   timestamp = isoNow(),
 ): SessionAcpxState {
   const acpx = ensureAcpxState(state);
-  appendAuditEvent(acpx, {
-    type: "client_operation",
-    timestamp,
-    operation: deepClone(operation),
-  });
   updateThreadTimestamp(thread, timestamp);
   return acpx;
 }

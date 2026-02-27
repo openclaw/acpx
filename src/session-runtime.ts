@@ -3,6 +3,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { AcpClient, type AgentLifecycleSnapshot } from "./client.js";
 import {
+  clientOperationToEventDraft,
+  createAcpxEvent,
+  errorToEventDraft,
+  sessionUpdateToEventDrafts,
+  truncateInputPreview,
+} from "./events.js";
+import {
   formatErrorMessage,
   isAcpResourceNotFoundError,
   normalizeOutputError,
@@ -15,6 +22,7 @@ import {
   recordPromptSubmission,
   recordSessionUpdate as recordThreadSessionUpdate,
 } from "./session-thread-model.js";
+import { SessionEventWriter, defaultSessionEventLog } from "./session-events.js";
 import {
   QueueOwnerTurnController,
   type QueueOwnerActiveSessionController,
@@ -52,6 +60,8 @@ import {
 import {
   SESSION_RECORD_SCHEMA,
   type AuthPolicy,
+  type AcpxEvent,
+  type AcpxEventDraft,
   type ClientOperation,
   type NonInteractivePermissionPolicy,
   type OutputErrorEmissionPolicy,
@@ -273,6 +283,14 @@ class QueueTaskOutputFormatter implements OutputFormatter {
     // queue formatter context is fixed by task request id
   }
 
+  onEvent(event: AcpxEvent): void {
+    this.send({
+      type: "event",
+      requestId: this.requestId,
+      event,
+    });
+  }
+
   onSessionUpdate(notification: SessionNotification): void {
     this.send({
       type: "session_update",
@@ -325,6 +343,9 @@ class QueueTaskOutputFormatter implements OutputFormatter {
 
 const DISCARD_OUTPUT_FORMATTER: OutputFormatter = {
   setContext() {
+    // no-op
+  },
+  onEvent() {
     // no-op
   },
   onSessionUpdate() {
@@ -538,6 +559,8 @@ async function runQueuedTask(
       origin: "runtime",
       detailCode: "QUEUE_RUNTIME_PROMPT_FAILED",
     });
+    const alreadyEmitted =
+      (error as { outputAlreadyEmitted?: unknown }).outputAlreadyEmitted === true;
     if (task.waitForCompletion) {
       task.send({
         type: "error",
@@ -548,6 +571,7 @@ async function runQueuedTask(
         message: normalizedError.message,
         retryable: normalizedError.retryable,
         acp: normalizedError.acp,
+        outputAlreadyEmitted: alreadyEmitted,
       });
     }
 
@@ -564,13 +588,44 @@ async function runSessionPrompt(
 ): Promise<SessionSendResult> {
   const output = options.outputFormatter;
   const record = await resolveSessionRecord(options.sessionRecordId);
-  output.setContext({
-    sessionId: record.acpxRecordId,
-    stream: "prompt",
-  });
   const thread = cloneSessionThread(record.thread);
   let acpxState = cloneSessionAcpxState(record.acpx);
   recordPromptSubmission(thread, options.message, isoNow());
+
+  output.setContext({
+    sessionId: record.acpxRecordId,
+    acpSessionId: record.acpSessionId,
+    agentSessionId: record.agentSessionId,
+    nextSeq: record.lastSeq + 1,
+  });
+
+  const eventWriter = await SessionEventWriter.open(record);
+  const pendingEvents: AcpxEvent[] = [];
+  let eventWriterClosed = false;
+
+  const closeEventWriter = async (checkpoint: boolean): Promise<void> => {
+    if (eventWriterClosed) {
+      return;
+    }
+    eventWriterClosed = true;
+    await eventWriter.close({ checkpoint });
+  };
+
+  const flushPendingEvents = async (checkpoint = false): Promise<void> => {
+    if (pendingEvents.length === 0) {
+      return;
+    }
+
+    const batch = pendingEvents.splice(0, pendingEvents.length);
+    await eventWriter.appendEvents(batch, { checkpoint });
+  };
+
+  const emitEvent = (draft: AcpxEventDraft): AcpxEvent => {
+    const event = eventWriter.createEvent(draft);
+    pendingEvents.push(event);
+    output.onEvent(event);
+    return event;
+  };
 
   const client = new AcpClient({
     agentCommand: record.agentCommand,
@@ -583,11 +638,14 @@ async function runSessionPrompt(
     verbose: options.verbose,
     onSessionUpdate: (notification) => {
       acpxState = recordThreadSessionUpdate(thread, acpxState, notification);
-      output.onSessionUpdate(notification);
+      const drafts = sessionUpdateToEventDrafts(notification);
+      for (const draft of drafts) {
+        emitEvent(draft);
+      }
     },
     onClientOperation: (operation) => {
       acpxState = recordThreadClientOperation(thread, acpxState, operation);
-      output.onClientOperation(operation);
+      emitEvent(clientOperationToEventDraft(operation));
     },
   });
   let activeSessionIdForControl = record.acpSessionId;
@@ -632,6 +690,23 @@ async function runSessionPrompt(
           },
         });
 
+        output.setContext({
+          sessionId: record.acpxRecordId,
+          acpSessionId: record.acpSessionId,
+          agentSessionId: record.agentSessionId,
+          nextSeq: record.lastSeq + 1,
+        });
+
+        emitEvent({
+          kind: "turn_started",
+          data: {
+            mode: "prompt",
+            resumed,
+            input_preview: truncateInputPreview(options.message),
+          },
+        });
+        await flushPendingEvents(false);
+
         let response;
         try {
           const promptPromise = client.prompt(activeSessionId, options.message);
@@ -641,7 +716,9 @@ async function runSessionPrompt(
             } catch (error) {
               if (options.verbose) {
                 process.stderr.write(
-                  `[acpx] onPromptActive hook failed: ${formatErrorMessage(error)}\n`,
+                  "[acpx] onPromptActive hook failed: " +
+                    formatErrorMessage(error) +
+                    "\n",
                 );
               }
             }
@@ -652,17 +729,60 @@ async function runSessionPrompt(
           applyLifecycleSnapshotToRecord(record, snapshot);
           if (snapshot.lastExit?.unexpectedDuringPrompt && options.verbose) {
             process.stderr.write(
-              `[acpx] agent disconnected during prompt (${snapshot.lastExit.reason}, exit=${snapshot.lastExit.exitCode}, signal=${snapshot.lastExit.signal ?? "none"})\n`,
+              "[acpx] agent disconnected during prompt (" +
+                snapshot.lastExit.reason +
+                ", exit=" +
+                snapshot.lastExit.exitCode +
+                ", signal=" +
+                (snapshot.lastExit.signal ?? "none") +
+                ")\n",
             );
           }
+
+          const normalizedError = normalizeOutputError(error, {
+            origin: "runtime",
+          });
+
+          emitEvent(
+            errorToEventDraft({
+              code: normalizedError.code,
+              detailCode: normalizedError.detailCode,
+              origin: normalizedError.origin,
+              message: normalizedError.message,
+              retryable: normalizedError.retryable,
+              acp: normalizedError.acp,
+            }),
+          );
+
+          await flushPendingEvents(true).catch(() => {
+            // best effort while bubbling prompt failure
+          });
+
+          output.flush();
+
           record.lastUsedAt = isoNow();
           record.thread = thread;
           record.acpx = acpxState;
-          await writeSessionRecord(record);
-          throw error;
+          await writeSessionRecord(record).catch(() => {
+            // best effort while bubbling prompt failure
+          });
+
+          const propagated =
+            error instanceof Error ? error : new Error(formatErrorMessage(error));
+          (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted =
+            true;
+          throw propagated;
         }
 
-        output.onDone(response.stopReason);
+        emitEvent({
+          kind: "turn_done",
+          data: {
+            stop_reason: response.stopReason,
+            permission_stats: client.getPermissionStats(),
+          },
+        });
+
+        await flushPendingEvents(true);
         output.flush();
 
         const now = isoNow();
@@ -689,7 +809,13 @@ async function runSessionPrompt(
         record.lastUsedAt = isoNow();
         record.thread = thread;
         record.acpx = acpxState;
+        await flushPendingEvents(true).catch(() => {
+          // best effort while process is being interrupted
+        });
         await writeSessionRecord(record).catch(() => {
+          // best effort while process is being interrupted
+        });
+        await closeEventWriter(false).catch(() => {
           // best effort while process is being interrupted
         });
         await client.close();
@@ -703,7 +829,13 @@ async function runSessionPrompt(
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     record.thread = thread;
     record.acpx = acpxState;
+    await flushPendingEvents(false).catch(() => {
+      // best effort on close
+    });
     await writeSessionRecord(record).catch(() => {
+      // best effort on close
+    });
+    await closeEventWriter(false).catch(() => {
       // best effort on close
     });
   }
@@ -925,10 +1057,34 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
           options.timeoutMs,
         );
         const sessionId = createdSession.sessionId;
+        const agentSessionId = normalizeRuntimeSessionId(createdSession.agentSessionId);
+
         output.setContext({
           sessionId,
-          stream: "prompt",
+          acpSessionId: sessionId,
+          agentSessionId,
+          nextSeq: 0,
         });
+
+        output.onEvent(
+          createAcpxEvent(
+            {
+              sessionId,
+              acpSessionId: sessionId,
+              agentSessionId,
+              seq: 0,
+            },
+            {
+              kind: "turn_started",
+              data: {
+                mode: "prompt",
+                resumed: false,
+                input_preview: truncateInputPreview(options.message),
+              },
+            },
+          ),
+        );
+
         const response = await withTimeout(
           client.prompt(sessionId, options.message),
           options.timeoutMs,
@@ -982,6 +1138,9 @@ export async function createSession(
           name: normalizeName(options.name),
           createdAt: now,
           lastUsedAt: now,
+          lastSeq: 0,
+          lastRequestId: undefined,
+          eventLog: defaultSessionEventLog(sessionId),
           closed: false,
           closedAt: undefined,
           pid: lifecycle.pid,
@@ -989,9 +1148,7 @@ export async function createSession(
           protocolVersion: client.initializeResult?.protocolVersion,
           agentCapabilities: client.initializeResult?.agentCapabilities,
           thread: createSessionThread(now),
-          acpx: {
-            audit_events: [],
-          },
+          acpx: {},
         };
 
         await writeSessionRecord(record);

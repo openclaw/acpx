@@ -53,15 +53,11 @@ test("integration: timeout emits structured TIMEOUT json error", async () => {
         .trim()
         .split("\n")
         .filter((line) => line.trim().length > 0)
-        .map(
-          (line) =>
-            JSON.parse(line) as { type?: string; code?: string; stream?: string },
-        );
+        .map((line) => JSON.parse(line) as { kind?: string; data?: { code?: string } });
       assert(payloads.length > 0, "expected at least one JSON payload");
-      const timeoutError = payloads.find((payload) => payload.type === "error");
+      const timeoutError = payloads.find((payload) => payload.kind === "error");
       assert(timeoutError, `expected error event in output:\n${result.stdout}`);
-      assert.equal(timeoutError.code, "TIMEOUT");
-      assert.equal(timeoutError.stream, "control");
+      assert.equal(timeoutError.data?.code, "TIMEOUT");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -96,15 +92,11 @@ test("integration: non-interactive fail emits structured permission error", asyn
         .trim()
         .split("\n")
         .filter((line) => line.trim().length > 0)
-        .map(
-          (line) =>
-            JSON.parse(line) as { type?: string; code?: string; stream?: string },
-        );
+        .map((line) => JSON.parse(line) as { kind?: string; data?: { code?: string } });
       assert(payloads.length > 0, "expected at least one JSON payload");
-      const permissionError = payloads.find((payload) => payload.type === "error");
+      const permissionError = payloads.find((payload) => payload.kind === "error");
       assert(permissionError, `expected error event in output:\n${result.stdout}`);
-      assert.equal(permissionError.code, "PERMISSION_PROMPT_UNAVAILABLE");
-      assert.equal(permissionError.stream, "control");
+      assert.equal(permissionError.data?.code, "PERMISSION_PROMPT_UNAVAILABLE");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -142,15 +134,11 @@ test("integration: json-strict suppresses runtime stderr diagnostics", async () 
         .trim()
         .split("\n")
         .filter((line) => line.trim().length > 0)
-        .map(
-          (line) =>
-            JSON.parse(line) as { type?: string; code?: string; stream?: string },
-        );
+        .map((line) => JSON.parse(line) as { kind?: string; data?: { code?: string } });
       assert(payloads.length > 0, "expected at least one JSON payload");
-      const permissionError = payloads.find((payload) => payload.type === "error");
+      const permissionError = payloads.find((payload) => payload.kind === "error");
       assert(permissionError, `expected error event in output:\n${result.stdout}`);
-      assert.equal(permissionError.code, "PERMISSION_PROMPT_UNAVAILABLE");
-      assert.equal(permissionError.stream, "control");
+      assert.equal(permissionError.data?.code, "PERMISSION_PROMPT_UNAVAILABLE");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -294,13 +282,14 @@ test("integration: cancel yields cancelled stopReason without queue error", asyn
         const promptResult = await doneEventPromise;
         assert.equal(
           promptResult.events.some(
-            (event) => event.type === "done" && event.stopReason === "cancelled",
+            (event) =>
+              event.kind === "turn_done" && event.data?.stop_reason === "cancelled",
           ),
           true,
           promptResult.stdout,
         );
         assert.equal(
-          promptResult.events.some((event) => event.type === "error"),
+          promptResult.events.some((event) => event.kind === "error"),
           false,
           promptResult.stdout,
         );
@@ -384,8 +373,11 @@ async function runCli(
 }
 
 type PromptEvent = {
-  type?: string;
-  stopReason?: string;
+  kind?: string;
+  data?: {
+    stop_reason?: string;
+    code?: string;
+  };
 };
 
 type PromptDoneResult = {
@@ -440,7 +432,7 @@ async function waitForPromptDoneEvent(
       }
 
       events.push(event);
-      if (event.type === "done") {
+      if (event.kind === "turn_done") {
         finish(() => {
           resolve({
             events,
