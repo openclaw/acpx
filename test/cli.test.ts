@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { InvalidArgumentError } from "commander";
 import { formatPromptSessionBannerLine, parseTtlSeconds } from "../src/cli.js";
+import { serializeSessionRecordForDisk } from "../src/session-persistence.js";
 import type { SessionRecord } from "../src/types.js";
 
 const CLI_PATH = fileURLToPath(new URL("../src/cli.js", import.meta.url));
@@ -322,8 +323,8 @@ test("prompt reconciles agentSessionId from loadSession metadata", async () => {
     );
     const storedRecord = JSON.parse(
       await fs.readFile(storedRecordPath, "utf8"),
-    ) as SessionRecord;
-    assert.equal(storedRecord.agentSessionId, "loaded-runtime-session");
+    ) as Record<string, unknown>;
+    assert.equal(storedRecord.agent_session_id, "loaded-runtime-session");
   });
 });
 
@@ -1187,7 +1188,7 @@ async function writeSessionRecord(
   const file = path.join(sessionDir, `${encodeURIComponent(record.acpxRecordId)}.json`);
   await fs.writeFile(
     file,
-    `${JSON.stringify(makeSessionRecord(record), null, 2)}\n`,
+    `${JSON.stringify(serializeSessionRecordForDisk(makeSessionRecord(record)), null, 2)}\n`,
     "utf8",
   );
 }

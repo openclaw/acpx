@@ -1,0 +1,122 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  assertPersistedKeyPolicy,
+  findPersistedKeyPolicyViolations,
+} from "../src/persisted-key-policy.js";
+import { serializeSessionRecordForDisk } from "../src/session-persistence.js";
+import type { SessionRecord } from "../src/types.js";
+
+function makeRecord(): SessionRecord {
+  return {
+    schema: "acpx.session.v1",
+    acpxRecordId: "record-1",
+    acpSessionId: "session-1",
+    agentSessionId: "agent-1",
+    agentCommand: "npx @zed-industries/codex-acp",
+    cwd: "/tmp/project",
+    createdAt: "2026-02-27T00:00:00.000Z",
+    lastUsedAt: "2026-02-27T00:00:00.000Z",
+    closed: false,
+    thread: {
+      version: "0.3.0",
+      title: null,
+      messages: [
+        {
+          User: {
+            id: "user-1",
+            content: [{ Text: "hello" }],
+          },
+        },
+        {
+          Agent: {
+            content: [
+              { Text: "world" },
+              {
+                ToolUse: {
+                  id: "call_1",
+                  name: "run_command",
+                  raw_input: '{"command":"ls"}',
+                  input: {
+                    command: "ls",
+                  },
+                  is_input_complete: true,
+                  thought_signature: null,
+                },
+              },
+            ],
+            tool_results: {
+              call_1: {
+                tool_use_id: "call_1",
+                tool_name: "run_command",
+                is_error: false,
+                content: {
+                  Text: "ok",
+                },
+                output: {
+                  exitCode: 0,
+                },
+              },
+            },
+          },
+        },
+      ],
+      updated_at: "2026-02-27T00:00:00.000Z",
+      detailed_summary: null,
+      initial_project_snapshot: null,
+      cumulative_token_usage: {},
+      request_token_usage: {
+        "5cf39f6d-9c4f-4d20-9e4b-739abc4b2554": {
+          input_tokens: 1,
+        },
+      },
+      model: null,
+      profile: null,
+      imported: false,
+      subagent_context: null,
+      speed: null,
+      thinking_enabled: false,
+      thinking_effort: null,
+    },
+    acpx: {
+      current_mode_id: "code",
+      available_commands: ["run"],
+      audit_events: [
+        {
+          type: "session_update",
+          timestamp: "2026-02-27T00:00:00.000Z",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+              type: "text",
+              text: "ok",
+            },
+          },
+          _meta: {
+            providerSessionId: "runtime-1",
+          },
+        },
+      ],
+    },
+  };
+}
+
+test("serialized session record satisfies persisted key policy", () => {
+  const persisted = serializeSessionRecordForDisk(makeRecord());
+  assert.deepEqual(findPersistedKeyPolicyViolations(persisted), []);
+  assertPersistedKeyPolicy(persisted);
+});
+
+test("persisted key policy rejects camelCase acpx-owned keys", () => {
+  const persisted = serializeSessionRecordForDisk(makeRecord()) as Record<
+    string,
+    unknown
+  >;
+  persisted.requestId = "bad";
+
+  const violations = findPersistedKeyPolicyViolations(persisted);
+  assert.equal(violations.includes("requestId"), true);
+  assert.throws(() => {
+    assertPersistedKeyPolicy(persisted);
+  }, /snake_case/);
+});

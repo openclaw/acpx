@@ -6,6 +6,7 @@ import { SessionNotFoundError, SessionResolutionError } from "./errors.js";
 import { normalizeRuntimeSessionId } from "./runtime-session-id.js";
 import type { SessionAcpxState, SessionRecord, SessionThread } from "./types.js";
 import { SESSION_RECORD_SCHEMA } from "./types.js";
+import { assertPersistedKeyPolicy } from "./persisted-key-policy.js";
 
 export const DEFAULT_HISTORY_LIMIT = 20;
 
@@ -490,23 +491,23 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
   const name = normalizeOptionalName(record.name);
   const pid = normalizeOptionalPid(record.pid);
   const closed = normalizeOptionalBoolean(record.closed, false);
-  const closedAt = normalizeOptionalString(record.closedAt);
-  const agentStartedAt = normalizeOptionalString(record.agentStartedAt);
-  const lastPromptAt = normalizeOptionalString(record.lastPromptAt);
-  const lastAgentExitCode = normalizeOptionalExitCode(record.lastAgentExitCode);
-  const lastAgentExitSignal = normalizeOptionalSignal(record.lastAgentExitSignal);
-  const lastAgentExitAt = normalizeOptionalString(record.lastAgentExitAt);
+  const closedAt = normalizeOptionalString(record.closed_at);
+  const agentStartedAt = normalizeOptionalString(record.agent_started_at);
+  const lastPromptAt = normalizeOptionalString(record.last_prompt_at);
+  const lastAgentExitCode = normalizeOptionalExitCode(record.last_agent_exit_code);
+  const lastAgentExitSignal = normalizeOptionalSignal(record.last_agent_exit_signal);
+  const lastAgentExitAt = normalizeOptionalString(record.last_agent_exit_at);
   const lastAgentDisconnectReason = normalizeOptionalString(
-    record.lastAgentDisconnectReason,
+    record.last_agent_disconnect_reason,
   );
 
   if (
-    typeof record.acpxRecordId !== "string" ||
-    typeof record.acpSessionId !== "string" ||
-    typeof record.agentCommand !== "string" ||
+    typeof record.acpx_record_id !== "string" ||
+    typeof record.acp_session_id !== "string" ||
+    typeof record.agent_command !== "string" ||
     typeof record.cwd !== "string" ||
-    typeof record.createdAt !== "string" ||
-    typeof record.lastUsedAt !== "string" ||
+    typeof record.created_at !== "string" ||
+    typeof record.last_used_at !== "string" ||
     name === null ||
     pid === null ||
     closed === null ||
@@ -528,14 +529,14 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
 
   return {
     schema: SESSION_RECORD_SCHEMA,
-    acpxRecordId: record.acpxRecordId,
-    acpSessionId: record.acpSessionId,
-    agentSessionId: normalizeRuntimeSessionId(record.agentSessionId),
-    agentCommand: record.agentCommand,
+    acpxRecordId: record.acpx_record_id,
+    acpSessionId: record.acp_session_id,
+    agentSessionId: normalizeRuntimeSessionId(record.agent_session_id),
+    agentCommand: record.agent_command,
     cwd: record.cwd,
     name,
-    createdAt: record.createdAt,
-    lastUsedAt: record.lastUsedAt,
+    createdAt: record.created_at,
+    lastUsedAt: record.last_used_at,
     closed,
     closedAt,
     pid,
@@ -549,25 +550,58 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
     lastAgentExitAt,
     lastAgentDisconnectReason,
     protocolVersion:
-      typeof record.protocolVersion === "number" ? record.protocolVersion : undefined,
+      typeof record.protocol_version === "number" ? record.protocol_version : undefined,
     agentCapabilities: asRecord(
-      record.agentCapabilities,
+      record.agent_capabilities,
     ) as SessionRecord["agentCapabilities"],
     thread,
     acpx: parseAcpxState(record.acpx),
   };
 }
 
-export async function writeSessionRecord(record: SessionRecord): Promise<void> {
-  await ensureSessionDir();
+export function serializeSessionRecordForDisk(
+  record: SessionRecord,
+): Record<string, unknown> {
   const canonical: SessionRecord = {
     ...record,
     schema: SESSION_RECORD_SCHEMA,
   };
 
-  const file = sessionFilePath(canonical.acpxRecordId);
+  return {
+    schema: canonical.schema,
+    acpx_record_id: canonical.acpxRecordId,
+    acp_session_id: canonical.acpSessionId,
+    agent_session_id: normalizeRuntimeSessionId(canonical.agentSessionId),
+    agent_command: canonical.agentCommand,
+    cwd: canonical.cwd,
+    name: canonical.name,
+    created_at: canonical.createdAt,
+    last_used_at: canonical.lastUsedAt,
+    closed: canonical.closed,
+    closed_at: canonical.closedAt,
+    pid: canonical.pid,
+    agent_started_at: canonical.agentStartedAt,
+    last_prompt_at: canonical.lastPromptAt,
+    last_agent_exit_code: canonical.lastAgentExitCode,
+    last_agent_exit_signal: canonical.lastAgentExitSignal,
+    last_agent_exit_at: canonical.lastAgentExitAt,
+    last_agent_disconnect_reason: canonical.lastAgentDisconnectReason,
+    protocol_version: canonical.protocolVersion,
+    agent_capabilities: canonical.agentCapabilities,
+    thread: canonical.thread,
+    acpx: canonical.acpx,
+  };
+}
+
+export async function writeSessionRecord(record: SessionRecord): Promise<void> {
+  await ensureSessionDir();
+
+  const persisted = serializeSessionRecordForDisk(record);
+  assertPersistedKeyPolicy(persisted);
+
+  const file = sessionFilePath(record.acpxRecordId);
   const tempFile = `${file}.${process.pid}.${Date.now()}.tmp`;
-  const payload = JSON.stringify(canonical, null, 2);
+  const payload = JSON.stringify(persisted, null, 2);
   await fs.writeFile(tempFile, `${payload}\n`, "utf8");
   await fs.rename(tempFile, file);
 }

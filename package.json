@@ -21,11 +21,12 @@
     "prepack": "npm run build",
     "dev": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src --max-warnings=0",
+    "lint": "eslint src --max-warnings=0 && npm run lint:persisted-key-casing",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "release": "release-it",
-    "release:ci": "release-it --ci"
+    "release:ci": "release-it --ci",
+    "lint:persisted-key-casing": "tsx scripts/lint-persisted-key-casing.ts"
   },
   "keywords": [
     "acp",

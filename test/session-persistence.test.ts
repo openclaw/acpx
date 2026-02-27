@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { serializeSessionRecordForDisk } from "../src/session-persistence.js";
 import type { SessionRecord } from "../src/types.js";
 
 type SessionModule = typeof import("../src/session.js");
@@ -61,7 +62,7 @@ test("listSessions ignores legacy thread message shapes", async () => {
 
     await fs.writeFile(
       path.join(sessionDir, "legacy-shape.json"),
-      JSON.stringify(legacy, null, 2) + "\n",
+      JSON.stringify(serializeSessionRecordForDisk(legacy), null, 2) + "\n",
       "utf8",
     );
 
@@ -240,9 +241,12 @@ test("closeSession soft-closes and terminates matching process", async () => {
       assert.equal(closed.pid, undefined);
       assert.equal(await fileExists(filePath), true);
 
-      const stored = JSON.parse(await fs.readFile(filePath, "utf8")) as SessionRecord;
+      const stored = JSON.parse(await fs.readFile(filePath, "utf8")) as Record<
+        string,
+        unknown
+      >;
       assert.equal(stored.closed, true);
-      assert.equal(typeof stored.closedAt, "string");
+      assert.equal(typeof stored.closed_at, "string");
 
       const exited = await waitForExit(child.pid);
       assert.equal(exited, true);
@@ -373,7 +377,11 @@ async function writeSessionRecord(
 ): Promise<void> {
   const filePath = sessionFilePath(homeDir, record.acpxRecordId);
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  await fs.writeFile(
+    filePath,
+    `${JSON.stringify(serializeSessionRecordForDisk(record), null, 2)}\n`,
+    "utf8",
+  );
 }
 
 async function fileExists(filePath: string): Promise<boolean> {
