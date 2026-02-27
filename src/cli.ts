@@ -53,6 +53,8 @@ import {
   type OutputPolicy,
   type PermissionMode,
   type SessionRecord,
+  type SessionThreadAgentContent,
+  type SessionThreadUserContent,
 } from "./types.js";
 
 class NoSessionError extends Error {
@@ -445,7 +447,7 @@ function printSessionsByFormat(sessions: SessionRecord[], format: OutputFormat):
   if (format === "quiet") {
     for (const session of sessions) {
       const closedMarker = session.closed ? " [closed]" : "";
-      process.stdout.write(`${session.id}${closedMarker}\n`);
+      process.stdout.write(`${session.acpxRecordId}${closedMarker}\n`);
     }
     return;
   }
@@ -458,7 +460,7 @@ function printSessionsByFormat(sessions: SessionRecord[], format: OutputFormat):
   for (const session of sessions) {
     const closedMarker = session.closed ? " [closed]" : "";
     process.stdout.write(
-      `${session.id}${closedMarker}\t${session.name ?? "-"}\t${session.cwd}\t${session.lastUsedAt}\n`,
+      `${session.acpxRecordId}${closedMarker}\t${session.name ?? "-"}\t${session.cwd}\t${session.lastUsedAt}\n`,
     );
   }
 }
@@ -468,8 +470,8 @@ function printClosedSessionByFormat(record: SessionRecord, format: OutputFormat)
     process.stdout.write(
       `${JSON.stringify({
         type: "session_closed",
-        id: record.id,
-        sessionId: record.sessionId,
+        acpxRecordId: record.acpxRecordId,
+        sessionId: record.acpSessionId,
         name: record.name,
       })}\n`,
     );
@@ -480,18 +482,18 @@ function printClosedSessionByFormat(record: SessionRecord, format: OutputFormat)
     return;
   }
 
-  process.stdout.write(`${record.id}\n`);
+  process.stdout.write(`${record.acpxRecordId}\n`);
 }
 
-function runtimeSessionIdPayload(runtimeSessionId: string | undefined): {
-  runtimeSessionId?: string;
+function agentSessionIdPayload(agentSessionId: string | undefined): {
+  agentSessionId?: string;
 } {
-  const normalized = normalizeRuntimeSessionId(runtimeSessionId);
+  const normalized = normalizeRuntimeSessionId(agentSessionId);
   if (!normalized) {
     return {};
   }
 
-  return { runtimeSessionId: normalized };
+  return { agentSessionId: normalized };
 }
 
 function printNewSessionByFormat(
@@ -503,27 +505,29 @@ function printNewSessionByFormat(
     process.stdout.write(
       `${JSON.stringify({
         type: "session_created",
-        id: record.id,
-        sessionId: record.sessionId,
+        acpxRecordId: record.acpxRecordId,
+        sessionId: record.acpSessionId,
         name: record.name,
-        replacedSessionId: replaced?.id,
-        ...runtimeSessionIdPayload(record.runtimeSessionId),
+        replacedSessionId: replaced?.acpxRecordId,
+        ...agentSessionIdPayload(record.agentSessionId),
       })}\n`,
     );
     return;
   }
 
   if (format === "quiet") {
-    process.stdout.write(`${record.id}\n`);
+    process.stdout.write(`${record.acpxRecordId}\n`);
     return;
   }
 
   if (replaced) {
-    process.stdout.write(`${record.id}\t(replaced ${replaced.id})\n`);
+    process.stdout.write(
+      `${record.acpxRecordId}\t(replaced ${replaced.acpxRecordId})\n`,
+    );
     return;
   }
 
-  process.stdout.write(`${record.id}\n`);
+  process.stdout.write(`${record.acpxRecordId}\n`);
 }
 
 function printEnsuredSessionByFormat(
@@ -535,23 +539,23 @@ function printEnsuredSessionByFormat(
     process.stdout.write(
       `${JSON.stringify({
         type: "session_ensured",
-        id: record.id,
-        sessionId: record.sessionId,
+        acpxRecordId: record.acpxRecordId,
+        sessionId: record.acpSessionId,
         name: record.name,
         created,
-        ...runtimeSessionIdPayload(record.runtimeSessionId),
+        ...agentSessionIdPayload(record.agentSessionId),
       })}\n`,
     );
     return;
   }
 
   if (format === "quiet") {
-    process.stdout.write(`${record.id}\n`);
+    process.stdout.write(`${record.acpxRecordId}\n`);
     return;
   }
 
   const action = created ? "created" : "existing";
-  process.stdout.write(`${record.id}\t(${action})\n`);
+  process.stdout.write(`${record.acpxRecordId}\t(${action})\n`);
 }
 
 function printQueuedPromptByFormat(
@@ -611,10 +615,10 @@ export function formatPromptSessionBannerLine(
   const status = sessionConnectionStatus(record);
 
   if (routedFrom) {
-    return `[acpx] session ${label} (${record.id}) · ${normalizedSessionCwd} (routed from ${routedFrom}) · agent ${status}`;
+    return `[acpx] session ${label} (${record.acpxRecordId}) · ${normalizedSessionCwd} (routed from ${routedFrom}) · agent ${status}`;
   }
 
-  return `[acpx] session ${label} (${record.id}) · ${normalizedSessionCwd} · agent ${status}`;
+  return `[acpx] session ${label} (${record.acpxRecordId}) · ${normalizedSessionCwd} · agent ${status}`;
 }
 
 function printPromptSessionBanner(
@@ -641,7 +645,7 @@ function printCreatedSessionBanner(
   }
 
   const label = formatSessionLabel(record);
-  process.stderr.write(`[acpx] created session ${label} (${record.id})\n`);
+  process.stderr.write(`[acpx] created session ${label} (${record.acpxRecordId})\n`);
   process.stderr.write(`[acpx] agent: ${agentName}\n`);
   process.stderr.write(`[acpx] cwd: ${record.cwd}\n`);
 }
@@ -697,7 +701,7 @@ async function handlePrompt(
   );
   const outputFormatter = createOutputFormatter(outputPolicy.format, {
     jsonContext: {
-      sessionId: record.id,
+      sessionId: record.acpxRecordId,
       stream: "prompt",
     },
   });
@@ -709,7 +713,7 @@ async function handlePrompt(
     outputPolicy.jsonStrict,
   );
   const result = await sendSession({
-    sessionId: record.id,
+    sessionId: record.acpxRecordId,
     message: prompt,
     permissionMode,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
@@ -799,7 +803,7 @@ function printSetModeResultByFormat(
   if (format === "json") {
     process.stdout.write(
       `${JSON.stringify({
-        sessionId: result.record.id,
+        sessionId: result.record.acpxRecordId,
         modeId,
         resumed: result.resumed,
       })}\n`,
@@ -828,7 +832,7 @@ function printSetConfigOptionResultByFormat(
   if (format === "json") {
     process.stdout.write(
       `${JSON.stringify({
-        sessionId: result.record.id,
+        sessionId: result.record.acpxRecordId,
         configId,
         value,
         resumed: result.resumed,
@@ -877,7 +881,7 @@ async function handleCancel(
   }
 
   const result = await cancelSessionPrompt({
-    sessionId: record.id,
+    sessionId: record.acpxRecordId,
     verbose: globalFlags.verbose,
   });
   printCancelResultByFormat(result, globalFlags.format);
@@ -899,7 +903,7 @@ async function handleSetMode(
     resolveSessionNameFromFlags(flags, command),
   );
   const result = await setSessionMode({
-    sessionId: record.id,
+    sessionId: record.acpxRecordId,
     modeId,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
@@ -934,7 +938,7 @@ async function handleSetConfigOption(
     resolveSessionNameFromFlags(flags, command),
   );
   const result = await setSessionConfigOption({
-    sessionId: record.id,
+    sessionId: record.acpxRecordId,
     configId,
     value,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
@@ -989,7 +993,7 @@ async function handleSessionsClose(
     throw new Error(`No cwd session for ${agent.cwd} and agent ${agent.agentName}`);
   }
 
-  const closed = await closeSession(record.id);
+  const closed = await closeSession(record.acpxRecordId);
   printClosedSessionByFormat(closed, globalFlags.format);
 }
 
@@ -1010,9 +1014,11 @@ async function handleSessionsNew(
   });
 
   if (replaced) {
-    await closeSession(replaced.id);
+    await closeSession(replaced.acpxRecordId);
     if (globalFlags.verbose) {
-      process.stderr.write(`[acpx] soft-closed prior session: ${replaced.id}\n`);
+      process.stderr.write(
+        `[acpx] soft-closed prior session: ${replaced.acpxRecordId}\n`,
+      );
     }
   }
 
@@ -1037,7 +1043,7 @@ async function handleSessionsNew(
 
   if (globalFlags.verbose) {
     const scope = flags.name ? `named session "${flags.name}"` : "cwd session";
-    process.stderr.write(`[acpx] created ${scope}: ${created.id}\n`);
+    process.stderr.write(`[acpx] created ${scope}: ${created.acpxRecordId}\n`);
   }
 
   printNewSessionByFormat(created, replaced, globalFlags.format);
@@ -1076,6 +1082,73 @@ async function handleSessionsEnsure(
   printEnsuredSessionByFormat(result.record, result.created, globalFlags.format);
 }
 
+function userContentToText(content: SessionThreadUserContent): string {
+  if (content.type === "text") {
+    return content.text;
+  }
+  if (content.type === "mention") {
+    return content.content;
+  }
+  if (content.type === "image") {
+    return content.uri ?? "[image]";
+  }
+  return "";
+}
+
+function agentContentToText(content: SessionThreadAgentContent): string {
+  if (content.type === "text") {
+    return content.text;
+  }
+  if (content.type === "thinking") {
+    return content.text;
+  }
+  if (content.type === "tool_use") {
+    return `[tool:${content.name}]`;
+  }
+  return "";
+}
+
+function threadHistoryEntries(record: SessionRecord): Array<{
+  role: "user" | "assistant";
+  timestamp: string;
+  textPreview: string;
+}> {
+  const entries: Array<{
+    role: "user" | "assistant";
+    timestamp: string;
+    textPreview: string;
+  }> = [];
+
+  for (const message of record.thread.messages) {
+    if (message.kind === "resume") {
+      continue;
+    }
+
+    const text =
+      message.kind === "user"
+        ? message.content
+            .map((entry) => userContentToText(entry))
+            .join(" ")
+            .trim()
+        : message.content
+            .map((entry) => agentContentToText(entry))
+            .join(" ")
+            .trim();
+
+    if (!text) {
+      continue;
+    }
+
+    entries.push({
+      role: message.kind === "user" ? "user" : "assistant",
+      timestamp: record.thread.updated_at,
+      textPreview: text,
+    });
+  }
+
+  return entries;
+}
+
 function printSessionDetailsByFormat(
   record: SessionRecord,
   format: OutputFormat,
@@ -1086,13 +1159,13 @@ function printSessionDetailsByFormat(
   }
 
   if (format === "quiet") {
-    process.stdout.write(`${record.id}\n`);
+    process.stdout.write(`${record.acpxRecordId}\n`);
     return;
   }
 
-  process.stdout.write(`id: ${record.id}\n`);
-  process.stdout.write(`sessionId: ${record.sessionId}\n`);
-  process.stdout.write(`runtimeSessionId: ${record.runtimeSessionId ?? "-"}\n`);
+  process.stdout.write(`id: ${record.acpxRecordId}\n`);
+  process.stdout.write(`sessionId: ${record.acpSessionId}\n`);
+  process.stdout.write(`agentSessionId: ${record.agentSessionId ?? "-"}\n`);
   process.stdout.write(`agent: ${record.agentCommand}\n`);
   process.stdout.write(`cwd: ${record.cwd}\n`);
   process.stdout.write(`name: ${record.name ?? "-"}\n`);
@@ -1109,7 +1182,7 @@ function printSessionDetailsByFormat(
   process.stdout.write(
     `disconnectReason: ${record.lastAgentDisconnectReason ?? "-"}\n`,
   );
-  process.stdout.write(`historyEntries: ${record.turnHistory?.length ?? 0}\n`);
+  process.stdout.write(`historyEntries: ${threadHistoryEntries(record).length}\n`);
 }
 
 function printSessionHistoryByFormat(
@@ -1117,14 +1190,14 @@ function printSessionHistoryByFormat(
   limit: number,
   format: OutputFormat,
 ): void {
-  const history = record.turnHistory ?? [];
+  const history = threadHistoryEntries(record);
   const visible = history.slice(Math.max(0, history.length - limit));
 
   if (format === "json") {
     process.stdout.write(
       `${JSON.stringify({
-        id: record.id,
-        sessionId: record.sessionId,
+        id: record.acpxRecordId,
+        sessionId: record.acpSessionId,
         limit,
         count: visible.length,
         entries: visible,
@@ -1141,7 +1214,7 @@ function printSessionHistoryByFormat(
   }
 
   process.stdout.write(
-    `session: ${record.id} (${visible.length}/${history.length} shown)\n`,
+    `session: ${record.acpxRecordId} (${visible.length}/${history.length} shown)\n`,
   );
   if (visible.length === 0) {
     process.stdout.write("No history\n");
@@ -1272,7 +1345,7 @@ async function handleStatus(
 
   const running = isProcessAlive(record.pid);
   const payload = {
-    sessionId: record.id,
+    sessionId: record.acpxRecordId,
     agentCommand: record.agentCommand,
     pid: record.pid ?? null,
     status: running ? "running" : "dead",
@@ -1280,7 +1353,7 @@ async function handleStatus(
     lastPromptTime: record.lastPromptAt ?? null,
     exitCode: running ? null : (record.lastAgentExitCode ?? null),
     signal: running ? null : (record.lastAgentExitSignal ?? null),
-    ...runtimeSessionIdPayload(record.runtimeSessionId),
+    ...agentSessionIdPayload(record.agentSessionId),
   };
 
   if (globalFlags.format === "json") {
@@ -1294,8 +1367,8 @@ async function handleStatus(
   }
 
   process.stdout.write(`session: ${payload.sessionId}\n`);
-  if ("runtimeSessionId" in payload) {
-    process.stdout.write(`runtimeSessionId: ${payload.runtimeSessionId}\n`);
+  if ("agentSessionId" in payload) {
+    process.stdout.write(`agentSessionId: ${payload.agentSessionId}\n`);
   }
   process.stdout.write(`agent: ${payload.agentCommand}\n`);
   process.stdout.write(`pid: ${payload.pid ?? "-"}\n`);

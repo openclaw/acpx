@@ -37,16 +37,16 @@ test("parseTtlSeconds rejects negative values", () => {
 });
 
 test("formatPromptSessionBannerLine prints single-line prompt banner for matching cwd", () => {
-  const record: SessionRecord = {
-    id: "abc123",
-    sessionId: "abc123",
+  const record = makeSessionRecord({
+    acpxRecordId: "abc123",
+    acpSessionId: "abc123",
     agentCommand: "agent-a",
     cwd: "/home/user/project",
     name: "calm-forest",
     createdAt: "2026-01-01T00:00:00.000Z",
     lastUsedAt: "2026-01-01T00:00:00.000Z",
     closed: false,
-  };
+  });
 
   const line = formatPromptSessionBannerLine(record, "/home/user/project");
   assert.equal(
@@ -56,16 +56,16 @@ test("formatPromptSessionBannerLine prints single-line prompt banner for matchin
 });
 
 test("formatPromptSessionBannerLine includes routed-from path when cwd differs", () => {
-  const record: SessionRecord = {
-    id: "abc123",
-    sessionId: "abc123",
+  const record = makeSessionRecord({
+    acpxRecordId: "abc123",
+    acpSessionId: "abc123",
     agentCommand: "agent-a",
     cwd: "/home/user/project",
     name: "calm-forest",
     createdAt: "2026-01-01T00:00:00.000Z",
     lastUsedAt: "2026-01-01T00:00:00.000Z",
     closed: false,
-  };
+  });
 
   const line = formatPromptSessionBannerLine(record, "/home/user/project/src/auth");
   assert.equal(
@@ -79,15 +79,15 @@ test("CLI resolves unknown subcommand names as raw agent commands", async () => 
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
 
-    const session: SessionRecord = {
-      id: "custom-session",
-      sessionId: "custom-session",
+    const session = makeSessionRecord({
+      acpxRecordId: "custom-session",
+      acpSessionId: "custom-session",
       agentCommand: "custom-agent",
       cwd,
       createdAt: "2026-01-01T00:00:00.000Z",
       lastUsedAt: "2026-01-01T00:00:00.000Z",
       closed: false,
-    };
+    });
     await writeSessionRecord(homeDir, session);
 
     const result = await runCli(
@@ -145,7 +145,7 @@ test("sessions ensure creates when missing and returns existing on subsequent ca
     assert.equal(first.code, 0, first.stderr);
     const firstPayload = JSON.parse(first.stdout.trim()) as {
       type: string;
-      id: string;
+      acpxRecordId: string;
       created: boolean;
     };
     assert.equal(firstPayload.type, "session_ensured");
@@ -158,12 +158,12 @@ test("sessions ensure creates when missing and returns existing on subsequent ca
     assert.equal(second.code, 0, second.stderr);
     const secondPayload = JSON.parse(second.stdout.trim()) as {
       type: string;
-      id: string;
+      acpxRecordId: string;
       created: boolean;
     };
     assert.equal(secondPayload.type, "session_ensured");
     assert.equal(secondPayload.created, false);
-    assert.equal(secondPayload.id, firstPayload.id);
+    assert.equal(secondPayload.acpxRecordId, firstPayload.acpxRecordId);
   });
 });
 
@@ -175,8 +175,8 @@ test("sessions ensure resolves existing session by directory walk", async () => 
     await fs.mkdir(path.join(root, ".git"), { recursive: true });
 
     await writeSessionRecord(homeDir, {
-      id: "parent-session",
-      sessionId: "parent-session",
+      acpxRecordId: "parent-session",
+      acpSessionId: "parent-session",
       agentCommand: "npx @zed-industries/codex-acp",
       cwd: root,
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -190,15 +190,15 @@ test("sessions ensure resolves existing session by directory walk", async () => 
     );
     assert.equal(result.code, 0, result.stderr);
     const payload = JSON.parse(result.stdout.trim()) as {
-      id: string;
+      acpxRecordId: string;
       created: boolean;
     };
-    assert.equal(payload.id, "parent-session");
+    assert.equal(payload.acpxRecordId, "parent-session");
     assert.equal(payload.created, false);
   });
 });
 
-test("sessions and status surface runtimeSessionId for codex and claude in JSON mode", async () => {
+test("sessions and status surface agentSessionId for codex and claude in JSON mode", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
@@ -244,10 +244,10 @@ test("sessions and status surface runtimeSessionId for codex and claude in JSON 
       assert.equal(created.code, 0, created.stderr);
       const createdPayload = JSON.parse(created.stdout.trim()) as {
         type: string;
-        runtimeSessionId?: string;
+        agentSessionId?: string;
       };
       assert.equal(createdPayload.type, "session_created");
-      assert.equal(createdPayload.runtimeSessionId, scenario.expectedRuntimeSessionId);
+      assert.equal(createdPayload.agentSessionId, scenario.expectedRuntimeSessionId);
 
       const ensured = await runCli(
         ["--cwd", cwd, "--format", "json", scenario.agentName, "sessions", "ensure"],
@@ -257,11 +257,11 @@ test("sessions and status surface runtimeSessionId for codex and claude in JSON 
       const ensuredPayload = JSON.parse(ensured.stdout.trim()) as {
         type: string;
         created: boolean;
-        runtimeSessionId?: string;
+        agentSessionId?: string;
       };
       assert.equal(ensuredPayload.type, "session_ensured");
       assert.equal(ensuredPayload.created, false);
-      assert.equal(ensuredPayload.runtimeSessionId, scenario.expectedRuntimeSessionId);
+      assert.equal(ensuredPayload.agentSessionId, scenario.expectedRuntimeSessionId);
 
       const status = await runCli(
         ["--cwd", cwd, "--format", "json", scenario.agentName, "status"],
@@ -269,14 +269,14 @@ test("sessions and status surface runtimeSessionId for codex and claude in JSON 
       );
       assert.equal(status.code, 0, status.stderr);
       const statusPayload = JSON.parse(status.stdout.trim()) as {
-        runtimeSessionId?: string;
+        agentSessionId?: string;
       };
-      assert.equal(statusPayload.runtimeSessionId, scenario.expectedRuntimeSessionId);
+      assert.equal(statusPayload.agentSessionId, scenario.expectedRuntimeSessionId);
     }
   });
 });
 
-test("prompt reconciles runtimeSessionId from loadSession metadata", async () => {
+test("prompt reconciles agentSessionId from loadSession metadata", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
@@ -299,8 +299,8 @@ test("prompt reconciles runtimeSessionId from loadSession metadata", async () =>
 
     const sessionId = "resume-runtime-session";
     await writeSessionRecord(homeDir, {
-      id: sessionId,
-      sessionId,
+      acpxRecordId: sessionId,
+      acpSessionId: sessionId,
       agentCommand: MOCK_AGENT_WITH_LOAD_RUNTIME_SESSION_ID,
       cwd,
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -323,7 +323,7 @@ test("prompt reconciles runtimeSessionId from loadSession metadata", async () =>
     const storedRecord = JSON.parse(
       await fs.readFile(storedRecordPath, "utf8"),
     ) as SessionRecord;
-    assert.equal(storedRecord.runtimeSessionId, "loaded-runtime-session");
+    assert.equal(storedRecord.agentSessionId, "loaded-runtime-session");
   });
 });
 
@@ -604,10 +604,10 @@ test("--json-strict suppresses session banners on stderr", async () => {
     assert.equal(result.stderr.trim(), "");
     const payload = JSON.parse(result.stdout.trim()) as {
       type: string;
-      id: string;
+      acpxRecordId: string;
     };
     assert.equal(payload.type, "session_created");
-    assert.equal(typeof payload.id, "string");
+    assert.equal(typeof payload.acpxRecordId, "string");
   });
 });
 
@@ -697,8 +697,8 @@ test("cancel resolves named session when -s is before subcommand", async () => {
     await fs.mkdir(cwd, { recursive: true });
 
     await writeSessionRecord(homeDir, {
-      id: "named-cancel-session",
-      sessionId: "named-cancel-session",
+      acpxRecordId: "named-cancel-session",
+      acpSessionId: "named-cancel-session",
       agentCommand: "npx @zed-industries/codex-acp",
       cwd,
       name: "named",
@@ -728,8 +728,8 @@ test("status resolves named session when -s is before subcommand", async () => {
     await fs.mkdir(cwd, { recursive: true });
 
     await writeSessionRecord(homeDir, {
-      id: "named-status-session",
-      sessionId: "named-status-session",
+      acpxRecordId: "named-status-session",
+      acpSessionId: "named-status-session",
       agentCommand: "npx @zed-industries/codex-acp",
       cwd,
       name: "named",
@@ -747,12 +747,12 @@ test("status resolves named session when -s is before subcommand", async () => {
     const payload = JSON.parse(result.stdout.trim()) as {
       sessionId: string | null;
       status: string;
-      runtimeSessionId?: string | null;
+      agentSessionId?: string | null;
     };
     assert.equal(payload.sessionId, "named-status-session");
     assert.equal(payload.status, "dead");
     assert.notEqual(payload.status, "no-session");
-    assert.equal("runtimeSessionId" in payload, false);
+    assert.equal("agentSessionId" in payload, false);
   });
 });
 
@@ -778,8 +778,8 @@ test("set-mode resolves named session when -s is before subcommand", async () =>
     );
 
     await writeSessionRecord(homeDir, {
-      id: "named-set-mode-session",
-      sessionId: "named-set-mode-session",
+      acpxRecordId: "named-set-mode-session",
+      acpSessionId: "named-set-mode-session",
       agentCommand: missingAgentCommand,
       cwd,
       name: "named",
@@ -821,8 +821,8 @@ test("set resolves named session when -s is before subcommand", async () => {
     );
 
     await writeSessionRecord(homeDir, {
-      id: "named-set-config-session",
-      sessionId: "named-set-config-session",
+      acpxRecordId: "named-set-config-session",
+      acpSessionId: "named-set-config-session",
       agentCommand: missingAgentCommand,
       cwd,
       name: "named",
@@ -929,25 +929,40 @@ test("sessions history prints stored history entries", async () => {
     await fs.mkdir(cwd, { recursive: true });
 
     await writeSessionRecord(homeDir, {
-      id: "history-session",
-      sessionId: "history-session",
+      acpxRecordId: "history-session",
+      acpSessionId: "history-session",
       agentCommand: "npx @zed-industries/codex-acp",
       cwd,
       createdAt: "2026-01-01T00:00:00.000Z",
       lastUsedAt: "2026-01-01T00:10:00.000Z",
       closed: false,
-      turnHistory: [
-        {
-          role: "user",
-          timestamp: "2026-01-01T00:01:00.000Z",
-          textPreview: "first message",
-        },
-        {
-          role: "assistant",
-          timestamp: "2026-01-01T00:02:00.000Z",
-          textPreview: "second message",
-        },
-      ],
+      thread: {
+        version: "0.3.0",
+        title: null,
+        messages: [
+          {
+            kind: "user",
+            id: "user_1",
+            content: [{ type: "text", text: "first message" }],
+          },
+          {
+            kind: "agent",
+            content: [{ type: "text", text: "second message" }],
+          },
+        ],
+        updated_at: "2026-01-01T00:02:00.000Z",
+        detailed_summary: null,
+        initial_project_snapshot: null,
+        cumulative_token_usage: {},
+        request_token_usage: {},
+        model: null,
+        profile: null,
+        imported: false,
+        subagent_context: null,
+        speed: null,
+        thinking_enabled: false,
+        thinking_effort: null,
+      },
     });
 
     const result = await runCli(
@@ -972,8 +987,8 @@ test("status reports running process when session pid is alive", async () => {
 
     try {
       await writeSessionRecord(homeDir, {
-        id: "status-live",
-        sessionId: "status-live",
+        acpxRecordId: "status-live",
+        acpSessionId: "status-live",
         agentCommand: "npx @zed-industries/codex-acp",
         cwd,
         createdAt: "2026-01-01T00:00:00.000Z",
@@ -1031,8 +1046,8 @@ test("config defaults are loaded from global and project config files", async ()
     );
 
     await writeSessionRecord(homeDir, {
-      id: "custom-config-session",
-      sessionId: "custom-config-session",
+      acpxRecordId: "custom-config-session",
+      acpSessionId: "custom-config-session",
       agentCommand: "custom-project",
       cwd,
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -1102,14 +1117,76 @@ async function runCli(
   });
 }
 
+function makeSessionRecord(
+  record: Partial<SessionRecord> & {
+    acpxRecordId: string;
+    acpSessionId: string;
+    agentCommand: string;
+    cwd: string;
+    createdAt?: string;
+    lastUsedAt?: string;
+  },
+): SessionRecord {
+  const timestamp = "2026-01-01T00:00:00.000Z";
+  return {
+    schema: "acpx.session.v1",
+    acpxRecordId: record.acpxRecordId,
+    acpSessionId: record.acpSessionId,
+    agentSessionId: record.agentSessionId,
+    agentCommand: record.agentCommand,
+    cwd: record.cwd,
+    name: record.name,
+    createdAt: record.createdAt ?? timestamp,
+    lastUsedAt: record.lastUsedAt ?? timestamp,
+    closed: record.closed ?? false,
+    closedAt: record.closedAt,
+    pid: record.pid,
+    agentStartedAt: record.agentStartedAt,
+    lastPromptAt: record.lastPromptAt,
+    lastAgentExitCode: record.lastAgentExitCode,
+    lastAgentExitSignal: record.lastAgentExitSignal,
+    lastAgentExitAt: record.lastAgentExitAt,
+    lastAgentDisconnectReason: record.lastAgentDisconnectReason,
+    protocolVersion: record.protocolVersion,
+    agentCapabilities: record.agentCapabilities,
+    thread: record.thread ?? {
+      version: "0.3.0",
+      title: null,
+      messages: [],
+      updated_at: record.lastUsedAt ?? timestamp,
+      detailed_summary: null,
+      initial_project_snapshot: null,
+      cumulative_token_usage: {},
+      request_token_usage: {},
+      model: null,
+      profile: null,
+      imported: false,
+      subagent_context: null,
+      speed: null,
+      thinking_enabled: false,
+      thinking_effort: null,
+    },
+    acpx: record.acpx,
+  };
+}
+
 async function writeSessionRecord(
   homeDir: string,
-  record: SessionRecord,
+  record: Partial<SessionRecord> & {
+    acpxRecordId: string;
+    acpSessionId: string;
+    agentCommand: string;
+    cwd: string;
+  },
 ): Promise<void> {
   const sessionDir = path.join(homeDir, ".acpx", "sessions");
   await fs.mkdir(sessionDir, { recursive: true });
-  const file = path.join(sessionDir, `${encodeURIComponent(record.id)}.json`);
-  await fs.writeFile(file, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  const file = path.join(sessionDir, `${encodeURIComponent(record.acpxRecordId)}.json`);
+  await fs.writeFile(
+    file,
+    `${JSON.stringify(makeSessionRecord(record), null, 2)}\n`,
+    "utf8",
+  );
 }
 
 function escapeRegex(value: string): string {

@@ -294,12 +294,14 @@ function parseSessionSendResult(raw: unknown): SessionSendResult | null {
   }
 
   const recordValid =
-    typeof record.id === "string" &&
-    typeof record.sessionId === "string" &&
+    typeof record.acpxRecordId === "string" &&
+    typeof record.acpSessionId === "string" &&
     typeof record.agentCommand === "string" &&
     typeof record.cwd === "string" &&
     typeof record.createdAt === "string" &&
-    typeof record.lastUsedAt === "string";
+    typeof record.lastUsedAt === "string" &&
+    !!record.thread &&
+    typeof record.thread === "object";
   if (!recordValid) {
     return null;
   }

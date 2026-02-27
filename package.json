@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "tsup src/cli.ts --format esm --dts --clean",
-    "build:test": "tsc -p tsconfig.test.json",
+    "build:test": "node -e \"require('node:fs').rmSync('dist-test',{recursive:true,force:true})\" && tsc -p tsconfig.test.json",
     "test": "npm run build:test && node --test dist-test/test/*.test.js",
     "prepare": "husky",
     "precommit": "npm exec -- lint-staged && npm run -s build",

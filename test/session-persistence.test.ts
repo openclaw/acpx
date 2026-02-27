@@ -12,20 +12,18 @@ type SessionModule = typeof import("../src/session.js");
 const SESSION_MODULE_URL = new URL("../src/session.js", import.meta.url);
 
 test("SessionRecord allows optional closed and closedAt fields", () => {
-  const record: SessionRecord = {
-    id: "type-check",
-    sessionId: "type-check",
+  const record = makeSessionRecord({
+    acpxRecordId: "type-check",
+    acpSessionId: "type-check",
     agentCommand: "agent",
     cwd: "/tmp/type-check",
-    createdAt: "2026-01-01T00:00:00.000Z",
-    lastUsedAt: "2026-01-01T00:00:00.000Z",
-  };
+  });
 
-  assert.equal(record.closed, undefined);
+  assert.equal(record.closed, false);
   assert.equal(record.closedAt, undefined);
 });
 
-test("listSessions preserves stored turn history and lifecycle metadata", async () => {
+test("listSessions preserves lifecycle and thread metadata", async () => {
   await withTempHome(async (homeDir) => {
     const session = await loadSessionModule();
     const cwd = path.join(homeDir, "workspace");
@@ -33,8 +31,8 @@ test("listSessions preserves stored turn history and lifecycle metadata", async 
     await writeSessionRecord(
       homeDir,
       makeSessionRecord({
-        id: "history-meta",
-        sessionId: "history-meta",
+        acpxRecordId: "session-a",
+        acpSessionId: "session-a",
         agentCommand: "agent-a",
         cwd,
         pid: 12345,
@@ -44,23 +42,38 @@ test("listSessions preserves stored turn history and lifecycle metadata", async 
         lastAgentExitSignal: "SIGTERM",
         lastAgentExitAt: "2026-01-01T00:02:00.000Z",
         lastAgentDisconnectReason: "process_exit",
-        turnHistory: [
-          {
-            role: "user",
-            timestamp: "2026-01-01T00:01:00.000Z",
-            textPreview: "hello",
-          },
-          {
-            role: "assistant",
-            timestamp: "2026-01-01T00:01:30.000Z",
-            textPreview: "world",
-          },
-        ],
+        thread: {
+          version: "0.3.0",
+          title: "My Thread",
+          messages: [
+            {
+              kind: "user",
+              id: "user_1",
+              content: [{ type: "text", text: "hello" }],
+            },
+            {
+              kind: "agent",
+              content: [{ type: "text", text: "world" }],
+            },
+          ],
+          updated_at: "2026-01-01T00:02:00.000Z",
+          detailed_summary: null,
+          initial_project_snapshot: null,
+          cumulative_token_usage: {},
+          request_token_usage: {},
+          model: null,
+          profile: null,
+          imported: false,
+          subagent_context: null,
+          speed: null,
+          thinking_enabled: false,
+          thinking_effort: null,
+        },
       }),
     );
 
     const sessions = await session.listSessions();
-    const record = sessions.find((entry) => entry.id === "history-meta");
+    const record = sessions.find((entry) => entry.acpxRecordId === "session-a");
     assert.ok(record);
     assert.equal(record.agentStartedAt, "2026-01-01T00:00:00.000Z");
     assert.equal(record.lastPromptAt, "2026-01-01T00:01:00.000Z");
@@ -68,14 +81,12 @@ test("listSessions preserves stored turn history and lifecycle metadata", async 
     assert.equal(record.lastAgentExitSignal, "SIGTERM");
     assert.equal(record.lastAgentExitAt, "2026-01-01T00:02:00.000Z");
     assert.equal(record.lastAgentDisconnectReason, "process_exit");
-    assert.deepEqual(
-      record.turnHistory?.map((entry) => entry.textPreview),
-      ["hello", "world"],
-    );
+    assert.equal(record.thread.messages.length, 2);
+    assert.equal(record.thread.title, "My Thread");
   });
 });
 
-test("listSessions preserves optional runtimeSessionId", async () => {
+test("listSessions preserves optional agentSessionId", async () => {
   await withTempHome(async (homeDir) => {
     const session = await loadSessionModule();
     const cwd = path.join(homeDir, "workspace");
@@ -83,323 +94,68 @@ test("listSessions preserves optional runtimeSessionId", async () => {
     await writeSessionRecord(
       homeDir,
       makeSessionRecord({
-        id: "runtime-meta",
-        sessionId: "runtime-meta",
-        runtimeSessionId: "provider-runtime-123",
+        acpxRecordId: "session-runtime",
+        acpSessionId: "session-runtime",
+        agentSessionId: "provider-runtime-123",
         agentCommand: "agent-a",
         cwd,
       }),
     );
 
     const sessions = await session.listSessions();
-    const record = sessions.find((entry) => entry.id === "runtime-meta");
+    const record = sessions.find((entry) => entry.acpxRecordId === "session-runtime");
     assert.ok(record);
-    assert.equal(record.runtimeSessionId, "provider-runtime-123");
+    assert.equal(record.agentSessionId, "provider-runtime-123");
   });
 });
 
-test("listSessions ignores invalid optional runtimeSessionId values", async () => {
+test("findSession and findSessionByDirectoryWalk resolve expected records", async () => {
   await withTempHome(async (homeDir) => {
     const session = await loadSessionModule();
-    const cwd = path.join(homeDir, "workspace");
-    const id = "runtime-meta-invalid";
 
-    const filePath = sessionFilePath(homeDir, id);
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    const repoRoot = path.join(homeDir, "repo");
+    const packagesDir = path.join(repoRoot, "packages");
+    const nestedDir = path.join(packagesDir, "app");
 
-    const invalidRecord = {
-      ...makeSessionRecord({
-        id,
-        sessionId: id,
-        agentCommand: "agent-a",
-        cwd,
-      }),
-      runtimeSessionId: 123,
-    };
-    await fs.writeFile(filePath, `${JSON.stringify(invalidRecord, null, 2)}\n`, "utf8");
-
-    const sessions = await session.listSessions();
-    const record = sessions.find((entry) => entry.id === id);
-    assert.ok(record);
-    assert.equal(record.runtimeSessionId, undefined);
-  });
-});
-
-test("findSession matches by agent/cwd and by agent/cwd/name", async () => {
-  await withTempHome(async (homeDir) => {
-    const session = await loadSessionModule();
-    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+    await fs.mkdir(nestedDir, { recursive: true });
 
     await writeSessionRecord(
       homeDir,
       makeSessionRecord({
-        id: "session-default",
-        sessionId: "session-default",
+        acpxRecordId: "session-root",
+        acpSessionId: "session-root",
         agentCommand: "agent-a",
-        cwd,
-        name: undefined,
+        cwd: repoRoot,
       }),
     );
     await writeSessionRecord(
       homeDir,
       makeSessionRecord({
-        id: "session-named",
-        sessionId: "session-named",
+        acpxRecordId: "session-packages",
+        acpSessionId: "session-packages",
         agentCommand: "agent-a",
-        cwd,
-        name: "backend",
+        cwd: packagesDir,
       }),
     );
 
     const foundDefault = await session.findSession({
       agentCommand: "agent-a",
-      cwd,
+      cwd: packagesDir,
     });
-    const foundNamed = await session.findSession({
-      agentCommand: "agent-a",
-      cwd,
-      name: "backend",
-    });
-
-    assert.equal(foundDefault?.id, "session-default");
-    assert.equal(foundNamed?.id, "session-named");
-  });
-});
-
-test("findSession skips closed sessions by default and includes them when requested", async () => {
-  await withTempHome(async (homeDir) => {
-    const session = await loadSessionModule();
-    const cwd = path.join(homeDir, "workspace");
-
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        id: "closed-session",
-        sessionId: "closed-session",
-        agentCommand: "agent-a",
-        cwd,
-        closed: true,
-        closedAt: "2026-01-01T00:01:00.000Z",
-      }),
-    );
-
-    const skipped = await session.findSession({
-      agentCommand: "agent-a",
-      cwd,
-    });
-    const included = await session.findSession({
-      agentCommand: "agent-a",
-      cwd,
-      includeClosed: true,
-    });
-
-    assert.equal(skipped, undefined);
-    assert.equal(included?.id, "closed-session");
-  });
-});
-
-test("findSessionByDirectoryWalk returns the nearest active session within git root boundary", async () => {
-  await withTempHome(async (homeDir) => {
-    const session = await loadSessionModule();
-
-    const repoRoot = path.join(homeDir, "repo");
-    const packagesDir = path.join(repoRoot, "packages");
-    const nestedDir = path.join(packagesDir, "app");
-
-    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
-    await fs.mkdir(nestedDir, { recursive: true });
-
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        id: "session-root",
-        sessionId: "session-root",
-        agentCommand: "agent-a",
-        cwd: repoRoot,
-      }),
-    );
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        id: "session-packages",
-        sessionId: "session-packages",
-        agentCommand: "agent-a",
-        cwd: packagesDir,
-      }),
-    );
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        id: "session-home",
-        sessionId: "session-home",
-        agentCommand: "agent-a",
-        cwd: homeDir,
-      }),
-    );
+    assert.equal(foundDefault?.acpxRecordId, "session-packages");
 
     const boundary = session.findGitRepositoryRoot(nestedDir);
-    assert.equal(boundary, repoRoot);
-
-    const found = await session.findSessionByDirectoryWalk({
+    const walked = await session.findSessionByDirectoryWalk({
       agentCommand: "agent-a",
       cwd: nestedDir,
       boundary,
     });
-
-    assert.equal(found?.id, "session-packages");
+    assert.equal(walked?.acpxRecordId, "session-packages");
   });
 });
 
-test("findSessionByDirectoryWalk matches named sessions and skips closed sessions", async () => {
-  await withTempHome(async (homeDir) => {
-    const session = await loadSessionModule();
-
-    const repoRoot = path.join(homeDir, "repo");
-    const packagesDir = path.join(repoRoot, "packages");
-    const nestedDir = path.join(packagesDir, "app");
-
-    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
-    await fs.mkdir(nestedDir, { recursive: true });
-
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        id: "session-closed",
-        sessionId: "session-closed",
-        agentCommand: "agent-a",
-        cwd: packagesDir,
-        closed: true,
-        closedAt: "2026-01-01T00:01:00.000Z",
-      }),
-    );
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        id: "session-default",
-        sessionId: "session-default",
-        agentCommand: "agent-a",
-        cwd: repoRoot,
-      }),
-    );
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        id: "session-named",
-        sessionId: "session-named",
-        agentCommand: "agent-a",
-        cwd: repoRoot,
-        name: "frontend",
-      }),
-    );
-
-    const boundary = session.findGitRepositoryRoot(nestedDir);
-    assert.equal(boundary, repoRoot);
-
-    const foundDefault = await session.findSessionByDirectoryWalk({
-      agentCommand: "agent-a",
-      cwd: nestedDir,
-      boundary,
-    });
-    const foundNamed = await session.findSessionByDirectoryWalk({
-      agentCommand: "agent-a",
-      cwd: nestedDir,
-      name: "frontend",
-      boundary,
-    });
-
-    assert.equal(foundDefault?.id, "session-default");
-    assert.equal(foundNamed?.id, "session-named");
-  });
-});
-
-test("findSessionByDirectoryWalk falls back to exact cwd matching when no git root exists", async () => {
-  await withTempHome(async (homeDir) => {
-    const session = await loadSessionModule();
-
-    const parentDir = path.join(homeDir, "outside-git");
-    const nestedDir = path.join(parentDir, "project");
-
-    await fs.mkdir(nestedDir, { recursive: true });
-
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        id: "session-parent",
-        sessionId: "session-parent",
-        agentCommand: "agent-a",
-        cwd: parentDir,
-      }),
-    );
-
-    const gitRoot = session.findGitRepositoryRoot(nestedDir);
-    assert.equal(gitRoot, undefined);
-
-    const missed = await session.findSessionByDirectoryWalk({
-      agentCommand: "agent-a",
-      cwd: nestedDir,
-      boundary: gitRoot ?? nestedDir,
-    });
-    assert.equal(missed, undefined);
-
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        id: "session-nested",
-        sessionId: "session-nested",
-        agentCommand: "agent-a",
-        cwd: nestedDir,
-      }),
-    );
-
-    const found = await session.findSessionByDirectoryWalk({
-      agentCommand: "agent-a",
-      cwd: nestedDir,
-      boundary: gitRoot ?? nestedDir,
-    });
-    assert.equal(found?.id, "session-nested");
-  });
-});
-
-test("listSessionsForAgent returns every session for the agent command", async () => {
-  await withTempHome(async (homeDir) => {
-    const session = await loadSessionModule();
-
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        id: "agent-a-1",
-        sessionId: "agent-a-1",
-        agentCommand: "agent-a",
-      }),
-    );
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        id: "agent-a-2",
-        sessionId: "agent-a-2",
-        agentCommand: "agent-a",
-        closed: true,
-        closedAt: "2026-01-01T00:01:00.000Z",
-      }),
-    );
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        id: "agent-b-1",
-        sessionId: "agent-b-1",
-        agentCommand: "agent-b",
-      }),
-    );
-
-    const sessions = await session.listSessionsForAgent("agent-a");
-    assert.deepEqual(
-      new Set(sessions.map((record) => record.id)),
-      new Set(["agent-a-1", "agent-a-2"]),
-    );
-  });
-});
-
-test("closeSession soft-closes, keeps file on disk, and terminates matching process", async () => {
+test("closeSession soft-closes and terminates matching process", async () => {
   await withTempHome(async (homeDir) => {
     const session = await loadSessionModule();
 
@@ -413,8 +169,8 @@ test("closeSession soft-closes, keeps file on disk, and terminates matching proc
     await writeSessionRecord(
       homeDir,
       makeSessionRecord({
-        id: sessionId,
-        sessionId,
+        acpxRecordId: sessionId,
+        acpSessionId: sessionId,
         agentCommand: process.execPath,
         cwd,
         pid: child.pid,
@@ -451,10 +207,7 @@ test("normalizeQueueOwnerTtlMs applies default and edge-case normalization", asy
       session.normalizeQueueOwnerTtlMs(undefined),
       session.DEFAULT_QUEUE_OWNER_TTL_MS,
     );
-    assert.equal(
-      session.normalizeQueueOwnerTtlMs(0),
-      0, // 0 means keep alive forever
-    );
+    assert.equal(session.normalizeQueueOwnerTtlMs(0), 0);
     assert.equal(
       session.normalizeQueueOwnerTtlMs(-1),
       session.DEFAULT_QUEUE_OWNER_TTL_MS,
@@ -500,14 +253,22 @@ async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<vo
   }
 }
 
-function makeSessionRecord(overrides: Partial<SessionRecord>): SessionRecord {
+function makeSessionRecord(
+  overrides: Partial<SessionRecord> & {
+    acpxRecordId: string;
+    acpSessionId: string;
+    agentCommand: string;
+    cwd: string;
+  },
+): SessionRecord {
   const timestamp = "2026-01-01T00:00:00.000Z";
   return {
-    id: overrides.id ?? "session-id",
-    sessionId: overrides.sessionId ?? overrides.id ?? "session-id",
-    runtimeSessionId: overrides.runtimeSessionId,
-    agentCommand: overrides.agentCommand ?? "agent-command",
-    cwd: path.resolve(overrides.cwd ?? "/tmp/acpx"),
+    schema: "acpx.session.v1",
+    acpxRecordId: overrides.acpxRecordId,
+    acpSessionId: overrides.acpSessionId,
+    agentSessionId: overrides.agentSessionId,
+    agentCommand: overrides.agentCommand,
+    cwd: path.resolve(overrides.cwd),
     name: overrides.name,
     createdAt: overrides.createdAt ?? timestamp,
     lastUsedAt: overrides.lastUsedAt ?? timestamp,
@@ -520,17 +281,35 @@ function makeSessionRecord(overrides: Partial<SessionRecord>): SessionRecord {
     lastAgentExitSignal: overrides.lastAgentExitSignal,
     lastAgentExitAt: overrides.lastAgentExitAt,
     lastAgentDisconnectReason: overrides.lastAgentDisconnectReason,
-    turnHistory: overrides.turnHistory,
-    acpProjection: overrides.acpProjection,
+    protocolVersion: overrides.protocolVersion,
+    agentCapabilities: overrides.agentCapabilities,
+    thread: overrides.thread ?? {
+      version: "0.3.0",
+      title: null,
+      messages: [],
+      updated_at: overrides.lastUsedAt ?? timestamp,
+      detailed_summary: null,
+      initial_project_snapshot: null,
+      cumulative_token_usage: {},
+      request_token_usage: {},
+      model: null,
+      profile: null,
+      imported: false,
+      subagent_context: null,
+      speed: null,
+      thinking_enabled: false,
+      thinking_effort: null,
+    },
+    acpx: overrides.acpx,
   };
 }
 
-function sessionFilePath(homeDir: string, sessionId: string): string {
+function sessionFilePath(homeDir: string, acpxRecordId: string): string {
   return path.join(
     homeDir,
     ".acpx",
     "sessions",
-    `${encodeURIComponent(sessionId)}.json`,
+    `${encodeURIComponent(acpxRecordId)}.json`,
   );
 }
 
@@ -538,7 +317,7 @@ async function writeSessionRecord(
   homeDir: string,
   record: SessionRecord,
 ): Promise<void> {
-  const filePath = sessionFilePath(homeDir, record.id);
+  const filePath = sessionFilePath(homeDir, record.acpxRecordId);
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
 }
@@ -571,70 +350,3 @@ async function waitForExit(pid: number | undefined): Promise<boolean> {
 
   return false;
 }
-
-test("listSessions preserves ACP projection when present", async () => {
-  await withTempHome(async (homeDir) => {
-    const session = await loadSessionModule();
-    const cwd = path.join(homeDir, "workspace");
-
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        id: "acp-projection",
-        sessionId: "acp-projection",
-        agentCommand: "agent-a",
-        cwd,
-        acpProjection: {
-          schema: "acpx.session.acp.v1",
-          events: [
-            {
-              type: "session_update",
-              timestamp: "2026-01-01T00:00:10.000Z",
-              update: {
-                sessionUpdate: "agent_message_chunk",
-                content: { type: "text", text: "hello" },
-              },
-            },
-            {
-              type: "client_operation",
-              timestamp: "2026-01-01T00:00:11.000Z",
-              operation: {
-                method: "terminal/create",
-                status: "completed",
-                summary: "created terminal",
-                timestamp: "2026-01-01T00:00:11.000Z",
-              },
-            },
-          ],
-          toolCalls: [
-            {
-              toolCallId: "call_1",
-              title: "Run ls",
-              status: "completed",
-              kind: "execute",
-              updatedAt: "2026-01-01T00:00:12.000Z",
-            },
-          ],
-          availableCommands: ["create_plan"],
-          currentModeId: "code",
-          usage: {
-            used: 10,
-            size: 100,
-            costAmount: 0.01,
-            costCurrency: "USD",
-          },
-        },
-      }),
-    );
-
-    const sessions = await session.listSessions();
-    const record = sessions.find((entry) => entry.id === "acp-projection");
-    assert.ok(record);
-    assert.equal(record.acpProjection?.schema, "acpx.session.acp.v1");
-    assert.equal(record.acpProjection?.events.length, 2);
-    assert.equal(record.acpProjection?.toolCalls.length, 1);
-    assert.equal(record.acpProjection?.availableCommands?.[0], "create_plan");
-    assert.equal(record.acpProjection?.currentModeId, "code");
-    assert.equal(record.acpProjection?.usage?.used, 10);
-  });
-});

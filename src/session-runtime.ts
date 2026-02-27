@@ -1,8 +1,4 @@
-import type {
-  ContentBlock,
-  SessionNotification,
-  StopReason,
-} from "@agentclientprotocol/sdk";
+import type { SessionNotification, StopReason } from "@agentclientprotocol/sdk";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { AcpClient, type AgentLifecycleSnapshot } from "./client.js";
@@ -12,11 +8,13 @@ import {
   normalizeOutputError,
 } from "./error-normalization.js";
 import {
-  cloneSessionAcpProjection,
-  createSessionAcpProjection,
-  recordClientOperation as recordProjectionClientOperation,
-  recordSessionUpdate as recordProjectionSessionUpdate,
-} from "./session-acp-projection.js";
+  cloneSessionAcpxState,
+  cloneSessionThread,
+  createSessionThread,
+  recordClientOperation as recordThreadClientOperation,
+  recordPromptSubmission,
+  recordSessionUpdate as recordThreadSessionUpdate,
+} from "./session-thread-model.js";
 import {
   QueueOwnerTurnController,
   type QueueOwnerActiveSessionController,
@@ -51,30 +49,28 @@ import {
   resolveSessionRecord,
   writeSessionRecord,
 } from "./session-persistence.js";
-import type {
-  AuthPolicy,
-  ClientOperation,
-  NonInteractivePermissionPolicy,
-  OutputErrorEmissionPolicy,
-  OutputErrorAcpPayload,
-  OutputErrorCode,
-  OutputErrorOrigin,
-  OutputFormatter,
-  PermissionMode,
-  RunPromptResult,
-  SessionEnsureResult,
-  SessionHistoryEntry,
-  SessionRecord,
-  SessionSetConfigOptionResult,
-  SessionSetModeResult,
-  SessionSendOutcome,
-  SessionSendResult,
+import {
+  SESSION_RECORD_SCHEMA,
+  type AuthPolicy,
+  type ClientOperation,
+  type NonInteractivePermissionPolicy,
+  type OutputErrorEmissionPolicy,
+  type OutputErrorAcpPayload,
+  type OutputErrorCode,
+  type OutputErrorOrigin,
+  type OutputFormatter,
+  type PermissionMode,
+  type RunPromptResult,
+  type SessionEnsureResult,
+  type SessionRecord,
+  type SessionSetConfigOptionResult,
+  type SessionSetModeResult,
+  type SessionSendOutcome,
+  type SessionSendResult,
 } from "./types.js";
 
 export const DEFAULT_QUEUE_OWNER_TTL_MS = 300_000;
 const INTERRUPT_CANCEL_WAIT_MS = 2_500;
-const SESSION_HISTORY_MAX_ENTRIES = 500;
-const SESSION_HISTORY_PREVIEW_CHARS = 220;
 
 export class TimeoutError extends Error {
   constructor(timeoutMs: number) {
@@ -360,84 +356,6 @@ export function normalizeQueueOwnerTtlMs(ttlMs: number | undefined): number {
   return Math.round(ttlMs);
 }
 
-function collapseWhitespace(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function toPreviewText(value: string): string {
-  const collapsed = collapseWhitespace(value);
-  if (collapsed.length <= SESSION_HISTORY_PREVIEW_CHARS) {
-    return collapsed;
-  }
-  if (SESSION_HISTORY_PREVIEW_CHARS <= 3) {
-    return collapsed.slice(0, SESSION_HISTORY_PREVIEW_CHARS);
-  }
-  return `${collapsed.slice(0, SESSION_HISTORY_PREVIEW_CHARS - 3)}...`;
-}
-
-function textFromContent(content: ContentBlock): string | undefined {
-  if (content.type === "text") {
-    return content.text;
-  }
-  if (content.type === "resource_link") {
-    return content.title ?? content.name ?? content.uri;
-  }
-  if (content.type === "resource") {
-    if ("text" in content.resource && typeof content.resource.text === "string") {
-      return content.resource.text;
-    }
-    return content.resource.uri;
-  }
-  return undefined;
-}
-
-function toHistoryEntryFromUpdate(
-  notification: SessionNotification,
-): SessionHistoryEntry | undefined {
-  const update = notification.update;
-  if (
-    update.sessionUpdate !== "user_message_chunk" &&
-    update.sessionUpdate !== "agent_message_chunk"
-  ) {
-    return undefined;
-  }
-
-  const text = textFromContent(update.content);
-  if (!text) {
-    return undefined;
-  }
-
-  const textPreview = toPreviewText(text);
-  if (!textPreview) {
-    return undefined;
-  }
-
-  return {
-    role: update.sessionUpdate === "user_message_chunk" ? "user" : "assistant",
-    timestamp: isoNow(),
-    textPreview,
-  };
-}
-
-function appendHistoryEntries(
-  current: SessionHistoryEntry[] | undefined,
-  entries: SessionHistoryEntry[],
-): SessionHistoryEntry[] {
-  const base = current ? [...current] : [];
-  for (const entry of entries) {
-    if (!entry.textPreview.trim()) {
-      continue;
-    }
-    base.push(entry);
-  }
-
-  if (base.length <= SESSION_HISTORY_MAX_ENTRIES) {
-    return base;
-  }
-
-  return base.slice(base.length - SESSION_HISTORY_MAX_ENTRIES);
-}
-
 function applyLifecycleSnapshotToRecord(
   record: SessionRecord,
   snapshot: AgentLifecycleSnapshot,
@@ -459,16 +377,16 @@ function applyLifecycleSnapshotToRecord(
   record.lastAgentDisconnectReason = undefined;
 }
 
-function reconcileRuntimeSessionId(
+function reconcileAgentSessionId(
   record: SessionRecord,
-  runtimeSessionId: string | undefined,
+  agentSessionId: string | undefined,
 ): void {
-  const normalized = normalizeRuntimeSessionId(runtimeSessionId);
+  const normalized = normalizeRuntimeSessionId(agentSessionId);
   if (!normalized) {
     return;
   }
 
-  record.runtimeSessionId = normalized;
+  record.agentSessionId = normalized;
 }
 
 function shouldFallbackToNewSession(error: unknown): boolean {
@@ -491,7 +409,7 @@ type ConnectAndLoadSessionOptions = {
 
 type ConnectAndLoadSessionResult = {
   sessionId: string;
-  runtimeSessionId?: string;
+  agentSessionId?: string;
   resumed: boolean;
   loadError?: string;
 };
@@ -526,17 +444,17 @@ async function connectAndLoadSession(
 
   let resumed = false;
   let loadError: string | undefined;
-  let sessionId = record.sessionId;
+  let sessionId = record.acpSessionId;
 
   if (client.supportsLoadSession()) {
     try {
       const loadResult = await withTimeout(
-        client.loadSessionWithOptions(record.sessionId, record.cwd, {
+        client.loadSessionWithOptions(record.acpSessionId, record.cwd, {
           suppressReplayUpdates: true,
         }),
         options.timeoutMs,
       );
-      reconcileRuntimeSessionId(record, loadResult.runtimeSessionId);
+      reconcileAgentSessionId(record, loadResult.agentSessionId);
       resumed = true;
     } catch (error) {
       loadError = formatErrorMessage(error);
@@ -548,8 +466,8 @@ async function connectAndLoadSession(
         options.timeoutMs,
       );
       sessionId = createdSession.sessionId;
-      record.sessionId = sessionId;
-      reconcileRuntimeSessionId(record, createdSession.runtimeSessionId);
+      record.acpSessionId = sessionId;
+      reconcileAgentSessionId(record, createdSession.agentSessionId);
     }
   } else {
     const createdSession = await withTimeout(
@@ -557,15 +475,15 @@ async function connectAndLoadSession(
       options.timeoutMs,
     );
     sessionId = createdSession.sessionId;
-    record.sessionId = sessionId;
-    reconcileRuntimeSessionId(record, createdSession.runtimeSessionId);
+    record.acpSessionId = sessionId;
+    reconcileAgentSessionId(record, createdSession.agentSessionId);
   }
 
   options.onSessionIdResolved?.(sessionId);
 
   return {
     sessionId,
-    runtimeSessionId: record.runtimeSessionId,
+    agentSessionId: record.agentSessionId,
     resumed,
     loadError,
   };
@@ -647,11 +565,12 @@ async function runSessionPrompt(
   const output = options.outputFormatter;
   const record = await resolveSessionRecord(options.sessionRecordId);
   output.setContext({
-    sessionId: record.id,
+    sessionId: record.acpxRecordId,
     stream: "prompt",
   });
-  const assistantSnippets: string[] = [];
-  const acpProjection = cloneSessionAcpProjection(record.acpProjection);
+  const thread = cloneSessionThread(record.thread);
+  let acpxState = cloneSessionAcpxState(record.acpx);
+  recordPromptSubmission(thread, options.message, isoNow());
 
   const client = new AcpClient({
     agentCommand: record.agentCommand,
@@ -663,19 +582,15 @@ async function runSessionPrompt(
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
     onSessionUpdate: (notification) => {
-      recordProjectionSessionUpdate(acpProjection, notification);
+      acpxState = recordThreadSessionUpdate(thread, acpxState, notification);
       output.onSessionUpdate(notification);
-      const entry = toHistoryEntryFromUpdate(notification);
-      if (entry && entry.role === "assistant") {
-        assistantSnippets.push(entry.textPreview);
-      }
     },
     onClientOperation: (operation) => {
-      recordProjectionClientOperation(acpProjection, operation);
+      acpxState = recordThreadClientOperation(thread, acpxState, operation);
       output.onClientOperation(operation);
     },
   });
-  let activeSessionIdForControl = record.sessionId;
+  let activeSessionIdForControl = record.acpSessionId;
   let notifiedClientAvailable = false;
   const activeController: ActiveSessionController = {
     hasActivePrompt: () => client.hasActivePrompt(),
@@ -741,7 +656,8 @@ async function runSessionPrompt(
             );
           }
           record.lastUsedAt = isoNow();
-          record.acpProjection = acpProjection;
+          record.thread = thread;
+          record.acpx = acpxState;
           await writeSessionRecord(record);
           throw error;
         }
@@ -750,37 +666,18 @@ async function runSessionPrompt(
         output.flush();
 
         const now = isoNow();
-        const turnEntries: SessionHistoryEntry[] = [];
-        const userPreview = toPreviewText(options.message);
-        if (userPreview) {
-          turnEntries.push({
-            role: "user",
-            timestamp: record.lastPromptAt ?? now,
-            textPreview: userPreview,
-          });
-        }
-
-        const assistantPreview = toPreviewText(assistantSnippets.join(" "));
-        if (assistantPreview) {
-          turnEntries.push({
-            role: "assistant",
-            timestamp: now,
-            textPreview: assistantPreview,
-          });
-        }
-
-        record.turnHistory = appendHistoryEntries(record.turnHistory, turnEntries);
         record.lastUsedAt = now;
         record.closed = false;
         record.closedAt = undefined;
         record.protocolVersion = client.initializeResult?.protocolVersion;
         record.agentCapabilities = client.initializeResult?.agentCapabilities;
-        record.acpProjection = acpProjection;
+        record.thread = thread;
+        record.acpx = acpxState;
         applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
         await writeSessionRecord(record);
 
         return {
-          ...toPromptResult(response.stopReason, record.id, client),
+          ...toPromptResult(response.stopReason, record.acpxRecordId, client),
           record,
           resumed,
           loadError,
@@ -790,7 +687,8 @@ async function runSessionPrompt(
         await client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS);
         applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
         record.lastUsedAt = isoNow();
-        record.acpProjection = acpProjection;
+        record.thread = thread;
+        record.acpx = acpxState;
         await writeSessionRecord(record).catch(() => {
           // best effort while process is being interrupted
         });
@@ -803,7 +701,8 @@ async function runSessionPrompt(
     }
     await client.close();
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-    record.acpProjection = acpProjection;
+    record.thread = thread;
+    record.acpx = acpxState;
     await writeSessionRecord(record).catch(() => {
       // best effort on close
     });
@@ -843,7 +742,7 @@ async function withConnectedSession<T>(
     authPolicy: options.authPolicy,
     verbose: options.verbose,
   });
-  let activeSessionIdForControl = record.sessionId;
+  let activeSessionIdForControl = record.acpSessionId;
   let notifiedClientAvailable = false;
   const activeController: ActiveSessionController = {
     hasActivePrompt: () => client.hasActivePrompt(),
@@ -1074,9 +973,10 @@ export async function createSession(
 
         const now = isoNow();
         const record: SessionRecord = {
-          id: sessionId,
-          sessionId,
-          runtimeSessionId: createdSession.runtimeSessionId,
+          schema: SESSION_RECORD_SCHEMA,
+          acpxRecordId: sessionId,
+          acpSessionId: sessionId,
+          agentSessionId: normalizeRuntimeSessionId(createdSession.agentSessionId),
           agentCommand: options.agentCommand,
           cwd: absolutePath(options.cwd),
           name: normalizeName(options.name),
@@ -1088,8 +988,10 @@ export async function createSession(
           agentStartedAt: lifecycle.startedAt,
           protocolVersion: client.initializeResult?.protocolVersion,
           agentCapabilities: client.initializeResult?.agentCapabilities,
-          turnHistory: [],
-          acpProjection: createSessionAcpProjection(),
+          thread: createSessionThread(now),
+          acpx: {
+            audit_events: [],
+          },
         };
 
         await writeSessionRecord(record);
@@ -1447,7 +1349,7 @@ async function isLikelyMatchingProcess(
 
 export async function closeSession(sessionId: string): Promise<SessionRecord> {
   const record = await resolveSessionRecord(sessionId);
-  await terminateQueueOwnerForSession(record.id);
+  await terminateQueueOwnerForSession(record.acpxRecordId);
 
   if (
     record.pid != null &&

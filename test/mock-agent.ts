@@ -210,38 +210,38 @@ type MetaFlagSpec = {
 const META_FLAG_SPECS: Record<string, MetaFlagSpec> = {
   "--runtime-session-id": {
     target: "newSessionMeta",
-    key: "runtimeSessionId",
+    key: "agentSessionId",
   },
   "--provider-session-id": {
     target: "newSessionMeta",
-    key: "providerSessionId",
+    key: "agentSessionId",
   },
   "--codex-session-id": {
     target: "newSessionMeta",
-    key: "codexSessionId",
+    key: "agentSessionId",
   },
   "--claude-session-id": {
     target: "newSessionMeta",
-    key: "claudeSessionId",
+    key: "agentSessionId",
   },
   "--load-runtime-session-id": {
     target: "loadSessionMeta",
-    key: "runtimeSessionId",
+    key: "agentSessionId",
     supportsLoadSession: true,
   },
   "--load-provider-session-id": {
     target: "loadSessionMeta",
-    key: "providerSessionId",
+    key: "agentSessionId",
     supportsLoadSession: true,
   },
   "--load-codex-session-id": {
     target: "loadSessionMeta",
-    key: "codexSessionId",
+    key: "agentSessionId",
     supportsLoadSession: true,
   },
   "--load-claude-session-id": {
     target: "loadSessionMeta",
-    key: "claudeSessionId",
+    key: "agentSessionId",
     supportsLoadSession: true,
   },
 };

@@ -1,15 +1,10 @@
 import type {
   AgentCapabilities,
-  PlanEntry,
   SessionConfigOption,
   SessionNotification,
   SessionUpdate,
   SetSessionConfigOptionResponse,
   StopReason,
-  ToolCallContent,
-  ToolCallLocation,
-  ToolCallStatus,
-  ToolKind,
 } from "@agentclientprotocol/sdk";
 
 export const EXIT_CODES = {
@@ -258,17 +253,93 @@ export type AcpClientOptions = {
   onClientOperation?: (operation: ClientOperation) => void;
 };
 
-export type SessionHistoryRole = "user" | "assistant";
+export const SESSION_RECORD_SCHEMA = "acpx.session.v1" as const;
+export const SESSION_THREAD_VERSION = "0.3.0" as const;
 
-export type SessionHistoryEntry = {
-  role: SessionHistoryRole;
-  timestamp: string;
-  textPreview: string;
+export type SessionThreadUserContent =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "mention";
+      uri: string;
+      content: string;
+    }
+  | {
+      type: "image";
+      uri?: string;
+      media_type?: string;
+      data?: string;
+      detail?: string;
+    };
+
+export type SessionThreadToolResult = {
+  tool_use_id: string;
+  tool_name: string;
+  is_error: boolean;
+  content?: string;
+  output?: unknown;
 };
 
-export const SESSION_ACP_PROJECTION_SCHEMA = "acpx.session.acp.v1" as const;
+export type SessionThreadAgentContent =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "thinking";
+      text: string;
+      signature: string | null;
+    }
+  | {
+      type: "redacted_thinking";
+    }
+  | {
+      type: "tool_use";
+      id: string;
+      name: string;
+      raw_input?: unknown;
+      input?: unknown;
+      is_input_complete?: boolean;
+      thought_signature?: string | null;
+    };
 
-export type SessionAcpEvent =
+export type SessionThreadMessage =
+  | {
+      kind: "user";
+      id: string;
+      content: SessionThreadUserContent[];
+    }
+  | {
+      kind: "agent";
+      content: SessionThreadAgentContent[];
+      tool_results?: Record<string, SessionThreadToolResult>;
+      reasoning_details?: unknown | null;
+    }
+  | {
+      kind: "resume";
+    };
+
+export type SessionThread = {
+  version: typeof SESSION_THREAD_VERSION;
+  title?: string | null;
+  messages: SessionThreadMessage[];
+  updated_at: string;
+  detailed_summary?: string | null;
+  initial_project_snapshot?: unknown | null;
+  cumulative_token_usage?: Record<string, unknown>;
+  request_token_usage?: Record<string, unknown>;
+  model?: string | null;
+  profile?: string | null;
+  imported: boolean;
+  subagent_context?: unknown | null;
+  speed?: string | null;
+  thinking_enabled: boolean;
+  thinking_effort?: string | null;
+};
+
+export type SessionAcpxAuditEvent =
   | {
       type: "session_update";
       timestamp: string;
@@ -281,42 +352,18 @@ export type SessionAcpEvent =
       operation: ClientOperation;
     };
 
-export type SessionAcpToolCall = {
-  toolCallId: string;
-  title?: string;
-  status?: ToolCallStatus;
-  kind?: ToolKind;
-  locations?: Array<ToolCallLocation>;
-  content?: Array<ToolCallContent>;
-  rawInput?: unknown;
-  rawOutput?: unknown;
-  updatedAt: string;
-};
-
-export type SessionAcpPlanEntry = Pick<PlanEntry, "content" | "status" | "priority">;
-
-export type SessionAcpProjection = {
-  schema: typeof SESSION_ACP_PROJECTION_SCHEMA;
-  events: SessionAcpEvent[];
-  toolCalls: SessionAcpToolCall[];
-  plan?: SessionAcpPlanEntry[];
-  availableCommands?: string[];
-  currentModeId?: string;
-  configOptions?: SessionConfigOption[];
-  sessionTitle?: string | null;
-  sessionUpdatedAt?: string | null;
-  usage?: {
-    used: number;
-    size: number;
-    costAmount?: number;
-    costCurrency?: string;
-  };
+export type SessionAcpxState = {
+  current_mode_id?: string;
+  available_commands?: string[];
+  config_options?: SessionConfigOption[];
+  audit_events?: SessionAcpxAuditEvent[];
 };
 
 export type SessionRecord = {
-  id: string;
-  sessionId: string;
-  runtimeSessionId?: string;
+  schema: typeof SESSION_RECORD_SCHEMA;
+  acpxRecordId: string;
+  acpSessionId: string;
+  agentSessionId?: string;
   agentCommand: string;
   cwd: string;
   name?: string;
@@ -331,10 +378,10 @@ export type SessionRecord = {
   lastAgentExitSignal?: NodeJS.Signals | null;
   lastAgentExitAt?: string;
   lastAgentDisconnectReason?: string;
-  turnHistory?: SessionHistoryEntry[];
-  acpProjection?: SessionAcpProjection;
   protocolVersion?: number;
   agentCapabilities?: AgentCapabilities;
+  thread: SessionThread;
+  acpx?: SessionAcpxState;
 };
 
 export type RunPromptResult = {

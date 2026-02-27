@@ -56,11 +56,11 @@ type LoadSessionOptions = {
 
 export type SessionCreateResult = {
   sessionId: string;
-  runtimeSessionId?: string;
+  agentSessionId?: string;
 };
 
 export type SessionLoadResult = {
-  runtimeSessionId?: string;
+  agentSessionId?: string;
 };
 
 type AgentDisconnectReason =
@@ -491,7 +491,7 @@ export class AcpClient {
     });
     return {
       sessionId: result.sessionId,
-      runtimeSessionId: extractRuntimeSessionId(result._meta),
+      agentSessionId: extractRuntimeSessionId(result._meta),
     };
   }
 
@@ -531,7 +531,7 @@ export class AcpClient {
     }
 
     return {
-      runtimeSessionId: extractRuntimeSessionId(response?._meta),
+      agentSessionId: extractRuntimeSessionId(response?._meta),
     };
   }
 
