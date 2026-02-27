@@ -1,456 +1,391 @@
 # ACPX Session Model
 
 Date: 2026-02-27
-Status: Implemented + Extended Specification
+Status: Specification (target model)
 
 ## Goal
 
-Define a stable acpx persistence model that:
+Define a long-term stable persistence model with:
 
-1. Keeps conversation/thread semantics as close as practical to Zed thread persistence.
-2. Keeps runtime bookkeeping separate from conversation content.
-3. Adds a dedicated append-only NDJSON event log for deep auditing.
-4. Avoids backward-compat complexity in this alpha phase.
+- one canonical event schema,
+- one authoritative event timeline,
+- one checkpoint/session schema that includes a Zed-analog thread projection.
 
-Reference alignment targets:
+## Core Decisions
 
-- `crates/agent/src/db.rs` (`DbThread`)
-- `crates/agent/src/thread.rs` (`Message`, `UserMessage`, `AgentMessage`, content/tool types)
+1. Persist exactly one canonical event schema: `acpx.event.v1`.
+2. Use append-only NDJSON event files as source of truth.
+3. Use `session.json` as a derived checkpoint/index.
+4. Keep `session.json.thread` as a Zed-analog projection for compatibility and ergonomics.
+5. Use `snake_case` for all persisted acpx-owned keys.
 
-## Design Rules
+## Canonical ID Semantics
 
-1. `thread` is the canonical conversation snapshot.
-2. `acpx.*` is runtime/control bookkeeping.
-3. High-volume event stream data goes to `events.ndjson`, not embedded in `thread`.
-4. `session.json` stays deterministic and cheap to read/write.
-5. No legacy schema read path for old message shapes.
+- `session_id`: acpx local record id (stable primary id for storage paths and lookup).
+- `acp_session_id`: ACP adapter/session id exposed by the adapter/runtime.
+- `agent_session_id`: upstream harness-native session id (Codex/Claude/OpenCode/Pi/etc), if available.
+- `request_id`: turn/control request scope id.
+- `event_id`: unique id of one persisted event.
 
-## File Layout
+Rules:
 
-For each session record id (`acpxRecordId`):
+- `session_id` is always required.
+- `acp_session_id` and `agent_session_id` are optional but should be populated when known.
+- IDs may be equal in some runtimes; semantics remain distinct.
+
+## Storage Layout
+
+For each `session_id`:
 
 ```text
-~/.acpx/sessions/<acpxRecordId>.json
-~/.acpx/sessions/<acpxRecordId>.events.ndjson
-~/.acpx/sessions/<acpxRecordId>.events.1.ndjson
-~/.acpx/sessions/<acpxRecordId>.events.2.ndjson
+~/.acpx/sessions/<session_id>.events.ndjson
+~/.acpx/sessions/<session_id>.events.1.ndjson
+~/.acpx/sessions/<session_id>.events.2.ndjson
 ...
+~/.acpx/sessions/<session_id>.json
+~/.acpx/sessions/<session_id>.events.lock
 ```
 
-Notes:
+Rules:
 
-- `<acpxRecordId>.json` is the authoritative current snapshot.
-- `.events*.ndjson` files are append-only audit timeline segments.
+- `events*.ndjson` is authoritative history.
+- `<session_id>.json` is derived checkpoint/index.
+- `.events.lock` enforces single-writer sequencing.
+- No second persisted event schema.
 
-## Canonical `session.json` Schema
+## Canonical Event Schema (`acpx.event.v1`)
+
+Each NDJSON line is exactly one object:
+
+```json
+{
+  "schema": "acpx.event.v1",
+  "event_id": "dce8a12e-4f8b-4a4e-b9f6-1f8f6fd2d66e",
+  "session_id": "019c....",
+  "acp_session_id": "019c....",
+  "agent_session_id": "019c....",
+  "request_id": "req_123",
+  "seq": 412,
+  "ts": "2026-02-27T12:10:00.000Z",
+  "kind": "output_delta",
+  "data": {
+    "stream": "output",
+    "text": "hello"
+  }
+}
+```
+
+Field contract:
+
+- `schema`: fixed string, currently `acpx.event.v1`.
+- `event_id`: UUID, unique per event.
+- `session_id`: required.
+- `acp_session_id`: optional.
+- `agent_session_id`: optional.
+- `request_id`: optional for session lifecycle events.
+- `seq`: strict monotonic integer per session; never resets.
+- `ts`: ISO-8601 UTC emit timestamp.
+- `kind`: event discriminator.
+- `data`: kind-specific payload.
+
+## Canonical Event Kinds
+
+### Prompt/Turn Flow
+
+#### `turn_started`
+
+```json
+{
+  "kind": "turn_started",
+  "data": {
+    "mode": "prompt",
+    "resumed": true,
+    "input_preview": "first 200 chars"
+  }
+}
+```
+
+#### `output_delta`
+
+```json
+{
+  "kind": "output_delta",
+  "data": {
+    "stream": "output",
+    "text": "chunk"
+  }
+}
+```
+
+`data.stream` enum:
+
+- `output`
+- `thought`
+
+#### `tool_call`
+
+```json
+{
+  "kind": "tool_call",
+  "data": {
+    "tool_call_id": "call_1",
+    "title": "run_command",
+    "status": "in_progress"
+  }
+}
+```
+
+`data.status` enum:
+
+- `pending`
+- `in_progress`
+- `completed`
+- `failed`
+- `unknown`
+
+#### `turn_done`
+
+```json
+{
+  "kind": "turn_done",
+  "data": {
+    "stop_reason": "end_turn",
+    "permission_stats": {
+      "requested": 1,
+      "approved": 1,
+      "denied": 0,
+      "cancelled": 0
+    }
+  }
+}
+```
+
+#### `error`
+
+```json
+{
+  "kind": "error",
+  "data": {
+    "code": "RUNTIME",
+    "detail_code": "QUEUE_RUNTIME_PROMPT_FAILED",
+    "origin": "queue",
+    "message": "Queue owner disconnected",
+    "retryable": true,
+    "acp_error": {
+      "code": -32002,
+      "message": "...",
+      "data": {}
+    }
+  }
+}
+```
+
+`data.code` enum:
+
+- `NO_SESSION`
+- `TIMEOUT`
+- `PERMISSION_DENIED`
+- `PERMISSION_PROMPT_UNAVAILABLE`
+- `RUNTIME`
+- `USAGE`
+
+`data.origin` enum:
+
+- `cli`
+- `runtime`
+- `queue`
+- `acp`
+
+### Control/Lifecycle Flow
+
+#### `session_ensured`
+
+```json
+{
+  "kind": "session_ensured",
+  "data": {
+    "created": true,
+    "name": "my-session"
+  }
+}
+```
+
+#### `cancel_requested`
+
+```json
+{
+  "kind": "cancel_requested",
+  "data": {}
+}
+```
+
+#### `cancel_result`
+
+```json
+{
+  "kind": "cancel_result",
+  "data": {
+    "cancelled": true
+  }
+}
+```
+
+#### `mode_set`
+
+```json
+{
+  "kind": "mode_set",
+  "data": {
+    "mode_id": "code"
+  }
+}
+```
+
+#### `config_set`
+
+```json
+{
+  "kind": "config_set",
+  "data": {
+    "config_id": "model",
+    "value": "gpt-5.3-codex"
+  }
+}
+```
+
+#### `status_snapshot`
+
+```json
+{
+  "kind": "status_snapshot",
+  "data": {
+    "status": "alive",
+    "pid": 1234,
+    "summary": "status=alive"
+  }
+}
+```
+
+#### `session_closed`
+
+```json
+{
+  "kind": "session_closed",
+  "data": {
+    "reason": "close"
+  }
+}
+```
+
+## Stdout Contract (All JSON Commands)
+
+When `--format json --json-strict` is enabled:
+
+- every stdout line must be valid JSON,
+- every JSON line must conform to `acpx.event.v1`,
+- no non-JSON diagnostics are allowed on stdout.
+
+Command behavior:
+
+- prompt commands emit `turn_started`, zero or more `output_delta`/`tool_call`, then terminal event (`turn_done` or `error`).
+- control/status/session commands emit relevant control/lifecycle events (`session_ensured`, `mode_set`, `config_set`, `status_snapshot`, `cancel_result`, `session_closed`) and may emit `error`.
+- `seq` ordering must match emission order for each `session_id`.
+
+## Session Checkpoint Schema (`acpx.session.v1`)
+
+`session.json` is derived from event replay.
 
 ```json
 {
   "schema": "acpx.session.v1",
-  "acpxRecordId": "...",
-  "acpSessionId": "...",
-  "agentSessionId": "...",
-  "agentCommand": "npx @zed-industries/codex-acp",
+  "session_id": "019c....",
+  "acp_session_id": "019c....",
+  "agent_session_id": "019c....",
+  "agent_command": "npx @zed-industries/codex-acp",
   "cwd": "/repo",
-  "name": "backend",
-  "createdAt": "2026-02-27T12:00:00.000Z",
-  "lastUsedAt": "2026-02-27T12:10:00.000Z",
-  "closed": false,
-  "closedAt": null,
-  "pid": 1234,
-  "agentStartedAt": "2026-02-27T12:00:01.000Z",
-  "lastPromptAt": "2026-02-27T12:09:40.000Z",
-  "lastAgentExitCode": null,
-  "lastAgentExitSignal": null,
-  "lastAgentExitAt": null,
-  "lastAgentDisconnectReason": null,
-  "protocolVersion": 1,
-  "agentCapabilities": {},
-  "thread": {},
-  "acpx": {}
-}
-```
-
-## `thread` Payload (Zed-Analogous)
-
-```json
-{
-  "version": "0.3.0",
-  "title": "...",
-  "messages": [],
+  "name": "my-session",
+  "created_at": "2026-02-27T12:00:00.000Z",
   "updated_at": "2026-02-27T12:10:00.000Z",
-  "detailed_summary": null,
-  "initial_project_snapshot": null,
-  "cumulative_token_usage": {},
-  "request_token_usage": {},
-  "model": null,
-  "profile": null,
-  "imported": false,
-  "subagent_context": null,
-  "speed": null,
-  "thinking_enabled": false,
-  "thinking_effort": null
-}
-```
-
-### `messages` Variants
-
-User message:
-
-```json
-{
-  "User": {
-    "id": "2f8f2028-df7d-4479-a0a0-9f10238986cd",
-    "content": [{ "Text": "hello" }]
-  }
-}
-```
-
-Agent message:
-
-```json
-{
-  "Agent": {
-    "content": [
-      { "Text": "hi" },
-      { "Thinking": { "text": "planning", "signature": null } },
-      {
-        "ToolUse": {
-          "id": "call_123",
-          "name": "run_command",
-          "raw_input": "{\"command\":\"ls\"}",
-          "input": { "command": "ls" },
-          "is_input_complete": true,
-          "thought_signature": null
-        }
-      }
-    ],
-    "tool_results": {
-      "call_123": {
-        "tool_use_id": "call_123",
-        "tool_name": "run_command",
-        "is_error": false,
-        "content": { "Text": "ok" },
-        "output": { "exitCode": 0 }
-      }
-    },
-    "reasoning_details": null
-  }
-}
-```
-
-Resume marker:
-
-```json
-"Resume"
-```
-
-### Token Usage Shape
-
-`cumulative_token_usage` and each entry in `request_token_usage` use:
-
-```json
-{
-  "input_tokens": 120,
-  "output_tokens": 80,
-  "cache_creation_input_tokens": 0,
-  "cache_read_input_tokens": 32
-}
-```
-
-`request_token_usage` is keyed by user message id.
-
-## `acpx` Namespace
-
-`acpx` holds runtime/control metadata, never conversation content.
-
-```json
-{
-  "current_mode_id": "code",
-  "available_commands": ["create_plan", "run"],
-  "config_options": [],
-  "audit_seq": 412,
-  "audit_dropped_count": 31,
-  "audit_events": [],
-  "last_turn": null,
-  "last_control_update": null,
+  "last_seq": 412,
+  "last_request_id": "req_123",
+  "closed": false,
+  "closed_at": null,
+  "pid": 1234,
   "event_log": {
-    "format_version": 1,
-    "active_path": "~/.acpx/sessions/<acpxRecordId>.events.ndjson",
+    "active_path": "/home/user/.acpx/sessions/019c....events.ndjson",
     "segment_count": 3,
     "max_segment_bytes": 67108864,
     "max_segments": 5,
-    "last_seq": 412,
     "last_write_at": "2026-02-27T12:10:00.000Z",
     "last_write_error": null
-  }
-}
-```
-
-### `acpx.audit_events` (In-JSON Compact Ring)
-
-- Purpose: quick local introspection without scanning NDJSON logs.
-- Shape: compact summaries of session updates/client operations.
-- Limit: capped ring buffer.
-- Overflow behavior: drop oldest entries and increment `audit_dropped_count`.
-
-## `last_turn` Schema
-
-Tracks terminal outcome of the latest prompt turn.
-
-```json
-{
-  "request_id": "req_123",
-  "started_at": "2026-02-27T12:09:40.000Z",
-  "ended_at": "2026-02-27T12:09:48.000Z",
-  "resumed": true,
-  "stop_reason": "end_turn",
-  "outcome": "completed",
-  "error": null,
-  "permission_stats": {
-    "requested": 1,
-    "approved": 1,
-    "denied": 0,
-    "cancelled": 0
-  }
-}
-```
-
-Error outcome example:
-
-```json
-{
-  "request_id": "req_124",
-  "started_at": "2026-02-27T12:11:00.000Z",
-  "ended_at": "2026-02-27T12:11:05.000Z",
-  "resumed": false,
-  "stop_reason": null,
-  "outcome": "failed",
-  "error": {
-    "code": "RUNTIME",
-    "detailCode": "QUEUE_RUNTIME_PROMPT_FAILED",
-    "message": "Queue owner disconnected",
-    "retryable": true
   },
-  "permission_stats": {
-    "requested": 0,
-    "approved": 0,
-    "denied": 0,
-    "cancelled": 0
+  "thread": {
+    "version": "0.3.0",
+    "title": null,
+    "messages": [],
+    "updated_at": "2026-02-27T12:10:00.000Z",
+    "detailed_summary": null,
+    "initial_project_snapshot": null,
+    "cumulative_token_usage": {},
+    "request_token_usage": {},
+    "model": null,
+    "profile": null,
+    "imported": false,
+    "subagent_context": null,
+    "speed": null,
+    "thinking_enabled": false,
+    "thinking_effort": null
   }
 }
 ```
 
-## `last_control_update` Schema
+Rules:
 
-Tracks latest non-prompt control mutation:
+- `thread` shape is a Zed-analog projection.
+- `thread` is derived from events; it is not the event source of truth.
+- `session.json` must be reconstructible by replaying `events*.ndjson`.
 
-- mode change
-- config option change
-- cancel request result
+## Sequence and Single-Writer Rules
 
-```json
-{
-  "action": "set_mode",
-  "request_id": "ctl_201",
-  "updated_at": "2026-02-27T12:12:00.000Z",
-  "ok": true,
-  "payload": {
-    "mode_id": "code"
-  },
-  "error": null
-}
-```
+To preserve strict monotonic `seq`:
 
-Config option example:
+1. Acquire exclusive lock on `<session_id>.events.lock`.
+2. Determine next `seq` from checkpoint tail/replay state.
+3. Append event line to active segment.
+4. Flush append (`fdatasync`/equivalent durability step).
+5. Update checkpoint and write `session.json` atomically (temp + rename).
+6. Release lock.
 
-```json
-{
-  "action": "set_config_option",
-  "request_id": "ctl_202",
-  "updated_at": "2026-02-27T12:13:00.000Z",
-  "ok": true,
-  "payload": {
-    "config_id": "model",
-    "value": "gpt-5.3-codex"
-  },
-  "error": null
-}
-```
+No writes are allowed without acquiring lock.
 
-## NDJSON Audit Log (`events.ndjson`)
+## Write Ordering and Failure Behavior
 
-Each line is one JSON object (no multiline JSON entries).
+For each event write:
 
-### Envelope
-
-```json
-{
-  "eventVersion": 1,
-  "seq": 413,
-  "timestamp": "2026-02-27T12:10:00.000Z",
-  "acpxRecordId": "...",
-  "acpSessionId": "...",
-  "requestId": "req_123",
-  "stream": "prompt",
-  "source": "acp",
-  "type": "session_update",
-  "payload": {}
-}
-```
-
-Fields:
-
-- `eventVersion`: fixed `1`.
-- `seq`: strict monotonic per session (incrementing integer).
-- `timestamp`: ISO-8601 UTC.
-- `acpxRecordId`, `acpSessionId`: stable correlation ids.
-- `requestId`: optional, present for prompt/control turn-scoped events.
-- `stream`: `prompt | control | lifecycle | queue`.
-- `source`: `acp | runtime | queue | client`.
-- `type`: event type discriminator.
-- `payload`: event-type-specific body.
-
-### Event Types
-
-#### `session_update`
-
-`payload` contains raw ACP session notification body:
-
-```json
-{
-  "sessionId": "...",
-  "update": {
-    "sessionUpdate": "agent_message_chunk",
-    "content": { "type": "text", "text": "hi" }
-  },
-  "_meta": null
-}
-```
-
-#### `client_operation`
-
-```json
-{
-  "method": "terminal/create",
-  "status": "completed",
-  "summary": "Ran command",
-  "details": "...",
-  "timestamp": "..."
-}
-```
-
-#### `prompt_started`
-
-```json
-{
-  "message_preview": "first 200 chars",
-  "resumed": true
-}
-```
-
-#### `prompt_done`
-
-```json
-{
-  "stopReason": "end_turn",
-  "permissionStats": {
-    "requested": 1,
-    "approved": 1,
-    "denied": 0,
-    "cancelled": 0
-  }
-}
-```
-
-#### `prompt_error`
-
-```json
-{
-  "code": "RUNTIME",
-  "detailCode": "QUEUE_RUNTIME_PROMPT_FAILED",
-  "message": "...",
-  "retryable": true,
-  "acp": {
-    "code": -32002,
-    "message": "...",
-    "data": {}
-  }
-}
-```
-
-#### `control_started`
-
-```json
-{
-  "action": "set_mode",
-  "input": { "modeId": "code" }
-}
-```
-
-#### `control_done`
-
-```json
-{
-  "action": "set_mode",
-  "ok": true,
-  "result": {}
-}
-```
-
-#### `control_error`
-
-```json
-{
-  "action": "set_config_option",
-  "ok": false,
-  "error": {
-    "code": "RUNTIME",
-    "detailCode": "...",
-    "message": "..."
-  }
-}
-```
-
-#### `queue_event`
-
-Used for queue accepts/results/errors in owner flow.
-
-```json
-{
-  "phase": "accepted",
-  "requestId": "req_123"
-}
-```
-
-#### `lifecycle_event`
-
-```json
-{
-  "phase": "agent_exit",
-  "exitCode": 1,
-  "signal": null,
-  "reason": "process_exit"
-}
-```
-
-## Write Ordering and Consistency
-
-For every event:
-
-1. Increment `acpx.audit_seq`.
-2. Build NDJSON envelope with that `seq`.
-3. Append one line to active `.events.ndjson`.
-4. Update `acpx.event_log.last_seq` and `last_write_at`.
-5. Update in-memory/session snapshot structures (`thread`, `acpx.audit_events`, `last_turn`, etc.).
-6. Persist `session.json` (atomic temp-file rename).
+1. Validate event against `acpx.event.v1`.
+2. Validate persisted key policy (`snake_case`).
+3. Append event.
+4. Update checkpoint.
 
 Failure policy:
 
-- Event log append failure must not silently disappear:
-  - set `acpx.event_log.last_write_error`.
-  - still attempt to persist `session.json`.
-- `session.json` write failure is fatal for the operation path currently using it.
+- append failure: operation fails; no synthetic success.
+- checkpoint failure after successful append: event remains authoritative; checkpoint rebuilt later.
+
+## Replay and Recovery
+
+On startup or repair:
+
+1. Read all segments oldest -> newest.
+2. Validate `schema` and event payloads.
+3. Enforce monotonic `seq`.
+4. Rebuild checkpoint and thread projection.
+5. Rewrite `session.json` atomically.
+
+Corrupt line policy:
+
+- trailing partial final line: ignore only that final line,
+- any mid-file invalid line: fatal in strict mode.
 
 ## Rotation and Retention
 
@@ -459,39 +394,45 @@ Defaults:
 - `max_segment_bytes`: `64 MiB`
 - `max_segments`: `5`
 
-When active segment exceeds max bytes:
+Rotation:
 
-1. Rotate: `.events.(n-1).ndjson -> .events.n.ndjson`
-2. Move active `.events.ndjson -> .events.1.ndjson`
-3. Create new empty active `.events.ndjson`
-4. Delete oldest beyond `max_segments`
+1. `.events.(n-1).ndjson -> .events.n.ndjson`
+2. active `.events.ndjson -> .events.1.ndjson`
+3. create new active `.events.ndjson`
+4. delete oldest beyond limit.
 
-`session.json` should reflect resulting `segment_count`.
+All rotation operations must occur under the same session lock.
 
-## Strictness and Validation
+## Privacy and Redaction
 
-- Only `schema: "acpx.session.v1"` is valid for session files.
-- `thread.messages` must be tagged `User`/`Agent`/`"Resume"` shape.
-- Legacy `kind/type` thread shapes are invalid and ignored.
-- Token usage objects must have numeric non-negative values.
-- `speed` must be `standard`, `fast`, or `null`.
+Default behavior:
 
-## ACP Mapping Summary
+- persist output deltas and minimal tool-call summaries,
+- do not persist raw terminal secrets,
+- do not persist opaque provider blobs unless explicitly enabled.
 
-- prompt send: add `User` message with UUID id
-- `agent_message_chunk`: append `Text`
-- `agent_thought_chunk`: append `Thinking`
-- `tool_call` / `tool_call_update`: upsert `ToolUse` + `tool_results`
-- `usage_update`: map to token usage fields when available
-- `session_info_update`: title / updated timestamp
-- `available_commands_update`: `acpx.available_commands`
-- `current_mode_update`: `acpx.current_mode_id`
-- `config_option_update`: `acpx.config_options`
+## Validation and Guardrails
 
-Everything above also emits corresponding NDJSON entries.
+Required:
+
+- schema validator for `acpx.event.v1` before write,
+- persisted-key-casing validator before write,
+- contract tests with golden NDJSON fixtures,
+- CI checks for unknown/invalid persisted keys,
+- parser contract tests that consume canonical events from stdout.
+
+## Mapping from ACP Runtime to Canonical Events
+
+- turn accepted -> `turn_started`
+- `agent_message_chunk` -> `output_delta` (`stream=output`)
+- `agent_thought_chunk` -> `output_delta` (`stream=thought`)
+- `tool_call` / `tool_call_update` -> `tool_call`
+- runtime/queue/acp failures -> `error`
+- completion -> `turn_done`
+- ensure/status/set/cancel/close control paths -> matching control/lifecycle kinds
 
 ## Non-Goals
 
-- No attempt to preserve old session file compatibility in this phase.
-- No embedding of raw high-volume audit stream inside `thread`.
-- No editor-specific Zed UI/domain data in acpx thread payload.
+- backward-compat layers for legacy persisted event schemas,
+- multiple persisted event schemas for one timeline,
+- duplicate canonical event history in `session.json`.
