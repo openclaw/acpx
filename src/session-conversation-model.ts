@@ -10,17 +10,16 @@ import type {
 import type {
   ClientOperation,
   SessionAcpxState,
-  SessionThread,
-  SessionThreadAgentContent,
-  SessionThreadAgentMessage,
-  SessionThreadMessage,
-  SessionThreadTokenUsage,
-  SessionThreadToolResult,
-  SessionThreadToolResultContent,
-  SessionThreadToolUse,
-  SessionThreadUserContent,
+  SessionConversation,
+  SessionAgentContent,
+  SessionAgentMessage,
+  SessionMessage,
+  SessionTokenUsage,
+  SessionToolResult,
+  SessionToolResultContent,
+  SessionToolUse,
+  SessionUserContent,
 } from "./types.js";
-import { SESSION_THREAD_VERSION } from "./types.js";
 
 export type LegacyHistoryEntry = {
   role: "user" | "assistant";
@@ -71,9 +70,7 @@ function extractText(content: ContentBlock): string | undefined {
   return undefined;
 }
 
-function contentToUserContent(
-  content: ContentBlock,
-): SessionThreadUserContent | undefined {
+function contentToUserContent(content: ContentBlock): SessionUserContent | undefined {
   if (content.type === "text") {
     return {
       Text: content.text,
@@ -121,8 +118,8 @@ function nextUserMessageId(): string {
   return randomUUID();
 }
 
-function isUserMessage(message: SessionThreadMessage): message is {
-  User: SessionThread["messages"][number] extends infer T
+function isUserMessage(message: SessionMessage): message is {
+  User: SessionConversation["messages"][number] extends infer T
     ? T extends { User: infer U }
       ? U
       : never
@@ -132,48 +129,49 @@ function isUserMessage(message: SessionThreadMessage): message is {
 }
 
 function isAgentMessage(
-  message: SessionThreadMessage,
-): message is { Agent: SessionThreadAgentMessage } {
+  message: SessionMessage,
+): message is { Agent: SessionAgentMessage } {
   return typeof message === "object" && message !== null && hasOwn(message, "Agent");
 }
 
-function isAgentTextContent(
-  content: SessionThreadAgentContent,
-): content is { Text: string } {
+function isAgentTextContent(content: SessionAgentContent): content is { Text: string } {
   return hasOwn(content, "Text");
 }
 
 function isAgentThinkingContent(
-  content: SessionThreadAgentContent,
+  content: SessionAgentContent,
 ): content is { Thinking: { text: string; signature?: string | null } } {
   return hasOwn(content, "Thinking");
 }
 
 function isAgentToolUseContent(
-  content: SessionThreadAgentContent,
-): content is { ToolUse: SessionThreadToolUse } {
+  content: SessionAgentContent,
+): content is { ToolUse: SessionToolUse } {
   return hasOwn(content, "ToolUse");
 }
 
-function updateThreadTimestamp(thread: SessionThread, timestamp: string): void {
-  thread.updated_at = timestamp;
+function updateConversationTimestamp(
+  conversation: SessionConversation,
+  timestamp: string,
+): void {
+  conversation.updated_at = timestamp;
 }
 
-function ensureAgentMessage(thread: SessionThread): SessionThreadAgentMessage {
-  const last = thread.messages.at(-1);
+function ensureAgentMessage(conversation: SessionConversation): SessionAgentMessage {
+  const last = conversation.messages.at(-1);
   if (last && isAgentMessage(last)) {
     return last.Agent;
   }
 
-  const created: SessionThreadAgentMessage = {
+  const created: SessionAgentMessage = {
     content: [],
     tool_results: {},
   };
-  thread.messages.push({ Agent: created });
+  conversation.messages.push({ Agent: created });
   return created;
 }
 
-function appendAgentText(agent: SessionThreadAgentMessage, text: string): void {
+function appendAgentText(agent: SessionAgentMessage, text: string): void {
   if (!text.trim()) {
     return;
   }
@@ -184,13 +182,13 @@ function appendAgentText(agent: SessionThreadAgentMessage, text: string): void {
     return;
   }
 
-  const next: SessionThreadAgentContent = {
+  const next: SessionAgentContent = {
     Text: text,
   };
   agent.content.push(next);
 }
 
-function appendAgentThinking(agent: SessionThreadAgentMessage, text: string): void {
+function appendAgentThinking(agent: SessionAgentMessage, text: string): void {
   if (!text.trim()) {
     return;
   }
@@ -201,7 +199,7 @@ function appendAgentThinking(agent: SessionThreadAgentMessage, text: string): vo
     return;
   }
 
-  const next: SessionThreadAgentContent = {
+  const next: SessionAgentContent = {
     Thinking: {
       text,
       signature: null,
@@ -233,7 +231,7 @@ function statusIndicatesError(status: unknown): boolean {
   return normalized.includes("fail") || normalized.includes("error");
 }
 
-function toToolResultContent(value: unknown): SessionThreadToolResultContent {
+function toToolResultContent(value: unknown): SessionToolResultContent {
   if (typeof value === "string") {
     return { Text: value };
   }
@@ -262,16 +260,16 @@ function toRawInput(value: unknown): string {
 }
 
 function ensureToolUseContent(
-  agent: SessionThreadAgentMessage,
+  agent: SessionAgentMessage,
   toolCallId: string,
-): SessionThreadToolUse {
+): SessionToolUse {
   for (const content of agent.content) {
     if (isAgentToolUseContent(content) && content.ToolUse.id === toolCallId) {
       return content.ToolUse;
     }
   }
 
-  const created: SessionThreadToolUse = {
+  const created: SessionToolUse = {
     id: toolCallId,
     name: "tool_call",
     raw_input: "{}",
@@ -284,12 +282,12 @@ function ensureToolUseContent(
 }
 
 function upsertToolResult(
-  agent: SessionThreadAgentMessage,
+  agent: SessionAgentMessage,
   toolCallId: string,
-  patch: Partial<SessionThreadToolResult>,
+  patch: Partial<SessionToolResult>,
 ): void {
   const existing = agent.tool_results[toolCallId];
-  const next: SessionThreadToolResult = {
+  const next: SessionToolResult = {
     tool_use_id: toolCallId,
     tool_name: patch.tool_name ?? existing?.tool_name ?? "tool_call",
     is_error: patch.is_error ?? existing?.is_error ?? false,
@@ -300,7 +298,7 @@ function upsertToolResult(
 }
 
 function applyToolCallUpdate(
-  agent: SessionThreadAgentMessage,
+  agent: SessionAgentMessage,
   update: ToolCall | ToolCallUpdate,
 ): void {
   const tool = ensureToolUseContent(agent, update.toolCallId);
@@ -371,7 +369,7 @@ function numberField(
   return undefined;
 }
 
-function usageToTokenUsage(update: UsageUpdate): SessionThreadTokenUsage | undefined {
+function usageToTokenUsage(update: UsageUpdate): SessionTokenUsage | undefined {
   const updateRecord = asRecord(update);
   const usageMeta = asRecord(updateRecord?._meta)?.usage;
   const source = asRecord(usageMeta) ?? updateRecord;
@@ -379,7 +377,7 @@ function usageToTokenUsage(update: UsageUpdate): SessionThreadTokenUsage | undef
     return undefined;
   }
 
-  const normalized: SessionThreadTokenUsage = {
+  const normalized: SessionTokenUsage = {
     input_tokens: numberField(source, ["input_tokens", "inputTokens"]),
     output_tokens: numberField(source, ["output_tokens", "outputTokens"]),
     cache_creation_input_tokens: numberField(source, [
@@ -410,9 +408,9 @@ function ensureAcpxState(state: SessionAcpxState | undefined): SessionAcpxState 
   return state ?? {};
 }
 
-function lastUserMessageId(thread: SessionThread): string | undefined {
-  for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
-    const message = thread.messages[index];
+function lastUserMessageId(conversation: SessionConversation): string | undefined {
+  for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
+    const message = conversation.messages[index];
     if (message && isUserMessage(message)) {
       return message.User.id;
     }
@@ -420,9 +418,8 @@ function lastUserMessageId(thread: SessionThread): string | undefined {
   return undefined;
 }
 
-export function createSessionThread(timestamp = isoNow()): SessionThread {
+export function createSessionConversation(timestamp = isoNow()): SessionConversation {
   return {
-    version: SESSION_THREAD_VERSION,
     title: null,
     messages: [],
     updated_at: timestamp,
@@ -431,18 +428,19 @@ export function createSessionThread(timestamp = isoNow()): SessionThread {
   };
 }
 
-export function cloneSessionThread(thread: SessionThread | undefined): SessionThread {
-  if (!thread) {
-    return createSessionThread();
+export function cloneSessionConversation(
+  conversation: SessionConversation | undefined,
+): SessionConversation {
+  if (!conversation) {
+    return createSessionConversation();
   }
 
   return {
-    version: SESSION_THREAD_VERSION,
-    title: thread.title,
-    messages: deepClone(thread.messages ?? []),
-    updated_at: thread.updated_at,
-    cumulative_token_usage: deepClone(thread.cumulative_token_usage ?? {}),
-    request_token_usage: deepClone(thread.request_token_usage ?? {}),
+    title: conversation.title,
+    messages: deepClone(conversation.messages ?? []),
+    updated_at: conversation.updated_at,
+    cumulative_token_usage: deepClone(conversation.cumulative_token_usage ?? {}),
+    request_token_usage: deepClone(conversation.request_token_usage ?? {}),
   };
 }
 
@@ -463,7 +461,7 @@ export function cloneSessionAcpxState(
 }
 
 export function appendLegacyHistory(
-  thread: SessionThread,
+  conversation: SessionConversation,
   entries: LegacyHistoryEntry[],
 ): void {
   for (const entry of entries) {
@@ -473,14 +471,14 @@ export function appendLegacyHistory(
     }
 
     if (entry.role === "user") {
-      thread.messages.push({
+      conversation.messages.push({
         User: {
           id: nextUserMessageId(),
           content: [{ Text: text }],
         },
       });
     } else {
-      thread.messages.push({
+      conversation.messages.push({
         Agent: {
           content: [{ Text: text }],
           tool_results: {},
@@ -488,12 +486,15 @@ export function appendLegacyHistory(
       });
     }
 
-    updateThreadTimestamp(thread, entry.timestamp || thread.updated_at);
+    updateConversationTimestamp(
+      conversation,
+      entry.timestamp || conversation.updated_at,
+    );
   }
 }
 
 export function recordPromptSubmission(
-  thread: SessionThread,
+  conversation: SessionConversation,
   prompt: string,
   timestamp = isoNow(),
 ): void {
@@ -502,17 +503,17 @@ export function recordPromptSubmission(
     return;
   }
 
-  thread.messages.push({
+  conversation.messages.push({
     User: {
       id: nextUserMessageId(),
       content: [{ Text: text }],
     },
   });
-  updateThreadTimestamp(thread, timestamp);
+  updateConversationTimestamp(conversation, timestamp);
 }
 
 export function recordSessionUpdate(
-  thread: SessionThread,
+  conversation: SessionConversation,
   state: SessionAcpxState | undefined,
   notification: SessionNotification,
   timestamp = isoNow(),
@@ -524,7 +525,7 @@ export function recordSessionUpdate(
     case "user_message_chunk": {
       const userContent = contentToUserContent(update.content);
       if (userContent) {
-        thread.messages.push({
+        conversation.messages.push({
           User: {
             id: nextUserMessageId(),
             content: [userContent],
@@ -536,7 +537,7 @@ export function recordSessionUpdate(
     case "agent_message_chunk": {
       const text = extractText(update.content);
       if (text) {
-        const agent = ensureAgentMessage(thread);
+        const agent = ensureAgentMessage(conversation);
         appendAgentText(agent, text);
       }
       break;
@@ -544,34 +545,34 @@ export function recordSessionUpdate(
     case "agent_thought_chunk": {
       const text = extractText(update.content);
       if (text) {
-        const agent = ensureAgentMessage(thread);
+        const agent = ensureAgentMessage(conversation);
         appendAgentThinking(agent, text);
       }
       break;
     }
     case "tool_call":
     case "tool_call_update": {
-      const agent = ensureAgentMessage(thread);
+      const agent = ensureAgentMessage(conversation);
       applyToolCallUpdate(agent, update);
       break;
     }
     case "usage_update": {
       const usage = usageToTokenUsage(update);
       if (usage) {
-        thread.cumulative_token_usage = usage;
-        const userId = lastUserMessageId(thread);
+        conversation.cumulative_token_usage = usage;
+        const userId = lastUserMessageId(conversation);
         if (userId) {
-          thread.request_token_usage[userId] = usage;
+          conversation.request_token_usage[userId] = usage;
         }
       }
       break;
     }
     case "session_info_update": {
       if (hasOwn(update, "title")) {
-        thread.title = update.title ?? null;
+        conversation.title = update.title ?? null;
       }
       if (hasOwn(update, "updatedAt")) {
-        thread.updated_at = update.updatedAt ?? thread.updated_at;
+        conversation.updated_at = update.updatedAt ?? conversation.updated_at;
       }
       break;
     }
@@ -593,17 +594,17 @@ export function recordSessionUpdate(
       break;
   }
 
-  updateThreadTimestamp(thread, timestamp);
+  updateConversationTimestamp(conversation, timestamp);
   return acpx;
 }
 
 export function recordClientOperation(
-  thread: SessionThread,
+  conversation: SessionConversation,
   state: SessionAcpxState | undefined,
   operation: ClientOperation,
   timestamp = isoNow(),
 ): SessionAcpxState {
   const acpx = ensureAcpxState(state);
-  updateThreadTimestamp(thread, timestamp);
+  updateConversationTimestamp(conversation, timestamp);
   return acpx;
 }

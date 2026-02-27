@@ -56,8 +56,8 @@ import {
   type OutputPolicy,
   type PermissionMode,
   type SessionRecord,
-  type SessionThreadAgentContent,
-  type SessionThreadUserContent,
+  type SessionAgentContent,
+  type SessionUserContent,
 } from "./types.js";
 
 class NoSessionError extends Error {
@@ -1161,7 +1161,7 @@ async function handleSessionsEnsure(
   printEnsuredSessionByFormat(result.record, result.created, globalFlags.format);
 }
 
-function userContentToText(content: SessionThreadUserContent): string {
+function userContentToText(content: SessionUserContent): string {
   if ("Text" in content) {
     return content.Text;
   }
@@ -1174,7 +1174,7 @@ function userContentToText(content: SessionThreadUserContent): string {
   return "";
 }
 
-function agentContentToText(content: SessionThreadAgentContent): string {
+function agentContentToText(content: SessionAgentContent): string {
   if ("Text" in content) {
     return content.Text;
   }
@@ -1190,7 +1190,7 @@ function agentContentToText(content: SessionThreadAgentContent): string {
   return "";
 }
 
-function threadHistoryEntries(record: SessionRecord): Array<{
+function conversationHistoryEntries(record: SessionRecord): Array<{
   role: "user" | "assistant";
   timestamp: string;
   textPreview: string;
@@ -1201,7 +1201,7 @@ function threadHistoryEntries(record: SessionRecord): Array<{
     textPreview: string;
   }> = [];
 
-  for (const message of record.thread.messages) {
+  for (const message of record.messages) {
     if (message === "Resume") {
       continue;
     }
@@ -1218,7 +1218,7 @@ function threadHistoryEntries(record: SessionRecord): Array<{
 
       entries.push({
         role: "user",
-        timestamp: record.thread.updated_at,
+        timestamp: record.updated_at,
         textPreview: text,
       });
       continue;
@@ -1236,7 +1236,7 @@ function threadHistoryEntries(record: SessionRecord): Array<{
 
       entries.push({
         role: "assistant",
-        timestamp: record.thread.updated_at,
+        timestamp: record.updated_at,
         textPreview: text,
       });
     }
@@ -1278,7 +1278,9 @@ function printSessionDetailsByFormat(
   process.stdout.write(
     `disconnectReason: ${record.lastAgentDisconnectReason ?? "-"}\n`,
   );
-  process.stdout.write(`historyEntries: ${threadHistoryEntries(record).length}\n`);
+  process.stdout.write(
+    `historyEntries: ${conversationHistoryEntries(record).length}\n`,
+  );
 }
 
 function printSessionHistoryByFormat(
@@ -1286,7 +1288,7 @@ function printSessionHistoryByFormat(
   limit: number,
   format: OutputFormat,
 ): void {
-  const history = threadHistoryEntries(record);
+  const history = conversationHistoryEntries(record);
   const visible = history.slice(Math.max(0, history.length - limit));
 
   if (format === "json") {

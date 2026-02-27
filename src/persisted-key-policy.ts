@@ -13,13 +13,13 @@ const ZED_TAG_KEYS = new Set([
 ]);
 
 const MAP_OBJECT_PATHS = new Set([
-  "thread.request_token_usage",
-  "thread.messages.Agent.tool_results",
+  "request_token_usage",
+  "messages.Agent.tool_results",
 ]);
 
 const OPAQUE_VALUE_PATHS = new Set([
   "agent_capabilities",
-  "thread.messages.Agent.content.ToolUse.input",
+  "messages.Agent.content.ToolUse.input",
   "acpx.config_options",
 ]);
 
@@ -48,7 +48,7 @@ function shouldSkipDescend(path: string[]): boolean {
 }
 
 function isToolResultOutputPath(path: string[]): boolean {
-  if (path.length < 6 || path[path.length - 1] !== "output") {
+  if (path.length < 5 || path[path.length - 1] !== "output") {
     return false;
   }
 
@@ -58,7 +58,7 @@ function isToolResultOutputPath(path: string[]): boolean {
   }
 
   const parentPath = path.slice(0, toolResultsIndex + 1).join(".");
-  return parentPath === "thread.messages.Agent.tool_results";
+  return parentPath === "messages.Agent.tool_results";
 }
 
 function collectViolations(value: unknown, path: string[], violations: string[]): void {

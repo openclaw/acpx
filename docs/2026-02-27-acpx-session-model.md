@@ -62,7 +62,7 @@ Each NDJSON line is exactly one object:
 {
   "schema": "acpx.event.v1",
   "event_id": "dce8a12e-4f8b-4a4e-b9f6-1f8f6fd2d66e",
-  "session_id": "019c....",
+  "acpx_record_id": "019c....",
   "acp_session_id": "019c....",
   "agent_session_id": "019c....",
   "request_id": "req_123",
@@ -301,9 +301,7 @@ Conversation fields and runtime fields are stored at the same top level.
 ```json
 {
   "schema": "acpx.session.v1",
-  "version": "1.0.0",
-
-  "session_id": "019c....",
+  "acpx_record_id": "019c....",
   "acp_session_id": "019c....",
   "agent_session_id": "019c....",
 

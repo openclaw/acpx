@@ -340,14 +340,12 @@ test("integration: prompt recovers when loadSession fails on empty session", asy
       );
       const storedRecord = JSON.parse(await fs.readFile(storedRecordPath, "utf8")) as {
         acp_session_id?: string;
-        thread?: {
-          messages?: unknown[];
-        };
+        messages?: unknown[];
       };
 
       assert.notEqual(storedRecord.acp_session_id, originalSessionId);
-      const messages = Array.isArray(storedRecord.thread?.messages)
-        ? storedRecord.thread?.messages
+      const messages = Array.isArray(storedRecord.messages)
+        ? storedRecord.messages
         : [];
       assert.equal(
         messages.some(

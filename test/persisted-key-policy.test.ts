@@ -28,55 +28,52 @@ function makeRecord(): SessionRecord {
       last_write_error: null,
     },
     closed: false,
-    thread: {
-      version: "0.3.0",
-      title: null,
-      messages: [
-        {
-          User: {
-            id: "user-1",
-            content: [{ Text: "hello" }],
-          },
+    title: null,
+    messages: [
+      {
+        User: {
+          id: "user-1",
+          content: [{ Text: "hello" }],
         },
-        {
-          Agent: {
-            content: [
-              { Text: "world" },
-              {
-                ToolUse: {
-                  id: "call_1",
-                  name: "run_command",
-                  raw_input: '{"command":"ls"}',
-                  input: {
-                    command: "ls",
-                  },
-                  is_input_complete: true,
-                  thought_signature: null,
+      },
+      {
+        Agent: {
+          content: [
+            { Text: "world" },
+            {
+              ToolUse: {
+                id: "call_1",
+                name: "run_command",
+                raw_input: '{"command":"ls"}',
+                input: {
+                  command: "ls",
                 },
+                is_input_complete: true,
+                thought_signature: null,
               },
-            ],
-            tool_results: {
-              call_1: {
-                tool_use_id: "call_1",
-                tool_name: "run_command",
-                is_error: false,
-                content: {
-                  Text: "ok",
-                },
-                output: {
-                  exitCode: 0,
-                },
+            },
+          ],
+          tool_results: {
+            call_1: {
+              tool_use_id: "call_1",
+              tool_name: "run_command",
+              is_error: false,
+              content: {
+                Text: "ok",
+              },
+              output: {
+                exitCode: 0,
               },
             },
           },
         },
-      ],
-      updated_at: "2026-02-27T00:00:00.000Z",
-      cumulative_token_usage: {},
-      request_token_usage: {
-        "5cf39f6d-9c4f-4d20-9e4b-739abc4b2554": {
-          input_tokens: 1,
-        },
+      },
+    ],
+    updated_at: "2026-02-27T00:00:00.000Z",
+    cumulative_token_usage: {},
+    request_token_usage: {
+      "5cf39f6d-9c4f-4d20-9e4b-739abc4b2554": {
+        input_tokens: 1,
       },
     },
     acpx: {

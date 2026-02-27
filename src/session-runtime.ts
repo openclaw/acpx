@@ -21,12 +21,12 @@ import {
 } from "./error-normalization.js";
 import {
   cloneSessionAcpxState,
-  cloneSessionThread,
-  createSessionThread,
-  recordClientOperation as recordThreadClientOperation,
+  cloneSessionConversation,
+  createSessionConversation,
+  recordClientOperation as recordConversationClientOperation,
   recordPromptSubmission,
-  recordSessionUpdate as recordThreadSessionUpdate,
-} from "./session-thread-model.js";
+  recordSessionUpdate as recordConversationSessionUpdate,
+} from "./session-conversation-model.js";
 import { SessionEventWriter } from "./session-events.js";
 import { defaultSessionEventLog } from "./session-event-log.js";
 import {
@@ -86,6 +86,7 @@ import {
   type PermissionMode,
   type RunPromptResult,
   type SessionEnsureResult,
+  type SessionConversation,
   type SessionRecord,
   type SessionSetConfigOptionResult,
   type SessionSetModeResult,
@@ -343,9 +344,20 @@ function reconcileAgentSessionId(
 }
 
 function sessionHasAgentMessages(record: SessionRecord): boolean {
-  return record.thread.messages.some(
+  return record.messages.some(
     (message) => typeof message === "object" && message !== null && "Agent" in message,
   );
+}
+
+function applyConversation(
+  record: SessionRecord,
+  conversation: SessionConversation,
+): void {
+  record.title = conversation.title;
+  record.messages = conversation.messages;
+  record.updated_at = conversation.updated_at;
+  record.cumulative_token_usage = conversation.cumulative_token_usage;
+  record.request_token_usage = conversation.request_token_usage;
 }
 
 function shouldFallbackToNewSession(error: unknown, record: SessionRecord): boolean {
@@ -544,9 +556,9 @@ async function runSessionPrompt(
 ): Promise<SessionSendResult> {
   const output = options.outputFormatter;
   const record = await resolveSessionRecord(options.sessionRecordId);
-  const thread = cloneSessionThread(record.thread);
+  const conversation = cloneSessionConversation(record);
   let acpxState = cloneSessionAcpxState(record.acpx);
-  recordPromptSubmission(thread, options.message, isoNow());
+  recordPromptSubmission(conversation, options.message, isoNow());
 
   output.setContext({
     sessionId: record.acpxRecordId,
@@ -596,14 +608,18 @@ async function runSessionPrompt(
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
     onSessionUpdate: (notification) => {
-      acpxState = recordThreadSessionUpdate(thread, acpxState, notification);
+      acpxState = recordConversationSessionUpdate(
+        conversation,
+        acpxState,
+        notification,
+      );
       const drafts = sessionUpdateToEventDrafts(notification);
       for (const draft of drafts) {
         emitEvent(draft);
       }
     },
     onClientOperation: (operation) => {
-      acpxState = recordThreadClientOperation(thread, acpxState, operation);
+      acpxState = recordConversationClientOperation(conversation, acpxState, operation);
       emitEvent(clientOperationToEventDraft(operation));
     },
   });
@@ -720,7 +736,7 @@ async function runSessionPrompt(
           output.flush();
 
           record.lastUsedAt = isoNow();
-          record.thread = thread;
+          applyConversation(record, conversation);
           record.acpx = acpxState;
           await writeSessionRecord(record).catch(() => {
             // best effort while bubbling prompt failure
@@ -750,7 +766,7 @@ async function runSessionPrompt(
         record.closedAt = undefined;
         record.protocolVersion = client.initializeResult?.protocolVersion;
         record.agentCapabilities = client.initializeResult?.agentCapabilities;
-        record.thread = thread;
+        applyConversation(record, conversation);
         record.acpx = acpxState;
         applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
         await writeSessionRecord(record);
@@ -766,7 +782,7 @@ async function runSessionPrompt(
         await client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS);
         applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
         record.lastUsedAt = isoNow();
-        record.thread = thread;
+        applyConversation(record, conversation);
         record.acpx = acpxState;
         await flushPendingEvents(true).catch(() => {
           // best effort while process is being interrupted
@@ -786,7 +802,7 @@ async function runSessionPrompt(
     }
     await client.close();
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-    record.thread = thread;
+    applyConversation(record, conversation);
     record.acpx = acpxState;
     await flushPendingEvents(false).catch(() => {
       // best effort on close
@@ -1106,7 +1122,7 @@ export async function createSession(
           agentStartedAt: lifecycle.startedAt,
           protocolVersion: client.initializeResult?.protocolVersion,
           agentCapabilities: client.initializeResult?.agentCapabilities,
-          thread: createSessionThread(now),
+          ...createSessionConversation(now),
           acpx: {},
         };
 

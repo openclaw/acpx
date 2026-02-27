@@ -2,20 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import {
-  createSessionThread,
+  createSessionConversation,
   recordClientOperation,
   recordPromptSubmission,
   recordSessionUpdate,
-} from "../src/session-thread-model.js";
+} from "../src/session-conversation-model.js";
 
-test("thread model captures prompt, chunks, tool calls, and metadata", () => {
-  const thread = createSessionThread("2026-02-27T10:00:00.000Z");
+test("conversation model captures prompt, chunks, tool calls, and metadata", () => {
+  const conversation = createSessionConversation("2026-02-27T10:00:00.000Z");
   let acpxState = undefined;
 
-  recordPromptSubmission(thread, "hello", "2026-02-27T10:00:00.000Z");
+  recordPromptSubmission(conversation, "hello", "2026-02-27T10:00:00.000Z");
 
   acpxState = recordSessionUpdate(
-    thread,
+    conversation,
     acpxState,
     {
       sessionId: "session-1",
@@ -28,7 +28,7 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
   );
 
   acpxState = recordSessionUpdate(
-    thread,
+    conversation,
     acpxState,
     {
       sessionId: "session-1",
@@ -41,7 +41,7 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
   );
 
   acpxState = recordSessionUpdate(
-    thread,
+    conversation,
     acpxState,
     {
       sessionId: "session-1",
@@ -58,7 +58,7 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
   );
 
   acpxState = recordSessionUpdate(
-    thread,
+    conversation,
     acpxState,
     {
       sessionId: "session-1",
@@ -73,7 +73,7 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
   );
 
   acpxState = recordSessionUpdate(
-    thread,
+    conversation,
     acpxState,
     {
       sessionId: "session-1",
@@ -86,7 +86,7 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
   );
 
   acpxState = recordSessionUpdate(
-    thread,
+    conversation,
     acpxState,
     {
       sessionId: "session-1",
@@ -99,7 +99,7 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
   );
 
   acpxState = recordSessionUpdate(
-    thread,
+    conversation,
     acpxState,
     {
       sessionId: "session-1",
@@ -113,7 +113,7 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
   );
 
   acpxState = recordSessionUpdate(
-    thread,
+    conversation,
     acpxState,
     {
       sessionId: "session-1",
@@ -135,7 +135,7 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
   );
 
   acpxState = recordClientOperation(
-    thread,
+    conversation,
     acpxState,
     {
       method: "terminal/create",
@@ -146,11 +146,11 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
     "2026-02-27T10:00:08.000Z",
   );
 
-  assert.equal(thread.messages.length, 2);
-  assert.equal(thread.title, "My Session");
+  assert.equal(conversation.messages.length, 2);
+  assert.equal(conversation.title, "My Session");
 
-  const user = thread.messages[0];
-  const agent = thread.messages[1];
+  const user = conversation.messages[0];
+  const agent = conversation.messages[1];
 
   assert.ok(typeof user === "object" && user !== null && "User" in user);
   assert.ok(typeof agent === "object" && agent !== null && "Agent" in agent);
@@ -170,13 +170,13 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
   assert.deepEqual(agent.Agent.tool_results.call_1?.output, { exitCode: 0 });
 
   const userId = user.User.id;
-  assert.deepEqual(thread.request_token_usage[userId], {
+  assert.deepEqual(conversation.request_token_usage[userId], {
     input_tokens: 60,
     output_tokens: 40,
     cache_creation_input_tokens: 10,
     cache_read_input_tokens: 15,
   });
-  assert.deepEqual(thread.cumulative_token_usage, {
+  assert.deepEqual(conversation.cumulative_token_usage, {
     input_tokens: 60,
     output_tokens: 40,
     cache_creation_input_tokens: 10,
@@ -188,9 +188,9 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
 });
 
 test("recordClientOperation keeps state and advances timestamp", () => {
-  const thread = createSessionThread("2026-02-27T10:00:00.000Z");
+  const conversation = createSessionConversation("2026-02-27T10:00:00.000Z");
   const state = recordClientOperation(
-    thread,
+    conversation,
     { current_mode_id: "code" },
     {
       method: "terminal/output",
@@ -202,5 +202,5 @@ test("recordClientOperation keeps state and advances timestamp", () => {
   );
 
   assert.equal(state?.current_mode_id, "code");
-  assert.equal(thread.updated_at, "2026-02-27T10:00:05.000Z");
+  assert.equal(conversation.updated_at, "2026-02-27T10:00:05.000Z");
 });

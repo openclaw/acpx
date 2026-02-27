@@ -339,9 +339,7 @@ export type AcpClientOptions = {
 };
 
 export const SESSION_RECORD_SCHEMA = "acpx.session.v1" as const;
-export const SESSION_THREAD_VERSION = "0.3.0" as const;
-
-export type SessionThreadImage = {
+export type SessionMessageImage = {
   source: string;
   size?: {
     width: number;
@@ -349,7 +347,7 @@ export type SessionThreadImage = {
   } | null;
 };
 
-export type SessionThreadUserContent =
+export type SessionUserContent =
   | {
       Text: string;
     }
@@ -360,10 +358,10 @@ export type SessionThreadUserContent =
       };
     }
   | {
-      Image: SessionThreadImage;
+      Image: SessionMessageImage;
     };
 
-export type SessionThreadToolUse = {
+export type SessionToolUse = {
   id: string;
   name: string;
   raw_input: string;
@@ -372,23 +370,23 @@ export type SessionThreadToolUse = {
   thought_signature?: string | null;
 };
 
-export type SessionThreadToolResultContent =
+export type SessionToolResultContent =
   | {
       Text: string;
     }
   | {
-      Image: SessionThreadImage;
+      Image: SessionMessageImage;
     };
 
-export type SessionThreadToolResult = {
+export type SessionToolResult = {
   tool_use_id: string;
   tool_name: string;
   is_error: boolean;
-  content: SessionThreadToolResultContent;
+  content: SessionToolResultContent;
   output?: unknown;
 };
 
-export type SessionThreadAgentContent =
+export type SessionAgentContent =
   | {
       Text: string;
     }
@@ -402,43 +400,42 @@ export type SessionThreadAgentContent =
       RedactedThinking: string;
     }
   | {
-      ToolUse: SessionThreadToolUse;
+      ToolUse: SessionToolUse;
     };
 
-export type SessionThreadUserMessage = {
+export type SessionUserMessage = {
   id: string;
-  content: SessionThreadUserContent[];
+  content: SessionUserContent[];
 };
 
-export type SessionThreadAgentMessage = {
-  content: SessionThreadAgentContent[];
-  tool_results: Record<string, SessionThreadToolResult>;
+export type SessionAgentMessage = {
+  content: SessionAgentContent[];
+  tool_results: Record<string, SessionToolResult>;
   reasoning_details?: unknown | null;
 };
 
-export type SessionThreadMessage =
+export type SessionMessage =
   | {
-      User: SessionThreadUserMessage;
+      User: SessionUserMessage;
     }
   | {
-      Agent: SessionThreadAgentMessage;
+      Agent: SessionAgentMessage;
     }
   | "Resume";
 
-export type SessionThreadTokenUsage = {
+export type SessionTokenUsage = {
   input_tokens?: number;
   output_tokens?: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
 };
 
-export type SessionThread = {
-  version: typeof SESSION_THREAD_VERSION;
+export type SessionConversation = {
   title?: string | null;
-  messages: SessionThreadMessage[];
+  messages: SessionMessage[];
   updated_at: string;
-  cumulative_token_usage: SessionThreadTokenUsage;
-  request_token_usage: Record<string, SessionThreadTokenUsage>;
+  cumulative_token_usage: SessionTokenUsage;
+  request_token_usage: Record<string, SessionTokenUsage>;
 };
 
 export type SessionAcpxState = {
@@ -471,7 +468,11 @@ export type SessionRecord = {
   lastAgentDisconnectReason?: string;
   protocolVersion?: number;
   agentCapabilities?: AgentCapabilities;
-  thread: SessionThread;
+  title?: string | null;
+  messages: SessionMessage[];
+  updated_at: string;
+  cumulative_token_usage: SessionTokenUsage;
+  request_token_usage: Record<string, SessionTokenUsage>;
   acpx?: SessionAcpxState;
 };
 

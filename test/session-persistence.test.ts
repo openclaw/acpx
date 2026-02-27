@@ -24,7 +24,7 @@ test("SessionRecord allows optional closed and closedAt fields", () => {
   assert.equal(record.closedAt, undefined);
 });
 
-test("listSessions ignores unsupported thread message shapes", async () => {
+test("listSessions ignores unsupported conversation message shapes", async () => {
   await withTempHome(async (homeDir) => {
     const sessionDir = path.join(homeDir, ".acpx", "sessions");
     await fs.mkdir(sessionDir, { recursive: true });
@@ -36,20 +36,13 @@ test("listSessions ignores unsupported thread message shapes", async () => {
       cwd: path.join(homeDir, "workspace"),
     });
 
-    (malformed as unknown as { thread: Record<string, unknown> }).thread = {
-      version: "0.3.0",
-      title: null,
-      messages: [
-        {
-          kind: "user",
-          id: "user_1",
-          content: [{ type: "text", text: "invalid" }],
-        },
-      ],
-      updated_at: "2026-01-01T00:00:00.000Z",
-      cumulative_token_usage: {},
-      request_token_usage: {},
-    };
+    (malformed as unknown as Record<string, unknown>).messages = [
+      {
+        kind: "user",
+        id: "user_1",
+        content: [{ type: "text", text: "invalid" }],
+      },
+    ];
 
     await fs.writeFile(
       path.join(sessionDir, "malformed-shape.json"),
@@ -66,7 +59,7 @@ test("listSessions ignores unsupported thread message shapes", async () => {
   });
 });
 
-test("listSessions preserves lifecycle and thread metadata", async () => {
+test("listSessions preserves lifecycle and conversation metadata", async () => {
   await withTempHome(async (homeDir) => {
     const session = await loadSessionModule();
     const cwd = path.join(homeDir, "workspace");
@@ -85,27 +78,24 @@ test("listSessions preserves lifecycle and thread metadata", async () => {
         lastAgentExitSignal: "SIGTERM",
         lastAgentExitAt: "2026-01-01T00:02:00.000Z",
         lastAgentDisconnectReason: "process_exit",
-        thread: {
-          version: "0.3.0",
-          title: "My Thread",
-          messages: [
-            {
-              User: {
-                id: "7c7615ad-5ba0-4cd3-a5f7-6ad9346dcfd5",
-                content: [{ Text: "hello" }],
-              },
+        title: "My Thread",
+        messages: [
+          {
+            User: {
+              id: "7c7615ad-5ba0-4cd3-a5f7-6ad9346dcfd5",
+              content: [{ Text: "hello" }],
             },
-            {
-              Agent: {
-                content: [{ Text: "world" }],
-                tool_results: {},
-              },
+          },
+          {
+            Agent: {
+              content: [{ Text: "world" }],
+              tool_results: {},
             },
-          ],
-          updated_at: "2026-01-01T00:02:00.000Z",
-          cumulative_token_usage: {},
-          request_token_usage: {},
-        },
+          },
+        ],
+        updated_at: "2026-01-01T00:02:00.000Z",
+        cumulative_token_usage: {},
+        request_token_usage: {},
       }),
     );
 
@@ -118,8 +108,8 @@ test("listSessions preserves lifecycle and thread metadata", async () => {
     assert.equal(record.lastAgentExitSignal, "SIGTERM");
     assert.equal(record.lastAgentExitAt, "2026-01-01T00:02:00.000Z");
     assert.equal(record.lastAgentDisconnectReason, "process_exit");
-    assert.equal(record.thread.messages.length, 2);
-    assert.equal(record.thread.title, "My Thread");
+    assert.equal(record.messages.length, 2);
+    assert.equal(record.title, "My Thread");
   });
 });
 
@@ -333,14 +323,11 @@ function makeSessionRecord(
     lastAgentDisconnectReason: overrides.lastAgentDisconnectReason,
     protocolVersion: overrides.protocolVersion,
     agentCapabilities: overrides.agentCapabilities,
-    thread: overrides.thread ?? {
-      version: "0.3.0",
-      title: null,
-      messages: [],
-      updated_at: overrides.lastUsedAt ?? timestamp,
-      cumulative_token_usage: {},
-      request_token_usage: {},
-    },
+    title: overrides.title ?? null,
+    messages: overrides.messages ?? [],
+    updated_at: overrides.updated_at ?? overrides.lastUsedAt ?? timestamp,
+    cumulative_token_usage: overrides.cumulative_token_usage ?? {},
+    request_token_usage: overrides.request_token_usage ?? {},
     acpx: overrides.acpx,
   };
 }

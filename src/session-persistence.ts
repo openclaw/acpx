@@ -9,7 +9,7 @@ import type {
   SessionAcpxState,
   SessionEventLog,
   SessionRecord,
-  SessionThread,
+  SessionConversation,
 } from "./types.js";
 import { SESSION_RECORD_SCHEMA } from "./types.js";
 import { assertPersistedKeyPolicy } from "./persisted-key-policy.js";
@@ -59,7 +59,7 @@ async function ensureSessionDir(): Promise<void> {
 
 function parseTokenUsage(
   raw: unknown,
-): SessionThread["cumulative_token_usage"] | null | undefined {
+): SessionConversation["cumulative_token_usage"] | null | undefined {
   if (raw === undefined || raw === null) {
     return undefined;
   }
@@ -69,8 +69,8 @@ function parseTokenUsage(
     return null;
   }
 
-  const usage: SessionThread["cumulative_token_usage"] = {};
-  const fields: Array<keyof SessionThread["cumulative_token_usage"]> = [
+  const usage: SessionConversation["cumulative_token_usage"] = {};
+  const fields: Array<keyof SessionConversation["cumulative_token_usage"]> = [
     "input_tokens",
     "output_tokens",
     "cache_creation_input_tokens",
@@ -93,7 +93,7 @@ function parseTokenUsage(
 
 function parseRequestTokenUsage(
   raw: unknown,
-): SessionThread["request_token_usage"] | null | undefined {
+): SessionConversation["request_token_usage"] | null | undefined {
   if (raw === undefined || raw === null) {
     return undefined;
   }
@@ -103,7 +103,7 @@ function parseRequestTokenUsage(
     return null;
   }
 
-  const usage: SessionThread["request_token_usage"] = {};
+  const usage: SessionConversation["request_token_usage"] = {};
   for (const [key, value] of Object.entries(record)) {
     const parsed = parseTokenUsage(value);
     if (parsed == null) {
@@ -115,7 +115,7 @@ function parseRequestTokenUsage(
   return usage;
 }
 
-function isSessionThreadImage(raw: unknown): boolean {
+function isSessionMessageImage(raw: unknown): boolean {
   const record = asRecord(raw);
   if (!record || typeof record.source !== "string") {
     return false;
@@ -155,7 +155,7 @@ function isUserContent(raw: unknown): boolean {
   }
 
   if (record.Image !== undefined) {
-    return isSessionThreadImage(record.Image);
+    return isSessionMessageImage(record.Image);
   }
 
   return false;
@@ -187,7 +187,7 @@ function isToolResultContent(raw: unknown): boolean {
   }
 
   if (record.Image !== undefined) {
-    return isSessionThreadImage(record.Image);
+    return isSessionMessageImage(record.Image);
   }
 
   return false;
@@ -270,20 +270,16 @@ function isAgentMessage(raw: unknown): boolean {
   return Object.values(toolResults).every(isToolResult);
 }
 
-function isThreadMessage(raw: unknown): boolean {
+function isConversationMessage(raw: unknown): boolean {
   return raw === "Resume" || isUserMessage(raw) || isAgentMessage(raw);
 }
 
-function parseThread(raw: unknown): SessionThread | undefined {
-  const record = asRecord(raw);
-  if (!record) {
-    return undefined;
-  }
-
+function parseConversationRecord(
+  record: Record<string, unknown>,
+): SessionConversation | undefined {
   if (
-    record.version !== "0.3.0" ||
     !Array.isArray(record.messages) ||
-    !record.messages.every(isThreadMessage) ||
+    !record.messages.every(isConversationMessage) ||
     typeof record.updated_at !== "string"
   ) {
     return undefined;
@@ -304,14 +300,13 @@ function parseThread(raw: unknown): SessionThread | undefined {
   }
 
   return {
-    version: "0.3.0",
     title:
       record.title === undefined ||
       record.title === null ||
       typeof record.title === "string"
         ? (record.title as string | null | undefined)
         : null,
-    messages: record.messages as SessionThread["messages"],
+    messages: record.messages as SessionConversation["messages"],
     updated_at: record.updated_at,
     cumulative_token_usage: cumulativeTokenUsage ?? {},
     request_token_usage: requestTokenUsage ?? {},
@@ -490,8 +485,8 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
     return null;
   }
 
-  const thread = parseThread(record.thread);
-  if (!thread) {
+  const conversation = parseConversationRecord(record);
+  if (!conversation) {
     return null;
   }
 
@@ -531,7 +526,11 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
     agentCapabilities: asRecord(
       record.agent_capabilities,
     ) as SessionRecord["agentCapabilities"],
-    thread,
+    title: conversation.title,
+    messages: conversation.messages,
+    updated_at: conversation.updated_at,
+    cumulative_token_usage: conversation.cumulative_token_usage,
+    request_token_usage: conversation.request_token_usage,
     acpx: parseAcpxState(record.acpx),
   };
 }
@@ -568,7 +567,11 @@ export function serializeSessionRecordForDisk(
     last_agent_disconnect_reason: canonical.lastAgentDisconnectReason,
     protocol_version: canonical.protocolVersion,
     agent_capabilities: canonical.agentCapabilities,
-    thread: canonical.thread,
+    title: canonical.title,
+    messages: canonical.messages,
+    updated_at: canonical.updated_at,
+    cumulative_token_usage: canonical.cumulative_token_usage,
+    request_token_usage: canonical.request_token_usage,
     acpx: canonical.acpx,
   };
 }

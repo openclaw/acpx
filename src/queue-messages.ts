@@ -284,8 +284,8 @@ function parseSessionSendResult(raw: unknown): SessionSendResult | null {
     typeof record.cwd === "string" &&
     typeof record.createdAt === "string" &&
     typeof record.lastUsedAt === "string" &&
-    !!record.thread &&
-    typeof record.thread === "object" &&
+    Array.isArray(record.messages) &&
+    typeof record.updated_at === "string" &&
     typeof record.lastSeq === "number" &&
     Number.isInteger(record.lastSeq) &&
     !!record.eventLog &&

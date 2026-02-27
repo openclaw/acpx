@@ -901,27 +901,24 @@ test("sessions history prints stored history entries", async () => {
       createdAt: "2026-01-01T00:00:00.000Z",
       lastUsedAt: "2026-01-01T00:10:00.000Z",
       closed: false,
-      thread: {
-        version: "0.3.0",
-        title: null,
-        messages: [
-          {
-            User: {
-              id: "7d7b0e67-9725-4f57-ba31-491bf4f97767",
-              content: [{ Text: "first message" }],
-            },
+      title: null,
+      messages: [
+        {
+          User: {
+            id: "7d7b0e67-9725-4f57-ba31-491bf4f97767",
+            content: [{ Text: "first message" }],
           },
-          {
-            Agent: {
-              content: [{ Text: "second message" }],
-              tool_results: {},
-            },
+        },
+        {
+          Agent: {
+            content: [{ Text: "second message" }],
+            tool_results: {},
           },
-        ],
-        updated_at: "2026-01-01T00:02:00.000Z",
-        cumulative_token_usage: {},
-        request_token_usage: {},
-      },
+        },
+      ],
+      updated_at: "2026-01-01T00:02:00.000Z",
+      cumulative_token_usage: {},
+      request_token_usage: {},
     });
 
     const result = await runCli(
@@ -1130,14 +1127,11 @@ function makeSessionRecord(
     lastAgentDisconnectReason: record.lastAgentDisconnectReason,
     protocolVersion: record.protocolVersion,
     agentCapabilities: record.agentCapabilities,
-    thread: record.thread ?? {
-      version: "0.3.0",
-      title: null,
-      messages: [],
-      updated_at: record.lastUsedAt ?? timestamp,
-      cumulative_token_usage: {},
-      request_token_usage: {},
-    },
+    title: record.title ?? null,
+    messages: record.messages ?? [],
+    updated_at: record.updated_at ?? record.lastUsedAt ?? timestamp,
+    cumulative_token_usage: record.cumulative_token_usage ?? {},
+    request_token_usage: record.request_token_usage ?? {},
     acpx: record.acpx,
   };
 }
