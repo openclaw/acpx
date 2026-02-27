@@ -1,8 +1,15 @@
 import type {
   AgentCapabilities,
+  PlanEntry,
+  SessionConfigOption,
   SessionNotification,
+  SessionUpdate,
   SetSessionConfigOptionResponse,
   StopReason,
+  ToolCallContent,
+  ToolCallLocation,
+  ToolCallStatus,
+  ToolKind,
 } from "@agentclientprotocol/sdk";
 
 export const EXIT_CODES = {
@@ -259,6 +266,53 @@ export type SessionHistoryEntry = {
   textPreview: string;
 };
 
+export const SESSION_ACP_PROJECTION_SCHEMA = "acpx.session.acp.v1" as const;
+
+export type SessionAcpEvent =
+  | {
+      type: "session_update";
+      timestamp: string;
+      update: SessionUpdate;
+      _meta?: Record<string, unknown> | null;
+    }
+  | {
+      type: "client_operation";
+      timestamp: string;
+      operation: ClientOperation;
+    };
+
+export type SessionAcpToolCall = {
+  toolCallId: string;
+  title?: string;
+  status?: ToolCallStatus;
+  kind?: ToolKind;
+  locations?: Array<ToolCallLocation>;
+  content?: Array<ToolCallContent>;
+  rawInput?: unknown;
+  rawOutput?: unknown;
+  updatedAt: string;
+};
+
+export type SessionAcpPlanEntry = Pick<PlanEntry, "content" | "status" | "priority">;
+
+export type SessionAcpProjection = {
+  schema: typeof SESSION_ACP_PROJECTION_SCHEMA;
+  events: SessionAcpEvent[];
+  toolCalls: SessionAcpToolCall[];
+  plan?: SessionAcpPlanEntry[];
+  availableCommands?: string[];
+  currentModeId?: string;
+  configOptions?: SessionConfigOption[];
+  sessionTitle?: string | null;
+  sessionUpdatedAt?: string | null;
+  usage?: {
+    used: number;
+    size: number;
+    costAmount?: number;
+    costCurrency?: string;
+  };
+};
+
 export type SessionRecord = {
   id: string;
   sessionId: string;
@@ -278,6 +332,7 @@ export type SessionRecord = {
   lastAgentExitAt?: string;
   lastAgentDisconnectReason?: string;
   turnHistory?: SessionHistoryEntry[];
+  acpProjection?: SessionAcpProjection;
   protocolVersion?: number;
   agentCapabilities?: AgentCapabilities;
 };

@@ -1,13 +1,23 @@
 # ACPX Session Model
 
 Date: 2026-02-27
-Status: Proposed
+Status: Implemented (v1 projection in `session.json`)
 
 ## Goal
 
 Store ACP sessions as durable event logs so acpx can always reconstruct truth from disk, including all relevant ACP traffic, queue behavior, tool activity, and turn lifecycle.
 
 This model is designed to survive protocol evolution without schema churn.
+
+## Current Implementation (v1)
+
+Implemented now in `session.json` under `acpProjection` (`schema: "acpx.session.acp.v1"`):
+
+- captures all `session/update` notifications and client operation callbacks in-order
+- keeps derived projection state for tool calls, plan, available commands, mode, session info, and usage
+- preserves existing `turnHistory` for quick CLI previews
+
+This is an additive step toward the full segment-based event-log layout below.
 
 ## Design Principles
 

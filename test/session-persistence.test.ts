@@ -521,6 +521,7 @@ function makeSessionRecord(overrides: Partial<SessionRecord>): SessionRecord {
     lastAgentExitAt: overrides.lastAgentExitAt,
     lastAgentDisconnectReason: overrides.lastAgentDisconnectReason,
     turnHistory: overrides.turnHistory,
+    acpProjection: overrides.acpProjection,
   };
 }
 
@@ -570,3 +571,70 @@ async function waitForExit(pid: number | undefined): Promise<boolean> {
 
   return false;
 }
+
+test("listSessions preserves ACP projection when present", async () => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const cwd = path.join(homeDir, "workspace");
+
+    await writeSessionRecord(
+      homeDir,
+      makeSessionRecord({
+        id: "acp-projection",
+        sessionId: "acp-projection",
+        agentCommand: "agent-a",
+        cwd,
+        acpProjection: {
+          schema: "acpx.session.acp.v1",
+          events: [
+            {
+              type: "session_update",
+              timestamp: "2026-01-01T00:00:10.000Z",
+              update: {
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: "hello" },
+              },
+            },
+            {
+              type: "client_operation",
+              timestamp: "2026-01-01T00:00:11.000Z",
+              operation: {
+                method: "terminal/create",
+                status: "completed",
+                summary: "created terminal",
+                timestamp: "2026-01-01T00:00:11.000Z",
+              },
+            },
+          ],
+          toolCalls: [
+            {
+              toolCallId: "call_1",
+              title: "Run ls",
+              status: "completed",
+              kind: "execute",
+              updatedAt: "2026-01-01T00:00:12.000Z",
+            },
+          ],
+          availableCommands: ["create_plan"],
+          currentModeId: "code",
+          usage: {
+            used: 10,
+            size: 100,
+            costAmount: 0.01,
+            costCurrency: "USD",
+          },
+        },
+      }),
+    );
+
+    const sessions = await session.listSessions();
+    const record = sessions.find((entry) => entry.id === "acp-projection");
+    assert.ok(record);
+    assert.equal(record.acpProjection?.schema, "acpx.session.acp.v1");
+    assert.equal(record.acpProjection?.events.length, 2);
+    assert.equal(record.acpProjection?.toolCalls.length, 1);
+    assert.equal(record.acpProjection?.availableCommands?.[0], "create_plan");
+    assert.equal(record.acpProjection?.currentModeId, "code");
+    assert.equal(record.acpProjection?.usage?.used, 10);
+  });
+});

@@ -4,7 +4,16 @@ import os from "node:os";
 import path from "node:path";
 import { SessionNotFoundError, SessionResolutionError } from "./errors.js";
 import { normalizeRuntimeSessionId } from "./runtime-session-id.js";
-import type { SessionHistoryEntry, SessionRecord } from "./types.js";
+import {
+  SESSION_ACP_PROJECTION_SCHEMA,
+  type ClientOperation,
+  type SessionAcpEvent,
+  type SessionAcpPlanEntry,
+  type SessionAcpProjection,
+  type SessionAcpToolCall,
+  type SessionHistoryEntry,
+  type SessionRecord,
+} from "./types.js";
 
 export const DEFAULT_HISTORY_LIMIT = 20;
 
@@ -21,6 +30,17 @@ type FindSessionByDirectoryWalkOptions = {
   name?: string;
   boundary?: string;
 };
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
 
 function sessionFilePath(id: string): string {
   const safeId = encodeURIComponent(id);
@@ -70,6 +90,251 @@ function parseHistoryEntries(raw: unknown): SessionHistoryEntry[] | undefined | 
   }
 
   return entries;
+}
+
+function parseClientOperation(raw: unknown): ClientOperation | undefined {
+  const record = asRecord(raw);
+  if (!record) {
+    return undefined;
+  }
+
+  const method = record.method;
+  const status = record.status;
+  const summary = record.summary;
+  const timestamp = record.timestamp;
+  const details = record.details;
+
+  if (
+    typeof method !== "string" ||
+    typeof status !== "string" ||
+    typeof summary !== "string" ||
+    typeof timestamp !== "string"
+  ) {
+    return undefined;
+  }
+
+  return {
+    method: method as ClientOperation["method"],
+    status: status as ClientOperation["status"],
+    summary,
+    details: typeof details === "string" ? details : undefined,
+    timestamp,
+  };
+}
+
+function parseSessionAcpEvent(raw: unknown): SessionAcpEvent | undefined {
+  const record = asRecord(raw);
+  if (
+    !record ||
+    typeof record.type !== "string" ||
+    typeof record.timestamp !== "string"
+  ) {
+    return undefined;
+  }
+
+  if (record.type === "session_update") {
+    const update = asRecord(record.update);
+    if (!update || typeof update.sessionUpdate !== "string") {
+      return undefined;
+    }
+
+    const metaRaw = record._meta;
+    const meta =
+      metaRaw === undefined
+        ? undefined
+        : metaRaw === null
+          ? null
+          : (asRecord(metaRaw) ?? undefined);
+
+    return {
+      type: "session_update",
+      timestamp: record.timestamp,
+      update: update as Extract<SessionAcpEvent, { type: "session_update" }>["update"],
+      _meta: meta,
+    };
+  }
+
+  if (record.type === "client_operation") {
+    const operation = parseClientOperation(record.operation);
+    if (!operation) {
+      return undefined;
+    }
+
+    return {
+      type: "client_operation",
+      timestamp: record.timestamp,
+      operation,
+    };
+  }
+
+  return undefined;
+}
+
+function parseToolCall(raw: unknown): SessionAcpToolCall | undefined {
+  const record = asRecord(raw);
+  if (!record) {
+    return undefined;
+  }
+
+  if (typeof record.toolCallId !== "string" || typeof record.updatedAt !== "string") {
+    return undefined;
+  }
+
+  return {
+    toolCallId: record.toolCallId,
+    title: typeof record.title === "string" ? record.title : undefined,
+    status:
+      typeof record.status === "string"
+        ? (record.status as SessionAcpToolCall["status"])
+        : undefined,
+    kind:
+      typeof record.kind === "string"
+        ? (record.kind as SessionAcpToolCall["kind"])
+        : undefined,
+    locations: Array.isArray(record.locations)
+      ? (record.locations as SessionAcpToolCall["locations"])
+      : undefined,
+    content: Array.isArray(record.content)
+      ? (record.content as SessionAcpToolCall["content"])
+      : undefined,
+    rawInput: record.rawInput,
+    rawOutput: record.rawOutput,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function parsePlanEntries(raw: unknown): SessionAcpPlanEntry[] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+
+  const entries: SessionAcpPlanEntry[] = [];
+  for (const item of raw) {
+    const record = asRecord(item);
+    if (!record) {
+      continue;
+    }
+
+    if (
+      typeof record.content !== "string" ||
+      typeof record.status !== "string" ||
+      typeof record.priority !== "string"
+    ) {
+      continue;
+    }
+
+    entries.push({
+      content: record.content,
+      status: record.status as SessionAcpPlanEntry["status"],
+      priority: record.priority as SessionAcpPlanEntry["priority"],
+    });
+  }
+
+  return entries;
+}
+
+function parseConfigOptions(raw: unknown): SessionAcpProjection["configOptions"] {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+
+  const options = raw.filter((entry) => {
+    const record = asRecord(entry);
+    return (
+      !!record &&
+      typeof record.id === "string" &&
+      typeof record.name === "string" &&
+      typeof record.currentValue === "string" &&
+      Array.isArray(record.options)
+    );
+  });
+
+  if (options.length === 0) {
+    return undefined;
+  }
+
+  return options as SessionAcpProjection["configOptions"];
+}
+
+function parseUsage(raw: unknown): SessionAcpProjection["usage"] {
+  const record = asRecord(raw);
+  if (!record) {
+    return undefined;
+  }
+
+  if (typeof record.used !== "number" || typeof record.size !== "number") {
+    return undefined;
+  }
+
+  const usage: NonNullable<SessionAcpProjection["usage"]> = {
+    used: record.used,
+    size: record.size,
+  };
+
+  if (typeof record.costAmount === "number") {
+    usage.costAmount = record.costAmount;
+  }
+  if (typeof record.costCurrency === "string") {
+    usage.costCurrency = record.costCurrency;
+  }
+
+  return usage;
+}
+
+function parseAcpProjection(raw: unknown): SessionAcpProjection | undefined {
+  const record = asRecord(raw);
+  if (!record) {
+    return undefined;
+  }
+
+  const events: SessionAcpEvent[] = [];
+  if (Array.isArray(record.events)) {
+    for (const event of record.events) {
+      const parsed = parseSessionAcpEvent(event);
+      if (parsed) {
+        events.push(parsed);
+      }
+    }
+  }
+
+  const toolCalls: SessionAcpToolCall[] = [];
+  if (Array.isArray(record.toolCalls)) {
+    for (const call of record.toolCalls) {
+      const parsed = parseToolCall(call);
+      if (parsed) {
+        toolCalls.push(parsed);
+      }
+    }
+  }
+
+  return {
+    schema:
+      record.schema === SESSION_ACP_PROJECTION_SCHEMA
+        ? SESSION_ACP_PROJECTION_SCHEMA
+        : SESSION_ACP_PROJECTION_SCHEMA,
+    events,
+    toolCalls,
+    plan: parsePlanEntries(record.plan),
+    availableCommands: isStringArray(record.availableCommands)
+      ? [...record.availableCommands]
+      : undefined,
+    currentModeId:
+      typeof record.currentModeId === "string" ? record.currentModeId : undefined,
+    configOptions: parseConfigOptions(record.configOptions),
+    sessionTitle:
+      record.sessionTitle === null
+        ? null
+        : typeof record.sessionTitle === "string"
+          ? record.sessionTitle
+          : undefined,
+    sessionUpdatedAt:
+      record.sessionUpdatedAt === null
+        ? null
+        : typeof record.sessionUpdatedAt === "string"
+          ? record.sessionUpdatedAt
+          : undefined,
+    usage: parseUsage(record.usage),
+  };
 }
 
 function parseSessionRecord(raw: unknown): SessionRecord | null {
@@ -150,6 +415,9 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
   const turnHistory = parseHistoryEntries(
     (record as { turnHistory?: unknown }).turnHistory,
   );
+  const acpProjection = parseAcpProjection(
+    (record as { acpProjection?: unknown }).acpProjection,
+  );
 
   if (
     typeof record.id !== "string" ||
@@ -196,6 +464,7 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
     lastAgentExitAt,
     lastAgentDisconnectReason,
     turnHistory,
+    acpProjection,
   };
 }
 
@@ -387,22 +656,67 @@ export async function findSessionByDirectoryWalk(
     return session.name === normalizedName;
   };
 
-  let dir = normalizedStart;
+  let current = normalizedStart;
+  const walkRoot = path.parse(current).root;
 
   for (;;) {
-    const match = sessions.find((session) => matchesScope(session, dir));
+    const match = sessions.find((session) => matchesScope(session, current));
     if (match) {
       return match;
     }
 
-    if (dir === walkBoundary) {
+    if (current === walkBoundary || current === walkRoot) {
       return undefined;
     }
 
-    const parent = path.dirname(dir);
-    if (parent === dir) {
+    const parent = path.dirname(current);
+    if (parent === current) {
       return undefined;
     }
-    dir = parent;
+
+    current = parent;
+
+    if (!isWithinBoundary(walkBoundary, current)) {
+      return undefined;
+    }
   }
+}
+
+function killSignalCandidates(signal: NodeJS.Signals | undefined): NodeJS.Signals[] {
+  if (!signal) {
+    return ["SIGTERM", "SIGKILL"];
+  }
+
+  const normalized = signal.toUpperCase() as NodeJS.Signals;
+  if (normalized === "SIGKILL") {
+    return ["SIGKILL"];
+  }
+
+  return [normalized, "SIGKILL"];
+}
+
+export async function closeSession(id: string): Promise<SessionRecord> {
+  const record = await resolveSessionRecord(id);
+  const now = isoNow();
+
+  if (record.pid) {
+    for (const signal of killSignalCandidates(
+      record.lastAgentExitSignal ?? undefined,
+    )) {
+      try {
+        process.kill(record.pid, signal);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  record.closed = true;
+  record.closedAt = now;
+  record.pid = undefined;
+  record.lastUsedAt = now;
+  record.lastPromptAt = record.lastPromptAt ?? now;
+
+  await writeSessionRecord(record);
+  return record;
 }

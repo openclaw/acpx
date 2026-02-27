@@ -12,6 +12,12 @@ import {
   normalizeOutputError,
 } from "./error-normalization.js";
 import {
+  cloneSessionAcpProjection,
+  createSessionAcpProjection,
+  recordClientOperation as recordProjectionClientOperation,
+  recordSessionUpdate as recordProjectionSessionUpdate,
+} from "./session-acp-projection.js";
+import {
   QueueOwnerTurnController,
   type QueueOwnerActiveSessionController,
 } from "./queue-owner-turn-controller.js";
@@ -645,6 +651,7 @@ async function runSessionPrompt(
     stream: "prompt",
   });
   const assistantSnippets: string[] = [];
+  const acpProjection = cloneSessionAcpProjection(record.acpProjection);
 
   const client = new AcpClient({
     agentCommand: record.agentCommand,
@@ -656,6 +663,7 @@ async function runSessionPrompt(
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
     onSessionUpdate: (notification) => {
+      recordProjectionSessionUpdate(acpProjection, notification);
       output.onSessionUpdate(notification);
       const entry = toHistoryEntryFromUpdate(notification);
       if (entry && entry.role === "assistant") {
@@ -663,6 +671,7 @@ async function runSessionPrompt(
       }
     },
     onClientOperation: (operation) => {
+      recordProjectionClientOperation(acpProjection, operation);
       output.onClientOperation(operation);
     },
   });
@@ -732,6 +741,7 @@ async function runSessionPrompt(
             );
           }
           record.lastUsedAt = isoNow();
+          record.acpProjection = acpProjection;
           await writeSessionRecord(record);
           throw error;
         }
@@ -765,6 +775,7 @@ async function runSessionPrompt(
         record.closedAt = undefined;
         record.protocolVersion = client.initializeResult?.protocolVersion;
         record.agentCapabilities = client.initializeResult?.agentCapabilities;
+        record.acpProjection = acpProjection;
         applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
         await writeSessionRecord(record);
 
@@ -779,6 +790,7 @@ async function runSessionPrompt(
         await client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS);
         applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
         record.lastUsedAt = isoNow();
+        record.acpProjection = acpProjection;
         await writeSessionRecord(record).catch(() => {
           // best effort while process is being interrupted
         });
@@ -791,6 +803,7 @@ async function runSessionPrompt(
     }
     await client.close();
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
+    record.acpProjection = acpProjection;
     await writeSessionRecord(record).catch(() => {
       // best effort on close
     });
@@ -1076,6 +1089,7 @@ export async function createSession(
           protocolVersion: client.initializeResult?.protocolVersion,
           agentCapabilities: client.initializeResult?.agentCapabilities,
           turnHistory: [],
+          acpProjection: createSessionAcpProjection(),
         };
 
         await writeSessionRecord(record);
