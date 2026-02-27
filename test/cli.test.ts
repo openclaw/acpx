@@ -941,13 +941,16 @@ test("sessions history prints stored history entries", async () => {
         title: null,
         messages: [
           {
-            kind: "user",
-            id: "user_1",
-            content: [{ type: "text", text: "first message" }],
+            User: {
+              id: "7d7b0e67-9725-4f57-ba31-491bf4f97767",
+              content: [{ Text: "first message" }],
+            },
           },
           {
-            kind: "agent",
-            content: [{ type: "text", text: "second message" }],
+            Agent: {
+              content: [{ Text: "second message" }],
+              tool_results: {},
+            },
           },
         ],
         updated_at: "2026-01-01T00:02:00.000Z",

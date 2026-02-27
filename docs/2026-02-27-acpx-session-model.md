@@ -86,9 +86,10 @@ User:
 
 ```json
 {
-  "kind": "user",
-  "id": "user_msg_id",
-  "content": [{ "type": "text", "text": "..." }]
+  "User": {
+    "id": "2f8f2028-df7d-4479-a0a0-9f10238986cd",
+    "content": [{ "Text": "..." }]
+  }
 }
 ```
 
@@ -96,46 +97,48 @@ Agent:
 
 ```json
 {
-  "kind": "agent",
-  "content": [
-    { "type": "text", "text": "..." },
-    { "type": "thinking", "text": "...", "signature": null },
-    {
-      "type": "tool_use",
-      "id": "tool_use_id",
-      "name": "run_command",
-      "raw_input": {},
-      "input": {},
-      "is_input_complete": true,
-      "thought_signature": null
-    }
-  ],
-  "tool_results": {
-    "tool_use_id": {
-      "tool_use_id": "tool_use_id",
-      "tool_name": "run_command",
-      "is_error": false,
-      "content": "...",
-      "output": null
-    }
-  },
-  "reasoning_details": null
+  "Agent": {
+    "content": [
+      { "Text": "..." },
+      { "Thinking": { "text": "...", "signature": null } },
+      {
+        "ToolUse": {
+          "id": "call_123",
+          "name": "run_command",
+          "raw_input": "{\"command\":\"ls\"}",
+          "input": { "command": "ls" },
+          "is_input_complete": true,
+          "thought_signature": null
+        }
+      }
+    ],
+    "tool_results": {
+      "call_123": {
+        "tool_use_id": "call_123",
+        "tool_name": "run_command",
+        "is_error": false,
+        "content": { "Text": "..." },
+        "output": null
+      }
+    },
+    "reasoning_details": null
+  }
 }
 ```
 
 Resume marker:
 
 ```json
-{ "kind": "resume" }
+"Resume"
 ```
 
 ## ACP Update Mapping
 
-- prompt send: create `user` message
-- `agent_message_chunk`: append `text` in current agent message
-- `agent_thought_chunk`: append `thinking` in current agent message
-- `tool_call` / `tool_call_update`: upsert `tool_use` and `tool_results`
-- `usage_update`: update `request_token_usage` and `cumulative_token_usage`
+- prompt send: create `User` message
+- `agent_message_chunk`: append `Text` in current `Agent` message
+- `agent_thought_chunk`: append `Thinking` in current `Agent` message
+- `tool_call` / `tool_call_update`: upsert `ToolUse` and `tool_results`
+- `usage_update`: only applied to `request_token_usage` / `cumulative_token_usage` when token-shaped metadata is available
 - `session_info_update`: update `thread.title` and `thread.updated_at`
 - `available_commands_update`: update `acpx.available_commands`
 - `current_mode_update`: update `acpx.current_mode_id`
@@ -157,3 +160,4 @@ Notes:
 
 - `acpx` is optional.
 - `thread` remains clean and conversation-focused.
+- Parser is strict to this shape; legacy `kind/type` message records are ignored.

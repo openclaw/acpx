@@ -23,6 +23,57 @@ test("SessionRecord allows optional closed and closedAt fields", () => {
   assert.equal(record.closedAt, undefined);
 });
 
+test("listSessions ignores legacy thread message shapes", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionDir = path.join(homeDir, ".acpx", "sessions");
+    await fs.mkdir(sessionDir, { recursive: true });
+
+    const legacy = makeSessionRecord({
+      acpxRecordId: "legacy-shape",
+      acpSessionId: "legacy-shape",
+      agentCommand: "agent",
+      cwd: path.join(homeDir, "workspace"),
+    });
+
+    (legacy as unknown as { thread: Record<string, unknown> }).thread = {
+      version: "0.3.0",
+      title: null,
+      messages: [
+        {
+          kind: "user",
+          id: "user_1",
+          content: [{ type: "text", text: "legacy" }],
+        },
+      ],
+      updated_at: "2026-01-01T00:00:00.000Z",
+      detailed_summary: null,
+      initial_project_snapshot: null,
+      cumulative_token_usage: {},
+      request_token_usage: {},
+      model: null,
+      profile: null,
+      imported: false,
+      subagent_context: null,
+      speed: null,
+      thinking_enabled: false,
+      thinking_effort: null,
+    };
+
+    await fs.writeFile(
+      path.join(sessionDir, "legacy-shape.json"),
+      JSON.stringify(legacy, null, 2) + "\n",
+      "utf8",
+    );
+
+    const session = await loadSessionModule();
+    const sessions = await session.listSessions();
+    assert.equal(
+      sessions.some((entry) => entry.acpxRecordId === "legacy-shape"),
+      false,
+    );
+  });
+});
+
 test("listSessions preserves lifecycle and thread metadata", async () => {
   await withTempHome(async (homeDir) => {
     const session = await loadSessionModule();
@@ -47,13 +98,16 @@ test("listSessions preserves lifecycle and thread metadata", async () => {
           title: "My Thread",
           messages: [
             {
-              kind: "user",
-              id: "user_1",
-              content: [{ type: "text", text: "hello" }],
+              User: {
+                id: "7c7615ad-5ba0-4cd3-a5f7-6ad9346dcfd5",
+                content: [{ Text: "hello" }],
+              },
             },
             {
-              kind: "agent",
-              content: [{ type: "text", text: "world" }],
+              Agent: {
+                content: [{ Text: "world" }],
+                tool_results: {},
+              },
             },
           ],
           updated_at: "2026-01-01T00:02:00.000Z",

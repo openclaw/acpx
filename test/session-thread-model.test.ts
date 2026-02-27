@@ -122,9 +122,13 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
         sessionUpdate: "usage_update",
         used: 100,
         size: 1000,
-        cost: {
-          amount: 0.05,
-          currency: "USD",
+        _meta: {
+          usage: {
+            inputTokens: 60,
+            outputTokens: 40,
+            cachedWriteTokens: 10,
+            cachedReadTokens: 15,
+          },
         },
       },
     } as SessionNotification,
@@ -144,23 +148,42 @@ test("thread model captures prompt, chunks, tool calls, and metadata", () => {
   );
 
   assert.equal(thread.messages.length, 2);
-  assert.equal(thread.messages[0]?.kind, "user");
-  assert.equal(thread.messages[1]?.kind, "agent");
   assert.equal(thread.title, "My Session");
 
+  const user = thread.messages[0];
   const agent = thread.messages[1];
-  assert.ok(agent && agent.kind === "agent");
-  if (agent && agent.kind === "agent") {
-    const tool = agent.content.find(
-      (entry) => entry.type === "tool_use" && entry.id === "call_1",
-    );
-    assert.ok(tool);
-    assert.equal(agent.tool_results?.call_1?.tool_name, "Run ls");
-    assert.deepEqual(agent.tool_results?.call_1?.output, { exitCode: 0 });
+
+  assert.ok(typeof user === "object" && user !== null && "User" in user);
+  assert.ok(typeof agent === "object" && agent !== null && "Agent" in agent);
+
+  if (!(typeof user === "object" && user !== null && "User" in user)) {
+    assert.fail("expected User message");
+  }
+  if (!(typeof agent === "object" && agent !== null && "Agent" in agent)) {
+    assert.fail("expected Agent message");
   }
 
-  assert.equal(thread.request_token_usage?.used, 100);
-  assert.equal(thread.request_token_usage?.size, 1000);
+  const tool = agent.Agent.content.find(
+    (entry) => "ToolUse" in entry && entry.ToolUse.id === "call_1",
+  );
+  assert.ok(tool);
+  assert.equal(agent.Agent.tool_results.call_1?.tool_name, "Run ls");
+  assert.deepEqual(agent.Agent.tool_results.call_1?.output, { exitCode: 0 });
+
+  const userId = user.User.id;
+  assert.deepEqual(thread.request_token_usage[userId], {
+    input_tokens: 60,
+    output_tokens: 40,
+    cache_creation_input_tokens: 10,
+    cache_read_input_tokens: 15,
+  });
+  assert.deepEqual(thread.cumulative_token_usage, {
+    input_tokens: 60,
+    output_tokens: 40,
+    cache_creation_input_tokens: 10,
+    cache_read_input_tokens: 15,
+  });
+
   assert.equal(acpxState?.current_mode_id, "code");
   assert.deepEqual(acpxState?.available_commands, ["create_plan"]);
   assert.equal(acpxState?.audit_events?.length, 9);

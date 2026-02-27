@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import { SessionNotFoundError, SessionResolutionError } from "./errors.js";
 import { normalizeRuntimeSessionId } from "./runtime-session-id.js";
-import { createSessionThread } from "./session-thread-model.js";
 import type { SessionAcpxState, SessionRecord, SessionThread } from "./types.js";
 import { SESSION_RECORD_SCHEMA } from "./types.js";
 
@@ -31,6 +30,10 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function hasOwn(source: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(source, key);
+}
+
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
@@ -48,160 +51,331 @@ async function ensureSessionDir(): Promise<void> {
   await fs.mkdir(sessionBaseDir(), { recursive: true });
 }
 
-function parseThreadMessage(
+function parseTokenUsage(
   raw: unknown,
-): SessionThread["messages"][number] | undefined {
-  const record = asRecord(raw);
-  if (!record || typeof record.kind !== "string") {
+): SessionThread["cumulative_token_usage"] | null | undefined {
+  if (raw === undefined || raw === null) {
     return undefined;
   }
 
-  if (record.kind === "resume") {
-    return { kind: "resume" };
+  const record = asRecord(raw);
+  if (!record) {
+    return null;
   }
 
-  if (record.kind === "user") {
-    if (typeof record.id !== "string" || !Array.isArray(record.content)) {
-      return undefined;
+  const usage: SessionThread["cumulative_token_usage"] = {};
+  const fields: Array<keyof SessionThread["cumulative_token_usage"]> = [
+    "input_tokens",
+    "output_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+  ];
+
+  for (const field of fields) {
+    const value = record[field];
+    if (value === undefined) {
+      continue;
     }
-
-    const content = record.content.filter((entry) => {
-      const item = asRecord(entry);
-      if (!item || typeof item.type !== "string") {
-        return false;
-      }
-
-      if (item.type === "text") {
-        return typeof item.text === "string";
-      }
-      if (item.type === "mention") {
-        return typeof item.uri === "string" && typeof item.content === "string";
-      }
-      if (item.type === "image") {
-        return true;
-      }
-
-      return false;
-    });
-
-    return {
-      kind: "user",
-      id: record.id,
-      content: content as SessionThread["messages"][number] extends infer T
-        ? T extends { kind: "user"; content: infer C }
-          ? C
-          : never
-        : never,
-    };
-  }
-
-  if (record.kind === "agent") {
-    if (!Array.isArray(record.content)) {
-      return undefined;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      return null;
     }
-
-    const content = record.content.filter((entry) => {
-      const item = asRecord(entry);
-      if (!item || typeof item.type !== "string") {
-        return false;
-      }
-
-      switch (item.type) {
-        case "text":
-          return typeof item.text === "string";
-        case "thinking":
-          return typeof item.text === "string";
-        case "redacted_thinking":
-          return true;
-        case "tool_use":
-          return typeof item.id === "string" && typeof item.name === "string";
-        default:
-          return false;
-      }
-    });
-
-    return {
-      kind: "agent",
-      content: content as SessionThread["messages"][number] extends infer T
-        ? T extends { kind: "agent"; content: infer C }
-          ? C
-          : never
-        : never,
-      tool_results: asRecord(
-        record.tool_results,
-      ) as SessionThread["messages"][number] extends infer T
-        ? T extends { kind: "agent"; tool_results?: infer R }
-          ? R
-          : never
-        : never,
-      reasoning_details: record.reasoning_details,
-    };
+    usage[field] = value;
   }
 
-  return undefined;
+  return usage;
 }
 
-function parseThread(
+function parseRequestTokenUsage(
   raw: unknown,
-  fallbackTimestamp: string,
-): SessionThread | undefined {
+): SessionThread["request_token_usage"] | null | undefined {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+
+  const record = asRecord(raw);
+  if (!record) {
+    return null;
+  }
+
+  const usage: SessionThread["request_token_usage"] = {};
+  for (const [key, value] of Object.entries(record)) {
+    const parsed = parseTokenUsage(value);
+    if (parsed == null) {
+      return null;
+    }
+    usage[key] = parsed;
+  }
+
+  return usage;
+}
+
+function isSessionThreadImage(raw: unknown): boolean {
+  const record = asRecord(raw);
+  if (!record || typeof record.source !== "string") {
+    return false;
+  }
+
+  if (record.size === undefined || record.size === null) {
+    return true;
+  }
+
+  const size = asRecord(record.size);
+  return (
+    !!size &&
+    typeof size.width === "number" &&
+    Number.isFinite(size.width) &&
+    typeof size.height === "number" &&
+    Number.isFinite(size.height)
+  );
+}
+
+function isUserContent(raw: unknown): boolean {
+  const record = asRecord(raw);
+  if (!record) {
+    return false;
+  }
+
+  if (typeof record.Text === "string") {
+    return true;
+  }
+
+  if (record.Mention !== undefined) {
+    const mention = asRecord(record.Mention);
+    return (
+      !!mention &&
+      typeof mention.uri === "string" &&
+      typeof mention.content === "string"
+    );
+  }
+
+  if (record.Image !== undefined) {
+    return isSessionThreadImage(record.Image);
+  }
+
+  return false;
+}
+
+function isToolUse(raw: unknown): boolean {
+  const record = asRecord(raw);
+  return (
+    !!record &&
+    typeof record.id === "string" &&
+    typeof record.name === "string" &&
+    typeof record.raw_input === "string" &&
+    hasOwn(record, "input") &&
+    typeof record.is_input_complete === "boolean" &&
+    (record.thought_signature === undefined ||
+      record.thought_signature === null ||
+      typeof record.thought_signature === "string")
+  );
+}
+
+function isToolResultContent(raw: unknown): boolean {
+  const record = asRecord(raw);
+  if (!record) {
+    return false;
+  }
+
+  if (typeof record.Text === "string") {
+    return true;
+  }
+
+  if (record.Image !== undefined) {
+    return isSessionThreadImage(record.Image);
+  }
+
+  return false;
+}
+
+function isToolResult(raw: unknown): boolean {
+  const record = asRecord(raw);
+  return (
+    !!record &&
+    typeof record.tool_use_id === "string" &&
+    typeof record.tool_name === "string" &&
+    typeof record.is_error === "boolean" &&
+    isToolResultContent(record.content)
+  );
+}
+
+function isAgentContent(raw: unknown): boolean {
+  const record = asRecord(raw);
+  if (!record) {
+    return false;
+  }
+
+  if (typeof record.Text === "string") {
+    return true;
+  }
+
+  if (record.Thinking !== undefined) {
+    const thinking = asRecord(record.Thinking);
+    return (
+      !!thinking &&
+      typeof thinking.text === "string" &&
+      (thinking.signature === undefined ||
+        thinking.signature === null ||
+        typeof thinking.signature === "string")
+    );
+  }
+
+  if (typeof record.RedactedThinking === "string") {
+    return true;
+  }
+
+  if (record.ToolUse !== undefined) {
+    return isToolUse(record.ToolUse);
+  }
+
+  return false;
+}
+
+function isUserMessage(raw: unknown): boolean {
+  const record = asRecord(raw);
+  if (!record || record.User === undefined) {
+    return false;
+  }
+
+  const user = asRecord(record.User);
+  return (
+    !!user &&
+    typeof user.id === "string" &&
+    Array.isArray(user.content) &&
+    user.content.every((entry) => isUserContent(entry))
+  );
+}
+
+function isAgentMessage(raw: unknown): boolean {
+  const record = asRecord(raw);
+  if (!record || record.Agent === undefined) {
+    return false;
+  }
+
+  const agent = asRecord(record.Agent);
+  if (!agent || !Array.isArray(agent.content) || !agent.content.every(isAgentContent)) {
+    return false;
+  }
+
+  const toolResults = asRecord(agent.tool_results);
+  if (!toolResults) {
+    return false;
+  }
+
+  return Object.values(toolResults).every(isToolResult);
+}
+
+function isThreadMessage(raw: unknown): boolean {
+  return raw === "Resume" || isUserMessage(raw) || isAgentMessage(raw);
+}
+
+function parseThread(raw: unknown): SessionThread | undefined {
   const record = asRecord(raw);
   if (!record) {
     return undefined;
   }
 
-  const messages = Array.isArray(record.messages)
-    ? record.messages
-        .map((entry) => parseThreadMessage(entry))
-        .filter((entry): entry is SessionThread["messages"][number] => !!entry)
-    : [];
+  if (
+    record.version !== "0.3.0" ||
+    !Array.isArray(record.messages) ||
+    !record.messages.every(isThreadMessage) ||
+    typeof record.updated_at !== "string" ||
+    typeof record.imported !== "boolean" ||
+    typeof record.thinking_enabled !== "boolean"
+  ) {
+    return undefined;
+  }
 
-  const thread = createSessionThread(
-    typeof record.updated_at === "string" ? record.updated_at : fallbackTimestamp,
-  );
+  if (
+    record.title !== undefined &&
+    record.title !== null &&
+    typeof record.title !== "string"
+  ) {
+    return undefined;
+  }
 
-  thread.version = "0.3.0";
-  thread.title =
-    record.title === null
-      ? null
-      : typeof record.title === "string"
-        ? record.title
-        : null;
-  thread.messages = messages;
-  thread.updated_at =
-    typeof record.updated_at === "string" ? record.updated_at : fallbackTimestamp;
-  thread.detailed_summary =
-    record.detailed_summary === null || typeof record.detailed_summary === "string"
-      ? (record.detailed_summary as string | null | undefined)
-      : null;
-  thread.initial_project_snapshot =
-    record.initial_project_snapshot === undefined
-      ? null
-      : record.initial_project_snapshot;
-  thread.cumulative_token_usage = asRecord(record.cumulative_token_usage) ?? {};
-  thread.request_token_usage = asRecord(record.request_token_usage) ?? {};
-  thread.model =
-    record.model === null || typeof record.model === "string"
-      ? (record.model as string | null | undefined)
-      : null;
-  thread.profile =
-    record.profile === null || typeof record.profile === "string"
-      ? (record.profile as string | null | undefined)
-      : null;
-  thread.imported = record.imported === true;
-  thread.subagent_context =
-    record.subagent_context === undefined ? null : record.subagent_context;
-  thread.speed =
-    record.speed === null || typeof record.speed === "string"
-      ? (record.speed as string | null | undefined)
-      : null;
-  thread.thinking_enabled = record.thinking_enabled === true;
-  thread.thinking_effort =
-    record.thinking_effort === null || typeof record.thinking_effort === "string"
-      ? (record.thinking_effort as string | null | undefined)
-      : null;
+  if (
+    record.detailed_summary !== undefined &&
+    record.detailed_summary !== null &&
+    typeof record.detailed_summary !== "string"
+  ) {
+    return undefined;
+  }
 
-  return thread;
+  if (
+    record.thinking_effort !== undefined &&
+    record.thinking_effort !== null &&
+    typeof record.thinking_effort !== "string"
+  ) {
+    return undefined;
+  }
+
+  const speed = record.speed;
+  if (
+    speed !== undefined &&
+    speed !== null &&
+    speed !== "standard" &&
+    speed !== "fast"
+  ) {
+    return undefined;
+  }
+
+  if (record.subagent_context !== undefined && record.subagent_context !== null) {
+    const subagentContext = asRecord(record.subagent_context);
+    if (
+      !subagentContext ||
+      typeof subagentContext.parent_session_id !== "string" ||
+      typeof subagentContext.depth !== "number" ||
+      !Number.isInteger(subagentContext.depth) ||
+      subagentContext.depth < 0
+    ) {
+      return undefined;
+    }
+  }
+
+  const cumulativeTokenUsage = parseTokenUsage(record.cumulative_token_usage);
+  const requestTokenUsage = parseRequestTokenUsage(record.request_token_usage);
+  if (cumulativeTokenUsage === null || requestTokenUsage === null) {
+    return undefined;
+  }
+
+  return {
+    version: "0.3.0",
+    title:
+      record.title === undefined ||
+      record.title === null ||
+      typeof record.title === "string"
+        ? (record.title as string | null | undefined)
+        : null,
+    messages: record.messages as SessionThread["messages"],
+    updated_at: record.updated_at,
+    detailed_summary:
+      record.detailed_summary === undefined ||
+      record.detailed_summary === null ||
+      typeof record.detailed_summary === "string"
+        ? (record.detailed_summary as string | null | undefined)
+        : null,
+    initial_project_snapshot:
+      record.initial_project_snapshot === undefined
+        ? null
+        : record.initial_project_snapshot,
+    cumulative_token_usage: cumulativeTokenUsage ?? {},
+    request_token_usage: requestTokenUsage ?? {},
+    model: record.model === undefined ? null : record.model,
+    profile: record.profile === undefined ? null : record.profile,
+    imported: record.imported,
+    subagent_context:
+      record.subagent_context === undefined
+        ? null
+        : (record.subagent_context as SessionThread["subagent_context"]),
+    speed: speed as SessionThread["speed"],
+    thinking_enabled: record.thinking_enabled,
+    thinking_effort:
+      record.thinking_effort === undefined ||
+      record.thinking_effort === null ||
+      typeof record.thinking_effort === "string"
+        ? (record.thinking_effort as string | null | undefined)
+        : null,
+  };
 }
 
 function parseAcpxState(raw: unknown): SessionAcpxState | undefined {
@@ -347,9 +521,10 @@ function parseSessionRecord(raw: unknown): SessionRecord | null {
     return null;
   }
 
-  const thread =
-    parseThread(record.thread, record.lastUsedAt) ??
-    createSessionThread(record.lastUsedAt);
+  const thread = parseThread(record.thread);
+  if (!thread) {
+    return null;
+  }
 
   return {
     schema: SESSION_RECORD_SCHEMA,

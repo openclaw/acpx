@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   ContentBlock,
   SessionNotification,
@@ -12,8 +13,12 @@ import type {
   SessionAcpxState,
   SessionThread,
   SessionThreadAgentContent,
+  SessionThreadAgentMessage,
   SessionThreadMessage,
+  SessionThreadTokenUsage,
   SessionThreadToolResult,
+  SessionThreadToolResultContent,
+  SessionThreadToolUse,
   SessionThreadUserContent,
 } from "./types.js";
 import { SESSION_THREAD_VERSION } from "./types.js";
@@ -81,104 +86,136 @@ function contentToUserContent(
 ): SessionThreadUserContent | undefined {
   if (content.type === "text") {
     return {
-      type: "text",
-      text: content.text,
+      Text: content.text,
     };
   }
 
   if (content.type === "resource_link") {
     const value = content.title ?? content.name ?? content.uri;
     return {
-      type: "mention",
-      uri: content.uri,
-      content: value,
+      Mention: {
+        uri: content.uri,
+        content: value,
+      },
     };
   }
 
   if (content.type === "resource") {
     if ("text" in content.resource && typeof content.resource.text === "string") {
       return {
-        type: "text",
-        text: content.resource.text,
+        Text: content.resource.text,
       };
     }
 
     return {
-      type: "mention",
-      uri: content.resource.uri,
-      content: content.resource.uri,
+      Mention: {
+        uri: content.resource.uri,
+        content: content.resource.uri,
+      },
+    };
+  }
+
+  if (content.type === "image") {
+    return {
+      Image: {
+        source: content.data,
+        size: null,
+      },
     };
   }
 
   return undefined;
 }
 
-function nextUserMessageId(thread: SessionThread): string {
-  const count =
-    thread.messages.reduce((acc, entry) => acc + (entry.kind === "user" ? 1 : 0), 0) +
-    1;
-  return `user_${count}`;
+function nextUserMessageId(): string {
+  return randomUUID();
+}
+
+function isUserMessage(message: SessionThreadMessage): message is {
+  User: SessionThread["messages"][number] extends infer T
+    ? T extends { User: infer U }
+      ? U
+      : never
+    : never;
+} {
+  return typeof message === "object" && message !== null && hasOwn(message, "User");
+}
+
+function isAgentMessage(
+  message: SessionThreadMessage,
+): message is { Agent: SessionThreadAgentMessage } {
+  return typeof message === "object" && message !== null && hasOwn(message, "Agent");
+}
+
+function isAgentTextContent(
+  content: SessionThreadAgentContent,
+): content is { Text: string } {
+  return hasOwn(content, "Text");
+}
+
+function isAgentThinkingContent(
+  content: SessionThreadAgentContent,
+): content is { Thinking: { text: string; signature?: string | null } } {
+  return hasOwn(content, "Thinking");
+}
+
+function isAgentToolUseContent(
+  content: SessionThreadAgentContent,
+): content is { ToolUse: SessionThreadToolUse } {
+  return hasOwn(content, "ToolUse");
 }
 
 function updateThreadTimestamp(thread: SessionThread, timestamp: string): void {
   thread.updated_at = timestamp;
 }
 
-function ensureAgentMessage(
-  thread: SessionThread,
-): Extract<SessionThreadMessage, { kind: "agent" }> {
+function ensureAgentMessage(thread: SessionThread): SessionThreadAgentMessage {
   const last = thread.messages.at(-1);
-  if (last && last.kind === "agent") {
-    return last;
+  if (last && isAgentMessage(last)) {
+    return last.Agent;
   }
 
-  const created: Extract<SessionThreadMessage, { kind: "agent" }> = {
-    kind: "agent",
+  const created: SessionThreadAgentMessage = {
     content: [],
+    tool_results: {},
   };
-  thread.messages.push(created);
+  thread.messages.push({ Agent: created });
   return created;
 }
 
-function appendAgentText(
-  agent: Extract<SessionThreadMessage, { kind: "agent" }>,
-  text: string,
-): void {
+function appendAgentText(agent: SessionThreadAgentMessage, text: string): void {
   if (!text.trim()) {
     return;
   }
 
   const last = agent.content.at(-1);
-  if (last && last.type === "text") {
-    last.text += text;
+  if (last && isAgentTextContent(last)) {
+    last.Text += text;
     return;
   }
 
   const next: SessionThreadAgentContent = {
-    type: "text",
-    text,
+    Text: text,
   };
   agent.content.push(next);
 }
 
-function appendAgentThinking(
-  agent: Extract<SessionThreadMessage, { kind: "agent" }>,
-  text: string,
-): void {
+function appendAgentThinking(agent: SessionThreadAgentMessage, text: string): void {
   if (!text.trim()) {
     return;
   }
 
   const last = agent.content.at(-1);
-  if (last && last.type === "thinking") {
-    last.text += text;
+  if (last && isAgentThinkingContent(last)) {
+    last.Thinking.text += text;
     return;
   }
 
   const next: SessionThreadAgentContent = {
-    type: "thinking",
-    text,
-    signature: null,
+    Thinking: {
+      text,
+      signature: null,
+    },
   };
   agent.content.push(next);
 }
@@ -206,63 +243,74 @@ function statusIndicatesError(status: unknown): boolean {
   return normalized.includes("fail") || normalized.includes("error");
 }
 
-function toToolResultText(value: unknown): string | undefined {
-  if (value == null) {
-    return undefined;
+function toToolResultContent(value: unknown): SessionThreadToolResultContent {
+  if (typeof value === "string") {
+    return { Text: value };
   }
 
+  if (value != null) {
+    try {
+      return { Text: JSON.stringify(value) };
+    } catch {
+      return { Text: String(value) };
+    }
+  }
+
+  return { Text: "" };
+}
+
+function toRawInput(value: unknown): string {
   if (typeof value === "string") {
     return value;
   }
 
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(value ?? {});
   } catch {
-    return String(value);
+    return String(value ?? "");
   }
 }
 
 function ensureToolUseContent(
-  agent: Extract<SessionThreadMessage, { kind: "agent" }>,
+  agent: SessionThreadAgentMessage,
   toolCallId: string,
-): Extract<SessionThreadAgentContent, { type: "tool_use" }> {
+): SessionThreadToolUse {
   for (const content of agent.content) {
-    if (content.type === "tool_use" && content.id === toolCallId) {
-      return content;
+    if (isAgentToolUseContent(content) && content.ToolUse.id === toolCallId) {
+      return content.ToolUse;
     }
   }
 
-  const created: Extract<SessionThreadAgentContent, { type: "tool_use" }> = {
-    type: "tool_use",
+  const created: SessionThreadToolUse = {
     id: toolCallId,
     name: "tool_call",
+    raw_input: "{}",
+    input: {},
+    is_input_complete: false,
+    thought_signature: null,
   };
-  agent.content.push(created);
+  agent.content.push({ ToolUse: created });
   return created;
 }
 
 function upsertToolResult(
-  agent: Extract<SessionThreadMessage, { kind: "agent" }>,
+  agent: SessionThreadAgentMessage,
   toolCallId: string,
   patch: Partial<SessionThreadToolResult>,
 ): void {
-  if (!agent.tool_results) {
-    agent.tool_results = {};
-  }
-
   const existing = agent.tool_results[toolCallId];
   const next: SessionThreadToolResult = {
     tool_use_id: toolCallId,
     tool_name: patch.tool_name ?? existing?.tool_name ?? "tool_call",
     is_error: patch.is_error ?? existing?.is_error ?? false,
-    content: patch.content ?? existing?.content,
+    content: patch.content ?? existing?.content ?? { Text: "" },
     output: patch.output ?? existing?.output,
   };
   agent.tool_results[toolCallId] = next;
 }
 
 function applyToolCallUpdate(
-  agent: Extract<SessionThreadMessage, { kind: "agent" }>,
+  agent: SessionThreadAgentMessage,
   update: ToolCall | ToolCallUpdate,
 ): void {
   const tool = ensureToolUseContent(agent, update.toolCallId);
@@ -282,10 +330,9 @@ function applyToolCallUpdate(
   }
 
   if (hasOwn(update, "rawInput")) {
-    tool.raw_input = deepClone((update as { rawInput?: unknown }).rawInput);
-    if (tool.raw_input !== undefined) {
-      tool.input = deepClone(tool.raw_input);
-    }
+    const rawInput = deepClone((update as { rawInput?: unknown }).rawInput);
+    tool.input = rawInput ?? {};
+    tool.raw_input = toRawInput(rawInput);
   }
 
   if (hasOwn(update, "status")) {
@@ -308,26 +355,65 @@ function applyToolCallUpdate(
     upsertToolResult(agent, update.toolCallId, {
       tool_name: tool.name,
       is_error: statusIndicatesError(status),
-      content: output === undefined ? undefined : toToolResultText(output),
+      content: output === undefined ? undefined : toToolResultContent(output),
       output,
     });
   }
 }
 
-function usageToObject(update: UsageUpdate): Record<string, unknown> {
-  const usage: Record<string, unknown> = {
-    used: update.used,
-    size: update.size,
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function numberField(
+  source: Record<string, unknown>,
+  keys: readonly string[],
+): number | undefined {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function usageToTokenUsage(update: UsageUpdate): SessionThreadTokenUsage | undefined {
+  const updateRecord = asRecord(update);
+  const usageMeta = asRecord(updateRecord?._meta)?.usage;
+  const source = asRecord(usageMeta) ?? updateRecord;
+  if (!source) {
+    return undefined;
+  }
+
+  const normalized: SessionThreadTokenUsage = {
+    input_tokens: numberField(source, ["input_tokens", "inputTokens"]),
+    output_tokens: numberField(source, ["output_tokens", "outputTokens"]),
+    cache_creation_input_tokens: numberField(source, [
+      "cache_creation_input_tokens",
+      "cacheCreationInputTokens",
+      "cachedWriteTokens",
+    ]),
+    cache_read_input_tokens: numberField(source, [
+      "cache_read_input_tokens",
+      "cacheReadInputTokens",
+      "cachedReadTokens",
+    ]),
   };
 
-  if (update.cost && typeof update.cost.amount === "number") {
-    usage.cost_amount = update.cost.amount;
-  }
-  if (update.cost && typeof update.cost.currency === "string") {
-    usage.cost_currency = update.cost.currency;
+  if (
+    normalized.input_tokens === undefined &&
+    normalized.output_tokens === undefined &&
+    normalized.cache_creation_input_tokens === undefined &&
+    normalized.cache_read_input_tokens === undefined
+  ) {
+    return undefined;
   }
 
-  return usage;
+  return normalized;
 }
 
 function appendAuditEvent(
@@ -342,6 +428,16 @@ function appendAuditEvent(
 
 function ensureAcpxState(state: SessionAcpxState | undefined): SessionAcpxState {
   return state ?? {};
+}
+
+function lastUserMessageId(thread: SessionThread): string | undefined {
+  for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
+    const message = thread.messages[index];
+    if (message && isUserMessage(message)) {
+      return message.User.id;
+    }
+  }
+  return undefined;
 }
 
 export function createSessionThread(timestamp = isoNow()): SessionThread {
@@ -378,8 +474,8 @@ export function cloneSessionThread(thread: SessionThread | undefined): SessionTh
     initial_project_snapshot: deepClone(thread.initial_project_snapshot),
     cumulative_token_usage: deepClone(thread.cumulative_token_usage ?? {}),
     request_token_usage: deepClone(thread.request_token_usage ?? {}),
-    model: thread.model,
-    profile: thread.profile,
+    model: deepClone(thread.model),
+    profile: deepClone(thread.profile),
     imported: thread.imported === true,
     subagent_context: deepClone(thread.subagent_context),
     speed: thread.speed,
@@ -417,14 +513,17 @@ export function appendLegacyHistory(
 
     if (entry.role === "user") {
       thread.messages.push({
-        kind: "user",
-        id: nextUserMessageId(thread),
-        content: [{ type: "text", text }],
+        User: {
+          id: nextUserMessageId(),
+          content: [{ Text: text }],
+        },
       });
     } else {
       thread.messages.push({
-        kind: "agent",
-        content: [{ type: "text", text }],
+        Agent: {
+          content: [{ Text: text }],
+          tool_results: {},
+        },
       });
     }
 
@@ -442,12 +541,12 @@ export function recordPromptSubmission(
     return;
   }
 
-  const message: Extract<SessionThreadMessage, { kind: "user" }> = {
-    kind: "user",
-    id: nextUserMessageId(thread),
-    content: [{ type: "text", text }],
-  };
-  thread.messages.push(message);
+  thread.messages.push({
+    User: {
+      id: nextUserMessageId(),
+      content: [{ Text: text }],
+    },
+  });
   updateThreadTimestamp(thread, timestamp);
 }
 
@@ -476,9 +575,10 @@ export function recordSessionUpdate(
       const userContent = contentToUserContent(update.content);
       if (userContent) {
         thread.messages.push({
-          kind: "user",
-          id: nextUserMessageId(thread),
-          content: [userContent],
+          User: {
+            id: nextUserMessageId(),
+            content: [userContent],
+          },
         });
       }
       break;
@@ -506,9 +606,14 @@ export function recordSessionUpdate(
       break;
     }
     case "usage_update": {
-      const usage = usageToObject(update);
-      thread.request_token_usage = usage;
-      thread.cumulative_token_usage = usage;
+      const usage = usageToTokenUsage(update);
+      if (usage) {
+        thread.cumulative_token_usage = usage;
+        const userId = lastUserMessageId(thread);
+        if (userId) {
+          thread.request_token_usage[userId] = usage;
+        }
+      }
       break;
     }
     case "session_info_update": {

@@ -1083,27 +1083,30 @@ async function handleSessionsEnsure(
 }
 
 function userContentToText(content: SessionThreadUserContent): string {
-  if (content.type === "text") {
-    return content.text;
+  if ("Text" in content) {
+    return content.Text;
   }
-  if (content.type === "mention") {
-    return content.content;
+  if ("Mention" in content) {
+    return content.Mention.content;
   }
-  if (content.type === "image") {
-    return content.uri ?? "[image]";
+  if ("Image" in content) {
+    return content.Image.source || "[image]";
   }
   return "";
 }
 
 function agentContentToText(content: SessionThreadAgentContent): string {
-  if (content.type === "text") {
-    return content.text;
+  if ("Text" in content) {
+    return content.Text;
   }
-  if (content.type === "thinking") {
-    return content.text;
+  if ("Thinking" in content) {
+    return content.Thinking.text;
   }
-  if (content.type === "tool_use") {
-    return `[tool:${content.name}]`;
+  if ("RedactedThinking" in content) {
+    return "[redacted_thinking]";
+  }
+  if ("ToolUse" in content) {
+    return `[tool:${content.ToolUse.name}]`;
   }
   return "";
 }
@@ -1120,30 +1123,44 @@ function threadHistoryEntries(record: SessionRecord): Array<{
   }> = [];
 
   for (const message of record.thread.messages) {
-    if (message.kind === "resume") {
+    if (message === "Resume") {
       continue;
     }
 
-    const text =
-      message.kind === "user"
-        ? message.content
-            .map((entry) => userContentToText(entry))
-            .join(" ")
-            .trim()
-        : message.content
-            .map((entry) => agentContentToText(entry))
-            .join(" ")
-            .trim();
+    if ("User" in message) {
+      const text = message.User.content
+        .map((entry) => userContentToText(entry))
+        .join(" ")
+        .trim();
 
-    if (!text) {
+      if (!text) {
+        continue;
+      }
+
+      entries.push({
+        role: "user",
+        timestamp: record.thread.updated_at,
+        textPreview: text,
+      });
       continue;
     }
 
-    entries.push({
-      role: message.kind === "user" ? "user" : "assistant",
-      timestamp: record.thread.updated_at,
-      textPreview: text,
-    });
+    if ("Agent" in message) {
+      const text = message.Agent.content
+        .map((entry) => agentContentToText(entry))
+        .join(" ")
+        .trim();
+
+      if (!text) {
+        continue;
+      }
+
+      entries.push({
+        role: "assistant",
+        timestamp: record.thread.updated_at,
+        textPreview: text,
+      });
+    }
   }
 
   return entries;

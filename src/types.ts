@@ -256,70 +256,96 @@ export type AcpClientOptions = {
 export const SESSION_RECORD_SCHEMA = "acpx.session.v1" as const;
 export const SESSION_THREAD_VERSION = "0.3.0" as const;
 
+export type SessionThreadImage = {
+  source: string;
+  size?: {
+    width: number;
+    height: number;
+  } | null;
+};
+
 export type SessionThreadUserContent =
   | {
-      type: "text";
-      text: string;
+      Text: string;
     }
   | {
-      type: "mention";
-      uri: string;
-      content: string;
+      Mention: {
+        uri: string;
+        content: string;
+      };
     }
   | {
-      type: "image";
-      uri?: string;
-      media_type?: string;
-      data?: string;
-      detail?: string;
+      Image: SessionThreadImage;
+    };
+
+export type SessionThreadToolUse = {
+  id: string;
+  name: string;
+  raw_input: string;
+  input: unknown;
+  is_input_complete: boolean;
+  thought_signature?: string | null;
+};
+
+export type SessionThreadToolResultContent =
+  | {
+      Text: string;
+    }
+  | {
+      Image: SessionThreadImage;
     };
 
 export type SessionThreadToolResult = {
   tool_use_id: string;
   tool_name: string;
   is_error: boolean;
-  content?: string;
+  content: SessionThreadToolResultContent;
   output?: unknown;
 };
 
 export type SessionThreadAgentContent =
   | {
-      type: "text";
-      text: string;
+      Text: string;
     }
   | {
-      type: "thinking";
-      text: string;
-      signature: string | null;
+      Thinking: {
+        text: string;
+        signature?: string | null;
+      };
     }
   | {
-      type: "redacted_thinking";
+      RedactedThinking: string;
     }
   | {
-      type: "tool_use";
-      id: string;
-      name: string;
-      raw_input?: unknown;
-      input?: unknown;
-      is_input_complete?: boolean;
-      thought_signature?: string | null;
+      ToolUse: SessionThreadToolUse;
     };
+
+export type SessionThreadUserMessage = {
+  id: string;
+  content: SessionThreadUserContent[];
+};
+
+export type SessionThreadAgentMessage = {
+  content: SessionThreadAgentContent[];
+  tool_results: Record<string, SessionThreadToolResult>;
+  reasoning_details?: unknown | null;
+};
 
 export type SessionThreadMessage =
   | {
-      kind: "user";
-      id: string;
-      content: SessionThreadUserContent[];
+      User: SessionThreadUserMessage;
     }
   | {
-      kind: "agent";
-      content: SessionThreadAgentContent[];
-      tool_results?: Record<string, SessionThreadToolResult>;
-      reasoning_details?: unknown | null;
+      Agent: SessionThreadAgentMessage;
     }
-  | {
-      kind: "resume";
-    };
+  | "Resume";
+
+export type SessionThreadTokenUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+};
 
 export type SessionThread = {
   version: typeof SESSION_THREAD_VERSION;
@@ -328,13 +354,16 @@ export type SessionThread = {
   updated_at: string;
   detailed_summary?: string | null;
   initial_project_snapshot?: unknown | null;
-  cumulative_token_usage?: Record<string, unknown>;
-  request_token_usage?: Record<string, unknown>;
-  model?: string | null;
-  profile?: string | null;
+  cumulative_token_usage: SessionThreadTokenUsage;
+  request_token_usage: Record<string, SessionThreadTokenUsage>;
+  model?: unknown | null;
+  profile?: unknown | null;
   imported: boolean;
-  subagent_context?: unknown | null;
-  speed?: string | null;
+  subagent_context?: {
+    parent_session_id: string;
+    depth: number;
+  } | null;
+  speed?: "standard" | "fast" | null;
   thinking_enabled: boolean;
   thinking_effort?: string | null;
 };
