@@ -11,19 +11,41 @@ This model is designed to survive protocol evolution without schema churn.
 
 ## Design Principles
 
-1. Append only event log is the source of truth.
+1. Append-only event log is the source of truth.
 2. Mutable state is only a projection that can be rebuilt from events.
-3. Every ACP wire frame is persisted losslessly.
+3. Every ACP JSON-RPC frame is persisted losslessly (requests, responses, notifications, errors).
 4. IDs are explicit and non-overlapping.
-5. Unknown future ACP methods and notifications are preserved without parser updates.
+5. Unknown future ACP methods/fields are preserved without parser updates.
+6. `_meta` is treated as opaque protocol extension data and never required for correctness.
+
+## ACP Spec Constraints This Model Must Respect
+
+From ACP docs/schema (`agent-client-protocol`):
+
+- Transport is JSON-RPC 2.0 over a bidirectional channel.
+- Baseline Agent methods: `initialize`, `session/new`, `session/prompt`.
+- Baseline Agent notification target: `session/cancel`.
+- Baseline Client method: `session/request_permission`.
+- Baseline Client notification target: `session/update`.
+- Optional methods include `authenticate`, `session/load`, `session/set_mode`, `session/set_config_option`, `fs/*`, `terminal/*`.
+- `session/update` includes multiple update kinds (e.g. message chunks, thought chunks, tool calls, plans, command/mode/config updates).
+- Agents may send updates after cancel; client must still accept them until prompt response arrives.
+- `_meta` exists across protocol types; clients and agents must not assume non-standard keys as required.
+- Extension methods start with `_` and must be preserved for forward compatibility.
+
+Implication for storage:
+
+- Storing only text turns is insufficient.
+- Storing only normalized known event kinds is insufficient.
+- Raw ACP frames must be first-class persisted records.
 
 ## Canonical IDs
 
 - `acpxRecordId`: stable local record key for the lifetime of a saved acpx session record.
 - `acpSessionId`: ACP session identity used on the wire. May change after reconnect fallback.
-- `agentSessionId`: optional inner harness session id (Codex, Claude Code, OpenCode, Pi, Gemini) if adapter exposes it.
-- `turnId`: acpx generated id for one user prompt lifecycle (start to done/error/cancel).
-- `requestId`: optional queue/request correlation id.
+- `agentSessionId`: optional inner harness session id (UUID-like in current adapters) if exposed by adapter metadata.
+- `turnId`: acpx-generated id for one `session/prompt` lifecycle (request -> final response/error).
+- `requestId`: optional acpx queue/request correlation id.
 
 ## Storage Layout
 
@@ -33,7 +55,7 @@ Each session becomes a directory instead of one flat JSON file:
 ~/.acpx/sessions/<acpxRecordId>/
   session.json                 # mutable projection
   events/
-    000000000001.ndjson        # append only segments
+    000000000001.ndjson        # append-only segments
     000000000002.ndjson
   index/
     turns.json                 # optional derived index
@@ -78,7 +100,7 @@ Stable constraints:
 
 ### 1) Raw ACP wire capture (mandatory)
 
-Capture every inbound and outbound JSON-RPC frame:
+Capture every inbound and outbound JSON-RPC frame as-is:
 
 ```json
 {
@@ -87,7 +109,7 @@ Capture every inbound and outbound JSON-RPC frame:
     "direction": "out",
     "message": {
       "jsonrpc": "2.0",
-      "id": "...",
+      "id": 12,
       "method": "session/prompt",
       "params": {}
     }
@@ -111,24 +133,30 @@ or
 }
 ```
 
-This guarantees future ACP fields/methods are retained even if acpx does not understand them yet.
+Rules:
 
-### 2) Session lifecycle
+- Keep JSON-RPC `id` type as-is (`string|number|null`), never normalize by coercion.
+- Preserve unknown methods/fields (including `_vendor/...`).
+- Preserve full `_meta` content exactly.
+
+### 2) Session lifecycle (normalized, optional but recommended)
 
 - `session.created`
 - `session.loaded`
 - `session.closed`
-- `session.rebound` (acpSessionId changed)
+- `session.rebound` (`acpSessionId` changed)
 - `session.agent_session_id.updated`
 
-### 3) Turn lifecycle
+### 3) Turn lifecycle (normalized, recommended)
 
 - `turn.started`
 - `turn.completed`
 - `turn.cancelled`
 - `turn.failed`
 
-### 4) Queue and owner lifecycle
+Turn boundaries are derived from raw `session/prompt` request/response pairs, not heuristics.
+
+### 4) Queue/owner lifecycle (normalized, acpx-local)
 
 - `queue.enqueued`
 - `queue.dequeued`
@@ -137,16 +165,30 @@ This guarantees future ACP fields/methods are retained even if acpx does not und
 - `queue.owner.idle_expired`
 - `queue.owner.stopped`
 
-### 5) Runtime and transport
+### 5) Runtime transport lifecycle (normalized)
 
 - `runtime.connected`
 - `runtime.disconnected`
 - `runtime.reconnect_attempt`
 - `runtime.reconnected`
 
-### 6) Error normalization
+### 6) Permission + client-ops projection (normalized, recommended)
 
-- `error` with `origin`, `code`, `detailCode`, and the raw error object in payload.
+Derived from captured ACP frames:
+
+- `permission.requested`
+- `permission.responded`
+- `client.fs.read`
+- `client.fs.write`
+- `client.terminal.create`
+- `client.terminal.output`
+- `client.terminal.wait_for_exit`
+- `client.terminal.kill`
+- `client.terminal.release`
+
+### 7) Error normalization (normalized, recommended)
+
+- `error` with `origin`, `code`, `detailCode`, and the raw protocol/runtime error payload.
 
 ## Mutable Projection (`session.json`)
 
@@ -215,15 +257,22 @@ On startup/session open:
 
 If projection is corrupt/missing, full replay is authoritative.
 
+## Handling `_meta` and `agentSessionId`
+
+- `_meta` is persisted exactly from ACP frames.
+- acpx may derive `agentSessionId` as a best-effort convenience field.
+- Missing or changed `agentSessionId` must never break session correctness.
+- `agentSessionId` is advisory identity, not the ACP wire key.
+
 ## Retention and Compaction
 
 - Keep events forever by default.
-- Optional operator retention policy may archive old segments, never mutate in-place.
-- Derived indexes can be deleted anytime and rebuilt from events.
+- Optional retention policy may archive old segments; never mutate existing segment contents.
+- Derived indexes can be deleted at any time and rebuilt from events.
 
 ## Migration from Current Model
 
-Current model stores a single JSON record with compact `turnHistory` previews.
+Current model stores one JSON record plus compact `turnHistory` previews.
 
 Migration should:
 
@@ -231,10 +280,10 @@ Migration should:
 2. create `events/000000000001.ndjson`
 3. backfill synthetic lifecycle events from existing metadata
 4. backfill synthetic turn events from `turnHistory` previews
-5. from that point onward, persist all ACP frames and lifecycle events
+5. start persisting all ACP frames + normalized lifecycle events going forward
 
 ## Why This Should Last
 
-- New ACP methods do not require storage schema changes because raw frames are preserved.
+- ACP protocol growth does not require storage schema changes because raw frames are preserved.
 - Projection shape can evolve independently from immutable events.
-- Debugging, auditing, analytics, and cross-tool integrations all depend on one stable contract: append-only event envelopes with explicit IDs.
+- Auditing, debugging, replay, analytics, and cross-tool integrations rely on one stable contract: append-only event envelopes + full raw ACP frames.
