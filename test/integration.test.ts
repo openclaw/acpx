@@ -250,6 +250,10 @@ test("integration: prompt reuses warm queue owner pid across turns", async () =>
         homeDir,
       );
       assert.equal(first.code, 0, first.stderr);
+      assert.ok(
+        first.stdout.trim().length > 0,
+        "first quiet prompt output should not be empty",
+      );
 
       const { lockPath } = queuePaths(homeDir, sessionId as string);
       const lockOne = JSON.parse(await fs.readFile(lockPath, "utf8")) as {
@@ -262,6 +266,10 @@ test("integration: prompt reuses warm queue owner pid across turns", async () =>
         homeDir,
       );
       assert.equal(second.code, 0, second.stderr);
+      assert.ok(
+        second.stdout.trim().length > 0,
+        "second quiet prompt output should not be empty",
+      );
 
       const lockTwo = JSON.parse(await fs.readFile(lockPath, "utf8")) as {
         pid?: number;

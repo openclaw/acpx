@@ -954,6 +954,9 @@ class JsonOutputFormatter implements OutputFormatter {
 class QuietOutputFormatter implements OutputFormatter {
   private readonly stdout: WritableLike;
   private chunks: string[] = [];
+  private sawEventOutput = false;
+  private sawSessionUpdateOutput = false;
+  private flushed = false;
 
   constructor(stdout: WritableLike) {
     this.stdout = stdout;
@@ -964,16 +967,31 @@ class QuietOutputFormatter implements OutputFormatter {
   }
 
   onEvent(event: AcpxEvent): void {
-    if (event.type !== ACPX_EVENT_TYPES.OUTPUT_DELTA) {
+    if (event.type === ACPX_EVENT_TYPES.OUTPUT_DELTA) {
+      if (event.data.stream !== "output") {
+        return;
+      }
+
+      if (!this.sawEventOutput && this.sawSessionUpdateOutput) {
+        // Prefer canonical event output when both paths are observed.
+        this.chunks = [];
+      }
+
+      this.sawEventOutput = true;
+      this.chunks.push(event.data.text);
       return;
     }
-    if (event.data.stream !== "output") {
-      return;
+
+    if (event.type === ACPX_EVENT_TYPES.TURN_DONE) {
+      this.flushBufferedOutput();
     }
-    this.chunks.push(event.data.text);
   }
 
   onSessionUpdate(notification: SessionNotification): void {
+    if (this.sawEventOutput) {
+      return;
+    }
+
     const update = notification.update;
     if (update.sessionUpdate !== "agent_message_chunk") {
       return;
@@ -981,12 +999,13 @@ class QuietOutputFormatter implements OutputFormatter {
     if (update.content.type !== "text") {
       return;
     }
+
+    this.sawSessionUpdateOutput = true;
     this.chunks.push(update.content.text);
   }
 
   onDone(_stopReason: StopReason): void {
-    const text = this.chunks.join("");
-    this.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+    this.flushBufferedOutput();
   }
 
   onError(_params: {
@@ -1007,6 +1026,16 @@ class QuietOutputFormatter implements OutputFormatter {
 
   flush(): void {
     // no-op for streaming output
+  }
+
+  private flushBufferedOutput(): void {
+    if (this.flushed) {
+      return;
+    }
+
+    this.flushed = true;
+    const text = this.chunks.join("");
+    this.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
   }
 }
 

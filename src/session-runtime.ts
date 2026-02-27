@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { AcpClient, type AgentLifecycleSnapshot } from "./client.js";
+import { AcpClient } from "./client.js";
 import {
   clientOperationToEventDraft,
   createAcpxEvent,
@@ -12,13 +12,7 @@ import {
   sessionUpdateToEventDrafts,
   truncateInputPreview,
 } from "./events.js";
-import {
-  extractAcpError,
-  formatErrorMessage,
-  isAcpQueryClosedBeforeResponseError,
-  isAcpResourceNotFoundError,
-  normalizeOutputError,
-} from "./error-normalization.js";
+import { formatErrorMessage, normalizeOutputError } from "./error-normalization.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,
@@ -31,7 +25,6 @@ import { SessionEventWriter } from "./session-events.js";
 import { defaultSessionEventLog } from "./session-event-log.js";
 import {
   InterruptedError,
-  TimeoutError,
   withInterrupt,
   withTimeout,
 } from "./session-runtime-helpers.js";
@@ -57,6 +50,15 @@ import {
   waitMs,
 } from "./queue-ipc.js";
 import { normalizeRuntimeSessionId } from "./runtime-session-id.js";
+import { connectAndLoadSession } from "./session-runtime/connect-load.js";
+import {
+  applyConversation,
+  applyLifecycleSnapshotToRecord,
+} from "./session-runtime/lifecycle.js";
+import {
+  runSessionSetConfigOptionDirect,
+  runSessionSetModeDirect,
+} from "./session-runtime/prompt-runner.js";
 import {
   DEFAULT_HISTORY_LIMIT,
   absolutePath,
@@ -86,7 +88,6 @@ import {
   type PermissionMode,
   type RunPromptResult,
   type SessionEnsureResult,
-  type SessionConversation,
   type SessionRecord,
   type SessionSetConfigOptionResult,
   type SessionSetModeResult,
@@ -308,174 +309,6 @@ export function normalizeQueueOwnerTtlMs(ttlMs: number | undefined): number {
 
   // 0 means keep alive forever (no TTL)
   return Math.round(ttlMs);
-}
-
-function applyLifecycleSnapshotToRecord(
-  record: SessionRecord,
-  snapshot: AgentLifecycleSnapshot,
-): void {
-  record.pid = snapshot.pid;
-  record.agentStartedAt = snapshot.startedAt;
-
-  if (snapshot.lastExit) {
-    record.lastAgentExitCode = snapshot.lastExit.exitCode;
-    record.lastAgentExitSignal = snapshot.lastExit.signal;
-    record.lastAgentExitAt = snapshot.lastExit.exitedAt;
-    record.lastAgentDisconnectReason = snapshot.lastExit.reason;
-    return;
-  }
-
-  record.lastAgentExitCode = undefined;
-  record.lastAgentExitSignal = undefined;
-  record.lastAgentExitAt = undefined;
-  record.lastAgentDisconnectReason = undefined;
-}
-
-function reconcileAgentSessionId(
-  record: SessionRecord,
-  agentSessionId: string | undefined,
-): void {
-  const normalized = normalizeRuntimeSessionId(agentSessionId);
-  if (!normalized) {
-    return;
-  }
-
-  record.agentSessionId = normalized;
-}
-
-function sessionHasAgentMessages(record: SessionRecord): boolean {
-  return record.messages.some(
-    (message) => typeof message === "object" && message !== null && "Agent" in message,
-  );
-}
-
-function applyConversation(
-  record: SessionRecord,
-  conversation: SessionConversation,
-): void {
-  record.title = conversation.title;
-  record.messages = conversation.messages;
-  record.updated_at = conversation.updated_at;
-  record.cumulative_token_usage = conversation.cumulative_token_usage;
-  record.request_token_usage = conversation.request_token_usage;
-}
-
-function shouldFallbackToNewSession(error: unknown, record: SessionRecord): boolean {
-  if (error instanceof TimeoutError || error instanceof InterruptedError) {
-    return false;
-  }
-
-  if (isAcpResourceNotFoundError(error)) {
-    return true;
-  }
-
-  // Some adapters return JSON-RPC internal errors when trying to
-  // load sessions that have never produced an agent turn yet.
-  if (!sessionHasAgentMessages(record)) {
-    if (isAcpQueryClosedBeforeResponseError(error)) {
-      return true;
-    }
-
-    const acp = extractAcpError(error);
-    if (acp?.code === -32603) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-type ConnectAndLoadSessionOptions = {
-  client: AcpClient;
-  record: SessionRecord;
-  timeoutMs?: number;
-  verbose?: boolean;
-  activeController: ActiveSessionController;
-  onClientAvailable?: (controller: ActiveSessionController) => void;
-  onConnectedRecord?: (record: SessionRecord) => void;
-  onSessionIdResolved?: (sessionId: string) => void;
-};
-
-type ConnectAndLoadSessionResult = {
-  sessionId: string;
-  agentSessionId?: string;
-  resumed: boolean;
-  loadError?: string;
-};
-
-async function connectAndLoadSession(
-  options: ConnectAndLoadSessionOptions,
-): Promise<ConnectAndLoadSessionResult> {
-  const record = options.record;
-  const client = options.client;
-  const storedProcessAlive = isProcessAlive(record.pid);
-  const shouldReconnect = Boolean(record.pid) && !storedProcessAlive;
-
-  if (options.verbose) {
-    if (storedProcessAlive) {
-      process.stderr.write(
-        `[acpx] saved session pid ${record.pid} is running; reconnecting with loadSession\n`,
-      );
-    } else if (shouldReconnect) {
-      process.stderr.write(
-        `[acpx] saved session pid ${record.pid} is dead; respawning agent and attempting session/load\n`,
-      );
-    }
-  }
-
-  await withTimeout(client.start(), options.timeoutMs);
-  options.onClientAvailable?.(options.activeController);
-  applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-  record.closed = false;
-  record.closedAt = undefined;
-  options.onConnectedRecord?.(record);
-  await writeSessionRecord(record);
-
-  let resumed = false;
-  let loadError: string | undefined;
-  let sessionId = record.acpSessionId;
-
-  if (client.supportsLoadSession()) {
-    try {
-      const loadResult = await withTimeout(
-        client.loadSessionWithOptions(record.acpSessionId, record.cwd, {
-          suppressReplayUpdates: true,
-        }),
-        options.timeoutMs,
-      );
-      reconcileAgentSessionId(record, loadResult.agentSessionId);
-      resumed = true;
-    } catch (error) {
-      loadError = formatErrorMessage(error);
-      if (!shouldFallbackToNewSession(error, record)) {
-        throw error;
-      }
-      const createdSession = await withTimeout(
-        client.createSession(record.cwd),
-        options.timeoutMs,
-      );
-      sessionId = createdSession.sessionId;
-      record.acpSessionId = sessionId;
-      reconcileAgentSessionId(record, createdSession.agentSessionId);
-    }
-  } else {
-    const createdSession = await withTimeout(
-      client.createSession(record.cwd),
-      options.timeoutMs,
-    );
-    sessionId = createdSession.sessionId;
-    record.acpSessionId = sessionId;
-    reconcileAgentSessionId(record, createdSession.agentSessionId);
-  }
-
-  options.onSessionIdResolved?.(sessionId);
-
-  return {
-    sessionId,
-    agentSessionId: record.agentSessionId,
-    resumed,
-    loadError,
-  };
 }
 
 async function runQueuedTask(
@@ -814,198 +647,6 @@ async function runSessionPrompt(
       // best effort on close
     });
   }
-}
-
-type WithConnectedSessionOptions<T> = {
-  sessionRecordId: string;
-  permissionMode?: PermissionMode;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  timeoutMs?: number;
-  verbose?: boolean;
-  onClientAvailable?: (controller: ActiveSessionController) => void;
-  onClientClosed?: () => void;
-  run: (client: AcpClient, sessionId: string, record: SessionRecord) => Promise<T>;
-};
-
-type WithConnectedSessionResult<T> = {
-  value: T;
-  record: SessionRecord;
-  resumed: boolean;
-  loadError?: string;
-};
-
-async function withConnectedSession<T>(
-  options: WithConnectedSessionOptions<T>,
-): Promise<WithConnectedSessionResult<T>> {
-  const record = await resolveSessionRecord(options.sessionRecordId);
-  const client = new AcpClient({
-    agentCommand: record.agentCommand,
-    cwd: absolutePath(record.cwd),
-    permissionMode: options.permissionMode ?? "approve-reads",
-    nonInteractivePermissions: options.nonInteractivePermissions,
-    authCredentials: options.authCredentials,
-    authPolicy: options.authPolicy,
-    verbose: options.verbose,
-  });
-  let activeSessionIdForControl = record.acpSessionId;
-  let notifiedClientAvailable = false;
-  const activeController: ActiveSessionController = {
-    hasActivePrompt: () => client.hasActivePrompt(),
-    requestCancelActivePrompt: async () => await client.requestCancelActivePrompt(),
-    setSessionMode: async (modeId: string) => {
-      await client.setSessionMode(activeSessionIdForControl, modeId);
-    },
-    setSessionConfigOption: async (configId: string, value: string) => {
-      return await client.setSessionConfigOption(
-        activeSessionIdForControl,
-        configId,
-        value,
-      );
-    },
-  };
-
-  try {
-    return await withInterrupt(
-      async () => {
-        const {
-          sessionId: activeSessionId,
-          resumed,
-          loadError,
-        } = await connectAndLoadSession({
-          client,
-          record,
-          timeoutMs: options.timeoutMs,
-          verbose: options.verbose,
-          activeController,
-          onClientAvailable: (controller) => {
-            options.onClientAvailable?.(controller);
-            notifiedClientAvailable = true;
-          },
-          onSessionIdResolved: (sessionId) => {
-            activeSessionIdForControl = sessionId;
-          },
-        });
-
-        const value = await options.run(client, activeSessionId, record);
-
-        const now = isoNow();
-        record.lastUsedAt = now;
-        record.closed = false;
-        record.closedAt = undefined;
-        record.protocolVersion = client.initializeResult?.protocolVersion;
-        record.agentCapabilities = client.initializeResult?.agentCapabilities;
-        applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-        await writeSessionRecord(record);
-
-        return {
-          value,
-          record,
-          resumed,
-          loadError,
-        };
-      },
-      async () => {
-        await client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS);
-        applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-        record.lastUsedAt = isoNow();
-        await writeSessionRecord(record).catch(() => {
-          // best effort while process is being interrupted
-        });
-        await client.close();
-      },
-    );
-  } finally {
-    if (notifiedClientAvailable) {
-      options.onClientClosed?.();
-    }
-    await client.close();
-    applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-    await writeSessionRecord(record).catch(() => {
-      // best effort on close
-    });
-  }
-}
-
-type RunSessionSetModeDirectOptions = {
-  sessionRecordId: string;
-  modeId: string;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  timeoutMs?: number;
-  verbose?: boolean;
-  onClientAvailable?: (controller: ActiveSessionController) => void;
-  onClientClosed?: () => void;
-};
-
-type RunSessionSetConfigOptionDirectOptions = {
-  sessionRecordId: string;
-  configId: string;
-  value: string;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  timeoutMs?: number;
-  verbose?: boolean;
-  onClientAvailable?: (controller: ActiveSessionController) => void;
-  onClientClosed?: () => void;
-};
-
-async function runSessionSetModeDirect(
-  options: RunSessionSetModeDirectOptions,
-): Promise<SessionSetModeResult> {
-  const result = await withConnectedSession({
-    sessionRecordId: options.sessionRecordId,
-    nonInteractivePermissions: options.nonInteractivePermissions,
-    authCredentials: options.authCredentials,
-    authPolicy: options.authPolicy,
-    timeoutMs: options.timeoutMs,
-    verbose: options.verbose,
-    onClientAvailable: options.onClientAvailable,
-    onClientClosed: options.onClientClosed,
-    run: async (client, sessionId) => {
-      await withTimeout(
-        client.setSessionMode(sessionId, options.modeId),
-        options.timeoutMs,
-      );
-    },
-  });
-
-  return {
-    record: result.record,
-    resumed: result.resumed,
-    loadError: result.loadError,
-  };
-}
-
-async function runSessionSetConfigOptionDirect(
-  options: RunSessionSetConfigOptionDirectOptions,
-): Promise<SessionSetConfigOptionResult> {
-  const result = await withConnectedSession({
-    sessionRecordId: options.sessionRecordId,
-    nonInteractivePermissions: options.nonInteractivePermissions,
-    authCredentials: options.authCredentials,
-    authPolicy: options.authPolicy,
-    timeoutMs: options.timeoutMs,
-    verbose: options.verbose,
-    onClientAvailable: options.onClientAvailable,
-    onClientClosed: options.onClientClosed,
-    run: async (client, sessionId) => {
-      return await withTimeout(
-        client.setSessionConfigOption(sessionId, options.configId, options.value),
-        options.timeoutMs,
-      );
-    },
-  });
-
-  return {
-    record: result.record,
-    response: result.value,
-    resumed: result.resumed,
-    loadError: result.loadError,
-  };
 }
 
 export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult> {

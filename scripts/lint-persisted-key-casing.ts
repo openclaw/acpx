@@ -109,20 +109,21 @@ function assertSerializationPolicy(): void {
 
 function assertSerializerSourceKeys(): void {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-  const sourcePath = path.join(scriptDir, "..", "src", "session-persistence.ts");
+  const sourcePath = path.join(
+    scriptDir,
+    "..",
+    "src",
+    "session-persistence",
+    "serialize.ts",
+  );
   const source = fs.readFileSync(sourcePath, "utf8");
 
   const serializerStart = source.indexOf(
     "export function serializeSessionRecordForDisk",
   );
-  const writeStart = source.indexOf(
-    "export async function writeSessionRecord",
-    serializerStart,
-  );
   assert.notEqual(serializerStart, -1, "serializeSessionRecordForDisk not found");
-  assert.notEqual(writeStart, -1, "writeSessionRecord not found");
 
-  const serializerBlock = source.slice(serializerStart, writeStart);
+  const serializerBlock = source.slice(serializerStart);
   const forbiddenPersistedKeys = [
     "acpxRecordId",
     "acpSessionId",

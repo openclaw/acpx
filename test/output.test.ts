@@ -228,3 +228,110 @@ test("quiet formatter suppresses non-text output", () => {
 
   assert.equal(writer.toString(), "Hello world\n");
 });
+
+test("quiet formatter flushes on turn_done event path", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("quiet", { stdout: writer });
+
+  formatter.onEvent({
+    schema: "acpx.event.v1",
+    event_id: "evt-1",
+    session_id: "session-1",
+    seq: 0,
+    ts: "2026-02-27T00:00:00.000Z",
+    type: "output_delta",
+    data: {
+      stream: "output",
+      text: "Hello ",
+    },
+  } as never);
+  formatter.onEvent({
+    schema: "acpx.event.v1",
+    event_id: "evt-2",
+    session_id: "session-1",
+    seq: 1,
+    ts: "2026-02-27T00:00:01.000Z",
+    type: "output_delta",
+    data: {
+      stream: "output",
+      text: "world",
+    },
+  } as never);
+  formatter.onEvent({
+    schema: "acpx.event.v1",
+    event_id: "evt-3",
+    session_id: "session-1",
+    seq: 2,
+    ts: "2026-02-27T00:00:02.000Z",
+    type: "turn_done",
+    data: {
+      stop_reason: "end_turn",
+    },
+  } as never);
+
+  assert.equal(writer.toString(), "Hello world\n");
+});
+
+test("quiet formatter avoids duplicate flush across turn_done and onDone", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("quiet", { stdout: writer });
+
+  formatter.onEvent({
+    schema: "acpx.event.v1",
+    event_id: "evt-10",
+    session_id: "session-1",
+    seq: 0,
+    ts: "2026-02-27T00:00:00.000Z",
+    type: "output_delta",
+    data: {
+      stream: "output",
+      text: "single",
+    },
+  } as never);
+  formatter.onEvent({
+    schema: "acpx.event.v1",
+    event_id: "evt-11",
+    session_id: "session-1",
+    seq: 1,
+    ts: "2026-02-27T00:00:01.000Z",
+    type: "turn_done",
+    data: {
+      stop_reason: "end_turn",
+    },
+  } as never);
+  formatter.onDone("end_turn");
+
+  assert.equal(writer.toString(), "single\n");
+});
+
+test("quiet formatter prefers event output when both session updates and events arrive", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("quiet", { stdout: writer });
+
+  formatter.onSessionUpdate(messageChunk("dup") as never);
+  formatter.onEvent({
+    schema: "acpx.event.v1",
+    event_id: "evt-20",
+    session_id: "session-1",
+    seq: 0,
+    ts: "2026-02-27T00:00:00.000Z",
+    type: "output_delta",
+    data: {
+      stream: "output",
+      text: "dup",
+    },
+  } as never);
+  formatter.onEvent({
+    schema: "acpx.event.v1",
+    event_id: "evt-21",
+    session_id: "session-1",
+    seq: 1,
+    ts: "2026-02-27T00:00:01.000Z",
+    type: "turn_done",
+    data: {
+      stop_reason: "end_turn",
+    },
+  } as never);
+
+  assert.equal(writer.toString(), "dup\n");
+});
