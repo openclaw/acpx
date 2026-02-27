@@ -58,7 +58,7 @@ Each line in `events/*.ndjson`:
   "at": "2026-02-27T10:11:12.345Z",
   "acpxRecordId": "019c...",
   "acpSessionId": "019c...",
-  "agentSessionId": "codex_...",
+  "agentSessionId": "550e8400-e29b-41d4-a716-446655440000",
   "turnId": "turn_...",
   "requestId": "req_...",
   "source": "acpx",
@@ -166,7 +166,7 @@ This guarantees future ACP fields/methods are retained even if acpx does not und
   },
   "identity": {
     "acpSessionId": "019c...",
-    "agentSessionId": "codex_..."
+    "agentSessionId": "550e8400-e29b-41d4-a716-446655440000"
   },
   "lifecycle": {
     "createdAt": "...",
