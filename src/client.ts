@@ -665,8 +665,14 @@ export class AcpClient {
 
     await this.terminalManager.shutdown();
 
-    if (this.agent && !this.agent.killed) {
-      this.agent.kill();
+    const agent = this.agent;
+    if (agent) {
+      // Some adapters keep stdio handles alive after SIGTERM; explicitly
+      // destroy/unref so CLI calls can exit deterministically.
+      if (!agent.killed) {
+        agent.kill();
+      }
+      this.detachAgentHandles(agent);
     }
 
     this.sessionUpdateChain = Promise.resolve();
@@ -678,6 +684,22 @@ export class AcpClient {
     this.promptPermissionFailures.clear();
     this.connection = undefined;
     this.agent = undefined;
+  }
+
+  private detachAgentHandles(agent: ChildProcess): void {
+    const stdin = agent.stdin as Writable | null;
+    const stdout = agent.stdout as Readable | null;
+    const stderr = agent.stderr as Readable | null;
+
+    stdin?.destroy();
+    stdout?.destroy();
+    stderr?.destroy();
+
+    try {
+      agent.unref();
+    } catch {
+      // best effort
+    }
   }
 
   private getConnection(): ClientSideConnection {

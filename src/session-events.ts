@@ -1,41 +1,21 @@
 import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { createAcpxEvent, isAcpxEvent } from "./events.js";
 import { assertPersistedKeyPolicy } from "./persisted-key-policy.js";
+import {
+  DEFAULT_EVENT_MAX_SEGMENTS,
+  DEFAULT_EVENT_SEGMENT_MAX_BYTES,
+  sessionBaseDir,
+  sessionEventActivePath as activeEventPath,
+  sessionEventLockPath as eventsLockPath,
+  sessionEventSegmentPath as segmentEventPath,
+} from "./session-event-log.js";
 import { writeSessionRecord } from "./session-persistence.js";
 import type { AcpxEvent, AcpxEventDraft, SessionRecord } from "./types.js";
 
 const LOCK_RETRY_MS = 15;
 
-export const DEFAULT_EVENT_SEGMENT_MAX_BYTES = 64 * 1024 * 1024;
-export const DEFAULT_EVENT_MAX_SEGMENTS = 5;
-
-function sessionBaseDir(): string {
-  return path.join(os.homedir(), ".acpx", "sessions");
-}
-
 async function ensureSessionDir(): Promise<void> {
   await fs.mkdir(sessionBaseDir(), { recursive: true });
-}
-
-function safeSessionId(sessionId: string): string {
-  return encodeURIComponent(sessionId);
-}
-
-function activeEventPath(sessionId: string): string {
-  return path.join(sessionBaseDir(), `${safeSessionId(sessionId)}.events.ndjson`);
-}
-
-function segmentEventPath(sessionId: string, segment: number): string {
-  return path.join(
-    sessionBaseDir(),
-    `${safeSessionId(sessionId)}.events.${segment}.ndjson`,
-  );
-}
-
-function eventsLockPath(sessionId: string): string {
-  return path.join(sessionBaseDir(), `${safeSessionId(sessionId)}.events.lock`);
 }
 
 async function pathExists(filePath: string): Promise<boolean> {
@@ -287,17 +267,6 @@ export class SessionEventWriter {
       await releaseEventsLock(this.lock);
     }
   }
-}
-
-export function defaultSessionEventLog(sessionId: string) {
-  return {
-    active_path: activeEventPath(sessionId),
-    segment_count: DEFAULT_EVENT_MAX_SEGMENTS,
-    max_segment_bytes: DEFAULT_EVENT_SEGMENT_MAX_BYTES,
-    max_segments: DEFAULT_EVENT_MAX_SEGMENTS,
-    last_write_at: undefined,
-    last_write_error: null,
-  } as const;
 }
 
 export async function listSessionEvents(sessionId: string): Promise<AcpxEvent[]> {

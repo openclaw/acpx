@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { SessionNotFoundError, SessionResolutionError } from "./errors.js";
 import { normalizeRuntimeSessionId } from "./runtime-session-id.js";
+import { defaultSessionEventLog } from "./session-event-log.js";
 import type {
   SessionAcpxState,
   SessionEventLog,
@@ -14,21 +15,6 @@ import { SESSION_RECORD_SCHEMA } from "./types.js";
 import { assertPersistedKeyPolicy } from "./persisted-key-policy.js";
 
 export const DEFAULT_HISTORY_LIMIT = 20;
-const DEFAULT_EVENT_SEGMENT_MAX_BYTES = 64 * 1024 * 1024;
-const DEFAULT_EVENT_MAX_SEGMENTS = 5;
-
-function defaultSessionEventLog(sessionId: string): SessionEventLog {
-  const safeId = encodeURIComponent(sessionId);
-  return {
-    active_path: path.join(sessionBaseDir(), `${safeId}.events.ndjson`),
-    segment_count: DEFAULT_EVENT_MAX_SEGMENTS,
-    max_segment_bytes: DEFAULT_EVENT_SEGMENT_MAX_BYTES,
-    max_segments: DEFAULT_EVENT_MAX_SEGMENTS,
-    last_write_at: undefined,
-    last_write_error: null,
-  };
-}
-
 type FindSessionOptions = {
   agentCommand: string;
   cwd: string;

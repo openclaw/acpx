@@ -1,8 +1,4 @@
-import type {
-  SetSessionConfigOptionResponse,
-  SessionNotification,
-  StopReason,
-} from "@agentclientprotocol/sdk";
+import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { isAcpxEvent } from "./events.js";
 import {
   OUTPUT_ERROR_CODES,
@@ -13,7 +9,6 @@ import {
 } from "./types.js";
 import type {
   AcpxEvent,
-  ClientOperation,
   NonInteractivePermissionPolicy,
   PermissionMode,
   SessionSendResult,
@@ -67,24 +62,6 @@ export type QueueOwnerEventMessage = {
   event: AcpxEvent;
 };
 
-export type QueueOwnerSessionUpdateMessage = {
-  type: "session_update";
-  requestId: string;
-  notification: SessionNotification;
-};
-
-export type QueueOwnerClientOperationMessage = {
-  type: "client_operation";
-  requestId: string;
-  operation: ClientOperation;
-};
-
-export type QueueOwnerDoneMessage = {
-  type: "done";
-  requestId: string;
-  stopReason: StopReason;
-};
-
 export type QueueOwnerResultMessage = {
   type: "result";
   requestId: string;
@@ -124,9 +101,6 @@ export type QueueOwnerErrorMessage = {
 export type QueueOwnerMessage =
   | QueueOwnerAcceptedMessage
   | QueueOwnerEventMessage
-  | QueueOwnerSessionUpdateMessage
-  | QueueOwnerClientOperationMessage
-  | QueueOwnerDoneMessage
   | QueueOwnerResultMessage
   | QueueOwnerCancelResultMessage
   | QueueOwnerSetModeResultMessage
@@ -349,54 +323,6 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
       type: "event",
       requestId: message.requestId,
       event: message.event,
-    };
-  }
-
-  if (message.type === "session_update") {
-    const notification = message.notification as SessionNotification | undefined;
-    if (!notification || typeof notification !== "object") {
-      return null;
-    }
-    return {
-      type: "session_update",
-      requestId: message.requestId,
-      notification,
-    };
-  }
-
-  if (message.type === "client_operation") {
-    const operation = asRecord(message.operation);
-    if (
-      !operation ||
-      typeof operation.method !== "string" ||
-      typeof operation.status !== "string" ||
-      typeof operation.summary !== "string" ||
-      typeof operation.timestamp !== "string"
-    ) {
-      return null;
-    }
-    if (
-      operation.status !== "running" &&
-      operation.status !== "completed" &&
-      operation.status !== "failed"
-    ) {
-      return null;
-    }
-    return {
-      type: "client_operation",
-      requestId: message.requestId,
-      operation: operation as ClientOperation,
-    };
-  }
-
-  if (message.type === "done") {
-    if (typeof message.stopReason !== "string") {
-      return null;
-    }
-    return {
-      type: "done",
-      requestId: message.requestId,
-      stopReason: message.stopReason as StopReason,
     };
   }
 

@@ -338,14 +338,14 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
       onEvent(event) {
         events.push(`event:${event.kind}`);
       },
-      onSessionUpdate(notification) {
-        events.push(`session_update:${notification.update.sessionUpdate}`);
+      onSessionUpdate() {
+        // queue transport forwards canonical events only
       },
       onClientOperation() {
-        events.push("client_operation");
+        // queue transport forwards canonical events only
       },
-      onDone(stopReason) {
-        events.push(`done:${stopReason}`);
+      onDone() {
+        // queue transport forwards canonical events only
       },
       onError(params) {
         events.push(`error:${params.code}`);
@@ -378,25 +378,22 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
         );
         socket.write(
           `${JSON.stringify({
-            type: "session_update",
+            type: "event",
             requestId: request.requestId,
-            notification: {
-              sessionId: "agent-session",
-              update: {
-                sessionUpdate: "agent_message_chunk",
-                content: {
-                  type: "text",
-                  text: "queued response",
-                },
+            event: {
+              schema: "acpx.event.v1",
+              event_id: "evt-queued-1",
+              session_id: sessionId,
+              acp_session_id: "agent-session",
+              seq: 1,
+              ts: "2026-01-01T00:00:00.000Z",
+              kind: "turn_started",
+              data: {
+                mode: "prompt",
+                resumed: true,
+                input_preview: "hello",
               },
             },
-          })}\n`,
-        );
-        socket.write(
-          `${JSON.stringify({
-            type: "done",
-            requestId: request.requestId,
-            stopReason: "end_turn",
           })}\n`,
         );
         socket.write(
@@ -478,8 +475,7 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
         events.some((entry) => entry.startsWith(`context:${sessionId}:`)),
         true,
       );
-      assert.equal(events.includes("session_update:agent_message_chunk"), true);
-      assert.equal(events.includes("done:end_turn"), true);
+      assert.equal(events.includes("event:turn_started"), true);
       assert.equal(events.includes("flush"), true);
       assert.equal(
         events.some((entry) => entry.startsWith("error:")),

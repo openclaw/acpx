@@ -22,7 +22,15 @@ import {
   recordPromptSubmission,
   recordSessionUpdate as recordThreadSessionUpdate,
 } from "./session-thread-model.js";
-import { SessionEventWriter, defaultSessionEventLog } from "./session-events.js";
+import { SessionEventWriter } from "./session-events.js";
+import { defaultSessionEventLog } from "./session-event-log.js";
+import {
+  InterruptedError,
+  TimeoutError,
+  withInterrupt,
+  withTimeout,
+} from "./session-runtime-helpers.js";
+export { InterruptedError, TimeoutError } from "./session-runtime-helpers.js";
 import {
   QueueOwnerTurnController,
   type QueueOwnerActiveSessionController,
@@ -81,20 +89,6 @@ import {
 
 export const DEFAULT_QUEUE_OWNER_TTL_MS = 300_000;
 const INTERRUPT_CANCEL_WAIT_MS = 2_500;
-
-export class TimeoutError extends Error {
-  constructor(timeoutMs: number) {
-    super(`Timed out after ${timeoutMs}ms`);
-    this.name = "TimeoutError";
-  }
-}
-
-export class InterruptedError extends Error {
-  constructor() {
-    super("Interrupted");
-    this.name = "InterruptedError";
-  }
-}
 
 type TimedRunOptions = {
   timeoutMs?: number;
@@ -180,66 +174,6 @@ export type SessionSetConfigOptionOptions = {
   verbose?: boolean;
 } & TimedRunOptions;
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
-  if (!timeoutMs || timeoutMs <= 0) {
-    return promise;
-  }
-
-  let timer: NodeJS.Timeout | undefined;
-  const timeoutPromise = new Promise<T>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      reject(new TimeoutError(timeoutMs));
-    }, timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-}
-
-async function withInterrupt<T>(
-  run: () => Promise<T>,
-  onInterrupt: () => Promise<void>,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let settled = false;
-
-    const finish = (cb: () => void) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      process.off("SIGINT", onSigint);
-      process.off("SIGTERM", onSigterm);
-      cb();
-    };
-
-    const onSigint = () => {
-      void onInterrupt().finally(() => {
-        finish(() => reject(new InterruptedError()));
-      });
-    };
-
-    const onSigterm = () => {
-      void onInterrupt().finally(() => {
-        finish(() => reject(new InterruptedError()));
-      });
-    };
-
-    process.once("SIGINT", onSigint);
-    process.once("SIGTERM", onSigterm);
-
-    void run().then(
-      (result) => finish(() => resolve(result)),
-      (error) => finish(() => reject(error)),
-    );
-  });
-}
-
 function toPromptResult(
   stopReason: RunPromptResult["stopReason"],
   sessionId: string,
@@ -291,28 +225,16 @@ class QueueTaskOutputFormatter implements OutputFormatter {
     });
   }
 
-  onSessionUpdate(notification: SessionNotification): void {
-    this.send({
-      type: "session_update",
-      requestId: this.requestId,
-      notification,
-    });
+  onSessionUpdate(_notification: SessionNotification): void {
+    // Queue protocol forwards canonical events only.
   }
 
-  onClientOperation(operation: ClientOperation): void {
-    this.send({
-      type: "client_operation",
-      requestId: this.requestId,
-      operation,
-    });
+  onClientOperation(_operation: ClientOperation): void {
+    // Queue protocol forwards canonical events only.
   }
 
-  onDone(stopReason: StopReason): void {
-    this.send({
-      type: "done",
-      requestId: this.requestId,
-      stopReason,
-    });
+  onDone(_stopReason: StopReason): void {
+    // turn_done is emitted as a canonical event.
   }
 
   onError(params: {

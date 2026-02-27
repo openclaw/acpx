@@ -749,7 +749,6 @@ async function submitToQueueOwner(
     let settled = false;
     let acknowledged = false;
     let buffer = "";
-    let sawDone = false;
 
     const finishResolve = (result: SessionSendOutcome) => {
       if (settled) {
@@ -870,26 +869,7 @@ async function submitToQueueOwner(
         return;
       }
 
-      if (message.type === "session_update") {
-        options.outputFormatter.onSessionUpdate(message.notification);
-        return;
-      }
-
-      if (message.type === "client_operation") {
-        options.outputFormatter.onClientOperation(message.operation);
-        return;
-      }
-
-      if (message.type === "done") {
-        options.outputFormatter.onDone(message.stopReason);
-        sawDone = true;
-        return;
-      }
-
       if (message.type === "result") {
-        if (!sawDone) {
-          options.outputFormatter.onDone(message.result.stopReason);
-        }
         options.outputFormatter.flush();
         finishResolve(message.result);
         return;
