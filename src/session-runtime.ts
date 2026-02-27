@@ -1204,7 +1204,6 @@ export async function sendSession(
   options: SessionSendOptions,
 ): Promise<SessionSendOutcome> {
   const waitForCompletion = options.waitForCompletion !== false;
-  const queueOwnerTtlMs = normalizeQueueOwnerTtlMs(options.ttlMs);
 
   const queuedToOwner = await trySubmitToRunningOwner({
     sessionId: options.sessionId,
@@ -1355,17 +1354,9 @@ export async function sendSession(
         });
       });
 
-      const idleWaitMs =
-        queueOwnerTtlMs === 0 ? undefined : Math.max(0, queueOwnerTtlMs);
-
       while (true) {
-        const task = await owner.nextTask(idleWaitMs);
+        const task = await owner.nextTask(0);
         if (!task) {
-          if (queueOwnerTtlMs > 0 && options.verbose) {
-            process.stderr.write(
-              `[acpx] queue owner TTL expired after ${Math.round(queueOwnerTtlMs / 1_000)}s for session ${options.sessionId}; shutting down\n`,
-            );
-          }
           break;
         }
         await runPromptTurn(async () => {
