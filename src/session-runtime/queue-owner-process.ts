@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import type {
   AuthPolicy,
   NonInteractivePermissionPolicy,
@@ -28,9 +28,16 @@ type SessionSendLike = {
   ttlMs?: number;
 };
 
-const QUEUE_OWNER_MAIN_PATH = fileURLToPath(
-  new URL("../queue-owner-main.js", import.meta.url),
-);
+export function resolveQueueOwnerSpawnArgs(
+  argv: readonly string[] = process.argv,
+): string[] {
+  const entry = argv[1];
+  if (!entry || entry.trim().length === 0) {
+    throw new Error("acpx self-spawn failed: missing CLI entry path");
+  }
+  const resolvedEntry = realpathSync(entry);
+  return [resolvedEntry, "__queue-owner"];
+}
 
 export function queueOwnerRuntimeOptionsFromSend(
   options: SessionSendLike,
@@ -49,7 +56,7 @@ export function queueOwnerRuntimeOptionsFromSend(
 
 export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): void {
   const payload = JSON.stringify(options);
-  const child = spawn(process.execPath, [QUEUE_OWNER_MAIN_PATH], {
+  const child = spawn(process.execPath, resolveQueueOwnerSpawnArgs(), {
     detached: true,
     stdio: "ignore",
     env: {
