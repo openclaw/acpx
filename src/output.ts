@@ -9,6 +9,7 @@ import type {
   ToolCallUpdate,
 } from "@agentclientprotocol/sdk";
 import { parseJsonRpcErrorMessage, parsePromptStopReason } from "./acp-jsonrpc.js";
+import { createJsonOutputFormatter } from "./output-json-formatter.js";
 import type {
   AcpJsonRpcMessage,
   ClientOperation,
@@ -63,16 +64,6 @@ const OUTPUT_PRIORITY_KEYS = [
   "response",
   "value",
 ] as const;
-
-const DEFAULT_JSON_SESSION_ID = "unknown";
-const OUTPUT_ERROR_JSONRPC_CODES: Record<OutputErrorCode, number> = {
-  NO_SESSION: -32002,
-  TIMEOUT: -32070,
-  PERMISSION_DENIED: -32071,
-  PERMISSION_PROMPT_UNAVAILABLE: -32072,
-  RUNTIME: -32603,
-  USAGE: -32602,
-};
 
 function asStatus(status: ToolCallStatus | null | undefined): NormalizedToolStatus {
   return status ?? "unknown";
@@ -848,77 +839,6 @@ class TextOutputFormatter implements OutputFormatter {
   }
 }
 
-class JsonOutputFormatter implements OutputFormatter {
-  private readonly stdout: WritableLike;
-  private sessionId: string;
-
-  constructor(stdout: WritableLike, context?: OutputFormatterContext) {
-    this.stdout = stdout;
-    this.sessionId = context?.sessionId?.trim() || DEFAULT_JSON_SESSION_ID;
-  }
-
-  setContext(context: OutputFormatterContext): void {
-    this.sessionId =
-      context.sessionId?.trim() || this.sessionId || DEFAULT_JSON_SESSION_ID;
-  }
-
-  onAcpMessage(message: AcpJsonRpcMessage): void {
-    this.stdout.write(`${JSON.stringify(message)}\n`);
-  }
-
-  onError(params: {
-    code: OutputErrorCode;
-    detailCode?: string;
-    origin?: OutputErrorOrigin;
-    message: string;
-    retryable?: boolean;
-    acp?: OutputErrorAcpPayload;
-    timestamp?: string;
-  }): void {
-    const fallbackData: Record<string, unknown> = {
-      acpxCode: params.code,
-      detailCode: params.detailCode,
-      origin: params.origin,
-      retryable: params.retryable,
-      timestamp: params.timestamp,
-      sessionId: this.sessionId,
-    };
-
-    for (const [key, value] of Object.entries(fallbackData)) {
-      if (value === undefined) {
-        delete fallbackData[key];
-      }
-    }
-
-    const resolvedError =
-      params.acp &&
-      Number.isFinite(params.acp.code) &&
-      params.acp.message.trim().length > 0
-        ? {
-            code: params.acp.code,
-            message: params.acp.message,
-            ...(params.acp.data !== undefined ? { data: params.acp.data } : {}),
-          }
-        : {
-            code: OUTPUT_ERROR_JSONRPC_CODES[params.code] ?? -32603,
-            message: params.message,
-            ...(Object.keys(fallbackData).length > 0 ? { data: fallbackData } : {}),
-          };
-
-    this.stdout.write(
-      `${JSON.stringify({
-        jsonrpc: "2.0",
-        id: null,
-        error: resolvedError,
-      })}\n`,
-    );
-  }
-
-  flush(): void {
-    // no-op for streaming output
-  }
-}
-
 class QuietOutputFormatter implements OutputFormatter {
   private readonly stdout: WritableLike;
   private chunks: string[] = [];
@@ -984,7 +904,7 @@ export function createOutputFormatter(
     case "text":
       return new TextOutputFormatter(stdout);
     case "json":
-      return new JsonOutputFormatter(stdout, options.jsonContext);
+      return createJsonOutputFormatter(stdout, options.jsonContext);
     case "quiet":
       return new QuietOutputFormatter(stdout);
     default: {

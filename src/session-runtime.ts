@@ -1,7 +1,5 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { AcpClient } from "./client.js";
 import { formatErrorMessage, normalizeOutputError } from "./error-normalization.js";
 import {
@@ -51,6 +49,12 @@ import {
   runSessionSetModeDirect,
 } from "./session-runtime/prompt-runner.js";
 import {
+  queueOwnerRuntimeOptionsFromSend,
+  spawnQueueOwnerProcess,
+  type QueueOwnerRuntimeOptions,
+} from "./session-runtime/queue-owner-process.js";
+export type { QueueOwnerRuntimeOptions } from "./session-runtime/queue-owner-process.js";
+import {
   DEFAULT_HISTORY_LIMIT,
   absolutePath,
   findGitRepositoryRoot,
@@ -86,9 +90,6 @@ import {
 export const DEFAULT_QUEUE_OWNER_TTL_MS = 300_000;
 const INTERRUPT_CANCEL_WAIT_MS = 2_500;
 const QUEUE_OWNER_STARTUP_MAX_ATTEMPTS = 120;
-const QUEUE_OWNER_MAIN_PATH = fileURLToPath(
-  new URL("./queue-owner-main.js", import.meta.url),
-);
 
 type TimedRunOptions = {
   timeoutMs?: number;
@@ -715,45 +716,6 @@ export async function ensureSession(
     record,
     created: true,
   };
-}
-
-export type QueueOwnerRuntimeOptions = {
-  sessionId: string;
-  permissionMode: PermissionMode;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  suppressSdkConsoleErrors?: boolean;
-  verbose?: boolean;
-  ttlMs?: number;
-};
-
-function queueOwnerRuntimeOptionsFromSend(
-  options: SessionSendOptions,
-): QueueOwnerRuntimeOptions {
-  return {
-    sessionId: options.sessionId,
-    permissionMode: options.permissionMode,
-    nonInteractivePermissions: options.nonInteractivePermissions,
-    authCredentials: options.authCredentials,
-    authPolicy: options.authPolicy,
-    suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
-    verbose: options.verbose,
-    ttlMs: options.ttlMs,
-  };
-}
-
-function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): void {
-  const payload = JSON.stringify(options);
-  const child = spawn(process.execPath, [QUEUE_OWNER_MAIN_PATH], {
-    detached: true,
-    stdio: "ignore",
-    env: {
-      ...process.env,
-      ACPX_QUEUE_OWNER_PAYLOAD: payload,
-    },
-  });
-  child.unref();
 }
 
 async function submitToRunningOwner(
