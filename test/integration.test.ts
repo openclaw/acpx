@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -448,6 +449,87 @@ test("integration: cancel yields cancelled stopReason without queue error", asyn
   });
 });
 
+test("integration: prompt exits after done while detached owner stays warm", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const created = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+      const createdPayload = JSON.parse(created.stdout.trim()) as {
+        acpxRecordId?: string;
+        acpx_record_id?: string;
+        acpSessionId?: string;
+        acp_session_id?: string;
+        sessionId?: string;
+        session_id?: string;
+      };
+      const sessionId =
+        createdPayload.acpxRecordId ??
+        createdPayload.acpx_record_id ??
+        createdPayload.acpSessionId ??
+        createdPayload.acp_session_id ??
+        createdPayload.sessionId ??
+        createdPayload.session_id;
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        throw new Error(`missing session id in sessions new output: `);
+      }
+
+      const firstPromptStartedAt = Date.now();
+      const firstPrompt = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "quiet",
+          "--ttl",
+          "3600",
+          "prompt",
+          "say exactly: warm-owner-ready",
+        ],
+        homeDir,
+      );
+      const firstPromptDurationMs = Date.now() - firstPromptStartedAt;
+      assert.equal(firstPrompt.code, 0, firstPrompt.stderr);
+      assert.match(firstPrompt.stdout, /warm-owner-ready/);
+      assert.equal(
+        firstPromptDurationMs < 8_000,
+        true,
+        `expected prompt to return quickly, got ${firstPromptDurationMs}ms`,
+      );
+
+      const lock = await readQueueOwnerLock(homeDir, sessionId);
+      assert.equal(Number.isInteger(lock.pid) && lock.pid > 0, true);
+      assert.equal(isPidAlive(lock.pid), true);
+
+      const secondPrompt = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "quiet",
+          "prompt",
+          "say exactly: second-turn",
+        ],
+        homeDir,
+      );
+      assert.equal(secondPrompt.code, 0, secondPrompt.stderr);
+      assert.match(secondPrompt.stdout, /second-turn/);
+
+      const closed = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "close"],
+        homeDir,
+      );
+      assert.equal(closed.code, 0, closed.stderr);
+
+      assert.equal(await waitForPidExit(lock.pid, 5_000), true);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 function baseAgentArgs(cwd: string): string[] {
   return ["--agent", MOCK_AGENT_COMMAND, "--approve-all", "--cwd", cwd];
 }
@@ -761,6 +843,47 @@ async function runCommand(command: string, args: string[]): Promise<string> {
       reject(new Error(`${command} ${args.join(" ")} failed (${code}): ${stderr}`));
     });
   });
+}
+
+function queueOwnerLockPath(homeDir: string, sessionId: string): string {
+  const queueKey = createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
+  return path.join(homeDir, ".acpx", "queues", `${queueKey}.lock`);
+}
+
+async function readQueueOwnerLock(
+  homeDir: string,
+  sessionId: string,
+): Promise<{ pid: number }> {
+  const lockPath = queueOwnerLockPath(homeDir, sessionId);
+  const payload = await fs.readFile(lockPath, "utf8");
+  const parsed = JSON.parse(payload) as { pid?: unknown };
+  const pid = Number(parsed.pid);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error(`queue owner lock missing valid pid: ${payload}`);
+  }
+  return {
+    pid,
+  };
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(pid)) {
+      return true;
+    }
+    await sleep(50);
+  }
+  return !isPidAlive(pid);
 }
 
 async function sleep(ms: number): Promise<void> {

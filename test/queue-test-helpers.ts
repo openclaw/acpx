@@ -63,7 +63,14 @@ export async function writeQueueOwnerLock(options: {
   pid: number | undefined;
   sessionId: string;
   socketPath: string;
+  ownerGeneration?: number;
+  queueDepth?: number;
+  createdAt?: string;
+  heartbeatAt?: string;
 }): Promise<void> {
+  const now = new Date().toISOString();
+  const createdAt = options.createdAt ?? now;
+  const heartbeatAt = options.heartbeatAt ?? createdAt;
   await fs.mkdir(path.dirname(options.lockPath), { recursive: true });
   await fs.writeFile(
     options.lockPath,
@@ -71,6 +78,12 @@ export async function writeQueueOwnerLock(options: {
       pid: options.pid,
       sessionId: options.sessionId,
       socketPath: options.socketPath,
+      createdAt,
+      heartbeatAt,
+      ownerGeneration:
+        options.ownerGeneration ??
+        Date.now() * 1_000 + Math.floor(Math.random() * 1_000),
+      queueDepth: options.queueDepth ?? 0,
     })}\n`,
     "utf8",
   );

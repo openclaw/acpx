@@ -6,9 +6,12 @@
 
 [![npm version](https://img.shields.io/npm/v/acpx.svg)](https://www.npmjs.com/package/acpx)
 [![npm downloads](https://img.shields.io/npm/dm/acpx.svg)](https://www.npmjs.com/package/acpx)
-[![CI](https://github.com/janitrai/acpx/actions/workflows/ci.yml/badge.svg)](https://github.com/janitrai/acpx/actions/workflows/ci.yml)
+[![CI](https://github.com/openclaw/acpx/actions/workflows/ci.yml/badge.svg)](https://github.com/openclaw/acpx/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/node/v/acpx.svg)](https://nodejs.org)
+
+> Alpha notice: `acpx` is in alpha and the CLI/runtime interfaces are likely to change.
+> ACP coverage status: see [ACP Spec Coverage Roadmap](docs/2026-02-19-acp-coverage-roadmap.md).
 
 Your agents love acpx! 🤖❤️ They hate having to scrape characters from a PTY session 😤
 
@@ -84,10 +87,10 @@ I want you to use acpx to run coding agents over the Agent Client Protocol
 
 3. Read the acpx skill reference so you know every command, flag, and
    workflow pattern:
-   https://raw.githubusercontent.com/janitrai/acpx/main/skills/acpx/SKILL.md
+   https://raw.githubusercontent.com/openclaw/acpx/main/skills/acpx/SKILL.md
 
 4. If you need the full CLI reference with all options and examples:
-   https://raw.githubusercontent.com/janitrai/acpx/main/docs/CLI.md
+   https://raw.githubusercontent.com/openclaw/acpx/main/docs/CLI.md
 
 From now on, when you need to delegate work to a coding agent, use acpx
 instead of spawning raw terminal sessions. For example:
