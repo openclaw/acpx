@@ -35,8 +35,7 @@ import {
 } from "./errors.js";
 import { FileSystemHandlers } from "./filesystem.js";
 import { classifyPermissionDecision, resolvePermissionRequest } from "./permissions.js";
-import { extractAgentSessionId } from "./agent-session-id.js";
-import { getAcpxVersion } from "./version.js";
+import { extractRuntimeSessionId } from "./runtime-session-id.js";
 import { TerminalManager } from "./terminal.js";
 import type { AcpClientOptions, PermissionStats } from "./types.js";
 
@@ -48,9 +47,6 @@ type CommandParts = {
 const REPLAY_IDLE_MS = 80;
 const REPLAY_DRAIN_TIMEOUT_MS = 5_000;
 const DRAIN_POLL_INTERVAL_MS = 20;
-const AGENT_CLOSE_AFTER_STDIN_END_MS = 100;
-const AGENT_CLOSE_TERM_GRACE_MS = 1_500;
-const AGENT_CLOSE_KILL_GRACE_MS = 1_000;
 
 type LoadSessionOptions = {
   suppressReplayUpdates?: boolean;
@@ -133,47 +129,6 @@ function waitForSpawn(child: ChildProcess): Promise<void> {
 
     child.once("spawn", onSpawn);
     child.once("error", onError);
-  });
-}
-
-function isChildProcessRunning(child: ChildProcess): boolean {
-  return child.exitCode == null && child.signalCode == null;
-}
-
-function waitForChildExit(
-  child: ChildProcessByStdio<Writable, Readable, Readable>,
-  timeoutMs: number,
-): Promise<boolean> {
-  if (!isChildProcessRunning(child)) {
-    return Promise.resolve(true);
-  }
-
-  return new Promise<boolean>((resolve) => {
-    let settled = false;
-    const timer = setTimeout(
-      () => {
-        finish(false);
-      },
-      Math.max(0, timeoutMs),
-    );
-
-    const finish = (value: boolean) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      child.off("close", onExitLike);
-      child.off("exit", onExitLike);
-      clearTimeout(timer);
-      resolve(value);
-    };
-
-    const onExitLike = () => {
-      finish(true);
-    };
-
-    child.once("close", onExitLike);
-    child.once("exit", onExitLike);
   });
 }
 
@@ -512,7 +467,7 @@ export class AcpClient {
         },
         clientInfo: {
           name: "acpx",
-          version: getAcpxVersion(),
+          version: "0.1.0",
         },
       });
 
@@ -536,7 +491,7 @@ export class AcpClient {
     });
     return {
       sessionId: result.sessionId,
-      agentSessionId: extractAgentSessionId(result._meta),
+      agentSessionId: extractRuntimeSessionId(result._meta),
     };
   }
 
@@ -576,7 +531,7 @@ export class AcpClient {
     }
 
     return {
-      agentSessionId: extractAgentSessionId(response?._meta),
+      agentSessionId: extractRuntimeSessionId(response?._meta),
     };
   }
 
@@ -710,8 +665,14 @@ export class AcpClient {
 
     await this.terminalManager.shutdown();
 
-    if (this.agent) {
-      await this.terminateAgentProcess(this.agent);
+    const agent = this.agent;
+    if (agent) {
+      // Some adapters keep stdio handles alive after SIGTERM; explicitly
+      // destroy/unref so CLI calls can exit deterministically.
+      if (!agent.killed) {
+        agent.kill();
+      }
+      this.detachAgentHandles(agent);
     }
 
     this.sessionUpdateChain = Promise.resolve();
@@ -725,53 +686,19 @@ export class AcpClient {
     this.agent = undefined;
   }
 
-  private async terminateAgentProcess(
-    child: ChildProcessByStdio<Writable, Readable, Readable>,
-  ): Promise<void> {
-    // Closing stdin is the most graceful shutdown signal for stdio-based ACP agents.
-    if (!child.stdin.destroyed) {
-      try {
-        child.stdin.end();
-      } catch {
-        // best effort
-      }
-    }
+  private detachAgentHandles(agent: ChildProcess): void {
+    const stdin = agent.stdin as Writable | null;
+    const stdout = agent.stdout as Readable | null;
+    const stderr = agent.stderr as Readable | null;
 
-    let exited = await waitForChildExit(child, AGENT_CLOSE_AFTER_STDIN_END_MS);
-    if (!exited && isChildProcessRunning(child)) {
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        // best effort
-      }
-      exited = await waitForChildExit(child, AGENT_CLOSE_TERM_GRACE_MS);
-    }
+    stdin?.destroy();
+    stdout?.destroy();
+    stderr?.destroy();
 
-    if (!exited && isChildProcessRunning(child)) {
-      this.log(
-        `agent did not exit after ${AGENT_CLOSE_TERM_GRACE_MS}ms; forcing SIGKILL`,
-      );
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // best effort
-      }
-      exited = await waitForChildExit(child, AGENT_CLOSE_KILL_GRACE_MS);
-    }
-
-    // Ensure stdio handles don't keep this process alive after close() returns.
-    if (!child.stdin.destroyed) {
-      child.stdin.destroy();
-    }
-    if (!child.stdout.destroyed) {
-      child.stdout.destroy();
-    }
-    if (!child.stderr.destroyed) {
-      child.stderr.destroy();
-    }
-
-    if (!exited) {
-      child.unref();
+    try {
+      agent.unref();
+    } catch {
+      // best effort
     }
   }
 

@@ -7,7 +7,6 @@ import test from "node:test";
 import { QueueConnectionError, QueueProtocolError } from "../src/errors.js";
 import {
   SessionQueueOwner,
-  isProcessAlive,
   releaseQueueOwnerLease,
   tryAcquireQueueOwnerLease,
   trySetModeOnRunningOwner,
@@ -29,6 +28,9 @@ const NOOP_OUTPUT_FORMATTER: OutputFormatter = {
   setContext() {
     // no-op
   },
+  onEvent() {
+    // no-op
+  },
   onSessionUpdate() {
     // no-op
   },
@@ -45,41 +47,6 @@ const NOOP_OUTPUT_FORMATTER: OutputFormatter = {
     // no-op
   },
 };
-
-test("trySubmitToRunningOwner reclaims stale owner heartbeat locks", async () => {
-  await withTempHome(async (homeDir) => {
-    const sessionId = "stale-heartbeat-owner";
-    const keeper = await startKeeperProcess();
-    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
-    await writeQueueOwnerLock({
-      lockPath,
-      pid: keeper.pid,
-      sessionId,
-      socketPath,
-      createdAt: "2000-01-01T00:00:00.000Z",
-      heartbeatAt: "2000-01-01T00:00:00.000Z",
-    });
-
-    try {
-      const result = await trySubmitToRunningOwner({
-        sessionId,
-        message: "hello",
-        permissionMode: "approve-reads",
-        outputFormatter: NOOP_OUTPUT_FORMATTER,
-        waitForCompletion: true,
-      });
-      assert.equal(result, undefined);
-      assert.equal(await waitForProcessExit(keeper.pid, 3_000), true);
-      await assert.rejects(async () => await fs.readFile(lockPath, "utf8"), {
-        code: "ENOENT",
-      });
-      assert.equal(isProcessAlive(keeper.pid), false);
-    } finally {
-      await cleanupOwnerArtifacts({ socketPath, lockPath });
-      stopProcess(keeper);
-    }
-  });
-});
 
 test("trySubmitToRunningOwner propagates typed queue prompt errors", async () => {
   await withTempHome(async (homeDir) => {
@@ -369,14 +336,17 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
       setContext(context) {
         events.push(`context:${context.sessionId}:${context.requestId ?? "-"}`);
       },
-      onSessionUpdate(notification) {
-        events.push(`session_update:${notification.update.sessionUpdate}`);
+      onEvent(event) {
+        events.push(`event:${event.type}`);
+      },
+      onSessionUpdate() {
+        // queue transport forwards canonical events only
       },
       onClientOperation() {
-        events.push("client_operation");
+        // queue transport forwards canonical events only
       },
-      onDone(stopReason) {
-        events.push(`done:${stopReason}`);
+      onDone() {
+        // queue transport forwards canonical events only
       },
       onError(params) {
         events.push(`error:${params.code}`);
@@ -409,25 +379,22 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
         );
         socket.write(
           `${JSON.stringify({
-            type: "session_update",
+            type: "event",
             requestId: request.requestId,
-            notification: {
-              sessionId: "agent-session",
-              update: {
-                sessionUpdate: "agent_message_chunk",
-                content: {
-                  type: "text",
-                  text: "queued response",
-                },
+            event: {
+              schema: "acpx.event.v1",
+              event_id: "evt-queued-1",
+              session_id: sessionId,
+              acp_session_id: "agent-session",
+              seq: 1,
+              ts: "2026-01-01T00:00:00.000Z",
+              type: "turn_started",
+              data: {
+                mode: "prompt",
+                resumed: true,
+                input_preview: "hello",
               },
             },
-          })}\n`,
-        );
-        socket.write(
-          `${JSON.stringify({
-            type: "done",
-            requestId: request.requestId,
-            stopReason: "end_turn",
           })}\n`,
         );
         socket.write(
@@ -445,12 +412,27 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
               },
               resumed: true,
               record: {
-                id: sessionId,
-                sessionId: "agent-session",
+                schema: "acpx.session.v1",
+                acpxRecordId: sessionId,
+                acpSessionId: "agent-session",
                 agentCommand: "mock-agent",
                 cwd: "/tmp/project",
                 createdAt: "2026-01-01T00:00:00.000Z",
                 lastUsedAt: "2026-01-01T00:00:00.000Z",
+                lastSeq: 2,
+                eventLog: {
+                  active_path: "/tmp/session.events.ndjson",
+                  segment_count: 1,
+                  max_segment_bytes: 1024,
+                  max_segments: 1,
+                  last_write_at: "2026-01-01T00:00:00.000Z",
+                  last_write_error: null,
+                },
+                title: null,
+                messages: [],
+                updated_at: "2026-01-01T00:00:00.000Z",
+                cumulative_token_usage: {},
+                request_token_usage: {},
               },
             },
           })}\n`,
@@ -482,8 +464,7 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
         events.some((entry) => entry.startsWith(`context:${sessionId}:`)),
         true,
       );
-      assert.equal(events.includes("session_update:agent_message_chunk"), true);
-      assert.equal(events.includes("done:end_turn"), true);
+      assert.equal(events.includes("event:turn_started"), true);
       assert.equal(events.includes("flush"), true);
       assert.equal(
         events.some((entry) => entry.startsWith("error:")),
@@ -641,21 +622,68 @@ async function nextJsonLine(
   return await Promise.race([next, timeout]);
 }
 
-async function waitForProcessExit(
-  pid: number | undefined,
-  timeoutMs: number,
-): Promise<boolean> {
-  if (!pid) {
-    return true;
-  }
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!isProcessAlive(pid)) {
-      return true;
-    }
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 50);
+test("trySubmitToRunningOwner clears stale owner lock on protocol mismatch", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "submit-stale-owner-protocol-mismatch";
+    const keeper = await startKeeperProcess();
+    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
+    await writeQueueOwnerLock({
+      lockPath,
+      pid: keeper.pid,
+      sessionId,
+      socketPath,
     });
-  }
-  return !isProcessAlive(pid);
-}
+
+    const server = net.createServer((socket) => {
+      socket.setEncoding("utf8");
+      let buffer = "";
+      socket.on("data", (chunk: string) => {
+        buffer += chunk;
+        const newlineIndex = buffer.indexOf("\n");
+        if (newlineIndex < 0) {
+          return;
+        }
+        const line = buffer.slice(0, newlineIndex).trim();
+        if (!line) {
+          return;
+        }
+        const request = JSON.parse(line) as { requestId: string; type: string };
+        assert.equal(request.type, "submit_prompt");
+        socket.write(
+          `${JSON.stringify({
+            type: "accepted",
+            requestId: request.requestId,
+          })}\n`,
+        );
+        socket.write(
+          `${JSON.stringify({
+            type: "session_update",
+            requestId: request.requestId,
+            update: {
+              sessionId: "legacy-session",
+            },
+          })}\n`,
+        );
+        socket.end();
+      });
+    });
+
+    await listenServer(server, socketPath);
+
+    try {
+      const outcome = await trySubmitToRunningOwner({
+        sessionId,
+        message: "hello",
+        permissionMode: "approve-reads",
+        outputFormatter: NOOP_OUTPUT_FORMATTER,
+        waitForCompletion: true,
+      });
+      assert.equal(outcome, undefined);
+      await assert.rejects(fs.access(lockPath));
+    } finally {
+      await closeServer(server);
+      await cleanupOwnerArtifacts({ socketPath, lockPath });
+      stopProcess(keeper);
+    }
+  });
+});

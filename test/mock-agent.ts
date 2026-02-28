@@ -27,13 +27,12 @@ type MockAgentOptions = {
   newSessionMeta?: Record<string, string>;
   loadSessionMeta?: Record<string, string>;
   supportsLoadSession: boolean;
-  loadSessionInternalNotFound?: boolean;
-  requireLoadSessionId?: string;
-  ignoreSigterm?: boolean;
+  loadSessionFailsOnEmpty: boolean;
 };
 
 type SessionState = {
   pendingPrompt?: AbortController;
+  hasCompletedPrompt: boolean;
 };
 
 class CancelledError extends Error {
@@ -211,22 +210,40 @@ type MetaFlagSpec = {
 };
 
 const META_FLAG_SPECS: Record<string, MetaFlagSpec> = {
-  "--agent-session-id": {
+  "--runtime-session-id": {
     target: "newSessionMeta",
     key: "agentSessionId",
   },
-  "--meta-session-id": {
+  "--provider-session-id": {
     target: "newSessionMeta",
-    key: "sessionId",
+    key: "agentSessionId",
   },
-  "--load-agent-session-id": {
+  "--codex-session-id": {
+    target: "newSessionMeta",
+    key: "agentSessionId",
+  },
+  "--claude-session-id": {
+    target: "newSessionMeta",
+    key: "agentSessionId",
+  },
+  "--load-runtime-session-id": {
     target: "loadSessionMeta",
     key: "agentSessionId",
     supportsLoadSession: true,
   },
-  "--load-meta-session-id": {
+  "--load-provider-session-id": {
     target: "loadSessionMeta",
-    key: "sessionId",
+    key: "agentSessionId",
+    supportsLoadSession: true,
+  },
+  "--load-codex-session-id": {
+    target: "loadSessionMeta",
+    key: "agentSessionId",
+    supportsLoadSession: true,
+  },
+  "--load-claude-session-id": {
+    target: "loadSessionMeta",
+    key: "agentSessionId",
     supportsLoadSession: true,
   },
 };
@@ -235,9 +252,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   const newSessionMeta: Record<string, string> = {};
   const loadSessionMeta: Record<string, string> = {};
   let supportsLoadSession = false;
-  let loadSessionInternalNotFound = false;
-  let requireLoadSessionId: string | undefined;
-  let ignoreSigterm = false;
+  let loadSessionFailsOnEmpty = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -247,21 +262,9 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
       continue;
     }
 
-    if (token === "--load-internal-session-not-found") {
+    if (token === "--load-session-fails-on-empty") {
       supportsLoadSession = true;
-      loadSessionInternalNotFound = true;
-      continue;
-    }
-
-    if (token === "--require-load-session-id") {
-      supportsLoadSession = true;
-      requireLoadSessionId = parseOptionValue(argv, index + 1, token);
-      index += 1;
-      continue;
-    }
-
-    if (token === "--ignore-sigterm") {
-      ignoreSigterm = true;
+      loadSessionFailsOnEmpty = true;
       continue;
     }
 
@@ -289,9 +292,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     loadSessionMeta:
       Object.keys(loadSessionMeta).length > 0 ? { ...loadSessionMeta } : undefined,
     supportsLoadSession,
-    loadSessionInternalNotFound,
-    requireLoadSessionId,
-    ignoreSigterm,
+    loadSessionFailsOnEmpty,
   };
 }
 
@@ -319,7 +320,7 @@ class MockAgent implements Agent {
 
   async newSession(): Promise<NewSessionResponse> {
     const sessionId = randomUUID();
-    this.sessions.set(sessionId, {});
+    this.sessions.set(sessionId, { hasCompletedPrompt: false });
 
     if (this.options.newSessionMeta) {
       return {
@@ -336,18 +337,25 @@ class MockAgent implements Agent {
       throw new Error("loadSession is not supported");
     }
 
+    const existing = this.sessions.get(params.sessionId);
     if (
-      this.options.requireLoadSessionId &&
-      params.sessionId !== this.options.requireLoadSessionId
+      this.options.loadSessionFailsOnEmpty &&
+      (!existing || !existing.hasCompletedPrompt)
     ) {
-      throw new Error(JSON.stringify({ details: "Session not found" }));
+      const error = new Error("Internal error") as Error & {
+        code: number;
+        data: {
+          details: string;
+        };
+      };
+      error.code = -32603;
+      error.data = {
+        details: "Query closed before response received",
+      };
+      throw error;
     }
 
-    if (this.options.loadSessionInternalNotFound) {
-      throw new Error(JSON.stringify({ details: "Session not found" }));
-    }
-
-    this.sessions.set(params.sessionId, this.sessions.get(params.sessionId) ?? {});
+    this.sessions.set(params.sessionId, existing ?? { hasCompletedPrompt: false });
 
     if (this.options.loadSessionMeta) {
       return {
@@ -375,6 +383,7 @@ class MockAgent implements Agent {
         text,
         promptAbort.signal,
       );
+      session.hasCompletedPrompt = true;
       await this.sendAssistantMessage(params.sessionId, response);
       return { stopReason: "end_turn" };
     } catch (error) {
@@ -570,11 +579,6 @@ const output = Writable.toWeb(process.stdout);
 const input = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>;
 const stream = ndJsonStream(output, input);
 const mockAgentOptions = parseMockAgentOptions(process.argv.slice(2));
-if (mockAgentOptions.ignoreSigterm) {
-  process.on("SIGTERM", () => {
-    // Intentionally ignore SIGTERM for shutdown-path regression coverage.
-  });
-}
 new AgentSideConnection(
   (connection) => new MockAgent(connection, mockAgentOptions),
   stream,

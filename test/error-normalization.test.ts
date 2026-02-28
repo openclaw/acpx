@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   exitCodeForOutputErrorCode,
   normalizeOutputError,
+  isAcpQueryClosedBeforeResponseError,
   isAcpResourceNotFoundError,
 } from "../src/error-normalization.js";
 import {
@@ -46,51 +47,34 @@ test("normalizeOutputError maps ACP resource not found errors to NO_SESSION", ()
   assert.equal(isAcpResourceNotFoundError(error), true);
 });
 
-test("normalizeOutputError maps legacy ACP -32001 resource errors to NO_SESSION", () => {
-  const error = {
-    code: -32001,
-    message: "Resource not found",
-  };
-
-  const normalized = normalizeOutputError(error, {
-    origin: "acp",
-  });
-
-  assert.equal(normalized.code, "NO_SESSION");
-  assert.equal(normalized.origin, "acp");
-  assert.equal(normalized.acp?.code, -32001);
-});
-
-test("normalizeOutputError maps ACP -32603 with session-not-found details to NO_SESSION", () => {
-  const error = {
-    error: {
-      code: -32603,
-      message: "Internal error",
-      data: {
-        details: "Session not found",
-      },
-    },
-  };
-
-  const normalized = normalizeOutputError(error, {
-    origin: "acp",
-  });
-
-  assert.equal(normalized.code, "NO_SESSION");
-  assert.equal(normalized.origin, "acp");
-  assert.equal(isAcpResourceNotFoundError(error), true);
-});
-
-test("normalizeOutputError falls back to message-based resource detection", () => {
-  const normalized = normalizeOutputError(
-    new Error("session not found while reconnecting"),
-    {
-      origin: "runtime",
-    },
+test("isAcpResourceNotFoundError requires typed ACP error payload", () => {
+  assert.equal(
+    isAcpResourceNotFoundError(new Error("session not found while reconnecting")),
+    false,
   );
+});
+test("isAcpQueryClosedBeforeResponseError matches typed ACP payload", () => {
+  const error = {
+    code: -32603,
+    message: "Internal error",
+    data: {
+      details: "Query closed before response received",
+    },
+  };
 
-  assert.equal(normalized.code, "NO_SESSION");
-  assert.equal(normalized.origin, "runtime");
+  assert.equal(isAcpQueryClosedBeforeResponseError(error), true);
+});
+
+test("isAcpQueryClosedBeforeResponseError ignores unrelated ACP errors", () => {
+  const error = {
+    code: -32603,
+    message: "Internal error",
+    data: {
+      details: "other detail",
+    },
+  };
+
+  assert.equal(isAcpQueryClosedBeforeResponseError(error), false);
 });
 
 test("normalizeOutputError preserves queue metadata from typed queue errors", () => {

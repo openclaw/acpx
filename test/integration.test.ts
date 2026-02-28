@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { queuePaths } from "./queue-test-helpers.js";
 
 const CLI_PATH = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
@@ -54,15 +55,11 @@ test("integration: timeout emits structured TIMEOUT json error", async () => {
         .trim()
         .split("\n")
         .filter((line) => line.trim().length > 0)
-        .map(
-          (line) =>
-            JSON.parse(line) as { type?: string; code?: string; stream?: string },
-        );
+        .map((line) => JSON.parse(line) as { type?: string; data?: { code?: string } });
       assert(payloads.length > 0, "expected at least one JSON payload");
       const timeoutError = payloads.find((payload) => payload.type === "error");
       assert(timeoutError, `expected error event in output:\n${result.stdout}`);
-      assert.equal(timeoutError.code, "TIMEOUT");
-      assert.equal(timeoutError.stream, "control");
+      assert.equal(timeoutError.data?.code, "TIMEOUT");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -97,15 +94,11 @@ test("integration: non-interactive fail emits structured permission error", asyn
         .trim()
         .split("\n")
         .filter((line) => line.trim().length > 0)
-        .map(
-          (line) =>
-            JSON.parse(line) as { type?: string; code?: string; stream?: string },
-        );
+        .map((line) => JSON.parse(line) as { type?: string; data?: { code?: string } });
       assert(payloads.length > 0, "expected at least one JSON payload");
       const permissionError = payloads.find((payload) => payload.type === "error");
       assert(permissionError, `expected error event in output:\n${result.stdout}`);
-      assert.equal(permissionError.code, "PERMISSION_PROMPT_UNAVAILABLE");
-      assert.equal(permissionError.stream, "control");
+      assert.equal(permissionError.data?.code, "PERMISSION_PROMPT_UNAVAILABLE");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -143,15 +136,11 @@ test("integration: json-strict suppresses runtime stderr diagnostics", async () 
         .trim()
         .split("\n")
         .filter((line) => line.trim().length > 0)
-        .map(
-          (line) =>
-            JSON.parse(line) as { type?: string; code?: string; stream?: string },
-        );
+        .map((line) => JSON.parse(line) as { type?: string; data?: { code?: string } });
       assert(payloads.length > 0, "expected at least one JSON payload");
       const permissionError = payloads.find((payload) => payload.type === "error");
       assert(permissionError, `expected error event in output:\n${result.stdout}`);
-      assert.equal(permissionError.code, "PERMISSION_PROMPT_UNAVAILABLE");
-      assert.equal(permissionError.stream, "control");
+      assert.equal(permissionError.data?.code, "PERMISSION_PROMPT_UNAVAILABLE");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -241,6 +230,147 @@ test("integration: terminal kill leaves no orphan sleep process", async () => {
   });
 });
 
+test("integration: prompt reuses warm queue owner pid across turns", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const created = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+      const createdEvent = JSON.parse(created.stdout.trim()) as {
+        session_id?: string;
+      };
+      const sessionId = createdEvent.session_id;
+      assert.equal(typeof sessionId, "string");
+
+      const first = await runCli(
+        [...baseAgentArgs(cwd), "--format", "quiet", "prompt", "echo first"],
+        homeDir,
+      );
+      assert.equal(first.code, 0, first.stderr);
+      assert.ok(
+        first.stdout.trim().length > 0,
+        "first quiet prompt output should not be empty",
+      );
+
+      const { lockPath } = queuePaths(homeDir, sessionId as string);
+      const lockOne = JSON.parse(await fs.readFile(lockPath, "utf8")) as {
+        pid?: number;
+      };
+      assert.equal(typeof lockOne.pid, "number");
+
+      const second = await runCli(
+        [...baseAgentArgs(cwd), "--format", "quiet", "prompt", "echo second"],
+        homeDir,
+      );
+      assert.equal(second.code, 0, second.stderr);
+      assert.ok(
+        second.stdout.trim().length > 0,
+        "second quiet prompt output should not be empty",
+      );
+
+      const lockTwo = JSON.parse(await fs.readFile(lockPath, "utf8")) as {
+        pid?: number;
+      };
+      assert.equal(lockTwo.pid, lockOne.pid);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: prompt recovers when loadSession fails on empty session", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const flakyLoadAgentCommand = `${MOCK_AGENT_COMMAND} --load-session-fails-on-empty`;
+
+    try {
+      const created = await runCli(
+        [
+          "--agent",
+          flakyLoadAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "sessions",
+          "new",
+        ],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+      const createdEvent = JSON.parse(created.stdout.trim()) as {
+        session_id?: string;
+      };
+      const originalSessionId = createdEvent.session_id;
+      assert.equal(typeof originalSessionId, "string");
+
+      const prompt = await runCli(
+        [
+          "--agent",
+          flakyLoadAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "prompt",
+          "echo recovered",
+        ],
+        homeDir,
+      );
+      assert.equal(prompt.code, 0, prompt.stderr);
+
+      const payloads = prompt.stdout
+        .trim()
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as { type?: string });
+      assert.equal(
+        payloads.some((payload) => payload.type === "error"),
+        false,
+        prompt.stdout,
+      );
+      assert.equal(
+        payloads.some((payload) => payload.type === "turn_done"),
+        true,
+        prompt.stdout,
+      );
+
+      const storedRecordPath = path.join(
+        homeDir,
+        ".acpx",
+        "sessions",
+        `${encodeURIComponent(originalSessionId as string)}.json`,
+      );
+      const storedRecord = JSON.parse(await fs.readFile(storedRecordPath, "utf8")) as {
+        acp_session_id?: string;
+        messages?: unknown[];
+      };
+
+      assert.notEqual(storedRecord.acp_session_id, originalSessionId);
+      const messages = Array.isArray(storedRecord.messages)
+        ? storedRecord.messages
+        : [];
+      assert.equal(
+        messages.some(
+          (message) =>
+            typeof message === "object" &&
+            message !== null &&
+            "Agent" in (message as Record<string, unknown>),
+        ),
+        true,
+      );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: cancel yields cancelled stopReason without queue error", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -276,9 +406,13 @@ test("integration: cancel yields cancelled stopReason without queue error", asyn
           assert.equal(cancelResult.code, 0, cancelResult.stderr);
 
           const payload = JSON.parse(cancelResult.stdout.trim()) as {
-            cancelled: boolean;
+            type: string;
+            data: {
+              cancelled?: boolean;
+            };
           };
-          cancelled = payload.cancelled === true;
+          assert.equal(payload.type, "cancel_result");
+          cancelled = payload.data.cancelled === true;
           if (cancelled) {
             break;
           }
@@ -295,7 +429,8 @@ test("integration: cancel yields cancelled stopReason without queue error", asyn
         const promptResult = await doneEventPromise;
         assert.equal(
           promptResult.events.some(
-            (event) => event.type === "done" && event.stopReason === "cancelled",
+            (event) =>
+              event.type === "turn_done" && event.data?.stop_reason === "cancelled",
           ),
           true,
           promptResult.stdout,
@@ -325,9 +460,23 @@ test("integration: prompt exits after done while detached owner stays warm", asy
       );
       assert.equal(created.code, 0, created.stderr);
       const createdPayload = JSON.parse(created.stdout.trim()) as {
-        acpxRecordId: string;
+        acpxRecordId?: string;
+        acpx_record_id?: string;
+        acpSessionId?: string;
+        acp_session_id?: string;
+        sessionId?: string;
+        session_id?: string;
       };
-      const sessionId = createdPayload.acpxRecordId;
+      const sessionId =
+        createdPayload.acpxRecordId ??
+        createdPayload.acpx_record_id ??
+        createdPayload.acpSessionId ??
+        createdPayload.acp_session_id ??
+        createdPayload.sessionId ??
+        createdPayload.session_id;
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        throw new Error(`missing session id in sessions new output: `);
+      }
 
       const firstPromptStartedAt = Date.now();
       const firstPrompt = await runCli(
@@ -453,7 +602,10 @@ async function runCli(
 
 type PromptEvent = {
   type?: string;
-  stopReason?: string;
+  data?: {
+    stop_reason?: string;
+    code?: string;
+  };
 };
 
 type PromptDoneResult = {
@@ -508,7 +660,7 @@ async function waitForPromptDoneEvent(
       }
 
       events.push(event);
-      if (event.type === "done") {
+      if (event.type === "turn_done") {
         finish(() => {
           resolve({
             events,

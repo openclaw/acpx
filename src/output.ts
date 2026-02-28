@@ -8,16 +8,24 @@ import type {
   ToolCallStatus,
   ToolCallUpdate,
 } from "@agentclientprotocol/sdk";
+import {
+  clientOperationToEventDraft,
+  createAcpxEvent,
+  errorToEventDraft,
+  isAcpxEvent,
+  sessionUpdateToEventDrafts,
+} from "./events.js";
+import { ACPX_EVENT_TYPES } from "./types.js";
 import type {
+  AcpxEvent,
+  AcpxEventDraft,
   ClientOperation,
   OutputErrorAcpPayload,
   OutputErrorCode,
-  OutputEvent,
   OutputFormatterContext,
   OutputFormat,
   OutputFormatter,
   OutputErrorOrigin,
-  OutputStream,
 } from "./types.js";
 
 type WritableLike = {
@@ -29,15 +37,6 @@ type OutputFormatterOptions = {
   stdout?: WritableLike;
   jsonContext?: OutputFormatterContext;
 };
-
-type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
-  ? Omit<T, K>
-  : never;
-
-type JsonOutputEventPayload = DistributiveOmit<
-  OutputEvent,
-  "eventVersion" | "sessionId" | "requestId" | "seq" | "stream"
->;
 
 type NormalizedToolStatus = ToolCallStatus | "unknown";
 
@@ -73,12 +72,7 @@ const OUTPUT_PRIORITY_KEYS = [
   "value",
 ] as const;
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
 const DEFAULT_JSON_SESSION_ID = "unknown";
-const DEFAULT_JSON_STREAM: OutputStream = "prompt";
 
 function asStatus(status: ToolCallStatus | null | undefined): NormalizedToolStatus {
   return status ?? "unknown";
@@ -497,6 +491,68 @@ class TextOutputFormatter implements OutputFormatter {
     // no-op for text mode
   }
 
+  onEvent(event: AcpxEvent): void {
+    if (event.type === ACPX_EVENT_TYPES.OUTPUT_DELTA) {
+      if (event.data.stream === "output") {
+        this.flushThoughtBuffer();
+        this.writeAssistantChunk(event.data.text);
+        return;
+      }
+
+      this.thoughtBuffer += event.data.text;
+      return;
+    }
+
+    if (event.type === ACPX_EVENT_TYPES.TOOL_CALL) {
+      this.flushThoughtBuffer();
+      this.renderToolUpdate({
+        sessionUpdate: "tool_call_update",
+        toolCallId: event.data.tool_call_id ?? "tool_call",
+        title: event.data.title,
+        status: event.data.status as ToolCallStatus | undefined,
+      } as ToolCallUpdate);
+      return;
+    }
+
+    if (event.type === ACPX_EVENT_TYPES.PLAN) {
+      this.flushThoughtBuffer();
+      this.beginSection("plan");
+      this.writeLine(this.bold("[plan]"));
+      for (const entry of event.data.entries) {
+        this.writeLine(`  - [${entry.status}] ${entry.content}`);
+      }
+      return;
+    }
+
+    if (event.type === ACPX_EVENT_TYPES.CLIENT_OPERATION) {
+      this.onClientOperation({
+        method: event.data.method,
+        status: event.data.status,
+        summary: event.data.summary,
+        details: event.data.details,
+        timestamp: event.ts,
+      });
+      return;
+    }
+
+    if (event.type === ACPX_EVENT_TYPES.TURN_DONE) {
+      this.onDone(event.data.stop_reason);
+      return;
+    }
+
+    if (event.type === ACPX_EVENT_TYPES.ERROR) {
+      this.onError({
+        code: event.data.code,
+        detailCode: event.data.detail_code,
+        origin: event.data.origin,
+        message: event.data.message,
+        retryable: event.data.retryable,
+        acp: event.data.acp_error,
+        timestamp: event.ts,
+      });
+    }
+  }
+
   onSessionUpdate(notification: SessionNotification): void {
     const update = notification.update;
     if (update.sessionUpdate !== "agent_thought_chunk") {
@@ -791,106 +847,59 @@ class TextOutputFormatter implements OutputFormatter {
 class JsonOutputFormatter implements OutputFormatter {
   private readonly stdout: WritableLike;
   private sessionId: string;
+  private acpSessionId?: string;
+  private agentSessionId?: string;
   private requestId?: string;
-  private stream: OutputStream;
-  private sequence = 0;
+  private nextSeq = 0;
 
   constructor(stdout: WritableLike, context?: OutputFormatterContext) {
     this.stdout = stdout;
     this.sessionId = context?.sessionId?.trim() || DEFAULT_JSON_SESSION_ID;
+    this.acpSessionId = context?.acpSessionId?.trim() || undefined;
+    this.agentSessionId = context?.agentSessionId?.trim() || undefined;
     this.requestId = context?.requestId?.trim() || undefined;
-    this.stream = context?.stream ?? DEFAULT_JSON_STREAM;
+    this.nextSeq = context?.nextSeq ?? 0;
   }
 
   setContext(context: OutputFormatterContext): void {
-    const nextSessionId =
+    this.sessionId =
       context.sessionId?.trim() || this.sessionId || DEFAULT_JSON_SESSION_ID;
-    const nextRequestId = context.requestId?.trim() || undefined;
-    const nextStream = context.stream ?? this.stream ?? DEFAULT_JSON_STREAM;
-    const sessionChanged = nextSessionId !== this.sessionId;
-    const requestChanged = nextRequestId !== this.requestId;
-    const streamChanged = nextStream !== this.stream;
-
-    this.sessionId = nextSessionId;
-    this.requestId = nextRequestId;
-    this.stream = nextStream;
-    if (sessionChanged || requestChanged || streamChanged) {
-      this.sequence = 0;
+    this.acpSessionId = context.acpSessionId?.trim() || this.acpSessionId;
+    this.agentSessionId = context.agentSessionId?.trim() || this.agentSessionId;
+    this.requestId = context.requestId?.trim() || this.requestId;
+    if (
+      typeof context.nextSeq === "number" &&
+      Number.isInteger(context.nextSeq) &&
+      context.nextSeq >= 0
+    ) {
+      this.nextSeq = context.nextSeq;
     }
   }
 
-  onSessionUpdate(notification: SessionNotification): void {
-    const update = notification.update;
-    const timestamp = nowIso();
+  onEvent(event: AcpxEvent): void {
+    if (!isAcpxEvent(event)) {
+      throw new Error("Attempted to render invalid acpx.event.v1 payload");
+    }
+    this.sessionId = event.session_id || this.sessionId;
+    this.acpSessionId = event.acp_session_id || this.acpSessionId;
+    this.agentSessionId = event.agent_session_id || this.agentSessionId;
+    this.requestId = event.request_id || this.requestId;
+    this.nextSeq = event.seq + 1;
+    this.stdout.write(JSON.stringify(event) + "\n");
+  }
 
-    switch (update.sessionUpdate) {
-      case "agent_message_chunk": {
-        if (update.content.type === "text") {
-          this.emit({
-            type: "text",
-            content: update.content.text,
-            timestamp,
-          });
-        }
-        return;
-      }
-      case "agent_thought_chunk": {
-        if (update.content.type === "text") {
-          this.emit({
-            type: "thought",
-            content: update.content.text,
-            timestamp,
-          });
-        }
-        return;
-      }
-      case "tool_call": {
-        this.emit({
-          type: "tool_call",
-          title: update.title,
-          toolCallId: update.toolCallId,
-          status: update.status,
-          timestamp,
-        });
-        return;
-      }
-      case "tool_call_update": {
-        this.emit({
-          type: "tool_call",
-          title: update.title ?? undefined,
-          toolCallId: update.toolCallId,
-          status: update.status ?? undefined,
-          timestamp,
-        });
-        return;
-      }
-      case "plan": {
-        this.emit({
-          type: "plan",
-          entries: update.entries.map((entry) => ({
-            content: entry.content,
-            status: entry.status,
-            priority: entry.priority,
-          })),
-          timestamp,
-        });
-        return;
-      }
-      default: {
-        this.emit({
-          type: "update",
-          update: update.sessionUpdate,
-          timestamp,
-        });
-      }
+  onSessionUpdate(notification: SessionNotification): void {
+    for (const draft of sessionUpdateToEventDrafts(notification)) {
+      this.emitDraft(draft);
     }
   }
 
   onDone(stopReason: StopReason): void {
-    this.emit({
-      type: "done",
-      stopReason,
-      timestamp: nowIso(),
+    this.emitDraft({
+      type: ACPX_EVENT_TYPES.TURN_DONE,
+      data: {
+        stop_reason: stopReason,
+      },
     });
   }
 
@@ -903,49 +912,51 @@ class JsonOutputFormatter implements OutputFormatter {
     acp?: OutputErrorAcpPayload;
     timestamp?: string;
   }): void {
-    this.emit({
-      type: "error",
-      code: params.code,
-      detailCode: params.detailCode,
-      origin: params.origin,
-      message: params.message,
-      retryable: params.retryable,
-      acp: params.acp,
-      timestamp: params.timestamp ?? nowIso(),
-    });
+    this.emitDraft(
+      errorToEventDraft({
+        code: params.code,
+        detailCode: params.detailCode,
+        origin: params.origin,
+        message: params.message,
+        retryable: params.retryable,
+        acp: params.acp,
+      }),
+    );
   }
 
   onClientOperation(operation: ClientOperation): void {
-    this.emit({
-      type: "client_operation",
-      method: operation.method,
-      status: operation.status,
-      summary: operation.summary,
-      details: operation.details,
-      timestamp: operation.timestamp,
-    });
+    this.emitDraft(clientOperationToEventDraft(operation));
   }
 
   flush(): void {
     // no-op for streaming output
   }
 
-  private emit(event: JsonOutputEventPayload): void {
-    const payload = {
-      eventVersion: 1,
-      sessionId: this.sessionId || DEFAULT_JSON_SESSION_ID,
-      requestId: this.requestId,
-      seq: this.sequence++,
-      stream: this.stream ?? DEFAULT_JSON_STREAM,
-      ...event,
-    } as OutputEvent;
-    this.stdout.write(`${JSON.stringify(payload)}\n`);
+  private emitDraft(draft: AcpxEventDraft): void {
+    const event = createAcpxEvent(
+      {
+        sessionId: this.sessionId || DEFAULT_JSON_SESSION_ID,
+        acpSessionId: this.acpSessionId,
+        agentSessionId: this.agentSessionId,
+        requestId: this.requestId,
+        seq: this.nextSeq,
+      },
+      draft,
+    );
+    if (!isAcpxEvent(event)) {
+      throw new Error("Attempted to render invalid acpx.event.v1 payload");
+    }
+    this.nextSeq += 1;
+    this.stdout.write(JSON.stringify(event) + "\n");
   }
 }
 
 class QuietOutputFormatter implements OutputFormatter {
   private readonly stdout: WritableLike;
   private chunks: string[] = [];
+  private sawEventOutput = false;
+  private sawSessionUpdateOutput = false;
+  private flushed = false;
 
   constructor(stdout: WritableLike) {
     this.stdout = stdout;
@@ -955,7 +966,32 @@ class QuietOutputFormatter implements OutputFormatter {
     // no-op for quiet mode
   }
 
+  onEvent(event: AcpxEvent): void {
+    if (event.type === ACPX_EVENT_TYPES.OUTPUT_DELTA) {
+      if (event.data.stream !== "output") {
+        return;
+      }
+
+      if (!this.sawEventOutput && this.sawSessionUpdateOutput) {
+        // Prefer canonical event output when both paths are observed.
+        this.chunks = [];
+      }
+
+      this.sawEventOutput = true;
+      this.chunks.push(event.data.text);
+      return;
+    }
+
+    if (event.type === ACPX_EVENT_TYPES.TURN_DONE) {
+      this.flushBufferedOutput();
+    }
+  }
+
   onSessionUpdate(notification: SessionNotification): void {
+    if (this.sawEventOutput) {
+      return;
+    }
+
     const update = notification.update;
     if (update.sessionUpdate !== "agent_message_chunk") {
       return;
@@ -963,12 +999,13 @@ class QuietOutputFormatter implements OutputFormatter {
     if (update.content.type !== "text") {
       return;
     }
+
+    this.sawSessionUpdateOutput = true;
     this.chunks.push(update.content.text);
   }
 
   onDone(_stopReason: StopReason): void {
-    const text = this.chunks.join("");
-    this.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+    this.flushBufferedOutput();
   }
 
   onError(_params: {
@@ -989,6 +1026,16 @@ class QuietOutputFormatter implements OutputFormatter {
 
   flush(): void {
     // no-op for streaming output
+  }
+
+  private flushBufferedOutput(): void {
+    if (this.flushed) {
+      return;
+    }
+
+    this.flushed = true;
+    const text = this.chunks.join("");
+    this.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
   }
 }
 

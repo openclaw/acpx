@@ -1,31 +1,64 @@
 import type { SessionNotification, StopReason } from "@agentclientprotocol/sdk";
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { AcpClient } from "./client.js";
+import {
+  clientOperationToEventDraft,
+  createAcpxEvent,
+  errorToEventDraft,
+  isAcpxEvent,
+  sessionUpdateToEventDrafts,
+  truncateInputPreview,
+} from "./events.js";
 import { formatErrorMessage, normalizeOutputError } from "./error-normalization.js";
-import { isAcpResourceNotFoundError } from "./acp-error-shapes.js";
-import type { QueueOwnerActiveSessionController } from "./queue-owner-turn-controller.js";
+import {
+  cloneSessionAcpxState,
+  cloneSessionConversation,
+  createSessionConversation,
+  recordClientOperation as recordConversationClientOperation,
+  recordPromptSubmission,
+  recordSessionUpdate as recordConversationSessionUpdate,
+} from "./session-conversation-model.js";
+import { SessionEventWriter } from "./session-events.js";
+import { defaultSessionEventLog } from "./session-event-log.js";
+import {
+  InterruptedError,
+  withInterrupt,
+  withTimeout,
+} from "./session-runtime-helpers.js";
+export { InterruptedError, TimeoutError } from "./session-runtime-helpers.js";
+import {
+  QueueOwnerTurnController,
+  type QueueOwnerActiveSessionController,
+} from "./queue-owner-turn-controller.js";
 import {
   type QueueOwnerMessage,
   type QueueTask,
+  QUEUE_CONNECT_RETRY_MS,
+  SessionQueueOwner,
   isProcessAlive,
-  readQueueOwnerStatus,
+  releaseQueueOwnerLease,
   terminateProcess,
   terminateQueueOwnerForSession,
+  tryAcquireQueueOwnerLease,
   tryCancelOnRunningOwner,
   trySetConfigOptionOnRunningOwner,
   trySetModeOnRunningOwner,
+  trySubmitToRunningOwner,
+  waitMs,
 } from "./queue-ipc.js";
+import { normalizeRuntimeSessionId } from "./runtime-session-id.js";
+import { connectAndLoadSession } from "./session-runtime/connect-load.js";
 import {
-  runQueueOwnerProcess as runQueueOwnerProcessInternal,
-  normalizeQueueOwnerTtlMs,
-  DEFAULT_QUEUE_OWNER_TTL_MS,
-  type QueueOwnerRunOptions,
-} from "./session-owner-runtime.js";
+  applyConversation,
+  applyLifecycleSnapshotToRecord,
+} from "./session-runtime/lifecycle.js";
 import {
-  sendViaDetachedQueueOwner,
-  type QueueOwnerSpawnConfig,
-} from "./session-owner-spawn.js";
+  runSessionSetConfigOptionDirect,
+  runSessionSetModeDirect,
+} from "./session-runtime/prompt-runner.js";
 import {
   DEFAULT_HISTORY_LIMIT,
   absolutePath,
@@ -39,48 +72,35 @@ import {
   resolveSessionRecord,
   writeSessionRecord,
 } from "./session-persistence.js";
+import { ACPX_EVENT_TYPES } from "./types.js";
 import {
-  appendHistoryEntries,
-  toHistoryEntryFromUpdate,
-  toPreviewText,
-} from "./session-runtime-history.js";
-import { applyLifecycleSnapshotToRecord } from "./session-runtime-lifecycle.js";
-import { connectAndLoadSession } from "./session-runtime-reconnect.js";
-import type {
-  AuthPolicy,
-  ClientOperation,
-  NonInteractivePermissionPolicy,
-  OutputErrorEmissionPolicy,
-  OutputErrorAcpPayload,
-  OutputErrorCode,
-  OutputErrorOrigin,
-  OutputFormatter,
-  PermissionMode,
-  RunPromptResult,
-  SessionEnsureResult,
-  SessionHistoryEntry,
-  SessionRecord,
-  SessionSetConfigOptionResult,
-  SessionSetModeResult,
-  SessionSendOutcome,
-  SessionSendResult,
+  SESSION_RECORD_SCHEMA,
+  type AuthPolicy,
+  type AcpxEvent,
+  type AcpxEventDraft,
+  type ClientOperation,
+  type NonInteractivePermissionPolicy,
+  type OutputErrorEmissionPolicy,
+  type OutputErrorAcpPayload,
+  type OutputErrorCode,
+  type OutputErrorOrigin,
+  type OutputFormatter,
+  type PermissionMode,
+  type RunPromptResult,
+  type SessionEnsureResult,
+  type SessionRecord,
+  type SessionSetConfigOptionResult,
+  type SessionSetModeResult,
+  type SessionSendOutcome,
+  type SessionSendResult,
 } from "./types.js";
 
+export const DEFAULT_QUEUE_OWNER_TTL_MS = 300_000;
 const INTERRUPT_CANCEL_WAIT_MS = 2_500;
-
-export class TimeoutError extends Error {
-  constructor(timeoutMs: number) {
-    super(`Timed out after ${timeoutMs}ms`);
-    this.name = "TimeoutError";
-  }
-}
-
-export class InterruptedError extends Error {
-  constructor() {
-    super("Interrupted");
-    this.name = "InterruptedError";
-  }
-}
+const QUEUE_OWNER_STARTUP_MAX_ATTEMPTS = 120;
+const QUEUE_OWNER_MAIN_PATH = fileURLToPath(
+  new URL("./queue-owner-main.js", import.meta.url),
+);
 
 type TimedRunOptions = {
   timeoutMs?: number;
@@ -123,7 +143,6 @@ export type SessionSendOptions = {
   verbose?: boolean;
   waitForCompletion?: boolean;
   ttlMs?: number;
-  queueOwnerSpawn?: QueueOwnerSpawnConfig;
 } & TimedRunOptions;
 
 export type SessionEnsureOptions = {
@@ -166,66 +185,6 @@ export type SessionSetConfigOptionOptions = {
   authPolicy?: AuthPolicy;
   verbose?: boolean;
 } & TimedRunOptions;
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
-  if (!timeoutMs || timeoutMs <= 0) {
-    return promise;
-  }
-
-  let timer: NodeJS.Timeout | undefined;
-  const timeoutPromise = new Promise<T>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      reject(new TimeoutError(timeoutMs));
-    }, timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-}
-
-async function withInterrupt<T>(
-  run: () => Promise<T>,
-  onInterrupt: () => Promise<void>,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let settled = false;
-
-    const finish = (cb: () => void) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      process.off("SIGINT", onSigint);
-      process.off("SIGTERM", onSigterm);
-      cb();
-    };
-
-    const onSigint = () => {
-      void onInterrupt().finally(() => {
-        finish(() => reject(new InterruptedError()));
-      });
-    };
-
-    const onSigterm = () => {
-      void onInterrupt().finally(() => {
-        finish(() => reject(new InterruptedError()));
-      });
-    };
-
-    process.once("SIGINT", onSigint);
-    process.once("SIGTERM", onSigterm);
-
-    void run().then(
-      (result) => finish(() => resolve(result)),
-      (error) => finish(() => reject(error)),
-    );
-  });
-}
 
 function toPromptResult(
   stopReason: RunPromptResult["stopReason"],
@@ -270,28 +229,24 @@ class QueueTaskOutputFormatter implements OutputFormatter {
     // queue formatter context is fixed by task request id
   }
 
-  onSessionUpdate(notification: SessionNotification): void {
+  onEvent(event: AcpxEvent): void {
     this.send({
-      type: "session_update",
+      type: "event",
       requestId: this.requestId,
-      notification,
+      event,
     });
   }
 
-  onClientOperation(operation: ClientOperation): void {
-    this.send({
-      type: "client_operation",
-      requestId: this.requestId,
-      operation,
-    });
+  onSessionUpdate(_notification: SessionNotification): void {
+    // Queue protocol forwards canonical events only.
   }
 
-  onDone(stopReason: StopReason): void {
-    this.send({
-      type: "done",
-      requestId: this.requestId,
-      stopReason,
-    });
+  onClientOperation(_operation: ClientOperation): void {
+    // Queue protocol forwards canonical events only.
+  }
+
+  onDone(_stopReason: StopReason): void {
+    // turn_done is emitted as a canonical event.
   }
 
   onError(params: {
@@ -324,6 +279,9 @@ const DISCARD_OUTPUT_FORMATTER: OutputFormatter = {
   setContext() {
     // no-op
   },
+  onEvent() {
+    // no-op
+  },
   onSessionUpdate() {
     // no-op
   },
@@ -340,12 +298,17 @@ const DISCARD_OUTPUT_FORMATTER: OutputFormatter = {
     // no-op
   },
 };
-
-function shouldFallbackToNewSession(error: unknown): boolean {
-  if (error instanceof TimeoutError || error instanceof InterruptedError) {
-    return false;
+export function normalizeQueueOwnerTtlMs(ttlMs: number | undefined): number {
+  if (ttlMs == null) {
+    return DEFAULT_QUEUE_OWNER_TTL_MS;
   }
-  return isAcpResourceNotFoundError(error);
+
+  if (!Number.isFinite(ttlMs) || ttlMs < 0) {
+    return DEFAULT_QUEUE_OWNER_TTL_MS;
+  }
+
+  // 0 means keep alive forever (no TTL)
+  return Math.round(ttlMs);
 }
 
 async function runQueuedTask(
@@ -397,6 +360,8 @@ async function runQueuedTask(
       origin: "runtime",
       detailCode: "QUEUE_RUNTIME_PROMPT_FAILED",
     });
+    const alreadyEmitted =
+      (error as { outputAlreadyEmitted?: unknown }).outputAlreadyEmitted === true;
     if (task.waitForCompletion) {
       task.send({
         type: "error",
@@ -407,6 +372,7 @@ async function runQueuedTask(
         message: normalizedError.message,
         retryable: normalizedError.retryable,
         acp: normalizedError.acp,
+        outputAlreadyEmitted: alreadyEmitted,
       });
     }
 
@@ -423,11 +389,47 @@ async function runSessionPrompt(
 ): Promise<SessionSendResult> {
   const output = options.outputFormatter;
   const record = await resolveSessionRecord(options.sessionRecordId);
+  const conversation = cloneSessionConversation(record);
+  let acpxState = cloneSessionAcpxState(record.acpx);
+  recordPromptSubmission(conversation, options.message, isoNow());
+
   output.setContext({
-    sessionId: record.id,
-    stream: "prompt",
+    sessionId: record.acpxRecordId,
+    acpSessionId: record.acpSessionId,
+    agentSessionId: record.agentSessionId,
+    nextSeq: record.lastSeq + 1,
   });
-  const assistantSnippets: string[] = [];
+
+  const eventWriter = await SessionEventWriter.open(record);
+  const pendingEvents: AcpxEvent[] = [];
+  let eventWriterClosed = false;
+
+  const closeEventWriter = async (checkpoint: boolean): Promise<void> => {
+    if (eventWriterClosed) {
+      return;
+    }
+    eventWriterClosed = true;
+    await eventWriter.close({ checkpoint });
+  };
+
+  const flushPendingEvents = async (checkpoint = false): Promise<void> => {
+    if (pendingEvents.length === 0) {
+      return;
+    }
+
+    const batch = pendingEvents.splice(0, pendingEvents.length);
+    await eventWriter.appendEvents(batch, { checkpoint });
+  };
+
+  const emitEvent = (draft: AcpxEventDraft): AcpxEvent => {
+    const event = eventWriter.createEvent(draft);
+    if (!isAcpxEvent(event)) {
+      throw new Error("Attempted to emit invalid acpx.event.v1 payload");
+    }
+    pendingEvents.push(event);
+    output.onEvent(event);
+    return event;
+  };
 
   const client = new AcpClient({
     agentCommand: record.agentCommand,
@@ -439,17 +441,22 @@ async function runSessionPrompt(
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
     onSessionUpdate: (notification) => {
-      output.onSessionUpdate(notification);
-      const entry = toHistoryEntryFromUpdate(notification);
-      if (entry && entry.role === "assistant") {
-        assistantSnippets.push(entry.textPreview);
+      acpxState = recordConversationSessionUpdate(
+        conversation,
+        acpxState,
+        notification,
+      );
+      const drafts = sessionUpdateToEventDrafts(notification);
+      for (const draft of drafts) {
+        emitEvent(draft);
       }
     },
     onClientOperation: (operation) => {
-      output.onClientOperation(operation);
+      acpxState = recordConversationClientOperation(conversation, acpxState, operation);
+      emitEvent(clientOperationToEventDraft(operation));
     },
   });
-  let activeSessionIdForControl = record.sessionId;
+  let activeSessionIdForControl = record.acpSessionId;
   let notifiedClientAvailable = false;
   const activeController: ActiveSessionController = {
     hasActivePrompt: () => client.hasActivePrompt(),
@@ -479,8 +486,6 @@ async function runSessionPrompt(
           timeoutMs: options.timeoutMs,
           verbose: options.verbose,
           activeController,
-          withTimeout,
-          shouldFallbackToNewSession,
           onClientAvailable: (controller) => {
             options.onClientAvailable?.(controller);
             notifiedClientAvailable = true;
@@ -493,6 +498,23 @@ async function runSessionPrompt(
           },
         });
 
+        output.setContext({
+          sessionId: record.acpxRecordId,
+          acpSessionId: record.acpSessionId,
+          agentSessionId: record.agentSessionId,
+          nextSeq: record.lastSeq + 1,
+        });
+
+        emitEvent({
+          type: ACPX_EVENT_TYPES.TURN_STARTED,
+          data: {
+            mode: "prompt",
+            resumed,
+            input_preview: truncateInputPreview(options.message),
+          },
+        });
+        await flushPendingEvents(false);
+
         let response;
         try {
           const promptPromise = client.prompt(activeSessionId, options.message);
@@ -502,7 +524,9 @@ async function runSessionPrompt(
             } catch (error) {
               if (options.verbose) {
                 process.stderr.write(
-                  `[acpx] onPromptActive hook failed: ${formatErrorMessage(error)}\n`,
+                  "[acpx] onPromptActive hook failed: " +
+                    formatErrorMessage(error) +
+                    "\n",
                 );
               }
             }
@@ -513,48 +537,75 @@ async function runSessionPrompt(
           applyLifecycleSnapshotToRecord(record, snapshot);
           if (snapshot.lastExit?.unexpectedDuringPrompt && options.verbose) {
             process.stderr.write(
-              `[acpx] agent disconnected during prompt (${snapshot.lastExit.reason}, exit=${snapshot.lastExit.exitCode}, signal=${snapshot.lastExit.signal ?? "none"})\n`,
+              "[acpx] agent disconnected during prompt (" +
+                snapshot.lastExit.reason +
+                ", exit=" +
+                snapshot.lastExit.exitCode +
+                ", signal=" +
+                (snapshot.lastExit.signal ?? "none") +
+                ")\n",
             );
           }
+
+          const normalizedError = normalizeOutputError(error, {
+            origin: "runtime",
+          });
+
+          emitEvent(
+            errorToEventDraft({
+              code: normalizedError.code,
+              detailCode: normalizedError.detailCode,
+              origin: normalizedError.origin,
+              message: normalizedError.message,
+              retryable: normalizedError.retryable,
+              acp: normalizedError.acp,
+            }),
+          );
+
+          await flushPendingEvents(true).catch(() => {
+            // best effort while bubbling prompt failure
+          });
+
+          output.flush();
+
           record.lastUsedAt = isoNow();
-          await writeSessionRecord(record);
-          throw error;
+          applyConversation(record, conversation);
+          record.acpx = acpxState;
+          await writeSessionRecord(record).catch(() => {
+            // best effort while bubbling prompt failure
+          });
+
+          const propagated =
+            error instanceof Error ? error : new Error(formatErrorMessage(error));
+          (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted =
+            true;
+          throw propagated;
         }
 
-        output.onDone(response.stopReason);
+        emitEvent({
+          type: ACPX_EVENT_TYPES.TURN_DONE,
+          data: {
+            stop_reason: response.stopReason,
+            permission_stats: client.getPermissionStats(),
+          },
+        });
+
+        await flushPendingEvents(true);
         output.flush();
 
         const now = isoNow();
-        const turnEntries: SessionHistoryEntry[] = [];
-        const userPreview = toPreviewText(options.message);
-        if (userPreview) {
-          turnEntries.push({
-            role: "user",
-            timestamp: record.lastPromptAt ?? now,
-            textPreview: userPreview,
-          });
-        }
-
-        const assistantPreview = toPreviewText(assistantSnippets.join(" "));
-        if (assistantPreview) {
-          turnEntries.push({
-            role: "assistant",
-            timestamp: now,
-            textPreview: assistantPreview,
-          });
-        }
-
-        record.turnHistory = appendHistoryEntries(record.turnHistory, turnEntries);
         record.lastUsedAt = now;
         record.closed = false;
         record.closedAt = undefined;
         record.protocolVersion = client.initializeResult?.protocolVersion;
         record.agentCapabilities = client.initializeResult?.agentCapabilities;
+        applyConversation(record, conversation);
+        record.acpx = acpxState;
         applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
         await writeSessionRecord(record);
 
         return {
-          ...toPromptResult(response.stopReason, record.id, client),
+          ...toPromptResult(response.stopReason, record.acpxRecordId, client),
           record,
           resumed,
           loadError,
@@ -564,7 +615,15 @@ async function runSessionPrompt(
         await client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS);
         applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
         record.lastUsedAt = isoNow();
+        applyConversation(record, conversation);
+        record.acpx = acpxState;
+        await flushPendingEvents(true).catch(() => {
+          // best effort while process is being interrupted
+        });
         await writeSessionRecord(record).catch(() => {
+          // best effort while process is being interrupted
+        });
+        await closeEventWriter(false).catch(() => {
           // best effort while process is being interrupted
         });
         await client.close();
@@ -576,204 +635,18 @@ async function runSessionPrompt(
     }
     await client.close();
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
+    applyConversation(record, conversation);
+    record.acpx = acpxState;
+    await flushPendingEvents(false).catch(() => {
+      // best effort on close
+    });
     await writeSessionRecord(record).catch(() => {
       // best effort on close
     });
-  }
-}
-
-type WithConnectedSessionOptions<T> = {
-  sessionRecordId: string;
-  permissionMode?: PermissionMode;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  timeoutMs?: number;
-  verbose?: boolean;
-  onClientAvailable?: (controller: ActiveSessionController) => void;
-  onClientClosed?: () => void;
-  run: (client: AcpClient, sessionId: string, record: SessionRecord) => Promise<T>;
-};
-
-type WithConnectedSessionResult<T> = {
-  value: T;
-  record: SessionRecord;
-  resumed: boolean;
-  loadError?: string;
-};
-
-async function withConnectedSession<T>(
-  options: WithConnectedSessionOptions<T>,
-): Promise<WithConnectedSessionResult<T>> {
-  const record = await resolveSessionRecord(options.sessionRecordId);
-  const client = new AcpClient({
-    agentCommand: record.agentCommand,
-    cwd: absolutePath(record.cwd),
-    permissionMode: options.permissionMode ?? "approve-reads",
-    nonInteractivePermissions: options.nonInteractivePermissions,
-    authCredentials: options.authCredentials,
-    authPolicy: options.authPolicy,
-    verbose: options.verbose,
-  });
-  let activeSessionIdForControl = record.sessionId;
-  let notifiedClientAvailable = false;
-  const activeController: ActiveSessionController = {
-    hasActivePrompt: () => client.hasActivePrompt(),
-    requestCancelActivePrompt: async () => await client.requestCancelActivePrompt(),
-    setSessionMode: async (modeId: string) => {
-      await client.setSessionMode(activeSessionIdForControl, modeId);
-    },
-    setSessionConfigOption: async (configId: string, value: string) => {
-      return await client.setSessionConfigOption(
-        activeSessionIdForControl,
-        configId,
-        value,
-      );
-    },
-  };
-
-  try {
-    return await withInterrupt(
-      async () => {
-        const {
-          sessionId: activeSessionId,
-          resumed,
-          loadError,
-        } = await connectAndLoadSession({
-          client,
-          record,
-          timeoutMs: options.timeoutMs,
-          verbose: options.verbose,
-          activeController,
-          withTimeout,
-          shouldFallbackToNewSession,
-          onClientAvailable: (controller) => {
-            options.onClientAvailable?.(controller);
-            notifiedClientAvailable = true;
-          },
-          onSessionIdResolved: (sessionId) => {
-            activeSessionIdForControl = sessionId;
-          },
-        });
-
-        const value = await options.run(client, activeSessionId, record);
-
-        const now = isoNow();
-        record.lastUsedAt = now;
-        record.closed = false;
-        record.closedAt = undefined;
-        record.protocolVersion = client.initializeResult?.protocolVersion;
-        record.agentCapabilities = client.initializeResult?.agentCapabilities;
-        applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-        await writeSessionRecord(record);
-
-        return {
-          value,
-          record,
-          resumed,
-          loadError,
-        };
-      },
-      async () => {
-        await client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS);
-        applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-        record.lastUsedAt = isoNow();
-        await writeSessionRecord(record).catch(() => {
-          // best effort while process is being interrupted
-        });
-        await client.close();
-      },
-    );
-  } finally {
-    if (notifiedClientAvailable) {
-      options.onClientClosed?.();
-    }
-    await client.close();
-    applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-    await writeSessionRecord(record).catch(() => {
+    await closeEventWriter(false).catch(() => {
       // best effort on close
     });
   }
-}
-
-type RunSessionSetModeDirectOptions = {
-  sessionRecordId: string;
-  modeId: string;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  timeoutMs?: number;
-  verbose?: boolean;
-  onClientAvailable?: (controller: ActiveSessionController) => void;
-  onClientClosed?: () => void;
-};
-
-type RunSessionSetConfigOptionDirectOptions = {
-  sessionRecordId: string;
-  configId: string;
-  value: string;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  timeoutMs?: number;
-  verbose?: boolean;
-  onClientAvailable?: (controller: ActiveSessionController) => void;
-  onClientClosed?: () => void;
-};
-
-async function runSessionSetModeDirect(
-  options: RunSessionSetModeDirectOptions,
-): Promise<SessionSetModeResult> {
-  const result = await withConnectedSession({
-    sessionRecordId: options.sessionRecordId,
-    nonInteractivePermissions: options.nonInteractivePermissions,
-    authCredentials: options.authCredentials,
-    authPolicy: options.authPolicy,
-    timeoutMs: options.timeoutMs,
-    verbose: options.verbose,
-    onClientAvailable: options.onClientAvailable,
-    onClientClosed: options.onClientClosed,
-    run: async (client, sessionId) => {
-      await withTimeout(
-        client.setSessionMode(sessionId, options.modeId),
-        options.timeoutMs,
-      );
-    },
-  });
-
-  return {
-    record: result.record,
-    resumed: result.resumed,
-    loadError: result.loadError,
-  };
-}
-
-async function runSessionSetConfigOptionDirect(
-  options: RunSessionSetConfigOptionDirectOptions,
-): Promise<SessionSetConfigOptionResult> {
-  const result = await withConnectedSession({
-    sessionRecordId: options.sessionRecordId,
-    nonInteractivePermissions: options.nonInteractivePermissions,
-    authCredentials: options.authCredentials,
-    authPolicy: options.authPolicy,
-    timeoutMs: options.timeoutMs,
-    verbose: options.verbose,
-    onClientAvailable: options.onClientAvailable,
-    onClientClosed: options.onClientClosed,
-    run: async (client, sessionId) => {
-      return await withTimeout(
-        client.setSessionConfigOption(sessionId, options.configId, options.value),
-        options.timeoutMs,
-      );
-    },
-  });
-
-  return {
-    record: result.record,
-    response: result.value,
-    resumed: result.resumed,
-    loadError: result.loadError,
-  };
 }
 
 export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult> {
@@ -800,10 +673,34 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
           options.timeoutMs,
         );
         const sessionId = createdSession.sessionId;
+        const agentSessionId = normalizeRuntimeSessionId(createdSession.agentSessionId);
+
         output.setContext({
           sessionId,
-          stream: "prompt",
+          acpSessionId: sessionId,
+          agentSessionId,
+          nextSeq: 0,
         });
+
+        output.onEvent(
+          createAcpxEvent(
+            {
+              sessionId,
+              acpSessionId: sessionId,
+              agentSessionId,
+              seq: 0,
+            },
+            {
+              type: ACPX_EVENT_TYPES.TURN_STARTED,
+              data: {
+                mode: "prompt",
+                resumed: false,
+                input_preview: truncateInputPreview(options.message),
+              },
+            },
+          ),
+        );
+
         const response = await withTimeout(
           client.prompt(sessionId, options.message),
           options.timeoutMs,
@@ -848,21 +745,26 @@ export async function createSession(
 
         const now = isoNow();
         const record: SessionRecord = {
-          id: sessionId,
-          sessionId,
-          agentSessionId: createdSession.agentSessionId,
+          schema: SESSION_RECORD_SCHEMA,
+          acpxRecordId: sessionId,
+          acpSessionId: sessionId,
+          agentSessionId: normalizeRuntimeSessionId(createdSession.agentSessionId),
           agentCommand: options.agentCommand,
           cwd: absolutePath(options.cwd),
           name: normalizeName(options.name),
           createdAt: now,
           lastUsedAt: now,
+          lastSeq: 0,
+          lastRequestId: undefined,
+          eventLog: defaultSessionEventLog(sessionId),
           closed: false,
           closedAt: undefined,
           pid: lifecycle.pid,
           agentStartedAt: lifecycle.startedAt,
           protocolVersion: client.initializeResult?.protocolVersion,
           agentCapabilities: client.initializeResult?.agentCapabilities,
-          turnHistory: [],
+          ...createSessionConversation(now),
+          acpx: {},
         };
 
         await writeSessionRecord(record);
@@ -914,15 +816,77 @@ export async function ensureSession(
   };
 }
 
-export { DEFAULT_QUEUE_OWNER_TTL_MS, normalizeQueueOwnerTtlMs };
-export type { QueueOwnerRunOptions } from "./session-owner-runtime.js";
-export type { QueueOwnerSpawnConfig } from "./session-owner-spawn.js";
+export type QueueOwnerRuntimeOptions = {
+  sessionId: string;
+  permissionMode: PermissionMode;
+  nonInteractivePermissions?: NonInteractivePermissionPolicy;
+  authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
+  suppressSdkConsoleErrors?: boolean;
+  verbose?: boolean;
+  ttlMs?: number;
+};
 
-export async function runQueueOwnerProcess(
-  options: QueueOwnerRunOptions,
+function queueOwnerRuntimeOptionsFromSend(
+  options: SessionSendOptions,
+): QueueOwnerRuntimeOptions {
+  return {
+    sessionId: options.sessionId,
+    permissionMode: options.permissionMode,
+    nonInteractivePermissions: options.nonInteractivePermissions,
+    authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
+    suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
+    verbose: options.verbose,
+    ttlMs: options.ttlMs,
+  };
+}
+
+function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): void {
+  const payload = JSON.stringify(options);
+  const child = spawn(process.execPath, [QUEUE_OWNER_MAIN_PATH], {
+    detached: true,
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      ACPX_QUEUE_OWNER_PAYLOAD: payload,
+    },
+  });
+  child.unref();
+}
+
+async function submitToRunningOwner(
+  options: SessionSendOptions,
+  waitForCompletion: boolean,
+): Promise<SessionSendOutcome | undefined> {
+  return await trySubmitToRunningOwner({
+    sessionId: options.sessionId,
+    message: options.message,
+    permissionMode: options.permissionMode,
+    nonInteractivePermissions: options.nonInteractivePermissions,
+    outputFormatter: options.outputFormatter,
+    errorEmissionPolicy: options.errorEmissionPolicy,
+    timeoutMs: options.timeoutMs,
+    suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
+    waitForCompletion,
+    verbose: options.verbose,
+  });
+}
+
+export async function runSessionQueueOwner(
+  options: QueueOwnerRuntimeOptions,
 ): Promise<void> {
-  await runQueueOwnerProcessInternal(options, {
-    runQueuedTask,
+  const lease = await tryAcquireQueueOwnerLease(options.sessionId);
+  if (!lease) {
+    return;
+  }
+
+  let owner: SessionQueueOwner | undefined;
+  const ttlMs = normalizeQueueOwnerTtlMs(options.ttlMs);
+  const taskPollTimeoutMs = ttlMs === 0 ? undefined : ttlMs;
+  const initialTaskPollTimeoutMs =
+    taskPollTimeoutMs == null ? undefined : Math.max(taskPollTimeoutMs, 1_000);
+  const turnController = new QueueOwnerTurnController({
     withTimeout: async (run, timeoutMs) => await withTimeout(run(), timeoutMs),
     setSessionModeFallback: async (modeId: string, timeoutMs?: number) => {
       await runSessionSetModeDirect({
@@ -953,27 +917,129 @@ export async function runQueueOwnerProcess(
       return result.response;
     },
   });
+
+  const applyPendingCancel = async (): Promise<boolean> => {
+    return await turnController.applyPendingCancel();
+  };
+
+  const scheduleApplyPendingCancel = (): void => {
+    void applyPendingCancel().catch((error) => {
+      if (options.verbose) {
+        process.stderr.write(
+          `[acpx] failed to apply deferred cancel: ${formatErrorMessage(error)}\n`,
+        );
+      }
+    });
+  };
+
+  const setActiveController = (controller: ActiveSessionController) => {
+    turnController.setActiveController(controller);
+    scheduleApplyPendingCancel();
+  };
+
+  const clearActiveController = () => {
+    turnController.clearActiveController();
+  };
+
+  const runPromptTurn = async <T>(run: () => Promise<T>): Promise<T> => {
+    turnController.beginTurn();
+    try {
+      return await run();
+    } finally {
+      turnController.endTurn();
+    }
+  };
+
+  try {
+    owner = await SessionQueueOwner.start(lease, {
+      cancelPrompt: async () => {
+        const accepted = await turnController.requestCancel();
+        if (!accepted) {
+          return false;
+        }
+        await applyPendingCancel();
+        return true;
+      },
+      setSessionMode: async (modeId: string, timeoutMs?: number) => {
+        await turnController.setSessionMode(modeId, timeoutMs);
+      },
+      setSessionConfigOption: async (
+        configId: string,
+        value: string,
+        timeoutMs?: number,
+      ) => {
+        return await turnController.setSessionConfigOption(configId, value, timeoutMs);
+      },
+    });
+
+    if (options.verbose) {
+      process.stderr.write(
+        `[acpx] queue owner ready for session ${options.sessionId} (ttlMs=${ttlMs})\n`,
+      );
+    }
+
+    let isFirstTask = true;
+    while (true) {
+      const pollTimeoutMs = isFirstTask ? initialTaskPollTimeoutMs : taskPollTimeoutMs;
+      const task = await owner.nextTask(pollTimeoutMs);
+      if (!task) {
+        break;
+      }
+      isFirstTask = false;
+
+      await runPromptTurn(async () => {
+        await runQueuedTask(options.sessionId, task, {
+          verbose: options.verbose,
+          nonInteractivePermissions: options.nonInteractivePermissions,
+          authCredentials: options.authCredentials,
+          authPolicy: options.authPolicy,
+          suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
+          onClientAvailable: setActiveController,
+          onClientClosed: clearActiveController,
+          onPromptActive: async () => {
+            turnController.markPromptActive();
+            await applyPendingCancel();
+          },
+        });
+      });
+    }
+  } finally {
+    turnController.beginClosing();
+    if (owner) {
+      await owner.close();
+    }
+    await releaseQueueOwnerLease(lease);
+    if (options.verbose) {
+      process.stderr.write(
+        `[acpx] queue owner stopped for session ${options.sessionId}\n`,
+      );
+    }
+  }
 }
 
 export async function sendSession(
   options: SessionSendOptions,
 ): Promise<SessionSendOutcome> {
-  return await sendViaDetachedQueueOwner(options);
-}
+  const waitForCompletion = options.waitForCompletion !== false;
 
-export async function readSessionQueueOwnerStatus(sessionId: string): Promise<
-  | {
-      pid: number;
-      socketPath: string;
-      heartbeatAt: string;
-      ownerGeneration: number;
-      queueDepth: number;
-      alive: boolean;
-      stale: boolean;
+  const queuedToOwner = await submitToRunningOwner(options, waitForCompletion);
+  if (queuedToOwner) {
+    return queuedToOwner;
+  }
+
+  spawnQueueOwnerProcess(queueOwnerRuntimeOptionsFromSend(options));
+
+  for (let attempt = 0; attempt < QUEUE_OWNER_STARTUP_MAX_ATTEMPTS; attempt += 1) {
+    const queued = await submitToRunningOwner(options, waitForCompletion);
+    if (queued) {
+      return queued;
     }
-  | undefined
-> {
-  return await readQueueOwnerStatus(sessionId);
+    await waitMs(QUEUE_CONNECT_RETRY_MS);
+  }
+
+  throw new Error(
+    `Session queue owner failed to start for session ${options.sessionId}`,
+  );
 }
 
 export async function cancelSessionPrompt(
@@ -1086,7 +1152,7 @@ async function isLikelyMatchingProcess(
 
 export async function closeSession(sessionId: string): Promise<SessionRecord> {
   const record = await resolveSessionRecord(sessionId);
-  await terminateQueueOwnerForSession(record.id);
+  await terminateQueueOwnerForSession(record.acpxRecordId);
 
   if (
     record.pid != null &&

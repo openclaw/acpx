@@ -1,5 +1,6 @@
 import type {
   AgentCapabilities,
+  SessionConfigOption,
   SessionNotification,
   SetSessionConfigOptionResponse,
   StopReason,
@@ -32,6 +33,46 @@ export type NonInteractivePermissionPolicy =
 
 export const OUTPUT_STREAMS = ["prompt", "control"] as const;
 export type OutputStream = (typeof OUTPUT_STREAMS)[number];
+
+export const ACPX_EVENT_SCHEMA = "acpx.event.v1" as const;
+export const ACPX_EVENT_OUTPUT_STREAMS = ["output", "thought"] as const;
+export type AcpxEventOutputStream = (typeof ACPX_EVENT_OUTPUT_STREAMS)[number];
+export const ACPX_EVENT_TYPES = {
+  TURN_STARTED: "turn_started",
+  OUTPUT_DELTA: "output_delta",
+  TOOL_CALL: "tool_call",
+  PLAN: "plan",
+  UPDATE: "update",
+  CLIENT_OPERATION: "client_operation",
+  TURN_DONE: "turn_done",
+  ERROR: "error",
+  PROMPT_QUEUED: "prompt_queued",
+  SESSION_ENSURED: "session_ensured",
+  CANCEL_REQUESTED: "cancel_requested",
+  CANCEL_RESULT: "cancel_result",
+  MODE_SET: "mode_set",
+  CONFIG_SET: "config_set",
+  STATUS_SNAPSHOT: "status_snapshot",
+  SESSION_CLOSED: "session_closed",
+} as const;
+export type AcpxEventType = (typeof ACPX_EVENT_TYPES)[keyof typeof ACPX_EVENT_TYPES];
+export const ACPX_EVENT_TURN_MODES = ["prompt"] as const;
+export type AcpxEventTurnMode = (typeof ACPX_EVENT_TURN_MODES)[number];
+export const ACPX_EVENT_STATUS_SNAPSHOT_STATUSES = [
+  "alive",
+  "dead",
+  "no-session",
+] as const;
+export type AcpxEventStatusSnapshotStatus =
+  (typeof ACPX_EVENT_STATUS_SNAPSHOT_STATUSES)[number];
+
+export const ACPX_EVENT_TOOL_CALL_STATUSES = [
+  "pending",
+  "in_progress",
+  "completed",
+  "failed",
+] as const;
+export type AcpxEventToolCallStatus = (typeof ACPX_EVENT_TOOL_CALL_STATUSES)[number];
 
 export const OUTPUT_ERROR_CODES = [
   "NO_SESSION",
@@ -95,118 +136,163 @@ export type ClientOperation = {
   timestamp: string;
 };
 
-export type OutputEventEnvelope = {
-  eventVersion: 1;
-  sessionId: string;
-  requestId?: string;
+type AcpxEventEnvelope = {
+  schema: typeof ACPX_EVENT_SCHEMA;
+  event_id: string;
+  session_id: string;
+  acp_session_id?: string;
+  agent_session_id?: string;
+  request_id?: string;
   seq: number;
-  stream: OutputStream;
+  ts: string;
 };
 
-export type BaseOutputEvent = OutputEventEnvelope & {
-  timestamp: string;
-};
+export type AcpxEvent =
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.TURN_STARTED;
+      data: {
+        mode: AcpxEventTurnMode;
+        resumed: boolean;
+        input_preview?: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.OUTPUT_DELTA;
+      data: {
+        stream: AcpxEventOutputStream;
+        text: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.TOOL_CALL;
+      data: {
+        tool_call_id: string;
+        title?: string;
+        status?: AcpxEventToolCallStatus;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.PLAN;
+      data: {
+        entries: Array<{
+          content: string;
+          status: string;
+          priority: string;
+        }>;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.UPDATE;
+      data: {
+        update: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.CLIENT_OPERATION;
+      data: {
+        method: ClientOperationMethod;
+        status: ClientOperationStatus;
+        summary: string;
+        details?: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.TURN_DONE;
+      data: {
+        stop_reason: StopReason;
+        permission_stats?: PermissionStats;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.ERROR;
+      data: {
+        code: OutputErrorCode;
+        detail_code?: string;
+        origin?: OutputErrorOrigin;
+        message: string;
+        retryable?: boolean;
+        acp_error?: OutputErrorAcpPayload;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.PROMPT_QUEUED;
+      data: {
+        request_id: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.SESSION_ENSURED;
+      data: {
+        created: boolean;
+        name?: string;
+        replaced_session_id?: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.CANCEL_REQUESTED;
+      data: Record<string, never>;
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.CANCEL_RESULT;
+      data: {
+        cancelled: boolean;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.MODE_SET;
+      data: {
+        mode_id: string;
+        resumed?: boolean;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.CONFIG_SET;
+      data: {
+        config_id: string;
+        value: string;
+        resumed?: boolean;
+        config_options?: unknown[];
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.STATUS_SNAPSHOT;
+      data: {
+        status: AcpxEventStatusSnapshotStatus;
+        pid?: number;
+        summary?: string;
+        uptime?: string;
+        last_prompt_time?: string;
+        exit_code?: number;
+        signal?: string;
+      };
+    })
+  | (AcpxEventEnvelope & {
+      type: typeof ACPX_EVENT_TYPES.SESSION_CLOSED;
+      data: {
+        reason: "close";
+      };
+    });
 
-export type OutputEvent =
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "text";
-      content: string;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "thought";
-      content: string;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "tool_call";
-      toolCallId?: string;
-      title?: string;
-      status?: string;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "client_operation";
-      method: ClientOperationMethod;
-      status: ClientOperationStatus;
-      summary: string;
-      details?: string;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "plan";
-      entries: Array<{
-        content: string;
-        status: string;
-        priority: string;
-      }>;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "update";
-      update: string;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "done";
-      stopReason: StopReason;
-      timestamp: string;
-    }
-  | {
-      eventVersion: 1;
-      sessionId: string;
-      requestId?: string;
-      seq: number;
-      stream: OutputStream;
-      type: "error";
-      code: OutputErrorCode;
-      detailCode?: string;
-      origin?: OutputErrorOrigin;
-      message: string;
-      retryable?: boolean;
-      acp?: OutputErrorAcpPayload;
-      timestamp: string;
-    };
+export type AcpxEventDraft = Omit<
+  AcpxEvent,
+  "schema" | "event_id" | "session_id" | "seq" | "ts"
+>;
+
+export type SessionEventLog = {
+  active_path: string;
+  segment_count: number;
+  max_segment_bytes: number;
+  max_segments: number;
+  last_write_at?: string;
+  last_write_error?: string | null;
+};
 
 export type OutputFormatterContext = {
   sessionId: string;
+  acpSessionId?: string;
+  agentSessionId?: string;
   requestId?: string;
-  stream?: OutputStream;
+  nextSeq?: number;
 };
 
 export type OutputPolicy = {
@@ -223,6 +309,7 @@ export type OutputErrorEmissionPolicy = {
 
 export interface OutputFormatter {
   setContext(context: OutputFormatterContext): void;
+  onEvent(event: AcpxEvent): void;
   onSessionUpdate(notification: SessionNotification): void;
   onClientOperation(operation: ClientOperation): void;
   onError(params: {
@@ -251,23 +338,125 @@ export type AcpClientOptions = {
   onClientOperation?: (operation: ClientOperation) => void;
 };
 
-export type SessionHistoryRole = "user" | "assistant";
+export const SESSION_RECORD_SCHEMA = "acpx.session.v1" as const;
+export type SessionMessageImage = {
+  source: string;
+  size?: {
+    width: number;
+    height: number;
+  } | null;
+};
 
-export type SessionHistoryEntry = {
-  role: SessionHistoryRole;
-  timestamp: string;
-  textPreview: string;
+export type SessionUserContent =
+  | {
+      Text: string;
+    }
+  | {
+      Mention: {
+        uri: string;
+        content: string;
+      };
+    }
+  | {
+      Image: SessionMessageImage;
+    };
+
+export type SessionToolUse = {
+  id: string;
+  name: string;
+  raw_input: string;
+  input: unknown;
+  is_input_complete: boolean;
+  thought_signature?: string | null;
+};
+
+export type SessionToolResultContent =
+  | {
+      Text: string;
+    }
+  | {
+      Image: SessionMessageImage;
+    };
+
+export type SessionToolResult = {
+  tool_use_id: string;
+  tool_name: string;
+  is_error: boolean;
+  content: SessionToolResultContent;
+  output?: unknown;
+};
+
+export type SessionAgentContent =
+  | {
+      Text: string;
+    }
+  | {
+      Thinking: {
+        text: string;
+        signature?: string | null;
+      };
+    }
+  | {
+      RedactedThinking: string;
+    }
+  | {
+      ToolUse: SessionToolUse;
+    };
+
+export type SessionUserMessage = {
+  id: string;
+  content: SessionUserContent[];
+};
+
+export type SessionAgentMessage = {
+  content: SessionAgentContent[];
+  tool_results: Record<string, SessionToolResult>;
+  reasoning_details?: unknown | null;
+};
+
+export type SessionMessage =
+  | {
+      User: SessionUserMessage;
+    }
+  | {
+      Agent: SessionAgentMessage;
+    }
+  | "Resume";
+
+export type SessionTokenUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+};
+
+export type SessionConversation = {
+  title?: string | null;
+  messages: SessionMessage[];
+  updated_at: string;
+  cumulative_token_usage: SessionTokenUsage;
+  request_token_usage: Record<string, SessionTokenUsage>;
+};
+
+export type SessionAcpxState = {
+  current_mode_id?: string;
+  available_commands?: string[];
+  config_options?: SessionConfigOption[];
 };
 
 export type SessionRecord = {
-  id: string;
-  sessionId: string;
+  schema: typeof SESSION_RECORD_SCHEMA;
+  acpxRecordId: string;
+  acpSessionId: string;
   agentSessionId?: string;
   agentCommand: string;
   cwd: string;
   name?: string;
   createdAt: string;
   lastUsedAt: string;
+  lastSeq: number;
+  lastRequestId?: string;
+  eventLog: SessionEventLog;
   closed?: boolean;
   closedAt?: string;
   pid?: number;
@@ -277,9 +466,14 @@ export type SessionRecord = {
   lastAgentExitSignal?: NodeJS.Signals | null;
   lastAgentExitAt?: string;
   lastAgentDisconnectReason?: string;
-  turnHistory?: SessionHistoryEntry[];
   protocolVersion?: number;
   agentCapabilities?: AgentCapabilities;
+  title?: string | null;
+  messages: SessionMessage[];
+  updated_at: string;
+  cumulative_token_usage: SessionTokenUsage;
+  request_token_usage: Record<string, SessionTokenUsage>;
+  acpx?: SessionAcpxState;
 };
 
 export type RunPromptResult = {

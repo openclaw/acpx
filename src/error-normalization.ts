@@ -3,7 +3,6 @@ import {
   PermissionDeniedError,
   PermissionPromptUnavailableError,
 } from "./errors.js";
-import { extractAcpError, isAcpResourceNotFoundError } from "./acp-error-shapes.js";
 import {
   EXIT_CODES,
   OUTPUT_ERROR_CODES,
@@ -14,9 +13,9 @@ import {
   type OutputErrorOrigin,
 } from "./types.js";
 
+const RESOURCE_NOT_FOUND_ACP_CODES = new Set([-32002]);
 const AUTH_REQUIRED_ACP_CODES = new Set([-32000]);
-
-export { extractAcpError, isAcpResourceNotFoundError } from "./acp-error-shapes.js";
+const QUERY_CLOSED_BEFORE_RESPONSE_DETAIL = "query closed before response received";
 
 type ErrorMeta = {
   outputCode?: OutputErrorCode;
@@ -159,6 +158,41 @@ function toAcpErrorPayload(value: unknown): OutputErrorAcpPayload | undefined {
   };
 }
 
+function extractAcpErrorInternal(
+  value: unknown,
+  depth: number,
+): OutputErrorAcpPayload | undefined {
+  if (depth > 5) {
+    return undefined;
+  }
+
+  const direct = toAcpErrorPayload(value);
+  if (direct) {
+    return direct;
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+
+  if ("error" in record) {
+    const nested = extractAcpErrorInternal(record.error, depth + 1);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  if ("cause" in record) {
+    const nested = extractAcpErrorInternal(record.cause, depth + 1);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return undefined;
+}
+
 function isTimeoutLike(error: unknown): boolean {
   return error instanceof Error && error.name === "TimeoutError";
 }
@@ -197,6 +231,30 @@ export function formatErrorMessage(error: unknown): string {
   }
 
   return String(error);
+}
+
+export function extractAcpError(error: unknown): OutputErrorAcpPayload | undefined {
+  return extractAcpErrorInternal(error, 0);
+}
+
+export function isAcpResourceNotFoundError(error: unknown): boolean {
+  const acp = extractAcpError(error);
+  return Boolean(acp && RESOURCE_NOT_FOUND_ACP_CODES.has(acp.code));
+}
+
+export function isAcpQueryClosedBeforeResponseError(error: unknown): boolean {
+  const acp = extractAcpError(error);
+  if (!acp || acp.code !== -32603) {
+    return false;
+  }
+
+  const data = asRecord(acp.data);
+  const details = data?.details;
+  if (typeof details !== "string") {
+    return false;
+  }
+
+  return details.toLowerCase().includes(QUERY_CLOSED_BEFORE_RESPONSE_DETAIL);
 }
 
 function mapErrorCode(error: unknown): OutputErrorCode | undefined {

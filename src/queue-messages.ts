@@ -1,8 +1,5 @@
-import type {
-  SetSessionConfigOptionResponse,
-  SessionNotification,
-  StopReason,
-} from "@agentclientprotocol/sdk";
+import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
+import { isAcpxEvent } from "./events.js";
 import {
   OUTPUT_ERROR_CODES,
   OUTPUT_ERROR_ORIGINS,
@@ -11,7 +8,7 @@ import {
   type OutputErrorOrigin,
 } from "./types.js";
 import type {
-  ClientOperation,
+  AcpxEvent,
   NonInteractivePermissionPolicy,
   PermissionMode,
   SessionSendResult,
@@ -59,22 +56,10 @@ export type QueueOwnerAcceptedMessage = {
   requestId: string;
 };
 
-export type QueueOwnerSessionUpdateMessage = {
-  type: "session_update";
+export type QueueOwnerEventMessage = {
+  type: "event";
   requestId: string;
-  notification: SessionNotification;
-};
-
-export type QueueOwnerClientOperationMessage = {
-  type: "client_operation";
-  requestId: string;
-  operation: ClientOperation;
-};
-
-export type QueueOwnerDoneMessage = {
-  type: "done";
-  requestId: string;
-  stopReason: StopReason;
+  event: AcpxEvent;
 };
 
 export type QueueOwnerResultMessage = {
@@ -110,13 +95,12 @@ export type QueueOwnerErrorMessage = {
   message: string;
   retryable?: boolean;
   acp?: OutputErrorAcpPayload;
+  outputAlreadyEmitted?: boolean;
 };
 
 export type QueueOwnerMessage =
   | QueueOwnerAcceptedMessage
-  | QueueOwnerSessionUpdateMessage
-  | QueueOwnerClientOperationMessage
-  | QueueOwnerDoneMessage
+  | QueueOwnerEventMessage
   | QueueOwnerResultMessage
   | QueueOwnerCancelResultMessage
   | QueueOwnerSetModeResultMessage
@@ -294,12 +278,18 @@ function parseSessionSendResult(raw: unknown): SessionSendResult | null {
   }
 
   const recordValid =
-    typeof record.id === "string" &&
-    typeof record.sessionId === "string" &&
+    typeof record.acpxRecordId === "string" &&
+    typeof record.acpSessionId === "string" &&
     typeof record.agentCommand === "string" &&
     typeof record.cwd === "string" &&
     typeof record.createdAt === "string" &&
-    typeof record.lastUsedAt === "string";
+    typeof record.lastUsedAt === "string" &&
+    Array.isArray(record.messages) &&
+    typeof record.updated_at === "string" &&
+    typeof record.lastSeq === "number" &&
+    Number.isInteger(record.lastSeq) &&
+    !!record.eventLog &&
+    typeof record.eventLog === "object";
   if (!recordValid) {
     return null;
   }
@@ -324,51 +314,15 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
     };
   }
 
-  if (message.type === "session_update") {
-    const notification = message.notification as SessionNotification | undefined;
-    if (!notification || typeof notification !== "object") {
+  if (message.type === "event") {
+    if (!isAcpxEvent(message.event)) {
       return null;
     }
-    return {
-      type: "session_update",
-      requestId: message.requestId,
-      notification,
-    };
-  }
 
-  if (message.type === "client_operation") {
-    const operation = asRecord(message.operation);
-    if (
-      !operation ||
-      typeof operation.method !== "string" ||
-      typeof operation.status !== "string" ||
-      typeof operation.summary !== "string" ||
-      typeof operation.timestamp !== "string"
-    ) {
-      return null;
-    }
-    if (
-      operation.status !== "running" &&
-      operation.status !== "completed" &&
-      operation.status !== "failed"
-    ) {
-      return null;
-    }
     return {
-      type: "client_operation",
+      type: "event",
       requestId: message.requestId,
-      operation: operation as ClientOperation,
-    };
-  }
-
-  if (message.type === "done") {
-    if (typeof message.stopReason !== "string") {
-      return null;
-    }
-    return {
-      type: "done",
-      requestId: message.requestId,
-      stopReason: message.stopReason as StopReason,
+      event: message.event,
     };
   }
 
@@ -419,28 +373,36 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
   }
 
   if (message.type === "error") {
-    if (typeof message.message !== "string") {
+    if (
+      typeof message.message !== "string" ||
+      !isOutputErrorCode(message.code) ||
+      !isOutputErrorOrigin(message.origin)
+    ) {
       return null;
     }
-    const code = isOutputErrorCode(message.code) ? message.code : undefined;
+
     const detailCode =
       typeof message.detailCode === "string" && message.detailCode.trim().length > 0
         ? message.detailCode
         : undefined;
-    const origin = isOutputErrorOrigin(message.origin) ? message.origin : undefined;
     const retryable =
       typeof message.retryable === "boolean" ? message.retryable : undefined;
     const acp = parseAcpError(message.acp);
+    const outputAlreadyEmitted =
+      typeof message.outputAlreadyEmitted === "boolean"
+        ? message.outputAlreadyEmitted
+        : undefined;
 
     return {
       type: "error",
       requestId: message.requestId,
-      code,
+      code: message.code,
       detailCode,
-      origin,
+      origin: message.origin,
       message: message.message,
       retryable,
       acp,
+      ...(outputAlreadyEmitted === undefined ? {} : { outputAlreadyEmitted }),
     };
   }
 
