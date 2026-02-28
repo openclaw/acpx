@@ -1,5 +1,6 @@
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import net from "node:net";
 import readline from "node:readline";
 import test from "node:test";
@@ -620,3 +621,69 @@ async function nextJsonLine(
 
   return await Promise.race([next, timeout]);
 }
+
+test("trySubmitToRunningOwner clears stale owner lock on protocol mismatch", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "submit-stale-owner-protocol-mismatch";
+    const keeper = await startKeeperProcess();
+    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
+    await writeQueueOwnerLock({
+      lockPath,
+      pid: keeper.pid,
+      sessionId,
+      socketPath,
+    });
+
+    const server = net.createServer((socket) => {
+      socket.setEncoding("utf8");
+      let buffer = "";
+      socket.on("data", (chunk: string) => {
+        buffer += chunk;
+        const newlineIndex = buffer.indexOf("\n");
+        if (newlineIndex < 0) {
+          return;
+        }
+        const line = buffer.slice(0, newlineIndex).trim();
+        if (!line) {
+          return;
+        }
+        const request = JSON.parse(line) as { requestId: string; type: string };
+        assert.equal(request.type, "submit_prompt");
+        socket.write(
+          `${JSON.stringify({
+            type: "accepted",
+            requestId: request.requestId,
+          })}\n`,
+        );
+        socket.write(
+          `${JSON.stringify({
+            type: "session_update",
+            requestId: request.requestId,
+            update: {
+              sessionId: "legacy-session",
+            },
+          })}\n`,
+        );
+        socket.end();
+      });
+    });
+
+    await listenServer(server, socketPath);
+
+    try {
+      const outcome = await trySubmitToRunningOwner({
+        sessionId,
+        message: "hello",
+        permissionMode: "approve-reads",
+        outputFormatter: NOOP_OUTPUT_FORMATTER,
+        waitForCompletion: true,
+      });
+      assert.equal(outcome, undefined);
+      await assert.rejects(fs.access(lockPath));
+    } finally {
+      await closeServer(server);
+      await cleanupOwnerArtifacts({ socketPath, lockPath });
+      stopProcess(keeper);
+    }
+  });
+});

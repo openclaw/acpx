@@ -84,6 +84,39 @@ function makeQueueOwnerErrorFromUnknown(
   };
 }
 
+const STALE_OWNER_PROTOCOL_DETAIL_CODES = new Set([
+  "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
+  "QUEUE_PROTOCOL_UNEXPECTED_RESPONSE",
+]);
+
+async function maybeRecoverStaleOwnerAfterProtocolMismatch(params: {
+  sessionId: string;
+  owner: QueueOwnerRecord;
+  error: unknown;
+  verbose?: boolean;
+}): Promise<boolean> {
+  if (!(params.error instanceof QueueProtocolError)) {
+    return false;
+  }
+
+  const detailCode = params.error.detailCode;
+  if (!detailCode || !STALE_OWNER_PROTOCOL_DETAIL_CODES.has(detailCode)) {
+    return false;
+  }
+
+  await cleanupStaleQueueOwner(params.sessionId, params.owner).catch(() => {
+    // Preserve existing behavior if cleanup fails.
+  });
+
+  if (params.verbose) {
+    process.stderr.write(
+      `[acpx] dropped stale queue owner metadata after protocol mismatch for session ${params.sessionId} (${detailCode})\n`,
+    );
+  }
+
+  return true;
+}
+
 export function isProcessAlive(pid: number | undefined): boolean {
   if (!pid || !Number.isInteger(pid) || pid <= 0 || pid === process.pid) {
     return false;
@@ -1265,7 +1298,21 @@ export async function trySubmitToRunningOwner(
     return undefined;
   }
 
-  const submitted = await submitToQueueOwner(owner, options);
+  let submitted: SessionSendOutcome | undefined;
+  try {
+    submitted = await submitToQueueOwner(owner, options);
+  } catch (error) {
+    const recovered = await maybeRecoverStaleOwnerAfterProtocolMismatch({
+      sessionId: options.sessionId,
+      owner,
+      error,
+      verbose: options.verbose,
+    });
+    if (recovered) {
+      return undefined;
+    }
+    throw error;
+  }
   if (submitted) {
     if (options.verbose) {
       process.stderr.write(

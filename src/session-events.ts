@@ -9,7 +9,7 @@ import {
   sessionEventLockPath as eventsLockPath,
   sessionEventSegmentPath as segmentEventPath,
 } from "./session-event-log.js";
-import { writeSessionRecord } from "./session-persistence.js";
+import { resolveSessionRecord, writeSessionRecord } from "./session-persistence.js";
 import type { AcpxEvent, AcpxEventDraft, SessionRecord } from "./types.js";
 
 const LOCK_RETRY_MS = 15;
@@ -34,6 +34,39 @@ async function statSize(filePath: string): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+async function countExistingEventSegments(
+  sessionId: string,
+  maxSegments: number,
+): Promise<number> {
+  let count = 0;
+
+  for (let segment = 1; segment <= maxSegments; segment += 1) {
+    if (await pathExists(segmentEventPath(sessionId, segment))) {
+      count += 1;
+    }
+  }
+
+  if (await pathExists(activeEventPath(sessionId))) {
+    count += 1;
+  }
+
+  return count;
+}
+
+async function resolveSessionMaxSegments(sessionId: string): Promise<number> {
+  try {
+    const record = await resolveSessionRecord(sessionId);
+    const configured = record.eventLog.max_segments;
+    if (Number.isInteger(configured) && configured > 0) {
+      return configured;
+    }
+  } catch {
+    // Fall back to default when session metadata is unavailable.
+  }
+
+  return DEFAULT_EVENT_MAX_SEGMENTS;
 }
 
 async function rotateSegments(sessionId: string, maxSegments: number): Promise<void> {
@@ -215,7 +248,10 @@ export class SessionEventWriter {
       this.record.lastUsedAt = event.ts;
       this.record.eventLog = {
         active_path: activePath,
-        segment_count: this.maxSegments,
+        segment_count: await countExistingEventSegments(
+          this.record.acpxRecordId,
+          this.maxSegments,
+        ),
         max_segment_bytes: this.maxSegmentBytes,
         max_segments: this.maxSegments,
         last_write_at: event.ts,
@@ -270,9 +306,10 @@ export class SessionEventWriter {
 }
 
 export async function listSessionEvents(sessionId: string): Promise<AcpxEvent[]> {
+  const maxSegments = await resolveSessionMaxSegments(sessionId);
   const files: string[] = [];
 
-  for (let segment = DEFAULT_EVENT_MAX_SEGMENTS; segment >= 1; segment -= 1) {
+  for (let segment = maxSegments; segment >= 1; segment -= 1) {
     const filePath = segmentEventPath(sessionId, segment);
     if (await pathExists(filePath)) {
       files.push(filePath);
