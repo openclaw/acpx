@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type {
   AuthPolicy,
@@ -28,9 +29,23 @@ type SessionSendLike = {
   ttlMs?: number;
 };
 
-const QUEUE_OWNER_MAIN_PATH = fileURLToPath(
-  new URL("../queue-owner-main.js", import.meta.url),
-);
+export function resolveQueueOwnerMainPath(baseUrl: string = import.meta.url): string {
+  // In tsc output, queue-owner-process.js lives in `session-runtime/` and the
+  // entrypoint is `../queue-owner-main.js`. In tsup bundle output, this code is
+  // emitted into `dist/chunk-*.js`, so the entrypoint is `./queue-owner-main.js`.
+  const candidates = [
+    fileURLToPath(new URL("../queue-owner-main.js", baseUrl)),
+    fileURLToPath(new URL("./queue-owner-main.js", baseUrl)),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return candidates[0]!;
+}
+
+const QUEUE_OWNER_MAIN_PATH = resolveQueueOwnerMainPath();
 
 export function queueOwnerRuntimeOptionsFromSend(
   options: SessionSendLike,
