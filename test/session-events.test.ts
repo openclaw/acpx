@@ -153,3 +153,44 @@ test("SessionEventWriter stores actual segment_count and increments lastSeq", as
     assert.equal(stored.lastSeq, 3);
   });
 });
+
+test("listSessionEvents skips malformed NDJSON lines", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const sessionId = "session-stream-skip-malformed";
+    const record = makeSessionRecord(sessionId, cwd, 5);
+    await writeSessionRecord(record);
+
+    await fs.mkdir(path.dirname(record.eventLog.active_path), { recursive: true });
+    const validOne = JSON.stringify({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "first" },
+        },
+      },
+    });
+    const validTwo = JSON.stringify({
+      jsonrpc: "2.0",
+      id: "req-2",
+      result: { stopReason: "end_turn" },
+    });
+    await fs.writeFile(
+      record.eventLog.active_path,
+      `${validOne}\n{invalid-json\n${validTwo}\n`,
+      "utf8",
+    );
+
+    const events = await listSessionEvents(sessionId);
+    assert.equal(events.length, 2);
+    assert.equal(
+      events.every((event) => event.jsonrpc === "2.0"),
+      true,
+    );
+  });
+});

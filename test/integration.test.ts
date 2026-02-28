@@ -19,6 +19,19 @@ type CliRunResult = {
   stderr: string;
 };
 
+function parseJsonRpcOutputLines(stdout: string): Array<Record<string, unknown>> {
+  const lines = stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  assert(lines.length > 0, "expected at least one JSON-RPC line");
+  return lines.map((line) => {
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    assert.equal(parsed.jsonrpc, "2.0");
+    return parsed;
+  });
+}
+
 test("integration: exec echo baseline", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -167,6 +180,36 @@ test("integration: json-strict suppresses runtime stderr diagnostics", async () 
       assert(
         permissionError,
         `expected ACP error response in output:\n${result.stdout}`,
+      );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: json-strict exec success emits JSON-RPC lines only", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "json",
+          "--json-strict",
+          "exec",
+          "echo strict-success",
+        ],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stderr.trim(), "");
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      assert(
+        payloads.some((payload) => Object.hasOwn(payload, "result")),
+        "expected at least one JSON-RPC result payload",
       );
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });

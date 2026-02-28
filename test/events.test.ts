@@ -68,3 +68,46 @@ test("isAcpJsonRpcMessage rejects non-JSON-RPC payload", () => {
     false,
   );
 });
+
+test("isAcpJsonRpcMessage accepts request/notification/response fixtures after roundtrip", () => {
+  const fixtures: unknown[] = [
+    {
+      jsonrpc: "2.0",
+      id: "req-1",
+      method: "session/prompt",
+      params: {
+        sessionId: "session-1",
+        prompt: [{ type: "text", text: "hi" }],
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "hello" },
+        },
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      id: "req-2",
+      result: { stopReason: "end_turn" },
+    },
+    {
+      jsonrpc: "2.0",
+      id: "req-3",
+      error: {
+        code: -32000,
+        message: "runtime error",
+      },
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    const roundTripped = JSON.parse(JSON.stringify(fixture));
+    assert.equal(isAcpJsonRpcMessage(roundTripped), true);
+  }
+});

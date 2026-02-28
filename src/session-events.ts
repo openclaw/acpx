@@ -293,9 +293,13 @@ export async function listSessionEvents(
     const payload = await fs.readFile(filePath, "utf8");
     const lines = payload.split("\n").filter((line) => line.trim().length > 0);
     for (const line of lines) {
-      const parsed = JSON.parse(line);
-      if (isAcpJsonRpcMessage(parsed)) {
-        events.push(parsed);
+      try {
+        const parsed = JSON.parse(line);
+        if (isAcpJsonRpcMessage(parsed)) {
+          events.push(parsed);
+        }
+      } catch {
+        // Skip malformed lines to keep event listing resilient.
       }
     }
   }

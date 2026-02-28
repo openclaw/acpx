@@ -54,6 +54,19 @@ function parseSingleAcpErrorLine(stdout: string): ParsedAcpError {
   return payload.error ?? {};
 }
 
+function parseJsonRpcLines(stdout: string): Array<Record<string, unknown>> {
+  const lines = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  assert(lines.length > 0, "expected at least one stdout line");
+  return lines.map((line) => {
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    assert.equal(parsed.jsonrpc, "2.0");
+    return parsed;
+  });
+}
+
 test("parseTtlSeconds parses and rounds valid numeric values", () => {
   assert.equal(parseTtlSeconds("30"), 30_000);
   assert.equal(parseTtlSeconds("0"), 0);
@@ -501,6 +514,87 @@ test("queued prompt failures emit exactly one JSON error event", async () => {
         (errors[0]?.error as { data?: { sessionId?: unknown } } | undefined)?.data
           ?.sessionId,
         "unknown",
+      );
+    } finally {
+      if (blocker.exitCode === null && blocker.signalCode == null) {
+        blocker.kill("SIGKILL");
+        await new Promise<void>((resolve) => {
+          blocker.once("close", () => resolve());
+        });
+      }
+    }
+  });
+});
+
+test("json-strict queued prompt failure emits JSON-RPC lines only", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_COMMAND,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const session = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "sessions", "new"],
+      homeDir,
+    );
+    assert.equal(session.code, 0, session.stderr);
+
+    const blocker = spawn(
+      process.execPath,
+      [CLI_PATH, "--cwd", cwd, "codex", "prompt", "sleep 1500"],
+      {
+        env: { ...process.env, HOME: homeDir },
+        stdio: ["ignore", "ignore", "ignore"],
+      },
+    );
+
+    try {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 200);
+      });
+
+      const writeResult = await runCli(
+        [
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "--json-strict",
+          "--non-interactive-permissions",
+          "fail",
+          "codex",
+          "prompt",
+          `write ${path.join(cwd, "x.txt")} hi`,
+        ],
+        homeDir,
+      );
+
+      assert.equal(writeResult.code, 5, writeResult.stderr);
+      assert.equal(writeResult.stderr.trim(), "");
+
+      const events = parseJsonRpcLines(writeResult.stdout);
+      assert.equal(
+        events.some(
+          (event) =>
+            typeof event.error === "object" &&
+            event.error !== null &&
+            typeof (event.error as { code?: unknown }).code === "number",
+        ),
+        true,
       );
     } finally {
       if (blocker.exitCode === null && blocker.signalCode == null) {
