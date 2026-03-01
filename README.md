@@ -10,7 +10,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/node/v/acpx.svg)](https://nodejs.org)
 
-> Alpha notice: `acpx` is in alpha and the CLI/runtime interfaces are likely to change.
+> ⚠️ `acpx` is in alpha and the CLI/runtime interfaces are likely to change. Anything you build downstream of this might break until it stabilizes.
+
 > ACP coverage status: see [ACP Spec Coverage Roadmap](docs/2026-02-19-acp-coverage-roadmap.md).
 
 Your agents love acpx! 🤖❤️ They hate having to scrape characters from a PTY session 😤
