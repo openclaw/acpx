@@ -34,6 +34,7 @@ import {
   AuthPolicyError,
   PermissionPromptUnavailableError,
 } from "./errors.js";
+import { isSessionUpdateNotification } from "./acp-jsonrpc.js";
 import { FileSystemHandlers } from "./filesystem.js";
 import { classifyPermissionDecision, resolvePermissionRequest } from "./permissions.js";
 import { extractRuntimeSessionId } from "./runtime-session-id.js";
@@ -283,6 +284,7 @@ export class AcpClient {
   private observedSessionUpdates = 0;
   private processedSessionUpdates = 0;
   private suppressSessionUpdates = false;
+  private suppressReplaySessionUpdateMessages = false;
   private activePrompt?: {
     sessionId: string;
     promise: Promise<PromptResponse>;
@@ -492,10 +494,17 @@ export class AcpClient {
     writable: WritableStream<AnyMessage>;
   } {
     const onAcpMessage = this.options.onAcpMessage;
+    const onAcpOutputMessage = this.options.onAcpOutputMessage;
 
-    if (!onAcpMessage) {
+    if (!onAcpMessage && !onAcpOutputMessage) {
       return base;
     }
+
+    const shouldSuppressInboundReplaySessionUpdate = (message: AnyMessage): boolean => {
+      return (
+        this.suppressReplaySessionUpdateMessages && isSessionUpdateNotification(message)
+      );
+    };
 
     const readable = new ReadableStream<AnyMessage>({
       async start(controller) {
@@ -509,7 +518,10 @@ export class AcpClient {
             if (!value) {
               continue;
             }
-            onAcpMessage("inbound", value);
+            if (!shouldSuppressInboundReplaySessionUpdate(value)) {
+              onAcpOutputMessage?.("inbound", value);
+              onAcpMessage?.("inbound", value);
+            }
             controller.enqueue(value);
           }
         } finally {
@@ -521,7 +533,8 @@ export class AcpClient {
 
     const writable = new WritableStream<AnyMessage>({
       async write(message) {
-        onAcpMessage("outbound", message);
+        onAcpOutputMessage?.("outbound", message);
+        onAcpMessage?.("outbound", message);
         const writer = base.writable.getWriter();
         try {
           await writer.write(message);
@@ -561,8 +574,11 @@ export class AcpClient {
   ): Promise<SessionLoadResult> {
     const connection = this.getConnection();
     const previousSuppression = this.suppressSessionUpdates;
+    const previousReplaySuppression = this.suppressReplaySessionUpdateMessages;
     this.suppressSessionUpdates =
       previousSuppression || Boolean(options.suppressReplayUpdates);
+    this.suppressReplaySessionUpdateMessages =
+      previousReplaySuppression || Boolean(options.suppressReplayUpdates);
 
     let response: LoadSessionResponse | undefined;
 
@@ -579,6 +595,7 @@ export class AcpClient {
       );
     } finally {
       this.suppressSessionUpdates = previousSuppression;
+      this.suppressReplaySessionUpdateMessages = previousReplaySuppression;
     }
 
     return {
@@ -730,6 +747,7 @@ export class AcpClient {
     this.observedSessionUpdates = 0;
     this.processedSessionUpdates = 0;
     this.suppressSessionUpdates = false;
+    this.suppressReplaySessionUpdateMessages = false;
     this.activePrompt = undefined;
     this.cancellingSessionIds.clear();
     this.promptPermissionFailures.clear();
