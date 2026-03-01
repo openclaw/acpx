@@ -346,6 +346,16 @@ test("integration: prompt reuses warm queue owner pid across turns", async () =>
         pid?: number;
       };
       assert.equal(lockTwo.pid, lockOne.pid);
+
+      const closed = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "close"],
+        homeDir,
+      );
+      assert.equal(closed.code, 0, closed.stderr);
+      if (typeof lockTwo.pid !== "number") {
+        throw new Error("queue owner lock missing pid");
+      }
+      assert.equal(await waitForPidExit(lockTwo.pid, 5_000), true);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -438,6 +448,22 @@ test("integration: prompt recovers when loadSession fails on empty session", asy
         ),
         true,
       );
+
+      const closed = await runCli(
+        [
+          "--agent",
+          flakyLoadAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "sessions",
+          "close",
+        ],
+        homeDir,
+      );
+      assert.equal(closed.code, 0, closed.stderr);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -447,6 +473,7 @@ test("integration: prompt recovers when loadSession fails on empty session", asy
 test("integration: cancel yields cancelled stopReason without queue error", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    let sessionId: string | undefined;
 
     try {
       const created = await runCli(
@@ -454,6 +481,11 @@ test("integration: cancel yields cancelled stopReason without queue error", asyn
         homeDir,
       );
       assert.equal(created.code, 0, created.stderr);
+      const createdPayload = JSON.parse(created.stdout.trim()) as {
+        acpxRecordId?: string;
+      };
+      sessionId = createdPayload.acpxRecordId;
+      assert.equal(typeof sessionId, "string");
 
       const promptChild = spawn(
         process.execPath,
@@ -510,6 +542,18 @@ test("integration: cancel yields cancelled stopReason without queue error", asyn
         );
       } finally {
         await stopChildProcess(promptChild, 5_000, "prompt");
+        if (sessionId) {
+          const lock = await readQueueOwnerLock(homeDir, sessionId).catch(
+            () => undefined,
+          );
+          await runCli(
+            [...baseAgentArgs(cwd), "--format", "json", "sessions", "close"],
+            homeDir,
+          );
+          if (lock) {
+            await waitForPidExit(lock.pid, 5_000);
+          }
+        }
       }
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
