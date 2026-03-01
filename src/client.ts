@@ -113,73 +113,6 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
-/**
- * Normalize non-standard ACP output from agents like kiro-cli.
- * kiro emits bare `{"content":"...","type":"text"}` lines instead of
- * proper `session/update` JSON-RPC notifications. This transform wraps
- * them into the standard ACP envelope so the SDK can parse them.
- * Applied to all agents — harmless for compliant agents since the
- * bare-content pattern never appears in standard ACP output.
- */
-function normalizeAgentOutput(
-  output: ReadableStream<Uint8Array>,
-): ReadableStream<Uint8Array> {
-  let sessionId = "";
-  let buf = "";
-  const enc = new TextEncoder();
-  const dec = new TextDecoder();
-
-  return output.pipeThrough(
-    new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, controller) {
-        buf += dec.decode(chunk, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop() ?? "";
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          try {
-            const msg = JSON.parse(trimmed) as Record<string, unknown>;
-            // Capture sessionId from session/new or session/load responses
-            const sid = (msg["result"] as Record<string, unknown> | undefined)?.[
-              "sessionId"
-            ];
-            if (typeof sid === "string") sessionId = sid;
-            // Detect kiro's bare content line: {"content":"...","type":"text"}
-            if (
-              typeof msg["content"] === "string" &&
-              typeof msg["type"] === "string" &&
-              !("jsonrpc" in msg) &&
-              !("method" in msg) &&
-              !("id" in msg)
-            ) {
-              const wrapped = JSON.stringify({
-                jsonrpc: "2.0",
-                method: "session/update",
-                params: {
-                  sessionId,
-                  update: {
-                    sessionUpdate: "agent_message_chunk",
-                    content: { type: "text", text: msg["content"] },
-                  },
-                },
-              });
-              controller.enqueue(enc.encode(wrapped + "\n"));
-              continue;
-            }
-          } catch {
-            // not JSON, pass through
-          }
-          controller.enqueue(enc.encode(line + "\n"));
-        }
-      },
-      flush(controller) {
-        if (buf.trim()) controller.enqueue(enc.encode(buf + "\n"));
-      },
-    }),
-  );
-}
-
 function waitForSpawn(child: ChildProcess): Promise<void> {
   return new Promise((resolve, reject) => {
     const onSpawn = () => {
@@ -491,8 +424,7 @@ export class AcpClient {
     });
 
     const input = Writable.toWeb(child.stdin);
-    const rawOutput = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
-    const output = normalizeAgentOutput(rawOutput);
+    const output = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
     const stream = this.createTappedStream(ndJsonStream(input, output));
 
     const connection = new ClientSideConnection(
