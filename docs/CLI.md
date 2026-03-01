@@ -42,7 +42,7 @@ acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--n
 
 `<agent>` can be:
 
-- built-in friendly name: `codex`, `claude`, `gemini`, `opencode`, `pi`
+- built-in friendly name: `codex`, `claude`, `gemini`, `opencode`, `pi`, `kiro`
 - unknown token (treated as raw command)
 - overridden by `--agent <command>` escape hatch
 

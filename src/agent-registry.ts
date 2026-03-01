@@ -4,6 +4,7 @@ export const AGENT_REGISTRY: Record<string, string> = {
   gemini: "gemini",
   opencode: "npx -y opencode-ai acp",
   pi: "npx pi-acp",
+  kiro: "kiro-cli acp",
 };
 
 export const DEFAULT_AGENT_NAME = "codex";
