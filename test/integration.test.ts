@@ -437,9 +437,11 @@ test("integration: load replay session/update notifications are suppressed from 
       assert.equal(prompt.code, 0, prompt.stderr);
 
       const outputMessages = parseJsonRpcOutputLines(prompt.stdout);
-      const outputChunkTexts = new Set(outputMessages
-        .map((message) => extractAgentMessageChunkText(message))
-        .filter((text): text is string => typeof text === "string"));
+      const outputChunkTexts = new Set(
+        outputMessages
+          .map((message) => extractAgentMessageChunkText(message))
+          .filter((text): text is string => typeof text === "string"),
+      );
 
       assert.equal(outputChunkTexts.has(replayText), false, prompt.stdout);
       assert.equal(outputChunkTexts.has(freshText), true, prompt.stdout);
@@ -480,9 +482,11 @@ test("integration: load replay session/update notifications are suppressed from 
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
         .map((line) => JSON.parse(line) as Record<string, unknown>);
-      const eventChunkTexts = new Set(eventMessages
-        .map((message) => extractAgentMessageChunkText(message))
-        .filter((text): text is string => typeof text === "string"));
+      const eventChunkTexts = new Set(
+        eventMessages
+          .map((message) => extractAgentMessageChunkText(message))
+          .filter((text): text is string => typeof text === "string"),
+      );
 
       assert.equal(eventChunkTexts.has(replayText), false, eventLog);
       assert.equal(eventChunkTexts.has(freshText), true, eventLog);
