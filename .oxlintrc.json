@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "categories": {
+    "correctness": "error",
+    "perf": "error",
+    "suspicious": "error"
+  },
+  "rules": {
+    "eslint/no-await-in-loop": "off",
+    "eslint/no-new": "off",
+    "eslint/no-shadow": "off",
+    "eslint/no-unmodified-loop-condition": "off",
+    "oxc/no-map-spread": "off",
+    "typescript/no-floating-promises": "off",
+    "typescript/no-unsafe-type-assertion": "off",
+    "typescript/restrict-template-expressions": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/no-useless-spread": "off"
+  },
+  "ignorePatterns": ["dist/", "dist-test/", "node_modules/", "*.tgz"]
+}

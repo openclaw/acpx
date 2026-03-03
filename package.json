@@ -26,7 +26,11 @@
     "format:check": "prettier --check .",
     "release": "release-it",
     "release:ci": "release-it --ci",
-    "lint:persisted-key-casing": "tsx scripts/lint-persisted-key-casing.ts"
+    "lint:persisted-key-casing": "tsx scripts/lint-persisted-key-casing.ts",
+    "lint:ox": "oxlint --type-aware src",
+    "lint:ox:fix": "oxlint --type-aware --fix src",
+    "format:ox": "oxfmt --write .",
+    "format:ox:check": "oxfmt --check ."
   },
   "keywords": [
     "acp",
@@ -58,6 +62,9 @@
     "globals": "^17.3.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
+    "oxfmt": "^0.36.0",
+    "oxlint": "^1.51.0",
+    "oxlint-tsgolint": "^0.15.0",
     "prettier": "^3.8.1",
     "release-it": "^19.2.4",
     "tsup": "^8.0.0",
