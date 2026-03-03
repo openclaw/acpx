@@ -194,6 +194,7 @@ type RunSessionPromptOptions = {
   onClientAvailable?: (controller: ActiveSessionController) => void;
   onClientClosed?: () => void;
   onPromptActive?: () => Promise<void> | void;
+  onAgentPid?: (pid: number) => void;
 };
 
 type ActiveSessionController = QueueOwnerActiveSessionController;
@@ -284,6 +285,7 @@ async function runQueuedTask(
     onClientAvailable?: (controller: ActiveSessionController) => void;
     onClientClosed?: () => void;
     onPromptActive?: () => Promise<void> | void;
+    onAgentPid?: (pid: number) => void;
   },
 ): Promise<void> {
   const outputFormatter = task.waitForCompletion
@@ -306,6 +308,7 @@ async function runQueuedTask(
       onClientAvailable: options.onClientAvailable,
       onClientClosed: options.onClientClosed,
       onPromptActive: options.onPromptActive,
+      onAgentPid: options.onAgentPid,
     });
 
     if (task.waitForCompletion) {
@@ -432,6 +435,9 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
           },
           onConnectedRecord: (connectedRecord) => {
             connectedRecord.lastPromptAt = isoNow();
+            if (connectedRecord.pid != null) {
+              options.onAgentPid?.(connectedRecord.pid);
+            }
           },
           onSessionIdResolved: (sessionId) => {
             activeSessionIdForControl = sessionId;
@@ -719,6 +725,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
   }
 
   let owner: SessionQueueOwner | undefined;
+  let lastAgentPid: number | undefined;
   const ttlMs = normalizeQueueOwnerTtlMs(options.ttlMs);
   const taskPollTimeoutMs = ttlMs === 0 ? undefined : ttlMs;
   const initialTaskPollTimeoutMs =
@@ -823,13 +830,23 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
           authCredentials: options.authCredentials,
           authPolicy: options.authPolicy,
           suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
-          onClientAvailable: setActiveController,
+          onClientAvailable: (controller) => {
+            setActiveController(controller);
+          },
           onClientClosed: clearActiveController,
           onPromptActive: async () => {
             turnController.markPromptActive();
             await applyPendingCancel();
           },
+          onAgentPid: (pid) => {
+            lastAgentPid = pid;
+          },
         });
+        // Track the agent pid after each task so we can kill it when the queue owner exits
+        const record = await resolveSessionRecord(options.sessionId).catch(() => null);
+        if (record?.pid != null) {
+          lastAgentPid = record.pid;
+        }
       });
     }
   } finally {
@@ -838,6 +855,15 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
       await owner.close();
     }
     await releaseQueueOwnerLease(lease);
+    // Kill the agent process if it is still alive (e.g. kiro-cli which does not self-exit)
+    if (lastAgentPid != null && isProcessAlive(lastAgentPid)) {
+      await terminateProcess(lastAgentPid).catch(() => {});
+      if (options.verbose) {
+        process.stderr.write(
+          `[acpx] killed agent pid ${lastAgentPid} on queue owner exit for session ${options.sessionId}\n`,
+        );
+      }
+    }
     if (options.verbose) {
       process.stderr.write(`[acpx] queue owner stopped for session ${options.sessionId}\n`);
     }

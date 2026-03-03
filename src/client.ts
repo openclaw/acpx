@@ -403,6 +403,7 @@ export class AcpClient {
       cwd: this.options.cwd,
       env: buildAgentEnvironment(this.options.authCredentials),
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
 
     try {
@@ -776,9 +777,20 @@ export class AcpClient {
     let exited = await waitForChildExit(child, AGENT_CLOSE_AFTER_STDIN_END_MS);
     if (!exited && isChildProcessRunning(child)) {
       try {
-        child.kill("SIGTERM");
+        // Kill the entire process group (negative pgid) to ensure child processes
+        // spawned by wrapper agents (e.g. kiro-cli → kiro-cli-chat) are also terminated.
+        // Falls back to child.kill() if process group kill is not supported.
+        if (child.pid != null) {
+          process.kill(-child.pid, "SIGTERM");
+        } else {
+          child.kill("SIGTERM");
+        }
       } catch {
-        // best effort
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          // best effort
+        }
       }
       exited = await waitForChildExit(child, AGENT_CLOSE_TERM_GRACE_MS);
     }
@@ -786,9 +798,17 @@ export class AcpClient {
     if (!exited && isChildProcessRunning(child)) {
       this.log(`agent did not exit after ${AGENT_CLOSE_TERM_GRACE_MS}ms; forcing SIGKILL`);
       try {
-        child.kill("SIGKILL");
+        if (child.pid != null) {
+          process.kill(-child.pid, "SIGKILL");
+        } else {
+          child.kill("SIGKILL");
+        }
       } catch {
-        // best effort
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // best effort
+        }
       }
       exited = await waitForChildExit(child, AGENT_CLOSE_KILL_GRACE_MS);
     }
