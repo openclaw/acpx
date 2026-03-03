@@ -20,6 +20,6 @@
     "autoGenerate": true
   },
   "hooks": {
-    "before:init": "npm run lint && npm run typecheck && npm test"
+    "before:init": "pnpm run lint && pnpm run typecheck && pnpm test"
   }
 }

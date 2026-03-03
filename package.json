@@ -28,22 +28,28 @@
   ],
   "type": "module",
   "scripts": {
-    "build": "tsdown src/cli.ts --format esm --dts --clean --platform node --target node18 --no-fixedExtension",
+    "build": "tsdown src/cli.ts --format esm --dts --clean --platform node --target node22 --no-fixedExtension",
     "build:test": "node -e \"require('node:fs').rmSync('dist-test',{recursive:true,force:true})\" && tsc -p tsconfig.test.json",
+    "check": "pnpm run format:check && pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test",
+    "check:docs": "pnpm run format:docs:check && pnpm run lint:docs",
     "dev": "tsx src/cli.ts",
     "format": "oxfmt --write",
     "format:check": "oxfmt --check",
     "format:diff": "oxfmt --write && git --no-pager diff",
-    "lint": "oxlint --type-aware src && npm run lint:persisted-key-casing",
-    "lint:fix": "oxlint --type-aware --fix src && npm run format",
+    "format:docs": "git ls-files 'docs/**/*.md' 'README.md' | xargs oxfmt --write",
+    "format:docs:check": "git ls-files 'docs/**/*.md' 'README.md' | xargs oxfmt --check",
+    "lint": "oxlint --type-aware src && pnpm run lint:persisted-key-casing",
+    "lint:docs": "markdownlint-cli2 README.md docs/**/*.md",
+    "lint:fix": "oxlint --type-aware --fix src && pnpm run format",
     "lint:persisted-key-casing": "tsx scripts/lint-persisted-key-casing.ts",
-    "precommit": "npm exec -- lint-staged && npm run -s build",
-    "prepack": "npm run build",
+    "precommit": "pnpm exec lint-staged && pnpm run -s build",
+    "prepack": "pnpm run build",
     "prepare": "husky",
     "release": "release-it",
     "release:ci": "release-it --ci",
-    "test": "npm run build:test && node --test dist-test/test/*.test.js",
-    "typecheck": "tsc --noEmit"
+    "test": "pnpm run build:test && node --test dist-test/test/*.test.js",
+    "typecheck": "tsgo --noEmit",
+    "typecheck:tsc": "tsc --noEmit"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",
@@ -52,8 +58,10 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@typescript/native-preview": "7.0.0-dev.20260301.1",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
+    "markdownlint-cli2": "^0.21.0",
     "oxfmt": "^0.36.0",
     "oxlint": "^1.51.0",
     "oxlint-tsgolint": "^0.15.0",
@@ -72,6 +80,7 @@
     ]
   },
   "engines": {
-    "node": ">=18"
-  }
+    "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@10.23.0"
 }

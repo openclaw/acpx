@@ -355,7 +355,7 @@ export function toConfigDisplay(config: ResolvedAcpxConfig): {
     timeout: config.timeoutMs == null ? null : config.timeoutMs / 1_000,
     format: config.format,
     agents,
-    authMethods: Object.keys(config.auth).sort(),
+    authMethods: Object.keys(config.auth).toSorted(),
   };
 }
 

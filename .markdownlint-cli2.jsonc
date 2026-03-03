@@ -1,0 +1,12 @@
+{
+  // Keep docs checks useful without forcing a full historical docs rewrite.
+  "config": {
+    "MD013": false,
+    "MD025": false,
+    "MD028": false,
+    "MD029": false,
+    "MD033": false,
+    "MD034": false,
+    "MD041": false,
+  },
+}

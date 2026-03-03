@@ -20,7 +20,6 @@
     "typescript/no-extraneous-class": "off",
     "typescript/no-unsafe-type-assertion": "off",
     "unicorn/consistent-function-scoping": "off",
-    "unicorn/no-array-sort": "off",
     "unicorn/require-post-message-target-origin": "off"
   },
   "ignorePatterns": ["dist/", "dist-test/", "node_modules/", "*.tgz"]
