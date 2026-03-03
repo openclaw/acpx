@@ -35,10 +35,7 @@ async function statSize(filePath: string): Promise<number> {
   }
 }
 
-async function countExistingSegments(
-  sessionId: string,
-  maxSegments: number,
-): Promise<number> {
+async function countExistingSegments(sessionId: string, maxSegments: number): Promise<number> {
   let count = 0;
 
   for (let segment = 1; segment <= maxSegments; segment += 1) {
@@ -173,9 +170,7 @@ export class SessionEventWriter {
         record.eventLog.max_segment_bytes ??
         DEFAULT_EVENT_SEGMENT_MAX_BYTES,
       maxSegments:
-        options.maxSegments ??
-        record.eventLog.max_segments ??
-        DEFAULT_EVENT_MAX_SEGMENTS,
+        options.maxSegments ?? record.eventLog.max_segments ?? DEFAULT_EVENT_MAX_SEGMENTS,
     });
   }
 
@@ -183,17 +178,11 @@ export class SessionEventWriter {
     return this.record;
   }
 
-  async appendMessage(
-    message: AcpJsonRpcMessage,
-    options: AppendOptions = {},
-  ): Promise<void> {
+  async appendMessage(message: AcpJsonRpcMessage, options: AppendOptions = {}): Promise<void> {
     await this.appendMessages([message], options);
   }
 
-  async appendMessages(
-    messages: AcpJsonRpcMessage[],
-    options: AppendOptions = {},
-  ): Promise<void> {
+  async appendMessages(messages: AcpJsonRpcMessage[], options: AppendOptions = {}): Promise<void> {
     if (this.closed) {
       throw new Error("SessionEventWriter is closed");
     }
@@ -231,10 +220,7 @@ export class SessionEventWriter {
       this.record.lastUsedAt = writeTs;
       this.record.eventLog = {
         active_path: activePath,
-        segment_count: await countExistingSegments(
-          this.record.acpxRecordId,
-          this.maxSegments,
-        ),
+        segment_count: await countExistingSegments(this.record.acpxRecordId, this.maxSegments),
         max_segment_bytes: this.maxSegmentBytes,
         max_segments: this.maxSegments,
         last_write_at: writeTs,
@@ -270,9 +256,7 @@ export class SessionEventWriter {
   }
 }
 
-export async function listSessionEvents(
-  sessionId: string,
-): Promise<AcpJsonRpcMessage[]> {
+export async function listSessionEvents(sessionId: string): Promise<AcpJsonRpcMessage[]> {
   const maxSegments = await resolveSessionMaxSegments(sessionId);
   const files: string[] = [];
 

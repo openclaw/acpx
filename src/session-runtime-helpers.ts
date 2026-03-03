@@ -12,10 +12,7 @@ export class InterruptedError extends Error {
   }
 }
 
-export async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs?: number,
-): Promise<T> {
+export async function withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
   if (timeoutMs == null || timeoutMs <= 0) {
     return await promise;
   }

@@ -32,10 +32,7 @@ export function emitJsonResult(format: OutputFormat, payload: unknown): boolean 
   return true;
 }
 
-export function printSessionsByFormat(
-  sessions: SessionRecord[],
-  format: OutputFormat,
-): void {
+export function printSessionsByFormat(sessions: SessionRecord[], format: OutputFormat): void {
   if (format === "json") {
     process.stdout.write(`${JSON.stringify(sessions)}\n`);
     return;
@@ -62,10 +59,7 @@ export function printSessionsByFormat(
   }
 }
 
-export function printClosedSessionByFormat(
-  record: SessionRecord,
-  format: OutputFormat,
-): void {
+export function printClosedSessionByFormat(record: SessionRecord, format: OutputFormat): void {
   if (
     emitJsonResult(format, {
       action: "session_closed",
@@ -109,9 +103,7 @@ export function printNewSessionByFormat(
   }
 
   if (replaced) {
-    process.stdout.write(
-      `${record.acpxRecordId}\t(replaced ${replaced.acpxRecordId})\n`,
-    );
+    process.stdout.write(`${record.acpxRecordId}\t(replaced ${replaced.acpxRecordId})\n`);
     return;
   }
 
@@ -201,9 +193,7 @@ export async function printPromptSessionBanner(
   }
 
   const status = await resolveSessionConnectionStatus(record);
-  process.stderr.write(
-    `${formatPromptSessionBannerLine(record, currentCwd, status)}\n`,
-  );
+  process.stderr.write(`${formatPromptSessionBannerLine(record, currentCwd, status)}\n`);
 }
 
 export function printCreatedSessionBanner(

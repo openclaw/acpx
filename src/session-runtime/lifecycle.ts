@@ -41,10 +41,7 @@ export function sessionHasAgentMessages(record: SessionRecord): boolean {
   );
 }
 
-export function applyConversation(
-  record: SessionRecord,
-  conversation: SessionConversation,
-): void {
+export function applyConversation(record: SessionRecord, conversation: SessionConversation): void {
   record.title = conversation.title;
   record.messages = conversation.messages;
   record.updated_at = conversation.updated_at;

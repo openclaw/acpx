@@ -18,10 +18,7 @@ export function sessionEventActivePath(sessionId: string): string {
 }
 
 export function sessionEventSegmentPath(sessionId: string, segment: number): string {
-  return path.join(
-    sessionBaseDir(),
-    `${safeSessionId(sessionId)}.stream.${segment}.ndjson`,
-  );
+  return path.join(sessionBaseDir(), `${safeSessionId(sessionId)}.stream.${segment}.ndjson`);
 }
 
 export function sessionEventLockPath(sessionId: string): string {

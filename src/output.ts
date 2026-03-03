@@ -168,7 +168,7 @@ function dedupeStrings(values: string[]): string[] {
 }
 
 function safeJson(value: unknown, spacing: number): string | undefined {
-  const seen = new WeakSet<object>();
+  const seen = new WeakSet();
 
   try {
     return JSON.stringify(
@@ -184,10 +184,10 @@ function safeJson(value: unknown, spacing: number): string | undefined {
           return entry.toString();
         }
         if (entry && typeof entry === "object") {
-          if (seen.has(entry as object)) {
+          if (seen.has(entry)) {
             return "[Circular]";
           }
-          seen.add(entry as object);
+          seen.add(entry);
         }
         return entry;
       },
@@ -198,10 +198,7 @@ function safeJson(value: unknown, spacing: number): string | undefined {
   }
 }
 
-function readFirstString(
-  source: Record<string, unknown>,
-  keys: string[],
-): string | undefined {
+function readFirstString(source: Record<string, unknown>, keys: string[]): string | undefined {
   for (const key of keys) {
     const value = source[key];
     if (typeof value === "string" && value.trim()) {
@@ -310,11 +307,7 @@ function formatLocations(
   return `${visible.join(", ")}, +${hidden} more`;
 }
 
-function summarizeDiff(
-  path: string,
-  oldText: string | null | undefined,
-  newText: string,
-): string {
+function summarizeDiff(path: string, oldText: string | null | undefined, newText: string): string {
   const oldLines = oldText ? oldText.split("\n").length : 0;
   const newLines = newText.split("\n").length;
   const delta = newLines - oldLines;
@@ -379,9 +372,7 @@ function summarizeToolContent(
   }
 
   const unique = dedupeStrings(
-    fragments
-      .map((fragment) => fragment.trim())
-      .filter((fragment) => fragment.length > 0),
+    fragments.map((fragment) => fragment.trim()).filter((fragment) => fragment.length > 0),
   );
   if (unique.length === 0) {
     return undefined;
@@ -711,10 +702,7 @@ class TextOutputFormatter implements OutputFormatter {
     return created;
   }
 
-  private mergeToolState(
-    state: ToolRenderState,
-    update: ToolCall | ToolCallUpdate,
-  ): void {
+  private mergeToolState(state: ToolRenderState, update: ToolCall | ToolCallUpdate): void {
     if (typeof update.title === "string" && update.title.trim().length > 0) {
       state.title = update.title;
     }
@@ -774,10 +762,7 @@ class TextOutputFormatter implements OutputFormatter {
     }
   }
 
-  private renderFinalToolState(
-    state: ToolRenderState,
-    status: "completed" | "failed",
-  ): void {
+  private renderFinalToolState(state: ToolRenderState, status: "completed" | "failed"): void {
     this.beginSection("tool");
 
     const title = state.title ?? state.id;
@@ -909,7 +894,8 @@ export function createOutputFormatter(
       return new QuietOutputFormatter(stdout);
     default: {
       const exhaustive: never = format;
-      throw new Error(`Unsupported output format: ${exhaustive}`);
+      void exhaustive;
+      throw new Error("Unsupported output format");
     }
   }
 }

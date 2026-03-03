@@ -128,9 +128,7 @@ function isUserMessage(message: SessionMessage): message is {
   return typeof message === "object" && message !== null && hasOwn(message, "User");
 }
 
-function isAgentMessage(
-  message: SessionMessage,
-): message is { Agent: SessionAgentMessage } {
+function isAgentMessage(message: SessionMessage): message is { Agent: SessionAgentMessage } {
   return typeof message === "object" && message !== null && hasOwn(message, "Agent");
 }
 
@@ -150,10 +148,7 @@ function isAgentToolUseContent(
   return hasOwn(content, "ToolUse");
 }
 
-function updateConversationTimestamp(
-  conversation: SessionConversation,
-  timestamp: string,
-): void {
+function updateConversationTimestamp(conversation: SessionConversation, timestamp: string): void {
   conversation.updated_at = timestamp;
 }
 
@@ -240,7 +235,7 @@ function toToolResultContent(value: unknown): SessionToolResultContent {
     try {
       return { Text: JSON.stringify(value) };
     } catch {
-      return { Text: String(value) };
+      return { Text: "[Unserializable value]" };
     }
   }
 
@@ -255,14 +250,11 @@ function toRawInput(value: unknown): string {
   try {
     return JSON.stringify(value ?? {});
   } catch {
-    return String(value ?? "");
+    return value == null ? "" : "[Unserializable input]";
   }
 }
 
-function ensureToolUseContent(
-  agent: SessionAgentMessage,
-  toolCallId: string,
-): SessionToolUse {
+function ensureToolUseContent(agent: SessionAgentMessage, toolCallId: string): SessionToolUse {
   for (const content of agent.content) {
     if (isAgentToolUseContent(content) && content.ToolUse.id === toolCallId) {
       return content.ToolUse;
@@ -297,17 +289,12 @@ function upsertToolResult(
   agent.tool_results[toolCallId] = next;
 }
 
-function applyToolCallUpdate(
-  agent: SessionAgentMessage,
-  update: ToolCall | ToolCallUpdate,
-): void {
+function applyToolCallUpdate(agent: SessionAgentMessage, update: ToolCall | ToolCallUpdate): void {
   const tool = ensureToolUseContent(agent, update.toolCallId);
 
   if (hasOwn(update, "title")) {
     tool.name =
-      normalizeAgentName((update as { title?: unknown }).title) ??
-      tool.name ??
-      "tool_call";
+      normalizeAgentName((update as { title?: unknown }).title) ?? tool.name ?? "tool_call";
   }
 
   if (hasOwn(update, "kind")) {
@@ -324,9 +311,7 @@ function applyToolCallUpdate(
   }
 
   if (hasOwn(update, "status")) {
-    tool.is_input_complete = statusIndicatesComplete(
-      (update as { status?: unknown }).status,
-    );
+    tool.is_input_complete = statusIndicatesComplete((update as { status?: unknown }).status);
   }
 
   if (
@@ -356,10 +341,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
-function numberField(
-  source: Record<string, unknown>,
-  keys: readonly string[],
-): number | undefined {
+function numberField(source: Record<string, unknown>, keys: readonly string[]): number | undefined {
   for (const key of keys) {
     const value = source[key];
     if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
@@ -453,9 +435,7 @@ export function cloneSessionAcpxState(
 
   return {
     current_mode_id: state.current_mode_id,
-    available_commands: state.available_commands
-      ? [...state.available_commands]
-      : undefined,
+    available_commands: state.available_commands ? [...state.available_commands] : undefined,
     config_options: state.config_options ? deepClone(state.config_options) : undefined,
   };
 }
@@ -486,10 +466,7 @@ export function appendLegacyHistory(
       });
     }
 
-    updateConversationTimestamp(
-      conversation,
-      entry.timestamp || conversation.updated_at,
-    );
+    updateConversationTimestamp(conversation, entry.timestamp || conversation.updated_at);
   }
 }
 

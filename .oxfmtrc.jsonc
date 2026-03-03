@@ -1,6 +1,12 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "experimentalSortImports": {
+    "newlinesBetween": false,
+  },
+  "experimentalSortPackageJson": {
+    "sortScripts": true,
+  },
   "tabWidth": 2,
   "useTabs": false,
-  "ignorePatterns": ["dist/", "dist-test/", "node_modules/"],
+  "ignorePatterns": ["dist/", "dist-test/", "node_modules/", "package-lock.json", "*.tgz"],
 }

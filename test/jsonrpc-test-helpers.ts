@@ -7,9 +7,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
-export function parseJsonRpcOutputLines(
-  stdout: string,
-): Array<Record<string, unknown>> {
+export function parseJsonRpcOutputLines(stdout: string): Array<Record<string, unknown>> {
   const lines = stdout
     .split("\n")
     .map((line) => line.trim())
@@ -22,9 +20,7 @@ export function parseJsonRpcOutputLines(
   });
 }
 
-export function extractAgentMessageChunkText(
-  message: Record<string, unknown>,
-): string | undefined {
+export function extractAgentMessageChunkText(message: Record<string, unknown>): string | undefined {
   if (message.method !== "session/update") {
     return undefined;
   }
@@ -43,9 +39,7 @@ export function extractAgentMessageChunkText(
   return content.text;
 }
 
-export function extractJsonRpcId(
-  message: Record<string, unknown>,
-): string | number | undefined {
+export function extractJsonRpcId(message: Record<string, unknown>): string | number | undefined {
   if (typeof message.id === "string" || typeof message.id === "number") {
     return message.id;
   }

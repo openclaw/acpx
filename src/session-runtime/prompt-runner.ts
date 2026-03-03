@@ -1,11 +1,12 @@
 import { AcpClient } from "../client.js";
-import { withInterrupt, withTimeout } from "../session-runtime-helpers.js";
+import type { QueueOwnerActiveSessionController } from "../queue-owner-turn-controller.js";
 import {
   absolutePath,
   isoNow,
   resolveSessionRecord,
   writeSessionRecord,
 } from "../session-persistence.js";
+import { withInterrupt, withTimeout } from "../session-runtime-helpers.js";
 import type {
   AuthPolicy,
   NonInteractivePermissionPolicy,
@@ -14,7 +15,6 @@ import type {
   SessionSetConfigOptionResult,
   SessionSetModeResult,
 } from "../types.js";
-import type { QueueOwnerActiveSessionController } from "../queue-owner-turn-controller.js";
 import { connectAndLoadSession } from "./connect-load.js";
 import { applyLifecycleSnapshotToRecord } from "./lifecycle.js";
 
@@ -62,11 +62,7 @@ async function withConnectedSession<T>(
       await client.setSessionMode(activeSessionIdForControl, modeId);
     },
     setSessionConfigOption: async (configId: string, value: string) => {
-      return await client.setSessionConfigOption(
-        activeSessionIdForControl,
-        configId,
-        value,
-      );
+      return await client.setSessionConfigOption(activeSessionIdForControl, configId, value);
     },
   };
 
@@ -170,10 +166,7 @@ export async function runSessionSetModeDirect(
     onClientAvailable: options.onClientAvailable,
     onClientClosed: options.onClientClosed,
     run: async (client, sessionId) => {
-      await withTimeout(
-        client.setSessionMode(sessionId, options.modeId),
-        options.timeoutMs,
-      );
+      await withTimeout(client.setSessionMode(sessionId, options.modeId), options.timeoutMs);
     },
   });
 

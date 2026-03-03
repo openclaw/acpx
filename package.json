@@ -2,53 +2,48 @@
   "name": "acpx",
   "version": "0.1.3",
   "description": "Headless CLI client for the Agent Client Protocol (ACP) — talk to coding agents from the command line",
-  "type": "module",
+  "keywords": [
+    "acp",
+    "agent-client-protocol",
+    "ai",
+    "claude-code",
+    "cli",
+    "codex",
+    "coding-agent"
+  ],
+  "license": "MIT",
+  "author": "OpenClaw Team <dev@openclaw.ai>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openclaw/acpx"
+  },
+  "bin": {
+    "acpx": "dist/cli.js"
+  },
   "files": [
     "dist",
     "skills",
     "README.md",
     "LICENSE"
   ],
-  "bin": {
-    "acpx": "dist/cli.js"
-  },
+  "type": "module",
   "scripts": {
     "build": "tsup src/cli.ts --format esm --dts --clean",
     "build:test": "node -e \"require('node:fs').rmSync('dist-test',{recursive:true,force:true})\" && tsc -p tsconfig.test.json",
-    "test": "npm run build:test && node --test dist-test/test/*.test.js",
-    "prepare": "husky",
+    "dev": "tsx src/cli.ts",
+    "format": "oxfmt --write",
+    "format:check": "oxfmt --check",
+    "format:diff": "oxfmt --write && git --no-pager diff",
+    "lint": "oxlint --type-aware src && npm run lint:persisted-key-casing",
+    "lint:fix": "oxlint --type-aware --fix src && npm run format",
+    "lint:persisted-key-casing": "tsx scripts/lint-persisted-key-casing.ts",
     "precommit": "npm exec -- lint-staged && npm run -s build",
     "prepack": "npm run build",
-    "dev": "tsx src/cli.ts",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src --max-warnings=0 && npm run lint:persisted-key-casing",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "prepare": "husky",
     "release": "release-it",
     "release:ci": "release-it --ci",
-    "lint:persisted-key-casing": "tsx scripts/lint-persisted-key-casing.ts",
-    "lint:ox": "oxlint --type-aware src",
-    "lint:ox:fix": "oxlint --type-aware --fix src",
-    "format:ox": "oxfmt --write .",
-    "format:ox:check": "oxfmt --check ."
-  },
-  "keywords": [
-    "acp",
-    "agent-client-protocol",
-    "cli",
-    "codex",
-    "claude-code",
-    "coding-agent",
-    "ai"
-  ],
-  "author": "OpenClaw Team <dev@openclaw.ai>",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/openclaw/acpx"
-  },
-  "engines": {
-    "node": ">=18"
+    "test": "npm run build:test && node --test dist-test/test/*.test.js",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",
@@ -56,29 +51,27 @@
     "skillflag": "^0.1.4"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
-    "eslint": "^10.0.0",
-    "globals": "^17.3.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
     "oxfmt": "^0.36.0",
     "oxlint": "^1.51.0",
     "oxlint-tsgolint": "^0.15.0",
-    "prettier": "^3.8.1",
     "release-it": "^19.2.4",
     "tsup": "^8.0.0",
     "tsx": "^4.0.0",
-    "typescript": "^5.7.0",
-    "typescript-eslint": "^8.56.0"
+    "typescript": "^5.7.0"
   },
   "lint-staged": {
     "*.{js,ts}": [
-      "prettier --write --ignore-unknown",
-      "eslint --fix"
+      "oxfmt --write",
+      "oxlint --fix"
     ],
     "*.{json,md}": [
-      "prettier --write --ignore-unknown"
+      "oxfmt --write"
     ]
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

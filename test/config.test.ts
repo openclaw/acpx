@@ -104,9 +104,7 @@ test("initGlobalConfigFile creates the config once and then reports existing fil
   });
 });
 
-async function withTempEnv(
-  run: (ctx: { homeDir: string }) => Promise<void>,
-): Promise<void> {
+async function withTempEnv(run: (ctx: { homeDir: string }) => Promise<void>): Promise<void> {
   const originalHome = process.env.HOME;
 
   const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-config-home-"));

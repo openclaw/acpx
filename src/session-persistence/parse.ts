@@ -113,11 +113,7 @@ function isUserContent(raw: unknown): boolean {
 
   if (record.Mention !== undefined) {
     const mention = asRecord(record.Mention);
-    return (
-      !!mention &&
-      typeof mention.uri === "string" &&
-      typeof mention.content === "string"
-    );
+    return !!mention && typeof mention.uri === "string" && typeof mention.content === "string";
   }
 
   if (record.Image !== undefined) {
@@ -240,9 +236,7 @@ function isConversationMessage(raw: unknown): boolean {
   return raw === "Resume" || isUserMessage(raw) || isAgentMessage(raw);
 }
 
-function parseConversationRecord(
-  record: Record<string, unknown>,
-): SessionConversation | undefined {
+function parseConversationRecord(record: Record<string, unknown>): SessionConversation | undefined {
   if (
     !Array.isArray(record.messages) ||
     !record.messages.every(isConversationMessage) ||
@@ -251,11 +245,7 @@ function parseConversationRecord(
     return undefined;
   }
 
-  if (
-    record.title !== undefined &&
-    record.title !== null &&
-    typeof record.title !== "string"
-  ) {
+  if (record.title !== undefined && record.title !== null && typeof record.title !== "string") {
     return undefined;
   }
 
@@ -267,10 +257,8 @@ function parseConversationRecord(
 
   return {
     title:
-      record.title === undefined ||
-      record.title === null ||
-      typeof record.title === "string"
-        ? (record.title as string | null | undefined)
+      record.title === undefined || record.title === null || typeof record.title === "string"
+        ? record.title
         : null,
     messages: record.messages as SessionConversation["messages"],
     updated_at: record.updated_at,
@@ -328,11 +316,10 @@ function parseEventLog(raw: unknown, sessionId: string): SessionEventLog {
     segment_count: record.segment_count,
     max_segment_bytes: record.max_segment_bytes,
     max_segments: record.max_segments,
-    last_write_at:
-      typeof record.last_write_at === "string" ? record.last_write_at : undefined,
+    last_write_at: typeof record.last_write_at === "string" ? record.last_write_at : undefined,
     last_write_error:
       record.last_write_error == null || typeof record.last_write_error === "string"
-        ? (record.last_write_error as string | null | undefined)
+        ? record.last_write_error
         : null,
   };
 }
@@ -389,9 +376,7 @@ function normalizeOptionalExitCode(value: unknown): number | null | undefined | 
   return Symbol("invalid");
 }
 
-function normalizeOptionalSignal(
-  value: unknown,
-): NodeJS.Signals | null | undefined | symbol {
+function normalizeOptionalSignal(value: unknown): NodeJS.Signals | null | undefined | symbol {
   if (value === undefined) {
     return undefined;
   }
@@ -423,9 +408,7 @@ export function parseSessionRecord(raw: unknown): SessionRecord | null {
   const lastAgentExitCode = normalizeOptionalExitCode(record.last_agent_exit_code);
   const lastAgentExitSignal = normalizeOptionalSignal(record.last_agent_exit_signal);
   const lastAgentExitAt = normalizeOptionalString(record.last_agent_exit_at);
-  const lastAgentDisconnectReason = normalizeOptionalString(
-    record.last_agent_disconnect_reason,
-  );
+  const lastAgentDisconnectReason = normalizeOptionalString(record.last_agent_disconnect_reason);
 
   if (
     typeof record.acpx_record_id !== "string" ||
@@ -481,17 +464,12 @@ export function parseSessionRecord(raw: unknown): SessionRecord | null {
     agentStartedAt,
     lastPromptAt,
     lastAgentExitCode,
-    lastAgentExitSignal:
-      lastAgentExitSignal == null
-        ? lastAgentExitSignal
-        : (lastAgentExitSignal as NodeJS.Signals),
+    lastAgentExitSignal: lastAgentExitSignal,
     lastAgentExitAt,
     lastAgentDisconnectReason,
     protocolVersion:
       typeof record.protocol_version === "number" ? record.protocol_version : undefined,
-    agentCapabilities: asRecord(
-      record.agent_capabilities,
-    ) as SessionRecord["agentCapabilities"],
+    agentCapabilities: asRecord(record.agent_capabilities) as SessionRecord["agentCapabilities"],
     title: conversation.title,
     messages: conversation.messages,
     updated_at: conversation.updated_at,

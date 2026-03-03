@@ -30,10 +30,6 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: OXC lint pilot (non-blocking)
-        continue-on-error: true
-        run: npm run lint:ox
-
       - name: Format check
         run: npm run format:check
 

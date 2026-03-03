@@ -6,9 +6,7 @@ export type PermissionPromptOptions = {
   details?: string;
 };
 
-export async function promptForPermission(
-  options: PermissionPromptOptions,
-): Promise<boolean> {
+export async function promptForPermission(options: PermissionPromptOptions): Promise<boolean> {
   if (!process.stdin.isTTY || !process.stderr.isTTY) {
     return false;
   }

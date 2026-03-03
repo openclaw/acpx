@@ -1,18 +1,14 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import type {
   ReadTextFileRequest,
   ReadTextFileResponse,
   WriteTextFileRequest,
   WriteTextFileResponse,
 } from "@agentclientprotocol/sdk";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { PermissionDeniedError, PermissionPromptUnavailableError } from "./errors.js";
 import { promptForPermission } from "./permission-prompt.js";
-import type {
-  ClientOperation,
-  NonInteractivePermissionPolicy,
-  PermissionMode,
-} from "./types.js";
+import type { ClientOperation, NonInteractivePermissionPolicy, PermissionMode } from "./types.js";
 
 const WRITE_PREVIEW_MAX_LINES = 16;
 const WRITE_PREVIEW_MAX_CHARS = 1_200;
@@ -31,9 +27,7 @@ function nowIso(): string {
 
 function isWithinRoot(rootDir: string, targetPath: string): boolean {
   const relative = path.relative(rootDir, targetPath);
-  return (
-    relative.length === 0 || (!relative.startsWith("..") && !path.isAbsolute(relative))
-  );
+  return relative.length === 0 || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function toWritePreview(content: string): string {
@@ -53,10 +47,7 @@ function toWritePreview(content: string): string {
   return preview;
 }
 
-async function defaultConfirmWrite(
-  filePath: string,
-  preview: string,
-): Promise<boolean> {
+async function defaultConfirmWrite(filePath: string, preview: string): Promise<boolean> {
   return await promptForPermission({
     header: `[permission] Allow write to ${filePath}?`,
     details: preview,
@@ -74,10 +65,7 @@ export class FileSystemHandlers {
   private readonly nonInteractivePermissions: NonInteractivePermissionPolicy;
   private readonly onOperation?: (operation: ClientOperation) => void;
   private readonly usesDefaultConfirmWrite: boolean;
-  private readonly confirmWrite: (
-    filePath: string,
-    preview: string,
-  ) => Promise<boolean>;
+  private readonly confirmWrite: (filePath: string, preview: string) => Promise<boolean>;
 
   constructor(options: FileSystemHandlersOptions) {
     this.rootDir = path.resolve(options.cwd);
@@ -101,9 +89,7 @@ export class FileSystemHandlers {
 
     try {
       if (this.permissionMode === "deny-all") {
-        throw new PermissionDeniedError(
-          "Permission denied for fs/read_text_file (--deny-all)",
-        );
+        throw new PermissionDeniedError("Permission denied for fs/read_text_file (--deny-all)");
       }
 
       const content = await fs.readFile(filePath, "utf8");

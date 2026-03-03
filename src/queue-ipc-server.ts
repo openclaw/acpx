@@ -1,5 +1,5 @@
-import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import net from "node:net";
+import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { normalizeOutputError } from "./error-normalization.js";
 import {
   parseQueueRequest,
@@ -124,7 +124,7 @@ export class SessionQueueOwner {
       server.listen(lease.socketPath);
     });
 
-    return ownerRef.current!;
+    return ownerRef.current;
   }
 
   async close(): Promise<void> {
@@ -260,11 +260,7 @@ export class SessionQueueOwner {
       try {
         parsed = JSON.parse(line);
       } catch {
-        fail(
-          "unknown",
-          "Invalid queue request payload",
-          "QUEUE_REQUEST_PAYLOAD_INVALID_JSON",
-        );
+        fail("unknown", "Invalid queue request payload", "QUEUE_REQUEST_PAYLOAD_INVALID_JSON");
         return;
       }
 

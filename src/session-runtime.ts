@@ -10,18 +10,10 @@ import {
   recordPromptSubmission,
   recordSessionUpdate as recordConversationSessionUpdate,
 } from "./session-conversation-model.js";
-import { SessionEventWriter } from "./session-events.js";
 import { defaultSessionEventLog } from "./session-event-log.js";
-import {
-  InterruptedError,
-  withInterrupt,
-  withTimeout,
-} from "./session-runtime-helpers.js";
+import { SessionEventWriter } from "./session-events.js";
+import { InterruptedError, withInterrupt, withTimeout } from "./session-runtime-helpers.js";
 export { InterruptedError, TimeoutError } from "./session-runtime-helpers.js";
-import {
-  QueueOwnerTurnController,
-  type QueueOwnerActiveSessionController,
-} from "./queue-owner-turn-controller.js";
 import {
   type QueueOwnerMessage,
   type QueueTask,
@@ -38,12 +30,13 @@ import {
   trySubmitToRunningOwner,
   waitMs,
 } from "./queue-ipc.js";
+import {
+  QueueOwnerTurnController,
+  type QueueOwnerActiveSessionController,
+} from "./queue-owner-turn-controller.js";
 import { normalizeRuntimeSessionId } from "./runtime-session-id.js";
 import { connectAndLoadSession } from "./session-runtime/connect-load.js";
-import {
-  applyConversation,
-  applyLifecycleSnapshotToRecord,
-} from "./session-runtime/lifecycle.js";
+import { applyConversation, applyLifecycleSnapshotToRecord } from "./session-runtime/lifecycle.js";
 import {
   runSessionSetConfigOptionDirect,
   runSessionSetModeDirect,
@@ -308,8 +301,7 @@ async function runQueuedTask(
       authPolicy: options.authPolicy,
       outputFormatter,
       timeoutMs: task.timeoutMs,
-      suppressSdkConsoleErrors:
-        task.suppressSdkConsoleErrors ?? options.suppressSdkConsoleErrors,
+      suppressSdkConsoleErrors: task.suppressSdkConsoleErrors ?? options.suppressSdkConsoleErrors,
       verbose: options.verbose,
       onClientAvailable: options.onClientAvailable,
       onClientClosed: options.onClientClosed,
@@ -352,9 +344,7 @@ async function runQueuedTask(
   }
 }
 
-async function runSessionPrompt(
-  options: RunSessionPromptOptions,
-): Promise<SessionSendResult> {
+async function runSessionPrompt(options: RunSessionPromptOptions): Promise<SessionSendResult> {
   const output = options.outputFormatter;
   const record = await resolveSessionRecord(options.sessionRecordId);
   const conversation = cloneSessionConversation(record);
@@ -404,11 +394,7 @@ async function runSessionPrompt(
       output.onAcpMessage(message);
     },
     onSessionUpdate: (notification) => {
-      acpxState = recordConversationSessionUpdate(
-        conversation,
-        acpxState,
-        notification,
-      );
+      acpxState = recordConversationSessionUpdate(conversation, acpxState, notification);
     },
     onClientOperation: (operation) => {
       acpxState = recordConversationClientOperation(conversation, acpxState, operation);
@@ -423,11 +409,7 @@ async function runSessionPrompt(
       await client.setSessionMode(activeSessionIdForControl, modeId);
     },
     setSessionConfigOption: async (configId: string, value: string) => {
-      return await client.setSessionConfigOption(
-        activeSessionIdForControl,
-        configId,
-        value,
-      );
+      return await client.setSessionConfigOption(activeSessionIdForControl, configId, value);
     },
   };
 
@@ -470,9 +452,7 @@ async function runSessionPrompt(
             } catch (error) {
               if (options.verbose) {
                 process.stderr.write(
-                  "[acpx] onPromptActive hook failed: " +
-                    formatErrorMessage(error) +
-                    "\n",
+                  "[acpx] onPromptActive hook failed: " + formatErrorMessage(error) + "\n",
                 );
               }
             }
@@ -510,10 +490,8 @@ async function runSessionPrompt(
             // best effort while bubbling prompt failure
           });
 
-          const propagated =
-            error instanceof Error ? error : new Error(formatErrorMessage(error));
-          (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted =
-            sawAcpMessage;
+          const propagated = error instanceof Error ? error : new Error(formatErrorMessage(error));
+          (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted = sawAcpMessage;
           (propagated as { normalizedOutputError?: unknown }).normalizedOutputError =
             normalizedError;
           throw propagated;
@@ -623,9 +601,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
   }
 }
 
-export async function createSession(
-  options: SessionCreateOptions,
-): Promise<SessionRecord> {
+export async function createSession(options: SessionCreateOptions): Promise<SessionRecord> {
   const client = new AcpClient({
     agentCommand: options.agentCommand,
     cwd: absolutePath(options.cwd),
@@ -683,9 +659,7 @@ export async function createSession(
   }
 }
 
-export async function ensureSession(
-  options: SessionEnsureOptions,
-): Promise<SessionEnsureResult> {
+export async function ensureSession(options: SessionEnsureOptions): Promise<SessionEnsureResult> {
   const cwd = absolutePath(options.cwd);
   const gitRoot = findGitRepositoryRoot(cwd);
   const walkBoundary = options.walkBoundary ?? gitRoot ?? cwd;
@@ -738,9 +712,7 @@ async function submitToRunningOwner(
   });
 }
 
-export async function runSessionQueueOwner(
-  options: QueueOwnerRuntimeOptions,
-): Promise<void> {
+export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): Promise<void> {
   const lease = await tryAcquireQueueOwnerLease(options.sessionId);
   if (!lease) {
     return;
@@ -764,11 +736,7 @@ export async function runSessionQueueOwner(
         verbose: options.verbose,
       });
     },
-    setSessionConfigOptionFallback: async (
-      configId: string,
-      value: string,
-      timeoutMs?: number,
-    ) => {
+    setSessionConfigOptionFallback: async (configId: string, value: string, timeoutMs?: number) => {
       const result = await runSessionSetConfigOptionDirect({
         sessionRecordId: options.sessionId,
         configId,
@@ -828,11 +796,7 @@ export async function runSessionQueueOwner(
       setSessionMode: async (modeId: string, timeoutMs?: number) => {
         await turnController.setSessionMode(modeId, timeoutMs);
       },
-      setSessionConfigOption: async (
-        configId: string,
-        value: string,
-        timeoutMs?: number,
-      ) => {
+      setSessionConfigOption: async (configId: string, value: string, timeoutMs?: number) => {
         return await turnController.setSessionConfigOption(configId, value, timeoutMs);
       },
     });
@@ -875,16 +839,12 @@ export async function runSessionQueueOwner(
     }
     await releaseQueueOwnerLease(lease);
     if (options.verbose) {
-      process.stderr.write(
-        `[acpx] queue owner stopped for session ${options.sessionId}\n`,
-      );
+      process.stderr.write(`[acpx] queue owner stopped for session ${options.sessionId}\n`);
     }
   }
 }
 
-export async function sendSession(
-  options: SessionSendOptions,
-): Promise<SessionSendOutcome> {
+export async function sendSession(options: SessionSendOptions): Promise<SessionSendOutcome> {
   const waitForCompletion = options.waitForCompletion !== false;
 
   const queuedToOwner = await submitToRunningOwner(options, waitForCompletion);
@@ -902,9 +862,7 @@ export async function sendSession(
     await waitMs(QUEUE_CONNECT_RETRY_MS);
   }
 
-  throw new Error(
-    `Session queue owner failed to start for session ${options.sessionId}`,
-  );
+  throw new Error(`Session queue owner failed to start for session ${options.sessionId}`);
 }
 
 export async function cancelSessionPrompt(
@@ -983,10 +941,7 @@ function firstAgentCommandToken(command: string): string | undefined {
   return token.length > 0 ? token : undefined;
 }
 
-async function isLikelyMatchingProcess(
-  pid: number,
-  agentCommand: string,
-): Promise<boolean> {
+async function isLikelyMatchingProcess(pid: number, agentCommand: string): Promise<boolean> {
   const expectedToken = firstAgentCommandToken(agentCommand);
   if (!expectedToken) {
     return false;
@@ -1006,8 +961,7 @@ async function isLikelyMatchingProcess(
     const executableBase = path.basename(argv[0]);
     const expectedBase = path.basename(expectedToken);
     return (
-      executableBase === expectedBase ||
-      argv.some((entry) => path.basename(entry) === expectedBase)
+      executableBase === expectedBase || argv.some((entry) => path.basename(entry) === expectedBase)
     );
   } catch {
     // If /proc is unavailable, fall back to PID liveness checks only.

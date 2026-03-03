@@ -27,10 +27,7 @@ test("resolveAgentCommand returns raw value for unknown agents", () => {
 test("listBuiltInAgents returns exactly all 5 registered agent names", () => {
   const agents = listBuiltInAgents();
   assert.equal(agents.length, 5);
-  assert.deepEqual(
-    new Set(agents),
-    new Set(["codex", "claude", "gemini", "opencode", "pi"]),
-  );
+  assert.deepEqual(new Set(agents), new Set(["codex", "claude", "gemini", "opencode", "pi"]));
 });
 
 test("default agent is codex", () => {

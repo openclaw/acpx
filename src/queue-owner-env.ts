@@ -1,7 +1,4 @@
-import {
-  runSessionQueueOwner,
-  type QueueOwnerRuntimeOptions,
-} from "./session-runtime.js";
+import { runSessionQueueOwner, type QueueOwnerRuntimeOptions } from "./session-runtime.js";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -37,8 +34,7 @@ export function parseQueueOwnerPayload(raw: string): QueueOwnerRuntimeOptions {
 
   if (typeof record.nonInteractivePermissions === "string") {
     options.nonInteractivePermissions =
-      record.nonInteractivePermissions === "deny" ||
-      record.nonInteractivePermissions === "fail"
+      record.nonInteractivePermissions === "deny" || record.nonInteractivePermissions === "fail"
         ? record.nonInteractivePermissions
         : undefined;
   }

@@ -1,9 +1,9 @@
-import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { QueueConnectionError, QueueProtocolError } from "./errors.js";
 import {
   parseQueueOwnerMessage,
@@ -201,9 +201,7 @@ async function removeSocketFile(socketPath: string): Promise<void> {
   }
 }
 
-async function readQueueOwnerRecord(
-  sessionId: string,
-): Promise<QueueOwnerRecord | undefined> {
+async function readQueueOwnerRecord(sessionId: string): Promise<QueueOwnerRecord | undefined> {
   const lockPath = queueLockFilePath(sessionId);
   try {
     const payload = await fs.readFile(lockPath, "utf8");
@@ -339,9 +337,7 @@ async function connectToQueueOwner(
   return undefined;
 }
 
-export async function probeQueueOwnerHealth(
-  sessionId: string,
-): Promise<QueueOwnerHealth> {
+export async function probeQueueOwnerHealth(sessionId: string): Promise<QueueOwnerHealth> {
   const owner = await readQueueOwnerRecord(sessionId);
   if (!owner) {
     return {
@@ -509,8 +505,7 @@ async function submitToQueueOwner(
         const queueErrorAlreadyEmitted =
           options.errorEmissionPolicy?.queueErrorAlreadyEmitted ?? true;
         const outputAlreadyEmitted = message.outputAlreadyEmitted === true;
-        const shouldEmitInFormatter =
-          !outputAlreadyEmitted || !queueErrorAlreadyEmitted;
+        const shouldEmitInFormatter = !outputAlreadyEmitted || !queueErrorAlreadyEmitted;
         if (shouldEmitInFormatter) {
           options.outputFormatter.onError({
             code: message.code ?? "RUNTIME",
@@ -593,14 +588,11 @@ async function submitToQueueOwner(
 
       if (!acknowledged) {
         finishReject(
-          new QueueConnectionError(
-            "Queue owner disconnected before acknowledging request",
-            {
-              detailCode: "QUEUE_DISCONNECTED_BEFORE_ACK",
-              origin: "queue",
-              retryable: true,
-            },
-          ),
+          new QueueConnectionError("Queue owner disconnected before acknowledging request", {
+            detailCode: "QUEUE_DISCONNECTED_BEFORE_ACK",
+            origin: "queue",
+            retryable: true,
+          }),
         );
         return;
       }
@@ -765,14 +757,11 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
       }
       if (!acknowledged) {
         finishReject(
-          new QueueConnectionError(
-            "Queue owner disconnected before acknowledging request",
-            {
-              detailCode: "QUEUE_DISCONNECTED_BEFORE_ACK",
-              origin: "queue",
-              retryable: true,
-            },
-          ),
+          new QueueConnectionError("Queue owner disconnected before acknowledging request", {
+            detailCode: "QUEUE_DISCONNECTED_BEFORE_ACK",
+            origin: "queue",
+            retryable: true,
+          }),
         );
         return;
       }
@@ -789,9 +778,7 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
   });
 }
 
-async function submitCancelToQueueOwner(
-  owner: QueueOwnerRecord,
-): Promise<boolean | undefined> {
+async function submitCancelToQueueOwner(owner: QueueOwnerRecord): Promise<boolean | undefined> {
   const request: QueueCancelRequest = {
     type: "cancel_prompt",
     requestId: randomUUID(),
@@ -799,8 +786,7 @@ async function submitCancelToQueueOwner(
   const response = await submitControlToQueueOwner(
     owner,
     request,
-    (message): message is QueueOwnerCancelResultMessage =>
-      message.type === "cancel_result",
+    (message): message is QueueOwnerCancelResultMessage => message.type === "cancel_result",
   );
   if (!response) {
     return undefined;
@@ -829,8 +815,7 @@ async function submitSetModeToQueueOwner(
   const response = await submitControlToQueueOwner(
     owner,
     request,
-    (message): message is QueueOwnerSetModeResultMessage =>
-      message.type === "set_mode_result",
+    (message): message is QueueOwnerSetModeResultMessage => message.type === "set_mode_result",
   );
   if (!response) {
     return undefined;
@@ -868,14 +853,11 @@ async function submitSetConfigOptionToQueueOwner(
     return undefined;
   }
   if (response.requestId !== request.requestId) {
-    throw new QueueProtocolError(
-      "Queue owner returned mismatched set_config_option response",
-      {
-        detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
-        origin: "queue",
-        retryable: true,
-      },
-    );
+    throw new QueueProtocolError("Queue owner returned mismatched set_config_option response", {
+      detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
+      origin: "queue",
+      retryable: true,
+    });
   }
   return response.response;
 }
@@ -1009,12 +991,7 @@ export async function trySetConfigOptionOnRunningOwner(
     return undefined;
   }
 
-  const response = await submitSetConfigOptionToQueueOwner(
-    owner,
-    configId,
-    value,
-    timeoutMs,
-  );
+  const response = await submitSetConfigOptionToQueueOwner(owner, configId, value, timeoutMs);
   if (response) {
     if (verbose) {
       process.stderr.write(

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import { Command, CommanderError, InvalidArgumentError } from "commander";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { Command, CommanderError, InvalidArgumentError } from "commander";
 import { findSkillsRoot, maybeHandleSkillflag } from "skillflag";
 import { listBuiltInAgents } from "./agent-registry.js";
 import {
@@ -26,17 +26,6 @@ import {
   type StatusFlags,
 } from "./cli/flags.js";
 import {
-  initGlobalConfigFile,
-  loadResolvedConfig,
-  toConfigDisplay,
-  type ResolvedAcpxConfig,
-} from "./config.js";
-import {
-  exitCodeForOutputErrorCode,
-  normalizeOutputError,
-  type NormalizedOutputError,
-} from "./error-normalization.js";
-import {
   agentSessionIdPayload,
   emitJsonResult,
   printClosedSessionByFormat,
@@ -47,7 +36,20 @@ import {
   printQueuedPromptByFormat,
   printSessionsByFormat,
 } from "./cli/output-render.js";
+import {
+  initGlobalConfigFile,
+  loadResolvedConfig,
+  toConfigDisplay,
+  type ResolvedAcpxConfig,
+} from "./config.js";
+import {
+  exitCodeForOutputErrorCode,
+  normalizeOutputError,
+  type NormalizedOutputError,
+} from "./error-normalization.js";
 import { createOutputFormatter } from "./output.js";
+import { probeQueueOwnerHealth } from "./queue-ipc.js";
+import { runQueueOwnerFromEnv } from "./queue-owner-env.js";
 import {
   DEFAULT_HISTORY_LIMIT,
   InterruptedError,
@@ -64,7 +66,6 @@ import {
   setSessionMode,
   sendSession,
 } from "./session.js";
-import { probeQueueOwnerHealth } from "./queue-ipc.js";
 import {
   EXIT_CODES,
   OUTPUT_FORMATS,
@@ -75,7 +76,6 @@ import {
   type SessionUserContent,
 } from "./types.js";
 import { getAcpxVersion } from "./version.js";
-import { runQueueOwnerFromEnv } from "./queue-owner-env.js";
 
 class NoSessionError extends Error {
   constructor(message: string) {
@@ -198,10 +198,7 @@ async function handlePrompt(
   config: ResolvedAcpxConfig,
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
-  const outputPolicy = resolveOutputPolicy(
-    globalFlags.format,
-    globalFlags.jsonStrict === true,
-  );
+  const outputPolicy = resolveOutputPolicy(globalFlags.format, globalFlags.jsonStrict === true);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const prompt = await readPrompt(promptParts, flags.file, globalFlags.cwd);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
@@ -217,12 +214,7 @@ async function handlePrompt(
     },
   });
 
-  await printPromptSessionBanner(
-    record,
-    agent.cwd,
-    outputPolicy.format,
-    outputPolicy.jsonStrict,
-  );
+  await printPromptSessionBanner(record, agent.cwd, outputPolicy.format, outputPolicy.jsonStrict);
   const result = await sendSession({
     sessionId: record.acpxRecordId,
     message: prompt,
@@ -249,9 +241,7 @@ async function handlePrompt(
   applyPermissionExitCode(result);
 
   if (globalFlags.verbose && result.loadError) {
-    process.stderr.write(
-      `[acpx] loadSession failed, started fresh session: ${result.loadError}\n`,
-    );
+    process.stderr.write(`[acpx] loadSession failed, started fresh session: ${result.loadError}\n`);
   }
 }
 
@@ -263,10 +253,7 @@ async function handleExec(
   config: ResolvedAcpxConfig,
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
-  const outputPolicy = resolveOutputPolicy(
-    globalFlags.format,
-    globalFlags.jsonStrict === true,
-  );
+  const outputPolicy = resolveOutputPolicy(globalFlags.format, globalFlags.jsonStrict === true);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const prompt = await readPrompt(promptParts, flags.file, globalFlags.cwd);
   const outputFormatter = createOutputFormatter(outputPolicy.format);
@@ -433,9 +420,7 @@ async function handleSetMode(
   });
 
   if (globalFlags.verbose && result.loadError) {
-    process.stderr.write(
-      `[acpx] loadSession failed, started fresh session: ${result.loadError}\n`,
-    );
+    process.stderr.write(`[acpx] loadSession failed, started fresh session: ${result.loadError}\n`);
   }
 
   printSetModeResultByFormat(modeId, result, globalFlags.format);
@@ -469,9 +454,7 @@ async function handleSetConfigOption(
   });
 
   if (globalFlags.verbose && result.loadError) {
-    process.stderr.write(
-      `[acpx] loadSession failed, started fresh session: ${result.loadError}\n`,
-    );
+    process.stderr.write(`[acpx] loadSession failed, started fresh session: ${result.loadError}\n`);
   }
 
   printSetConfigOptionResultByFormat(configId, value, result, globalFlags.format);
@@ -536,9 +519,7 @@ async function handleSessionsNew(
   if (replaced) {
     await closeSession(replaced.acpxRecordId);
     if (globalFlags.verbose) {
-      process.stderr.write(
-        `[acpx] soft-closed prior session: ${replaced.acpxRecordId}\n`,
-      );
+      process.stderr.write(`[acpx] soft-closed prior session: ${replaced.acpxRecordId}\n`);
     }
   }
 
@@ -554,12 +535,7 @@ async function handleSessionsNew(
     verbose: globalFlags.verbose,
   });
 
-  printCreatedSessionBanner(
-    created,
-    agent.agentName,
-    globalFlags.format,
-    globalFlags.jsonStrict,
-  );
+  printCreatedSessionBanner(created, agent.agentName, globalFlags.format, globalFlags.jsonStrict);
 
   if (globalFlags.verbose) {
     const scope = flags.name ? `named session "${flags.name}"` : "cwd session";
@@ -686,10 +662,7 @@ function conversationHistoryEntries(record: SessionRecord): Array<{
   return entries;
 }
 
-function printSessionDetailsByFormat(
-  record: SessionRecord,
-  format: OutputFormat,
-): void {
+function printSessionDetailsByFormat(record: SessionRecord, format: OutputFormat): void {
   if (format === "json") {
     process.stdout.write(`${JSON.stringify(record)}\n`);
     return;
@@ -716,12 +689,8 @@ function printSessionDetailsByFormat(
   process.stdout.write(`lastExitCode: ${record.lastAgentExitCode ?? "-"}\n`);
   process.stdout.write(`lastExitSignal: ${record.lastAgentExitSignal ?? "-"}\n`);
   process.stdout.write(`lastExitAt: ${record.lastAgentExitAt ?? "-"}\n`);
-  process.stdout.write(
-    `disconnectReason: ${record.lastAgentDisconnectReason ?? "-"}\n`,
-  );
-  process.stdout.write(
-    `historyEntries: ${conversationHistoryEntries(record).length}\n`,
-  );
+  process.stdout.write(`disconnectReason: ${record.lastAgentDisconnectReason ?? "-"}\n`);
+  process.stdout.write(`historyEntries: ${conversationHistoryEntries(record).length}\n`);
 }
 
 function printSessionHistoryByFormat(
@@ -929,10 +898,7 @@ async function handleStatus(
   }
 }
 
-async function handleConfigShow(
-  command: Command,
-  config: ResolvedAcpxConfig,
-): Promise<void> {
+async function handleConfigShow(command: Command, config: ResolvedAcpxConfig): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const payload = {
     ...toConfigDisplay(config),
@@ -954,10 +920,7 @@ async function handleConfigShow(
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
-async function handleConfigInit(
-  command: Command,
-  config: ResolvedAcpxConfig,
-): Promise<void> {
+async function handleConfigInit(command: Command, config: ResolvedAcpxConfig): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const result = await initGlobalConfigFile();
   if (globalFlags.format === "json") {
@@ -1043,11 +1006,7 @@ function registerSessionsCommand(
       parseHistoryLimit,
       DEFAULT_HISTORY_LIMIT,
     )
-    .action(async function (
-      this: Command,
-      name: string | undefined,
-      flags: SessionsHistoryFlags,
-    ) {
+    .action(async function (this: Command, name: string | undefined, flags: SessionsHistoryFlags) {
       await handleSessionsHistory(explicitAgentName, name, flags, this, config);
     });
 }
@@ -1074,11 +1033,7 @@ function registerSharedAgentSubcommands(
     .showHelpAfterError();
   addSessionOption(promptCommand);
   addPromptInputOption(promptCommand);
-  promptCommand.action(async function (
-    this: Command,
-    promptParts: string[],
-    flags: PromptFlags,
-  ) {
+  promptCommand.action(async function (this: Command, promptParts: string[], flags: PromptFlags) {
     await handlePrompt(explicitAgentName, promptParts, flags, this, config);
   });
 
@@ -1088,11 +1043,7 @@ function registerSharedAgentSubcommands(
     .argument("[prompt...]", "Prompt text")
     .showHelpAfterError();
   addPromptInputOption(execCommand);
-  execCommand.action(async function (
-    this: Command,
-    promptParts: string[],
-    flags: ExecFlags,
-  ) {
+  execCommand.action(async function (this: Command, promptParts: string[], flags: ExecFlags) {
     await handleExec(explicitAgentName, promptParts, flags, this, config);
   });
 
@@ -1105,15 +1056,9 @@ function registerSharedAgentSubcommands(
   const setModeCommand = parent
     .command("set-mode")
     .description(descriptions.setMode)
-    .argument("<mode>", "Mode id", (value: string) =>
-      parseNonEmptyValue("Mode", value),
-    );
+    .argument("<mode>", "Mode id", (value: string) => parseNonEmptyValue("Mode", value));
   addSessionNameOption(setModeCommand);
-  setModeCommand.action(async function (
-    this: Command,
-    modeId: string,
-    flags: StatusFlags,
-  ) {
+  setModeCommand.action(async function (this: Command, modeId: string, flags: StatusFlags) {
     await handleSetMode(explicitAgentName, modeId, flags, this, config);
   });
 
@@ -1158,11 +1103,7 @@ function registerAgentCommand(
 
   addSessionOption(agentCommand);
   addPromptInputOption(agentCommand);
-  agentCommand.action(async function (
-    this: Command,
-    promptParts: string[],
-    flags: PromptFlags,
-  ) {
+  agentCommand.action(async function (this: Command, promptParts: string[], flags: PromptFlags) {
     await handlePrompt(agentName, promptParts, flags, this, config);
   });
 
@@ -1312,10 +1253,7 @@ function detectInitialCwd(argv: string[]): string {
   return process.cwd();
 }
 
-function detectRequestedOutputFormat(
-  argv: string[],
-  fallback: OutputFormat,
-): OutputFormat {
+function detectRequestedOutputFormat(argv: string[], fallback: OutputFormat): OutputFormat {
   let detectedFormat = fallback;
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -1420,14 +1358,8 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
   const config = await loadResolvedConfig(detectInitialCwd(argv.slice(2)));
   const requestedJsonStrict = detectJsonStrict(argv.slice(2));
-  const requestedOutputFormat = detectRequestedOutputFormat(
-    argv.slice(2),
-    config.format,
-  );
-  const requestedOutputPolicy = resolveOutputPolicy(
-    requestedOutputFormat,
-    requestedJsonStrict,
-  );
+  const requestedOutputFormat = detectRequestedOutputFormat(argv.slice(2), config.format);
+  const requestedOutputPolicy = resolveOutputPolicy(requestedOutputFormat, requestedJsonStrict);
   const builtInAgents = listBuiltInAgents(config.agents);
 
   const program = new Command();
@@ -1519,10 +1451,7 @@ Examples:
       await program.parseAsync(argv);
     } catch (error) {
       if (error instanceof CommanderError) {
-        if (
-          error.code === "commander.helpDisplayed" ||
-          error.code === "commander.version"
-        ) {
+        if (error.code === "commander.helpDisplayed" || error.code === "commander.version") {
           process.exit(EXIT_CODES.SUCCESS);
         }
         const normalized = normalizeOutputError(error, {

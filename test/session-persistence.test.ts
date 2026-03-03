@@ -213,10 +213,7 @@ test("closeSession soft-closes and terminates matching process", async () => {
       assert.equal(closed.pid, undefined);
       assert.equal(await fileExists(filePath), true);
 
-      const stored = JSON.parse(await fs.readFile(filePath, "utf8")) as Record<
-        string,
-        unknown
-      >;
+      const stored = JSON.parse(await fs.readFile(filePath, "utf8")) as Record<string, unknown>;
       assert.equal(stored.closed, true);
       assert.equal(typeof stored.closed_at, "string");
 
@@ -233,19 +230,10 @@ test("closeSession soft-closes and terminates matching process", async () => {
 test("normalizeQueueOwnerTtlMs applies default and edge-case normalization", async () => {
   await withTempHome(async () => {
     const session = await loadSessionModule();
-    assert.equal(
-      session.normalizeQueueOwnerTtlMs(undefined),
-      session.DEFAULT_QUEUE_OWNER_TTL_MS,
-    );
+    assert.equal(session.normalizeQueueOwnerTtlMs(undefined), session.DEFAULT_QUEUE_OWNER_TTL_MS);
     assert.equal(session.normalizeQueueOwnerTtlMs(0), 0);
-    assert.equal(
-      session.normalizeQueueOwnerTtlMs(-1),
-      session.DEFAULT_QUEUE_OWNER_TTL_MS,
-    );
-    assert.equal(
-      session.normalizeQueueOwnerTtlMs(Number.NaN),
-      session.DEFAULT_QUEUE_OWNER_TTL_MS,
-    );
+    assert.equal(session.normalizeQueueOwnerTtlMs(-1), session.DEFAULT_QUEUE_OWNER_TTL_MS);
+    assert.equal(session.normalizeQueueOwnerTtlMs(Number.NaN), session.DEFAULT_QUEUE_OWNER_TTL_MS);
     assert.equal(
       session.normalizeQueueOwnerTtlMs(Number.POSITIVE_INFINITY),
       session.DEFAULT_QUEUE_OWNER_TTL_MS,
@@ -261,9 +249,7 @@ test("normalizeQueueOwnerTtlMs applies default and edge-case normalization", asy
 
 async function loadSessionModule(): Promise<SessionModule> {
   const cacheBuster = `${Date.now()}-${Math.random()}`;
-  return (await import(
-    `${SESSION_MODULE_URL.href}?session_test=${cacheBuster}`
-  )) as SessionModule;
+  return (await import(`${SESSION_MODULE_URL.href}?session_test=${cacheBuster}`)) as SessionModule;
 }
 
 async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {
@@ -333,18 +319,10 @@ function makeSessionRecord(
 }
 
 function sessionFilePath(homeDir: string, acpxRecordId: string): string {
-  return path.join(
-    homeDir,
-    ".acpx",
-    "sessions",
-    `${encodeURIComponent(acpxRecordId)}.json`,
-  );
+  return path.join(homeDir, ".acpx", "sessions", `${encodeURIComponent(acpxRecordId)}.json`);
 }
 
-async function writeSessionRecord(
-  homeDir: string,
-  record: SessionRecord,
-): Promise<void> {
+async function writeSessionRecord(homeDir: string, record: SessionRecord): Promise<void> {
   const filePath = sessionFilePath(homeDir, record.acpxRecordId);
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(

@@ -1,9 +1,9 @@
-import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import net from "node:net";
 import readline from "node:readline";
 import test from "node:test";
+import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { QueueConnectionError, QueueProtocolError } from "../src/errors.js";
 import {
   SessionQueueOwner,
@@ -586,10 +586,7 @@ async function connectSocket(socketPath: string): Promise<net.Socket> {
   });
 }
 
-async function nextJsonLine(
-  iterator: AsyncIterator<string>,
-  timeoutMs = 2_000,
-): Promise<unknown> {
+async function nextJsonLine(iterator: AsyncIterator<string>, timeoutMs = 2_000): Promise<unknown> {
   const timeout = new Promise<never>((_resolve, reject) => {
     setTimeout(() => reject(new Error("Timed out waiting for queue line")), timeoutMs);
   });

@@ -341,10 +341,7 @@ test("sessions and status surface agentSessionId for codex and claude in JSON mo
     ] as const;
 
     const agentsConfig = Object.fromEntries(
-      runtimeScenarios.map((scenario) => [
-        scenario.agentName,
-        { command: scenario.command },
-      ]),
+      runtimeScenarios.map((scenario) => [scenario.agentName, { command: scenario.command }]),
     );
 
     await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
@@ -366,10 +363,7 @@ test("sessions and status surface agentSessionId for codex and claude in JSON mo
         homeDir,
       );
       assert.equal(created.code, 0, created.stderr);
-      const createdPayload = JSON.parse(created.stdout.trim()) as Record<
-        string,
-        unknown
-      >;
+      const createdPayload = JSON.parse(created.stdout.trim()) as Record<string, unknown>;
       assert.equal(createdPayload.action, "session_ensured");
       assert.equal(createdPayload.created, true);
       assert.equal(createdPayload.agentSessionId, scenario.expectedRuntimeSessionId);
@@ -379,10 +373,7 @@ test("sessions and status surface agentSessionId for codex and claude in JSON mo
         homeDir,
       );
       assert.equal(ensured.code, 0, ensured.stderr);
-      const ensuredPayload = JSON.parse(ensured.stdout.trim()) as Record<
-        string,
-        unknown
-      >;
+      const ensuredPayload = JSON.parse(ensured.stdout.trim()) as Record<string, unknown>;
       assert.equal(ensuredPayload.action, "session_ensured");
       assert.equal(ensuredPayload.created, false);
       assert.equal(ensuredPayload.agentSessionId, scenario.expectedRuntimeSessionId);
@@ -443,9 +434,10 @@ test("prompt reconciles agentSessionId from loadSession metadata", async () => {
       "sessions",
       `${encodeURIComponent(sessionId)}.json`,
     );
-    const storedRecord = JSON.parse(
-      await fs.readFile(storedRecordPath, "utf8"),
-    ) as Record<string, unknown>;
+    const storedRecord = JSON.parse(await fs.readFile(storedRecordPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
     assert.equal(storedRecord.agent_session_id, "loaded-runtime-session");
   });
 });
@@ -468,10 +460,7 @@ test("--ttl flag is parsed for sessions commands", async () => {
 
 test("--auth-policy flag validates supported values", async () => {
   await withTempHome(async (homeDir) => {
-    const ok = await runCli(
-      ["--auth-policy", "skip", "--format", "json", "sessions"],
-      homeDir,
-    );
+    const ok = await runCli(["--auth-policy", "skip", "--format", "json", "sessions"], homeDir);
     assert.equal(ok.code, 0, ok.stderr);
 
     const invalid = await runCli(["--auth-policy", "bad", "sessions"], homeDir);
@@ -523,10 +512,7 @@ test("--json-strict rejects --verbose", async () => {
     const error = parseSingleAcpErrorLine(result.stdout);
     assert.equal(error.code, -32602);
     assert.equal(error.data?.acpxCode, "USAGE");
-    assert.match(
-      error.message ?? "",
-      /--json-strict cannot be combined with --verbose/,
-    );
+    assert.match(error.message ?? "", /--json-strict cannot be combined with --verbose/);
   });
 });
 
@@ -600,8 +586,7 @@ test("queued prompt failures emit exactly one JSON error event", async () => {
       assert.equal(errors.length, 1, writeResult.stdout);
       assert.equal((errors[0]?.error as { code?: unknown } | undefined)?.code, -32603);
       assert.notEqual(
-        (errors[0]?.error as { data?: { sessionId?: unknown } } | undefined)?.data
-          ?.sessionId,
+        (errors[0]?.error as { data?: { sessionId?: unknown } } | undefined)?.data?.sessionId,
         "unknown",
       );
     } finally {
@@ -754,10 +739,7 @@ test("queued prompt failures remain visible in quiet mode", async () => {
 
       assert.equal(writeResult.code, 5);
       assert.match(writeResult.stdout, /error:\s*Internal error/i);
-      assert.match(
-        writeResult.stderr,
-        /Permission prompt unavailable in non-interactive mode/,
-      );
+      assert.match(writeResult.stderr, /Permission prompt unavailable in non-interactive mode/);
     } finally {
       if (blocker.exitCode === null && blocker.signalCode == null) {
         blocker.kill("SIGKILL");
@@ -826,10 +808,7 @@ test("json format emits structured no-session error event", async () => {
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
 
-    const result = await runCli(
-      ["--cwd", cwd, "--format", "json", "codex", "hello"],
-      homeDir,
-    );
+    const result = await runCli(["--cwd", cwd, "--format", "json", "codex", "hello"], homeDir);
     assert.equal(result.code, 4);
     const error = parseSingleAcpErrorLine(result.stdout);
     assert.equal(error.code, -32002);
@@ -855,10 +834,7 @@ test("set command exits with NO_SESSION when no session exists", async () => {
     const cwd = path.join(homeDir, "workspace", "packages", "app");
     await fs.mkdir(cwd, { recursive: true });
 
-    const result = await runCli(
-      ["--cwd", cwd, "codex", "set", "temperature", "high"],
-      homeDir,
-    );
+    const result = await runCli(["--cwd", cwd, "codex", "set", "temperature", "high"], homeDir);
 
     assert.equal(result.code, 4);
     assert.match(result.stderr, /No acpx session found/);
@@ -1044,10 +1020,7 @@ test("prompt reads from --file for persistent prompts", async () => {
     await fs.mkdir(cwd, { recursive: true });
     await fs.writeFile(path.join(cwd, "prompt.md"), "fix the tests\n", "utf8");
 
-    const result = await runCli(
-      ["--cwd", cwd, "codex", "--file", "prompt.md"],
-      homeDir,
-    );
+    const result = await runCli(["--cwd", cwd, "codex", "--file", "prompt.md"], homeDir);
 
     assert.equal(result.code, 4);
     assert.match(result.stderr, /No acpx session found/);
@@ -1078,10 +1051,7 @@ test("prompt subcommand accepts --file without being consumed by parent command"
     await fs.mkdir(cwd, { recursive: true });
     await fs.writeFile(path.join(cwd, "prompt.md"), "fix the tests\n", "utf8");
 
-    const result = await runCli(
-      ["--cwd", cwd, "codex", "prompt", "--file", "prompt.md"],
-      homeDir,
-    );
+    const result = await runCli(["--cwd", cwd, "codex", "prompt", "--file", "prompt.md"], homeDir);
 
     assert.equal(result.code, 4);
     assert.match(result.stderr, /No acpx session found/);
@@ -1094,10 +1064,7 @@ test("exec subcommand accepts --file without being consumed by parent command", 
     const promptPath = path.join(homeDir, "prompt.txt");
     await fs.writeFile(promptPath, "say exactly: file-flag-test\n", "utf8");
 
-    const result = await runCli(
-      ["custom-agent", "exec", "--file", promptPath],
-      homeDir,
-    );
+    const result = await runCli(["custom-agent", "exec", "--file", promptPath], homeDir);
 
     assert.equal(result.code, 1);
     assert.doesNotMatch(result.stderr, /unknown option/i);

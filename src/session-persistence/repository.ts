@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { SessionNotFoundError, SessionResolutionError } from "../errors.js";
 import { assertPersistedKeyPolicy } from "../persisted-key-policy.js";
+import type { SessionRecord } from "../types.js";
 import { parseSessionRecord } from "./parse.js";
 import { serializeSessionRecordForDisk } from "./serialize.js";
-import type { SessionRecord } from "../types.js";
 
 export const DEFAULT_HISTORY_LIMIT = 20;
 
@@ -66,8 +66,7 @@ export async function resolveSessionRecord(sessionId: string): Promise<SessionRe
   const sessions = await listSessions();
 
   const exact = sessions.filter(
-    (session) =>
-      session.acpxRecordId === sessionId || session.acpSessionId === sessionId,
+    (session) => session.acpxRecordId === sessionId || session.acpSessionId === sessionId,
   );
   if (exact.length === 1) {
     return exact[0];
@@ -78,8 +77,7 @@ export async function resolveSessionRecord(sessionId: string): Promise<SessionRe
 
   const suffixMatches = sessions.filter(
     (session) =>
-      session.acpxRecordId.endsWith(sessionId) ||
-      session.acpSessionId.endsWith(sessionId),
+      session.acpxRecordId.endsWith(sessionId) || session.acpSessionId.endsWith(sessionId),
   );
   if (suffixMatches.length === 1) {
     return suffixMatches[0];
@@ -102,9 +100,7 @@ function hasGitDirectory(dir: string): boolean {
 
 function isWithinBoundary(boundary: string, target: string): boolean {
   const relative = path.relative(boundary, target);
-  return (
-    relative.length === 0 || (!relative.startsWith("..") && !path.isAbsolute(relative))
-  );
+  return relative.length === 0 || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 export function absolutePath(value: string): string {
@@ -172,16 +168,12 @@ export async function listSessions(): Promise<SessionRecord[]> {
   return records;
 }
 
-export async function listSessionsForAgent(
-  agentCommand: string,
-): Promise<SessionRecord[]> {
+export async function listSessionsForAgent(agentCommand: string): Promise<SessionRecord[]> {
   const sessions = await listSessions();
   return sessions.filter((session) => session.agentCommand === agentCommand);
 }
 
-export async function findSession(
-  options: FindSessionOptions,
-): Promise<SessionRecord | undefined> {
+export async function findSession(options: FindSessionOptions): Promise<SessionRecord | undefined> {
   const normalizedCwd = absolutePath(options.cwd);
   const normalizedName = normalizeName(options.name);
   const sessions = await listSessionsForAgent(options.agentCommand);
@@ -274,9 +266,7 @@ export async function closeSession(id: string): Promise<SessionRecord> {
   const now = isoNow();
 
   if (record.pid) {
-    for (const signal of killSignalCandidates(
-      record.lastAgentExitSignal ?? undefined,
-    )) {
+    for (const signal of killSignalCandidates(record.lastAgentExitSignal ?? undefined)) {
       try {
         process.kill(record.pid, signal);
       } catch {

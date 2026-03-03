@@ -125,11 +125,7 @@ test("QueueOwnerTurnController routes setSessionConfigOption through fallback wh
     },
   });
 
-  const response = await controller.setSessionConfigOption(
-    "approval_policy",
-    "strict",
-    2300,
-  );
+  const response = await controller.setSessionConfigOption("approval_policy", "strict", 2300);
   assert.equal(fallbackCalls, 1);
   assert.deepEqual(fallbackTimeouts, [2300]);
   assert.deepEqual(response, { configOptions: [] });
@@ -176,8 +172,7 @@ function createQueueOwnerTurnController(
   overrides: QueueOwnerTurnControllerOverrides = {},
 ): QueueOwnerTurnController {
   const withTimeout =
-    overrides.withTimeout ??
-    (async <T>(run: () => Promise<T>): Promise<T> => await run());
+    overrides.withTimeout ?? (async <T>(run: () => Promise<T>): Promise<T> => await run());
   const setSessionModeFallback =
     overrides.setSessionModeFallback ??
     (async (): Promise<void> => {
@@ -203,8 +198,7 @@ function makeActiveController(
 ): QueueOwnerActiveSessionController {
   return {
     hasActivePrompt: overrides.hasActivePrompt ?? (() => false),
-    requestCancelActivePrompt:
-      overrides.requestCancelActivePrompt ?? (async () => false),
+    requestCancelActivePrompt: overrides.requestCancelActivePrompt ?? (async () => false),
     setSessionMode:
       overrides.setSessionMode ??
       (async () => {

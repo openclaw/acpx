@@ -1,3 +1,6 @@
+import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
+import path from "node:path";
+import { Readable, Writable } from "node:stream";
 import {
   ClientSideConnection,
   PROTOCOL_VERSION,
@@ -26,15 +29,8 @@ import {
   type WriteTextFileRequest,
   type WriteTextFileResponse,
 } from "@agentclientprotocol/sdk";
-import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
-import path from "node:path";
-import { Readable, Writable } from "node:stream";
-import {
-  AgentSpawnError,
-  AuthPolicyError,
-  PermissionPromptUnavailableError,
-} from "./errors.js";
 import { isSessionUpdateNotification } from "./acp-jsonrpc.js";
+import { AgentSpawnError, AuthPolicyError, PermissionPromptUnavailableError } from "./errors.js";
 import { FileSystemHandlers } from "./filesystem.js";
 import { classifyPermissionDecision, resolvePermissionRequest } from "./permissions.js";
 import { extractRuntimeSessionId } from "./runtime-session-id.js";
@@ -68,11 +64,7 @@ export type SessionLoadResult = {
   agentSessionId?: string;
 };
 
-type AgentDisconnectReason =
-  | "process_exit"
-  | "process_close"
-  | "pipe_close"
-  | "connection_close";
+type AgentDisconnectReason = "process_exit" | "process_close" | "pipe_close" | "connection_close";
 
 type AuthSelection = {
   methodId: string;
@@ -288,11 +280,7 @@ function buildAgentEnvironment(
       continue;
     }
 
-    if (
-      !methodId.includes("=") &&
-      !methodId.includes("\u0000") &&
-      env[methodId] == null
-    ) {
+    if (!methodId.includes("=") && !methodId.includes("\u0000") && env[methodId] == null) {
       env[methodId] = credential;
     }
 
@@ -338,10 +326,7 @@ export class AcpClient {
   private agentStartedAt?: string;
   private lastAgentExit?: AgentExitInfo;
   private lastKnownPid?: number;
-  private readonly promptPermissionFailures = new Map<
-    string,
-    PermissionPromptUnavailableError
-  >();
+  private readonly promptPermissionFailures = new Map<string, PermissionPromptUnavailableError>();
 
   constructor(options: AcpClientOptions) {
     this.options = {
@@ -452,24 +437,16 @@ export class AcpClient {
         ): Promise<RequestPermissionResponse> => {
           return this.handlePermissionRequest(params);
         },
-        readTextFile: async (
-          params: ReadTextFileRequest,
-        ): Promise<ReadTextFileResponse> => {
+        readTextFile: async (params: ReadTextFileRequest): Promise<ReadTextFileResponse> => {
           return this.handleReadTextFile(params);
         },
-        writeTextFile: async (
-          params: WriteTextFileRequest,
-        ): Promise<WriteTextFileResponse> => {
+        writeTextFile: async (params: WriteTextFileRequest): Promise<WriteTextFileResponse> => {
           return this.handleWriteTextFile(params);
         },
-        createTerminal: async (
-          params: CreateTerminalRequest,
-        ): Promise<CreateTerminalResponse> => {
+        createTerminal: async (params: CreateTerminalRequest): Promise<CreateTerminalResponse> => {
           return this.handleCreateTerminal(params);
         },
-        terminalOutput: async (
-          params: TerminalOutputRequest,
-        ): Promise<TerminalOutputResponse> => {
+        terminalOutput: async (params: TerminalOutputRequest): Promise<TerminalOutputResponse> => {
           return this.handleTerminalOutput(params);
         },
         waitForTerminalExit: async (
@@ -493,11 +470,7 @@ export class AcpClient {
     connection.signal.addEventListener(
       "abort",
       () => {
-        this.recordAgentExit(
-          "connection_close",
-          child.exitCode ?? null,
-          child.signalCode ?? null,
-        );
+        this.recordAgentExit("connection_close", child.exitCode ?? null, child.signalCode ?? null);
       },
       { once: true },
     );
@@ -545,9 +518,7 @@ export class AcpClient {
     }
 
     const shouldSuppressInboundReplaySessionUpdate = (message: AnyMessage): boolean => {
-      return (
-        this.suppressReplaySessionUpdateMessages && isSessionUpdateNotification(message)
-      );
+      return this.suppressReplaySessionUpdateMessages && isSessionUpdateNotification(message);
     };
 
     const readable = new ReadableStream<AnyMessage>({
@@ -603,10 +574,7 @@ export class AcpClient {
     };
   }
 
-  async loadSession(
-    sessionId: string,
-    cwd = this.options.cwd,
-  ): Promise<SessionLoadResult> {
+  async loadSession(sessionId: string, cwd = this.options.cwd): Promise<SessionLoadResult> {
     this.getConnection();
     return await this.loadSessionWithOptions(sessionId, cwd, {});
   }
@@ -619,8 +587,7 @@ export class AcpClient {
     const connection = this.getConnection();
     const previousSuppression = this.suppressSessionUpdates;
     const previousReplaySuppression = this.suppressReplaySessionUpdateMessages;
-    this.suppressSessionUpdates =
-      previousSuppression || Boolean(options.suppressReplayUpdates);
+    this.suppressSessionUpdates = previousSuppression || Boolean(options.suppressReplayUpdates);
     this.suppressReplaySessionUpdateMessages =
       previousReplaySuppression || Boolean(options.suppressReplayUpdates);
 
@@ -817,9 +784,7 @@ export class AcpClient {
     }
 
     if (!exited && isChildProcessRunning(child)) {
-      this.log(
-        `agent did not exit after ${AGENT_CLOSE_TERM_GRACE_MS}ms; forcing SIGKILL`,
-      );
+      this.log(`agent did not exit after ${AGENT_CLOSE_TERM_GRACE_MS}ms; forcing SIGKILL`);
       try {
         child.kill("SIGKILL");
       } catch {
@@ -833,9 +798,9 @@ export class AcpClient {
   }
 
   private detachAgentHandles(agent: ChildProcess, unref: boolean): void {
-    const stdin = agent.stdin as Writable | null;
-    const stdout = agent.stdout as Readable | null;
-    const stderr = agent.stderr as Readable | null;
+    const stdin = agent.stdin;
+    const stdout = agent.stdout;
+    const stderr = agent.stderr;
 
     stdin?.destroy();
     stdout?.destroy();
@@ -977,11 +942,7 @@ export class AcpClient {
     });
 
     child.stdout.once("close", () => {
-      this.recordAgentExit(
-        "pipe_close",
-        child.exitCode ?? null,
-        child.signalCode ?? null,
-      );
+      this.recordAgentExit("pipe_close", child.exitCode ?? null, child.signalCode ?? null);
     });
   }
 
@@ -1022,15 +983,11 @@ export class AcpClient {
     return error;
   }
 
-  private async handleReadTextFile(
-    params: ReadTextFileRequest,
-  ): Promise<ReadTextFileResponse> {
+  private async handleReadTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
     return await this.filesystem.readTextFile(params);
   }
 
-  private async handleWriteTextFile(
-    params: WriteTextFileRequest,
-  ): Promise<WriteTextFileResponse> {
+  private async handleWriteTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
     try {
       return await this.filesystem.writeTextFile(params);
     } catch (error) {
@@ -1096,10 +1053,7 @@ export class AcpClient {
     await this.sessionUpdateChain;
   }
 
-  private async waitForSessionUpdateDrain(
-    idleMs: number,
-    timeoutMs: number,
-  ): Promise<void> {
+  private async waitForSessionUpdateDrain(idleMs: number, timeoutMs: number): Promise<void> {
     const normalizedIdleMs = Math.max(0, idleMs);
     const normalizedTimeoutMs = Math.max(normalizedIdleMs, timeoutMs);
     const deadline = Date.now() + normalizedTimeoutMs;
@@ -1128,8 +1082,6 @@ export class AcpClient {
       });
     }
 
-    throw new Error(
-      `Timed out waiting for session replay drain after ${normalizedTimeoutMs}ms`,
-    );
+    throw new Error(`Timed out waiting for session replay drain after ${normalizedTimeoutMs}ms`);
   }
 }

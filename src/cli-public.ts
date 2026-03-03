@@ -15,11 +15,7 @@ type ConfigurePublicCliOptions = {
   topLevelVerbs: ReadonlySet<string>;
   listBuiltInAgents: (agents: ResolvedAcpxConfig["agents"]) => string[];
   detectAgentToken: (argv: string[]) => AgentTokenScan;
-  registerAgentCommand: (
-    program: Command,
-    agentName: string,
-    config: ResolvedAcpxConfig,
-  ) => void;
+  registerAgentCommand: (program: Command, agentName: string, config: ResolvedAcpxConfig) => void;
   registerDefaultCommands: (program: Command, config: ResolvedAcpxConfig) => void;
   handlePromptAction: (command: Command, promptParts: string[]) => Promise<void>;
 };

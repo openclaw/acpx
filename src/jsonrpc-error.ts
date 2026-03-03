@@ -1,8 +1,4 @@
-import type {
-  OutputErrorAcpPayload,
-  OutputErrorCode,
-  OutputErrorOrigin,
-} from "./types.js";
+import type { OutputErrorAcpPayload, OutputErrorCode, OutputErrorOrigin } from "./types.js";
 
 export const OUTPUT_ERROR_JSONRPC_CODES: Record<OutputErrorCode, number> = {
   NO_SESSION: -32002,

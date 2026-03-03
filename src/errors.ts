@@ -1,8 +1,4 @@
-import type {
-  OutputErrorAcpPayload,
-  OutputErrorCode,
-  OutputErrorOrigin,
-} from "./types.js";
+import type { OutputErrorAcpPayload, OutputErrorCode, OutputErrorOrigin } from "./types.js";
 
 type AcpxErrorOptions = ErrorOptions & {
   outputCode?: OutputErrorCode;

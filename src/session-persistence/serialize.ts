@@ -2,9 +2,7 @@ import { normalizeRuntimeSessionId } from "../runtime-session-id.js";
 import type { SessionRecord } from "../types.js";
 import { SESSION_RECORD_SCHEMA } from "../types.js";
 
-export function serializeSessionRecordForDisk(
-  record: SessionRecord,
-): Record<string, unknown> {
+export function serializeSessionRecordForDisk(record: SessionRecord): Record<string, unknown> {
   const canonical: SessionRecord = {
     ...record,
     schema: SESSION_RECORD_SCHEMA,

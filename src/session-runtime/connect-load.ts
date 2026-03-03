@@ -5,15 +5,11 @@ import {
   isAcpQueryClosedBeforeResponseError,
   isAcpResourceNotFoundError,
 } from "../error-normalization.js";
-import {
-  InterruptedError,
-  TimeoutError,
-  withTimeout,
-} from "../session-runtime-helpers.js";
 import { isProcessAlive } from "../queue-ipc.js";
-import { writeSessionRecord } from "../session-persistence.js";
-import type { SessionRecord } from "../types.js";
 import type { QueueOwnerActiveSessionController } from "../queue-owner-turn-controller.js";
+import { writeSessionRecord } from "../session-persistence.js";
+import { InterruptedError, TimeoutError, withTimeout } from "../session-runtime-helpers.js";
+import type { SessionRecord } from "../types.js";
 import {
   applyLifecycleSnapshotToRecord,
   reconcileAgentSessionId,
@@ -110,19 +106,13 @@ export async function connectAndLoadSession(
       if (!shouldFallbackToNewSession(error, record)) {
         throw error;
       }
-      const createdSession = await withTimeout(
-        client.createSession(record.cwd),
-        options.timeoutMs,
-      );
+      const createdSession = await withTimeout(client.createSession(record.cwd), options.timeoutMs);
       sessionId = createdSession.sessionId;
       record.acpSessionId = sessionId;
       reconcileAgentSessionId(record, createdSession.agentSessionId);
     }
   } else {
-    const createdSession = await withTimeout(
-      client.createSession(record.cwd),
-      options.timeoutMs,
-    );
+    const createdSession = await withTimeout(client.createSession(record.cwd), options.timeoutMs);
     sessionId = createdSession.sessionId;
     record.acpSessionId = sessionId;
     reconcileAgentSessionId(record, createdSession.agentSessionId);

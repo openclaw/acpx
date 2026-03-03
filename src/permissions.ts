@@ -78,9 +78,7 @@ function isAutoApprovedReadKind(kind: ToolKind | undefined): boolean {
   return kind === "read" || kind === "search";
 }
 
-async function promptForToolPermission(
-  params: RequestPermissionRequest,
-): Promise<boolean> {
+async function promptForToolPermission(params: RequestPermissionRequest): Promise<boolean> {
   const toolName = params.toolCall.title ?? "tool";
   const toolKind = inferToolKind(params) ?? "other";
   return await promptForPermission({
@@ -153,9 +151,7 @@ export function classifyPermissionDecision(
   }
 
   const selectedOptionId = response.outcome.optionId;
-  const selectedOption = params.options.find(
-    (option) => option.optionId === selectedOptionId,
-  );
+  const selectedOption = params.options.find((option) => option.optionId === selectedOptionId);
 
   if (!selectedOption) {
     return "cancelled";

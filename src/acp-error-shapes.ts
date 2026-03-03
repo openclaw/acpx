@@ -29,10 +29,7 @@ function toAcpErrorPayload(value: unknown): OutputErrorAcpPayload | undefined {
   };
 }
 
-function extractAcpErrorInternal(
-  value: unknown,
-  depth: number,
-): OutputErrorAcpPayload | undefined {
+function extractAcpErrorInternal(value: unknown, depth: number): OutputErrorAcpPayload | undefined {
   if (depth > 5) {
     return undefined;
   }
@@ -118,9 +115,7 @@ function hasSessionNotFoundHint(value: unknown, depth = 0): boolean {
     return false;
   }
 
-  return Object.values(record).some((entry) =>
-    hasSessionNotFoundHint(entry, depth + 1),
-  );
+  return Object.values(record).some((entry) => hasSessionNotFoundHint(entry, depth + 1));
 }
 
 export function extractAcpError(error: unknown): OutputErrorAcpPayload | undefined {

@@ -49,8 +49,7 @@ type ConfigFileLoadResult = {
 const DEFAULT_TIMEOUT_MS = undefined;
 const DEFAULT_TTL_MS = 300_000;
 const DEFAULT_PERMISSION_MODE: PermissionMode = "approve-reads";
-const DEFAULT_NON_INTERACTIVE_PERMISSION_POLICY: NonInteractivePermissionPolicy =
-  "deny";
+const DEFAULT_NON_INTERACTIVE_PERMISSION_POLICY: NonInteractivePermissionPolicy = "deny";
 const DEFAULT_AUTH_POLICY: AuthPolicy = "skip";
 const DEFAULT_OUTPUT_FORMAT: OutputFormat = "text";
 const VALID_PERMISSION_MODES = new Set<PermissionMode>([
@@ -58,8 +57,10 @@ const VALID_PERMISSION_MODES = new Set<PermissionMode>([
   "approve-reads",
   "deny-all",
 ]);
-const VALID_NON_INTERACTIVE_PERMISSION_POLICIES =
-  new Set<NonInteractivePermissionPolicy>(["deny", "fail"]);
+const VALID_NON_INTERACTIVE_PERMISSION_POLICIES = new Set<NonInteractivePermissionPolicy>([
+  "deny",
+  "fail",
+]);
 const VALID_AUTH_POLICIES = new Set<AuthPolicy>(["skip", "fail"]);
 const VALID_OUTPUT_FORMATS = new Set<OutputFormat>(["text", "json", "quiet"]);
 
@@ -80,9 +81,7 @@ function parseTtlMs(value: unknown, sourcePath: string): number | undefined {
     return undefined;
   }
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new Error(
-      `Invalid config ttl in ${sourcePath}: expected non-negative seconds`,
-    );
+    throw new Error(`Invalid config ttl in ${sourcePath}: expected non-negative seconds`);
   }
   return Math.round(value * 1_000);
 }
@@ -92,24 +91,16 @@ function parseTimeoutMs(value: unknown, sourcePath: string): number | undefined 
     return undefined;
   }
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    throw new Error(
-      `Invalid config timeout in ${sourcePath}: expected positive seconds or null`,
-    );
+    throw new Error(`Invalid config timeout in ${sourcePath}: expected positive seconds or null`);
   }
   return Math.round(value * 1_000);
 }
 
-function parsePermissionMode(
-  value: unknown,
-  sourcePath: string,
-): PermissionMode | undefined {
+function parsePermissionMode(value: unknown, sourcePath: string): PermissionMode | undefined {
   if (value == null) {
     return undefined;
   }
-  if (
-    typeof value !== "string" ||
-    !VALID_PERMISSION_MODES.has(value as PermissionMode)
-  ) {
+  if (typeof value !== "string" || !VALID_PERMISSION_MODES.has(value as PermissionMode)) {
     throw new Error(
       `Invalid config defaultPermissions in ${sourcePath}: expected approve-all, approve-reads, or deny-all`,
     );
@@ -126,9 +117,7 @@ function parseNonInteractivePermissionPolicy(
   }
   if (
     typeof value !== "string" ||
-    !VALID_NON_INTERACTIVE_PERMISSION_POLICIES.has(
-      value as NonInteractivePermissionPolicy,
-    )
+    !VALID_NON_INTERACTIVE_PERMISSION_POLICIES.has(value as NonInteractivePermissionPolicy)
   ) {
     throw new Error(
       `Invalid config nonInteractivePermissions in ${sourcePath}: expected deny or fail`,
@@ -142,24 +131,17 @@ function parseAuthPolicy(value: unknown, sourcePath: string): AuthPolicy | undef
     return undefined;
   }
   if (typeof value !== "string" || !VALID_AUTH_POLICIES.has(value as AuthPolicy)) {
-    throw new Error(
-      `Invalid config authPolicy in ${sourcePath}: expected skip or fail`,
-    );
+    throw new Error(`Invalid config authPolicy in ${sourcePath}: expected skip or fail`);
   }
   return value as AuthPolicy;
 }
 
-function parseOutputFormat(
-  value: unknown,
-  sourcePath: string,
-): OutputFormat | undefined {
+function parseOutputFormat(value: unknown, sourcePath: string): OutputFormat | undefined {
   if (value == null) {
     return undefined;
   }
   if (typeof value !== "string" || !VALID_OUTPUT_FORMATS.has(value as OutputFormat)) {
-    throw new Error(
-      `Invalid config format in ${sourcePath}: expected text, json, or quiet`,
-    );
+    throw new Error(`Invalid config format in ${sourcePath}: expected text, json, or quiet`);
   }
   return value as OutputFormat;
 }
@@ -169,17 +151,12 @@ function parseDefaultAgent(value: unknown, sourcePath: string): string | undefin
     return undefined;
   }
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(
-      `Invalid config defaultAgent in ${sourcePath}: expected non-empty string`,
-    );
+    throw new Error(`Invalid config defaultAgent in ${sourcePath}: expected non-empty string`);
   }
   return normalizeAgentName(value);
 }
 
-function parseAgents(
-  value: unknown,
-  sourcePath: string,
-): Record<string, string> | undefined {
+function parseAgents(value: unknown, sourcePath: string): Record<string, string> | undefined {
   if (value == null) {
     return undefined;
   }
@@ -206,10 +183,7 @@ function parseAgents(
   return parsed;
 }
 
-function parseAuth(
-  value: unknown,
-  sourcePath: string,
-): Record<string, string> | undefined {
+function parseAuth(value: unknown, sourcePath: string): Record<string, string> | undefined {
   if (value == null) {
     return undefined;
   }
@@ -262,8 +236,8 @@ function mergeAgents(
   projectAgents: Record<string, string> | undefined,
 ): Record<string, string> {
   return {
-    ...(globalAgents ?? {}),
-    ...(projectAgents ?? {}),
+    ...globalAgents,
+    ...projectAgents,
   };
 }
 
@@ -272,8 +246,8 @@ function mergeAuth(
   projectAuth: Record<string, string> | undefined,
 ): Record<string, string> {
   return {
-    ...(globalAuth ?? {}),
-    ...(projectAuth ?? {}),
+    ...globalAuth,
+    ...projectAuth,
   };
 }
 
@@ -300,14 +274,8 @@ export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfi
     DEFAULT_PERMISSION_MODE;
 
   const nonInteractivePermissions =
-    parseNonInteractivePermissionPolicy(
-      projectConfig?.nonInteractivePermissions,
-      projectPath,
-    ) ??
-    parseNonInteractivePermissionPolicy(
-      globalConfig?.nonInteractivePermissions,
-      globalPath,
-    ) ??
+    parseNonInteractivePermissionPolicy(projectConfig?.nonInteractivePermissions, projectPath) ??
+    parseNonInteractivePermissionPolicy(globalConfig?.nonInteractivePermissions, globalPath) ??
     DEFAULT_NON_INTERACTIVE_PERMISSION_POLICY;
 
   const authPolicy =
@@ -321,11 +289,9 @@ export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfi
     DEFAULT_TTL_MS;
 
   const timeoutConfiguredInProject =
-    projectConfig != null &&
-    Object.prototype.hasOwnProperty.call(projectConfig, "timeout");
+    projectConfig != null && Object.prototype.hasOwnProperty.call(projectConfig, "timeout");
   const timeoutConfiguredInGlobal =
-    globalConfig != null &&
-    Object.prototype.hasOwnProperty.call(globalConfig, "timeout");
+    globalConfig != null && Object.prototype.hasOwnProperty.call(globalConfig, "timeout");
   let timeoutMs: number | undefined = DEFAULT_TIMEOUT_MS;
   if (timeoutConfiguredInProject) {
     timeoutMs = parseTimeoutMs(projectConfig?.timeout, projectPath);

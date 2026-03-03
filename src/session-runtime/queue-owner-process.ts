@@ -1,10 +1,6 @@
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
-import type {
-  AuthPolicy,
-  NonInteractivePermissionPolicy,
-  PermissionMode,
-} from "../types.js";
+import type { AuthPolicy, NonInteractivePermissionPolicy, PermissionMode } from "../types.js";
 
 export type QueueOwnerRuntimeOptions = {
   sessionId: string;
@@ -28,9 +24,7 @@ type SessionSendLike = {
   ttlMs?: number;
 };
 
-export function resolveQueueOwnerSpawnArgs(
-  argv: readonly string[] = process.argv,
-): string[] {
+export function resolveQueueOwnerSpawnArgs(argv: readonly string[] = process.argv): string[] {
   const entry = argv[1];
   if (!entry || entry.trim().length === 0) {
     throw new Error("acpx self-spawn failed: missing CLI entry path");

@@ -40,10 +40,7 @@ function makeRecord(): SessionRecord {
 }
 
 function assertSerializationPolicy(): void {
-  const persisted = serializeSessionRecordForDisk(makeRecord()) as Record<
-    string,
-    unknown
-  >;
+  const persisted = serializeSessionRecordForDisk(makeRecord()) as Record<string, unknown>;
   const violations = findPersistedKeyPolicyViolations(persisted);
   assert.equal(
     violations.length,
@@ -109,18 +106,10 @@ function assertSerializationPolicy(): void {
 
 function assertSerializerSourceKeys(): void {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-  const sourcePath = path.join(
-    scriptDir,
-    "..",
-    "src",
-    "session-persistence",
-    "serialize.ts",
-  );
+  const sourcePath = path.join(scriptDir, "..", "src", "session-persistence", "serialize.ts");
   const source = fs.readFileSync(sourcePath, "utf8");
 
-  const serializerStart = source.indexOf(
-    "export function serializeSessionRecordForDisk",
-  );
+  const serializerStart = source.indexOf("export function serializeSessionRecordForDisk");
   assert.notEqual(serializerStart, -1, "serializeSessionRecordForDisk not found");
 
   const serializerBlock = source.slice(serializerStart);

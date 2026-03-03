@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { Writable, Readable } from "node:stream";
 import readline from "node:readline/promises";
-
+import { Writable, Readable } from "node:stream";
+import { fileURLToPath } from "node:url";
 import * as acp from "../acp.js";
 
 class ExampleClient implements acp.Client {
@@ -57,9 +56,7 @@ class ExampleClient implements acp.Client {
         console.log(`\n🔧 ${update.title} (${update.status})`);
         break;
       case "tool_call_update":
-        console.log(
-          `\n🔧 Tool call \`${update.toolCallId}\` updated: ${update.status}\n`,
-        );
+        console.log(`\n🔧 Tool call \`${update.toolCallId}\` updated: ${update.status}\n`);
         break;
       case "plan":
       case "agent_thought_chunk":
@@ -71,24 +68,14 @@ class ExampleClient implements acp.Client {
     }
   }
 
-  async writeTextFile(
-    params: acp.WriteTextFileRequest,
-  ): Promise<acp.WriteTextFileResponse> {
-    console.error(
-      "[Client] Write text file called with:",
-      JSON.stringify(params, null, 2),
-    );
+  async writeTextFile(params: acp.WriteTextFileRequest): Promise<acp.WriteTextFileResponse> {
+    console.error("[Client] Write text file called with:", JSON.stringify(params, null, 2));
 
     return {};
   }
 
-  async readTextFile(
-    params: acp.ReadTextFileRequest,
-  ): Promise<acp.ReadTextFileResponse> {
-    console.error(
-      "[Client] Read text file called with:",
-      JSON.stringify(params, null, 2),
-    );
+  async readTextFile(params: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> {
+    console.error("[Client] Read text file called with:", JSON.stringify(params, null, 2));
 
     return {
       content: "Mock file content",

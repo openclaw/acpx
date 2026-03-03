@@ -30,8 +30,7 @@ test("readTextFile respects line/limit and logs operations", async () => {
     assert.equal(response.content, "two\nthree");
     assert.equal(
       ops.some(
-        (operation) =>
-          operation.method === "fs/read_text_file" && operation.status === "completed",
+        (operation) => operation.method === "fs/read_text_file" && operation.status === "completed",
       ),
       true,
     );

@@ -12,9 +12,7 @@ export function normalizeAgentName(value: string): string {
   return value.trim().toLowerCase();
 }
 
-export function mergeAgentRegistry(
-  overrides?: Record<string, string>,
-): Record<string, string> {
+export function mergeAgentRegistry(overrides?: Record<string, string>): Record<string, string> {
   if (!overrides) {
     return { ...AGENT_REGISTRY };
   }
@@ -30,10 +28,7 @@ export function mergeAgentRegistry(
   return merged;
 }
 
-export function resolveAgentCommand(
-  agentName: string,
-  overrides?: Record<string, string>,
-): string {
+export function resolveAgentCommand(agentName: string, overrides?: Record<string, string>): string {
   const normalized = normalizeAgentName(agentName);
   const registry = mergeAgentRegistry(overrides);
   return registry[normalized] ?? agentName;

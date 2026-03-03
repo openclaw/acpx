@@ -78,7 +78,5 @@ test("cancelSessionPrompt sends cancel request to active queue owner", async () 
 
 async function loadSessionModule(): Promise<SessionModule> {
   const cacheBuster = `${Date.now()}-${Math.random()}`;
-  return (await import(
-    `${SESSION_MODULE_URL.href}?session_test=${cacheBuster}`
-  )) as SessionModule;
+  return (await import(`${SESSION_MODULE_URL.href}?session_test=${cacheBuster}`)) as SessionModule;
 }

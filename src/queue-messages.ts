@@ -118,23 +118,16 @@ function isPermissionMode(value: unknown): value is PermissionMode {
   return value === "approve-all" || value === "approve-reads" || value === "deny-all";
 }
 
-function isNonInteractivePermissionPolicy(
-  value: unknown,
-): value is NonInteractivePermissionPolicy {
+function isNonInteractivePermissionPolicy(value: unknown): value is NonInteractivePermissionPolicy {
   return value === "deny" || value === "fail";
 }
 
 function isOutputErrorCode(value: unknown): value is OutputErrorCode {
-  return (
-    typeof value === "string" && OUTPUT_ERROR_CODES.includes(value as OutputErrorCode)
-  );
+  return typeof value === "string" && OUTPUT_ERROR_CODES.includes(value as OutputErrorCode);
 }
 
 function isOutputErrorOrigin(value: unknown): value is OutputErrorOrigin {
-  return (
-    typeof value === "string" &&
-    OUTPUT_ERROR_ORIGINS.includes(value as OutputErrorOrigin)
-  );
+  return typeof value === "string" && OUTPUT_ERROR_ORIGINS.includes(value as OutputErrorOrigin);
 }
 
 function parseAcpError(value: unknown): OutputErrorAcpPayload | undefined {
@@ -385,13 +378,10 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
       typeof message.detailCode === "string" && message.detailCode.trim().length > 0
         ? message.detailCode
         : undefined;
-    const retryable =
-      typeof message.retryable === "boolean" ? message.retryable : undefined;
+    const retryable = typeof message.retryable === "boolean" ? message.retryable : undefined;
     const acp = parseAcpError(message.acp);
     const outputAlreadyEmitted =
-      typeof message.outputAlreadyEmitted === "boolean"
-        ? message.outputAlreadyEmitted
-        : undefined;
+      typeof message.outputAlreadyEmitted === "boolean" ? message.outputAlreadyEmitted : undefined;
 
     return {
       type: "error",

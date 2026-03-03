@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  AGENT_SESSION_ID_META_KEYS,
-  extractAgentSessionId,
-} from "../src/agent-session-id.js";
+import { AGENT_SESSION_ID_META_KEYS, extractAgentSessionId } from "../src/agent-session-id.js";
 
 test("agent session id precedence is stable", () => {
   assert.deepEqual(AGENT_SESSION_ID_META_KEYS, ["agentSessionId", "sessionId"]);

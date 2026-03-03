@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  isAcpJsonRpcMessage,
-  isSessionUpdateNotification,
-} from "../src/acp-jsonrpc.js";
+import { isAcpJsonRpcMessage, isSessionUpdateNotification } from "../src/acp-jsonrpc.js";
 
 test("isAcpJsonRpcMessage accepts JSON-RPC request", () => {
   assert.equal(

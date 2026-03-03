@@ -1,6 +1,6 @@
+import path from "node:path";
 import { InvalidArgumentError } from "commander";
 import type { Command } from "commander";
-import path from "node:path";
 import {
   DEFAULT_AGENT_NAME,
   resolveAgentCommand as resolveAgentCommandFromRegistry,
@@ -76,14 +76,8 @@ export function parseAuthPolicy(value: string): AuthPolicy {
   return value as AuthPolicy;
 }
 
-export function parseNonInteractivePermissionPolicy(
-  value: string,
-): NonInteractivePermissionPolicy {
-  if (
-    !NON_INTERACTIVE_PERMISSION_POLICIES.includes(
-      value as NonInteractivePermissionPolicy,
-    )
-  ) {
+export function parseNonInteractivePermissionPolicy(value: string): NonInteractivePermissionPolicy {
+  if (!NON_INTERACTIVE_PERMISSION_POLICIES.includes(value as NonInteractivePermissionPolicy)) {
     throw new InvalidArgumentError(
       `Invalid non-interactive permission policy "${value}". Expected one of: ${NON_INTERACTIVE_PERMISSION_POLICIES.join(", ")}`,
     );
@@ -135,9 +129,7 @@ export function resolvePermissionMode(
   flags: PermissionFlags,
   defaultMode: PermissionMode,
 ): PermissionMode {
-  const selected = [flags.approveAll, flags.approveReads, flags.denyAll].filter(
-    Boolean,
-  ).length;
+  const selected = [flags.approveAll, flags.approveReads, flags.denyAll].filter(Boolean).length;
 
   if (selected > 1) {
     throw new InvalidArgumentError(
@@ -165,10 +157,7 @@ export function addGlobalFlags(command: Command): Command {
       parseAuthPolicy,
     )
     .option("--approve-all", "Auto-approve all permission requests")
-    .option(
-      "--approve-reads",
-      "Auto-approve read/search requests and prompt for writes",
-    )
+    .option("--approve-reads", "Auto-approve read/search requests and prompt for writes")
     .option("--deny-all", "Deny all permission requests")
     .option(
       "--non-interactive-permissions <policy>",
@@ -180,11 +169,7 @@ export function addGlobalFlags(command: Command): Command {
       "--json-strict",
       "Strict JSON mode: requires --format json and suppresses non-JSON stderr output",
     )
-    .option(
-      "--timeout <seconds>",
-      "Maximum time to wait for agent response",
-      parseTimeoutSeconds,
-    )
+    .option("--timeout <seconds>", "Maximum time to wait for agent response", parseTimeoutSeconds)
     .option(
       "--ttl <seconds>",
       "Queue owner idle TTL before shutdown (0 = keep alive forever) (default: 300)",
@@ -195,11 +180,7 @@ export function addGlobalFlags(command: Command): Command {
 
 export function addSessionOption(command: Command): Command {
   return command
-    .option(
-      "-s, --session <name>",
-      "Use named session instead of cwd default",
-      parseSessionName,
-    )
+    .option("-s, --session <name>", "Use named session instead of cwd default", parseSessionName)
     .option(
       "--no-wait",
       "Queue prompt and return immediately when another prompt is already running",
@@ -225,9 +206,7 @@ export function resolveSessionNameFromFlags(
   // Commander parses options on the parent command when flags appear before the
   // subcommand (e.g. `acpx codex -s foo cancel`). Use optsWithGlobals() so
   // subcommands can still access those values.
-  const allOpts = (
-    command as unknown as { optsWithGlobals?: () => unknown }
-  ).optsWithGlobals?.();
+  const allOpts = (command as unknown as { optsWithGlobals?: () => unknown }).optsWithGlobals?.();
   if (allOpts && typeof (allOpts as { session?: unknown }).session === "string") {
     return parseSessionName((allOpts as { session: string }).session);
   }
@@ -241,17 +220,11 @@ export function resolveSessionNameFromFlags(
 }
 
 export function addPromptInputOption(command: Command): Command {
-  return command.option(
-    "-f, --file <path>",
-    "Read prompt text from file path (use - for stdin)",
-  );
+  return command.option("-f, --file <path>", "Read prompt text from file path (use - for stdin)");
 }
 
-export function resolveGlobalFlags(
-  command: Command,
-  config: ResolvedAcpxConfig,
-): GlobalFlags {
-  const opts = command.optsWithGlobals() as Partial<GlobalFlags>;
+export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig): GlobalFlags {
+  const opts = command.optsWithGlobals();
   const format = opts.format ?? config.format ?? "text";
   const jsonStrict = opts.jsonStrict === true;
   const verbose = opts.verbose === true;
@@ -268,8 +241,7 @@ export function resolveGlobalFlags(
     agent: opts.agent,
     cwd: opts.cwd ?? process.cwd(),
     authPolicy: opts.authPolicy ?? config.authPolicy,
-    nonInteractivePermissions:
-      opts.nonInteractivePermissions ?? config.nonInteractivePermissions,
+    nonInteractivePermissions: opts.nonInteractivePermissions ?? config.nonInteractivePermissions,
     jsonStrict,
     timeout: opts.timeout ?? config.timeoutMs,
     ttl: opts.ttl ?? config.ttlMs ?? DEFAULT_QUEUE_OWNER_TTL_MS,
@@ -281,10 +253,7 @@ export function resolveGlobalFlags(
   };
 }
 
-export function resolveOutputPolicy(
-  format: OutputFormat,
-  jsonStrict: boolean,
-): OutputPolicy {
+export function resolveOutputPolicy(format: OutputFormat, jsonStrict: boolean): OutputPolicy {
   return {
     format,
     jsonStrict,
@@ -305,9 +274,7 @@ export function resolveAgentInvocation(
 } {
   const override = globalFlags.agent?.trim();
   if (override && explicitAgentName) {
-    throw new InvalidArgumentError(
-      "Do not combine positional agent with --agent override",
-    );
+    throw new InvalidArgumentError("Do not combine positional agent with --agent override");
   }
 
   const agentName = explicitAgentName ?? config.defaultAgent ?? DEFAULT_AGENT_NAME;

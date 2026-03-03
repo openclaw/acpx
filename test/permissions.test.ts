@@ -9,9 +9,7 @@ const BASE_OPTIONS = [
   { optionId: "reject", kind: "reject_once" },
 ] as const;
 
-function makeRequest(
-  kind: RequestPermissionRequest["toolCall"]["kind"],
-): RequestPermissionRequest {
+function makeRequest(kind: RequestPermissionRequest["toolCall"]["kind"]): RequestPermissionRequest {
   return {
     sessionId: "session-1",
     toolCall: {
@@ -59,18 +57,12 @@ test("deny-all denies everything", async () => {
 
 test("approve-reads approves reads and denies writes", async () => {
   await withNonTty(async () => {
-    const readResponse = await resolvePermissionRequest(
-      makeRequest("read"),
-      "approve-reads",
-    );
+    const readResponse = await resolvePermissionRequest(makeRequest("read"), "approve-reads");
     assert.deepEqual(readResponse, {
       outcome: { outcome: "selected", optionId: "allow" },
     });
 
-    const writeResponse = await resolvePermissionRequest(
-      makeRequest("edit"),
-      "approve-reads",
-    );
+    const writeResponse = await resolvePermissionRequest(makeRequest("edit"), "approve-reads");
     assert.deepEqual(writeResponse, {
       outcome: { outcome: "selected", optionId: "reject" },
     });
@@ -80,8 +72,7 @@ test("approve-reads approves reads and denies writes", async () => {
 test("non-interactive policy fail throws when prompt is required", async () => {
   await withNonTty(async () => {
     await assert.rejects(
-      async () =>
-        await resolvePermissionRequest(makeRequest("edit"), "approve-reads", "fail"),
+      async () => await resolvePermissionRequest(makeRequest("edit"), "approve-reads", "fail"),
       PermissionPromptUnavailableError,
     );
   });

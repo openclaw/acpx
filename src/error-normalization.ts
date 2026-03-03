@@ -99,16 +99,11 @@ function isAcpAuthRequiredPayload(acp: OutputErrorAcpPayload | undefined): boole
 }
 
 function isOutputErrorCode(value: unknown): value is OutputErrorCode {
-  return (
-    typeof value === "string" && OUTPUT_ERROR_CODES.includes(value as OutputErrorCode)
-  );
+  return typeof value === "string" && OUTPUT_ERROR_CODES.includes(value as OutputErrorCode);
 }
 
 function isOutputErrorOrigin(value: unknown): value is OutputErrorOrigin {
-  return (
-    typeof value === "string" &&
-    OUTPUT_ERROR_ORIGINS.includes(value as OutputErrorOrigin)
-  );
+  return typeof value === "string" && OUTPUT_ERROR_ORIGINS.includes(value as OutputErrorOrigin);
 }
 
 function readOutputErrorMeta(error: unknown): ErrorMeta {
@@ -117,16 +112,13 @@ function readOutputErrorMeta(error: unknown): ErrorMeta {
     return {};
   }
 
-  const outputCode = isOutputErrorCode(record.outputCode)
-    ? record.outputCode
-    : undefined;
+  const outputCode = isOutputErrorCode(record.outputCode) ? record.outputCode : undefined;
   const detailCode =
     typeof record.detailCode === "string" && record.detailCode.trim().length > 0
       ? record.detailCode
       : undefined;
   const origin = isOutputErrorOrigin(record.origin) ? record.origin : undefined;
-  const retryable =
-    typeof record.retryable === "boolean" ? record.retryable : undefined;
+  const retryable = typeof record.retryable === "boolean" ? record.retryable : undefined;
 
   const acp = toAcpErrorPayload(record.acp);
   return {
@@ -158,10 +150,7 @@ function toAcpErrorPayload(value: unknown): OutputErrorAcpPayload | undefined {
   };
 }
 
-function extractAcpErrorInternal(
-  value: unknown,
-  depth: number,
-): OutputErrorAcpPayload | undefined {
+function extractAcpErrorInternal(value: unknown, depth: number): OutputErrorAcpPayload | undefined {
   if (depth > 5) {
     return undefined;
   }
@@ -208,7 +197,7 @@ function isUsageLike(error: unknown): boolean {
   return (
     error.name === "CommanderError" ||
     error.name === "InvalidArgumentError" ||
-    (asRecord(error)?.code as unknown) === "commander.invalidArgument"
+    asRecord(error)?.code === "commander.invalidArgument"
   );
 }
 

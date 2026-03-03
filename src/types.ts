@@ -29,8 +29,7 @@ export const AUTH_POLICIES = ["skip", "fail"] as const;
 export type AuthPolicy = (typeof AUTH_POLICIES)[number];
 
 export const NON_INTERACTIVE_PERMISSION_POLICIES = ["deny", "fail"] as const;
-export type NonInteractivePermissionPolicy =
-  (typeof NON_INTERACTIVE_PERMISSION_POLICIES)[number];
+export type NonInteractivePermissionPolicy = (typeof NON_INTERACTIVE_PERMISSION_POLICIES)[number];
 
 export const OUTPUT_STREAMS = ["prompt", "control"] as const;
 export type OutputStream = (typeof OUTPUT_STREAMS)[number];
@@ -149,10 +148,7 @@ export type AcpClientOptions = {
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
-  onAcpOutputMessage?: (
-    direction: AcpMessageDirection,
-    message: AcpJsonRpcMessage,
-  ) => void;
+  onAcpOutputMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onSessionUpdate?: (notification: SessionNotification) => void;
   onClientOperation?: (operation: ClientOperation) => void;
 };
@@ -230,7 +226,7 @@ export type SessionUserMessage = {
 export type SessionAgentMessage = {
   content: SessionAgentContent[];
   tool_results: Record<string, SessionToolResult>;
-  reasoning_details?: unknown | null;
+  reasoning_details?: unknown;
 };
 
 export type SessionMessage =

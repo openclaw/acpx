@@ -1,3 +1,6 @@
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import type { Readable } from "node:stream";
 import type {
   CreateTerminalRequest,
   CreateTerminalResponse,
@@ -10,16 +13,9 @@ import type {
   WaitForTerminalExitRequest,
   WaitForTerminalExitResponse,
 } from "@agentclientprotocol/sdk";
-import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import type { Readable } from "node:stream";
 import { PermissionDeniedError, PermissionPromptUnavailableError } from "./errors.js";
 import { promptForPermission } from "./permission-prompt.js";
-import type {
-  ClientOperation,
-  NonInteractivePermissionPolicy,
-  PermissionMode,
-} from "./types.js";
+import type { ClientOperation, NonInteractivePermissionPolicy, PermissionMode } from "./types.js";
 
 const DEFAULT_TERMINAL_OUTPUT_LIMIT_BYTES = 64 * 1024;
 const DEFAULT_KILL_GRACE_MS = 1_500;
@@ -84,9 +80,7 @@ function trimToUtf8Boundary(buffer: Buffer, limit: number): Buffer {
   return buffer.subarray(start);
 }
 
-function waitForSpawn(
-  process: ChildProcessByStdio<null, Readable, Readable>,
-): Promise<void> {
+function waitForSpawn(process: ChildProcessByStdio<null, Readable, Readable>): Promise<void> {
   return new Promise((resolve, reject) => {
     const onSpawn = () => {
       process.off("error", onError);
@@ -135,10 +129,7 @@ export class TerminalManager {
     this.onOperation = options.onOperation;
     this.usesDefaultConfirmExecute = options.confirmExecute == null;
     this.confirmExecute = options.confirmExecute ?? defaultConfirmExecute;
-    this.killGraceMs = Math.max(
-      0,
-      Math.round(options.killGraceMs ?? DEFAULT_KILL_GRACE_MS),
-    );
+    this.killGraceMs = Math.max(0, Math.round(options.killGraceMs ?? DEFAULT_KILL_GRACE_MS));
   }
 
   async createTerminal(params: CreateTerminalRequest): Promise<CreateTerminalResponse> {
@@ -192,10 +183,7 @@ export class TerminalManager {
 
         terminal.output = Buffer.concat([terminal.output, bytes]);
         if (terminal.output.length > terminal.outputByteLimit) {
-          terminal.output = trimToUtf8Boundary(
-            terminal.output,
-            terminal.outputByteLimit,
-          );
+          terminal.output = trimToUtf8Boundary(terminal.output, terminal.outputByteLimit);
           terminal.truncated = true;
         }
       };
@@ -241,8 +229,7 @@ export class TerminalManager {
       throw new Error(`Unknown terminal: ${params.terminalId}`);
     }
 
-    const hasExitStatus =
-      terminal.exitCode !== undefined || terminal.signal !== undefined;
+    const hasExitStatus = terminal.exitCode !== undefined || terminal.signal !== undefined;
 
     this.emitOperation({
       method: "terminal/output",
@@ -282,9 +269,7 @@ export class TerminalManager {
     return response;
   }
 
-  async killTerminal(
-    params: KillTerminalCommandRequest,
-  ): Promise<KillTerminalCommandResponse> {
+  async killTerminal(params: KillTerminalCommandRequest): Promise<KillTerminalCommandResponse> {
     const terminal = this.getTerminal(params.terminalId);
     if (!terminal) {
       throw new Error(`Unknown terminal: ${params.terminalId}`);
@@ -320,9 +305,7 @@ export class TerminalManager {
     }
   }
 
-  async releaseTerminal(
-    params: ReleaseTerminalRequest,
-  ): Promise<ReleaseTerminalResponse> {
+  async releaseTerminal(params: ReleaseTerminalRequest): Promise<ReleaseTerminalResponse> {
     const summary = `terminal/release: ${params.terminalId}`;
     this.emitOperation({
       method: "terminal/release",
@@ -372,7 +355,7 @@ export class TerminalManager {
   }
 
   async shutdown(): Promise<void> {
-    for (const terminalId of [...this.terminals.keys()]) {
+    for (const terminalId of Array.from(this.terminals.keys())) {
       await this.releaseTerminal({ terminalId, sessionId: "shutdown" });
     }
   }
@@ -432,9 +415,6 @@ export class TerminalManager {
       return;
     }
 
-    await Promise.race([
-      terminal.exitPromise.then(() => undefined),
-      waitMs(this.killGraceMs),
-    ]);
+    await Promise.race([terminal.exitPromise.then(() => undefined), waitMs(this.killGraceMs)]);
   }
 }

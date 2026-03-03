@@ -101,11 +101,7 @@ export class QueueOwnerTurnController {
 
   async applyPendingCancel(): Promise<boolean> {
     const activeController = this.activeController;
-    if (
-      !this.pendingCancel ||
-      !activeController ||
-      !activeController.hasActivePrompt()
-    ) {
+    if (!this.pendingCancel || !activeController || !activeController.hasActivePrompt()) {
       return false;
     }
 
@@ -144,10 +140,6 @@ export class QueueOwnerTurnController {
       );
     }
 
-    return await this.options.setSessionConfigOptionFallback(
-      configId,
-      value,
-      timeoutMs,
-    );
+    return await this.options.setSessionConfigOptionFallback(configId, value, timeoutMs);
   }
 }

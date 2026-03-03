@@ -23,8 +23,7 @@ class JsonOutputFormatter implements OutputFormatter {
   }
 
   setContext(context: OutputFormatterContext): void {
-    this.sessionId =
-      context.sessionId?.trim() || this.sessionId || DEFAULT_JSON_SESSION_ID;
+    this.sessionId = context.sessionId?.trim() || this.sessionId || DEFAULT_JSON_SESSION_ID;
   }
 
   onAcpMessage(message: unknown): void {

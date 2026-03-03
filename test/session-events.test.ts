@@ -5,10 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { defaultSessionEventLog } from "../src/session-event-log.js";
 import { SessionEventWriter, listSessionEvents } from "../src/session-events.js";
-import {
-  resolveSessionRecord,
-  writeSessionRecord,
-} from "../src/session-persistence.js";
+import { resolveSessionRecord, writeSessionRecord } from "../src/session-persistence.js";
 import type { SessionRecord } from "../src/types.js";
 
 async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {
@@ -28,11 +25,7 @@ async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<vo
   }
 }
 
-function makeSessionRecord(
-  sessionId: string,
-  cwd: string,
-  maxSegments: number,
-): SessionRecord {
+function makeSessionRecord(sessionId: string, cwd: string, maxSegments: number): SessionRecord {
   const now = "2026-02-28T00:00:00.000Z";
   return {
     schema: "acpx.session.v1",

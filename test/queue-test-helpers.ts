@@ -25,9 +25,7 @@ export function queuePaths(homeDir: string, sessionId: string): QueuePaths {
   };
 }
 
-export async function withTempHome(
-  run: (homeDir: string) => Promise<void>,
-): Promise<void> {
+export async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {
   const originalHome = process.env.HOME;
   const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-test-home-"));
   process.env.HOME = tempHome;
@@ -81,8 +79,7 @@ export async function writeQueueOwnerLock(options: {
       createdAt,
       heartbeatAt,
       ownerGeneration:
-        options.ownerGeneration ??
-        Date.now() * 1_000 + Math.floor(Math.random() * 1_000),
+        options.ownerGeneration ?? Date.now() * 1_000 + Math.floor(Math.random() * 1_000),
       queueDepth: options.queueDepth ?? 0,
     })}\n`,
     "utf8",
@@ -99,10 +96,7 @@ export async function cleanupOwnerArtifacts(options: {
   await fs.rm(options.lockPath, { force: true });
 }
 
-export async function listenServer(
-  server: net.Server,
-  socketPath: string,
-): Promise<void> {
+export async function listenServer(server: net.Server, socketPath: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {
       reject(error);

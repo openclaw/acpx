@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { randomUUID } from "node:crypto";
+import { Readable, Writable } from "node:stream";
 import {
   AgentSideConnection,
   PROTOCOL_VERSION,
@@ -15,8 +17,6 @@ import {
   type PromptResponse,
   type SessionId,
 } from "@agentclientprotocol/sdk";
-import { randomUUID } from "node:crypto";
-import { Readable, Writable } from "node:stream";
 
 type ParsedCommand = {
   command: string;
@@ -312,10 +312,8 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   }
 
   return {
-    newSessionMeta:
-      Object.keys(newSessionMeta).length > 0 ? { ...newSessionMeta } : undefined,
-    loadSessionMeta:
-      Object.keys(loadSessionMeta).length > 0 ? { ...loadSessionMeta } : undefined,
+    newSessionMeta: Object.keys(newSessionMeta).length > 0 ? { ...newSessionMeta } : undefined,
+    loadSessionMeta: Object.keys(loadSessionMeta).length > 0 ? { ...loadSessionMeta } : undefined,
     supportsLoadSession,
     loadSessionFailsOnEmpty,
     replayLoadSessionUpdates,
@@ -366,10 +364,7 @@ class MockAgent implements Agent {
     }
 
     const existing = this.sessions.get(params.sessionId);
-    if (
-      this.options.loadSessionFailsOnEmpty &&
-      (!existing || !existing.hasCompletedPrompt)
-    ) {
+    if (this.options.loadSessionFailsOnEmpty && (!existing || !existing.hasCompletedPrompt)) {
       const error = new Error("Internal error") as Error & {
         code: number;
         data: {
@@ -410,11 +405,7 @@ class MockAgent implements Agent {
 
     try {
       const text = getPromptText(params.prompt);
-      const response = await this.handlePrompt(
-        params.sessionId,
-        text,
-        promptAbort.signal,
-      );
+      const response = await this.handlePrompt(params.sessionId, text, promptAbort.signal);
       session.hasCompletedPrompt = true;
       await this.sendAssistantMessage(params.sessionId, response);
       return { stopReason: "end_turn" };
@@ -423,10 +414,7 @@ class MockAgent implements Agent {
         return { stopReason: "cancelled" };
       }
 
-      await this.sendAssistantMessage(
-        params.sessionId,
-        `error: ${toErrorMessage(error)}`,
-      );
+      await this.sendAssistantMessage(params.sessionId, `error: ${toErrorMessage(error)}`);
       return { stopReason: "end_turn" };
     } finally {
       if (session.pendingPrompt === promptAbort) {
@@ -439,10 +427,7 @@ class MockAgent implements Agent {
     this.sessions.get(params.sessionId)?.pendingPrompt?.abort();
   }
 
-  private async sendAssistantMessage(
-    sessionId: SessionId,
-    text: string,
-  ): Promise<void> {
+  private async sendAssistantMessage(sessionId: SessionId, text: string): Promise<void> {
     await this.connection.sessionUpdate({
       sessionId,
       update: {
@@ -618,7 +603,4 @@ if (mockAgentOptions.ignoreSigterm) {
   });
 }
 
-new AgentSideConnection(
-  (connection) => new MockAgent(connection, mockAgentOptions),
-  stream,
-);
+new AgentSideConnection((connection) => new MockAgent(connection, mockAgentOptions), stream);

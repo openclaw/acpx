@@ -82,8 +82,7 @@ export function isJsonRpcNotification(message: AnyMessage): boolean {
 
 export function isSessionUpdateNotification(message: AnyMessage): boolean {
   return (
-    isJsonRpcNotification(message) &&
-    (message as { method?: unknown }).method === "session/update"
+    isJsonRpcNotification(message) && (message as { method?: unknown }).method === "session/update"
   );
 }
 
