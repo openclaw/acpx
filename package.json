@@ -28,7 +28,7 @@
   ],
   "type": "module",
   "scripts": {
-    "build": "tsup src/cli.ts --format esm --dts --clean",
+    "build": "tsdown src/cli.ts --format esm --dts --clean --platform node --target node18 --no-fixedExtension",
     "build:test": "node -e \"require('node:fs').rmSync('dist-test',{recursive:true,force:true})\" && tsc -p tsconfig.test.json",
     "dev": "tsx src/cli.ts",
     "format": "oxfmt --write",
@@ -58,7 +58,7 @@
     "oxlint": "^1.51.0",
     "oxlint-tsgolint": "^0.15.0",
     "release-it": "^19.2.4",
-    "tsup": "^8.0.0",
+    "tsdown": "^0.21.0-beta.2",
     "tsx": "^4.0.0",
     "typescript": "^5.7.0"
   },
