@@ -279,6 +279,10 @@ function parseAcpxState(raw: unknown): SessionAcpxState | undefined {
     state.current_mode_id = record.current_mode_id;
   }
 
+  if (typeof record.desired_mode_id === "string") {
+    state.desired_mode_id = record.desired_mode_id;
+  }
+
   if (isStringArray(record.available_commands)) {
     state.available_commands = [...record.available_commands];
   }

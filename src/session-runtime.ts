@@ -35,6 +35,7 @@ import {
   type QueueOwnerActiveSessionController,
 } from "./queue-owner-turn-controller.js";
 import { normalizeRuntimeSessionId } from "./runtime-session-id.js";
+import { setDesiredModeId } from "./session-mode-preference.js";
 import { connectAndLoadSession } from "./session-runtime/connect-load.js";
 import { applyConversation, applyLifecycleSnapshotToRecord } from "./session-runtime/lifecycle.js";
 import {
@@ -885,8 +886,11 @@ export async function setSessionMode(
     options.verbose,
   );
   if (submittedToOwner) {
+    const record = await resolveSessionRecord(options.sessionId);
+    setDesiredModeId(record, options.modeId);
+    await writeSessionRecord(record);
     return {
-      record: await resolveSessionRecord(options.sessionId),
+      record,
       resumed: false,
     };
   }
@@ -913,8 +917,13 @@ export async function setSessionConfigOption(
     options.verbose,
   );
   if (ownerResponse) {
+    const record = await resolveSessionRecord(options.sessionId);
+    if (options.configId === "mode") {
+      setDesiredModeId(record, options.value);
+      await writeSessionRecord(record);
+    }
     return {
-      record: await resolveSessionRecord(options.sessionId),
+      record,
       response: ownerResponse,
       resumed: false,
     };

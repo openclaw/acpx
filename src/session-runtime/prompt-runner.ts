@@ -1,5 +1,6 @@
 import { AcpClient } from "../client.js";
 import type { QueueOwnerActiveSessionController } from "../queue-owner-turn-controller.js";
+import { setDesiredModeId } from "../session-mode-preference.js";
 import {
   absolutePath,
   isoNow,
@@ -165,8 +166,9 @@ export async function runSessionSetModeDirect(
     verbose: options.verbose,
     onClientAvailable: options.onClientAvailable,
     onClientClosed: options.onClientClosed,
-    run: async (client, sessionId) => {
+    run: async (client, sessionId, record) => {
       await withTimeout(client.setSessionMode(sessionId, options.modeId), options.timeoutMs);
+      setDesiredModeId(record, options.modeId);
     },
   });
 
@@ -189,11 +191,15 @@ export async function runSessionSetConfigOptionDirect(
     verbose: options.verbose,
     onClientAvailable: options.onClientAvailable,
     onClientClosed: options.onClientClosed,
-    run: async (client, sessionId) => {
-      return await withTimeout(
+    run: async (client, sessionId, record) => {
+      const response = await withTimeout(
         client.setSessionConfigOption(sessionId, options.configId, options.value),
         options.timeoutMs,
       );
+      if (options.configId === "mode") {
+        setDesiredModeId(record, options.value);
+      }
+      return response;
     },
   });
 

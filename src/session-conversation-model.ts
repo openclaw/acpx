@@ -435,6 +435,7 @@ export function cloneSessionAcpxState(
 
   return {
     current_mode_id: state.current_mode_id,
+    desired_mode_id: state.desired_mode_id,
     available_commands: state.available_commands ? [...state.available_commands] : undefined,
     config_options: state.config_options ? deepClone(state.config_options) : undefined,
   };
