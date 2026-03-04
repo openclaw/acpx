@@ -15,6 +15,9 @@ import {
   type NewSessionResponse,
   type PromptRequest,
   type PromptResponse,
+  type SetSessionConfigOptionRequest,
+  type SetSessionConfigOptionResponse,
+  type SetSessionModeRequest,
   type SessionId,
 } from "@agentclientprotocol/sdk";
 
@@ -36,6 +39,8 @@ type MockAgentOptions = {
 type SessionState = {
   pendingPrompt?: AbortController;
   hasCompletedPrompt: boolean;
+  modeId: string;
+  configValues: Record<string, string>;
 };
 
 class CancelledError extends Error {
@@ -322,6 +327,48 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   };
 }
 
+function createSessionState(hasCompletedPrompt = false): SessionState {
+  return {
+    hasCompletedPrompt,
+    modeId: "auto",
+    configValues: {
+      reasoning_effort: "medium",
+    },
+  };
+}
+
+function buildConfigOptions(state: SessionState): SetSessionConfigOptionResponse["configOptions"] {
+  return [
+    {
+      id: "mode",
+      name: "Session Mode",
+      category: "mode",
+      type: "select",
+      currentValue: state.modeId,
+      options: [
+        { value: "read-only", name: "Read Only" },
+        { value: "auto", name: "Default" },
+        { value: "full-access", name: "Full Access" },
+        { value: "plan", name: "Plan" },
+        { value: "default", name: "Default" },
+      ],
+    },
+    {
+      id: "reasoning_effort",
+      name: "Reasoning Effort",
+      category: "thought_level",
+      type: "select",
+      currentValue: state.configValues.reasoning_effort ?? "medium",
+      options: [
+        { value: "low", name: "Low" },
+        { value: "medium", name: "Medium" },
+        { value: "high", name: "High" },
+        { value: "xhigh", name: "Xhigh" },
+      ],
+    },
+  ];
+}
+
 class MockAgent implements Agent {
   private readonly connection: AgentConnection;
   private readonly sessions = new Map<SessionId, SessionState>();
@@ -346,7 +393,7 @@ class MockAgent implements Agent {
 
   async newSession(): Promise<NewSessionResponse> {
     const sessionId = randomUUID();
-    this.sessions.set(sessionId, { hasCompletedPrompt: false });
+    this.sessions.set(sessionId, createSessionState(false));
 
     if (this.options.newSessionMeta) {
       return {
@@ -378,7 +425,7 @@ class MockAgent implements Agent {
       throw error;
     }
 
-    this.sessions.set(params.sessionId, existing ?? { hasCompletedPrompt: false });
+    this.sessions.set(params.sessionId, existing ?? createSessionState(false));
 
     if (this.options.replayLoadSessionUpdates) {
       await this.sendAssistantMessage(params.sessionId, this.options.loadReplayText);
@@ -425,6 +472,33 @@ class MockAgent implements Agent {
 
   async cancel(params: { sessionId: SessionId }): Promise<void> {
     this.sessions.get(params.sessionId)?.pendingPrompt?.abort();
+  }
+
+  async setSessionMode(params: SetSessionModeRequest): Promise<void> {
+    const session = this.sessions.get(params.sessionId);
+    if (!session) {
+      throw new Error(`Unknown session: ${params.sessionId}`);
+    }
+    session.modeId = params.modeId;
+  }
+
+  async setSessionConfigOption(
+    params: SetSessionConfigOptionRequest,
+  ): Promise<SetSessionConfigOptionResponse> {
+    const session = this.sessions.get(params.sessionId);
+    if (!session) {
+      throw new Error(`Unknown session: ${params.sessionId}`);
+    }
+
+    if (params.configId === "mode") {
+      session.modeId = params.value;
+    } else {
+      session.configValues[params.configId] = params.value;
+    }
+
+    return {
+      configOptions: buildConfigOptions(session),
+    };
   }
 
   private async sendAssistantMessage(sessionId: SessionId, text: string): Promise<void> {

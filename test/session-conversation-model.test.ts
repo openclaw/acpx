@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import {
+  cloneSessionAcpxState,
   createSessionConversation,
   recordClientOperation,
   recordPromptSubmission,
@@ -203,4 +204,16 @@ test("recordClientOperation keeps state and advances timestamp", () => {
 
   assert.equal(state?.current_mode_id, "code");
   assert.equal(conversation.updated_at, "2026-02-27T10:00:05.000Z");
+});
+
+test("cloneSessionAcpxState preserves desired mode id", () => {
+  const cloned = cloneSessionAcpxState({
+    current_mode_id: "auto",
+    desired_mode_id: "plan",
+    available_commands: ["review"],
+  });
+
+  assert.equal(cloned?.current_mode_id, "auto");
+  assert.equal(cloned?.desired_mode_id, "plan");
+  assert.deepEqual(cloned?.available_commands, ["review"]);
 });

@@ -24,6 +24,31 @@ test("SessionRecord allows optional closed and closedAt fields", () => {
   assert.equal(record.closedAt, undefined);
 });
 
+test("listSessions preserves acpx desired_mode_id", async () => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const cwd = path.join(homeDir, "workspace");
+
+    await writeSessionRecord(
+      homeDir,
+      makeSessionRecord({
+        acpxRecordId: "desired-mode",
+        acpSessionId: "desired-mode",
+        agentCommand: "agent-a",
+        cwd,
+        acpx: {
+          desired_mode_id: "plan",
+        },
+      }),
+    );
+
+    const sessions = await session.listSessions();
+    const record = sessions.find((entry) => entry.acpxRecordId === "desired-mode");
+    assert.ok(record);
+    assert.equal(record.acpx?.desired_mode_id, "plan");
+  });
+});
+
 test("listSessions ignores unsupported conversation message shapes", async () => {
   await withTempHome(async (homeDir) => {
     const sessionDir = path.join(homeDir, ".acpx", "sessions");

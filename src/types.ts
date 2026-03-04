@@ -255,6 +255,7 @@ export type SessionConversation = {
 
 export type SessionAcpxState = {
   current_mode_id?: string;
+  desired_mode_id?: string;
   available_commands?: string[];
   config_options?: SessionConfigOption[];
 };

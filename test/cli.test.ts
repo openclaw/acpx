@@ -50,6 +50,7 @@ const MOCK_AGENT_IGNORING_SIGTERM = `${MOCK_AGENT_COMMAND} --ignore-sigterm`;
 const MOCK_CODEX_AGENT_WITH_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --codex-session-id codex-runtime-session`;
 const MOCK_CLAUDE_AGENT_WITH_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --claude-session-id claude-runtime-session`;
 const MOCK_AGENT_WITH_LOAD_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --supports-load-session --load-runtime-session-id loaded-runtime-session`;
+const MOCK_AGENT_WITH_LOAD_FALLBACK = `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-fails-on-empty`;
 
 type CliRunResult = {
   code: number | null;
@@ -439,6 +440,99 @@ test("prompt reconciles agentSessionId from loadSession metadata", async () => {
       unknown
     >;
     assert.equal(storedRecord.agent_session_id, "loaded-runtime-session");
+  });
+});
+
+test("set-mode persists across load fallback and replays on fresh ACP sessions", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_WITH_LOAD_FALLBACK,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const sessionId = "mode-replay-session";
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: sessionId,
+      acpSessionId: sessionId,
+      agentCommand: MOCK_AGENT_WITH_LOAD_FALLBACK,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+    });
+
+    const setPlan = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "set-mode", "plan"],
+      homeDir,
+    );
+    assert.equal(setPlan.code, 0, setPlan.stderr);
+    const setPlanPayload = JSON.parse(setPlan.stdout.trim()) as {
+      acpxSessionId?: unknown;
+    };
+
+    const checkPlan = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "set", "reasoning_effort", "high"],
+      homeDir,
+    );
+    assert.equal(checkPlan.code, 0, checkPlan.stderr);
+    const checkPlanPayload = JSON.parse(checkPlan.stdout.trim()) as {
+      acpxSessionId?: unknown;
+      configOptions?: Array<{ id?: string; currentValue?: string }>;
+    };
+    const modeAfterPlan =
+      checkPlanPayload.configOptions?.find((option) => option.id === "mode")?.currentValue ?? "";
+    assert.equal(modeAfterPlan, "plan");
+    assert.notEqual(checkPlanPayload.acpxSessionId, setPlanPayload.acpxSessionId);
+
+    const setAuto = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "set-mode", "auto"],
+      homeDir,
+    );
+    assert.equal(setAuto.code, 0, setAuto.stderr);
+    const setAutoPayload = JSON.parse(setAuto.stdout.trim()) as {
+      acpxSessionId?: unknown;
+    };
+
+    const checkAuto = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "set", "reasoning_effort", "medium"],
+      homeDir,
+    );
+    assert.equal(checkAuto.code, 0, checkAuto.stderr);
+    const checkAutoPayload = JSON.parse(checkAuto.stdout.trim()) as {
+      acpxSessionId?: unknown;
+      configOptions?: Array<{ id?: string; currentValue?: string }>;
+    };
+    const modeAfterAuto =
+      checkAutoPayload.configOptions?.find((option) => option.id === "mode")?.currentValue ?? "";
+    assert.equal(modeAfterAuto, "auto");
+    assert.notEqual(checkAutoPayload.acpxSessionId, setAutoPayload.acpxSessionId);
+
+    const storedRecordPath = path.join(
+      homeDir,
+      ".acpx",
+      "sessions",
+      `${encodeURIComponent(sessionId)}.json`,
+    );
+    const storedRecord = JSON.parse(await fs.readFile(storedRecordPath, "utf8")) as {
+      acpx?: {
+        desired_mode_id?: string;
+      };
+    };
+    assert.equal(storedRecord.acpx?.desired_mode_id, "auto");
   });
 });
 

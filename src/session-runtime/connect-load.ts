@@ -7,6 +7,7 @@ import {
 } from "../error-normalization.js";
 import { isProcessAlive } from "../queue-ipc.js";
 import type { QueueOwnerActiveSessionController } from "../queue-owner-turn-controller.js";
+import { getDesiredModeId } from "../session-mode-preference.js";
 import { writeSessionRecord } from "../session-persistence.js";
 import { InterruptedError, TimeoutError, withTimeout } from "../session-runtime-helpers.js";
 import type { SessionRecord } from "../types.js";
@@ -64,6 +65,8 @@ export async function connectAndLoadSession(
 ): Promise<ConnectAndLoadSessionResult> {
   const record = options.record;
   const client = options.client;
+  const originalSessionId = record.acpSessionId;
+  const desiredModeId = getDesiredModeId(record.acpx);
   const storedProcessAlive = isProcessAlive(record.pid);
   const shouldReconnect = Boolean(record.pid) && !storedProcessAlive;
 
@@ -90,6 +93,7 @@ export async function connectAndLoadSession(
   let resumed = false;
   let loadError: string | undefined;
   let sessionId = record.acpSessionId;
+  let createdFreshSession = false;
 
   if (client.supportsLoadSession()) {
     try {
@@ -108,14 +112,33 @@ export async function connectAndLoadSession(
       }
       const createdSession = await withTimeout(client.createSession(record.cwd), options.timeoutMs);
       sessionId = createdSession.sessionId;
+      createdFreshSession = true;
       record.acpSessionId = sessionId;
       reconcileAgentSessionId(record, createdSession.agentSessionId);
     }
   } else {
     const createdSession = await withTimeout(client.createSession(record.cwd), options.timeoutMs);
     sessionId = createdSession.sessionId;
+    createdFreshSession = true;
     record.acpSessionId = sessionId;
     reconcileAgentSessionId(record, createdSession.agentSessionId);
+  }
+
+  if (createdFreshSession && desiredModeId) {
+    try {
+      await withTimeout(client.setSessionMode(sessionId, desiredModeId), options.timeoutMs);
+      if (options.verbose) {
+        process.stderr.write(
+          `[acpx] replayed desired mode ${desiredModeId} on fresh ACP session ${sessionId} (previous ${originalSessionId})\n`,
+        );
+      }
+    } catch (error) {
+      if (options.verbose) {
+        process.stderr.write(
+          `[acpx] failed to replay desired mode ${desiredModeId} on fresh ACP session ${sessionId}: ${formatErrorMessage(error)}\n`,
+        );
+      }
+    }
   }
 
   options.onSessionIdResolved?.(sessionId);
