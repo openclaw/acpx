@@ -54,9 +54,11 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",
     "commander": "^13.0.0",
+    "cross-spawn": "^7.0.6",
     "skillflag": "^0.1.4"
   },
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
     "@types/node": "^22.0.0",
     "@typescript/native-preview": "7.0.0-dev.20260301.1",
     "husky": "^9.1.7",
