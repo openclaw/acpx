@@ -16,6 +16,7 @@ test("resolveAgentCommand maps known agents to commands", () => {
     ["opencode", "npx -y opencode-ai acp"],
     ["kiro", "kiro-cli acp"],
     ["pi", "npx pi-acp"],
+    ["kilocode", "npx -y @kilocode/cli acp"],
   ]);
 
   for (const [name, command] of expected) {
@@ -27,12 +28,22 @@ test("resolveAgentCommand returns raw value for unknown agents", () => {
   assert.equal(resolveAgentCommand("custom-acp-server"), "custom-acp-server");
 });
 
-test("listBuiltInAgents returns exactly all 7 registered agent names", () => {
+test("listBuiltInAgents returns exactly all 9 registered agent names", () => {
   const agents = listBuiltInAgents();
-  assert.equal(agents.length, 8);
+  assert.equal(agents.length, 9);
   assert.deepEqual(
     new Set(agents),
-    new Set(["copilot", "codex", "claude", "gemini", "openclaw", "opencode", "kiro", "pi"]),
+    new Set([
+      "copilot",
+      "codex",
+      "claude",
+      "gemini",
+      "openclaw",
+      "opencode",
+      "kiro",
+      "pi",
+      "kilocode",
+    ]),
   );
 });
 
