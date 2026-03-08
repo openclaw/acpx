@@ -403,6 +403,7 @@ export class AcpClient {
       cwd: this.options.cwd,
       env: buildAgentEnvironment(this.options.authCredentials),
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     try {

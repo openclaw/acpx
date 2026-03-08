@@ -156,6 +156,7 @@ export class TerminalManager {
         cwd: params.cwd ?? this.cwd,
         env: toEnvObject(params.env),
         stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
       });
       await waitForSpawn(proc);
 

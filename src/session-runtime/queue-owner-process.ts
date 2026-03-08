@@ -53,6 +53,7 @@ export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): void 
   const child = spawn(process.execPath, resolveQueueOwnerSpawnArgs(), {
     detached: true,
     stdio: "ignore",
+    windowsHide: true,
     env: {
       ...process.env,
       ACPX_QUEUE_OWNER_PAYLOAD: payload,
