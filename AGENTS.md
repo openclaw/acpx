@@ -78,6 +78,7 @@ Rules:
 - Unknown names are treated as raw commands.
 - Escape hatch: `--agent <command>` sets a raw command explicitly.
 - Default agent is `codex` for top-level `prompt|exec|sessions` verbs.
+- Keep built-in adapter names and adapter examples in A-Z order where practical.
 
 ## Session Behavior
 
