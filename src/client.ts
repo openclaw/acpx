@@ -421,7 +421,7 @@ export class AcpClient {
       command,
       args,
       buildAgentSpawnOptions(this.options.cwd, this.options.authCredentials),
-    );
+    ) as ChildProcessByStdio<Writable, Readable, Readable>;
 
     try {
       await waitForSpawn(child);
