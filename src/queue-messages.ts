@@ -17,6 +17,7 @@ import type {
 export type QueueSubmitRequest = {
   type: "submit_prompt";
   requestId: string;
+  ownerGeneration?: number;
   message: string;
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
@@ -28,11 +29,13 @@ export type QueueSubmitRequest = {
 export type QueueCancelRequest = {
   type: "cancel_prompt";
   requestId: string;
+  ownerGeneration?: number;
 };
 
 export type QueueSetModeRequest = {
   type: "set_mode";
   requestId: string;
+  ownerGeneration?: number;
   modeId: string;
   timeoutMs?: number;
 };
@@ -40,6 +43,7 @@ export type QueueSetModeRequest = {
 export type QueueSetConfigOptionRequest = {
   type: "set_config_option";
   requestId: string;
+  ownerGeneration?: number;
   configId: string;
   value: string;
   timeoutMs?: number;
@@ -54,41 +58,48 @@ export type QueueRequest =
 export type QueueOwnerAcceptedMessage = {
   type: "accepted";
   requestId: string;
+  ownerGeneration?: number;
 };
 
 export type QueueOwnerEventMessage = {
   type: "event";
   requestId: string;
+  ownerGeneration?: number;
   message: AcpJsonRpcMessage;
 };
 
 export type QueueOwnerResultMessage = {
   type: "result";
   requestId: string;
+  ownerGeneration?: number;
   result: SessionSendResult;
 };
 
 export type QueueOwnerCancelResultMessage = {
   type: "cancel_result";
   requestId: string;
+  ownerGeneration?: number;
   cancelled: boolean;
 };
 
 export type QueueOwnerSetModeResultMessage = {
   type: "set_mode_result";
   requestId: string;
+  ownerGeneration?: number;
   modeId: string;
 };
 
 export type QueueOwnerSetConfigOptionResultMessage = {
   type: "set_config_option_result";
   requestId: string;
+  ownerGeneration?: number;
   response: SetSessionConfigOptionResponse;
 };
 
 export type QueueOwnerErrorMessage = {
   type: "error";
   requestId: string;
+  ownerGeneration?: number;
   code?: OutputErrorCode;
   detailCode?: string;
   origin?: OutputErrorOrigin;
@@ -149,6 +160,16 @@ function parseAcpError(value: unknown): OutputErrorAcpPayload | undefined {
   };
 }
 
+function parseOwnerGeneration(value: unknown): number | undefined | null {
+  if (value == null) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    return null;
+  }
+  return value;
+}
+
 export function parseQueueRequest(raw: unknown): QueueRequest | null {
   const request = asRecord(raw);
   if (!request) {
@@ -156,6 +177,10 @@ export function parseQueueRequest(raw: unknown): QueueRequest | null {
   }
 
   if (typeof request.type !== "string" || typeof request.requestId !== "string") {
+    return null;
+  }
+  const ownerGeneration = parseOwnerGeneration(request.ownerGeneration);
+  if (ownerGeneration === null) {
     return null;
   }
 
@@ -192,6 +217,7 @@ export function parseQueueRequest(raw: unknown): QueueRequest | null {
     return {
       type: "submit_prompt",
       requestId: request.requestId,
+      ownerGeneration,
       message: request.message,
       permissionMode: request.permissionMode,
       nonInteractivePermissions,
@@ -205,6 +231,7 @@ export function parseQueueRequest(raw: unknown): QueueRequest | null {
     return {
       type: "cancel_prompt",
       requestId: request.requestId,
+      ownerGeneration,
     };
   }
 
@@ -215,6 +242,7 @@ export function parseQueueRequest(raw: unknown): QueueRequest | null {
     return {
       type: "set_mode",
       requestId: request.requestId,
+      ownerGeneration,
       modeId: request.modeId,
       timeoutMs,
     };
@@ -232,6 +260,7 @@ export function parseQueueRequest(raw: unknown): QueueRequest | null {
     return {
       type: "set_config_option",
       requestId: request.requestId,
+      ownerGeneration,
       configId: request.configId,
       value: request.value,
       timeoutMs,
@@ -299,11 +328,16 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
   if (typeof message.requestId !== "string") {
     return null;
   }
+  const ownerGeneration = parseOwnerGeneration(message.ownerGeneration);
+  if (ownerGeneration === null) {
+    return null;
+  }
 
   if (message.type === "accepted") {
     return {
       type: "accepted",
       requestId: message.requestId,
+      ownerGeneration,
     };
   }
 
@@ -315,6 +349,7 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
     return {
       type: "event",
       requestId: message.requestId,
+      ownerGeneration,
       message: message.message,
     };
   }
@@ -327,6 +362,7 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
     return {
       type: "result",
       requestId: message.requestId,
+      ownerGeneration,
       result: parsedResult,
     };
   }
@@ -338,6 +374,7 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
     return {
       type: "cancel_result",
       requestId: message.requestId,
+      ownerGeneration,
       cancelled: message.cancelled,
     };
   }
@@ -349,6 +386,7 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
     return {
       type: "set_mode_result",
       requestId: message.requestId,
+      ownerGeneration,
       modeId: message.modeId,
     };
   }
@@ -361,6 +399,7 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
     return {
       type: "set_config_option_result",
       requestId: message.requestId,
+      ownerGeneration,
       response: response as SetSessionConfigOptionResponse,
     };
   }
@@ -386,6 +425,7 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
     return {
       type: "error",
       requestId: message.requestId,
+      ownerGeneration,
       code: message.code,
       detailCode,
       origin: message.origin,

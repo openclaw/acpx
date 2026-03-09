@@ -568,6 +568,78 @@ test("SessionQueueOwner emits typed shutdown errors for pending prompts", async 
   });
 });
 
+test("SessionQueueOwner rejects prompts when queue depth exceeds the configured limit", async () => {
+  await withTempHome(async () => {
+    const lease = await tryAcquireQueueOwnerLease("owner-overloaded");
+    assert(lease);
+
+    const owner = await SessionQueueOwner.start(
+      lease,
+      {
+        cancelPrompt: async () => false,
+        setSessionMode: async () => {
+          // no-op
+        },
+        setSessionConfigOption: async () =>
+          ({
+            configOptions: [],
+          }) as SetSessionConfigOptionResponse,
+      },
+      {
+        maxQueueDepth: 1,
+      },
+    );
+
+    const firstSocket = await connectSocket(lease.socketPath);
+    firstSocket.write(
+      `${JSON.stringify({
+        type: "submit_prompt",
+        requestId: "req-first",
+        ownerGeneration: lease.ownerGeneration,
+        message: "first",
+        permissionMode: "approve-reads",
+        waitForCompletion: true,
+      })}\n`,
+    );
+
+    const secondSocket = await connectSocket(lease.socketPath);
+    secondSocket.write(
+      `${JSON.stringify({
+        type: "submit_prompt",
+        requestId: "req-second",
+        ownerGeneration: lease.ownerGeneration,
+        message: "second",
+        permissionMode: "approve-reads",
+        waitForCompletion: true,
+      })}\n`,
+    );
+
+    const secondLines = readline.createInterface({ input: secondSocket });
+    const secondIterator = secondLines[Symbol.asyncIterator]();
+
+    try {
+      const accepted = (await nextJsonLine(secondIterator)) as { type: string; requestId: string };
+      assert.equal(accepted.type, "accepted");
+      assert.equal(accepted.requestId, "req-second");
+
+      const error = (await nextJsonLine(secondIterator)) as {
+        type: string;
+        detailCode?: string;
+        retryable?: boolean;
+      };
+      assert.equal(error.type, "error");
+      assert.equal(error.detailCode, "QUEUE_OWNER_OVERLOADED");
+      assert.equal(error.retryable, true);
+    } finally {
+      secondLines.close();
+      secondSocket.destroy();
+      firstSocket.destroy();
+      await owner.close();
+      await releaseQueueOwnerLease(lease);
+    }
+  });
+});
+
 async function connectSocket(socketPath: string): Promise<net.Socket> {
   return await new Promise<net.Socket>((resolve, reject) => {
     const socket = net.createConnection(socketPath);

@@ -13,7 +13,7 @@ import {
   writeQueueOwnerLock,
 } from "./queue-test-helpers.js";
 
-test("probeQueueOwnerHealth reports healthy when socket is reachable despite stale pid", async () => {
+test("probeQueueOwnerHealth clears stale dead owners even if a stray socket exists", async () => {
   await withTempHome(async (homeDir) => {
     const sessionId = "probe-stale-pid-healthy-socket";
     const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
@@ -33,9 +33,9 @@ test("probeQueueOwnerHealth reports healthy when socket is reachable despite sta
 
     try {
       const health = await probeQueueOwnerHealth(sessionId);
-      assert.equal(health.hasLease, true);
-      assert.equal(health.healthy, true);
-      assert.equal(health.socketReachable, true);
+      assert.equal(health.hasLease, false);
+      assert.equal(health.healthy, false);
+      assert.equal(health.socketReachable, false);
       assert.equal(health.pidAlive, false);
     } finally {
       await closeServer(server);
@@ -63,6 +63,7 @@ test("probeQueueOwnerHealth reports unavailable socket when pid is alive", async
       assert.equal(health.healthy, false);
       assert.equal(health.socketReachable, false);
       assert.equal(health.pidAlive, true);
+      assert.equal(typeof health.ownerGeneration, "number");
     } finally {
       await cleanupOwnerArtifacts({ socketPath, lockPath });
       stopProcess(keeper);

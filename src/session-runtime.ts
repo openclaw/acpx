@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { AcpClient } from "./client.js";
 import { formatErrorMessage, normalizeOutputError } from "./error-normalization.js";
+import { formatPerfMetric, measurePerf, setPerfGauge, startPerfTimer } from "./perf-metrics.js";
+import { refreshQueueOwnerLease } from "./queue-lease-store.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,
@@ -9,6 +11,7 @@ import {
   recordClientOperation as recordConversationClientOperation,
   recordPromptSubmission,
   recordSessionUpdate as recordConversationSessionUpdate,
+  trimConversationForRuntime,
 } from "./session-conversation-model.js";
 import { defaultSessionEventLog } from "./session-event-log.js";
 import { SessionEventWriter } from "./session-events.js";
@@ -84,6 +87,7 @@ import {
 export const DEFAULT_QUEUE_OWNER_TTL_MS = 300_000;
 const INTERRUPT_CANCEL_WAIT_MS = 2_500;
 const QUEUE_OWNER_STARTUP_MAX_ATTEMPTS = 120;
+const QUEUE_OWNER_HEARTBEAT_INTERVAL_MS = 5_000;
 
 type TimedRunOptions = {
   timeoutMs?: number;
@@ -126,6 +130,7 @@ export type SessionSendOptions = {
   verbose?: boolean;
   waitForCompletion?: boolean;
   ttlMs?: number;
+  maxQueueDepth?: number;
 } & TimedRunOptions;
 
 export type SessionEnsureOptions = {
@@ -346,8 +351,11 @@ async function runQueuedTask(
 }
 
 async function runSessionPrompt(options: RunSessionPromptOptions): Promise<SessionSendResult> {
+  const stopTotalTimer = startPerfTimer("runtime.prompt.total");
   const output = options.outputFormatter;
-  const record = await resolveSessionRecord(options.sessionRecordId);
+  const record = await measurePerf("session.resolve_prompt_record", async () => {
+    return await resolveSessionRecord(options.sessionRecordId);
+  });
   const conversation = cloneSessionConversation(record);
   let acpxState = cloneSessionAcpxState(record.acpx);
   recordPromptSubmission(conversation, options.message, isoNow());
@@ -356,7 +364,9 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     sessionId: record.acpxRecordId,
   });
 
-  const eventWriter = await SessionEventWriter.open(record);
+  const eventWriter = await measurePerf("session.events.open", async () => {
+    return await SessionEventWriter.open(record);
+  });
   const pendingMessages: AcpJsonRpcMessage[] = [];
   let sawAcpMessage = false;
   let eventWriterClosed = false;
@@ -375,7 +385,9 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     }
 
     const batch = pendingMessages.splice(0, pendingMessages.length);
-    await eventWriter.appendMessages(batch, { checkpoint });
+    await measurePerf("session.events.flush_pending", async () => {
+      await eventWriter.appendMessages(batch, { checkpoint });
+    });
   };
 
   const client = new AcpClient({
@@ -396,9 +408,11 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     },
     onSessionUpdate: (notification) => {
       acpxState = recordConversationSessionUpdate(conversation, acpxState, notification);
+      trimConversationForRuntime(conversation);
     },
     onClientOperation: (operation) => {
       acpxState = recordConversationClientOperation(conversation, acpxState, operation);
+      trimConversationForRuntime(conversation);
     },
   });
   let activeSessionIdForControl = record.acpSessionId;
@@ -417,27 +431,37 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
   try {
     return await withInterrupt(
       async () => {
+        const connectStartedAt = Date.now();
         const {
           sessionId: activeSessionId,
           resumed,
           loadError,
-        } = await connectAndLoadSession({
-          client,
-          record,
-          timeoutMs: options.timeoutMs,
-          verbose: options.verbose,
-          activeController,
-          onClientAvailable: (controller) => {
-            options.onClientAvailable?.(controller);
-            notifiedClientAvailable = true;
-          },
-          onConnectedRecord: (connectedRecord) => {
-            connectedRecord.lastPromptAt = isoNow();
-          },
-          onSessionIdResolved: (sessionId) => {
-            activeSessionIdForControl = sessionId;
-          },
-        });
+        } = await measurePerf(
+          "runtime.connect_and_load",
+          async () =>
+            await connectAndLoadSession({
+              client,
+              record,
+              timeoutMs: options.timeoutMs,
+              verbose: options.verbose,
+              activeController,
+              onClientAvailable: (controller) => {
+                options.onClientAvailable?.(controller);
+                notifiedClientAvailable = true;
+              },
+              onConnectedRecord: (connectedRecord) => {
+                connectedRecord.lastPromptAt = isoNow();
+              },
+              onSessionIdResolved: (sessionId) => {
+                activeSessionIdForControl = sessionId;
+              },
+            }),
+        );
+        if (options.verbose) {
+          process.stderr.write(
+            `[acpx] ${formatPerfMetric("prompt.connect_and_load", Date.now() - connectStartedAt)}\n`,
+          );
+        }
 
         output.setContext({
           sessionId: record.acpxRecordId,
@@ -446,6 +470,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
 
         let response;
         try {
+          const promptStartedAt = Date.now();
           const promptPromise = client.prompt(activeSessionId, options.message);
           if (options.onPromptActive) {
             try {
@@ -458,7 +483,14 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
               }
             }
           }
-          response = await withTimeout(promptPromise, options.timeoutMs);
+          response = await measurePerf("runtime.prompt.agent_turn", async () => {
+            return await withTimeout(promptPromise, options.timeoutMs);
+          });
+          if (options.verbose) {
+            process.stderr.write(
+              `[acpx] ${formatPerfMetric("prompt.agent_turn", Date.now() - promptStartedAt)}\n`,
+            );
+          }
         } catch (error) {
           const snapshot = client.getAgentLifecycleSnapshot();
           applyLifecycleSnapshotToRecord(record, snapshot);
@@ -511,6 +543,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
         record.acpx = acpxState;
         applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
         await writeSessionRecord(record);
+        stopTotalTimer();
 
         return {
           ...toPromptResult(response.stopReason, record.acpxRecordId, client),
@@ -538,6 +571,11 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       },
     );
   } finally {
+    if (options.verbose) {
+      process.stderr.write(`[acpx] ${formatPerfMetric("prompt.total", stopTotalTimer())}\n`);
+    } else {
+      stopTotalTimer();
+    }
     if (notifiedClientAvailable) {
       options.onClientClosed?.();
     }
@@ -720,7 +758,9 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
   }
 
   let owner: SessionQueueOwner | undefined;
+  let heartbeatTimer: NodeJS.Timeout | undefined;
   const ttlMs = normalizeQueueOwnerTtlMs(options.ttlMs);
+  const maxQueueDepth = Math.max(1, Math.round(options.maxQueueDepth ?? 16));
   const taskPollTimeoutMs = ttlMs === 0 ? undefined : ttlMs;
   const initialTaskPollTimeoutMs =
     taskPollTimeoutMs == null ? undefined : Math.max(taskPollTimeoutMs, 1_000);
@@ -785,28 +825,48 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
   };
 
   try {
-    owner = await SessionQueueOwner.start(lease, {
-      cancelPrompt: async () => {
-        const accepted = await turnController.requestCancel();
-        if (!accepted) {
-          return false;
-        }
-        await applyPendingCancel();
-        return true;
+    owner = await SessionQueueOwner.start(
+      lease,
+      {
+        cancelPrompt: async () => {
+          const accepted = await turnController.requestCancel();
+          if (!accepted) {
+            return false;
+          }
+          await applyPendingCancel();
+          return true;
+        },
+        setSessionMode: async (modeId: string, timeoutMs?: number) => {
+          await turnController.setSessionMode(modeId, timeoutMs);
+        },
+        setSessionConfigOption: async (configId: string, value: string, timeoutMs?: number) => {
+          return await turnController.setSessionConfigOption(configId, value, timeoutMs);
+        },
       },
-      setSessionMode: async (modeId: string, timeoutMs?: number) => {
-        await turnController.setSessionMode(modeId, timeoutMs);
+      {
+        maxQueueDepth,
+        onQueueDepthChanged: (queueDepth) => {
+          setPerfGauge("queue.owner.depth", queueDepth);
+          void refreshQueueOwnerLease(lease, { queueDepth }).catch(() => {
+            // best effort heartbeat refresh while owner is live
+          });
+        },
       },
-      setSessionConfigOption: async (configId: string, value: string, timeoutMs?: number) => {
-        return await turnController.setSessionConfigOption(configId, value, timeoutMs);
-      },
-    });
+    );
 
     if (options.verbose) {
       process.stderr.write(
-        `[acpx] queue owner ready for session ${options.sessionId} (ttlMs=${ttlMs})\n`,
+        `[acpx] queue owner ready for session ${options.sessionId} (ttlMs=${ttlMs}, maxQueueDepth=${maxQueueDepth})\n`,
       );
     }
+    await refreshQueueOwnerLease(lease, { queueDepth: owner.queueDepth() }).catch(() => {
+      // best effort initial heartbeat
+    });
+    heartbeatTimer = setInterval(() => {
+      void refreshQueueOwnerLease(lease, { queueDepth: owner?.queueDepth() ?? 0 }).catch(() => {
+        // best effort heartbeat
+      });
+    }, QUEUE_OWNER_HEARTBEAT_INTERVAL_MS);
 
     let isFirstTask = true;
     while (true) {
@@ -834,6 +894,9 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
       });
     }
   } finally {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+    }
     turnController.beginClosing();
     if (owner) {
       await owner.close();

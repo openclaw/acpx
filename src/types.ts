@@ -52,6 +52,8 @@ export type OutputErrorOrigin = (typeof OUTPUT_ERROR_ORIGINS)[number];
 export const QUEUE_ERROR_DETAIL_CODES = [
   "QUEUE_OWNER_CLOSED",
   "QUEUE_OWNER_SHUTTING_DOWN",
+  "QUEUE_OWNER_OVERLOADED",
+  "QUEUE_OWNER_GENERATION_MISMATCH",
   "QUEUE_REQUEST_INVALID",
   "QUEUE_REQUEST_PAYLOAD_INVALID_JSON",
   "QUEUE_ACK_MISSING",
@@ -105,6 +107,18 @@ export type SessionEventLog = {
   max_segments: number;
   last_write_at?: string;
   last_write_error?: string | null;
+};
+
+export type PerfMetricSummary = {
+  count: number;
+  totalMs: number;
+  maxMs: number;
+};
+
+export type PerfMetricsSnapshot = {
+  counters: Record<string, number>;
+  timings: Record<string, PerfMetricSummary>;
+  gauges: Record<string, number>;
 };
 
 export type OutputFormatterContext = {

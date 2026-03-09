@@ -1,8 +1,20 @@
 import { randomUUID } from "node:crypto";
-import fs from "node:fs/promises";
 import net from "node:net";
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { QueueConnectionError, QueueProtocolError } from "./errors.js";
+import { incrementPerfCounter, measurePerf } from "./perf-metrics.js";
+import {
+  type QueueOwnerLease,
+  type QueueOwnerRecord,
+  isProcessAlive,
+  readQueueOwnerRecord,
+  readQueueOwnerStatus,
+  releaseQueueOwnerLease,
+  terminateProcess,
+  terminateQueueOwnerForSession,
+  tryAcquireQueueOwnerLease,
+  waitMs,
+} from "./queue-lease-store.js";
 import {
   parseQueueOwnerMessage,
   type QueueCancelRequest,
@@ -15,12 +27,6 @@ import {
   type QueueSetModeRequest,
   type QueueSubmitRequest,
 } from "./queue-messages.js";
-import {
-  queueBaseDir,
-  queueLockFilePath,
-  queueSocketBaseDir,
-  queueSocketPath,
-} from "./queue-paths.js";
 import type {
   NonInteractivePermissionPolicy,
   OutputErrorEmissionPolicy,
@@ -30,10 +36,17 @@ import type {
   SessionSendOutcome,
 } from "./types.js";
 
-const PROCESS_EXIT_GRACE_MS = 1_500;
-const PROCESS_POLL_MS = 50;
 const QUEUE_CONNECT_ATTEMPTS = 40;
 export const QUEUE_CONNECT_RETRY_MS = 50;
+export {
+  isProcessAlive,
+  releaseQueueOwnerLease,
+  terminateProcess,
+  terminateQueueOwnerForSession,
+  tryAcquireQueueOwnerLease,
+  waitMs,
+} from "./queue-lease-store.js";
+export type { QueueOwnerLease } from "./queue-lease-store.js";
 
 const STALE_OWNER_PROTOCOL_DETAIL_CODES = new Set([
   "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
@@ -55,9 +68,10 @@ async function maybeRecoverStaleOwnerAfterProtocolMismatch(params: {
     return false;
   }
 
-  await cleanupStaleQueueOwner(params.sessionId, params.owner).catch(() => {
+  await terminateQueueOwnerForSession(params.sessionId).catch(() => {
     // Preserve existing behavior if cleanup fails.
   });
+  incrementPerfCounter("queue.owner.stale_recovered");
 
   if (params.verbose) {
     process.stderr.write(
@@ -67,65 +81,6 @@ async function maybeRecoverStaleOwnerAfterProtocolMismatch(params: {
 
   return true;
 }
-
-export function isProcessAlive(pid: number | undefined): boolean {
-  if (!pid || !Number.isInteger(pid) || pid <= 0 || pid === process.pid) {
-    return false;
-  }
-
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + Math.max(0, timeoutMs);
-  while (Date.now() <= deadline) {
-    if (!isProcessAlive(pid)) {
-      return true;
-    }
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, PROCESS_POLL_MS);
-    });
-  }
-
-  return !isProcessAlive(pid);
-}
-
-export async function terminateProcess(pid: number): Promise<boolean> {
-  if (!isProcessAlive(pid)) {
-    return false;
-  }
-
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch {
-    return false;
-  }
-
-  if (await waitForProcessExit(pid, PROCESS_EXIT_GRACE_MS)) {
-    return true;
-  }
-
-  try {
-    process.kill(pid, "SIGKILL");
-  } catch {
-    return false;
-  }
-
-  await waitForProcessExit(pid, PROCESS_EXIT_GRACE_MS);
-  return true;
-}
-
-type QueueOwnerRecord = {
-  pid: number;
-  sessionId: string;
-  socketPath: string;
-};
-
 export type QueueOwnerHealth = {
   sessionId: string;
   hasLease: boolean;
@@ -134,151 +89,17 @@ export type QueueOwnerHealth = {
   pidAlive: boolean;
   pid?: number;
   socketPath?: string;
-};
-
-export type QueueOwnerLease = {
-  lockPath: string;
-  socketPath: string;
+  ownerGeneration?: number;
+  queueDepth?: number;
 };
 
 export type { QueueOwnerMessage, QueueSubmitRequest } from "./queue-messages.js";
 export type { QueueOwnerControlHandlers, QueueTask } from "./queue-ipc-server.js";
 export { SessionQueueOwner } from "./queue-ipc-server.js";
 
-function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return null;
-  }
-  const record = raw as Record<string, unknown>;
-
-  if (
-    !Number.isInteger(record.pid) ||
-    (record.pid as number) <= 0 ||
-    typeof record.sessionId !== "string" ||
-    typeof record.socketPath !== "string"
-  ) {
-    return null;
-  }
-
-  return {
-    pid: record.pid as number,
-    sessionId: record.sessionId,
-    socketPath: record.socketPath,
-  };
-}
-
-async function ensureQueueDir(): Promise<void> {
-  await fs.mkdir(queueBaseDir(), { recursive: true });
-  const socketDir = queueSocketBaseDir();
-  if (socketDir) {
-    await fs.mkdir(socketDir, { recursive: true });
-  }
-}
-
-async function removeSocketFile(socketPath: string): Promise<void> {
-  if (process.platform === "win32") {
-    return;
-  }
-
-  try {
-    await fs.unlink(socketPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-  }
-}
-
-async function readQueueOwnerRecord(sessionId: string): Promise<QueueOwnerRecord | undefined> {
-  const lockPath = queueLockFilePath(sessionId);
-  try {
-    const payload = await fs.readFile(lockPath, "utf8");
-    const parsed = parseQueueOwnerRecord(JSON.parse(payload));
-    return parsed ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function cleanupStaleQueueOwner(
-  sessionId: string,
-  owner: QueueOwnerRecord | undefined,
-): Promise<void> {
-  const lockPath = queueLockFilePath(sessionId);
-  const socketPath = owner?.socketPath ?? queueSocketPath(sessionId);
-
-  await removeSocketFile(socketPath).catch(() => {
-    // ignore stale socket cleanup failures
-  });
-
-  await fs.unlink(lockPath).catch((error) => {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-  });
-}
-
-export async function tryAcquireQueueOwnerLease(
-  sessionId: string,
-  nowIso: () => string = () => new Date().toISOString(),
-): Promise<QueueOwnerLease | undefined> {
-  await ensureQueueDir();
-  const lockPath = queueLockFilePath(sessionId);
-  const socketPath = queueSocketPath(sessionId);
-  const payload = JSON.stringify(
-    {
-      pid: process.pid,
-      sessionId,
-      socketPath,
-      createdAt: nowIso(),
-    },
-    null,
-    2,
-  );
-
-  try {
-    await fs.writeFile(lockPath, `${payload}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-    });
-    await removeSocketFile(socketPath).catch(() => {
-      // best-effort stale socket cleanup after ownership is acquired
-    });
-    return { lockPath, socketPath };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      throw error;
-    }
-
-    const owner = await readQueueOwnerRecord(sessionId);
-    if (!owner || !isProcessAlive(owner.pid)) {
-      await cleanupStaleQueueOwner(sessionId, owner);
-    }
-    return undefined;
-  }
-}
-
-export async function releaseQueueOwnerLease(lease: QueueOwnerLease): Promise<void> {
-  await removeSocketFile(lease.socketPath).catch(() => {
-    // ignore best-effort cleanup failures
-  });
-
-  await fs.unlink(lease.lockPath).catch((error) => {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-  });
-}
-
 function shouldRetryQueueConnect(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code;
   return code === "ENOENT" || code === "ECONNREFUSED";
-}
-
-export async function waitMs(ms: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
 
 async function connectToSocket(socketPath: string): Promise<net.Socket> {
@@ -308,7 +129,10 @@ async function connectToQueueOwner(
   const attempts = Math.max(1, Math.trunc(maxAttempts));
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      return await connectToSocket(owner.socketPath);
+      return await measurePerf(
+        "queue.connect",
+        async () => await connectToSocket(owner.socketPath),
+      );
     } catch (error) {
       lastError = error;
       if (!shouldRetryQueueConnect(error)) {
@@ -326,7 +150,18 @@ async function connectToQueueOwner(
 }
 
 export async function probeQueueOwnerHealth(sessionId: string): Promise<QueueOwnerHealth> {
-  const owner = await readQueueOwnerRecord(sessionId);
+  const ownerRecord = await readQueueOwnerRecord(sessionId);
+  if (!ownerRecord) {
+    return {
+      sessionId,
+      hasLease: false,
+      healthy: false,
+      socketReachable: false,
+      pidAlive: false,
+    };
+  }
+
+  const owner = await readQueueOwnerStatus(sessionId);
   if (!owner) {
     return {
       sessionId,
@@ -337,11 +172,10 @@ export async function probeQueueOwnerHealth(sessionId: string): Promise<QueueOwn
     };
   }
 
-  const pidAlive = isProcessAlive(owner.pid);
+  const pidAlive = owner.alive;
   let socketReachable = false;
-
   try {
-    const socket = await connectToQueueOwner(owner, 2);
+    const socket = await connectToQueueOwner(ownerRecord, 2);
     if (socket) {
       socketReachable = true;
       if (!socket.destroyed) {
@@ -352,17 +186,6 @@ export async function probeQueueOwnerHealth(sessionId: string): Promise<QueueOwn
     socketReachable = false;
   }
 
-  if (!socketReachable && !pidAlive) {
-    await cleanupStaleQueueOwner(sessionId, owner);
-    return {
-      sessionId,
-      hasLease: false,
-      healthy: false,
-      socketReachable: false,
-      pidAlive: false,
-    };
-  }
-
   return {
     sessionId,
     hasLease: true,
@@ -371,7 +194,27 @@ export async function probeQueueOwnerHealth(sessionId: string): Promise<QueueOwn
     pidAlive,
     pid: owner.pid,
     socketPath: owner.socketPath,
+    ownerGeneration: owner.ownerGeneration,
+    queueDepth: owner.queueDepth,
   };
+}
+
+function assertOwnerGeneration(
+  owner: QueueOwnerRecord,
+  message: QueueOwnerMessage,
+): QueueOwnerMessage {
+  if (
+    owner.ownerGeneration !== undefined &&
+    message.ownerGeneration !== undefined &&
+    message.ownerGeneration !== owner.ownerGeneration
+  ) {
+    throw new QueueProtocolError("Queue owner returned mismatched generation", {
+      detailCode: "QUEUE_OWNER_GENERATION_MISMATCH",
+      origin: "queue",
+      retryable: true,
+    });
+  }
+  return message;
 }
 
 export type SubmitToQueueOwnerOptions = {
@@ -401,6 +244,7 @@ async function submitToQueueOwner(
   const request: QueueSubmitRequest = {
     type: "submit_prompt",
     requestId,
+    ownerGeneration: owner.ownerGeneration,
     message: options.message,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
@@ -457,8 +301,19 @@ async function submitToQueueOwner(
         return;
       }
 
-      const message = parseQueueOwnerMessage(parsed);
-      if (!message || message.requestId !== requestId) {
+      const parsedMessage = parseQueueOwnerMessage(parsed);
+      if (!parsedMessage) {
+        finishReject(
+          new QueueProtocolError("Queue owner sent malformed message", {
+            detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
+            origin: "queue",
+            retryable: true,
+          }),
+        );
+        return;
+      }
+      const message = assertOwnerGeneration(owner, parsedMessage);
+      if (message.requestId !== requestId) {
         finishReject(
           new QueueProtocolError("Queue owner sent malformed message", {
             detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
@@ -664,8 +519,19 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
         return;
       }
 
-      const message = parseQueueOwnerMessage(parsed);
-      if (!message || message.requestId !== request.requestId) {
+      const parsedMessage = parseQueueOwnerMessage(parsed);
+      if (!parsedMessage) {
+        finishReject(
+          new QueueProtocolError("Queue owner sent malformed message", {
+            detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
+            origin: "queue",
+            retryable: true,
+          }),
+        );
+        return;
+      }
+      const message = assertOwnerGeneration(owner, parsedMessage);
+      if (message.requestId !== request.requestId) {
         finishReject(
           new QueueProtocolError("Queue owner sent malformed message", {
             detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
@@ -770,6 +636,7 @@ async function submitCancelToQueueOwner(owner: QueueOwnerRecord): Promise<boolea
   const request: QueueCancelRequest = {
     type: "cancel_prompt",
     requestId: randomUUID(),
+    ownerGeneration: owner.ownerGeneration,
   };
   const response = await submitControlToQueueOwner(
     owner,
@@ -797,6 +664,7 @@ async function submitSetModeToQueueOwner(
   const request: QueueSetModeRequest = {
     type: "set_mode",
     requestId: randomUUID(),
+    ownerGeneration: owner.ownerGeneration,
     modeId,
     timeoutMs,
   };
@@ -827,6 +695,7 @@ async function submitSetConfigOptionToQueueOwner(
   const request: QueueSetConfigOptionRequest = {
     type: "set_config_option",
     requestId: randomUUID(),
+    ownerGeneration: owner.ownerGeneration,
     configId,
     value,
     timeoutMs,
@@ -1002,17 +871,4 @@ export async function trySetConfigOptionOnRunningOwner(
       retryable: true,
     },
   );
-}
-
-export async function terminateQueueOwnerForSession(sessionId: string): Promise<void> {
-  const owner = await readQueueOwnerRecord(sessionId);
-  if (!owner) {
-    return;
-  }
-
-  if (isProcessAlive(owner.pid)) {
-    await terminateProcess(owner.pid);
-  }
-
-  await cleanupStaleQueueOwner(sessionId, owner);
 }

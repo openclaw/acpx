@@ -62,6 +62,10 @@ export function parseQueueOwnerPayload(raw: string): QueueOwnerRuntimeOptions {
     options.ttlMs = record.ttlMs;
   }
 
+  if (typeof record.maxQueueDepth === "number" && Number.isFinite(record.maxQueueDepth)) {
+    options.maxQueueDepth = Math.max(1, Math.round(record.maxQueueDepth));
+  }
+
   return options;
 }
 

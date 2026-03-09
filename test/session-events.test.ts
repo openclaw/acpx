@@ -187,3 +187,40 @@ test("listSessionEvents skips malformed NDJSON lines", async () => {
     );
   });
 });
+
+test("SessionEventWriter recovers stale stream lock files", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const sessionId = "session-stream-stale-lock";
+    const record = makeSessionRecord(sessionId, cwd, 5);
+    await writeSessionRecord(record);
+
+    const lockPath = path.join(
+      homeDir,
+      ".acpx",
+      "sessions",
+      `${encodeURIComponent(sessionId)}.stream.lock`,
+    );
+    await fs.writeFile(
+      lockPath,
+      `${JSON.stringify({
+        pid: 999_999,
+        created_at: "2026-01-01T00:00:00.000Z",
+      })}\n`,
+      "utf8",
+    );
+
+    const writer = await SessionEventWriter.open(record);
+    await writer.appendMessage({
+      jsonrpc: "2.0",
+      id: "req-stale-lock",
+      result: { stopReason: "end_turn" },
+    } as never);
+    await writer.close({ checkpoint: true });
+
+    const stored = await resolveSessionRecord(sessionId);
+    assert.equal(stored.lastRequestId, "req-stale-lock");
+  });
+});

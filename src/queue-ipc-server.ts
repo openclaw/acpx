@@ -1,6 +1,7 @@
 import net from "node:net";
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { normalizeOutputError } from "./error-normalization.js";
+import { recordPerfDuration } from "./perf-metrics.js";
 import {
   parseQueueRequest,
   type QueueOwnerErrorMessage,
@@ -10,6 +11,7 @@ import type { NonInteractivePermissionPolicy, PermissionMode } from "./types.js"
 
 type QueueOwnerSocketLease = {
   socketPath: string;
+  ownerGeneration?: number;
 };
 
 function makeQueueOwnerError(
@@ -23,6 +25,7 @@ function makeQueueOwnerError(
   return {
     type: "error",
     requestId,
+    ownerGeneration: undefined,
     code: "RUNTIME",
     detailCode,
     origin: "queue",
@@ -73,6 +76,7 @@ export type QueueTask = {
   timeoutMs?: number;
   suppressSdkConsoleErrors?: boolean;
   waitForCompletion: boolean;
+  enqueuedAt: number;
   send: (message: QueueOwnerMessage) => void;
   close: () => void;
 };
@@ -87,27 +91,46 @@ export type QueueOwnerControlHandlers = {
   ) => Promise<SetSessionConfigOptionResponse>;
 };
 
+type SessionQueueOwnerOptions = {
+  maxQueueDepth: number;
+  onQueueDepthChanged?: (queueDepth: number) => void;
+};
+
 export class SessionQueueOwner {
   private readonly server: net.Server;
   private readonly controlHandlers: QueueOwnerControlHandlers;
+  private readonly ownerGeneration?: number;
+  private readonly maxQueueDepth: number;
+  private readonly onQueueDepthChanged?: (queueDepth: number) => void;
   private readonly pending: QueueTask[] = [];
   private readonly waiters: Array<(task: QueueTask | undefined) => void> = [];
   private closed = false;
 
-  private constructor(server: net.Server, controlHandlers: QueueOwnerControlHandlers) {
+  private constructor(
+    server: net.Server,
+    controlHandlers: QueueOwnerControlHandlers,
+    lease: QueueOwnerSocketLease,
+    options: SessionQueueOwnerOptions,
+  ) {
     this.server = server;
     this.controlHandlers = controlHandlers;
+    this.ownerGeneration = lease.ownerGeneration;
+    this.maxQueueDepth = Math.max(1, Math.round(options.maxQueueDepth));
+    this.onQueueDepthChanged = options.onQueueDepthChanged;
   }
 
   static async start(
     lease: QueueOwnerSocketLease,
     controlHandlers: QueueOwnerControlHandlers,
+    options: SessionQueueOwnerOptions = {
+      maxQueueDepth: 16,
+    },
   ): Promise<SessionQueueOwner> {
     const ownerRef: { current: SessionQueueOwner | undefined } = { current: undefined };
     const server = net.createServer((socket) => {
       ownerRef.current?.handleConnection(socket);
     });
-    ownerRef.current = new SessionQueueOwner(server, controlHandlers);
+    ownerRef.current = new SessionQueueOwner(server, controlHandlers, lease, options);
 
     await new Promise<void>((resolve, reject) => {
       const onListening = () => {
@@ -152,6 +175,7 @@ export class SessionQueueOwner {
       }
       task.close();
     }
+    this.emitQueueDepth();
 
     await new Promise<void>((resolve) => {
       this.server.close(() => resolve());
@@ -160,7 +184,12 @@ export class SessionQueueOwner {
 
   async nextTask(timeoutMs?: number): Promise<QueueTask | undefined> {
     if (this.pending.length > 0) {
-      return this.pending.shift();
+      const task = this.pending.shift();
+      this.emitQueueDepth();
+      if (task) {
+        recordPerfDuration("queue.owner.wait_ms", Date.now() - task.enqueuedAt);
+      }
+      return task;
     }
     if (this.closed) {
       return undefined;
@@ -196,6 +225,10 @@ export class SessionQueueOwner {
     return this.pending.length;
   }
 
+  private emitQueueDepth(): void {
+    this.onQueueDepthChanged?.(this.pending.length);
+  }
+
   private enqueue(task: QueueTask): void {
     if (this.closed) {
       if (task.waitForCompletion) {
@@ -220,7 +253,26 @@ export class SessionQueueOwner {
       return;
     }
 
+    if (this.pending.length >= this.maxQueueDepth) {
+      if (task.waitForCompletion) {
+        task.send({
+          ...makeQueueOwnerError(
+            task.requestId,
+            `Queue owner is overloaded (${this.pending.length}/${this.maxQueueDepth} queued)`,
+            "QUEUE_OWNER_OVERLOADED",
+            {
+              retryable: true,
+            },
+          ),
+          ownerGeneration: this.ownerGeneration,
+        });
+      }
+      task.close();
+      return;
+    }
+
     this.pending.push(task);
+    this.emitQueueDepth();
   }
 
   private handleConnection(socket: net.Socket): void {
@@ -241,12 +293,12 @@ export class SessionQueueOwner {
     let handled = false;
 
     const fail = (requestId: string, message: string, detailCode: string): void => {
-      writeQueueMessage(
-        socket,
-        makeQueueOwnerError(requestId, message, detailCode, {
+      writeQueueMessage(socket, {
+        ...makeQueueOwnerError(requestId, message, detailCode, {
           retryable: false,
         }),
-      );
+        ownerGeneration: this.ownerGeneration,
+      });
       socket.end();
     };
 
@@ -270,10 +322,24 @@ export class SessionQueueOwner {
         return;
       }
 
+      if (
+        request.ownerGeneration !== undefined &&
+        this.ownerGeneration !== undefined &&
+        request.ownerGeneration !== this.ownerGeneration
+      ) {
+        fail(
+          request.requestId,
+          "Queue request targeted a stale queue owner generation",
+          "QUEUE_OWNER_GENERATION_MISMATCH",
+        );
+        return;
+      }
+
       if (request.type === "cancel_prompt") {
         writeQueueMessage(socket, {
           type: "accepted",
           requestId: request.requestId,
+          ownerGeneration: this.ownerGeneration,
         });
         void this.controlHandlers
           .cancelPrompt()
@@ -281,18 +347,19 @@ export class SessionQueueOwner {
             writeQueueMessage(socket, {
               type: "cancel_result",
               requestId: request.requestId,
+              ownerGeneration: this.ownerGeneration,
               cancelled,
             });
           })
           .catch((error) => {
-            writeQueueMessage(
-              socket,
-              makeQueueOwnerErrorFromUnknown(
+            writeQueueMessage(socket, {
+              ...makeQueueOwnerErrorFromUnknown(
                 request.requestId,
                 error,
                 "QUEUE_CONTROL_REQUEST_FAILED",
               ),
-            );
+              ownerGeneration: this.ownerGeneration,
+            });
           })
           .finally(() => {
             if (!socket.destroyed) {
@@ -306,6 +373,7 @@ export class SessionQueueOwner {
         writeQueueMessage(socket, {
           type: "accepted",
           requestId: request.requestId,
+          ownerGeneration: this.ownerGeneration,
         });
         void this.controlHandlers
           .setSessionMode(request.modeId, request.timeoutMs)
@@ -313,18 +381,19 @@ export class SessionQueueOwner {
             writeQueueMessage(socket, {
               type: "set_mode_result",
               requestId: request.requestId,
+              ownerGeneration: this.ownerGeneration,
               modeId: request.modeId,
             });
           })
           .catch((error) => {
-            writeQueueMessage(
-              socket,
-              makeQueueOwnerErrorFromUnknown(
+            writeQueueMessage(socket, {
+              ...makeQueueOwnerErrorFromUnknown(
                 request.requestId,
                 error,
                 "QUEUE_CONTROL_REQUEST_FAILED",
               ),
-            );
+              ownerGeneration: this.ownerGeneration,
+            });
           })
           .finally(() => {
             if (!socket.destroyed) {
@@ -338,6 +407,7 @@ export class SessionQueueOwner {
         writeQueueMessage(socket, {
           type: "accepted",
           requestId: request.requestId,
+          ownerGeneration: this.ownerGeneration,
         });
         void this.controlHandlers
           .setSessionConfigOption(request.configId, request.value, request.timeoutMs)
@@ -345,18 +415,19 @@ export class SessionQueueOwner {
             writeQueueMessage(socket, {
               type: "set_config_option_result",
               requestId: request.requestId,
+              ownerGeneration: this.ownerGeneration,
               response,
             });
           })
           .catch((error) => {
-            writeQueueMessage(
-              socket,
-              makeQueueOwnerErrorFromUnknown(
+            writeQueueMessage(socket, {
+              ...makeQueueOwnerErrorFromUnknown(
                 request.requestId,
                 error,
                 "QUEUE_CONTROL_REQUEST_FAILED",
               ),
-            );
+              ownerGeneration: this.ownerGeneration,
+            });
           })
           .finally(() => {
             if (!socket.destroyed) {
@@ -374,8 +445,12 @@ export class SessionQueueOwner {
         timeoutMs: request.timeoutMs,
         suppressSdkConsoleErrors: request.suppressSdkConsoleErrors,
         waitForCompletion: request.waitForCompletion,
+        enqueuedAt: Date.now(),
         send: (message) => {
-          writeQueueMessage(socket, message);
+          writeQueueMessage(socket, {
+            ...message,
+            ownerGeneration: this.ownerGeneration,
+          });
         },
         close: () => {
           if (!socket.destroyed) {
@@ -387,6 +462,7 @@ export class SessionQueueOwner {
       writeQueueMessage(socket, {
         type: "accepted",
         requestId: request.requestId,
+        ownerGeneration: this.ownerGeneration,
       });
 
       if (!request.waitForCompletion) {

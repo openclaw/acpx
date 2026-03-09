@@ -27,6 +27,12 @@ export type LegacyHistoryEntry = {
   textPreview: string;
 };
 
+const MAX_RUNTIME_MESSAGES = 200;
+const MAX_RUNTIME_AGENT_TEXT_CHARS = 8_000;
+const MAX_RUNTIME_THINKING_CHARS = 4_000;
+const MAX_RUNTIME_TOOL_IO_CHARS = 4_000;
+const MAX_RUNTIME_REQUEST_TOKEN_USAGE = 100;
+
 function isoNow(): string {
   return new Date().toISOString();
 }
@@ -173,7 +179,7 @@ function appendAgentText(agent: SessionAgentMessage, text: string): void {
 
   const last = agent.content.at(-1);
   if (last && isAgentTextContent(last)) {
-    last.Text += text;
+    last.Text = trimRuntimeText(`${last.Text}${text}`, MAX_RUNTIME_AGENT_TEXT_CHARS);
     return;
   }
 
@@ -190,7 +196,10 @@ function appendAgentThinking(agent: SessionAgentMessage, text: string): void {
 
   const last = agent.content.at(-1);
   if (last && isAgentThinkingContent(last)) {
-    last.Thinking.text += text;
+    last.Thinking.text = trimRuntimeText(
+      `${last.Thinking.text}${text}`,
+      MAX_RUNTIME_THINKING_CHARS,
+    );
     return;
   }
 
@@ -201,6 +210,13 @@ function appendAgentThinking(agent: SessionAgentMessage, text: string): void {
     },
   };
   agent.content.push(next);
+}
+
+function trimRuntimeText(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, maxChars - 3))}...`;
 }
 
 function statusIndicatesComplete(status: unknown): boolean {
@@ -228,12 +244,12 @@ function statusIndicatesError(status: unknown): boolean {
 
 function toToolResultContent(value: unknown): SessionToolResultContent {
   if (typeof value === "string") {
-    return { Text: value };
+    return { Text: trimRuntimeText(value, MAX_RUNTIME_TOOL_IO_CHARS) };
   }
 
   if (value != null) {
     try {
-      return { Text: JSON.stringify(value) };
+      return { Text: trimRuntimeText(JSON.stringify(value), MAX_RUNTIME_TOOL_IO_CHARS) };
     } catch {
       return { Text: "[Unserializable value]" };
     }
@@ -244,11 +260,11 @@ function toToolResultContent(value: unknown): SessionToolResultContent {
 
 function toRawInput(value: unknown): string {
   if (typeof value === "string") {
-    return value;
+    return trimRuntimeText(value, MAX_RUNTIME_TOOL_IO_CHARS);
   }
 
   try {
-    return JSON.stringify(value ?? {});
+    return trimRuntimeText(JSON.stringify(value ?? {}), MAX_RUNTIME_TOOL_IO_CHARS);
   } catch {
     return value == null ? "" : "[Unserializable input]";
   }
@@ -484,10 +500,11 @@ export function recordPromptSubmission(
   conversation.messages.push({
     User: {
       id: nextUserMessageId(),
-      content: [{ Text: text }],
+      content: [{ Text: trimRuntimeText(text, MAX_RUNTIME_AGENT_TEXT_CHARS) }],
     },
   });
   updateConversationTimestamp(conversation, timestamp);
+  trimConversationForRuntime(conversation);
 }
 
 export function recordSessionUpdate(
@@ -573,6 +590,7 @@ export function recordSessionUpdate(
   }
 
   updateConversationTimestamp(conversation, timestamp);
+  trimConversationForRuntime(conversation);
   return acpx;
 }
 
@@ -584,5 +602,57 @@ export function recordClientOperation(
 ): SessionAcpxState {
   const acpx = ensureAcpxState(state);
   updateConversationTimestamp(conversation, timestamp);
+  trimConversationForRuntime(conversation);
   return acpx;
+}
+
+export function trimConversationForRuntime(conversation: SessionConversation): void {
+  if (conversation.messages.length > MAX_RUNTIME_MESSAGES) {
+    conversation.messages = conversation.messages.slice(-MAX_RUNTIME_MESSAGES);
+  }
+
+  for (const message of conversation.messages) {
+    if (!isAgentMessage(message)) {
+      if (isUserMessage(message)) {
+        message.User.content = message.User.content.map((content) => {
+          if ("Text" in content) {
+            return {
+              Text: trimRuntimeText(content.Text, MAX_RUNTIME_AGENT_TEXT_CHARS),
+            };
+          }
+          return content;
+        });
+      }
+      continue;
+    }
+
+    for (const content of message.Agent.content) {
+      if ("Text" in content) {
+        content.Text = trimRuntimeText(content.Text, MAX_RUNTIME_AGENT_TEXT_CHARS);
+      } else if ("Thinking" in content) {
+        content.Thinking.text = trimRuntimeText(content.Thinking.text, MAX_RUNTIME_THINKING_CHARS);
+      } else if ("ToolUse" in content) {
+        content.ToolUse.raw_input = trimRuntimeText(
+          content.ToolUse.raw_input,
+          MAX_RUNTIME_TOOL_IO_CHARS,
+        );
+      }
+    }
+
+    for (const result of Object.values(message.Agent.tool_results)) {
+      if ("Text" in result.content) {
+        result.content.Text = trimRuntimeText(result.content.Text, MAX_RUNTIME_TOOL_IO_CHARS);
+      }
+      if (typeof result.output === "string") {
+        result.output = trimRuntimeText(result.output, MAX_RUNTIME_TOOL_IO_CHARS);
+      }
+    }
+  }
+
+  const requestUsageEntries = Object.entries(conversation.request_token_usage);
+  if (requestUsageEntries.length > MAX_RUNTIME_REQUEST_TOKEN_USAGE) {
+    conversation.request_token_usage = Object.fromEntries(
+      requestUsageEntries.slice(-MAX_RUNTIME_REQUEST_TOKEN_USAGE),
+    );
+  }
 }

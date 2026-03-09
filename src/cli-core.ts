@@ -229,6 +229,7 @@ async function handlePrompt(
     suppressSdkConsoleErrors: outputPolicy.suppressSdkConsoleErrors,
     timeoutMs: globalFlags.timeout,
     ttlMs: globalFlags.ttl,
+    maxQueueDepth: config.queueMaxDepth,
     verbose: globalFlags.verbose,
     waitForCompletion: flags.wait !== false,
   });

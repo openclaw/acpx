@@ -21,6 +21,7 @@ test("loadResolvedConfig merges global and project config with project priority"
           authPolicy: "fail",
           ttl: 15,
           timeout: 30,
+          queueMaxDepth: 9,
           format: "json",
           agents: {
             custom: { command: "global-custom" },
@@ -44,6 +45,7 @@ test("loadResolvedConfig merges global and project config with project priority"
           authPolicy: "skip",
           ttl: 42,
           timeout: null,
+          queueMaxDepth: 5,
           format: "quiet",
           agents: {
             custom: { command: "project-custom" },
@@ -67,6 +69,7 @@ test("loadResolvedConfig merges global and project config with project priority"
     assert.equal(config.authPolicy, "skip");
     assert.equal(config.ttlMs, 42_000);
     assert.equal(config.timeoutMs, undefined);
+    assert.equal(config.queueMaxDepth, 5);
     assert.equal(config.format, "quiet");
     assert.deepEqual(config.agents, {
       custom: "project-custom",
@@ -96,11 +99,13 @@ test("initGlobalConfigFile creates the config once and then reports existing fil
       defaultPermissions: string;
       nonInteractivePermissions: string;
       authPolicy: string;
+      queueMaxDepth: number;
     };
     assert.equal(payload.defaultAgent, "codex");
     assert.equal(payload.defaultPermissions, "approve-all");
     assert.equal(payload.nonInteractivePermissions, "deny");
     assert.equal(payload.authPolicy, "skip");
+    assert.equal(payload.queueMaxDepth, 16);
   });
 });
 

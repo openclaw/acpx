@@ -6,6 +6,7 @@ test("parseQueueRequest accepts submit_prompt with nonInteractivePermissions", (
   const parsed = parseQueueRequest({
     type: "submit_prompt",
     requestId: "req-1",
+    ownerGeneration: 123,
     message: "hello",
     permissionMode: "approve-reads",
     nonInteractivePermissions: "fail",
@@ -16,6 +17,7 @@ test("parseQueueRequest accepts submit_prompt with nonInteractivePermissions", (
   assert.deepEqual(parsed, {
     type: "submit_prompt",
     requestId: "req-1",
+    ownerGeneration: 123,
     message: "hello",
     permissionMode: "approve-reads",
     nonInteractivePermissions: "fail",
@@ -41,6 +43,7 @@ test("parseQueueOwnerMessage accepts typed queue error payload", () => {
   const parsed = parseQueueOwnerMessage({
     type: "error",
     requestId: "req-err-1",
+    ownerGeneration: 123,
     code: "RUNTIME",
     detailCode: "QUEUE_OWNER_CLOSED",
     origin: "queue",
@@ -58,6 +61,7 @@ test("parseQueueOwnerMessage accepts typed queue error payload", () => {
   assert.deepEqual(parsed, {
     type: "error",
     requestId: "req-err-1",
+    ownerGeneration: 123,
     code: "RUNTIME",
     detailCode: "QUEUE_OWNER_CLOSED",
     origin: "queue",
@@ -78,6 +82,16 @@ test("parseQueueOwnerMessage rejects untyped queue error payload", () => {
     type: "error",
     requestId: "req-err-untyped",
     message: "message only",
+  });
+
+  assert.equal(parsed, null);
+});
+
+test("parseQueueRequest rejects invalid owner generation", () => {
+  const parsed = parseQueueRequest({
+    type: "cancel_prompt",
+    requestId: "req-bad-generation",
+    ownerGeneration: 0,
   });
 
   assert.equal(parsed, null);

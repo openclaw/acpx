@@ -11,6 +11,7 @@ export type QueueOwnerRuntimeOptions = {
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   ttlMs?: number;
+  maxQueueDepth?: number;
 };
 
 type SessionSendLike = {
@@ -22,6 +23,7 @@ type SessionSendLike = {
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   ttlMs?: number;
+  maxQueueDepth?: number;
 };
 
 export function resolveQueueOwnerSpawnArgs(argv: readonly string[] = process.argv): string[] {
@@ -45,6 +47,7 @@ export function queueOwnerRuntimeOptionsFromSend(
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
     ttlMs: options.ttlMs,
+    maxQueueDepth: options.maxQueueDepth,
   };
 }
 

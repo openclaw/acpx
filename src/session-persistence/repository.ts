@@ -3,8 +3,16 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { SessionNotFoundError, SessionResolutionError } from "../errors.js";
+import { incrementPerfCounter, measurePerf } from "../perf-metrics.js";
 import { assertPersistedKeyPolicy } from "../persisted-key-policy.js";
 import type { SessionRecord } from "../types.js";
+import {
+  loadOrRebuildSessionIndex,
+  rebuildSessionIndex,
+  toSessionIndexEntry,
+  writeSessionIndex,
+  type SessionIndexEntry,
+} from "./index.js";
 import { parseSessionRecord } from "./parse.js";
 import { serializeSessionRecordForDisk } from "./serialize.js";
 
@@ -36,17 +44,65 @@ function sessionBaseDir(): string {
 async function ensureSessionDir(): Promise<void> {
   await fs.mkdir(sessionBaseDir(), { recursive: true });
 }
-export async function writeSessionRecord(record: SessionRecord): Promise<void> {
+
+async function loadRecordFromIndexEntry(
+  entry: SessionIndexEntry,
+): Promise<SessionRecord | undefined> {
+  try {
+    const payload = await fs.readFile(path.join(sessionBaseDir(), entry.file), "utf8");
+    return parseSessionRecord(JSON.parse(payload)) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function loadSessionIndexEntries(): Promise<SessionIndexEntry[]> {
   await ensureSessionDir();
+  const index = await measurePerf("session.index_load", async () => {
+    return await loadOrRebuildSessionIndex(sessionBaseDir());
+  });
+  return index.entries;
+}
 
-  const persisted = serializeSessionRecordForDisk(record);
-  assertPersistedKeyPolicy(persisted);
+function matchesSessionEntry(
+  session: SessionIndexEntry,
+  normalizedCwd: string,
+  normalizedName: string | undefined,
+  includeClosed = false,
+): boolean {
+  if (session.cwd !== normalizedCwd) {
+    return false;
+  }
+  if (!includeClosed && session.closed) {
+    return false;
+  }
+  if (normalizedName == null) {
+    return session.name == null;
+  }
+  return session.name === normalizedName;
+}
 
-  const file = sessionFilePath(record.acpxRecordId);
-  const tempFile = `${file}.${process.pid}.${Date.now()}.tmp`;
-  const payload = JSON.stringify(persisted, null, 2);
-  await fs.writeFile(tempFile, `${payload}\n`, "utf8");
-  await fs.rename(tempFile, file);
+export async function writeSessionRecord(record: SessionRecord): Promise<void> {
+  await measurePerf("session.write_record", async () => {
+    await ensureSessionDir();
+
+    const persisted = serializeSessionRecordForDisk(record);
+    assertPersistedKeyPolicy(persisted);
+
+    const file = sessionFilePath(record.acpxRecordId);
+    const tempFile = `${file}.${process.pid}.${Date.now()}.tmp`;
+    const payload = JSON.stringify(persisted, null, 2);
+    await fs.writeFile(tempFile, `${payload}\n`, "utf8");
+    await fs.rename(tempFile, file);
+
+    const sessionDir = sessionBaseDir();
+    const index = await loadOrRebuildSessionIndex(sessionDir);
+    const fileName = path.basename(file);
+    const entries = index.entries.filter((entry) => entry.file !== fileName);
+    entries.push(toSessionIndexEntry(record, fileName));
+    const files = [...new Set([...index.files.filter((entry) => entry !== fileName), fileName])];
+    await writeSessionIndex(sessionDir, { files, entries });
+  });
 }
 
 export async function resolveSessionRecord(sessionId: string): Promise<SessionRecord> {
@@ -54,38 +110,45 @@ export async function resolveSessionRecord(sessionId: string): Promise<SessionRe
 
   const directPath = sessionFilePath(sessionId);
   try {
-    const directPayload = await fs.readFile(directPath, "utf8");
+    const directPayload = await measurePerf("session.resolve_direct", async () => {
+      return await fs.readFile(directPath, "utf8");
+    });
     const directRecord = parseSessionRecord(JSON.parse(directPayload));
     if (directRecord) {
       return directRecord;
     }
   } catch {
-    // fallback to search
+    // fallback to indexed search
   }
 
-  const sessions = await listSessions();
-
-  const exact = sessions.filter(
-    (session) => session.acpxRecordId === sessionId || session.acpSessionId === sessionId,
+  const entries = await loadSessionIndexEntries();
+  const exactEntries = entries.filter(
+    (entry) => entry.acpxRecordId === sessionId || entry.acpSessionId === sessionId,
   );
-  if (exact.length === 1) {
-    return exact[0];
+  const exactRecords = (
+    await Promise.all(exactEntries.map((entry) => loadRecordFromIndexEntry(entry)))
+  ).filter((entry): entry is SessionRecord => Boolean(entry));
+  if (exactRecords.length === 1) {
+    return exactRecords[0];
   }
-  if (exact.length > 1) {
+  if (exactRecords.length > 1) {
     throw new SessionResolutionError(`Multiple sessions match id: ${sessionId}`);
   }
 
-  const suffixMatches = sessions.filter(
-    (session) =>
-      session.acpxRecordId.endsWith(sessionId) || session.acpSessionId.endsWith(sessionId),
+  const suffixEntries = entries.filter(
+    (entry) => entry.acpxRecordId.endsWith(sessionId) || entry.acpSessionId.endsWith(sessionId),
   );
-  if (suffixMatches.length === 1) {
-    return suffixMatches[0];
+  const suffixRecords = (
+    await Promise.all(suffixEntries.map((entry) => loadRecordFromIndexEntry(entry)))
+  ).filter((entry): entry is SessionRecord => Boolean(entry));
+  if (suffixRecords.length === 1) {
+    return suffixRecords[0];
   }
-  if (suffixMatches.length > 1) {
+  if (suffixRecords.length > 1) {
     throw new SessionResolutionError(`Session id is ambiguous: ${sessionId}`);
   }
 
+  incrementPerfCounter("session.resolve_miss");
   throw new SessionNotFoundError(sessionId);
 }
 
@@ -143,24 +206,13 @@ export function isoNow(): string {
 
 export async function listSessions(): Promise<SessionRecord[]> {
   await ensureSessionDir();
-
-  const entries = await fs.readdir(sessionBaseDir(), { withFileTypes: true });
+  const entries = await loadSessionIndexEntries();
   const records: SessionRecord[] = [];
 
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) {
-      continue;
-    }
-
-    const fullPath = path.join(sessionBaseDir(), entry.name);
-    try {
-      const payload = await fs.readFile(fullPath, "utf8");
-      const parsed = parseSessionRecord(JSON.parse(payload));
-      if (parsed) {
-        records.push(parsed);
-      }
-    } catch {
-      // ignore corrupt session files
+    const parsed = await loadRecordFromIndexEntry(entry);
+    if (parsed) {
+      records.push(parsed);
     }
   }
 
@@ -169,30 +221,28 @@ export async function listSessions(): Promise<SessionRecord[]> {
 }
 
 export async function listSessionsForAgent(agentCommand: string): Promise<SessionRecord[]> {
-  const sessions = await listSessions();
-  return sessions.filter((session) => session.agentCommand === agentCommand);
+  const entries = (await loadSessionIndexEntries()).filter(
+    (session) => session.agentCommand === agentCommand,
+  );
+  const records = await Promise.all(entries.map((entry) => loadRecordFromIndexEntry(entry)));
+  return records
+    .filter((entry): entry is SessionRecord => Boolean(entry))
+    .toSorted((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
 }
 
 export async function findSession(options: FindSessionOptions): Promise<SessionRecord | undefined> {
   const normalizedCwd = absolutePath(options.cwd);
   const normalizedName = normalizeName(options.name);
-  const sessions = await listSessionsForAgent(options.agentCommand);
-
-  return sessions.find((session) => {
-    if (session.cwd !== normalizedCwd) {
-      return false;
-    }
-
-    if (!options.includeClosed && session.closed) {
-      return false;
-    }
-
-    if (normalizedName == null) {
-      return session.name == null;
-    }
-
-    return session.name === normalizedName;
-  });
+  const entries = await loadSessionIndexEntries();
+  const match = entries.find(
+    (session) =>
+      session.agentCommand === options.agentCommand &&
+      matchesSessionEntry(session, normalizedCwd, normalizedName, options.includeClosed),
+  );
+  if (!match) {
+    return undefined;
+  }
+  return await loadRecordFromIndexEntry(match);
 }
 
 export async function findSessionByDirectoryWalk(
@@ -204,31 +254,17 @@ export async function findSessionByDirectoryWalk(
   const walkBoundary = isWithinBoundary(normalizedBoundary, normalizedStart)
     ? normalizedBoundary
     : normalizedStart;
-  const sessions = await listSessionsForAgent(options.agentCommand);
-
-  const matchesScope = (session: SessionRecord, dir: string): boolean => {
-    if (session.cwd !== dir) {
-      return false;
-    }
-
-    if (session.closed) {
-      return false;
-    }
-
-    if (normalizedName == null) {
-      return session.name == null;
-    }
-
-    return session.name === normalizedName;
-  };
+  const sessions = (await loadSessionIndexEntries()).filter(
+    (session) => session.agentCommand === options.agentCommand,
+  );
 
   let current = normalizedStart;
   const walkRoot = path.parse(current).root;
 
   for (;;) {
-    const match = sessions.find((session) => matchesScope(session, current));
+    const match = sessions.find((session) => matchesSessionEntry(session, current, normalizedName));
     if (match) {
-      return match;
+      return await loadRecordFromIndexEntry(match);
     }
 
     if (current === walkBoundary || current === walkRoot) {
@@ -282,5 +318,8 @@ export async function closeSession(id: string): Promise<SessionRecord> {
   record.lastPromptAt = record.lastPromptAt ?? now;
 
   await writeSessionRecord(record);
+  await rebuildSessionIndex(sessionBaseDir()).catch(() => {
+    // best effort cache rebuild
+  });
   return record;
 }

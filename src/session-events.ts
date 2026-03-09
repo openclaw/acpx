@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
 import { isAcpJsonRpcMessage } from "./acp-jsonrpc.js";
+import { incrementPerfCounter, measurePerf } from "./perf-metrics.js";
+import { isProcessAlive } from "./queue-lease-store.js";
 import {
   DEFAULT_EVENT_MAX_SEGMENTS,
   DEFAULT_EVENT_SEGMENT_MAX_BYTES,
@@ -12,6 +14,7 @@ import { resolveSessionRecord, writeSessionRecord } from "./session-persistence.
 import type { AcpJsonRpcMessage, SessionRecord } from "./types.js";
 
 const LOCK_RETRY_MS = 15;
+const EVENT_LOCK_STALE_MS = 15_000;
 
 async function ensureSessionDir(): Promise<void> {
   await fs.mkdir(sessionBaseDir(), { recursive: true });
@@ -93,6 +96,50 @@ type LockHandle = {
   filePath: string;
 };
 
+type EventLockPayload = {
+  pid?: number;
+  created_at?: string;
+};
+
+function parseEventLockPayload(raw: string): EventLockPayload {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    const record = parsed as Record<string, unknown>;
+    return {
+      pid: typeof record.pid === "number" ? record.pid : undefined,
+      created_at: typeof record.created_at === "string" ? record.created_at : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function removeStaleEventLock(lockPath: string): Promise<boolean> {
+  try {
+    const payload = await fs.readFile(lockPath, "utf8");
+    const parsed = parseEventLockPayload(payload);
+    const createdAtMs = parsed.created_at ? Date.parse(parsed.created_at) : Number.NaN;
+    const lockAgeMs = Number.isFinite(createdAtMs)
+      ? Date.now() - createdAtMs
+      : Number.POSITIVE_INFINITY;
+    const pidAlive = isProcessAlive(parsed.pid);
+    if (pidAlive && lockAgeMs <= EVENT_LOCK_STALE_MS) {
+      return false;
+    }
+    await fs.unlink(lockPath);
+    incrementPerfCounter("session.events.stale_lock_recovered");
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return true;
+    }
+    return false;
+  }
+}
+
 async function acquireEventsLock(sessionId: string): Promise<LockHandle> {
   await ensureSessionDir();
   const lockPath = eventsLockPath(sessionId);
@@ -116,6 +163,10 @@ async function acquireEventsLock(sessionId: string): Promise<LockHandle> {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "EEXIST") {
         throw error;
+      }
+      const recovered = await removeStaleEventLock(lockPath);
+      if (recovered) {
+        continue;
       }
       await new Promise<void>((resolve) => {
         setTimeout(resolve, LOCK_RETRY_MS);
@@ -146,17 +197,28 @@ export class SessionEventWriter {
   private readonly lock: LockHandle;
   private readonly maxSegmentBytes: number;
   private readonly maxSegments: number;
+  private activePath: string;
+  private activeSizeBytes: number;
+  private segmentCount: number;
   private closed = false;
 
   private constructor(
     record: SessionRecord,
     lock: LockHandle,
     options: Required<SessionEventWriterOptions>,
+    state: {
+      activePath: string;
+      activeSizeBytes: number;
+      segmentCount: number;
+    },
   ) {
     this.record = record;
     this.lock = lock;
     this.maxSegmentBytes = options.maxSegmentBytes;
     this.maxSegments = options.maxSegments;
+    this.activePath = state.activePath;
+    this.activeSizeBytes = state.activeSizeBytes;
+    this.segmentCount = state.segmentCount;
   }
 
   static async open(
@@ -164,14 +226,31 @@ export class SessionEventWriter {
     options: SessionEventWriterOptions = {},
   ): Promise<SessionEventWriter> {
     const lock = await acquireEventsLock(record.acpxRecordId);
-    return new SessionEventWriter(record, lock, {
-      maxSegmentBytes:
-        options.maxSegmentBytes ??
-        record.eventLog.max_segment_bytes ??
-        DEFAULT_EVENT_SEGMENT_MAX_BYTES,
-      maxSegments:
-        options.maxSegments ?? record.eventLog.max_segments ?? DEFAULT_EVENT_MAX_SEGMENTS,
-    });
+    const maxSegmentBytes =
+      options.maxSegmentBytes ??
+      record.eventLog.max_segment_bytes ??
+      DEFAULT_EVENT_SEGMENT_MAX_BYTES;
+    const maxSegments =
+      options.maxSegments ?? record.eventLog.max_segments ?? DEFAULT_EVENT_MAX_SEGMENTS;
+    const activePath = activeEventPath(record.acpxRecordId);
+    const activeSizeBytes = await statSize(activePath);
+    const segmentCount =
+      Number.isInteger(record.eventLog.segment_count) && record.eventLog.segment_count > 0
+        ? record.eventLog.segment_count
+        : (await countExistingSegments(record.acpxRecordId, maxSegments)) || 1;
+    return new SessionEventWriter(
+      record,
+      lock,
+      {
+        maxSegmentBytes,
+        maxSegments,
+      },
+      {
+        activePath,
+        activeSizeBytes,
+        segmentCount,
+      },
+    );
   }
 
   getRecord(): SessionRecord {
@@ -192,41 +271,45 @@ export class SessionEventWriter {
     }
 
     await ensureSessionDir();
-    let activePath = activeEventPath(this.record.acpxRecordId);
 
-    for (const message of messages) {
-      if (!isAcpJsonRpcMessage(message)) {
-        throw new Error("Attempted to persist invalid ACP JSON-RPC payload");
-      }
-
-      const line = `${JSON.stringify(message)}\n`;
-      const lineBytes = Buffer.byteLength(line);
-      const currentSize = await statSize(activePath);
-      if (currentSize > 0 && currentSize + lineBytes > this.maxSegmentBytes) {
-        await rotateSegments(this.record.acpxRecordId, this.maxSegments);
-        activePath = activeEventPath(this.record.acpxRecordId);
-      }
-
-      await fs.appendFile(activePath, line, "utf8");
-
-      this.record.lastSeq += 1;
-      if (Object.hasOwn(message, "id")) {
-        const id = (message as { id?: unknown }).id;
-        if (typeof id === "string" || typeof id === "number") {
-          this.record.lastRequestId = String(id);
+    await measurePerf("session.events.append_batch", async () => {
+      for (const message of messages) {
+        if (!isAcpJsonRpcMessage(message)) {
+          throw new Error("Attempted to persist invalid ACP JSON-RPC payload");
         }
+
+        const line = `${JSON.stringify(message)}\n`;
+        const lineBytes = Buffer.byteLength(line);
+        if (this.activeSizeBytes > 0 && this.activeSizeBytes + lineBytes > this.maxSegmentBytes) {
+          await rotateSegments(this.record.acpxRecordId, this.maxSegments);
+          this.activePath = activeEventPath(this.record.acpxRecordId);
+          this.activeSizeBytes = 0;
+          this.segmentCount = Math.min(this.segmentCount + 1, this.maxSegments);
+          incrementPerfCounter("session.events.rotate");
+        }
+
+        await fs.appendFile(this.activePath, line, "utf8");
+        this.activeSizeBytes += lineBytes;
+
+        this.record.lastSeq += 1;
+        if (Object.hasOwn(message, "id")) {
+          const id = (message as { id?: unknown }).id;
+          if (typeof id === "string" || typeof id === "number") {
+            this.record.lastRequestId = String(id);
+          }
+        }
+        const writeTs = new Date().toISOString();
+        this.record.lastUsedAt = writeTs;
+        this.record.eventLog = {
+          active_path: this.activePath,
+          segment_count: this.segmentCount,
+          max_segment_bytes: this.maxSegmentBytes,
+          max_segments: this.maxSegments,
+          last_write_at: writeTs,
+          last_write_error: null,
+        };
       }
-      const writeTs = new Date().toISOString();
-      this.record.lastUsedAt = writeTs;
-      this.record.eventLog = {
-        active_path: activePath,
-        segment_count: await countExistingSegments(this.record.acpxRecordId, this.maxSegments),
-        max_segment_bytes: this.maxSegmentBytes,
-        max_segments: this.maxSegments,
-        last_write_at: writeTs,
-        last_write_error: null,
-      };
-    }
+    });
 
     if (options.checkpoint === true) {
       await writeSessionRecord(this.record);

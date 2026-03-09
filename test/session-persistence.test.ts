@@ -207,6 +207,38 @@ test("findSession and findSessionByDirectoryWalk resolve expected records", asyn
   });
 });
 
+test("writeSessionRecord maintains an index and listSessions rebuilds it when missing", async () => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const cwd = path.join(homeDir, "repo");
+    const record = makeSessionRecord({
+      acpxRecordId: "indexed-session",
+      acpSessionId: "indexed-session",
+      agentCommand: "agent-a",
+      cwd,
+    });
+
+    const indexPath = path.join(homeDir, ".acpx", "sessions", "index.json");
+    await writeSessionRecord(homeDir, record);
+    assert.equal(await fileExists(indexPath), false);
+
+    const initialSessions = await session.listSessions();
+    assert.equal(
+      initialSessions.some((entry) => entry.acpxRecordId === "indexed-session"),
+      true,
+    );
+    assert.equal(await fileExists(indexPath), true);
+
+    await fs.rm(indexPath, { force: true });
+    const sessions = await session.listSessions();
+    assert.equal(
+      sessions.some((entry) => entry.acpxRecordId === "indexed-session"),
+      true,
+    );
+    assert.equal(await fileExists(indexPath), true);
+  });
+});
+
 test("closeSession soft-closes and terminates matching process", async () => {
   await withTempHome(async (homeDir) => {
     const session = await loadSessionModule();

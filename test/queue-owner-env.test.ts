@@ -9,11 +9,13 @@ describe("parseQueueOwnerPayload", () => {
         sessionId: "session-1",
         permissionMode: "approve-reads",
         ttlMs: 1234,
+        maxQueueDepth: 7,
       }),
     );
     assert.equal(parsed.sessionId, "session-1");
     assert.equal(parsed.permissionMode, "approve-reads");
     assert.equal(parsed.ttlMs, 1234);
+    assert.equal(parsed.maxQueueDepth, 7);
   });
 
   it("rejects invalid payloads", () => {

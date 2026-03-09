@@ -20,6 +20,7 @@ type ConfigFileShape = {
   authPolicy?: unknown;
   ttl?: unknown;
   timeout?: unknown;
+  queueMaxDepth?: unknown;
   format?: unknown;
   agents?: unknown;
   auth?: unknown;
@@ -32,6 +33,7 @@ export type ResolvedAcpxConfig = {
   authPolicy: AuthPolicy;
   ttlMs: number;
   timeoutMs?: number;
+  queueMaxDepth: number;
   format: OutputFormat;
   agents: Record<string, string>;
   auth: Record<string, string>;
@@ -52,6 +54,7 @@ const DEFAULT_PERMISSION_MODE: PermissionMode = "approve-reads";
 const DEFAULT_NON_INTERACTIVE_PERMISSION_POLICY: NonInteractivePermissionPolicy = "deny";
 const DEFAULT_AUTH_POLICY: AuthPolicy = "skip";
 const DEFAULT_OUTPUT_FORMAT: OutputFormat = "text";
+const DEFAULT_QUEUE_MAX_DEPTH = 16;
 const VALID_PERMISSION_MODES = new Set<PermissionMode>([
   "approve-all",
   "approve-reads",
@@ -94,6 +97,16 @@ function parseTimeoutMs(value: unknown, sourcePath: string): number | undefined 
     throw new Error(`Invalid config timeout in ${sourcePath}: expected positive seconds or null`);
   }
   return Math.round(value * 1_000);
+}
+
+function parseQueueMaxDepth(value: unknown, sourcePath: string): number | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  if (!Number.isInteger(value) || (value as number) <= 0) {
+    throw new Error(`Invalid config queueMaxDepth in ${sourcePath}: expected positive integer`);
+  }
+  return value as number;
 }
 
 function parsePermissionMode(value: unknown, sourcePath: string): PermissionMode | undefined {
@@ -304,6 +317,11 @@ export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfi
     parseOutputFormat(globalConfig?.format, globalPath) ??
     DEFAULT_OUTPUT_FORMAT;
 
+  const queueMaxDepth =
+    parseQueueMaxDepth(projectConfig?.queueMaxDepth, projectPath) ??
+    parseQueueMaxDepth(globalConfig?.queueMaxDepth, globalPath) ??
+    DEFAULT_QUEUE_MAX_DEPTH;
+
   const agents = mergeAgents(
     parseAgents(globalConfig?.agents, globalPath),
     parseAgents(projectConfig?.agents, projectPath),
@@ -320,6 +338,7 @@ export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfi
     authPolicy,
     ttlMs,
     timeoutMs,
+    queueMaxDepth,
     format,
     agents,
     auth,
@@ -337,6 +356,7 @@ export function toConfigDisplay(config: ResolvedAcpxConfig): {
   authPolicy: AuthPolicy;
   ttl: number;
   timeout: number | null;
+  queueMaxDepth: number;
   format: OutputFormat;
   agents: Record<string, ConfigAgentEntry>;
   authMethods: string[];
@@ -353,6 +373,7 @@ export function toConfigDisplay(config: ResolvedAcpxConfig): {
     authPolicy: config.authPolicy,
     ttl: Math.round(config.ttlMs / 1_000),
     timeout: config.timeoutMs == null ? null : config.timeoutMs / 1_000,
+    queueMaxDepth: config.queueMaxDepth,
     format: config.format,
     agents,
     authMethods: Object.keys(config.auth).toSorted(),
@@ -383,6 +404,7 @@ export async function initGlobalConfigFile(): Promise<{
     authPolicy: "skip",
     ttl: 300,
     timeout: null,
+    queueMaxDepth: DEFAULT_QUEUE_MAX_DEPTH,
     format: "text",
     agents: {},
     auth: {},
