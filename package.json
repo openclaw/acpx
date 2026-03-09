@@ -60,7 +60,7 @@
   },
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",
-    "@types/node": "^22.0.0",
+    "@types/node": "^25.3.5",
     "@typescript/native-preview": "7.0.0-dev.20260301.1",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
