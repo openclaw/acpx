@@ -61,6 +61,23 @@ function toEnvObject(env: CreateTerminalRequest["env"]): NodeJS.ProcessEnv | und
   return merged;
 }
 
+export function buildTerminalSpawnOptions(
+  cwd: string,
+  env: CreateTerminalRequest["env"],
+): {
+  cwd: string;
+  env: NodeJS.ProcessEnv | undefined;
+  stdio: ["ignore", "pipe", "pipe"];
+  windowsHide: true;
+} {
+  return {
+    cwd,
+    env: toEnvObject(env),
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  };
+}
+
 function trimToUtf8Boundary(buffer: Buffer, limit: number): Buffer {
   if (limit <= 0) {
     return Buffer.alloc(0);
@@ -152,11 +169,11 @@ export class TerminalManager {
         0,
         Math.round(params.outputByteLimit ?? DEFAULT_TERMINAL_OUTPUT_LIMIT_BYTES),
       );
-      const proc = spawn(params.command, params.args ?? [], {
-        cwd: params.cwd ?? this.cwd,
-        env: toEnvObject(params.env),
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      const proc = spawn(
+        params.command,
+        params.args ?? [],
+        buildTerminalSpawnOptions(params.cwd ?? this.cwd, params.env),
+      );
       await waitForSpawn(proc);
 
       let resolveExit: (response: WaitForTerminalExitResponse) => void = () => {};

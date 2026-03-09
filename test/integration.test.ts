@@ -304,6 +304,56 @@ test("integration: prompt reuses warm queue owner pid across turns", async () =>
   });
 });
 
+test("integration: config agent command with flags is split correctly and stores protocol version", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+      await fs.writeFile(
+        path.join(homeDir, ".acpx", "config.json"),
+        `${JSON.stringify(
+          {
+            agents: {
+              codex: {
+                command: `node ${JSON.stringify(MOCK_AGENT_PATH)} --supports-load-session`,
+              },
+            },
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      const created = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "json", "codex", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+
+      const createdPayload = JSON.parse(created.stdout.trim()) as {
+        acpxRecordId?: string;
+      };
+      const sessionId = createdPayload.acpxRecordId;
+      assert.equal(typeof sessionId, "string");
+
+      const storedRecordPath = path.join(
+        homeDir,
+        ".acpx",
+        "sessions",
+        `${encodeURIComponent(sessionId as string)}.json`,
+      );
+      const storedRecord = JSON.parse(await fs.readFile(storedRecordPath, "utf8")) as {
+        protocol_version?: unknown;
+      };
+      assert.equal(storedRecord.protocol_version, 1);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: prompt recovers when loadSession fails on empty session", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
