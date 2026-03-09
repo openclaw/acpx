@@ -86,7 +86,7 @@ Convenience is not enough. Every new convention creates long-term compatibility
 cost.
 
 This applies even to choices that may look small. For example, when `acpx`
-defines `claude` and uses Claude Code examples, that should be an intentional
+defines `claude` instead of `claude-code`, that should be an intentional
 convention, not a casual shortcut.
 
 People and tools will build workflows on top of `acpx`. Once a keyword, flag,
