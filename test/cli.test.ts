@@ -185,6 +185,7 @@ test("sessions new command is present in help output", async () => {
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, /\bnew\b/);
     assert.match(result.stdout, /\bensure\b/);
+    assert.match(result.stdout, /\bread\b/);
 
     const newHelp = await runCli(["sessions", "new", "--help"], homeDir);
     assert.equal(newHelp.code, 0, newHelp.stderr);
@@ -193,6 +194,10 @@ test("sessions new command is present in help output", async () => {
     const ensureHelp = await runCli(["sessions", "ensure", "--help"], homeDir);
     assert.equal(ensureHelp.code, 0, ensureHelp.stderr);
     assert.match(ensureHelp.stdout, /--name <name>/);
+
+    const readHelp = await runCli(["sessions", "read", "--help"], homeDir);
+    assert.equal(readHelp.code, 0, readHelp.stderr);
+    assert.match(readHelp.stdout, /--tail <count>/);
   });
 });
 
@@ -1206,6 +1211,53 @@ test("sessions history prints stored history entries", async () => {
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, /second message/);
     assert.doesNotMatch(result.stdout, /first message/);
+  });
+});
+
+test("sessions read prints full history by default and supports --tail", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: "read-session",
+      acpSessionId: "read-session",
+      agentCommand: "npx @zed-industries/codex-acp",
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:10:00.000Z",
+      closed: false,
+      title: null,
+      messages: [
+        {
+          User: {
+            id: "4cb89fd7-0dd5-4bdd-8f50-3de20eaa58a5",
+            content: [{ Text: "first message" }],
+          },
+        },
+        {
+          Agent: {
+            content: [{ Text: "second message" }],
+            tool_results: {},
+          },
+        },
+      ],
+      updated_at: "2026-01-01T00:02:00.000Z",
+      cumulative_token_usage: {},
+      request_token_usage: {},
+    });
+
+    const full = await runCli(["--cwd", cwd, "codex", "sessions", "read"], homeDir);
+    assert.equal(full.code, 0, full.stderr);
+    assert.match(full.stdout, /first message/);
+    assert.match(full.stdout, /second message/);
+    assert.match(full.stdout, /\(2\/2 shown\)/);
+
+    const tail = await runCli(["--cwd", cwd, "codex", "sessions", "read", "--tail", "1"], homeDir);
+    assert.equal(tail.code, 0, tail.stderr);
+    assert.match(tail.stdout, /second message/);
+    assert.doesNotMatch(tail.stdout, /first message/);
+    assert.match(tail.stdout, /\(1\/2 shown\)/);
   });
 });
 

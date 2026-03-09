@@ -751,7 +751,7 @@ function printSessionHistoryByFormat(
   format: OutputFormat,
 ): void {
   const history = conversationHistoryEntries(record);
-  const visible = history.slice(Math.max(0, history.length - limit));
+  const visible = limit === 0 ? history : history.slice(Math.max(0, history.length - limit));
 
   if (format === "json") {
     process.stdout.write(
@@ -1064,6 +1064,25 @@ function registerSessionsCommand(
     )
     .action(async function (this: Command, name: string | undefined, flags: SessionsHistoryFlags) {
       await handleSessionsHistory(explicitAgentName, name, flags, this, config);
+    });
+
+  sessionsCommand
+    .command("read")
+    .description("Read full session history")
+    .argument("[name]", "Session name", parseSessionName)
+    .option(
+      "--tail <count>",
+      "Show only the last N entries instead of all history",
+      parseHistoryLimit,
+    )
+    .action(async function (this: Command, name: string | undefined, flags: { tail?: number }) {
+      await handleSessionsHistory(
+        explicitAgentName,
+        name,
+        { limit: flags.tail ?? 0 },
+        this,
+        config,
+      );
     });
 }
 
