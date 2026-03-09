@@ -1,3 +1,4 @@
+import { parseOptionalMcpServers } from "./mcp-servers.js";
 import { runSessionQueueOwner, type QueueOwnerRuntimeOptions } from "./session-runtime.js";
 
 type UnknownRecord = Record<string, unknown>;
@@ -31,6 +32,11 @@ export function parseQueueOwnerPayload(raw: string): QueueOwnerRuntimeOptions {
     sessionId: record.sessionId,
     permissionMode: record.permissionMode,
   };
+
+  const parsedMcpServers = parseOptionalMcpServers(record.mcpServers, "queue owner payload");
+  if (parsedMcpServers) {
+    options.mcpServers = parsedMcpServers;
+  }
 
   if (typeof record.nonInteractivePermissions === "string") {
     options.nonInteractivePermissions =

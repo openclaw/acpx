@@ -293,6 +293,113 @@ test("integration: perf metrics capture preserves SIGTERM termination semantics"
   }
 });
 
+test("integration: configured mcpServers are sent to session/new and session/load", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const loadCapableAgentCommand = `${MOCK_AGENT_COMMAND} --supports-load-session`;
+    const loadCapableAgentArgs = [
+      "--agent",
+      loadCapableAgentCommand,
+      "--approve-all",
+      "--cwd",
+      cwd,
+    ];
+    let sessionId: string | undefined;
+
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          mcpServers: [
+            {
+              name: "linear-http",
+              type: "http",
+              url: "https://example.com/mcp",
+            },
+            {
+              name: "local-stdio",
+              type: "stdio",
+              command: "./bin/local-mcp",
+              args: ["--serve"],
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const expectedMcpServers = [
+      {
+        name: "linear-http",
+        type: "http",
+        url: "https://example.com/mcp",
+        headers: [],
+      },
+      {
+        name: "local-stdio",
+        command: "./bin/local-mcp",
+        args: ["--serve"],
+        env: [],
+      },
+    ];
+
+    try {
+      const execResult = await runCli(
+        [...loadCapableAgentArgs, "--format", "json", "exec", "echo mcp-new"],
+        homeDir,
+      );
+      assert.equal(execResult.code, 0, execResult.stderr);
+      const execMessages = parseJsonRpcOutputLines(execResult.stdout);
+      const newSessionRequest = execMessages.find(
+        (message) => message.method === "session/new" && extractJsonRpcId(message) !== undefined,
+      );
+      assert(newSessionRequest, `expected session/new request in output:\n${execResult.stdout}`);
+      assert.deepEqual(
+        (newSessionRequest.params as { mcpServers?: unknown } | undefined)?.mcpServers,
+        expectedMcpServers,
+      );
+
+      const created = await runCli(
+        [...loadCapableAgentArgs, "--format", "json", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+      const createdPayload = JSON.parse(created.stdout.trim()) as {
+        acpxRecordId?: string;
+      };
+      sessionId = createdPayload.acpxRecordId;
+      assert.equal(typeof sessionId, "string");
+
+      const promptResult = await runCli(
+        [...loadCapableAgentArgs, "--format", "json", "prompt", "echo mcp-load"],
+        homeDir,
+      );
+      assert.equal(promptResult.code, 0, promptResult.stderr);
+
+      const promptMessages = parseJsonRpcOutputLines(promptResult.stdout);
+      const loadSessionRequest = promptMessages.find(
+        (message) => message.method === "session/load" && extractJsonRpcId(message) !== undefined,
+      );
+      assert(
+        loadSessionRequest,
+        `expected session/load request in output:\n${promptResult.stdout}`,
+      );
+      assert.deepEqual(
+        (loadSessionRequest.params as { mcpServers?: unknown } | undefined)?.mcpServers,
+        expectedMcpServers,
+      );
+    } finally {
+      if (sessionId) {
+        await runCli([...loadCapableAgentArgs, "--format", "json", "sessions", "close"], homeDir);
+      }
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: timeout emits structured TIMEOUT json error", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

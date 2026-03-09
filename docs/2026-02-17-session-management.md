@@ -76,7 +76,7 @@ Resume path in `sendSession`:
 
 1. start ACP client process
 2. initialize protocol
-3. `loadSession(sessionId, cwd, mcpServers: [])`
+3. `loadSession(sessionId, cwd, mcpServers: <resolved config>)`
 4. suppress replayed updates during load
 5. wait for session-update drain
 6. send new prompt

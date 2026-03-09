@@ -69,6 +69,7 @@ import {
   SESSION_RECORD_SCHEMA,
   type AcpJsonRpcMessage,
   type AuthPolicy,
+  type McpServer,
   type NonInteractivePermissionPolicy,
   type OutputErrorEmissionPolicy,
   type OutputErrorAcpPayload,
@@ -104,6 +105,7 @@ export type RunOnceOptions = {
   agentCommand: string;
   cwd: string;
   message: string;
+  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -119,6 +121,7 @@ export type SessionCreateOptions = {
   cwd: string;
   name?: string;
   resumeSessionId?: string;
+  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -130,6 +133,7 @@ export type SessionCreateOptions = {
 export type SessionSendOptions = {
   sessionId: string;
   message: string;
+  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -148,6 +152,7 @@ export type SessionEnsureOptions = {
   cwd: string;
   name?: string;
   resumeSessionId?: string;
+  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -170,6 +175,7 @@ export type SessionCancelResult = {
 export type SessionSetModeOptions = {
   sessionId: string;
   modeId: string;
+  mcpServers?: McpServer[];
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
@@ -180,6 +186,7 @@ export type SessionSetConfigOptionOptions = {
   sessionId: string;
   configId: string;
   value: string;
+  mcpServers?: McpServer[];
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
@@ -201,6 +208,7 @@ function toPromptResult(
 type RunSessionPromptOptions = {
   sessionRecordId: string;
   message: string;
+  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -297,6 +305,7 @@ async function runQueuedTask(
   options: {
     sharedClient?: AcpClient;
     verbose?: boolean;
+    mcpServers?: McpServer[];
     nonInteractivePermissions?: NonInteractivePermissionPolicy;
     authCredentials?: Record<string, string>;
     authPolicy?: AuthPolicy;
@@ -314,6 +323,7 @@ async function runQueuedTask(
     const result = await runSessionPrompt({
       sessionRecordId,
       message: task.message,
+      mcpServers: options.mcpServers,
       permissionMode: task.permissionMode,
       nonInteractivePermissions:
         task.nonInteractivePermissions ?? options.nonInteractivePermissions,
@@ -411,6 +421,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     new AcpClient({
       agentCommand: record.agentCommand,
       cwd: absolutePath(record.cwd),
+      mcpServers: options.mcpServers,
       permissionMode: options.permissionMode,
       nonInteractivePermissions: options.nonInteractivePermissions,
       authCredentials: options.authCredentials,
@@ -618,6 +629,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
   const client = new AcpClient({
     agentCommand: options.agentCommand,
     cwd: absolutePath(options.cwd),
+    mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
@@ -666,6 +678,7 @@ export async function createSession(options: SessionCreateOptions): Promise<Sess
   const client = new AcpClient({
     agentCommand: options.agentCommand,
     cwd: absolutePath(options.cwd),
+    mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
@@ -774,6 +787,7 @@ export async function ensureSession(options: SessionEnsureOptions): Promise<Sess
     cwd,
     name: options.name,
     resumeSessionId: options.resumeSessionId,
+    mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
@@ -819,6 +833,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
   const sharedClient = new AcpClient({
     agentCommand: sessionRecord.agentCommand,
     cwd: absolutePath(sessionRecord.cwd),
+    mcpServers: options.mcpServers,
     permissionMode: "approve-reads",
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
@@ -837,6 +852,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
       await runSessionSetModeDirect({
         sessionRecordId: options.sessionId,
         modeId,
+        mcpServers: options.mcpServers,
         nonInteractivePermissions: options.nonInteractivePermissions,
         authCredentials: options.authCredentials,
         authPolicy: options.authPolicy,
@@ -849,6 +865,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
         sessionRecordId: options.sessionId,
         configId,
         value,
+        mcpServers: options.mcpServers,
         nonInteractivePermissions: options.nonInteractivePermissions,
         authCredentials: options.authCredentials,
         authPolicy: options.authPolicy,
@@ -949,6 +966,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
           await runQueuedTask(options.sessionId, task, {
             sharedClient,
             verbose: options.verbose,
+            mcpServers: options.mcpServers,
             nonInteractivePermissions: options.nonInteractivePermissions,
             authCredentials: options.authCredentials,
             authPolicy: options.authPolicy,
@@ -1057,6 +1075,7 @@ export async function setSessionMode(
   return await runSessionSetModeDirect({
     sessionRecordId: options.sessionId,
     modeId: options.modeId,
+    mcpServers: options.mcpServers,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
@@ -1092,6 +1111,7 @@ export async function setSessionConfigOption(
     sessionRecordId: options.sessionId,
     configId: options.configId,
     value: options.value,
+    mcpServers: options.mcpServers,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,

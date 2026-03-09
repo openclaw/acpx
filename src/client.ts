@@ -909,7 +909,7 @@ export class AcpClient {
     try {
       const createPromise = connection.newSession({
         cwd: asAbsoluteCwd(cwd),
-        mcpServers: [],
+        mcpServers: this.options.mcpServers ?? [],
         _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions),
       });
       result = claudeAcp
@@ -955,7 +955,7 @@ export class AcpClient {
       response = await connection.loadSession({
         sessionId,
         cwd: asAbsoluteCwd(cwd),
-        mcpServers: [],
+        mcpServers: this.options.mcpServers ?? [],
       });
 
       await this.waitForSessionUpdateDrain(
