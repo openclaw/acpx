@@ -131,6 +131,74 @@ test("integration: gemini ACP startup timeout is surfaced as actionable error", 
   });
 });
 
+test("integration: claude ACP session creation timeout is surfaced as actionable error", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-claude-acp-"));
+    const fakeClaudeAcpPath = path.join(fakeBinDir, "claude-agent-acp");
+    const previousTimeout = process.env.ACPX_CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS;
+
+    try {
+      await fs.writeFile(
+        fakeClaudeAcpPath,
+        `#!/bin/sh\nexec node ${JSON.stringify(MOCK_AGENT_PATH)} --hang-on-new-session "$@"\n`,
+        {
+          encoding: "utf8",
+          mode: 0o755,
+        },
+      );
+      process.env.ACPX_CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS = "100";
+
+      const result = await runCli(
+        [
+          "--agent",
+          JSON.stringify(fakeClaudeAcpPath),
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "sessions",
+          "new",
+          "--name",
+          "claude-timeout",
+        ],
+        homeDir,
+        { timeoutMs: 10_000 },
+      );
+
+      assert.equal(result.code, 3, result.stderr);
+      const payloads = result.stdout
+        .trim()
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              error?: { message?: string; data?: { acpxCode?: string; detailCode?: string } };
+            },
+        );
+      const timeoutError = payloads.find(
+        (payload) => payload.error?.data?.detailCode === "CLAUDE_ACP_SESSION_CREATE_TIMEOUT",
+      );
+      assert(timeoutError, result.stdout);
+      assert.equal(timeoutError.error?.data?.acpxCode, "TIMEOUT");
+      assert.equal(timeoutError.error?.data?.detailCode, "CLAUDE_ACP_SESSION_CREATE_TIMEOUT");
+      assert.match(timeoutError.error?.message ?? "", /Claude ACP session creation timed out/i);
+      assert.match(timeoutError.error?.message ?? "", /nonInteractivePermissions=deny/i);
+      assert.match(timeoutError.error?.message ?? "", /acpx claude exec/i);
+    } finally {
+      if (previousTimeout == null) {
+        delete process.env.ACPX_CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS;
+      } else {
+        process.env.ACPX_CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS = previousTimeout;
+      }
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: non-interactive fail emits structured permission error", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

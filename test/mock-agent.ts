@@ -27,6 +27,7 @@ type ParsedCommand = {
 };
 
 type MockAgentOptions = {
+  hangOnNewSession: boolean;
   newSessionMeta?: Record<string, string>;
   loadSessionMeta?: Record<string, string>;
   supportsLoadSession: boolean;
@@ -264,6 +265,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let replayLoadSessionUpdates = false;
   let loadReplayText = "replayed load session update";
   let ignoreSigterm = false;
+  let hangOnNewSession = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -287,6 +289,11 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
 
     if (token === "--ignore-sigterm") {
       ignoreSigterm = true;
+      continue;
+    }
+
+    if (token === "--hang-on-new-session") {
+      hangOnNewSession = true;
       continue;
     }
 
@@ -317,6 +324,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   }
 
   return {
+    hangOnNewSession,
     newSessionMeta: Object.keys(newSessionMeta).length > 0 ? { ...newSessionMeta } : undefined,
     loadSessionMeta: Object.keys(loadSessionMeta).length > 0 ? { ...loadSessionMeta } : undefined,
     supportsLoadSession,
@@ -392,6 +400,10 @@ class MockAgent implements Agent {
   }
 
   async newSession(): Promise<NewSessionResponse> {
+    if (this.options.hangOnNewSession) {
+      return await new Promise<NewSessionResponse>(() => {});
+    }
+
     const sessionId = randomUUID();
     this.sessions.set(sessionId, createSessionState(false));
 

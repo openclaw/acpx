@@ -34,6 +34,7 @@ import { isSessionUpdateNotification } from "./acp-jsonrpc.js";
 import {
   AgentSpawnError,
   AuthPolicyError,
+  ClaudeAcpSessionCreateTimeoutError,
   GeminiAcpStartupTimeoutError,
   PermissionPromptUnavailableError,
 } from "./errors.js";
@@ -56,6 +57,7 @@ const AGENT_CLOSE_AFTER_STDIN_END_MS = 100;
 const AGENT_CLOSE_TERM_GRACE_MS = 1_500;
 const AGENT_CLOSE_KILL_GRACE_MS = 1_000;
 const GEMINI_ACP_STARTUP_TIMEOUT_MS = 15_000;
+const CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS = 60_000;
 const GEMINI_VERSION_TIMEOUT_MS = 2_000;
 
 type LoadSessionOptions = {
@@ -263,6 +265,14 @@ function isGeminiAcpCommand(command: string, args: readonly string[]): boolean {
   return basenameToken(command) === "gemini" && args.includes("--experimental-acp");
 }
 
+function isClaudeAcpCommand(command: string, args: readonly string[]): boolean {
+  const commandToken = basenameToken(command);
+  if (commandToken === "claude-agent-acp") {
+    return true;
+  }
+  return args.some((arg) => arg.includes("claude-agent-acp"));
+}
+
 function resolveGeminiAcpStartupTimeoutMs(): number {
   const raw = process.env.ACPX_GEMINI_ACP_STARTUP_TIMEOUT_MS;
   if (typeof raw === "string" && raw.trim().length > 0) {
@@ -272,6 +282,17 @@ function resolveGeminiAcpStartupTimeoutMs(): number {
     }
   }
   return GEMINI_ACP_STARTUP_TIMEOUT_MS;
+}
+
+function resolveClaudeAcpSessionCreateTimeoutMs(): number {
+  const raw = process.env.ACPX_CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS;
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.round(parsed);
+    }
+  }
+  return CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS;
 }
 
 async function detectGeminiVersion(command: string): Promise<string | undefined> {
@@ -338,6 +359,14 @@ async function buildGeminiAcpStartupTimeoutMessage(command: string): Promise<str
 
   parts.push("Try upgrading Gemini CLI and using API-key-based auth for non-interactive ACP runs.");
   return parts.join(" ");
+}
+
+function buildClaudeAcpSessionCreateTimeoutMessage(): string {
+  return [
+    "Claude ACP session creation timed out before session/new completed.",
+    "This matches the known persistent-session stall seen with some Claude Code and @zed-industries/claude-agent-acp combinations.",
+    "In harnessed or non-interactive runs, prefer --approve-all with nonInteractivePermissions=deny, upgrade Claude Code and the Claude ACP adapter, or use acpx claude exec as a one-shot fallback.",
+  ].join(" ");
 }
 
 function toEnvToken(value: string): string {
@@ -693,10 +722,28 @@ export class AcpClient {
 
   async createSession(cwd = this.options.cwd): Promise<SessionCreateResult> {
     const connection = this.getConnection();
-    const result = await connection.newSession({
-      cwd: asAbsoluteCwd(cwd),
-      mcpServers: [],
-    });
+    const { command, args } = splitCommandLine(this.options.agentCommand);
+    const claudeAcp = isClaudeAcpCommand(command, args);
+
+    let result: Awaited<ReturnType<typeof connection.newSession>>;
+    try {
+      const createPromise = connection.newSession({
+        cwd: asAbsoluteCwd(cwd),
+        mcpServers: [],
+      });
+      result = claudeAcp
+        ? await withTimeout(createPromise, resolveClaudeAcpSessionCreateTimeoutMs())
+        : await createPromise;
+    } catch (error) {
+      if (claudeAcp && error instanceof TimeoutError) {
+        throw new ClaudeAcpSessionCreateTimeoutError(buildClaudeAcpSessionCreateTimeoutMessage(), {
+          cause: error,
+          retryable: true,
+        });
+      }
+      throw error;
+    }
+
     return {
       sessionId: result.sessionId,
       agentSessionId: extractRuntimeSessionId(result._meta),
