@@ -67,7 +67,7 @@
     "markdownlint-cli2": "^0.21.0",
     "oxfmt": "^0.36.0",
     "oxlint": "^1.51.0",
-    "oxlint-tsgolint": "^0.15.0",
+    "oxlint-tsgolint": "^0.16.0",
     "release-it": "^19.2.4",
     "tsdown": "^0.21.0-beta.2",
     "tsx": "^4.0.0",
