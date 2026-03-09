@@ -9,6 +9,7 @@ import { connectAndLoadSession } from "../src/session-runtime/connect-load.js";
 import type { SessionRecord } from "../src/types.js";
 
 type FakeClient = {
+  hasReusableSession: (sessionId: string) => boolean;
   start: () => Promise<void>;
   getAgentLifecycleSnapshot: () => {
     pid?: number;
@@ -58,6 +59,7 @@ test("connectAndLoadSession resumes an existing load-capable session", async () 
     let connectedRecordCalls = 0;
     let resolvedSessionId: string | undefined;
     const client: FakeClient = {
+      hasReusableSession: () => false,
       start: async () => {},
       getAgentLifecycleSnapshot: () => ({
         pid: 777,
@@ -123,6 +125,7 @@ test("connectAndLoadSession falls back to createSession when load returns resour
     });
 
     const client: FakeClient = {
+      hasReusableSession: () => false,
       start: async () => {},
       getAgentLifecycleSnapshot: () => ({
         running: true,
@@ -175,6 +178,7 @@ test("connectAndLoadSession falls back to createSession for empty sessions on ad
     });
 
     const client: FakeClient = {
+      hasReusableSession: () => false,
       start: async () => {},
       getAgentLifecycleSnapshot: () => ({
         running: true,
@@ -228,6 +232,7 @@ test("connectAndLoadSession rethrows load failures that should not create a new 
     });
 
     const client: FakeClient = {
+      hasReusableSession: () => false,
       start: async () => {},
       getAgentLifecycleSnapshot: () => ({
         running: true,
@@ -263,6 +268,54 @@ test("connectAndLoadSession rethrows load failures that should not create a new 
         return true;
       },
     );
+  });
+});
+
+test("connectAndLoadSession reuses an already loaded client session", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "reused-record",
+      acpSessionId: "reused-session",
+      agentCommand: "agent",
+      cwd,
+    });
+
+    let started = false;
+    let loaded = false;
+    const client: FakeClient = {
+      hasReusableSession: (sessionId) => sessionId === "reused-session",
+      start: async () => {
+        started = true;
+      },
+      getAgentLifecycleSnapshot: () => ({
+        pid: 888,
+        startedAt: "2026-01-01T00:00:00.000Z",
+        running: true,
+      }),
+      supportsLoadSession: () => true,
+      loadSessionWithOptions: async () => {
+        loaded = true;
+        return {};
+      },
+      createSession: async () => {
+        throw new Error("createSession should not be called");
+      },
+    };
+
+    const result = await connectAndLoadSession({
+      client: client as never,
+      record,
+      activeController: ACTIVE_CONTROLLER,
+    });
+
+    assert.equal(started, false);
+    assert.equal(loaded, false);
+    assert.equal(result.resumed, true);
+    assert.equal(result.sessionId, "reused-session");
+    assert.equal(record.pid, 888);
   });
 });
 

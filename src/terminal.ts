@@ -131,8 +131,8 @@ function waitMs(ms: number): Promise<void> {
 
 export class TerminalManager {
   private readonly cwd: string;
-  private readonly permissionMode: PermissionMode;
-  private readonly nonInteractivePermissions: NonInteractivePermissionPolicy;
+  private permissionMode: PermissionMode;
+  private nonInteractivePermissions: NonInteractivePermissionPolicy;
   private readonly onOperation?: (operation: ClientOperation) => void;
   private readonly usesDefaultConfirmExecute: boolean;
   private readonly confirmExecute: (commandLine: string) => Promise<boolean>;
@@ -147,6 +147,14 @@ export class TerminalManager {
     this.usesDefaultConfirmExecute = options.confirmExecute == null;
     this.confirmExecute = options.confirmExecute ?? defaultConfirmExecute;
     this.killGraceMs = Math.max(0, Math.round(options.killGraceMs ?? DEFAULT_KILL_GRACE_MS));
+  }
+
+  updatePermissionPolicy(
+    permissionMode: PermissionMode,
+    nonInteractivePermissions?: NonInteractivePermissionPolicy,
+  ): void {
+    this.permissionMode = permissionMode;
+    this.nonInteractivePermissions = nonInteractivePermissions ?? "deny";
   }
 
   async createTerminal(params: CreateTerminalRequest): Promise<CreateTerminalResponse> {

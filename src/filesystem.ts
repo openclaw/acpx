@@ -61,8 +61,8 @@ function canPromptForPermission(): boolean {
 
 export class FileSystemHandlers {
   private readonly rootDir: string;
-  private readonly permissionMode: PermissionMode;
-  private readonly nonInteractivePermissions: NonInteractivePermissionPolicy;
+  private permissionMode: PermissionMode;
+  private nonInteractivePermissions: NonInteractivePermissionPolicy;
   private readonly onOperation?: (operation: ClientOperation) => void;
   private readonly usesDefaultConfirmWrite: boolean;
   private readonly confirmWrite: (filePath: string, preview: string) => Promise<boolean>;
@@ -74,6 +74,14 @@ export class FileSystemHandlers {
     this.onOperation = options.onOperation;
     this.usesDefaultConfirmWrite = options.confirmWrite == null;
     this.confirmWrite = options.confirmWrite ?? defaultConfirmWrite;
+  }
+
+  updatePermissionPolicy(
+    permissionMode: PermissionMode,
+    nonInteractivePermissions?: NonInteractivePermissionPolicy,
+  ): void {
+    this.permissionMode = permissionMode;
+    this.nonInteractivePermissions = nonInteractivePermissions ?? "deny";
   }
 
   async readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {

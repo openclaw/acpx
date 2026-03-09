@@ -651,7 +651,7 @@ test("integration: terminal kill leaves no orphan sleep process", async () => {
   });
 });
 
-test("integration: prompt reuses warm queue owner pid across turns", async () => {
+test("integration: prompt reuses warm queue owner and agent pid across turns", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
 
@@ -666,6 +666,12 @@ test("integration: prompt reuses warm queue owner pid across turns", async () =>
       };
       const sessionId = createdEvent.acpxRecordId;
       assert.equal(typeof sessionId, "string");
+      const sessionRecordPath = path.join(
+        homeDir,
+        ".acpx",
+        "sessions",
+        `${encodeURIComponent(sessionId as string)}.json`,
+      );
 
       const first = await runCli(
         [...baseAgentArgs(cwd), "--format", "quiet", "prompt", "echo first"],
@@ -673,6 +679,10 @@ test("integration: prompt reuses warm queue owner pid across turns", async () =>
       );
       assert.equal(first.code, 0, first.stderr);
       assert.ok(first.stdout.trim().length > 0, "first quiet prompt output should not be empty");
+      const firstRecord = JSON.parse(await fs.readFile(sessionRecordPath, "utf8")) as {
+        pid?: number;
+      };
+      assert.equal(Number.isInteger(firstRecord.pid) && (firstRecord.pid ?? 0) > 0, true);
 
       const { lockPath } = queuePaths(homeDir, sessionId as string);
       const lockOne = JSON.parse(await fs.readFile(lockPath, "utf8")) as {
@@ -686,6 +696,10 @@ test("integration: prompt reuses warm queue owner pid across turns", async () =>
       );
       assert.equal(second.code, 0, second.stderr);
       assert.ok(second.stdout.trim().length > 0, "second quiet prompt output should not be empty");
+      const secondRecord = JSON.parse(await fs.readFile(sessionRecordPath, "utf8")) as {
+        pid?: number;
+      };
+      assert.equal(secondRecord.pid, firstRecord.pid);
 
       const lockTwo = JSON.parse(await fs.readFile(lockPath, "utf8")) as {
         pid?: number;
