@@ -42,6 +42,7 @@
     "lint:docs": "markdownlint-cli2 README.md docs/**/*.md",
     "lint:fix": "oxlint --type-aware --fix src && pnpm run format",
     "lint:persisted-key-casing": "tsx scripts/lint-persisted-key-casing.ts",
+    "perf:report": "tsx scripts/perf-report.ts",
     "precommit": "pnpm exec lint-staged && pnpm run -s build",
     "prepack": "pnpm run build",
     "prepare": "husky",

@@ -48,6 +48,7 @@ import {
   type NormalizedOutputError,
 } from "./error-normalization.js";
 import { createOutputFormatter } from "./output.js";
+import { flushPerfMetricsCapture, installPerfMetricsCapture } from "./perf-metrics-capture.js";
 import { probeQueueOwnerHealth } from "./queue-ipc.js";
 import { runQueueOwnerFromEnv } from "./queue-owner-env.js";
 import {
@@ -1341,6 +1342,11 @@ async function runWithOutputPolicy<T>(
 }
 
 export async function main(argv: string[] = process.argv): Promise<void> {
+  installPerfMetricsCapture({
+    argv: argv.slice(2),
+    role: argv[2] === "__queue-owner" ? "queue_owner" : "cli",
+  });
+
   if (argv[2] === "__queue-owner") {
     try {
       await runQueueOwnerFromEnv(process.env);
@@ -1447,33 +1453,37 @@ Examples:
     throw error;
   });
 
-  await runWithOutputPolicy(requestedOutputPolicy, async () => {
-    try {
-      await program.parseAsync(argv);
-    } catch (error) {
-      if (error instanceof CommanderError) {
-        if (error.code === "commander.helpDisplayed" || error.code === "commander.version") {
-          process.exit(EXIT_CODES.SUCCESS);
+  try {
+    await runWithOutputPolicy(requestedOutputPolicy, async () => {
+      try {
+        await program.parseAsync(argv);
+      } catch (error) {
+        if (error instanceof CommanderError) {
+          if (error.code === "commander.helpDisplayed" || error.code === "commander.version") {
+            process.exit(EXIT_CODES.SUCCESS);
+          }
+          const normalized = normalizeOutputError(error, {
+            defaultCode: "USAGE",
+            origin: "cli",
+          });
+          if (requestedOutputPolicy.format === "json") {
+            emitRequestedError(error, normalized, requestedOutputPolicy);
+          }
+          process.exit(exitCodeForOutputErrorCode(normalized.code));
         }
+
+        if (error instanceof InterruptedError) {
+          process.exit(EXIT_CODES.INTERRUPTED);
+        }
+
         const normalized = normalizeOutputError(error, {
-          defaultCode: "USAGE",
           origin: "cli",
         });
-        if (requestedOutputPolicy.format === "json") {
-          emitRequestedError(error, normalized, requestedOutputPolicy);
-        }
+        emitRequestedError(error, normalized, requestedOutputPolicy);
         process.exit(exitCodeForOutputErrorCode(normalized.code));
       }
-
-      if (error instanceof InterruptedError) {
-        process.exit(EXIT_CODES.INTERRUPTED);
-      }
-
-      const normalized = normalizeOutputError(error, {
-        origin: "cli",
-      });
-      emitRequestedError(error, normalized, requestedOutputPolicy);
-      process.exit(exitCodeForOutputErrorCode(normalized.code));
-    }
-  });
+    });
+  } finally {
+    flushPerfMetricsCapture();
+  }
 }

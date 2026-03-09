@@ -612,21 +612,24 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
   try {
     return await withInterrupt(
       async () => {
-        await withTimeout(client.start(), options.timeoutMs);
-        const createdSession = await withTimeout(
-          client.createSession(absolutePath(options.cwd)),
-          options.timeoutMs,
-        );
+        await measurePerf("runtime.exec.start", async () => {
+          await withTimeout(client.start(), options.timeoutMs);
+        });
+        const createdSession = await measurePerf("runtime.exec.create_session", async () => {
+          return await withTimeout(
+            client.createSession(absolutePath(options.cwd)),
+            options.timeoutMs,
+          );
+        });
         const sessionId = createdSession.sessionId;
 
         output.setContext({
           sessionId,
         });
 
-        const response = await withTimeout(
-          client.prompt(sessionId, options.message),
-          options.timeoutMs,
-        );
+        const response = await measurePerf("runtime.exec.prompt", async () => {
+          return await withTimeout(client.prompt(sessionId, options.message), options.timeoutMs);
+        });
         output.flush();
         return toPromptResult(response.stopReason, sessionId, client);
       },
@@ -654,10 +657,17 @@ export async function createSession(options: SessionCreateOptions): Promise<Sess
   try {
     return await withInterrupt(
       async () => {
-        await withTimeout(client.start(), options.timeoutMs);
-        const createdSession = await withTimeout(
-          client.createSession(absolutePath(options.cwd)),
-          options.timeoutMs,
+        await measurePerf("runtime.session_create.start", async () => {
+          await withTimeout(client.start(), options.timeoutMs);
+        });
+        const createdSession = await measurePerf(
+          "runtime.session_create.create_session",
+          async () => {
+            return await withTimeout(
+              client.createSession(absolutePath(options.cwd)),
+              options.timeoutMs,
+            );
+          },
         );
         const sessionId = createdSession.sessionId;
         const lifecycle = client.getAgentLifecycleSnapshot();

@@ -1321,6 +1321,7 @@ type CliRunOptions = {
   stdin?: string;
   cwd?: string;
   timeoutMs?: number;
+  env?: NodeJS.ProcessEnv;
 };
 
 async function runCli(
@@ -1333,6 +1334,7 @@ async function runCli(
       env: {
         ...process.env,
         HOME: homeDir,
+        ...options.env,
       },
       cwd: options.cwd,
       stdio: ["pipe", "pipe", "pipe"],

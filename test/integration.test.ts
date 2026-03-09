@@ -24,6 +24,13 @@ type CliRunResult = {
   stderr: string;
 };
 
+type CliRunOptions = {
+  timeoutMs?: number;
+  cwd?: string;
+  stdin?: string;
+  env?: NodeJS.ProcessEnv;
+};
+
 test("integration: exec echo baseline", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -32,6 +39,50 @@ test("integration: exec echo baseline", async () => {
       const result = await runCli([...baseExecArgs(cwd), "echo hello"], homeDir);
       assert.equal(result.code, 0, result.stderr);
       assert.match(result.stdout, /hello/);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: perf metrics capture writes ndjson records for CLI runs", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const metricsPath = path.join(homeDir, "perf", "metrics.ndjson");
+
+    try {
+      const result = await runCli([...baseExecArgs(cwd), "echo hello"], homeDir, {
+        env: {
+          ACPX_PERF_METRICS_FILE: metricsPath,
+        },
+      });
+      assert.equal(result.code, 0, result.stderr);
+
+      const payload = await fs.readFile(metricsPath, "utf8");
+      const records = payload
+        .trim()
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map(
+          (line) =>
+            JSON.parse(line) as { role?: string; metrics?: { timings?: Record<string, unknown> } },
+        );
+
+      assert.equal(records.length >= 1, true);
+      assert.equal(
+        records.some((record) => record.role === "cli"),
+        true,
+      );
+      assert.equal(
+        records.some(
+          (record) =>
+            record.metrics &&
+            typeof record.metrics === "object" &&
+            record.metrics.timings &&
+            Object.keys(record.metrics.timings).length > 0,
+        ),
+        true,
+      );
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -1005,10 +1056,6 @@ async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<vo
   }
 }
 
-type CliRunOptions = {
-  timeoutMs?: number;
-};
-
 async function runCli(
   args: string[],
   homeDir: string,
@@ -1019,7 +1066,9 @@ async function runCli(
       env: {
         ...process.env,
         HOME: homeDir,
+        ...options.env,
       },
+      cwd: options.cwd,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
