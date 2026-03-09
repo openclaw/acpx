@@ -48,6 +48,7 @@ export type ExecFlags = {
 
 export type SessionsNewFlags = {
   name?: string;
+  resumeSession?: string;
 };
 
 export type SessionsHistoryFlags = {
