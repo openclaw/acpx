@@ -6,6 +6,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Sync the agent-registry documentation with the live built-in registry, including the current `claude`, `gemini`, and `opencode` commands plus the newer `copilot`, `kiro`, `kilocode`, and `qwen` entries. Thanks @gandli.
 - Upgrade `@agentclientprotocol/sdk` to v0.15.0 and align the CLI with the latest ACP client surface.
 - Add built-in agent support for Copilot, Kiro CLI, and kilocode.
 - Improve runtime performance and queue coordination.

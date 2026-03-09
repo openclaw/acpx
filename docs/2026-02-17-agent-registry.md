@@ -11,12 +11,15 @@ date: 2026-02-17
 
 - `codex -> npx @zed-industries/codex-acp`
 - `copilot -> copilot --acp --stdio`
-- `claude -> npx @zed-industries/claude-agent-acp`
+- `claude -> npx -y @zed-industries/claude-agent-acp`
 - `gemini -> gemini --experimental-acp`
 - `openclaw -> openclaw acp`
 - `kimi -> kimi acp`
-- `opencode -> npx opencode-ai`
+- `opencode -> npx -y opencode-ai acp`
+- `kiro -> kiro-cli acp`
 - `pi -> npx pi-acp`
+- `kilocode -> npx -y @kilocode/cli acp`
+- `qwen -> qwen --acp`
 
 Default agent is `codex`.
 
@@ -48,7 +51,7 @@ Rules:
 
 ## Practical guidance
 
-Use built-ins for common adapters (`copilot`, `codex`, `claude`, `gemini`, `kimi`, `openclaw`, `opencode`, `pi`).
+Use built-ins for common adapters (`copilot`, `codex`, `claude`, `gemini`, `openclaw`, `kimi`, `opencode`, `kiro`, `pi`, `kilocode`, `qwen`).
 Use `--agent` when you need:
 
 - local development adapters

@@ -42,7 +42,7 @@ acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--n
 
 `<agent>` can be:
 
-- built-in friendly name: `codex`, `claude`, `gemini`, `kimi`, `openclaw`, `opencode`, `pi`
+- built-in friendly name: `codex`, `claude`, `copilot`, `gemini`, `openclaw`, `kimi`, `opencode`, `kiro`, `pi`, `kilocode`, `qwen`
 - unknown token (treated as raw command)
 - overridden by `--agent <command>` escape hatch
 
@@ -134,7 +134,7 @@ acpx [global_options] claude exec [prompt_text...]
 acpx [global_options] claude sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
-Built-in command mapping: `claude -> npx @zed-industries/claude-agent-acp`
+Built-in command mapping: `claude -> npx -y @zed-industries/claude-agent-acp`
 
 ### `gemini`
 

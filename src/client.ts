@@ -43,7 +43,12 @@ import { classifyPermissionDecision, resolvePermissionRequest } from "./permissi
 import { extractRuntimeSessionId } from "./runtime-session-id.js";
 import { TimeoutError, withTimeout } from "./session-runtime-helpers.js";
 import { TerminalManager } from "./terminal.js";
-import type { AcpClientOptions, PermissionStats } from "./types.js";
+import type {
+  AcpClientOptions,
+  NonInteractivePermissionPolicy,
+  PermissionMode,
+  PermissionStats,
+} from "./types.js";
 
 type CommandParts = {
   command: string;
@@ -525,10 +530,15 @@ export function buildAgentSpawnOptions(
 }
 
 export class AcpClient {
-  private readonly options: AcpClientOptions;
+  private options: AcpClientOptions;
   private connection?: ClientSideConnection;
   private agent?: ChildProcessByStdio<Writable, Readable, Readable>;
   private initResult?: InitializeResponse;
+  private loadedSessionId?: string;
+  private eventHandlers: Pick<
+    AcpClientOptions,
+    "onAcpMessage" | "onAcpOutputMessage" | "onSessionUpdate" | "onClientOperation"
+  >;
   private readonly permissionStats: PermissionStats = {
     requested: 0,
     approved: 0,
@@ -559,19 +569,28 @@ export class AcpClient {
       cwd: asAbsoluteCwd(options.cwd),
       authPolicy: options.authPolicy ?? "skip",
     };
+    this.eventHandlers = {
+      onAcpMessage: this.options.onAcpMessage,
+      onAcpOutputMessage: this.options.onAcpOutputMessage,
+      onSessionUpdate: this.options.onSessionUpdate,
+      onClientOperation: this.options.onClientOperation,
+    };
 
-    const emitOperation = this.options.onClientOperation;
     this.filesystem = new FileSystemHandlers({
       cwd: this.options.cwd,
       permissionMode: this.options.permissionMode,
       nonInteractivePermissions: this.options.nonInteractivePermissions,
-      onOperation: emitOperation,
+      onOperation: (operation) => {
+        this.eventHandlers.onClientOperation?.(operation);
+      },
     });
     this.terminalManager = new TerminalManager({
       cwd: this.options.cwd,
       permissionMode: this.options.permissionMode,
       nonInteractivePermissions: this.options.nonInteractivePermissions,
-      onOperation: emitOperation,
+      onOperation: (operation) => {
+        this.eventHandlers.onClientOperation?.(operation);
+      },
     });
   }
 
@@ -606,6 +625,58 @@ export class AcpClient {
     return Boolean(this.initResult?.agentCapabilities?.loadSession);
   }
 
+  setEventHandlers(
+    handlers: Pick<
+      AcpClientOptions,
+      "onAcpMessage" | "onAcpOutputMessage" | "onSessionUpdate" | "onClientOperation"
+    >,
+  ): void {
+    this.eventHandlers = { ...handlers };
+  }
+
+  clearEventHandlers(): void {
+    this.eventHandlers = {};
+  }
+
+  updateRuntimeOptions(options: {
+    permissionMode?: PermissionMode;
+    nonInteractivePermissions?: NonInteractivePermissionPolicy;
+    suppressSdkConsoleErrors?: boolean;
+    verbose?: boolean;
+  }): void {
+    if (options.permissionMode) {
+      this.options.permissionMode = options.permissionMode;
+    }
+    if (options.nonInteractivePermissions !== undefined) {
+      this.options.nonInteractivePermissions = options.nonInteractivePermissions;
+    }
+    if (options.permissionMode || options.nonInteractivePermissions !== undefined) {
+      this.filesystem.updatePermissionPolicy(
+        this.options.permissionMode,
+        this.options.nonInteractivePermissions,
+      );
+      this.terminalManager.updatePermissionPolicy(
+        this.options.permissionMode,
+        this.options.nonInteractivePermissions,
+      );
+    }
+    if (options.suppressSdkConsoleErrors !== undefined) {
+      this.options.suppressSdkConsoleErrors = options.suppressSdkConsoleErrors;
+    }
+    if (options.verbose !== undefined) {
+      this.options.verbose = options.verbose;
+    }
+  }
+
+  hasReusableSession(sessionId: string): boolean {
+    return (
+      this.connection != null &&
+      this.agent != null &&
+      isChildProcessRunning(this.agent) &&
+      this.loadedSessionId === sessionId
+    );
+  }
+
   hasActivePrompt(sessionId?: string): boolean {
     if (!this.activePrompt) {
       return false;
@@ -617,8 +688,11 @@ export class AcpClient {
   }
 
   async start(): Promise<void> {
-    if (this.connection && this.agent) {
+    if (this.connection && this.agent && isChildProcessRunning(this.agent)) {
       return;
+    }
+    if (this.connection || this.agent) {
+      await this.close();
     }
 
     const { command, args } = splitCommandLine(this.options.agentCommand);
@@ -749,12 +823,8 @@ export class AcpClient {
     readable: ReadableStream<AnyMessage>;
     writable: WritableStream<AnyMessage>;
   } {
-    const onAcpMessage = this.options.onAcpMessage;
-    const onAcpOutputMessage = this.options.onAcpOutputMessage;
-
-    if (!onAcpMessage && !onAcpOutputMessage) {
-      return base;
-    }
+    const onAcpMessage = () => this.eventHandlers.onAcpMessage;
+    const onAcpOutputMessage = () => this.eventHandlers.onAcpOutputMessage;
 
     const shouldSuppressInboundReplaySessionUpdate = (message: AnyMessage): boolean => {
       return this.suppressReplaySessionUpdateMessages && isSessionUpdateNotification(message);
@@ -773,8 +843,8 @@ export class AcpClient {
               continue;
             }
             if (!shouldSuppressInboundReplaySessionUpdate(value)) {
-              onAcpOutputMessage?.("inbound", value);
-              onAcpMessage?.("inbound", value);
+              onAcpOutputMessage()?.("inbound", value);
+              onAcpMessage()?.("inbound", value);
             }
             controller.enqueue(value);
           }
@@ -787,8 +857,8 @@ export class AcpClient {
 
     const writable = new WritableStream<AnyMessage>({
       async write(message) {
-        onAcpOutputMessage?.("outbound", message);
-        onAcpMessage?.("outbound", message);
+        onAcpOutputMessage()?.("outbound", message);
+        onAcpMessage()?.("outbound", message);
         const writer = base.writable.getWriter();
         try {
           await writer.write(message);
@@ -825,6 +895,7 @@ export class AcpClient {
       throw error;
     }
 
+    this.loadedSessionId = result.sessionId;
     return {
       sessionId: result.sessionId,
       agentSessionId: extractRuntimeSessionId(result._meta),
@@ -866,6 +937,7 @@ export class AcpClient {
       this.suppressReplaySessionUpdateMessages = previousReplaySuppression;
     }
 
+    this.loadedSessionId = sessionId;
     return {
       agentSessionId: extractRuntimeSessionId(response?._meta),
     };
@@ -1014,6 +1086,8 @@ export class AcpClient {
     this.activePrompt = undefined;
     this.cancellingSessionIds.clear();
     this.promptPermissionFailures.clear();
+    this.loadedSessionId = undefined;
+    this.initResult = undefined;
     this.connection = undefined;
     this.agent = undefined;
   }
@@ -1295,7 +1369,7 @@ export class AcpClient {
     this.sessionUpdateChain = this.sessionUpdateChain.then(async () => {
       try {
         if (!this.suppressSessionUpdates) {
-          this.options.onSessionUpdate?.(notification);
+          this.eventHandlers.onSessionUpdate?.(notification);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

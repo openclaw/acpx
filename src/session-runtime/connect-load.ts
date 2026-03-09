@@ -5,6 +5,7 @@ import {
   isAcpQueryClosedBeforeResponseError,
   isAcpResourceNotFoundError,
 } from "../error-normalization.js";
+import { incrementPerfCounter } from "../perf-metrics.js";
 import { isProcessAlive } from "../queue-ipc.js";
 import type { QueueOwnerActiveSessionController } from "../queue-owner-turn-controller.js";
 import { getDesiredModeId } from "../session-mode-preference.js";
@@ -81,7 +82,12 @@ export async function connectAndLoadSession(
     }
   }
 
-  await withTimeout(client.start(), options.timeoutMs);
+  const reusingLoadedSession = client.hasReusableSession(record.acpSessionId);
+  if (reusingLoadedSession) {
+    incrementPerfCounter("runtime.connect_and_load.reused_session");
+  } else {
+    await withTimeout(client.start(), options.timeoutMs);
+  }
   options.onClientAvailable?.(options.activeController);
   applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
   record.closed = false;
@@ -93,7 +99,9 @@ export async function connectAndLoadSession(
   let sessionId = record.acpSessionId;
   let createdFreshSession = false;
 
-  if (client.supportsLoadSession()) {
+  if (reusingLoadedSession) {
+    resumed = true;
+  } else if (client.supportsLoadSession()) {
     try {
       const loadResult = await withTimeout(
         client.loadSessionWithOptions(record.acpSessionId, record.cwd, {

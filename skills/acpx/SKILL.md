@@ -72,11 +72,16 @@ If prompt text is omitted and stdin is piped, `acpx` reads prompt text from stdi
 Friendly agent names resolve to commands:
 
 - `codex` -> `npx @zed-industries/codex-acp`
-- `claude` -> `npx @zed-industries/claude-agent-acp`
-- `gemini` -> `gemini`
+- `claude` -> `npx -y @zed-industries/claude-agent-acp`
+- `copilot` -> `copilot --acp --stdio`
+- `gemini` -> `gemini --experimental-acp`
+- `openclaw` -> `openclaw acp`
 - `kimi` -> `kimi acp`
-- `opencode` -> `npx opencode-ai`
+- `opencode` -> `npx -y opencode-ai acp`
+- `kiro` -> `kiro-cli acp`
 - `pi` -> `npx pi-acp`
+- `kilocode` -> `npx -y @kilocode/cli acp`
+- `qwen` -> `qwen --acp`
 
 Rules:
 

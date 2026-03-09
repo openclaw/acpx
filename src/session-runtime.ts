@@ -201,6 +201,7 @@ type RunSessionPromptOptions = {
   onClientAvailable?: (controller: ActiveSessionController) => void;
   onClientClosed?: () => void;
   onPromptActive?: () => Promise<void> | void;
+  client?: AcpClient;
 };
 
 type ActiveSessionController = QueueOwnerActiveSessionController;
@@ -283,6 +284,7 @@ async function runQueuedTask(
   sessionRecordId: string,
   task: QueueTask,
   options: {
+    sharedClient?: AcpClient;
     verbose?: boolean;
     nonInteractivePermissions?: NonInteractivePermissionPolicy;
     authCredentials?: Record<string, string>;
@@ -313,6 +315,7 @@ async function runQueuedTask(
       onClientAvailable: options.onClientAvailable,
       onClientClosed: options.onClientClosed,
       onPromptActive: options.onPromptActive,
+      client: options.sharedClient,
     });
 
     if (task.waitForCompletion) {
@@ -391,15 +394,26 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     });
   };
 
-  const client = new AcpClient({
-    agentCommand: record.agentCommand,
-    cwd: absolutePath(record.cwd),
+  const ownClient = options.client == null;
+  const client =
+    options.client ??
+    new AcpClient({
+      agentCommand: record.agentCommand,
+      cwd: absolutePath(record.cwd),
+      permissionMode: options.permissionMode,
+      nonInteractivePermissions: options.nonInteractivePermissions,
+      authCredentials: options.authCredentials,
+      authPolicy: options.authPolicy,
+      suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
+      verbose: options.verbose,
+    });
+  client.updateRuntimeOptions({
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
-    authCredentials: options.authCredentials,
-    authPolicy: options.authPolicy,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
+  });
+  client.setEventHandlers({
     onAcpMessage: (_direction, message) => {
       sawAcpMessage = true;
       pendingMessages.push(message);
@@ -558,7 +572,9 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
         await flushPendingMessages(false).catch(() => {
           // best effort while process is being interrupted
         });
-        await client.close();
+        if (ownClient) {
+          await client.close();
+        }
       },
     );
   } finally {
@@ -570,7 +586,10 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     if (notifiedClientAvailable) {
       options.onClientClosed?.();
     }
-    await client.close();
+    client.clearEventHandlers();
+    if (ownClient) {
+      await client.close();
+    }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     applyConversation(record, conversation);
     record.acpx = acpxState;
@@ -755,8 +774,19 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     return;
   }
 
+  const sessionRecord = await resolveSessionRecord(options.sessionId);
   let owner: SessionQueueOwner | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
+  const sharedClient = new AcpClient({
+    agentCommand: sessionRecord.agentCommand,
+    cwd: absolutePath(sessionRecord.cwd),
+    permissionMode: "approve-reads",
+    nonInteractivePermissions: options.nonInteractivePermissions,
+    authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
+    suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
+    verbose: options.verbose,
+  });
   const ttlMs = normalizeQueueOwnerTtlMs(options.ttlMs);
   const maxQueueDepth = Math.max(1, Math.round(options.maxQueueDepth ?? 16));
   const taskPollTimeoutMs = ttlMs === 0 ? undefined : ttlMs;
@@ -878,6 +908,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
       await runPromptTurn(async () => {
         try {
           await runQueuedTask(options.sessionId, task, {
+            sharedClient,
             verbose: options.verbose,
             nonInteractivePermissions: options.nonInteractivePermissions,
             authCredentials: options.authCredentials,
@@ -902,6 +933,16 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     turnController.beginClosing();
     if (owner) {
       await owner.close();
+    }
+    await sharedClient.close().catch(() => {
+      // best effort while queue owner is shutting down
+    });
+    try {
+      const record = await resolveSessionRecord(options.sessionId);
+      applyLifecycleSnapshotToRecord(record, sharedClient.getAgentLifecycleSnapshot());
+      await writeSessionRecord(record);
+    } catch {
+      // best effort — session may already be cleaned up
     }
     await releaseQueueOwnerLease(lease);
 
