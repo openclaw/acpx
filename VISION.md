@@ -76,7 +76,25 @@ That means the defaults should favor:
 Robustness matters more than novelty. A boring feature that works everywhere is
 better than a clever feature that only works in one harness.
 
-### 4. Fully customizable
+### 4. Conventions are API surface
+
+In `acpx`, data models, config keys, keywords, flags, output shapes, and naming
+conventions are part of the product surface.
+
+They should be scrutinized multiple times before being added or changed.
+Convenience is not enough. Every new convention creates long-term compatibility
+cost.
+
+This applies even to choices that may look small. For example, when `acpx`
+defines `claude` and uses Claude Code examples, that should be an intentional
+convention, not a casual shortcut.
+
+People and tools will build workflows on top of `acpx`. Once a keyword, flag,
+field, or convention becomes part of those workflows, changing it casually can
+break users and create unnecessary cruft. The default stance should be to add
+fewer conventions, make them clearer, and keep them stable.
+
+### 5. Fully customizable
 
 `acpx` should be easy to customize locally and per project.
 
@@ -87,7 +105,7 @@ configuration programmatically in a controlled way, similar in spirit to Pi.
 The point of customization is not to make the core bigger. The point is to let
 users adapt `acpx` to their environment without forking it.
 
-### 5. Backend-friendly
+### 6. Backend-friendly
 
 `acpx` should be useful even for tools whose end users never type `acpx`
 directly.
