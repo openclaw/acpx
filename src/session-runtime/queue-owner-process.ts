@@ -1,9 +1,15 @@
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
-import type { AuthPolicy, NonInteractivePermissionPolicy, PermissionMode } from "../types.js";
+import type {
+  AuthPolicy,
+  McpServer,
+  NonInteractivePermissionPolicy,
+  PermissionMode,
+} from "../types.js";
 
 export type QueueOwnerRuntimeOptions = {
   sessionId: string;
+  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -15,6 +21,7 @@ export type QueueOwnerRuntimeOptions = {
 
 type SessionSendLike = {
   sessionId: string;
+  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -38,6 +45,7 @@ export function queueOwnerRuntimeOptionsFromSend(
 ): QueueOwnerRuntimeOptions {
   return {
     sessionId: options.sessionId,
+    mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,

@@ -9,6 +9,7 @@ import {
 import { withInterrupt, withTimeout } from "../session-runtime-helpers.js";
 import type {
   AuthPolicy,
+  McpServer,
   NonInteractivePermissionPolicy,
   PermissionMode,
   SessionRecord,
@@ -22,6 +23,7 @@ export type ActiveSessionController = QueueOwnerActiveSessionController;
 
 type WithConnectedSessionOptions<T> = {
   sessionRecordId: string;
+  mcpServers?: McpServer[];
   permissionMode?: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -47,6 +49,7 @@ async function withConnectedSession<T>(
   const client = new AcpClient({
     agentCommand: record.agentCommand,
     cwd: absolutePath(record.cwd),
+    mcpServers: options.mcpServers,
     permissionMode: options.permissionMode ?? "approve-reads",
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
@@ -131,6 +134,7 @@ async function withConnectedSession<T>(
 export type RunSessionSetModeDirectOptions = {
   sessionRecordId: string;
   modeId: string;
+  mcpServers?: McpServer[];
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
@@ -144,6 +148,7 @@ export type RunSessionSetConfigOptionDirectOptions = {
   sessionRecordId: string;
   configId: string;
   value: string;
+  mcpServers?: McpServer[];
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
@@ -158,6 +163,7 @@ export async function runSessionSetModeDirect(
 ): Promise<SessionSetModeResult> {
   const result = await withConnectedSession({
     sessionRecordId: options.sessionRecordId,
+    mcpServers: options.mcpServers,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
@@ -182,6 +188,7 @@ export async function runSessionSetConfigOptionDirect(
 ): Promise<SessionSetConfigOptionResult> {
   const result = await withConnectedSession({
     sessionRecordId: options.sessionRecordId,
+    mcpServers: options.mcpServers,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,

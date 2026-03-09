@@ -28,6 +28,13 @@ test("loadResolvedConfig merges global and project config with project priority"
           auth: {
             global_method: "global-token",
           },
+          mcpServers: [
+            {
+              name: "global-http",
+              type: "http",
+              url: "https://global.example/mcp",
+            },
+          ],
         },
         null,
         2,
@@ -53,6 +60,15 @@ test("loadResolvedConfig merges global and project config with project priority"
             global_method: "project-override",
             project_method: "project-token",
           },
+          mcpServers: [
+            {
+              name: "project-stdio",
+              type: "stdio",
+              command: "./bin/project-mcp",
+              args: ["--serve"],
+              env: [{ name: "TOKEN", value: "secret" }],
+            },
+          ],
         },
         null,
         2,
@@ -76,8 +92,41 @@ test("loadResolvedConfig merges global and project config with project priority"
       global_method: "project-override",
       project_method: "project-token",
     });
+    assert.deepEqual(config.mcpServers, [
+      {
+        name: "project-stdio",
+        command: "./bin/project-mcp",
+        args: ["--serve"],
+        env: [{ name: "TOKEN", value: "secret" }],
+        _meta: undefined,
+      },
+    ]);
     assert.equal(config.hasGlobalConfig, true);
     assert.equal(config.hasProjectConfig, true);
+  });
+});
+
+test("loadResolvedConfig rejects invalid mcpServers config", async () => {
+  await withTempEnv(async ({ homeDir }) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          mcpServers: [{ name: "bad-http", type: "http", url: 123 }],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await assert.rejects(async () => await loadResolvedConfig(cwd), {
+      message: /Invalid mcpServers\[0\] in .*\.url: expected non-empty string/,
+    });
   });
 });
 
@@ -96,11 +145,13 @@ test("initGlobalConfigFile creates the config once and then reports existing fil
       defaultPermissions: string;
       nonInteractivePermissions: string;
       authPolicy: string;
+      mcpServers?: unknown[];
     };
     assert.equal(payload.defaultAgent, "codex");
     assert.equal(payload.defaultPermissions, "approve-all");
     assert.equal(payload.nonInteractivePermissions, "deny");
     assert.equal(payload.authPolicy, "skip");
+    assert.deepEqual(payload.mcpServers, []);
   });
 });
 

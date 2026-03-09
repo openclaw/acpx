@@ -566,7 +566,7 @@ export class AcpClient {
     const connection = this.getConnection();
     const result = await connection.newSession({
       cwd: asAbsoluteCwd(cwd),
-      mcpServers: [],
+      mcpServers: this.options.mcpServers ?? [],
     });
     return {
       sessionId: result.sessionId,
@@ -597,7 +597,7 @@ export class AcpClient {
       response = await connection.loadSession({
         sessionId,
         cwd: asAbsoluteCwd(cwd),
-        mcpServers: [],
+        mcpServers: this.options.mcpServers ?? [],
       });
 
       await this.waitForSessionUpdateDrain(

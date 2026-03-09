@@ -2,8 +2,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DEFAULT_AGENT_NAME, normalizeAgentName } from "./agent-registry.js";
+import { parseMcpServers } from "./mcp-servers.js";
 import type {
   AuthPolicy,
+  McpServer,
   NonInteractivePermissionPolicy,
   OutputFormat,
   PermissionMode,
@@ -23,6 +25,7 @@ type ConfigFileShape = {
   format?: unknown;
   agents?: unknown;
   auth?: unknown;
+  mcpServers?: unknown;
 };
 
 export type ResolvedAcpxConfig = {
@@ -35,6 +38,7 @@ export type ResolvedAcpxConfig = {
   format: OutputFormat;
   agents: Record<string, string>;
   auth: Record<string, string>;
+  mcpServers: McpServer[];
   globalPath: string;
   projectPath: string;
   hasGlobalConfig: boolean;
@@ -313,6 +317,17 @@ export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfi
     parseAuth(projectConfig?.auth, projectPath),
   );
 
+  const mcpServersConfiguredInProject =
+    projectConfig != null && Object.prototype.hasOwnProperty.call(projectConfig, "mcpServers");
+  const mcpServersConfiguredInGlobal =
+    globalConfig != null && Object.prototype.hasOwnProperty.call(globalConfig, "mcpServers");
+  let mcpServers: McpServer[] = [];
+  if (mcpServersConfiguredInProject) {
+    mcpServers = parseMcpServers(projectConfig?.mcpServers, projectPath);
+  } else if (mcpServersConfiguredInGlobal) {
+    mcpServers = parseMcpServers(globalConfig?.mcpServers, globalPath);
+  }
+
   return {
     defaultAgent,
     defaultPermissions,
@@ -323,6 +338,7 @@ export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfi
     format,
     agents,
     auth,
+    mcpServers,
     globalPath,
     projectPath,
     hasGlobalConfig: globalResult.exists,
@@ -340,6 +356,7 @@ export function toConfigDisplay(config: ResolvedAcpxConfig): {
   format: OutputFormat;
   agents: Record<string, ConfigAgentEntry>;
   authMethods: string[];
+  mcpServers: McpServer[];
 } {
   const agents: Record<string, ConfigAgentEntry> = {};
   for (const [name, command] of Object.entries(config.agents)) {
@@ -356,6 +373,7 @@ export function toConfigDisplay(config: ResolvedAcpxConfig): {
     format: config.format,
     agents,
     authMethods: Object.keys(config.auth).toSorted(),
+    mcpServers: config.mcpServers,
   };
 }
 
@@ -386,6 +404,7 @@ export async function initGlobalConfigFile(): Promise<{
     format: "text",
     agents: {},
     auth: {},
+    mcpServers: [],
   };
 
   await fs.writeFile(configPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
