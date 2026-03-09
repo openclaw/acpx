@@ -1,4 +1,4 @@
-import { type ChildProcess, type ChildProcessByStdio } from "node:child_process";
+import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
@@ -29,7 +29,6 @@ import {
   type WriteTextFileRequest,
   type WriteTextFileResponse,
 } from "@agentclientprotocol/sdk";
-import spawn from "cross-spawn";
 import { isSessionUpdateNotification } from "./acp-jsonrpc.js";
 import {
   AgentSpawnError,

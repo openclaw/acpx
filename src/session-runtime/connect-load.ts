@@ -8,7 +8,6 @@ import {
 import { isProcessAlive } from "../queue-ipc.js";
 import type { QueueOwnerActiveSessionController } from "../queue-owner-turn-controller.js";
 import { getDesiredModeId } from "../session-mode-preference.js";
-import { writeSessionRecord } from "../session-persistence.js";
 import { InterruptedError, TimeoutError, withTimeout } from "../session-runtime-helpers.js";
 import type { SessionRecord } from "../types.js";
 import {
@@ -88,7 +87,6 @@ export async function connectAndLoadSession(
   record.closed = false;
   record.closedAt = undefined;
   options.onConnectedRecord?.(record);
-  await writeSessionRecord(record);
 
   let resumed = false;
   let loadError: string | undefined;

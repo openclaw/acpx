@@ -89,6 +89,167 @@ test("integration: perf metrics capture writes ndjson records for CLI runs", asy
   });
 });
 
+test("integration: perf metrics capture checkpoints queue-owner turns before owner exit", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const metricsPath = path.join(homeDir, "perf", "metrics.ndjson");
+
+    try {
+      const created = await runCli([...baseAgentArgs(cwd), "sessions", "new"], homeDir, {
+        env: {
+          ACPX_PERF_METRICS_FILE: metricsPath,
+        },
+      });
+      assert.equal(created.code, 0, created.stderr);
+
+      const prompted = await runCli(
+        [...baseAgentArgs(cwd), "--format", "quiet", "--ttl", "5", "prompt", "echo warm"],
+        homeDir,
+        {
+          env: {
+            ACPX_PERF_METRICS_FILE: metricsPath,
+          },
+        },
+      );
+      assert.equal(prompted.code, 0, prompted.stderr);
+      assert.match(prompted.stdout, /warm/);
+
+      const queueOwnerRecord = await waitForValue(async () => {
+        const records = await readPerfRecords(metricsPath);
+        return records.find(
+          (record) =>
+            record.role === "queue_owner" &&
+            record.reason === "checkpoint" &&
+            typeof record.metrics === "object" &&
+            typeof record.metrics?.timings === "object" &&
+            Object.keys(record.metrics.timings ?? {}).length > 0,
+        );
+      });
+      assert(queueOwnerRecord, "expected queue owner checkpoint record before owner exit");
+      assert.equal(readPerfTimingCount(queueOwnerRecord, "session.write_record"), 1);
+
+      const status = await runCli([...baseAgentArgs(cwd), "--format", "json", "status"], homeDir);
+      assert.equal(status.code, 0, status.stderr);
+      const statusPayload = JSON.parse(status.stdout.trim()) as { status?: string };
+      assert.equal(statusPayload.status, "alive");
+
+      const closed = await runCli([...baseAgentArgs(cwd), "sessions", "close"], homeDir);
+      assert.equal(closed.code, 0, closed.stderr);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: perf report tolerates malformed lines and keeps role and gauge summaries", async () => {
+  const metricsPath = path.join(os.tmpdir(), `acpx-perf-report-${Date.now()}.ndjson`);
+
+  try {
+    await fs.writeFile(
+      metricsPath,
+      [
+        JSON.stringify({
+          role: "cli",
+          metrics: {
+            counters: {
+              sample: 1,
+            },
+            timings: {
+              "runtime.exec.start": {
+                count: 1,
+                totalMs: 12.5,
+                maxMs: 12.5,
+              },
+            },
+          },
+        }),
+        "not-json",
+        JSON.stringify({
+          role: "queue_owner",
+          metrics: {
+            gauges: {
+              "queue.owner.depth": 2,
+            },
+          },
+        }),
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await runPerfReport(metricsPath);
+    assert.equal(result.code, 0, result.stderr);
+    const payload = JSON.parse(result.stdout) as {
+      droppedLines?: number;
+      gauges?: Record<string, unknown>;
+      byRole?: Record<string, { gauges?: Record<string, unknown>; timings?: unknown[] }>;
+    };
+    assert.equal(payload.droppedLines, 1);
+    assert.equal(typeof payload.gauges?.["queue.owner.depth"], "object");
+    assert.equal(Array.isArray(payload.byRole?.queue_owner?.timings), true);
+    assert.equal(typeof payload.byRole?.queue_owner?.gauges?.["queue.owner.depth"], "object");
+  } finally {
+    await fs.rm(metricsPath, { force: true });
+  }
+});
+
+test("integration: perf metrics capture preserves SIGTERM termination semantics", async () => {
+  const metricsPath = path.join(os.tmpdir(), `acpx-perf-signal-${Date.now()}.ndjson`);
+
+  try {
+    const result = await new Promise<CliRunResult>((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [
+          "--input-type=module",
+          "--eval",
+          [
+            "import { installPerfMetricsCapture } from './dist-test/src/perf-metrics-capture.js';",
+            "import { recordPerfDuration } from './dist-test/src/perf-metrics.js';",
+            `installPerfMetricsCapture({ filePath: ${JSON.stringify(metricsPath)} });`,
+            "recordPerfDuration('signal.test', 1);",
+            "setInterval(() => {}, 1000);",
+          ].join(" "),
+        ],
+        {
+          cwd: process.cwd(),
+          env: process.env,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+
+      let stdout = "";
+      let stderr = "";
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+      child.stderr.on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+
+      child.once("error", reject);
+      setTimeout(() => {
+        child.kill("SIGTERM");
+      }, 500);
+      child.once("close", (code, signal) => {
+        resolve({
+          code,
+          signal,
+          stdout,
+          stderr,
+        });
+      });
+    });
+
+    assert.equal(result.code === 143 || result.signal === "SIGTERM", true);
+    const records = await readPerfRecords(metricsPath);
+    assert.equal(records.length >= 1, true);
+  } finally {
+    await fs.rm(metricsPath, { force: true });
+  }
+});
+
 test("integration: timeout emits structured TIMEOUT json error", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -1105,6 +1266,100 @@ async function runCli(
       });
     });
   });
+}
+
+async function runPerfReport(filePath: string): Promise<CliRunResult> {
+  return await new Promise<CliRunResult>((resolve, reject) => {
+    const child = spawn("pnpm", ["exec", "tsx", "scripts/perf-report.ts", filePath], {
+      env: process.env,
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      resolve({
+        code,
+        signal,
+        stdout,
+        stderr,
+      });
+    });
+  });
+}
+
+async function readPerfRecords(metricsPath: string): Promise<
+  Array<{
+    role?: string;
+    reason?: string;
+    metrics?: {
+      timings?: Record<string, unknown>;
+    };
+  }>
+> {
+  try {
+    const payload = await fs.readFile(metricsPath, "utf8");
+    return payload
+      .trim()
+      .split("\n")
+      .filter((line) => line.trim().length > 0)
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            role?: string;
+            reason?: string;
+            metrics?: { timings?: Record<string, unknown> };
+          },
+      );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+function readPerfTimingCount(
+  record: {
+    metrics?: {
+      timings?: Record<string, unknown>;
+    };
+  },
+  name: string,
+): number | undefined {
+  const value = record.metrics?.timings?.[name];
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const count = (value as { count?: unknown }).count;
+  return typeof count === "number" ? count : undefined;
+}
+
+async function waitForValue<T>(
+  load: () => Promise<T | undefined>,
+  timeoutMs = 2_000,
+): Promise<T | undefined> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const value = await load();
+    if (value !== undefined) {
+      return value;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return undefined;
 }
 
 type PromptEvent = {

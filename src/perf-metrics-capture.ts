@@ -9,12 +9,15 @@ let flushed = false;
 let captureFilePath: string | undefined;
 let captureRole = "cli";
 let captureArgv: string[] = [];
+let captureSequence = 0;
+
+type CaptureReason = "checkpoint" | "exit" | "signal";
 
 function shouldCapture(): boolean {
   return typeof captureFilePath === "string" && captureFilePath.trim().length > 0;
 }
 
-function buildPayload(): Record<string, unknown> {
+function buildPayload(reason: CaptureReason): Record<string, unknown> {
   return {
     timestamp: new Date().toISOString(),
     pid: process.pid,
@@ -22,22 +25,56 @@ function buildPayload(): Record<string, unknown> {
     role: captureRole,
     argv: captureArgv,
     cwd: process.cwd(),
+    sequence: captureSequence,
+    reason,
     metrics: getPerfMetricsSnapshot(),
   };
 }
 
-export function flushPerfMetricsCapture(): void {
+function writePerfMetricsCapture(reason: CaptureReason, resetAfterWrite: boolean): boolean {
+  if (!shouldCapture()) {
+    return false;
+  }
+
+  const payload = buildPayload(reason);
+  const metrics = payload.metrics as {
+    counters?: Record<string, number>;
+    gauges?: Record<string, number>;
+    timings?: Record<string, unknown>;
+  };
+  const hasData =
+    Object.keys(metrics.counters ?? {}).length > 0 ||
+    Object.keys(metrics.gauges ?? {}).length > 0 ||
+    Object.keys(metrics.timings ?? {}).length > 0;
+  if (!hasData) {
+    return false;
+  }
+
+  try {
+    fs.mkdirSync(path.dirname(captureFilePath!), { recursive: true });
+    fs.appendFileSync(captureFilePath!, `${JSON.stringify(payload)}\n`, "utf8");
+    captureSequence += 1;
+    if (resetAfterWrite) {
+      resetPerfMetrics();
+    }
+    return true;
+  } catch {
+    // metrics capture is best-effort only
+    return false;
+  }
+}
+
+export function checkpointPerfMetricsCapture(): void {
+  flushed = false;
+  writePerfMetricsCapture("checkpoint", true);
+}
+
+export function flushPerfMetricsCapture(reason: CaptureReason = "exit"): void {
   if (flushed || !shouldCapture()) {
     return;
   }
   flushed = true;
-
-  try {
-    fs.mkdirSync(path.dirname(captureFilePath!), { recursive: true });
-    fs.appendFileSync(captureFilePath!, `${JSON.stringify(buildPayload())}\n`, "utf8");
-  } catch {
-    // metrics capture is best-effort only
-  }
+  writePerfMetricsCapture(reason, false);
 }
 
 export function installPerfMetricsCapture(
@@ -55,6 +92,7 @@ export function installPerfMetricsCapture(
   resetPerfMetrics();
   captureRole = options.role ?? captureRole;
   captureArgv = options.argv ?? [];
+  captureSequence = 0;
   flushed = false;
 
   if (installed) {
@@ -63,14 +101,16 @@ export function installPerfMetricsCapture(
   installed = true;
 
   process.once("exit", () => {
-    flushPerfMetricsCapture();
+    flushPerfMetricsCapture("exit");
   });
-  process.once("SIGINT", () => {
-    flushPerfMetricsCapture();
-  });
-  process.once("SIGTERM", () => {
-    flushPerfMetricsCapture();
-  });
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    const handler = () => {
+      flushPerfMetricsCapture("signal");
+      process.removeListener(signal, handler);
+      process.kill(process.pid, signal);
+    };
+    process.once(signal, handler);
+  }
 }
 
 export function perfMetricsCaptureFileFromEnv(

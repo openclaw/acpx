@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { AcpClient } from "./client.js";
 import { formatErrorMessage, normalizeOutputError } from "./error-normalization.js";
+import { checkpointPerfMetricsCapture } from "./perf-metrics-capture.js";
 import { formatPerfMetric, measurePerf, setPerfGauge, startPerfTimer } from "./perf-metrics.js";
 import { refreshQueueOwnerLease } from "./queue-lease-store.js";
 import {
@@ -510,7 +511,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
             origin: "runtime",
           });
 
-          await flushPendingMessages(true).catch(() => {
+          await flushPendingMessages(false).catch(() => {
             // best effort while bubbling prompt failure
           });
 
@@ -519,9 +520,6 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
           record.lastUsedAt = isoNow();
           applyConversation(record, conversation);
           record.acpx = acpxState;
-          await writeSessionRecord(record).catch(() => {
-            // best effort while bubbling prompt failure
-          });
 
           const propagated = error instanceof Error ? error : new Error(formatErrorMessage(error));
           (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted = sawAcpMessage;
@@ -530,7 +528,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
           throw propagated;
         }
 
-        await flushPendingMessages(true);
+        await flushPendingMessages(false);
         output.flush();
 
         const now = isoNow();
@@ -542,7 +540,6 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
         applyConversation(record, conversation);
         record.acpx = acpxState;
         applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-        await writeSessionRecord(record);
         stopTotalTimer();
 
         return {
@@ -558,13 +555,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
         record.lastUsedAt = isoNow();
         applyConversation(record, conversation);
         record.acpx = acpxState;
-        await flushPendingMessages(true).catch(() => {
-          // best effort while process is being interrupted
-        });
-        await writeSessionRecord(record).catch(() => {
-          // best effort while process is being interrupted
-        });
-        await closeEventWriter(false).catch(() => {
+        await flushPendingMessages(false).catch(() => {
           // best effort while process is being interrupted
         });
         await client.close();
@@ -586,10 +577,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     await flushPendingMessages(false).catch(() => {
       // best effort on close
     });
-    await writeSessionRecord(record).catch(() => {
-      // best effort on close
-    });
-    await closeEventWriter(false).catch(() => {
+    await closeEventWriter(true).catch(() => {
       // best effort on close
     });
   }
@@ -888,19 +876,23 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
       isFirstTask = false;
 
       await runPromptTurn(async () => {
-        await runQueuedTask(options.sessionId, task, {
-          verbose: options.verbose,
-          nonInteractivePermissions: options.nonInteractivePermissions,
-          authCredentials: options.authCredentials,
-          authPolicy: options.authPolicy,
-          suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
-          onClientAvailable: setActiveController,
-          onClientClosed: clearActiveController,
-          onPromptActive: async () => {
-            turnController.markPromptActive();
-            await applyPendingCancel();
-          },
-        });
+        try {
+          await runQueuedTask(options.sessionId, task, {
+            verbose: options.verbose,
+            nonInteractivePermissions: options.nonInteractivePermissions,
+            authCredentials: options.authCredentials,
+            authPolicy: options.authPolicy,
+            suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
+            onClientAvailable: setActiveController,
+            onClientClosed: clearActiveController,
+            onPromptActive: async () => {
+              turnController.markPromptActive();
+              await applyPendingCancel();
+            },
+          });
+        } finally {
+          checkpointPerfMetricsCapture();
+        }
       });
     }
   } finally {
