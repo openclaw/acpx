@@ -3,7 +3,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
-import { findSkillsRoot, maybeHandleSkillflag } from "skillflag";
 import { listBuiltInAgents } from "./agent-registry.js";
 import {
   addGlobalFlags,
@@ -26,17 +25,6 @@ import {
   type StatusFlags,
 } from "./cli/flags.js";
 import {
-  agentSessionIdPayload,
-  emitJsonResult,
-  printClosedSessionByFormat,
-  printCreatedSessionBanner,
-  printEnsuredSessionByFormat,
-  printNewSessionByFormat,
-  printPromptSessionBanner,
-  printQueuedPromptByFormat,
-  printSessionsByFormat,
-} from "./cli/output-render.js";
-import {
   initGlobalConfigFile,
   loadResolvedConfig,
   toConfigDisplay,
@@ -47,26 +35,15 @@ import {
   normalizeOutputError,
   type NormalizedOutputError,
 } from "./error-normalization.js";
-import { createOutputFormatter } from "./output.js";
 import { flushPerfMetricsCapture, installPerfMetricsCapture } from "./perf-metrics-capture.js";
-import { probeQueueOwnerHealth } from "./queue-ipc.js";
 import { runQueueOwnerFromEnv } from "./queue-owner-env.js";
 import {
   DEFAULT_HISTORY_LIMIT,
-  InterruptedError,
-  cancelSessionPrompt,
-  closeSession,
-  createSession,
-  ensureSession,
   findGitRepositoryRoot,
   findSession,
   findSessionByDirectoryWalk,
-  listSessionsForAgent,
-  runOnce,
-  setSessionConfigOption,
-  setSessionMode,
-  sendSession,
-} from "./session.js";
+} from "./session-persistence.js";
+import { InterruptedError } from "./session-runtime-helpers.js";
 import {
   EXIT_CODES,
   OUTPUT_FORMATS,
@@ -160,8 +137,57 @@ function applyPermissionExitCode(result: {
   }
 }
 
+function emitJsonResult(format: OutputFormat, payload: unknown): boolean {
+  if (format !== "json") {
+    return false;
+  }
+  process.stdout.write(`${JSON.stringify(payload)}\n`);
+  return true;
+}
+
 export { parseTtlSeconds };
 export { formatPromptSessionBannerLine } from "./cli/output-render.js";
+
+type SessionModule = typeof import("./session.js");
+type OutputModule = typeof import("./output.js");
+type OutputRenderModule = typeof import("./cli/output-render.js");
+type QueueIpcModule = typeof import("./queue-ipc.js");
+type SkillflagModule = typeof import("skillflag");
+
+let sessionModulePromise: Promise<SessionModule> | undefined;
+let outputModulePromise: Promise<OutputModule> | undefined;
+let outputRenderModulePromise: Promise<OutputRenderModule> | undefined;
+let queueIpcModulePromise: Promise<QueueIpcModule> | undefined;
+let skillflagModulePromise: Promise<SkillflagModule> | undefined;
+
+function loadSessionModule(): Promise<SessionModule> {
+  sessionModulePromise ??= import("./session.js");
+  return sessionModulePromise;
+}
+
+function loadOutputModule(): Promise<OutputModule> {
+  outputModulePromise ??= import("./output.js");
+  return outputModulePromise;
+}
+
+function loadOutputRenderModule(): Promise<OutputRenderModule> {
+  outputRenderModulePromise ??= import("./cli/output-render.js");
+  return outputRenderModulePromise;
+}
+
+function loadQueueIpcModule(): Promise<QueueIpcModule> {
+  queueIpcModulePromise ??= import("./queue-ipc.js");
+  return queueIpcModulePromise;
+}
+
+function loadSkillflagModule(): Promise<SkillflagModule> {
+  skillflagModulePromise ??= import("skillflag");
+  return skillflagModulePromise;
+}
+
+function shouldMaybeHandleSkillflag(argv: string[]): boolean {
+  return argv.some((token) => token === "--skill" || token.startsWith("--skill="));
+}
 
 async function findRoutedSessionOrThrow(
   agentCommand: string,
@@ -203,6 +229,11 @@ async function handlePrompt(
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const prompt = await readPrompt(promptParts, flags.file, globalFlags.cwd);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const [
+    { createOutputFormatter },
+    { printPromptSessionBanner, printQueuedPromptByFormat },
+    { sendSession },
+  ] = await Promise.all([loadOutputModule(), loadOutputRenderModule(), loadSessionModule()]);
   const record = await findRoutedSessionOrThrow(
     agent.agentCommand,
     agent.agentName,
@@ -258,6 +289,10 @@ async function handleExec(
   const outputPolicy = resolveOutputPolicy(globalFlags.format, globalFlags.jsonStrict === true);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const prompt = await readPrompt(promptParts, flags.file, globalFlags.cwd);
+  const [{ createOutputFormatter }, { runOnce }] = await Promise.all([
+    loadOutputModule(),
+    loadSessionModule(),
+  ]);
   const outputFormatter = createOutputFormatter(outputPolicy.format);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
 
@@ -369,6 +404,7 @@ async function handleCancel(
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const { cancelSessionPrompt } = await loadSessionModule();
   const gitRoot = findGitRepositoryRoot(agent.cwd);
   const walkBoundary = gitRoot ?? agent.cwd;
   const record = await findSessionByDirectoryWalk({
@@ -405,6 +441,7 @@ async function handleSetMode(
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const { setSessionMode } = await loadSessionModule();
   const record = await findRoutedSessionOrThrow(
     agent.agentCommand,
     agent.agentName,
@@ -438,6 +475,7 @@ async function handleSetConfigOption(
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const { setSessionConfigOption } = await loadSessionModule();
   const record = await findRoutedSessionOrThrow(
     agent.agentCommand,
     agent.agentName,
@@ -469,6 +507,10 @@ async function handleSessionsList(
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const [{ listSessionsForAgent }, { printSessionsByFormat }] = await Promise.all([
+    loadSessionModule(),
+    loadOutputRenderModule(),
+  ]);
   const sessions = await listSessionsForAgent(agent.agentCommand);
   printSessionsByFormat(sessions, globalFlags.format);
 }
@@ -481,6 +523,10 @@ async function handleSessionsClose(
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const [{ closeSession }, { printClosedSessionByFormat }] = await Promise.all([
+    loadSessionModule(),
+    loadOutputRenderModule(),
+  ]);
 
   const record = await findSession({
     agentCommand: agent.agentCommand,
@@ -511,6 +557,8 @@ async function handleSessionsNew(
   const globalFlags = resolveGlobalFlags(command, config);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const [{ createSession, closeSession }, { printCreatedSessionBanner, printNewSessionByFormat }] =
+    await Promise.all([loadSessionModule(), loadOutputRenderModule()]);
 
   const replaced = await findSession({
     agentCommand: agent.agentCommand,
@@ -556,6 +604,8 @@ async function handleSessionsEnsure(
   const globalFlags = resolveGlobalFlags(command, config);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const [{ ensureSession }, { printCreatedSessionBanner, printEnsuredSessionByFormat }] =
+    await Promise.all([loadSessionModule(), loadOutputRenderModule()]);
   const result = await ensureSession({
     agentCommand: agent.agentCommand,
     cwd: agent.cwd,
@@ -817,6 +867,10 @@ async function handleStatus(
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const [{ probeQueueOwnerHealth }, { agentSessionIdPayload, emitJsonResult }] = await Promise.all([
+    loadQueueIpcModule(),
+    loadOutputRenderModule(),
+  ]);
   const record = await findSession({
     agentCommand: agent.agentCommand,
     cwd: agent.cwd,
@@ -1302,7 +1356,8 @@ function detectJsonStrict(argv: string[]): boolean {
   return false;
 }
 
-function emitJsonErrorEvent(error: NormalizedOutputError): void {
+async function emitJsonErrorEvent(error: NormalizedOutputError): Promise<void> {
+  const { createOutputFormatter } = await loadOutputModule();
   const formatter = createOutputFormatter("json", {
     jsonContext: {
       sessionId: "unknown",
@@ -1319,16 +1374,16 @@ function isOutputAlreadyEmitted(error: unknown): boolean {
   return (error as { outputAlreadyEmitted?: unknown }).outputAlreadyEmitted === true;
 }
 
-function emitRequestedError(
+async function emitRequestedError(
   error: unknown,
   normalized: NormalizedOutputError,
   outputPolicy: OutputPolicy,
-): void {
+): Promise<void> {
   if (isOutputAlreadyEmitted(error)) {
     return;
   }
   if (outputPolicy.format === "json") {
-    emitJsonErrorEvent(normalized);
+    await emitJsonErrorEvent(normalized);
   } else if (!outputPolicy.suppressNonJsonStderr) {
     process.stderr.write(`${normalized.message}\n`);
   }
@@ -1347,6 +1402,11 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     role: argv[2] === "__queue-owner" ? "queue_owner" : "cli",
   });
 
+  if (argv.includes("--version") || argv.includes("-V")) {
+    process.stdout.write(`${getAcpxVersion()}\n`);
+    return;
+  }
+
   if (argv[2] === "__queue-owner") {
     try {
       await runQueueOwnerFromEnv(process.env);
@@ -1358,10 +1418,13 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     }
   }
 
-  await maybeHandleSkillflag(argv, {
-    skillsRoot: findSkillsRoot(import.meta.url),
-    includeBundledSkill: false,
-  });
+  if (shouldMaybeHandleSkillflag(argv)) {
+    const { findSkillsRoot, maybeHandleSkillflag } = await loadSkillflagModule();
+    await maybeHandleSkillflag(argv, {
+      skillsRoot: findSkillsRoot(import.meta.url),
+      includeBundledSkill: false,
+    });
+  }
 
   const config = await loadResolvedConfig(detectInitialCwd(argv.slice(2)));
   const requestedJsonStrict = detectJsonStrict(argv.slice(2));
@@ -1467,7 +1530,7 @@ Examples:
             origin: "cli",
           });
           if (requestedOutputPolicy.format === "json") {
-            emitRequestedError(error, normalized, requestedOutputPolicy);
+            await emitRequestedError(error, normalized, requestedOutputPolicy);
           }
           process.exit(exitCodeForOutputErrorCode(normalized.code));
         }
@@ -1479,7 +1542,7 @@ Examples:
         const normalized = normalizeOutputError(error, {
           origin: "cli",
         });
-        emitRequestedError(error, normalized, requestedOutputPolicy);
+        await emitRequestedError(error, normalized, requestedOutputPolicy);
         process.exit(exitCodeForOutputErrorCode(normalized.code));
       }
     });
