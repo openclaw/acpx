@@ -70,6 +70,67 @@ test("integration: timeout emits structured TIMEOUT json error", async () => {
   });
 });
 
+test("integration: gemini ACP startup timeout is surfaced as actionable error", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-gemini-"));
+    const fakeGeminiPath = path.join(fakeBinDir, "gemini");
+    const previousTimeout = process.env.ACPX_GEMINI_ACP_STARTUP_TIMEOUT_MS;
+
+    try {
+      await fs.writeFile(fakeGeminiPath, "#!/bin/sh\nsleep 60\n", {
+        encoding: "utf8",
+        mode: 0o755,
+      });
+      process.env.ACPX_GEMINI_ACP_STARTUP_TIMEOUT_MS = "100";
+
+      const result = await runCli(
+        [
+          "--agent",
+          `${JSON.stringify(fakeGeminiPath)} --experimental-acp`,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "exec",
+          "say exactly: hi",
+        ],
+        homeDir,
+        { timeoutMs: 10_000 },
+      );
+
+      assert.equal(result.code, 3, result.stderr);
+      const payloads = result.stdout
+        .trim()
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              error?: { message?: string; data?: { acpxCode?: string; detailCode?: string } };
+            },
+        );
+      const timeoutError = payloads.find(
+        (payload) => payload.error?.data?.detailCode === "GEMINI_ACP_STARTUP_TIMEOUT",
+      );
+      assert(timeoutError, result.stdout);
+      assert.equal(timeoutError.error?.data?.acpxCode, "TIMEOUT");
+      assert.equal(timeoutError.error?.data?.detailCode, "GEMINI_ACP_STARTUP_TIMEOUT");
+      assert.match(timeoutError.error?.message ?? "", /Gemini CLI ACP startup timed out/i);
+      assert.match(timeoutError.error?.message ?? "", /API-key-based auth/i);
+    } finally {
+      if (previousTimeout == null) {
+        delete process.env.ACPX_GEMINI_ACP_STARTUP_TIMEOUT_MS;
+      } else {
+        process.env.ACPX_GEMINI_ACP_STARTUP_TIMEOUT_MS = previousTimeout;
+      }
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: non-interactive fail emits structured permission error", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

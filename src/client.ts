@@ -31,10 +31,16 @@ import {
 } from "@agentclientprotocol/sdk";
 import spawn from "cross-spawn";
 import { isSessionUpdateNotification } from "./acp-jsonrpc.js";
-import { AgentSpawnError, AuthPolicyError, PermissionPromptUnavailableError } from "./errors.js";
+import {
+  AgentSpawnError,
+  AuthPolicyError,
+  GeminiAcpStartupTimeoutError,
+  PermissionPromptUnavailableError,
+} from "./errors.js";
 import { FileSystemHandlers } from "./filesystem.js";
 import { classifyPermissionDecision, resolvePermissionRequest } from "./permissions.js";
 import { extractRuntimeSessionId } from "./runtime-session-id.js";
+import { TimeoutError, withTimeout } from "./session-runtime-helpers.js";
 import { TerminalManager } from "./terminal.js";
 import type { AcpClientOptions, PermissionStats } from "./types.js";
 
@@ -49,6 +55,8 @@ const DRAIN_POLL_INTERVAL_MS = 20;
 const AGENT_CLOSE_AFTER_STDIN_END_MS = 100;
 const AGENT_CLOSE_TERM_GRACE_MS = 1_500;
 const AGENT_CLOSE_KILL_GRACE_MS = 1_000;
+const GEMINI_ACP_STARTUP_TIMEOUT_MS = 15_000;
+const GEMINI_VERSION_TIMEOUT_MS = 2_000;
 
 type LoadSessionOptions = {
   suppressReplayUpdates?: boolean;
@@ -240,6 +248,91 @@ function asAbsoluteCwd(cwd: string): string {
   return path.resolve(cwd);
 }
 
+function basenameToken(value: string): string {
+  return path.basename(value).toLowerCase();
+}
+
+function isGeminiAcpCommand(command: string, args: readonly string[]): boolean {
+  return basenameToken(command) === "gemini" && args.includes("--experimental-acp");
+}
+
+function resolveGeminiAcpStartupTimeoutMs(): number {
+  const raw = process.env.ACPX_GEMINI_ACP_STARTUP_TIMEOUT_MS;
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.round(parsed);
+    }
+  }
+  return GEMINI_ACP_STARTUP_TIMEOUT_MS;
+}
+
+async function detectGeminiVersion(command: string): Promise<string | undefined> {
+  return await new Promise<string | undefined>((resolve) => {
+    const child = spawn(command, ["--version"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (value: string | undefined) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      child.removeAllListeners();
+      child.stdout?.removeAllListeners();
+      child.stderr?.removeAllListeners();
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(undefined);
+    }, GEMINI_VERSION_TIMEOUT_MS);
+
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once("error", () => {
+      finish(undefined);
+    });
+    child.once("close", () => {
+      const combined = `${stdout}\n${stderr}`
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => /^\d+\.\d+\.\d+/.test(line));
+      finish(combined);
+    });
+  });
+}
+
+async function buildGeminiAcpStartupTimeoutMessage(command: string): Promise<string> {
+  const parts = [
+    "Gemini CLI ACP startup timed out before initialize completed.",
+    "This usually means the local Gemini CLI is waiting on interactive OAuth or has incompatible ACP subprocess behavior.",
+  ];
+
+  const version = await detectGeminiVersion(command);
+  if (version) {
+    parts.push(`Detected Gemini CLI version: ${version}.`);
+  }
+
+  if (!process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
+    parts.push("No GEMINI_API_KEY or GOOGLE_API_KEY was set for non-interactive auth.");
+  }
+
+  parts.push("Try upgrading Gemini CLI and using API-key-based auth for non-interactive ACP runs.");
+  return parts.join(" ");
+}
+
 function toEnvToken(value: string): string {
   return value
     .trim()
@@ -416,6 +509,7 @@ export class AcpClient {
 
     const { command, args } = splitCommandLine(this.options.agentCommand);
     this.log(`spawning agent: ${command} ${args.join(" ")}`);
+    const geminiAcp = isGeminiAcpCommand(command, args);
 
     const child = spawn(
       command,
@@ -494,7 +588,7 @@ export class AcpClient {
     );
 
     try {
-      const initResult = await connection.initialize({
+      const initializePromise = connection.initialize({
         protocolVersion: PROTOCOL_VERSION,
         clientCapabilities: {
           fs: {
@@ -508,6 +602,9 @@ export class AcpClient {
           version: "0.1.0",
         },
       });
+      const initResult = geminiAcp
+        ? await withTimeout(initializePromise, resolveGeminiAcpStartupTimeoutMs())
+        : await initializePromise;
 
       await this.authenticateIfRequired(connection, initResult.authMethods ?? []);
 
@@ -517,6 +614,12 @@ export class AcpClient {
       this.log(`initialized protocol version ${initResult.protocolVersion}`);
     } catch (error) {
       child.kill();
+      if (geminiAcp && error instanceof TimeoutError) {
+        throw new GeminiAcpStartupTimeoutError(await buildGeminiAcpStartupTimeoutMessage(command), {
+          cause: error,
+          retryable: true,
+        });
+      }
       throw error;
     }
   }

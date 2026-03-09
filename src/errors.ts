@@ -51,6 +51,17 @@ export class AgentSpawnError extends AcpxOperationalError {
   }
 }
 
+export class GeminiAcpStartupTimeoutError extends AcpxOperationalError {
+  constructor(message: string, options?: AcpxErrorOptions) {
+    super(message, {
+      outputCode: "TIMEOUT",
+      detailCode: "GEMINI_ACP_STARTUP_TIMEOUT",
+      origin: "acp",
+      ...options,
+    });
+  }
+}
+
 export class AuthPolicyError extends AcpxOperationalError {
   constructor(message: string, options?: AcpxErrorOptions) {
     super(message, {
