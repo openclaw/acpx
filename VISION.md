@@ -17,12 +17,14 @@ command line.
 
 It should work in two modes at the same time:
 
-- as a simple CLI for humans and shell scripts
+- as an agent-first CLI that humans can still drive directly when needed
 - as a reusable backend for tools that do not want to reimplement session
   storage, queueing, lifecycle handling, or harness-specific behavior
 
 If a tool wants ACP sessions, structured output, queueing, and persistence, it
 should be able to delegate those concerns to `acpx` instead of rebuilding them.
+The primary user is another agent, orchestrator, or harness. Human usability
+still matters, but it is a secondary constraint.
 
 ## Principles
 
