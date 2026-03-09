@@ -1,4 +1,5 @@
 export const AGENT_REGISTRY: Record<string, string> = {
+  copilot: "copilot --acp --stdio",
   codex: "npx @zed-industries/codex-acp",
   claude: "npx -y @zed-industries/claude-agent-acp",
   gemini: "gemini --experimental-acp",

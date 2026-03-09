@@ -8,6 +8,7 @@ import {
 
 test("resolveAgentCommand maps known agents to commands", () => {
   const expected = new Map<string, string>([
+    ["copilot", "copilot --acp --stdio"],
     ["codex", "npx @zed-industries/codex-acp"],
     ["claude", "npx -y @zed-industries/claude-agent-acp"],
     ["gemini", "gemini --experimental-acp"],
@@ -25,12 +26,12 @@ test("resolveAgentCommand returns raw value for unknown agents", () => {
   assert.equal(resolveAgentCommand("custom-acp-server"), "custom-acp-server");
 });
 
-test("listBuiltInAgents returns exactly all 6 registered agent names", () => {
+test("listBuiltInAgents returns exactly all 7 registered agent names", () => {
   const agents = listBuiltInAgents();
-  assert.equal(agents.length, 6);
+  assert.equal(agents.length, 7);
   assert.deepEqual(
     new Set(agents),
-    new Set(["codex", "claude", "gemini", "openclaw", "opencode", "pi"]),
+    new Set(["copilot", "codex", "claude", "gemini", "openclaw", "opencode", "pi"]),
   );
 });
 
