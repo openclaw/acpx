@@ -5,7 +5,9 @@ export const AGENT_REGISTRY: Record<string, string> = {
   gemini: "gemini --experimental-acp",
   openclaw: "openclaw acp",
   opencode: "npx -y opencode-ai acp",
+  kiro: "kiro-cli acp",
   pi: "npx pi-acp",
+  kilocode: "npx -y @kilocode/cli acp",
 };
 
 export const DEFAULT_AGENT_NAME = "codex";

@@ -18,7 +18,7 @@ Your agents love acpx! 🤖❤️ They hate having to scrape characters from a P
 
 `acpx` is a headless CLI client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com), so AI agents and orchestrators can talk to coding agents over a structured protocol instead of PTY scraping.
 
-One command surface for Codex, Claude, Gemini, OpenClaw ACP, OpenCode, Pi, or custom ACP servers. Built for agent-to-agent communication over the command line.
+One command surface for Codex, Claude, Gemini, OpenClaw ACP, OpenCode, Pi, Kilocode, or custom ACP servers. Built for agent-to-agent communication over the command line.
 
 - **Persistent sessions**: multi-turn conversations that survive across invocations, scoped per repo
 - **Named sessions**: run parallel workstreams in the same repo (`-s backend`, `-s frontend`)
@@ -126,7 +126,9 @@ The only prerequisite is the underlying coding agent you want to use:
 - `acpx gemini` -> Gemini CLI: https://github.com/google/gemini-cli
 - `acpx openclaw` -> OpenClaw ACP bridge: https://github.com/openclaw/openclaw
 - `acpx opencode` -> OpenCode: https://opencode.ai
+- `acpx kiro` -> Kiro CLI: https://kiro.dev
 - `acpx pi` -> Pi Coding Agent: https://github.com/mariozechner/pi
+- `acpx kilocode` -> Kilocode: https://kilocode.ai
 
 ## Usage examples
 
@@ -281,6 +283,7 @@ Built-ins:
 | `openclaw` | native                                                                 | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
 | `opencode` | native                                                                 | [OpenCode](https://opencode.ai)                                                                                 |
 | `pi`       | [pi-acp](https://github.com/svkozak/pi-acp)                            | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
+| `kilocode` | native                                                                 | [Kilocode](https://kilocode.ai)                                                                                 |
 
 Use `--agent` as an escape hatch for custom ACP servers:
 
