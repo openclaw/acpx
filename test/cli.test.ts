@@ -55,7 +55,11 @@ const MOCK_AGENT_IGNORING_SIGTERM = `${MOCK_AGENT_COMMAND} --ignore-sigterm`;
 const MOCK_CODEX_AGENT_WITH_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --codex-session-id codex-runtime-session`;
 const MOCK_CLAUDE_AGENT_WITH_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --claude-session-id claude-runtime-session`;
 const MOCK_AGENT_WITH_LOAD_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --supports-load-session --load-runtime-session-id loaded-runtime-session`;
+const MOCK_AGENT_WITH_DISTINCT_CREATE_AND_LOAD_RUNTIME_SESSION_IDS =
+  `${MOCK_AGENT_COMMAND} --runtime-session-id fresh-runtime-session ` +
+  "--supports-load-session --load-runtime-session-id resumed-runtime-session";
 const MOCK_AGENT_WITH_LOAD_FALLBACK = `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-fails-on-empty`;
+const MOCK_AGENT_WITH_LOAD_SESSION_NOT_FOUND = `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-not-found`;
 
 type CliRunResult = {
   code: number | null;
@@ -220,6 +224,7 @@ test("sessions new command is present in help output", async () => {
     const newHelp = await runCli(["sessions", "new", "--help"], homeDir);
     assert.equal(newHelp.code, 0, newHelp.stderr);
     assert.match(newHelp.stdout, /--name <name>/);
+    assert.match(newHelp.stdout, /--resume-session <id>/);
 
     const ensureHelp = await runCli(["sessions", "ensure", "--help"], homeDir);
     assert.equal(ensureHelp.code, 0, ensureHelp.stderr);
@@ -228,6 +233,140 @@ test("sessions new command is present in help output", async () => {
     const readHelp = await runCli(["sessions", "read", "--help"], homeDir);
     assert.equal(readHelp.code, 0, readHelp.stderr);
     assert.match(readHelp.stdout, /--tail <count>/);
+    assert.match(ensureHelp.stdout, /--resume-session <id>/);
+  });
+});
+
+test("sessions new --resume-session loads ACP session and stores resumed ids", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_WITH_DISTINCT_CREATE_AND_LOAD_RUNTIME_SESSION_IDS,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const resumeSessionId = "cs_resume123";
+    const result = await runCli(
+      [
+        "--cwd",
+        cwd,
+        "--format",
+        "json",
+        "codex",
+        "sessions",
+        "new",
+        "--resume-session",
+        resumeSessionId,
+      ],
+      homeDir,
+    );
+    assert.equal(result.code, 0, result.stderr);
+
+    const payload = JSON.parse(result.stdout.trim()) as {
+      action?: unknown;
+      created?: unknown;
+      acpxRecordId?: unknown;
+      acpxSessionId?: unknown;
+      agentSessionId?: unknown;
+    };
+    assert.equal(payload.action, "session_ensured");
+    assert.equal(payload.created, true);
+    assert.equal(payload.acpxRecordId, resumeSessionId);
+    assert.equal(payload.acpxSessionId, resumeSessionId);
+    assert.equal(payload.agentSessionId, "resumed-runtime-session");
+
+    const storedRecordPath = path.join(
+      homeDir,
+      ".acpx",
+      "sessions",
+      `${encodeURIComponent(resumeSessionId)}.json`,
+    );
+    const storedRecord = JSON.parse(await fs.readFile(storedRecordPath, "utf8")) as {
+      acp_session_id?: unknown;
+      agent_session_id?: unknown;
+    };
+    assert.equal(storedRecord.acp_session_id, resumeSessionId);
+    assert.equal(storedRecord.agent_session_id, "resumed-runtime-session");
+  });
+});
+
+test("sessions new --resume-session fails when agent does not support session/load", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_COMMAND,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const result = await runCli(
+      ["--cwd", cwd, "codex", "sessions", "new", "--resume-session", "cs_unsupported"],
+      homeDir,
+    );
+
+    assert.equal(result.code, 1, result.stderr);
+    assert.match(result.stderr, /does not support session\/load/i);
+  });
+});
+
+test("sessions new --resume-session surfaces not-found loadSession errors without fallback", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_WITH_LOAD_SESSION_NOT_FOUND,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const resumeSessionId = "cs_missing";
+    const result = await runCli(
+      ["--cwd", cwd, "codex", "sessions", "new", "--resume-session", resumeSessionId],
+      homeDir,
+    );
+
+    assert.equal(result.code, 4, result.stderr);
+    assert.match(result.stderr, /Failed to resume ACP session cs_missing: Resource not found/);
+
+    const sessionsDir = path.join(homeDir, ".acpx", "sessions");
+    const entries = await fs.readdir(sessionsDir).catch(() => [] as string[]);
+    assert.equal(entries.includes(`${encodeURIComponent(resumeSessionId)}.json`), false);
   });
 });
 
@@ -270,6 +409,57 @@ test("sessions ensure creates when missing and returns existing on subsequent ca
     assert.equal(secondPayload.action, "session_ensured");
     assert.equal(secondPayload.created, false);
     assert.equal(secondPayload.acpxRecordId, firstPayload.acpxRecordId);
+  });
+});
+
+test("sessions ensure --resume-session loads ACP session when creating missing session", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_WITH_DISTINCT_CREATE_AND_LOAD_RUNTIME_SESSION_IDS,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const resumeSessionId = "cs_ensure_resume";
+    const result = await runCli(
+      [
+        "--cwd",
+        cwd,
+        "--format",
+        "json",
+        "codex",
+        "sessions",
+        "ensure",
+        "--resume-session",
+        resumeSessionId,
+      ],
+      homeDir,
+    );
+    assert.equal(result.code, 0, result.stderr);
+
+    const payload = JSON.parse(result.stdout.trim()) as {
+      created?: unknown;
+      acpxRecordId?: unknown;
+      acpxSessionId?: unknown;
+      agentSessionId?: unknown;
+    };
+    assert.equal(payload.created, true);
+    assert.equal(payload.acpxRecordId, resumeSessionId);
+    assert.equal(payload.acpxSessionId, resumeSessionId);
+    assert.equal(payload.agentSessionId, "resumed-runtime-session");
   });
 });
 

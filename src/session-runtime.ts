@@ -118,6 +118,7 @@ export type SessionCreateOptions = {
   agentCommand: string;
   cwd: string;
   name?: string;
+  resumeSessionId?: string;
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -146,6 +147,7 @@ export type SessionEnsureOptions = {
   agentCommand: string;
   cwd: string;
   name?: string;
+  resumeSessionId?: string;
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -675,19 +677,43 @@ export async function createSession(options: SessionCreateOptions): Promise<Sess
   try {
     return await withInterrupt(
       async () => {
+        const cwd = absolutePath(options.cwd);
         await measurePerf("runtime.session_create.start", async () => {
           await withTimeout(client.start(), options.timeoutMs);
         });
-        const createdSession = await measurePerf(
-          "runtime.session_create.create_session",
-          async () => {
-            return await withTimeout(
-              client.createSession(absolutePath(options.cwd)),
+        let sessionId: string;
+        let agentSessionId: string | undefined;
+
+        if (options.resumeSessionId) {
+          if (!client.supportsLoadSession()) {
+            throw new Error(
+              `Agent command "${options.agentCommand}" does not support session/load; cannot resume session ${options.resumeSessionId}`,
+            );
+          }
+
+          try {
+            const loadedSession = await withTimeout(
+              client.loadSession(options.resumeSessionId, cwd),
               options.timeoutMs,
             );
-          },
-        );
-        const sessionId = createdSession.sessionId;
+            sessionId = options.resumeSessionId;
+            agentSessionId = normalizeRuntimeSessionId(loadedSession.agentSessionId);
+          } catch (error) {
+            throw new Error(
+              `Failed to resume ACP session ${options.resumeSessionId}: ${formatErrorMessage(error)}`,
+              {
+                cause: error,
+              },
+            );
+          }
+        } else {
+          const createdSession = await measurePerf(
+            "runtime.session_create.create_session",
+            async () => await withTimeout(client.createSession(cwd), options.timeoutMs),
+          );
+          sessionId = createdSession.sessionId;
+          agentSessionId = normalizeRuntimeSessionId(createdSession.agentSessionId);
+        }
         const lifecycle = client.getAgentLifecycleSnapshot();
 
         const now = isoNow();
@@ -695,9 +721,9 @@ export async function createSession(options: SessionCreateOptions): Promise<Sess
           schema: SESSION_RECORD_SCHEMA,
           acpxRecordId: sessionId,
           acpSessionId: sessionId,
-          agentSessionId: normalizeRuntimeSessionId(createdSession.agentSessionId),
+          agentSessionId,
           agentCommand: options.agentCommand,
-          cwd: absolutePath(options.cwd),
+          cwd,
           name: normalizeName(options.name),
           createdAt: now,
           lastUsedAt: now,
@@ -747,6 +773,7 @@ export async function ensureSession(options: SessionEnsureOptions): Promise<Sess
     agentCommand: options.agentCommand,
     cwd,
     name: options.name,
+    resumeSessionId: options.resumeSessionId,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,

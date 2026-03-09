@@ -609,6 +609,7 @@ async function handleSessionsNew(
     agentCommand: agent.agentCommand,
     cwd: agent.cwd,
     name: flags.name,
+    resumeSessionId: flags.resumeSession,
     permissionMode,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
@@ -647,6 +648,7 @@ async function handleSessionsEnsure(
     agentCommand: agent.agentCommand,
     cwd: agent.cwd,
     name: flags.name,
+    resumeSessionId: flags.resumeSession,
     permissionMode,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
@@ -1066,6 +1068,9 @@ function registerSessionsCommand(
     .command("new")
     .description("Create a fresh session for current cwd")
     .option("--name <name>", "Session name", parseSessionName)
+    .option("--resume-session <id>", "Resume existing ACP session id", (value: string) =>
+      parseNonEmptyValue("Resume session id", value),
+    )
     .action(async function (this: Command, flags: SessionsNewFlags) {
       await handleSessionsNew(explicitAgentName, flags, this, config);
     });
@@ -1074,6 +1079,9 @@ function registerSessionsCommand(
     .command("ensure")
     .description("Ensure a session exists for current cwd or ancestor")
     .option("--name <name>", "Session name", parseSessionName)
+    .option("--resume-session <id>", "Resume existing ACP session id", (value: string) =>
+      parseNonEmptyValue("Resume session id", value),
+    )
     .action(async function (this: Command, flags: SessionsNewFlags) {
       await handleSessionsEnsure(explicitAgentName, flags, this, config);
     });

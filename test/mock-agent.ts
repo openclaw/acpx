@@ -5,6 +5,7 @@ import { Readable, Writable } from "node:stream";
 import {
   AgentSideConnection,
   PROTOCOL_VERSION,
+  RequestError,
   ndJsonStream,
   type Agent,
   type AgentSideConnection as AgentConnection,
@@ -32,6 +33,7 @@ type MockAgentOptions = {
   newSessionMeta?: Record<string, string>;
   loadSessionMeta?: Record<string, string>;
   supportsLoadSession: boolean;
+  loadSessionNotFound: boolean;
   loadSessionFailsOnEmpty: boolean;
   replayLoadSessionUpdates: boolean;
   loadReplayText: string;
@@ -262,6 +264,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   const newSessionMeta: Record<string, string> = {};
   const loadSessionMeta: Record<string, string> = {};
   let supportsLoadSession = false;
+  let loadSessionNotFound = false;
   let loadSessionFailsOnEmpty = false;
   let replayLoadSessionUpdates = false;
   let loadReplayText = "replayed load session update";
@@ -279,6 +282,12 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     if (token === "--load-session-fails-on-empty") {
       supportsLoadSession = true;
       loadSessionFailsOnEmpty = true;
+      continue;
+    }
+
+    if (token === "--load-session-not-found") {
+      supportsLoadSession = true;
+      loadSessionNotFound = true;
       continue;
     }
 
@@ -329,6 +338,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     newSessionMeta: Object.keys(newSessionMeta).length > 0 ? { ...newSessionMeta } : undefined,
     loadSessionMeta: Object.keys(loadSessionMeta).length > 0 ? { ...loadSessionMeta } : undefined,
     supportsLoadSession,
+    loadSessionNotFound,
     loadSessionFailsOnEmpty,
     replayLoadSessionUpdates,
     loadReplayText,
@@ -421,6 +431,10 @@ class MockAgent implements Agent {
   async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
     if (!this.options.supportsLoadSession) {
       throw new Error("loadSession is not supported");
+    }
+
+    if (this.options.loadSessionNotFound) {
+      throw RequestError.resourceNotFound(params.sessionId);
     }
 
     const existing = this.sessions.get(params.sessionId);
