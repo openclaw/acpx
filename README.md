@@ -120,6 +120,7 @@ Session state lives in `~/.acpx/` either way. Global install is a little faster,
 
 The only prerequisite is the underlying coding agent you want to use:
 
+- `acpx copilot` -> GitHub Copilot CLI (`copilot --acp --stdio`, requires a release that supports ACP stdio mode): https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line
 - `acpx codex` -> Codex CLI: https://codex.openai.com
 - `acpx claude` -> Claude Code: https://claude.ai/code
 - `acpx gemini` -> Gemini CLI: https://github.com/google/gemini-cli
@@ -163,6 +164,7 @@ acpx codex status                # local process status for current session
 acpx config show                 # show resolved config (global + project)
 acpx config init                 # create ~/.acpx/config.json template
 
+acpx copilot 'summarize recent changes'     # built-in GitHub Copilot agent
 acpx claude 'refactor auth middleware' # built-in claude agent
 acpx gemini 'add startup logging'      # built-in gemini agent
 acpx openclaw exec 'summarize active session state' # built-in OpenClaw ACP bridge
@@ -270,20 +272,23 @@ Session-control JSON payloads (`sessions new|ensure`, `status`) may also include
 
 Built-ins:
 
-| Agent      | Adapter                                                                | Wraps                                                       |
-| ---------- | ---------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `codex`    | [codex-acp](https://github.com/zed-industries/codex-acp)               | [Codex CLI](https://codex.openai.com)                       |
-| `claude`   | [claude-agent-acp](https://github.com/zed-industries/claude-agent-acp) | [Claude Code](https://claude.ai/code)                       |
-| `gemini`   | native                                                                 | [Gemini CLI](https://github.com/google/gemini-cli)          |
-| `openclaw` | native                                                                 | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw) |
-| `opencode` | native                                                                 | [OpenCode](https://opencode.ai)                             |
-| `pi`       | [pi-acp](https://github.com/svkozak/pi-acp)                            | [Pi Coding Agent](https://github.com/mariozechner/pi)       |
+| Agent      | Adapter                                                                | Wraps                                                                                                           |
+| ---------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `copilot`  | native                                                                 | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
+| `codex`    | [codex-acp](https://github.com/zed-industries/codex-acp)               | [Codex CLI](https://codex.openai.com)                                                                           |
+| `claude`   | [claude-agent-acp](https://github.com/zed-industries/claude-agent-acp) | [Claude Code](https://claude.ai/code)                                                                           |
+| `gemini`   | native                                                                 | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
+| `openclaw` | native                                                                 | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
+| `opencode` | native                                                                 | [OpenCode](https://opencode.ai)                                                                                 |
+| `pi`       | [pi-acp](https://github.com/svkozak/pi-acp)                            | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
 
 Use `--agent` as an escape hatch for custom ACP servers:
 
 ```bash
 acpx --agent ./my-custom-acp-server 'do something'
 ```
+
+`acpx copilot` expects a Copilot CLI release with `--acp --stdio` support. Older binaries will fail before ACP startup.
 
 For repo-local OpenClaw checkouts, override the built-in command in config so `acpx openclaw ...`
 spawns the ACP bridge directly without `pnpm` wrapper noise:

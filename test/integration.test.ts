@@ -131,6 +131,68 @@ test("integration: gemini ACP startup timeout is surfaced as actionable error", 
   });
 });
 
+test("integration: copilot ACP unsupported binary is surfaced as actionable error", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-copilot-"));
+    const fakeCopilotPath = path.join(fakeBinDir, "copilot");
+
+    try {
+      await fs.writeFile(
+        fakeCopilotPath,
+        '#!/bin/sh\nif [ "$1" = "--help" ]; then\n  echo \'Usage: copilot [options]\'\n  exit 0\nfi\necho "error: unknown option \'$1\'" 1>&2\nexit 0\n',
+        {
+          encoding: "utf8",
+          mode: 0o755,
+        },
+      );
+
+      const result = await runCli(
+        [
+          "--agent",
+          `${JSON.stringify(fakeCopilotPath)} --acp --stdio`,
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "sessions",
+          "new",
+          "--name",
+          "copilot-timeout",
+        ],
+        homeDir,
+        { timeoutMs: 10_000 },
+      );
+
+      assert.equal(result.code, 1, result.stderr);
+      const payloads = result.stdout
+        .trim()
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              error?: { message?: string; data?: { acpxCode?: string; detailCode?: string } };
+            },
+        );
+      const unsupportedError = payloads.find(
+        (payload) => payload.error?.data?.detailCode === "COPILOT_ACP_UNSUPPORTED",
+      );
+      assert(unsupportedError, result.stdout);
+      assert.equal(unsupportedError.error?.data?.acpxCode, "RUNTIME");
+      assert.equal(unsupportedError.error?.data?.detailCode, "COPILOT_ACP_UNSUPPORTED");
+      assert.match(
+        unsupportedError.error?.message ?? "",
+        /Copilot CLI release that supports --acp --stdio/i,
+      );
+      assert.match(unsupportedError.error?.message ?? "", /Upgrade GitHub Copilot CLI/i);
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: claude ACP session creation timeout is surfaced as actionable error", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

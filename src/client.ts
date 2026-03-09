@@ -35,6 +35,7 @@ import {
   AgentSpawnError,
   AuthPolicyError,
   ClaudeAcpSessionCreateTimeoutError,
+  CopilotAcpUnsupportedError,
   GeminiAcpStartupTimeoutError,
   PermissionPromptUnavailableError,
 } from "./errors.js";
@@ -59,6 +60,7 @@ const AGENT_CLOSE_KILL_GRACE_MS = 1_000;
 const GEMINI_ACP_STARTUP_TIMEOUT_MS = 15_000;
 const CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS = 60_000;
 const GEMINI_VERSION_TIMEOUT_MS = 2_000;
+const COPILOT_HELP_TIMEOUT_MS = 2_000;
 
 type LoadSessionOptions = {
   suppressReplayUpdates?: boolean;
@@ -273,6 +275,10 @@ function isClaudeAcpCommand(command: string, args: readonly string[]): boolean {
   return args.some((arg) => arg.includes("claude-agent-acp"));
 }
 
+function isCopilotAcpCommand(command: string, args: readonly string[]): boolean {
+  return basenameToken(command) === "copilot" && args.includes("--acp");
+}
+
 function resolveGeminiAcpStartupTimeoutMs(): number {
   const raw = process.env.ACPX_GEMINI_ACP_STARTUP_TIMEOUT_MS;
   if (typeof raw === "string" && raw.trim().length > 0) {
@@ -342,6 +348,53 @@ async function detectGeminiVersion(command: string): Promise<string | undefined>
   });
 }
 
+async function readCommandOutput(
+  command: string,
+  args: readonly string[],
+  timeoutMs: number,
+): Promise<string | undefined> {
+  return await new Promise<string | undefined>((resolve) => {
+    const child = spawn(command, [...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (value: string | undefined) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      child.removeAllListeners();
+      child.stdout?.removeAllListeners();
+      child.stderr?.removeAllListeners();
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(undefined);
+    }, timeoutMs);
+
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once("error", () => {
+      finish(undefined);
+    });
+    child.once("close", () => {
+      finish(`${stdout}\n${stderr}`);
+    });
+  });
+}
+
 async function buildGeminiAcpStartupTimeoutMessage(command: string): Promise<string> {
   const parts = [
     "Gemini CLI ACP startup timed out before initialize completed.",
@@ -367,6 +420,32 @@ function buildClaudeAcpSessionCreateTimeoutMessage(): string {
     "This matches the known persistent-session stall seen with some Claude Code and @zed-industries/claude-agent-acp combinations.",
     "In harnessed or non-interactive runs, prefer --approve-all with nonInteractivePermissions=deny, upgrade Claude Code and the Claude ACP adapter, or use acpx claude exec as a one-shot fallback.",
   ].join(" ");
+}
+
+async function buildCopilotAcpUnsupportedMessage(command: string): Promise<string> {
+  const parts = [
+    "GitHub Copilot CLI ACP stdio mode is not available in the installed copilot binary.",
+    "acpx copilot expects a Copilot CLI release that supports --acp --stdio.",
+  ];
+
+  const helpOutput = await readCommandOutput(command, ["--help"], COPILOT_HELP_TIMEOUT_MS);
+  if (typeof helpOutput === "string" && !helpOutput.includes("--acp")) {
+    parts.push("Detected copilot --help output without --acp support.");
+  }
+
+  parts.push(
+    "Upgrade GitHub Copilot CLI to a release with ACP stdio support, or use --agent with another ACP-compatible adapter in the meantime.",
+  );
+  return parts.join(" ");
+}
+
+async function ensureCopilotAcpSupport(command: string): Promise<void> {
+  const helpOutput = await readCommandOutput(command, ["--help"], COPILOT_HELP_TIMEOUT_MS);
+  if (typeof helpOutput === "string" && !helpOutput.includes("--acp")) {
+    throw new CopilotAcpUnsupportedError(await buildCopilotAcpUnsupportedMessage(command), {
+      retryable: false,
+    });
+  }
 }
 
 function toEnvToken(value: string): string {
@@ -546,6 +625,11 @@ export class AcpClient {
     const { command, args } = splitCommandLine(this.options.agentCommand);
     this.log(`spawning agent: ${command} ${args.join(" ")}`);
     const geminiAcp = isGeminiAcpCommand(command, args);
+    const copilotAcp = isCopilotAcpCommand(command, args);
+
+    if (copilotAcp) {
+      await ensureCopilotAcpSupport(command);
+    }
 
     const spawnedChild = spawn(
       command,

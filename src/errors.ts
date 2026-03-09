@@ -73,6 +73,17 @@ export class ClaudeAcpSessionCreateTimeoutError extends AcpxOperationalError {
   }
 }
 
+export class CopilotAcpUnsupportedError extends AcpxOperationalError {
+  constructor(message: string, options?: AcpxErrorOptions) {
+    super(message, {
+      outputCode: "RUNTIME",
+      detailCode: "COPILOT_ACP_UNSUPPORTED",
+      origin: "acp",
+      ...options,
+    });
+  }
+}
+
 export class AuthPolicyError extends AcpxOperationalError {
   constructor(message: string, options?: AcpxErrorOptions) {
     super(message, {
