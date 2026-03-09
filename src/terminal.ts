@@ -4,8 +4,8 @@ import type { Readable } from "node:stream";
 import type {
   CreateTerminalRequest,
   CreateTerminalResponse,
-  KillTerminalCommandRequest,
-  KillTerminalCommandResponse,
+  KillTerminalRequest,
+  KillTerminalResponse,
   ReleaseTerminalRequest,
   ReleaseTerminalResponse,
   TerminalOutputRequest,
@@ -286,7 +286,7 @@ export class TerminalManager {
     return response;
   }
 
-  async killTerminal(params: KillTerminalCommandRequest): Promise<KillTerminalCommandResponse> {
+  async killTerminal(params: KillTerminalRequest): Promise<KillTerminalResponse> {
     const terminal = this.getTerminal(params.terminalId);
     if (!terminal) {
       throw new Error(`Unknown terminal: ${params.terminalId}`);

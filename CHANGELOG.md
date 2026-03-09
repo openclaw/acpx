@@ -6,6 +6,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Upgrade `@agentclientprotocol/sdk` to v0.15.0 and align the CLI with the latest ACP client surface.
 - Add built-in agent support for Copilot, Kiro CLI, and kilocode.
 - Improve runtime performance and queue coordination.
 - Expand direct ACP client, prompt runner, permission, session runtime, and adapter coverage, and enforce coverage in CI.

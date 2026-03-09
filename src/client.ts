@@ -10,8 +10,8 @@ import {
   type CreateTerminalRequest,
   type CreateTerminalResponse,
   type InitializeResponse,
-  type KillTerminalCommandRequest,
-  type KillTerminalCommandResponse,
+  type KillTerminalRequest,
+  type KillTerminalResponse,
   type LoadSessionResponse,
   type PromptResponse,
   type ReadTextFileRequest,
@@ -687,9 +687,7 @@ export class AcpClient {
         ): Promise<WaitForTerminalExitResponse> => {
           return this.handleWaitForTerminalExit(params);
         },
-        killTerminal: async (
-          params: KillTerminalCommandRequest,
-        ): Promise<KillTerminalCommandResponse> => {
+        killTerminal: async (params: KillTerminalRequest): Promise<KillTerminalResponse> => {
           return this.handleKillTerminal(params);
         },
         releaseTerminal: async (
@@ -1283,9 +1281,7 @@ export class AcpClient {
     return await this.terminalManager.waitForTerminalExit(params);
   }
 
-  private async handleKillTerminal(
-    params: KillTerminalCommandRequest,
-  ): Promise<KillTerminalCommandResponse> {
+  private async handleKillTerminal(params: KillTerminalRequest): Promise<KillTerminalResponse> {
     return await this.terminalManager.killTerminal(params);
   }
 
