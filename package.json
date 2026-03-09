@@ -54,7 +54,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",
-    "commander": "^13.0.0",
+    "commander": "^14.0.3",
     "cross-spawn": "^7.0.6",
     "skillflag": "^0.1.4"
   },
