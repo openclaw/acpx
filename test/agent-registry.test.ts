@@ -10,7 +10,7 @@ test("resolveAgentCommand maps known agents to commands", () => {
   const expected = new Map<string, string>([
     ["codex", "npx @zed-industries/codex-acp"],
     ["claude", "npx -y @zed-industries/claude-agent-acp"],
-    ["gemini", "gemini"],
+    ["gemini", "gemini --experimental-acp"],
     ["openclaw", "openclaw acp"],
     ["opencode", "npx -y opencode-ai acp"],
     ["pi", "npx pi-acp"],
