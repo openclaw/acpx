@@ -284,10 +284,6 @@ Built-ins:
 | `opencode` | native                                                                 | [OpenCode](https://opencode.ai)                                                                                 |
 | `pi`       | [pi-acp](https://github.com/svkozak/pi-acp)                            | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
 | `kilocode` | native                                                                 | [Kilocode](https://kilocode.ai)                                                                                 |
-| `opencode` | native                                                                 | [OpenCode](https://opencode.ai)                       |
-| `pi`       | [pi-acp](https://github.com/svkozak/pi-acp)                            | [Pi Coding Agent](https://github.com/mariozechner/pi) |
-| `kilocode` | native                                                                 | [Kilocode](https://kilocode.ai)                       |
->>>>>>> a93dbca (docs: add kilocode to built-in agents table)
 
 Use `--agent` as an escape hatch for custom ACP servers:
 
