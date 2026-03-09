@@ -1,7 +1,5 @@
 # acpx Vision
 
-This is a draft vision for `acpx`.
-
 `acpx` should be the smallest useful ACP client: a lightweight CLI that lets one
 agent talk to another agent through the Agent Client Protocol without PTY
 scraping or adapter-specific glue.
