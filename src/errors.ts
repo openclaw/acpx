@@ -62,6 +62,17 @@ export class GeminiAcpStartupTimeoutError extends AcpxOperationalError {
   }
 }
 
+export class ClaudeAcpSessionCreateTimeoutError extends AcpxOperationalError {
+  constructor(message: string, options?: AcpxErrorOptions) {
+    super(message, {
+      outputCode: "TIMEOUT",
+      detailCode: "CLAUDE_ACP_SESSION_CREATE_TIMEOUT",
+      origin: "acp",
+      ...options,
+    });
+  }
+}
+
 export class AuthPolicyError extends AcpxOperationalError {
   constructor(message: string, options?: AcpxErrorOptions) {
     super(message, {
