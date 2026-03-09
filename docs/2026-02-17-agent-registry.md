@@ -10,8 +10,9 @@ date: 2026-02-17
 `src/agent-registry.ts` defines friendly names:
 
 - `codex -> npx @zed-industries/codex-acp`
+- `copilot -> copilot --acp --stdio`
 - `claude -> npx @zed-industries/claude-agent-acp`
-- `gemini -> gemini`
+- `gemini -> gemini --experimental-acp`
 - `openclaw -> openclaw acp`
 - `opencode -> npx opencode-ai`
 - `pi -> npx pi-acp`
@@ -46,7 +47,7 @@ Rules:
 
 ## Practical guidance
 
-Use built-ins for common adapters (`codex`, `claude`, `gemini`, `openclaw`, `opencode`, `pi`).
+Use built-ins for common adapters (`copilot`, `codex`, `claude`, `gemini`, `openclaw`, `opencode`, `pi`).
 Use `--agent` when you need:
 
 - local development adapters

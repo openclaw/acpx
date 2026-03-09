@@ -101,6 +101,19 @@ acpx --verbose codex 'debug adapter startup issues'
 
 Each agent command supports the same shape.
 
+### `copilot`
+
+```bash
+acpx [global_options] copilot [prompt_options] [prompt_text...]
+acpx [global_options] copilot prompt [prompt_options] [prompt_text...]
+acpx [global_options] copilot exec [prompt_text...]
+acpx [global_options] copilot sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
+```
+
+Built-in command mapping: `copilot -> copilot --acp --stdio`
+
+Requires a GitHub Copilot CLI release that supports ACP stdio mode. Older `copilot` binaries will fail before ACP startup.
+
 ### `codex`
 
 ```bash
@@ -132,7 +145,7 @@ acpx [global_options] gemini exec [prompt_text...]
 acpx [global_options] gemini sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
-Built-in command mapping: `gemini -> gemini`
+Built-in command mapping: `gemini -> gemini --experimental-acp`
 
 ### `openclaw`
 
