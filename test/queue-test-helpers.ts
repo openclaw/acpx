@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { once } from "node:events";
 import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { queueLockFilePath, queueSocketPath } from "../src/queue-paths.js";
 
 export type QueuePaths = {
   lockPath: string;
@@ -12,16 +12,9 @@ export type QueuePaths = {
 };
 
 export function queuePaths(homeDir: string, sessionId: string): QueuePaths {
-  const queueDir = path.join(homeDir, ".acpx", "queues");
-  const queueKey = createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
-  const socketPath =
-    process.platform === "win32"
-      ? `\\\\.\\pipe\\acpx-${queueKey}`
-      : path.join(queueDir, `${queueKey}.sock`);
-  const lockPath = path.join(queueDir, `${queueKey}.lock`);
   return {
-    lockPath,
-    socketPath,
+    lockPath: queueLockFilePath(sessionId, homeDir),
+    socketPath: queueSocketPath(sessionId, homeDir),
   };
 }
 
@@ -97,6 +90,9 @@ export async function cleanupOwnerArtifacts(options: {
 }
 
 export async function listenServer(server: net.Server, socketPath: string): Promise<void> {
+  if (process.platform !== "win32") {
+    await fs.mkdir(path.dirname(socketPath), { recursive: true });
+  }
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {
       reject(error);

@@ -1,7 +1,10 @@
-import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import {
+  queueBaseDir,
+  queueLockFilePath,
+  queueSocketBaseDir,
+  queueSocketPath,
+} from "./queue-paths.js";
 
 const PROCESS_EXIT_GRACE_MS = 1_500;
 const PROCESS_POLL_MS = 50;
@@ -34,26 +37,6 @@ export type QueueOwnerStatus = {
   alive: boolean;
   stale: boolean;
 };
-
-function queueBaseDir(): string {
-  return path.join(os.homedir(), ".acpx", "queues");
-}
-
-function queueKeyForSession(sessionId: string): string {
-  return createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
-}
-
-function queueLockFilePath(sessionId: string): string {
-  return path.join(queueBaseDir(), `${queueKeyForSession(sessionId)}.lock`);
-}
-
-function queueSocketPath(sessionId: string): string {
-  const key = queueKeyForSession(sessionId);
-  if (process.platform === "win32") {
-    return `\\\\.\\pipe\\acpx-${key}`;
-  }
-  return path.join(queueBaseDir(), `${key}.sock`);
-}
 
 function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -105,6 +88,10 @@ function isQueueOwnerHeartbeatStale(owner: QueueOwnerRecord): boolean {
 
 async function ensureQueueDir(): Promise<void> {
   await fs.mkdir(queueBaseDir(), { recursive: true });
+  const socketDir = queueSocketBaseDir();
+  if (socketDir) {
+    await fs.mkdir(socketDir, { recursive: true });
+  }
 }
 
 async function removeSocketFile(socketPath: string): Promise<void> {

@@ -48,15 +48,29 @@ export function queueOwnerRuntimeOptionsFromSend(
   };
 }
 
-export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): void {
-  const payload = JSON.stringify(options);
-  const child = spawn(process.execPath, resolveQueueOwnerSpawnArgs(), {
+export function buildQueueOwnerSpawnOptions(payload: string): {
+  detached: true;
+  stdio: "ignore";
+  env: NodeJS.ProcessEnv;
+  windowsHide: true;
+} {
+  return {
     detached: true,
     stdio: "ignore",
     env: {
       ...process.env,
       ACPX_QUEUE_OWNER_PAYLOAD: payload,
     },
-  });
+    windowsHide: true,
+  };
+}
+
+export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): void {
+  const payload = JSON.stringify(options);
+  const child = spawn(
+    process.execPath,
+    resolveQueueOwnerSpawnArgs(),
+    buildQueueOwnerSpawnOptions(payload),
+  );
   child.unref();
 }

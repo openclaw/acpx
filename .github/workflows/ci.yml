@@ -6,31 +6,149 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: 24
+  PNPM_VERSION: 10.23.0
+
 jobs:
+  scope:
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+      docs_changed: ${{ steps.scope.outputs.docs_changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: false
+          submodules: false
+
+      - name: Detect changed scope
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            BASE_SHA="${{ github.event.before }}"
+            BASE_REF="origin/${{ github.ref_name }}"
+          else
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            BASE_REF="origin/${{ github.event.pull_request.base.ref }}"
+          fi
+
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "${BASE_REF#origin/}" --depth=1
+          fi
+
+          mapfile -t changed_files < <(git diff --name-only "${BASE_SHA}"...HEAD)
+
+          docs_changed=false
+          docs_only=true
+
+          if [ "${#changed_files[@]}" -eq 0 ]; then
+            docs_only=false
+          fi
+
+          for file in "${changed_files[@]}"; do
+            case "$file" in
+              docs/**|README.md|CONTRIBUTING.md)
+                docs_changed=true
+                ;;
+              *)
+                docs_only=false
+                ;;
+            esac
+          done
+
+          echo "docs_only=${docs_only}" >> "$GITHUB_OUTPUT"
+          echo "docs_changed=${docs_changed}" >> "$GITHUB_OUTPUT"
+
   checks:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.name }}
+    needs: scope
+    if: needs.scope.outputs.docs_only != 'true'
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Format
+            command: pnpm run format:check
+          - name: Typecheck
+            command: pnpm run typecheck
+          - name: Lint
+            command: pnpm run lint
+          - name: Build
+            command: pnpm run build
+          - name: Test
+            command: pnpm run test
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+          submodules: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.23.0
+          version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: ${{ env.NODE_VERSION }}
           check-latest: true
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check
-        run: pnpm run check
+      - name: Run ${{ matrix.name }}
+        run: ${{ matrix.command }}
+
+  check-docs:
+    name: Docs
+    needs: scope
+    if: needs.scope.outputs.docs_changed == 'true'
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+          submodules: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          check-latest: true
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Check docs
         run: pnpm run check:docs

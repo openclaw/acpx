@@ -12,6 +12,7 @@ date: 2026-02-17
 - `codex -> npx @zed-industries/codex-acp`
 - `claude -> npx @zed-industries/claude-agent-acp`
 - `gemini -> gemini`
+- `openclaw -> openclaw acp`
 - `opencode -> npx opencode-ai`
 - `pi -> npx pi-acp`
 
@@ -45,9 +46,10 @@ Rules:
 
 ## Practical guidance
 
-Use built-ins for common adapters (`codex`, `claude`, `gemini`, `opencode`, `pi`).
+Use built-ins for common adapters (`codex`, `claude`, `gemini`, `openclaw`, `opencode`, `pi`).
 Use `--agent` when you need:
 
 - local development adapters
+- repo-local OpenClaw bridge commands such as `pnpm openclaw acp --session agent:main:main`
 - pinned binaries/scripts
 - non-standard ACP servers

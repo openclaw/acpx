@@ -1,8 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import net from "node:net";
-import os from "node:os";
-import path from "node:path";
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { QueueConnectionError, QueueProtocolError } from "./errors.js";
 import {
@@ -17,6 +15,12 @@ import {
   type QueueSetModeRequest,
   type QueueSubmitRequest,
 } from "./queue-messages.js";
+import {
+  queueBaseDir,
+  queueLockFilePath,
+  queueSocketBaseDir,
+  queueSocketPath,
+} from "./queue-paths.js";
 import type {
   NonInteractivePermissionPolicy,
   OutputErrorEmissionPolicy,
@@ -30,10 +34,6 @@ const PROCESS_EXIT_GRACE_MS = 1_500;
 const PROCESS_POLL_MS = 50;
 const QUEUE_CONNECT_ATTEMPTS = 40;
 export const QUEUE_CONNECT_RETRY_MS = 50;
-
-function queueBaseDir(): string {
-  return path.join(os.homedir(), ".acpx", "queues");
-}
 
 const STALE_OWNER_PROTOCOL_DETAIL_CODES = new Set([
   "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
@@ -167,24 +167,12 @@ function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
   };
 }
 
-function queueKeyForSession(sessionId: string): string {
-  return createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
-}
-
-function queueLockFilePath(sessionId: string): string {
-  return path.join(queueBaseDir(), `${queueKeyForSession(sessionId)}.lock`);
-}
-
-function queueSocketPath(sessionId: string): string {
-  const key = queueKeyForSession(sessionId);
-  if (process.platform === "win32") {
-    return `\\\\.\\pipe\\acpx-${key}`;
-  }
-  return path.join(queueBaseDir(), `${key}.sock`);
-}
-
 async function ensureQueueDir(): Promise<void> {
   await fs.mkdir(queueBaseDir(), { recursive: true });
+  const socketDir = queueSocketBaseDir();
+  if (socketDir) {
+    await fs.mkdir(socketDir, { recursive: true });
+  }
 }
 
 async function removeSocketFile(socketPath: string): Promise<void> {

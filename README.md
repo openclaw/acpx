@@ -18,7 +18,7 @@ Your agents love acpx! 🤖❤️ They hate having to scrape characters from a P
 
 `acpx` is a headless CLI client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com), so AI agents and orchestrators can talk to coding agents over a structured protocol instead of PTY scraping.
 
-One command surface for Codex, Claude, Gemini, OpenCode, Pi, or custom ACP servers. Built for agent-to-agent communication over the command line.
+One command surface for Codex, Claude, Gemini, OpenClaw ACP, OpenCode, Pi, or custom ACP servers. Built for agent-to-agent communication over the command line.
 
 - **Persistent sessions**: multi-turn conversations that survive across invocations, scoped per repo
 - **Named sessions**: run parallel workstreams in the same repo (`-s backend`, `-s frontend`)
@@ -123,6 +123,7 @@ The only prerequisite is the underlying coding agent you want to use:
 - `acpx codex` -> Codex CLI: https://codex.openai.com
 - `acpx claude` -> Claude Code: https://claude.ai/code
 - `acpx gemini` -> Gemini CLI: https://github.com/google/gemini-cli
+- `acpx openclaw` -> OpenClaw ACP bridge: https://github.com/openclaw/openclaw
 - `acpx opencode` -> OpenCode: https://opencode.ai
 - `acpx pi` -> Pi Coding Agent: https://github.com/mariozechner/pi
 
@@ -164,6 +165,7 @@ acpx config init                 # create ~/.acpx/config.json template
 
 acpx claude 'refactor auth middleware' # built-in claude agent
 acpx gemini 'add startup logging'      # built-in gemini agent
+acpx openclaw exec 'summarize active session state' # built-in OpenClaw ACP bridge
 
 acpx my-agent 'review this patch'                      # unknown name -> raw command
 acpx --agent './bin/dev-acp --profile ci' 'run checks' # --agent escape hatch
@@ -268,18 +270,32 @@ Session-control JSON payloads (`sessions new|ensure`, `status`) may also include
 
 Built-ins:
 
-| Agent      | Adapter                                                                | Wraps                                                 |
-| ---------- | ---------------------------------------------------------------------- | ----------------------------------------------------- |
-| `codex`    | [codex-acp](https://github.com/zed-industries/codex-acp)               | [Codex CLI](https://codex.openai.com)                 |
-| `claude`   | [claude-agent-acp](https://github.com/zed-industries/claude-agent-acp) | [Claude Code](https://claude.ai/code)                 |
-| `gemini`   | native                                                                 | [Gemini CLI](https://github.com/google/gemini-cli)    |
-| `opencode` | native                                                                 | [OpenCode](https://opencode.ai)                       |
-| `pi`       | [pi-acp](https://github.com/svkozak/pi-acp)                            | [Pi Coding Agent](https://github.com/mariozechner/pi) |
+| Agent      | Adapter                                                                | Wraps                                                       |
+| ---------- | ---------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `codex`    | [codex-acp](https://github.com/zed-industries/codex-acp)               | [Codex CLI](https://codex.openai.com)                       |
+| `claude`   | [claude-agent-acp](https://github.com/zed-industries/claude-agent-acp) | [Claude Code](https://claude.ai/code)                       |
+| `gemini`   | native                                                                 | [Gemini CLI](https://github.com/google/gemini-cli)          |
+| `openclaw` | native                                                                 | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw) |
+| `opencode` | native                                                                 | [OpenCode](https://opencode.ai)                             |
+| `pi`       | [pi-acp](https://github.com/svkozak/pi-acp)                            | [Pi Coding Agent](https://github.com/mariozechner/pi)       |
 
 Use `--agent` as an escape hatch for custom ACP servers:
 
 ```bash
 acpx --agent ./my-custom-acp-server 'do something'
+```
+
+For repo-local OpenClaw checkouts, override the built-in command in config so `acpx openclaw ...`
+spawns the ACP bridge directly without `pnpm` wrapper noise:
+
+```json
+{
+  "agents": {
+    "openclaw": {
+      "command": "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 node scripts/run-node.mjs acp --url ws://127.0.0.1:18789 --token-file ~/.openclaw/gateway.token --session agent:main:main"
+    }
+  }
+}
 ```
 
 ## Session behavior

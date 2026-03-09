@@ -300,6 +300,23 @@ function buildAgentEnvironment(
   return env;
 }
 
+export function buildAgentSpawnOptions(
+  cwd: string,
+  authCredentials: Record<string, string> | undefined,
+): {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  stdio: ["pipe", "pipe", "pipe"];
+  windowsHide: true;
+} {
+  return {
+    cwd,
+    env: buildAgentEnvironment(authCredentials),
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  };
+}
+
 export class AcpClient {
   private readonly options: AcpClientOptions;
   private connection?: ClientSideConnection;
@@ -400,11 +417,11 @@ export class AcpClient {
     const { command, args } = splitCommandLine(this.options.agentCommand);
     this.log(`spawning agent: ${command} ${args.join(" ")}`);
 
-    const child = spawn(command, args, {
-      cwd: this.options.cwd,
-      env: buildAgentEnvironment(this.options.authCredentials),
-      stdio: ["pipe", "pipe", "pipe"],
-    }) as ChildProcessByStdio<Writable, Readable, Readable>;
+    const child = spawn(
+      command,
+      args,
+      buildAgentSpawnOptions(this.options.cwd, this.options.authCredentials),
+    );
 
     try {
       await waitForSpawn(child);

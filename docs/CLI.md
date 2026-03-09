@@ -42,7 +42,7 @@ acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--n
 
 `<agent>` can be:
 
-- built-in friendly name: `codex`, `claude`, `gemini`, `opencode`, `pi`
+- built-in friendly name: `codex`, `claude`, `gemini`, `openclaw`, `opencode`, `pi`
 - unknown token (treated as raw command)
 - overridden by `--agent <command>` escape hatch
 
@@ -133,6 +133,29 @@ acpx [global_options] gemini sessions [list | new [--name <name>] | ensure [--na
 ```
 
 Built-in command mapping: `gemini -> gemini`
+
+### `openclaw`
+
+```bash
+acpx [global_options] openclaw [prompt_options] [prompt_text...]
+acpx [global_options] openclaw prompt [prompt_options] [prompt_text...]
+acpx [global_options] openclaw exec [prompt_text...]
+acpx [global_options] openclaw sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
+```
+
+Built-in command mapping: `openclaw -> openclaw acp`
+
+For repo-local OpenClaw checkouts, override the built-in command in config:
+
+```json
+{
+  "agents": {
+    "openclaw": {
+      "command": "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 node scripts/run-node.mjs acp --url ws://127.0.0.1:18789 --token-file ~/.openclaw/gateway.token --session agent:main:main"
+    }
+  }
+}
+```
 
 ### Custom positional agents
 
