@@ -69,6 +69,7 @@ import {
   SESSION_RECORD_SCHEMA,
   type AcpJsonRpcMessage,
   type AuthPolicy,
+  type McpServer,
   type NonInteractivePermissionPolicy,
   type OutputErrorEmissionPolicy,
   type OutputErrorAcpPayload,
@@ -94,10 +95,17 @@ type TimedRunOptions = {
   timeoutMs?: number;
 };
 
+export type SessionAgentOptions = {
+  model?: string;
+  allowedTools?: string[];
+  maxTurns?: number;
+};
+
 export type RunOnceOptions = {
   agentCommand: string;
   cwd: string;
   message: string;
+  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -105,22 +113,27 @@ export type RunOnceOptions = {
   outputFormatter: OutputFormatter;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
+  sessionOptions?: SessionAgentOptions;
 } & TimedRunOptions;
 
 export type SessionCreateOptions = {
   agentCommand: string;
   cwd: string;
   name?: string;
+  resumeSessionId?: string;
+  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   verbose?: boolean;
+  sessionOptions?: SessionAgentOptions;
 } & TimedRunOptions;
 
 export type SessionSendOptions = {
   sessionId: string;
   message: string;
+  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -138,12 +151,15 @@ export type SessionEnsureOptions = {
   agentCommand: string;
   cwd: string;
   name?: string;
+  resumeSessionId?: string;
+  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   verbose?: boolean;
   walkBoundary?: string;
+  sessionOptions?: SessionAgentOptions;
 } & TimedRunOptions;
 
 export type SessionCancelOptions = {
@@ -159,6 +175,7 @@ export type SessionCancelResult = {
 export type SessionSetModeOptions = {
   sessionId: string;
   modeId: string;
+  mcpServers?: McpServer[];
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
@@ -169,6 +186,7 @@ export type SessionSetConfigOptionOptions = {
   sessionId: string;
   configId: string;
   value: string;
+  mcpServers?: McpServer[];
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
@@ -190,6 +208,7 @@ function toPromptResult(
 type RunSessionPromptOptions = {
   sessionRecordId: string;
   message: string;
+  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -286,6 +305,7 @@ async function runQueuedTask(
   options: {
     sharedClient?: AcpClient;
     verbose?: boolean;
+    mcpServers?: McpServer[];
     nonInteractivePermissions?: NonInteractivePermissionPolicy;
     authCredentials?: Record<string, string>;
     authPolicy?: AuthPolicy;
@@ -303,6 +323,7 @@ async function runQueuedTask(
     const result = await runSessionPrompt({
       sessionRecordId,
       message: task.message,
+      mcpServers: options.mcpServers,
       permissionMode: task.permissionMode,
       nonInteractivePermissions:
         task.nonInteractivePermissions ?? options.nonInteractivePermissions,
@@ -400,6 +421,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     new AcpClient({
       agentCommand: record.agentCommand,
       cwd: absolutePath(record.cwd),
+      mcpServers: options.mcpServers,
       permissionMode: options.permissionMode,
       nonInteractivePermissions: options.nonInteractivePermissions,
       authCredentials: options.authCredentials,
@@ -607,6 +629,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
   const client = new AcpClient({
     agentCommand: options.agentCommand,
     cwd: absolutePath(options.cwd),
+    mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
@@ -614,6 +637,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
     onAcpOutputMessage: (_direction, message) => output.onAcpMessage(message),
+    sessionOptions: options.sessionOptions,
   });
 
   try {
@@ -654,29 +678,55 @@ export async function createSession(options: SessionCreateOptions): Promise<Sess
   const client = new AcpClient({
     agentCommand: options.agentCommand,
     cwd: absolutePath(options.cwd),
+    mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     verbose: options.verbose,
+    sessionOptions: options.sessionOptions,
   });
 
   try {
     return await withInterrupt(
       async () => {
+        const cwd = absolutePath(options.cwd);
         await measurePerf("runtime.session_create.start", async () => {
           await withTimeout(client.start(), options.timeoutMs);
         });
-        const createdSession = await measurePerf(
-          "runtime.session_create.create_session",
-          async () => {
-            return await withTimeout(
-              client.createSession(absolutePath(options.cwd)),
+        let sessionId: string;
+        let agentSessionId: string | undefined;
+
+        if (options.resumeSessionId) {
+          if (!client.supportsLoadSession()) {
+            throw new Error(
+              `Agent command "${options.agentCommand}" does not support session/load; cannot resume session ${options.resumeSessionId}`,
+            );
+          }
+
+          try {
+            const loadedSession = await withTimeout(
+              client.loadSession(options.resumeSessionId, cwd),
               options.timeoutMs,
             );
-          },
-        );
-        const sessionId = createdSession.sessionId;
+            sessionId = options.resumeSessionId;
+            agentSessionId = normalizeRuntimeSessionId(loadedSession.agentSessionId);
+          } catch (error) {
+            throw new Error(
+              `Failed to resume ACP session ${options.resumeSessionId}: ${formatErrorMessage(error)}`,
+              {
+                cause: error,
+              },
+            );
+          }
+        } else {
+          const createdSession = await measurePerf(
+            "runtime.session_create.create_session",
+            async () => await withTimeout(client.createSession(cwd), options.timeoutMs),
+          );
+          sessionId = createdSession.sessionId;
+          agentSessionId = normalizeRuntimeSessionId(createdSession.agentSessionId);
+        }
         const lifecycle = client.getAgentLifecycleSnapshot();
 
         const now = isoNow();
@@ -684,9 +734,9 @@ export async function createSession(options: SessionCreateOptions): Promise<Sess
           schema: SESSION_RECORD_SCHEMA,
           acpxRecordId: sessionId,
           acpSessionId: sessionId,
-          agentSessionId: normalizeRuntimeSessionId(createdSession.agentSessionId),
+          agentSessionId,
           agentCommand: options.agentCommand,
-          cwd: absolutePath(options.cwd),
+          cwd,
           name: normalizeName(options.name),
           createdAt: now,
           lastUsedAt: now,
@@ -736,12 +786,15 @@ export async function ensureSession(options: SessionEnsureOptions): Promise<Sess
     agentCommand: options.agentCommand,
     cwd,
     name: options.name,
+    resumeSessionId: options.resumeSessionId,
+    mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
+    sessionOptions: options.sessionOptions,
   });
 
   return {
@@ -780,6 +833,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
   const sharedClient = new AcpClient({
     agentCommand: sessionRecord.agentCommand,
     cwd: absolutePath(sessionRecord.cwd),
+    mcpServers: options.mcpServers,
     permissionMode: "approve-reads",
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
@@ -798,6 +852,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
       await runSessionSetModeDirect({
         sessionRecordId: options.sessionId,
         modeId,
+        mcpServers: options.mcpServers,
         nonInteractivePermissions: options.nonInteractivePermissions,
         authCredentials: options.authCredentials,
         authPolicy: options.authPolicy,
@@ -810,6 +865,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
         sessionRecordId: options.sessionId,
         configId,
         value,
+        mcpServers: options.mcpServers,
         nonInteractivePermissions: options.nonInteractivePermissions,
         authCredentials: options.authCredentials,
         authPolicy: options.authPolicy,
@@ -910,6 +966,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
           await runQueuedTask(options.sessionId, task, {
             sharedClient,
             verbose: options.verbose,
+            mcpServers: options.mcpServers,
             nonInteractivePermissions: options.nonInteractivePermissions,
             authCredentials: options.authCredentials,
             authPolicy: options.authPolicy,
@@ -945,19 +1002,6 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
       // best effort — session may already be cleaned up
     }
     await releaseQueueOwnerLease(lease);
-
-    // Auto-close the session when the queue owner shuts down and the agent
-    // has exited, preventing zombie session accumulation (#47).
-    try {
-      const record = await resolveSessionRecord(options.sessionId);
-      if (!record.closed && record.lastAgentExitAt) {
-        record.closed = true;
-        record.closedAt = isoNow();
-        await writeSessionRecord(record);
-      }
-    } catch {
-      // best effort — session may already be cleaned up
-    }
 
     if (options.verbose) {
       process.stderr.write(`[acpx] queue owner stopped for session ${options.sessionId}\n`);
@@ -1018,6 +1062,7 @@ export async function setSessionMode(
   return await runSessionSetModeDirect({
     sessionRecordId: options.sessionId,
     modeId: options.modeId,
+    mcpServers: options.mcpServers,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
@@ -1053,6 +1098,7 @@ export async function setSessionConfigOption(
     sessionRecordId: options.sessionId,
     configId: options.configId,
     value: options.value,
+    mcpServers: options.mcpServers,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,

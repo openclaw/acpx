@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { AGENT_REGISTRY } from "../src/agent-registry.js";
 import { defaultSessionEventLog } from "../src/session-event-log.js";
 import { SessionEventWriter, listSessionEvents } from "../src/session-events.js";
 import { resolveSessionRecord, writeSessionRecord } from "../src/session-persistence.js";
@@ -31,7 +32,7 @@ function makeSessionRecord(sessionId: string, cwd: string, maxSegments: number):
     schema: "acpx.session.v1",
     acpxRecordId: sessionId,
     acpSessionId: sessionId,
-    agentCommand: "npx @zed-industries/codex-acp",
+    agentCommand: AGENT_REGISTRY.codex,
     cwd,
     createdAt: now,
     lastUsedAt: now,

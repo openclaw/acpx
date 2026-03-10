@@ -2,8 +2,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DEFAULT_AGENT_NAME, normalizeAgentName } from "./agent-registry.js";
+import { parseMcpServers } from "./mcp-servers.js";
 import type {
   AuthPolicy,
+  McpServer,
   NonInteractivePermissionPolicy,
   OutputFormat,
   PermissionMode,
@@ -24,6 +26,8 @@ type ConfigFileShape = {
   format?: unknown;
   agents?: unknown;
   auth?: unknown;
+  disableExec?: unknown;
+  mcpServers?: unknown;
 };
 
 export type ResolvedAcpxConfig = {
@@ -37,6 +41,8 @@ export type ResolvedAcpxConfig = {
   format: OutputFormat;
   agents: Record<string, string>;
   auth: Record<string, string>;
+  disableExec: boolean;
+  mcpServers: McpServer[];
   globalPath: string;
   projectPath: string;
   hasGlobalConfig: boolean;
@@ -55,6 +61,7 @@ const DEFAULT_NON_INTERACTIVE_PERMISSION_POLICY: NonInteractivePermissionPolicy 
 const DEFAULT_AUTH_POLICY: AuthPolicy = "skip";
 const DEFAULT_OUTPUT_FORMAT: OutputFormat = "text";
 const DEFAULT_QUEUE_MAX_DEPTH = 16;
+const DEFAULT_DISABLE_EXEC = false;
 const VALID_PERMISSION_MODES = new Set<PermissionMode>([
   "approve-all",
   "approve-reads",
@@ -216,6 +223,16 @@ function parseAuth(value: unknown, sourcePath: string): Record<string, string> |
   return parsed;
 }
 
+function parseDisableExec(value: unknown, sourcePath: string): boolean | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`Invalid config disableExec in ${sourcePath}: expected boolean`);
+  }
+  return value;
+}
+
 async function readConfigFile(filePath: string): Promise<ConfigFileLoadResult> {
   try {
     const payload = await fs.readFile(filePath, "utf8");
@@ -331,6 +348,22 @@ export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfi
     parseAuth(projectConfig?.auth, projectPath),
   );
 
+  const mcpServersConfiguredInProject =
+    projectConfig != null && Object.prototype.hasOwnProperty.call(projectConfig, "mcpServers");
+  const mcpServersConfiguredInGlobal =
+    globalConfig != null && Object.prototype.hasOwnProperty.call(globalConfig, "mcpServers");
+  let mcpServers: McpServer[] = [];
+  if (mcpServersConfiguredInProject) {
+    mcpServers = parseMcpServers(projectConfig?.mcpServers, projectPath);
+  } else if (mcpServersConfiguredInGlobal) {
+    mcpServers = parseMcpServers(globalConfig?.mcpServers, globalPath);
+  }
+
+  const disableExec =
+    parseDisableExec(projectConfig?.disableExec, projectPath) ??
+    parseDisableExec(globalConfig?.disableExec, globalPath) ??
+    DEFAULT_DISABLE_EXEC;
+
   return {
     defaultAgent,
     defaultPermissions,
@@ -342,6 +375,8 @@ export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfi
     format,
     agents,
     auth,
+    disableExec,
+    mcpServers,
     globalPath,
     projectPath,
     hasGlobalConfig: globalResult.exists,
@@ -360,6 +395,7 @@ export function toConfigDisplay(config: ResolvedAcpxConfig): {
   format: OutputFormat;
   agents: Record<string, ConfigAgentEntry>;
   authMethods: string[];
+  disableExec: boolean;
 } {
   const agents: Record<string, ConfigAgentEntry> = {};
   for (const [name, command] of Object.entries(config.agents)) {
@@ -377,6 +413,7 @@ export function toConfigDisplay(config: ResolvedAcpxConfig): {
     format: config.format,
     agents,
     authMethods: Object.keys(config.auth).toSorted(),
+    disableExec: config.disableExec,
   };
 }
 

@@ -45,6 +45,76 @@ test("integration: exec echo baseline", async () => {
   });
 });
 
+test("integration: built-in cursor agent resolves to cursor-agent acp", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-cursor-"));
+
+    try {
+      await writeFakeCursorAgent(fakeBinDir);
+
+      const result = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "quiet", "cursor", "exec", "echo hello"],
+        homeDir,
+        {
+          env: {
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /hello/);
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: exec forwards model, allowed-tools, and max-turns in session/new _meta", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "json",
+          "--model",
+          "sonnet",
+          "--allowed-tools",
+          "Read,Grep",
+          "--max-turns",
+          "7",
+          "exec",
+          "echo hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const createRequest = payloads.find((payload) => payload.method === "session/new") as
+        | { params?: { _meta?: unknown } }
+        | undefined;
+      assert(createRequest, result.stdout);
+      assert.deepEqual(createRequest.params?._meta, {
+        claudeCode: {
+          options: {
+            model: "sonnet",
+            allowedTools: ["Read", "Grep"],
+            maxTurns: 7,
+          },
+        },
+      });
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: perf metrics capture writes ndjson records for CLI runs", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -250,6 +320,113 @@ test("integration: perf metrics capture preserves SIGTERM termination semantics"
   }
 });
 
+test("integration: configured mcpServers are sent to session/new and session/load", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const loadCapableAgentCommand = `${MOCK_AGENT_COMMAND} --supports-load-session`;
+    const loadCapableAgentArgs = [
+      "--agent",
+      loadCapableAgentCommand,
+      "--approve-all",
+      "--cwd",
+      cwd,
+    ];
+    let sessionId: string | undefined;
+
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          mcpServers: [
+            {
+              name: "linear-http",
+              type: "http",
+              url: "https://example.com/mcp",
+            },
+            {
+              name: "local-stdio",
+              type: "stdio",
+              command: "./bin/local-mcp",
+              args: ["--serve"],
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const expectedMcpServers = [
+      {
+        name: "linear-http",
+        type: "http",
+        url: "https://example.com/mcp",
+        headers: [],
+      },
+      {
+        name: "local-stdio",
+        command: "./bin/local-mcp",
+        args: ["--serve"],
+        env: [],
+      },
+    ];
+
+    try {
+      const execResult = await runCli(
+        [...loadCapableAgentArgs, "--format", "json", "exec", "echo mcp-new"],
+        homeDir,
+      );
+      assert.equal(execResult.code, 0, execResult.stderr);
+      const execMessages = parseJsonRpcOutputLines(execResult.stdout);
+      const newSessionRequest = execMessages.find(
+        (message) => message.method === "session/new" && extractJsonRpcId(message) !== undefined,
+      );
+      assert(newSessionRequest, `expected session/new request in output:\n${execResult.stdout}`);
+      assert.deepEqual(
+        (newSessionRequest.params as { mcpServers?: unknown } | undefined)?.mcpServers,
+        expectedMcpServers,
+      );
+
+      const created = await runCli(
+        [...loadCapableAgentArgs, "--format", "json", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+      const createdPayload = JSON.parse(created.stdout.trim()) as {
+        acpxRecordId?: string;
+      };
+      sessionId = createdPayload.acpxRecordId;
+      assert.equal(typeof sessionId, "string");
+
+      const promptResult = await runCli(
+        [...loadCapableAgentArgs, "--format", "json", "prompt", "echo mcp-load"],
+        homeDir,
+      );
+      assert.equal(promptResult.code, 0, promptResult.stderr);
+
+      const promptMessages = parseJsonRpcOutputLines(promptResult.stdout);
+      const loadSessionRequest = promptMessages.find(
+        (message) => message.method === "session/load" && extractJsonRpcId(message) !== undefined,
+      );
+      assert(
+        loadSessionRequest,
+        `expected session/load request in output:\n${promptResult.stdout}`,
+      );
+      assert.deepEqual(
+        (loadSessionRequest.params as { mcpServers?: unknown } | undefined)?.mcpServers,
+        expectedMcpServers,
+      );
+    } finally {
+      if (sessionId) {
+        await runCli([...loadCapableAgentArgs, "--format", "json", "sessions", "close"], homeDir);
+      }
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: timeout emits structured TIMEOUT json error", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -282,11 +459,11 @@ test("integration: timeout emits structured TIMEOUT json error", async () => {
   });
 });
 
-test("integration: gemini ACP startup timeout is surfaced as actionable error", async () => {
+test("integration: gemini ACP startup timeout is surfaced as actionable error for gemini.cmd too", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-gemini-"));
-    const fakeGeminiPath = path.join(fakeBinDir, "gemini");
+    const fakeGeminiPath = path.join(fakeBinDir, "gemini.cmd");
     const previousTimeout = process.env.ACPX_GEMINI_ACP_STARTUP_TIMEOUT_MS;
 
     try {
@@ -1127,7 +1304,7 @@ test("integration: prompt exits after done while detached owner stays warm", asy
   });
 });
 
-test("integration: session auto-closes when queue owner exits and agent has exited (#47)", async () => {
+test("integration: session remains resumable after queue owner exits and agent has exited", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
 
@@ -1185,8 +1362,8 @@ test("integration: session auto-closes when queue owner exits and agent has exit
         last_agent_exit_code?: number | null;
       };
 
-      // 5. After the fix for #47, the queue owner auto-closes the session
-      //    when it shuts down and the agent has exited.
+      // 5. Routine queue-owner shutdown must not permanently close
+      //    a resumable persistent session.
       assert.equal(
         storedRecord.last_agent_exit_at != null,
         true,
@@ -1195,14 +1372,14 @@ test("integration: session auto-closes when queue owner exits and agent has exit
 
       assert.equal(
         storedRecord.closed,
-        true,
-        "session should be auto-closed after agent exit and queue owner shutdown (#47)",
+        false,
+        "session should remain resumable after queue owner shutdown",
       );
 
       assert.equal(
-        typeof storedRecord.closed_at,
-        "string",
-        "closed_at should be set when session is auto-closed",
+        storedRecord.closed_at,
+        undefined,
+        "closed_at should remain unset for resumable sessions",
       );
     } finally {
       // Clean up: close session if it's still around
@@ -1220,6 +1397,36 @@ function baseAgentArgs(cwd: string): string[] {
 
 function baseExecArgs(cwd: string): string[] {
   return [...baseAgentArgs(cwd), "--format", "quiet", "exec"];
+}
+
+async function writeFakeCursorAgent(binDir: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(binDir, "cursor-agent.cmd"),
+      [
+        "@echo off",
+        "setlocal",
+        'if "%~1"=="acp" shift',
+        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
+        "",
+      ].join("\r\n"),
+      { encoding: "utf8" },
+    );
+    return;
+  }
+
+  await fs.writeFile(
+    path.join(binDir, "cursor-agent"),
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "acp" ]; then',
+      "  shift",
+      "fi",
+      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
+      "",
+    ].join("\n"),
+    { encoding: "utf8", mode: 0o755 },
+  );
 }
 
 async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {

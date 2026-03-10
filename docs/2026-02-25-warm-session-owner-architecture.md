@@ -272,7 +272,7 @@ Structured logs should always include:
 
 For startup speed and determinism:
 
-- prefer direct adapter binaries in config (for example `codex-acp`, `claude-agent-acp`, `opencode acp`)
+- prefer direct adapter binaries in config (for example `pi-acp`, `codex-acp`, `claude-agent-acp`)
 - keep `npx -y ...` only as fallback defaults
 - recommend preinstall + prewarm for high-traffic adapters
 

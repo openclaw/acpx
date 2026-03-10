@@ -28,7 +28,7 @@ For the current maintainer list, check the original OpenClaw contributing guide:
 - Run tests: `pnpm build && pnpm check && pnpm test:coverage`
 - Ensure CI checks pass
 - Keep PRs focused (one thing per PR; do not mix unrelated concerns)
-- Keep adapter names, adapter lists, and adapter registry examples in A-Z order where practical
+- Keep built-in agent docs, examples, and links consistent with the existing docs structure.
 - Describe what & why
 - Reply to or resolve bot review conversations you addressed before asking for review again
 - **Include screenshots** — one showing the problem/before, one showing the fix/after (for UI or visual changes)

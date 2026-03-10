@@ -5,6 +5,7 @@ import { Readable, Writable } from "node:stream";
 import {
   AgentSideConnection,
   PROTOCOL_VERSION,
+  RequestError,
   ndJsonStream,
   type Agent,
   type AgentSideConnection as AgentConnection,
@@ -32,7 +33,9 @@ type MockAgentOptions = {
   newSessionMeta?: Record<string, string>;
   loadSessionMeta?: Record<string, string>;
   supportsLoadSession: boolean;
+  loadSessionNotFound: boolean;
   loadSessionFailsOnEmpty: boolean;
+  setSessionModeFails: boolean;
   replayLoadSessionUpdates: boolean;
   loadReplayText: string;
   ignoreSigterm: boolean;
@@ -262,7 +265,9 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   const newSessionMeta: Record<string, string> = {};
   const loadSessionMeta: Record<string, string> = {};
   let supportsLoadSession = false;
+  let loadSessionNotFound = false;
   let loadSessionFailsOnEmpty = false;
+  let setSessionModeFails = false;
   let replayLoadSessionUpdates = false;
   let loadReplayText = "replayed load session update";
   let ignoreSigterm = false;
@@ -279,6 +284,17 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     if (token === "--load-session-fails-on-empty") {
       supportsLoadSession = true;
       loadSessionFailsOnEmpty = true;
+      continue;
+    }
+
+    if (token === "--load-session-not-found") {
+      supportsLoadSession = true;
+      loadSessionNotFound = true;
+      continue;
+    }
+
+    if (token === "--set-session-mode-fails") {
+      setSessionModeFails = true;
       continue;
     }
 
@@ -329,7 +345,9 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     newSessionMeta: Object.keys(newSessionMeta).length > 0 ? { ...newSessionMeta } : undefined,
     loadSessionMeta: Object.keys(loadSessionMeta).length > 0 ? { ...loadSessionMeta } : undefined,
     supportsLoadSession,
+    loadSessionNotFound,
     loadSessionFailsOnEmpty,
+    setSessionModeFails,
     replayLoadSessionUpdates,
     loadReplayText,
     ignoreSigterm,
@@ -423,6 +441,10 @@ class MockAgent implements Agent {
       throw new Error("loadSession is not supported");
     }
 
+    if (this.options.loadSessionNotFound) {
+      throw RequestError.resourceNotFound(params.sessionId);
+    }
+
     const existing = this.sessions.get(params.sessionId);
     if (this.options.loadSessionFailsOnEmpty && (!existing || !existing.hasCompletedPrompt)) {
       const error = new Error("Internal error") as Error & {
@@ -489,6 +511,9 @@ class MockAgent implements Agent {
 
   async setSessionMode(params: SetSessionModeRequest): Promise<SetSessionModeResponse> {
     const session = this.ensureSession(params.sessionId);
+    if (this.options.setSessionModeFails) {
+      throw new Error("setSessionMode failed");
+    }
     session.modeId = params.modeId;
     return {};
   }

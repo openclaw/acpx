@@ -98,7 +98,7 @@ If local command output is needed for non-ACP commands, that output is not part 
   "acp_session_id": "019c....",
   "agent_session_id": "019c....",
 
-  "agent_command": "npx codex-acp",
+  "agent_command": "npx @zed-industries/codex-acp",
   "cwd": "/repo",
   "name": "my-session",
 

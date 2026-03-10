@@ -8,7 +8,13 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { InvalidArgumentError } from "commander";
-import { formatPromptSessionBannerLine, parseTtlSeconds } from "../src/cli.js";
+import { AGENT_REGISTRY } from "../src/agent-registry.js";
+import {
+  formatPromptSessionBannerLine,
+  parseAllowedTools,
+  parseMaxTurns,
+  parseTtlSeconds,
+} from "../src/cli.js";
 import { serializeSessionRecordForDisk } from "../src/session-persistence.js";
 import type { SessionRecord } from "../src/types.js";
 import {
@@ -50,7 +56,12 @@ const MOCK_AGENT_IGNORING_SIGTERM = `${MOCK_AGENT_COMMAND} --ignore-sigterm`;
 const MOCK_CODEX_AGENT_WITH_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --codex-session-id codex-runtime-session`;
 const MOCK_CLAUDE_AGENT_WITH_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --claude-session-id claude-runtime-session`;
 const MOCK_AGENT_WITH_LOAD_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --supports-load-session --load-runtime-session-id loaded-runtime-session`;
+const MOCK_AGENT_WITH_DISTINCT_CREATE_AND_LOAD_RUNTIME_SESSION_IDS =
+  `${MOCK_AGENT_COMMAND} --runtime-session-id fresh-runtime-session ` +
+  "--supports-load-session --load-runtime-session-id resumed-runtime-session";
 const MOCK_AGENT_WITH_LOAD_FALLBACK = `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-fails-on-empty`;
+const MOCK_AGENT_WITH_LOAD_SESSION_NOT_FOUND = `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-not-found`;
+const MOCK_AGENT_WITH_LOAD_FALLBACK_AND_MODE_FAILURE = `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-fails-on-empty --set-session-mode-fails`;
 
 type CliRunResult = {
   code: number | null;
@@ -113,6 +124,21 @@ test("parseTtlSeconds rejects non-numeric values", () => {
 
 test("parseTtlSeconds rejects negative values", () => {
   assert.throws(() => parseTtlSeconds("-1"), InvalidArgumentError);
+});
+
+test("parseAllowedTools parses empty and comma-separated values", () => {
+  assert.deepEqual(parseAllowedTools(""), []);
+  assert.deepEqual(parseAllowedTools("Read,Grep, Glob"), ["Read", "Grep", "Glob"]);
+});
+
+test("parseAllowedTools rejects empty entries", () => {
+  assert.throws(() => parseAllowedTools("Read,,Grep"), InvalidArgumentError);
+});
+
+test("parseMaxTurns accepts positive integers and rejects invalid values", () => {
+  assert.equal(parseMaxTurns("3"), 3);
+  assert.throws(() => parseMaxTurns("0"), InvalidArgumentError);
+  assert.throws(() => parseMaxTurns("1.5"), InvalidArgumentError);
 });
 
 test("formatPromptSessionBannerLine prints single-line prompt banner for matching cwd", () => {
@@ -179,20 +205,170 @@ test("CLI resolves unknown subcommand names as raw agent commands", async () => 
   });
 });
 
+test("global passthrough flags are present in help output", async () => {
+  await withTempHome(async (homeDir) => {
+    const result = await runCli(["--help"], homeDir);
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /--model <id>/);
+    assert.match(result.stdout, /--allowed-tools <list>/);
+    assert.match(result.stdout, /--max-turns <count>/);
+  });
+});
+
 test("sessions new command is present in help output", async () => {
   await withTempHome(async (homeDir) => {
     const result = await runCli(["sessions", "--help"], homeDir);
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, /\bnew\b/);
     assert.match(result.stdout, /\bensure\b/);
+    assert.match(result.stdout, /\bread\b/);
 
     const newHelp = await runCli(["sessions", "new", "--help"], homeDir);
     assert.equal(newHelp.code, 0, newHelp.stderr);
     assert.match(newHelp.stdout, /--name <name>/);
+    assert.match(newHelp.stdout, /--resume-session <id>/);
 
     const ensureHelp = await runCli(["sessions", "ensure", "--help"], homeDir);
     assert.equal(ensureHelp.code, 0, ensureHelp.stderr);
     assert.match(ensureHelp.stdout, /--name <name>/);
+
+    const readHelp = await runCli(["sessions", "read", "--help"], homeDir);
+    assert.equal(readHelp.code, 0, readHelp.stderr);
+    assert.match(readHelp.stdout, /--tail <count>/);
+    assert.match(ensureHelp.stdout, /--resume-session <id>/);
+  });
+});
+
+test("sessions new --resume-session loads ACP session and stores resumed ids", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_WITH_DISTINCT_CREATE_AND_LOAD_RUNTIME_SESSION_IDS,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const resumeSessionId = "cs_resume123";
+    const result = await runCli(
+      [
+        "--cwd",
+        cwd,
+        "--format",
+        "json",
+        "codex",
+        "sessions",
+        "new",
+        "--resume-session",
+        resumeSessionId,
+      ],
+      homeDir,
+    );
+    assert.equal(result.code, 0, result.stderr);
+
+    const payload = JSON.parse(result.stdout.trim()) as {
+      action?: unknown;
+      created?: unknown;
+      acpxRecordId?: unknown;
+      acpxSessionId?: unknown;
+      agentSessionId?: unknown;
+    };
+    assert.equal(payload.action, "session_ensured");
+    assert.equal(payload.created, true);
+    assert.equal(payload.acpxRecordId, resumeSessionId);
+    assert.equal(payload.acpxSessionId, resumeSessionId);
+    assert.equal(payload.agentSessionId, "resumed-runtime-session");
+
+    const storedRecordPath = path.join(
+      homeDir,
+      ".acpx",
+      "sessions",
+      `${encodeURIComponent(resumeSessionId)}.json`,
+    );
+    const storedRecord = JSON.parse(await fs.readFile(storedRecordPath, "utf8")) as {
+      acp_session_id?: unknown;
+      agent_session_id?: unknown;
+    };
+    assert.equal(storedRecord.acp_session_id, resumeSessionId);
+    assert.equal(storedRecord.agent_session_id, "resumed-runtime-session");
+  });
+});
+
+test("sessions new --resume-session fails when agent does not support session/load", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_COMMAND,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const result = await runCli(
+      ["--cwd", cwd, "codex", "sessions", "new", "--resume-session", "cs_unsupported"],
+      homeDir,
+    );
+
+    assert.equal(result.code, 1, result.stderr);
+    assert.match(result.stderr, /does not support session\/load/i);
+  });
+});
+
+test("sessions new --resume-session surfaces not-found loadSession errors without fallback", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_WITH_LOAD_SESSION_NOT_FOUND,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const resumeSessionId = "cs_missing";
+    const result = await runCli(
+      ["--cwd", cwd, "codex", "sessions", "new", "--resume-session", resumeSessionId],
+      homeDir,
+    );
+
+    assert.equal(result.code, 4, result.stderr);
+    assert.match(result.stderr, /Failed to resume ACP session cs_missing: Resource not found/);
+
+    const sessionsDir = path.join(homeDir, ".acpx", "sessions");
+    const entries = await fs.readdir(sessionsDir).catch(() => [] as string[]);
+    assert.equal(entries.includes(`${encodeURIComponent(resumeSessionId)}.json`), false);
   });
 });
 
@@ -235,6 +411,57 @@ test("sessions ensure creates when missing and returns existing on subsequent ca
     assert.equal(secondPayload.action, "session_ensured");
     assert.equal(secondPayload.created, false);
     assert.equal(secondPayload.acpxRecordId, firstPayload.acpxRecordId);
+  });
+});
+
+test("sessions ensure --resume-session loads ACP session when creating missing session", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_WITH_DISTINCT_CREATE_AND_LOAD_RUNTIME_SESSION_IDS,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const resumeSessionId = "cs_ensure_resume";
+    const result = await runCli(
+      [
+        "--cwd",
+        cwd,
+        "--format",
+        "json",
+        "codex",
+        "sessions",
+        "ensure",
+        "--resume-session",
+        resumeSessionId,
+      ],
+      homeDir,
+    );
+    assert.equal(result.code, 0, result.stderr);
+
+    const payload = JSON.parse(result.stdout.trim()) as {
+      created?: unknown;
+      acpxRecordId?: unknown;
+      acpxSessionId?: unknown;
+      agentSessionId?: unknown;
+    };
+    assert.equal(payload.created, true);
+    assert.equal(payload.acpxRecordId, resumeSessionId);
+    assert.equal(payload.acpxSessionId, resumeSessionId);
+    assert.equal(payload.agentSessionId, "resumed-runtime-session");
   });
 });
 
@@ -304,7 +531,7 @@ test("sessions ensure resolves existing session by directory walk", async () => 
     await writeSessionRecord(homeDir, {
       acpxRecordId: "parent-session",
       acpSessionId: "parent-session",
-      agentCommand: "npx @zed-industries/codex-acp",
+      agentCommand: AGENT_REGISTRY.codex,
       cwd: root,
       createdAt: "2026-01-01T00:00:00.000Z",
       lastUsedAt: "2026-01-01T00:00:00.000Z",
@@ -533,6 +760,67 @@ test("set-mode persists across load fallback and replays on fresh ACP sessions",
       };
     };
     assert.equal(storedRecord.acpx?.desired_mode_id, "auto");
+  });
+});
+
+test("set-mode load fallback failure does not persist the fresh session id to disk", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_WITH_LOAD_FALLBACK_AND_MODE_FAILURE,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const sessionId = "mode-replay-session";
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: sessionId,
+      acpSessionId: sessionId,
+      agentCommand: MOCK_AGENT_WITH_LOAD_FALLBACK_AND_MODE_FAILURE,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+      acpx: {
+        desired_mode_id: "plan",
+      },
+    });
+
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "set-mode", "plan"],
+      homeDir,
+    );
+    assert.equal(result.code, 1, result.stderr);
+    const error = parseSingleAcpErrorLine(result.stdout);
+    assert.equal(error.data?.acpxCode, "RUNTIME");
+    assert.equal(error.data?.detailCode, "SESSION_MODE_REPLAY_FAILED");
+
+    const storedRecordPath = path.join(
+      homeDir,
+      ".acpx",
+      "sessions",
+      `${encodeURIComponent(sessionId)}.json`,
+    );
+    const storedRecord = JSON.parse(await fs.readFile(storedRecordPath, "utf8")) as {
+      acp_session_id?: string;
+      acpx?: {
+        desired_mode_id?: string;
+      };
+    };
+    assert.equal(storedRecord.acp_session_id, sessionId);
+    assert.equal(storedRecord.acpx?.desired_mode_id, "plan");
   });
 });
 
@@ -955,7 +1243,7 @@ test("cancel resolves named session when -s is before subcommand", async () => {
     await writeSessionRecord(homeDir, {
       acpxRecordId: "named-cancel-session",
       acpSessionId: "named-cancel-session",
-      agentCommand: "npx @zed-industries/codex-acp",
+      agentCommand: AGENT_REGISTRY.codex,
       cwd,
       name: "named",
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -984,7 +1272,7 @@ test("status resolves named session when -s is before subcommand", async () => {
     await writeSessionRecord(homeDir, {
       acpxRecordId: "named-status-session",
       acpSessionId: "named-status-session",
-      agentCommand: "npx @zed-industries/codex-acp",
+      agentCommand: AGENT_REGISTRY.codex,
       cwd,
       name: "named",
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -1173,7 +1461,7 @@ test("sessions history prints stored history entries", async () => {
     await writeSessionRecord(homeDir, {
       acpxRecordId: "history-session",
       acpSessionId: "history-session",
-      agentCommand: "npx @zed-industries/codex-acp",
+      agentCommand: AGENT_REGISTRY.codex,
       cwd,
       createdAt: "2026-01-01T00:00:00.000Z",
       lastUsedAt: "2026-01-01T00:10:00.000Z",
@@ -1209,6 +1497,53 @@ test("sessions history prints stored history entries", async () => {
   });
 });
 
+test("sessions read prints full history by default and supports --tail", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: "read-session",
+      acpSessionId: "read-session",
+      agentCommand: AGENT_REGISTRY.codex,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:10:00.000Z",
+      closed: false,
+      title: null,
+      messages: [
+        {
+          User: {
+            id: "4cb89fd7-0dd5-4bdd-8f50-3de20eaa58a5",
+            content: [{ Text: "first message" }],
+          },
+        },
+        {
+          Agent: {
+            content: [{ Text: "second message" }],
+            tool_results: {},
+          },
+        },
+      ],
+      updated_at: "2026-01-01T00:02:00.000Z",
+      cumulative_token_usage: {},
+      request_token_usage: {},
+    });
+
+    const full = await runCli(["--cwd", cwd, "codex", "sessions", "read"], homeDir);
+    assert.equal(full.code, 0, full.stderr);
+    assert.match(full.stdout, /first message/);
+    assert.match(full.stdout, /second message/);
+    assert.match(full.stdout, /\(2\/2 shown\)/);
+
+    const tail = await runCli(["--cwd", cwd, "codex", "sessions", "read", "--tail", "1"], homeDir);
+    assert.equal(tail.code, 0, tail.stderr);
+    assert.match(tail.stdout, /second message/);
+    assert.doesNotMatch(tail.stdout, /first message/);
+    assert.match(tail.stdout, /\(1\/2 shown\)/);
+  });
+});
+
 test("status reports running queue owner when owner socket is reachable", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
@@ -1226,7 +1561,7 @@ test("status reports running queue owner when owner socket is reachable", async 
       await writeSessionRecord(homeDir, {
         acpxRecordId: sessionId,
         acpSessionId: sessionId,
-        agentCommand: "npx @zed-industries/codex-acp",
+        agentCommand: AGENT_REGISTRY.codex,
         cwd,
         createdAt: "2026-01-01T00:00:00.000Z",
         lastUsedAt: "2026-01-01T00:00:00.000Z",
@@ -1305,6 +1640,100 @@ test("config defaults are loaded from global and project config files", async ()
     assert.equal(result.code, 0, result.stderr);
     assert.doesNotThrow(() => JSON.parse(result.stdout.trim()));
     assert.match(result.stdout, /custom-config-session/);
+  });
+});
+
+test("exec subcommand is blocked when disableExec is true", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          disableExec: true,
+          agents: {
+            codex: { command: MOCK_AGENT_COMMAND },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const result = await runCli(["--cwd", cwd, "codex", "exec", "hello"], homeDir);
+
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /exec subcommand is disabled by configuration/);
+  });
+});
+
+test("exec subcommand is blocked in json format when disableExec is true", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          disableExec: true,
+          agents: {
+            codex: { command: MOCK_AGENT_COMMAND },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "exec", "hello"],
+      homeDir,
+    );
+
+    assert.equal(result.code, 1);
+    const payload = JSON.parse(result.stdout.trim()) as {
+      error?: { code?: number; data?: { acpxCode?: string } };
+    };
+    assert.equal(payload.error?.code, -32603);
+    assert.equal(payload.error?.data?.acpxCode, "EXEC_DISABLED");
+  });
+});
+
+test("exec subcommand works when disableExec is false", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          disableExec: false,
+          agents: {
+            codex: { command: MOCK_AGENT_COMMAND },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "exec", "echo hello"],
+      homeDir,
+    );
+
+    // exec should work (exit code 0) since disableExec is false
+    assert.equal(result.code, 0, result.stderr);
   });
 });
 

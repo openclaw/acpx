@@ -1,11 +1,13 @@
 import type {
   AgentCapabilities,
   AnyMessage,
+  McpServer,
   SessionNotification,
   SessionConfigOption,
   SetSessionConfigOptionResponse,
   StopReason,
 } from "@agentclientprotocol/sdk";
+export type { McpServer } from "@agentclientprotocol/sdk";
 
 export const EXIT_CODES = {
   SUCCESS: 0,
@@ -155,12 +157,18 @@ export interface OutputFormatter {
 export type AcpClientOptions = {
   agentCommand: string;
   cwd: string;
+  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
+  sessionOptions?: {
+    model?: string;
+    allowedTools?: string[];
+    maxTurns?: number;
+  };
   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onAcpOutputMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onSessionUpdate?: (notification: SessionNotification) => void;

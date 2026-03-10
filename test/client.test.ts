@@ -216,6 +216,40 @@ test("AcpClient handlePermissionRequest records approved decisions", async () =>
   });
 });
 
+test("AcpClient createSession forwards claudeCode options in _meta", async () => {
+  const client = makeClient({
+    sessionOptions: {
+      model: "sonnet",
+      allowedTools: ["Read", "Grep"],
+      maxTurns: 12,
+    },
+  });
+
+  let capturedParams: Record<string, unknown> | undefined;
+  asInternals(client).connection = {
+    newSession: async (params: Record<string, unknown>) => {
+      capturedParams = params;
+      return { sessionId: "session-123" };
+    },
+  };
+
+  const result = await client.createSession("/tmp/acpx-client-meta");
+  assert.equal(result.sessionId, "session-123");
+  assert.deepEqual(capturedParams, {
+    cwd: "/tmp/acpx-client-meta",
+    mcpServers: [],
+    _meta: {
+      claudeCode: {
+        options: {
+          model: "sonnet",
+          allowedTools: ["Read", "Grep"],
+          maxTurns: 12,
+        },
+      },
+    },
+  });
+});
+
 test("AcpClient session update handling drains queued callbacks and swallows handler failures", async () => {
   const notifications: string[] = [];
   const client = makeClient({

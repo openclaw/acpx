@@ -264,7 +264,10 @@ function asAbsoluteCwd(cwd: string): string {
 }
 
 function basenameToken(value: string): string {
-  return path.basename(value).toLowerCase();
+  return path
+    .basename(value)
+    .toLowerCase()
+    .replace(/\.(cmd|exe|bat)$/u, "");
 }
 
 function isGeminiAcpCommand(command: string, args: readonly string[]): boolean {
@@ -478,6 +481,35 @@ function readEnvCredential(methodId: string): string | undefined {
     }
   }
   return undefined;
+}
+
+function buildClaudeCodeOptionsMeta(
+  options: AcpClientOptions["sessionOptions"],
+): Record<string, unknown> | undefined {
+  if (!options) {
+    return undefined;
+  }
+
+  const claudeCodeOptions: Record<string, unknown> = {};
+  if (typeof options.model === "string" && options.model.trim().length > 0) {
+    claudeCodeOptions.model = options.model;
+  }
+  if (Array.isArray(options.allowedTools)) {
+    claudeCodeOptions.allowedTools = [...options.allowedTools];
+  }
+  if (typeof options.maxTurns === "number") {
+    claudeCodeOptions.maxTurns = options.maxTurns;
+  }
+
+  if (Object.keys(claudeCodeOptions).length === 0) {
+    return undefined;
+  }
+
+  return {
+    claudeCode: {
+      options: claudeCodeOptions,
+    },
+  };
 }
 
 function buildAgentEnvironment(
@@ -880,7 +912,8 @@ export class AcpClient {
     try {
       const createPromise = connection.newSession({
         cwd: asAbsoluteCwd(cwd),
-        mcpServers: [],
+        mcpServers: this.options.mcpServers ?? [],
+        _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions),
       });
       result = claudeAcp
         ? await withTimeout(createPromise, resolveClaudeAcpSessionCreateTimeoutMs())
@@ -925,7 +958,7 @@ export class AcpClient {
       response = await connection.loadSession({
         sessionId,
         cwd: asAbsoluteCwd(cwd),
-        mcpServers: [],
+        mcpServers: this.options.mcpServers ?? [],
       });
 
       await this.waitForSessionUpdateDrain(

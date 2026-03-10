@@ -9,7 +9,9 @@ import {
   addPromptInputOption,
   addSessionNameOption,
   addSessionOption,
+  parseAllowedTools,
   parseHistoryLimit,
+  parseMaxTurns,
   parseNonEmptyValue,
   parseSessionName,
   parseTtlSeconds,
@@ -145,7 +147,7 @@ function emitJsonResult(format: OutputFormat, payload: unknown): boolean {
   return true;
 }
 
-export { parseTtlSeconds };
+export { parseAllowedTools, parseMaxTurns, parseTtlSeconds };
 export { formatPromptSessionBannerLine } from "./cli/output-render.js";
 
 type SessionModule = typeof import("./session.js");
@@ -250,6 +252,7 @@ async function handlePrompt(
   const result = await sendSession({
     sessionId: record.acpxRecordId,
     message: prompt,
+    mcpServers: config.mcpServers,
     permissionMode,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
@@ -285,6 +288,31 @@ async function handleExec(
   command: Command,
   config: ResolvedAcpxConfig,
 ): Promise<void> {
+  if (config.disableExec) {
+    const globalFlags = resolveGlobalFlags(command, config);
+    const outputPolicy = resolveOutputPolicy(globalFlags.format, globalFlags.jsonStrict === true);
+    if (outputPolicy.format === "json") {
+      process.stdout.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          error: {
+            code: -32603,
+            message: "exec subcommand is disabled by configuration (disableExec: true)",
+            data: {
+              acpxCode: "EXEC_DISABLED",
+            },
+          },
+        })}\n`,
+      );
+    } else {
+      process.stderr.write(
+        "Error: exec subcommand is disabled by configuration (disableExec: true)\n",
+      );
+    }
+    process.exitCode = EXIT_CODES.ERROR;
+    return;
+  }
+
   const globalFlags = resolveGlobalFlags(command, config);
   const outputPolicy = resolveOutputPolicy(globalFlags.format, globalFlags.jsonStrict === true);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
@@ -300,6 +328,7 @@ async function handleExec(
     agentCommand: agent.agentCommand,
     cwd: agent.cwd,
     message: prompt,
+    mcpServers: config.mcpServers,
     permissionMode,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
@@ -308,6 +337,11 @@ async function handleExec(
     suppressSdkConsoleErrors: outputPolicy.suppressSdkConsoleErrors,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
+    sessionOptions: {
+      model: globalFlags.model,
+      allowedTools: globalFlags.allowedTools,
+      maxTurns: globalFlags.maxTurns,
+    },
   });
 
   applyPermissionExitCode(result);
@@ -451,6 +485,7 @@ async function handleSetMode(
   const result = await setSessionMode({
     sessionId: record.acpxRecordId,
     modeId,
+    mcpServers: config.mcpServers,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
@@ -486,6 +521,7 @@ async function handleSetConfigOption(
     sessionId: record.acpxRecordId,
     configId,
     value,
+    mcpServers: config.mcpServers,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
@@ -577,12 +613,19 @@ async function handleSessionsNew(
     agentCommand: agent.agentCommand,
     cwd: agent.cwd,
     name: flags.name,
+    resumeSessionId: flags.resumeSession,
+    mcpServers: config.mcpServers,
     permissionMode,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
+    sessionOptions: {
+      model: globalFlags.model,
+      allowedTools: globalFlags.allowedTools,
+      maxTurns: globalFlags.maxTurns,
+    },
   });
 
   printCreatedSessionBanner(created, agent.agentName, globalFlags.format, globalFlags.jsonStrict);
@@ -610,12 +653,19 @@ async function handleSessionsEnsure(
     agentCommand: agent.agentCommand,
     cwd: agent.cwd,
     name: flags.name,
+    resumeSessionId: flags.resumeSession,
+    mcpServers: config.mcpServers,
     permissionMode,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
+    sessionOptions: {
+      model: globalFlags.model,
+      allowedTools: globalFlags.allowedTools,
+      maxTurns: globalFlags.maxTurns,
+    },
   });
 
   if (result.created) {
@@ -751,7 +801,7 @@ function printSessionHistoryByFormat(
   format: OutputFormat,
 ): void {
   const history = conversationHistoryEntries(record);
-  const visible = history.slice(Math.max(0, history.length - limit));
+  const visible = limit === 0 ? history : history.slice(Math.max(0, history.length - limit));
 
   if (format === "json") {
     process.stdout.write(
@@ -1024,6 +1074,9 @@ function registerSessionsCommand(
     .command("new")
     .description("Create a fresh session for current cwd")
     .option("--name <name>", "Session name", parseSessionName)
+    .option("--resume-session <id>", "Resume existing ACP session id", (value: string) =>
+      parseNonEmptyValue("Resume session id", value),
+    )
     .action(async function (this: Command, flags: SessionsNewFlags) {
       await handleSessionsNew(explicitAgentName, flags, this, config);
     });
@@ -1032,6 +1085,9 @@ function registerSessionsCommand(
     .command("ensure")
     .description("Ensure a session exists for current cwd or ancestor")
     .option("--name <name>", "Session name", parseSessionName)
+    .option("--resume-session <id>", "Resume existing ACP session id", (value: string) =>
+      parseNonEmptyValue("Resume session id", value),
+    )
     .action(async function (this: Command, flags: SessionsNewFlags) {
       await handleSessionsEnsure(explicitAgentName, flags, this, config);
     });
@@ -1064,6 +1120,25 @@ function registerSessionsCommand(
     )
     .action(async function (this: Command, name: string | undefined, flags: SessionsHistoryFlags) {
       await handleSessionsHistory(explicitAgentName, name, flags, this, config);
+    });
+
+  sessionsCommand
+    .command("read")
+    .description("Read full session history")
+    .argument("[name]", "Session name", parseSessionName)
+    .option(
+      "--tail <count>",
+      "Show only the last N entries instead of all history",
+      parseHistoryLimit,
+    )
+    .action(async function (this: Command, name: string | undefined, flags: { tail?: number }) {
+      await handleSessionsHistory(
+        explicitAgentName,
+        name,
+        { limit: flags.tail ?? 0 },
+        this,
+        config,
+      );
     });
 }
 
@@ -1248,6 +1323,9 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
       token === "--auth-policy" ||
       token === "--non-interactive-permissions" ||
       token === "--format" ||
+      token === "--model" ||
+      token === "--allowed-tools" ||
+      token === "--max-turns" ||
       token === "--timeout" ||
       token === "--ttl" ||
       token === "--file"
@@ -1261,6 +1339,9 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
       token.startsWith("--auth-policy=") ||
       token.startsWith("--non-interactive-permissions=") ||
       token.startsWith("--format=") ||
+      token.startsWith("--model=") ||
+      token.startsWith("--allowed-tools=") ||
+      token.startsWith("--max-turns=") ||
       token.startsWith("--json-strict=") ||
       token.startsWith("--timeout=") ||
       token.startsWith("--ttl=") ||
@@ -1490,6 +1571,8 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     "after",
     `
 Examples:
+  acpx pi "review recent changes"
+  acpx openclaw exec "summarize active session state"
   acpx codex sessions new
   acpx codex "fix the tests"
   acpx codex prompt "fix the tests"
@@ -1508,7 +1591,6 @@ Examples:
   acpx config init
   acpx --ttl 30 codex "investigate flaky tests"
   acpx claude "refactor auth"
-  acpx gemini "add logging"
   acpx --agent ./my-custom-server "do something"`,
   );
 

@@ -42,9 +42,11 @@ acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--n
 
 `<agent>` can be:
 
-- built-in friendly name: `codex`, `claude`, `copilot`, `gemini`, `openclaw`, `kimi`, `opencode`, `kiro`, `pi`, `kilocode`, `qwen`
+- built-in friendly name from [../README.md](../README.md)
 - unknown token (treated as raw command)
 - overridden by `--agent <command>` escape hatch
+
+Additional built-in agent docs live in [../agents/README.md](../agents/README.md).
 
 Prompt options:
 
@@ -101,51 +103,16 @@ acpx --verbose codex 'debug adapter startup issues'
 
 Each agent command supports the same shape.
 
-### `copilot`
+### `pi`
 
 ```bash
-acpx [global_options] copilot [prompt_options] [prompt_text...]
-acpx [global_options] copilot prompt [prompt_options] [prompt_text...]
-acpx [global_options] copilot exec [prompt_text...]
-acpx [global_options] copilot sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
+acpx [global_options] pi [prompt_options] [prompt_text...]
+acpx [global_options] pi prompt [prompt_options] [prompt_text...]
+acpx [global_options] pi exec [prompt_text...]
+acpx [global_options] pi sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
-Built-in command mapping: `copilot -> copilot --acp --stdio`
-
-Requires a GitHub Copilot CLI release that supports ACP stdio mode. Older `copilot` binaries will fail before ACP startup.
-
-### `codex`
-
-```bash
-acpx [global_options] codex [prompt_options] [prompt_text...]
-acpx [global_options] codex prompt [prompt_options] [prompt_text...]
-acpx [global_options] codex exec [prompt_text...]
-acpx [global_options] codex sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
-```
-
-Built-in command mapping: `codex -> npx @zed-industries/codex-acp`
-
-### `claude`
-
-```bash
-acpx [global_options] claude [prompt_options] [prompt_text...]
-acpx [global_options] claude prompt [prompt_options] [prompt_text...]
-acpx [global_options] claude exec [prompt_text...]
-acpx [global_options] claude sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
-```
-
-Built-in command mapping: `claude -> npx -y @zed-industries/claude-agent-acp`
-
-### `gemini`
-
-```bash
-acpx [global_options] gemini [prompt_options] [prompt_text...]
-acpx [global_options] gemini prompt [prompt_options] [prompt_text...]
-acpx [global_options] gemini exec [prompt_text...]
-acpx [global_options] gemini sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
-```
-
-Built-in command mapping: `gemini -> gemini --experimental-acp`
+Built-in command mapping: `pi -> npx pi-acp`
 
 ### `openclaw`
 
@@ -170,16 +137,29 @@ For repo-local OpenClaw checkouts, override the built-in command in config:
 }
 ```
 
-### `kimi`
+### `codex`
 
 ```bash
-acpx [global_options] kimi [prompt_options] [prompt_text...]
-acpx [global_options] kimi prompt [prompt_options] [prompt_text...]
-acpx [global_options] kimi exec [prompt_text...]
-acpx [global_options] kimi sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
+acpx [global_options] codex [prompt_options] [prompt_text...]
+acpx [global_options] codex prompt [prompt_options] [prompt_text...]
+acpx [global_options] codex exec [prompt_text...]
+acpx [global_options] codex sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
-Built-in command mapping: `kimi -> kimi acp`
+Built-in command mapping: `codex -> npx @zed-industries/codex-acp`
+
+### `claude`
+
+```bash
+acpx [global_options] claude [prompt_options] [prompt_text...]
+acpx [global_options] claude prompt [prompt_options] [prompt_text...]
+acpx [global_options] claude exec [prompt_text...]
+acpx [global_options] claude sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
+```
+
+Built-in command mapping: `claude -> npx -y @zed-industries/claude-agent-acp`
+
+Additional built-in agent docs live in [../agents/README.md](../agents/README.md).
 
 ### Custom positional agents
 

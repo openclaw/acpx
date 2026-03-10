@@ -1,13 +1,20 @@
+const ACP_ADAPTER_PACKAGE_RANGES = {
+  pi: "^0.0.22",
+  codex: "^0.9.5",
+  claude: "^0.21.0",
+} as const;
+
 export const AGENT_REGISTRY: Record<string, string> = {
-  copilot: "copilot --acp --stdio",
-  codex: "npx @zed-industries/codex-acp",
-  claude: "npx -y @zed-industries/claude-agent-acp",
-  gemini: "gemini --experimental-acp",
+  pi: `npx pi-acp@${ACP_ADAPTER_PACKAGE_RANGES.pi}`,
   openclaw: "openclaw acp",
+  codex: `npx @zed-industries/codex-acp@${ACP_ADAPTER_PACKAGE_RANGES.codex}`,
+  claude: `npx -y @zed-industries/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
+  gemini: "gemini --experimental-acp",
+  cursor: "cursor-agent acp",
+  copilot: "copilot --acp --stdio",
   kimi: "kimi acp",
   opencode: "npx -y opencode-ai acp",
   kiro: "kiro-cli acp",
-  pi: "npx pi-acp",
   kilocode: "npx -y @kilocode/cli acp",
   qwen: "qwen --acp",
 };
