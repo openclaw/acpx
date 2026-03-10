@@ -92,6 +92,7 @@ jobs:
           - name: Build
             command: pnpm run build
           - name: Test
+            node_version: 22
             command: pnpm run test:coverage
 
     steps:
@@ -110,7 +111,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: ${{ matrix.node_version || env.NODE_VERSION }}
           check-latest: true
           cache: pnpm
 
