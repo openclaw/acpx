@@ -11,6 +11,7 @@ date: 2026-02-17
 
 - `codex -> npx @zed-industries/codex-acp`
 - `copilot -> copilot --acp --stdio`
+- `cursor -> cursor-agent acp`
 - `claude -> npx -y @zed-industries/claude-agent-acp`
 - `gemini -> gemini --experimental-acp`
 - `openclaw -> openclaw acp`
@@ -51,7 +52,7 @@ Rules:
 
 ## Practical guidance
 
-Use built-ins for common adapters (`copilot`, `codex`, `claude`, `gemini`, `openclaw`, `kimi`, `opencode`, `kiro`, `pi`, `kilocode`, `qwen`).
+Use built-ins for common adapters (`copilot`, `codex`, `cursor`, `claude`, `gemini`, `openclaw`, `kimi`, `opencode`, `kiro`, `pi`, `kilocode`, `qwen`).
 Use `--agent` when you need:
 
 - local development adapters

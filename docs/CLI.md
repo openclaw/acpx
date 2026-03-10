@@ -42,7 +42,7 @@ acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--n
 
 `<agent>` can be:
 
-- built-in friendly name: `codex`, `claude`, `copilot`, `gemini`, `openclaw`, `kimi`, `opencode`, `kiro`, `pi`, `kilocode`, `qwen`
+- built-in friendly name: `codex`, `claude`, `copilot`, `cursor`, `gemini`, `openclaw`, `kimi`, `opencode`, `kiro`, `pi`, `kilocode`, `qwen`
 - unknown token (treated as raw command)
 - overridden by `--agent <command>` escape hatch
 
@@ -124,6 +124,19 @@ acpx [global_options] codex sessions [list | new [--name <name>] | ensure [--nam
 ```
 
 Built-in command mapping: `codex -> npx @zed-industries/codex-acp`
+
+### `cursor`
+
+```bash
+acpx [global_options] cursor [prompt_options] [prompt_text...]
+acpx [global_options] cursor prompt [prompt_options] [prompt_text...]
+acpx [global_options] cursor exec [prompt_text...]
+acpx [global_options] cursor sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
+```
+
+Built-in command mapping: `cursor -> cursor-agent acp`
+
+If your Cursor ACP binary is installed under a different name such as `agent`, override the built-in command in config.
 
 ### `claude`
 

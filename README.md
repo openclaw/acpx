@@ -18,7 +18,7 @@ Your agents love acpx! 🤖❤️ They hate having to scrape characters from a P
 
 `acpx` is a headless CLI client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com), so AI agents and orchestrators can talk to coding agents over a structured protocol instead of PTY scraping.
 
-One command surface for Codex, Claude, Gemini, OpenClaw ACP, OpenCode, Pi, Kilocode, or custom ACP servers. Built for agent-to-agent communication over the command line.
+One command surface for Codex, Cursor, Claude, Gemini, OpenClaw ACP, OpenCode, Pi, Kilocode, or custom ACP servers. Built for agent-to-agent communication over the command line.
 
 - **Persistent sessions**: multi-turn conversations that survive across invocations, scoped per repo
 - **Named sessions**: run parallel workstreams in the same repo (`-s backend`, `-s frontend`)
@@ -122,6 +122,7 @@ The only prerequisite is the underlying coding agent you want to use:
 
 - `acpx copilot` -> GitHub Copilot CLI (`copilot --acp --stdio`, requires a release that supports ACP stdio mode): https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line
 - `acpx codex` -> Codex CLI: https://codex.openai.com
+- `acpx cursor` -> Cursor CLI (`cursor-agent acp`; override in config if your install exposes `agent acp`): https://cursor.com/docs/cli/acp
 - `acpx claude` -> Claude Code: https://claude.ai/code
 - `acpx gemini` -> Gemini CLI: https://github.com/google/gemini-cli
 - `acpx kimi` -> Kimi CLI: https://github.com/MoonshotAI/kimi-cli
@@ -169,6 +170,7 @@ acpx config show                 # show resolved config (global + project)
 acpx config init                 # create ~/.acpx/config.json template
 
 acpx copilot 'summarize recent changes'     # built-in GitHub Copilot agent
+acpx cursor 'fix the failing typecheck'     # built-in Cursor agent
 acpx claude 'refactor auth middleware' # built-in claude agent
 acpx gemini 'add startup logging'      # built-in gemini agent
 acpx openclaw exec 'summarize active session state' # built-in OpenClaw ACP bridge
@@ -282,6 +284,7 @@ Built-ins:
 | ---------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `copilot`  | native                                                                 | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
 | `codex`    | [codex-acp](https://github.com/zed-industries/codex-acp)               | [Codex CLI](https://codex.openai.com)                                                                           |
+| `cursor`   | native (`cursor-agent acp`)                                            | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
 | `claude`   | [claude-agent-acp](https://github.com/zed-industries/claude-agent-acp) | [Claude Code](https://claude.ai/code)                                                                           |
 | `gemini`   | native                                                                 | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
 | `kimi`     | native                                                                 | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |

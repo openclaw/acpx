@@ -45,6 +45,33 @@ test("integration: exec echo baseline", async () => {
   });
 });
 
+test("integration: built-in cursor agent resolves to cursor-agent acp", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-cursor-"));
+
+    try {
+      await writeFakeCursorAgent(fakeBinDir);
+
+      const result = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "quiet", "cursor", "exec", "echo hello"],
+        homeDir,
+        {
+          env: {
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /hello/);
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: exec forwards model, allowed-tools, and max-turns in session/new _meta", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -1370,6 +1397,36 @@ function baseAgentArgs(cwd: string): string[] {
 
 function baseExecArgs(cwd: string): string[] {
   return [...baseAgentArgs(cwd), "--format", "quiet", "exec"];
+}
+
+async function writeFakeCursorAgent(binDir: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(binDir, "cursor-agent.cmd"),
+      [
+        "@echo off",
+        "setlocal",
+        'if "%~1"=="acp" shift',
+        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
+        "",
+      ].join("\r\n"),
+      { encoding: "utf8" },
+    );
+    return;
+  }
+
+  await fs.writeFile(
+    path.join(binDir, "cursor-agent"),
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "acp" ]; then',
+      "  shift",
+      "fi",
+      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
+      "",
+    ].join("\n"),
+    { encoding: "utf8", mode: 0o755 },
+  );
 }
 
 async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {
