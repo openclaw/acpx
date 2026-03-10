@@ -356,26 +356,9 @@ Supported keys:
   },
   "auth": {
     "my_auth_method_id": "credential-value"
-  },
-  "mcpServers": [
-    {
-      "name": "linear",
-      "type": "http",
-      "url": "https://example.com/mcp",
-      "headers": [{ "name": "Authorization", "value": "Bearer token" }]
-    },
-    {
-      "name": "local",
-      "type": "stdio",
-      "command": "./bin/mcp-local",
-      "args": ["--serve"],
-      "env": [{ "name": "API_KEY", "value": "secret" }]
-    }
-  ]
+  }
 }
 ```
-
-`mcpServers` can be set globally and overridden per project. The resolved list is forwarded to both `session/new` and `session/load`.
 
 CLI flags always override config values.
 

@@ -235,26 +235,9 @@ Supported keys:
   },
   "auth": {
     "my_auth_method_id": "credential-value"
-  },
-  "mcpServers": [
-    {
-      "name": "linear",
-      "type": "http",
-      "url": "https://example.com/mcp",
-      "headers": [{ "name": "Authorization", "value": "Bearer token" }]
-    },
-    {
-      "name": "local",
-      "type": "stdio",
-      "command": "./bin/mcp-local",
-      "args": ["--serve"],
-      "env": [{ "name": "API_KEY", "value": "secret" }]
-    }
-  ]
+  }
 }
 ```
-
-`mcpServers` can be defined globally and overridden per project. `acpx` passes the resolved list to both `session/new` and `session/load`.
 
 Use `acpx config show` to inspect the resolved result and `acpx config init` to create the global template.
 
