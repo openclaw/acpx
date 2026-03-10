@@ -38,6 +38,7 @@ import {
   type NormalizedOutputError,
 } from "./error-normalization.js";
 import { flushPerfMetricsCapture, installPerfMetricsCapture } from "./perf-metrics-capture.js";
+import { mergePromptSourceWithText, parsePromptSource, textPrompt } from "./prompt-content.js";
 import { runQueueOwnerFromEnv } from "./queue-owner-env.js";
 import {
   DEFAULT_HISTORY_LIMIT,
@@ -88,17 +89,14 @@ async function readPrompt(
   promptParts: string[],
   filePath: string | undefined,
   cwd: string,
-): Promise<string> {
+): Promise<import("./types.js").PromptInput> {
   if (filePath) {
     const source =
       filePath === "-"
         ? await readPromptInputFromStdin()
         : await fs.readFile(path.resolve(cwd, filePath), "utf8");
-    const pieces = [source.trim(), promptParts.join(" ").trim()].filter(
-      (value) => value.length > 0,
-    );
-    const prompt = pieces.join("\n\n").trim();
-    if (!prompt) {
+    const prompt = mergePromptSourceWithText(source, promptParts.join(" "));
+    if (prompt.length === 0) {
       throw new InvalidArgumentError("Prompt from --file is empty");
     }
     return prompt;
@@ -106,7 +104,7 @@ async function readPrompt(
 
   const joined = promptParts.join(" ").trim();
   if (joined.length > 0) {
-    return joined;
+    return textPrompt(joined);
   }
 
   if (process.stdin.isTTY) {
@@ -115,8 +113,8 @@ async function readPrompt(
     );
   }
 
-  const prompt = (await readPromptInputFromStdin()).trim();
-  if (!prompt) {
+  const prompt = parsePromptSource(await readPromptInputFromStdin());
+  if (prompt.length === 0) {
     throw new InvalidArgumentError("Prompt from stdin is empty");
   }
 
@@ -251,7 +249,7 @@ async function handlePrompt(
   await printPromptSessionBanner(record, agent.cwd, outputPolicy.format, outputPolicy.jsonStrict);
   const result = await sendSession({
     sessionId: record.acpxRecordId,
-    message: prompt,
+    prompt,
     mcpServers: config.mcpServers,
     permissionMode,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
@@ -327,7 +325,7 @@ async function handleExec(
   const result = await runOnce({
     agentCommand: agent.agentCommand,
     cwd: agent.cwd,
-    message: prompt,
+    prompt,
     mcpServers: config.mcpServers,
     permissionMode,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,

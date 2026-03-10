@@ -8,6 +8,7 @@ import type {
   StopReason,
 } from "@agentclientprotocol/sdk";
 export type { McpServer } from "@agentclientprotocol/sdk";
+import type { PromptInput } from "./prompt-content.js";
 
 export const EXIT_CODES = {
   SUCCESS: 0,
@@ -351,3 +352,4 @@ export type SessionEnqueueResult = {
 };
 
 export type SessionSendOutcome = SessionSendResult | SessionEnqueueResult;
+export type { PromptInput };

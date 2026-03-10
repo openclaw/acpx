@@ -52,6 +52,7 @@ import {
   type QueueOwnerRuntimeOptions,
 } from "./session-runtime/queue-owner-process.js";
 export type { QueueOwnerRuntimeOptions } from "./session-runtime/queue-owner-process.js";
+import { promptToDisplayText, textPrompt } from "./prompt-content.js";
 import {
   DEFAULT_HISTORY_LIMIT,
   absolutePath,
@@ -77,6 +78,7 @@ import {
   type OutputErrorOrigin,
   type OutputFormatter,
   type PermissionMode,
+  type PromptInput,
   type RunPromptResult,
   type SessionEnsureResult,
   type SessionRecord,
@@ -104,7 +106,7 @@ export type SessionAgentOptions = {
 export type RunOnceOptions = {
   agentCommand: string;
   cwd: string;
-  message: string;
+  prompt: PromptInput;
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
@@ -132,7 +134,7 @@ export type SessionCreateOptions = {
 
 export type SessionSendOptions = {
   sessionId: string;
-  message: string;
+  prompt: PromptInput;
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
@@ -207,7 +209,7 @@ function toPromptResult(
 
 type RunSessionPromptOptions = {
   sessionRecordId: string;
-  message: string;
+  prompt: PromptInput;
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
@@ -322,8 +324,8 @@ async function runQueuedTask(
   try {
     const result = await runSessionPrompt({
       sessionRecordId,
-      message: task.message,
       mcpServers: options.mcpServers,
+      prompt: task.prompt ?? textPrompt(task.message),
       permissionMode: task.permissionMode,
       nonInteractivePermissions:
         task.nonInteractivePermissions ?? options.nonInteractivePermissions,
@@ -383,7 +385,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
   });
   const conversation = cloneSessionConversation(record);
   let acpxState = cloneSessionAcpxState(record.acpx);
-  recordPromptSubmission(conversation, options.message, isoNow());
+  recordPromptSubmission(conversation, options.prompt, isoNow());
 
   output.setContext({
     sessionId: record.acpxRecordId,
@@ -508,7 +510,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
         let response;
         try {
           const promptStartedAt = Date.now();
-          const promptPromise = client.prompt(activeSessionId, options.message);
+          const promptPromise = client.prompt(activeSessionId, options.prompt);
           if (options.onPromptActive) {
             try {
               await options.onPromptActive();
@@ -659,7 +661,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
         });
 
         const response = await measurePerf("runtime.exec.prompt", async () => {
-          return await withTimeout(client.prompt(sessionId, options.message), options.timeoutMs);
+          return await withTimeout(client.prompt(sessionId, options.prompt), options.timeoutMs);
         });
         output.flush();
         return toPromptResult(response.stopReason, sessionId, client);
@@ -809,7 +811,8 @@ async function submitToRunningOwner(
 ): Promise<SessionSendOutcome | undefined> {
   return await trySubmitToRunningOwner({
     sessionId: options.sessionId,
-    message: options.message,
+    message: promptToDisplayText(options.prompt),
+    prompt: options.prompt,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     outputFormatter: options.outputFormatter,

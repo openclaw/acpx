@@ -19,6 +19,7 @@ test("parseQueueRequest accepts submit_prompt with nonInteractivePermissions", (
     requestId: "req-1",
     ownerGeneration: 123,
     message: "hello",
+    prompt: [{ type: "text", text: "hello" }],
     permissionMode: "approve-reads",
     nonInteractivePermissions: "fail",
     timeoutMs: 1_500,

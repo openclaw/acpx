@@ -1427,6 +1427,62 @@ test("prompt supports --file - with additional argument text", async () => {
   });
 });
 
+test("exec accepts structured ACP prompt blocks from stdin", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const result = await runCli(
+      ["--agent", MOCK_AGENT_COMMAND, "--cwd", cwd, "--format", "quiet", "exec"],
+      homeDir,
+      {
+        stdin: JSON.stringify([
+          { type: "text", text: "inspect-prompt" },
+          { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+        ]),
+      },
+    );
+
+    assert.equal(result.code, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim()) as Array<Record<string, unknown>>;
+    assert.deepEqual(payload, [
+      { type: "text", text: "inspect-prompt" },
+      { type: "image", mimeType: "image/png", bytes: 8 },
+    ]);
+  });
+});
+
+test("prompt preserves structured ACP prompt blocks through the queue owner", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const created = await runCli(
+      ["--agent", MOCK_AGENT_COMMAND, "--cwd", cwd, "sessions", "new"],
+      homeDir,
+    );
+    assert.equal(created.code, 0, created.stderr);
+
+    const result = await runCli(
+      ["--agent", MOCK_AGENT_COMMAND, "--cwd", cwd, "--format", "quiet", "prompt"],
+      homeDir,
+      {
+        stdin: JSON.stringify([
+          { type: "text", text: "inspect-prompt" },
+          { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+        ]),
+      },
+    );
+
+    assert.equal(result.code, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim()) as Array<Record<string, unknown>>;
+    assert.deepEqual(payload, [
+      { type: "text", text: "inspect-prompt" },
+      { type: "image", mimeType: "image/png", bytes: 8 },
+    ]);
+  });
+});
+
 test("prompt subcommand accepts --file without being consumed by parent command", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");

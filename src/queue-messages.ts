@@ -1,5 +1,6 @@
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { isAcpJsonRpcMessage } from "./acp-jsonrpc.js";
+import { isPromptInput, textPrompt } from "./prompt-content.js";
 import {
   OUTPUT_ERROR_CODES,
   OUTPUT_ERROR_ORIGINS,
@@ -11,6 +12,7 @@ import type {
   AcpJsonRpcMessage,
   NonInteractivePermissionPolicy,
   PermissionMode,
+  PromptInput,
   SessionSendResult,
 } from "./types.js";
 
@@ -19,6 +21,7 @@ export type QueueSubmitRequest = {
   requestId: string;
   ownerGeneration?: number;
   message: string;
+  prompt?: PromptInput;
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   timeoutMs?: number;
@@ -204,9 +207,12 @@ export function parseQueueRequest(raw: unknown): QueueRequest | null {
           ? request.suppressSdkConsoleErrors
           : null;
 
+    const prompt =
+      request.prompt == null ? undefined : isPromptInput(request.prompt) ? request.prompt : null;
     if (
       typeof request.message !== "string" ||
       !isPermissionMode(request.permissionMode) ||
+      prompt === null ||
       nonInteractivePermissions === null ||
       suppressSdkConsoleErrors === null ||
       typeof request.waitForCompletion !== "boolean"
@@ -219,6 +225,7 @@ export function parseQueueRequest(raw: unknown): QueueRequest | null {
       requestId: request.requestId,
       ownerGeneration,
       message: request.message,
+      prompt: prompt ?? textPrompt(request.message),
       permissionMode: request.permissionMode,
       nonInteractivePermissions,
       timeoutMs,

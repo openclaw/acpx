@@ -32,6 +32,7 @@ import type {
   OutputErrorEmissionPolicy,
   OutputFormatter,
   PermissionMode,
+  PromptInput,
   SessionEnqueueResult,
   SessionSendOutcome,
 } from "./types.js";
@@ -220,6 +221,7 @@ function assertOwnerGeneration(
 export type SubmitToQueueOwnerOptions = {
   sessionId: string;
   message: string;
+  prompt?: PromptInput;
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   outputFormatter: OutputFormatter;
@@ -246,6 +248,7 @@ async function submitToQueueOwner(
     requestId,
     ownerGeneration: owner.ownerGeneration,
     message: options.message,
+    prompt: options.prompt,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     timeoutMs: options.timeoutMs,

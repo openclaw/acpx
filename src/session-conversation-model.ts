@@ -7,8 +7,10 @@ import type {
   ToolCallUpdate,
   UsageUpdate,
 } from "@agentclientprotocol/sdk";
+import { textPrompt } from "./prompt-content.js";
 import type {
   ClientOperation,
+  PromptInput,
   SessionAcpxState,
   SessionConversation,
   SessionAgentContent,
@@ -489,18 +491,28 @@ export function appendLegacyHistory(
 
 export function recordPromptSubmission(
   conversation: SessionConversation,
-  prompt: string,
+  prompt: PromptInput | string,
   timestamp = isoNow(),
 ): void {
-  const text = prompt.trim();
-  if (!text) {
+  const normalizedPrompt = typeof prompt === "string" ? textPrompt(prompt) : prompt;
+  const userContent = normalizedPrompt
+    .map((content) => contentToUserContent(content))
+    .filter((content) => content !== undefined);
+  if (userContent.length === 0) {
     return;
   }
 
   conversation.messages.push({
     User: {
       id: nextUserMessageId(),
-      content: [{ Text: trimRuntimeText(text, MAX_RUNTIME_AGENT_TEXT_CHARS) }],
+      content: userContent.map((content) => {
+        if ("Text" in content) {
+          return {
+            Text: trimRuntimeText(content.Text, MAX_RUNTIME_AGENT_TEXT_CHARS),
+          };
+        }
+        return content;
+      }),
     },
   });
   updateConversationTimestamp(conversation, timestamp);

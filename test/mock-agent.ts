@@ -97,6 +97,27 @@ function getPromptText(prompt: ContentBlock[]): string {
   return parts.join("").trim();
 }
 
+function describePromptBlocks(prompt: ContentBlock[]): string {
+  return JSON.stringify(
+    prompt.map((block) => {
+      switch (block.type) {
+        case "text":
+          return { type: "text", text: block.text };
+        case "image":
+          return { type: "image", mimeType: block.mimeType, bytes: block.data.length };
+        case "resource_link":
+          return { type: "resource_link", uri: block.uri };
+        case "resource":
+          return {
+            type: "resource",
+            uri: block.resource.uri,
+            hasText: "text" in block.resource && typeof block.resource.text === "string",
+          };
+      }
+    }),
+  );
+}
+
 function splitCommandLine(value: string): ParsedCommand {
   const parts: string[] = [];
   let current = "";
@@ -487,7 +508,10 @@ class MockAgent implements Agent {
 
     try {
       const text = getPromptText(params.prompt);
-      const response = await this.handlePrompt(params.sessionId, text, promptAbort.signal);
+      const response =
+        text === "inspect-prompt"
+          ? describePromptBlocks(params.prompt)
+          : await this.handlePrompt(params.sessionId, text, promptAbort.signal);
       session.hasCompletedPrompt = true;
       await this.sendAssistantMessage(params.sessionId, response);
       return { stopReason: "end_turn" };

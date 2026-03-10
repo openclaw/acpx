@@ -2,12 +2,13 @@ import net from "node:net";
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { normalizeOutputError } from "./error-normalization.js";
 import { recordPerfDuration } from "./perf-metrics.js";
+import { textPrompt } from "./prompt-content.js";
 import {
   parseQueueRequest,
   type QueueOwnerErrorMessage,
   type QueueOwnerMessage,
 } from "./queue-messages.js";
-import type { NonInteractivePermissionPolicy, PermissionMode } from "./types.js";
+import type { NonInteractivePermissionPolicy, PermissionMode, PromptInput } from "./types.js";
 
 type QueueOwnerSocketLease = {
   socketPath: string;
@@ -71,6 +72,7 @@ function writeQueueMessage(socket: net.Socket, message: QueueOwnerMessage): void
 export type QueueTask = {
   requestId: string;
   message: string;
+  prompt: PromptInput;
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   timeoutMs?: number;
@@ -440,6 +442,7 @@ export class SessionQueueOwner {
       const task: QueueTask = {
         requestId: request.requestId,
         message: request.message,
+        prompt: request.prompt ?? textPrompt(request.message),
         permissionMode: request.permissionMode,
         nonInteractivePermissions: request.nonInteractivePermissions,
         timeoutMs: request.timeoutMs,

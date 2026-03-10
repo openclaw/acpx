@@ -40,6 +40,7 @@ import {
 } from "./errors.js";
 import { FileSystemHandlers } from "./filesystem.js";
 import { classifyPermissionDecision, resolvePermissionRequest } from "./permissions.js";
+import { textPrompt } from "./prompt-content.js";
 import { extractRuntimeSessionId } from "./runtime-session-id.js";
 import { TimeoutError, withTimeout } from "./session-runtime-helpers.js";
 import { TerminalManager } from "./terminal.js";
@@ -48,6 +49,7 @@ import type {
   NonInteractivePermissionPolicy,
   PermissionMode,
   PermissionStats,
+  PromptInput,
 } from "./types.js";
 
 type CommandParts = {
@@ -976,7 +978,7 @@ export class AcpClient {
     };
   }
 
-  async prompt(sessionId: string, text: string): Promise<PromptResponse> {
+  async prompt(sessionId: string, prompt: PromptInput | string): Promise<PromptResponse> {
     const connection = this.getConnection();
     const restoreConsoleError = this.options.suppressSdkConsoleErrors
       ? installSdkConsoleErrorSuppression()
@@ -986,12 +988,7 @@ export class AcpClient {
     try {
       promptPromise = connection.prompt({
         sessionId,
-        prompt: [
-          {
-            type: "text",
-            text,
-          },
-        ],
+        prompt: typeof prompt === "string" ? textPrompt(prompt) : prompt,
       });
     } catch (error) {
       restoreConsoleError?.();
