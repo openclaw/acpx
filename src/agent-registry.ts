@@ -1,14 +1,14 @@
 export const AGENT_REGISTRY: Record<string, string> = {
-  copilot: "copilot --acp --stdio",
+  pi: "npx pi-acp",
+  openclaw: "openclaw acp",
   codex: "npx @zed-industries/codex-acp",
-  cursor: "cursor-agent acp",
   claude: "npx -y @zed-industries/claude-agent-acp",
   gemini: "gemini --experimental-acp",
-  openclaw: "openclaw acp",
+  cursor: "cursor-agent acp",
+  copilot: "copilot --acp --stdio",
   kimi: "kimi acp",
   opencode: "npx -y opencode-ai acp",
   kiro: "kiro-cli acp",
-  pi: "npx pi-acp",
   kilocode: "npx -y @kilocode/cli acp",
   qwen: "qwen --acp",
 };

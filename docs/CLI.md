@@ -42,7 +42,7 @@ acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--n
 
 `<agent>` can be:
 
-- built-in friendly name: `codex`, `claude`, `copilot`, `cursor`, `gemini`, `openclaw`, `kimi`, `opencode`, `kiro`, `pi`, `kilocode`, `qwen`
+- built-in friendly name: `pi`, `openclaw`, `codex`, `claude`, `gemini`, `cursor`, `copilot`, `kimi`, `opencode`, `kiro`, `kilocode`, `qwen`
 - unknown token (treated as raw command)
 - overridden by `--agent <command>` escape hatch
 
@@ -101,18 +101,28 @@ acpx --verbose codex 'debug adapter startup issues'
 
 Each agent command supports the same shape.
 
-### `copilot`
+### `openclaw`
 
 ```bash
-acpx [global_options] copilot [prompt_options] [prompt_text...]
-acpx [global_options] copilot prompt [prompt_options] [prompt_text...]
-acpx [global_options] copilot exec [prompt_text...]
-acpx [global_options] copilot sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
+acpx [global_options] openclaw [prompt_options] [prompt_text...]
+acpx [global_options] openclaw prompt [prompt_options] [prompt_text...]
+acpx [global_options] openclaw exec [prompt_text...]
+acpx [global_options] openclaw sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
-Built-in command mapping: `copilot -> copilot --acp --stdio`
+Built-in command mapping: `openclaw -> openclaw acp`
 
-Requires a GitHub Copilot CLI release that supports ACP stdio mode. Older `copilot` binaries will fail before ACP startup.
+For repo-local OpenClaw checkouts, override the built-in command in config:
+
+```json
+{
+  "agents": {
+    "openclaw": {
+      "command": "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 node scripts/run-node.mjs acp --url ws://127.0.0.1:18789 --token-file ~/.openclaw/gateway.token --session agent:main:main"
+    }
+  }
+}
+```
 
 ### `codex`
 
@@ -124,19 +134,6 @@ acpx [global_options] codex sessions [list | new [--name <name>] | ensure [--nam
 ```
 
 Built-in command mapping: `codex -> npx @zed-industries/codex-acp`
-
-### `cursor`
-
-```bash
-acpx [global_options] cursor [prompt_options] [prompt_text...]
-acpx [global_options] cursor prompt [prompt_options] [prompt_text...]
-acpx [global_options] cursor exec [prompt_text...]
-acpx [global_options] cursor sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
-```
-
-Built-in command mapping: `cursor -> cursor-agent acp`
-
-If your Cursor ACP binary is installed under a different name such as `agent`, override the built-in command in config.
 
 ### `claude`
 
@@ -160,28 +157,31 @@ acpx [global_options] gemini sessions [list | new [--name <name>] | ensure [--na
 
 Built-in command mapping: `gemini -> gemini --experimental-acp`
 
-### `openclaw`
+### `cursor`
 
 ```bash
-acpx [global_options] openclaw [prompt_options] [prompt_text...]
-acpx [global_options] openclaw prompt [prompt_options] [prompt_text...]
-acpx [global_options] openclaw exec [prompt_text...]
-acpx [global_options] openclaw sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
+acpx [global_options] cursor [prompt_options] [prompt_text...]
+acpx [global_options] cursor prompt [prompt_options] [prompt_text...]
+acpx [global_options] cursor exec [prompt_text...]
+acpx [global_options] cursor sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
-Built-in command mapping: `openclaw -> openclaw acp`
+Built-in command mapping: `cursor -> cursor-agent acp`
 
-For repo-local OpenClaw checkouts, override the built-in command in config:
+If your Cursor ACP binary is installed under a different name such as `agent`, override the built-in command in config.
 
-```json
-{
-  "agents": {
-    "openclaw": {
-      "command": "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 node scripts/run-node.mjs acp --url ws://127.0.0.1:18789 --token-file ~/.openclaw/gateway.token --session agent:main:main"
-    }
-  }
-}
+### `copilot`
+
+```bash
+acpx [global_options] copilot [prompt_options] [prompt_text...]
+acpx [global_options] copilot prompt [prompt_options] [prompt_text...]
+acpx [global_options] copilot exec [prompt_text...]
+acpx [global_options] copilot sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
+
+Built-in command mapping: `copilot -> copilot --acp --stdio`
+
+Requires a GitHub Copilot CLI release that supports ACP stdio mode. Older `copilot` binaries will fail before ACP startup.
 
 ### `kimi`
 

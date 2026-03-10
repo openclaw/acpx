@@ -8,16 +8,16 @@ import {
 
 test("resolveAgentCommand maps known agents to commands", () => {
   const expected = new Map<string, string>([
-    ["copilot", "copilot --acp --stdio"],
+    ["pi", "npx pi-acp"],
+    ["openclaw", "openclaw acp"],
     ["codex", "npx @zed-industries/codex-acp"],
-    ["cursor", "cursor-agent acp"],
     ["claude", "npx -y @zed-industries/claude-agent-acp"],
     ["gemini", "gemini --experimental-acp"],
-    ["openclaw", "openclaw acp"],
+    ["cursor", "cursor-agent acp"],
+    ["copilot", "copilot --acp --stdio"],
     ["kimi", "kimi acp"],
     ["opencode", "npx -y opencode-ai acp"],
     ["kiro", "kiro-cli acp"],
-    ["pi", "npx pi-acp"],
     ["kilocode", "npx -y @kilocode/cli acp"],
     ["qwen", "qwen --acp"],
   ]);
@@ -31,26 +31,22 @@ test("resolveAgentCommand returns raw value for unknown agents", () => {
   assert.equal(resolveAgentCommand("custom-acp-server"), "custom-acp-server");
 });
 
-test("listBuiltInAgents returns exactly all 12 registered agent names", () => {
+test("listBuiltInAgents preserves the required built-in example order", () => {
   const agents = listBuiltInAgents();
-  assert.equal(agents.length, 12);
-  assert.deepEqual(
-    new Set(agents),
-    new Set([
-      "copilot",
-      "codex",
-      "cursor",
-      "claude",
-      "gemini",
-      "openclaw",
-      "kimi",
-      "opencode",
-      "kiro",
-      "pi",
-      "kilocode",
-      "qwen",
-    ]),
-  );
+  assert.deepEqual(agents, [
+    "pi",
+    "openclaw",
+    "codex",
+    "claude",
+    "gemini",
+    "cursor",
+    "copilot",
+    "kimi",
+    "opencode",
+    "kiro",
+    "kilocode",
+    "qwen",
+  ]);
 });
 
 test("default agent is codex", () => {

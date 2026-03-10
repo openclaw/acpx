@@ -9,16 +9,16 @@ date: 2026-02-17
 
 `src/agent-registry.ts` defines friendly names:
 
+- `pi -> npx pi-acp`
+- `openclaw -> openclaw acp`
 - `codex -> npx @zed-industries/codex-acp`
-- `copilot -> copilot --acp --stdio`
-- `cursor -> cursor-agent acp`
 - `claude -> npx -y @zed-industries/claude-agent-acp`
 - `gemini -> gemini --experimental-acp`
-- `openclaw -> openclaw acp`
+- `cursor -> cursor-agent acp`
+- `copilot -> copilot --acp --stdio`
 - `kimi -> kimi acp`
 - `opencode -> npx -y opencode-ai acp`
 - `kiro -> kiro-cli acp`
-- `pi -> npx pi-acp`
 - `kilocode -> npx -y @kilocode/cli acp`
 - `qwen -> qwen --acp`
 
@@ -52,7 +52,7 @@ Rules:
 
 ## Practical guidance
 
-Use built-ins for common adapters (`copilot`, `codex`, `cursor`, `claude`, `gemini`, `openclaw`, `kimi`, `opencode`, `kiro`, `pi`, `kilocode`, `qwen`).
+Use built-ins for common adapters (`pi`, `openclaw`, `codex`, `claude`, `gemini`, `cursor`, `copilot`, `kimi`, `opencode`, `kiro`, `kilocode`, `qwen`).
 Use `--agent` when you need:
 
 - local development adapters

@@ -18,7 +18,7 @@ Your agents love acpx! 🤖❤️ They hate having to scrape characters from a P
 
 `acpx` is a headless CLI client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com), so AI agents and orchestrators can talk to coding agents over a structured protocol instead of PTY scraping.
 
-One command surface for Codex, Cursor, Claude, Gemini, OpenClaw ACP, OpenCode, Pi, Kilocode, or custom ACP servers. Built for agent-to-agent communication over the command line.
+One command surface for Pi, OpenClaw ACP, Codex, Claude, Gemini, Cursor, OpenCode, Kilocode, or custom ACP servers. Built for agent-to-agent communication over the command line.
 
 - **Persistent sessions**: multi-turn conversations that survive across invocations, scoped per repo
 - **Named sessions**: run parallel workstreams in the same repo (`-s backend`, `-s frontend`)
@@ -71,7 +71,7 @@ reading stale state from the previous run.
 
 ## Quick setup — tell your agent about acpx
 
-Copy the block below and paste it into your OpenClaw, Pi, Claude Code, or similar agent harness. It will install acpx, read the skill reference, and know how to use ACP for all future coding agent tasks.
+Copy the block below and paste it into your Pi, OpenClaw, Claude Code, or similar agent harness. It will install acpx, read the skill reference, and know how to use ACP for all future coding agent tasks.
 
 ```text
 I want you to use acpx to run coding agents over the Agent Client Protocol
@@ -120,16 +120,16 @@ Session state lives in `~/.acpx/` either way. Global install is a little faster,
 
 The only prerequisite is the underlying coding agent you want to use:
 
-- `acpx copilot` -> GitHub Copilot CLI (`copilot --acp --stdio`, requires a release that supports ACP stdio mode): https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line
+- `acpx pi` -> Pi Coding Agent: https://github.com/mariozechner/pi
+- `acpx openclaw` -> OpenClaw ACP bridge: https://github.com/openclaw/openclaw
 - `acpx codex` -> Codex CLI: https://codex.openai.com
-- `acpx cursor` -> Cursor CLI (`cursor-agent acp`; override in config if your install exposes `agent acp`): https://cursor.com/docs/cli/acp
 - `acpx claude` -> Claude Code: https://claude.ai/code
 - `acpx gemini` -> Gemini CLI: https://github.com/google/gemini-cli
+- `acpx cursor` -> Cursor CLI (`cursor-agent acp`; override in config if your install exposes `agent acp`): https://cursor.com/docs/cli/acp
+- `acpx copilot` -> GitHub Copilot CLI (`copilot --acp --stdio`, requires a release that supports ACP stdio mode): https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line
 - `acpx kimi` -> Kimi CLI: https://github.com/MoonshotAI/kimi-cli
-- `acpx openclaw` -> OpenClaw ACP bridge: https://github.com/openclaw/openclaw
 - `acpx opencode` -> OpenCode: https://opencode.ai
 - `acpx kiro` -> Kiro CLI: https://kiro.dev
-- `acpx pi` -> Pi Coding Agent: https://github.com/mariozechner/pi
 - `acpx kilocode` -> Kilocode: https://kilocode.ai
 - `acpx qwen` -> Qwen Code: https://github.com/QwenLM/qwen-code
 
@@ -282,15 +282,15 @@ Built-ins:
 
 | Agent      | Adapter                                                                | Wraps                                                                                                           |
 | ---------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `copilot`  | native                                                                 | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
+| `pi`       | [pi-acp](https://github.com/svkozak/pi-acp)                            | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
+| `openclaw` | native                                                                 | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
 | `codex`    | [codex-acp](https://github.com/zed-industries/codex-acp)               | [Codex CLI](https://codex.openai.com)                                                                           |
-| `cursor`   | native (`cursor-agent acp`)                                            | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
 | `claude`   | [claude-agent-acp](https://github.com/zed-industries/claude-agent-acp) | [Claude Code](https://claude.ai/code)                                                                           |
 | `gemini`   | native                                                                 | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
+| `cursor`   | native (`cursor-agent acp`)                                            | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
+| `copilot`  | native                                                                 | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
 | `kimi`     | native                                                                 | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
-| `openclaw` | native                                                                 | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
 | `opencode` | native                                                                 | [OpenCode](https://opencode.ai)                                                                                 |
-| `pi`       | [pi-acp](https://github.com/svkozak/pi-acp)                            | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
 | `kilocode` | native                                                                 | [Kilocode](https://kilocode.ai)                                                                                 |
 | `qwen`     | native (`qwen --acp`)                                                  | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
 
