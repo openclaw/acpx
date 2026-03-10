@@ -93,6 +93,28 @@ npx acpx@latest --help
 - `pnpm run check:docs` — docs format and markdown lint
 - `pnpm run perf:report` — performance reporting helper
 
+## Fundamental acpx Calls
+
+Use these examples when you need the most basic `acpx` flows while developing
+or validating the CLI:
+
+```bash
+acpx codex sessions new
+acpx codex 'fix the failing test'
+acpx codex prompt 'rewrite AGENTS.md for contributors'
+acpx codex exec 'summarize this repo'
+acpx exec 'summarize this repo'                  # defaults to codex
+acpx codex sessions list
+acpx codex sessions show
+acpx codex status
+acpx codex cancel
+acpx codex sessions new --name docs
+acpx codex -s docs 'rewrite CLI docs'
+acpx config show
+acpx config init
+acpx --format json codex exec 'review changed files'
+```
+
 ## When To Run Checks
 
 - Docs-only changes in `docs/**`, [`README.md`](README.md), or [`CONTRIBUTING.md`](CONTRIBUTING.md):
