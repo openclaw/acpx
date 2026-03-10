@@ -8,6 +8,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { InvalidArgumentError } from "commander";
+import { AGENT_REGISTRY } from "../src/agent-registry.js";
 import {
   formatPromptSessionBannerLine,
   parseAllowedTools,
@@ -530,7 +531,7 @@ test("sessions ensure resolves existing session by directory walk", async () => 
     await writeSessionRecord(homeDir, {
       acpxRecordId: "parent-session",
       acpSessionId: "parent-session",
-      agentCommand: "npx @zed-industries/codex-acp@^0.9.5",
+      agentCommand: AGENT_REGISTRY.codex,
       cwd: root,
       createdAt: "2026-01-01T00:00:00.000Z",
       lastUsedAt: "2026-01-01T00:00:00.000Z",
@@ -1242,7 +1243,7 @@ test("cancel resolves named session when -s is before subcommand", async () => {
     await writeSessionRecord(homeDir, {
       acpxRecordId: "named-cancel-session",
       acpSessionId: "named-cancel-session",
-      agentCommand: "npx @zed-industries/codex-acp@^0.9.5",
+      agentCommand: AGENT_REGISTRY.codex,
       cwd,
       name: "named",
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -1271,7 +1272,7 @@ test("status resolves named session when -s is before subcommand", async () => {
     await writeSessionRecord(homeDir, {
       acpxRecordId: "named-status-session",
       acpSessionId: "named-status-session",
-      agentCommand: "npx @zed-industries/codex-acp@^0.9.5",
+      agentCommand: AGENT_REGISTRY.codex,
       cwd,
       name: "named",
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -1460,7 +1461,7 @@ test("sessions history prints stored history entries", async () => {
     await writeSessionRecord(homeDir, {
       acpxRecordId: "history-session",
       acpSessionId: "history-session",
-      agentCommand: "npx @zed-industries/codex-acp@^0.9.5",
+      agentCommand: AGENT_REGISTRY.codex,
       cwd,
       createdAt: "2026-01-01T00:00:00.000Z",
       lastUsedAt: "2026-01-01T00:10:00.000Z",
@@ -1504,7 +1505,7 @@ test("sessions read prints full history by default and supports --tail", async (
     await writeSessionRecord(homeDir, {
       acpxRecordId: "read-session",
       acpSessionId: "read-session",
-      agentCommand: "npx @zed-industries/codex-acp@^0.9.5",
+      agentCommand: AGENT_REGISTRY.codex,
       cwd,
       createdAt: "2026-01-01T00:00:00.000Z",
       lastUsedAt: "2026-01-01T00:10:00.000Z",
@@ -1560,7 +1561,7 @@ test("status reports running queue owner when owner socket is reachable", async 
       await writeSessionRecord(homeDir, {
         acpxRecordId: sessionId,
         acpSessionId: sessionId,
-        agentCommand: "npx @zed-industries/codex-acp@^0.9.5",
+        agentCommand: AGENT_REGISTRY.codex,
         cwd,
         createdAt: "2026-01-01T00:00:00.000Z",
         lastUsedAt: "2026-01-01T00:00:00.000Z",

@@ -105,6 +105,7 @@ Main landing documentation policy:
 6. Harness-specific docs for other supported agents MUST live under `agents/` and MUST use capitalized filenames, for example `agents/Cursor.md` and `agents/Copilot.md`.
 7. No other specific harness MUST BE ALLOWED to receive special placement, singled-out examples, or harness-specific promotion in main landing docs. This rule applies even when the change is framed as harmless, helpful, or accidental.
 8. Other harnesses may still be supported elsewhere in the repo, but main landing docs must describe them impartially and MUST NOT promote them unjustly.
+9. Documentation MUST NOT include adapter package version specifiers or semver ranges such as `pi-acp@^0.0.22` or `@zed-industries/codex-acp@^0.9.5`. Keep documentation generic. Keep actual adapter pinning in code, config, or release logic instead.
 
 ## Common Commands
 
