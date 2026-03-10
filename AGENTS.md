@@ -1,209 +1,166 @@
 # AGENTS.md — acpx
 
-## What is acpx?
+## Purpose
 
-`acpx` is a headless, scriptable CLI client for the Agent Client Protocol (ACP). It lets AI agents (or humans) create and resume ACP sessions, send prompts, stream structured results, and manage multiple sessions from the command line.
+This file is for contributors and coding agents working in this repository.
+Keep it focused on how to develop, validate, and ship `acpx`.
 
-Think of it as "curl for ACP": a pipe-friendly bridge between orchestrators (like OpenClaw) and coding agents, without PTY scraping.
+Use these files for the other concerns:
 
-## Why?
+- [`README.md`](README.md) for user-facing install and usage
+- [`docs/CLI.md`](docs/CLI.md) for CLI reference
+- [`VISION.md`](VISION.md) for product direction and boundaries
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) for PR expectations
+- [`skills/acpx/SKILL.md`](skills/acpx/SKILL.md) for agent-usage guidance
 
-Orchestrators commonly spawn coding agents in raw terminals and parse ANSI text. That loses structure: tool calls, permission requests, plans, diffs, and session state.
+When you need implementation detail, prefer the in-repo references below
+instead of expanding this file into a full technical spec.
 
-ACP adapters already exist for major agents, but there was no headless CLI client focused on scripted use. `acpx` fills that gap.
+## Repo
 
-## Architecture
+- GitHub: `https://github.com/openclaw/acpx`
+- npm: `https://www.npmjs.com/package/acpx`
+- Default branch: `main`
+- Runtime: Node.js `>=22.12.0`
+- Package manager: `pnpm@10.23.0`
 
-```
-┌─────────────┐     stdio/ndjson     ┌──────────────┐     wraps      ┌─────────┐
-│   acpx CLI  │ ◄──────────────────► │  ACP adapter  │ ◄───────────► │  Agent   │
-│  (client)   │     ACP protocol     │ (codex-acp)   │   internal    │ (Codex)  │
-└─────────────┘                      └──────────────┘               └─────────┘
-```
+## Product Direction
 
-acpx spawns the ACP adapter as a child process and communicates over stdio using ndjson (JSON-RPC).
+- `acpx` should be the smallest useful ACP client: a lightweight CLI that lets one
+  agent talk to another agent through the Agent Client Protocol without PTY
+  scraping or adapter-specific glue.
+- The goal is not to build a giant orchestration layer. The goal is to make ACP
+  practical, robust, and easy to compose in real workflows.
+- The primary user is another agent, orchestrator, or harness. Human usability
+  still matters, but it is a secondary constraint.
+- `acpx` should not try to do too many things at once.
+- If a feature does not make `acpx` a better ACP client or backend, it probably
+  does not belong in core.
+- In `acpx`, data models, config keys, keywords, flags, output shapes, and naming
+  conventions are part of the product surface.
+- They should be scrutinized multiple times before being added or changed.
+  Convenience is not enough. Every new convention creates long-term compatibility
+  cost.
+- The default stance should be to add fewer conventions, make them clearer, and
+  keep them stable.
+- Read [`VISION.md`](VISION.md) before changing user-visible behavior or conventions.
 
-## CLI Design
+## Setup
 
-### Grammar
-
-```bash
-acpx <agent> [prompt] <text>
-acpx <agent> exec <text>
-acpx <agent> sessions [list|new|close]
-```
-
-`prompt` is implicit, so `acpx codex "fix tests"` and `acpx codex prompt "fix tests"` are equivalent.
-
-### Examples
-
-```bash
-acpx codex sessions new                       # explicit session creation (once per project dir)
-acpx codex 'fix the tests'                    # implicit prompt, routes via directory-walk
-acpx codex prompt 'fix the tests'             # explicit prompt
-acpx codex exec 'what does this repo do'      # one-shot, no saved session
-acpx codex sessions new --name backend        # create named session
-acpx codex -s backend 'fix the API'           # prompt in named session
-acpx codex sessions                           # list sessions for codex
-acpx codex sessions close                     # close cwd-scoped codex session
-acpx codex sessions close backend             # close named codex session
-acpx claude 'refactor auth'                   # claude adapter
-acpx gemini 'add logging'                     # gemini adapter
-```
-
-Default-agent shortcuts are also supported:
+Install dependencies:
 
 ```bash
-acpx sessions new          # defaults to codex
-acpx prompt 'fix tests'   # defaults to codex
-acpx exec 'summarize repo'
-acpx sessions
+pnpm install
 ```
 
-## Agent Registry
+Run the CLI from source:
 
-Built-in friendly names map to commands:
-
-```ts
-const AGENT_REGISTRY: Record<string, string> = {
-  codex: "npx @zed-industries/codex-acp",
-  claude: "npx -y @zed-industries/claude-agent-acp",
-  gemini: "gemini --experimental-acp",
-};
+```bash
+pnpm run dev -- --help
 ```
 
-Rules:
+Build the distributable CLI:
 
-- Known names resolve automatically.
-- Unknown names are treated as raw commands.
-- Escape hatch: `--agent <command>` sets a raw command explicitly.
-- Default agent is `codex` for top-level `prompt|exec|sessions` verbs.
-- Keep built-in adapter names and adapter examples in A-Z order where practical.
-
-## Session Behavior
-
-- `prompt` always uses a saved session (no implicit creation).
-- Session routing walks up the directory tree (like `git`) from `cwd` (or `--cwd`) to `/` and picks the first active match by `(agent command, dir, optional name)`.
-- `sessions new [--name <name>]` is the explicit creation point for saved sessions.
-- `-s <name>` switches to named-session lookup during the directory walk.
-- `exec` is one-shot: temporary session, prompt, discard.
-- `sessions list` lists all saved sessions for the selected agent command.
-- `sessions close [name]` closes/removes cwd-scoped session or named cwd-scoped session.
-
-Sessions are persisted in `~/.acpx/sessions/*.json`.
-
-## Global Options
-
-These go before the agent name:
-
-```text
---agent <command>     Raw ACP agent command (escape hatch)
---cwd <dir>           Working directory for the session (default: .)
---approve-all         Auto-approve all permission requests
---approve-reads       Auto-approve reads/searches, prompt for writes
---deny-all            Deny all permission requests
---format <fmt>        Output format: text (default), json, quiet
---timeout <seconds>   Maximum time to wait for agent response
---ttl <seconds>       Queue owner idle TTL before shutdown (0 = keep alive forever)
---verbose             Show ACP protocol debug info on stderr
+```bash
+pnpm run build
+node dist/cli.js --help
 ```
 
-## Output Formats
+Published install/use:
 
-### text (default)
-
-```
-[tool] read_file: src/auth.ts (completed)
-[tool] edit_file: src/auth.ts (running)
-
-Refactored the auth module to use async/await...
-
-[tool] run_command: npm test (completed)
-All 42 tests passing.
-
-[done] end_turn
+```bash
+npm install -g acpx@latest
+# or
+npx acpx@latest --help
 ```
 
-### json
+## Local Workflow
 
-```json
-{"type":"tool_call","title":"read_file: src/auth.ts","status":"completed","timestamp":"..."}
-{"type":"text","content":"Refactored the auth module..."}
-{"type":"tool_call","title":"run_command: npm test","status":"completed","timestamp":"..."}
-{"type":"done","stopReason":"end_turn","timestamp":"..."}
-```
+1. Make changes in `src/`, `test/`, docs, or workflow files.
+2. Use `pnpm run dev -- ...` for quick manual checks.
+3. Run the smallest relevant validation command while iterating.
+4. Before opening or updating a PR, run the full checks for the scope you changed.
 
-### quiet
+## Common Commands
 
-```
-Refactored the auth module to use async/await. All 42 tests passing.
-```
+- `pnpm run build` — build the distributable CLI
+- `pnpm run test` — local test run without coverage gate
+- `pnpm run test:coverage` — CI-equivalent test run with coverage thresholds
+- `pnpm run typecheck` — TypeScript typecheck
+- `pnpm run lint` — source linting plus persisted-key casing checks
+- `pnpm run format:check` — formatting check
+- `pnpm run check` — format, typecheck, lint, build, and coverage tests
+- `pnpm run check:docs` — docs format and markdown lint
+- `pnpm run perf:report` — performance reporting helper
 
-## Permission Handling
+## When To Run Checks
 
-- `--approve-all` auto-approves everything
-- `--approve-reads` auto-approves reads/searches and prompts for writes (default)
-- `--deny-all` denies all permission requests
+- Docs-only changes in `docs/**`, [`README.md`](README.md), or [`CONTRIBUTING.md`](CONTRIBUTING.md):
+  run `pnpm run check:docs`
+- Code changes in `src/**`, `test/**`, `scripts/**`, `package.json`, or workflow files:
+  run `pnpm run check`
+- Code plus docs changes:
+  run both `pnpm run check` and `pnpm run check:docs`
+- Quick iteration on runtime or test changes:
+  use `pnpm run test` first, then `pnpm run check` before pushing
+- Changes to flags, config, output, agent registry names, session behavior, queueing, or persistence formats:
+  always run `pnpm run check`
 
-## Exit Codes
+`AGENTS.md` changes are not treated as docs-only by CI right now, so changes to
+this file should be treated like regular repo changes for validation purposes.
 
-| Code | Meaning                                  |
-| ---- | ---------------------------------------- |
-| 0    | Success                                  |
-| 1    | Agent/protocol error                     |
-| 2    | CLI usage error                          |
-| 3    | Timeout                                  |
-| 4    | No session found                         |
-| 5    | Permission denied (all options rejected) |
-| 130  | Interrupted (Ctrl+C)                     |
+## CI
 
-## Tech Stack
+CI lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-- Language: TypeScript
-- ACP SDK: `@agentclientprotocol/sdk`
-- CLI framework: `commander`
-- Build: `tsup`
-- Runtime: Node.js 18+
+- Pull requests and pushes run against `main`
+- CI first detects change scope
+- Docs-only changes skip the code matrix
+- Docs changes run the `Docs` job via `pnpm run check:docs`
+- Non-doc changes run:
+  - `pnpm run format:check`
+  - `pnpm run typecheck`
+  - `pnpm run lint`
+  - `pnpm run build`
+  - `pnpm run test:coverage`
+- CI installs dependencies with `pnpm install --frozen-lockfile`
+- CI uses Node 24 by default; the `Test` job runs on Node 22
 
-## Project Structure
+## Release / CD
 
-```
-acpx/
-├── src/
-│   ├── cli.ts              # CLI entry point and command grammar
-│   ├── agent-registry.ts   # Friendly-name agent registry
-│   ├── client.ts           # ACP client wrapper
-│   ├── session.ts          # Session create/send/list/close + persistence
-│   ├── permissions.ts      # Permission request policy handling
-│   ├── output.ts           # Output formatters (text/json/quiet)
-│   └── types.ts            # Shared types
-├── package.json
-├── tsconfig.json
-├── README.md
-├── LICENSE
-└── AGENTS.md
-```
+Release automation lives in [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
-## Implementation Notes
+- Releases are manual (`workflow_dispatch`)
+- The workflow installs dependencies with `pnpm install --frozen-lockfile`
+- It validates `package.json` release metadata before publishing
+- It runs `pnpm run lint`, `pnpm run typecheck`, and `pnpm run build`
+- It bumps from the latest npm version and publishes through `release-it`
 
-- Use `ClientSideConnection`, `ndJsonStream`, and `PROTOCOL_VERSION` from ACP SDK
-- Spawn agent with `stdio: ['pipe', 'pipe', 'inherit']`
-- Stream `sessionUpdate` notifications directly to formatter output
-- Prefer `loadSession` when supported, fallback to `newSession`
-- Advertise client capabilities:
-  - `fs: { readTextFile: true, writeTextFile: true }`
-  - `terminal: true`
-- Handle SIGINT/SIGTERM with client cleanup
+The release workflow currently requires these `package.json` values:
 
-## Reference Implementations
+- `author`: `OpenClaw Team <dev@openclaw.ai>`
+- `repository.url`: `https://github.com/openclaw/acpx`
 
-- OpenClaw ACP client: `/home/bob/openclaw/src/acp/client.ts`
-- ACP SDK example: `/tmp/acp-sdk/src/examples/client.ts`
-- Codex ACP adapter: `https://github.com/zed-industries/codex-acp`
+Do not change release metadata or publishing behavior casually.
 
-## Non-Goals (v1)
+## Key Areas
 
-- No remote/HTTP transport (stdio only)
-- No MCP passthrough (`mcpServers: []`)
-- No agent discovery/registry service integration
-- No daemon mode
+- [`src/`](src) — CLI and runtime implementation
+- [`test/`](test) — Node test suite
+- [`scripts/`](scripts) — repo maintenance and perf helpers
+- [`README.md`](README.md) — install and usage docs
+- [`docs/CLI.md`](docs/CLI.md) — full CLI reference
+- [`VISION.md`](VISION.md) — product boundaries
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution workflow
+
+## Technical References
+
+- [`src/cli-core.ts`](src/cli-core.ts) — command handling and top-level CLI flow
+- [`src/client.ts`](src/client.ts) — ACP client integration
+- [`src/config.ts`](src/config.ts) — config loading and defaults
+- [`src/agent-registry.ts`](src/agent-registry.ts) — built-in agent names and commands
+- [`src/session-runtime.ts`](src/session-runtime.ts) and [`src/session-runtime/`](src/session-runtime) — session lifecycle and runtime behavior
+- [`src/queue-ipc.ts`](src/queue-ipc.ts) and [`src/queue-ipc-server.ts`](src/queue-ipc-server.ts) — queue IPC behavior
+- [`test/integration.test.ts`](test/integration.test.ts) — end-to-end CLI expectations
+- [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — CI behavior
+- [`.github/workflows/release.yml`](.github/workflows/release.yml) — release workflow
