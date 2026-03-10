@@ -47,10 +47,14 @@ test("normalizeOutputError maps ACP resource not found errors to NO_SESSION", ()
   assert.equal(isAcpResourceNotFoundError(error), true);
 });
 
-test("isAcpResourceNotFoundError requires typed ACP error payload", () => {
+test("isAcpResourceNotFoundError recognizes session-not-found hints in nested errors", () => {
   assert.equal(
-    isAcpResourceNotFoundError(new Error("session not found while reconnecting")),
-    false,
+    isAcpResourceNotFoundError({
+      cause: {
+        message: "session not found while reconnecting",
+      },
+    }),
+    true,
   );
 });
 test("isAcpQueryClosedBeforeResponseError matches typed ACP payload", () => {

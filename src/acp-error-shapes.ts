@@ -61,7 +61,7 @@ function extractAcpErrorInternal(value: unknown, depth: number): OutputErrorAcpP
   return undefined;
 }
 
-function formatUnknownErrorMessage(error: unknown): string {
+export function formatUnknownErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }

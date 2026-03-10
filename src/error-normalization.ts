@@ -1,4 +1,9 @@
 import {
+  extractAcpError,
+  formatUnknownErrorMessage,
+  isAcpResourceNotFoundError,
+} from "./acp-error-shapes.js";
+import {
   AuthPolicyError,
   PermissionDeniedError,
   PermissionPromptUnavailableError,
@@ -13,7 +18,6 @@ import {
   type OutputErrorOrigin,
 } from "./types.js";
 
-const RESOURCE_NOT_FOUND_ACP_CODES = new Set([-32002]);
 const AUTH_REQUIRED_ACP_CODES = new Set([-32000]);
 const QUERY_CLOSED_BEFORE_RESPONSE_DETAIL = "query closed before response received";
 
@@ -120,7 +124,7 @@ function readOutputErrorMeta(error: unknown): ErrorMeta {
   const origin = isOutputErrorOrigin(record.origin) ? record.origin : undefined;
   const retryable = typeof record.retryable === "boolean" ? record.retryable : undefined;
 
-  const acp = toAcpErrorPayload(record.acp);
+  const acp = extractAcpError(record.acp);
   return {
     outputCode,
     detailCode,
@@ -128,58 +132,6 @@ function readOutputErrorMeta(error: unknown): ErrorMeta {
     retryable,
     acp,
   };
-}
-
-function toAcpErrorPayload(value: unknown): OutputErrorAcpPayload | undefined {
-  const record = asRecord(value);
-  if (!record) {
-    return undefined;
-  }
-
-  if (typeof record.code !== "number" || !Number.isFinite(record.code)) {
-    return undefined;
-  }
-  if (typeof record.message !== "string" || record.message.length === 0) {
-    return undefined;
-  }
-
-  return {
-    code: record.code,
-    message: record.message,
-    data: record.data,
-  };
-}
-
-function extractAcpErrorInternal(value: unknown, depth: number): OutputErrorAcpPayload | undefined {
-  if (depth > 5) {
-    return undefined;
-  }
-
-  const direct = toAcpErrorPayload(value);
-  if (direct) {
-    return direct;
-  }
-
-  const record = asRecord(value);
-  if (!record) {
-    return undefined;
-  }
-
-  if ("error" in record) {
-    const nested = extractAcpErrorInternal(record.error, depth + 1);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  if ("cause" in record) {
-    const nested = extractAcpErrorInternal(record.cause, depth + 1);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  return undefined;
 }
 
 function isTimeoutLike(error: unknown): boolean {
@@ -202,34 +154,10 @@ function isUsageLike(error: unknown): boolean {
 }
 
 export function formatErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (error && typeof error === "object") {
-    const maybeMessage = (error as { message?: unknown }).message;
-    if (typeof maybeMessage === "string" && maybeMessage.length > 0) {
-      return maybeMessage;
-    }
-
-    try {
-      return JSON.stringify(error);
-    } catch {
-      // fall through
-    }
-  }
-
-  return String(error);
+  return formatUnknownErrorMessage(error);
 }
 
-export function extractAcpError(error: unknown): OutputErrorAcpPayload | undefined {
-  return extractAcpErrorInternal(error, 0);
-}
-
-export function isAcpResourceNotFoundError(error: unknown): boolean {
-  const acp = extractAcpError(error);
-  return Boolean(acp && RESOURCE_NOT_FOUND_ACP_CODES.has(acp.code));
-}
+export { extractAcpError, isAcpResourceNotFoundError };
 
 export function isAcpQueryClosedBeforeResponseError(error: unknown): boolean {
   const acp = extractAcpError(error);
