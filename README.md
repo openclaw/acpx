@@ -18,7 +18,7 @@ Your agents love acpx! 🤖❤️ They hate having to scrape characters from a P
 
 `acpx` is a headless CLI client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com), so AI agents and orchestrators can talk to coding agents over a structured protocol instead of PTY scraping.
 
-One command surface for Pi, OpenClaw ACP, Codex, Claude, Gemini, Cursor, OpenCode, Kilocode, or custom ACP servers. Built for agent-to-agent communication over the command line.
+One command surface for Pi, OpenClaw ACP, Codex, Claude, and other ACP-compatible agents. Built for agent-to-agent communication over the command line.
 
 - **Persistent sessions**: multi-turn conversations that survive across invocations, scoped per repo
 - **Named sessions**: run parallel workstreams in the same repo (`-s backend`, `-s frontend`)
@@ -124,14 +124,8 @@ The only prerequisite is the underlying coding agent you want to use:
 - `acpx openclaw` -> OpenClaw ACP bridge: https://github.com/openclaw/openclaw
 - `acpx codex` -> Codex CLI: https://codex.openai.com
 - `acpx claude` -> Claude Code: https://claude.ai/code
-- `acpx gemini` -> Gemini CLI: https://github.com/google/gemini-cli
-- `acpx cursor` -> Cursor CLI (`cursor-agent acp`; override in config if your install exposes `agent acp`): https://cursor.com/docs/cli/acp
-- `acpx copilot` -> GitHub Copilot CLI (`copilot --acp --stdio`, requires a release that supports ACP stdio mode): https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line
-- `acpx kimi` -> Kimi CLI: https://github.com/MoonshotAI/kimi-cli
-- `acpx opencode` -> OpenCode: https://opencode.ai
-- `acpx kiro` -> Kiro CLI: https://kiro.dev
-- `acpx kilocode` -> Kilocode: https://kilocode.ai
-- `acpx qwen` -> Qwen Code: https://github.com/QwenLM/qwen-code
+
+Additional built-in agent docs live in [agents/README.md](agents/README.md).
 
 ## Usage examples
 
@@ -150,7 +144,7 @@ acpx exec 'summarize this repo'                # default agent shortcut (codex)
 acpx codex exec 'what does this repo do?'      # one-shot, no saved session
 
 acpx codex sessions new --name api              # create named session
-acpx codex -s api 'implement cursor pagination' # prompt in named session
+acpx codex -s api 'implement token pagination'  # prompt in named session
 acpx codex sessions new --name docs             # create another named session
 acpx codex -s docs 'rewrite API docs'           # parallel work in another named session
 
@@ -168,15 +162,20 @@ acpx codex status                # local process status for current session
 
 acpx config show                 # show resolved config (global + project)
 acpx config init                 # create ~/.acpx/config.json template
+```
 
+Main landing harness examples:
+
+```bash
+acpx pi 'review recent changes'
 acpx openclaw exec 'summarize active session state' # built-in OpenClaw ACP bridge
+acpx codex 'fix the failing typecheck'
 acpx claude 'refactor auth middleware' # built-in claude agent
-acpx gemini 'add startup logging'      # built-in gemini agent
-acpx cursor 'fix the failing typecheck'     # built-in Cursor agent
-acpx copilot 'summarize recent changes'     # built-in GitHub Copilot agent
-acpx qwen 'explain this module architecture' # built-in qwen code agent
-acpx qwen exec 'Reply exactly QWEN_ACP_OK'   # one-shot ACP smoke test
+```
 
+Additional supported harnesses and their specific notes are documented in [agents/README.md](agents/README.md).
+
+```bash
 acpx my-agent 'review this patch'                      # unknown name -> raw command
 acpx --agent './bin/dev-acp --profile ci' 'run checks' # --agent escape hatch
 ```
@@ -283,24 +282,25 @@ Built-ins:
 | Agent      | Adapter                                                                | Wraps                                                                                                           |
 | ---------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `pi`       | [pi-acp](https://github.com/svkozak/pi-acp)                            | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
-| `openclaw` | native                                                                 | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
+| `openclaw` | native (`openclaw acp`)                                                | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
 | `codex`    | [codex-acp](https://github.com/zed-industries/codex-acp)               | [Codex CLI](https://codex.openai.com)                                                                           |
 | `claude`   | [claude-agent-acp](https://github.com/zed-industries/claude-agent-acp) | [Claude Code](https://claude.ai/code)                                                                           |
-| `gemini`   | native                                                                 | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
+| `gemini`   | native (`gemini --experimental-acp`)                                   | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
 | `cursor`   | native (`cursor-agent acp`)                                            | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
-| `copilot`  | native                                                                 | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
-| `kimi`     | native                                                                 | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
-| `opencode` | native                                                                 | [OpenCode](https://opencode.ai)                                                                                 |
-| `kilocode` | native                                                                 | [Kilocode](https://kilocode.ai)                                                                                 |
+| `copilot`  | native (`copilot --acp --stdio`)                                       | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
+| `kimi`     | native (`kimi acp`)                                                    | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
+| `opencode` | `npx -y opencode-ai acp`                                               | [OpenCode](https://opencode.ai)                                                                                 |
+| `kiro`     | native (`kiro-cli acp`)                                                | [Kiro CLI](https://kiro.dev)                                                                                    |
+| `kilocode` | `npx -y @kilocode/cli acp`                                             | [Kilocode](https://kilocode.ai)                                                                                 |
 | `qwen`     | native (`qwen --acp`)                                                  | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
+
+Additional built-in agent docs live in [agents/README.md](agents/README.md).
 
 Use `--agent` as an escape hatch for custom ACP servers:
 
 ```bash
 acpx --agent ./my-custom-acp-server 'do something'
 ```
-
-`acpx copilot` expects a Copilot CLI release with `--acp --stdio` support. Older binaries will fail before ACP startup.
 
 For repo-local OpenClaw checkouts, override the built-in command in config so `acpx openclaw ...`
 spawns the ACP bridge directly without `pnpm` wrapper noise:

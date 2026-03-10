@@ -7,20 +7,14 @@ date: 2026-02-17
 
 ## Built-in registry
 
-`src/agent-registry.ts` defines friendly names:
+`src/agent-registry.ts` defines friendly names such as:
 
 - `pi -> npx pi-acp`
 - `openclaw -> openclaw acp`
 - `codex -> npx @zed-industries/codex-acp`
 - `claude -> npx -y @zed-industries/claude-agent-acp`
-- `gemini -> gemini --experimental-acp`
-- `cursor -> cursor-agent acp`
-- `copilot -> copilot --acp --stdio`
-- `kimi -> kimi acp`
-- `opencode -> npx -y opencode-ai acp`
-- `kiro -> kiro-cli acp`
-- `kilocode -> npx -y @kilocode/cli acp`
-- `qwen -> qwen --acp`
+
+The built-in agents table lives in [../README.md](../README.md). Additional built-in agent docs live under [../agents/README.md](../agents/README.md).
 
 Default agent is `codex`.
 
@@ -52,7 +46,7 @@ Rules:
 
 ## Practical guidance
 
-Use built-ins for common adapters (`pi`, `openclaw`, `codex`, `claude`, `gemini`, `cursor`, `copilot`, `kimi`, `opencode`, `kiro`, `kilocode`, `qwen`).
+Use the built-ins documented in `src/agent-registry.ts`. For the full supported-agents list and additional built-in agent docs, see [../README.md](../README.md) and [../agents/README.md](../agents/README.md).
 Use `--agent` when you need:
 
 - local development adapters

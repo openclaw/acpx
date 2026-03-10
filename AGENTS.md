@@ -38,6 +38,8 @@ acpx <agent> sessions [list|new|close]
 ### Examples
 
 ```bash
+acpx pi 'review recent changes'               # pi adapter
+acpx openclaw exec 'summarize active session state' # openclaw adapter
 acpx codex sessions new                       # explicit session creation (once per project dir)
 acpx codex 'fix the tests'                    # implicit prompt, routes via directory-walk
 acpx codex prompt 'fix the tests'             # explicit prompt
@@ -48,7 +50,6 @@ acpx codex sessions                           # list sessions for codex
 acpx codex sessions close                     # close cwd-scoped codex session
 acpx codex sessions close backend             # close named codex session
 acpx claude 'refactor auth'                   # claude adapter
-acpx gemini 'add logging'                     # gemini adapter
 ```
 
 Default-agent shortcuts are also supported:
@@ -66,11 +67,14 @@ Built-in friendly names map to commands:
 
 ```ts
 const AGENT_REGISTRY: Record<string, string> = {
+  pi: "npx pi-acp",
+  openclaw: "openclaw acp",
   codex: "npx @zed-industries/codex-acp",
   claude: "npx -y @zed-industries/claude-agent-acp",
-  gemini: "gemini --experimental-acp",
 };
 ```
+
+Harness-specific docs for other supported agents live under `agents/`.
 
 Rules:
 
@@ -90,6 +94,17 @@ Example ordering policy:
 7. `copilot`
 
 This ordering is mandatory whenever multiple built-in agents appear in the same example set. Agents after those may appear in any order, but the precedence above MUST NOT be broken. Any PR that introduces or preserves example ordering that violates this rule MUST be modified until it adheres to this ordering before merge.
+
+Main landing documentation policy:
+
+1. This repo will receive many contributions. Contributors will sometimes try, intentionally or unintentionally, to promote their own harness or product through the docs.
+2. Main landing docs such as `README.md` and `docs/CLI.md` MUST remain impartial. They MUST NOT become promotional surfaces for specific harnesses.
+3. `pi` and `openclaw` are the primary citizens. They may appear at the top of main landing docs, in that order.
+4. `codex` and `claude` are the next most important citizens because they are the most widely used. These four harnesses — `pi`, `openclaw`, `codex`, and `claude` — are the only harnesses that may be used as named examples in main landing docs, and the only ones whose specific quirks or harness-specific details may be called out there.
+5. The only main-landing exception is the neutral supported-agents table in `README.md`. That table MAY list every supported built-in harness, but it MUST remain exhaustive, factual, and non-promotional. It MUST NOT single out non-primary harnesses for extra emphasis.
+6. Harness-specific docs for other supported agents MUST live under `agents/` and MUST use capitalized filenames, for example `agents/Cursor.md` and `agents/Copilot.md`.
+7. No other specific harness MUST BE ALLOWED to receive special placement, singled-out examples, or harness-specific promotion in main landing docs. This rule applies even when the change is framed as harmless, helpful, or accidental.
+8. Other harnesses may still be supported elsewhere in the repo, but main landing docs must describe them impartially and MUST NOT promote them unjustly.
 
 ## Session Behavior
 

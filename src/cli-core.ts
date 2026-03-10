@@ -1571,6 +1571,8 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     "after",
     `
 Examples:
+  acpx pi "review recent changes"
+  acpx openclaw exec "summarize active session state"
   acpx codex sessions new
   acpx codex "fix the tests"
   acpx codex prompt "fix the tests"
@@ -1589,7 +1591,6 @@ Examples:
   acpx config init
   acpx --ttl 30 codex "investigate flaky tests"
   acpx claude "refactor auth"
-  acpx gemini "add logging"
   acpx --agent ./my-custom-server "do something"`,
   );
 
