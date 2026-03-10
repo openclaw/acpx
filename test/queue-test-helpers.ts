@@ -110,3 +110,63 @@ export async function closeServer(server: net.Server): Promise<void> {
     server.close(() => resolve());
   });
 }
+
+export function createSingleRequestServer(
+  onRequest: (socket: net.Socket, request: { requestId: string; type: string }) => void,
+): net.Server {
+  return net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    let buffer = "";
+    socket.on("data", (chunk: string) => {
+      buffer += chunk;
+      const newlineIndex = buffer.indexOf("\n");
+      if (newlineIndex < 0) {
+        return;
+      }
+
+      const line = buffer.slice(0, newlineIndex).trim();
+      if (!line) {
+        return;
+      }
+
+      onRequest(socket, JSON.parse(line) as { requestId: string; type: string });
+    });
+  });
+}
+
+export async function connectSocket(socketPath: string): Promise<net.Socket> {
+  return await new Promise<net.Socket>((resolve, reject) => {
+    const socket = net.createConnection(socketPath);
+    socket.setEncoding("utf8");
+    const onConnect = () => {
+      socket.off("error", onError);
+      resolve(socket);
+    };
+    const onError = (error: Error) => {
+      socket.off("connect", onConnect);
+      reject(error);
+    };
+
+    socket.once("connect", onConnect);
+    socket.once("error", onError);
+  });
+}
+
+export async function nextJsonLine(
+  iterator: AsyncIterator<string>,
+  timeoutMs = 2_000,
+): Promise<unknown> {
+  const timeout = new Promise<never>((_resolve, reject) => {
+    setTimeout(() => reject(new Error("Timed out waiting for queue line")), timeoutMs);
+  });
+
+  const next = (async () => {
+    const result = await iterator.next();
+    if (result.done || !result.value) {
+      throw new Error("Queue socket closed before receiving expected line");
+    }
+    return JSON.parse(result.value);
+  })();
+
+  return await Promise.race([next, timeout]);
+}

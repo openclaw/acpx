@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import net from "node:net";
 import test from "node:test";
 import {
   cleanupOwnerArtifacts,
   closeServer,
+  createSingleRequestServer,
   listenServer,
   queuePaths,
   startKeeperProcess,
@@ -29,37 +29,22 @@ test("cancelSessionPrompt sends cancel request to active queue owner", async () 
       socketPath,
     });
 
-    const server = net.createServer((socket) => {
-      socket.setEncoding("utf8");
-      let buffer = "";
-      socket.on("data", (chunk: string) => {
-        buffer += chunk;
-        const newlineIndex = buffer.indexOf("\n");
-        if (newlineIndex < 0) {
-          return;
-        }
-        const line = buffer.slice(0, newlineIndex).trim();
-        if (!line) {
-          return;
-        }
-
-        const request = JSON.parse(line) as { requestId: string; type: string };
-        assert.equal(request.type, "cancel_prompt");
-        socket.write(
-          `${JSON.stringify({
-            type: "accepted",
-            requestId: request.requestId,
-          })}\n`,
-        );
-        socket.write(
-          `${JSON.stringify({
-            type: "cancel_result",
-            requestId: request.requestId,
-            cancelled: true,
-          })}\n`,
-        );
-        socket.end();
-      });
+    const server = createSingleRequestServer((socket, request) => {
+      assert.equal(request.type, "cancel_prompt");
+      socket.write(
+        `${JSON.stringify({
+          type: "accepted",
+          requestId: request.requestId,
+        })}\n`,
+      );
+      socket.write(
+        `${JSON.stringify({
+          type: "cancel_result",
+          requestId: request.requestId,
+          cancelled: true,
+        })}\n`,
+      );
+      socket.end();
     });
 
     await listenServer(server, socketPath);

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import net from "node:net";
 import readline from "node:readline";
 import test from "node:test";
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
@@ -16,7 +15,10 @@ import type { OutputFormatter } from "../src/types.js";
 import {
   cleanupOwnerArtifacts,
   closeServer,
+  connectSocket,
+  createSingleRequestServer,
   listenServer,
+  nextJsonLine,
   queuePaths,
   startKeeperProcess,
   stopProcess,
@@ -51,48 +53,33 @@ test("trySubmitToRunningOwner propagates typed queue prompt errors", async () =>
       socketPath,
     });
 
-    const server = net.createServer((socket) => {
-      socket.setEncoding("utf8");
-      let buffer = "";
-      socket.on("data", (chunk: string) => {
-        buffer += chunk;
-        const newlineIndex = buffer.indexOf("\n");
-        if (newlineIndex < 0) {
-          return;
-        }
-        const line = buffer.slice(0, newlineIndex).trim();
-        if (!line) {
-          return;
-        }
-
-        const request = JSON.parse(line) as { requestId: string; type: string };
-        assert.equal(request.type, "submit_prompt");
-        socket.write(
-          `${JSON.stringify({
-            type: "accepted",
-            requestId: request.requestId,
-          })}\n`,
-        );
-        socket.write(
-          `${JSON.stringify({
-            type: "error",
-            requestId: request.requestId,
-            code: "PERMISSION_DENIED",
-            detailCode: "QUEUE_CONTROL_REQUEST_FAILED",
-            origin: "queue",
-            retryable: false,
-            message: "permission denied by queue control",
-            acp: {
-              code: -32000,
-              message: "Authentication required",
-              data: {
-                methodId: "token",
-              },
+    const server = createSingleRequestServer((socket, request) => {
+      assert.equal(request.type, "submit_prompt");
+      socket.write(
+        `${JSON.stringify({
+          type: "accepted",
+          requestId: request.requestId,
+        })}\n`,
+      );
+      socket.write(
+        `${JSON.stringify({
+          type: "error",
+          requestId: request.requestId,
+          code: "PERMISSION_DENIED",
+          detailCode: "QUEUE_CONTROL_REQUEST_FAILED",
+          origin: "queue",
+          retryable: false,
+          message: "permission denied by queue control",
+          acp: {
+            code: -32000,
+            message: "Authentication required",
+            data: {
+              methodId: "token",
             },
-          })}\n`,
-        );
-        socket.end();
-      });
+          },
+        })}\n`,
+      );
+      socket.end();
     });
 
     await listenServer(server, socketPath);
@@ -138,41 +125,26 @@ test("trySetModeOnRunningOwner propagates typed queue control errors", async () 
       socketPath,
     });
 
-    const server = net.createServer((socket) => {
-      socket.setEncoding("utf8");
-      let buffer = "";
-      socket.on("data", (chunk: string) => {
-        buffer += chunk;
-        const newlineIndex = buffer.indexOf("\n");
-        if (newlineIndex < 0) {
-          return;
-        }
-        const line = buffer.slice(0, newlineIndex).trim();
-        if (!line) {
-          return;
-        }
-
-        const request = JSON.parse(line) as { requestId: string; type: string };
-        assert.equal(request.type, "set_mode");
-        socket.write(
-          `${JSON.stringify({
-            type: "accepted",
-            requestId: request.requestId,
-          })}\n`,
-        );
-        socket.write(
-          `${JSON.stringify({
-            type: "error",
-            requestId: request.requestId,
-            code: "RUNTIME",
-            detailCode: "QUEUE_CONTROL_REQUEST_FAILED",
-            origin: "queue",
-            retryable: true,
-            message: "mode switch rejected by owner",
-          })}\n`,
-        );
-        socket.end();
-      });
+    const server = createSingleRequestServer((socket, request) => {
+      assert.equal(request.type, "set_mode");
+      socket.write(
+        `${JSON.stringify({
+          type: "accepted",
+          requestId: request.requestId,
+        })}\n`,
+      );
+      socket.write(
+        `${JSON.stringify({
+          type: "error",
+          requestId: request.requestId,
+          code: "RUNTIME",
+          detailCode: "QUEUE_CONTROL_REQUEST_FAILED",
+          origin: "queue",
+          retryable: true,
+          message: "mode switch rejected by owner",
+        })}\n`,
+      );
+      socket.end();
     });
 
     await listenServer(server, socketPath);
@@ -210,29 +182,15 @@ test("trySubmitToRunningOwner surfaces protocol invalid JSON detail code", async
       socketPath,
     });
 
-    const server = net.createServer((socket) => {
-      socket.setEncoding("utf8");
-      let buffer = "";
-      socket.on("data", (chunk: string) => {
-        buffer += chunk;
-        const newlineIndex = buffer.indexOf("\n");
-        if (newlineIndex < 0) {
-          return;
-        }
-        const line = buffer.slice(0, newlineIndex).trim();
-        if (!line) {
-          return;
-        }
-        const request = JSON.parse(line) as { requestId: string; type: string };
-        assert.equal(request.type, "submit_prompt");
-        socket.write(
-          `${JSON.stringify({
-            type: "accepted",
-            requestId: request.requestId,
-          })}\n`,
-        );
-        socket.write("{invalid-json\n");
-      });
+    const server = createSingleRequestServer((socket, request) => {
+      assert.equal(request.type, "submit_prompt");
+      socket.write(
+        `${JSON.stringify({
+          type: "accepted",
+          requestId: request.requestId,
+        })}\n`,
+      );
+      socket.write("{invalid-json\n");
     });
 
     await listenServer(server, socketPath);
@@ -275,11 +233,8 @@ test("trySubmitToRunningOwner surfaces disconnect-before-ack detail code", async
       socketPath,
     });
 
-    const server = net.createServer((socket) => {
-      socket.setEncoding("utf8");
-      socket.once("data", () => {
-        socket.end();
-      });
+    const server = createSingleRequestServer((socket) => {
+      socket.end();
     });
 
     await listenServer(server, socketPath);
@@ -342,86 +297,72 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
       },
     };
 
-    const server = net.createServer((socket) => {
-      socket.setEncoding("utf8");
-      let buffer = "";
-      socket.on("data", (chunk: string) => {
-        buffer += chunk;
-        const newlineIndex = buffer.indexOf("\n");
-        if (newlineIndex < 0) {
-          return;
-        }
-        const line = buffer.slice(0, newlineIndex).trim();
-        if (!line) {
-          return;
-        }
-        const request = JSON.parse(line) as { requestId: string; type: string };
-        assert.equal(request.type, "submit_prompt");
-        socket.write(
-          `${JSON.stringify({
-            type: "accepted",
-            requestId: request.requestId,
-          })}\n`,
-        );
-        socket.write(
-          `${JSON.stringify({
-            type: "event",
-            requestId: request.requestId,
-            message: {
-              jsonrpc: "2.0",
-              method: "session/update",
-              params: {
-                sessionId: "agent-session",
-                update: {
-                  sessionUpdate: "agent_message_chunk",
-                  content: { type: "text", text: "hello" },
-                },
-              },
-            },
-          })}\n`,
-        );
-        socket.write(
-          `${JSON.stringify({
-            type: "result",
-            requestId: request.requestId,
-            result: {
-              stopReason: "end_turn",
+    const server = createSingleRequestServer((socket, request) => {
+      assert.equal(request.type, "submit_prompt");
+      socket.write(
+        `${JSON.stringify({
+          type: "accepted",
+          requestId: request.requestId,
+        })}\n`,
+      );
+      socket.write(
+        `${JSON.stringify({
+          type: "event",
+          requestId: request.requestId,
+          message: {
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: {
               sessionId: "agent-session",
-              permissionStats: {
-                requested: 1,
-                approved: 1,
-                denied: 0,
-                cancelled: 0,
-              },
-              resumed: true,
-              record: {
-                schema: "acpx.session.v1",
-                acpxRecordId: sessionId,
-                acpSessionId: "agent-session",
-                agentCommand: "mock-agent",
-                cwd: "/tmp/project",
-                createdAt: "2026-01-01T00:00:00.000Z",
-                lastUsedAt: "2026-01-01T00:00:00.000Z",
-                lastSeq: 2,
-                eventLog: {
-                  active_path: "/tmp/session.stream.ndjson",
-                  segment_count: 1,
-                  max_segment_bytes: 1024,
-                  max_segments: 1,
-                  last_write_at: "2026-01-01T00:00:00.000Z",
-                  last_write_error: null,
-                },
-                title: null,
-                messages: [],
-                updated_at: "2026-01-01T00:00:00.000Z",
-                cumulative_token_usage: {},
-                request_token_usage: {},
+              update: {
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: "hello" },
               },
             },
-          })}\n`,
-        );
-        socket.end();
-      });
+          },
+        })}\n`,
+      );
+      socket.write(
+        `${JSON.stringify({
+          type: "result",
+          requestId: request.requestId,
+          result: {
+            stopReason: "end_turn",
+            sessionId: "agent-session",
+            permissionStats: {
+              requested: 1,
+              approved: 1,
+              denied: 0,
+              cancelled: 0,
+            },
+            resumed: true,
+            record: {
+              schema: "acpx.session.v1",
+              acpxRecordId: sessionId,
+              acpSessionId: "agent-session",
+              agentCommand: "mock-agent",
+              cwd: "/tmp/project",
+              createdAt: "2026-01-01T00:00:00.000Z",
+              lastUsedAt: "2026-01-01T00:00:00.000Z",
+              lastSeq: 2,
+              eventLog: {
+                active_path: "/tmp/session.stream.ndjson",
+                segment_count: 1,
+                max_segment_bytes: 1024,
+                max_segments: 1,
+                last_write_at: "2026-01-01T00:00:00.000Z",
+                last_write_error: null,
+              },
+              title: null,
+              messages: [],
+              updated_at: "2026-01-01T00:00:00.000Z",
+              cumulative_token_usage: {},
+              request_token_usage: {},
+            },
+          },
+        })}\n`,
+      );
+      socket.end();
     });
 
     await listenServer(server, socketPath);
@@ -640,40 +581,6 @@ test("SessionQueueOwner rejects prompts when queue depth exceeds the configured 
   });
 });
 
-async function connectSocket(socketPath: string): Promise<net.Socket> {
-  return await new Promise<net.Socket>((resolve, reject) => {
-    const socket = net.createConnection(socketPath);
-    socket.setEncoding("utf8");
-    const onConnect = () => {
-      socket.off("error", onError);
-      resolve(socket);
-    };
-    const onError = (error: Error) => {
-      socket.off("connect", onConnect);
-      reject(error);
-    };
-
-    socket.once("connect", onConnect);
-    socket.once("error", onError);
-  });
-}
-
-async function nextJsonLine(iterator: AsyncIterator<string>, timeoutMs = 2_000): Promise<unknown> {
-  const timeout = new Promise<never>((_resolve, reject) => {
-    setTimeout(() => reject(new Error("Timed out waiting for queue line")), timeoutMs);
-  });
-
-  const next = (async () => {
-    const result = await iterator.next();
-    if (result.done || !result.value) {
-      throw new Error("Queue socket closed before receiving expected line");
-    }
-    return JSON.parse(result.value);
-  })();
-
-  return await Promise.race([next, timeout]);
-}
-
 test("trySubmitToRunningOwner clears stale owner lock on protocol mismatch", async () => {
   await withTempHome(async (homeDir) => {
     const sessionId = "submit-stale-owner-protocol-mismatch";
@@ -686,38 +593,24 @@ test("trySubmitToRunningOwner clears stale owner lock on protocol mismatch", asy
       socketPath,
     });
 
-    const server = net.createServer((socket) => {
-      socket.setEncoding("utf8");
-      let buffer = "";
-      socket.on("data", (chunk: string) => {
-        buffer += chunk;
-        const newlineIndex = buffer.indexOf("\n");
-        if (newlineIndex < 0) {
-          return;
-        }
-        const line = buffer.slice(0, newlineIndex).trim();
-        if (!line) {
-          return;
-        }
-        const request = JSON.parse(line) as { requestId: string; type: string };
-        assert.equal(request.type, "submit_prompt");
-        socket.write(
-          `${JSON.stringify({
-            type: "accepted",
-            requestId: request.requestId,
-          })}\n`,
-        );
-        socket.write(
-          `${JSON.stringify({
-            type: "session_update",
-            requestId: request.requestId,
-            update: {
-              sessionId: "legacy-session",
-            },
-          })}\n`,
-        );
-        socket.end();
-      });
+    const server = createSingleRequestServer((socket, request) => {
+      assert.equal(request.type, "submit_prompt");
+      socket.write(
+        `${JSON.stringify({
+          type: "accepted",
+          requestId: request.requestId,
+        })}\n`,
+      );
+      socket.write(
+        `${JSON.stringify({
+          type: "session_update",
+          requestId: request.requestId,
+          update: {
+            sessionId: "legacy-session",
+          },
+        })}\n`,
+      );
+      socket.end();
     });
 
     await listenServer(server, socketPath);

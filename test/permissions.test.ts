@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import readline from "node:readline/promises";
 import test from "node:test";
 import type { RequestPermissionRequest } from "@agentclientprotocol/sdk";
 import { PermissionPromptUnavailableError } from "../src/errors.js";
 import { classifyPermissionDecision, resolvePermissionRequest } from "../src/permissions.js";
+import { withMockedReadline, withTtyState } from "./tty-test-helpers.js";
 
 const BASE_OPTIONS = [
   { optionId: "allow", kind: "allow_once" },
@@ -44,25 +44,7 @@ function makeRequestWithTitle(
 }
 
 function withNonTty<T>(run: () => Promise<T>): Promise<T> {
-  const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
-  const stderrDescriptor = Object.getOwnPropertyDescriptor(process.stderr, "isTTY");
-
-  Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
-  Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: true });
-
-  return run().finally(() => {
-    if (stdinDescriptor) {
-      Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
-    } else {
-      delete (process.stdin as { isTTY?: boolean }).isTTY;
-    }
-
-    if (stderrDescriptor) {
-      Object.defineProperty(process.stderr, "isTTY", stderrDescriptor);
-    } else {
-      delete (process.stderr as { isTTY?: boolean }).isTTY;
-    }
-  });
+  return withTtyState({ stdin: false, stderr: false }, run);
 }
 
 test("approve-all approves everything", async () => {
@@ -157,54 +139,29 @@ test("approve-reads rejects non-read title inference when prompting is unavailab
 });
 
 test("approve-reads prompts interactively for non-read tools", async () => {
-  const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
-  const stderrDescriptor = Object.getOwnPropertyDescriptor(process.stderr, "isTTY");
-  const originalCreateInterface = readline.createInterface;
-
-  Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
-  Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
-
   let closed = false;
-  (
-    readline as unknown as {
-      createInterface: typeof readline.createInterface;
-    }
-  ).createInterface = (() => ({
-    question: async () => "yes",
-    close: () => {
-      closed = true;
-    },
-  })) as unknown as typeof readline.createInterface;
+  await withTtyState({ stdin: true, stderr: true }, async () => {
+    await withMockedReadline(
+      () => ({
+        question: async () => "yes",
+        close: () => {
+          closed = true;
+        },
+      }),
+      async () => {
+        const response = await resolvePermissionRequest(
+          makeRequestWithTitle("run: pnpm test", undefined),
+          "approve-reads",
+        );
 
-  try {
-    const response = await resolvePermissionRequest(
-      makeRequestWithTitle("run: pnpm test", undefined),
-      "approve-reads",
+        assert.deepEqual(response, {
+          outcome: { outcome: "selected", optionId: "allow" },
+        });
+      },
     );
+  });
 
-    assert.deepEqual(response, {
-      outcome: { outcome: "selected", optionId: "allow" },
-    });
-    assert.equal(closed, true);
-  } finally {
-    (
-      readline as unknown as {
-        createInterface: typeof readline.createInterface;
-      }
-    ).createInterface = originalCreateInterface;
-
-    if (stdinDescriptor) {
-      Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
-    } else {
-      delete (process.stdin as { isTTY?: boolean }).isTTY;
-    }
-
-    if (stderrDescriptor) {
-      Object.defineProperty(process.stderr, "isTTY", stderrDescriptor);
-    } else {
-      delete (process.stderr as { isTTY?: boolean }).isTTY;
-    }
-  }
+  assert.equal(closed, true);
 });
 
 test("classifyPermissionDecision maps selected outcomes to approved, denied, or cancelled", () => {
