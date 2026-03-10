@@ -81,9 +81,15 @@ Rules:
 
 Example ordering policy:
 
-1. You MUST use this ordering whenever multiple built-in agents appear in the same example set: `pi`, `openclaw`, `codex`, `claude`, `gemini`, `cursor`.
-2. This is mandatory. Agents after those may appear in any order, but the precedence above MUST NOT be broken.
-3. Any PR that introduces or preserves example ordering that violates this rule MUST be modified until it adheres to this ordering before merge.
+1. `pi`
+2. `openclaw`
+3. `codex`
+4. `claude`
+5. `gemini`
+6. `cursor`
+7. `copilot`
+
+This ordering is mandatory whenever multiple built-in agents appear in the same example set. Agents after those may appear in any order, but the precedence above MUST NOT be broken. Any PR that introduces or preserves example ordering that violates this rule MUST be modified until it adheres to this ordering before merge.
 
 ## Session Behavior
 
