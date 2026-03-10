@@ -112,7 +112,7 @@ acpx [global_options] pi exec [prompt_text...]
 acpx [global_options] pi sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
-Built-in command mapping: `pi -> npx pi-acp`
+Built-in command mapping: `pi -> npx pi-acp@^0.0.22`
 
 ### `openclaw`
 
@@ -146,7 +146,7 @@ acpx [global_options] codex exec [prompt_text...]
 acpx [global_options] codex sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
-Built-in command mapping: `codex -> npx @zed-industries/codex-acp`
+Built-in command mapping: `codex -> npx @zed-industries/codex-acp@^0.9.5`
 
 ### `claude`
 
@@ -157,7 +157,7 @@ acpx [global_options] claude exec [prompt_text...]
 acpx [global_options] claude sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
-Built-in command mapping: `claude -> npx -y @zed-industries/claude-agent-acp`
+Built-in command mapping: `claude -> npx -y @zed-industries/claude-agent-acp@^0.21.0`
 
 Additional built-in agent docs live in [../agents/README.md](../agents/README.md).
 

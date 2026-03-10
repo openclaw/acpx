@@ -8,10 +8,10 @@ import {
 
 test("resolveAgentCommand maps known agents to commands", () => {
   const expected = new Map<string, string>([
-    ["pi", "npx pi-acp"],
+    ["pi", "npx pi-acp@^0.0.22"],
     ["openclaw", "openclaw acp"],
-    ["codex", "npx @zed-industries/codex-acp"],
-    ["claude", "npx -y @zed-industries/claude-agent-acp"],
+    ["codex", "npx @zed-industries/codex-acp@^0.9.5"],
+    ["claude", "npx -y @zed-industries/claude-agent-acp@^0.21.0"],
     ["gemini", "gemini --experimental-acp"],
     ["cursor", "cursor-agent acp"],
     ["copilot", "copilot --acp --stdio"],

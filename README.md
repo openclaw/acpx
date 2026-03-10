@@ -279,20 +279,20 @@ Session-control JSON payloads (`sessions new|ensure`, `status`) may also include
 
 Built-ins:
 
-| Agent      | Adapter                                                                | Wraps                                                                                                           |
-| ---------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `pi`       | [pi-acp](https://github.com/svkozak/pi-acp)                            | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
-| `openclaw` | native (`openclaw acp`)                                                | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
-| `codex`    | [codex-acp](https://github.com/zed-industries/codex-acp)               | [Codex CLI](https://codex.openai.com)                                                                           |
-| `claude`   | [claude-agent-acp](https://github.com/zed-industries/claude-agent-acp) | [Claude Code](https://claude.ai/code)                                                                           |
-| `gemini`   | native (`gemini --experimental-acp`)                                   | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
-| `cursor`   | native (`cursor-agent acp`)                                            | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
-| `copilot`  | native (`copilot --acp --stdio`)                                       | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
-| `kimi`     | native (`kimi acp`)                                                    | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
-| `opencode` | `npx -y opencode-ai acp`                                               | [OpenCode](https://opencode.ai)                                                                                 |
-| `kiro`     | native (`kiro-cli acp`)                                                | [Kiro CLI](https://kiro.dev)                                                                                    |
-| `kilocode` | `npx -y @kilocode/cli acp`                                             | [Kilocode](https://kilocode.ai)                                                                                 |
-| `qwen`     | native (`qwen --acp`)                                                  | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
+| Agent      | Adapter                                                                        | Wraps                                                                                                           |
+| ---------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `pi`       | [pi-acp@^0.0.22](https://github.com/svkozak/pi-acp)                            | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
+| `openclaw` | native (`openclaw acp`)                                                        | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
+| `codex`    | [codex-acp@^0.9.5](https://github.com/zed-industries/codex-acp)                | [Codex CLI](https://codex.openai.com)                                                                           |
+| `claude`   | [claude-agent-acp@^0.21.0](https://github.com/zed-industries/claude-agent-acp) | [Claude Code](https://claude.ai/code)                                                                           |
+| `gemini`   | native (`gemini --experimental-acp`)                                           | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
+| `cursor`   | native (`cursor-agent acp`)                                                    | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
+| `copilot`  | native (`copilot --acp --stdio`)                                               | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
+| `kimi`     | native (`kimi acp`)                                                            | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
+| `opencode` | `npx -y opencode-ai acp`                                                       | [OpenCode](https://opencode.ai)                                                                                 |
+| `kiro`     | native (`kiro-cli acp`)                                                        | [Kiro CLI](https://kiro.dev)                                                                                    |
+| `kilocode` | `npx -y @kilocode/cli acp`                                                     | [Kilocode](https://kilocode.ai)                                                                                 |
+| `qwen`     | native (`qwen --acp`)                                                          | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
 
 Additional built-in agent docs live in [agents/README.md](agents/README.md).
 
@@ -339,7 +339,7 @@ spawns the ACP bridge directly without `pnpm` wrapper noise:
 
 ## Full CLI reference
 
-See `docs/CLI.md`.
+See [docs/CLI.md](docs/CLI.md).
 
 ## License
 

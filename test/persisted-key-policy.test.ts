@@ -13,7 +13,7 @@ function makeRecord(): SessionRecord {
     acpxRecordId: "record-1",
     acpSessionId: "session-1",
     agentSessionId: "agent-1",
-    agentCommand: "npx @zed-industries/codex-acp",
+    agentCommand: "npx @zed-industries/codex-acp@^0.9.5",
     cwd: "/tmp/project",
     createdAt: "2026-02-27T00:00:00.000Z",
     lastUsedAt: "2026-02-27T00:00:00.000Z",

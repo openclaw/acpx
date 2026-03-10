@@ -31,7 +31,7 @@ function makeSessionRecord(sessionId: string, cwd: string, maxSegments: number):
     schema: "acpx.session.v1",
     acpxRecordId: sessionId,
     acpSessionId: sessionId,
-    agentCommand: "npx @zed-industries/codex-acp",
+    agentCommand: "npx @zed-industries/codex-acp@^0.9.5",
     cwd,
     createdAt: now,
     lastUsedAt: now,

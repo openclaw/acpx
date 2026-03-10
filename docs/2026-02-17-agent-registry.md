@@ -9,10 +9,10 @@ date: 2026-02-17
 
 `src/agent-registry.ts` defines friendly names such as:
 
-- `pi -> npx pi-acp`
+- `pi -> npx pi-acp@^0.0.22`
 - `openclaw -> openclaw acp`
-- `codex -> npx @zed-industries/codex-acp`
-- `claude -> npx -y @zed-industries/claude-agent-acp`
+- `codex -> npx @zed-industries/codex-acp@^0.9.5`
+- `claude -> npx -y @zed-industries/claude-agent-acp@^0.21.0`
 
 The built-in agents table lives in [../README.md](../README.md). Additional built-in agent docs live under [../agents/README.md](../agents/README.md).
 
