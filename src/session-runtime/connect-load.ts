@@ -5,8 +5,8 @@ import {
   isAcpQueryClosedBeforeResponseError,
   isAcpResourceNotFoundError,
 } from "../error-normalization.js";
-import { incrementPerfCounter } from "../perf-metrics.js";
 import { SessionModeReplayError } from "../errors.js";
+import { incrementPerfCounter } from "../perf-metrics.js";
 import { isProcessAlive } from "../queue-ipc.js";
 import type { QueueOwnerActiveSessionController } from "../queue-owner-turn-controller.js";
 import { getDesiredModeId } from "../session-mode-preference.js";
