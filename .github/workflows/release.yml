@@ -91,22 +91,43 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run build
 
-      # Fetch latest version from npm, bump it, write to package.json.
-      # Nothing is committed — the bumped version lives only in the CI
-      # runner's working directory. release-it tags + publishes from it.
+      # Sync the working tree to the currently published version, then let
+      # release-it perform the requested bump from that baseline.
       - name: Bump version from npm registry
         run: |
           LATEST=$(npm view acpx version 2>/dev/null || echo "0.0.0")
           echo "Latest on npm: $LATEST"
+          TARGET=$(node - "$LATEST" "${{ inputs.increment }}" <<'NODE'
+          const [version, increment] = process.argv.slice(2);
+          const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+          if (!match) {
+            throw new Error(`Unsupported semver: ${version}`);
+          }
+          const [major, minor, patch] = match.slice(1).map(Number);
+
+          if (increment === "patch") {
+            console.log(`${major}.${minor}.${patch + 1}`);
+            process.exit(0);
+          }
+          if (increment === "minor") {
+            console.log(`${major}.${minor + 1}.0`);
+            process.exit(0);
+          }
+          if (increment === "major") {
+            console.log(`${major + 1}.0.0`);
+            process.exit(0);
+          }
+
+          throw new Error(`Unsupported increment: ${increment}`);
+          NODE
+          )
           npm version --no-git-tag-version "$LATEST" --allow-same-version
-          npm version --no-git-tag-version ${{ inputs.increment }}
-          VERSION=$(node -p 'require("./package.json").version')
-          echo "Releasing: $VERSION"
+          echo "VERSION=$TARGET" >> "$GITHUB_ENV"
+          echo "Releasing: $TARGET"
 
       - name: Release
         run: |
-          VERSION=$(node -p 'require("./package.json").version')
-          pnpm run release:ci -- --increment "$VERSION"
+          pnpm exec release-it "$VERSION" --ci
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
