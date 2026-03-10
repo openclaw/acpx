@@ -78,7 +78,8 @@ Rules:
 - Unknown names are treated as raw commands.
 - Escape hatch: `--agent <command>` sets a raw command explicitly.
 - Default agent is `codex` for top-level `prompt|exec|sessions` verbs.
-- Keep built-in adapter names and adapter examples in A-Z order where practical.
+- Example agent ordering MUST follow this precedence whenever multiple built-in agents appear in the same example set: `pi`, `openclaw`, `codex`, `claude`, `gemini`, `cursor`. Agents after those may appear in any order.
+- PRs that introduce or preserve example ordering that violates that precedence MUST be corrected before merge.
 
 ## Session Behavior
 

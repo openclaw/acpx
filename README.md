@@ -169,11 +169,11 @@ acpx codex status                # local process status for current session
 acpx config show                 # show resolved config (global + project)
 acpx config init                 # create ~/.acpx/config.json template
 
-acpx copilot 'summarize recent changes'     # built-in GitHub Copilot agent
-acpx cursor 'fix the failing typecheck'     # built-in Cursor agent
+acpx openclaw exec 'summarize active session state' # built-in OpenClaw ACP bridge
 acpx claude 'refactor auth middleware' # built-in claude agent
 acpx gemini 'add startup logging'      # built-in gemini agent
-acpx openclaw exec 'summarize active session state' # built-in OpenClaw ACP bridge
+acpx cursor 'fix the failing typecheck'     # built-in Cursor agent
+acpx copilot 'summarize recent changes'     # built-in GitHub Copilot agent
 acpx qwen 'explain this module architecture' # built-in qwen code agent
 acpx qwen exec 'Reply exactly QWEN_ACP_OK'   # one-shot ACP smoke test
 
