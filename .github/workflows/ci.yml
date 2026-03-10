@@ -53,6 +53,8 @@ jobs:
 
           docs_changed=false
           docs_only=true
+          changelog_present=false
+          changelog_scope_only=true
 
           if [ "${#changed_files[@]}" -eq 0 ]; then
             docs_only=false
@@ -60,14 +62,26 @@ jobs:
 
           for file in "${changed_files[@]}"; do
             case "$file" in
-              docs/**|README.md|CONTRIBUTING.md)
+              docs/**|README.md|CONTRIBUTING.md|CHANGELOG.md)
                 docs_changed=true
+                if [ "$file" = "CHANGELOG.md" ]; then
+                  changelog_present=true
+                else
+                  changelog_scope_only=false
+                fi
+                ;;
+              .github/workflows/ci.yml)
                 ;;
               *)
                 docs_only=false
+                changelog_scope_only=false
                 ;;
             esac
           done
+
+          if [ "$docs_only" != "true" ] && [ "$changelog_present" = "true" ] && [ "$changelog_scope_only" = "true" ]; then
+            docs_only=true
+          fi
 
           echo "docs_only=${docs_only}" >> "$GITHUB_OUTPUT"
           echo "docs_changed=${docs_changed}" >> "$GITHUB_OUTPUT"

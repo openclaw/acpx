@@ -6,15 +6,31 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+### Breaking
+
+### Fixes
+
+## 2026.3.10 (v0.1.16)
+
+### Changes
+
+- Align `acpx` tooling with the wider OpenClaw stack.
+- Sync contributor guidance with OpenClaw, add the project vision doc, and refocus the agent contributor guide.
+- Clarify that `set-mode` mode IDs are adapter-defined.
+- Expand direct ACP client, prompt runner, permission, session runtime, and adapter coverage, and enforce coverage in CI.
+- Add built-in agent support for Copilot, Cursor, Kimi CLI, Kiro CLI, kilocode, and qwen.
+- Add a `sessions read` command.
+- Add a `disableExec` config option.
+- Add CLI passthrough flags for Claude session options.
+- Add `--resume-session` to attach to an existing agent session.
+- Pass `mcpServers` through ACP session setup.
 - Sync the agent-registry documentation with the live built-in registry, including the current `claude`, `gemini`, and `opencode` commands plus the newer `copilot`, `kiro`, `kilocode`, and `qwen` entries. Thanks @gandli.
 - Upgrade `@agentclientprotocol/sdk` to v0.15.0 and align the CLI with the latest ACP client surface.
-- Add built-in agent support for Copilot, Kiro CLI, and kilocode.
+- Reuse warm queue-owner ACP clients across prompt turns to avoid repeated adapter startup and session reload overhead.
+- Lazy-load CLI startup modules and fast-path `--version` to reduce one-shot command startup cost.
 - Improve runtime performance and queue coordination.
-- Expand direct ACP client, prompt runner, permission, session runtime, and adapter coverage, and enforce coverage in CI.
 - Add Dependabot configuration.
-- Sync contributor guidance with OpenClaw and add the project vision doc.
-- Add the contributor-facing adapter ordering rule.
-- Speed up CI, move releases to Blacksmith, and skip heavy jobs for docs-only changes.
+- Pin ACP adapter package ranges.
 
 ### Breaking
 
@@ -24,6 +40,9 @@ Repo: https://github.com/openclaw/acpx
 - Harden Gemini ACP startup and reconnect handling, including `session/load` fallback paths.
 - Harden Claude ACP session creation stalls.
 - Use `cross-spawn` for Windows compatibility and fix ACP client stdio typing.
+- Fix session reconnect and Gemini startup regressions.
+- Restore the CI release version bump flow.
+- Keep release jobs on GitHub-hosted runners.
 
 ## 2026.3.1 (v0.1.14-v0.1.15)
 
