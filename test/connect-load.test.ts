@@ -29,6 +29,7 @@ type FakeClient = {
     options: { suppressReplayUpdates: boolean },
   ) => Promise<{ agentSessionId?: string }>;
   createSession: (cwd: string) => Promise<{ sessionId: string; agentSessionId?: string }>;
+  setSessionMode: (sessionId: string, modeId: string) => Promise<void>;
 };
 
 const ACTIVE_CONTROLLER: QueueOwnerActiveSessionController = {
@@ -76,6 +77,7 @@ test("connectAndLoadSession resumes an existing load-capable session", async () 
       createSession: async () => {
         throw new Error("createSession should not be called");
       },
+      setSessionMode: async () => {},
     };
 
     const result = await connectAndLoadSession({
@@ -146,6 +148,7 @@ test("connectAndLoadSession falls back to createSession when load returns resour
           agentSessionId: "new-runtime",
         };
       },
+      setSessionMode: async () => {},
     };
 
     const result = await connectAndLoadSession({
@@ -196,6 +199,7 @@ test("connectAndLoadSession falls back to createSession for empty sessions on ad
         sessionId: "created-for-empty",
         agentSessionId: "created-runtime",
       }),
+      setSessionMode: async () => {},
     };
 
     const result = await connectAndLoadSession({
@@ -249,6 +253,7 @@ test("connectAndLoadSession rethrows load failures that should not create a new 
       createSession: async () => ({
         sessionId: "unexpected",
       }),
+      setSessionMode: async () => {},
     };
 
     await assert.rejects(
@@ -268,6 +273,65 @@ test("connectAndLoadSession rethrows load failures that should not create a new 
         return true;
       },
     );
+  });
+});
+
+test("connectAndLoadSession fails when desired mode replay cannot be restored on a fresh session", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "mode-replay-record",
+      acpSessionId: "stale-session",
+      agentCommand: "agent",
+      cwd,
+      acpx: {
+        desired_mode_id: "plan",
+      },
+    });
+
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({
+        running: true,
+      }),
+      supportsLoadSession: () => true,
+      loadSessionWithOptions: async () => {
+        throw {
+          error: {
+            code: -32002,
+            message: "session not found",
+          },
+        };
+      },
+      createSession: async () => ({
+        sessionId: "fresh-session",
+        agentSessionId: "fresh-runtime",
+      }),
+      setSessionMode: async (sessionId, modeId) => {
+        assert.equal(sessionId, "fresh-session");
+        assert.equal(modeId, "plan");
+        throw new Error("mode restore rejected");
+      },
+    };
+
+    await assert.rejects(
+      async () =>
+        await connectAndLoadSession({
+          client: client as never,
+          record,
+          activeController: ACTIVE_CONTROLLER,
+        }),
+      (error: unknown) => {
+        assert(error instanceof Error);
+        assert.match(error.message, /Failed to replay saved session mode plan/);
+        return true;
+      },
+    );
+    assert.equal(record.acpSessionId, "stale-session");
+    assert.equal(record.agentSessionId, undefined);
   });
 });
 
@@ -303,6 +367,7 @@ test("connectAndLoadSession reuses an already loaded client session", async () =
       createSession: async () => {
         throw new Error("createSession should not be called");
       },
+      setSessionMode: async () => {},
     };
 
     const result = await connectAndLoadSession({

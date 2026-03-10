@@ -60,6 +60,7 @@ const MOCK_AGENT_WITH_DISTINCT_CREATE_AND_LOAD_RUNTIME_SESSION_IDS =
   "--supports-load-session --load-runtime-session-id resumed-runtime-session";
 const MOCK_AGENT_WITH_LOAD_FALLBACK = `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-fails-on-empty`;
 const MOCK_AGENT_WITH_LOAD_SESSION_NOT_FOUND = `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-not-found`;
+const MOCK_AGENT_WITH_LOAD_FALLBACK_AND_MODE_FAILURE = `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-fails-on-empty --set-session-mode-fails`;
 
 type CliRunResult = {
   code: number | null;
@@ -758,6 +759,67 @@ test("set-mode persists across load fallback and replays on fresh ACP sessions",
       };
     };
     assert.equal(storedRecord.acpx?.desired_mode_id, "auto");
+  });
+});
+
+test("set-mode load fallback failure does not persist the fresh session id to disk", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_WITH_LOAD_FALLBACK_AND_MODE_FAILURE,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const sessionId = "mode-replay-session";
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: sessionId,
+      acpSessionId: sessionId,
+      agentCommand: MOCK_AGENT_WITH_LOAD_FALLBACK_AND_MODE_FAILURE,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+      acpx: {
+        desired_mode_id: "plan",
+      },
+    });
+
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "set-mode", "plan"],
+      homeDir,
+    );
+    assert.equal(result.code, 1, result.stderr);
+    const error = parseSingleAcpErrorLine(result.stdout);
+    assert.equal(error.data?.acpxCode, "RUNTIME");
+    assert.equal(error.data?.detailCode, "SESSION_MODE_REPLAY_FAILED");
+
+    const storedRecordPath = path.join(
+      homeDir,
+      ".acpx",
+      "sessions",
+      `${encodeURIComponent(sessionId)}.json`,
+    );
+    const storedRecord = JSON.parse(await fs.readFile(storedRecordPath, "utf8")) as {
+      acp_session_id?: string;
+      acpx?: {
+        desired_mode_id?: string;
+      };
+    };
+    assert.equal(storedRecord.acp_session_id, sessionId);
+    assert.equal(storedRecord.acpx?.desired_mode_id, "plan");
   });
 });
 

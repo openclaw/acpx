@@ -35,6 +35,7 @@ type MockAgentOptions = {
   supportsLoadSession: boolean;
   loadSessionNotFound: boolean;
   loadSessionFailsOnEmpty: boolean;
+  setSessionModeFails: boolean;
   replayLoadSessionUpdates: boolean;
   loadReplayText: string;
   ignoreSigterm: boolean;
@@ -266,6 +267,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let supportsLoadSession = false;
   let loadSessionNotFound = false;
   let loadSessionFailsOnEmpty = false;
+  let setSessionModeFails = false;
   let replayLoadSessionUpdates = false;
   let loadReplayText = "replayed load session update";
   let ignoreSigterm = false;
@@ -288,6 +290,11 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     if (token === "--load-session-not-found") {
       supportsLoadSession = true;
       loadSessionNotFound = true;
+      continue;
+    }
+
+    if (token === "--set-session-mode-fails") {
+      setSessionModeFails = true;
       continue;
     }
 
@@ -340,6 +347,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     supportsLoadSession,
     loadSessionNotFound,
     loadSessionFailsOnEmpty,
+    setSessionModeFails,
     replayLoadSessionUpdates,
     loadReplayText,
     ignoreSigterm,
@@ -503,6 +511,9 @@ class MockAgent implements Agent {
 
   async setSessionMode(params: SetSessionModeRequest): Promise<SetSessionModeResponse> {
     const session = this.ensureSession(params.sessionId);
+    if (this.options.setSessionModeFails) {
+      throw new Error("setSessionMode failed");
+    }
     session.modeId = params.modeId;
     return {};
   }

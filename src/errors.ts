@@ -62,6 +62,17 @@ export class GeminiAcpStartupTimeoutError extends AcpxOperationalError {
   }
 }
 
+export class SessionModeReplayError extends AcpxOperationalError {
+  constructor(message: string, options?: AcpxErrorOptions) {
+    super(message, {
+      outputCode: "RUNTIME",
+      detailCode: "SESSION_MODE_REPLAY_FAILED",
+      origin: "acp",
+      ...options,
+    });
+  }
+}
+
 export class ClaudeAcpSessionCreateTimeoutError extends AcpxOperationalError {
   constructor(message: string, options?: AcpxErrorOptions) {
     super(message, {

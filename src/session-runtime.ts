@@ -985,19 +985,6 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     }
     await releaseQueueOwnerLease(lease);
 
-    // Auto-close the session when the queue owner shuts down and the agent
-    // has exited, preventing zombie session accumulation (#47).
-    try {
-      const record = await resolveSessionRecord(options.sessionId);
-      if (!record.closed && record.lastAgentExitAt) {
-        record.closed = true;
-        record.closedAt = isoNow();
-        await writeSessionRecord(record);
-      }
-    } catch {
-      // best effort — session may already be cleaned up
-    }
-
     if (options.verbose) {
       process.stderr.write(`[acpx] queue owner stopped for session ${options.sessionId}\n`);
     }

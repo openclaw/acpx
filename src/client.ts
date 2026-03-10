@@ -264,7 +264,10 @@ function asAbsoluteCwd(cwd: string): string {
 }
 
 function basenameToken(value: string): string {
-  return path.basename(value).toLowerCase();
+  return path
+    .basename(value)
+    .toLowerCase()
+    .replace(/\.(cmd|exe|bat)$/u, "");
 }
 
 function isGeminiAcpCommand(command: string, args: readonly string[]): boolean {

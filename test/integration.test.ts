@@ -325,11 +325,11 @@ test("integration: timeout emits structured TIMEOUT json error", async () => {
   });
 });
 
-test("integration: gemini ACP startup timeout is surfaced as actionable error", async () => {
+test("integration: gemini ACP startup timeout is surfaced as actionable error for gemini.cmd too", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-gemini-"));
-    const fakeGeminiPath = path.join(fakeBinDir, "gemini");
+    const fakeGeminiPath = path.join(fakeBinDir, "gemini.cmd");
     const previousTimeout = process.env.ACPX_GEMINI_ACP_STARTUP_TIMEOUT_MS;
 
     try {
@@ -1170,7 +1170,7 @@ test("integration: prompt exits after done while detached owner stays warm", asy
   });
 });
 
-test("integration: session auto-closes when queue owner exits and agent has exited (#47)", async () => {
+test("integration: session remains resumable after queue owner exits and agent has exited", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
 
@@ -1228,8 +1228,8 @@ test("integration: session auto-closes when queue owner exits and agent has exit
         last_agent_exit_code?: number | null;
       };
 
-      // 5. After the fix for #47, the queue owner auto-closes the session
-      //    when it shuts down and the agent has exited.
+      // 5. Routine queue-owner shutdown must not permanently close
+      //    a resumable persistent session.
       assert.equal(
         storedRecord.last_agent_exit_at != null,
         true,
@@ -1238,14 +1238,14 @@ test("integration: session auto-closes when queue owner exits and agent has exit
 
       assert.equal(
         storedRecord.closed,
-        true,
-        "session should be auto-closed after agent exit and queue owner shutdown (#47)",
+        false,
+        "session should remain resumable after queue owner shutdown",
       );
 
       assert.equal(
-        typeof storedRecord.closed_at,
-        "string",
-        "closed_at should be set when session is auto-closed",
+        storedRecord.closed_at,
+        undefined,
+        "closed_at should remain unset for resumable sessions",
       );
     } finally {
       // Clean up: close session if it's still around
