@@ -9,7 +9,9 @@ import {
   addPromptInputOption,
   addSessionNameOption,
   addSessionOption,
+  parseAllowedTools,
   parseHistoryLimit,
+  parseMaxTurns,
   parseNonEmptyValue,
   parseSessionName,
   parseTtlSeconds,
@@ -145,7 +147,7 @@ function emitJsonResult(format: OutputFormat, payload: unknown): boolean {
   return true;
 }
 
-export { parseTtlSeconds };
+export { parseAllowedTools, parseMaxTurns, parseTtlSeconds };
 export { formatPromptSessionBannerLine } from "./cli/output-render.js";
 
 type SessionModule = typeof import("./session.js");
@@ -333,6 +335,11 @@ async function handleExec(
     suppressSdkConsoleErrors: outputPolicy.suppressSdkConsoleErrors,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
+    sessionOptions: {
+      model: globalFlags.model,
+      allowedTools: globalFlags.allowedTools,
+      maxTurns: globalFlags.maxTurns,
+    },
   });
 
   applyPermissionExitCode(result);
@@ -608,6 +615,11 @@ async function handleSessionsNew(
     authPolicy: globalFlags.authPolicy,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
+    sessionOptions: {
+      model: globalFlags.model,
+      allowedTools: globalFlags.allowedTools,
+      maxTurns: globalFlags.maxTurns,
+    },
   });
 
   printCreatedSessionBanner(created, agent.agentName, globalFlags.format, globalFlags.jsonStrict);
@@ -641,6 +653,11 @@ async function handleSessionsEnsure(
     authPolicy: globalFlags.authPolicy,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
+    sessionOptions: {
+      model: globalFlags.model,
+      allowedTools: globalFlags.allowedTools,
+      maxTurns: globalFlags.maxTurns,
+    },
   });
 
   if (result.created) {
@@ -1292,6 +1309,9 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
       token === "--auth-policy" ||
       token === "--non-interactive-permissions" ||
       token === "--format" ||
+      token === "--model" ||
+      token === "--allowed-tools" ||
+      token === "--max-turns" ||
       token === "--timeout" ||
       token === "--ttl" ||
       token === "--file"
@@ -1305,6 +1325,9 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
       token.startsWith("--auth-policy=") ||
       token.startsWith("--non-interactive-permissions=") ||
       token.startsWith("--format=") ||
+      token.startsWith("--model=") ||
+      token.startsWith("--allowed-tools=") ||
+      token.startsWith("--max-turns=") ||
       token.startsWith("--json-strict=") ||
       token.startsWith("--timeout=") ||
       token.startsWith("--ttl=") ||

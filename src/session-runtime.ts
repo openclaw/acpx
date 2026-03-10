@@ -94,6 +94,12 @@ type TimedRunOptions = {
   timeoutMs?: number;
 };
 
+export type SessionAgentOptions = {
+  model?: string;
+  allowedTools?: string[];
+  maxTurns?: number;
+};
+
 export type RunOnceOptions = {
   agentCommand: string;
   cwd: string;
@@ -105,6 +111,7 @@ export type RunOnceOptions = {
   outputFormatter: OutputFormatter;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
+  sessionOptions?: SessionAgentOptions;
 } & TimedRunOptions;
 
 export type SessionCreateOptions = {
@@ -116,6 +123,7 @@ export type SessionCreateOptions = {
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   verbose?: boolean;
+  sessionOptions?: SessionAgentOptions;
 } & TimedRunOptions;
 
 export type SessionSendOptions = {
@@ -144,6 +152,7 @@ export type SessionEnsureOptions = {
   authPolicy?: AuthPolicy;
   verbose?: boolean;
   walkBoundary?: string;
+  sessionOptions?: SessionAgentOptions;
 } & TimedRunOptions;
 
 export type SessionCancelOptions = {
@@ -614,6 +623,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
     onAcpOutputMessage: (_direction, message) => output.onAcpMessage(message),
+    sessionOptions: options.sessionOptions,
   });
 
   try {
@@ -659,6 +669,7 @@ export async function createSession(options: SessionCreateOptions): Promise<Sess
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     verbose: options.verbose,
+    sessionOptions: options.sessionOptions,
   });
 
   try {
@@ -742,6 +753,7 @@ export async function ensureSession(options: SessionEnsureOptions): Promise<Sess
     authPolicy: options.authPolicy,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
+    sessionOptions: options.sessionOptions,
   });
 
   return {

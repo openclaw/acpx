@@ -34,6 +34,9 @@ export type GlobalFlags = PermissionFlags & {
   ttl: number;
   verbose?: boolean;
   format: OutputFormat;
+  model?: string;
+  allowedTools?: string[];
+  maxTurns?: number;
 };
 
 export type PromptFlags = {
@@ -125,6 +128,30 @@ export function parseHistoryLimit(value: string): number {
   return parsed;
 }
 
+export function parseAllowedTools(value: string): string[] {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return [];
+  }
+
+  const items = trimmed.split(",").map((item) => item.trim());
+  if (items.some((item) => item.length === 0)) {
+    throw new InvalidArgumentError(
+      "Allowed tools must be a comma-separated list without empty entries",
+    );
+  }
+
+  return items;
+}
+
+export function parseMaxTurns(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new InvalidArgumentError("Max turns must be a positive integer");
+  }
+  return parsed;
+}
+
 export function resolvePermissionMode(
   flags: PermissionFlags,
   defaultMode: PermissionMode,
@@ -165,6 +192,13 @@ export function addGlobalFlags(command: Command): Command {
       parseNonInteractivePermissionPolicy,
     )
     .option("--format <fmt>", "Output format: text, json, quiet", parseOutputFormat)
+    .option("--model <id>", "Agent model id")
+    .option(
+      "--allowed-tools <list>",
+      'Allowed tool names as a comma-separated list (use "" for no tools)',
+      parseAllowedTools,
+    )
+    .option("--max-turns <count>", "Maximum turns for the session", parseMaxTurns)
     .option(
       "--json-strict",
       "Strict JSON mode: requires --format json and suppresses non-JSON stderr output",
@@ -247,6 +281,9 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
     ttl: opts.ttl ?? config.ttlMs ?? DEFAULT_QUEUE_OWNER_TTL_MS,
     verbose,
     format,
+    model: typeof opts.model === "string" ? parseNonEmptyValue("Model", opts.model) : undefined,
+    allowedTools: Array.isArray(opts.allowedTools) ? opts.allowedTools : undefined,
+    maxTurns: typeof opts.maxTurns === "number" ? opts.maxTurns : undefined,
     approveAll: opts.approveAll ? true : undefined,
     approveReads: opts.approveReads ? true : undefined,
     denyAll: opts.denyAll ? true : undefined,

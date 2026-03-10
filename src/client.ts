@@ -480,6 +480,35 @@ function readEnvCredential(methodId: string): string | undefined {
   return undefined;
 }
 
+function buildClaudeCodeOptionsMeta(
+  options: AcpClientOptions["sessionOptions"],
+): Record<string, unknown> | undefined {
+  if (!options) {
+    return undefined;
+  }
+
+  const claudeCodeOptions: Record<string, unknown> = {};
+  if (typeof options.model === "string" && options.model.trim().length > 0) {
+    claudeCodeOptions.model = options.model;
+  }
+  if (Array.isArray(options.allowedTools)) {
+    claudeCodeOptions.allowedTools = [...options.allowedTools];
+  }
+  if (typeof options.maxTurns === "number") {
+    claudeCodeOptions.maxTurns = options.maxTurns;
+  }
+
+  if (Object.keys(claudeCodeOptions).length === 0) {
+    return undefined;
+  }
+
+  return {
+    claudeCode: {
+      options: claudeCodeOptions,
+    },
+  };
+}
+
 function buildAgentEnvironment(
   authCredentials: Record<string, string> | undefined,
 ): NodeJS.ProcessEnv {
@@ -881,6 +910,7 @@ export class AcpClient {
       const createPromise = connection.newSession({
         cwd: asAbsoluteCwd(cwd),
         mcpServers: [],
+        _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions),
       });
       result = claudeAcp
         ? await withTimeout(createPromise, resolveClaudeAcpSessionCreateTimeoutMs())

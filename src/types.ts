@@ -161,6 +161,11 @@ export type AcpClientOptions = {
   authPolicy?: AuthPolicy;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
+  sessionOptions?: {
+    model?: string;
+    allowedTools?: string[];
+    maxTurns?: number;
+  };
   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onAcpOutputMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onSessionUpdate?: (notification: SessionNotification) => void;

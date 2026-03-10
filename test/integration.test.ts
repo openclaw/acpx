@@ -45,6 +45,49 @@ test("integration: exec echo baseline", async () => {
   });
 });
 
+test("integration: exec forwards model, allowed-tools, and max-turns in session/new _meta", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "json",
+          "--model",
+          "sonnet",
+          "--allowed-tools",
+          "Read,Grep",
+          "--max-turns",
+          "7",
+          "exec",
+          "echo hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const createRequest = payloads.find((payload) => payload.method === "session/new") as
+        | { params?: { _meta?: unknown } }
+        | undefined;
+      assert(createRequest, result.stdout);
+      assert.deepEqual(createRequest.params?._meta, {
+        claudeCode: {
+          options: {
+            model: "sonnet",
+            allowedTools: ["Read", "Grep"],
+            maxTurns: 7,
+          },
+        },
+      });
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: perf metrics capture writes ndjson records for CLI runs", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

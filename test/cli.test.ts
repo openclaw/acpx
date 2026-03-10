@@ -8,7 +8,12 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { InvalidArgumentError } from "commander";
-import { formatPromptSessionBannerLine, parseTtlSeconds } from "../src/cli.js";
+import {
+  formatPromptSessionBannerLine,
+  parseAllowedTools,
+  parseMaxTurns,
+  parseTtlSeconds,
+} from "../src/cli.js";
 import { serializeSessionRecordForDisk } from "../src/session-persistence.js";
 import type { SessionRecord } from "../src/types.js";
 import {
@@ -115,6 +120,21 @@ test("parseTtlSeconds rejects negative values", () => {
   assert.throws(() => parseTtlSeconds("-1"), InvalidArgumentError);
 });
 
+test("parseAllowedTools parses empty and comma-separated values", () => {
+  assert.deepEqual(parseAllowedTools(""), []);
+  assert.deepEqual(parseAllowedTools("Read,Grep, Glob"), ["Read", "Grep", "Glob"]);
+});
+
+test("parseAllowedTools rejects empty entries", () => {
+  assert.throws(() => parseAllowedTools("Read,,Grep"), InvalidArgumentError);
+});
+
+test("parseMaxTurns accepts positive integers and rejects invalid values", () => {
+  assert.equal(parseMaxTurns("3"), 3);
+  assert.throws(() => parseMaxTurns("0"), InvalidArgumentError);
+  assert.throws(() => parseMaxTurns("1.5"), InvalidArgumentError);
+});
+
 test("formatPromptSessionBannerLine prints single-line prompt banner for matching cwd", () => {
   const record = makeSessionRecord({
     acpxRecordId: "abc123",
@@ -176,6 +196,16 @@ test("CLI resolves unknown subcommand names as raw agent commands", async () => 
 
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, /custom-session/);
+  });
+});
+
+test("global passthrough flags are present in help output", async () => {
+  await withTempHome(async (homeDir) => {
+    const result = await runCli(["--help"], homeDir);
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /--model <id>/);
+    assert.match(result.stdout, /--allowed-tools <list>/);
+    assert.match(result.stdout, /--max-turns <count>/);
   });
 });
 

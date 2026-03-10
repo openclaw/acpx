@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { main } from "./cli-core.js";
 
 export { formatPromptSessionBannerLine } from "./cli-core.js";
-export { parseTtlSeconds } from "./cli/flags.js";
+export { parseAllowedTools, parseMaxTurns, parseTtlSeconds } from "./cli/flags.js";
 
 function isCliEntrypoint(argv: string[]): boolean {
   const entry = argv[1];
