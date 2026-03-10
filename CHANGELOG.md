@@ -9,6 +9,8 @@ Repo: https://github.com/openclaw/acpx
 - Sync the agent-registry documentation with the live built-in registry, including the current `claude`, `gemini`, and `opencode` commands plus the newer `copilot`, `kiro`, `kilocode`, and `qwen` entries. Thanks @gandli.
 - Upgrade `@agentclientprotocol/sdk` to v0.15.0 and align the CLI with the latest ACP client surface.
 - Add built-in agent support for Copilot, Kiro CLI, and kilocode.
+- Reuse warm queue-owner ACP clients across prompt turns to avoid repeated adapter startup and session reload overhead.
+- Lazy-load CLI startup modules and fast-path `--version` to reduce one-shot command startup cost.
 - Improve runtime performance and queue coordination.
 - Expand direct ACP client, prompt runner, permission, session runtime, and adapter coverage, and enforce coverage in CI.
 - Add Dependabot configuration.
