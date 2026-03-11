@@ -122,6 +122,33 @@ test("normalizeOutputError infers AUTH_REQUIRED detail from ACP payload", () => 
   assert.equal(normalized.acp?.code, -32000);
 });
 
+test("normalizeOutputError appends guidance for read-only sandbox errors", () => {
+  const normalized = normalizeOutputError(
+    new Error("I am in a read-only sandbox and cannot apply this change."),
+  );
+
+  assert.equal(normalized.code, "RUNTIME");
+  assert.match(normalized.message, /read-only sandbox/i);
+  assert.match(normalized.message, /acpx permission flags/i);
+  assert.match(normalized.message, /set-mode auto/i);
+  assert.match(normalized.message, /set-mode full-access/i);
+});
+
+test("normalizeOutputError appends guidance when ACP details report read-only sandbox", () => {
+  const normalized = normalizeOutputError({
+    error: {
+      code: -32603,
+      message: "Internal error",
+      data: {
+        details: "Operation denied in read-only sandbox",
+      },
+    },
+  });
+
+  assert.equal(normalized.code, "RUNTIME");
+  assert.match(normalized.message, /acpx permission flags/i);
+});
+
 test("exitCodeForOutputErrorCode maps machine codes to stable exits", () => {
   assert.equal(exitCodeForOutputErrorCode("USAGE"), 2);
   assert.equal(exitCodeForOutputErrorCode("TIMEOUT"), 3);

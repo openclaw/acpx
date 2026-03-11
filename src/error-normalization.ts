@@ -20,6 +20,8 @@ import {
 
 const AUTH_REQUIRED_ACP_CODES = new Set([-32000]);
 const QUERY_CLOSED_BEFORE_RESPONSE_DETAIL = "query closed before response received";
+const READ_ONLY_HINT_TEXT =
+  "Hint: acpx permission flags (--approve-all/--approve-reads/--deny-all) control client-side approvals, not adapter sandbox mode. If Codex remains read-only, run `acpx codex set-mode auto` or `acpx codex set-mode full-access`.";
 
 type ErrorMeta = {
   outputCode?: OutputErrorCode;
@@ -66,6 +68,54 @@ function isAuthRequiredMessage(value: string | undefined): boolean {
     normalized.includes("credentials required") ||
     normalized.includes("token required") ||
     normalized.includes("login required")
+  );
+}
+
+function readStringField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function containsReadOnlySandboxSignal(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  const normalized = value.toLowerCase();
+  if (normalized.includes("read-only sandbox")) {
+    return true;
+  }
+  if (normalized.includes("readonly sandbox")) {
+    return true;
+  }
+  return normalized.includes("read-only") && normalized.includes("sandbox");
+}
+
+function shouldAppendReadOnlyHint(
+  message: string,
+  acp: OutputErrorAcpPayload | undefined,
+): boolean {
+  if (message.includes("acpx permission flags")) {
+    return false;
+  }
+  if (containsReadOnlySandboxSignal(message)) {
+    return true;
+  }
+
+  if (!acp) {
+    return false;
+  }
+  if (containsReadOnlySandboxSignal(acp.message)) {
+    return true;
+  }
+
+  const data = asRecord(acp.data);
+  if (!data) {
+    return false;
+  }
+  return (
+    containsReadOnlySandboxSignal(readStringField(data, "details")) ||
+    containsReadOnlySandboxSignal(readStringField(data, "detail")) ||
+    containsReadOnlySandboxSignal(readStringField(data, "reason"))
   );
 }
 
@@ -216,9 +266,13 @@ export function normalizeOutputError(
     (error instanceof AuthPolicyError || isAcpAuthRequiredPayload(acp)
       ? "AUTH_REQUIRED"
       : undefined);
+  const baseMessage = formatErrorMessage(error);
+  const message = shouldAppendReadOnlyHint(baseMessage, acp)
+    ? `${baseMessage}\n${READ_ONLY_HINT_TEXT}`
+    : baseMessage;
   return {
     code,
-    message: formatErrorMessage(error),
+    message,
     detailCode,
     origin: meta.origin ?? options.origin,
     retryable: meta.retryable ?? options.retryable,

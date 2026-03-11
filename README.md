@@ -211,6 +211,23 @@ acpx --ttl 30 codex 'keep queue owner alive for quick follow-ups'
 acpx --verbose codex 'debug why adapter startup is failing'
 ```
 
+## Permission layers and Codex read-only mode
+
+`acpx` permission flags and adapter sandbox modes are different controls:
+
+- `--approve-all`, `--approve-reads`, and `--deny-all` control `acpx` client-side permission handling for ACP client methods (for example `fs/*` and `terminal/*`).
+- `set-mode` controls adapter-defined session modes via ACP `session/set_mode` (for example Codex `read-only`, `auto`, `full-access`).
+- These controls are independent by design, so `--approve-all` does not imply `set-mode full-access`.
+
+If Codex still reports read-only sandbox behavior, set the session mode explicitly:
+
+```bash
+acpx codex sessions ensure
+acpx codex set-mode auto
+# or
+acpx codex set-mode full-access
+```
+
 ## Configuration files
 
 `acpx` reads config in this order (later wins):

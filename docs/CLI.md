@@ -474,6 +474,27 @@ Non-interactive prompt policy:
 - `--non-interactive-permissions deny`: deny non-read/search prompts when no TTY (default)
 - `--non-interactive-permissions fail`: fail with `PERMISSION_PROMPT_UNAVAILABLE`
 
+### Permission flags vs adapter session modes
+
+`acpx` permission flags and adapter sandbox modes are separate controls:
+
+- `--approve-all`, `--approve-reads`, and `--deny-all` affect `acpx` client-side permission handling.
+- `set-mode` affects the connected adapter session mode through ACP `session/set_mode`.
+- They are intentionally not auto-mapped, so `--approve-all` does not automatically switch adapter sandbox mode.
+
+### Troubleshooting Codex read-only behavior
+
+If Codex reports read-only sandbox behavior even when running with `--approve-all`, explicitly set the Codex session mode:
+
+```bash
+acpx codex sessions ensure
+acpx codex set-mode auto
+# or
+acpx codex set-mode full-access
+```
+
+`set-mode` values are adapter-defined; unsupported values are rejected by the adapter.
+
 ## Exit codes
 
 | Code  | Meaning                                                                                    |
