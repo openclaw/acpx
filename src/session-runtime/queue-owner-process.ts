@@ -14,6 +14,7 @@ export type QueueOwnerRuntimeOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  envOverrides?: Record<string, string>;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   ttlMs?: number;
@@ -27,6 +28,7 @@ type SessionSendLike = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  envOverrides?: Record<string, string>;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   ttlMs?: number;
@@ -52,6 +54,7 @@ export function queueOwnerRuntimeOptionsFromSend(
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    envOverrides: options.envOverrides,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
     ttlMs: options.ttlMs,

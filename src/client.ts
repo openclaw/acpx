@@ -651,8 +651,18 @@ function buildClaudeCodeOptionsMeta(
 
 function buildAgentEnvironment(
   authCredentials: Record<string, string> | undefined,
+  envOverrides: Record<string, string> | undefined,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
+
+  if (envOverrides) {
+    for (const [key, value] of Object.entries(envOverrides)) {
+      if (typeof value === "string") {
+        env[key] = value;
+      }
+    }
+  }
+
   if (!authCredentials) {
     return env;
   }
@@ -684,6 +694,7 @@ function buildAgentEnvironment(
 export function buildAgentSpawnOptions(
   cwd: string,
   authCredentials: Record<string, string> | undefined,
+  envOverrides?: Record<string, string>,
 ): {
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -692,7 +703,7 @@ export function buildAgentSpawnOptions(
 } {
   return {
     cwd,
-    env: buildAgentEnvironment(authCredentials),
+    env: buildAgentEnvironment(authCredentials, envOverrides),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   };
@@ -879,7 +890,11 @@ export class AcpClient {
       args,
       buildSpawnCommandOptions(
         command,
-        buildAgentSpawnOptions(this.options.cwd, this.options.authCredentials),
+        buildAgentSpawnOptions(
+          this.options.cwd,
+          this.options.authCredentials,
+          this.options.envOverrides,
+        ),
       ),
     ) as ChildProcessByStdio<Writable, Readable, Readable>;
 

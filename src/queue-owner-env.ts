@@ -52,6 +52,15 @@ export function parseQueueOwnerPayload(raw: string): QueueOwnerRuntimeOptions {
     options.authCredentials = Object.fromEntries(entries);
   }
 
+  if (record.envOverrides && typeof record.envOverrides === "object") {
+    const entries = Object.entries(record.envOverrides as UnknownRecord).filter(
+      ([, value]) => typeof value === "string",
+    ) as Array<[string, string]>;
+    if (entries.length > 0) {
+      options.envOverrides = Object.fromEntries(entries);
+    }
+  }
+
   if (record.authPolicy === "skip" || record.authPolicy === "fail") {
     options.authPolicy = record.authPolicy;
   }

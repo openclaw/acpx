@@ -163,6 +163,7 @@ export type AcpClientOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  envOverrides?: Record<string, string>;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   sessionOptions?: {

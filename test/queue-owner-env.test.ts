@@ -23,12 +23,17 @@ describe("parseQueueOwnerPayload", () => {
         ],
         ttlMs: 1234,
         maxQueueDepth: 7,
+        envOverrides: { ANTHROPIC_API_KEY: "sk-agent-1", CUSTOM_FLAG: "on" },
       }),
     );
     assert.equal(parsed.sessionId, "session-1");
     assert.equal(parsed.permissionMode, "approve-reads");
     assert.equal(parsed.ttlMs, 1234);
     assert.equal(parsed.maxQueueDepth, 7);
+    assert.deepEqual(parsed.envOverrides, {
+      ANTHROPIC_API_KEY: "sk-agent-1",
+      CUSTOM_FLAG: "on",
+    });
     assert.deepEqual(parsed.mcpServers, [
       {
         name: "linear-http",

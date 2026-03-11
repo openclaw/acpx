@@ -18,6 +18,18 @@ test("buildAgentSpawnOptions hides Windows console windows and preserves auth en
   assert.equal(options.env.ACPX_AUTH_TOKEN, "secret-token");
 });
 
+test("buildAgentSpawnOptions applies envOverrides to the spawned environment", () => {
+  const options = buildAgentSpawnOptions(
+    "/tmp/acpx-agent",
+    { ACPX_AUTH_TOKEN: "secret-token" },
+    { ANTHROPIC_API_KEY: "sk-override", CUSTOM_VAR: "custom-value" },
+  );
+
+  assert.equal(options.env.ACPX_AUTH_TOKEN, "secret-token");
+  assert.equal(options.env.ANTHROPIC_API_KEY, "sk-override");
+  assert.equal(options.env.CUSTOM_VAR, "custom-value");
+});
+
 test("buildTerminalSpawnOptions hides Windows console windows and maps env entries", () => {
   const options = buildTerminalSpawnOptions("/tmp/acpx-terminal", [
     { name: "TMUX", value: "/tmp/tmux-1000/default,123,0" },

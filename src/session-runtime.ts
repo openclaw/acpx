@@ -112,6 +112,7 @@ export type RunOnceOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  envOverrides?: Record<string, string>;
   outputFormatter: OutputFormatter;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
@@ -128,6 +129,7 @@ export type SessionCreateOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  envOverrides?: Record<string, string>;
   verbose?: boolean;
   sessionOptions?: SessionAgentOptions;
 } & TimedRunOptions;
@@ -140,6 +142,7 @@ export type SessionSendOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  envOverrides?: Record<string, string>;
   outputFormatter: OutputFormatter;
   errorEmissionPolicy?: OutputErrorEmissionPolicy;
   suppressSdkConsoleErrors?: boolean;
@@ -159,6 +162,7 @@ export type SessionEnsureOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  envOverrides?: Record<string, string>;
   verbose?: boolean;
   walkBoundary?: string;
   sessionOptions?: SessionAgentOptions;
@@ -215,6 +219,7 @@ type RunSessionPromptOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  envOverrides?: Record<string, string>;
   outputFormatter: OutputFormatter;
   timeoutMs?: number;
   suppressSdkConsoleErrors?: boolean;
@@ -311,6 +316,7 @@ async function runQueuedTask(
     nonInteractivePermissions?: NonInteractivePermissionPolicy;
     authCredentials?: Record<string, string>;
     authPolicy?: AuthPolicy;
+    envOverrides?: Record<string, string>;
     suppressSdkConsoleErrors?: boolean;
     onClientAvailable?: (controller: ActiveSessionController) => void;
     onClientClosed?: () => void;
@@ -331,6 +337,7 @@ async function runQueuedTask(
         task.nonInteractivePermissions ?? options.nonInteractivePermissions,
       authCredentials: options.authCredentials,
       authPolicy: options.authPolicy,
+      envOverrides: options.envOverrides,
       outputFormatter,
       timeoutMs: task.timeoutMs,
       suppressSdkConsoleErrors: task.suppressSdkConsoleErrors ?? options.suppressSdkConsoleErrors,
@@ -428,6 +435,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       nonInteractivePermissions: options.nonInteractivePermissions,
       authCredentials: options.authCredentials,
       authPolicy: options.authPolicy,
+      envOverrides: options.envOverrides,
       suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
       verbose: options.verbose,
     });
@@ -636,6 +644,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    envOverrides: options.envOverrides,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
     onAcpOutputMessage: (_direction, message) => output.onAcpMessage(message),
@@ -685,6 +694,7 @@ export async function createSession(options: SessionCreateOptions): Promise<Sess
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    envOverrides: options.envOverrides,
     verbose: options.verbose,
     sessionOptions: options.sessionOptions,
   });
@@ -841,6 +851,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    envOverrides: options.envOverrides,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
   });
@@ -973,6 +984,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
             nonInteractivePermissions: options.nonInteractivePermissions,
             authCredentials: options.authCredentials,
             authPolicy: options.authPolicy,
+            envOverrides: options.envOverrides,
             suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
             onClientAvailable: setActiveController,
             onClientClosed: clearActiveController,
