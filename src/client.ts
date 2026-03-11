@@ -37,6 +37,7 @@ import {
   ClaudeAcpSessionCreateTimeoutError,
   CopilotAcpUnsupportedError,
   GeminiAcpStartupTimeoutError,
+  PermissionDeniedError,
   PermissionPromptUnavailableError,
 } from "./errors.js";
 import { FileSystemHandlers } from "./filesystem.js";
@@ -1406,8 +1407,7 @@ export class AcpClient {
     } catch (error) {
       if (error instanceof PermissionPromptUnavailableError) {
         this.notePromptPermissionFailure(params.sessionId, error);
-        this.permissionStats.requested += 1;
-        this.permissionStats.cancelled += 1;
+        this.recordPermissionDecision("cancelled");
         return {
           outcome: {
             outcome: "cancelled",
@@ -1418,14 +1418,7 @@ export class AcpClient {
     }
 
     const decision = classifyPermissionDecision(params, response);
-    this.permissionStats.requested += 1;
-    if (decision === "approved") {
-      this.permissionStats.approved += 1;
-    } else if (decision === "denied") {
-      this.permissionStats.denied += 1;
-    } else {
-      this.permissionStats.cancelled += 1;
-    }
+    this.recordPermissionDecision(decision);
 
     return response;
   }
@@ -1484,16 +1477,19 @@ export class AcpClient {
   }
 
   private async handleReadTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
-    return await this.filesystem.readTextFile(params);
+    try {
+      return await this.filesystem.readTextFile(params);
+    } catch (error) {
+      this.recordPermissionError(params.sessionId, error);
+      throw error;
+    }
   }
 
   private async handleWriteTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
     try {
       return await this.filesystem.writeTextFile(params);
     } catch (error) {
-      if (error instanceof PermissionPromptUnavailableError) {
-        this.notePromptPermissionFailure(params.sessionId, error);
-      }
+      this.recordPermissionError(params.sessionId, error);
       throw error;
     }
   }
@@ -1504,9 +1500,7 @@ export class AcpClient {
     try {
       return await this.terminalManager.createTerminal(params);
     } catch (error) {
-      if (error instanceof PermissionPromptUnavailableError) {
-        this.notePromptPermissionFailure(params.sessionId, error);
-      }
+      this.recordPermissionError(params.sessionId, error);
       throw error;
     }
   }
@@ -1531,6 +1525,30 @@ export class AcpClient {
     params: ReleaseTerminalRequest,
   ): Promise<ReleaseTerminalResponse> {
     return await this.terminalManager.releaseTerminal(params);
+  }
+
+  private recordPermissionDecision(decision: "approved" | "denied" | "cancelled"): void {
+    this.permissionStats.requested += 1;
+    if (decision === "approved") {
+      this.permissionStats.approved += 1;
+      return;
+    }
+    if (decision === "denied") {
+      this.permissionStats.denied += 1;
+      return;
+    }
+    this.permissionStats.cancelled += 1;
+  }
+
+  private recordPermissionError(sessionId: string, error: unknown): void {
+    if (error instanceof PermissionPromptUnavailableError) {
+      this.notePromptPermissionFailure(sessionId, error);
+      this.recordPermissionDecision("cancelled");
+      return;
+    }
+    if (error instanceof PermissionDeniedError) {
+      this.recordPermissionDecision("denied");
+    }
   }
 
   private async handleSessionUpdate(notification: SessionNotification): Promise<void> {
