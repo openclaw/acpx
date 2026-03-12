@@ -19,6 +19,7 @@ Built-in agents:
 
 Harness-specific docs in this directory:
 
+- [Codex](Codex.md): built-in `codex -> npx @zed-industries/codex-acp`
 - [Copilot](Copilot.md): built-in `copilot -> copilot --acp --stdio`
 - [Droid](Droid.md): built-in `droid -> droid exec --output-format acp`
 - [Cursor](Cursor.md): built-in `cursor -> cursor-agent acp`

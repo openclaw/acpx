@@ -140,7 +140,7 @@ Behavior:
 ```bash
 acpx codex cancel
 acpx codex set-mode auto
-acpx codex set approval_policy conservative
+acpx codex set thought_level high
 ```
 
 Behavior:
@@ -149,6 +149,7 @@ Behavior:
 - `set-mode`: calls ACP `session/set_mode`.
 - `set-mode` mode ids are adapter-defined; unsupported values are rejected by the adapter (often `Invalid params`).
 - `set`: calls ACP `session/set_config_option`.
+- For codex, `thought_level` is accepted as a compatibility alias for codex-acp `reasoning_effort`.
 - `set-mode`/`set` route through queue-owner IPC when active, otherwise reconnect directly.
 
 ### Sessions

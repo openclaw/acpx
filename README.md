@@ -139,7 +139,7 @@ acpx codex --file - "extra context"            # explicit stdin + appended args
 acpx codex --no-wait 'draft test migration plan' # enqueue without waiting if session is busy
 acpx codex cancel                               # cooperative cancel of in-flight prompt
 acpx codex set-mode auto                        # session/set_mode (adapter-defined mode id)
-acpx codex set approval_policy conservative     # session/set_config_option
+acpx codex set thought_level high               # codex compatibility alias -> reasoning_effort
 acpx exec 'summarize this repo'                # default agent shortcut (codex)
 acpx codex exec 'what does this repo do?'      # one-shot, no saved session
 
