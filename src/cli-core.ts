@@ -174,6 +174,20 @@ function resolveCompatibleConfigId(
   return configId;
 }
 
+function resolveCompatibleConfigValue(
+  agent: { agentName: string; agentCommand: string },
+  configId: string,
+  value: string,
+): string {
+  if (isCodexAgentInvocation(agent) && configId === "model") {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/^gpt-(\d+)-(\d+)(.*)$/u, "gpt-$1.$2$3");
+  }
+  return value;
+}
+
 export { parseAllowedTools, parseMaxTurns, parseTtlSeconds };
 export { formatPromptSessionBannerLine } from "./cli/output-render.js";
 
@@ -538,6 +552,7 @@ async function handleSetConfigOption(
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
   const resolvedConfigId = resolveCompatibleConfigId(agent, configId);
+  const resolvedValue = resolveCompatibleConfigValue(agent, resolvedConfigId, value);
   const { setSessionConfigOption } = await loadSessionModule();
   const record = await findRoutedSessionOrThrow(
     agent.agentCommand,
@@ -548,7 +563,7 @@ async function handleSetConfigOption(
   const result = await setSessionConfigOption({
     sessionId: record.acpxRecordId,
     configId: resolvedConfigId,
-    value,
+    value: resolvedValue,
     mcpServers: config.mcpServers,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
