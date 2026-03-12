@@ -62,6 +62,8 @@ const MOCK_AGENT_WITH_DISTINCT_CREATE_AND_LOAD_RUNTIME_SESSION_IDS =
 const MOCK_AGENT_WITH_LOAD_FALLBACK = `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-fails-on-empty`;
 const MOCK_AGENT_WITH_LOAD_SESSION_NOT_FOUND = `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-not-found`;
 const MOCK_AGENT_WITH_LOAD_FALLBACK_AND_MODE_FAILURE = `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-fails-on-empty --set-session-mode-fails`;
+const MOCK_AGENT_WITH_SET_MODE_INVALID_PARAMS = `${MOCK_AGENT_COMMAND} --set-session-mode-invalid-params`;
+const MOCK_AGENT_WITH_SET_CONFIG_INVALID_PARAMS = `${MOCK_AGENT_COMMAND} --set-session-config-invalid-params`;
 
 type CliRunResult = {
   code: number | null;
@@ -821,6 +823,100 @@ test("set-mode load fallback failure does not persist the fresh session id to di
     };
     assert.equal(storedRecord.acp_session_id, sessionId);
     assert.equal(storedRecord.acpx?.desired_mode_id, "plan");
+  });
+});
+
+test("set-mode surfaces actionable guidance when agent rejects session/set_mode params", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_WITH_SET_MODE_INVALID_PARAMS,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const sessionId = "set-mode-invalid-params";
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: sessionId,
+      acpSessionId: sessionId,
+      agentCommand: MOCK_AGENT_WITH_SET_MODE_INVALID_PARAMS,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+    });
+
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "set-mode", "plan"],
+      homeDir,
+    );
+    assert.equal(result.code, 1, result.stderr);
+    const error = parseSingleAcpErrorLine(result.stdout);
+    assert.equal(error.data?.acpxCode, "RUNTIME");
+    assert.match(error.message ?? "", /session\/set_mode/);
+    assert.match(error.message ?? "", /mode "plan"/);
+    assert.match(error.message ?? "", /Invalid params/);
+    assert.match(error.message ?? "", /ACP -3260[23]/);
+    assert.match(error.message ?? "", /may not implement session\/set_mode/);
+  });
+});
+
+test("set surfaces actionable guidance when agent rejects session/set_config_option params", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_WITH_SET_CONFIG_INVALID_PARAMS,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const sessionId = "set-config-invalid-params";
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: sessionId,
+      acpSessionId: sessionId,
+      agentCommand: MOCK_AGENT_WITH_SET_CONFIG_INVALID_PARAMS,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+    });
+
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "set", "thought_level", "high"],
+      homeDir,
+    );
+    assert.equal(result.code, 1, result.stderr);
+    const error = parseSingleAcpErrorLine(result.stdout);
+    assert.equal(error.data?.acpxCode, "RUNTIME");
+    assert.match(error.message ?? "", /session\/set_config_option/);
+    assert.match(error.message ?? "", /"thought_level"="high"/);
+    assert.match(error.message ?? "", /Invalid params/);
+    assert.match(error.message ?? "", /ACP -3260[23]/);
+    assert.match(error.message ?? "", /may not implement session\/set_config_option/);
   });
 });
 

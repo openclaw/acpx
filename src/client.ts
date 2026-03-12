@@ -30,6 +30,7 @@ import {
   type WriteTextFileRequest,
   type WriteTextFileResponse,
 } from "@agentclientprotocol/sdk";
+import { extractAcpError } from "./acp-error-shapes.js";
 import { isSessionUpdateNotification } from "./acp-jsonrpc.js";
 import {
   AgentSpawnError,
@@ -69,6 +70,7 @@ const CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS = 60_000;
 const GEMINI_VERSION_TIMEOUT_MS = 2_000;
 const GEMINI_ACP_FLAG_VERSION = [0, 33, 0] as const;
 const COPILOT_HELP_TIMEOUT_MS = 2_000;
+const SESSION_CONTROL_UNSUPPORTED_ACP_CODES = new Set([-32601, -32602]);
 
 type LoadSessionOptions = {
   suppressReplayUpdates?: boolean;
@@ -649,6 +651,60 @@ function buildClaudeCodeOptionsMeta(
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function isLikelySessionControlUnsupportedError(acp: {
+  code: number;
+  message: string;
+  data?: unknown;
+}): boolean {
+  if (SESSION_CONTROL_UNSUPPORTED_ACP_CODES.has(acp.code)) {
+    return true;
+  }
+
+  if (acp.code !== -32603) {
+    return false;
+  }
+
+  const details = asRecord(acp.data)?.details;
+  return typeof details === "string" && details.toLowerCase().includes("invalid params");
+}
+
+function formatSessionControlAcpSummary(acp: {
+  code: number;
+  message: string;
+  data?: unknown;
+}): string {
+  const details = asRecord(acp.data)?.details;
+  if (typeof details === "string" && details.trim().length > 0) {
+    return `${details.trim()} (ACP ${acp.code}, adapter reported "${acp.message}")`;
+  }
+  return `${acp.message} (ACP ${acp.code})`;
+}
+
+function maybeWrapSessionControlError(
+  method: "session/set_mode" | "session/set_config_option",
+  error: unknown,
+  context?: string,
+): unknown {
+  const acp = extractAcpError(error);
+  if (!acp || !isLikelySessionControlUnsupportedError(acp)) {
+    return error;
+  }
+
+  const acpSummary = formatSessionControlAcpSummary(acp);
+  const contextSuffix = context ? ` ${context}` : "";
+  const message =
+    `Agent rejected ${method}${contextSuffix}: ${acpSummary}. ` +
+    `The adapter may not implement ${method}, or the requested value is not supported.`;
+  return new Error(message);
+}
+
 function buildAgentEnvironment(
   authCredentials: Record<string, string> | undefined,
 ): NodeJS.ProcessEnv {
@@ -1164,10 +1220,14 @@ export class AcpClient {
 
   async setSessionMode(sessionId: string, modeId: string): Promise<void> {
     const connection = this.getConnection();
-    await connection.setSessionMode({
-      sessionId,
-      modeId,
-    });
+    try {
+      await connection.setSessionMode({
+        sessionId,
+        modeId,
+      });
+    } catch (error) {
+      throw maybeWrapSessionControlError("session/set_mode", error, `for mode "${modeId}"`);
+    }
   }
 
   async setSessionConfigOption(
@@ -1176,11 +1236,19 @@ export class AcpClient {
     value: string,
   ): Promise<SetSessionConfigOptionResponse> {
     const connection = this.getConnection();
-    return await connection.setSessionConfigOption({
-      sessionId,
-      configId,
-      value,
-    });
+    try {
+      return await connection.setSessionConfigOption({
+        sessionId,
+        configId,
+        value,
+      });
+    } catch (error) {
+      throw maybeWrapSessionControlError(
+        "session/set_config_option",
+        error,
+        `for "${configId}"="${value}"`,
+      );
+    }
   }
 
   async cancel(sessionId: string): Promise<void> {

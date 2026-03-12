@@ -36,6 +36,8 @@ type MockAgentOptions = {
   loadSessionNotFound: boolean;
   loadSessionFailsOnEmpty: boolean;
   setSessionModeFails: boolean;
+  setSessionModeInvalidParams: boolean;
+  setSessionConfigInvalidParams: boolean;
   replayLoadSessionUpdates: boolean;
   loadReplayText: string;
   ignoreSigterm: boolean;
@@ -289,6 +291,8 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let loadSessionNotFound = false;
   let loadSessionFailsOnEmpty = false;
   let setSessionModeFails = false;
+  let setSessionModeInvalidParams = false;
+  let setSessionConfigInvalidParams = false;
   let replayLoadSessionUpdates = false;
   let loadReplayText = "replayed load session update";
   let ignoreSigterm = false;
@@ -316,6 +320,16 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
 
     if (token === "--set-session-mode-fails") {
       setSessionModeFails = true;
+      continue;
+    }
+
+    if (token === "--set-session-mode-invalid-params") {
+      setSessionModeInvalidParams = true;
+      continue;
+    }
+
+    if (token === "--set-session-config-invalid-params") {
+      setSessionConfigInvalidParams = true;
       continue;
     }
 
@@ -369,6 +383,8 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     loadSessionNotFound,
     loadSessionFailsOnEmpty,
     setSessionModeFails,
+    setSessionModeInvalidParams,
+    setSessionConfigInvalidParams,
     replayLoadSessionUpdates,
     loadReplayText,
     ignoreSigterm,
@@ -535,6 +551,21 @@ class MockAgent implements Agent {
 
   async setSessionMode(params: SetSessionModeRequest): Promise<SetSessionModeResponse> {
     const session = this.ensureSession(params.sessionId);
+    if (this.options.setSessionModeInvalidParams) {
+      const error = new Error("Invalid params") as Error & {
+        code: number;
+        data: {
+          method: string;
+          modeId: string;
+        };
+      };
+      error.code = -32602;
+      error.data = {
+        method: "session/set_mode",
+        modeId: params.modeId,
+      };
+      throw error;
+    }
     if (this.options.setSessionModeFails) {
       throw new Error("setSessionMode failed");
     }
@@ -546,6 +577,23 @@ class MockAgent implements Agent {
     params: SetSessionConfigOptionRequest,
   ): Promise<SetSessionConfigOptionResponse> {
     const session = this.ensureSession(params.sessionId);
+    if (this.options.setSessionConfigInvalidParams) {
+      const error = new Error("Invalid params") as Error & {
+        code: number;
+        data: {
+          method: string;
+          configId: string;
+          value: string;
+        };
+      };
+      error.code = -32602;
+      error.data = {
+        method: "session/set_config_option",
+        configId: params.configId,
+        value: params.value,
+      };
+      throw error;
+    }
     if (params.configId === "mode") {
       session.modeId = params.value;
     } else {
