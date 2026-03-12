@@ -288,6 +288,93 @@ const DISCARD_OUTPUT_FORMATTER: OutputFormatter = {
     // no-op
   },
 };
+
+function jsonRpcIdKey(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return `s:${value}`;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return `n:${value}`;
+  }
+  return undefined;
+}
+
+function extractJsonRpcRequestInfo(
+  message: AcpJsonRpcMessage,
+): { idKey: string; method: string } | undefined {
+  const candidate = message as { method?: unknown; id?: unknown };
+  if (typeof candidate.method !== "string") {
+    return undefined;
+  }
+  const idKey = jsonRpcIdKey(candidate.id);
+  if (!idKey) {
+    return undefined;
+  }
+  return {
+    idKey,
+    method: candidate.method,
+  };
+}
+
+function extractJsonRpcResponseInfo(
+  message: AcpJsonRpcMessage,
+): { idKey: string; hasError: boolean } | undefined {
+  const candidate = message as { id?: unknown; error?: unknown; result?: unknown };
+  const idKey = jsonRpcIdKey(candidate.id);
+  if (!idKey) {
+    return undefined;
+  }
+  const hasError = Object.hasOwn(candidate, "error");
+  const hasResult = Object.hasOwn(candidate, "result");
+  if (!hasError && !hasResult) {
+    return undefined;
+  }
+  return {
+    idKey,
+    hasError,
+  };
+}
+
+function filterRecoverableLoadFallbackOutput(messages: AcpJsonRpcMessage[]): AcpJsonRpcMessage[] {
+  const requestMethodById = new Map<string, string>();
+  const failedLoadRequestIds = new Set<string>();
+
+  for (const message of messages) {
+    const request = extractJsonRpcRequestInfo(message);
+    if (request) {
+      requestMethodById.set(request.idKey, request.method);
+      continue;
+    }
+
+    const response = extractJsonRpcResponseInfo(message);
+    if (!response || !response.hasError) {
+      continue;
+    }
+
+    if (requestMethodById.get(response.idKey) === "session/load") {
+      failedLoadRequestIds.add(response.idKey);
+    }
+  }
+
+  if (failedLoadRequestIds.size === 0) {
+    return messages;
+  }
+
+  return messages.filter((message) => {
+    const request = extractJsonRpcRequestInfo(message);
+    if (request && request.method === "session/load" && failedLoadRequestIds.has(request.idKey)) {
+      return false;
+    }
+
+    const response = extractJsonRpcResponseInfo(message);
+    if (response && failedLoadRequestIds.has(response.idKey)) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
 export function normalizeQueueOwnerTtlMs(ttlMs: number | undefined): number {
   if (ttlMs == null) {
     return DEFAULT_QUEUE_OWNER_TTL_MS;
@@ -395,6 +482,8 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     return await SessionEventWriter.open(record);
   });
   const pendingMessages: AcpJsonRpcMessage[] = [];
+  const pendingConnectOutputMessages: AcpJsonRpcMessage[] = [];
+  let bufferingConnectOutput = true;
   let sawAcpMessage = false;
   let eventWriterClosed = false;
 
@@ -443,6 +532,10 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       pendingMessages.push(message);
     },
     onAcpOutputMessage: (_direction, message) => {
+      if (bufferingConnectOutput) {
+        pendingConnectOutputMessages.push(message);
+        return;
+      }
       output.onAcpMessage(message);
     },
     onSessionUpdate: (notification) => {
@@ -475,10 +568,9 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
           sessionId: activeSessionId,
           resumed,
           loadError,
-        } = await measurePerf(
-          "runtime.connect_and_load",
-          async () =>
-            await connectAndLoadSession({
+        } = await measurePerf("runtime.connect_and_load", async () => {
+          try {
+            return await connectAndLoadSession({
               client,
               record,
               timeoutMs: options.timeoutMs,
@@ -494,8 +586,25 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
               onSessionIdResolved: (sessionId) => {
                 activeSessionIdForControl = sessionId;
               },
-            }),
-        );
+            });
+          } catch (error) {
+            bufferingConnectOutput = false;
+            for (const message of pendingConnectOutputMessages) {
+              output.onAcpMessage(message);
+            }
+            pendingConnectOutputMessages.length = 0;
+            throw error;
+          }
+        });
+        bufferingConnectOutput = false;
+        const connectOutputMessages =
+          loadError == null
+            ? pendingConnectOutputMessages
+            : filterRecoverableLoadFallbackOutput(pendingConnectOutputMessages);
+        for (const message of connectOutputMessages) {
+          output.onAcpMessage(message);
+        }
+        pendingConnectOutputMessages.length = 0;
         if (options.verbose) {
           process.stderr.write(
             `[acpx] ${formatPerfMetric("prompt.connect_and_load", Date.now() - connectStartedAt)}\n`,

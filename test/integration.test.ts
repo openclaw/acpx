@@ -1102,7 +1102,7 @@ test("integration: config agent command with flags is split correctly and stores
   });
 });
 
-test("integration: prompt recovers when loadSession fails on empty session", async () => {
+test("integration: prompt recovers when loadSession fails on empty session without emitting load error", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const flakyLoadAgentCommand = `${MOCK_AGENT_COMMAND} --load-session-fails-on-empty`;
@@ -1152,7 +1152,7 @@ test("integration: prompt recovers when loadSession fails on empty session", asy
         .map((line) => JSON.parse(line) as { jsonrpc?: string; result?: { stopReason?: string } });
       assert.equal(
         payloads.some((payload) => Object.hasOwn(payload, "error")),
-        true,
+        false,
         prompt.stdout,
       );
       assert.equal(
@@ -1199,6 +1199,82 @@ test("integration: prompt recovers when loadSession fails on empty session", asy
         homeDir,
       );
       assert.equal(closed.code, 0, closed.stderr);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: prompt recovers when loadSession returns not found without emitting load error", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const notFoundLoadAgentCommand = `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-not-found`;
+
+    try {
+      const created = await runCli(
+        [
+          "--agent",
+          notFoundLoadAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "sessions",
+          "new",
+        ],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+      const createdEvent = JSON.parse(created.stdout.trim()) as {
+        acpxRecordId?: string;
+      };
+      const originalSessionId = createdEvent.acpxRecordId;
+      assert.equal(typeof originalSessionId, "string");
+
+      const prompt = await runCli(
+        [
+          "--agent",
+          notFoundLoadAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "prompt",
+          "echo recovered",
+        ],
+        homeDir,
+      );
+      assert.equal(prompt.code, 0, prompt.stderr);
+
+      const payloads = prompt.stdout
+        .trim()
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as { jsonrpc?: string; result?: { stopReason?: string } });
+
+      assert.equal(
+        payloads.some((payload) => Object.hasOwn(payload, "error")),
+        false,
+        prompt.stdout,
+      );
+      assert.equal(
+        payloads.some((payload) => payload.result?.stopReason === "end_turn"),
+        true,
+        prompt.stdout,
+      );
+
+      const storedRecordPath = path.join(
+        homeDir,
+        ".acpx",
+        "sessions",
+        `${encodeURIComponent(originalSessionId as string)}.json`,
+      );
+      const storedRecord = JSON.parse(await fs.readFile(storedRecordPath, "utf8")) as {
+        acp_session_id?: string;
+      };
+      assert.notEqual(storedRecord.acp_session_id, originalSessionId);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
