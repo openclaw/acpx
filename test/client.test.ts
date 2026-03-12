@@ -3,7 +3,11 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 import type { RequestPermissionRequest, RequestPermissionResponse } from "@agentclientprotocol/sdk";
 import { AcpClient, buildAgentSpawnOptions } from "../src/client.js";
-import { AuthPolicyError, PermissionPromptUnavailableError } from "../src/errors.js";
+import {
+  AuthPolicyError,
+  PermissionDeniedError,
+  PermissionPromptUnavailableError,
+} from "../src/errors.js";
 
 type ClientInternals = {
   selectAuthMethod?: (methods: Array<{ id: string }>) =>
@@ -20,6 +24,22 @@ type ClientInternals = {
   handlePermissionRequest?: (
     params: RequestPermissionRequest,
   ) => Promise<RequestPermissionResponse>;
+  handleReadTextFile?: (params: {
+    sessionId: string;
+    path: string;
+    line?: number | null;
+    limit?: number | null;
+  }) => Promise<{ content: string }>;
+  handleWriteTextFile?: (params: {
+    sessionId: string;
+    path: string;
+    content: string;
+  }) => Promise<Record<string, never>>;
+  handleCreateTerminal?: (params: {
+    sessionId: string;
+    command: string;
+    args?: string[];
+  }) => Promise<{ terminalId: string }>;
   notePromptPermissionFailure?: (
     sessionId: string,
     error: PermissionPromptUnavailableError,
@@ -34,8 +54,26 @@ type ClientInternals = {
     exitCode: number | null,
     signal: NodeJS.Signals | null,
   ) => void;
+  filesystem?: {
+    readTextFile: (params: {
+      sessionId: string;
+      path: string;
+      line?: number | null;
+      limit?: number | null;
+    }) => Promise<{ content: string }>;
+    writeTextFile: (params: {
+      sessionId: string;
+      path: string;
+      content: string;
+    }) => Promise<Record<string, never>>;
+  };
   terminalManager?: {
     shutdown: () => Promise<void>;
+    createTerminal?: (params: {
+      sessionId: string;
+      command: string;
+      args?: string[];
+    }) => Promise<{ terminalId: string }>;
   };
   cancel?: (sessionId: string) => Promise<void>;
   connection?: unknown;
@@ -214,6 +252,62 @@ test("AcpClient handlePermissionRequest records approved decisions", async () =>
     denied: 0,
     cancelled: 0,
   });
+});
+
+test("AcpClient client-method permission errors update permission stats", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+
+  internals.filesystem = {
+    readTextFile: async () => {
+      throw new PermissionDeniedError("Permission denied for fs/read_text_file");
+    },
+    writeTextFile: async () => {
+      throw new PermissionDeniedError("Permission denied for fs/write_text_file");
+    },
+  };
+  internals.terminalManager = {
+    shutdown: async () => {},
+    createTerminal: async () => {
+      throw new PermissionPromptUnavailableError();
+    },
+  };
+
+  await assert.rejects(
+    async () =>
+      await internals.handleReadTextFile?.({
+        sessionId: "session-read",
+        path: "/tmp/read.txt",
+      }),
+    PermissionDeniedError,
+  );
+  await assert.rejects(
+    async () =>
+      await internals.handleWriteTextFile?.({
+        sessionId: "session-write",
+        path: "/tmp/write.txt",
+        content: "updated",
+      }),
+    PermissionDeniedError,
+  );
+  await assert.rejects(
+    async () =>
+      await internals.handleCreateTerminal?.({
+        sessionId: "session-terminal",
+        command: "echo",
+        args: ["hi"],
+      }),
+    PermissionPromptUnavailableError,
+  );
+
+  assert.deepEqual(client.getPermissionStats(), {
+    requested: 3,
+    approved: 0,
+    denied: 2,
+    cancelled: 1,
+  });
+  const noted = internals.consumePromptPermissionFailure?.("session-terminal");
+  assert(noted instanceof PermissionPromptUnavailableError);
 });
 
 test("AcpClient createSession forwards claudeCode options in _meta", async () => {
