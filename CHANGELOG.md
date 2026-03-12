@@ -12,6 +12,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Codex/session config: treat `thought_level` as a compatibility alias for codex-acp `reasoning_effort` so `acpx codex set thought_level <value>` works on current codex-acp releases. Thanks @vincentkoc.
 - Session control/errors: surface actionable `set-mode` and `set` error messages when adapters reject unsupported session control params. (#123) Thanks @manthan787 and @vincentkoc.
 - Sessions/load fallback: suppress recoverable `session/load` error payloads during first-run prompt recovery and keep the session record rotated to the fresh ACP session. (#122) Thanks @lynnzc and @vincentkoc.
 - Agents/gemini: default to `--acp` for Gemini CLI and fall back to `--experimental-acp` for pre-0.33 releases. (#113)
