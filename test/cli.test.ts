@@ -1133,6 +1133,52 @@ test("queued prompt failures remain visible in quiet mode", async () => {
   });
 });
 
+test("non-queued write permission denial exits with code 5", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_COMMAND,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const session = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "sessions", "new"],
+      homeDir,
+    );
+    assert.equal(session.code, 0, session.stderr);
+
+    const writeResult = await runCli(
+      [
+        "--cwd",
+        cwd,
+        "--format",
+        "quiet",
+        "--approve-reads",
+        "codex",
+        "prompt",
+        `write ${path.join(cwd, "x.txt")} hi`,
+      ],
+      homeDir,
+    );
+
+    assert.equal(writeResult.code, 5);
+    assert.match(writeResult.stdout, /error:\s*Internal error/i);
+  });
+});
+
 test("--json-strict suppresses session banners on stderr", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
