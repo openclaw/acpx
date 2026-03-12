@@ -408,6 +408,57 @@ test("AcpClient createSession forwards claudeCode options in _meta", async () =>
   });
 });
 
+test("AcpClient createSession applies codex model via session/set_config_option", async () => {
+  const client = makeClient({
+    agentCommand: "npx @zed-industries/codex-acp",
+    sessionOptions: {
+      model: "GPT-5-2",
+    },
+  });
+
+  let capturedNewSessionParams: Record<string, unknown> | undefined;
+  let capturedSetConfigParams:
+    | {
+        sessionId: string;
+        configId: string;
+        value: string;
+      }
+    | undefined;
+  asInternals(client).connection = {
+    newSession: async (params: Record<string, unknown>) => {
+      capturedNewSessionParams = params;
+      return { sessionId: "session-456" };
+    },
+    setSessionConfigOption: async (params: {
+      sessionId: string;
+      configId: string;
+      value: string;
+    }) => {
+      capturedSetConfigParams = params;
+      return { configOptions: [] };
+    },
+  };
+
+  const result = await client.createSession("/tmp/acpx-client-codex-model");
+  assert.equal(result.sessionId, "session-456");
+  assert.deepEqual(capturedNewSessionParams, {
+    cwd: "/tmp/acpx-client-codex-model",
+    mcpServers: [],
+    _meta: {
+      claudeCode: {
+        options: {
+          model: "GPT-5-2",
+        },
+      },
+    },
+  });
+  assert.deepEqual(capturedSetConfigParams, {
+    sessionId: "session-456",
+    configId: "model",
+    value: "gpt-5.2",
+  });
+});
+
 test("AcpClient session update handling drains queued callbacks and swallows handler failures", async () => {
   const notifications: string[] = [];
   const client = makeClient({

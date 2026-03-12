@@ -380,6 +380,24 @@ function isClaudeAcpCommand(command: string, args: readonly string[]): boolean {
   return args.some((arg) => arg.includes("claude-agent-acp"));
 }
 
+function isCodexAcpCommand(command: string, args: readonly string[]): boolean {
+  const commandToken = basenameToken(command);
+  if (commandToken === "codex-acp") {
+    return true;
+  }
+  return args.some((arg) => arg.includes("codex-acp"));
+}
+
+function normalizeCodexModelId(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return trimmed;
+  }
+
+  const lower = trimmed.toLowerCase();
+  return lower.replace(/^gpt-(\d+)-(\d+)(.*)$/u, "gpt-$1.$2$3");
+}
+
 function isCopilotAcpCommand(command: string, args: readonly string[]): boolean {
   return basenameToken(command) === "copilot" && args.includes("--acp");
 }
@@ -1170,6 +1188,7 @@ export class AcpClient {
     const connection = this.getConnection();
     const { command, args } = splitCommandLine(this.options.agentCommand);
     const claudeAcp = isClaudeAcpCommand(command, args);
+    const codexAcp = isCodexAcpCommand(command, args);
 
     let result: Awaited<ReturnType<typeof connection.newSession>>;
     try {
@@ -1192,6 +1211,18 @@ export class AcpClient {
     }
 
     this.loadedSessionId = result.sessionId;
+    if (
+      codexAcp &&
+      typeof this.options.sessionOptions?.model === "string" &&
+      this.options.sessionOptions.model.trim().length > 0
+    ) {
+      await this.setSessionConfigOption(
+        result.sessionId,
+        "model",
+        normalizeCodexModelId(this.options.sessionOptions.model),
+      );
+    }
+
     return {
       sessionId: result.sessionId,
       agentSessionId: extractRuntimeSessionId(result._meta),

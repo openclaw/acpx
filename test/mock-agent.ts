@@ -423,6 +423,18 @@ function buildConfigOptions(state: SessionState): SetSessionConfigOptionResponse
       ],
     },
     {
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: state.configValues.model ?? "default",
+      options: [
+        { value: "default", name: "Default" },
+        { value: "gpt-5.4", name: "gpt-5.4" },
+        { value: "gpt-5.2", name: "gpt-5.2" },
+      ],
+    },
+    {
       id: "reasoning_effort",
       name: "Reasoning Effort",
       category: "thought_level",

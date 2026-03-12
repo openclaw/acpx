@@ -834,6 +834,59 @@ test("codex thought_level aliases to reasoning_effort", async () => {
   });
 });
 
+test("codex model aliases normalize to codex-acp model ids", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: MOCK_AGENT_COMMAND,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const sessionId = "codex-model-alias";
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: sessionId,
+      acpSessionId: sessionId,
+      agentCommand: MOCK_AGENT_COMMAND,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+    });
+
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "set", "model", "GPT-5-2"],
+      homeDir,
+    );
+    assert.equal(result.code, 0, result.stderr);
+
+    const payload = JSON.parse(result.stdout.trim()) as {
+      action?: string;
+      configId?: string;
+      value?: string;
+      configOptions?: Array<{ id?: string; currentValue?: string; category?: string }>;
+    };
+    assert.equal(payload.action, "config_set");
+    assert.equal(payload.configId, "model");
+    assert.equal(payload.value, "GPT-5-2");
+    const model = payload.configOptions?.find((option) => option.id === "model");
+    assert.equal(model?.currentValue, "gpt-5.2");
+    assert.equal(model?.category, "model");
+  });
+});
+
 test("set-mode load fallback failure does not persist the fresh session id to disk", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
