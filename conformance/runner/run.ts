@@ -10,12 +10,16 @@ import {
   type ContentBlock,
   PROTOCOL_VERSION,
   type PromptResponse,
+  type ReadTextFileRequest,
+  type ReadTextFileResponse,
   RequestError,
   ndJsonStream,
   type Client,
   type InitializeResponse,
   type SessionId,
   type SessionNotification,
+  type WriteTextFileRequest,
+  type WriteTextFileResponse,
 } from "@agentclientprotocol/sdk";
 
 type PermissionMode = "approve-all" | "deny-all";
@@ -26,6 +30,7 @@ type CliOptions = {
   profilePath: string;
   casesDir: string;
   agentCommand: string;
+  agentCommandCwd: string;
   permissionMode: PermissionMode;
   format: OutputFormat;
   reportPath?: string;
@@ -167,12 +172,35 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_UPDATE_TIMEOUT_MS = 30_000;
 const DEFAULT_INITIALIZE_TIMEOUT_MS = 10_000;
 
+function isWithinRoot(rootDir: string, targetPath: string): boolean {
+  const relative = path.relative(rootDir, targetPath);
+  return relative.length === 0 || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function resolvePathWithinRoot(rootDir: string, rawPath: string): string {
+  const resolved = path.isAbsolute(rawPath)
+    ? path.resolve(rawPath)
+    : path.resolve(rootDir, rawPath);
+  if (!isWithinRoot(rootDir, resolved)) {
+    throw new RequestError(-32001, `Path is outside session cwd root: ${resolved}`);
+  }
+  return resolved;
+}
+
 class RunnerClient implements Client {
   readonly updates: SessionNotification[] = [];
   private readonly permissionMode: PermissionMode;
+  private readonly defaultSessionCwd: string;
+  private readonly sessionCwds = new Map<SessionId, string>();
+  private readonly createdFiles = new Set<string>();
 
-  constructor(permissionMode: PermissionMode) {
-    this.permissionMode = permissionMode;
+  constructor(params: { permissionMode: PermissionMode; defaultSessionCwd: string }) {
+    this.permissionMode = params.permissionMode;
+    this.defaultSessionCwd = path.resolve(params.defaultSessionCwd);
+  }
+
+  registerSessionCwd(sessionId: SessionId, cwd: string): void {
+    this.sessionCwds.set(sessionId, path.resolve(cwd));
   }
 
   async requestPermission(params: {
@@ -206,20 +234,52 @@ class RunnerClient implements Client {
     this.updates.push(params);
   }
 
-  async readTextFile(params: { path: string }): Promise<{ content: string }> {
+  async readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
+    const filePath = this.resolveSessionPath(params);
     if (this.permissionMode === "deny-all") {
       throw new RequestError(-32001, "Permission denied by conformance runner");
     }
-    const content = await fs.readFile(params.path, "utf8");
+    const content = await fs.readFile(filePath, "utf8");
     return { content };
   }
 
-  async writeTextFile(params: { path: string; content: string }): Promise<{}> {
+  async writeTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
+    const filePath = this.resolveSessionPath(params);
     if (this.permissionMode === "deny-all") {
       throw new RequestError(-32001, "Permission denied by conformance runner");
     }
-    await fs.writeFile(params.path, params.content, "utf8");
+    const fileDidExist = await this.pathExists(filePath);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, params.content, "utf8");
+    if (!fileDidExist) {
+      this.createdFiles.add(filePath);
+    }
     return {};
+  }
+
+  async cleanup(): Promise<void> {
+    for (const filePath of this.createdFiles) {
+      try {
+        await fs.rm(filePath, { force: true });
+      } catch {
+        // Best-effort cleanup for scratch files created by conformance cases.
+      }
+    }
+    this.createdFiles.clear();
+  }
+
+  private resolveSessionPath(params: { sessionId: SessionId; path: string }): string {
+    const sessionCwd = this.sessionCwds.get(params.sessionId) ?? this.defaultSessionCwd;
+    return resolvePathWithinRoot(sessionCwd, params.path);
+  }
+
+  private async pathExists(filePath: string): Promise<boolean> {
+    try {
+      await fs.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -228,6 +288,7 @@ function parseArgs(argv: string[]): CliOptions {
     profilePath: path.resolve("conformance/profiles/acp-core-v1.json"),
     casesDir: path.resolve("conformance/cases"),
     agentCommand: "tsx test/mock-agent.ts",
+    agentCommandCwd: process.cwd(),
     permissionMode: "approve-all",
     format: "text",
     cwd: process.cwd(),
@@ -489,7 +550,7 @@ async function loadProfileAndCases(options: CliOptions): Promise<{
 async function createHarness(options: CliOptions): Promise<Harness> {
   const parsed = splitCommandLine(options.agentCommand);
   const child = spawn(parsed.command, parsed.args, {
-    cwd: options.cwd,
+    cwd: options.agentCommandCwd,
     stdio: ["pipe", "pipe", "pipe"],
     env: process.env,
   });
@@ -507,12 +568,25 @@ async function createHarness(options: CliOptions): Promise<Harness> {
   const input = Writable.toWeb(child.stdin);
   const output = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
   const stream = ndJsonStream(input, output);
-  const client = new RunnerClient(options.permissionMode);
+  const client = new RunnerClient({
+    permissionMode: options.permissionMode,
+    defaultSessionCwd: options.cwd,
+  });
   const connection = new ClientSideConnection(() => client, stream);
   let initializeResult: InitializeResponse;
+  let cleanedUp = false;
+
+  const cleanupClientState = async (): Promise<void> => {
+    if (cleanedUp) {
+      return;
+    }
+    cleanedUp = true;
+    await client.cleanup();
+  };
 
   const shutdown = async (): Promise<void> => {
     if (child.killed || child.exitCode !== null) {
+      await cleanupClientState();
       return;
     }
     child.kill("SIGTERM");
@@ -528,6 +602,7 @@ async function createHarness(options: CliOptions): Promise<Harness> {
       });
       setTimeout(() => resolve(), 2500);
     });
+    await cleanupClientState();
   };
 
   try {
@@ -689,18 +764,26 @@ async function executeCaseStep(params: {
     }
 
     case "new_session": {
+      const cwdCandidate = step.cwd === undefined ? options.cwd : step.cwd;
       const result = await executeWithExpectation({
         label: "session/new",
         timeoutMs: requestTimeoutMs,
         expectError: step.expect_error,
         operation: async () => {
-          const cwdCandidate = step.cwd === undefined ? options.cwd : step.cwd;
           return await harness.connection.newSession({
             cwd: cwdCandidate as string,
             mcpServers: [],
           });
         },
       });
+
+      if (
+        result.ok &&
+        typeof result.value.sessionId === "string" &&
+        typeof cwdCandidate === "string"
+      ) {
+        harness.client.registerSessionCwd(result.value.sessionId, cwdCandidate);
+      }
 
       if (step.save_as) {
         context.saved[step.save_as] =
@@ -860,18 +943,20 @@ async function runCase(
     caseDefinition.permission_mode && caseDefinition.permission_mode !== options.permissionMode
       ? { ...options, permissionMode: caseDefinition.permission_mode }
       : options;
-  const harness = await createHarness(effectiveOptions);
+  let harness: Harness | undefined;
   const context: ExecutionContext = {
     saved: {},
     background: new Map(),
   };
   try {
+    harness = await createHarness(effectiveOptions);
+    const activeHarness = harness;
     for (const step of caseDefinition.steps ?? []) {
       await executeCaseStep({
         step,
-        harness,
+        harness: activeHarness,
         context,
-        options,
+        options: effectiveOptions,
         requestTimeoutMs,
         updateTimeoutMs,
       });
@@ -879,14 +964,14 @@ async function runCase(
 
     evaluateCaseChecks({
       caseDefinition,
-      harness,
+      harness: activeHarness,
       context,
     });
     return { passed: true };
   } catch (error) {
     return { passed: false, error: toErrorMessage(error) };
   } finally {
-    await harness.shutdown();
+    await harness?.shutdown();
   }
 }
 

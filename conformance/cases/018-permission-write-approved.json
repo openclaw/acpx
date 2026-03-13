@@ -15,7 +15,7 @@
       "prompt": [
         {
           "type": "text",
-          "text": "write /tmp/acpx-conformance-write.txt hello"
+          "text": "write .acpx-conformance-write.txt hello"
         }
       ],
       "save_as": "write_result"
@@ -29,7 +29,7 @@
     },
     {
       "type": "updates_text_includes",
-      "text": "wrote /tmp/acpx-conformance-write.txt"
+      "text": "wrote .acpx-conformance-write.txt"
     }
   ],
   "timeouts": {
