@@ -427,7 +427,9 @@ async function loadJsonFile<T>(filePath: string): Promise<T> {
   try {
     raw = await fs.readFile(filePath, "utf8");
   } catch (error) {
-    throw new Error(`Failed to read JSON file ${filePath}: ${toErrorMessage(error)}`, { cause: error });
+    throw new Error(`Failed to read JSON file ${filePath}: ${toErrorMessage(error)}`, {
+      cause: error,
+    });
   }
 
   try {
