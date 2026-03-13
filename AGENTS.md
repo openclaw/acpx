@@ -126,6 +126,38 @@ Harness documentation synchronization policy:
 - `pnpm run check:docs` — docs format and markdown lint
 - `pnpm run perf:report` — performance reporting helper
 
+## Testing And Changelog Guidelines
+
+- Run `pnpm run test` or `pnpm run test:coverage` before pushing when you touch
+  runtime logic.
+- Changelog entries should cover user-facing changes only. Do not add internal
+  release-process or meta-only notes.
+- Changelog placement: add new entries under [`CHANGELOG.md`](CHANGELOG.md)
+  `## Unreleased`, appending to the end of the target section (`### Changes`,
+  `### Breaking`, or `### Fixes`) instead of inserting at the top.
+- Changelog attribution: use concise `Thanks @author` attribution and avoid
+  repeating multiple attribution styles in the same line.
+- Pure test-only changes generally do not need a changelog entry unless they
+  change user-visible behavior or the maintainer explicitly wants one.
+
+## Commit And Pull Request Guidelines
+
+- Repo-local `/landpr` instructions live at [`.pi/prompts/landpr.md`](.pi/prompts/landpr.md).
+  When landing or merging a PR in this repo, follow that process.
+- Before `/landpr`, run `/reviewpr` and require explicit evidence for bug-fix
+  claims. Do not merge bug-fix PRs based only on issue text, PR text, or AI
+  rationale.
+- Minimum merge gate for bug-fix PRs:
+  1. symptom evidence (repro, log, or failing test)
+  2. verified root cause in code with file/line
+  3. fix touches the implicated code path
+  4. regression test when feasible; otherwise include manual verification proof
+     and why no test was added
+- Use concise, action-oriented commit messages and keep unrelated refactors out
+  of the same commit when possible.
+- Group changelog updates with the PR that introduces the user-facing change
+  instead of batching them later.
+
 ## Fundamental acpx Calls
 
 Use these examples when you need the most basic `acpx` flows while developing

@@ -6,6 +6,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Contributors/workflow: document `/landpr`, changelog placement rules, and the repo-local PR landing prompt for maintainer workflows. Thanks @osolmaz.
+
 ### Breaking
 
 ### Fixes
