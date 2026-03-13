@@ -1,0 +1,176 @@
+name: Conformance Nightly
+
+on:
+  schedule:
+    - cron: "20 3 * * *"
+  workflow_dispatch:
+    inputs:
+      run_real_adapters:
+        description: "Run real-adapter smoke matrix in this manual run"
+        required: false
+        default: false
+        type: boolean
+      strict_real_adapters:
+        description: "Fail workflow when any real-adapter smoke job fails"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: conformance-nightly-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: 24
+  PNPM_VERSION: 10.23.0
+
+jobs:
+  conformance-mock:
+    name: Conformance (Mock Full)
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+          submodules: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          check-latest: true
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run mock conformance profile
+        run: |
+          set -euo pipefail
+          mkdir -p conformance-artifacts
+          pnpm run conformance:run -- \
+            --format json \
+            --report conformance-artifacts/mock-report.json
+
+      - name: Add mock summary
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require("node:fs");
+
+          const reportPath = "conformance-artifacts/mock-report.json";
+          const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+          const lines = [
+            "### Conformance (Mock Full)",
+            "",
+            `- Cases: ${report.totals.cases}`,
+            `- Passed: ${report.totals.passed}`,
+            `- Failed: ${report.totals.failed}`,
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`);
+          NODE
+
+      - name: Upload mock report
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-mock-report
+          path: conformance-artifacts/mock-report.json
+          if-no-files-found: error
+
+  conformance-real-adapters:
+    name: Conformance (Real Adapter Smoke)
+    needs: conformance-mock
+    if: ${{ vars.ACPX_CONFORMANCE_REAL == '1' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_real_adapters == 'true') }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    continue-on-error: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.strict_real_adapters == 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: pi
+            command: "npx -y pi-acp"
+          - id: codex
+            command: "npx -y @zed-industries/codex-acp"
+          - id: claude
+            command: "npx -y @zed-industries/claude-agent-acp"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+          submodules: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          check-latest: true
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run adapter handshake smoke case
+        run: |
+          set -euo pipefail
+          mkdir -p conformance-artifacts
+          pnpm run conformance:run -- \
+            --format json \
+            --agent-command '${{ matrix.command }}' \
+            --case acp.v1.initialize.handshake \
+            --report "conformance-artifacts/${{ matrix.id }}-report.json"
+
+      - name: Add adapter summary
+        if: always()
+        run: |
+          set -euo pipefail
+          REPORT="conformance-artifacts/${{ matrix.id }}-report.json"
+          if [ ! -f "$REPORT" ]; then
+            node - <<'NODE'
+            const fs = require("node:fs");
+            const lines = [
+              "### Adapter Smoke: ${{ matrix.id }}",
+              "",
+              "- Result: report not produced (adapter failed before report write)",
+            ];
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`);
+            NODE
+            exit 0
+          fi
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const reportPath = "conformance-artifacts/${{ matrix.id }}-report.json";
+          const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+          const lines = [
+            "### Adapter Smoke: ${{ matrix.id }}",
+            "",
+            `- Passed: ${report.totals.passed}`,
+            `- Failed: ${report.totals.failed}`,
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`);
+          NODE
+
+      - name: Upload adapter report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-${{ matrix.id }}-report
+          path: conformance-artifacts/${{ matrix.id }}-report.json
+          if-no-files-found: ignore

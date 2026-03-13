@@ -1,0 +1,26 @@
+{
+  "id": "acp.v1.errors.invalid_params",
+  "profile": "acp-core-v1",
+  "title": "Invalid params produce explicit protocol error",
+  "description": "Verify malformed session/new params are rejected.",
+  "steps": [
+    {
+      "action": "new_session",
+      "cwd": 12345,
+      "save_as": "invalid_new_session_error",
+      "expect_error": {
+        "codes": [-32602, -32600, -32000],
+        "message_any": ["invalid", "params", "cwd"]
+      }
+    }
+  ],
+  "checks": [
+    {
+      "type": "saved_error_present",
+      "key": "invalid_new_session_error"
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000
+  }
+}

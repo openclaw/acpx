@@ -1,0 +1,38 @@
+{
+  "id": "acp.v1.session.prompt.unrecognized",
+  "profile": "acp-core-v1",
+  "title": "Unrecognized prompt is surfaced in updates",
+  "description": "Verify unknown prompt text is surfaced by the adapter update stream.",
+  "steps": [
+    {
+      "action": "new_session",
+      "save_as": "session_id"
+    },
+    {
+      "action": "prompt",
+      "session": "$session_id",
+      "prompt": [
+        {
+          "type": "text",
+          "text": "this-command-does-not-exist"
+        }
+      ],
+      "save_as": "unknown_prompt_result"
+    }
+  ],
+  "checks": [
+    {
+      "type": "saved_stop_reason_in",
+      "key": "unknown_prompt_result",
+      "values": ["end_turn", "completed", "done"]
+    },
+    {
+      "type": "updates_text_includes",
+      "text": "unrecognized prompt"
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000,
+    "update_timeout_ms": 30000
+  }
+}

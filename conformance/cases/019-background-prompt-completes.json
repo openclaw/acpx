@@ -1,0 +1,39 @@
+{
+  "id": "acp.v1.session.prompt.background_completion",
+  "profile": "acp-core-v1",
+  "title": "Background prompt can be awaited",
+  "description": "Verify prompt_background + await_background flow completes successfully.",
+  "steps": [
+    {
+      "action": "new_session",
+      "save_as": "session_id"
+    },
+    {
+      "action": "prompt_background",
+      "session": "$session_id",
+      "prompt": [
+        {
+          "type": "text",
+          "text": "sleep 80"
+        }
+      ],
+      "save_as": "bg_prompt"
+    },
+    {
+      "action": "await_background",
+      "from": "bg_prompt",
+      "save_as": "bg_result"
+    }
+  ],
+  "checks": [
+    {
+      "type": "saved_stop_reason_in",
+      "key": "bg_result",
+      "values": ["end_turn", "completed", "done"]
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000,
+    "update_timeout_ms": 30000
+  }
+}

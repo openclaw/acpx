@@ -105,6 +105,8 @@ jobs:
             command: pnpm run lint
           - name: Build
             command: pnpm run build
+          - name: Conformance Smoke
+            command: pnpm run conformance:run -- --case acp.v1.initialize.handshake
           - name: Test
             node_version: 22
             command: pnpm run test:coverage

@@ -1,0 +1,32 @@
+{
+  "id": "acp.v1.errors.invalid_prompt_session_type",
+  "profile": "acp-core-v1",
+  "title": "Prompt rejects invalid session id type",
+  "description": "Verify prompt with non-string session id fails explicitly.",
+  "steps": [
+    {
+      "action": "prompt",
+      "session": 12345,
+      "prompt": [
+        {
+          "type": "text",
+          "text": "hello"
+        }
+      ],
+      "save_as": "invalid_prompt_session_error",
+      "expect_error": {
+        "codes": [-32603, -32602, -32000],
+        "message_any": ["invalid", "session", "unknown"]
+      }
+    }
+  ],
+  "checks": [
+    {
+      "type": "saved_error_present",
+      "key": "invalid_prompt_session_error"
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000
+  }
+}

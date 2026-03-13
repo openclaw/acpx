@@ -1,0 +1,40 @@
+{
+  "id": "acp.v1.errors.permission_denied.write",
+  "profile": "acp-core-v1",
+  "title": "Permission denial for write is explicit",
+  "description": "Verify denied client-authority file write is surfaced clearly.",
+  "permission_mode": "deny-all",
+  "steps": [
+    {
+      "action": "new_session",
+      "save_as": "session_id"
+    },
+    {
+      "action": "prompt",
+      "session": "$session_id",
+      "prompt": [
+        {
+          "type": "text",
+          "text": "write README.md blocked"
+        }
+      ],
+      "save_as": "permission_write_result",
+      "suppress_console_error": true
+    }
+  ],
+  "checks": [
+    {
+      "type": "updates_text_includes",
+      "text": "permission denied"
+    },
+    {
+      "type": "saved_stop_reason_in",
+      "key": "permission_write_result",
+      "values": ["end_turn", "cancelled", "failed"]
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000,
+    "update_timeout_ms": 30000
+  }
+}

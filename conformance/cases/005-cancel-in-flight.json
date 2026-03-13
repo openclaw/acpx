@@ -1,0 +1,47 @@
+{
+  "id": "acp.v1.session.cancel.in_flight",
+  "profile": "acp-core-v1",
+  "title": "Cancel terminates active turn",
+  "description": "Verify session/cancel transitions an in-flight prompt to cancelled.",
+  "steps": [
+    {
+      "action": "new_session",
+      "save_as": "session_id"
+    },
+    {
+      "action": "prompt_background",
+      "session": "$session_id",
+      "prompt": [
+        {
+          "type": "text",
+          "text": "sleep 5000"
+        }
+      ],
+      "save_as": "bg_prompt"
+    },
+    {
+      "action": "sleep",
+      "ms": 100
+    },
+    {
+      "action": "cancel",
+      "session": "$session_id"
+    },
+    {
+      "action": "await_background",
+      "from": "bg_prompt",
+      "save_as": "cancelled_result"
+    }
+  ],
+  "checks": [
+    {
+      "type": "saved_stop_reason_in",
+      "key": "cancelled_result",
+      "values": ["cancelled"]
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000,
+    "update_timeout_ms": 15000
+  }
+}

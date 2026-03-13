@@ -1,0 +1,21 @@
+{
+  "id": "acp.v1.session.new.basic",
+  "profile": "acp-core-v1",
+  "title": "Session creation returns a session id",
+  "description": "Verify session/new creates a usable conversation session.",
+  "steps": [
+    {
+      "action": "new_session",
+      "save_as": "session_id"
+    }
+  ],
+  "checks": [
+    {
+      "type": "saved_non_empty_string",
+      "key": "session_id"
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000
+  }
+}

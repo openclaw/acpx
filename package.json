@@ -32,6 +32,7 @@
     "build:test": "node -e \"require('node:fs').rmSync('dist-test',{recursive:true,force:true})\" && tsc -p tsconfig.test.json",
     "check": "pnpm run format:check && pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test:coverage",
     "check:docs": "pnpm run format:docs:check && pnpm run lint:docs",
+    "conformance:run": "tsx conformance/runner/run.ts",
     "dev": "tsx src/cli.ts",
     "format": "oxfmt --write",
     "format:check": "oxfmt --check",

@@ -1,0 +1,32 @@
+{
+  "id": "acp.v1.errors.unknown_session",
+  "profile": "acp-core-v1",
+  "title": "Unknown session id fails explicitly",
+  "description": "Verify prompt against unknown session is rejected.",
+  "steps": [
+    {
+      "action": "prompt",
+      "session": "session-does-not-exist",
+      "prompt": [
+        {
+          "type": "text",
+          "text": "hello"
+        }
+      ],
+      "save_as": "unknown_session_error",
+      "expect_error": {
+        "codes": [-32603, -32000],
+        "message_any": ["unknown session", "not found", "invalid session"]
+      }
+    }
+  ],
+  "checks": [
+    {
+      "type": "saved_error_present",
+      "key": "unknown_session_error"
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000
+  }
+}
