@@ -6,7 +6,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
-- Contributors/workflow: document `/landpr`, changelog placement rules, and the repo-local PR landing prompt for maintainer workflows. Thanks @osolmaz.
+- Conformance/ACP: add a data-driven ACP core v1 conformance suite with CI smoke coverage, nightly coverage, and a hardened runner that reports startup failures cleanly and scopes filesystem checks to the session cwd. (#130) Thanks @lynnzc.
 
 ### Breaking
 
