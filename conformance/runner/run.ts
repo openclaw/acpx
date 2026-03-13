@@ -575,6 +575,20 @@ async function createHarness(options: CliOptions): Promise<Harness> {
   const connection = new ClientSideConnection(() => client, stream);
   let initializeResult: InitializeResponse;
   let cleanedUp = false;
+  const waitForSpawn = new Promise<void>((resolve, reject) => {
+    const onSpawn = () => {
+      child.off("error", onError);
+      resolve();
+    };
+    const onError = (error: Error) => {
+      child.off("spawn", onSpawn);
+      reject(
+        new Error(`failed to spawn agent process: ${toErrorMessage(error)}`, { cause: error }),
+      );
+    };
+    child.once("spawn", onSpawn);
+    child.once("error", onError);
+  });
 
   const cleanupClientState = async (): Promise<void> => {
     if (cleanedUp) {
@@ -606,6 +620,7 @@ async function createHarness(options: CliOptions): Promise<Harness> {
   };
 
   try {
+    await waitForSpawn;
     initializeResult = await withTimeout(
       connection.initialize({
         protocolVersion: PROTOCOL_VERSION,

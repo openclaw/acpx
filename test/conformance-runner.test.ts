@@ -69,6 +69,33 @@ test("runner reports initialize failures as failed cases and still writes a repo
   }
 });
 
+test("runner reports missing adapter commands as failed initialize cases", async () => {
+  const result = await runRunner(
+    [
+      "--case",
+      "acp.v1.initialize.handshake",
+      "--agent-command",
+      "definitely-not-a-real-command",
+      "--format",
+      "json",
+    ],
+    { timeoutMs: 20_000 },
+  );
+
+  assert.equal(result.code, 1, result.stderr);
+  assert.equal(result.stderr.trim(), "");
+
+  const report = parseReport(result.stdout);
+  assert.deepEqual(report.totals, {
+    cases: 1,
+    passed: 0,
+    failed: 1,
+  });
+  assert.equal(report.results[0]?.id, "acp.v1.initialize.handshake");
+  assert.equal(report.results[0]?.passed, false);
+  assert.match(report.results[0]?.error ?? "", /failed to spawn agent process/i);
+});
+
 test("runner resolves relative file reads within session cwd without changing adapter command cwd", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-conformance-runner-"));
   try {
@@ -243,7 +270,10 @@ async function runRunner(
     const child = spawn(process.execPath, ["--import", "tsx", RUNNER_PATH, ...args], {
       cwd: REPO_ROOT,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: {
+        ...process.env,
+        NODE_V8_COVERAGE: "",
+      },
     });
 
     let stdout = "";
