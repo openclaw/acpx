@@ -29,7 +29,7 @@ Core capabilities:
 - Local agent process checks via `status`
 - Stable ACP client methods for filesystem and terminal requests
 - Stable ACP `authenticate` handshake via env/config credentials
-- Structured streaming output (`text`, `json`, `quiet`)
+- Structured streaming output (`text`, `json`, `quiet`) with optional `--suppress-reads`
 - Built-in agent registry plus raw `--agent` escape hatch
 
 ## Install
@@ -197,6 +197,7 @@ Behavior:
 - `--approve-reads`: auto-approve reads/searches, prompt for writes (default mode)
 - `--deny-all`: deny all permission requests
 - `--format <fmt>`: output format (`text`, `json`, `quiet`)
+- `--suppress-reads`: suppress raw read-file contents while preserving the selected format
 - `--timeout <seconds>`: max wait time (positive number)
 - `--ttl <seconds>`: queue owner idle TTL before shutdown (default `300`, `0` disables TTL)
 - `--verbose`: verbose ACP/debug logs to stderr
@@ -271,6 +272,7 @@ Use `--format <fmt>`:
 - `text` (default): human-readable stream with updates/tool status and done line
 - `json`: NDJSON event stream (good for automation)
 - `quiet`: final assistant text only
+- `--suppress-reads`: replace raw read-file contents with `[read output suppressed]` in `text` and `json` output
 
 Example automation:
 

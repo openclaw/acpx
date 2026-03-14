@@ -171,6 +171,203 @@ test("json formatter emits ACP JSON-RPC error response from onError", () => {
   assert.equal(parsed.error?.data?.sessionId, "session-err");
 });
 
+test("text formatter suppresses read output when requested", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("text", { stdout: writer, suppressReads: true });
+
+  formatter.onAcpMessage(messageChunk("assistant text still visible") as never);
+  formatter.onAcpMessage(thoughtChunk("thought still visible") as never);
+  formatter.onAcpMessage({
+    jsonrpc: "2.0",
+    method: "session/update",
+    params: {
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "tool-read-1",
+        title: "Read",
+        status: "in_progress",
+        rawInput: { filePath: "/tmp/demo.txt" },
+      },
+    },
+  } as never);
+  formatter.onAcpMessage({
+    jsonrpc: "2.0",
+    method: "session/update",
+    params: {
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "tool-read-1",
+        title: "Read",
+        kind: "read",
+        status: "completed",
+        rawInput: { filePath: "/tmp/demo.txt" },
+        rawOutput: { content: "secret file body" },
+      },
+    },
+  } as never);
+  formatter.onAcpMessage(doneResult("end_turn") as never);
+
+  const output = writer.toString();
+  assert.match(output, /assistant text still visible/);
+  assert.match(output, /\[thinking\] thought still visible/);
+  assert.match(output, /\[tool\] Read/);
+  assert.match(output, /\/tmp\/demo.txt/);
+  assert.match(output, /\[read output suppressed\]/);
+  assert.doesNotMatch(output, /secret file body/);
+});
+
+test("json formatter suppresses read output when requested", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("json", {
+    stdout: writer,
+    suppressReads: true,
+    jsonContext: {
+      sessionId: "session-json",
+    },
+  });
+
+  formatter.onAcpMessage({
+    jsonrpc: "2.0",
+    id: "req-read-1",
+    method: "fs/read_text_file",
+    params: {
+      sessionId: "session-json",
+      path: "/tmp/demo.txt",
+    },
+  } as never);
+  formatter.onAcpMessage({
+    jsonrpc: "2.0",
+    id: "req-read-1",
+    result: {
+      content: "secret file body",
+    },
+  } as never);
+
+  const lines = writer
+    .toString()
+    .trim()
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+  assert.equal(lines.length, 2);
+  assert.equal(
+    (lines[1]?.result as { content?: string } | undefined)?.content,
+    "[read output suppressed]",
+  );
+});
+
+test("json formatter suppresses read-like tool updates inferred from title", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("json", {
+    stdout: writer,
+    suppressReads: true,
+    jsonContext: {
+      sessionId: "session-json",
+    },
+  });
+
+  formatter.onAcpMessage({
+    jsonrpc: "2.0",
+    method: "session/update",
+    params: {
+      sessionId: "session-json",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "tool-read-2",
+        title: "Open file",
+        status: "completed",
+        rawOutput: { content: "secret file body" },
+        content: [
+          {
+            type: "content",
+            content: {
+              type: "text",
+              text: "secret file body",
+            },
+          },
+        ],
+      },
+    },
+  } as never);
+
+  const line = JSON.parse(writer.toString().trim()) as {
+    params?: {
+      update?: {
+        rawOutput?: { content?: string };
+        content?: Array<{ content?: { text?: string } }>;
+      };
+    };
+  };
+
+  assert.equal(line.params?.update?.rawOutput?.content, "[read output suppressed]");
+  assert.equal(line.params?.update?.content?.[0]?.content?.text, "[read output suppressed]");
+});
+
+test("json formatter leaves non-read tool updates unchanged with suppression enabled", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("json", {
+    stdout: writer,
+    suppressReads: true,
+    jsonContext: {
+      sessionId: "session-json",
+    },
+  });
+
+  formatter.onAcpMessage({
+    jsonrpc: "2.0",
+    method: "session/update",
+    params: {
+      sessionId: "session-json",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "tool-write-1",
+        title: "Write",
+        kind: "edit",
+        status: "completed",
+        rawOutput: { content: "wrote file" },
+      },
+    },
+  } as never);
+
+  const line = JSON.parse(writer.toString().trim()) as {
+    params?: {
+      update?: {
+        rawOutput?: { content?: string };
+      };
+    };
+  };
+
+  assert.equal(line.params?.update?.rawOutput?.content, "wrote file");
+});
+
+test("quiet formatter ignores suppress-reads and still outputs assistant text only", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("quiet", { stdout: writer, suppressReads: true });
+
+  formatter.onAcpMessage({
+    jsonrpc: "2.0",
+    method: "session/update",
+    params: {
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "tool-read-1",
+        title: "Read",
+        kind: "read",
+        status: "completed",
+        rawOutput: { content: "secret file body" },
+      },
+    },
+  } as never);
+  formatter.onAcpMessage(messageChunk("Hello world") as never);
+  formatter.onAcpMessage(doneResult("end_turn") as never);
+
+  assert.equal(writer.toString(), "Hello world\n");
+});
+
 test("quiet formatter outputs only agent text and flushes on prompt result", () => {
   const writer = new CaptureWriter();
   const formatter = createOutputFormatter("quiet", { stdout: writer });

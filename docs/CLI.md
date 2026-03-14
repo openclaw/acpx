@@ -110,6 +110,7 @@ All global options:
 | `--approve-reads`                        | Auto-approve reads/searches, prompt for others | Default permission mode.                                            |
 | `--deny-all`                             | Deny all permissions                           | Permission mode `deny-all`.                                         |
 | `--format <fmt>`                         | Output format                                  | `text` (default), `json`, `quiet`.                                  |
+| `--suppress-reads`                       | Suppress read file contents                    | Replaces raw read payloads with `[read output suppressed]`.         |
 | `--json-strict`                          | Strict JSON mode                               | Requires `--format json`; suppresses non-JSON stderr output.        |
 | `--non-interactive-permissions <policy>` | Non-TTY prompt policy                          | `deny` (default) or `fail` when approval prompt cannot be shown.    |
 | `--timeout <seconds>`                    | Max wait time for agent response               | Must be positive. Decimal seconds allowed.                          |
@@ -458,6 +459,12 @@ When a prompt is already in flight for a session, `acpx` uses a per-session queu
 - `text`: assistant text, tool status blocks, client-operation logs, plan updates, and `[done] <reason>`
 - `json`: one raw ACP JSON-RPC message per line
 - `quiet`: concatenated assistant text only
+
+When `--suppress-reads` is enabled:
+
+- `text`: read-like tool outputs render as `[read output suppressed]`
+- `json`: ACP `fs/read_text_file` responses and read-like tool-call outputs replace raw file contents with `[read output suppressed]`
+- `quiet`: unchanged, because quiet mode only prints assistant text
 
 ACP message examples:
 

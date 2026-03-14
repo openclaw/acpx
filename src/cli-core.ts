@@ -167,6 +167,17 @@ function resolveCompatibleConfigId(
 export { parseAllowedTools, parseMaxTurns, parseTtlSeconds };
 export { formatPromptSessionBannerLine } from "./cli/output-render.js";
 
+function resolveRequestedOutputPolicy(globalFlags: {
+  format: OutputFormat;
+  jsonStrict?: boolean;
+  suppressReads?: boolean;
+}): OutputPolicy {
+  return {
+    ...resolveOutputPolicy(globalFlags.format, globalFlags.jsonStrict === true),
+    suppressReads: globalFlags.suppressReads === true,
+  };
+}
+
 type SessionModule = typeof import("./session.js");
 type OutputModule = typeof import("./output.js");
 type OutputRenderModule = typeof import("./cli/output-render.js");
@@ -237,7 +248,7 @@ async function handlePrompt(
   config: ResolvedAcpxConfig,
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
-  const outputPolicy = resolveOutputPolicy(globalFlags.format, globalFlags.jsonStrict === true);
+  const outputPolicy = resolveRequestedOutputPolicy(globalFlags);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const prompt = await readPrompt(promptParts, flags.file, globalFlags.cwd);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
@@ -256,6 +267,7 @@ async function handlePrompt(
     jsonContext: {
       sessionId: record.acpxRecordId,
     },
+    suppressReads: outputPolicy.suppressReads,
   });
 
   await printPromptSessionBanner(record, agent.cwd, outputPolicy.format, outputPolicy.jsonStrict);
@@ -300,7 +312,7 @@ async function handleExec(
 ): Promise<void> {
   if (config.disableExec) {
     const globalFlags = resolveGlobalFlags(command, config);
-    const outputPolicy = resolveOutputPolicy(globalFlags.format, globalFlags.jsonStrict === true);
+    const outputPolicy = resolveRequestedOutputPolicy(globalFlags);
     if (outputPolicy.format === "json") {
       process.stdout.write(
         `${JSON.stringify({
@@ -324,14 +336,16 @@ async function handleExec(
   }
 
   const globalFlags = resolveGlobalFlags(command, config);
-  const outputPolicy = resolveOutputPolicy(globalFlags.format, globalFlags.jsonStrict === true);
+  const outputPolicy = resolveRequestedOutputPolicy(globalFlags);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const prompt = await readPrompt(promptParts, flags.file, globalFlags.cwd);
   const [{ createOutputFormatter }, { runOnce }] = await Promise.all([
     loadOutputModule(),
     loadSessionModule(),
   ]);
-  const outputFormatter = createOutputFormatter(outputPolicy.format);
+  const outputFormatter = createOutputFormatter(outputPolicy.format, {
+    suppressReads: outputPolicy.suppressReads,
+  });
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
 
   const result = await runOnce({
@@ -1288,6 +1302,7 @@ async function emitJsonErrorEvent(error: NormalizedOutputError): Promise<void> {
     jsonContext: {
       sessionId: "unknown",
     },
+    suppressReads: false,
   });
   formatter.onError(error);
   formatter.flush();
@@ -1355,7 +1370,10 @@ export async function main(argv: string[] = process.argv): Promise<void> {
   const config = await loadResolvedConfig(detectInitialCwd(argv.slice(2)));
   const requestedJsonStrict = detectJsonStrict(argv.slice(2));
   const requestedOutputFormat = detectRequestedOutputFormat(argv.slice(2), config.format);
-  const requestedOutputPolicy = resolveOutputPolicy(requestedOutputFormat, requestedJsonStrict);
+  const requestedOutputPolicy = {
+    ...resolveOutputPolicy(requestedOutputFormat, requestedJsonStrict),
+    suppressReads: argv.slice(2).some((token) => token === "--suppress-reads"),
+  };
   const builtInAgents = listBuiltInAgents(config.agents);
 
   const program = new Command();

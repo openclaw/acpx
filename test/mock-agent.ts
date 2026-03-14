@@ -673,6 +673,52 @@ class MockAgent implements Agent {
       return readResult.content;
     }
 
+    if (text.startsWith("read-tool ")) {
+      const filePath = text.slice("read-tool ".length).trim();
+      if (!filePath) {
+        throw new Error("Usage: read-tool <path>");
+      }
+
+      const toolCallId = randomUUID();
+      await this.connection.sessionUpdate({
+        sessionId,
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId,
+          title: "Read",
+          kind: "read",
+          status: "in_progress",
+          rawInput: {
+            filePath,
+          },
+        },
+      });
+
+      const readResult = await this.connection.readTextFile({
+        sessionId,
+        path: filePath,
+      });
+
+      await this.connection.sessionUpdate({
+        sessionId,
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          title: "Read",
+          kind: "read",
+          status: "completed",
+          rawInput: {
+            filePath,
+          },
+          rawOutput: {
+            content: readResult.content,
+          },
+        },
+      });
+
+      return `read complete: ${filePath}`;
+    }
+
     if (text.startsWith("write ")) {
       const rest = text.slice("write ".length).trim();
       const firstSpace = rest.search(/\s/);

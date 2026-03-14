@@ -10,6 +10,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 import { parseJsonRpcErrorMessage, parsePromptStopReason } from "./acp-jsonrpc.js";
 import { createJsonOutputFormatter } from "./output-json-formatter.js";
+import { isReadLikeTool, SUPPRESSED_READ_OUTPUT } from "./read-output-suppression.js";
 import type {
   AcpJsonRpcMessage,
   ClientOperation,
@@ -29,6 +30,7 @@ type WritableLike = {
 type OutputFormatterOptions = {
   stdout?: WritableLike;
   jsonContext?: OutputFormatterContext;
+  suppressReads?: boolean;
 };
 
 type NormalizedToolStatus = ToolCallStatus | "unknown";
@@ -465,6 +467,14 @@ function summarizeToolOutput(
   return fragments.join("\n\n");
 }
 
+function renderToolOutput(state: ToolRenderState, suppressReads: boolean): string | undefined {
+  if (suppressReads && isReadLikeTool(state)) {
+    return SUPPRESSED_READ_OUTPUT;
+  }
+
+  return summarizeToolOutput(state.rawOutput, state.content);
+}
+
 function limitOutputBlock(value: string): string {
   const normalized = value.replace(/\r\n/g, "\n").trim();
   if (!normalized) {
@@ -490,15 +500,17 @@ function limitOutputBlock(value: string): string {
 class TextOutputFormatter implements OutputFormatter {
   private readonly stdout: WritableLike;
   private readonly useColor: boolean;
+  private readonly suppressReads: boolean;
   private readonly toolStates = new Map<string, ToolRenderState>();
   private thoughtBuffer = "";
   private wroteAny = false;
   private atLineStart = true;
   private section: FormatterSection | null = null;
 
-  constructor(stdout: WritableLike) {
+  constructor(stdout: WritableLike, suppressReads: boolean) {
     this.stdout = stdout;
     this.useColor = Boolean(stdout.isTTY);
+    this.suppressReads = suppressReads;
   }
 
   setContext(_context: OutputFormatterContext): void {
@@ -734,7 +746,7 @@ class TextOutputFormatter implements OutputFormatter {
       kind: state.kind,
       input: summarizeToolInput(state.rawInput),
       files: formatLocations(state.locations),
-      output: summarizeToolOutput(state.rawOutput, state.content),
+      output: renderToolOutput(state, this.suppressReads),
     };
 
     return safeJson(signaturePayload, 0) ?? JSON.stringify(signaturePayload);
@@ -783,7 +795,7 @@ class TextOutputFormatter implements OutputFormatter {
       this.writeLine(`  files: ${files}`);
     }
 
-    const output = summarizeToolOutput(state.rawOutput, state.content);
+    const output = renderToolOutput(state, this.suppressReads);
     if (output) {
       this.writeLine("  output:");
       this.writeLine(indentBlock(limitOutputBlock(output), "    "));
@@ -884,12 +896,13 @@ export function createOutputFormatter(
   options: OutputFormatterOptions = {},
 ): OutputFormatter {
   const stdout = options.stdout ?? process.stdout;
+  const suppressReads = options.suppressReads === true;
 
   switch (format) {
     case "text":
-      return new TextOutputFormatter(stdout);
+      return new TextOutputFormatter(stdout, suppressReads);
     case "json":
-      return createJsonOutputFormatter(stdout, options.jsonContext);
+      return createJsonOutputFormatter(stdout, suppressReads, options.jsonContext);
     case "quiet":
       return new QuietOutputFormatter(stdout);
     default: {

@@ -1555,6 +1555,56 @@ test("integration: fs/read_text_file through mock agent", async () => {
   });
 });
 
+test("integration: --suppress-reads hides read file body in text format", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const readPath = path.join(cwd, "acpx-test-read-tools.txt");
+    await fs.writeFile(readPath, "mock read content", "utf8");
+
+    try {
+      const result = await runCli(
+        [...baseAgentArgs(cwd), "--suppress-reads", "exec", `read-tool ${readPath}`],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /\[tool\] Read/);
+      assert.match(result.stdout, /\[read output suppressed\]/);
+      assert.doesNotMatch(result.stdout, /mock read content/);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: --suppress-reads hides read file body in json format", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const readPath = path.join(cwd, "acpx-test-read-json.txt");
+    await fs.writeFile(readPath, "mock read content", "utf8");
+
+    try {
+      const result = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "--suppress-reads", "exec", `read ${readPath}`],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const readResponse = payloads.find((payload) => {
+        if (!("result" in payload)) {
+          return false;
+        }
+        return typeof (payload.result as { content?: unknown } | undefined)?.content === "string";
+      });
+      assert.equal(
+        (readResponse?.result as { content?: string } | undefined)?.content,
+        "[read output suppressed]",
+      );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: fs/write_text_file through mock agent", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

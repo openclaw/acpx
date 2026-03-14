@@ -34,6 +34,7 @@ export type GlobalFlags = PermissionFlags & {
   authPolicy?: AuthPolicy;
   nonInteractivePermissions: NonInteractivePermissionPolicy;
   jsonStrict?: boolean;
+  suppressReads?: boolean;
   timeout?: number;
   ttl: number;
   verbose?: boolean;
@@ -200,6 +201,7 @@ export function addGlobalFlags(command: Command): Command {
       parseNonInteractivePermissionPolicy,
     )
     .option("--format <fmt>", "Output format: text, json, quiet", parseOutputFormat)
+    .option("--suppress-reads", "Suppress raw read-file contents in output")
     .option("--model <id>", "Agent model id")
     .option(
       "--allowed-tools <list>",
@@ -285,6 +287,7 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
     authPolicy: opts.authPolicy ?? config.authPolicy,
     nonInteractivePermissions: opts.nonInteractivePermissions ?? config.nonInteractivePermissions,
     jsonStrict,
+    suppressReads: opts.suppressReads === true,
     timeout: opts.timeout ?? config.timeoutMs,
     ttl: opts.ttl ?? config.ttlMs ?? DEFAULT_QUEUE_OWNER_TTL_MS,
     verbose,
@@ -302,6 +305,7 @@ export function resolveOutputPolicy(format: OutputFormat, jsonStrict: boolean): 
   return {
     format,
     jsonStrict,
+    suppressReads: false,
     suppressNonJsonStderr: jsonStrict,
     queueErrorAlreadyEmitted: format !== "quiet",
     suppressSdkConsoleErrors: jsonStrict,
