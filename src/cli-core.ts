@@ -292,6 +292,7 @@ async function handlePrompt(
     timeoutMs: globalFlags.timeout,
     ttlMs: globalFlags.ttl,
     maxQueueDepth: config.queueMaxDepth,
+    promptRetries: globalFlags.promptRetries,
     verbose: globalFlags.verbose,
     waitForCompletion: flags.wait !== false,
   });
@@ -364,6 +365,7 @@ async function handleExec(
     suppressSdkConsoleErrors: outputPolicy.suppressSdkConsoleErrors,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
+    promptRetries: globalFlags.promptRetries,
     sessionOptions: {
       model: globalFlags.model,
       allowedTools: globalFlags.allowedTools,

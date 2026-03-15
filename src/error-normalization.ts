@@ -226,6 +226,49 @@ export function normalizeOutputError(
   };
 }
 
+/**
+ * Returns true when an error from `client.prompt()` looks transient and
+ * can reasonably be retried (e.g. model-API 400/500, network hiccups that
+ * surface as ACP internal errors).
+ *
+ * Errors that are definitively non-recoverable (auth, missing session,
+ * invalid params, timeout, permission) return false.
+ */
+export function isRetryablePromptError(error: unknown): boolean {
+  if (error instanceof PermissionDeniedError || error instanceof PermissionPromptUnavailableError) {
+    return false;
+  }
+  if (isTimeoutLike(error) || isNoSessionLike(error) || isUsageLike(error)) {
+    return false;
+  }
+
+  // Extract ACP payload once and reuse for all subsequent checks.
+  const acp = extractAcpError(error);
+  if (!acp) {
+    // Non-ACP errors (e.g. process crash) are not retried at the prompt level.
+    return false;
+  }
+
+  // Resource-not-found (session gone) — check using the already-extracted payload.
+  if (acp.code === -32001 || acp.code === -32002) {
+    return false;
+  }
+
+  // Auth-required errors are never retryable. Use the same thorough check as normalizeOutputError.
+  if (isAcpAuthRequiredPayload(acp)) {
+    return false;
+  }
+
+  // Method-not-found or invalid-params are permanent protocol errors.
+  if (acp.code === -32601 || acp.code === -32602) {
+    return false;
+  }
+
+  // ACP internal errors (-32603) typically wrap model-API failures → retryable.
+  // Parse errors (-32700) can also be transient.
+  return acp.code === -32603 || acp.code === -32700;
+}
+
 export function exitCodeForOutputErrorCode(code: OutputErrorCode): ExitCode {
   switch (code) {
     case "USAGE":

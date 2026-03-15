@@ -1,7 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { AcpClient } from "./client.js";
-import { formatErrorMessage, normalizeOutputError } from "./error-normalization.js";
+import {
+  formatErrorMessage,
+  isRetryablePromptError,
+  normalizeOutputError,
+} from "./error-normalization.js";
 import { checkpointPerfMetricsCapture } from "./perf-metrics-capture.js";
 import { formatPerfMetric, measurePerf, setPerfGauge, startPerfTimer } from "./perf-metrics.js";
 import { refreshQueueOwnerLease } from "./queue-lease-store.js";
@@ -116,6 +120,7 @@ export type RunOnceOptions = {
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   sessionOptions?: SessionAgentOptions;
+  promptRetries?: number;
 } & TimedRunOptions;
 
 export type SessionCreateOptions = {
@@ -147,6 +152,7 @@ export type SessionSendOptions = {
   waitForCompletion?: boolean;
   ttlMs?: number;
   maxQueueDepth?: number;
+  promptRetries?: number;
 } & TimedRunOptions;
 
 export type SessionEnsureOptions = {
@@ -219,6 +225,7 @@ type RunSessionPromptOptions = {
   timeoutMs?: number;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
+  promptRetries?: number;
   onClientAvailable?: (controller: ActiveSessionController) => void;
   onClientClosed?: () => void;
   onPromptActive?: () => Promise<void> | void;
@@ -399,6 +406,7 @@ async function runQueuedTask(
     authCredentials?: Record<string, string>;
     authPolicy?: AuthPolicy;
     suppressSdkConsoleErrors?: boolean;
+    promptRetries?: number;
     onClientAvailable?: (controller: ActiveSessionController) => void;
     onClientClosed?: () => void;
     onPromptActive?: () => Promise<void> | void;
@@ -422,6 +430,7 @@ async function runQueuedTask(
       timeoutMs: task.timeoutMs,
       suppressSdkConsoleErrors: task.suppressSdkConsoleErrors ?? options.suppressSdkConsoleErrors,
       verbose: options.verbose,
+      promptRetries: options.promptRetries,
       onClientAvailable: options.onClientAvailable,
       onClientClosed: options.onClientClosed,
       onPromptActive: options.onPromptActive,
@@ -616,63 +625,82 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
         });
         await flushPendingMessages(false);
 
+        const maxRetries = options.promptRetries ?? 0;
         let response;
-        try {
-          const promptStartedAt = Date.now();
-          const promptPromise = client.prompt(activeSessionId, options.prompt);
-          if (options.onPromptActive) {
-            try {
-              await options.onPromptActive();
-            } catch (error) {
-              if (options.verbose) {
-                process.stderr.write(
-                  "[acpx] onPromptActive hook failed: " + formatErrorMessage(error) + "\n",
-                );
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const promptStartedAt = Date.now();
+            const promptPromise = client.prompt(activeSessionId, options.prompt);
+            if (attempt === 0 && options.onPromptActive) {
+              try {
+                await options.onPromptActive();
+              } catch (error) {
+                if (options.verbose) {
+                  process.stderr.write(
+                    "[acpx] onPromptActive hook failed: " + formatErrorMessage(error) + "\n",
+                  );
+                }
               }
             }
+            response = await measurePerf("runtime.prompt.agent_turn", async () => {
+              return await withTimeout(promptPromise, options.timeoutMs);
+            });
+            if (options.verbose) {
+              process.stderr.write(
+                `[acpx] ${formatPerfMetric("prompt.agent_turn", Date.now() - promptStartedAt)}\n`,
+              );
+            }
+            break;
+          } catch (error) {
+            const snapshot = client.getAgentLifecycleSnapshot();
+            const agentCrashed = snapshot.lastExit?.unexpectedDuringPrompt === true;
+
+            // Retry if: retries remain, agent is still alive, error is transient.
+            if (attempt < maxRetries && !agentCrashed && isRetryablePromptError(error)) {
+              const delayMs = Math.min(1_000 * 2 ** attempt, 10_000);
+              process.stderr.write(
+                `[acpx] prompt failed (${formatErrorMessage(error)}), retrying in ${delayMs}ms ` +
+                  `(attempt ${attempt + 1}/${maxRetries})\n`,
+              );
+              await waitMs(delayMs);
+              continue;
+            }
+
+            applyLifecycleSnapshotToRecord(record, snapshot);
+            const lastExit = snapshot.lastExit;
+            if (lastExit?.unexpectedDuringPrompt && options.verbose) {
+              process.stderr.write(
+                "[acpx] agent disconnected during prompt (" +
+                  lastExit.reason +
+                  ", exit=" +
+                  lastExit.exitCode +
+                  ", signal=" +
+                  (lastExit.signal ?? "none") +
+                  ")\n",
+              );
+            }
+
+            const normalizedError = normalizeOutputError(error, {
+              origin: "runtime",
+            });
+
+            await flushPendingMessages(false).catch(() => {
+              // best effort while bubbling prompt failure
+            });
+
+            output.flush();
+
+            record.lastUsedAt = isoNow();
+            applyConversation(record, conversation);
+            record.acpx = acpxState;
+
+            const propagated =
+              error instanceof Error ? error : new Error(formatErrorMessage(error));
+            (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted = sawAcpMessage;
+            (propagated as { normalizedOutputError?: unknown }).normalizedOutputError =
+              normalizedError;
+            throw propagated;
           }
-          response = await measurePerf("runtime.prompt.agent_turn", async () => {
-            return await withTimeout(promptPromise, options.timeoutMs);
-          });
-          if (options.verbose) {
-            process.stderr.write(
-              `[acpx] ${formatPerfMetric("prompt.agent_turn", Date.now() - promptStartedAt)}\n`,
-            );
-          }
-        } catch (error) {
-          const snapshot = client.getAgentLifecycleSnapshot();
-          applyLifecycleSnapshotToRecord(record, snapshot);
-          if (snapshot.lastExit?.unexpectedDuringPrompt && options.verbose) {
-            process.stderr.write(
-              "[acpx] agent disconnected during prompt (" +
-                snapshot.lastExit.reason +
-                ", exit=" +
-                snapshot.lastExit.exitCode +
-                ", signal=" +
-                (snapshot.lastExit.signal ?? "none") +
-                ")\n",
-            );
-          }
-
-          const normalizedError = normalizeOutputError(error, {
-            origin: "runtime",
-          });
-
-          await flushPendingMessages(false).catch(() => {
-            // best effort while bubbling prompt failure
-          });
-
-          output.flush();
-
-          record.lastUsedAt = isoNow();
-          applyConversation(record, conversation);
-          record.acpx = acpxState;
-
-          const propagated = error instanceof Error ? error : new Error(formatErrorMessage(error));
-          (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted = sawAcpMessage;
-          (propagated as { normalizedOutputError?: unknown }).normalizedOutputError =
-            normalizedError;
-          throw propagated;
         }
 
         await flushPendingMessages(false);
@@ -769,9 +797,27 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
           sessionId,
         });
 
-        const response = await measurePerf("runtime.exec.prompt", async () => {
-          return await withTimeout(client.prompt(sessionId, options.prompt), options.timeoutMs);
-        });
+        const maxRetries = options.promptRetries ?? 0;
+        let response;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            response = await measurePerf("runtime.exec.prompt", async () => {
+              return await withTimeout(client.prompt(sessionId, options.prompt), options.timeoutMs);
+            });
+            break;
+          } catch (error) {
+            if (attempt < maxRetries && isRetryablePromptError(error)) {
+              const delayMs = Math.min(1_000 * 2 ** attempt, 10_000);
+              process.stderr.write(
+                `[acpx] prompt failed (${formatErrorMessage(error)}), retrying in ${delayMs}ms ` +
+                  `(attempt ${attempt + 1}/${maxRetries})\n`,
+              );
+              await waitMs(delayMs);
+              continue;
+            }
+            throw error;
+          }
+        }
         output.flush();
         return toPromptResult(response.stopReason, sessionId, client);
       },
@@ -1083,6 +1129,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
             authCredentials: options.authCredentials,
             authPolicy: options.authPolicy,
             suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
+            promptRetries: options.promptRetries,
             onClientAvailable: setActiveController,
             onClientClosed: clearActiveController,
             onPromptActive: async () => {
