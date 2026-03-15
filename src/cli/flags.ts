@@ -42,6 +42,7 @@ export type GlobalFlags = PermissionFlags & {
   model?: string;
   allowedTools?: string[];
   maxTurns?: number;
+  promptRetries?: number;
 };
 
 export type PromptFlags = {
@@ -158,6 +159,14 @@ export function parseMaxTurns(value: string): number {
   return parsed;
 }
 
+export function parsePromptRetries(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new InvalidArgumentError("Prompt retries must be a non-negative integer");
+  }
+  return parsed;
+}
+
 export function resolvePermissionMode(
   flags: PermissionFlags,
   defaultMode: PermissionMode,
@@ -209,6 +218,11 @@ export function addGlobalFlags(command: Command): Command {
       parseAllowedTools,
     )
     .option("--max-turns <count>", "Maximum turns for the session", parseMaxTurns)
+    .option(
+      "--prompt-retries <count>",
+      "Retry failed prompt turns on transient errors (default: 0)",
+      parsePromptRetries,
+    )
     .option(
       "--json-strict",
       "Strict JSON mode: requires --format json and suppresses non-JSON stderr output",
@@ -295,6 +309,7 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
     model: typeof opts.model === "string" ? parseNonEmptyValue("Model", opts.model) : undefined,
     allowedTools: Array.isArray(opts.allowedTools) ? opts.allowedTools : undefined,
     maxTurns: typeof opts.maxTurns === "number" ? opts.maxTurns : undefined,
+    promptRetries: typeof opts.promptRetries === "number" ? opts.promptRetries : undefined,
     approveAll: opts.approveAll ? true : undefined,
     approveReads: opts.approveReads ? true : undefined,
     denyAll: opts.denyAll ? true : undefined,

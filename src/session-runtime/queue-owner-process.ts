@@ -18,6 +18,7 @@ export type QueueOwnerRuntimeOptions = {
   verbose?: boolean;
   ttlMs?: number;
   maxQueueDepth?: number;
+  promptRetries?: number;
 };
 
 type SessionSendLike = {
@@ -31,6 +32,7 @@ type SessionSendLike = {
   verbose?: boolean;
   ttlMs?: number;
   maxQueueDepth?: number;
+  promptRetries?: number;
 };
 
 export function sanitizeQueueOwnerExecArgv(
@@ -128,6 +130,7 @@ export function queueOwnerRuntimeOptionsFromSend(
     verbose: options.verbose,
     ttlMs: options.ttlMs,
     maxQueueDepth: options.maxQueueDepth,
+    promptRetries: options.promptRetries,
   };
 }
 
