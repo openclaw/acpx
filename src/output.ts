@@ -131,6 +131,10 @@ function collapseWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function normalizeLineEndings(value: string): string {
+  return value.replace(/\r\n?/g, "\n");
+}
+
 function truncate(value: string, maxChars: number): string {
   if (value.length <= maxChars) {
     return value;
@@ -656,14 +660,18 @@ class TextOutputFormatter implements OutputFormatter {
   }
 
   private flushThoughtBuffer(): void {
-    const thought = truncate(collapseWhitespace(this.thoughtBuffer), MAX_THOUGHT_CHARS);
+    const thought = truncate(normalizeLineEndings(this.thoughtBuffer).trim(), MAX_THOUGHT_CHARS);
     this.thoughtBuffer = "";
     if (!thought) {
       return;
     }
 
     this.beginSection("thought");
-    this.writeLine(this.dim(`[thinking] ${thought}`));
+    const [firstLine, ...restLines] = thought.split("\n");
+    this.writeLine(this.dim(`[thinking] ${firstLine}`));
+    for (const line of restLines) {
+      this.writeLine(this.dim(`           ${line}`));
+    }
   }
 
   private renderToolUpdate(update: ToolCall | ToolCallUpdate): void {

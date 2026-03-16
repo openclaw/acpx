@@ -68,6 +68,18 @@ test("text formatter batches thought chunks from ACP notifications", () => {
   assert.match(output, /\[done\] end_turn/);
 });
 
+test("text formatter preserves line breaks in thought chunks", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("text", { stdout: writer });
+
+  formatter.onAcpMessage(thoughtChunk("Line one\n\nLine two") as never);
+  formatter.onAcpMessage(doneResult("end_turn") as never);
+
+  const output = writer.toString();
+  assert.match(output, /\[thinking\] Line one\n\s*\n\s*Line two/);
+  assert.doesNotMatch(output, /\[thinking\] Line one Line two/);
+});
+
 test("text formatter renders tool call lifecycle from ACP updates", () => {
   const writer = new CaptureWriter();
   const formatter = createOutputFormatter("text", { stdout: writer });
