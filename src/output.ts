@@ -554,7 +554,7 @@ class TextOutputFormatter implements OutputFormatter {
       }
       case "agent_thought_chunk": {
         if (update.content.type === "text") {
-          this.thoughtBuffer += update.content.text;
+          this.writeThoughtChunk(update.content.text);
         }
         return;
       }
@@ -653,6 +653,14 @@ class TextOutputFormatter implements OutputFormatter {
     }
     this.section = "assistant";
     this.write(text);
+  }
+
+  private writeThoughtChunk(text: string): void {
+    if (!text) {
+      return;
+    }
+    this.beginSection("thought");
+    this.writeLine(this.dim(`[thinking] ${truncate(collapseWhitespace(text), MAX_THOUGHT_CHARS)}`));
   }
 
   private flushThoughtBuffer(): void {

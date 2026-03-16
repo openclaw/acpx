@@ -53,18 +53,22 @@ function doneResult(stopReason: string): unknown {
   };
 }
 
-test("text formatter batches thought chunks from ACP notifications", () => {
+test("text formatter streams thought chunks from ACP notifications immediately", () => {
   const writer = new CaptureWriter();
   const formatter = createOutputFormatter("text", { stdout: writer });
 
   formatter.onAcpMessage(thoughtChunk("Investigating ") as never);
+  assert.match(writer.toString(), /\[thinking\] Investigating/);
+
   formatter.onAcpMessage(thoughtChunk("the issue") as never);
+  assert.equal((writer.toString().match(/\[thinking\]/g) ?? []).length, 2);
+
   formatter.onAcpMessage(messageChunk("Done.") as never);
   formatter.onAcpMessage(doneResult("end_turn") as never);
 
   const output = writer.toString();
-  assert.equal((output.match(/\[thinking\]/g) ?? []).length, 1);
-  assert.match(output, /\[thinking\] Investigating the issue/);
+  assert.match(output, /\[thinking\] Investigating/);
+  assert.match(output, /\[thinking\] the issue/);
   assert.match(output, /\[done\] end_turn/);
 });
 
