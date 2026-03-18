@@ -21,6 +21,11 @@ export const AGENT_REGISTRY: Record<string, string> = {
   qwen: "qwen --acp",
 };
 
+const AGENT_ALIASES: Record<string, string> = {
+  "factory-droid": "droid",
+  factorydroid: "droid",
+};
+
 export const DEFAULT_AGENT_NAME = "codex";
 
 export function normalizeAgentName(value: string): string {
@@ -46,7 +51,7 @@ export function mergeAgentRegistry(overrides?: Record<string, string>): Record<s
 export function resolveAgentCommand(agentName: string, overrides?: Record<string, string>): string {
   const normalized = normalizeAgentName(agentName);
   const registry = mergeAgentRegistry(overrides);
-  return registry[normalized] ?? agentName;
+  return registry[normalized] ?? registry[AGENT_ALIASES[normalized] ?? normalized] ?? agentName;
 }
 
 export function listBuiltInAgents(overrides?: Record<string, string>): string[] {
