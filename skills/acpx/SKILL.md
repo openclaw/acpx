@@ -78,7 +78,7 @@ Friendly agent names resolve to commands:
 - `gemini` -> `gemini --acp`
 - `cursor` -> `cursor-agent acp`
 - `copilot` -> `copilot --acp --stdio`
-- `droid` -> `droid exec --output-format acp`
+- `droid` -> `droid exec --output-format acp` (`factory-droid` and `factorydroid` also resolve to `droid`)
 - `kimi` -> `kimi acp`
 - `opencode` -> `npx -y opencode-ai acp`
 - `kiro` -> `kiro-cli acp`

@@ -28,6 +28,9 @@ When you run `acpx <agent> ...`:
 
 This means custom names work without any registry file edits.
 
+`factory-droid` and `factorydroid` are built-in aliases for `droid`, so they
+resolve to the same `droid exec --output-format acp` command.
+
 ## `--agent` escape hatch
 
 `--agent <command>` forces a raw adapter command and bypasses positional agent resolution.
