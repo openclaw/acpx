@@ -57,6 +57,19 @@ test("isAcpResourceNotFoundError recognizes session-not-found hints in nested er
     true,
   );
 });
+
+test("isAcpResourceNotFoundError recognizes Cursor session-not-found format", () => {
+  // Cursor returns: {"code":-32602,"message":"Invalid params","data":{"message":"Session \"xxx\" not found"}}
+  const cursorError = {
+    code: -32602,
+    message: "Invalid params",
+    data: {
+      message: 'Session "nonexistent-session-id" not found',
+    },
+  };
+
+  assert.equal(isAcpResourceNotFoundError(cursorError), true);
+});
 test("isAcpQueryClosedBeforeResponseError matches typed ACP payload", () => {
   const error = {
     code: -32603,

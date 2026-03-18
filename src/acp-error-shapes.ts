@@ -89,6 +89,10 @@ export function formatUnknownErrorMessage(error: unknown): string {
   return String(error);
 }
 
+// Matches "session" followed by optional ID (quoted or unquoted) followed by "not found"
+// Examples: "Session \"abc\" not found", "Session abc-123 not found"
+const SESSION_NOT_FOUND_PATTERN = /session\s+["'\w\-]+\s+not found/i;
+
 function isSessionNotFoundText(value: unknown): boolean {
   if (typeof value !== "string") {
     return false;
@@ -100,7 +104,8 @@ function isSessionNotFoundText(value: unknown): boolean {
     normalized.includes("resource not found") ||
     normalized.includes("session not found") ||
     normalized.includes("unknown session") ||
-    normalized.includes("invalid session identifier")
+    normalized.includes("invalid session identifier") ||
+    SESSION_NOT_FOUND_PATTERN.test(value)
   );
 }
 
