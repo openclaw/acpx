@@ -1,7 +1,7 @@
 const ACP_ADAPTER_PACKAGE_RANGES = {
   pi: "^0.0.22",
   codex: "^0.9.5",
-  claude: "^0.21.0",
+  claude: "^0.22.0",
 } as const;
 
 export const AGENT_REGISTRY: Record<string, string> = {
