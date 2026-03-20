@@ -1,4 +1,9 @@
-import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
+import {
+  execFileSync,
+  spawn,
+  type ChildProcess,
+  type ChildProcessByStdio,
+} from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -712,10 +717,52 @@ function maybeWrapSessionControlError(
   return wrapped;
 }
 
+function detectClaudeCliPath(): string | undefined {
+  try {
+    const resolved = execFileSync("which", ["claude"], {
+      encoding: "utf8",
+      timeout: 2_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (resolved && fs.existsSync(resolved)) {
+      return resolved;
+    }
+  } catch {
+    // not found in PATH
+  }
+
+  // Common install locations
+  const candidates = [
+    path.join(process.env.HOME ?? "", ".local", "bin", "claude"),
+    path.join(process.env.HOME ?? "", ".claude", "bin", "claude"),
+    "/usr/local/bin/claude",
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
 function buildAgentEnvironment(
   authCredentials: Record<string, string> | undefined,
+  options?: { claudeAcp?: boolean },
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
+
+  // claude-agent-acp requires CLAUDE_CODE_EXECUTABLE to locate the Claude CLI
+  // when it is not bundled as a static binary. Without this, the SDK's query()
+  // spawns a child process that cannot find the CLI and exits immediately,
+  // causing "Query closed before response received".
+  if (options?.claudeAcp && !env.CLAUDE_CODE_EXECUTABLE) {
+    const detected = detectClaudeCliPath();
+    if (detected) {
+      env.CLAUDE_CODE_EXECUTABLE = detected;
+    }
+  }
+
   if (!authCredentials) {
     return env;
   }
@@ -747,6 +794,7 @@ function buildAgentEnvironment(
 export function buildAgentSpawnOptions(
   cwd: string,
   authCredentials: Record<string, string> | undefined,
+  options?: { claudeAcp?: boolean },
 ): {
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -755,7 +803,7 @@ export function buildAgentSpawnOptions(
 } {
   return {
     cwd,
-    env: buildAgentEnvironment(authCredentials),
+    env: buildAgentEnvironment(authCredentials, options),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   };
@@ -931,6 +979,7 @@ export class AcpClient {
     const args = await resolveGeminiCommandArgs(command, initialArgs);
     this.log(`spawning agent: ${command} ${args.join(" ")}`);
     const geminiAcp = isGeminiAcpCommand(command, args);
+    const claudeAcp = isClaudeAcpCommand(command, args);
     const copilotAcp = isCopilotAcpCommand(command, args);
 
     if (copilotAcp) {
@@ -942,7 +991,7 @@ export class AcpClient {
       args,
       buildSpawnCommandOptions(
         command,
-        buildAgentSpawnOptions(this.options.cwd, this.options.authCredentials),
+        buildAgentSpawnOptions(this.options.cwd, this.options.authCredentials, { claudeAcp }),
       ),
     ) as ChildProcessByStdio<Writable, Readable, Readable>;
 
