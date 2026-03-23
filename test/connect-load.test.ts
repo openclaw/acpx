@@ -215,6 +215,114 @@ test("connectAndLoadSession falls back to createSession for empty sessions on ad
   });
 });
 
+test("connectAndLoadSession falls back to session/new on -32602 Invalid params", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "invalid-params-record",
+      acpSessionId: "invalid-params-session",
+      agentCommand: "agent",
+      cwd,
+      messages: [
+        {
+          Agent: {
+            content: [{ Text: "has history" }],
+            tool_results: {},
+          },
+        },
+      ],
+    });
+
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({
+        running: true,
+      }),
+      supportsLoadSession: () => true,
+      loadSessionWithOptions: async () => {
+        throw {
+          error: {
+            code: -32602,
+            message: "Invalid params",
+          },
+        };
+      },
+      createSession: async () => ({
+        sessionId: "fallback-from-32602",
+        agentSessionId: "fallback-runtime",
+      }),
+      setSessionMode: async () => {},
+    };
+
+    const result = await connectAndLoadSession({
+      client: client as never,
+      record,
+      activeController: ACTIVE_CONTROLLER,
+    });
+
+    assert.equal(result.sessionId, "fallback-from-32602");
+    assert.equal(result.resumed, false);
+    assert.equal(record.acpSessionId, "fallback-from-32602");
+  });
+});
+
+test("connectAndLoadSession falls back to session/new on -32601 Method not found", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "method-not-found-record",
+      acpSessionId: "method-not-found-session",
+      agentCommand: "agent",
+      cwd,
+      messages: [
+        {
+          Agent: {
+            content: [{ Text: "has history" }],
+            tool_results: {},
+          },
+        },
+      ],
+    });
+
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({
+        running: true,
+      }),
+      supportsLoadSession: () => true,
+      loadSessionWithOptions: async () => {
+        throw {
+          error: {
+            code: -32601,
+            message: "Method not found",
+          },
+        };
+      },
+      createSession: async () => ({
+        sessionId: "fallback-from-32601",
+        agentSessionId: "fallback-runtime",
+      }),
+      setSessionMode: async () => {},
+    };
+
+    const result = await connectAndLoadSession({
+      client: client as never,
+      record,
+      activeController: ACTIVE_CONTROLLER,
+    });
+
+    assert.equal(result.sessionId, "fallback-from-32601");
+    assert.equal(result.resumed, false);
+    assert.equal(record.acpSessionId, "fallback-from-32601");
+  });
+});
+
 test("connectAndLoadSession rethrows load failures that should not create a new session", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
