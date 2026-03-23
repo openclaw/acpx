@@ -215,6 +215,62 @@ test("connectAndLoadSession falls back to createSession for empty sessions on ad
   });
 });
 
+test("connectAndLoadSession skips load for pristine saved sessions with no turns yet", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "pristine-record",
+      acpSessionId: "pristine-session",
+      agentSessionId: "runtime-pristine-session",
+      agentCommand: "agent",
+      cwd,
+      pid: 999_999,
+      messages: [],
+      lastPromptAt: undefined,
+      acpx: {},
+    });
+
+    let loadCalled = false;
+    let createCalled = false;
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({
+        running: true,
+      }),
+      supportsLoadSession: () => true,
+      loadSessionWithOptions: async () => {
+        loadCalled = true;
+        throw new Error("loadSession should not be called for pristine sessions");
+      },
+      createSession: async () => {
+        createCalled = true;
+        return {
+          sessionId: "fresh-pristine-session",
+          agentSessionId: "fresh-runtime",
+        };
+      },
+      setSessionMode: async () => {},
+    };
+
+    const result = await connectAndLoadSession({
+      client: client as never,
+      record,
+      activeController: ACTIVE_CONTROLLER,
+    });
+
+    assert.equal(loadCalled, false);
+    assert.equal(createCalled, true);
+    assert.equal(result.resumed, false);
+    assert.equal(result.loadError, undefined);
+    assert.equal(result.sessionId, "fresh-pristine-session");
+    assert.equal(record.acpSessionId, "fresh-pristine-session");
+    assert.equal(record.agentSessionId, "fresh-runtime");
+  });
+});
+
 test("connectAndLoadSession rethrows load failures that should not create a new session", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");

@@ -36,6 +36,36 @@ export type ConnectAndLoadSessionResult = {
   loadError?: string;
 };
 
+function shouldStartFreshForPristineRecord(
+  record: SessionRecord,
+  storedProcessAlive: boolean,
+): boolean {
+  if (record.closed === true) {
+    return false;
+  }
+
+  if (typeof record.pid !== "number" || storedProcessAlive) {
+    return false;
+  }
+
+  if (record.messages.length > 0) {
+    return false;
+  }
+
+  if (typeof record.lastPromptAt === "string" && record.lastPromptAt.trim().length > 0) {
+    return false;
+  }
+
+  const hasCurrentMode =
+    typeof record.acpx?.current_mode_id === "string" &&
+    record.acpx.current_mode_id.trim().length > 0;
+  if (hasCurrentMode) {
+    return false;
+  }
+
+  return !Array.isArray(record.acpx?.config_options) || record.acpx.config_options.length === 0;
+}
+
 function shouldFallbackToNewSession(error: unknown, record: SessionRecord): boolean {
   if (error instanceof TimeoutError || error instanceof InterruptedError) {
     return false;
@@ -71,6 +101,10 @@ export async function connectAndLoadSession(
   const desiredModeId = getDesiredModeId(record.acpx);
   const storedProcessAlive = isProcessAlive(record.pid);
   const shouldReconnect = Boolean(record.pid) && !storedProcessAlive;
+  const shouldBypassLoadForPristineRecord = shouldStartFreshForPristineRecord(
+    record,
+    storedProcessAlive,
+  );
 
   if (options.verbose) {
     if (storedProcessAlive) {
@@ -104,6 +138,16 @@ export async function connectAndLoadSession(
 
   if (reusingLoadedSession) {
     resumed = true;
+  } else if (shouldBypassLoadForPristineRecord) {
+    if (options.verbose) {
+      process.stderr.write(
+        `[acpx] saved session ${record.acpSessionId} has no turns yet; starting fresh ACP session instead of session/load\n`,
+      );
+    }
+    const createdSession = await withTimeout(client.createSession(record.cwd), options.timeoutMs);
+    sessionId = createdSession.sessionId;
+    createdFreshSession = true;
+    pendingAgentSessionId = createdSession.agentSessionId;
   } else if (client.supportsLoadSession()) {
     try {
       const loadResult = await withTimeout(
