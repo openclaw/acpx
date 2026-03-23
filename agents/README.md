@@ -16,6 +16,7 @@ Built-in agents:
 - `kiro -> kiro-cli acp`
 - `opencode -> npx -y opencode-ai acp`
 - `qwen -> qwen --acp`
+- `trae -> trae-cli acp serve`
 
 Harness-specific docs in this directory:
 
@@ -30,3 +31,4 @@ Harness-specific docs in this directory:
 - [Kiro](Kiro.md): built-in `kiro -> kiro-cli acp`
 - [OpenCode](OpenCode.md): built-in `opencode -> npx -y opencode-ai acp`
 - [Qwen](Qwen.md): built-in `qwen -> qwen --acp`
+- [Trae](Trae.md): built-in `trae -> trae-cli acp serve`

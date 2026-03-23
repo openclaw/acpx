@@ -52,6 +52,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "kiro",
     "opencode",
     "qwen",
+    "trae",
   ]);
 });
 
