@@ -401,7 +401,7 @@ test("integration: perf metrics capture preserves SIGTERM termination semantics"
   }
 });
 
-test("integration: configured mcpServers are sent to session/new and session/load", async () => {
+test("integration: configured mcpServers are sent to fresh and resumed sessions", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const loadCapableAgentCommand = `${MOCK_AGENT_COMMAND} --supports-load-session`;
@@ -480,6 +480,15 @@ test("integration: configured mcpServers are sent to session/new and session/loa
       };
       sessionId = createdPayload.acpxRecordId;
       assert.equal(typeof sessionId, "string");
+
+      const warmPrompt = await runCli(
+        [...loadCapableAgentArgs, "--format", "json", "--ttl", "1", "prompt", "echo mcp-prime"],
+        homeDir,
+      );
+      assert.equal(warmPrompt.code, 0, warmPrompt.stderr);
+
+      const warmLock = await readQueueOwnerLock(homeDir, sessionId as string);
+      assert.equal(await waitForPidExit(warmLock.pid, 5_000), true, "queue owner did not exit");
 
       const promptResult = await runCli(
         [...loadCapableAgentArgs, "--format", "json", "prompt", "echo mcp-load"],
@@ -1330,6 +1339,15 @@ test("integration: load replay session/update notifications are suppressed from 
       };
       sessionId = createdPayload.acpxRecordId;
       assert.equal(typeof sessionId, "string");
+
+      const warmPrompt = await runCli(
+        [...replayAgentArgs, "--format", "json", "--ttl", "1", "prompt", "echo warm-before-load"],
+        homeDir,
+      );
+      assert.equal(warmPrompt.code, 0, warmPrompt.stderr);
+
+      const warmLock = await readQueueOwnerLock(homeDir, sessionId as string);
+      assert.equal(await waitForPidExit(warmLock.pid, 5_000), true, "queue owner did not exit");
 
       const prompt = await runCli(
         [...replayAgentArgs, "--format", "json", "prompt", `echo ${freshText}`],
