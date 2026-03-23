@@ -68,12 +68,14 @@ export function buildTerminalSpawnOptions(
   cwd: string;
   env: NodeJS.ProcessEnv | undefined;
   stdio: ["ignore", "pipe", "pipe"];
+  shell: boolean;
   windowsHide: true;
 } {
   return {
     cwd,
     env: toEnvObject(env),
     stdio: ["ignore", "pipe", "pipe"],
+    shell: process.platform === "win32",
     windowsHide: true,
   };
 }

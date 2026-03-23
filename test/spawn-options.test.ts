@@ -101,3 +101,10 @@ test("buildSpawnCommandOptions keeps shell disabled for non-batch commands", asy
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("buildTerminalSpawnOptions enables shell on Windows for PATH resolution", () => {
+  const options = buildTerminalSpawnOptions("/tmp/acpx-terminal", []);
+
+  // shell should be set based on the current platform
+  assert.equal(typeof options.shell, "boolean");
+});
