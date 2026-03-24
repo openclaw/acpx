@@ -106,6 +106,61 @@ export type SessionAgentOptions = {
   maxTurns?: number;
 };
 
+function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOptions | undefined {
+  const stored = record.acpx?.session_options;
+  if (!stored) {
+    return undefined;
+  }
+
+  const sessionOptions: SessionAgentOptions = {};
+
+  if (typeof stored.model === "string" && stored.model.trim().length > 0) {
+    sessionOptions.model = stored.model;
+  }
+  if (Array.isArray(stored.allowed_tools)) {
+    sessionOptions.allowedTools = [...stored.allowed_tools];
+  }
+  if (typeof stored.max_turns === "number") {
+    sessionOptions.maxTurns = stored.max_turns;
+  }
+
+  return Object.keys(sessionOptions).length > 0 ? sessionOptions : undefined;
+}
+
+function persistSessionOptions(
+  record: SessionRecord,
+  options: SessionAgentOptions | undefined,
+): void {
+  const next =
+    options &&
+    ({
+      model: typeof options.model === "string" ? options.model : undefined,
+      allowed_tools: Array.isArray(options.allowedTools) ? [...options.allowedTools] : undefined,
+      max_turns: typeof options.maxTurns === "number" ? options.maxTurns : undefined,
+    } satisfies NonNullable<NonNullable<SessionRecord["acpx"]>["session_options"]>);
+
+  const hasValues = Boolean(
+    next &&
+    ((typeof next.model === "string" && next.model.trim().length > 0) ||
+      (Array.isArray(next.allowed_tools) && next.allowed_tools.length > 0) ||
+      typeof next.max_turns === "number"),
+  );
+
+  if (hasValues && next) {
+    record.acpx = {
+      ...record.acpx,
+      session_options: next,
+    };
+    return;
+  }
+
+  if (!record.acpx) {
+    return;
+  }
+
+  delete record.acpx.session_options;
+}
+
 export type RunOnceOptions = {
   agentCommand: string;
   cwd: string;
@@ -531,6 +586,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       authPolicy: options.authPolicy,
       suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
       verbose: options.verbose,
+      sessionOptions: sessionOptionsFromRecord(record),
     });
   client.updateRuntimeOptions({
     permissionMode: options.permissionMode,
@@ -882,6 +938,8 @@ export async function createSession(options: SessionCreateOptions): Promise<Sess
           acpx: {},
         };
 
+        persistSessionOptions(record, options.sessionOptions);
+
         await writeSessionRecord(record);
         return record;
       },
@@ -970,6 +1028,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     authPolicy: options.authPolicy,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
+    sessionOptions: sessionOptionsFromRecord(sessionRecord),
   });
   const ttlMs = normalizeQueueOwnerTtlMs(options.ttlMs);
   const maxQueueDepth = Math.max(1, Math.round(options.maxQueueDepth ?? 16));

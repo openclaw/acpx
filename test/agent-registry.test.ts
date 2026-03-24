@@ -56,6 +56,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "kimi",
     "kiro",
     "opencode",
+    "qoder",
     "qwen",
     "trae",
   ]);

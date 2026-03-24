@@ -525,6 +525,111 @@ test("integration: built-in iflow agent resolves to iflow --experimental-acp", a
   });
 });
 
+test("integration: built-in qoder agent resolves to qodercli --acp", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-qoder-"));
+
+    try {
+      await writeFakeQoderAgent(fakeBinDir);
+
+      const result = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "quiet", "qoder", "exec", "echo hello"],
+        homeDir,
+        {
+          env: {
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /hello/);
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: qoder session reuse preserves persisted startup flags", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-qoder-"));
+    const argLogPath = path.join(fakeBinDir, "qoder-args.log");
+
+    try {
+      await writeFakeQoderAgent(fakeBinDir, argLogPath);
+      const { createSession } = await import("../src/session.js");
+      const { runSessionSetModeDirect } = await import("../src/session-runtime/prompt-runner.js");
+      const previousHome = process.env.HOME;
+      const previousPath = process.env.PATH;
+      process.env.HOME = homeDir;
+      process.env.PATH = `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`;
+
+      try {
+        const record = await createSession({
+          agentCommand: "qodercli --acp",
+          cwd,
+          permissionMode: "approve-reads",
+          timeoutMs: 10_000,
+          sessionOptions: {
+            allowedTools: ["Read", "Grep"],
+            maxTurns: 4,
+          },
+        });
+
+        const result = await runSessionSetModeDirect({
+          sessionRecordId: record.acpxRecordId,
+          modeId: "plan",
+          timeoutMs: 10_000,
+        });
+        assert.equal(result.record.acpxRecordId, record.acpxRecordId);
+      } finally {
+        if (previousHome === undefined) {
+          delete process.env.HOME;
+        } else {
+          process.env.HOME = previousHome;
+        }
+        process.env.PATH = previousPath;
+      }
+
+      const argLines = (await fs.readFile(argLogPath, "utf8"))
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+      assert.equal(
+        argLines.length >= 2,
+        true,
+        `expected at least two qoder invocations:\n${argLines.join("\n")}`,
+      );
+      assert.equal(
+        argLines.some(
+          (line) =>
+            line.includes("--acp") &&
+            line.includes("--max-turns=4") &&
+            line.includes("--allowed-tools=READ,GREP"),
+        ),
+        true,
+        `expected persisted qoder flags in logged invocations:\n${argLines.join("\n")}`,
+      );
+      assert.equal(
+        argLines.slice(-1)[0]?.includes("--allowed-tools=READ,GREP") ?? false,
+        true,
+        `expected reused prompt spawn to preserve allowed-tools:\n${argLines.join("\n")}`,
+      );
+      assert.equal(
+        argLines.slice(-1)[0]?.includes("--max-turns=4") ?? false,
+        true,
+        `expected reused prompt spawn to preserve max-turns:\n${argLines.join("\n")}`,
+      );
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: exec forwards model, allowed-tools, and max-turns in session/new _meta", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -2119,6 +2224,56 @@ async function writeFakeIflowAgent(binDir: string): Promise<void> {
       'if [ "$1" = "--experimental-acp" ]; then',
       "  shift",
       "fi",
+      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
+      "",
+    ].join("\n"),
+    { encoding: "utf8", mode: 0o755 },
+  );
+}
+
+async function writeFakeQoderAgent(binDir: string, argLogPath?: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(binDir, "qodercli.cmd"),
+      [
+        "@echo off",
+        "setlocal",
+        ...(argLogPath ? [`echo %*>> "${argLogPath}"`] : []),
+        ":shift_known",
+        'if "%~1"=="--acp" shift & goto shift_known',
+        'if /I "%~1"=="--max-turns" shift & shift & goto shift_known',
+        'if /I "%~1"=="--allowed-tools" shift & shift & goto shift_known',
+        'if /I "%~1"=="--disallowed-tools" shift & shift & goto shift_known',
+        'echo %~1 | findstr /B /C:"--max-turns=" >nul && shift & goto shift_known',
+        'echo %~1 | findstr /B /C:"--allowed-tools=" >nul && shift & goto shift_known',
+        'echo %~1 | findstr /B /C:"--disallowed-tools=" >nul && shift & goto shift_known',
+        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
+        "",
+      ].join("\r\n"),
+      { encoding: "utf8" },
+    );
+    return;
+  }
+
+  await fs.writeFile(
+    path.join(binDir, "qodercli"),
+    [
+      "#!/bin/sh",
+      ...(argLogPath ? [`printf '%s\\n' "$*" >> ${JSON.stringify(argLogPath)}`] : []),
+      'while [ "$#" -gt 0 ]; do',
+      '  case "$1" in',
+      "    --acp|--max-turns=*|--allowed-tools=*|--disallowed-tools=*)",
+      "      shift",
+      "      ;;",
+      "    --max-turns|--allowed-tools|--disallowed-tools)",
+      "      shift",
+      '      [ "$#" -gt 0 ] && shift',
+      "      ;;",
+      "    *)",
+      "      break",
+      "      ;;",
+      "  esac",
+      "done",
       `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
       "",
     ].join("\n"),

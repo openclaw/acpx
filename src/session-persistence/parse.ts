@@ -291,6 +291,31 @@ function parseAcpxState(raw: unknown): SessionAcpxState | undefined {
     state.config_options = record.config_options as SessionAcpxState["config_options"];
   }
 
+  const sessionOptions = asRecord(record.session_options);
+  if (sessionOptions) {
+    const parsedSessionOptions: NonNullable<SessionAcpxState["session_options"]> = {};
+
+    if (typeof sessionOptions.model === "string") {
+      parsedSessionOptions.model = sessionOptions.model;
+    }
+
+    if (isStringArray(sessionOptions.allowed_tools)) {
+      parsedSessionOptions.allowed_tools = [...sessionOptions.allowed_tools];
+    }
+
+    if (
+      typeof sessionOptions.max_turns === "number" &&
+      Number.isInteger(sessionOptions.max_turns) &&
+      sessionOptions.max_turns > 0
+    ) {
+      parsedSessionOptions.max_turns = sessionOptions.max_turns;
+    }
+
+    if (Object.keys(parsedSessionOptions).length > 0) {
+      state.session_options = parsedSessionOptions;
+    }
+  }
+
   return state;
 }
 

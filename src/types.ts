@@ -281,6 +281,11 @@ export type SessionAcpxState = {
   desired_mode_id?: string;
   available_commands?: string[];
   config_options?: SessionConfigOption[];
+  session_options?: {
+    model?: string;
+    allowed_tools?: string[];
+    max_turns?: number;
+  };
 };
 
 export type SessionRecord = {

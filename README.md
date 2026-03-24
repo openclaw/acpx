@@ -332,6 +332,7 @@ Built-ins:
 | `kimi`     | native (`kimi acp`)                                                    | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
 | `kiro`     | native (`kiro-cli acp`)                                                | [Kiro CLI](https://kiro.dev)                                                                                    |
 | `opencode` | `npx -y opencode-ai acp`                                               | [OpenCode](https://opencode.ai)                                                                                 |
+| `qoder`    | native (`qodercli --acp`)                                              | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |
 | `qwen`     | native (`qwen --acp`)                                                  | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
 | `trae`     | native (`traecli acp serve`)                                           | [Trae CLI](https://docs.trae.cn/cli)                                                                            |
 
