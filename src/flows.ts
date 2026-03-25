@@ -5,7 +5,6 @@ export {
   checkpoint,
   compute,
   defineFlow,
-  flowRunsBaseDir,
   shell,
   type FlowNodeCommon,
   type AcpNodeDefinition,
@@ -26,4 +25,5 @@ export {
   type ShellActionNodeDefinition,
   type ShellActionResult,
 } from "./flows/runtime.js";
+export { flowRunsBaseDir } from "./flows/store.js";
 export { extractJsonObject } from "./flows/json.js";
