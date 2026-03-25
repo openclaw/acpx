@@ -25,8 +25,8 @@ workers step by step with:
 - programmable branching
 - selective context visibility
 - persistent workflow state outside the worker
-- reusable sessions where continuity helps
-- fresh sessions where blind judgment is required
+- one main conversation by default
+- explicit isolated conversations where blind judgment is required
 
 This document defines that plan.
 
@@ -109,15 +109,16 @@ Each node should receive only what its `read(...)` projection returns.
 If a step should not know earlier conclusions, that must be enforced by:
 
 - a narrow `read(...)`
-- a fresh ACP session
+- an isolated ACP session
 
-### 4. Session continuity is a policy, not a side effect
+### 4. One main session by default, explicit extra sessions when needed
 
-Each ACP node should explicitly choose:
+Each flow run should get one implicit main ACP conversation.
 
-- `fresh`
-- `sticky(key)`
-- `inherit`
+Most `acp` nodes should just use that main conversation.
+
+If a step needs isolation or a separate line of work, the flow should ask for
+that explicitly instead of relying on hidden session policy defaults.
 
 ### 5. Conversations stay in the existing session store
 
@@ -150,8 +151,9 @@ It should not shell out to `acpx` as a subprocess.
 The repository should become a workspace monorepo with these packages:
 
 - `packages/acpx`
-- `packages/core`
 - `packages/flows`
+- `packages/core` if extracting the shared runtime into its own workspace
+  package proves useful
 
 Recommended responsibilities:
 
@@ -163,7 +165,6 @@ Responsibilities:
 
 - CLI binary
 - public umbrella exports
-- `acpx/core` subpath export
 - `acpx/flows` subpath export
 
 This package is the user-facing umbrella.
@@ -215,14 +216,17 @@ modular:
 
 ## Public package surface
 
-The public API should present a single umbrella:
+The public API should start with a single umbrella:
 
 - `acpx`
-- `acpx/core`
 - `acpx/flows`
 
-That means `packages/acpx` should re-export the public surfaces from the
-workspace libraries rather than forcing users to import package-internal names.
+`acpx/core` can exist later if the lower-level runtime surface proves worth
+stabilizing. It should not be forced into the first public compatibility
+contract unless there is a clear need.
+
+`packages/acpx` should re-export the public surfaces from the workspace
+libraries rather than forcing users to import package-internal names.
 
 ## Flow authoring model
 
@@ -387,47 +391,66 @@ This keeps the graph readable while allowing arbitrary branching rules.
 
 ## Session model
 
-Session policy is first-class on each `acp` node.
+The public model should be simple.
 
-Support exactly these policies:
+### Default behavior
 
-- `fresh`
-- `sticky(key)`
-- `inherit`
+Each flow run gets one implicit main ACP session.
 
-### `fresh`
+Every `acp` node uses that main session by default.
 
-Use a new ACP session for this node.
+That should be the common case for:
 
-Use for:
+- exploratory analysis
+- implementation
+- follow-up fixes
+- review/fix loops
+
+### Isolated steps
+
+If a step must be independent, the flow should opt into an isolated session
+explicitly.
+
+Use isolation for:
 
 - blind judgment
 - independent critics
-- isolated analysis
+- adversarial review
+- any step that must not inherit earlier conversation state
 
-### `sticky(key)`
+This should be expressed as a simple flow-level option such as "run this step in
+its own session", not by forcing every author to learn internal session-policy
+keywords.
 
-Reuse a persistent `acpx` session bound to the run and key.
+### Extra long-lived sessions
 
-Use for:
+Most flows should not need to manually name sessions.
 
-- implementation loops
-- long-running review/fix cycles
-- branch-local continuity
+If a workflow truly needs multiple persistent conversations, it may declare
+additional session handles explicitly. That is an advanced case, not the
+default.
 
-### `inherit`
+The runtime should own the mapping from those logical handles to underlying
+`acpxRecordId` and ACP session identifiers for the run.
 
-Reuse the active session from an upstream sticky path.
+### Internal runtime model
 
-Use only when continuity is intentional.
+Internally, the runtime will still need semantics equivalent to:
+
+- reuse the main session
+- create an isolated one-off session
+- continue a previously created non-main session
+
+Those are implementation concerns. They do not need to be the first public API
+surface.
 
 ### Validation rules
 
 The flow validator should reject:
 
-- `inherit` when no inherited session can exist
-- two concurrent branches writing to the same sticky key
-- steps marked as blind/isolated while using `inherit`
+- isolated or blind steps that try to reuse the main conversation
+- concurrent branches that would interleave prompts into the same session
+- explicit extra-session references that cannot be resolved for the run
 
 ## Context visibility
 
@@ -442,6 +465,9 @@ Example:
 - node C sees the verdict and executes a side effect
 
 This is the main mechanism for reducing anchoring and confirmation bias.
+
+It is not sufficient by itself for blind review. If a node must not inherit
+earlier worker memory, it must use an isolated session as well.
 
 ## Prompt model
 
@@ -467,13 +493,7 @@ steps. The first implementation should respect that.
 
 ### Initial result path
 
-Each `acp` node should specify:
-
-- a prompt
-- an output schema
-- a result extraction policy
-
-Default policy:
+The first implementation should support one result path:
 
 - ask the worker to return a final structured JSON object
 - capture the ACP output stream
@@ -521,13 +541,15 @@ Store workflow state under:
 
 - `~/.acpx/flows/`
 
-Recommended layout:
+Recommended initial layout:
 
-- `~/.acpx/flows/index.json`
-- `~/.acpx/flows/runs/<runId>.json`
-- `~/.acpx/flows/runs/<runId>.events.ndjson`
-- `~/.acpx/flows/runs/<runId>.lock`
-- `~/.acpx/flows/artifacts/<runId>/...`
+- `~/.acpx/flows/runs/<runId>/run.json`
+- `~/.acpx/flows/runs/<runId>/events.ndjson`
+- `~/.acpx/flows/runs/<runId>/lock`
+- `~/.acpx/flows/runs/<runId>/artifacts/...`
+
+If later experience shows that fast global lookup is necessary, an index file
+can be added then. It should not be required up front.
 
 ### What a run record should store
 
@@ -543,7 +565,7 @@ Recommended layout:
 - `nodeStates`
 - `outputs`
 - `activeBranches`
-- `sessionBindings`
+- `sessionBindings` mapping runtime-owned handles to persisted session ids
 - `waitingOn`
 - `artifacts`
 
@@ -622,9 +644,9 @@ The flow engine should build on the current runtime instead of duplicating it.
 
 Recommended mapping:
 
-- `fresh` node -> `runOnce`
-- `sticky(key)` initial bind -> `ensureSession`
-- sticky turn execution -> `sendSession`
+- default main-session step -> `ensureSession` then `sendSession`
+- isolated one-off step -> `runOnce`
+- explicit extra persistent session -> `ensureSession` then `sendSession`
 - cancel/control -> existing session control functions
 
 This keeps ACP execution in one place.
@@ -638,8 +660,9 @@ Build on the existing mock ACP agent and integration test style.
 Add tests for:
 
 - graph validation
-- `fresh` vs `sticky` semantics
-- `inherit` validation
+- default main-session reuse
+- isolated-step semantics
+- explicit extra-session validation
 - declarative branching
 - arbitrary code-based routing via `compute`
 - fork/join execution
@@ -668,23 +691,24 @@ layer is validated against ACP behavior, not ad-hoc stubs.
 
 - create workspace structure
 - add `packages/acpx`
-- add `packages/core`
 - add `packages/flows`
-- move existing code into `packages/core` and `packages/acpx` with minimal logic changes
+- extract a shared runtime package only if it materially clarifies the split
+- move existing code into the monorepo with minimal logic changes
 - keep published `acpx` CLI behavior unchanged
 
 ### 2. Core library surface
 
-- define public `acpx/core` exports
+- define the internal runtime surface that `acpx/flows` depends on
 - stop treating all runtime code as CLI-internal implementation detail
-- expose stable session and prompt APIs for flow execution
+- expose stable session and prompt APIs for flow execution inside the repo
+- publish `acpx/core` only if that lower-level surface proves worth freezing
 
 ### 3. Flow graph and validator
 
 - implement `defineFlow`
 - implement node and edge types
 - normalize to internal graph IR
-- validate graph structure and session-policy constraints
+- validate graph structure and session-isolation constraints
 
 ### 4. File-based run store
 
@@ -727,6 +751,8 @@ layer is validated against ACP behavior, not ad-hoc stubs.
 - Graph topology is object-shaped, not fluent-first.
 - Branching is fully programmable.
 - `checkpoint` is the right primitive, not `human`.
+- Each flow run has one implicit main session by default.
+- Extra sessions must be explicit.
 - Conversations remain in the existing session store.
 - Workflow state uses file-based persistence first.
 - The flow runtime uses the current `acpx` runtime directly, not CLI subprocesses.
@@ -738,8 +764,8 @@ This work is successful when all of the following are true:
 
 - a flow can be authored as one `.ts` file
 - `acpx flow run file.ts` executes it end to end
-- fresh and sticky session behavior are explicit and reliable
-- blind steps do not inherit hidden worker memory accidentally
+- the default main-session model is simple and reliable
+- isolated steps do not inherit hidden worker memory accidentally
 - arbitrary routing rules can be expressed cleanly
 - fork/join works across multiple ACP workers
 - run state survives process exit and resume
