@@ -80,11 +80,56 @@ async function readFlowInput(flags: FlowRunFlags): Promise<unknown> {
 async function loadFlowModule(flowPath: string): Promise<FlowDefinition> {
   const module = (await tsImport(pathToFileURL(flowPath).href, import.meta.url)) as {
     default?: unknown;
+    "module.exports"?: unknown;
   };
-  if (!module.default || typeof module.default !== "object") {
-    throw new Error(`Flow module must export a default flow object: ${flowPath}`);
+
+  const candidate = findFlowDefinition(module);
+  if (!candidate) {
+    throw new Error(`Flow module must export a flow object: ${flowPath}`);
   }
-  return module.default as FlowDefinition;
+  return candidate;
+}
+
+function findFlowDefinition(module: {
+  default?: unknown;
+  "module.exports"?: unknown;
+}): FlowDefinition | null {
+  const candidates = [
+    module.default,
+    module["module.exports"],
+    getNestedDefault(module.default),
+    getNestedDefault(module["module.exports"]),
+  ];
+
+  for (const candidate of candidates) {
+    if (isFlowDefinition(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function getNestedDefault(value: unknown): unknown {
+  if (!value || typeof value !== "object" || !("default" in value)) {
+    return null;
+  }
+  return (value as { default?: unknown }).default ?? null;
+}
+
+function isFlowDefinition(value: unknown): value is FlowDefinition {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<FlowDefinition>;
+  return (
+    typeof candidate.name === "string" &&
+    typeof candidate.startAt === "string" &&
+    candidate.nodes !== undefined &&
+    typeof candidate.nodes === "object" &&
+    Array.isArray(candidate.edges)
+  );
 }
 
 function parseJsonInput(raw: string, label: string): unknown {
