@@ -34,6 +34,19 @@ type SessionSendLike = {
 };
 
 export function resolveQueueOwnerSpawnArgs(argv: readonly string[] = process.argv): string[] {
+  const override = process.env.ACPX_QUEUE_OWNER_ARGS;
+  if (override) {
+    const parsed = JSON.parse(override) as unknown;
+    if (
+      Array.isArray(parsed) &&
+      parsed.length > 0 &&
+      parsed.every((value) => typeof value === "string" && value.length > 0)
+    ) {
+      return [...parsed];
+    }
+    throw new Error("acpx self-spawn failed: invalid ACPX_QUEUE_OWNER_ARGS");
+  }
+
   const entry = argv[1];
   if (!entry || entry.trim().length === 0) {
     throw new Error("acpx self-spawn failed: missing CLI entry path");

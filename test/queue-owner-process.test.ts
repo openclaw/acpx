@@ -16,6 +16,26 @@ async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
 }
 
 describe("resolveQueueOwnerSpawnArgs", () => {
+  it("prefers ACPX_QUEUE_OWNER_ARGS when provided", () => {
+    const previous = process.env.ACPX_QUEUE_OWNER_ARGS;
+    process.env.ACPX_QUEUE_OWNER_ARGS = JSON.stringify([
+      "--import",
+      "tsx",
+      "src/cli.ts",
+      "__queue-owner",
+    ]);
+    try {
+      const args = resolveQueueOwnerSpawnArgs(["node", "ignored.js"]);
+      assert.deepEqual(args, ["--import", "tsx", "src/cli.ts", "__queue-owner"]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ACPX_QUEUE_OWNER_ARGS;
+      } else {
+        process.env.ACPX_QUEUE_OWNER_ARGS = previous;
+      }
+    }
+  });
+
   it("returns <real cli path> and __queue-owner", async () => {
     await withTempDir(async (dir) => {
       const cliFile = path.join(dir, "cli.js");

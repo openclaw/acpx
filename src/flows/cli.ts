@@ -152,6 +152,11 @@ function printFlowRunResult(
     flowName: result.state.flowName,
     flowPath: result.state.flowPath,
     status: result.state.status,
+    currentNode: result.state.currentNode,
+    currentNodeKind: result.state.currentNodeKind,
+    currentNodeStartedAt: result.state.currentNodeStartedAt,
+    lastHeartbeatAt: result.state.lastHeartbeatAt,
+    statusDetail: result.state.statusDetail,
     waitingOn: result.state.waitingOn,
     runDir: result.runDir,
     outputs: result.state.outputs,
@@ -172,6 +177,12 @@ function printFlowRunResult(
   process.stdout.write(`flow: ${payload.flowName}\n`);
   process.stdout.write(`status: ${payload.status}\n`);
   process.stdout.write(`runDir: ${payload.runDir}\n`);
+  if (payload.currentNode) {
+    process.stdout.write(`currentNode: ${payload.currentNode}\n`);
+  }
+  if (payload.statusDetail) {
+    process.stdout.write(`statusDetail: ${payload.statusDetail}\n`);
+  }
   if (payload.waitingOn) {
     process.stdout.write(`waitingOn: ${payload.waitingOn}\n`);
   }

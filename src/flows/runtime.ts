@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -5,7 +6,14 @@ import path from "node:path";
 import { createOutputFormatter } from "../output.js";
 import { promptToDisplayText, textPrompt } from "../prompt-content.js";
 import { resolveSessionRecord } from "../session-persistence.js";
-import { createSession, runOnce, sendSession, type SessionAgentOptions } from "../session.js";
+import { TimeoutError, withTimeout } from "../session-runtime-helpers.js";
+import {
+  cancelSessionPrompt,
+  createSession,
+  runOnce,
+  sendSession,
+  type SessionAgentOptions,
+} from "../session.js";
 import type {
   AuthPolicy,
   McpServer,
@@ -15,12 +23,19 @@ import type {
 } from "../types.js";
 
 type MaybePromise<T> = T | Promise<T>;
+const DEFAULT_FLOW_HEARTBEAT_MS = 5_000;
 
 export type FlowNodeContext<TInput = unknown> = {
   input: TInput;
   outputs: Record<string, unknown>;
   state: FlowRunState;
   services: Record<string, unknown>;
+};
+
+export type FlowNodeCommon = {
+  timeoutMs?: number;
+  heartbeatMs?: number;
+  statusDetail?: string;
 };
 
 export type FlowEdge =
@@ -36,7 +51,7 @@ export type FlowEdge =
       };
     };
 
-export type AcpNodeDefinition = {
+export type AcpNodeDefinition = FlowNodeCommon & {
   kind: "acp";
   profile?: string;
   session?: {
@@ -47,17 +62,48 @@ export type AcpNodeDefinition = {
   parse?: (text: string, context: FlowNodeContext) => MaybePromise<unknown>;
 };
 
-export type ComputeNodeDefinition = {
+export type ComputeNodeDefinition = FlowNodeCommon & {
   kind: "compute";
   run: (context: FlowNodeContext) => MaybePromise<unknown>;
 };
 
-export type ActionNodeDefinition = {
+export type FunctionActionNodeDefinition = FlowNodeCommon & {
   kind: "action";
   run: (context: FlowNodeContext) => MaybePromise<unknown>;
 };
 
-export type CheckpointNodeDefinition = {
+export type ShellActionExecution = {
+  command: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  stdin?: string;
+  shell?: boolean | string;
+  allowNonZeroExit?: boolean;
+  timeoutMs?: number;
+};
+
+export type ShellActionResult = {
+  command: string;
+  args: string[];
+  cwd: string;
+  stdout: string;
+  stderr: string;
+  combinedOutput: string;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  durationMs: number;
+};
+
+export type ShellActionNodeDefinition = FlowNodeCommon & {
+  kind: "action";
+  exec: (context: FlowNodeContext) => MaybePromise<ShellActionExecution>;
+  parse?: (result: ShellActionResult, context: FlowNodeContext) => MaybePromise<unknown>;
+};
+
+export type ActionNodeDefinition = FunctionActionNodeDefinition | ShellActionNodeDefinition;
+
+export type CheckpointNodeDefinition = FlowNodeCommon & {
   kind: "checkpoint";
   summary?: string;
   run?: (context: FlowNodeContext) => MaybePromise<unknown>;
@@ -112,11 +158,16 @@ export type FlowRunState = {
   startedAt: string;
   finishedAt?: string;
   updatedAt: string;
-  status: "running" | "waiting" | "completed" | "failed";
+  status: "running" | "waiting" | "completed" | "failed" | "timed_out";
   input: unknown;
   outputs: Record<string, unknown>;
   steps: FlowStepRecord[];
   sessionBindings: Record<string, FlowSessionBinding>;
+  currentNode?: string;
+  currentNodeKind?: FlowNodeDefinition["kind"];
+  currentNodeStartedAt?: string;
+  lastHeartbeatAt?: string;
+  statusDetail?: string;
   waitingOn?: string;
   error?: string;
 };
@@ -168,7 +219,24 @@ export function compute(definition: Omit<ComputeNodeDefinition, "kind">): Comput
   };
 }
 
-export function action(definition: Omit<ActionNodeDefinition, "kind">): ActionNodeDefinition {
+export function action(
+  definition: Omit<FunctionActionNodeDefinition, "kind">,
+): FunctionActionNodeDefinition;
+export function action(
+  definition: Omit<ShellActionNodeDefinition, "kind">,
+): ShellActionNodeDefinition;
+export function action(
+  definition: Omit<FunctionActionNodeDefinition, "kind"> | Omit<ShellActionNodeDefinition, "kind">,
+): ActionNodeDefinition {
+  return {
+    kind: "action",
+    ...definition,
+  } as ActionNodeDefinition;
+}
+
+export function shell(
+  definition: Omit<ShellActionNodeDefinition, "kind">,
+): ShellActionNodeDefinition {
   return {
     kind: "action",
     ...definition,
@@ -264,14 +332,48 @@ export class FlowRunner {
         let rawText: string | null = null;
         let sessionInfo: FlowSessionBinding | null = null;
         let agentInfo: ReturnType<FlowRunnerOptions["resolveAgent"]> | null = null;
+        this.markNodeStarted(state, current, node.kind, startedAt, node.statusDetail);
+        await this.persist(runDir, state, {
+          type: "node_started",
+          nodeId: current,
+          kind: node.kind,
+        });
 
         switch (node.kind) {
           case "compute": {
-            output = await node.run(context);
+            output = await this.runWithHeartbeat(runDir, state, current, node, async () => {
+              return await withTimeout(
+                Promise.resolve(node.run(context)),
+                node.timeoutMs ?? this.timeoutMs,
+              );
+            });
             break;
           }
           case "action": {
-            output = await node.run(context);
+            if ("run" in node) {
+              output = await this.runWithHeartbeat(runDir, state, current, node, async () => {
+                return await withTimeout(
+                  Promise.resolve(node.run(context)),
+                  node.timeoutMs ?? this.timeoutMs,
+                );
+              });
+            } else {
+              const execution = await Promise.resolve(node.exec(context));
+              const effectiveExecution: ShellActionExecution = {
+                ...execution,
+                timeoutMs: execution.timeoutMs ?? node.timeoutMs ?? this.timeoutMs,
+              };
+              this.updateStatusDetail(state, formatShellActionSummary(effectiveExecution));
+              await this.persist(runDir, state, {
+                type: "node_detail",
+                nodeId: current,
+                detail: state.statusDetail,
+              });
+              const result = await this.runWithHeartbeat(runDir, state, current, node, async () => {
+                return await runShellAction(effectiveExecution);
+              });
+              output = node.parse ? await node.parse(result, context) : result;
+            }
             break;
           }
           case "checkpoint": {
@@ -286,6 +388,7 @@ export class FlowRunner {
             state.waitingOn = current;
             state.updatedAt = isoNow();
             state.status = "waiting";
+            this.clearActiveNode(state, node.summary ?? current);
             state.steps.push({
               nodeId: current,
               kind: node.kind,
@@ -308,15 +411,50 @@ export class FlowRunner {
             };
           }
           case "acp": {
-            agentInfo = this.resolveAgent(node.profile);
+            const resolvedAgent = this.resolveAgent(node.profile);
+            agentInfo = resolvedAgent;
             const prompt = normalizePromptInput(await node.prompt(context));
             promptText = promptToDisplayText(prompt);
+            this.updateStatusDetail(state, summarizePrompt(promptText, node.statusDetail));
+            await this.persist(runDir, state, {
+              type: "node_detail",
+              nodeId: current,
+              detail: state.statusDetail,
+            });
             if (node.session?.isolated) {
-              rawText = await this.runIsolatedPrompt(agentInfo, prompt);
+              rawText = await this.runWithHeartbeat(runDir, state, current, node, async () => {
+                return await this.runIsolatedPrompt(
+                  resolvedAgent,
+                  prompt,
+                  node.timeoutMs ?? this.timeoutMs,
+                );
+              });
             } else {
-              sessionInfo = await this.ensureSessionBinding(state, flow, node, agentInfo);
-              rawText = await this.runPersistentPrompt(sessionInfo, prompt);
-              sessionInfo = await this.refreshSessionBinding(sessionInfo);
+              const boundSession = await this.ensureSessionBinding(
+                state,
+                flow,
+                node,
+                resolvedAgent,
+              );
+              sessionInfo = boundSession;
+              rawText = await this.runWithHeartbeat(
+                runDir,
+                state,
+                current,
+                node,
+                async () =>
+                  await this.runPersistentPrompt(
+                    boundSession,
+                    prompt,
+                    node.timeoutMs ?? this.timeoutMs,
+                  ),
+                async () => {
+                  await cancelSessionPrompt({
+                    sessionId: boundSession.acpxRecordId,
+                  });
+                },
+              );
+              sessionInfo = await this.refreshSessionBinding(boundSession);
               state.sessionBindings[sessionInfo.key] = sessionInfo;
             }
             output = node.parse ? await node.parse(rawText, context) : rawText;
@@ -330,6 +468,7 @@ export class FlowRunner {
 
         state.outputs[current] = output;
         state.updatedAt = isoNow();
+        this.clearActiveNode(state);
         state.steps.push({
           nodeId: current,
           kind: node.kind,
@@ -354,16 +493,20 @@ export class FlowRunner {
       state.status = "completed";
       state.finishedAt = isoNow();
       state.updatedAt = state.finishedAt;
+      this.clearActiveNode(state);
       await this.persist(runDir, state, { type: "run_completed" });
       return {
         runDir,
         state,
       };
     } catch (error) {
-      state.status = "failed";
+      state.status = error instanceof TimeoutError ? "timed_out" : "failed";
       state.updatedAt = isoNow();
       state.finishedAt = state.updatedAt;
       state.error = error instanceof Error ? error.message : String(error);
+      state.statusDetail = state.currentNode
+        ? `Failed in ${state.currentNode}: ${state.error}`
+        : state.error;
       await this.persist(runDir, state, {
         type: "run_failed",
         error: state.error,
@@ -379,6 +522,83 @@ export class FlowRunner {
       state,
       services: this.services,
     };
+  }
+
+  private markNodeStarted(
+    state: FlowRunState,
+    nodeId: string,
+    kind: FlowNodeDefinition["kind"],
+    startedAt: string,
+    detail?: string,
+  ): void {
+    state.status = "running";
+    state.waitingOn = undefined;
+    state.currentNode = nodeId;
+    state.currentNodeKind = kind;
+    state.currentNodeStartedAt = startedAt;
+    state.lastHeartbeatAt = startedAt;
+    state.statusDetail = detail ?? `Running ${kind} node ${nodeId}`;
+  }
+
+  private clearActiveNode(state: FlowRunState, detail?: string): void {
+    state.currentNode = undefined;
+    state.currentNodeKind = undefined;
+    state.currentNodeStartedAt = undefined;
+    state.lastHeartbeatAt = undefined;
+    state.statusDetail = detail;
+  }
+
+  private updateStatusDetail(state: FlowRunState, detail?: string): void {
+    if (!detail) {
+      return;
+    }
+    state.statusDetail = detail;
+  }
+
+  private async runWithHeartbeat<T>(
+    runDir: string,
+    state: FlowRunState,
+    nodeId: string,
+    node: FlowNodeCommon,
+    run: () => Promise<T>,
+    onTimeout?: () => Promise<void>,
+  ): Promise<T> {
+    const heartbeatMs = Math.max(0, Math.round(node.heartbeatMs ?? DEFAULT_FLOW_HEARTBEAT_MS));
+    let timer: NodeJS.Timeout | undefined;
+    let active = true;
+    const heartbeat = async (): Promise<void> => {
+      if (!active) {
+        return;
+      }
+      state.lastHeartbeatAt = isoNow();
+      state.updatedAt = state.lastHeartbeatAt;
+      await this.persist(runDir, state, {
+        type: "node_heartbeat",
+        nodeId,
+      });
+    };
+
+    if (heartbeatMs > 0) {
+      timer = setInterval(() => {
+        void heartbeat();
+      }, heartbeatMs);
+    }
+
+    try {
+      return await run();
+    } catch (error) {
+      if (error instanceof TimeoutError && onTimeout) {
+        await onTimeout().catch(() => {
+          // best effort cancellation only
+        });
+      }
+      throw error;
+    } finally {
+      active = false;
+      if (timer) {
+        clearInterval(timer);
+      }
+    }
   }
 
   private async ensureSessionBinding(
@@ -437,6 +657,7 @@ export class FlowRunner {
   private async runPersistentPrompt(
     binding: FlowSessionBinding,
     prompt: PromptInput,
+    timeoutMs?: number,
   ): Promise<string> {
     const capture = createQuietCaptureOutput();
     await sendSession({
@@ -449,7 +670,7 @@ export class FlowRunner {
       authPolicy: this.authPolicy,
       outputFormatter: capture.formatter,
       suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
-      timeoutMs: this.timeoutMs,
+      timeoutMs,
       ttlMs: this.ttlMs,
       verbose: this.verbose,
       waitForCompletion: true,
@@ -460,6 +681,7 @@ export class FlowRunner {
   private async runIsolatedPrompt(
     agent: ReturnType<FlowRunnerOptions["resolveAgent"]>,
     prompt: PromptInput,
+    timeoutMs?: number,
   ): Promise<string> {
     const capture = createQuietCaptureOutput();
     await runOnce({
@@ -473,7 +695,7 @@ export class FlowRunner {
       authPolicy: this.authPolicy,
       outputFormatter: capture.formatter,
       suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
-      timeoutMs: this.timeoutMs,
+      timeoutMs,
       verbose: this.verbose,
       sessionOptions: this.sessionOptions,
     });
@@ -564,6 +786,119 @@ function getByPath(value: unknown, jsonPath: string): unknown {
       }
       return (current as Record<string, unknown>)[key];
     }, value);
+}
+
+function summarizePrompt(promptText: string, explicitDetail?: string): string {
+  if (explicitDetail) {
+    return explicitDetail;
+  }
+
+  const line = promptText
+    .split("\n")
+    .map((candidate) => candidate.trim())
+    .find((candidate) => candidate.length > 0);
+
+  if (!line) {
+    return "Running ACP prompt";
+  }
+
+  const truncated = line.length > 120 ? `${line.slice(0, 117)}...` : line;
+  return `ACP: ${truncated}`;
+}
+
+function formatShellActionSummary(spec: ShellActionExecution): string {
+  return `shell: ${renderShellCommand(spec.command, spec.args ?? [])}`;
+}
+
+function renderShellCommand(command: string, args: string[]): string {
+  const renderedArgs = args.map((arg) => JSON.stringify(arg)).join(" ");
+  return renderedArgs.length > 0 ? `${command} ${renderedArgs}` : command;
+}
+
+async function runShellAction(spec: ShellActionExecution): Promise<ShellActionResult> {
+  const cwd = spec.cwd ?? process.cwd();
+  const args = spec.args ?? [];
+  const startMs = Date.now();
+  const child = spawn(spec.command, args, {
+    cwd,
+    env: {
+      ...process.env,
+      ...spec.env,
+    },
+    shell: spec.shell,
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+
+  let stdout = "";
+  let stderr = "";
+  let timedOut = false;
+  let timeout: NodeJS.Timeout | undefined;
+
+  const finish = new Promise<ShellActionResult>((resolve, reject) => {
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    child.once("error", reject);
+    child.once("exit", (exitCode, signal) => {
+      const result: ShellActionResult = {
+        command: spec.command,
+        args,
+        cwd,
+        stdout,
+        stderr,
+        combinedOutput: `${stdout}${stderr}`,
+        exitCode,
+        signal,
+        durationMs: Date.now() - startMs,
+      };
+
+      if (timedOut) {
+        reject(new TimeoutError(spec.timeoutMs ?? 0));
+        return;
+      }
+
+      if ((exitCode ?? 0) !== 0 && spec.allowNonZeroExit !== true) {
+        reject(
+          new Error(
+            `Shell action failed (${renderShellCommand(spec.command, args)}): exit ${String(exitCode)}${stderr.length > 0 ? `\n${stderr.trim()}` : ""}`,
+          ),
+        );
+        return;
+      }
+
+      resolve(result);
+    });
+  });
+
+  if (spec.stdin != null) {
+    child.stdin.write(spec.stdin);
+  }
+  child.stdin.end();
+
+  if (spec.timeoutMs != null && spec.timeoutMs > 0) {
+    timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        child.kill("SIGKILL");
+      }, 1_000).unref();
+    }, spec.timeoutMs);
+  }
+
+  try {
+    return await finish;
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 function createQuietCaptureOutput(): {

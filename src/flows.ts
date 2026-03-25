@@ -6,10 +6,13 @@ export {
   compute,
   defineFlow,
   flowRunsBaseDir,
+  shell,
+  type FlowNodeCommon,
   type AcpNodeDefinition,
   type ActionNodeDefinition,
   type CheckpointNodeDefinition,
   type ComputeNodeDefinition,
+  type FunctionActionNodeDefinition,
   type FlowDefinition,
   type FlowEdge,
   type FlowNodeContext,
@@ -19,5 +22,8 @@ export {
   type FlowRunnerOptions,
   type FlowSessionBinding,
   type FlowStepRecord,
+  type ShellActionExecution,
+  type ShellActionNodeDefinition,
+  type ShellActionResult,
 } from "./flows/runtime.js";
 export { extractJsonObject } from "./flows/json.js";
