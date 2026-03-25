@@ -39,7 +39,7 @@ One command surface for Pi, OpenClaw ACP, Codex, Claude, and other ACP-compatibl
 - **Structured output**: typed ACP messages (thinking, tool calls, diffs) instead of ANSI scraping
 - **Any ACP agent**: built-in registry + `--agent` escape hatch for custom servers
 - **One-shot mode**: `exec` for stateless fire-and-forget tasks
-- **Experimental flows**: `flow run <file>` for stepwise ACP workflows over multiple prompts
+- **Experimental flows**: `flow run <file>` for user-authored ACP workflows over multiple prompts
 
 ```bash
 $ acpx codex sessions new
@@ -205,7 +205,7 @@ acpx --cwd ~/repos/backend codex 'review recent auth changes'
 acpx --format text codex 'summarize your findings'
 acpx --format json codex exec 'review changed files'
 acpx --format json --json-strict codex exec 'machine-safe JSON only'
-acpx flow run workflows/pr-triage.flow.ts --input-json '{"repo":"openclaw/acpx","prNumber":174}'
+acpx flow run ./my-flow.ts --input-file ./flow-input.json
 acpx --format quiet codex 'final recommendation only'
 
 acpx --timeout 90 codex 'investigate intermittent test timeout'

@@ -273,7 +273,7 @@ The recommended repository layout is:
 
 Example:
 
-- `workflows/pr-triage.flow.ts`
+- `workflows/example.flow.ts`
 - `workflows/review.flow.ts`
 
 That keeps the workflow library separate from the workflows it executes and
@@ -331,10 +331,10 @@ Explicit local side effect.
 
 Used for:
 
-- GitHub writes
 - file writes
 - notifications
 - external API calls
+- arbitrary local side effects
 
 ### `checkpoint(...)`
 
@@ -632,7 +632,7 @@ The CLI should load them directly.
 
 The canonical local invocation should look like:
 
-- `acpx flow run workflows/pr-triage.flow.ts`
+- `acpx flow run workflows/example.flow.ts`
 
 That means the monorepo needs a dedicated runtime loader path for TypeScript
 flow modules instead of pretending the current CLI-only build is enough.

@@ -12,7 +12,6 @@ import {
 } from "../cli/flags.js";
 import type { ResolvedAcpxConfig } from "../config.js";
 import { type FlowDefinition, FlowRunner } from "../flows.js";
-import { GitHubFlowService } from "./github.js";
 
 type FlowRunFlags = {
   inputJson?: string;
@@ -50,9 +49,6 @@ export async function handleFlowRun(
       model: globalFlags.model,
       allowedTools: globalFlags.allowedTools,
       maxTurns: globalFlags.maxTurns,
-    },
-    services: {
-      github: new GitHubFlowService(),
     },
   });
 

@@ -14,7 +14,6 @@ import {
   extractJsonObject,
   flowRunsBaseDir,
 } from "../src/flows.js";
-import { GitHubFlowService } from "../src/flows/github.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
 const MOCK_AGENT_COMMAND = `node ${JSON.stringify(MOCK_AGENT_PATH)}`;
@@ -140,85 +139,6 @@ test("FlowRunner stops at checkpoint nodes and marks the run as waiting", async 
     assert.deepEqual(result.state.outputs.prepare, { prepared: true });
     assert.equal(result.state.outputs.after_wait, undefined);
   });
-});
-
-test("GitHubFlowService builds PR prompt context from gh CLI output", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-gh-"));
-  const scriptPath = path.join(tempDir, "fake-gh.js");
-  const launcherPath =
-    process.platform === "win32" ? path.join(tempDir, "gh.cmd") : path.join(tempDir, "gh");
-
-  await fs.writeFile(
-    scriptPath,
-    [
-      "#!/usr/bin/env node",
-      "const args = process.argv.slice(2);",
-      'if (args[0] === "pr" && args[1] === "view") {',
-      "  process.stdout.write(JSON.stringify({",
-      "    number: 7,",
-      '    title: "Flow PR",',
-      '    body: "Fixes #42",',
-      '    author: { login: "dev" },',
-      '    url: "https://example.test/pr/7",',
-      "    additions: 10,",
-      "    deletions: 2,",
-      "    changedFiles: 1,",
-      '    files: [{ path: "src/flow.ts", additions: 10, deletions: 2 }],',
-      '    baseRefName: "main",',
-      '    headRefName: "feature/flow"',
-      "  }));",
-      '} else if (args[0] === "issue" && args[1] === "view") {',
-      "  process.stdout.write(JSON.stringify({",
-      "    number: 42,",
-      '    title: "Underlying issue",',
-      '    body: "Make the flow runner reusable.",',
-      '    url: "https://example.test/issues/42"',
-      "  }));",
-      '} else if (args[0] === "pr" && args[1] === "diff") {',
-      '  process.stdout.write("diff --git a/src/flow.ts b/src/flow.ts\\n+new behavior\\n+more");',
-      "} else {",
-      '  process.stderr.write(`unexpected args: ${args.join(" ")}`);',
-      "  process.exit(1);",
-      "}",
-      "",
-    ].join("\n"),
-    { mode: 0o755 },
-  );
-
-  if (process.platform === "win32") {
-    await fs.writeFile(
-      launcherPath,
-      [`@echo off`, `"${process.execPath}" "${scriptPath}" %*`, ""].join("\r\n"),
-      "utf8",
-    );
-  } else {
-    await fs.writeFile(
-      launcherPath,
-      [`#!/bin/sh`, `exec "${process.execPath}" "${scriptPath}" "$@"`, ""].join("\n"),
-      { mode: 0o755 },
-    );
-  }
-
-  try {
-    const service = new GitHubFlowService({
-      ghCommand: launcherPath,
-      maxDiffChars: 20,
-    });
-
-    const context = await service.loadPullRequestContext({
-      repo: "openclaw/acpx",
-      prNumber: 7,
-    });
-
-    assert.equal(context.repo, "openclaw/acpx");
-    assert.equal(context.pr.number, 7);
-    assert.equal(context.linkedIssue?.number, 42);
-    assert.match(context.promptContext, /Flow PR/);
-    assert.match(context.promptContext, /Linked issue #42/);
-    assert.match(context.promptContext, /\[diff truncated at 20 characters]/);
-  } finally {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
 });
 
 async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {

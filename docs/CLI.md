@@ -60,7 +60,7 @@ Prompt options:
 Notes:
 
 - Top-level `prompt`, `exec`, `cancel`, `set-mode`, `set`, `sessions`, and bare `acpx <prompt>` default to `codex`.
-- Top-level `flow run <file>` executes a workflow module and persists run state under `~/.acpx/flows/runs/`.
+- Top-level `flow run <file>` executes a user-authored workflow module and persists run state under `~/.acpx/flows/runs/`.
 - If a prompt argument is omitted, `acpx` reads prompt text from stdin when piped.
 - `--file` works for implicit prompt, `prompt`, and `exec` commands.
 - `acpx` with no args in an interactive terminal shows help.
@@ -71,12 +71,13 @@ Notes:
 acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>] [--default-agent <name>]
 ```
 
-- Runs a workflow module step by step through the `acpx/flows` runtime.
+- Runs a user-authored workflow module step by step through the `acpx/flows` runtime.
 - Persists run artifacts under `~/.acpx/flows/runs/<runId>/`.
 - Reuses one implicit main ACP session by default for non-isolated `acp` nodes.
 - `--input-json` passes flow input inline as JSON.
 - `--input-file` reads flow input JSON from disk.
 - `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.
+- `acpx` does not ship built-in workload-specific flows; the file is provided by the caller.
 
 ## Global options
 
