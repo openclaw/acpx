@@ -78,6 +78,7 @@ acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>
 - `--input-file` reads flow input JSON from disk.
 - `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.
 - `acpx` does not ship built-in workload-specific flows; the file is provided by the caller.
+- The source repo includes small generic examples under `examples/flows/`.
 
 ## Global options
 
