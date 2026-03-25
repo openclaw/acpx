@@ -26,4 +26,9 @@ export {
   type ShellActionResult,
 } from "./flows/runtime.js";
 export { flowRunsBaseDir } from "./flows/store.js";
-export { extractJsonObject } from "./flows/json.js";
+export {
+  extractJsonObject,
+  parseJsonObject,
+  parseStrictJsonObject,
+  type JsonObjectParseMode,
+} from "./flows/json.js";

@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import path from "node:path";
 import { createOutputFormatter } from "../output.js";
 import { promptToDisplayText, textPrompt } from "../prompt-content.js";
 import { resolveSessionRecord } from "../session-persistence.js";
@@ -22,6 +23,7 @@ import { FlowRunStore, flowRunsBaseDir } from "./store.js";
 
 type MaybePromise<T> = T | Promise<T>;
 const DEFAULT_FLOW_HEARTBEAT_MS = 5_000;
+const DEFAULT_FLOW_STEP_TIMEOUT_MS = 15 * 60_000;
 
 export type FlowNodeContext<TInput = unknown> = {
   input: TInput;
@@ -52,6 +54,7 @@ export type FlowEdge =
 export type AcpNodeDefinition = FlowNodeCommon & {
   kind: "acp";
   profile?: string;
+  cwd?: string | ((context: FlowNodeContext) => MaybePromise<string | undefined>);
   session?: {
     handle?: string;
     isolated?: boolean;
@@ -199,6 +202,7 @@ export type FlowRunnerOptions = {
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   timeoutMs?: number;
+  defaultNodeTimeoutMs?: number;
   ttlMs?: number;
   verbose?: boolean;
   suppressSdkConsoleErrors?: boolean;
@@ -266,6 +270,7 @@ export class FlowRunner {
   private readonly authCredentials?;
   private readonly authPolicy?;
   private readonly timeoutMs?;
+  private readonly defaultNodeTimeoutMs;
   private readonly ttlMs?;
   private readonly verbose?;
   private readonly suppressSdkConsoleErrors?;
@@ -281,6 +286,8 @@ export class FlowRunner {
     this.authCredentials = options.authCredentials;
     this.authPolicy = options.authPolicy;
     this.timeoutMs = options.timeoutMs;
+    this.defaultNodeTimeoutMs =
+      options.defaultNodeTimeoutMs ?? options.timeoutMs ?? DEFAULT_FLOW_STEP_TIMEOUT_MS;
     this.ttlMs = options.ttlMs;
     this.verbose = options.verbose;
     this.suppressSdkConsoleErrors = options.suppressSdkConsoleErrors;
@@ -470,7 +477,10 @@ export class FlowRunner {
       state.currentNode ?? "",
       node,
       async () =>
-        await withTimeout(Promise.resolve(node.run(context)), node.timeoutMs ?? this.timeoutMs),
+        await withTimeout(
+          Promise.resolve(node.run(context)),
+          node.timeoutMs ?? this.defaultNodeTimeoutMs,
+        ),
     );
     return {
       output,
@@ -494,7 +504,10 @@ export class FlowRunner {
         state.currentNode ?? "",
         node,
         async () =>
-          await withTimeout(Promise.resolve(node.run(context)), node.timeoutMs ?? this.timeoutMs),
+          await withTimeout(
+            Promise.resolve(node.run(context)),
+            node.timeoutMs ?? this.defaultNodeTimeoutMs,
+          ),
       );
       return {
         output,
@@ -508,7 +521,7 @@ export class FlowRunner {
     const execution = await Promise.resolve(node.exec(context));
     const effectiveExecution: ShellActionExecution = {
       ...execution,
-      timeoutMs: execution.timeoutMs ?? node.timeoutMs ?? this.timeoutMs,
+      timeoutMs: execution.timeoutMs ?? node.timeoutMs ?? this.defaultNodeTimeoutMs,
     };
     this.updateStatusDetail(state, formatShellActionSummary(effectiveExecution));
     await this.store.writeLive(runDir, state, {
@@ -561,7 +574,11 @@ export class FlowRunner {
     node: AcpNodeDefinition,
     context: FlowNodeContext,
   ): Promise<FlowNodeExecutionResult> {
-    const agentInfo = this.resolveAgent(node.profile);
+    const resolvedAgent = this.resolveAgent(node.profile);
+    const agentInfo = {
+      ...resolvedAgent,
+      cwd: await resolveNodeCwd(resolvedAgent.cwd, node.cwd, context),
+    };
     const prompt = normalizePromptInput(await node.prompt(context));
     const promptText = promptToDisplayText(prompt);
     this.updateStatusDetail(state, summarizePrompt(promptText, node.statusDetail));
@@ -578,7 +595,11 @@ export class FlowRunner {
         state.currentNode ?? "",
         node,
         async () =>
-          await this.runIsolatedPrompt(agentInfo, prompt, node.timeoutMs ?? this.timeoutMs),
+          await this.runIsolatedPrompt(
+            agentInfo,
+            prompt,
+            node.timeoutMs ?? this.defaultNodeTimeoutMs,
+          ),
       );
       return {
         output: node.parse ? await node.parse(rawText, context) : rawText,
@@ -596,7 +617,11 @@ export class FlowRunner {
       state.currentNode ?? "",
       node,
       async () =>
-        await this.runPersistentPrompt(boundSession, prompt, node.timeoutMs ?? this.timeoutMs),
+        await this.runPersistentPrompt(
+          boundSession,
+          prompt,
+          node.timeoutMs ?? this.defaultNodeTimeoutMs,
+        ),
       async () => {
         await cancelSessionPrompt({
           sessionId: boundSession.acpxRecordId,
@@ -698,13 +723,13 @@ export class FlowRunner {
     agent: ReturnType<FlowRunnerOptions["resolveAgent"]>,
   ): Promise<FlowSessionBinding> {
     const handle = node.session?.handle ?? "main";
-    const key = `${agent.agentCommand}::${handle}`;
+    const key = createSessionBindingKey(agent.agentCommand, agent.cwd, handle);
     const existing = state.sessionBindings[key];
     if (existing) {
       return existing;
     }
 
-    const name = `${flow.name}-${handle}-${state.runId.slice(-8)}`;
+    const name = createSessionName(flow.name, handle, agent.cwd, state.runId);
     const created = await createSession({
       agentCommand: agent.agentCommand,
       cwd: agent.cwd,
@@ -714,7 +739,7 @@ export class FlowRunner {
       nonInteractivePermissions: this.nonInteractivePermissions,
       authCredentials: this.authCredentials,
       authPolicy: this.authPolicy,
-      timeoutMs: this.timeoutMs,
+      timeoutMs: this.defaultNodeTimeoutMs,
       verbose: this.verbose,
       sessionOptions: this.sessionOptions,
     });
@@ -823,6 +848,18 @@ function normalizePromptInput(prompt: PromptInput | string): PromptInput {
   return typeof prompt === "string" ? textPrompt(prompt) : prompt;
 }
 
+async function resolveNodeCwd(
+  defaultCwd: string,
+  cwd: string | ((context: FlowNodeContext) => MaybePromise<string | undefined>) | undefined,
+  context: FlowNodeContext,
+): Promise<string> {
+  if (typeof cwd === "function") {
+    const resolved = (await cwd(context)) ?? defaultCwd;
+    return path.resolve(defaultCwd, resolved);
+  }
+  return path.resolve(defaultCwd, cwd ?? defaultCwd);
+}
+
 function resolveNext(edges: FlowEdge[], from: string, output: unknown): string | null {
   const edge = edges.find((candidate) => candidate.from === from);
   if (!edge) {
@@ -904,6 +941,19 @@ function createRunId(flowName: string): string {
     .replace(/^-+|-+$/g, "")
     .toLowerCase();
   return `${stamp}-${slug}-${randomUUID().slice(0, 8)}`;
+}
+
+function createSessionBindingKey(agentCommand: string, cwd: string, handle: string): string {
+  return `${agentCommand}::${cwd}::${handle}`;
+}
+
+function createSessionName(flowName: string, handle: string, cwd: string, runId: string): string {
+  const stamp = stableShortHash(cwd);
+  return `${flowName}-${handle}-${stamp}-${runId.slice(-8)}`;
+}
+
+function stableShortHash(value: string): string {
+  return createHash("sha1").update(value).digest("hex").slice(0, 8);
 }
 
 function isoNow(): string {

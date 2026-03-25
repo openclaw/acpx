@@ -16,6 +16,9 @@ import { queuePaths } from "./queue-test-helpers.js";
 const CLI_PATH = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
 const FLOW_FIXTURE_PATH = fileURLToPath(new URL("./fixtures/flow-branch.flow.js", import.meta.url));
+const FLOW_WORKDIR_FIXTURE_PATH = fileURLToPath(
+  new URL("./fixtures/flow-workdir.flow.js", import.meta.url),
+);
 const MOCK_AGENT_COMMAND = `node ${JSON.stringify(MOCK_AGENT_PATH)}`;
 
 type CliRunResult = {
@@ -111,6 +114,52 @@ test("integration: flow run executes multiple ACP steps in one session and branc
         1,
         JSON.stringify(payload, null, 2),
       );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: flow run supports dynamic ACP working directories", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "json",
+          "--ttl",
+          "1",
+          "flow",
+          "run",
+          FLOW_WORKDIR_FIXTURE_PATH,
+        ],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      const payload = JSON.parse(result.stdout.trim()) as {
+        action?: string;
+        status?: string;
+        outputs?: {
+          prepare?: { workdir: string };
+          finalize?: { cwd: string };
+        };
+        sessionBindings?: Record<string, { cwd: string }>;
+      };
+
+      assert.equal(payload.action, "flow_run_result");
+      assert.equal(payload.status, "completed");
+      const workdir = payload.outputs?.prepare?.workdir;
+      const finalCwd = payload.outputs?.finalize?.cwd;
+      assert.equal(typeof workdir, "string");
+      assert.equal(typeof finalCwd, "string");
+      assert.equal(await fs.realpath(String(finalCwd)), await fs.realpath(String(workdir)));
+      const bindings = Object.values(payload.sessionBindings ?? {});
+      assert.equal(bindings.length, 1);
+      assert.equal(await fs.realpath(bindings[0]?.cwd ?? ""), await fs.realpath(String(workdir)));
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }

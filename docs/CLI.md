@@ -74,6 +74,8 @@ acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>
 - Runs a user-authored workflow module step by step through the `acpx/flows` runtime.
 - Persists run artifacts under `~/.acpx/flows/runs/<runId>/`.
 - Reuses one implicit main ACP session by default for non-isolated `acp` nodes.
+- `acp` nodes may override their working directory per step, which lets flows prepare an isolated workspace with an action node and then keep the agent session inside that cwd.
+- `acp` and `action` nodes use the global `--timeout` value as their default step timeout. If `--timeout` is omitted, flows default to 15 minutes per active step.
 - `--input-json` passes flow input inline as JSON.
 - `--input-file` reads flow input JSON from disk.
 - `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.

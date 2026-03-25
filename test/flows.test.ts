@@ -13,17 +13,33 @@ import {
   defineFlow,
   extractJsonObject,
   flowRunsBaseDir,
+  parseJsonObject,
+  parseStrictJsonObject,
   shell,
 } from "../src/flows.js";
 import { TimeoutError } from "../src/session-runtime-helpers.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
 const MOCK_AGENT_COMMAND = `node ${JSON.stringify(MOCK_AGENT_PATH)}`;
+const TEST_CLI_PATH = fileURLToPath(new URL("../src/cli.js", import.meta.url));
+const TEST_QUEUE_OWNER_ARGS = JSON.stringify([TEST_CLI_PATH, "__queue-owner"]);
 
 test("extractJsonObject parses direct, fenced, and embedded JSON", () => {
   assert.deepEqual(extractJsonObject('{"ok":true}'), { ok: true });
   assert.deepEqual(extractJsonObject('```json\n{"ok":true}\n```'), { ok: true });
   assert.deepEqual(extractJsonObject('before {"ok":true} after'), { ok: true });
+});
+
+test("parseJsonObject supports strict and fenced-only modes", () => {
+  assert.deepEqual(parseStrictJsonObject('{"ok":true}'), { ok: true });
+  assert.deepEqual(parseJsonObject('```json\n{"ok":true}\n```', { mode: "fenced" }), {
+    ok: true,
+  });
+  assert.throws(() => parseStrictJsonObject('before {"ok":true} after'), /Could not parse JSON/);
+  assert.throws(
+    () => parseJsonObject('before {"ok":true} after', { mode: "fenced" }),
+    /Could not parse JSON/,
+  );
 });
 
 test("FlowRunner executes isolated ACP nodes and branches deterministically", async () => {
@@ -229,6 +245,114 @@ test("FlowRunner persists active node state while a shell step is running", asyn
   });
 });
 
+test("FlowRunner lets ACP nodes run in a dynamic working directory", async () => {
+  await withTempHome(async () => {
+    const baseCwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-base-cwd-"));
+    const worktree = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-worktree-"));
+
+    try {
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: MOCK_AGENT_COMMAND,
+          cwd: baseCwd,
+        }),
+        permissionMode: "approve-all",
+        outputRoot: await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-")),
+      });
+
+      const flow = defineFlow({
+        name: "dynamic-cwd-test",
+        startAt: "prepare",
+        nodes: {
+          prepare: action({
+            run: () => ({ worktree }),
+          }),
+          inspect: acp({
+            cwd: ({ outputs }) => (outputs.prepare as { worktree: string }).worktree,
+            prompt: () => {
+              const script = "process.stdout.write(process.cwd())";
+              return `terminal ${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`;
+            },
+            parse: (text) => text.trim().split("\n")[0] ?? "",
+          }),
+        },
+        edges: [{ from: "prepare", to: "inspect" }],
+      });
+
+      const result = await runner.run(flow, {});
+      assert.equal(result.state.status, "completed");
+      assert.equal(
+        await fs.realpath(String(result.state.outputs.inspect)),
+        await fs.realpath(worktree),
+      );
+      const bindings = Object.values(result.state.sessionBindings);
+      assert.equal(bindings.length, 1);
+      assert.equal(await fs.realpath(bindings[0]?.cwd ?? ""), await fs.realpath(worktree));
+    } finally {
+      await fs.rm(baseCwd, { recursive: true, force: true });
+      await fs.rm(worktree, { recursive: true, force: true });
+    }
+  });
+});
+
+test("FlowRunner keeps same session handles isolated by working directory", async () => {
+  await withTempHome(async () => {
+    const baseCwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-base-cwd-"));
+    const worktreeA = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-worktree-a-"));
+    const worktreeB = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-worktree-b-"));
+
+    try {
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: MOCK_AGENT_COMMAND,
+          cwd: baseCwd,
+        }),
+        permissionMode: "approve-all",
+        outputRoot: await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-")),
+      });
+
+      const flow = defineFlow({
+        name: "session-cwd-split-test",
+        startAt: "first",
+        nodes: {
+          first: acp({
+            session: {
+              handle: "main",
+            },
+            cwd: () => worktreeA,
+            prompt: () => 'echo {"where":"A"}',
+            parse: (text) => extractJsonObject(text),
+          }),
+          second: acp({
+            session: {
+              handle: "main",
+            },
+            cwd: () => worktreeB,
+            prompt: () => 'echo {"where":"B"}',
+            parse: (text) => extractJsonObject(text),
+          }),
+        },
+        edges: [{ from: "first", to: "second" }],
+      });
+
+      const result = await runner.run(flow, {});
+      assert.equal(result.state.status, "completed");
+      assert.deepEqual(result.state.outputs.first, { where: "A" });
+      assert.deepEqual(result.state.outputs.second, { where: "B" });
+      const bindings = Object.values(result.state.sessionBindings);
+      assert.equal(bindings.length, 2);
+      const bindingCwds = new Set(bindings.map((binding) => binding.cwd));
+      assert.deepEqual(bindingCwds, new Set([worktreeA, worktreeB]));
+    } finally {
+      await fs.rm(baseCwd, { recursive: true, force: true });
+      await fs.rm(worktreeA, { recursive: true, force: true });
+      await fs.rm(worktreeB, { recursive: true, force: true });
+    }
+  });
+});
+
 test("FlowRunner marks timed out shell steps explicitly", async () => {
   await withTempHome(async () => {
     const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
@@ -268,8 +392,10 @@ test("FlowRunner marks timed out shell steps explicitly", async () => {
 
 async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {
   const previousHome = process.env.HOME;
+  const previousQueueOwnerArgs = process.env.ACPX_QUEUE_OWNER_ARGS;
   const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-home-"));
   process.env.HOME = homeDir;
+  process.env.ACPX_QUEUE_OWNER_ARGS = TEST_QUEUE_OWNER_ARGS;
 
   try {
     await run(homeDir);
@@ -278,6 +404,11 @@ async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<vo
       delete process.env.HOME;
     } else {
       process.env.HOME = previousHome;
+    }
+    if (previousQueueOwnerArgs === undefined) {
+      delete process.env.ACPX_QUEUE_OWNER_ARGS;
+    } else {
+      process.env.ACPX_QUEUE_OWNER_ARGS = previousQueueOwnerArgs;
     }
     await fs.rm(homeDir, { recursive: true, force: true });
   }

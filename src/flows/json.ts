@@ -1,31 +1,51 @@
-export function extractJsonObject(text: string): unknown {
+export type JsonObjectParseMode = "strict" | "fenced" | "compat";
+
+export function parseJsonObject(
+  text: string,
+  options: {
+    mode?: JsonObjectParseMode;
+  } = {},
+): unknown {
   const trimmed = String(text ?? "").trim();
   if (!trimmed) {
     throw new Error("Expected JSON output, got empty text");
   }
+  const mode = options.mode ?? "compat";
 
   const direct = tryParse(trimmed);
   if (direct.ok) {
     return direct.value;
   }
 
-  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fencedMatch) {
-    const fenced = tryParse(fencedMatch[1].trim());
-    if (fenced.ok) {
-      return fenced.value;
+  if (mode === "fenced" || mode === "compat") {
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fencedMatch) {
+      const fenced = tryParse(fencedMatch[1].trim());
+      if (fenced.ok) {
+        return fenced.value;
+      }
     }
   }
 
-  const balanced = extractBalancedJson(trimmed);
-  if (balanced) {
-    const parsed = tryParse(balanced);
-    if (parsed.ok) {
-      return parsed.value;
+  if (mode === "compat") {
+    const balanced = extractBalancedJson(trimmed);
+    if (balanced) {
+      const parsed = tryParse(balanced);
+      if (parsed.ok) {
+        return parsed.value;
+      }
     }
   }
 
   throw new Error(`Could not parse JSON from assistant output:\n${trimmed}`);
+}
+
+export function parseStrictJsonObject(text: string): unknown {
+  return parseJsonObject(text, { mode: "strict" });
+}
+
+export function extractJsonObject(text: string): unknown {
+  return parseJsonObject(text, { mode: "compat" });
 }
 
 function tryParse(text: string): { ok: true; value: unknown } | { ok: false } {

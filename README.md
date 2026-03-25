@@ -40,6 +40,8 @@ One command surface for Pi, OpenClaw ACP, Codex, Claude, and other ACP-compatibl
 - **Any ACP agent**: built-in registry + `--agent` escape hatch for custom servers
 - **One-shot mode**: `exec` for stateless fire-and-forget tasks
 - **Experimental flows**: `flow run <file>` for user-authored ACP workflows over multiple prompts
+- **Runtime-owned flow actions**: shell-backed action steps can prepare workspaces and other deterministic mechanics outside the agent turn
+- **Flow workspace isolation**: `acp` nodes can target an explicit per-step cwd, so flows can keep agent work inside disposable worktrees
 
 ```bash
 $ acpx codex sessions new
@@ -206,6 +208,7 @@ acpx --format text codex 'summarize your findings'
 acpx --format json codex exec 'review changed files'
 acpx --format json --json-strict codex exec 'machine-safe JSON only'
 acpx flow run ./my-flow.ts --input-file ./flow-input.json
+acpx --timeout 1800 flow run ./my-flow.ts
 acpx --format quiet codex 'final recommendation only'
 
 acpx --timeout 90 codex 'investigate intermittent test timeout'
