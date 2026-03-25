@@ -1,5 +1,7 @@
 export type JsonObjectParseMode = "strict" | "fenced" | "compat";
 
+// The generic entrypoint when a workflow wants to choose its tolerance level
+// explicitly. Most callers should still use one of the small helpers below.
 export function parseJsonObject(
   text: string,
   options: {
@@ -40,10 +42,14 @@ export function parseJsonObject(
   throw new Error(`Could not parse JSON from assistant output:\n${trimmed}`);
 }
 
+// Use this when the model contract must be exact JSON and any extra text
+// should fail the step immediately.
 export function parseStrictJsonObject(text: string): unknown {
   return parseJsonObject(text, { mode: "strict" });
 }
 
+// Default workflow parser: direct JSON first, fenced JSON second, and finally
+// a balanced embedded object for compatibility with chatty model output.
 export function extractJsonObject(text: string): unknown {
   return parseJsonObject(text, { mode: "compat" });
 }

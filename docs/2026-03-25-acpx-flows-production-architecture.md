@@ -265,6 +265,36 @@ Use for explicit wait states:
 - external webhook
 - workflow approval gate that the runtime cannot clear
 
+## Simplicity rules
+
+The runtime should stay boring.
+
+That means:
+
+- keep the core node set small
+- prefer generic primitives over workload-specific helpers
+- add fewer conventions, not more
+
+Some concrete examples:
+
+- a per-step `cwd` override is enough; `acpx` does not need a built-in
+  `git_worktree_for_pr` primitive
+- a shell-backed `action` step is enough for many deterministic mechanics; do
+  not rush to add a new first-class node type for every external tool
+- keep JSON parsing simple:
+  - use compatibility parsing by default for real workflows, because models do
+    sometimes wrap valid JSON in extra chatter
+  - use strict JSON parsing only when the contract truly must fail on any extra
+    text
+  - do not turn structured-output handling into a giant parser framework
+
+The right bias is:
+
+- generic runtime capabilities in `acpx`
+- workload-specific policy in user-authored workflow files
+
+That keeps the library production-ready without making it heavy.
+
 ## PR triage under the production model
 
 The PR triage workflow should still follow the same logical flow, but some
