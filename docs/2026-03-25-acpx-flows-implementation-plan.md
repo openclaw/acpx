@@ -266,6 +266,19 @@ export default defineFlow({
 });
 ```
 
+The recommended repository layout is:
+
+- library/runtime code under the package workspace
+- user-authored and example flows under a repo-level `workflows/` directory
+
+Example:
+
+- `workflows/pr-triage.flow.ts`
+- `workflows/review.flow.ts`
+
+That keeps the workflow library separate from the workflows it executes and
+gives the CLI one obvious path shape for local development.
+
 ### Why object-shaped graphs
 
 This format is better than a fluent chain for:
@@ -617,6 +630,10 @@ Flow files should be authored as `.ts`.
 
 The CLI should load them directly.
 
+The canonical local invocation should look like:
+
+- `acpx flow run workflows/pr-triage.flow.ts`
+
 That means the monorepo needs a dedicated runtime loader path for TypeScript
 flow modules instead of pretending the current CLI-only build is enough.
 
@@ -753,6 +770,8 @@ layer is validated against ACP behavior, not ad-hoc stubs.
 - `checkpoint` is the right primitive, not `human`.
 - Each flow run has one implicit main session by default.
 - Extra sessions must be explicit.
+- Example and user-authored flows should live under a repo-level `workflows/`
+  directory rather than inside the library package tree.
 - Conversations remain in the existing session store.
 - Workflow state uses file-based persistence first.
 - The flow runtime uses the current `acpx` runtime directly, not CLI subprocesses.
