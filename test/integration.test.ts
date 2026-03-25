@@ -15,6 +15,7 @@ import { queuePaths } from "./queue-test-helpers.js";
 
 const CLI_PATH = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
+const FLOW_FIXTURE_PATH = fileURLToPath(new URL("./fixtures/flow-branch.flow.js", import.meta.url));
 const MOCK_AGENT_COMMAND = `node ${JSON.stringify(MOCK_AGENT_PATH)}`;
 
 type CliRunResult = {
@@ -67,6 +68,50 @@ test("integration: built-in cursor agent resolves to cursor-agent acp", async ()
       assert.match(result.stdout, /hello/);
     } finally {
       await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: flow run executes multiple ACP steps in one session and branches", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "json",
+          "--ttl",
+          "1",
+          "flow",
+          "run",
+          FLOW_FIXTURE_PATH,
+          "--input-json",
+          JSON.stringify({ next: "yes_path" }),
+        ],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      const payload = JSON.parse(result.stdout.trim()) as {
+        action?: string;
+        status?: string;
+        outputs?: Record<string, unknown>;
+        sessionBindings?: Record<string, { acpxRecordId: string }>;
+      };
+
+      assert.equal(payload.action, "flow_run_result");
+      assert.equal(payload.status, "completed");
+      assert.deepEqual(payload.outputs?.yes_path, { ok: true });
+      assert.equal(payload.outputs?.no_path, undefined);
+      assert.equal(
+        Object.keys(payload.sessionBindings ?? {}).length,
+        1,
+        JSON.stringify(payload, null, 2),
+      );
+    } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });

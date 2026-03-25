@@ -8,6 +8,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Conformance/ACP: add a data-driven ACP core v1 conformance suite with CI smoke coverage, nightly coverage, and a hardened runner that reports startup failures cleanly and scopes filesystem checks to the session cwd. (#130) Thanks @lynnzc.
 - Agents/droid: add `factory-droid` and `factorydroid` aliases for the built-in Factory Droid adapter and sync the built-in docs. Thanks @vincentkoc.
+- Flows/workflows: add an initial `flow run` command, an `acpx/flows` runtime surface, file-backed flow run state under `~/.acpx/flows/runs`, and a repo-level PR triage example workflow. Thanks @osolmaz.
 
 ### Breaking
 

@@ -70,10 +70,17 @@ class NoSessionError extends Error {
   }
 }
 
+type FlowRunFlags = {
+  inputJson?: string;
+  inputFile?: string;
+  defaultAgent?: string;
+};
+
 const TOP_LEVEL_VERBS = new Set([
   "prompt",
   "exec",
   "cancel",
+  "flow",
   "set-mode",
   "set",
   "sessions",
@@ -1302,6 +1309,28 @@ function registerConfigCommand(program: Command, config: ResolvedAcpxConfig): vo
   });
 }
 
+function registerFlowCommand(program: Command, config: ResolvedAcpxConfig): void {
+  const flowCommand = program
+    .command("flow")
+    .description("Run multi-step ACP workflows from flow files");
+
+  flowCommand
+    .command("run")
+    .description("Run a flow file")
+    .argument("<file>", "Flow module path")
+    .option("--input-json <json>", "Flow input as JSON")
+    .option("--input-file <path>", "Read flow input JSON from file")
+    .option(
+      "--default-agent <name>",
+      "Default agent profile for ACP nodes without profile",
+      (value: string) => parseNonEmptyValue("Default agent", value),
+    )
+    .action(async function (this: Command, file: string, flags: FlowRunFlags) {
+      const { handleFlowRun } = await import("./flows/cli.js");
+      await handleFlowRun(file, flags, this, config);
+    });
+}
+
 function registerDefaultCommands(program: Command, config: ResolvedAcpxConfig): void {
   registerSharedAgentSubcommands(program, undefined, config, {
     prompt: `Prompt using ${config.defaultAgent} by default`,
@@ -1314,6 +1343,7 @@ function registerDefaultCommands(program: Command, config: ResolvedAcpxConfig): 
 
   registerSessionsCommand(program, undefined, config);
   registerConfigCommand(program, config);
+  registerFlowCommand(program, config);
 }
 
 type AgentTokenScan = {

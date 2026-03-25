@@ -23,6 +23,7 @@ Global options apply to all commands.
 acpx [global_options] [prompt_text...]
 acpx [global_options] prompt [prompt_options] [prompt_text...]
 acpx [global_options] exec [prompt_options] [prompt_text...]
+acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>] [--default-agent <name>]
 acpx [global_options] cancel [-s <name>]
 acpx [global_options] set-mode <mode> [-s <name>]
 acpx [global_options] set <key> <value> [-s <name>]
@@ -59,9 +60,23 @@ Prompt options:
 Notes:
 
 - Top-level `prompt`, `exec`, `cancel`, `set-mode`, `set`, `sessions`, and bare `acpx <prompt>` default to `codex`.
+- Top-level `flow run <file>` executes a workflow module and persists run state under `~/.acpx/flows/runs/`.
 - If a prompt argument is omitted, `acpx` reads prompt text from stdin when piped.
 - `--file` works for implicit prompt, `prompt`, and `exec` commands.
 - `acpx` with no args in an interactive terminal shows help.
+
+## `flow run` subcommand
+
+```bash
+acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>] [--default-agent <name>]
+```
+
+- Runs a workflow module step by step through the `acpx/flows` runtime.
+- Persists run artifacts under `~/.acpx/flows/runs/<runId>/`.
+- Reuses one implicit main ACP session by default for non-isolated `acp` nodes.
+- `--input-json` passes flow input inline as JSON.
+- `--input-file` reads flow input JSON from disk.
+- `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.
 
 ## Global options
 

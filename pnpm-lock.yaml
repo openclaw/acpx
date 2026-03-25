@@ -17,6 +17,9 @@ importers:
       skillflag:
         specifier: ^0.1.4
         version: 0.1.4
+      tsx:
+        specifier: ^4.0.0
+        version: 4.21.0
     devDependencies:
       '@types/node':
         specifier: ^25.3.5
@@ -45,9 +48,6 @@ importers:
       tsdown:
         specifier: ^0.21.0-beta.2
         version: 0.21.1(@typescript/native-preview@7.0.0-dev.20260310.1)(typescript@5.9.3)
-      tsx:
-        specifier: ^4.0.0
-        version: 4.21.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
