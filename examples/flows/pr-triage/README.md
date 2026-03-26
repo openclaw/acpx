@@ -7,15 +7,18 @@ flowchart TD
     classDef hidden fill:none,stroke:none,color:none,stroke-width:0px;
     A[Read item] --> B[Find intent]
     B --> C{"Judge implementation<br/>or solution"}
+    Y(( ))
+    Z(( ))
+    class Y,Z hidden
 
-    C -->|"Bad, localized,<br/>or unclear"| D[Comment and close PR]
-    C -->|"Seems OK but needs a<br/>design decision/human call"| E["Comment and escalate to human<br/>(needs judgment)"]
-    C -->|Good enough| M{"Conflict status against<br/>current base?"}
+    C -->|"Bad, localized,<br/>or unclear"| D[Comment and<br/>close PR]
+    C -->|"Seems OK but needs a<br/>design decision/human call"| Y
+    C -->|Good enough| M{"Conflicts vs<br/>current base?"}
 
     M -->|Clean| V{Bug or feature?}
-    M -->|"Straightforward<br/>conflicts"| O[Resolve conflicts]
+    M -->|Straightforward| O[Resolve conflicts]
     O --> V
-    M -->|"Ambiguous<br/>conflicts"| E
+    M -->|Ambiguous| Y
 
     V -->|Bug| P[If bug, reproduce it<br/>and test the fix]
     V -->|Feature| T[If feature,<br/>test it directly]
@@ -24,11 +27,11 @@ flowchart TD
     T -->|Validated| F
     P -->|"Not validated"| X(( ))
     T -->|"Not validated"| X
-    X --> E
+    X --> Y
     X ~~~ F
     class X hidden
 
-    F -->|Fundamental| E
+    F -->|Fundamental| Y
     F -->|Superficial| R[Do superficial refactor]
     F -->|None| G[Trigger Codex review]
     R --> G
@@ -38,14 +41,18 @@ flowchart TD
     H -->|Yes| I[Address review feedback]
     I --> G
     J --> K{CI failures?}
-    K -->|No| Q{"Conflict status against<br/>current base?"}
+    K -->|No| Q{"Conflicts vs<br/>current base?"}
     K -->|Yes| L[Fix CI failures]
     L --> J
 
-    Q -->|Clean| W["Comment and escalate to human<br/>(ready for landing)"]
-    Q -->|"Straightforward<br/>conflicts"| U[Resolve conflicts]
+    Q -->|Clean| Z
+    Q -->|Straightforward| U[Resolve conflicts]
     U --> J
-    Q -->|"Ambiguous<br/>conflicts"| E
+    Q -->|Ambiguous| Y
+    Y --> E["Comment and<br/>escalate to human<br/>(needs judgment)"]
+    Z --> W["Comment and<br/>escalate to human<br/>(ready for landing)"]
+    Y ~~~ Z
+    E ~~~ W
 ```
 
 This prompt may process multiple items in one run. Use it for the triage lane, not the single-PR landing lane.
