@@ -7,29 +7,35 @@ flowchart TD
     classDef hidden fill:none,stroke:none,color:none,stroke-width:0px;
     A[Read item] --> B[Find intent]
     B --> C{"Judge implementation<br/>or solution"}
-    LeftRail(( ))
-    RightRail(( ))
-    BackRail(( ))
-    class LeftRail,RightRail,BackRail hidden
+    Y(( ))
+    YC(( ))
+    YF(( ))
+    QL(( ))
+    QC(( ))
+    QR(( ))
+    BACK(( ))
+    class Y,YC,YF,QL,QC,QR,BACK hidden
 
     C -->|"Bad, localized,<br/>or unclear"| D[Comment and<br/>close PR]
-    C -->|"Seems OK but needs a<br/>design decision/human call"| LeftRail
+    C -->|"Seems OK but needs a<br/>design decision/human call"| Y
     C -->|Good enough| M{"Conflicts vs<br/>current base?"}
 
     M -->|Clean| V{Bug or feature?}
     M -->|Straightforward| O[Resolve conflicts]
     O --> V
-    M -->|Ambiguous| LeftRail
+    M -->|Ambiguous| YC
+    YC --> Y
 
     V -->|Bug| P[If bug, reproduce it<br/>and test the fix]
     V -->|Feature| T[If feature,<br/>test it directly]
 
     P -->|Validated| F{Refactor?}
     T -->|Validated| F
-    P -->|"Not validated"| LeftRail
-    T -->|"Not validated"| LeftRail
+    P -->|"Not validated"| Y
+    T -->|"Not validated"| Y
 
-    F -->|Fundamental| LeftRail
+    F -->|Fundamental| YF
+    YF --> Y
     F -->|Superficial| R[Do superficial refactor]
     F -->|None| G[Trigger Codex review]
     R --> G
@@ -42,13 +48,15 @@ flowchart TD
     J -->|Related failures| L[Fix CI failures]
     L --> J
 
-    Q -->|Clean| RightRail
-    Q -->|Straightforward| U[Resolve conflicts]
-    U --> BackRail
-    BackRail --> J
-    Q -->|Ambiguous| LeftRail
-    LeftRail --> E["Comment and<br/>escalate to human<br/>(needs judgment)"]
-    RightRail --> W["Comment and<br/>escalate to human<br/>(ready for landing)"]
+    Q -->|Clean| QL
+    QL --> W["Comment and<br/>escalate to human<br/>(ready for landing)"]
+    Q -->|Straightforward| QC
+    QC --> U[Resolve conflicts]
+    U --> BACK
+    BACK --> J
+    Q -->|Ambiguous| QR
+    QR --> Y
+    Y --> E["Comment and<br/>escalate to human<br/>(needs judgment)"]
     E ~~~ W
 ```
 
