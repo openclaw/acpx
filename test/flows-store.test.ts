@@ -25,6 +25,7 @@ test("FlowRunStore writes snapshots, live state, and events", async () => {
       status: "running",
       input: { ok: true },
       outputs: {},
+      results: {},
       steps: [],
       sessionBindings: {},
       currentNode: "prepare",

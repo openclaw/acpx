@@ -1,4 +1,4 @@
-import type { FlowDefinition, FlowEdge } from "./types.js";
+import type { FlowDefinition, FlowEdge, FlowNodeResult } from "./types.js";
 
 export function validateFlowDefinition(flow: FlowDefinition): void {
   if (!flow.name.trim()) {
@@ -31,7 +31,12 @@ export function validateFlowDefinition(flow: FlowDefinition): void {
   }
 }
 
-export function resolveNext(edges: FlowEdge[], from: string, output: unknown): string | null {
+export function resolveNext(
+  edges: FlowEdge[],
+  from: string,
+  output: unknown,
+  result?: FlowNodeResult,
+): string | null {
   const edge = edges.find((candidate) => candidate.from === from);
   if (!edge) {
     return null;
@@ -41,7 +46,7 @@ export function resolveNext(edges: FlowEdge[], from: string, output: unknown): s
     return edge.to;
   }
 
-  const value = getByPath(output, edge.switch.on);
+  const value = getBySwitchPath(output, result, edge.switch.on);
   if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
     throw new Error(`Flow switch value must be scalar for ${edge.switch.on}`);
   }
@@ -50,6 +55,43 @@ export function resolveNext(edges: FlowEdge[], from: string, output: unknown): s
     throw new Error(`No flow switch case for ${edge.switch.on}=${JSON.stringify(value)}`);
   }
   return next;
+}
+
+export function resolveNextForOutcome(
+  edges: FlowEdge[],
+  from: string,
+  result: FlowNodeResult,
+): string | null {
+  const edge = edges.find((candidate) => candidate.from === from);
+  if (!edge || "to" in edge) {
+    return null;
+  }
+  if (!edge.switch.on.startsWith("$result.")) {
+    return null;
+  }
+  const value = getBySwitchPath(undefined, result, edge.switch.on);
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+    throw new Error(`Flow switch value must be scalar for ${edge.switch.on}`);
+  }
+  const next = edge.switch.cases[String(value)];
+  if (!next) {
+    throw new Error(`No flow switch case for ${edge.switch.on}=${JSON.stringify(value)}`);
+  }
+  return next;
+}
+
+function getBySwitchPath(
+  output: unknown,
+  result: FlowNodeResult | undefined,
+  jsonPath: string,
+): unknown {
+  if (jsonPath.startsWith("$result.")) {
+    return getByPath(result, `$.${jsonPath.slice("$result.".length)}`);
+  }
+  if (jsonPath.startsWith("$output.")) {
+    return getByPath(output, `$.${jsonPath.slice("$output.".length)}`);
+  }
+  return getByPath(output, jsonPath);
 }
 
 function getByPath(value: unknown, jsonPath: string): unknown {

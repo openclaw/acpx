@@ -422,8 +422,106 @@ test("FlowRunner marks timed out shell steps explicitly", async () => {
     const runDir = await waitForRunDir(outputRoot, "timeout-test");
     const state = await readRunJson(runDir);
     assert.equal(state.status, "timed_out");
-    assert.equal(state.currentNode, "slow");
     assert.match(String(state.error), /Timed out after 50ms/);
+    const slowResult = (state.results as Record<string, Record<string, unknown>>).slow;
+    assert.equal(slowResult.nodeId, "slow");
+    assert.equal(slowResult.kind, "action");
+    assert.equal(slowResult.outcome, "timed_out");
+    assert.equal(slowResult.error, "Timed out after 50ms");
+    assert.equal(typeof slowResult.startedAt, "string");
+    assert.equal(typeof slowResult.finishedAt, "string");
+    assert.equal(typeof slowResult.durationMs, "number");
+  });
+});
+
+test("FlowRunner can route timed out nodes by outcome", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "unused",
+        agentCommand: "unused",
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+
+    const flow = defineFlow({
+      name: "timeout-route-test",
+      startAt: "slow",
+      nodes: {
+        slow: shell({
+          exec: () => ({
+            command: process.execPath,
+            args: ["-e", "setTimeout(() => {}, 1000)"],
+            timeoutMs: 50,
+          }),
+        }),
+        after_timeout: action({
+          run: ({ results }) => ({
+            routed: true,
+            outcome: results.slow?.outcome,
+          }),
+        }),
+      },
+      edges: [
+        {
+          from: "slow",
+          switch: {
+            on: "$result.outcome",
+            cases: {
+              timed_out: "after_timeout",
+            },
+          },
+        },
+      ],
+    });
+
+    const result = await runner.run(flow, {});
+    assert.equal(result.state.status, "completed");
+    assert.equal(result.state.results.slow?.outcome, "timed_out");
+    assert.deepEqual(result.state.outputs.after_timeout, {
+      routed: true,
+      outcome: "timed_out",
+    });
+  });
+});
+
+test("FlowRunner stores successful node results separately from outputs", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "unused",
+        agentCommand: "unused",
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+
+    const flow = defineFlow({
+      name: "result-state-test",
+      startAt: "first",
+      nodes: {
+        first: compute({
+          run: () => ({ next: "done" }),
+        }),
+        done: action({
+          run: ({ results }) => ({
+            firstOutcome: results.first?.outcome,
+          }),
+        }),
+      },
+      edges: [{ from: "first", to: "done" }],
+    });
+
+    const result = await runner.run(flow, {});
+    assert.equal(result.state.status, "completed");
+    assert.equal(result.state.results.first?.outcome, "ok");
+    assert.deepEqual(result.state.outputs.first, { next: "done" });
+    assert.deepEqual(result.state.outputs.done, { firstOutcome: "ok" });
   });
 });
 

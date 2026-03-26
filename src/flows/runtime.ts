@@ -3,12 +3,12 @@ import path from "node:path";
 import { createOutputFormatter } from "../output.js";
 import { promptToDisplayText, textPrompt } from "../prompt-content.js";
 import { resolveSessionRecord } from "../session-persistence.js";
-import { TimeoutError, withTimeout } from "../session-runtime-helpers.js";
+import { InterruptedError, TimeoutError, withTimeout } from "../session-runtime-helpers.js";
 import { cancelSessionPrompt, createSession, runOnce, sendSession } from "../session.js";
 import type { PromptInput } from "../types.js";
 import { acp, action, checkpoint, compute, defineFlow, shell } from "./definition.js";
 import { formatShellActionSummary, runShellAction } from "./executors/shell.js";
-import { resolveNext, validateFlowDefinition } from "./graph.js";
+import { resolveNext, resolveNextForOutcome, validateFlowDefinition } from "./graph.js";
 import { FlowRunStore } from "./store.js";
 import type {
   AcpNodeDefinition,
@@ -25,6 +25,8 @@ import type {
   FlowSessionBinding,
   FlowEdge,
   FlowStepRecord,
+  FlowNodeOutcome,
+  FlowNodeResult,
   FunctionActionNodeDefinition,
   ResolvedFlowAgent,
   ShellActionExecution,
@@ -43,6 +45,8 @@ export type {
   FlowNodeCommon,
   FlowNodeContext,
   FlowNodeDefinition,
+  FlowNodeOutcome,
+  FlowNodeResult,
   FlowRunResult,
   FlowRunState,
   FlowRunnerOptions,
@@ -122,6 +126,7 @@ export class FlowRunner {
       status: "running",
       input,
       outputs: {},
+      results: {},
       steps: [],
       sessionBindings: {},
     };
@@ -154,16 +159,40 @@ export class FlowRunner {
           nodeId: current,
           kind: node.kind,
         });
-        ({ output, promptText, rawText, sessionInfo, agentInfo } = await this.executeNode(
-          runDir,
-          state,
-          flow,
-          current,
-          node,
-          context,
-        ));
+        let nodeResult: FlowNodeResult | undefined;
+        let executionError: unknown;
+        try {
+          ({ output, promptText, rawText, sessionInfo, agentInfo } = await this.executeNode(
+            runDir,
+            state,
+            flow,
+            current,
+            node,
+            context,
+          ));
+          nodeResult = createNodeResult({
+            nodeId: current,
+            kind: node.kind,
+            outcome: "ok",
+            startedAt,
+            finishedAt: isoNow(),
+            output,
+          });
+        } catch (error) {
+          executionError = error;
+          nodeResult = createNodeResult({
+            nodeId: current,
+            kind: node.kind,
+            outcome: outcomeForError(error),
+            startedAt,
+            finishedAt: isoNow(),
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
 
-        if (node.kind === "checkpoint") {
+        state.results[current] = nodeResult;
+
+        if (nodeResult.outcome === "ok" && node.kind === "checkpoint") {
           state.outputs[current] = output;
           state.waitingOn = current;
           state.updatedAt = isoNow();
@@ -172,8 +201,9 @@ export class FlowRunner {
           state.steps.push({
             nodeId: current,
             kind: node.kind,
+            outcome: nodeResult.outcome,
             startedAt,
-            finishedAt: isoNow(),
+            finishedAt: nodeResult.finishedAt,
             promptText,
             rawText,
             output,
@@ -191,28 +221,49 @@ export class FlowRunner {
           };
         }
 
-        state.outputs[current] = output;
+        if (nodeResult.outcome === "ok") {
+          state.outputs[current] = output;
+        }
         state.updatedAt = isoNow();
         this.clearActiveNode(state);
         state.steps.push({
           nodeId: current,
           kind: node.kind,
+          outcome: nodeResult.outcome,
           startedAt,
-          finishedAt: isoNow(),
+          finishedAt: nodeResult.finishedAt,
           promptText,
           rawText,
           output,
+          error: nodeResult.error,
           session: sessionInfo,
           agent: agentInfo,
         });
 
+        if (nodeResult.outcome === "ok") {
+          await this.store.writeSnapshot(runDir, state, {
+            type: "node_completed",
+            nodeId: current,
+            output,
+          });
+          current = resolveNext(flow.edges, current, output, nodeResult);
+          continue;
+        }
+
         await this.store.writeSnapshot(runDir, state, {
-          type: "node_completed",
+          type: "node_outcome",
           nodeId: current,
-          output,
+          outcome: nodeResult.outcome,
+          error: nodeResult.error,
         });
 
-        current = resolveNext(flow.edges, current, output);
+        const next = resolveNextForOutcome(flow.edges, current, nodeResult);
+        if (next) {
+          current = next;
+          continue;
+        }
+
+        throw executionError;
       }
 
       state.status = "completed";
@@ -244,6 +295,7 @@ export class FlowRunner {
     return {
       input,
       outputs: state.outputs,
+      results: state.results,
       state,
       services: this.services,
     };
@@ -695,6 +747,37 @@ function createSessionBindingKey(agentCommand: string, cwd: string, handle: stri
 function createSessionName(flowName: string, handle: string, cwd: string, runId: string): string {
   const stamp = stableShortHash(cwd);
   return `${flowName}-${handle}-${stamp}-${runId.slice(-8)}`;
+}
+
+function createNodeResult(options: {
+  nodeId: string;
+  kind: FlowNodeDefinition["kind"];
+  outcome: FlowNodeOutcome;
+  startedAt: string;
+  finishedAt: string;
+  output?: unknown;
+  error?: string;
+}): FlowNodeResult {
+  return {
+    nodeId: options.nodeId,
+    kind: options.kind,
+    outcome: options.outcome,
+    startedAt: options.startedAt,
+    finishedAt: options.finishedAt,
+    durationMs: new Date(options.finishedAt).getTime() - new Date(options.startedAt).getTime(),
+    output: options.output,
+    error: options.error,
+  };
+}
+
+function outcomeForError(error: unknown): FlowNodeOutcome {
+  if (error instanceof TimeoutError) {
+    return "timed_out";
+  }
+  if (error instanceof InterruptedError) {
+    return "cancelled";
+  }
+  return "failed";
 }
 
 function stableShortHash(value: string): string {

@@ -12,6 +12,7 @@ type MaybePromise<T> = T | Promise<T>;
 export type FlowNodeContext<TInput = unknown> = {
   input: TInput;
   outputs: Record<string, unknown>;
+  results: Record<string, FlowNodeResult>;
   state: FlowRunState;
   services: Record<string, unknown>;
 };
@@ -107,14 +108,29 @@ export type FlowDefinition = {
   edges: FlowEdge[];
 };
 
+export type FlowNodeOutcome = "ok" | "timed_out" | "failed" | "cancelled";
+
+export type FlowNodeResult = {
+  nodeId: string;
+  kind: FlowNodeDefinition["kind"];
+  outcome: FlowNodeOutcome;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  output?: unknown;
+  error?: string;
+};
+
 export type FlowStepRecord = {
   nodeId: string;
   kind: FlowNodeDefinition["kind"];
+  outcome: FlowNodeOutcome;
   startedAt: string;
   finishedAt: string;
   promptText: string | null;
   rawText: string | null;
   output: unknown;
+  error?: string;
   session: FlowSessionBinding | null;
   agent: {
     agentName: string;
@@ -146,6 +162,7 @@ export type FlowRunState = {
   status: "running" | "waiting" | "completed" | "failed" | "timed_out";
   input: unknown;
   outputs: Record<string, unknown>;
+  results: Record<string, FlowNodeResult>;
   steps: FlowStepRecord[];
   sessionBindings: Record<string, FlowSessionBinding>;
   currentNode?: string;

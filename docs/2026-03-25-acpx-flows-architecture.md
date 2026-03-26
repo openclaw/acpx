@@ -163,6 +163,63 @@ Prefer:
 - declarative `switch` edges
 - `compute` nodes for custom routing logic
 
+## Node outcomes
+
+Timeouts should be treated as routable node outcomes, not only as fatal run
+errors.
+
+The clean model is small:
+
+- `ok`
+- `timed_out`
+- `failed`
+- `cancelled`
+
+That outcome is control-plane state, separate from the business output of the
+step.
+
+In practice, that means a flow should be able to say things like:
+
+- `review_loop` timed out -> escalate to human
+- `collect_review_state` failed -> escalate to human
+- `fix_ci_failures` cancelled -> pause or escalate
+
+This should not become a large event system.
+
+The runtime should persist:
+
+- step output
+- step outcome
+- error text when present
+- timestamps and duration
+
+Then the graph can route on those outcomes when needed.
+
+For example, a switch edge may branch on:
+
+- `$.next` for normal business output
+- `$result.outcome` for control-plane routing
+- `$output.route` when a flow wants the output path to be explicit
+
+If a flow does not define a route for a non-`ok` outcome, failing the run is
+still the right default.
+
+## Events and history
+
+Flow event logs are for observability, not for driving the graph directly.
+
+For example, the runtime may record events such as:
+
+- node started
+- node heartbeat
+- node finished
+- run failed
+
+That append-only history belongs in the run log.
+
+Routing should still use a small structured result model rather than treating
+the event stream itself as the workflow API.
+
 ## Session model
 
 Each flow run gets one main ACP session by default.
@@ -233,6 +290,7 @@ The flow store keeps orchestration state such as:
 - run status
 - current node
 - outputs
+- latest node results and outcomes
 - step history
 - session bindings
 - errors
