@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import {
+  buildQueueOwnerArgOverride,
   resolveQueueOwnerSpawnArgs,
   sanitizeQueueOwnerExecArgv,
 } from "../src/session-runtime/queue-owner-process.js";
@@ -72,6 +73,27 @@ describe("sanitizeQueueOwnerExecArgv", () => {
         "custom-loader",
       ]),
       ["--import", "tsx", "--loader", "custom-loader"],
+    );
+  });
+});
+
+describe("buildQueueOwnerArgOverride", () => {
+  it("returns null when no loader args remain after sanitization", () => {
+    assert.equal(
+      buildQueueOwnerArgOverride("/tmp/cli.js", [
+        "--experimental-test-coverage",
+        "--test",
+        "--test-name-pattern",
+        "flow",
+      ]),
+      null,
+    );
+  });
+
+  it("returns a serialized override when loader args are required", () => {
+    assert.equal(
+      buildQueueOwnerArgOverride("/tmp/cli.js", ["--import", "tsx"]),
+      JSON.stringify(["--import", "tsx", "/tmp/cli.js", "__queue-owner"]),
     );
   });
 });

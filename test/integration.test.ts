@@ -16,6 +16,12 @@ import { queuePaths } from "./queue-test-helpers.js";
 const CLI_PATH = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
 const FLOW_FIXTURE_PATH = fileURLToPath(new URL("./fixtures/flow-branch.flow.js", import.meta.url));
+const FLOW_SHELL_FIXTURE_PATH = fileURLToPath(
+  new URL("./fixtures/flow-shell.flow.js", import.meta.url),
+);
+const FLOW_WAIT_FIXTURE_PATH = fileURLToPath(
+  new URL("./fixtures/flow-wait.flow.js", import.meta.url),
+);
 const FLOW_WORKDIR_FIXTURE_PATH = fileURLToPath(
   new URL("./fixtures/flow-workdir.flow.js", import.meta.url),
 );
@@ -160,6 +166,97 @@ test("integration: flow run supports dynamic ACP working directories", async () 
       const bindings = Object.values(payload.sessionBindings ?? {});
       assert.equal(bindings.length, 1);
       assert.equal(await fs.realpath(bindings[0]?.cwd ?? ""), await fs.realpath(String(workdir)));
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: flow run executes function and shell actions from --input-file", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const inputPath = path.join(cwd, "input.json");
+
+    try {
+      await fs.writeFile(inputPath, JSON.stringify({ text: "smoke" }), "utf8");
+
+      const result = await runCli(
+        [
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "flow",
+          "run",
+          FLOW_SHELL_FIXTURE_PATH,
+          "--input-file",
+          inputPath,
+        ],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      const payload = JSON.parse(result.stdout.trim()) as {
+        action?: string;
+        status?: string;
+        outputs?: {
+          prepare?: { text: string };
+          finalize?: { value: string; cwd: string };
+        };
+      };
+
+      assert.equal(payload.action, "flow_run_result");
+      assert.equal(payload.status, "completed");
+      assert.equal(payload.outputs?.prepare?.text, "SMOKE");
+      assert.equal(payload.outputs?.finalize?.value, "SMOKE");
+      assert.equal(typeof payload.outputs?.finalize?.cwd, "string");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: flow run reports waiting checkpoints in json mode", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "flow",
+          "run",
+          FLOW_WAIT_FIXTURE_PATH,
+          "--input-json",
+          JSON.stringify({ ticket: "pr-174" }),
+        ],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      const payload = JSON.parse(result.stdout.trim()) as {
+        action?: string;
+        status?: string;
+        waitingOn?: string;
+        outputs?: {
+          prepare?: { ticket: string };
+          wait_for_human?: { checkpoint: string; summary: string };
+          unreachable?: unknown;
+        };
+      };
+
+      assert.equal(payload.action, "flow_run_result");
+      assert.equal(payload.status, "waiting");
+      assert.equal(payload.waitingOn, "wait_for_human");
+      assert.equal(payload.outputs?.prepare?.ticket, "pr-174");
+      assert.equal(payload.outputs?.wait_for_human?.checkpoint, "wait_for_human");
+      assert.equal(payload.outputs?.wait_for_human?.summary, "review pr-174");
+      assert.equal(payload.outputs?.unreachable, undefined);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }

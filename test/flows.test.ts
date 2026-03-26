@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { extractJsonObject, parseJsonObject, parseStrictJsonObject } from "../src/flows/json.js";
 import {
   FlowRunner,
   acp,
@@ -11,12 +12,9 @@ import {
   checkpoint,
   compute,
   defineFlow,
-  extractJsonObject,
-  flowRunsBaseDir,
-  parseJsonObject,
-  parseStrictJsonObject,
   shell,
-} from "../src/flows.js";
+} from "../src/flows/runtime.js";
+import { flowRunsBaseDir } from "../src/flows/store.js";
 import { TimeoutError } from "../src/session-runtime-helpers.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));

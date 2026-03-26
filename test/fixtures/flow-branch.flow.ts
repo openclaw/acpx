@@ -1,4 +1,5 @@
-import { acp, compute, defineFlow, extractJsonObject } from "../../src/flows.js";
+import { extractJsonObject } from "../../src/flows/json.js";
+import { acp, compute, defineFlow } from "../../src/flows/runtime.js";
 
 export default defineFlow({
   name: "fixture-branch",

@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { InvalidArgumentError, type Command } from "commander";
-import { tsImport } from "tsx/esm/api";
 import {
   resolveAgentInvocation,
   resolveGlobalFlags,
@@ -78,16 +77,44 @@ async function readFlowInput(flags: FlowRunFlags): Promise<unknown> {
 }
 
 async function loadFlowModule(flowPath: string): Promise<FlowDefinition> {
-  const module = (await tsImport(pathToFileURL(flowPath).href, import.meta.url)) as {
-    default?: unknown;
-    "module.exports"?: unknown;
-  };
+  const flowUrl = pathToFileURL(flowPath).href;
+  const extension = path.extname(flowPath).toLowerCase();
+  const module = await loadFlowRuntimeModule(flowUrl, extension);
 
   const candidate = findFlowDefinition(module);
   if (!candidate) {
     throw new Error(`Flow module must export a flow object: ${flowPath}`);
   }
   return candidate;
+}
+
+async function loadFlowRuntimeModule(
+  flowUrl: string,
+  extension: string,
+): Promise<{
+  default?: unknown;
+  "module.exports"?: unknown;
+}> {
+  if (extension === ".ts" || extension === ".tsx" || extension === ".mts" || extension === ".cts") {
+    const { tsImport } = (await import("tsx/esm/api")) as {
+      tsImport: (
+        specifier: string,
+        parentURL: string,
+      ) => Promise<{
+        default?: unknown;
+        "module.exports"?: unknown;
+      }>;
+    };
+    return (await tsImport(flowUrl, import.meta.url)) as {
+      default?: unknown;
+      "module.exports"?: unknown;
+    };
+  }
+
+  return (await import(flowUrl)) as {
+    default?: unknown;
+    "module.exports"?: unknown;
+  };
 }
 
 function findFlowDefinition(module: {

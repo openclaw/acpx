@@ -58,6 +58,17 @@ export function sanitizeQueueOwnerExecArgv(
   return sanitized;
 }
 
+export function buildQueueOwnerArgOverride(
+  entryPath: string,
+  execArgv: readonly string[] = process.execArgv,
+): string | null {
+  const sanitized = sanitizeQueueOwnerExecArgv(execArgv);
+  if (sanitized.length === 0) {
+    return null;
+  }
+  return JSON.stringify([...sanitized, entryPath, "__queue-owner"]);
+}
+
 export function resolveQueueOwnerSpawnArgs(argv: readonly string[] = process.argv): string[] {
   const override = process.env.ACPX_QUEUE_OWNER_ARGS;
   if (override) {
