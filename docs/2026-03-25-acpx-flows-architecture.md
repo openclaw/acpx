@@ -299,6 +299,14 @@ The flow store keeps orchestration state such as:
 The flow layer should reference session records, not duplicate full ACP
 transcripts.
 
+Trace and replay storage are specified separately in:
+
+- [`2026-03-26-acpx-flow-trace-replay.md`](2026-03-26-acpx-flow-trace-replay.md)
+
+That document defines the run-bundle layout, trace event model, session replay
+linkage, and artifact rules needed for step-by-step replay or external
+visualization.
+
 ## Liveness
 
 Long-running steps need explicit liveness.
