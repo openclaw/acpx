@@ -100,7 +100,7 @@ access to `~/.acpx/sessions/*.json` outside the bundle.
 ### File roles
 
 - `manifest.json`: versioned bundle index and file map
-- `flow.json`: exact resolved flow definition that ran
+- `flow.json`: structural snapshot of the resolved flow definition that ran
 - `trace.ndjson`: append-only event log for the run
 - `projections/run.json`: latest full run snapshot
 - `projections/live.json`: latest liveness snapshot
@@ -746,7 +746,7 @@ That should evolve into this bundle layout rather than being replaced outright.
 The important shifts are:
 
 - add `manifest.json`
-- snapshot the exact `flow.json` that ran
+- snapshot the structural `flow.json` that ran
 - bundle session replay data inside the run
 - add explicit ACP range linkage per ACP node attempt
 - treat the append-only trace as the source of truth

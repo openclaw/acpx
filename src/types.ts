@@ -7,7 +7,7 @@ import type {
   SetSessionConfigOptionResponse,
   StopReason,
 } from "@agentclientprotocol/sdk";
-export type { McpServer } from "@agentclientprotocol/sdk";
+export type { McpServer, SessionNotification } from "@agentclientprotocol/sdk";
 import type { PromptInput } from "./prompt-content.js";
 
 export const EXIT_CODES = {

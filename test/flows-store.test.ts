@@ -3,14 +3,14 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { FlowRunState } from "../src/flows/runtime.js";
+import { defineFlow, action, type FlowRunState } from "../src/flows/runtime.js";
 import { FlowRunStore, flowRunsBaseDir } from "../src/flows/store.js";
 
 test("flowRunsBaseDir defaults under the acpx home directory", () => {
   assert.equal(flowRunsBaseDir("/tmp/home"), path.join("/tmp/home", ".acpx", "flows", "runs"));
 });
 
-test("FlowRunStore writes snapshots, live state, and events", async () => {
+test("FlowRunStore writes manifest, projections, flow snapshot, and trace events", async () => {
   const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-test-"));
 
   try {
@@ -29,62 +29,109 @@ test("FlowRunStore writes snapshots, live state, and events", async () => {
       steps: [],
       sessionBindings: {},
       currentNode: "prepare",
+      currentAttemptId: "prepare#1",
       currentNodeKind: "action",
       currentNodeStartedAt: "2026-03-26T00:00:01.000Z",
       lastHeartbeatAt: "2026-03-26T00:00:01.000Z",
       statusDetail: "Preparing",
     };
-
-    await store.writeSnapshot(runDir, state, {
-      type: "run_started",
+    const flow = defineFlow({
+      name: "demo",
+      startAt: "prepare",
+      nodes: {
+        prepare: action({
+          run: () => ({ ok: true }),
+        }),
+      },
+      edges: [],
     });
 
-    const snapshot = JSON.parse(await fs.readFile(path.join(runDir, "run.json"), "utf8")) as {
+    await store.initializeRunBundle(runDir, {
+      flow,
+      state,
+    });
+
+    const manifest = JSON.parse(await fs.readFile(path.join(runDir, "manifest.json"), "utf8")) as {
+      schema: string;
+      paths: {
+        runProjection: string;
+        liveProjection: string;
+        stepsProjection: string;
+        trace: string;
+      };
+    };
+    const flowSnapshot = JSON.parse(await fs.readFile(path.join(runDir, "flow.json"), "utf8")) as {
+      schema: string;
+      nodes: Record<string, { kind: string; actionExecution?: string }>;
+    };
+    const snapshot = JSON.parse(
+      await fs.readFile(path.join(runDir, "projections", "run.json"), "utf8"),
+    ) as {
       runId: string;
       currentNode?: string;
       statusDetail?: string;
     };
-    const live = JSON.parse(await fs.readFile(path.join(runDir, "live.json"), "utf8")) as {
+    const live = JSON.parse(
+      await fs.readFile(path.join(runDir, "projections", "live.json"), "utf8"),
+    ) as {
       runId: string;
       currentNode?: string;
+      currentAttemptId?: string;
       statusDetail?: string;
     };
-    const events = (await fs.readFile(path.join(runDir, "events.ndjson"), "utf8"))
+    const steps = JSON.parse(
+      await fs.readFile(path.join(runDir, "projections", "steps.json"), "utf8"),
+    ) as unknown[];
+    const events = (await fs.readFile(path.join(runDir, "trace.ndjson"), "utf8"))
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line) as { type?: string; at?: string });
+      .map((line) => JSON.parse(line) as { type?: string; at?: string; seq?: number });
 
+    assert.equal(manifest.schema, "acpx.flow-run-bundle.v1");
+    assert.equal(manifest.paths.runProjection, "projections/run.json");
+    assert.equal(flowSnapshot.schema, "acpx.flow-definition-snapshot.v1");
+    assert.equal(flowSnapshot.nodes.prepare?.kind, "action");
+    assert.equal(flowSnapshot.nodes.prepare?.actionExecution, "function");
     assert.equal(snapshot.runId, "run-123");
     assert.equal(snapshot.currentNode, "prepare");
     assert.equal(live.runId, "run-123");
+    assert.equal(live.currentAttemptId, "prepare#1");
     assert.equal(live.statusDetail, "Preparing");
+    assert.deepEqual(steps, []);
     assert.equal(events.length, 1);
     assert.equal(events[0]?.type, "run_started");
+    assert.equal(events[0]?.seq, 1);
     assert.equal(typeof events[0]?.at, "string");
 
     state.lastHeartbeatAt = "2026-03-26T00:00:02.000Z";
     state.statusDetail = "Still preparing";
     await store.writeLive(runDir, state, {
+      scope: "node",
       type: "node_heartbeat",
       nodeId: "prepare",
+      attemptId: "prepare#1",
+      payload: {
+        statusDetail: "Still preparing",
+      },
     });
 
     const liveAfterHeartbeat = JSON.parse(
-      await fs.readFile(path.join(runDir, "live.json"), "utf8"),
+      await fs.readFile(path.join(runDir, "projections", "live.json"), "utf8"),
     ) as {
       lastHeartbeatAt?: string;
       statusDetail?: string;
     };
-    const eventsAfterHeartbeat = (await fs.readFile(path.join(runDir, "events.ndjson"), "utf8"))
+    const eventsAfterHeartbeat = (await fs.readFile(path.join(runDir, "trace.ndjson"), "utf8"))
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line) as { type?: string; nodeId?: string });
+      .map((line) => JSON.parse(line) as { type?: string; nodeId?: string; seq?: number });
 
     assert.equal(liveAfterHeartbeat.lastHeartbeatAt, "2026-03-26T00:00:02.000Z");
     assert.equal(liveAfterHeartbeat.statusDetail, "Still preparing");
     assert.equal(eventsAfterHeartbeat.length, 2);
     assert.equal(eventsAfterHeartbeat[1]?.type, "node_heartbeat");
     assert.equal(eventsAfterHeartbeat[1]?.nodeId, "prepare");
+    assert.equal(eventsAfterHeartbeat[1]?.seq, 2);
   } finally {
     await fs.rm(outputRoot, { recursive: true, force: true });
   }
@@ -110,15 +157,33 @@ test("FlowRunStore uses unique temp paths for concurrent live writes", async () 
       steps: [],
       sessionBindings: {},
       currentNode: "step",
+      currentAttemptId: "step#1",
       currentNodeKind: "action",
       currentNodeStartedAt: "2026-03-26T00:00:00.000Z",
       lastHeartbeatAt: "2026-03-26T00:00:00.000Z",
     };
+    const flow = defineFlow({
+      name: "race",
+      startAt: "step",
+      nodes: {
+        step: action({
+          run: () => ({ ok: true }),
+        }),
+      },
+      edges: [],
+    });
+    await store.initializeRunBundle(runDir, {
+      flow,
+      state: baseState,
+    });
 
     await Promise.all([
       store.writeLive(runDir, structuredClone(baseState), {
+        scope: "node",
         type: "node_heartbeat",
         nodeId: "step",
+        attemptId: "step#1",
+        payload: {},
       }),
       store.writeLive(
         runDir,
@@ -127,22 +192,29 @@ test("FlowRunStore uses unique temp paths for concurrent live writes", async () 
           statusDetail: "updated",
         },
         {
-          type: "node_detail",
+          scope: "node",
+          type: "node_heartbeat",
           nodeId: "step",
+          attemptId: "step#1",
+          payload: {
+            statusDetail: "updated",
+          },
         },
       ),
     ]);
 
-    const live = JSON.parse(await fs.readFile(path.join(runDir, "live.json"), "utf8")) as {
+    const live = JSON.parse(
+      await fs.readFile(path.join(runDir, "projections", "live.json"), "utf8"),
+    ) as {
       runId?: string;
     };
-    const events = (await fs.readFile(path.join(runDir, "events.ndjson"), "utf8"))
+    const events = (await fs.readFile(path.join(runDir, "trace.ndjson"), "utf8"))
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { type?: string });
 
     assert.equal(live.runId, "run-race");
-    assert.equal(events.length, 2);
+    assert.equal(events.length, 3);
   } finally {
     Date.now = originalDateNow;
     await fs.rm(outputRoot, { recursive: true, force: true });

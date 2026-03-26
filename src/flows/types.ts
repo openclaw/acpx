@@ -1,10 +1,13 @@
 import type { SessionAgentOptions } from "../session.js";
 import type {
+  AcpJsonRpcMessage,
+  AcpMessageDirection,
   AuthPolicy,
   McpServer,
   NonInteractivePermissionPolicy,
   PermissionMode,
   PromptInput,
+  SessionRecord,
 } from "../types.js";
 
 type MaybePromise<T> = T | Promise<T>;
@@ -108,9 +111,37 @@ export type FlowDefinition = {
   edges: FlowEdge[];
 };
 
+export type FlowNodeSnapshot = FlowNodeCommon & {
+  kind: FlowNodeDefinition["kind"];
+  profile?: string;
+  session?: {
+    handle?: string;
+    isolated?: boolean;
+  };
+  cwd?: {
+    mode: "default" | "static" | "dynamic";
+    value?: string;
+  };
+  summary?: string;
+  actionExecution?: "function" | "shell";
+  hasPrompt?: boolean;
+  hasParse?: boolean;
+  hasRun?: boolean;
+  hasExec?: boolean;
+};
+
+export type FlowDefinitionSnapshot = {
+  schema: "acpx.flow-definition-snapshot.v1";
+  name: string;
+  startAt: string;
+  nodes: Record<string, FlowNodeSnapshot>;
+  edges: FlowEdge[];
+};
+
 export type FlowNodeOutcome = "ok" | "timed_out" | "failed" | "cancelled";
 
 export type FlowNodeResult = {
+  attemptId: string;
   nodeId: string;
   kind: FlowNodeDefinition["kind"];
   outcome: FlowNodeOutcome;
@@ -121,7 +152,45 @@ export type FlowNodeResult = {
   error?: string;
 };
 
+export type FlowArtifactRef = {
+  path: string;
+  mediaType: string;
+  bytes: number;
+  sha256: string;
+};
+
+export type FlowConversationTrace = {
+  sessionId: string;
+  messageStart: number;
+  messageEnd: number;
+  eventStartSeq: number;
+  eventEndSeq: number;
+};
+
+export type FlowActionReceipt = {
+  kind: "shell" | "function";
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  exitCode?: number | null;
+  signal?: NodeJS.Signals | null;
+  durationMs?: number;
+};
+
+export type FlowStepTrace = {
+  sessionId?: string;
+  promptArtifact?: FlowArtifactRef;
+  rawResponseArtifact?: FlowArtifactRef;
+  outputArtifact?: FlowArtifactRef;
+  outputInline?: unknown;
+  stdoutArtifact?: FlowArtifactRef;
+  stderrArtifact?: FlowArtifactRef;
+  conversation?: FlowConversationTrace;
+  action?: FlowActionReceipt;
+};
+
 export type FlowStepRecord = {
+  attemptId: string;
   nodeId: string;
   kind: FlowNodeDefinition["kind"];
   outcome: FlowNodeOutcome;
@@ -137,11 +206,13 @@ export type FlowStepRecord = {
     agentCommand: string;
     cwd: string;
   } | null;
+  trace?: FlowStepTrace;
 };
 
 export type FlowSessionBinding = {
   key: string;
   handle: string;
+  bundleId: string;
   name: string;
   profile?: string;
   agentName: string;
@@ -166,6 +237,7 @@ export type FlowRunState = {
   steps: FlowStepRecord[];
   sessionBindings: Record<string, FlowSessionBinding>;
   currentNode?: string;
+  currentAttemptId?: string;
   currentNodeKind?: FlowNodeDefinition["kind"];
   currentNodeStartedAt?: string;
   lastHeartbeatAt?: string;
@@ -177,6 +249,62 @@ export type FlowRunState = {
 export type FlowRunResult = {
   runDir: string;
   state: FlowRunState;
+};
+
+export type FlowManifestSessionEntry = {
+  id: string;
+  handle: string;
+  bindingPath: string;
+  recordPath: string;
+  eventsPath: string;
+};
+
+export type FlowRunManifest = {
+  schema: "acpx.flow-run-bundle.v1";
+  runId: string;
+  flowName: string;
+  flowPath?: string;
+  startedAt: string;
+  finishedAt?: string;
+  status: FlowRunState["status"];
+  traceSchema: "acpx.flow-trace-event.v1";
+  paths: {
+    flow: string;
+    trace: string;
+    runProjection: string;
+    liveProjection: string;
+    stepsProjection: string;
+    sessionsDir: string;
+    artifactsDir: string;
+  };
+  sessions: FlowManifestSessionEntry[];
+};
+
+export type FlowTraceEvent = {
+  seq: number;
+  at: string;
+  scope: "run" | "node" | "acp" | "action" | "session" | "artifact";
+  type: string;
+  runId: string;
+  nodeId?: string;
+  attemptId?: string;
+  sessionId?: string;
+  artifact?: FlowArtifactRef;
+  payload: Record<string, unknown>;
+};
+
+export type FlowTraceEventDraft = Omit<FlowTraceEvent, "seq" | "at" | "runId">;
+
+export type FlowBundledSessionEvent = {
+  seq: number;
+  at: string;
+  direction: AcpMessageDirection;
+  message: AcpJsonRpcMessage;
+};
+
+export type FlowSessionBundleSnapshot = {
+  binding: FlowSessionBinding;
+  record: SessionRecord;
 };
 
 export type ResolvedFlowAgent = {

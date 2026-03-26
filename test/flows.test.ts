@@ -119,6 +119,181 @@ test("FlowRunner executes isolated ACP nodes and branches deterministically", as
   });
 });
 
+test("FlowRunner writes isolated ACP bundle traces and artifacts", async () => {
+  await withTempHome(async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-isolated-trace-"));
+
+    try {
+      const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: MOCK_AGENT_COMMAND,
+          cwd,
+        }),
+        permissionMode: "approve-all",
+        outputRoot,
+      });
+
+      const flow = defineFlow({
+        name: "isolated-trace-test",
+        startAt: "only",
+        nodes: {
+          only: acp({
+            session: {
+              isolated: true,
+            },
+            prompt: () => 'echo {"ok":true}',
+            parse: (text) => extractJsonObject(text),
+          }),
+        },
+        edges: [],
+      });
+
+      const result = await runner.run(flow, {});
+      const manifest = JSON.parse(
+        await fs.readFile(path.join(result.runDir, "manifest.json"), "utf8"),
+      ) as {
+        sessions: Array<{ id: string; recordPath: string; eventsPath: string }>;
+      };
+      const steps = JSON.parse(
+        await fs.readFile(path.join(result.runDir, "projections", "steps.json"), "utf8"),
+      ) as Array<{
+        attemptId: string;
+        trace?: {
+          sessionId?: string;
+          promptArtifact?: { path: string };
+          rawResponseArtifact?: { path: string };
+          conversation?: {
+            messageStart: number;
+            messageEnd: number;
+            eventStartSeq: number;
+            eventEndSeq: number;
+          };
+        };
+      }>;
+      const traceEvents = (await fs.readFile(path.join(result.runDir, "trace.ndjson"), "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { type?: string });
+
+      assert.equal(result.state.status, "completed");
+      assert.equal(manifest.sessions.length, 1);
+      assert.equal(steps.length, 1);
+      assert.equal(steps[0]?.attemptId, "only#1");
+      assert.equal(steps[0]?.trace?.sessionId, manifest.sessions[0]?.id);
+      assert.equal(steps[0]?.trace?.conversation?.messageStart, 0);
+      assert.equal(steps[0]?.trace?.conversation?.eventStartSeq, 1);
+      assert.ok(steps[0]?.trace?.promptArtifact?.path);
+      assert.ok(steps[0]?.trace?.rawResponseArtifact?.path);
+      assert.ok(traceEvents.some((event) => event.type === "acp_prompt_prepared"));
+      assert.ok(traceEvents.some((event) => event.type === "acp_response_parsed"));
+
+      const record = JSON.parse(
+        await fs.readFile(path.join(result.runDir, manifest.sessions[0]!.recordPath), "utf8"),
+      ) as { messages: unknown[]; lastSeq: number };
+      const bundledEvents = (
+        await fs.readFile(path.join(result.runDir, manifest.sessions[0]!.eventsPath), "utf8")
+      )
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { seq?: number; direction?: string });
+
+      assert.ok(record.messages.length >= 2);
+      assert.equal(record.lastSeq, bundledEvents.length);
+      assert.equal(bundledEvents[0]?.seq, 1);
+      assert.ok(
+        bundledEvents.every(
+          (event) => event.direction === "inbound" || event.direction === "outbound",
+        ),
+      );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("FlowRunner writes persistent ACP bundle traces and session bindings", async () => {
+  await withTempHome(async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-persistent-trace-"));
+
+    try {
+      const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: MOCK_AGENT_COMMAND,
+          cwd,
+        }),
+        permissionMode: "approve-all",
+        outputRoot,
+      });
+
+      const flow = defineFlow({
+        name: "persistent-trace-test",
+        startAt: "only",
+        nodes: {
+          only: acp({
+            prompt: () => 'echo {"ok":true}',
+            parse: (text) => extractJsonObject(text),
+          }),
+        },
+        edges: [],
+      });
+
+      const result = await runner.run(flow, {});
+      const manifest = JSON.parse(
+        await fs.readFile(path.join(result.runDir, "manifest.json"), "utf8"),
+      ) as {
+        sessions: Array<{ id: string; recordPath: string; eventsPath: string }>;
+      };
+      const steps = JSON.parse(
+        await fs.readFile(path.join(result.runDir, "projections", "steps.json"), "utf8"),
+      ) as Array<{
+        session?: { bundleId?: string };
+        trace?: {
+          sessionId?: string;
+          conversation?: {
+            messageStart: number;
+            messageEnd: number;
+            eventStartSeq: number;
+            eventEndSeq: number;
+          };
+        };
+      }>;
+      const traceEvents = (await fs.readFile(path.join(result.runDir, "trace.ndjson"), "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { type?: string; sessionId?: string });
+
+      assert.equal(result.state.status, "completed");
+      assert.equal(manifest.sessions.length, 1);
+      assert.equal(Object.values(result.state.sessionBindings).length, 1);
+      assert.equal(steps[0]?.session?.bundleId, manifest.sessions[0]?.id);
+      assert.equal(steps[0]?.trace?.sessionId, manifest.sessions[0]?.id);
+      assert.ok(steps[0]?.trace?.conversation?.eventEndSeq);
+      assert.ok(traceEvents.some((event) => event.type === "session_bound"));
+      assert.ok(traceEvents.some((event) => event.type === "acp_response_parsed"));
+
+      const record = JSON.parse(
+        await fs.readFile(path.join(result.runDir, manifest.sessions[0]!.recordPath), "utf8"),
+      ) as { messages: unknown[]; lastSeq: number };
+      const bundledEvents = (
+        await fs.readFile(path.join(result.runDir, manifest.sessions[0]!.eventsPath), "utf8")
+      )
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { seq?: number });
+
+      assert.ok(record.messages.length >= 2);
+      assert.equal(record.lastSeq, bundledEvents.length);
+      assert.equal(bundledEvents[0]?.seq, 1);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("FlowRunner stops at checkpoint nodes and marks the run as waiting", async () => {
   await withTempHome(async () => {
     const runner = new FlowRunner({
@@ -781,7 +956,7 @@ async function waitForRunDir(outputRoot: string, flowName: string): Promise<stri
 }
 
 async function readRunJson(runDir: string): Promise<Record<string, unknown>> {
-  const payload = await fs.readFile(path.join(runDir, "run.json"), "utf8");
+  const payload = await fs.readFile(path.join(runDir, "projections", "run.json"), "utf8");
   return JSON.parse(payload) as Record<string, unknown>;
 }
 
