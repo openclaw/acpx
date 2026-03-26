@@ -57,7 +57,7 @@ flowchart TD
     Q -->|Ambiguous| QR
     QR --> Y
     Y --> E["Comment and<br/>escalate to human<br/>(needs judgment)"]
-    E ~~~ W
+    W ~~~ E
     QC ~~~ QR
 ```
 
