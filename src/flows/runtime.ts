@@ -980,10 +980,8 @@ export class FlowRunner {
         const pending = this.store
           .appendSessionEvent(runDir, binding, direction, message)
           .then((seq) => {
-            if (eventStartSeq === undefined) {
-              eventStartSeq = seq;
-            }
-            eventEndSeq = seq;
+            eventStartSeq = eventStartSeq === undefined ? seq : Math.min(eventStartSeq, seq);
+            eventEndSeq = eventEndSeq === undefined ? seq : Math.max(eventEndSeq, seq);
           });
         pendingEventWrites.push(pending);
       },
@@ -1052,10 +1050,8 @@ export class FlowRunner {
         const pending = this.store
           .appendSessionEvent(runDir, binding, direction, message)
           .then((seq) => {
-            if (eventStartSeq === undefined) {
-              eventStartSeq = seq;
-            }
-            eventEndSeq = seq;
+            eventStartSeq = eventStartSeq === undefined ? seq : Math.min(eventStartSeq, seq);
+            eventEndSeq = eventEndSeq === undefined ? seq : Math.max(eventEndSeq, seq);
           });
         pendingEventWrites.push(pending);
       },

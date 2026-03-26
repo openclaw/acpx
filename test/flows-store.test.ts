@@ -5,6 +5,9 @@ import path from "node:path";
 import test from "node:test";
 import { defineFlow, action, type FlowRunState } from "../src/flows/runtime.js";
 import { FlowRunStore, flowRunsBaseDir } from "../src/flows/store.js";
+import { createSessionConversation } from "../src/session-conversation-model.js";
+import { defaultSessionEventLog } from "../src/session-event-log.js";
+import { SESSION_RECORD_SCHEMA, type SessionRecord } from "../src/types.js";
 
 test("flowRunsBaseDir defaults under the acpx home directory", () => {
   assert.equal(flowRunsBaseDir("/tmp/home"), path.join("/tmp/home", ".acpx", "flows", "runs"));
@@ -217,6 +220,103 @@ test("FlowRunStore uses unique temp paths for concurrent live writes", async () 
     assert.equal(events.length, 3);
   } finally {
     Date.now = originalDateNow;
+    await fs.rm(outputRoot, { recursive: true, force: true });
+  }
+});
+
+test("FlowRunStore preserves bundled session event order across concurrent appends", async () => {
+  const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-session-events-"));
+
+  try {
+    const store = new FlowRunStore(outputRoot);
+    const runDir = await store.createRunDir("run-session-order");
+    const state: FlowRunState = {
+      runId: "run-session-order",
+      flowName: "order",
+      startedAt: "2026-03-26T00:00:00.000Z",
+      updatedAt: "2026-03-26T00:00:00.000Z",
+      status: "running",
+      input: {},
+      outputs: {},
+      results: {},
+      steps: [],
+      sessionBindings: {},
+    };
+    const flow = defineFlow({
+      name: "order",
+      startAt: "step",
+      nodes: {
+        step: action({
+          run: () => ({ ok: true }),
+        }),
+      },
+      edges: [],
+    });
+    await store.initializeRunBundle(runDir, {
+      flow,
+      state,
+    });
+
+    const binding = {
+      key: "main::/tmp/workspace",
+      handle: "main",
+      bundleId: "main-test",
+      name: "main",
+      agentName: "mock",
+      agentCommand: "mock-agent",
+      acpxRecordId: "record-123",
+      acpSessionId: "session-123",
+      cwd: "/tmp/workspace",
+    };
+    const now = "2026-03-26T00:00:00.000Z";
+    const record: SessionRecord = {
+      schema: SESSION_RECORD_SCHEMA,
+      acpxRecordId: "record-123",
+      acpSessionId: "session-123",
+      agentCommand: "mock-agent",
+      cwd: "/tmp/workspace",
+      createdAt: now,
+      lastUsedAt: now,
+      lastSeq: 0,
+      lastRequestId: undefined,
+      eventLog: defaultSessionEventLog("record-123"),
+      closed: false,
+      closedAt: undefined,
+      pid: undefined,
+      agentStartedAt: undefined,
+      protocolVersion: undefined,
+      agentCapabilities: undefined,
+      ...createSessionConversation(now),
+      acpx: {},
+    };
+
+    await store.ensureSessionBundle(runDir, state, binding, record);
+
+    const writes = Array.from({ length: 200 }, (_, index) =>
+      store.appendSessionEvent(runDir, binding, "outbound", {
+        jsonrpc: "2.0",
+        id: index + 1,
+        method: "test/message",
+        params: { index: index + 1 },
+      }),
+    );
+    const seqs = await Promise.all(writes);
+    const bundledEvents = (
+      await fs.readFile(path.join(runDir, "sessions", binding.bundleId, "events.ndjson"), "utf8")
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { seq: number });
+
+    assert.deepEqual(
+      seqs,
+      Array.from({ length: 200 }, (_, index) => index + 1),
+    );
+    assert.deepEqual(
+      bundledEvents.map((event) => event.seq),
+      Array.from({ length: 200 }, (_, index) => index + 1),
+    );
+  } finally {
     await fs.rm(outputRoot, { recursive: true, force: true });
   }
 });

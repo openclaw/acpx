@@ -68,6 +68,7 @@ export class FlowRunStore {
   private readonly traceSeqByRun = new Map<string, number>();
   private readonly sessionSeqByBundle = new Map<string, number>();
   private readonly manifestByRun = new Map<string, FlowRunManifest>();
+  private readonly appendChainByPath = new Map<string, Promise<void>>();
 
   constructor(outputRoot: string = flowRunsBaseDir()) {
     this.outputRoot = outputRoot;
@@ -171,7 +172,7 @@ export class FlowRunStore {
       runId: state.runId,
       ...event,
     };
-    await appendJsonLine(this.resolveRunPath(runDir, TRACE_PATH), traceEvent);
+    await this.appendJsonLine(this.resolveRunPath(runDir, TRACE_PATH), traceEvent);
     return traceEvent;
   }
 
@@ -287,7 +288,7 @@ export class FlowRunStore {
     const sessionKey = `${runDir}::${binding.bundleId}`;
     const seq = (this.sessionSeqByBundle.get(sessionKey) ?? 0) + 1;
     this.sessionSeqByBundle.set(sessionKey, seq);
-    await appendJsonLine(
+    await this.appendJsonLine(
       this.resolveRunPath(
         runDir,
         path.posix.join(sessionDirPath(binding.bundleId), "events.ndjson"),
@@ -350,6 +351,21 @@ export class FlowRunStore {
 
   private resolveRunPath(runDir: string, relativePath: string): string {
     return path.join(runDir, ...relativePath.split("/"));
+  }
+
+  private async appendJsonLine(filePath: string, value: unknown): Promise<void> {
+    const prior = this.appendChainByPath.get(filePath) ?? Promise.resolve();
+    const nextWrite = prior.then(async () => {
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.appendFile(filePath, `${JSON.stringify(value)}\n`, "utf8");
+    });
+    const tracked = nextWrite.finally(() => {
+      if (this.appendChainByPath.get(filePath) === tracked) {
+        this.appendChainByPath.delete(filePath);
+      }
+    });
+    this.appendChainByPath.set(filePath, tracked);
+    await tracked;
   }
 }
 
@@ -467,11 +483,6 @@ async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> 
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(tempPath, `${payload}\n`, "utf8");
   await fs.rename(tempPath, filePath);
-}
-
-async function appendJsonLine(filePath: string, value: unknown): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.appendFile(filePath, `${JSON.stringify(value)}\n`, "utf8");
 }
 
 async function ensureFile(filePath: string): Promise<void> {
