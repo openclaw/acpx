@@ -7,6 +7,7 @@ flowchart TD
     classDef hidden fill:none,stroke:none,color:none,stroke-width:0px;
     classDef success fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20,stroke-width:2px;
     classDef reject fill:#ffebee,stroke:#c62828,color:#8e0000,stroke-width:2px;
+    classDef caution fill:#fff8e1,stroke:#f9a825,color:#8d6e00,stroke-width:2px;
     A[Read item] --> B[Find intent]
     B --> C{"Judge implementation<br/>or solution"}
     Y(( ))
@@ -63,6 +64,7 @@ flowchart TD
     QC ~~~ QR
     class W success
     class D reject
+    class E caution
 ```
 
 This prompt may process multiple items in one run. Use it for the triage lane, not the single-PR landing lane.
