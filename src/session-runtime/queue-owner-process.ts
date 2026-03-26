@@ -33,6 +33,31 @@ type SessionSendLike = {
   maxQueueDepth?: number;
 };
 
+export function sanitizeQueueOwnerExecArgv(
+  execArgv: readonly string[] = process.execArgv,
+): string[] {
+  const sanitized: string[] = [];
+  for (let index = 0; index < execArgv.length; index += 1) {
+    const value = execArgv[index];
+    if (value === "--experimental-test-coverage" || value === "--test") {
+      continue;
+    }
+    if (
+      value === "--test-name-pattern" ||
+      value === "--test-reporter" ||
+      value === "--test-reporter-destination"
+    ) {
+      index += 1;
+      continue;
+    }
+    if (value.startsWith("--test-")) {
+      continue;
+    }
+    sanitized.push(value);
+  }
+  return sanitized;
+}
+
 export function resolveQueueOwnerSpawnArgs(argv: readonly string[] = process.argv): string[] {
   const override = process.env.ACPX_QUEUE_OWNER_ARGS;
   if (override) {

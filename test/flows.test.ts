@@ -192,6 +192,45 @@ test("FlowRunner executes native shell actions and parses structured output", as
   });
 });
 
+test("FlowRunner rejects multiple outgoing edges from the same node", async () => {
+  await withTempHome(async () => {
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "unused",
+        agentCommand: "unused",
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot: await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-")),
+    });
+
+    const flow = defineFlow({
+      name: "ambiguous-edges",
+      startAt: "start",
+      nodes: {
+        start: compute({
+          run: () => ({ ok: true }),
+        }),
+        one: action({
+          run: () => ({ branch: 1 }),
+        }),
+        two: action({
+          run: () => ({ branch: 2 }),
+        }),
+      },
+      edges: [
+        { from: "start", to: "one" },
+        { from: "start", to: "two" },
+      ],
+    });
+
+    await assert.rejects(
+      async () => await runner.run(flow, {}),
+      /Flow node must not declare multiple outgoing edges: start/,
+    );
+  });
+});
+
 test("FlowRunner persists active node state while a shell step is running", async () => {
   await withTempHome(async () => {
     const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));

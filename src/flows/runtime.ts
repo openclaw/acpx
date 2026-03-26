@@ -826,10 +826,15 @@ function validateFlowDefinition(flow: FlowDefinition): void {
     throw new Error(`Flow start node is missing: ${flow.startAt}`);
   }
 
+  const outgoingEdges = new Set<string>();
   for (const edge of flow.edges) {
     if (!flow.nodes[edge.from]) {
       throw new Error(`Flow edge references unknown from-node: ${edge.from}`);
     }
+    if (outgoingEdges.has(edge.from)) {
+      throw new Error(`Flow node must not declare multiple outgoing edges: ${edge.from}`);
+    }
+    outgoingEdges.add(edge.from);
     if ("to" in edge) {
       if (!flow.nodes[edge.to]) {
         throw new Error(`Flow edge references unknown to-node: ${edge.to}`);

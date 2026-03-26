@@ -4,7 +4,10 @@ import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { resolveQueueOwnerSpawnArgs } from "../src/session-runtime/queue-owner-process.js";
+import {
+  resolveQueueOwnerSpawnArgs,
+  sanitizeQueueOwnerExecArgv,
+} from "../src/session-runtime/queue-owner-process.js";
 
 async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "acpx-queue-owner-path-"));
@@ -52,5 +55,23 @@ describe("resolveQueueOwnerSpawnArgs", () => {
     assert.throws(() => resolveQueueOwnerSpawnArgs(["node"]), {
       message: "acpx self-spawn failed: missing CLI entry path",
     });
+  });
+});
+
+describe("sanitizeQueueOwnerExecArgv", () => {
+  it("drops test runner coverage flags but keeps loader args", () => {
+    assert.deepEqual(
+      sanitizeQueueOwnerExecArgv([
+        "--experimental-test-coverage",
+        "--test",
+        "--test-name-pattern",
+        "flow",
+        "--import",
+        "tsx",
+        "--loader",
+        "custom-loader",
+      ]),
+      ["--import", "tsx", "--loader", "custom-loader"],
+    );
   });
 });
