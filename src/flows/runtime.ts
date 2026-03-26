@@ -4,179 +4,59 @@ import { createOutputFormatter } from "../output.js";
 import { promptToDisplayText, textPrompt } from "../prompt-content.js";
 import { resolveSessionRecord } from "../session-persistence.js";
 import { TimeoutError, withTimeout } from "../session-runtime-helpers.js";
-import {
-  cancelSessionPrompt,
-  createSession,
-  runOnce,
-  sendSession,
-  type SessionAgentOptions,
-} from "../session.js";
-import type {
-  AuthPolicy,
-  McpServer,
-  NonInteractivePermissionPolicy,
-  PermissionMode,
-  PromptInput,
-} from "../types.js";
+import { cancelSessionPrompt, createSession, runOnce, sendSession } from "../session.js";
+import type { PromptInput } from "../types.js";
+import { acp, action, checkpoint, compute, defineFlow, shell } from "./definition.js";
 import { formatShellActionSummary, runShellAction } from "./executors/shell.js";
-import { FlowRunStore, flowRunsBaseDir } from "./store.js";
+import { resolveNext, validateFlowDefinition } from "./graph.js";
+import { FlowRunStore } from "./store.js";
+import type {
+  AcpNodeDefinition,
+  ActionNodeDefinition,
+  CheckpointNodeDefinition,
+  ComputeNodeDefinition,
+  FlowDefinition,
+  FlowNodeCommon,
+  FlowNodeContext,
+  FlowNodeDefinition,
+  FlowRunResult,
+  FlowRunState,
+  FlowRunnerOptions,
+  FlowSessionBinding,
+  FlowEdge,
+  FlowStepRecord,
+  FunctionActionNodeDefinition,
+  ResolvedFlowAgent,
+  ShellActionExecution,
+  ShellActionNodeDefinition,
+  ShellActionResult,
+} from "./types.js";
 
-type MaybePromise<T> = T | Promise<T>;
+export { acp, action, checkpoint, compute, defineFlow, shell };
+export type {
+  AcpNodeDefinition,
+  ActionNodeDefinition,
+  CheckpointNodeDefinition,
+  ComputeNodeDefinition,
+  FlowDefinition,
+  FlowEdge,
+  FlowNodeCommon,
+  FlowNodeContext,
+  FlowNodeDefinition,
+  FlowRunResult,
+  FlowRunState,
+  FlowRunnerOptions,
+  FlowSessionBinding,
+  FlowStepRecord,
+  FunctionActionNodeDefinition,
+  ResolvedFlowAgent,
+  ShellActionExecution,
+  ShellActionNodeDefinition,
+  ShellActionResult,
+} from "./types.js";
+
 const DEFAULT_FLOW_HEARTBEAT_MS = 5_000;
 const DEFAULT_FLOW_STEP_TIMEOUT_MS = 15 * 60_000;
-
-export type FlowNodeContext<TInput = unknown> = {
-  input: TInput;
-  outputs: Record<string, unknown>;
-  state: FlowRunState;
-  services: Record<string, unknown>;
-};
-
-export type FlowNodeCommon = {
-  timeoutMs?: number;
-  heartbeatMs?: number;
-  statusDetail?: string;
-};
-
-export type FlowEdge =
-  | {
-      from: string;
-      to: string;
-    }
-  | {
-      from: string;
-      switch: {
-        on: string;
-        cases: Record<string, string>;
-      };
-    };
-
-export type AcpNodeDefinition = FlowNodeCommon & {
-  kind: "acp";
-  profile?: string;
-  cwd?: string | ((context: FlowNodeContext) => MaybePromise<string | undefined>);
-  session?: {
-    handle?: string;
-    isolated?: boolean;
-  };
-  prompt: (context: FlowNodeContext) => MaybePromise<PromptInput | string>;
-  parse?: (text: string, context: FlowNodeContext) => MaybePromise<unknown>;
-};
-
-export type ComputeNodeDefinition = FlowNodeCommon & {
-  kind: "compute";
-  run: (context: FlowNodeContext) => MaybePromise<unknown>;
-};
-
-export type FunctionActionNodeDefinition = FlowNodeCommon & {
-  kind: "action";
-  run: (context: FlowNodeContext) => MaybePromise<unknown>;
-};
-
-export type ShellActionExecution = {
-  command: string;
-  args?: string[];
-  cwd?: string;
-  env?: Record<string, string>;
-  stdin?: string;
-  shell?: boolean | string;
-  allowNonZeroExit?: boolean;
-  timeoutMs?: number;
-};
-
-export type ShellActionResult = {
-  command: string;
-  args: string[];
-  cwd: string;
-  stdout: string;
-  stderr: string;
-  combinedOutput: string;
-  exitCode: number | null;
-  signal: NodeJS.Signals | null;
-  durationMs: number;
-};
-
-export type ShellActionNodeDefinition = FlowNodeCommon & {
-  kind: "action";
-  exec: (context: FlowNodeContext) => MaybePromise<ShellActionExecution>;
-  parse?: (result: ShellActionResult, context: FlowNodeContext) => MaybePromise<unknown>;
-};
-
-export type ActionNodeDefinition = FunctionActionNodeDefinition | ShellActionNodeDefinition;
-
-export type CheckpointNodeDefinition = FlowNodeCommon & {
-  kind: "checkpoint";
-  summary?: string;
-  run?: (context: FlowNodeContext) => MaybePromise<unknown>;
-};
-
-export type FlowNodeDefinition =
-  | AcpNodeDefinition
-  | ComputeNodeDefinition
-  | ActionNodeDefinition
-  | CheckpointNodeDefinition;
-
-export type FlowDefinition = {
-  name: string;
-  startAt: string;
-  nodes: Record<string, FlowNodeDefinition>;
-  edges: FlowEdge[];
-};
-
-export type FlowStepRecord = {
-  nodeId: string;
-  kind: FlowNodeDefinition["kind"];
-  startedAt: string;
-  finishedAt: string;
-  promptText: string | null;
-  rawText: string | null;
-  output: unknown;
-  session: FlowSessionBinding | null;
-  agent: {
-    agentName: string;
-    agentCommand: string;
-    cwd: string;
-  } | null;
-};
-
-export type FlowSessionBinding = {
-  key: string;
-  handle: string;
-  name: string;
-  profile?: string;
-  agentName: string;
-  agentCommand: string;
-  cwd: string;
-  acpxRecordId: string;
-  acpSessionId: string;
-  agentSessionId?: string;
-};
-
-export type FlowRunState = {
-  runId: string;
-  flowName: string;
-  flowPath?: string;
-  startedAt: string;
-  finishedAt?: string;
-  updatedAt: string;
-  status: "running" | "waiting" | "completed" | "failed" | "timed_out";
-  input: unknown;
-  outputs: Record<string, unknown>;
-  steps: FlowStepRecord[];
-  sessionBindings: Record<string, FlowSessionBinding>;
-  currentNode?: string;
-  currentNodeKind?: FlowNodeDefinition["kind"];
-  currentNodeStartedAt?: string;
-  lastHeartbeatAt?: string;
-  statusDetail?: string;
-  waitingOn?: string;
-  error?: string;
-};
-
-export type FlowRunResult = {
-  runDir: string;
-  state: FlowRunState;
-};
 
 type MemoryWritable = {
   write(chunk: string): void;
@@ -187,80 +67,8 @@ type FlowNodeExecutionResult = {
   promptText: string | null;
   rawText: string | null;
   sessionInfo: FlowSessionBinding | null;
-  agentInfo: ReturnType<FlowRunnerOptions["resolveAgent"]> | null;
+  agentInfo: ResolvedFlowAgent | null;
 };
-
-export type FlowRunnerOptions = {
-  resolveAgent: (profile?: string) => {
-    agentName: string;
-    agentCommand: string;
-    cwd: string;
-  };
-  permissionMode: PermissionMode;
-  mcpServers?: McpServer[];
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  timeoutMs?: number;
-  defaultNodeTimeoutMs?: number;
-  ttlMs?: number;
-  verbose?: boolean;
-  suppressSdkConsoleErrors?: boolean;
-  sessionOptions?: SessionAgentOptions;
-  services?: Record<string, unknown>;
-  outputRoot?: string;
-};
-
-export function defineFlow<TFlow extends FlowDefinition>(definition: TFlow): TFlow {
-  return definition;
-}
-
-export function acp(definition: Omit<AcpNodeDefinition, "kind">): AcpNodeDefinition {
-  return {
-    kind: "acp",
-    ...definition,
-  };
-}
-
-export function compute(definition: Omit<ComputeNodeDefinition, "kind">): ComputeNodeDefinition {
-  return {
-    kind: "compute",
-    ...definition,
-  };
-}
-
-export function action(
-  definition: Omit<FunctionActionNodeDefinition, "kind">,
-): FunctionActionNodeDefinition;
-export function action(
-  definition: Omit<ShellActionNodeDefinition, "kind">,
-): ShellActionNodeDefinition;
-export function action(
-  definition: Omit<FunctionActionNodeDefinition, "kind"> | Omit<ShellActionNodeDefinition, "kind">,
-): ActionNodeDefinition {
-  return {
-    kind: "action",
-    ...definition,
-  } as ActionNodeDefinition;
-}
-
-export function shell(
-  definition: Omit<ShellActionNodeDefinition, "kind">,
-): ShellActionNodeDefinition {
-  return {
-    kind: "action",
-    ...definition,
-  };
-}
-
-export function checkpoint(
-  definition: Omit<CheckpointNodeDefinition, "kind"> = {},
-): CheckpointNodeDefinition {
-  return {
-    kind: "checkpoint",
-    ...definition,
-  };
-}
 
 export class FlowRunner {
   private readonly resolveAgent;
@@ -293,7 +101,7 @@ export class FlowRunner {
     this.suppressSdkConsoleErrors = options.suppressSdkConsoleErrors;
     this.sessionOptions = options.sessionOptions;
     this.services = options.services ?? {};
-    this.store = new FlowRunStore(options.outputRoot ?? flowRunsBaseDir());
+    this.store = new FlowRunStore(options.outputRoot);
   }
 
   async run(
@@ -339,7 +147,7 @@ export class FlowRunner {
         let promptText: string | null = null;
         let rawText: string | null = null;
         let sessionInfo: FlowSessionBinding | null = null;
-        let agentInfo: ReturnType<FlowRunnerOptions["resolveAgent"]> | null = null;
+        let agentInfo: ResolvedFlowAgent | null = null;
         this.markNodeStarted(state, current, node.kind, startedAt, node.statusDetail);
         await this.store.writeSnapshot(runDir, state, {
           type: "node_started",
@@ -720,7 +528,7 @@ export class FlowRunner {
     state: FlowRunState,
     flow: FlowDefinition,
     node: AcpNodeDefinition,
-    agent: ReturnType<FlowRunnerOptions["resolveAgent"]>,
+    agent: ResolvedFlowAgent,
   ): Promise<FlowSessionBinding> {
     const handle = node.session?.handle ?? "main";
     const key = createSessionBindingKey(agent.agentCommand, agent.cwd, handle);
@@ -794,7 +602,7 @@ export class FlowRunner {
   }
 
   private async runIsolatedPrompt(
-    agent: ReturnType<FlowRunnerOptions["resolveAgent"]>,
+    agent: ResolvedFlowAgent,
     prompt: PromptInput,
     timeoutMs?: number,
   ): Promise<string> {
@@ -818,44 +626,13 @@ export class FlowRunner {
   }
 }
 
-function validateFlowDefinition(flow: FlowDefinition): void {
-  if (!flow.name.trim()) {
-    throw new Error("Flow name must not be empty");
-  }
-  if (!flow.nodes[flow.startAt]) {
-    throw new Error(`Flow start node is missing: ${flow.startAt}`);
-  }
-
-  const outgoingEdges = new Set<string>();
-  for (const edge of flow.edges) {
-    if (!flow.nodes[edge.from]) {
-      throw new Error(`Flow edge references unknown from-node: ${edge.from}`);
-    }
-    if (outgoingEdges.has(edge.from)) {
-      throw new Error(`Flow node must not declare multiple outgoing edges: ${edge.from}`);
-    }
-    outgoingEdges.add(edge.from);
-    if ("to" in edge) {
-      if (!flow.nodes[edge.to]) {
-        throw new Error(`Flow edge references unknown to-node: ${edge.to}`);
-      }
-      continue;
-    }
-    for (const target of Object.values(edge.switch.cases)) {
-      if (!flow.nodes[target]) {
-        throw new Error(`Flow switch references unknown to-node: ${target}`);
-      }
-    }
-  }
-}
-
 function normalizePromptInput(prompt: PromptInput | string): PromptInput {
   return typeof prompt === "string" ? textPrompt(prompt) : prompt;
 }
 
 async function resolveNodeCwd(
   defaultCwd: string,
-  cwd: string | ((context: FlowNodeContext) => MaybePromise<string | undefined>) | undefined,
+  cwd: AcpNodeDefinition["cwd"],
   context: FlowNodeContext,
 ): Promise<string> {
   if (typeof cwd === "function") {
@@ -863,43 +640,6 @@ async function resolveNodeCwd(
     return path.resolve(defaultCwd, resolved);
   }
   return path.resolve(defaultCwd, cwd ?? defaultCwd);
-}
-
-function resolveNext(edges: FlowEdge[], from: string, output: unknown): string | null {
-  const edge = edges.find((candidate) => candidate.from === from);
-  if (!edge) {
-    return null;
-  }
-
-  if ("to" in edge) {
-    return edge.to;
-  }
-
-  const value = getByPath(output, edge.switch.on);
-  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
-    throw new Error(`Flow switch value must be scalar for ${edge.switch.on}`);
-  }
-  const next = edge.switch.cases[String(value)];
-  if (!next) {
-    throw new Error(`No flow switch case for ${edge.switch.on}=${JSON.stringify(value)}`);
-  }
-  return next;
-}
-
-function getByPath(value: unknown, jsonPath: string): unknown {
-  if (!jsonPath.startsWith("$.")) {
-    throw new Error(`Unsupported JSON path: ${jsonPath}`);
-  }
-
-  return jsonPath
-    .slice(2)
-    .split(".")
-    .reduce<unknown>((current, key) => {
-      if (current == null || typeof current !== "object") {
-        return undefined;
-      }
-      return (current as Record<string, unknown>)[key];
-    }, value);
 }
 
 function summarizePrompt(promptText: string, explicitDetail?: string): string {
