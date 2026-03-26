@@ -8,8 +8,7 @@ flowchart TD
     A[Read item] --> B[Find intent]
     B --> C{"Judge implementation<br/>or solution"}
     Y(( ))
-    Z(( ))
-    class Y,Z hidden
+    class Y hidden
 
     C -->|"Bad, localized,<br/>or unclear"| D[Comment and<br/>close PR]
     C -->|"Seems OK but needs a<br/>design decision/human call"| Y
@@ -45,14 +44,13 @@ flowchart TD
     K -->|Yes| L[Fix CI failures]
     L --> J
 
-    Q -->|Clean| Z
+    Q -->|Clean| W["Comment and<br/>escalate to human<br/>(ready for landing)"]
     Q -->|Straightforward| U[Resolve conflicts]
-    U --> J
+    U --> J2[Check CI again]
+    J2 --> K
     Q -->|Ambiguous| Y
     Y --> E["Comment and<br/>escalate to human<br/>(needs judgment)"]
-    Z --> W["Comment and<br/>escalate to human<br/>(ready for landing)"]
-    Y ~~~ Z
-    E ~~~ W
+    J2 ~~~ W
 ```
 
 This prompt may process multiple items in one run. Use it for the triage lane, not the single-PR landing lane.
