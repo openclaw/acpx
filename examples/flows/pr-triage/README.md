@@ -41,9 +41,8 @@ flowchart TD
     H -->|No| J[Check CI]
     H -->|Yes| I[Address review feedback]
     I --> G
-    J --> K{CI failures?}
-    K -->|No| Q{"Conflicts vs<br/>current base?"}
-    K -->|Yes| L[Fix CI failures]
+    J -->|Green / unrelated| Q{"Conflicts vs<br/>current base?"}
+    J -->|Related failures| L[Fix CI failures]
     L --> J
 
     Q -->|Clean| W["Comment and<br/>escalate to human<br/>(ready for landing)"]
