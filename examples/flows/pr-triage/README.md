@@ -58,6 +58,7 @@ flowchart TD
     QR --> Y
     Y --> E["Comment and<br/>escalate to human<br/>(needs judgment)"]
     E ~~~ W
+    QC ~~~ QR
 ```
 
 This prompt may process multiple items in one run. Use it for the triage lane, not the single-PR landing lane.
