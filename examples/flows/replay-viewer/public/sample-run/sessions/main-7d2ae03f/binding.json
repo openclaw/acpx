@@ -1,0 +1,11 @@
+{
+  "key": "node /workspace/acpx/dist-test/test/mock-agent.js::/tmp/acpx-viewer-sample::main",
+  "handle": "main",
+  "bundleId": "main-7d2ae03f",
+  "name": "example-two-turn-main-92244a3a-5a8505cf",
+  "agentName": "codex",
+  "agentCommand": "node /workspace/acpx/dist-test/test/mock-agent.js",
+  "cwd": "/tmp/acpx-viewer-sample",
+  "acpxRecordId": "fb5d3eb7-4a1c-406b-a3dd-67551aa67794",
+  "acpSessionId": "69f349e6-fc11-4360-9583-7eee631e4be6"
+}

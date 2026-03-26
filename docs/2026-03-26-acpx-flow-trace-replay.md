@@ -23,6 +23,10 @@ This document specifies the trace and replay model for flow runs:
 
 This is a storage and replay spec. It is not a UI spec.
 
+The source tree includes one example consumer of this bundle format under
+`examples/flows/replay-viewer/`. That viewer is not part of the `acpx` CLI
+surface, but it exercises the same bundle contract described here.
+
 ## Goals
 
 - Make previous flow runs replayable without depending on live global state

@@ -1,0 +1,77 @@
+{
+  "schema": "acpx.session.v1",
+  "acpxRecordId": "fb5d3eb7-4a1c-406b-a3dd-67551aa67794",
+  "acpSessionId": "69f349e6-fc11-4360-9583-7eee631e4be6",
+  "agentCommand": "node /workspace/acpx/dist-test/test/mock-agent.js",
+  "cwd": "/tmp/acpx-viewer-sample",
+  "name": "example-two-turn-main-92244a3a-5a8505cf",
+  "createdAt": "2026-03-26T23:21:15.935Z",
+  "lastUsedAt": "2026-03-26T23:21:16.288Z",
+  "lastSeq": 14,
+  "lastRequestId": "2",
+  "eventLog": {
+    "active_path": "sessions/main-7d2ae03f/events.ndjson",
+    "segment_count": 1,
+    "max_segment_bytes": 67108864,
+    "max_segments": 1,
+    "last_write_at": "2026-03-26T23:21:16.288Z",
+    "last_write_error": null
+  },
+  "closed": false,
+  "pid": 56359,
+  "agentStartedAt": "2026-03-26T23:21:16.161Z",
+  "lastPromptAt": "2026-03-26T23:21:16.284Z",
+  "lastAgentExitCode": null,
+  "lastAgentExitSignal": null,
+  "lastAgentExitAt": "2026-03-26T23:21:16.292Z",
+  "lastAgentDisconnectReason": "connection_close",
+  "protocolVersion": 1,
+  "agentCapabilities": {},
+  "title": null,
+  "messages": [
+    {
+      "User": {
+        "id": "13d47f4c-f685-42bb-aece-56056acd8a3d",
+        "content": [
+          {
+            "Text": "Write a short draft answer about the topic below.\nReturn exactly one JSON object with this shape:\n{\n  \"draft\": \"short paragraph\"\n}\n\nTopic: How should we visualize a flow trace elegantly?"
+          }
+        ]
+      }
+    },
+    {
+      "Agent": {
+        "content": [
+          {
+            "Text": "unrecognized prompt: Write a short draft answer about the topic below.\nReturn exactly one JSON object with this shape:\n{\n  \"draft\": \"short paragraph\"\n}\n\nTopic: How should we visualize a flow trace elegantly?"
+          }
+        ],
+        "tool_results": {}
+      }
+    },
+    {
+      "User": {
+        "id": "8f005184-1015-47a0-9b73-f6f33c7bc3ec",
+        "content": [
+          {
+            "Text": "Use the earlier draft already in this session.\nTurn it into a concise checklist.\nReturn exactly one JSON object with this shape:\n{\n  \"checklist\": [\"item\", \"item\"]\n}\n\nDraft: {\"draft\":\"short paragraph\"}"
+          }
+        ]
+      }
+    },
+    {
+      "Agent": {
+        "content": [
+          {
+            "Text": "unrecognized prompt: Use the earlier draft already in this session.\nTurn it into a concise checklist.\nReturn exactly one JSON object with this shape:\n{\n  \"checklist\": [\"item\", \"item\"]\n}\n\nDraft: {\"draft\":\"short paragraph\"}"
+          }
+        ],
+        "tool_results": {}
+      }
+    }
+  ],
+  "updated_at": "2026-03-26T23:21:16.287Z",
+  "cumulative_token_usage": {},
+  "request_token_usage": {},
+  "acpx": {}
+}

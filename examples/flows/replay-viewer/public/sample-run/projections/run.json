@@ -1,0 +1,204 @@
+{
+  "runId": "2026-03-26T232115765Z-example-two-turn-5a8505cf",
+  "flowName": "example-two-turn",
+  "flowPath": "/workspace/acpx/examples/flows/two-turn.flow.ts",
+  "startedAt": "2026-03-26T23:21:15.767Z",
+  "updatedAt": "2026-03-26T23:21:16.297Z",
+  "status": "completed",
+  "input": {
+    "topic": "How should we visualize a flow trace elegantly?"
+  },
+  "outputs": {
+    "draft": {
+      "draft": "short paragraph"
+    },
+    "refine": {
+      "checklist": ["item", "item"]
+    },
+    "finalize": {
+      "checklist": ["item", "item"]
+    }
+  },
+  "results": {
+    "draft": {
+      "attemptId": "draft#1",
+      "nodeId": "draft",
+      "kind": "acp",
+      "outcome": "ok",
+      "startedAt": "2026-03-26T23:21:15.769Z",
+      "finishedAt": "2026-03-26T23:21:16.157Z",
+      "durationMs": 388,
+      "output": {
+        "draft": "short paragraph"
+      }
+    },
+    "refine": {
+      "attemptId": "refine#1",
+      "nodeId": "refine",
+      "kind": "acp",
+      "outcome": "ok",
+      "startedAt": "2026-03-26T23:21:16.158Z",
+      "finishedAt": "2026-03-26T23:21:16.294Z",
+      "durationMs": 136,
+      "output": {
+        "checklist": ["item", "item"]
+      }
+    },
+    "finalize": {
+      "attemptId": "finalize#1",
+      "nodeId": "finalize",
+      "kind": "compute",
+      "outcome": "ok",
+      "startedAt": "2026-03-26T23:21:16.295Z",
+      "finishedAt": "2026-03-26T23:21:16.296Z",
+      "durationMs": 1,
+      "output": {
+        "checklist": ["item", "item"]
+      }
+    }
+  },
+  "steps": [
+    {
+      "attemptId": "draft#1",
+      "nodeId": "draft",
+      "kind": "acp",
+      "outcome": "ok",
+      "startedAt": "2026-03-26T23:21:15.769Z",
+      "finishedAt": "2026-03-26T23:21:16.157Z",
+      "promptText": "Write a short draft answer about the topic below.\nReturn exactly one JSON object with this shape:\n{\n  \"draft\": \"short paragraph\"\n}\n\nTopic: How should we visualize a flow trace elegantly?",
+      "rawText": "unrecognized prompt: Write a short draft answer about the topic below.\nReturn exactly one JSON object with this shape:\n{\n  \"draft\": \"short paragraph\"\n}\n\nTopic: How should we visualize a flow trace elegantly?",
+      "output": {
+        "draft": "short paragraph"
+      },
+      "session": {
+        "key": "node /workspace/acpx/dist-test/test/mock-agent.js::/tmp/acpx-viewer-sample::main",
+        "handle": "main",
+        "bundleId": "main-7d2ae03f",
+        "name": "example-two-turn-main-92244a3a-5a8505cf",
+        "agentName": "codex",
+        "agentCommand": "node /workspace/acpx/dist-test/test/mock-agent.js",
+        "cwd": "/tmp/acpx-viewer-sample",
+        "acpxRecordId": "fb5d3eb7-4a1c-406b-a3dd-67551aa67794",
+        "acpSessionId": "b7387168-8a36-4374-ae3d-d75301c22be4"
+      },
+      "agent": {
+        "agentName": "codex",
+        "agentCommand": "node /workspace/acpx/dist-test/test/mock-agent.js",
+        "cwd": "/tmp/acpx-viewer-sample"
+      },
+      "trace": {
+        "sessionId": "main-7d2ae03f",
+        "promptArtifact": {
+          "path": "artifacts/sha256-ceff117cb1c4e33ca1ee6fee42dd3fbff8b1ee987f007c467f747d9895d648fb.txt",
+          "mediaType": "text/plain",
+          "bytes": 186,
+          "sha256": "ceff117cb1c4e33ca1ee6fee42dd3fbff8b1ee987f007c467f747d9895d648fb"
+        },
+        "rawResponseArtifact": {
+          "path": "artifacts/sha256-b047c20d8605f5c87b4e8c858f42168972d477fed3f31ae84efe0499f08a437a.txt",
+          "mediaType": "text/plain",
+          "bytes": 207,
+          "sha256": "b047c20d8605f5c87b4e8c858f42168972d477fed3f31ae84efe0499f08a437a"
+        },
+        "conversation": {
+          "sessionId": "main-7d2ae03f",
+          "messageStart": 0,
+          "messageEnd": 1,
+          "eventStartSeq": 1,
+          "eventEndSeq": 7
+        },
+        "outputInline": {
+          "draft": "short paragraph"
+        }
+      }
+    },
+    {
+      "attemptId": "refine#1",
+      "nodeId": "refine",
+      "kind": "acp",
+      "outcome": "ok",
+      "startedAt": "2026-03-26T23:21:16.158Z",
+      "finishedAt": "2026-03-26T23:21:16.294Z",
+      "promptText": "Use the earlier draft already in this session.\nTurn it into a concise checklist.\nReturn exactly one JSON object with this shape:\n{\n  \"checklist\": [\"item\", \"item\"]\n}\n\nDraft: {\"draft\":\"short paragraph\"}",
+      "rawText": "unrecognized prompt: Use the earlier draft already in this session.\nTurn it into a concise checklist.\nReturn exactly one JSON object with this shape:\n{\n  \"checklist\": [\"item\", \"item\"]\n}\n\nDraft: {\"draft\":\"short paragraph\"}",
+      "output": {
+        "checklist": ["item", "item"]
+      },
+      "session": {
+        "key": "node /workspace/acpx/dist-test/test/mock-agent.js::/tmp/acpx-viewer-sample::main",
+        "handle": "main",
+        "bundleId": "main-7d2ae03f",
+        "name": "example-two-turn-main-92244a3a-5a8505cf",
+        "agentName": "codex",
+        "agentCommand": "node /workspace/acpx/dist-test/test/mock-agent.js",
+        "cwd": "/tmp/acpx-viewer-sample",
+        "acpxRecordId": "fb5d3eb7-4a1c-406b-a3dd-67551aa67794",
+        "acpSessionId": "69f349e6-fc11-4360-9583-7eee631e4be6"
+      },
+      "agent": {
+        "agentName": "codex",
+        "agentCommand": "node /workspace/acpx/dist-test/test/mock-agent.js",
+        "cwd": "/tmp/acpx-viewer-sample"
+      },
+      "trace": {
+        "sessionId": "main-7d2ae03f",
+        "promptArtifact": {
+          "path": "artifacts/sha256-08d939bbb21657f868fde0eb6000a539388837f1b3800aae9a8889528c3a0cf6.txt",
+          "mediaType": "text/plain",
+          "bytes": 200,
+          "sha256": "08d939bbb21657f868fde0eb6000a539388837f1b3800aae9a8889528c3a0cf6"
+        },
+        "rawResponseArtifact": {
+          "path": "artifacts/sha256-68f27508c95abf8a0995937491c392690cc55fc8305a9982f9082df5746c5cad.txt",
+          "mediaType": "text/plain",
+          "bytes": 221,
+          "sha256": "68f27508c95abf8a0995937491c392690cc55fc8305a9982f9082df5746c5cad"
+        },
+        "conversation": {
+          "sessionId": "main-7d2ae03f",
+          "messageStart": 2,
+          "messageEnd": 3,
+          "eventStartSeq": 8,
+          "eventEndSeq": 14
+        },
+        "outputInline": {
+          "checklist": ["item", "item"]
+        }
+      }
+    },
+    {
+      "attemptId": "finalize#1",
+      "nodeId": "finalize",
+      "kind": "compute",
+      "outcome": "ok",
+      "startedAt": "2026-03-26T23:21:16.295Z",
+      "finishedAt": "2026-03-26T23:21:16.296Z",
+      "promptText": null,
+      "rawText": null,
+      "output": {
+        "checklist": ["item", "item"]
+      },
+      "session": null,
+      "agent": null,
+      "trace": {
+        "outputInline": {
+          "checklist": ["item", "item"]
+        }
+      }
+    }
+  ],
+  "sessionBindings": {
+    "node /workspace/acpx/dist-test/test/mock-agent.js::/tmp/acpx-viewer-sample::main": {
+      "key": "node /workspace/acpx/dist-test/test/mock-agent.js::/tmp/acpx-viewer-sample::main",
+      "handle": "main",
+      "bundleId": "main-7d2ae03f",
+      "name": "example-two-turn-main-92244a3a-5a8505cf",
+      "agentName": "codex",
+      "agentCommand": "node /workspace/acpx/dist-test/test/mock-agent.js",
+      "cwd": "/tmp/acpx-viewer-sample",
+      "acpxRecordId": "fb5d3eb7-4a1c-406b-a3dd-67551aa67794",
+      "acpSessionId": "69f349e6-fc11-4360-9583-7eee631e4be6"
+    }
+  },
+  "finishedAt": "2026-03-26T23:21:16.297Z"
+}

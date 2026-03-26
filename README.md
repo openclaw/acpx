@@ -232,6 +232,7 @@ The source tree includes flow examples under [examples/flows/README.md](examples
 
 - small examples such as `echo`, `branch`, `shell`, `workdir`, and `two-turn`
 - a larger PR-triage example under [examples/flows/pr-triage/README.md](examples/flows/pr-triage/README.md)
+- a replay viewer under [examples/flows/replay-viewer/README.md](examples/flows/replay-viewer/README.md) for inspecting saved run bundles in the browser
 
 Example runs:
 

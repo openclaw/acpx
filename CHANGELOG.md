@@ -11,6 +11,7 @@ Repo: https://github.com/openclaw/acpx
 - Flows/workflows: add an initial `flow run` command, an `acpx/flows` runtime surface, and file-backed flow run state under `~/.acpx/flows/runs` for user-authored workflow modules. Thanks @osolmaz.
 - Flows/workspaces: let `acp` nodes bind to an explicit per-step cwd, add a native isolated-workspace example, and default active flow steps to a 15 minute timeout unless overridden. Thanks @osolmaz.
 - Flows/replay: store flow runs as trace bundles with `manifest.json`, `flow.json`, `trace.ndjson`, projections, bundled session replay data, and per-attempt ACP/action receipts for later inspection. Thanks @osolmaz.
+- Flows/replay viewer: add a React Flow-based replay viewer example that replays saved run bundles and shows the bundled ACP session beside the graph. Thanks @osolmaz.
 
 ### Breaking
 
