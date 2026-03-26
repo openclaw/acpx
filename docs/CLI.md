@@ -79,8 +79,23 @@ acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>
 - `--input-json` passes flow input inline as JSON.
 - `--input-file` reads flow input JSON from disk.
 - `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.
-- `acpx` does not ship built-in workload-specific flows; the file is provided by the caller.
-- The source repo includes small generic examples under `examples/flows/`.
+- The file is always provided by the caller at runtime. `acpx` does not require any built-in flow registry.
+- The source repo includes example flow files under `examples/flows/`, including a larger PR-triage example under `examples/flows/pr-triage/`.
+
+Example invocations:
+
+```bash
+acpx flow run ./my-flow.ts --input-file ./flow-input.json
+
+acpx flow run examples/flows/branch.flow.ts \
+  --input-json '{"task":"FIX: add a regression test for the reconnect bug"}'
+
+acpx flow run examples/flows/pr-triage/pr-triage.flow.ts \
+  --input-json '{"repo":"openclaw/acpx","prNumber":150}'
+```
+
+The PR-triage example is only an example workflow. It can post GitHub comments
+or close a PR if you run it against a live repository.
 
 ## Global options
 

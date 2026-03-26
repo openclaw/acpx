@@ -287,7 +287,8 @@ Do not turn output parsing into a large framework.
 - Prefer clear runtime boundaries over specialized built-ins
 - Add fewer conventions, not more
 - Use one main session by default
-- Keep workload-specific logic in user flow files, not in `acpx` core
+- Keep workload-specific logic in user flow files or example files, not in
+  `acpx` core product behavior
 - Use compatibility JSON by default and strict JSON only when it pays for itself
 
 ## PR triage example shape
@@ -311,18 +312,19 @@ bounded.
 
 ## CLI shape
 
-The main user-facing entrypoint is:
+The current user-facing entrypoint is:
 
 ```bash
 acpx flow run <file> [--input-json <json> | --input-file <path>]
 ```
 
-Related commands:
+Run state is persisted under `~/.acpx/flows/runs/`.
 
-- `acpx flow resume <run-id>`
-- `acpx flow show <run-id>`
-- `acpx flow graph <file>`
-- `acpx flow validate <file>`
+The source tree includes example flows under `examples/flows/`, including:
+
+- small focused examples such as `echo`, `branch`, `shell`, `workdir`, and
+  `two-turn`
+- a larger PR-triage example under `examples/flows/pr-triage/`
 
 ## What belongs in core
 

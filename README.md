@@ -39,7 +39,7 @@ One command surface for Pi, OpenClaw ACP, Codex, Claude, and other ACP-compatibl
 - **Structured output**: typed ACP messages (thinking, tool calls, diffs) instead of ANSI scraping
 - **Any ACP agent**: built-in registry + `--agent` escape hatch for custom servers
 - **One-shot mode**: `exec` for stateless fire-and-forget tasks
-- **Experimental flows**: `flow run <file>` for user-authored ACP workflows over multiple prompts
+- **Experimental flows**: `flow run <file>` for TypeScript workflow modules over multiple prompts
 - **Runtime-owned flow actions**: shell-backed action steps can prepare workspaces and other deterministic mechanics outside the agent turn
 - **Flow workspace isolation**: `acp` nodes can target an explicit per-step cwd, so flows can keep agent work inside disposable worktrees
 
@@ -215,6 +215,38 @@ acpx --timeout 90 codex 'investigate intermittent test timeout'
 acpx --ttl 30 codex 'keep queue owner alive for quick follow-ups'
 acpx --verbose codex 'debug why adapter startup is failing'
 ```
+
+## Flows
+
+`acpx flow run <file>` executes a TypeScript flow module through the `acpx/flows`
+runtime and persists run state under `~/.acpx/flows/runs/`.
+
+Flows are for multi-step ACP work where one prompt is not enough:
+
+- `acp` steps keep model-shaped work in ACP
+- `action` steps handle deterministic mechanics like shell commands or GitHub calls
+- `compute` steps do local routing or shaping
+- `checkpoint` steps pause for something outside the runtime
+
+The source tree includes flow examples under [examples/flows/README.md](examples/flows/README.md):
+
+- small examples such as `echo`, `branch`, `shell`, `workdir`, and `two-turn`
+- a larger PR-triage example under [examples/flows/pr-triage/README.md](examples/flows/pr-triage/README.md)
+
+Example runs:
+
+```bash
+acpx flow run ./my-flow.ts --input-file ./flow-input.json
+
+acpx flow run examples/flows/branch.flow.ts \
+  --input-json '{"task":"FIX: add a regression test for the reconnect bug"}'
+
+acpx flow run examples/flows/pr-triage/pr-triage.flow.ts \
+  --input-json '{"repo":"openclaw/acpx","prNumber":150}'
+```
+
+The PR-triage example is only an example workflow. It can comment on or close
+real GitHub PRs if you run it against a live repository.
 
 ## Configuration files
 

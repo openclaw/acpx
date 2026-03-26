@@ -323,6 +323,13 @@ Raw custom adapter command:
 acpx --agent './bin/custom-acp-server --profile ci' 'run validation checks'
 ```
 
+Flow run:
+
+```bash
+acpx flow run ./my-flow.ts --input-file ./flow-input.json
+acpx flow run examples/flows/branch.flow.ts --input-json '{"task":"FIX: add a regression test"}'
+```
+
 Repo-scoped review with permissive mode:
 
 ```bash

@@ -2,6 +2,8 @@
 
 These are source-tree examples for `acpx flow run`.
 
+They range from small primitives to one larger end-to-end example.
+
 - `echo.flow.ts`: one ACP step that returns a JSON reply
 - `branch.flow.ts`: ACP classification followed by a deterministic branch into either `continue` or `checkpoint`
 - `pr-triage/pr-triage.flow.ts`: a larger single-PR workflow example with a colocated written spec in `pr-triage/README.md`
@@ -30,5 +32,8 @@ acpx flow run examples/flows/two-turn.flow.ts \
   --input-json '{"topic":"How should we validate a new ACP adapter?"}'
 ```
 
-These examples are examples only. They do not define `acpx` core product behavior.
-The PR-triage example can comment on or close real GitHub PRs if you run it against a live repository.
+These examples are examples only. They do not define `acpx` core product
+behavior.
+
+The PR-triage example can comment on or close real GitHub PRs if you run it
+against a live repository.
