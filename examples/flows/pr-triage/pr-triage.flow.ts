@@ -102,7 +102,7 @@ const flow = {
       kind: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
-      timeoutMs: 30 * 60_000,
+      timeoutMs: 90 * 60_000,
       async prompt({ outputs }) {
         return promptReviewLoop(prepared(outputs), outputs);
       },

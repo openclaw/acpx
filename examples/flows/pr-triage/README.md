@@ -133,7 +133,7 @@ These are the current operational timeout assumptions in the single-file executa
 - `do_superficial_refactor`: 25 minutes
 - `collect_review_state`: 60 minutes
 - nested local `codex review` inside `collect_review_state`: 30 minutes
-- `review_loop`: 30 minutes
+- `review_loop`: 90 minutes
 - `collect_ci_state`: 15 minutes
 - `fix_ci_failures`: 30 minutes
 - `post_close_pr`: 15 minutes
