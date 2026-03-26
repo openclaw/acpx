@@ -14,8 +14,10 @@ import {
   defineFlow,
   shell,
 } from "../src/flows/runtime.js";
+import type { ShellActionExecution } from "../src/flows/runtime.js";
 import { flowRunsBaseDir } from "../src/flows/store.js";
 import { TimeoutError } from "../src/session-runtime-helpers.js";
+import type { PromptInput } from "../src/types.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
 const MOCK_AGENT_COMMAND = `node ${JSON.stringify(MOCK_AGENT_PATH)}`;
@@ -485,6 +487,108 @@ test("FlowRunner can route timed out nodes by outcome", async () => {
       routed: true,
       outcome: "timed_out",
     });
+  });
+});
+
+test("FlowRunner times out async shell exec callbacks", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "unused",
+        agentCommand: "unused",
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+
+    const flow = defineFlow({
+      name: "shell-exec-timeout-test",
+      startAt: "slow",
+      nodes: {
+        slow: shell({
+          timeoutMs: 50,
+          exec: async () => await new Promise<ShellActionExecution>(() => {}),
+        }),
+      },
+      edges: [],
+    });
+
+    await assert.rejects(async () => await runner.run(flow, {}), TimeoutError);
+    const runDir = await waitForRunDir(outputRoot, "shell-exec-timeout-test");
+    const state = await readRunJson(runDir);
+    const slowResult = (state.results as Record<string, Record<string, unknown>>).slow;
+    assert.equal(slowResult.outcome, "timed_out");
+  });
+});
+
+test("FlowRunner times out async ACP prompt callbacks", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "mock",
+        agentCommand: MOCK_AGENT_COMMAND,
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+
+    const flow = defineFlow({
+      name: "acp-prompt-timeout-test",
+      startAt: "slow",
+      nodes: {
+        slow: acp({
+          session: {
+            isolated: true,
+          },
+          timeoutMs: 50,
+          prompt: async () => await new Promise<PromptInput>(() => {}),
+        }),
+      },
+      edges: [],
+    });
+
+    await assert.rejects(async () => await runner.run(flow, {}), TimeoutError);
+    const runDir = await waitForRunDir(outputRoot, "acp-prompt-timeout-test");
+    const state = await readRunJson(runDir);
+    const slowResult = (state.results as Record<string, Record<string, unknown>>).slow;
+    assert.equal(slowResult.outcome, "timed_out");
+  });
+});
+
+test("FlowRunner times out async checkpoint callbacks", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "unused",
+        agentCommand: "unused",
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+
+    const flow = defineFlow({
+      name: "checkpoint-timeout-test",
+      startAt: "wait",
+      nodes: {
+        wait: checkpoint({
+          timeoutMs: 50,
+          run: async () => await new Promise(() => {}),
+        }),
+      },
+      edges: [],
+    });
+
+    await assert.rejects(async () => await runner.run(flow, {}), TimeoutError);
+    const runDir = await waitForRunDir(outputRoot, "checkpoint-timeout-test");
+    const state = await readRunJson(runDir);
+    const waitResult = (state.results as Record<string, Record<string, unknown>>).wait;
+    assert.equal(waitResult.outcome, "timed_out");
   });
 });
 

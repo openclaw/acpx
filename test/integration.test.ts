@@ -210,7 +210,10 @@ test("integration: flow run executes function and shell actions from --input-fil
       assert.equal(payload.status, "completed");
       assert.equal(payload.outputs?.prepare?.text, "SMOKE");
       assert.equal(payload.outputs?.finalize?.value, "SMOKE");
-      assert.equal(typeof payload.outputs?.finalize?.cwd, "string");
+      assert.equal(
+        await fs.realpath(String(payload.outputs?.finalize?.cwd ?? "")),
+        await fs.realpath(cwd),
+      );
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
