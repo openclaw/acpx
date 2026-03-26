@@ -10,13 +10,12 @@ flowchart TD
 
     C -->|"Bad, localized,<br/>or unclear"| D[Comment and close PR]
     C -->|"Seems OK but needs a<br/>design decision/human call"| E[Comment and escalate to human]
-    C -->|Good enough| M{"Conflicts against<br/>current base?"}
+    C -->|Good enough| M{"Conflict status against<br/>current base?"}
 
-    M -->|No| V{Bug or feature?}
-    M -->|Yes| N{"Straightforward<br/>conflicts?"}
-    N -->|Yes| O[Resolve conflicts]
+    M -->|Clean| V{Bug or feature?}
+    M -->|"Straightforward<br/>conflicts"| O[Resolve conflicts]
     O --> V
-    N -->|"No / ambiguous"| E
+    M -->|"Ambiguous<br/>conflicts"| E
 
     V -->|Bug| P[If bug, reproduce it<br/>and test the fix]
     V -->|Feature| T[If feature,<br/>test it directly]
@@ -39,15 +38,14 @@ flowchart TD
     H -->|Yes| I[Address review feedback]
     I --> G
     J --> K{CI failures?}
-    K -->|No| Q{"Conflicts against<br/>current base?"}
+    K -->|No| Q{"Conflict status against<br/>current base?"}
     K -->|Yes| L[Fix CI failures]
     L --> J
 
-    Q -->|No| E
-    Q -->|Yes| S{"Straightforward<br/>conflicts?"}
-    S -->|Yes| U[Resolve conflicts]
+    Q -->|Clean| E
+    Q -->|"Straightforward<br/>conflicts"| U[Resolve conflicts]
     U --> V
-    S -->|"No / ambiguous"| E
+    Q -->|"Ambiguous<br/>conflicts"| E
 ```
 
 This prompt may process multiple items in one run. Use it for the triage lane, not the single-PR landing lane.
