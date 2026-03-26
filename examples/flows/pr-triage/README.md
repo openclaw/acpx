@@ -9,7 +9,7 @@ flowchart TD
     B --> C{"Judge implementation<br/>or solution"}
 
     C -->|"Bad, localized,<br/>or unclear"| D[Comment and close PR]
-    C -->|"Seems OK but needs a<br/>design decision/human call"| E[Comment and escalate to human]
+    C -->|"Seems OK but needs a<br/>design decision/human call"| E["Comment and escalate to human<br/>(needs judgment)"]
     C -->|Good enough| M{"Conflict status against<br/>current base?"}
 
     M -->|Clean| V{Bug or feature?}
@@ -42,9 +42,9 @@ flowchart TD
     K -->|Yes| L[Fix CI failures]
     L --> J
 
-    Q -->|Clean| E
+    Q -->|Clean| W["Comment and escalate to human<br/>(ready for landing)"]
     Q -->|"Straightforward<br/>conflicts"| U[Resolve conflicts]
-    U --> V
+    U --> J
     Q -->|"Ambiguous<br/>conflicts"| E
 ```
 
@@ -108,7 +108,7 @@ This prompt may process multiple items in one run. Use it for the triage lane, n
 
 - if you changed code while fixing CI-related problems, rerun the targeted validation from the earlier bug-or-feature validation step and any nearby integration or end-to-end tests when feasible before checking CI again
 
-19. **Check for new conflicts again before the final handoff or landing decision.** After review is clear and CI is green or clearly unrelated, check one more time whether the branch still applies cleanly to the current base. The base branch may have moved while review or CI was in progress. If new conflicts appeared, assess them again. If they are straightforward and mechanical, resolve them autonomously, then rerun the appropriate validation, review, and CI path on the updated branch. If they are ambiguous or require judgment about the right final shape, escalate to a human instead of pretending the PR is still merge-ready.
+19. **Check for new conflicts again before the final handoff or landing decision.** After review is clear and CI is green or clearly unrelated, check one more time whether the branch still applies cleanly to the current base. The base branch may have moved while review or CI was in progress. If new conflicts appeared, assess them again. If they are straightforward and mechanical, resolve them autonomously, then go back through the final CI check path on the updated branch. If they are ambiguous or require judgment about the right final shape, escalate to a human instead of pretending the PR is still merge-ready.
 
 20. **Only land PRs that clear every gate.** A PR is ready to land only if all of the following are true:
 
@@ -137,7 +137,7 @@ This prompt may process multiple items in one run. Use it for the triage lane, n
 - CI/CD status and whether any failures are unrelated
 - Final recommendation: close PR, land, continue autonomously, or escalate to a human
 
-23. **Post the result back, and close PRs when the outcome says to close them.** If the item is a real PR or issue, post the final result back onto that item as a comment. The comment should be written for a human reviewer or author, in plain language, and should include the intention, the judgment about whether the work really solves the right problem, whether conflict resolution stayed straightforward or needed human judgment, whether the work was actually validated on the correct bug or feature path, whether a refactor is needed and what kind, whether the PR should be closed, any blocking Codex review or CI concerns, and the final recommendation. If the item needed human attention, the comment should clearly say that the autonomous review-and-land path was intentionally stopped early and that a fundamental refactor, ambiguous conflict, failed validation step, or human reframing is still needed. All human-escalation outcomes should use the same basic note structure; do not invent separate note formats for different escalation branches. Instead, reuse one shared human note and make the reason explicit, such as `design decision/human call`, `ambiguous conflicts`, `validation not established`, or `ready for human landing decision`. If the item is a PR and the conclusion is that the current implementation is unclear, a bad fix, or merely a localized fix, close the PR after posting the comment. If the input item is only a raw issue description with no real item to comment on, skip the posting step and state that there was no concrete item to comment on.
+23. **Post the result back, and close PRs when the outcome says to close them.** If the item is a real PR or issue, post the final result back onto that item as a comment. The comment should be written for a human reviewer or author, in plain language, and should include the intention, the judgment about whether the work really solves the right problem, whether conflict resolution stayed straightforward or needed human judgment, whether the work was actually validated on the correct bug or feature path, whether a refactor is needed and what kind, whether the PR should be closed, any blocking Codex review or CI concerns, and the final recommendation. There are two human-escalation variants: one for `needs judgment`, where the autonomous review-and-land path stopped early because a fundamental refactor, ambiguous conflict, failed validation step, or human reframing is still needed; and one for `ready for landing`, where the autonomous lane is otherwise clear and the remaining step is a human landing decision. If the item is a PR and the conclusion is that the current implementation is unclear, a bad fix, or merely a localized fix, close the PR after posting the comment. If the input item is only a raw issue description with no real item to comment on, skip the posting step and state that there was no concrete item to comment on.
 
 ### Timeout assumptions in the executable flow
 
@@ -159,7 +159,7 @@ These are the current operational timeout assumptions in the single-file executa
 
 ACP steps without an explicit timeout in the workflow currently rely on the `acpx` flow runtime default. At the moment that default is 15 minutes, so if a step such as `extract_intent`, `judge_solution`, `bug_or_feature`, `judge_refactor`, `comment_and_close_pr`, or `comment_and_escalate_to_human` should have a different budget, that must be stated explicitly in the workflow file.
 
-24. **Use a short, scannable comment template with explicit status signals.** Use an actual comment template when posting the result. Keep it short, plain, and scannable. Use helpful status emojis so a human can quickly tell whether this is safe to keep moving, needs intervention, or should be closed. When the outcome is `escalate to human`, always use the same note format and include a field or line that clearly states why human input is needed. This template is mandatory for posted comments. Do not invent a different layout.
+24. **Use a short, scannable comment template with explicit status signals.** Use an actual comment template when posting the result. Keep it short, plain, and scannable. Use helpful status emojis so a human can quickly tell whether this is safe to keep moving, needs intervention, or should be closed. When the outcome is `escalate to human`, use one of two human note variants: `needs judgment` or `ready for landing`. Both should keep the same basic layout, but the human-decision line and recommendation should make the variant obvious. This template is mandatory for posted comments. Do not invent a different layout.
 
 Emoji guide:
 
@@ -214,14 +214,20 @@ Default comment template:
 🏁 <close PR / land / continue autonomously / escalate to a human>
 ```
 
-If the item needs human attention, the template should make that obvious near the top:
+If the item needs human attention because the autonomous lane stopped early, the template should make that obvious near the top:
 
 - `Human attention: ⚠️ Required`
 - `Human decision needed: <design decision/human call | ambiguous conflicts | validation not established | ready for human landing decision | other explicit reason>`
 - `Refactor needed: 🧱 Fundamental` if applicable
 - `Recommendation: 🏁 escalate to a human`
 
-Use this same human-escalation note shape for every human branch. Only change the explicit human decision needed line and the supporting explanation.
+If the item is otherwise clear and only needs a final human landing decision, the template should make that obvious near the top:
+
+- `Human attention: ⚠️ Required`
+- `Human decision needed: ready for human landing decision`
+- `Recommendation: 🏁 escalate to a human`
+
+Keep the same basic human note shape for both variants. Change the human-decision line, the supporting explanation, and the recommendation wording only as needed to make the variant obvious.
 
 If the item is a PR and the solution is bad, unclear, or merely localized, the template should make that obvious near the top:
 
