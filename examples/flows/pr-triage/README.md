@@ -7,32 +7,29 @@ flowchart TD
     classDef hidden fill:none,stroke:none,color:none,stroke-width:0px;
     A[Read item] --> B[Find intent]
     B --> C{"Judge implementation<br/>or solution"}
-    Y(( ))
-    Z(( ))
-    AA(( ))
-    class Y,Z,AA hidden
+    LeftRail(( ))
+    RightRail(( ))
+    BackRail(( ))
+    class LeftRail,RightRail,BackRail hidden
 
     C -->|"Bad, localized,<br/>or unclear"| D[Comment and<br/>close PR]
-    C -->|"Seems OK but needs a<br/>design decision/human call"| Y
+    C -->|"Seems OK but needs a<br/>design decision/human call"| LeftRail
     C -->|Good enough| M{"Conflicts vs<br/>current base?"}
 
     M -->|Clean| V{Bug or feature?}
     M -->|Straightforward| O[Resolve conflicts]
     O --> V
-    M -->|Ambiguous| Y
+    M -->|Ambiguous| LeftRail
 
     V -->|Bug| P[If bug, reproduce it<br/>and test the fix]
     V -->|Feature| T[If feature,<br/>test it directly]
 
     P -->|Validated| F{Refactor?}
     T -->|Validated| F
-    P -->|"Not validated"| X(( ))
-    T -->|"Not validated"| X
-    X --> Y
-    X ~~~ F
-    class X hidden
+    P -->|"Not validated"| LeftRail
+    T -->|"Not validated"| LeftRail
 
-    F -->|Fundamental| Y
+    F -->|Fundamental| LeftRail
     F -->|Superficial| R[Do superficial refactor]
     F -->|None| G[Trigger Codex review]
     R --> G
@@ -45,15 +42,14 @@ flowchart TD
     J -->|Related failures| L[Fix CI failures]
     L --> J
 
-    Q -->|Clean| W["Comment and<br/>escalate to human<br/>(ready for landing)"]
-    Q -->|Straightforward| AA
-    AA --> U[Resolve conflicts]
-    U --> Z
-    Z --> J
-    Q -->|Ambiguous| Y
-    Y --> E["Comment and<br/>escalate to human<br/>(needs judgment)"]
-    AA ~~~ Y
-    Z ~~~ W
+    Q -->|Clean| RightRail
+    Q -->|Straightforward| U[Resolve conflicts]
+    U --> BackRail
+    BackRail --> J
+    Q -->|Ambiguous| LeftRail
+    LeftRail --> E["Comment and<br/>escalate to human<br/>(needs judgment)"]
+    RightRail --> W["Comment and<br/>escalate to human<br/>(ready for landing)"]
+    E ~~~ W
 ```
 
 This prompt may process multiple items in one run. Use it for the triage lane, not the single-PR landing lane.
