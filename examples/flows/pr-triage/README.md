@@ -9,7 +9,8 @@ flowchart TD
     B --> C{"Judge implementation<br/>or solution"}
     Y(( ))
     Z(( ))
-    class Y,Z hidden
+    AA(( ))
+    class Y,Z,AA hidden
 
     C -->|"Bad, localized,<br/>or unclear"| D[Comment and<br/>close PR]
     C -->|"Seems OK but needs a<br/>design decision/human call"| Y
@@ -46,11 +47,13 @@ flowchart TD
     L --> J
 
     Q -->|Clean| W["Comment and<br/>escalate to human<br/>(ready for landing)"]
-    Q -->|Straightforward| U[Resolve conflicts]
+    Q -->|Straightforward| AA
+    AA --> U[Resolve conflicts]
     U --> Z
     Z --> J
     Q -->|Ambiguous| Y
     Y --> E["Comment and<br/>escalate to human<br/>(needs judgment)"]
+    AA ~~~ Y
     Z ~~~ W
 ```
 
