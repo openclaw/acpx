@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { InvalidArgumentError, type Command } from "commander";
 import {
   resolveAgentInvocation,
@@ -17,6 +18,9 @@ type FlowRunFlags = {
   inputFile?: string;
   defaultAgent?: string;
 };
+
+const FLOW_RUNTIME_SPECIFIER = "acpx/flows";
+const TEXT_MODULE_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"]);
 
 export async function handleFlowRun(
   flowFile: string,
@@ -77,15 +81,67 @@ async function readFlowInput(flags: FlowRunFlags): Promise<unknown> {
 }
 
 async function loadFlowModule(flowPath: string): Promise<FlowDefinition> {
-  const flowUrl = pathToFileURL(flowPath).href;
   const extension = path.extname(flowPath).toLowerCase();
-  const module = await loadFlowRuntimeModule(flowUrl, extension);
+  const prepared = await prepareFlowModuleImport(flowPath, extension);
+  try {
+    const module = await loadFlowRuntimeModule(prepared.flowUrl, extension);
 
-  const candidate = findFlowDefinition(module);
-  if (!candidate) {
-    throw new Error(`Flow module must export a flow object: ${flowPath}`);
+    const candidate = findFlowDefinition(module);
+    if (!candidate) {
+      throw new Error(`Flow module must export a flow object: ${flowPath}`);
+    }
+    return candidate;
+  } finally {
+    await prepared.cleanup?.();
   }
-  return candidate;
+}
+
+async function prepareFlowModuleImport(
+  flowPath: string,
+  extension: string,
+): Promise<{
+  flowUrl: string;
+  cleanup?: () => Promise<void>;
+}> {
+  const flowUrl = pathToFileURL(flowPath).href;
+  if (!TEXT_MODULE_EXTENSIONS.has(extension)) {
+    return { flowUrl };
+  }
+
+  const source = await fs.readFile(flowPath, "utf8");
+  if (!source.includes(FLOW_RUNTIME_SPECIFIER)) {
+    return { flowUrl };
+  }
+
+  const runtimeSpecifier = resolveFlowRuntimeImportSpecifier();
+  const rewritten = source.replaceAll(
+    /(["'])acpx\/flows\1/g,
+    (_match, quote: string) => `${quote}${runtimeSpecifier}${quote}`,
+  );
+  if (rewritten === source) {
+    return { flowUrl };
+  }
+
+  const tempPath = path.join(path.dirname(flowPath), `.acpx-flow-load-${randomUUID()}${extension}`);
+  await fs.writeFile(tempPath, rewritten, "utf8");
+  return {
+    flowUrl: pathToFileURL(tempPath).href,
+    cleanup: async () => {
+      await fs.rm(tempPath, { force: true });
+    },
+  };
+}
+
+function resolveFlowRuntimeImportSpecifier(): string {
+  const selfPath = fileURLToPath(import.meta.url);
+
+  if (selfPath.endsWith(`${path.sep}src${path.sep}flows${path.sep}cli.ts`)) {
+    return new URL("../flows.ts", import.meta.url).href;
+  }
+  if (selfPath.endsWith(`${path.sep}src${path.sep}flows${path.sep}cli.js`)) {
+    return new URL("../flows.js", import.meta.url).href;
+  }
+  return new URL("./flows.js", import.meta.url).href;
 }
 
 async function loadFlowRuntimeModule(

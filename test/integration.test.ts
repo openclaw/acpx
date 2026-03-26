@@ -220,6 +220,63 @@ test("integration: flow run executes function and shell actions from --input-fil
   });
 });
 
+test('integration: flow run resolves "acpx/flows" imports for external flow files', async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const flowDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-import-"));
+    const flowPath = path.join(flowDir, "external.flow.ts");
+
+    try {
+      await fs.writeFile(
+        flowPath,
+        [
+          'import { compute, defineFlow } from "acpx/flows";',
+          "",
+          "export default defineFlow({",
+          '  name: "external-flow-import",',
+          '  startAt: "done",',
+          "  nodes: {",
+          "    done: compute({",
+          '      run: () => ({ ok: true, source: "external" }),',
+          "    }),",
+          "  },",
+          "  edges: [],",
+          "});",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "json", "flow", "run", flowPath],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      const payload = JSON.parse(result.stdout.trim()) as {
+        action?: string;
+        status?: string;
+        outputs?: {
+          done?: {
+            ok?: boolean;
+            source?: string;
+          };
+        };
+      };
+
+      assert.equal(payload.action, "flow_run_result");
+      assert.equal(payload.status, "completed");
+      assert.deepEqual(payload.outputs?.done, {
+        ok: true,
+        source: "external",
+      });
+    } finally {
+      await fs.rm(flowDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: flow run reports waiting checkpoints in json mode", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -1962,8 +2019,17 @@ async function runCli(
   homeDir: string,
   options: CliRunOptions = {},
 ): Promise<CliRunResult> {
+  return await runCliWithEntry(CLI_PATH, args, homeDir, options);
+}
+
+async function runCliWithEntry(
+  entryPath: string,
+  args: string[],
+  homeDir: string,
+  options: CliRunOptions = {},
+): Promise<CliRunResult> {
   return await new Promise<CliRunResult>((resolve, reject) => {
-    const child = spawn(process.execPath, [CLI_PATH, ...args], {
+    const child = spawn(process.execPath, [entryPath, ...args], {
       env: {
         ...process.env,
         HOME: homeDir,

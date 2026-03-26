@@ -75,6 +75,20 @@ describe("sanitizeQueueOwnerExecArgv", () => {
       ["--import", "tsx", "--loader", "custom-loader"],
     );
   });
+
+  it("drops debugger flags from queue-owner exec args", () => {
+    assert.deepEqual(
+      sanitizeQueueOwnerExecArgv([
+        "--inspect-brk=9229",
+        "--inspect-port",
+        "9230",
+        "--debug-port=9231",
+        "--import",
+        "tsx",
+      ]),
+      ["--import", "tsx"],
+    );
+  });
 });
 
 describe("buildQueueOwnerArgOverride", () => {

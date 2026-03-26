@@ -53,6 +53,29 @@ export function sanitizeQueueOwnerExecArgv(
     if (value.startsWith("--test-")) {
       continue;
     }
+    if (
+      value === "--inspect" ||
+      value === "--inspect-brk" ||
+      value === "--inspect-port" ||
+      value === "--inspect-publish-uid" ||
+      value.startsWith("--inspect=") ||
+      value.startsWith("--inspect-brk=") ||
+      value.startsWith("--inspect-port=") ||
+      value.startsWith("--inspect-publish-uid=") ||
+      value === "--debug-port" ||
+      value.startsWith("--debug-port=")
+    ) {
+      if (
+        value === "--inspect" ||
+        value === "--inspect-brk" ||
+        value === "--inspect-port" ||
+        value === "--inspect-publish-uid" ||
+        value === "--debug-port"
+      ) {
+        index += 1;
+      }
+      continue;
+    }
     sanitized.push(value);
   }
   return sanitized;
