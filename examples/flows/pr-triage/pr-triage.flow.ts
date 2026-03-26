@@ -54,6 +54,17 @@ const flow = {
         }),
     },
 
+    judge_initial_conflicts: {
+      kind: "acp",
+      session: MAIN_SESSION,
+      cwd: ({ outputs }) => prepared(outputs).workdir,
+      timeoutMs: 20 * 60_000,
+      async prompt({ outputs }) {
+        return promptJudgeInitialConflicts(prepared(outputs), outputs);
+      },
+      parse: (text) => extractJson(text),
+    },
+
     resolve_initial_conflicts: {
       kind: "acp",
       session: MAIN_SESSION,
@@ -158,6 +169,17 @@ const flow = {
         }),
     },
 
+    judge_final_conflicts: {
+      kind: "acp",
+      session: MAIN_SESSION,
+      cwd: ({ outputs }) => prepared(outputs).workdir,
+      timeoutMs: 20 * 60_000,
+      async prompt({ outputs }) {
+        return promptJudgeFinalConflicts(prepared(outputs), outputs);
+      },
+      parse: (text) => extractJson(text),
+    },
+
     resolve_final_conflicts: {
       kind: "acp",
       session: MAIN_SESSION,
@@ -219,11 +241,18 @@ const flow = {
         validationPath: outputs.bug_or_feature ?? null,
         validation: outputs.reproduce_bug_and_test_fix ?? outputs.test_feature_directly ?? null,
         initialConflict:
-          outputs.check_initial_conflicts ?? outputs.resolve_initial_conflicts ?? null,
+          outputs.check_initial_conflicts ??
+          outputs.judge_initial_conflicts ??
+          outputs.resolve_initial_conflicts ??
+          null,
         refactor: outputs.judge_refactor ?? null,
         review: outputs.review_loop ?? null,
         ci: outputs.fix_ci_failures ?? null,
-        finalConflict: outputs.check_final_conflicts ?? outputs.resolve_final_conflicts ?? null,
+        finalConflict:
+          outputs.check_final_conflicts ??
+          outputs.judge_final_conflicts ??
+          outputs.resolve_final_conflicts ??
+          null,
         workspace: outputs.prepare_workspace ?? null,
         sessionBindings: state.sessionBindings,
       }),
@@ -250,6 +279,15 @@ const flow = {
         on: "$.route",
         cases: {
           bug_or_feature: "bug_or_feature",
+          judge_initial_conflicts: "judge_initial_conflicts",
+        },
+      },
+    },
+    {
+      from: "judge_initial_conflicts",
+      switch: {
+        on: "$.route",
+        cases: {
           resolve_initial_conflicts: "resolve_initial_conflicts",
           comment_and_escalate_to_human: "comment_and_escalate_to_human",
         },
@@ -334,6 +372,16 @@ const flow = {
     },
     {
       from: "check_final_conflicts",
+      switch: {
+        on: "$.route",
+        cases: {
+          comment_and_escalate_to_human: "comment_and_escalate_to_human",
+          judge_final_conflicts: "judge_final_conflicts",
+        },
+      },
+    },
+    {
+      from: "judge_final_conflicts",
       switch: {
         on: "$.route",
         cases: {
@@ -708,17 +756,14 @@ async function collectConflictState(pr, options) {
     .filter(Boolean);
 
   const clean = attempt.exitCode === 0;
-  const straightforward = !clean && conflictsLookStraightforward(conflictedFiles);
-  const conflictStatus = clean ? "clean" : straightforward ? "straightforward" : "ambiguous";
+  const conflictStatus = clean ? "clean" : "conflicts_detected";
   const route = clean
     ? options.phase === "initial"
       ? "bug_or_feature"
       : "comment_and_escalate_to_human"
-    : straightforward
-      ? options.phase === "initial"
-        ? "resolve_initial_conflicts"
-        : "resolve_final_conflicts"
-      : "comment_and_escalate_to_human";
+    : options.phase === "initial"
+      ? "judge_initial_conflicts"
+      : "judge_final_conflicts";
 
   const conflictState = {
     phase: options.phase,
@@ -733,7 +778,7 @@ async function collectConflictState(pr, options) {
   const statePath = path.join(pr.flowDir, `${options.phase}-conflict-state.json`);
   await writeJson(statePath, conflictState);
 
-  if (clean || !straightforward) {
+  if (clean) {
     await cleanupMergeState(pr.workdir);
   }
 
@@ -743,9 +788,7 @@ async function collectConflictState(pr, options) {
     summary:
       conflictStatus === "clean"
         ? `No conflicts were detected against ${baseRef}.`
-        : conflictStatus === "straightforward"
-          ? `Conflicts were detected against ${baseRef} and look straightforward enough to resolve autonomously.`
-          : `Conflicts were detected against ${baseRef} and need human judgment.`,
+        : `Conflicts were detected against ${baseRef} and need conflict judgment before the flow can continue.`,
   };
 }
 
@@ -872,6 +915,29 @@ function promptBugOrFeature(pr) {
   ].join("\n");
 }
 
+function promptJudgeInitialConflicts(pr, outputs) {
+  const conflictStatePath =
+    outputs.check_initial_conflicts?.conflict_state_path ??
+    `${FLOW_DIR}/initial-conflict-state.json`;
+  return [
+    "You are still in the same PR session inside the isolated workspace.",
+    `Target PR: ${prRef(pr)}`,
+    `The runtime already attempted a merge against the current base and left the worktree in the conflict state. Read ${conflictStatePath} for the conflict summary and inspect the conflicted files directly in the repo.`,
+    "Decide whether the conflict has a clear resolution path or needs human judgment.",
+    "Use `clear_resolution_path` if the correct merged result is apparent from the PR intent plus the current base, even when code moved or was refactored.",
+    "Use `needs_human_judgment` if resolving the conflict requires choosing behavior, design, or architecture rather than integrating both sides safely.",
+    "If the correct move is to keep the current-base refactor and port the PR's behavior into the new structure, that still counts as `clear_resolution_path`.",
+    "Route `resolve_initial_conflicts` for `clear_resolution_path`.",
+    "Route `comment_and_escalate_to_human` for `needs_human_judgment`.",
+    "Return exactly one JSON object and nothing else:",
+    "{",
+    '  "conflict_assessment": "clear_resolution_path" | "needs_human_judgment",',
+    '  "route": "resolve_initial_conflicts" | "comment_and_escalate_to_human",',
+    '  "reason": "short explanation"',
+    "}",
+  ].join("\n");
+}
+
 function promptResolveInitialConflicts(pr, outputs) {
   const conflictStatePath =
     outputs.check_initial_conflicts?.conflict_state_path ??
@@ -881,7 +947,7 @@ function promptResolveInitialConflicts(pr, outputs) {
     `Target PR: ${prRef(pr)}`,
     `The runtime already prepared a merge-conflict state for this PR. Read ${conflictStatePath} for the conflict summary and inspect the conflicted files directly in the repo.`,
     `Use the local branch ${pr.localBranch}. If you need to push, use remote ${pr.pushRemote} branch ${pr.pushRef}.`,
-    "Resolve only straightforward conflicts while preserving the intended PR behavior.",
+    "Resolve the conflict only because you already judged that it has a clear resolution path while preserving the intended PR behavior.",
     "If you cannot resolve the conflicts confidently, do not guess. Route to `comment_and_escalate_to_human` instead.",
     "If you resolve them, finish the merge, run focused checks when feasible, commit the merge result if needed, push the branch yourself, and route to `bug_or_feature`.",
     "Return exactly one JSON object and nothing else:",
@@ -993,6 +1059,28 @@ function promptFixCiFailures(pr, outputs) {
   ].join("\n");
 }
 
+function promptJudgeFinalConflicts(pr, outputs) {
+  const conflictStatePath =
+    outputs.check_final_conflicts?.conflict_state_path ?? `${FLOW_DIR}/final-conflict-state.json`;
+  return [
+    "You are still in the same PR session inside the isolated workspace.",
+    `Target PR: ${prRef(pr)}`,
+    `The runtime already attempted a merge against the current base and left the worktree in the conflict state. Read ${conflictStatePath} for the conflict summary and inspect the conflicted files directly in the repo.`,
+    "Decide whether the conflict has a clear resolution path or needs human judgment.",
+    "Use `clear_resolution_path` if the correct merged result is apparent from the PR intent plus the current base, even when code moved or was refactored.",
+    "Use `needs_human_judgment` if resolving the conflict requires choosing behavior, design, or architecture rather than integrating both sides safely.",
+    "If the correct move is to keep the current-base refactor and port the PR's behavior into the new structure, that still counts as `clear_resolution_path`.",
+    "Route `resolve_final_conflicts` for `clear_resolution_path`.",
+    "Route `comment_and_escalate_to_human` for `needs_human_judgment`.",
+    "Return exactly one JSON object and nothing else:",
+    "{",
+    '  "conflict_assessment": "clear_resolution_path" | "needs_human_judgment",',
+    '  "route": "resolve_final_conflicts" | "comment_and_escalate_to_human",',
+    '  "reason": "short explanation"',
+    "}",
+  ].join("\n");
+}
+
 function promptResolveFinalConflicts(pr, outputs) {
   const conflictStatePath =
     outputs.check_final_conflicts?.conflict_state_path ?? `${FLOW_DIR}/final-conflict-state.json`;
@@ -1002,7 +1090,7 @@ function promptResolveFinalConflicts(pr, outputs) {
     `Target PR: ${prRef(pr)}`,
     `The runtime already prepared a merge-conflict state for this PR. Read ${conflictStatePath} for the conflict summary and inspect the conflicted files directly in the repo.`,
     `Use the local branch ${pr.localBranch}. If you need to push, use remote ${pr.pushRemote} branch ${pr.pushRef}.`,
-    "Resolve only straightforward conflicts while preserving the intended PR behavior.",
+    "Resolve the conflict only because you already judged that it has a clear resolution path while preserving the intended PR behavior.",
     "If you cannot resolve the conflicts confidently, do not guess. Route to `comment_and_escalate_to_human` instead.",
     `If you resolve them, rerun the earlier targeted validation before returning. Latest validation summary: ${validation?.summary ?? "none"}.`,
     "After resolving and pushing the branch, route back to `collect_ci_state` so the flow runtime can rerun the final CI path.",
@@ -1051,7 +1139,7 @@ function promptCommentAndEscalate(pr, outputs) {
     "- `Recommendation: 🏁 escalate to a human`",
     "- `Human decision needed: <explicit next human action>` near the top of the comment",
     "If the final conflict gate is clean and CI is green or unrelated, make the human decision needed `ready for human landing decision`.",
-    "If the blocker is an ambiguous conflict or another earlier stop condition, say that plainly in `Human decision needed`.",
+    "If the blocker is a conflict that still needs human judgment or another earlier stop condition, say that plainly in `Human decision needed`.",
     "If the remaining blocker is workflow approval, say that plainly.",
     "Use the current run state below as the source of truth:",
     JSON.stringify(summary, null, 2),
@@ -1100,13 +1188,21 @@ function finalCommentSummary(outputs) {
   return {
     intent: outputs.extract_intent ?? null,
     solution: outputs.judge_solution ?? null,
-    initialConflict: outputs.check_initial_conflicts ?? outputs.resolve_initial_conflicts ?? null,
+    initialConflict:
+      outputs.check_initial_conflicts ??
+      outputs.judge_initial_conflicts ??
+      outputs.resolve_initial_conflicts ??
+      null,
     validationPath: outputs.bug_or_feature ?? null,
     validation: outputs.reproduce_bug_and_test_fix ?? outputs.test_feature_directly ?? null,
     refactor: outputs.judge_refactor ?? null,
     review: outputs.review_loop ?? null,
     ci: outputs.fix_ci_failures ?? null,
-    finalConflict: outputs.check_final_conflicts ?? outputs.resolve_final_conflicts ?? null,
+    finalConflict:
+      outputs.check_final_conflicts ??
+      outputs.judge_final_conflicts ??
+      outputs.resolve_final_conflicts ??
+      null,
   };
 }
 
@@ -1234,21 +1330,6 @@ function extractLinkedIssueNumber(body) {
 
 function isTestFile(filename) {
   return /(^|\/)(test|tests|__tests__)\/|\.test\.[jt]sx?$|\.spec\.[jt]sx?$/.test(filename);
-}
-
-function isDocsLikeFile(filename) {
-  return (
-    /\.(md|mdx|txt|ya?ml|json)$/i.test(filename) ||
-    /^(docs|examples|skills|agents|\.github\/workflows)\//.test(filename)
-  );
-}
-
-function conflictsLookStraightforward(conflictedFiles) {
-  return (
-    conflictedFiles.length > 0 &&
-    conflictedFiles.length <= 3 &&
-    conflictedFiles.every((filename) => isDocsLikeFile(filename) || isTestFile(filename))
-  );
 }
 
 async function writeJson(filename, value) {

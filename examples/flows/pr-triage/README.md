@@ -1,5 +1,5 @@
 ---
-description: Prompt for triaging PRs, issues, or issue descriptions by inferring the plain-language intent, judging whether the work actually solves the underlying problem, routing ambiguous cases to a human, and only landing changes after Codex review and CI are in an acceptable state
+description: Prompt for triaging PRs, issues, or issue descriptions by inferring the plain-language intent, judging whether the work actually solves the underlying problem, routing cases that still need human judgment to a human, and only landing changes after Codex review and CI are in an acceptable state
 ---
 
 ```mermaid
@@ -95,7 +95,7 @@ This prompt may process multiple items in one run. Use it for the triage lane, n
    - a fundamental refactor is needed to solve the problem properly
    - a human must decide what the correct product or architecture direction should be before any implementation can be judged
 
-8. **Check conflicts against the current base before doing write-heavy autonomous work.** After the early read-only judgment says the solution is good enough to continue, update against the current base in the isolated workspace and check whether the branch still applies cleanly. If there are no conflicts, continue. If the conflicts are straightforward and mechanical, resolve them autonomously and then continue. If the conflicts are ambiguous, semantic, or require judgment about the right final shape, stop and escalate to a human instead of pretending the rest of the autonomous lane is still trustworthy.
+8. **Check conflicts against the current base before doing write-heavy autonomous work.** After the early read-only judgment says the solution is good enough to continue, update against the current base in the isolated workspace and check whether the branch still applies cleanly. If there are no conflicts, continue. If the conflict has a clear resolution path, resolve it autonomously and then continue. If the conflict still needs human judgment about the right final shape, stop and escalate to a human instead of pretending the rest of the autonomous lane is still trustworthy.
 
 9. **Choose the right validation path before polishing the PR.** After deciding that the solution is good enough to continue, explicitly decide whether the PR is primarily a bug-fix or a feature/behavior change. That choice determines how the work should be validated before it proceeds to refactor, review, or CI.
 
@@ -127,13 +127,13 @@ This prompt may process multiple items in one run. Use it for the triage lane, n
 
 - if you changed code while fixing CI-related problems, rerun the targeted validation from the earlier bug-or-feature validation step and any nearby integration or end-to-end tests when feasible before checking CI again
 
-19. **Check for new conflicts again before the final handoff or landing decision.** After review is clear and CI is green or clearly unrelated, check one more time whether the branch still applies cleanly to the current base. The base branch may have moved while review or CI was in progress. If new conflicts appeared, assess them again. If they are straightforward and mechanical, resolve them autonomously, then go back through the final CI check path on the updated branch. If they are ambiguous or require judgment about the right final shape, escalate to a human instead of pretending the PR is still merge-ready.
+19. **Check for new conflicts again before the final handoff or landing decision.** After review is clear and CI is green or clearly unrelated, check one more time whether the branch still applies cleanly to the current base. The base branch may have moved while review or CI was in progress. If new conflicts appeared, assess them again. If they have a clear resolution path, resolve them autonomously, then go back through the final CI check path on the updated branch. If they still need human judgment about the right final shape, escalate to a human instead of pretending the PR is still merge-ready.
 
 20. **Only land PRs that clear every gate.** A PR is ready to land only if all of the following are true:
 
 - the plain-language intention is clear
 - the implementation serves that intention in a real way rather than merely covering symptoms
-- the branch either applies cleanly to the current base or only needed straightforward conflicts that were resolved and then revalidated
+- the branch either applies cleanly to the current base or only needed conflicts with a clear resolution path that were resolved and then revalidated
 - the work has been validated on the correct path: a bug was reproduced and shown fixed, or a feature was tested directly
 - any needed refactor is either unnecessary or superficial rather than fundamental
 - there is no remaining need for human framing or architectural judgment
@@ -147,7 +147,7 @@ This prompt may process multiple items in one run. Use it for the triage lane, n
 - Plain-language intention
 - Is the intention valid
 - Does the current PR or proposed solution actually solve the right problem
-- Conflict status: clean, straightforward conflicts resolved, or ambiguous conflicts escalated
+- Conflict status: clean, clear resolution path resolved, or needs human judgment escalated
 - Was the work validated on the correct path: bug reproduced and fixed, or feature tested directly
 - Should this PR be closed immediately
 - Refactor needed: none, superficial, or fundamental
@@ -156,7 +156,7 @@ This prompt may process multiple items in one run. Use it for the triage lane, n
 - CI/CD status and whether any failures are unrelated
 - Final recommendation: close PR, land, continue autonomously, or escalate to a human
 
-23. **Post the result back, and close PRs when the outcome says to close them.** If the item is a real PR or issue, post the final result back onto that item as a comment. The comment should be written for a human reviewer or author, in plain language, and should include the intention, the judgment about whether the work really solves the right problem, whether conflict resolution stayed straightforward or needed human judgment, whether the work was actually validated on the correct bug or feature path, whether a refactor is needed and what kind, whether the PR should be closed, any blocking Codex review or CI concerns, and the final recommendation. There are two human-escalation variants: one for `needs judgment`, where the autonomous review-and-land path stopped early because a fundamental refactor, ambiguous conflict, failed validation step, or human reframing is still needed; and one for `ready for landing`, where the autonomous lane is otherwise clear and the remaining step is a human landing decision. If the item is a PR and the conclusion is that the current implementation is unclear, a bad fix, or merely a localized fix, close the PR after posting the comment. If the input item is only a raw issue description with no real item to comment on, skip the posting step and state that there was no concrete item to comment on.
+23. **Post the result back, and close PRs when the outcome says to close them.** If the item is a real PR or issue, post the final result back onto that item as a comment. The comment should be written for a human reviewer or author, in plain language, and should include the intention, the judgment about whether the work really solves the right problem, whether conflict resolution had a clear resolution path or still needed human judgment, whether the work was actually validated on the correct bug or feature path, whether a refactor is needed and what kind, whether the PR should be closed, any blocking Codex review or CI concerns, and the final recommendation. There are two human-escalation variants: one for `needs judgment`, where the autonomous review-and-land path stopped early because a fundamental refactor, a conflict that still needs human judgment, a failed validation step, or human reframing is still needed; and one for `ready for landing`, where the autonomous lane is otherwise clear and the remaining step is a human landing decision. If the item is a PR and the conclusion is that the current implementation is unclear, a bad fix, or merely a localized fix, close the PR after posting the comment. If the input item is only a raw issue description with no real item to comment on, skip the posting step and state that there was no concrete item to comment on.
 
 ### Timeout assumptions in the executable flow
 
@@ -240,7 +240,7 @@ Default comment template:
 If the item needs human attention because the autonomous lane stopped early, the template should make that obvious near the top:
 
 - `Human attention: ⚠️ Required`
-- `Human decision needed: <design decision/human call | ambiguous conflicts | validation not established | ready for human landing decision | other explicit reason>`
+- `Human decision needed: <design decision/human call | conflict still needs human judgment | validation not established | ready for human landing decision | other explicit reason>`
 - `Refactor needed: 🧱 Fundamental` if applicable
 - `Recommendation: 🏁 escalate to a human`
 
