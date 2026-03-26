@@ -163,6 +163,8 @@ This prompt may process multiple items in one run. Use it for the triage lane, n
 These are the current operational timeout assumptions in the single-file executable workflow, and the markdown should stay in sync with the TypeScript file:
 
 - `prepare_workspace`: 20 minutes
+- `check_initial_conflicts`: 20 minutes
+- `resolve_initial_conflicts`: 30 minutes
 - `reproduce_bug_and_test_fix`: 30 minutes
 - `test_feature_directly`: 25 minutes
 - `do_superficial_refactor`: 25 minutes
@@ -171,6 +173,8 @@ These are the current operational timeout assumptions in the single-file executa
 - `review_loop`: 90 minutes
 - `collect_ci_state`: 15 minutes
 - `fix_ci_failures`: 30 minutes
+- `check_final_conflicts`: 20 minutes
+- `resolve_final_conflicts`: 30 minutes
 - `post_close_pr`: 15 minutes
 - `post_escalation_comment`: 10 minutes
 - `ensureProjectDependencies` (`pnpm install --frozen-lockfile` when needed): 20 minutes
