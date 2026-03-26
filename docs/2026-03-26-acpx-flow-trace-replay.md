@@ -147,7 +147,7 @@ access to `~/.acpx/sessions/*.json` outside the bundle.
 }
 ```
 
-### Artifact rules
+### Manifest rules
 
 - `schema` is required and versioned
 - every path is bundle-relative
@@ -232,6 +232,208 @@ For ACP and action replay, these event types must also be present when relevant:
 Implementations may add more event types later. Readers must ignore unknown
 types.
 
+### Canonical event payloads
+
+The event envelope should stay stable for a long time.
+
+That means the set of required event types should be small, and each one should
+have a narrow payload contract.
+
+#### `run_started`
+
+```json
+{
+  "flowName": "pr-triage",
+  "flowPath": "/abs/path/examples/flows/pr-triage/pr-triage.flow.ts",
+  "inputArtifact": {
+    "path": "artifacts/sha256-....json",
+    "mediaType": "application/json",
+    "sha256": "..."
+  }
+}
+```
+
+#### `run_completed`
+
+```json
+{
+  "status": "completed"
+}
+```
+
+#### `run_failed`
+
+```json
+{
+  "status": "failed",
+  "error": "Timed out after 1800000ms"
+}
+```
+
+#### `node_started`
+
+```json
+{
+  "kind": "acp",
+  "timeoutMs": 900000,
+  "cwd": "/tmp/workdir",
+  "statusDetail": "Extract the PR intent"
+}
+```
+
+#### `node_heartbeat`
+
+```json
+{
+  "statusDetail": "Still waiting for ACP response"
+}
+```
+
+#### `node_outcome`
+
+```json
+{
+  "kind": "acp",
+  "outcome": "ok",
+  "durationMs": 28764,
+  "error": null,
+  "outputArtifact": {
+    "path": "artifacts/sha256-....json",
+    "mediaType": "application/json",
+    "sha256": "..."
+  }
+}
+```
+
+`node_outcome` is the canonical final receipt for a node attempt.
+
+If the output is naturally small and scalar, it may also be stored inline:
+
+```json
+{
+  "kind": "compute",
+  "outcome": "ok",
+  "durationMs": 2,
+  "outputInline": {
+    "route": "judge_refactor"
+  }
+}
+```
+
+Do not inline large or multi-line payloads.
+
+#### `session_bound`
+
+```json
+{
+  "sessionId": "main-8c7c0d6d",
+  "handle": "main",
+  "bindingArtifact": {
+    "path": "sessions/main-8c7c0d6d/binding.json",
+    "mediaType": "application/json",
+    "sha256": "..."
+  }
+}
+```
+
+#### `artifact_written`
+
+```json
+{
+  "artifact": {
+    "path": "artifacts/sha256-....txt",
+    "mediaType": "text/plain",
+    "sha256": "..."
+  }
+}
+```
+
+#### `acp_prompt_prepared`
+
+```json
+{
+  "sessionId": "main-8c7c0d6d",
+  "promptArtifact": {
+    "path": "artifacts/sha256-....txt",
+    "mediaType": "text/plain",
+    "sha256": "..."
+  }
+}
+```
+
+#### `acp_response_parsed`
+
+```json
+{
+  "sessionId": "main-8c7c0d6d",
+  "conversation": {
+    "messageStart": 0,
+    "messageEnd": 1,
+    "eventStartSeq": 120,
+    "eventEndSeq": 188
+  },
+  "rawResponseArtifact": {
+    "path": "artifacts/sha256-....txt",
+    "mediaType": "text/plain",
+    "sha256": "..."
+  }
+}
+```
+
+#### `action_prepared`
+
+```json
+{
+  "action": {
+    "kind": "shell",
+    "command": "pnpm",
+    "args": ["run", "check"],
+    "cwd": "/tmp/workdir"
+  }
+}
+```
+
+#### `action_completed`
+
+```json
+{
+  "action": {
+    "kind": "shell",
+    "command": "pnpm",
+    "args": ["run", "check"],
+    "cwd": "/tmp/workdir",
+    "exitCode": 0,
+    "signal": null,
+    "durationMs": 12834
+  },
+  "stdoutArtifact": {
+    "path": "artifacts/sha256-....txt",
+    "mediaType": "text/plain",
+    "sha256": "..."
+  },
+  "stderrArtifact": {
+    "path": "artifacts/sha256-....txt",
+    "mediaType": "text/plain",
+    "sha256": "..."
+  }
+}
+```
+
+## Trace writing rules
+
+The trace log is the source of truth, so its write semantics should stay very
+simple:
+
+- `trace.ndjson` is append-only
+- `seq` starts at `1` and increases by `1`
+- events are never rewritten or deleted
+- every node attempt must have exactly one `node_started`
+- every node attempt must have exactly one terminal `node_outcome`
+- `attemptId` must be unique within the run
+
+When a run is still active, the bundle may be incomplete. Readers should use
+the latest projections together with the current `trace.ndjson` tail.
+
 ## Node attempts
 
 Replay should operate on node attempts, not only on node ids.
@@ -300,6 +502,10 @@ Both message and event ranges are needed:
 - normalized messages are best for readable replay
 - raw ACP events are best for exact low-level inspection
 
+The ACP linkage in `node_outcome` is the canonical bridge from the workflow
+trace to the bundled session replay data. Viewers should not try to infer this
+linkage heuristically.
+
 ## Action receipts
 
 Action steps need stable receipts for replay.
@@ -348,6 +554,12 @@ Full latest run state:
 - current error
 - session bindings
 
+Write policy:
+
+- rewrite atomically after every terminal node outcome
+- rewrite atomically when the overall run status changes
+- it may lag behind active heartbeats, because `live.json` covers that case
+
 ### `projections/live.json`
 
 Minimal liveness view:
@@ -358,6 +570,14 @@ Minimal liveness view:
 - last heartbeat
 - waiting status
 - current error
+
+Write policy:
+
+- rewrite atomically at run start
+- rewrite atomically at every node start
+- rewrite atomically at every heartbeat
+- rewrite atomically at every terminal node outcome
+- this is the only projection that should update during heartbeats
 
 ### `projections/steps.json`
 
@@ -372,6 +592,25 @@ Ordered node-attempt receipts, one entry per attempt, with:
 - key references to ACP/action artifacts
 
 This is the easiest projection for external viewers to read directly.
+
+Write policy:
+
+- rewrite atomically after every terminal node outcome
+- entries are append-only in logical order
+- each entry represents one node attempt
+- once written, an earlier attempt entry must not be mutated
+
+## Projection stability
+
+The projections exist for convenience, but they should still be stable enough
+that simple tools can rely on them for years.
+
+That means:
+
+- keep projection filenames fixed
+- keep field names additive
+- never require viewers to scan temporary files
+- never encode meaning in implicit array positions when an explicit id exists
 
 ## Session bundles
 
@@ -406,6 +645,50 @@ Stores the raw ACP event stream for the bundled session.
 Replay readers should prefer the bundled session event file over the global
 session store.
 
+### Session event envelope
+
+The bundled session event stream is not just raw JSON-RPC lines. It needs a
+small stable envelope so ACP ranges can be addressed precisely.
+
+Each line in `sessions/<id>/events.ndjson` must look like:
+
+```json
+{
+  "seq": 120,
+  "at": "2026-03-26T18:56:16.102Z",
+  "direction": "outbound",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": "1",
+    "method": "prompt",
+    "params": {}
+  }
+}
+```
+
+Required fields:
+
+- `seq`: strictly increasing integer within that bundled session file
+- `at`: ISO timestamp
+- `direction`: `outbound` or `inbound`
+- `message`: the raw ACP JSON-RPC payload
+
+### Session bundle write policy
+
+To keep replay deterministic and simple:
+
+- create `sessions/<id>/binding.json` immediately when the session is first
+  bound to the run
+- create `sessions/<id>/record.json` immediately when the binding is created
+- append to `sessions/<id>/events.ndjson` whenever ACP messages are observed for
+  that session
+- rewrite `sessions/<id>/record.json` atomically after every ACP node outcome
+- rewrite `sessions/<id>/record.json` atomically again at run completion or
+  failure
+
+That gives external replay tools a stable normalized snapshot plus the exact ACP
+event stream that produced it.
+
 ## Artifacts
 
 Artifacts are immutable content-addressed files referenced by trace events or
@@ -429,6 +712,17 @@ projections.
 - large or multi-line payloads should use artifact refs instead of bloating the
   trace log
 - readers must tolerate unknown media types
+
+Use artifacts for:
+
+- prompt text
+- raw ACP output
+- parsed ACP output when large
+- shell stdout/stderr
+- fetched external JSON
+- rendered comments
+
+Do not use artifacts for tiny scalar fields that fit cleanly inline.
 
 ## Versioning and compatibility
 
@@ -456,6 +750,22 @@ The important shifts are:
 - bundle session replay data inside the run
 - add explicit ACP range linkage per ACP node attempt
 - treat the append-only trace as the source of truth
+
+## Implementation choices fixed by this spec
+
+These choices are intentionally fixed here so implementation stays simple and
+stable:
+
+- `trace.ndjson` is the source of truth for the run bundle
+- `projections/steps.json` is rewritten after each terminal node outcome, not
+  only once at the end
+- bundled session `record.json` is rewritten after each ACP node outcome
+- bundled session `events.ndjson` uses a small envelope with its own `seq`
+- ACP node outcomes link to both normalized message ranges and raw event ranges
+- all large payloads are referenced through immutable artifacts
+
+This should be enough to implement replay and visualization without inventing
+new semantics during coding.
 
 ## External viewers
 
