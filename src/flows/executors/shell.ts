@@ -60,10 +60,10 @@ export async function runShellAction(spec: ShellActionExecution): Promise<ShellA
         return;
       }
 
-      if ((exitCode ?? 0) !== 0 && spec.allowNonZeroExit !== true) {
+      if (((exitCode ?? 0) !== 0 || signal != null) && spec.allowNonZeroExit !== true) {
         reject(
           new Error(
-            `Shell action failed (${renderShellCommand(spec.command, args)}): exit ${String(exitCode)}${stderr.length > 0 ? `\n${stderr.trim()}` : ""}`,
+            `Shell action failed (${renderShellCommand(spec.command, args)}): ${signal ? `signal ${signal}` : `exit ${String(exitCode)}`}${stderr.length > 0 ? `\n${stderr.trim()}` : ""}`,
           ),
         );
         return;

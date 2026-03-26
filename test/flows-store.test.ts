@@ -89,3 +89,62 @@ test("FlowRunStore writes snapshots, live state, and events", async () => {
     await fs.rm(outputRoot, { recursive: true, force: true });
   }
 });
+
+test("FlowRunStore uses unique temp paths for concurrent live writes", async () => {
+  const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-race-"));
+  const originalDateNow = Date.now;
+  Date.now = () => 1_700_000_000_000;
+
+  try {
+    const store = new FlowRunStore(outputRoot);
+    const runDir = await store.createRunDir("run-race");
+    const baseState: FlowRunState = {
+      runId: "run-race",
+      flowName: "race",
+      startedAt: "2026-03-26T00:00:00.000Z",
+      updatedAt: "2026-03-26T00:00:00.000Z",
+      status: "running",
+      input: {},
+      outputs: {},
+      results: {},
+      steps: [],
+      sessionBindings: {},
+      currentNode: "step",
+      currentNodeKind: "action",
+      currentNodeStartedAt: "2026-03-26T00:00:00.000Z",
+      lastHeartbeatAt: "2026-03-26T00:00:00.000Z",
+    };
+
+    await Promise.all([
+      store.writeLive(runDir, structuredClone(baseState), {
+        type: "node_heartbeat",
+        nodeId: "step",
+      }),
+      store.writeLive(
+        runDir,
+        {
+          ...structuredClone(baseState),
+          statusDetail: "updated",
+        },
+        {
+          type: "node_detail",
+          nodeId: "step",
+        },
+      ),
+    ]);
+
+    const live = JSON.parse(await fs.readFile(path.join(runDir, "live.json"), "utf8")) as {
+      runId?: string;
+    };
+    const events = (await fs.readFile(path.join(runDir, "events.ndjson"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type?: string });
+
+    assert.equal(live.runId, "run-race");
+    assert.equal(events.length, 2);
+  } finally {
+    Date.now = originalDateNow;
+    await fs.rm(outputRoot, { recursive: true, force: true });
+  }
+});

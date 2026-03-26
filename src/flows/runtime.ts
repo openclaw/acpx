@@ -333,16 +333,14 @@ export class FlowRunner {
     node: ComputeNodeDefinition,
     context: FlowNodeContext,
   ): Promise<FlowNodeExecutionResult> {
+    const nodeTimeoutMs = node.timeoutMs ?? this.defaultNodeTimeoutMs;
     const output = await this.runWithHeartbeat(
       runDir,
       state,
       state.currentNode ?? "",
       node,
-      async () =>
-        await withTimeout(
-          Promise.resolve(node.run(context)),
-          node.timeoutMs ?? this.defaultNodeTimeoutMs,
-        ),
+      nodeTimeoutMs,
+      async () => await Promise.resolve(node.run(context)),
     );
     return {
       output,
@@ -366,7 +364,8 @@ export class FlowRunner {
         state,
         state.currentNode ?? "",
         node,
-        async () => await withTimeout(Promise.resolve(node.run(context)), nodeTimeoutMs),
+        nodeTimeoutMs,
+        async () => await Promise.resolve(node.run(context)),
       );
       return {
         output,
@@ -377,36 +376,36 @@ export class FlowRunner {
       };
     }
 
-    const execution = await this.runWithHeartbeat(
+    const { output, rawText } = await this.runWithHeartbeat(
       runDir,
       state,
       state.currentNode ?? "",
       node,
-      async () => await withTimeout(Promise.resolve(node.exec(context)), nodeTimeoutMs),
+      nodeTimeoutMs,
+      async () => {
+        const execution = await Promise.resolve(node.exec(context));
+        const effectiveExecution: ShellActionExecution = {
+          ...execution,
+          cwd: resolveShellActionCwd(this.defaultCwd, execution.cwd),
+          timeoutMs: execution.timeoutMs ?? nodeTimeoutMs,
+        };
+        this.updateStatusDetail(state, formatShellActionSummary(effectiveExecution));
+        await this.store.writeLive(runDir, state, {
+          type: "node_detail",
+          nodeId: state.currentNode,
+          detail: state.statusDetail,
+        });
+        const result = await runShellAction(effectiveExecution);
+        return {
+          output: node.parse ? await node.parse(result, context) : result,
+          rawText: result.combinedOutput,
+        };
+      },
     );
-    const effectiveExecution: ShellActionExecution = {
-      ...execution,
-      cwd: resolveShellActionCwd(this.defaultCwd, execution.cwd),
-      timeoutMs: execution.timeoutMs ?? nodeTimeoutMs,
-    };
-    this.updateStatusDetail(state, formatShellActionSummary(effectiveExecution));
-    await this.store.writeLive(runDir, state, {
-      type: "node_detail",
-      nodeId: state.currentNode,
-      detail: state.statusDetail,
-    });
-    const result = await this.runWithHeartbeat(
-      runDir,
-      state,
-      state.currentNode ?? "",
-      node,
-      async () => await runShellAction(effectiveExecution),
-    );
-    const output = node.parse ? await node.parse(result, context) : result;
     return {
       output,
       promptText: null,
-      rawText: result.combinedOutput,
+      rawText,
       sessionInfo: null,
       agentInfo: null,
     };
@@ -419,6 +418,7 @@ export class FlowRunner {
     node: CheckpointNodeDefinition,
     context: FlowNodeContext,
   ): Promise<FlowNodeExecutionResult> {
+    const nodeTimeoutMs = node.timeoutMs ?? this.defaultNodeTimeoutMs;
     const output =
       typeof node.run === "function"
         ? await this.runWithHeartbeat(
@@ -426,11 +426,8 @@ export class FlowRunner {
             state,
             state.currentNode ?? "",
             node,
-            async () =>
-              await withTimeout(
-                Promise.resolve(node.run?.(context)),
-                node.timeoutMs ?? this.defaultNodeTimeoutMs,
-              ),
+            nodeTimeoutMs,
+            async () => await Promise.resolve(node.run?.(context)),
           )
         : {
             checkpoint: nodeId,
@@ -459,18 +456,14 @@ export class FlowRunner {
       state,
       state.currentNode ?? "",
       node,
+      nodeTimeoutMs,
       async () => {
         const resolvedAgent = this.resolveAgent(node.profile);
         const agentInfo = {
           ...resolvedAgent,
-          cwd: await withTimeout(
-            resolveNodeCwd(resolvedAgent.cwd, node.cwd, context),
-            nodeTimeoutMs,
-          ),
+          cwd: await resolveNodeCwd(resolvedAgent.cwd, node.cwd, context),
         };
-        const prompt = normalizePromptInput(
-          await withTimeout(Promise.resolve(node.prompt(context)), nodeTimeoutMs),
-        );
+        const prompt = normalizePromptInput(await Promise.resolve(node.prompt(context)));
         const promptText = promptToDisplayText(prompt);
         this.updateStatusDetail(state, summarizePrompt(promptText, node.statusDetail));
         await this.store.writeLive(runDir, state, {
@@ -490,7 +483,7 @@ export class FlowRunner {
           };
         }
 
-        boundSession = await this.ensureSessionBinding(state, flow, node, agentInfo);
+        boundSession = await this.ensureSessionBinding(state, flow, node, agentInfo, nodeTimeoutMs);
         const rawText = await this.runPersistentPrompt(boundSession, prompt, nodeTimeoutMs);
         const sessionInfo = await this.refreshSessionBinding(boundSession);
         state.sessionBindings[sessionInfo.key] = sessionInfo;
@@ -549,6 +542,7 @@ export class FlowRunner {
     state: FlowRunState,
     nodeId: string,
     node: FlowNodeCommon,
+    timeoutMs: number | undefined,
     run: () => Promise<T>,
     onTimeout?: () => Promise<void>,
   ): Promise<T> {
@@ -574,7 +568,7 @@ export class FlowRunner {
     }
 
     try {
-      return await run();
+      return await withTimeout(run(), timeoutMs);
     } catch (error) {
       if (error instanceof TimeoutError && onTimeout) {
         await onTimeout().catch(() => {
@@ -595,6 +589,7 @@ export class FlowRunner {
     flow: FlowDefinition,
     node: AcpNodeDefinition,
     agent: ResolvedFlowAgent,
+    timeoutMs: number | undefined,
   ): Promise<FlowSessionBinding> {
     const handle = node.session?.handle ?? "main";
     const key = createSessionBindingKey(agent.agentCommand, agent.cwd, handle);
@@ -613,7 +608,7 @@ export class FlowRunner {
       nonInteractivePermissions: this.nonInteractivePermissions,
       authCredentials: this.authCredentials,
       authPolicy: this.authPolicy,
-      timeoutMs: this.defaultNodeTimeoutMs,
+      timeoutMs,
       verbose: this.verbose,
       sessionOptions: this.sessionOptions,
     });

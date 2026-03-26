@@ -523,6 +523,43 @@ test("FlowRunner times out async shell exec callbacks", async () => {
   });
 });
 
+test("FlowRunner times out async shell parse callbacks", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "unused",
+        agentCommand: "unused",
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+
+    const flow = defineFlow({
+      name: "shell-parse-timeout-test",
+      startAt: "slow",
+      nodes: {
+        slow: shell({
+          timeoutMs: 50,
+          exec: () => ({
+            command: process.execPath,
+            args: ["-e", 'process.stdout.write("ok")'],
+          }),
+          parse: async () => await new Promise(() => {}),
+        }),
+      },
+      edges: [],
+    });
+
+    await assert.rejects(async () => await runner.run(flow, {}), TimeoutError);
+    const runDir = await waitForRunDir(outputRoot, "shell-parse-timeout-test");
+    const state = await readRunJson(runDir);
+    const slowResult = (state.results as Record<string, Record<string, unknown>>).slow;
+    assert.equal(slowResult.outcome, "timed_out");
+  });
+});
+
 test("FlowRunner times out async ACP prompt callbacks", async () => {
   await withTempHome(async () => {
     const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
@@ -553,6 +590,84 @@ test("FlowRunner times out async ACP prompt callbacks", async () => {
 
     await assert.rejects(async () => await runner.run(flow, {}), TimeoutError);
     const runDir = await waitForRunDir(outputRoot, "acp-prompt-timeout-test");
+    const state = await readRunJson(runDir);
+    const slowResult = (state.results as Record<string, Record<string, unknown>>).slow;
+    assert.equal(slowResult.outcome, "timed_out");
+  });
+});
+
+test("FlowRunner times out async ACP parse callbacks", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "unused",
+        agentCommand: "unused",
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+    const runnerHarness = runner as unknown as {
+      runIsolatedPrompt: () => Promise<string>;
+    };
+    runnerHarness.runIsolatedPrompt = async () => "hello";
+
+    const flow = defineFlow({
+      name: "acp-parse-timeout-test",
+      startAt: "slow",
+      nodes: {
+        slow: acp({
+          session: {
+            isolated: true,
+          },
+          timeoutMs: 50,
+          prompt: () => "hello",
+          parse: async () => await new Promise(() => {}),
+        }),
+      },
+      edges: [],
+    });
+
+    await assert.rejects(async () => await runner.run(flow, {}), TimeoutError);
+    const runDir = await waitForRunDir(outputRoot, "acp-parse-timeout-test");
+    const state = await readRunJson(runDir);
+    const slowResult = (state.results as Record<string, Record<string, unknown>>).slow;
+    assert.equal(slowResult.outcome, "timed_out");
+  });
+});
+
+test("FlowRunner respects per-node timeouts while creating persistent ACP sessions", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "unused",
+        agentCommand: "unused",
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+    const runnerHarness = runner as unknown as {
+      ensureSessionBinding: () => Promise<unknown>;
+    };
+    runnerHarness.ensureSessionBinding = async () => await new Promise(() => {});
+
+    const flow = defineFlow({
+      name: "acp-session-create-timeout-test",
+      startAt: "slow",
+      nodes: {
+        slow: acp({
+          timeoutMs: 50,
+          prompt: () => "hello",
+        }),
+      },
+      edges: [],
+    });
+
+    await assert.rejects(async () => await runner.run(flow, {}), TimeoutError);
+    const runDir = await waitForRunDir(outputRoot, "acp-session-create-timeout-test");
     const state = await readRunJson(runDir);
     const slowResult = (state.results as Record<string, Record<string, unknown>>).slow;
     assert.equal(slowResult.outcome, "timed_out");

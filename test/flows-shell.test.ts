@@ -66,3 +66,14 @@ test("runShellAction times out long-running commands", async () => {
     (error: unknown) => error instanceof TimeoutError,
   );
 });
+
+test("runShellAction rejects commands terminated by signal", async () => {
+  await assert.rejects(
+    async () =>
+      await runShellAction({
+        command: "/bin/sh",
+        args: ["-c", 'kill -TERM "$$"'],
+      }),
+    /signal SIGTERM/,
+  );
+});

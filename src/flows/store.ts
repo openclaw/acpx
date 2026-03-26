@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -75,7 +76,7 @@ function createLiveState(state: FlowRunState): FlowLiveState {
 }
 
 async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
-  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
   const payload = JSON.stringify(value, null, 2);
   await fs.writeFile(tempPath, `${payload}\n`, "utf8");
   await fs.rename(tempPath, filePath);
