@@ -10,7 +10,13 @@ flowchart TD
 
     C -->|"Bad, localized,<br/>or unclear"| D[Comment and close PR]
     C -->|"Seems OK but needs a<br/>design decision/human call"| E[Comment and escalate to human]
-    C -->|Good enough| V{Bug or feature?}
+    C -->|Good enough| M{"Conflicts against<br/>current base?"}
+
+    M -->|No| V{Bug or feature?}
+    M -->|Yes| N{"Straightforward<br/>conflicts?"}
+    N -->|Yes| O[Resolve conflicts]
+    O --> V
+    N -->|"No / ambiguous"| E
 
     V -->|Bug| P[If bug, reproduce it<br/>and test the fix]
     V -->|Feature| T[If feature,<br/>test it directly]
@@ -33,9 +39,15 @@ flowchart TD
     H -->|Yes| I[Address review feedback]
     I --> G
     J --> K{CI failures?}
-    K -->|No| E
+    K -->|No| Q{"Conflicts against<br/>current base?"}
     K -->|Yes| L[Fix CI failures]
     L --> J
+
+    Q -->|No| E
+    Q -->|Yes| S{"Straightforward<br/>conflicts?"}
+    S -->|Yes| U[Resolve conflicts]
+    U --> V
+    S -->|"No / ambiguous"| E
 ```
 
 This prompt may process multiple items in one run. Use it for the triage lane, not the single-PR landing lane.
@@ -66,23 +78,25 @@ This prompt may process multiple items in one run. Use it for the triage lane, n
    - a fundamental refactor is needed to solve the problem properly
    - a human must decide what the correct product or architecture direction should be before any implementation can be judged
 
-8. **Choose the right validation path before polishing the PR.** After deciding that the solution is good enough to continue, explicitly decide whether the PR is primarily a bug-fix or a feature/behavior change. That choice determines how the work should be validated before it proceeds to refactor, review, or CI.
+8. **Check conflicts against the current base before doing write-heavy autonomous work.** After the early read-only judgment says the solution is good enough to continue, update against the current base in the isolated workspace and check whether the branch still applies cleanly. If there are no conflicts, continue. If the conflicts are straightforward and mechanical, resolve them autonomously and then continue. If the conflicts are ambiguous, semantic, or require judgment about the right final shape, stop and escalate to a human instead of pretending the rest of the autonomous lane is still trustworthy.
 
-9. **If it is a bug, reproduce it and then test the fix.** For a bug-fix, regression, or other failure claim, identify the smallest targeted repro or test that captures the issue. If needed, temporarily ablate the fix or the changed test setup so you can demonstrate failure on the refreshed base or ablated state. That temporary ablation must stay local only: do not commit it, do not push it, and do not leave the PR branch in the broken state. Restore the real PR fix in the working tree before continuing, then rerun the same repro or targeted test to prove that the fix changes the outcome. When feasible, also run relevant integration or end-to-end tests near that behavior.
+9. **Choose the right validation path before polishing the PR.** After deciding that the solution is good enough to continue, explicitly decide whether the PR is primarily a bug-fix or a feature/behavior change. That choice determines how the work should be validated before it proceeds to refactor, review, or CI.
 
-10. **If it is a feature, test the changed behavior directly.** For a feature or behavior change, validate the changed behavior directly on the PR branch with the smallest targeted test or check that shows the feature works as intended. When feasible, also run relevant integration or end-to-end tests near that behavior. Do not force an artificial “reproduce a prior failure” step for work that is not actually a bug fix.
+10. **If it is a bug, reproduce it and then test the fix.** For a bug-fix, regression, or other failure claim, identify the smallest targeted repro or test that captures the issue. If needed, temporarily ablate the fix or the changed test setup so you can demonstrate failure on the refreshed base or ablated state. That temporary ablation must stay local only: do not commit it, do not push it, and do not leave the PR branch in the broken state. Restore the real PR fix in the working tree before continuing, then rerun the same repro or targeted test to prove that the fix changes the outcome. When feasible, also run relevant integration or end-to-end tests near that behavior.
 
-11. **Escalate if the claimed work cannot actually be validated.** If a bug cannot be reproduced, the fix does not change the outcome, or a feature change cannot be validated confidently with targeted testing, stop and escalate to a human rather than continuing into refactor, review, or CI as if the work were proven.
+11. **If it is a feature, test the changed behavior directly.** For a feature or behavior change, validate the changed behavior directly on the PR branch with the smallest targeted test or check that shows the feature works as intended. When feasible, also run relevant integration or end-to-end tests near that behavior. Do not force an artificial “reproduce a prior failure” step for work that is not actually a bug fix.
 
-12. **Do superficial refactors before continuing into review.** If the item only needs a superficial refactor, that does not require human attention by itself. Superficial refactors should be done on the autonomous lane before the item proceeds into Codex review. Only fundamental refactors trigger the human-attention path.
+12. **Escalate if the claimed work cannot actually be validated.** If a bug cannot be reproduced, the fix does not change the outcome, or a feature change cannot be validated confidently with targeted testing, stop and escalate to a human rather than continuing into refactor, review, or CI as if the work were proven.
 
-13. **Keep moving when the work is good enough to continue.** If the item does not need human attention and is not a close outcome, continue autonomously. It is acceptable to proceed with automated review, local validation, CI/CD checking, and follow-up fixes as long as the intention is clear, the work has been validated on the correct bug or feature path, and the item does not require a human product or architecture judgment. If the implementation looks acceptable enough to continue, keep going rather than blocking on perfectionism.
+13. **Do superficial refactors before continuing into review.** If the item only needs a superficial refactor, that does not require human attention by itself. Superficial refactors should be done on the autonomous lane before the item proceeds into Codex review. Only fundamental refactors trigger the human-attention path.
 
-14. **Do not spend review effort on work that should stop early.** Only continue into Codex review if the item is safe to continue autonomously. If the item needs human attention or should be closed, stop the autonomous flow there. Do not spend time running Codex review, fixing code, or chasing CI on work that is not ready to merge anyway. Instead, write up the intention, the reason human attention is required or the reason the PR should be closed, whether a fundamental refactor is needed, whether the bug or feature claim could actually be validated, and the exact decision or reframing needed from a human.
+14. **Keep moving when the work is good enough to continue.** If the item does not need human attention and is not a close outcome, continue autonomously. It is acceptable to proceed with automated conflict resolution, review, local validation, CI/CD checking, and follow-up fixes as long as the intention is clear, the work has been validated on the correct bug or feature path, and the item does not require a human product or architecture judgment. If the implementation looks acceptable enough to continue, keep going rather than blocking on perfectionism.
 
-15. **Trigger Codex review in a fixed order on every PR that stays on the autonomous lane.** For items that are safe to continue autonomously, every PR must go through Codex review in this order. First, check whether the PR already has Codex review comments on GitHub for the current PR head and address the valid unresolved ones. Do not skip existing Codex feedback just because you plan to run another review. When reading GitHub review state, do not rely on `gh pr view --comments`; use stable REST-backed `gh api` calls such as `repos/{owner}/{repo}/pulls/{pr}/reviews`, `repos/{owner}/{repo}/pulls/{pr}/comments`, and `repos/{owner}/{repo}/issues/{pr}/comments` instead. After that, refresh the PR base branch from origin, determine the correct updated base ref or merge base from the checked-out repo, and run a fresh local `codex review --base <base>` against that fresh base ref. Do not review against a stale local base branch, against the whole repository state, or against a stale local diff. If that local Codex review cannot be completed reliably, including timing out, stop pretending review is clear and escalate to a human. Treat P0 and P1 findings from either source as blockers that must be resolved before the PR can move forward. P2 and lower findings are not blockers by default; handle them with judgment and do not keep looping just to polish them unless they materially change the intention-first assessment.
+15. **Do not spend review effort on work that should stop early.** Only continue into Codex review if the item is safe to continue autonomously. If the item needs human attention or should be closed, stop the autonomous flow there. Do not spend time running Codex review, fixing code, or chasing CI on work that is not ready to merge anyway. Instead, write up the intention, the reason human attention is required or the reason the PR should be closed, whether a fundamental refactor is needed, whether the bug or feature claim could actually be validated, and the exact decision or reframing needed from a human.
 
-16. **Address blocking review feedback and rerun local review if needed.** After Codex review, make sure the review feedback is actually closed out. That means:
+16. **Trigger Codex review in a fixed order on every PR that stays on the autonomous lane.** For items that are safe to continue autonomously, every PR must go through Codex review in this order. First, check whether the PR already has Codex review comments on GitHub for the current PR head and address the valid unresolved ones. Do not skip existing Codex feedback just because you plan to run another review. When reading GitHub review state, do not rely on `gh pr view --comments`; use stable REST-backed `gh api` calls such as `repos/{owner}/{repo}/pulls/{pr}/reviews`, `repos/{owner}/{repo}/pulls/{pr}/comments`, and `repos/{owner}/{repo}/issues/{pr}/comments` instead. After that, refresh the PR base branch from origin, determine the correct updated base ref or merge base from the checked-out repo, and run a fresh local `codex review --base <base>` against that fresh base ref. Do not review against a stale local base branch, against the whole repository state, or against a stale local diff. If that local Codex review cannot be completed reliably, including timing out, stop pretending review is clear and escalate to a human. Treat P0 and P1 findings from either source as blockers that must be resolved before the PR can move forward. P2 and lower findings are not blockers by default; handle them with judgment and do not keep looping just to polish them unless they materially change the intention-first assessment.
+
+17. **Address blocking review feedback and rerun local review if needed.** After Codex review, make sure the review feedback is actually closed out. That means:
 
 - valid Codex findings from GitHub reviews are fixed or otherwise resolved with a clear reason
 - the PR base branch has been refreshed from origin before local review
@@ -92,27 +106,31 @@ This prompt may process multiple items in one run. Use it for the triage lane, n
 - stale comments from older commits are recognized as stale and not mistaken for current blockers
 - if P0 or P1 findings remain, address that review feedback and run local review again until the blocking findings are cleared
 
-17. **Check whether CI failures really belong to this PR, and approve workflow runs when that is the blocker.** Then evaluate CI/CD for items still on the autonomous lane. If CI is green, that part is satisfied. If CI is not fully green, determine whether the failures are actually caused by the PR. If a workflow run is blocked only because it needs maintainer approval to run, approve or enable that workflow run first if you have permission, for example with the workflow-run approval endpoint `POST /repos/{owner}/{repo}/actions/runs/{run_id}/approve`, then re-check CI before escalating. If failures are unrelated, pre-existing, or clearly due to external churn outside the diff, document that plainly and do not treat them as blockers. If the failures are plausibly related to the PR, they must be fixed before landing. After fixing related CI failures or approving the blocked workflow run, check CI again until the related failures are gone or clearly shown to be unrelated. If the only remaining blocker is a workflow approval gate that you cannot clear yourself, escalate to a human and say that explicitly.
+18. **Check whether CI failures really belong to this PR, and approve workflow runs when that is the blocker.** Then evaluate CI/CD for items still on the autonomous lane. If CI is green, that part is satisfied. If CI is not fully green, determine whether the failures are actually caused by the PR. If a workflow run is blocked only because it needs maintainer approval to run, approve or enable that workflow run first if you have permission, for example with the workflow-run approval endpoint `POST /repos/{owner}/{repo}/actions/runs/{run_id}/approve`, then re-check CI before escalating. If failures are unrelated, pre-existing, or clearly due to external churn outside the diff, document that plainly and do not treat them as blockers. If the failures are plausibly related to the PR, they must be fixed before landing. After fixing related CI failures or approving the blocked workflow run, check CI again until the related failures are gone or clearly shown to be unrelated. If the only remaining blocker is a workflow approval gate that you cannot clear yourself, escalate to a human and say that explicitly.
 
 - if you changed code while fixing CI-related problems, rerun the targeted validation from the earlier bug-or-feature validation step and any nearby integration or end-to-end tests when feasible before checking CI again
 
-18. **Only land PRs that clear every gate.** A PR is ready to land only if all of the following are true:
+19. **Check for new conflicts again before the final handoff or landing decision.** After review is clear and CI is green or clearly unrelated, check one more time whether the branch still applies cleanly to the current base. The base branch may have moved while review or CI was in progress. If new conflicts appeared, assess them again. If they are straightforward and mechanical, resolve them autonomously, then rerun the appropriate validation, review, and CI path on the updated branch. If they are ambiguous or require judgment about the right final shape, escalate to a human instead of pretending the PR is still merge-ready.
+
+20. **Only land PRs that clear every gate.** A PR is ready to land only if all of the following are true:
 
 - the plain-language intention is clear
 - the implementation serves that intention in a real way rather than merely covering symptoms
+- the branch either applies cleanly to the current base or only needed straightforward conflicts that were resolved and then revalidated
 - the work has been validated on the correct path: a bug was reproduced and shown fixed, or a feature was tested directly
 - any needed refactor is either unnecessary or superficial rather than fundamental
 - there is no remaining need for human framing or architectural judgment
 - Codex review has happened, existing GitHub Codex feedback has been handled, and there are no unresolved P0 or P1 findings
 - CI/CD is green, or any remaining failures are clearly unrelated to the PR
 
-19. **Apply the same judgment to issues, but only close real PRs.** If the item is an issue or issue description rather than an existing PR, do the same intention-first analysis and decide whether it is ready for autonomous implementation or whether it needs human framing first. If the issue is already framed well enough to proceed, say so. If it is not, explain exactly what judgment call, fundamental refactor, or reframing a human still needs to provide. The explicit close action applies only to real PRs.
+21. **Apply the same judgment to issues, but only close real PRs.** If the item is an issue or issue description rather than an existing PR, do the same intention-first analysis and decide whether it is ready for autonomous implementation or whether it needs human framing first. If the issue is already framed well enough to proceed, say so. If it is not, explain exactly what judgment call, fundamental refactor, or reframing a human still needs to provide. The explicit close action applies only to real PRs.
 
-20. **Write down one concise decision record for each item.** For every item, produce a concise but complete result with these sections:
+22. **Write down one concise decision record for each item.** For every item, produce a concise but complete result with these sections:
 
 - Plain-language intention
 - Is the intention valid
 - Does the current PR or proposed solution actually solve the right problem
+- Conflict status: clean, straightforward conflicts resolved, or ambiguous conflicts escalated
 - Was the work validated on the correct path: bug reproduced and fixed, or feature tested directly
 - Should this PR be closed immediately
 - Refactor needed: none, superficial, or fundamental
@@ -121,7 +139,7 @@ This prompt may process multiple items in one run. Use it for the triage lane, n
 - CI/CD status and whether any failures are unrelated
 - Final recommendation: close PR, land, continue autonomously, or escalate to a human
 
-21. **Post the result back, and close PRs when the outcome says to close them.** If the item is a real PR or issue, post the final result back onto that item as a comment. The comment should be written for a human reviewer or author, in plain language, and should include the intention, the judgment about whether the work really solves the right problem, whether the work was actually validated on the correct bug or feature path, whether a refactor is needed and what kind, whether the PR should be closed, any blocking Codex review or CI concerns, and the final recommendation. If the item needed human attention, the comment should clearly say that the autonomous review-and-land path was intentionally stopped early and that a fundamental refactor, failed validation step, or human reframing is still needed. All human-escalation outcomes should use the same basic note structure; do not invent separate note formats for different escalation branches. Instead, reuse one shared human note and make the reason explicit, such as `design decision/human call`, `validation not established`, or `ready for human landing decision`. If the item is a PR and the conclusion is that the current implementation is unclear, a bad fix, or merely a localized fix, close the PR after posting the comment. If the input item is only a raw issue description with no real item to comment on, skip the posting step and state that there was no concrete item to comment on.
+23. **Post the result back, and close PRs when the outcome says to close them.** If the item is a real PR or issue, post the final result back onto that item as a comment. The comment should be written for a human reviewer or author, in plain language, and should include the intention, the judgment about whether the work really solves the right problem, whether conflict resolution stayed straightforward or needed human judgment, whether the work was actually validated on the correct bug or feature path, whether a refactor is needed and what kind, whether the PR should be closed, any blocking Codex review or CI concerns, and the final recommendation. If the item needed human attention, the comment should clearly say that the autonomous review-and-land path was intentionally stopped early and that a fundamental refactor, ambiguous conflict, failed validation step, or human reframing is still needed. All human-escalation outcomes should use the same basic note structure; do not invent separate note formats for different escalation branches. Instead, reuse one shared human note and make the reason explicit, such as `design decision/human call`, `ambiguous conflicts`, `validation not established`, or `ready for human landing decision`. If the item is a PR and the conclusion is that the current implementation is unclear, a bad fix, or merely a localized fix, close the PR after posting the comment. If the input item is only a raw issue description with no real item to comment on, skip the posting step and state that there was no concrete item to comment on.
 
 ### Timeout assumptions in the executable flow
 
@@ -143,7 +161,7 @@ These are the current operational timeout assumptions in the single-file executa
 
 ACP steps without an explicit timeout in the workflow currently rely on the `acpx` flow runtime default. At the moment that default is 15 minutes, so if a step such as `extract_intent`, `judge_solution`, `bug_or_feature`, `judge_refactor`, `comment_and_close_pr`, or `comment_and_escalate_to_human` should have a different budget, that must be stated explicitly in the workflow file.
 
-22. **Use a short, scannable comment template with explicit status signals.** Use an actual comment template when posting the result. Keep it short, plain, and scannable. Use helpful status emojis so a human can quickly tell whether this is safe to keep moving, needs intervention, or should be closed. When the outcome is `escalate to human`, always use the same note format and include a field or line that clearly states why human input is needed. This template is mandatory for posted comments. Do not invent a different layout.
+24. **Use a short, scannable comment template with explicit status signals.** Use an actual comment template when posting the result. Keep it short, plain, and scannable. Use helpful status emojis so a human can quickly tell whether this is safe to keep moving, needs intervention, or should be closed. When the outcome is `escalate to human`, always use the same note format and include a field or line that clearly states why human input is needed. This template is mandatory for posted comments. Do not invent a different layout.
 
 Emoji guide:
 
@@ -201,7 +219,7 @@ Default comment template:
 If the item needs human attention, the template should make that obvious near the top:
 
 - `Human attention: ⚠️ Required`
-- `Human decision needed: <design decision/human call | validation not established | ready for human landing decision | other explicit reason>`
+- `Human decision needed: <design decision/human call | ambiguous conflicts | validation not established | ready for human landing decision | other explicit reason>`
 - `Refactor needed: 🧱 Fundamental` if applicable
 - `Recommendation: 🏁 escalate to a human`
 
@@ -218,4 +236,4 @@ If the item is safe to keep moving:
 - `Human attention: 🟢 Not required`
 - `Recommendation: 🏁 continue autonomously` or `🏁 land`
 
-23. **Be rigorous about protecting the project from wrong-shaped work.** Be extremely diligent. The point of this prompt is not just to do process. The point is to protect against technically polished PRs that sound right but are solving the wrong thing, solving too little, or avoiding the real problem behind the work.
+25. **Be rigorous about protecting the project from wrong-shaped work.** Be extremely diligent. The point of this prompt is not just to do process. The point is to protect against technically polished PRs that sound right but are solving the wrong thing, solving too little, or avoiding the real problem behind the work.
