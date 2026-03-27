@@ -353,6 +353,132 @@ The timeline should show:
 It should not show multiple secondary status boxes that repeat the same replay
 state in different wordings.
 
+### Continuous playback model
+
+The replay viewer should keep the stored run data discrete while making playback
+feel continuous.
+
+That means:
+
+- the run bundle remains step-based and attempt-based
+- the viewer adds a transient continuous playhead
+- pausing or releasing the scrubber snaps back to the nearest discrete attempt
+
+The viewer should not add fractional or interpolated playback state to the
+stored run bundle.
+
+### Canonical vs transient state
+
+The viewer should keep two layers of state:
+
+1. canonical discrete replay state
+2. transient playback state
+
+Canonical discrete replay state answers:
+
+- which attempt is selected
+- which ACP slice is selected
+- which node is selected when the viewer is paused
+
+Transient playback state answers:
+
+- where the playhead currently is while playing
+- where the scrubber is while dragging
+- how far the current ACP message reveal has progressed
+
+The discrete state remains the source of truth when replay is paused.
+
+### Time model
+
+Continuous playback should be time-based, not percentage-based.
+
+The viewer should derive playback from:
+
+- attempt start time
+- attempt finish time
+- run start time
+- run finish time when available
+
+Within a step, local playback progress should be derived from elapsed time
+between the step start and finish.
+
+If a step has no meaningful duration, the viewer may use a small synthetic
+minimum playback duration for presentation only.
+
+That synthetic duration must remain viewer-local and must not be written back to
+the bundle.
+
+### ACP message reveal
+
+When replay is actively playing, ACP text should reveal progressively rather
+than appearing only at step boundaries.
+
+Required behavior:
+
+- user and assistant text should reveal character by character
+- tool calls and tool results may appear once the playhead reaches the relevant
+  message threshold
+- raw payload disclosures should stay closed by default during playback
+
+When replay is paused or scrubbing ends:
+
+- the ACP pane should snap to the nearest discrete step
+- the selected step should render in its full discrete state
+- the viewer should not remain stuck in a half-revealed message state
+
+### Graph overlay during playback
+
+The full definition graph should remain structurally discrete.
+
+Continuous playback should affect only the overlay:
+
+- edge highlight progression
+- node emphasis
+- selected-attempt indicator
+- current-position glow or stroke
+
+The viewer should not invent intermediate nodes or intermediate graph topology.
+
+### Scrubber behavior
+
+The scrubber should behave like a media player seek bar.
+
+While dragging:
+
+- the viewer may preview a continuous playhead position
+- the viewer should not immediately commit a new discrete selection on every
+  pointer movement
+
+When the drag ends:
+
+- snap to the nearest discrete attempt
+- commit that attempt as the selected step
+- render the canonical paused state for that attempt
+
+### Paused state
+
+When replay is paused:
+
+- the graph overlay should reflect a single discrete attempt
+- the inspector should reflect a single discrete ACP slice
+- the playhead should not imply continuous progression
+
+The paused viewer should always answer:
+
+- which attempt is selected right now
+- which node that attempt belongs to
+- what the exact stored state of that attempt was
+
+### Implementation boundary
+
+This behavior belongs in the viewer playback model and view-model only.
+
+It should not require:
+
+- changes to the run bundle schema
+- new persistence fields for interpolation
+- synthetic progress values stored in run projections
+
 ## Layout shell
 
 The viewer should fit within the viewport.
