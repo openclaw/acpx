@@ -302,7 +302,10 @@ code {
 }
 
 .run-browser__list {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  align-content: flex-start;
   gap: 6px;
   min-height: 0;
   overflow: auto;
@@ -311,6 +314,7 @@ code {
 
 .run-list-item {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
