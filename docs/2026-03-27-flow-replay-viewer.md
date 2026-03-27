@@ -15,6 +15,86 @@ It does not change the run-bundle storage model. The viewer derives its display
 semantics from the stored flow definition, trace, projections, and bundled
 session data.
 
+## Information density
+
+The viewer exists to inspect dense technical state.
+
+That means the default visual style should prefer:
+
+- small typography
+- tight spacing
+- strong grouping
+- less duplicated metadata
+
+The viewer should not feel like a marketing dashboard or a spacious card UI.
+
+### Typography
+
+The default font size should be small enough to keep substantial technical
+context visible at once.
+
+Requirements:
+
+- compact base text
+- compact labels
+- compact metadata chips
+- no oversized headers inside the main viewing surface
+
+The viewer should optimize for scanability over visual decoration.
+
+### Metadata budget
+
+There is too much state available to show all at once.
+
+The default view should show only the metadata needed to answer:
+
+- what run is this?
+- where am I in replay?
+- what node is selected?
+- what happened here?
+
+Everything else should be:
+
+- collapsed
+- secondary
+- or moved into a detail view
+
+## Viewer chrome
+
+The viewer should not have a large changing top navbar.
+
+The left sidebar already establishes:
+
+- run selection
+- app identity
+- navigation
+
+So the main viewing surface should avoid a second heavy navigation layer.
+
+### Top-level chrome rules
+
+- no large persistent top navbar
+- no step-dependent global header that changes while replay advances
+- replay controls and run outcome should live in the player section, not a
+  separate app bar
+
+If any top chrome remains, it should be minimal and stable.
+
+### Playback stability
+
+While replay is playing:
+
+- the main chrome should not jump
+- the header should not change size
+- layout should not reflow because the selected step changes
+
+Only the replay-specific surfaces should update:
+
+- scrubber
+- current-step indicator
+- graph overlay
+- inspector content
+
 ## Purpose
 
 The viewer must make two things legible at the same time:
@@ -248,7 +328,7 @@ Scrolling should happen inside sections, not on the page root.
 ### Required shell
 
 - full-height left sidebar for run selection
-- top area for replay controls and run outcome
+- player area for replay controls and run outcome
 - central graph pane
 - side or lower pane for attempt/session inspection
 
@@ -270,7 +350,7 @@ screen during normal viewing.
 
 ## Inspector panels
 
-The ACP session should be the default panel.
+The ACP session should be the default panel and the primary reading surface.
 
 The viewer should not dump raw JSON into the main reading path by default.
 
@@ -279,6 +359,12 @@ The viewer should not dump raw JSON into the main reading path by default.
 - ACP session
 - selected attempt details
 - raw events
+
+The ACP session tab should be selected by default on load and after run
+switching.
+
+The session panel should not feel secondary to attempt metadata. It should be
+the main readable explanation of what happened at the selected point in replay.
 
 ### ACP session rendering
 
@@ -294,6 +380,17 @@ Tool noise should be collapsed or summarized by default.
 The user should not have to read large raw payloads unless they intentionally
 expand them.
 
+Human-readable session text must not be truncated with ellipses in the default
+conversation rendering.
+
+Readable conversation text should:
+
+- wrap
+- remain selectable
+- remain fully visible within the scrollable session panel
+
+Only clearly secondary metadata may be truncated.
+
 ### Required behavior
 
 - show human-readable user and agent text blocks by default
@@ -301,6 +398,8 @@ expand them.
 - summarize tool results in one line
 - collapse raw payloads behind disclosure controls
 - keep the selected ACP slice highlighted
+- avoid truncating readable message text
+- give the ACP session pane more visual priority than attempt metadata
 
 Raw JSON is still important, but it belongs behind expansion controls or in a
 raw-events view.
