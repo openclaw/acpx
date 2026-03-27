@@ -95,9 +95,9 @@ function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
 
   if (!sessionRecord) {
     return (
-      <div className="inspector__section-stack">
-        <Section title="ACP session">
-          <div className="empty-card">This step did not use an ACP session.</div>
+      <div className="inspector__section-stack inspector__section-stack--fill">
+        <Section title="ACP session" fill>
+          <div className="empty-card empty-card--fill">This step did not use an ACP session.</div>
         </Section>
       </div>
     );
@@ -304,14 +304,16 @@ function TabButton({
 function Section({
   title,
   subtitle,
+  fill = false,
   children,
 }: {
   title: string;
   subtitle?: string;
+  fill?: boolean;
   children: ReactNode;
 }) {
   return (
-    <section className="panel-section">
+    <section className={`panel-section${fill ? " panel-section--fill" : ""}`}>
       <div className="panel-section__header">
         <h3>{title}</h3>
         {subtitle ? <div className="panel-section__subtitle">{subtitle}</div> : null}

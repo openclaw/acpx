@@ -560,6 +560,13 @@ code {
   color: var(--ink-soft);
 }
 
+.empty-card--fill {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
 .flow-node-card {
   min-width: 248px;
   display: grid;
@@ -742,6 +749,10 @@ code {
   gap: 8px;
 }
 
+.inspector__section-stack--fill {
+  min-height: 100%;
+}
+
 .panel-section,
 .panel-disclosure,
 .conversation__message,
@@ -753,6 +764,12 @@ code {
 
 .panel-section {
   padding: 10px;
+}
+
+.panel-section--fill {
+  min-height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .panel-section__header {
