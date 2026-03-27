@@ -235,39 +235,6 @@ function SessionTab({
         ))}
         <div ref={sessionEndRef} aria-hidden="true" />
       </div>
-
-      <DisclosureSection title="Session details">
-        <dl className="definition-grid">
-          <div>
-            <dt>Name</dt>
-            <dd>{activeSession.sessionRecord.name ?? "n/a"}</dd>
-          </div>
-          <div>
-            <dt>Session id</dt>
-            <dd>{activeSession.id}</dd>
-          </div>
-          <div>
-            <dt>Started</dt>
-            <dd>{formatDate(selectedAttempt.step.startedAt)}</dd>
-          </div>
-          <div>
-            <dt>Finished</dt>
-            <dd>{formatDate(selectedAttempt.step.finishedAt)}</dd>
-          </div>
-          <div>
-            <dt>cwd</dt>
-            <dd>{activeSession.sessionRecord.cwd ?? selectedAttempt.step.agent?.cwd ?? "n/a"}</dd>
-          </div>
-          <div>
-            <dt>Agent command</dt>
-            <dd>
-              {activeSession.sessionRecord.agentCommand ??
-                selectedAttempt.step.agent?.agentCommand ??
-                "n/a"}
-            </dd>
-          </div>
-        </dl>
-      </DisclosureSection>
     </div>
   );
 }
