@@ -184,6 +184,8 @@ ACP steps without an explicit timeout in the workflow currently rely on the `acp
 
 24. **Use a short, scannable comment template with explicit status signals.** Use an actual comment template when posting the result. Keep it short, plain, and scannable. Use helpful status emojis so a human can quickly tell whether this is safe to keep moving, needs intervention, or should be closed. When the outcome is `escalate to human`, use one of two human note variants: `needs judgment` or `ready for landing`. Both should keep the same basic layout, but the human-decision line and recommendation should make the variant obvious. This template is mandatory for posted comments. Do not invent a different layout.
 
+ACP judgment steps in the executable workflow are JSON-only by contract. They should return a single JSON object with no commentary, preamble, or markdown fences. The flow runtime still uses compatibility JSON extraction as a safety net when the model adds recoverable extra text, but the prompt contract is still exact JSON only.
+
 Emoji guide:
 
 - `✅` valid / good / safe

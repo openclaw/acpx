@@ -30,9 +30,8 @@ export function parseJsonObject(
   }
 
   if (mode === "compat") {
-    const balanced = extractBalancedJson(trimmed);
-    if (balanced) {
-      const parsed = tryParse(balanced);
+    for (const candidate of extractBalancedJsonCandidates(trimmed)) {
+      const parsed = tryParse(candidate);
       if (parsed.ok) {
         return parsed.value;
       }
@@ -67,7 +66,9 @@ function tryParse(text: string): { ok: true; value: unknown } | { ok: false } {
   }
 }
 
-function extractBalancedJson(text: string): string | null {
+function extractBalancedJsonCandidates(text: string): string[] {
+  const candidates: string[] = [];
+
   for (let index = 0; index < text.length; index += 1) {
     if (text[index] !== "{" && text[index] !== "[") {
       continue;
@@ -75,11 +76,11 @@ function extractBalancedJson(text: string): string | null {
 
     const result = scanBalanced(text, index);
     if (result) {
-      return result;
+      candidates.push(result);
     }
   }
 
-  return null;
+  return candidates;
 }
 
 function scanBalanced(text: string, startIndex: number): string | null {

@@ -28,6 +28,7 @@ test("extractJsonObject parses direct, fenced, and embedded JSON", () => {
   assert.deepEqual(extractJsonObject('{"ok":true}'), { ok: true });
   assert.deepEqual(extractJsonObject('```json\n{"ok":true}\n```'), { ok: true });
   assert.deepEqual(extractJsonObject('before {"ok":true} after'), { ok: true });
+  assert.deepEqual(extractJsonObject('status {not json} then {"ok":true}'), { ok: true });
 });
 
 test("parseJsonObject supports strict and fenced-only modes", () => {

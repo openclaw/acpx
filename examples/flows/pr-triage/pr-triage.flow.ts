@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { extractJsonObject } from "../../../src/flows.js";
 
 const FLOW_DIR = ".acpx-flow";
 const MAIN_SESSION = {
@@ -31,7 +32,7 @@ const flow = {
       async prompt({ outputs }) {
         return promptExtractIntent(prepared(outputs));
       },
-      parse: (text) => extractJson(text),
+      parse: (text) => extractJsonObject(text),
     },
 
     judge_solution: {
@@ -41,7 +42,7 @@ const flow = {
       async prompt({ outputs }) {
         return promptJudgeSolution(prepared(outputs));
       },
-      parse: (text) => extractJson(text),
+      parse: (text) => extractJsonObject(text),
     },
 
     check_initial_conflicts: {
@@ -62,7 +63,7 @@ const flow = {
       async prompt({ outputs }) {
         return promptJudgeInitialConflicts(prepared(outputs), outputs);
       },
-      parse: (text) => extractJson(text),
+      parse: (text) => extractJsonObject(text),
     },
 
     resolve_initial_conflicts: {
@@ -73,7 +74,7 @@ const flow = {
       async prompt({ outputs }) {
         return promptResolveInitialConflicts(prepared(outputs), outputs);
       },
-      parse: (text) => extractJson(text),
+      parse: (text) => extractJsonObject(text),
     },
 
     bug_or_feature: {
@@ -83,7 +84,7 @@ const flow = {
       async prompt({ outputs }) {
         return promptBugOrFeature(prepared(outputs));
       },
-      parse: (text) => extractJson(text),
+      parse: (text) => extractJsonObject(text),
     },
 
     reproduce_bug_and_test_fix: {
@@ -109,7 +110,7 @@ const flow = {
       async prompt({ outputs }) {
         return promptJudgeRefactor(prepared(outputs), outputs);
       },
-      parse: (text) => extractJson(text),
+      parse: (text) => extractJsonObject(text),
     },
 
     do_superficial_refactor: {
@@ -120,7 +121,7 @@ const flow = {
       async prompt({ outputs }) {
         return promptDoSuperficialRefactor(prepared(outputs), outputs);
       },
-      parse: (text) => extractJson(text),
+      parse: (text) => extractJsonObject(text),
     },
 
     collect_review_state: {
@@ -138,7 +139,7 @@ const flow = {
       async prompt({ outputs }) {
         return promptReviewLoop(prepared(outputs), outputs);
       },
-      parse: (text) => extractJson(text),
+      parse: (text) => extractJsonObject(text),
     },
 
     collect_ci_state: {
@@ -156,7 +157,7 @@ const flow = {
       async prompt({ outputs }) {
         return promptFixCiFailures(prepared(outputs), outputs);
       },
-      parse: (text) => extractJson(text),
+      parse: (text) => extractJsonObject(text),
     },
 
     check_final_conflicts: {
@@ -177,7 +178,7 @@ const flow = {
       async prompt({ outputs }) {
         return promptJudgeFinalConflicts(prepared(outputs), outputs);
       },
-      parse: (text) => extractJson(text),
+      parse: (text) => extractJsonObject(text),
     },
 
     resolve_final_conflicts: {
@@ -188,7 +189,7 @@ const flow = {
       async prompt({ outputs }) {
         return promptResolveFinalConflicts(prepared(outputs), outputs);
       },
-      parse: (text) => extractJson(text),
+      parse: (text) => extractJsonObject(text),
     },
 
     comment_and_close_pr: {
@@ -198,7 +199,7 @@ const flow = {
       async prompt({ outputs }) {
         return promptCommentAndClose(prepared(outputs), outputs);
       },
-      parse: (text) => extractJson(text),
+      parse: (text) => extractJsonObject(text),
     },
 
     post_close_pr: {
@@ -216,7 +217,7 @@ const flow = {
       async prompt({ outputs }) {
         return promptCommentAndEscalate(prepared(outputs), outputs);
       },
-      parse: (text) => extractJson(text),
+      parse: (text) => extractJsonObject(text),
     },
 
     post_escalation_comment: {
@@ -859,13 +860,15 @@ function promptExtractIntent(pr) {
     "Inspect the checked-out repo and current diff yourself when needed. Do not ask the runtime to fetch more context.",
     "This is a read-only judgment step. Do not run installs, tests, CI checks, Codex review, or GitHub API commands here.",
     "Extract the plain-language human intent and the underlying problem.",
-    "Return exactly one JSON object with this shape and nothing else:",
-    "{",
-    '  "intent": "plain-language human goal",',
-    '  "problem": "short description of the underlying issue",',
-    '  "confidence": 0.0,',
-    '  "reason": "short explanation"',
-    "}",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "intent": "plain-language human goal",',
+      '  "problem": "short description of the underlying issue",',
+      '  "confidence": 0.0,',
+      '  "reason": "short explanation"',
+      "}",
+    ]),
   ].join("\n");
 }
 
@@ -886,13 +889,15 @@ function promptJudgeSolution(pr) {
     "Route `close_pr` for localized_fix, bad_fix, or unclear.",
     "Route `comment_and_escalate_to_human` for needs_human_call.",
     "Route `bug_or_feature` for good_enough. The conflict gate runs immediately after this step.",
-    "Return exactly one JSON object and nothing else:",
-    "{",
-    '  "verdict": "good_enough" | "localized_fix" | "bad_fix" | "unclear" | "needs_human_call",',
-    '  "route": "close_pr" | "comment_and_escalate_to_human" | "bug_or_feature",',
-    '  "reason": "short explanation",',
-    '  "evidence": ["brief evidence item"]',
-    "}",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "verdict": "good_enough" | "localized_fix" | "bad_fix" | "unclear" | "needs_human_call",',
+      '  "route": "close_pr" | "comment_and_escalate_to_human" | "bug_or_feature",',
+      '  "reason": "short explanation",',
+      '  "evidence": ["brief evidence item"]',
+      "}",
+    ]),
   ].join("\n");
 }
 
@@ -906,12 +911,14 @@ function promptBugOrFeature(pr) {
     "Use `bug` if this PR primarily claims to fix a bug, regression, broken behavior, or other issue that should first be reproduced and then proven fixed.",
     "Use `feature` if this PR primarily adds or changes behavior that should be validated directly without first reproducing a prior failure.",
     "If you cannot classify it confidently, route to `comment_and_escalate_to_human`.",
-    "Return exactly one JSON object and nothing else:",
-    "{",
-    '  "classification": "bug" | "feature" | "unclear",',
-    '  "route": "reproduce_bug_and_test_fix" | "test_feature_directly" | "comment_and_escalate_to_human",',
-    '  "reason": "short explanation"',
-    "}",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "classification": "bug" | "feature" | "unclear",',
+      '  "route": "reproduce_bug_and_test_fix" | "test_feature_directly" | "comment_and_escalate_to_human",',
+      '  "reason": "short explanation"',
+      "}",
+    ]),
   ].join("\n");
 }
 
@@ -929,12 +936,14 @@ function promptJudgeInitialConflicts(pr, outputs) {
     "If the correct move is to keep the current-base refactor and port the PR's behavior into the new structure, that still counts as `clear_resolution_path`.",
     "Route `resolve_initial_conflicts` for `clear_resolution_path`.",
     "Route `comment_and_escalate_to_human` for `needs_human_judgment`.",
-    "Return exactly one JSON object and nothing else:",
-    "{",
-    '  "conflict_assessment": "clear_resolution_path" | "needs_human_judgment",',
-    '  "route": "resolve_initial_conflicts" | "comment_and_escalate_to_human",',
-    '  "reason": "short explanation"',
-    "}",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "conflict_assessment": "clear_resolution_path" | "needs_human_judgment",',
+      '  "route": "resolve_initial_conflicts" | "comment_and_escalate_to_human",',
+      '  "reason": "short explanation"',
+      "}",
+    ]),
   ].join("\n");
 }
 
@@ -950,13 +959,15 @@ function promptResolveInitialConflicts(pr, outputs) {
     "Resolve the conflict only because you already judged that it has a clear resolution path while preserving the intended PR behavior.",
     "If you cannot resolve the conflicts confidently, do not guess. Route to `comment_and_escalate_to_human` instead.",
     "If you resolve them, finish the merge, run focused checks when feasible, commit the merge result if needed, push the branch yourself, and route to `bug_or_feature`.",
-    "Return exactly one JSON object and nothing else:",
-    "{",
-    '  "route": "bug_or_feature" | "comment_and_escalate_to_human",',
-    '  "summary": "short explanation",',
-    '  "files_touched": ["path/to/file"],',
-    '  "committed": true | false',
-    "}",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "route": "bug_or_feature" | "comment_and_escalate_to_human",',
+      '  "summary": "short explanation",',
+      '  "files_touched": ["path/to/file"],',
+      '  "committed": true | false',
+      "}",
+    ]),
   ].join("\n");
 }
 
@@ -972,12 +983,14 @@ function promptJudgeRefactor(pr, outputs) {
     "Route `collect_review_state` for none.",
     "Route `do_superficial_refactor` for superficial.",
     "Route `comment_and_escalate_to_human` for fundamental.",
-    "Return exactly one JSON object and nothing else:",
-    "{",
-    '  "refactor_needed": "none" | "superficial" | "fundamental",',
-    '  "route": "collect_review_state" | "do_superficial_refactor" | "comment_and_escalate_to_human",',
-    '  "reason": "short explanation"',
-    "}",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "refactor_needed": "none" | "superficial" | "fundamental",',
+      '  "route": "collect_review_state" | "do_superficial_refactor" | "comment_and_escalate_to_human",',
+      '  "reason": "short explanation"',
+      "}",
+    ]),
   ].join("\n");
 }
 
@@ -989,13 +1002,15 @@ function promptDoSuperficialRefactor(pr) {
     "Perform only the superficial refactor directly in the checked-out repo.",
     "Keep it minor and maintainability-focused. Do not reframe the problem or turn this into a fundamental rewrite.",
     "If you change files, run focused checks when feasible, rerun the earlier targeted validation before returning, then commit and push the branch yourself.",
-    "Return exactly one JSON object with this shape and nothing else:",
-    "{",
-    '  "route": "collect_review_state",',
-    '  "summary": "short explanation",',
-    '  "files_touched": ["path/to/file"],',
-    '  "committed": true | false',
-    "}",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "route": "collect_review_state",',
+      '  "summary": "short explanation",',
+      '  "files_touched": ["path/to/file"],',
+      '  "committed": true | false',
+      "}",
+    ]),
   ].join("\n");
 }
 
@@ -1018,16 +1033,18 @@ function promptReviewLoop(pr, outputs) {
     `If you change code in this loop, rerun the earlier targeted validation before returning. Latest validation summary: ${validation?.summary ?? "none"}.`,
     "If `localCodexReviewExitCode` is non-zero, if `localCodexReviewTimedOut` is true, or if the local Codex review could not be established reliably, route to `comment_and_escalate_to_human` instead of pretending review is clear.",
     "If blocking review findings are cleared, route to `collect_ci_state`.",
-    "Return exactly one JSON object and nothing else:",
-    "{",
-    '  "route": "collect_review_state" | "collect_ci_state" | "comment_and_escalate_to_human",',
-    '  "review_status": "blocking_findings_remain" | "clear" | "could_not_establish",',
-    '  "summary": "short explanation",',
-    '  "github_codex_reviews_handled": true | false,',
-    '  "local_codex_review_ran": true | false,',
-    '  "blocking_findings": ["brief finding"],',
-    '  "committed": true | false',
-    "}",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "route": "collect_review_state" | "collect_ci_state" | "comment_and_escalate_to_human",',
+      '  "review_status": "blocking_findings_remain" | "clear" | "could_not_establish",',
+      '  "summary": "short explanation",',
+      '  "github_codex_reviews_handled": true | false,',
+      '  "local_codex_review_ran": true | false,',
+      '  "blocking_findings": ["brief finding"],',
+      '  "committed": true | false',
+      "}",
+    ]),
   ].join("\n");
 }
 
@@ -1045,17 +1062,19 @@ function promptFixCiFailures(pr, outputs) {
     `Latest validation summary: ${validation?.summary ?? "none"}.`,
     "If CI is green or the remaining failures are clearly unrelated, route to `check_final_conflicts` so the final conflict gate can run before the human handoff.",
     "If the only remaining blocker is workflow approval that the runtime could not clear, route to `comment_and_escalate_to_human` and make that the explicit human action needed next.",
-    "Return exactly one JSON object and nothing else:",
-    "{",
-    '  "route": "collect_ci_state" | "check_final_conflicts" | "comment_and_escalate_to_human",',
-    '  "ci_status": "related_failures_remain" | "green_or_unrelated" | "approval_blocked",',
-    '  "summary": "short explanation",',
-    '  "related_failures": ["brief failure"],',
-    '  "unrelated_failures": ["brief failure"],',
-    '  "workflow_approval_attempted": true | false,',
-    '  "workflow_approved": true | false,',
-    '  "committed": true | false',
-    "}",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "route": "collect_ci_state" | "check_final_conflicts" | "comment_and_escalate_to_human",',
+      '  "ci_status": "related_failures_remain" | "green_or_unrelated" | "approval_blocked",',
+      '  "summary": "short explanation",',
+      '  "related_failures": ["brief failure"],',
+      '  "unrelated_failures": ["brief failure"],',
+      '  "workflow_approval_attempted": true | false,',
+      '  "workflow_approved": true | false,',
+      '  "committed": true | false',
+      "}",
+    ]),
   ].join("\n");
 }
 
@@ -1072,12 +1091,14 @@ function promptJudgeFinalConflicts(pr, outputs) {
     "If the correct move is to keep the current-base refactor and port the PR's behavior into the new structure, that still counts as `clear_resolution_path`.",
     "Route `resolve_final_conflicts` for `clear_resolution_path`.",
     "Route `comment_and_escalate_to_human` for `needs_human_judgment`.",
-    "Return exactly one JSON object and nothing else:",
-    "{",
-    '  "conflict_assessment": "clear_resolution_path" | "needs_human_judgment",',
-    '  "route": "resolve_final_conflicts" | "comment_and_escalate_to_human",',
-    '  "reason": "short explanation"',
-    "}",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "conflict_assessment": "clear_resolution_path" | "needs_human_judgment",',
+      '  "route": "resolve_final_conflicts" | "comment_and_escalate_to_human",',
+      '  "reason": "short explanation"',
+      "}",
+    ]),
   ].join("\n");
 }
 
@@ -1094,13 +1115,15 @@ function promptResolveFinalConflicts(pr, outputs) {
     "If you cannot resolve the conflicts confidently, do not guess. Route to `comment_and_escalate_to_human` instead.",
     `If you resolve them, rerun the earlier targeted validation before returning. Latest validation summary: ${validation?.summary ?? "none"}.`,
     "After resolving and pushing the branch, route back to `collect_ci_state` so the flow runtime can rerun the final CI path.",
-    "Return exactly one JSON object and nothing else:",
-    "{",
-    '  "route": "collect_ci_state" | "comment_and_escalate_to_human",',
-    '  "summary": "short explanation",',
-    '  "files_touched": ["path/to/file"],',
-    '  "committed": true | false',
-    "}",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "route": "collect_ci_state" | "comment_and_escalate_to_human",',
+      '  "summary": "short explanation",',
+      '  "files_touched": ["path/to/file"],',
+      '  "committed": true | false',
+      "}",
+    ]),
   ].join("\n");
 }
 
@@ -1117,13 +1140,15 @@ function promptCommentAndClose(pr, outputs) {
     "- `Recommendation: 🏁 close PR`",
     "Use the current run state below as the source of truth:",
     JSON.stringify(summary, null, 2),
-    "Return exactly one JSON object and nothing else:",
-    "{",
-    '  "route": "close_pr",',
-    '  "summary": "short explanation",',
-    '  "comment_format_followed": true | false,',
-    '  "comment": "markdown comment to post"',
-    "}",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "route": "close_pr",',
+      '  "summary": "short explanation",',
+      '  "comment_format_followed": true | false,',
+      '  "comment": "markdown comment to post"',
+      "}",
+    ]),
   ].join("\n");
 }
 
@@ -1143,15 +1168,26 @@ function promptCommentAndEscalate(pr, outputs) {
     "If the remaining blocker is workflow approval, say that plainly.",
     "Use the current run state below as the source of truth:",
     JSON.stringify(summary, null, 2),
-    "Return exactly one JSON object and nothing else:",
-    "{",
-    '  "route": "escalate_to_human",',
-    '  "summary": "short explanation",',
-    '  "human_decision_needed": "short explanation",',
-    '  "comment_format_followed": true | false,',
-    '  "comment": "markdown comment to post"',
-    "}",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "route": "escalate_to_human",',
+      '  "summary": "short explanation",',
+      '  "human_decision_needed": "short explanation",',
+      '  "comment_format_followed": true | false,',
+      '  "comment": "markdown comment to post"',
+      "}",
+    ]),
   ].join("\n");
+}
+
+function exactJsonResponse(shapeLines: string[]) {
+  return [
+    "Return exactly one JSON object and nothing else.",
+    "The first character of your response must be `{` and the last character must be `}`.",
+    "Do not include commentary, progress updates, markdown fences, or any text before or after the JSON.",
+    ...shapeLines,
+  ];
 }
 
 function loadPullRequestInput(input) {
@@ -1444,109 +1480,10 @@ async function runCommand(command, args, options = {}) {
   };
 }
 
-function extractJson(text) {
-  const trimmed = String(text ?? "").trim();
-  if (!trimmed) {
-    throw new Error("Expected JSON output, got empty text");
-  }
-
-  const direct = tryParse(trimmed);
-  if (direct.ok) {
-    return direct.value;
-  }
-
-  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fencedMatch) {
-    const fenced = tryParse(fencedMatch[1].trim());
-    if (fenced.ok) {
-      return fenced.value;
-    }
-  }
-
-  for (const candidate of extractBalancedJsonCandidates(trimmed)) {
-    const parsed = tryParse(candidate);
-    if (parsed.ok) {
-      return parsed.value;
-    }
-  }
-
-  throw new Error(`Could not parse JSON from assistant output:\n${trimmed}`);
-}
-
 function tryExtractJson(text) {
   try {
-    return extractJson(text);
+    return extractJsonObject(text);
   } catch {
     return null;
   }
-}
-
-function tryParse(text) {
-  try {
-    return { ok: true, value: JSON.parse(text) };
-  } catch {
-    return { ok: false };
-  }
-}
-
-function extractBalancedJsonCandidates(text) {
-  const candidates = [];
-  const starts = new Set(["{", "["]);
-  for (let i = 0; i < text.length; i += 1) {
-    if (!starts.has(text[i] ?? "")) {
-      continue;
-    }
-
-    const result = scanBalanced(text, i);
-    if (result) {
-      candidates.push(result);
-    }
-  }
-
-  return candidates;
-}
-
-function scanBalanced(text, startIndex) {
-  const stack = [];
-  let inString = false;
-  let escaped = false;
-
-  for (let i = startIndex; i < text.length; i += 1) {
-    const char = text[i];
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === '"') {
-      inString = true;
-      continue;
-    }
-
-    if (char === "{" || char === "[") {
-      stack.push(char);
-      continue;
-    }
-
-    if (char === "}" || char === "]") {
-      const last = stack.at(-1);
-      if ((last === "{" && char !== "}") || (last === "[" && char !== "]")) {
-        return null;
-      }
-
-      stack.pop();
-      if (stack.length === 0) {
-        return text.slice(startIndex, i + 1);
-      }
-    }
-  }
-
-  return null;
 }
