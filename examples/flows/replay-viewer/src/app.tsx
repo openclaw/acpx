@@ -1,5 +1,5 @@
 import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { FlowNodeCard } from "./components/flow-node-card";
 import { InspectorPanel } from "./components/inspector-panel";
 import { RoutedFlowEdge } from "./components/routed-flow-edge";
@@ -194,6 +194,26 @@ export function App() {
                     />
                     <Background color="rgba(148, 163, 184, 0.08)" gap={40} />
                   </ReactFlow>
+                  <div className="canvas-card__camera">
+                    <div className="timeline__mode-switcher" role="tablist" aria-label="Camera mode">
+                      <ModeButton
+                        label="Follow current node"
+                        active={viewMode === "follow"}
+                        onClick={() => setViewMode("follow")}
+                      >
+                        <FollowIcon />
+                        <span>Follow</span>
+                      </ModeButton>
+                      <ModeButton
+                        label="Overview"
+                        active={viewMode === "overview"}
+                        onClick={() => setViewMode("overview")}
+                      >
+                        <OverviewIcon />
+                        <span>Overview</span>
+                      </ModeButton>
+                    </div>
+                  </div>
                 </div>
                 <StepTimeline
                   steps={bundle.steps}
@@ -205,7 +225,6 @@ export function App() {
                   currentNodeLabel={currentStep ? humanizeIdentifier(currentStep.nodeId) : "n/a"}
                   currentMeta={currentDuration}
                   playing={playback.isPlaying}
-                  viewMode={viewMode}
                   onSelect={playback.selectStep}
                   onPlay={playback.play}
                   onPause={playback.pause}
@@ -215,7 +234,6 @@ export function App() {
                   onSeek={playback.seek}
                   onSeekCommit={playback.commitSeek}
                   onPlaybackRateChange={playback.setPlaybackRate}
-                  onViewModeChange={setViewMode}
                 />
               </section>
             ) : (
@@ -250,4 +268,52 @@ function deriveStepDurationLabel(step: LoadedRunBundle["steps"][number]): string
 
 function playbackProgressLabel(progress: number): string {
   return `${Math.round(Math.max(0, Math.min(1, progress)) * 100)}%`;
+}
+
+function ModeButton({
+  children,
+  label,
+  active,
+  onClick,
+}: {
+  children: ReactNode;
+  label: string;
+  active: boolean;
+  onClick(): void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`timeline__mode-button${active ? " timeline__mode-button--active" : ""}`}
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+    >
+      {children}
+    </button>
+  );
+}
+
+function FollowIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3v4" />
+      <path d="M12 17v4" />
+      <path d="M3 12h4" />
+      <path d="M17 12h4" />
+      <circle cx="12" cy="12" r="3.5" />
+    </svg>
+  );
+}
+
+function OverviewIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M8 9h8" />
+      <path d="M8 12h4" />
+      <path d="M8 15h6" />
+    </svg>
+  );
 }

@@ -11,7 +11,6 @@ type StepTimelineProps = {
   currentNodeLabel: string;
   currentMeta: string;
   playing: boolean;
-  viewMode: "follow" | "overview";
   onSelect(index: number): void;
   onPlay(): void;
   onPause(): void;
@@ -21,7 +20,6 @@ type StepTimelineProps = {
   onSeek(value: number): void;
   onSeekCommit(value: number): void;
   onPlaybackRateChange(playbackRate: number): void;
-  onViewModeChange(viewMode: "follow" | "overview"): void;
 };
 
 export function StepTimeline({
@@ -34,7 +32,6 @@ export function StepTimeline({
   currentNodeLabel,
   currentMeta,
   playing,
-  viewMode,
   onSelect,
   onPlay,
   onPause,
@@ -44,7 +41,6 @@ export function StepTimeline({
   onSeek,
   onSeekCommit,
   onPlaybackRateChange,
-  onViewModeChange,
 }: StepTimelineProps) {
   if (steps.length === 0) {
     return (
@@ -119,23 +115,17 @@ export function StepTimeline({
           </IconButton>
         </div>
         <div className="timeline__camera">
-          <div className="timeline__mode-switcher" role="tablist" aria-label="Camera mode">
-            <ModeButton
-              label="Follow current node"
-              active={viewMode === "follow"}
-              onClick={() => onViewModeChange("follow")}
-            >
-              <FollowIcon />
-              <span>Follow</span>
-            </ModeButton>
-            <ModeButton
-              label="Overview"
-              active={viewMode === "overview"}
-              onClick={() => onViewModeChange("overview")}
-            >
-              <OverviewIcon />
-              <span>Overview</span>
-            </ModeButton>
+          <div className="timeline__speed-switcher" role="group" aria-label="Playback speed">
+            {playbackSpeedOptions.map((option) => (
+              <SpeedButton
+                key={option}
+                label={`${option}x playback`}
+                active={playbackRate === option}
+                onClick={() => onPlaybackRateChange(option)}
+              >
+                {formatPlaybackRate(option)}
+              </SpeedButton>
+            ))}
           </div>
         </div>
       </div>
@@ -168,31 +158,6 @@ function IconButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-    >
-      {children}
-    </button>
-  );
-}
-
-function ModeButton({
-  children,
-  label,
-  active,
-  onClick,
-}: {
-  children: ReactNode;
-  label: string;
-  active: boolean;
-  onClick(): void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`timeline__mode-button${active ? " timeline__mode-button--active" : ""}`}
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      aria-pressed={active}
     >
       {children}
     </button>
@@ -271,29 +236,6 @@ function LastIcon() {
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="m6 6 8 6-8 6z" />
       <path d="M18 5v14" />
-    </svg>
-  );
-}
-
-function FollowIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 3v4" />
-      <path d="M12 17v4" />
-      <path d="M3 12h4" />
-      <path d="M17 12h4" />
-      <circle cx="12" cy="12" r="3.5" />
-    </svg>
-  );
-}
-
-function OverviewIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="4" y="5" width="16" height="14" rx="2" />
-      <path d="M8 9h8" />
-      <path d="M8 12h4" />
-      <path d="M8 15h6" />
     </svg>
   );
 }

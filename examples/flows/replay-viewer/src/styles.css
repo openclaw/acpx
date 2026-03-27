@@ -369,6 +369,7 @@ code {
 }
 
 .canvas-card__flow {
+  position: relative;
   min-height: 0;
   height: 100%;
   border-radius: 12px;
@@ -377,6 +378,18 @@ code {
   background:
     radial-gradient(circle at top left, rgba(62, 166, 198, 0.08), transparent 26%),
     linear-gradient(180deg, rgba(12, 19, 27, 0.98), rgba(10, 16, 24, 0.98));
+}
+
+.canvas-card__camera {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.canvas-card__camera .timeline__mode-switcher {
+  pointer-events: auto;
 }
 
 .timeline {
@@ -515,7 +528,7 @@ code {
   max-width: 100%;
   margin-inline: auto;
   justify-self: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: center;
 }
 
