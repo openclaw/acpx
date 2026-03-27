@@ -11,6 +11,14 @@ export function FlowNodeCard({ data, selected = false }: FlowNodeCardProps) {
     <div
       className={`flow-node-card flow-node-card--${data.status}${selected ? " flow-node-card--selected" : ""}`}
     >
+      {typeof data.playbackProgress === "number" ? (
+        <div className="flow-node-card__progress" aria-hidden="true">
+          <div
+            className="flow-node-card__progress-fill"
+            style={{ transform: `scaleX(${data.playbackProgress})` }}
+          />
+        </div>
+      ) : null}
       <Handle
         id="in-top"
         type="target"
@@ -39,7 +47,9 @@ export function FlowNodeCard({ data, selected = false }: FlowNodeCardProps) {
           {data.isTerminal ? <span className="flow-node-card__semantic">end</span> : null}
         </div>
         <span className={`flow-node-card__status flow-node-card__status--${data.status}`}>
-          {labelForStatus(data.status)}
+          {typeof data.playbackProgress === "number"
+            ? `${Math.round(data.playbackProgress * 100)}%`
+            : labelForStatus(data.status)}
         </span>
       </div>
       <div className="flow-node-card__title">{data.title}</div>

@@ -34,6 +34,31 @@ export type ViewerNodeData = {
   branchLabels: string[];
   isRunOutcomeNode: boolean;
   runOutcomeLabel?: string;
+  playbackProgress?: number;
+};
+
+export type PlaybackSegment = {
+  stepIndex: number;
+  nodeId: string;
+  nodeType: FlowStepRecord["nodeType"];
+  startMs: number;
+  endMs: number;
+  durationMs: number;
+};
+
+export type PlaybackTimeline = {
+  segments: PlaybackSegment[];
+  totalDurationMs: number;
+};
+
+export type PlaybackPreview = {
+  playheadMs: number;
+  activeStepIndex: number;
+  nearestStepIndex: number;
+  stepProgress: number;
+  stepStartMs: number;
+  stepEndMs: number;
+  totalDurationMs: number;
 };
 
 export type SelectedAttemptView = {
@@ -99,6 +124,7 @@ type NodeSemantics = {
 export function buildGraph(
   bundle: LoadedRunBundle,
   selectedStepIndex: number,
+  playback: PlaybackPreview | null = null,
 ): {
   nodes: Node<ViewerNodeData>[];
   edges: Edge[];
@@ -166,6 +192,8 @@ export function buildGraph(
         isRunOutcomeNode: runOutcome.nodeId === nodeId,
         runOutcomeLabel:
           runOutcome.nodeId === nodeId && runOutcome.isTerminal ? runOutcome.shortLabel : undefined,
+        playbackProgress:
+          playback && selectedStep?.nodeId === nodeId ? clamp01(playback.stepProgress) : undefined,
       },
       position: { x, y },
       sourcePosition: Position.Bottom,
@@ -218,6 +246,124 @@ export function buildGraph(
     nodes: graphNodes,
     edges: graphEdges,
   };
+}
+
+export function buildPlaybackTimeline(bundle: LoadedRunBundle): PlaybackTimeline {
+  let cursorMs = 0;
+
+  const segments = bundle.steps.map((step, stepIndex) => {
+    const durationMs = estimatePlaybackDuration(bundle, stepIndex);
+    const segment = {
+      stepIndex,
+      nodeId: step.nodeId,
+      nodeType: step.nodeType,
+      startMs: cursorMs,
+      endMs: cursorMs + durationMs,
+      durationMs,
+    } satisfies PlaybackSegment;
+    cursorMs += durationMs;
+    return segment;
+  });
+
+  return {
+    segments,
+    totalDurationMs: Math.max(cursorMs, 0),
+  };
+}
+
+export function derivePlaybackPreview(
+  timeline: PlaybackTimeline,
+  playheadMs: number,
+): PlaybackPreview | null {
+  if (timeline.segments.length === 0) {
+    return null;
+  }
+
+  const clampedPlayhead = clamp(playheadMs, 0, timeline.totalDurationMs);
+  const lastSegment = timeline.segments.at(-1)!;
+  const activeSegment =
+    timeline.segments.find((segment) => clampedPlayhead < segment.endMs) ?? lastSegment;
+  const durationMs = Math.max(activeSegment.durationMs, 1);
+  const localProgress =
+    activeSegment === lastSegment && clampedPlayhead >= timeline.totalDurationMs
+      ? 1
+      : clamp01((clampedPlayhead - activeSegment.startMs) / durationMs);
+
+  return {
+    playheadMs: clampedPlayhead,
+    activeStepIndex: activeSegment.stepIndex,
+    nearestStepIndex: findNearestStepIndex(timeline, clampedPlayhead),
+    stepProgress: localProgress,
+    stepStartMs: activeSegment.startMs,
+    stepEndMs: activeSegment.endMs,
+    totalDurationMs: timeline.totalDurationMs,
+  };
+}
+
+export function playbackAnchorMs(timeline: PlaybackTimeline, stepIndex: number): number {
+  const segment = timeline.segments[clamp(stepIndex, 0, Math.max(timeline.segments.length - 1, 0))];
+  return segment?.endMs ?? 0;
+}
+
+export function revealConversationSlice(
+  sessionSlice: SelectedAttemptView["sessionSlice"],
+  progress: number,
+): SelectedAttemptView["sessionSlice"] {
+  const clampedProgress = clamp01(progress);
+  if (clampedProgress >= 1) {
+    return sessionSlice;
+  }
+  if (clampedProgress <= 0) {
+    return [];
+  }
+  const revealed: SelectedAttemptView["sessionSlice"] = [];
+  const revealableIndexes = sessionSlice
+    .map((message, index) => (isRevealableMessage(message) ? index : -1))
+    .filter((index) => index >= 0);
+  const revealableOrder = new Map(revealableIndexes.map((index, order) => [index, order]));
+  const messageSpan = revealableIndexes.length > 0 ? 1 / revealableIndexes.length : 1;
+
+  for (let index = 0; index < sessionSlice.length; index += 1) {
+    const message = sessionSlice[index];
+    if (!message) {
+      break;
+    }
+    const revealIndex = revealableOrder.get(index);
+    if (revealIndex == null) {
+      continue;
+    }
+
+    const start = revealIndex * messageSpan;
+    const end = start + messageSpan;
+    if (clampedProgress <= start) {
+      break;
+    }
+
+    if (clampedProgress >= end) {
+      revealed.push(message);
+      continue;
+    }
+
+    const charCount = message.textBlocks.reduce((sum, block) => sum + block.length, 0);
+    const localProgress = clamp01((clampedProgress - start) / messageSpan);
+    const partialTextBlocks =
+      charCount > 0
+        ? revealTextBlocks(message.textBlocks, Math.max(1, Math.round(charCount * localProgress)))
+        : [];
+
+    if (partialTextBlocks.length > 0 || (message.textBlocks.length === 0 && localProgress >= 1)) {
+      revealed.push({
+        ...message,
+        textBlocks: partialTextBlocks,
+        toolUses: [],
+        toolResults: [],
+        hiddenPayloads: [],
+      });
+    }
+    break;
+  }
+
+  return revealed;
 }
 
 export function selectAttemptView(
@@ -365,6 +511,14 @@ export function humanizeIdentifier(value: string): string {
   return normalized.replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function clamp01(value: number): number {
+  return clamp(value, 0, 1);
+}
+
 function resolveSessionSourceStep(
   steps: FlowStepRecord[],
   selectedStepIndex: number,
@@ -386,6 +540,48 @@ function resolveSessionSourceStep(
   }
 
   return null;
+}
+
+function estimatePlaybackDuration(bundle: LoadedRunBundle, stepIndex: number): number {
+  const step = bundle.steps[stepIndex];
+  if (!step) {
+    return 800;
+  }
+
+  const actualDurationMs = Math.max(0, Date.parse(step.finishedAt) - Date.parse(step.startedAt));
+  const actualScaledMs = actualDurationMs > 0 ? Math.round(actualDurationMs / 8) : 0;
+
+  if (step.nodeType === "acp") {
+    const selected = selectAttemptView(bundle, stepIndex);
+    const isDirectSession = selected?.sessionSourceStep?.attemptId === step.attemptId;
+    const visibleChars = isDirectSession
+      ? countConversationChars(selected.sessionSlice)
+      : [step.promptText, step.rawText].reduce(
+          (sum, value) => sum + (typeof value === "string" ? value.length : 0),
+          0,
+        );
+    const revealDurationMs = 1_300 + visibleChars * 7;
+    return clamp(Math.max(actualScaledMs, revealDurationMs), 1_400, 7_000);
+  }
+
+  const minimumMs = step.nodeType === "action" ? 850 : step.nodeType === "checkpoint" ? 650 : 700;
+  const maximumMs = step.nodeType === "action" ? 3_000 : 2_400;
+  return clamp(Math.max(actualScaledMs, minimumMs), minimumMs, maximumMs);
+}
+
+function findNearestStepIndex(timeline: PlaybackTimeline, playheadMs: number): number {
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const segment of timeline.segments) {
+    const distance = Math.abs(segment.endMs - playheadMs);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = segment.stepIndex;
+    }
+  }
+
+  return bestIndex;
 }
 
 export function formatDuration(durationMs: number | undefined): string {
@@ -763,6 +959,42 @@ function createSessionSlice(
       hiddenPayloads: contentView.hiddenPayloads,
     };
   });
+}
+
+function countConversationChars(sessionSlice: SelectedAttemptView["sessionSlice"]): number {
+  return sessionSlice.reduce(
+    (sum, message) =>
+      sum + message.textBlocks.reduce((blockSum, block) => blockSum + block.length, 0),
+    0,
+  );
+}
+
+function isRevealableMessage(message: SelectedAttemptView["sessionSlice"][number]): boolean {
+  return (
+    message.textBlocks.length > 0 ||
+    message.toolUses.length > 0 ||
+    message.toolResults.length > 0 ||
+    message.hiddenPayloads.length > 0
+  );
+}
+
+function revealTextBlocks(textBlocks: string[], charBudget: number): string[] {
+  const revealed: string[] = [];
+  let remainingChars = Math.max(0, charBudget);
+
+  for (const block of textBlocks) {
+    if (remainingChars <= 0) {
+      break;
+    }
+    const take = Math.min(block.length, remainingChars);
+    revealed.push(block.slice(0, take));
+    remainingChars -= take;
+    if (take < block.length) {
+      break;
+    }
+  }
+
+  return revealed.filter((value) => value.length > 0);
 }
 
 function createRawEventSlice(

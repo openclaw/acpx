@@ -1,5 +1,5 @@
 import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FlowNodeCard } from "./components/flow-node-card";
 import { InspectorPanel } from "./components/inspector-panel";
 import { RunBrowser } from "./components/run-browser";
@@ -12,7 +12,16 @@ import {
   listRecentRuns,
 } from "./lib/bundle-reader";
 import { loadRunBundle } from "./lib/load-bundle";
-import { buildGraph, deriveRunOutcomeView, selectAttemptView } from "./lib/view-model";
+import {
+  buildGraph,
+  buildPlaybackTimeline,
+  derivePlaybackPreview,
+  deriveRunOutcomeView,
+  formatDuration,
+  humanizeIdentifier,
+  playbackAnchorMs,
+  selectAttemptView,
+} from "./lib/view-model";
 import type { LoadedRunBundle, RunBundleSummary } from "./types";
 
 const nodeTypes = {
@@ -30,39 +39,84 @@ export function App() {
     "bootstrap" | "runs" | "sample" | "local" | "run" | null
   >("bootstrap");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [playing, setPlaying] = useState(false);
+  const [playbackMode, setPlaybackMode] = useState<"playing" | "seeking" | null>(null);
+  const [playheadMs, setPlayheadMs] = useState<number | null>(null);
 
   useEffect(() => {
     void bootstrap();
   }, []);
 
+  const playbackTimeline = useMemo(() => (bundle ? buildPlaybackTimeline(bundle) : null), [bundle]);
+  const playbackPreview = useMemo(
+    () =>
+      playbackTimeline && playheadMs != null
+        ? derivePlaybackPreview(playbackTimeline, playheadMs)
+        : null,
+    [playbackTimeline, playheadMs],
+  );
+
   useEffect(() => {
-    if (!bundle || !playing) {
+    if (playbackMode !== "playing" || !playbackTimeline || playheadMs == null) {
       return undefined;
     }
-    if (selectedStepIndex >= bundle.steps.length - 1) {
-      setPlaying(false);
+    if (playbackTimeline.segments.length === 0) {
       return undefined;
     }
-    const intervalId = window.setInterval(() => {
-      setSelectedStepIndex((current) => {
-        if (!bundle || current >= bundle.steps.length - 1) {
-          setPlaying(false);
+    let frameId = 0;
+    let lastTimestamp: number | null = null;
+
+    const tick = (timestamp: number) => {
+      if (lastTimestamp == null) {
+        lastTimestamp = timestamp;
+      }
+      const deltaMs = timestamp - lastTimestamp;
+      lastTimestamp = timestamp;
+
+      setPlayheadMs((current) => {
+        if (current == null) {
           return current;
         }
-        return current + 1;
+        return Math.min(current + deltaMs, playbackTimeline.totalDurationMs);
       });
-    }, 950);
-    return () => window.clearInterval(intervalId);
-  }, [bundle, playing, selectedStepIndex]);
+      frameId = window.requestAnimationFrame(tick);
+    };
 
-  const graph = bundle ? buildGraph(bundle, selectedStepIndex) : { nodes: [], edges: [] };
-  const selectedAttempt = bundle ? selectAttemptView(bundle, selectedStepIndex) : null;
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [playbackMode, playbackTimeline, playheadMs]);
+
+  useEffect(() => {
+    if (
+      playbackMode === "playing" &&
+      playbackTimeline &&
+      playbackPreview &&
+      playbackPreview.playheadMs >= playbackTimeline.totalDurationMs
+    ) {
+      setSelectedStepIndex(Math.max(bundle?.steps.length ?? 1, 1) - 1);
+      setPlaybackMode(null);
+      setPlayheadMs(null);
+    }
+  }, [bundle?.steps.length, playbackMode, playbackPreview, playbackTimeline]);
+
+  const effectiveStepIndex = playbackPreview?.activeStepIndex ?? selectedStepIndex;
+  const graph = bundle
+    ? buildGraph(bundle, effectiveStepIndex, playbackPreview)
+    : { nodes: [], edges: [] };
+  const selectedAttempt = bundle ? selectAttemptView(bundle, effectiveStepIndex) : null;
+  const currentStep = bundle?.steps[effectiveStepIndex] ?? null;
+  const currentDuration = currentStep
+    ? `${effectiveStepIndex + 1} / ${bundle?.steps.length ?? 0} · ${currentStep.nodeType} · ${playbackPreview ? playbackProgressLabel(playbackPreview.stepProgress) : deriveStepDurationLabel(currentStep)}`
+    : "n/a";
+  const sessionRevealProgress =
+    playbackPreview && selectedAttempt?.step.attemptId === currentStep?.attemptId
+      ? playbackPreview.stepProgress
+      : null;
 
   async function bootstrap(): Promise<void> {
     setLoadingState("bootstrap");
     setErrorMessage(null);
-    setPlaying(false);
+    setPlaybackMode(null);
+    setPlayheadMs(null);
 
     const runs = await refreshRuns();
     if (runs && runs.length > 0) {
@@ -88,7 +142,8 @@ export function App() {
   async function loadSample(): Promise<void> {
     setLoadingState("sample");
     setErrorMessage(null);
-    setPlaying(false);
+    setPlaybackMode(null);
+    setPlayheadMs(null);
 
     try {
       const loaded = await loadRunBundle(createSampleBundleReader());
@@ -106,7 +161,8 @@ export function App() {
   async function loadLocalBundle(): Promise<void> {
     setLoadingState("local");
     setErrorMessage(null);
-    setPlaying(false);
+    setPlaybackMode(null);
+    setPlayheadMs(null);
 
     try {
       const reader = await createDirectoryBundleReader();
@@ -128,7 +184,8 @@ export function App() {
   async function loadRecentRun(run: RunBundleSummary): Promise<void> {
     setLoadingState("run");
     setErrorMessage(null);
-    setPlaying(false);
+    setPlaybackMode(null);
+    setPlayheadMs(null);
 
     try {
       const loaded = await loadRunBundle(createRecentRunBundleReader(run));
@@ -147,7 +204,9 @@ export function App() {
     if (!bundle) {
       return;
     }
-    const visibleSteps = bundle.steps.slice(0, selectedStepIndex + 1);
+    setPlaybackMode(null);
+    setPlayheadMs(null);
+    const visibleSteps = bundle.steps.slice(0, effectiveStepIndex + 1);
     const visibleIndex = visibleSteps.map((step) => step.nodeId).lastIndexOf(nodeId);
     if (visibleIndex >= 0) {
       setSelectedStepIndex(visibleIndex);
@@ -216,27 +275,73 @@ export function App() {
                     </div>
                     <StepTimeline
                       steps={bundle.steps}
-                      selectedIndex={selectedStepIndex}
-                      playing={playing}
+                      selectedIndex={effectiveStepIndex}
+                      playbackValue={
+                        playbackPreview?.playheadMs ??
+                        (playbackTimeline
+                          ? playbackAnchorMs(playbackTimeline, selectedStepIndex)
+                          : 0)
+                      }
+                      playbackMax={playbackTimeline?.totalDurationMs ?? 0}
+                      currentNodeLabel={
+                        currentStep ? humanizeIdentifier(currentStep.nodeId) : "n/a"
+                      }
+                      currentMeta={currentDuration}
+                      playing={playbackMode === "playing"}
                       runOutcome={runOutcome}
                       onSelect={(index) => {
-                        setPlaying(false);
+                        setPlaybackMode(null);
+                        setPlayheadMs(null);
                         setSelectedStepIndex(index);
                       }}
                       onPlay={() => {
-                        if (selectedStepIndex >= bundle.steps.length - 1) {
-                          setSelectedStepIndex(0);
+                        if (!playbackTimeline) {
+                          return;
                         }
-                        setPlaying(true);
+                        const startMs = playbackTimeline.segments[selectedStepIndex]?.startMs ?? 0;
+                        setPlayheadMs(startMs);
+                        setPlaybackMode("playing");
                       }}
-                      onPause={() => setPlaying(false)}
+                      onPause={() => {
+                        if (!playbackPreview) {
+                          setPlaybackMode(null);
+                          setPlayheadMs(null);
+                          return;
+                        }
+                        setSelectedStepIndex(playbackPreview.nearestStepIndex);
+                        setPlaybackMode(null);
+                        setPlayheadMs(null);
+                      }}
                       onReset={() => {
-                        setPlaying(false);
+                        setPlaybackMode(null);
+                        setPlayheadMs(null);
                         setSelectedStepIndex(0);
                       }}
                       onJumpToEnd={() => {
-                        setPlaying(false);
+                        setPlaybackMode(null);
+                        setPlayheadMs(null);
                         setSelectedStepIndex(Math.max(bundle.steps.length - 1, 0));
+                      }}
+                      onSeekStart={() => {
+                        setPlaybackMode("seeking");
+                        setPlayheadMs(
+                          playbackPreview?.playheadMs ??
+                            (playbackTimeline
+                              ? playbackAnchorMs(playbackTimeline, selectedStepIndex)
+                              : 0),
+                        );
+                      }}
+                      onSeek={(value) => {
+                        setPlayheadMs(value);
+                      }}
+                      onSeekCommit={(value) => {
+                        if (!playbackTimeline) {
+                          return;
+                        }
+                        const preview = derivePlaybackPreview(playbackTimeline, value);
+                        setSelectedStepIndex(preview?.nearestStepIndex ?? selectedStepIndex);
+                        setPlaybackMode(null);
+                        setPlayheadMs(null);
                       }}
                     />
                   </section>
@@ -255,6 +360,7 @@ export function App() {
 
           <InspectorPanel
             selectedAttempt={selectedAttempt}
+            sessionRevealProgress={sessionRevealProgress}
             activeTab={activeTab}
             onTabChange={setActiveTab}
           />
@@ -266,4 +372,12 @@ export function App() {
 
 function defaultSelectedStepIndex(bundle: LoadedRunBundle): number {
   return Math.max(bundle.steps.length - 1, 0);
+}
+
+function deriveStepDurationLabel(step: LoadedRunBundle["steps"][number]): string {
+  return `${Math.max(0, Date.parse(step.finishedAt) - Date.parse(step.startedAt))} ms`;
+}
+
+function playbackProgressLabel(progress: number): string {
+  return `${Math.round(Math.max(0, Math.min(1, progress)) * 100)}%`;
 }

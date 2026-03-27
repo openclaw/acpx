@@ -607,6 +607,8 @@ code {
 }
 
 .flow-node-card {
+  position: relative;
+  overflow: hidden;
   min-width: 248px;
   display: grid;
   gap: 6px;
@@ -615,6 +617,21 @@ code {
   border: 1px solid rgba(133, 146, 166, 0.14);
   background: rgba(18, 25, 35, 0.98);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26);
+}
+
+.flow-node-card__progress {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  pointer-events: none;
+}
+
+.flow-node-card__progress-fill {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, rgba(62, 166, 198, 0.65), rgba(109, 230, 167, 0.92));
+  transform-origin: left center;
 }
 
 .flow-node-card--queued {

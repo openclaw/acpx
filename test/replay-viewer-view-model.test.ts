@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildGraph,
+  buildPlaybackTimeline,
+  derivePlaybackPreview,
   deriveRunOutcomeView,
   formatDuration,
   formatJson,
   humanizeIdentifier,
+  playbackAnchorMs,
+  revealConversationSlice,
   selectAttemptView,
 } from "../examples/flows/replay-viewer/src/lib/view-model.js";
 import type {
@@ -77,12 +81,45 @@ test("buildGraph infers start terminal and branch semantics across the full defi
   assert.equal(nodeMap.get("load_pr")?.isStart, true);
   assert.equal(nodeMap.get("review_loop")?.status, "active");
   assert.equal(nodeMap.get("review_loop")?.isDecision, true);
+  assert.equal(nodeMap.get("review_loop")?.playbackProgress, undefined);
   assert.deepEqual(nodeMap.get("review_loop")?.branchLabels, ["clear", "blocked"]);
   assert.equal(nodeMap.get("check_ci")?.status, "queued");
   assert.equal(nodeMap.get("check_ci")?.isTerminal, true);
   assert.equal(nodeMap.get("escalate")?.status, "queued");
   assert.equal(nodeMap.get("escalate")?.isTerminal, true);
   assert.ok(graph.edges.every((edge) => edge.label == null));
+});
+
+test("buildGraph applies playback progress to the active node during preview", () => {
+  const load = baseStep("load_pr", "action", "ok");
+  load.startedAt = "2026-03-27T07:26:00.000Z";
+  load.finishedAt = "2026-03-27T07:26:01.000Z";
+  const extract = baseStep("extract_intent", "acp", "ok");
+  extract.startedAt = "2026-03-27T07:26:02.000Z";
+  extract.finishedAt = "2026-03-27T07:26:20.000Z";
+
+  const bundle = makeBundle(extract, {
+    steps: [load, extract],
+    flow: {
+      schema: "acpx.flow-definition-snapshot.v1",
+      name: "playback-flow",
+      startAt: "load_pr",
+      nodes: {
+        load_pr: { nodeType: "action" },
+        extract_intent: { nodeType: "acp", session: { handle: "main", isolated: false } },
+      },
+      edges: [{ from: "load_pr", to: "extract_intent" }],
+    },
+  });
+
+  const timeline = buildPlaybackTimeline(bundle);
+  const preview = derivePlaybackPreview(timeline, timeline.segments[1]!.startMs + 200);
+  const graph = buildGraph(bundle, preview!.activeStepIndex, preview);
+  const nodeMap = new Map(graph.nodes.map((node) => [node.id, node.data]));
+
+  assert.equal(nodeMap.get("load_pr")?.status, "completed");
+  assert.equal(nodeMap.get("extract_intent")?.status, "active");
+  assert.ok((nodeMap.get("extract_intent")?.playbackProgress ?? 0) > 0);
 });
 
 test("selectAttemptView falls back to hidden payloads for unknown structured messages", () => {
@@ -182,6 +219,47 @@ test("selectAttemptView falls back to the latest visible ACP session for non-ACP
   assert.equal(selected.sessionSourceStep?.nodeId, "review_loop");
   assert.equal(selected.sessionSlice.length, 2);
   assert.match(selected.sessionSlice[0]?.textBlocks[0] ?? "", /Please inspect the PR diff/);
+});
+
+test("revealConversationSlice reveals ACP text progressively and hides tool noise until complete", () => {
+  const step = baseStep("extract_intent", "acp", "ok");
+  const bundle = makeBundle(step, {});
+  const selected = selectAttemptView(bundle, 0);
+
+  assert.ok(selected);
+
+  const partial = revealConversationSlice(selected.sessionSlice, 0.25);
+
+  assert.equal(partial.length, 1);
+  assert.match(partial[0]?.textBlocks[0] ?? "", /^Ple/);
+  assert.equal(partial[0]?.toolUses.length, 0);
+  assert.equal(partial[0]?.toolResults.length, 0);
+
+  const full = revealConversationSlice(selected.sessionSlice, 1);
+  assert.equal(full.length, selected.sessionSlice.length);
+  assert.equal(full[1]?.toolUses.length, 1);
+});
+
+test("buildPlaybackTimeline and anchors support continuous preview with discrete snapping", () => {
+  const first = baseStep("load_pr", "action", "ok");
+  first.startedAt = "2026-03-27T07:26:00.000Z";
+  first.finishedAt = "2026-03-27T07:26:01.000Z";
+  const second = baseStep("extract_intent", "acp", "ok");
+  second.startedAt = "2026-03-27T07:26:02.000Z";
+  second.finishedAt = "2026-03-27T07:26:20.000Z";
+
+  const bundle = makeBundle(second, { steps: [first, second] });
+  const timeline = buildPlaybackTimeline(bundle);
+
+  assert.equal(timeline.segments.length, 2);
+  assert.equal(playbackAnchorMs(timeline, 0), timeline.segments[0]?.endMs);
+  assert.equal(playbackAnchorMs(timeline, 1), timeline.totalDurationMs);
+
+  const preview = derivePlaybackPreview(timeline, timeline.segments[1]!.startMs + 120);
+
+  assert.equal(preview?.activeStepIndex, 1);
+  assert.equal(preview?.nearestStepIndex, 0);
+  assert.ok((preview?.stepProgress ?? 0) > 0);
 });
 
 test("format helpers keep replay labels stable", () => {

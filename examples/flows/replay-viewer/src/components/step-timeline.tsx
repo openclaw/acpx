@@ -1,10 +1,14 @@
 import type { ReactNode } from "react";
-import { formatDuration, humanizeIdentifier, type RunOutcomeView } from "../lib/view-model";
+import { type RunOutcomeView } from "../lib/view-model";
 import type { FlowStepRecord } from "../types";
 
 type StepTimelineProps = {
   steps: FlowStepRecord[];
   selectedIndex: number;
+  playbackValue: number;
+  playbackMax: number;
+  currentNodeLabel: string;
+  currentMeta: string;
   playing: boolean;
   runOutcome: RunOutcomeView;
   onSelect(index: number): void;
@@ -12,11 +16,18 @@ type StepTimelineProps = {
   onPause(): void;
   onReset(): void;
   onJumpToEnd(): void;
+  onSeekStart(): void;
+  onSeek(value: number): void;
+  onSeekCommit(value: number): void;
 };
 
 export function StepTimeline({
   steps,
   selectedIndex,
+  playbackValue,
+  playbackMax,
+  currentNodeLabel,
+  currentMeta,
   playing,
   runOutcome,
   onSelect,
@@ -24,6 +35,9 @@ export function StepTimeline({
   onPause,
   onReset,
   onJumpToEnd,
+  onSeekStart,
+  onSeek,
+  onSeekCommit,
 }: StepTimelineProps) {
   if (steps.length === 0) {
     return (
@@ -33,28 +47,26 @@ export function StepTimeline({
     );
   }
 
-  const currentStep = steps[selectedIndex] ?? steps[0];
-  const currentDuration =
-    currentStep != null
-      ? formatDuration(Date.parse(currentStep.finishedAt) - Date.parse(currentStep.startedAt))
-      : "n/a";
-  const currentNodeLabel = currentStep ? humanizeIdentifier(currentStep.nodeId) : "n/a";
-  const currentMeta = `${selectedIndex + 1} / ${steps.length} · ${currentStep?.nodeType ?? "n/a"} · ${currentDuration}`;
-
   return (
     <section className="timeline">
       <div className={`timeline__outcome-strip timeline__outcome-strip--${runOutcome.accent}`}>
-        <span className={`outcome-pill outcome-pill--${runOutcome.status}`}>{runOutcome.shortLabel}</span>
+        <span className={`outcome-pill outcome-pill--${runOutcome.status}`}>
+          {runOutcome.shortLabel}
+        </span>
       </div>
       <div className="timeline__meter">
         <input
           className="timeline__scrubber"
           type="range"
           min={0}
-          max={Math.max(steps.length - 1, 0)}
+          max={Math.max(playbackMax, 0)}
           step={1}
-          value={selectedIndex}
-          onChange={(event) => onSelect(Number(event.target.value))}
+          value={Math.min(playbackValue, Math.max(playbackMax, 0))}
+          onPointerDown={onSeekStart}
+          onChange={(event) => onSeek(Number(event.target.value))}
+          onPointerUp={(event) => onSeekCommit(Number((event.target as HTMLInputElement).value))}
+          onKeyUp={(event) => onSeekCommit(Number((event.target as HTMLInputElement).value))}
+          onBlur={(event) => onSeekCommit(Number((event.target as HTMLInputElement).value))}
           aria-label={`Replay position step ${selectedIndex + 1} of ${steps.length}`}
         />
       </div>

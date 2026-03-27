@@ -1,14 +1,26 @@
 import type { ReactNode } from "react";
-import { formatDate, formatDuration, formatJson, humanizeIdentifier } from "../lib/view-model";
+import {
+  formatDate,
+  formatDuration,
+  formatJson,
+  humanizeIdentifier,
+  revealConversationSlice,
+} from "../lib/view-model";
 import type { SelectedAttemptView } from "../lib/view-model";
 
 type InspectorPanelProps = {
   selectedAttempt: SelectedAttemptView | null;
+  sessionRevealProgress: number | null;
   activeTab: "attempt" | "session" | "events";
   onTabChange(tab: "attempt" | "session" | "events"): void;
 };
 
-export function InspectorPanel({ selectedAttempt, activeTab, onTabChange }: InspectorPanelProps) {
+export function InspectorPanel({
+  selectedAttempt,
+  sessionRevealProgress,
+  activeTab,
+  onTabChange,
+}: InspectorPanelProps) {
   if (!selectedAttempt) {
     return (
       <aside className="inspector">
@@ -42,7 +54,12 @@ export function InspectorPanel({ selectedAttempt, activeTab, onTabChange }: Insp
       </div>
 
       <div className="inspector__body">
-        {activeTab === "session" ? <SessionTab selectedAttempt={selectedAttempt} /> : null}
+        {activeTab === "session" ? (
+          <SessionTab
+            selectedAttempt={selectedAttempt}
+            sessionRevealProgress={sessionRevealProgress}
+          />
+        ) : null}
         {activeTab === "attempt" ? <AttemptTab selectedAttempt={selectedAttempt} /> : null}
         {activeTab === "events" ? <EventsTab selectedAttempt={selectedAttempt} /> : null}
       </div>
@@ -89,7 +106,13 @@ function AttemptTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
   );
 }
 
-function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView }) {
+function SessionTab({
+  selectedAttempt,
+  sessionRevealProgress,
+}: {
+  selectedAttempt: SelectedAttemptView;
+  sessionRevealProgress: number | null;
+}) {
   const { step, sessionRecord, sessionSlice } = selectedAttempt;
 
   if (!sessionRecord) {
@@ -100,10 +123,19 @@ function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
     );
   }
 
+  const highlightedSlice = sessionSlice.filter((message) => message.highlighted);
+  const baseConversationSlice = highlightedSlice.length > 0 ? highlightedSlice : sessionSlice;
+  const renderedSessionSlice =
+    !selectedAttempt.sessionFromFallback &&
+    selectedAttempt.sessionSourceStep?.attemptId === step.attemptId &&
+    typeof sessionRevealProgress === "number"
+      ? revealConversationSlice(baseConversationSlice, sessionRevealProgress)
+      : baseConversationSlice;
+
   return (
     <div className="session-pane">
       <div className="conversation">
-        {sessionSlice.map((message) => (
+        {renderedSessionSlice.map((message) => (
           <article
             key={`${message.index}-${message.role}`}
             className={`conversation__message conversation__message--${message.role}${message.highlighted ? " conversation__message--highlighted" : ""}`}
