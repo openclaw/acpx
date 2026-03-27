@@ -398,38 +398,6 @@ code {
   line-height: 1.35;
 }
 
-.timeline__outcome-strip {
-  min-height: 30px;
-  display: flex;
-  align-items: center;
-  padding: 0 9px;
-  border-radius: 10px;
-  border: 1px solid rgba(133, 146, 166, 0.14);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--ink-soft);
-  overflow: hidden;
-}
-
-.timeline__outcome-strip--ok {
-  border-color: rgba(88, 187, 129, 0.26);
-  background: rgba(88, 187, 129, 0.08);
-}
-
-.timeline__outcome-strip--active {
-  border-color: rgba(62, 166, 198, 0.26);
-  background: rgba(62, 166, 198, 0.08);
-}
-
-.timeline__outcome-strip--failed {
-  border-color: rgba(216, 107, 107, 0.26);
-  background: rgba(216, 107, 107, 0.08);
-}
-
-.timeline__outcome-strip--timed_out {
-  border-color: rgba(212, 155, 69, 0.26);
-  background: rgba(212, 155, 69, 0.08);
-}
-
 .outcome-pill,
 .flow-node-card__status,
 .flow-node-card__semantic,
@@ -759,31 +727,8 @@ code {
 
 .inspector {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
-}
-
-.inspector__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.inspector__title {
-  margin: 2px 0 0;
-  font-family: "Manrope", "Inter", sans-serif;
-  font-size: 1.02rem;
-  font-weight: 800;
-  line-height: 1.2;
-}
-
-.inspector__subtitle {
-  margin-top: 4px;
-  color: var(--ink-soft);
-  font-family: "IBM Plex Mono", "SFMono-Regular", "Cascadia Code", monospace;
-  font-size: 0.72rem;
-  overflow-wrap: anywhere;
 }
 
 .inspector__tabs {
@@ -1103,7 +1048,6 @@ code {
     padding-inline: 8px;
   }
 
-  .inspector__header,
   .timeline__transport {
     grid-template-columns: 1fr;
   }

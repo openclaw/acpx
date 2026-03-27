@@ -16,7 +16,6 @@ import {
   buildGraph,
   buildPlaybackTimeline,
   derivePlaybackPreview,
-  deriveRunOutcomeView,
   formatDuration,
   humanizeIdentifier,
   playbackAnchorMs,
@@ -250,8 +249,6 @@ export function App() {
           <section className="stage">
             {bundle ? (
               (() => {
-                const runOutcome = deriveRunOutcomeView(bundle);
-
                 return (
                   <section className="canvas-card">
                     <div className="canvas-card__flow" style={{ minHeight: "360px" }}>
@@ -288,7 +285,6 @@ export function App() {
                       }
                       currentMeta={currentDuration}
                       playing={playbackMode === "playing"}
-                      runOutcome={runOutcome}
                       onSelect={(index) => {
                         setPlaybackMode(null);
                         setPlayheadMs(null);

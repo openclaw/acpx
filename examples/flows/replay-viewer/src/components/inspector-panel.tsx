@@ -3,7 +3,6 @@ import {
   formatDate,
   formatDuration,
   formatJson,
-  humanizeIdentifier,
   revealConversationSlice,
 } from "../lib/view-model";
 import type { SelectedAttemptView } from "../lib/view-model";
@@ -31,22 +30,8 @@ export function InspectorPanel({
     );
   }
 
-  const { step } = selectedAttempt;
-  const durationLabel = formatDuration(Date.parse(step.finishedAt) - Date.parse(step.startedAt));
-
   return (
     <aside className="inspector">
-      <div className="inspector__header">
-        <div>
-          <div className="inspector__eyebrow">{labelForNodeType(step.nodeType)} step</div>
-          <h2 className="inspector__title">{humanizeIdentifier(step.nodeId)}</h2>
-          <div className="inspector__subtitle">
-            {step.nodeId} · {step.attemptId} · {durationLabel}
-          </div>
-        </div>
-        <span className={`outcome-pill outcome-pill--${step.outcome}`}>{step.outcome}</span>
-      </div>
-
       <div className="inspector__tabs">
         <TabButton tab="session" activeTab={activeTab} onTabChange={onTabChange} />
         <TabButton tab="attempt" activeTab={activeTab} onTabChange={onTabChange} />
@@ -354,18 +339,4 @@ function DisclosureSection({
 
 function CodeBlock({ children }: { children: string }) {
   return <pre className="code-block">{children}</pre>;
-}
-
-function labelForNodeType(nodeType: SelectedAttemptView["step"]["nodeType"]): string {
-  switch (nodeType) {
-    case "acp":
-      return "ACP";
-    case "action":
-      return "Action";
-    case "checkpoint":
-      return "Checkpoint";
-    case "compute":
-    default:
-      return "Compute";
-  }
 }

@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { type RunOutcomeView } from "../lib/view-model";
 import type { FlowStepRecord } from "../types";
 
 type StepTimelineProps = {
@@ -10,7 +9,6 @@ type StepTimelineProps = {
   currentNodeLabel: string;
   currentMeta: string;
   playing: boolean;
-  runOutcome: RunOutcomeView;
   onSelect(index: number): void;
   onPlay(): void;
   onPause(): void;
@@ -29,7 +27,6 @@ export function StepTimeline({
   currentNodeLabel,
   currentMeta,
   playing,
-  runOutcome,
   onSelect,
   onPlay,
   onPause,
@@ -49,11 +46,6 @@ export function StepTimeline({
 
   return (
     <section className="timeline">
-      <div className={`timeline__outcome-strip timeline__outcome-strip--${runOutcome.accent}`}>
-        <span className={`outcome-pill outcome-pill--${runOutcome.status}`}>
-          {runOutcome.shortLabel}
-        </span>
-      </div>
       <div className="timeline__meter">
         <input
           className="timeline__scrubber"
