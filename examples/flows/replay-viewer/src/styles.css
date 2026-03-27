@@ -961,12 +961,6 @@ code {
   justify-items: stretch;
 }
 
-.conversation__message--highlighted {
-  outline: 1px solid rgba(62, 166, 198, 0.18);
-  border-radius: 12px;
-  padding: 6px 8px;
-}
-
 .event-card__meta,
 .conversation__tool-head {
   display: flex;

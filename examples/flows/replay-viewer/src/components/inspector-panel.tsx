@@ -138,7 +138,7 @@ function SessionTab({
         {renderedSessionSlice.map((message) => (
           <article
             key={`${message.index}-${message.role}`}
-            className={`conversation__message conversation__message--${message.role}${message.highlighted ? " conversation__message--highlighted" : ""}`}
+            className={`conversation__message conversation__message--${message.role}`}
           >
             {message.textBlocks.length > 0 ? (
               <div className="conversation__text">
