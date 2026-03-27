@@ -511,6 +511,9 @@ code {
   display: flex;
   align-items: center;
   gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
   justify-self: center;
   flex-wrap: wrap;
   justify-content: center;
@@ -519,6 +522,8 @@ code {
 .timeline__camera {
   min-width: 0;
   display: flex;
+  align-items: center;
+  gap: 8px;
   justify-content: flex-end;
 }
 
@@ -613,7 +618,6 @@ code {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-left: 6px;
   padding: 3px;
   border-radius: 999px;
   border: 1px solid rgba(133, 146, 166, 0.14);
@@ -1228,9 +1232,18 @@ code {
     justify-content: flex-start;
   }
 
+  .timeline__actions {
+    justify-content: center;
+  }
+
   .timeline__current,
   .timeline__camera {
     justify-self: center;
+  }
+
+  .timeline__camera {
+    flex-wrap: wrap;
+    justify-content: center;
   }
 
   .run-browser__footer,
