@@ -90,8 +90,7 @@ function AttemptTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
 }
 
 function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView }) {
-  const { step, sessionRecord, sessionSlice, sessionSourceStep, sessionFromFallback } =
-    selectedAttempt;
+  const { step, sessionRecord, sessionSlice } = selectedAttempt;
 
   if (!sessionRecord) {
     return (
@@ -103,94 +102,85 @@ function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
 
   return (
     <div className="session-pane">
-        {sessionFromFallback && sessionSourceStep ? (
-          <div className="session-note">
-            Showing the latest visible ACP conversation from{" "}
-            <strong>{humanizeIdentifier(sessionSourceStep.nodeId)}</strong> because{" "}
-            <code>{step.nodeId}</code> does not carry its own session slice.
-          </div>
-        ) : null}
+      <div className="conversation">
+        {sessionSlice.map((message) => (
+          <article
+            key={`${message.index}-${message.role}`}
+            className={`conversation__message conversation__message--${message.role}${message.highlighted ? " conversation__message--highlighted" : ""}`}
+          >
+            {message.textBlocks.length > 0 ? (
+              <div className="conversation__text">
+                {message.textBlocks.map((text, index) => (
+                  <p key={`${message.index}-text-${index}`}>{text}</p>
+                ))}
+              </div>
+            ) : (
+              <div className="conversation__empty-text">No visible text content.</div>
+            )}
 
-        <div className="conversation">
-          {sessionSlice.map((message) => (
-            <article
-              key={`${message.index}-${message.role}`}
-              className={`conversation__message conversation__message--${message.role}${message.highlighted ? " conversation__message--highlighted" : ""}`}
-            >
-              {message.textBlocks.length > 0 ? (
-                <div className="conversation__text">
-                  {message.textBlocks.map((text, index) => (
-                    <p key={`${message.index}-text-${index}`}>{text}</p>
+            {message.toolUses.length > 0 ? (
+              <DisclosureSection title={`Tool calls (${message.toolUses.length})`} compact>
+                <div className="conversation__tool-list">
+                  {message.toolUses.map((toolUse) => (
+                    <article key={toolUse.id} className="conversation__tool-card">
+                      <div className="conversation__tool-head">
+                        <strong>{toolUse.name}</strong>
+                        <span>{toolUse.id}</span>
+                      </div>
+                      <p>{toolUse.summary}</p>
+                      <details className="conversation__nested-details">
+                        <summary>Raw tool call</summary>
+                        <CodeBlock>{formatJson(toolUse.raw)}</CodeBlock>
+                      </details>
+                    </article>
                   ))}
                 </div>
-              ) : (
-                <div className="conversation__empty-text">No visible text content.</div>
-              )}
+              </DisclosureSection>
+            ) : null}
 
-              {message.toolUses.length > 0 ? (
-                <DisclosureSection title={`Tool calls (${message.toolUses.length})`} compact>
-                  <div className="conversation__tool-list">
-                    {message.toolUses.map((toolUse) => (
-                      <article key={toolUse.id} className="conversation__tool-card">
-                        <div className="conversation__tool-head">
-                          <strong>{toolUse.name}</strong>
-                          <span>{toolUse.id}</span>
-                        </div>
-                        <p>{toolUse.summary}</p>
-                        <details className="conversation__nested-details">
-                          <summary>Raw tool call</summary>
-                          <CodeBlock>{formatJson(toolUse.raw)}</CodeBlock>
-                        </details>
-                      </article>
-                    ))}
-                  </div>
-                </DisclosureSection>
-              ) : null}
+            {message.toolResults.length > 0 ? (
+              <DisclosureSection title={`Tool results (${message.toolResults.length})`} compact>
+                <div className="conversation__tool-list">
+                  {message.toolResults.map((toolResult) => (
+                    <article key={toolResult.id} className="conversation__tool-card">
+                      <div className="conversation__tool-head">
+                        <strong>{toolResult.toolName}</strong>
+                        <span>{toolResult.status}</span>
+                      </div>
+                      <p>{toolResult.preview}</p>
+                      <details className="conversation__nested-details">
+                        <summary>Raw tool result</summary>
+                        <CodeBlock>{formatJson(toolResult.raw)}</CodeBlock>
+                      </details>
+                    </article>
+                  ))}
+                </div>
+              </DisclosureSection>
+            ) : null}
 
-              {message.toolResults.length > 0 ? (
-                <DisclosureSection title={`Tool results (${message.toolResults.length})`} compact>
-                  <div className="conversation__tool-list">
-                    {message.toolResults.map((toolResult) => (
-                      <article key={toolResult.id} className="conversation__tool-card">
-                        <div className="conversation__tool-head">
-                          <strong>{toolResult.toolName}</strong>
-                          <span>{toolResult.status}</span>
-                        </div>
-                        <p>{toolResult.preview}</p>
-                        <details className="conversation__nested-details">
-                          <summary>Raw tool result</summary>
-                          <CodeBlock>{formatJson(toolResult.raw)}</CodeBlock>
-                        </details>
-                      </article>
-                    ))}
-                  </div>
-                </DisclosureSection>
-              ) : null}
-
-              {message.hiddenPayloads.length > 0 ? (
-                <DisclosureSection
-                  title={`Hidden structured data (${message.hiddenPayloads.length})`}
-                  compact
-                >
-                  <div className="conversation__tool-list">
-                    {message.hiddenPayloads.map((payload, index) => (
-                      <article
-                        key={`${message.index}-payload-${index}`}
-                        className="conversation__tool-card"
-                      >
-                        <div className="conversation__tool-head">
-                          <strong>{payload.label}</strong>
-                        </div>
-                        <CodeBlock>{formatJson(payload.raw)}</CodeBlock>
-                      </article>
-                    ))}
-                  </div>
-                </DisclosureSection>
-              ) : null}
-            </article>
-          ))}
-        </div>
-      
+            {message.hiddenPayloads.length > 0 ? (
+              <DisclosureSection
+                title={`Hidden structured data (${message.hiddenPayloads.length})`}
+                compact
+              >
+                <div className="conversation__tool-list">
+                  {message.hiddenPayloads.map((payload, index) => (
+                    <article
+                      key={`${message.index}-payload-${index}`}
+                      className="conversation__tool-card"
+                    >
+                      <div className="conversation__tool-head">
+                        <strong>{payload.label}</strong>
+                      </div>
+                      <CodeBlock>{formatJson(payload.raw)}</CodeBlock>
+                    </article>
+                  ))}
+                </div>
+              </DisclosureSection>
+            ) : null}
+          </article>
+        ))}
+      </div>
 
       <DisclosureSection title="Session details">
         <dl className="definition-grid">

@@ -915,17 +915,6 @@ code {
   overflow-wrap: anywhere;
 }
 
-.session-note {
-  padding: 2px 0 4px;
-  color: var(--ink-soft);
-  font-size: 0.74rem;
-  line-height: 1.45;
-}
-
-.session-note code {
-  font-size: 0.72rem;
-}
-
 .session-pane {
   min-height: 100%;
   align-content: start;
