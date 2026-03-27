@@ -71,6 +71,7 @@ code {
   height: 100dvh;
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -79,22 +80,22 @@ code {
 }
 
 .app-main {
+  height: 100%;
   min-width: 0;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: var(--shell-gap);
   padding: 8px 10px 10px 0;
   overflow: hidden;
 }
 
 .viewer-layout {
+  flex: 1 1 auto;
   height: 100%;
   min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(356px, 402px);
+  display: flex;
   gap: var(--shell-gap);
-  align-items: stretch;
   overflow: hidden;
 }
 
@@ -337,7 +338,9 @@ code {
 }
 
 .stage {
+  flex: 1 1 auto;
   height: 100%;
+  min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-rows: minmax(0, 1fr);
@@ -361,6 +364,7 @@ code {
 }
 
 .inspector {
+  flex: 0 0 402px;
   height: 100%;
 }
 
@@ -1058,17 +1062,18 @@ code {
 }
 
 @media (max-width: 1380px) {
-  .viewer-layout {
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+  .inspector {
+    flex-basis: 360px;
   }
 }
 
 @media (max-width: 1160px) {
   .viewer-layout {
-    grid-template-columns: minmax(0, 1fr);
+    flex-direction: column;
   }
 
   .inspector {
+    flex: 0 0 auto;
     min-height: 320px;
   }
 }
