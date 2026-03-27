@@ -321,39 +321,51 @@ export function revealConversationSlice(
   if (clampedProgress >= 1) {
     return sessionSlice;
   }
-  if (clampedProgress <= 0) {
-    return [];
-  }
   const revealed: SelectedAttemptView["sessionSlice"] = [];
-  const revealableIndexes = sessionSlice
-    .map((message, index) => (isRevealableMessage(message) ? index : -1))
-    .filter((index) => index >= 0);
-  const revealableOrder = new Map(revealableIndexes.map((index, order) => [index, order]));
-  const messageSpan = revealableIndexes.length > 0 ? 1 / revealableIndexes.length : 1;
+  const totalWeight = countStreamedConversationChars(sessionSlice);
+
+  if (totalWeight <= 0) {
+    return sessionSlice.filter(isRevealableMessage);
+  }
+
+  let consumedWeight = 0;
 
   for (let index = 0; index < sessionSlice.length; index += 1) {
     const message = sessionSlice[index];
     if (!message) {
       break;
     }
-    const revealIndex = revealableOrder.get(index);
-    if (revealIndex == null) {
+
+    if (!isRevealableMessage(message)) {
       continue;
     }
 
-    const start = revealIndex * messageSpan;
-    const end = start + messageSpan;
-    if (clampedProgress <= start) {
+    const messageWeight = messageRevealWeight(message);
+    const start = consumedWeight / totalWeight;
+
+    if (messageWeight <= 0) {
+      if (clampedProgress >= start) {
+        revealed.push(message);
+        continue;
+      }
       break;
     }
 
+    const end = (consumedWeight + messageWeight) / totalWeight;
     if (clampedProgress >= end) {
       revealed.push(message);
+      consumedWeight += messageWeight;
       continue;
     }
 
-    const charCount = message.textBlocks.reduce((sum, block) => sum + block.length, 0);
-    const localProgress = clamp01((clampedProgress - start) / messageSpan);
+    if (clampedProgress < start) {
+      break;
+    }
+
+    const charCount = messageWeight;
+    const localProgress = clamp01(
+      (clampedProgress - start) / Math.max(end - start, Number.EPSILON),
+    );
     const partialTextBlocks =
       charCount > 0
         ? revealTextBlocks(message.textBlocks, Math.max(1, Math.round(charCount * localProgress)))
@@ -614,7 +626,7 @@ function estimatePlaybackDuration(bundle: LoadedRunBundle, stepIndex: number): n
     const selected = selectAttemptView(bundle, stepIndex);
     const isDirectSession = selected?.sessionSourceStep?.attemptId === step.attemptId;
     const visibleChars = isDirectSession
-      ? countConversationChars(selected.sessionSlice)
+      ? countStreamedConversationChars(selected.sessionSlice)
       : [step.promptText, step.rawText].reduce(
           (sum, value) => sum + (typeof value === "string" ? value.length : 0),
           0,
@@ -1132,12 +1144,8 @@ function createSessionSlice(
   });
 }
 
-function countConversationChars(sessionSlice: SelectedAttemptView["sessionSlice"]): number {
-  return sessionSlice.reduce(
-    (sum, message) =>
-      sum + message.textBlocks.reduce((blockSum, block) => blockSum + block.length, 0),
-    0,
-  );
+function countStreamedConversationChars(sessionSlice: SelectedAttemptView["sessionSlice"]): number {
+  return sessionSlice.reduce((sum, message) => sum + messageRevealWeight(message), 0);
 }
 
 function isRevealableMessage(message: SelectedAttemptView["sessionSlice"][number]): boolean {
@@ -1147,6 +1155,13 @@ function isRevealableMessage(message: SelectedAttemptView["sessionSlice"][number
     message.toolResults.length > 0 ||
     message.hiddenPayloads.length > 0
   );
+}
+
+function messageRevealWeight(message: SelectedAttemptView["sessionSlice"][number]): number {
+  if (message.role !== "agent") {
+    return 0;
+  }
+  return message.textBlocks.reduce((sum, block) => sum + block.length, 0);
 }
 
 function revealTextBlocks(textBlocks: string[], charBudget: number): string[] {

@@ -277,7 +277,7 @@ test("selectAttemptView falls back to the latest visible ACP session for non-ACP
   assert.match(selected.sessionSlice[0]?.textBlocks[0] ?? "", /Please inspect the PR diff/);
 });
 
-test("revealConversationSlice reveals ACP text progressively and hides tool noise until complete", () => {
+test("revealConversationSlice shows user turns instantly and only streams assistant text", () => {
   const step = baseStep("extract_intent", "acp", "ok");
   const bundle = makeBundle(step, {});
   const selected = selectAttemptView(bundle, 0);
@@ -286,10 +286,11 @@ test("revealConversationSlice reveals ACP text progressively and hides tool nois
 
   const partial = revealConversationSlice(selected.sessionSlice, 0.25);
 
-  assert.equal(partial.length, 1);
-  assert.match(partial[0]?.textBlocks[0] ?? "", /^Ple/);
-  assert.equal(partial[0]?.toolUses.length, 0);
-  assert.equal(partial[0]?.toolResults.length, 0);
+  assert.equal(partial.length, 2);
+  assert.equal(partial[0]?.textBlocks[0], "Please inspect the PR diff.");
+  assert.match(partial[1]?.textBlocks[0] ?? "", /^I am ch/);
+  assert.equal(partial[1]?.toolUses.length, 0);
+  assert.equal(partial[1]?.toolResults.length, 0);
 
   const full = revealConversationSlice(selected.sessionSlice, 1);
   assert.equal(full.length, selected.sessionSlice.length);
@@ -332,10 +333,11 @@ test("revealConversationTranscript keeps prior session messages visible while st
 
   const partial = revealConversationTranscript(selected.sessionSlice, 0.25);
 
-  assert.equal(partial.length, 3);
+  assert.equal(partial.length, 4);
   assert.equal(partial[0]?.textBlocks[0], "Earlier context.");
   assert.equal(partial[1]?.textBlocks[0], "Older reply.");
-  assert.match(partial[2]?.textBlocks[0] ?? "", /^Cur/);
+  assert.equal(partial[2]?.textBlocks[0], "Current prompt.");
+  assert.match(partial[3]?.textBlocks[0] ?? "", /^Cur/);
 });
 
 test("listSessionViews returns all run sessions and marks the current streaming source", () => {
