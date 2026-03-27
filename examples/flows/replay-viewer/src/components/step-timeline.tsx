@@ -72,18 +72,6 @@ export function StepTimeline({
         <div className="timeline__current">
           <div className="timeline__headline">{currentNodeLabel}</div>
           <div className="timeline__subheadline">{currentMeta}</div>
-          <div className="timeline__speed-switcher" role="group" aria-label="Playback speed">
-            {playbackSpeedOptions.map((option) => (
-              <SpeedButton
-                key={option}
-                label={`${option}x playback`}
-                active={playbackRate === option}
-                onClick={() => onPlaybackRateChange(option)}
-              >
-                {formatPlaybackRate(option)}
-              </SpeedButton>
-            ))}
-          </div>
         </div>
         <div className="timeline__actions">
           <IconButton label="Jump to start" onClick={onReset}>
