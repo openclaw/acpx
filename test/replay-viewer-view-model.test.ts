@@ -124,6 +124,60 @@ test("buildGraph applies playback progress to the active node during preview", (
   assert.ok((nodeMap.get("extract_intent")?.playbackProgress ?? 0) > 0);
 });
 
+test("buildGraph pulls pre-terminal handoff chains toward the bottom automatically", () => {
+  const finalize = baseStep("finalize", "compute", "ok");
+  finalize.startedAt = "2026-03-27T07:30:00.000Z";
+  finalize.finishedAt = "2026-03-27T07:30:01.000Z";
+
+  const bundle = makeBundle(finalize, {
+    steps: [finalize],
+    flow: {
+      schema: "acpx.flow-definition-snapshot.v1",
+      name: "handoff-flow",
+      startAt: "judge_solution",
+      nodes: {
+        judge_solution: { nodeType: "acp", session: { handle: "main", isolated: false } },
+        bug_or_feature: { nodeType: "acp", session: { handle: "main", isolated: false } },
+        collect_review_state: { nodeType: "action" },
+        comment_and_escalate_to_human: {
+          nodeType: "acp",
+          session: { handle: "main", isolated: false },
+        },
+        post_escalation_comment: { nodeType: "action" },
+        finalize: { nodeType: "compute" },
+      },
+      edges: [
+        {
+          from: "judge_solution",
+          switch: {
+            on: "route",
+            cases: {
+              continue: "bug_or_feature",
+              human: "comment_and_escalate_to_human",
+            },
+          },
+        },
+        { from: "bug_or_feature", to: "collect_review_state" },
+        { from: "collect_review_state", to: "comment_and_escalate_to_human" },
+        { from: "comment_and_escalate_to_human", to: "post_escalation_comment" },
+        { from: "post_escalation_comment", to: "finalize" },
+      ],
+    },
+  });
+
+  const graph = buildGraph(bundle, 0);
+  const positions = new Map(graph.nodes.map((node) => [node.id, node.position.y]));
+
+  assert.ok(
+    (positions.get("comment_and_escalate_to_human") ?? 0) > (positions.get("judge_solution") ?? 0),
+  );
+  assert.ok(
+    (positions.get("post_escalation_comment") ?? 0) >
+      (positions.get("comment_and_escalate_to_human") ?? 0),
+  );
+  assert.ok((positions.get("finalize") ?? 0) > (positions.get("post_escalation_comment") ?? 0));
+});
+
 test("selectAttemptView falls back to hidden payloads for unknown structured messages", () => {
   const step = baseStep("check_ci", "action", "ok");
   const bundle = makeBundle(step, {

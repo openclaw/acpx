@@ -843,37 +843,149 @@ function computeLevels(
   backEdgeIds: Set<string>,
   terminalNodeIds: Set<string>,
 ): Map<string, number> {
+  const forwardEdges = expandedEdges.filter((edge) => !backEdgeIds.has(edge.edgeId));
+  const topologicalOrder = computeTopologicalOrder(orderedNodeIds, forwardEdges);
+  const longestFromStart = computeLongestLevels(flow.startAt, topologicalOrder, forwardEdges);
+  const tailDepths = computeTailDepths(orderedNodeIds, forwardEdges, terminalNodeIds);
   const levelByNode = new Map<string, number>();
-  levelByNode.set(flow.startAt, 0);
+  let fallbackLevel = Math.max(...longestFromStart.values(), 0);
 
   for (const nodeId of orderedNodeIds) {
-    const fromLevel = levelByNode.get(nodeId) ?? 0;
-
-    for (const edge of expandedEdges) {
-      if (edge.source !== nodeId || backEdgeIds.has(edge.edgeId)) {
-        continue;
-      }
-      const nextLevel = fromLevel + 1;
-      if (nextLevel > (levelByNode.get(edge.target) ?? -1)) {
-        levelByNode.set(edge.target, nextLevel);
-      }
+    const baseLevel = longestFromStart.get(nodeId);
+    if (baseLevel == null) {
+      fallbackLevel += 1;
+      levelByNode.set(nodeId, fallbackLevel);
+      continue;
     }
+    levelByNode.set(nodeId, baseLevel);
   }
+
+  const maxLevel = Math.max(...levelByNode.values(), 0);
 
   for (const nodeId of orderedNodeIds) {
-    if (!levelByNode.has(nodeId)) {
-      levelByNode.set(nodeId, levelByNode.size);
+    const tailDepth = tailDepths.get(nodeId);
+    if (tailDepth == null) {
+      continue;
     }
-  }
-
-  const maxLevel = Math.max(...levelByNode.values());
-  for (const nodeId of terminalNodeIds) {
-    if (levelByNode.has(nodeId)) {
-      levelByNode.set(nodeId, maxLevel);
-    }
+    const currentLevel = levelByNode.get(nodeId) ?? 0;
+    levelByNode.set(nodeId, Math.max(currentLevel, maxLevel - tailDepth));
   }
 
   return levelByNode;
+}
+
+function computeTopologicalOrder(
+  orderedNodeIds: string[],
+  forwardEdges: ExpandedFlowEdge[],
+): string[] {
+  const indegree = new Map<string, number>();
+  const outgoing = new Map<string, string[]>();
+
+  for (const nodeId of orderedNodeIds) {
+    indegree.set(nodeId, 0);
+    outgoing.set(nodeId, []);
+  }
+
+  for (const edge of forwardEdges) {
+    indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1);
+    outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge.target]);
+  }
+
+  const queue = orderedNodeIds.filter((nodeId) => (indegree.get(nodeId) ?? 0) === 0);
+  const visited = new Set<string>();
+  const order: string[] = [];
+
+  while (queue.length > 0) {
+    const nodeId = queue.shift()!;
+    if (visited.has(nodeId)) {
+      continue;
+    }
+    visited.add(nodeId);
+    order.push(nodeId);
+
+    for (const target of outgoing.get(nodeId) ?? []) {
+      const nextDegree = (indegree.get(target) ?? 0) - 1;
+      indegree.set(target, nextDegree);
+      if (nextDegree === 0) {
+        queue.push(target);
+      }
+    }
+  }
+
+  for (const nodeId of orderedNodeIds) {
+    if (!visited.has(nodeId)) {
+      order.push(nodeId);
+    }
+  }
+
+  return order;
+}
+
+function computeLongestLevels(
+  startNodeId: string,
+  topologicalOrder: string[],
+  forwardEdges: ExpandedFlowEdge[],
+): Map<string, number> {
+  const levels = new Map<string, number>();
+  const outgoing = new Map<string, string[]>();
+  levels.set(startNodeId, 0);
+
+  for (const edge of forwardEdges) {
+    outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge.target]);
+  }
+
+  for (const nodeId of topologicalOrder) {
+    const fromLevel = levels.get(nodeId);
+    if (fromLevel == null) {
+      continue;
+    }
+
+    for (const target of outgoing.get(nodeId) ?? []) {
+      levels.set(target, Math.max(levels.get(target) ?? -1, fromLevel + 1));
+    }
+  }
+
+  return levels;
+}
+
+function computeTailDepths(
+  orderedNodeIds: string[],
+  forwardEdges: ExpandedFlowEdge[],
+  terminalNodeIds: Set<string>,
+): Map<string, number> {
+  const outgoing = new Map<string, string[]>();
+  const memo = new Map<string, number | null>();
+
+  for (const edge of forwardEdges) {
+    outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge.target]);
+  }
+
+  function visit(nodeId: string): number | null {
+    if (memo.has(nodeId)) {
+      return memo.get(nodeId)!;
+    }
+    if (terminalNodeIds.has(nodeId)) {
+      memo.set(nodeId, 0);
+      return 0;
+    }
+    const targets = outgoing.get(nodeId) ?? [];
+    if (targets.length !== 1) {
+      memo.set(nodeId, null);
+      return null;
+    }
+    const childDepth = visit(targets[0]!);
+    const depth = childDepth == null ? null : childDepth + 1;
+    memo.set(nodeId, depth);
+    return depth;
+  }
+
+  for (const nodeId of orderedNodeIds) {
+    visit(nodeId);
+  }
+
+  return new Map(
+    Array.from(memo.entries()).filter((entry): entry is [string, number] => entry[1] != null),
+  );
 }
 
 function computeShortestLevels(
