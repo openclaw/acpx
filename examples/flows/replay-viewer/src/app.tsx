@@ -2,9 +2,11 @@ import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
 import { useEffect, useMemo, useState } from "react";
 import { FlowNodeCard } from "./components/flow-node-card";
 import { InspectorPanel } from "./components/inspector-panel";
+import { RoutedFlowEdge } from "./components/routed-flow-edge";
 import { RunBrowser } from "./components/run-browser";
 import { StepTimeline } from "./components/step-timeline";
 import { REPLAY_FIT_VIEW_OPTIONS, useGraphCamera } from "./hooks/use-graph-camera";
+import { useGraphLayout } from "./hooks/use-graph-layout";
 import { usePlaybackController } from "./hooks/use-playback-controller";
 import { useRunBundleLoader } from "./hooks/use-run-bundle-loader";
 import { isDirectoryPickerSupported } from "./lib/bundle-reader";
@@ -21,6 +23,10 @@ const nodeTypes = {
   flowNode: FlowNodeCard,
 };
 
+const edgeTypes = {
+  routedFlow: RoutedFlowEdge,
+};
+
 export function App() {
   const {
     bundle,
@@ -35,6 +41,7 @@ export function App() {
     loadRecentRun,
   } = useRunBundleLoader();
   const playback = usePlaybackController(bundle);
+  const graphLayout = useGraphLayout(bundle);
   const [activeTab, setActiveTab] = useState<"attempt" | "session" | "events">("session");
   const [runsCollapsed, setRunsCollapsed] = useState(true);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -50,7 +57,7 @@ export function App() {
   }, [bundle?.run.runId]);
 
   const graph = bundle
-    ? buildGraph(bundle, playback.effectiveStepIndex, playback.playbackPreview)
+    ? buildGraph(bundle, playback.effectiveStepIndex, playback.playbackPreview, graphLayout)
     : { nodes: [], edges: [] };
   const graphLayoutKey = useMemo(
     () => graph.nodes.map((node) => `${node.id}:${node.position.x}:${node.position.y}`).join("|"),
@@ -163,6 +170,7 @@ export function App() {
                     nodes={graph.nodes}
                     edges={graph.edges}
                     nodeTypes={nodeTypes}
+                    edgeTypes={edgeTypes}
                     defaultViewport={{ x: 0, y: 0, zoom: 0.84 }}
                     nodesDraggable={false}
                     nodesConnectable={false}

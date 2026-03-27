@@ -33,6 +33,27 @@ export type ViewerNodeData = {
   playbackProgress?: number;
 };
 
+export type ViewerPoint = {
+  x: number;
+  y: number;
+};
+
+export type ViewerEdgeData = {
+  points?: ViewerPoint[];
+  isBackEdge: boolean;
+};
+
+export type ViewerGraphLayout = {
+  nodePositions: Record<string, ViewerPoint>;
+  edgeRoutes: Record<
+    string,
+    {
+      points: ViewerPoint[];
+      isBackEdge: boolean;
+    }
+  >;
+};
+
 export type PlaybackSegment = {
   stepIndex: number;
   nodeId: string;

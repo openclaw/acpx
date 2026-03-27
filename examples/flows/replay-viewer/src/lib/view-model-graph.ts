@@ -1,5 +1,11 @@
 import { Position, type Edge, type Node } from "@xyflow/react";
 import type {
+  ELK as ElkEngine,
+  ElkExtendedEdge,
+  ElkNode,
+  ElkPoint,
+} from "elkjs/lib/elk.bundled.js";
+import type {
   FlowDefinitionSnapshot,
   FlowNodeOutcome,
   FlowStepRecord,
@@ -9,6 +15,8 @@ import { formatDuration, humanizeIdentifier } from "./view-model-format.js";
 import type {
   PlaybackPreview,
   RunOutcomeView,
+  ViewerEdgeData,
+  ViewerGraphLayout,
   ViewerNodeData,
   ViewerNodeStatus,
 } from "./view-model-types";
@@ -27,13 +35,19 @@ type NodeSemantics = {
   outgoingLabels: Map<string, string[]>;
 };
 
+const ELK_NODE_WIDTH = 264;
+const ELK_NODE_BASE_HEIGHT = 132;
+const ELK_BRANCH_ROW_HEIGHT = 26;
+let elkPromise: Promise<ElkEngine> | null = null;
+
 export function buildGraph(
   bundle: LoadedRunBundle,
   selectedStepIndex: number,
   playback: PlaybackPreview | null = null,
+  layout: ViewerGraphLayout | null = null,
 ): {
   nodes: Node<ViewerNodeData>[];
-  edges: Edge[];
+  edges: Edge<ViewerEdgeData>[];
 } {
   const orderedNodeIds = layoutNodeIds(bundle.flow, bundle.steps);
   const selectedStep = bundle.steps[selectedStepIndex] ?? null;
@@ -50,8 +64,13 @@ export function buildGraph(
     backEdgeIds,
     semantics.terminalNodeIds,
   );
-  const rankOrder = orderNodesWithinRanks(orderedNodeIds, expandedEdges, levelByNode, backEdgeIds);
   const runOutcome = deriveRunOutcomeView(bundle);
+  const fallbackRankOrder = orderNodesWithinRanks(
+    orderedNodeIds,
+    expandedEdges,
+    levelByNode,
+    backEdgeIds,
+  );
 
   for (let index = 1; index < visibleSteps.length; index += 1) {
     actualTransitions.add(`${visibleSteps[index - 1]?.nodeId}->${visibleSteps[index]?.nodeId}`);
@@ -62,12 +81,10 @@ export function buildGraph(
     const attemptsForNode = bundle.steps.filter((step) => step.nodeId === nodeId);
     const visibleAttempt = findLatestVisibleAttempt(visibleSteps, nodeId);
     const status = deriveNodeStatus(nodeId, visibleAttempt, selectedStep);
-    const level = levelByNode.get(nodeId) ?? 0;
-    const laneNodes = rankOrder.get(level) ?? [];
-    const column = laneNodes.indexOf(nodeId);
-    const laneWidth = 332;
-    const x = (column - (laneNodes.length - 1) / 2) * laneWidth;
-    const y = level * 236;
+    const fallbackPosition = deriveFallbackNodePosition(nodeId, levelByNode, fallbackRankOrder);
+    const layoutPosition = layout?.nodePositions[nodeId];
+    const x = layoutPosition?.x ?? fallbackPosition.x;
+    const y = layoutPosition?.y ?? fallbackPosition.y;
     const isStart = nodeId === semantics.startNodeId;
     const isTerminal = semantics.terminalNodeIds.has(nodeId);
     const isDecision = semantics.decisionNodeIds.has(nodeId);
@@ -117,23 +134,23 @@ export function buildGraph(
       selectedStep.nodeId === edge.target,
     );
     const isBackEdge = backEdgeIds.has(edge.edgeId);
-    const sourceNode = graphNodes.find((node) => node.id === edge.source);
-    const targetNode = graphNodes.find((node) => node.id === edge.target);
-    const leftToRight = (sourceNode?.position.x ?? 0) <= (targetNode?.position.x ?? 0);
     const stroke = isSelected
       ? "var(--edge-active)"
       : isTraversed
         ? "var(--edge-complete)"
         : "var(--edge-pending)";
+    const routedPoints = layout?.edgeRoutes[edge.edgeId]?.points;
 
     return {
       id: edge.edgeId,
       source: edge.source,
       target: edge.target,
-      type: isBackEdge ? "smoothstep" : "step",
-      sourceHandle: isBackEdge ? (leftToRight ? "out-right" : "out-left") : "out-bottom",
-      targetHandle: isBackEdge ? (leftToRight ? "in-left" : "in-right") : "in-top",
+      type: "routedFlow",
       animated: isSelected,
+      data: {
+        points: routedPoints,
+        isBackEdge,
+      },
       style: {
         stroke,
         strokeWidth: isSelected || isTraversed ? 2.4 : 1.2,
@@ -145,7 +162,7 @@ export function buildGraph(
         color: stroke,
       },
       zIndex: isBackEdge ? 0 : 1,
-    } satisfies Edge;
+    } satisfies Edge<ViewerEdgeData>;
   });
 
   return {
@@ -242,6 +259,105 @@ export function deriveRunOutcomeView(bundle: LoadedRunBundle): RunOutcomeView {
   }
 }
 
+export async function buildGraphLayout(
+  flow: FlowDefinitionSnapshot,
+): Promise<ViewerGraphLayout | null> {
+  const orderedNodeIds = layoutNodeIds(flow, []);
+  const semantics = inferNodeSemantics(flow);
+  const expandedEdges = expandFlowEdges(flow);
+  const shortestLevels = computeShortestLevels(flow, expandedEdges, orderedNodeIds);
+  const backEdgeIds = findBackEdgeIds(expandedEdges, shortestLevels);
+  const elkGraph: ElkNode = {
+    id: "root",
+    layoutOptions: {
+      "elk.algorithm": "layered",
+      "elk.direction": "DOWN",
+      "elk.edgeRouting": "ORTHOGONAL",
+      "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+      "elk.layered.considerModelOrder.strategy": "PREFER_NODES",
+      "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+      "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
+      "elk.layered.unnecessaryBendpoints": "true",
+      "elk.padding": "[top=48,left=72,bottom=72,right=72]",
+      "elk.spacing.nodeNode": "56",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "96",
+      "elk.spacing.edgeNode": "42",
+      "elk.spacing.edgeEdge": "24",
+    },
+    children: orderedNodeIds.map((nodeId, index) => {
+      const branchLabels = semantics.outgoingLabels.get(nodeId) ?? [];
+      const layoutOptions: Record<string, string> = {
+        "elk.priority": `${1000 - index}`,
+      };
+      if (semantics.terminalNodeIds.has(nodeId)) {
+        layoutOptions["elk.layered.layering.layerConstraint"] = "LAST";
+      } else if (nodeId === flow.startAt) {
+        layoutOptions["elk.layered.layering.layerConstraint"] = "FIRST";
+      }
+      return {
+        id: nodeId,
+        width: ELK_NODE_WIDTH,
+        height: estimateElkNodeHeight(branchLabels.length),
+        layoutOptions,
+      } satisfies ElkNode;
+    }),
+    edges: expandedEdges.map((edge, index) => {
+      const layoutOptions: Record<string, string> = backEdgeIds.has(edge.edgeId)
+        ? {
+            "elk.layered.priority.direction": "1",
+          }
+        : {
+            "elk.priority": `${1000 - index}`,
+          };
+      return {
+        id: edge.edgeId,
+        sources: [edge.source],
+        targets: [edge.target],
+        layoutOptions,
+      };
+    }) satisfies ElkExtendedEdge[],
+  };
+
+  try {
+    const elk = await getElk();
+    const layout = await elk.layout(elkGraph);
+    const nodePositions: ViewerGraphLayout["nodePositions"] = {};
+    const edgeRoutes: ViewerGraphLayout["edgeRoutes"] = {};
+
+    for (const child of layout.children ?? []) {
+      nodePositions[child.id] = {
+        x: child.x ?? 0,
+        y: child.y ?? 0,
+      };
+    }
+
+    for (const edge of layout.edges ?? []) {
+      const points = extractElkEdgePoints(edge);
+      if (points.length === 0) {
+        continue;
+      }
+      edgeRoutes[edge.id] = {
+        points,
+        isBackEdge: backEdgeIds.has(edge.id),
+      };
+    }
+
+    return {
+      nodePositions,
+      edgeRoutes,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function getElk(): Promise<ElkEngine> {
+  if (!elkPromise) {
+    elkPromise = import("elkjs/lib/elk.bundled.js").then(({ default: Elk }) => new Elk());
+  }
+  return elkPromise;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
@@ -310,6 +426,54 @@ function findLatestVisibleAttempt(
 ): FlowStepRecord | undefined {
   const matching = steps.filter((step) => step.nodeId === nodeId);
   return matching.at(-1);
+}
+
+function deriveFallbackNodePosition(
+  nodeId: string,
+  levelByNode: Map<string, number>,
+  rankOrder: Map<number, string[]>,
+): { x: number; y: number } {
+  const level = levelByNode.get(nodeId) ?? 0;
+  const laneNodes = rankOrder.get(level) ?? [];
+  const column = laneNodes.indexOf(nodeId);
+  const laneWidth = 332;
+  return {
+    x: (column - (laneNodes.length - 1) / 2) * laneWidth,
+    y: level * 236,
+  };
+}
+
+function estimateElkNodeHeight(branchLabelCount: number): number {
+  const branchRows = branchLabelCount > 0 ? Math.ceil(Math.min(branchLabelCount, 4) / 3) : 0;
+  return ELK_NODE_BASE_HEIGHT + branchRows * ELK_BRANCH_ROW_HEIGHT;
+}
+
+function extractElkEdgePoints(edge: ElkExtendedEdge): ElkPoint[] {
+  const points: ElkPoint[] = [];
+
+  for (const section of edge.sections ?? []) {
+    if (points.length === 0) {
+      points.push(section.startPoint);
+    }
+    for (const bendPoint of section.bendPoints ?? []) {
+      points.push(bendPoint);
+    }
+    points.push(section.endPoint);
+  }
+
+  return dedupeConsecutivePoints(points);
+}
+
+function dedupeConsecutivePoints(points: ElkPoint[]): ElkPoint[] {
+  const deduped: ElkPoint[] = [];
+  for (const point of points) {
+    const previous = deduped.at(-1);
+    if (previous && previous.x === point.x && previous.y === point.y) {
+      continue;
+    }
+    deduped.push(point);
+  }
+  return deduped;
 }
 
 function expandFlowEdges(flow: FlowDefinitionSnapshot): ExpandedFlowEdge[] {
@@ -620,9 +784,9 @@ function orderNodesWithinRanks(
   levelByNode: Map<string, number>,
   backEdgeIds: Set<string>,
 ): Map<number, string[]> {
+  const forwardEdges = expandedEdges.filter((edge) => !backEdgeIds.has(edge.edgeId));
   const ranks = new Map<number, string[]>();
   const orderIndex = new Map(orderedNodeIds.map((nodeId, index) => [nodeId, index]));
-  const parentOrder = new Map<string, number>();
 
   for (const nodeId of orderedNodeIds) {
     const level = levelByNode.get(nodeId) ?? 0;
@@ -632,56 +796,98 @@ function orderNodesWithinRanks(
   }
 
   const maxLevel = Math.max(...ranks.keys());
-  for (let level = 0; level <= maxLevel; level += 1) {
-    const nodes = ranks.get(level) ?? [];
-    nodes.sort((left, right) => {
-      const leftScore = computeParentBarycenter(
-        left,
-        expandedEdges,
+  let currentOrder = buildRankOrderIndex(ranks);
+
+  for (let pass = 0; pass < 6; pass += 1) {
+    for (let level = 1; level <= maxLevel; level += 1) {
+      const nodes = ranks.get(level) ?? [];
+      sortRankByNeighborBarycenter(nodes, {
+        direction: "down",
+        forwardEdges,
         levelByNode,
-        parentOrder,
-        backEdgeIds,
-      );
-      const rightScore = computeParentBarycenter(
-        right,
-        expandedEdges,
+        currentOrder,
+        fallbackOrder: orderIndex,
+      });
+      currentOrder = buildRankOrderIndex(ranks);
+    }
+
+    for (let level = maxLevel - 1; level >= 0; level -= 1) {
+      const nodes = ranks.get(level) ?? [];
+      sortRankByNeighborBarycenter(nodes, {
+        direction: "up",
+        forwardEdges,
         levelByNode,
-        parentOrder,
-        backEdgeIds,
-      );
-      if (leftScore !== rightScore) {
-        return leftScore - rightScore;
-      }
-      return (orderIndex.get(left) ?? 0) - (orderIndex.get(right) ?? 0);
-    });
-    nodes.forEach((nodeId, index) => {
-      parentOrder.set(nodeId, index);
-    });
+        currentOrder,
+        fallbackOrder: orderIndex,
+      });
+      currentOrder = buildRankOrderIndex(ranks);
+    }
   }
 
   return ranks;
 }
 
-function computeParentBarycenter(
-  nodeId: string,
-  expandedEdges: ExpandedFlowEdge[],
-  levelByNode: Map<string, number>,
-  parentOrder: Map<string, number>,
-  backEdgeIds: Set<string>,
-): number {
-  const parents = expandedEdges
-    .filter(
-      (edge) =>
-        edge.target === nodeId &&
-        !backEdgeIds.has(edge.edgeId) &&
-        (levelByNode.get(edge.source) ?? 0) < (levelByNode.get(nodeId) ?? 0),
-    )
-    .map((edge) => parentOrder.get(edge.source))
-    .filter((value): value is number => typeof value === "number");
+function buildRankOrderIndex(ranks: Map<number, string[]>): Map<string, number> {
+  const order = new Map<string, number>();
+  for (const [, nodes] of ranks) {
+    nodes.forEach((nodeId, index) => {
+      order.set(nodeId, index);
+    });
+  }
+  return order;
+}
 
-  if (parents.length === 0) {
+function sortRankByNeighborBarycenter(
+  nodes: string[],
+  options: {
+    direction: "down" | "up";
+    forwardEdges: ExpandedFlowEdge[];
+    levelByNode: Map<string, number>;
+    currentOrder: Map<string, number>;
+    fallbackOrder: Map<string, number>;
+  },
+): void {
+  nodes.sort((left, right) => {
+    const leftScore = computeNeighborBarycenter(left, options);
+    const rightScore = computeNeighborBarycenter(right, options);
+    if (leftScore !== rightScore) {
+      return leftScore - rightScore;
+    }
+    return (options.fallbackOrder.get(left) ?? 0) - (options.fallbackOrder.get(right) ?? 0);
+  });
+}
+
+function computeNeighborBarycenter(
+  nodeId: string,
+  options: {
+    direction: "down" | "up";
+    forwardEdges: ExpandedFlowEdge[];
+    levelByNode: Map<string, number>;
+    currentOrder: Map<string, number>;
+  },
+): number {
+  const nodeLevel = options.levelByNode.get(nodeId) ?? 0;
+  const neighbors =
+    options.direction === "down"
+      ? options.forwardEdges
+          .filter(
+            (edge) =>
+              edge.target === nodeId && (options.levelByNode.get(edge.source) ?? 0) < nodeLevel,
+          )
+          .map((edge) => options.currentOrder.get(edge.source))
+      : options.forwardEdges
+          .filter(
+            (edge) =>
+              edge.source === nodeId && (options.levelByNode.get(edge.target) ?? 0) > nodeLevel,
+          )
+          .map((edge) => options.currentOrder.get(edge.target));
+
+  const orderedNeighbors = neighbors.filter((value): value is number => typeof value === "number");
+  if (orderedNeighbors.length === 0) {
     return Number.MAX_SAFE_INTEGER;
   }
 
-  return parents.reduce((sum, value) => sum + value, 0) / parents.length;
+  return (
+    orderedNeighbors.reduce((sum, value) => sum + value, 0) / Math.max(orderedNeighbors.length, 1)
+  );
 }

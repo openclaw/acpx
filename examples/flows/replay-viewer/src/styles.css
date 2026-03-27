@@ -640,6 +640,30 @@ code {
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26);
 }
 
+.flow-node-card--type-acp {
+  background:
+    linear-gradient(180deg, rgba(56, 144, 194, 0.12), rgba(18, 25, 35, 0.98) 26%),
+    rgba(18, 25, 35, 0.98);
+}
+
+.flow-node-card--type-action {
+  background:
+    linear-gradient(180deg, rgba(92, 128, 214, 0.1), rgba(18, 25, 35, 0.98) 26%),
+    rgba(18, 25, 35, 0.98);
+}
+
+.flow-node-card--type-compute {
+  background:
+    linear-gradient(180deg, rgba(98, 176, 157, 0.08), rgba(18, 25, 35, 0.98) 26%),
+    rgba(18, 25, 35, 0.98);
+}
+
+.flow-node-card--type-checkpoint {
+  background:
+    linear-gradient(180deg, rgba(193, 148, 68, 0.1), rgba(18, 25, 35, 0.98) 26%),
+    rgba(18, 25, 35, 0.98);
+}
+
 .flow-node-card__progress {
   position: absolute;
   inset: 0 0 auto 0;
@@ -702,6 +726,26 @@ code {
 .flow-node-card__type {
   background: rgba(255, 255, 255, 0.04);
   color: var(--ink-soft);
+}
+
+.flow-node-card--type-acp .flow-node-card__type {
+  background: rgba(62, 166, 198, 0.15);
+  color: #91d8ea;
+}
+
+.flow-node-card--type-action .flow-node-card__type {
+  background: rgba(92, 128, 214, 0.16);
+  color: #aebdff;
+}
+
+.flow-node-card--type-compute .flow-node-card__type {
+  background: rgba(109, 230, 167, 0.12);
+  color: #9ee1c6;
+}
+
+.flow-node-card--type-checkpoint .flow-node-card__type {
+  background: rgba(212, 155, 69, 0.16);
+  color: #efc97c;
 }
 
 .flow-node-card__semantic {

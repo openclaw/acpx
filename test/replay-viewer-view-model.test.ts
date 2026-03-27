@@ -3,6 +3,7 @@ import test from "node:test";
 import { resolvePlaybackResumeMs } from "../examples/flows/replay-viewer/src/hooks/use-playback-controller.js";
 import {
   buildGraph,
+  buildGraphLayout,
   buildPlaybackTimeline,
   derivePlaybackPreview,
   deriveRunOutcomeView,
@@ -177,6 +178,56 @@ test("buildGraph pulls pre-terminal handoff chains toward the bottom automatical
       (positions.get("comment_and_escalate_to_human") ?? 0),
   );
   assert.ok((positions.get("finalize") ?? 0) > (positions.get("post_escalation_comment") ?? 0));
+});
+
+test("buildGraphLayout uses layered routing and sinks terminal chains", async () => {
+  const bundle = makeBundle(baseStep("finalize", "compute", "ok"), {
+    flow: {
+      schema: "acpx.flow-definition-snapshot.v1",
+      name: "layout-flow",
+      startAt: "judge_solution",
+      nodes: {
+        judge_solution: { nodeType: "acp", session: { handle: "main", isolated: false } },
+        bug_or_feature: { nodeType: "acp", session: { handle: "main", isolated: false } },
+        check_initial_conflicts: { nodeType: "action" },
+        judge_initial_conflicts: {
+          nodeType: "acp",
+          session: { handle: "main", isolated: false },
+        },
+        comment_and_escalate_to_human: {
+          nodeType: "acp",
+          session: { handle: "main", isolated: false },
+        },
+        post_escalation_comment: { nodeType: "action" },
+        finalize: { nodeType: "compute" },
+      },
+      edges: [
+        {
+          from: "judge_solution",
+          switch: {
+            on: "route",
+            cases: {
+              classify: "bug_or_feature",
+              human: "comment_and_escalate_to_human",
+            },
+          },
+        },
+        { from: "bug_or_feature", to: "check_initial_conflicts" },
+        { from: "check_initial_conflicts", to: "judge_initial_conflicts" },
+        { from: "judge_initial_conflicts", to: "comment_and_escalate_to_human" },
+        { from: "comment_and_escalate_to_human", to: "post_escalation_comment" },
+        { from: "post_escalation_comment", to: "finalize" },
+      ],
+    },
+  });
+
+  const layout = await buildGraphLayout(bundle.flow);
+
+  assert.ok(layout);
+  assert.ok(layout.nodePositions.finalize);
+  assert.ok(layout.nodePositions.comment_and_escalate_to_human);
+  assert.ok(layout.edgeRoutes["judge_solution->bug_or_feature-0-0"]?.points.length! >= 2);
+  assert.ok(layout.nodePositions.finalize.y > layout.nodePositions.comment_and_escalate_to_human.y);
 });
 
 test("selectAttemptView falls back to hidden payloads for unknown structured messages", () => {

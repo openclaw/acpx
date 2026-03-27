@@ -39,6 +39,9 @@ importers:
       '@xyflow/react':
         specifier: ^12.10.1
         version: 12.10.1(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      elkjs:
+        specifier: ^0.11.1
+        version: 0.11.1
       husky:
         specifier: ^9.1.7
         version: 9.1.7
@@ -1055,6 +1058,9 @@ packages:
     peerDependenciesMeta:
       oxc-resolver:
         optional: true
+
+  elkjs@0.11.1:
+    resolution: {integrity: sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg==}
 
   emoji-regex@10.6.0:
     resolution: {integrity: sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A==}
@@ -2397,6 +2403,8 @@ snapshots:
       dequal: 2.0.3
 
   dts-resolver@2.1.3: {}
+
+  elkjs@0.11.1: {}
 
   emoji-regex@10.6.0: {}
 

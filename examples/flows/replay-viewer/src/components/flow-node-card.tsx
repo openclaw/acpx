@@ -9,7 +9,7 @@ type FlowNodeCardProps = {
 export function FlowNodeCard({ data, selected = false }: FlowNodeCardProps) {
   return (
     <div
-      className={`flow-node-card flow-node-card--${data.status}${selected ? " flow-node-card--selected" : ""}`}
+      className={`flow-node-card flow-node-card--${data.status} flow-node-card--type-${data.nodeType}${selected ? " flow-node-card--selected" : ""}`}
     >
       {typeof data.playbackProgress === "number" ? (
         <div className="flow-node-card__progress" aria-hidden="true">

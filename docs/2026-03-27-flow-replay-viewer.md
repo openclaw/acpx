@@ -298,6 +298,10 @@ The graph should be laid out primarily top-to-bottom.
 
 The layout engine must do more than simple breadth-first ranking.
 
+The viewer should not rely on hand-tuned explicit coordinates for real flows.
+The graph should derive a readable layout automatically from the definition and
+its inferred semantics.
+
 ### Goals
 
 - start near the top
@@ -316,6 +320,97 @@ The layout engine must do more than simple breadth-first ranking.
 
 If the automatic layout cannot satisfy these rules well enough, the viewer
 should add post-processing rather than accepting a tangled graph.
+
+### Preferred layout engine
+
+The target implementation should use a real layered graph layout engine rather
+than continuing to grow a custom heuristic ranker.
+
+Preferred direction:
+
+- `ELK layered` from Eclipse Layout Kernel
+
+Acceptable transitional direction:
+
+- `dagre`
+
+But the long-term target is `ELK layered`, not a permanent in-house layout
+algorithm.
+
+### Why ELK layered
+
+The replay viewer needs more than node ranking. It needs:
+
+- crossing reduction
+- branch grouping
+- top-to-bottom layered flow layout
+- port-aware edge routing
+- bend points for orthogonal or near-orthogonal edges
+- separation of forward edges from back edges
+
+That is a real graph-layout problem. It should be handled by a graph-layout
+engine instead of a growing pile of viewer-specific heuristics.
+
+### Required graph-to-layout pipeline
+
+The viewer should derive semantic structure first, then hand a layout graph to
+the engine.
+
+Required derived semantics:
+
+- start node
+- definition-terminal nodes
+- decision nodes
+- pre-terminal chains
+- back edges / loop edges
+
+The layout pipeline should then:
+
+1. build a directed graph from the flow definition
+2. separate back edges from the forward layered graph for layout purposes
+3. insert dummy routing points for long edges that span multiple ranks when
+   needed
+4. assign layered layout constraints
+5. route back edges on outer rails instead of through the central reading path
+6. return node positions and routed edge geometry
+
+The viewer should then render that returned geometry in React Flow.
+
+### Required layout constraints
+
+The layout engine should be configured so that:
+
+- the graph direction is top-to-bottom
+- definition-terminal nodes sink to the bottom ranks
+- pre-terminal chains stay near terminal ranks
+- sibling branches stay grouped
+- decision nodes sit above their branch fan-out
+- long forward edges do not cut straight through unrelated branches
+- back edges are visibly distinct and routed outside the main flow
+
+### Rendering contract
+
+React Flow should be treated as the renderer, not the layout engine.
+
+That means:
+
+- node positions should come from the layout result
+- edge bend points or routed segments should come from the layout result when
+  available
+- the viewer should not depend on default edge generation from rough node
+  placement if the result causes avoidable crossings
+
+### Long-term architecture
+
+The durable architecture is:
+
+- semantic graph inference
+- ELK layered layout
+- routed edges from the layout result
+- run replay as an overlay on top of that static semantic map
+
+This is the preferred "once and for all" direction for making large flow
+definitions readable without hand-authoring coordinates.
 
 ## Replay controls
 

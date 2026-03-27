@@ -1,5 +1,5 @@
 export { formatDate, formatDuration, formatJson, humanizeIdentifier } from "./view-model-format.js";
-export { buildGraph, deriveRunOutcomeView } from "./view-model-graph.js";
+export { buildGraph, buildGraphLayout, deriveRunOutcomeView } from "./view-model-graph.js";
 export {
   countStreamedConversationChars,
   listSessionViews,
@@ -18,7 +18,10 @@ export type {
   PlaybackTimeline,
   RunOutcomeView,
   SelectedAttemptView,
+  ViewerEdgeData,
+  ViewerGraphLayout,
   SessionListItemView,
+  ViewerPoint,
   ViewerNodeData,
   ViewerNodeStatus,
 } from "./view-model-types";
