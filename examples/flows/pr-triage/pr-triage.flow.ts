@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { extractJsonObject } from "../../../src/flows.js";
+import { selectLocalCodexReviewText } from "./review-text.js";
 
 const FLOW_DIR = ".acpx-flow";
 const MAIN_SESSION = {
@@ -662,7 +663,12 @@ async function collectReviewState(pr) {
     allowFailure: true,
     timeoutMs: 30 * 60_000,
   });
-  const localReviewParsed = tryExtractJson(localReviewRun.stdout);
+  const localReviewStdout = trimTextTail(localReviewRun.stdout, 16_000);
+  const localReviewStderr = trimTextTail(localReviewRun.stderr, 16_000);
+  const localReviewText = trimTextTail(
+    selectLocalCodexReviewText(localReviewRun.stdout, localReviewRun.stderr),
+    16_000,
+  );
 
   const reviewState = {
     baseRef,
@@ -674,9 +680,10 @@ async function collectReviewState(pr) {
     githubIssueComments: Array.isArray(issueComments)
       ? issueComments.map(normalizeGitHubIssueComment)
       : [],
-    localCodexReview: localReviewParsed,
-    localCodexReviewRaw: trimTextTail(localReviewRun.stdout, 16_000),
-    localCodexReviewError: trimTextTail(localReviewRun.stderr, 8_000),
+    localCodexReviewText: localReviewText,
+    localCodexReviewStdout: localReviewStdout,
+    localCodexReviewStderr: localReviewStderr,
+    localCodexReviewAvailable: Boolean(localReviewText),
     localCodexReviewExitCode: localReviewRun.exitCode,
     localCodexReviewTimedOut: localReviewRun.timedOut,
   };
@@ -684,9 +691,9 @@ async function collectReviewState(pr) {
 
   return {
     review_state_path: path.join(pr.flowDir, "review-state.json"),
-    review_status: localReviewParsed?.review_status ?? null,
     local_codex_review_ran: true,
     local_codex_review_exit_code: localReviewRun.exitCode,
+    local_codex_review_available: Boolean(localReviewText),
   };
 }
 
@@ -1023,15 +1030,17 @@ function promptReviewLoop(pr, outputs) {
     `Target PR: ${prRef(pr)}`,
     `The review mechanics have already been collected by the flow runtime in ${reviewStatePath}.`,
     "Read that local JSON file and the local repo state instead of rerunning `gh api` or `codex review` yourself.",
-    "Use only the normalized GitHub review data and the stored local Codex review result from that file as review evidence.",
+    "Use only the normalized GitHub review data and the stored local Codex review text from that file as review evidence.",
     "Top-level GitHub issue comments count only if they clearly contain Codex-authored review feedback for the current head. Ignore plain handoff or status comments.",
     `Use the local branch ${pr.localBranch}. If you need to push, use remote ${pr.pushRemote} branch ${pr.pushRef}.`,
     "First, inspect the existing GitHub Codex review data already collected for the current PR head.",
-    "Then inspect the fresh local Codex review result that was already run against the refreshed base ref.",
+    "Then inspect the fresh local Codex review text that was already run against the refreshed base ref.",
+    "The local Codex review is plain text, not structured JSON. Read `localCodexReviewText`, and use `localCodexReviewStdout` and `localCodexReviewStderr` only as fallback context if needed.",
     "If valid P0 or P1 issues remain from either source, fix them directly in the repo, run focused checks when feasible, commit and push the branch yourself, and then route back to `collect_review_state` so the flow runtime can rerun the review mechanics.",
     "Do not keep looping just because only P2 or lower findings remain. Treat P2 and lower as non-blocking unless they materially change your judgment about whether the PR is safe to continue.",
     `If you change code in this loop, rerun the earlier targeted validation before returning. Latest validation summary: ${validation?.summary ?? "none"}.`,
-    "If `localCodexReviewExitCode` is non-zero, if `localCodexReviewTimedOut` is true, or if the local Codex review could not be established reliably, route to `comment_and_escalate_to_human` instead of pretending review is clear.",
+    "Treat the local Codex review as established if `localCodexReviewExitCode` is zero, `localCodexReviewTimedOut` is false, and there is substantive review text available.",
+    "Only route to `comment_and_escalate_to_human` if the local Codex review actually failed, timed out, or produced no usable review text at all.",
     "If blocking review findings are cleared, route to `collect_ci_state`.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
@@ -1478,12 +1487,4 @@ async function runCommand(command, args, options = {}) {
     signal: exit.signal,
     timedOut,
   };
-}
-
-function tryExtractJson(text) {
-  try {
-    return extractJsonObject(text);
-  } catch {
-    return null;
-  }
 }
