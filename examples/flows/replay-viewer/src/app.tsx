@@ -1,131 +1,94 @@
-import { Background, Controls, ReactFlow, type Node, type ReactFlowInstance } from "@xyflow/react";
+import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
 import { useEffect, useMemo, useState } from "react";
 import { FlowNodeCard } from "./components/flow-node-card";
 import { InspectorPanel } from "./components/inspector-panel";
 import { RunBrowser } from "./components/run-browser";
 import { StepTimeline } from "./components/step-timeline";
-import {
-  createRecentRunBundleReader,
-  createDirectoryBundleReader,
-  createSampleBundleReader,
-  isDirectoryPickerSupported,
-  listRecentRuns,
-} from "./lib/bundle-reader";
-import { loadRunBundle } from "./lib/load-bundle";
+import { useGraphCamera } from "./hooks/use-graph-camera";
+import { usePlaybackController } from "./hooks/use-playback-controller";
+import { useRunBundleLoader } from "./hooks/use-run-bundle-loader";
+import { isDirectoryPickerSupported } from "./lib/bundle-reader";
 import {
   buildGraph,
-  buildPlaybackTimeline,
-  derivePlaybackPreview,
-  formatDuration,
   humanizeIdentifier,
   listSessionViews,
-  playbackAnchorMs,
   selectAttemptView,
 } from "./lib/view-model";
-import type { LoadedRunBundle, RunBundleSummary } from "./types";
+import type { LoadedRunBundle } from "./types";
 
 const nodeTypes = {
   flowNode: FlowNodeCard,
 };
 
 export function App() {
-  const [bundle, setBundle] = useState<LoadedRunBundle | null>(null);
-  const [recentRuns, setRecentRuns] = useState<RunBundleSummary[]>([]);
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [selectedStepIndex, setSelectedStepIndex] = useState(0);
+  const {
+    bundle,
+    recentRuns,
+    activeRunId,
+    loadingState,
+    errorMessage,
+    bootstrap,
+    refreshRuns,
+    loadSample,
+    loadLocalBundle,
+    loadRecentRun,
+  } = useRunBundleLoader();
+  const playback = usePlaybackController(bundle);
   const [activeTab, setActiveTab] = useState<"attempt" | "session" | "events">("session");
   const [runsCollapsed, setRunsCollapsed] = useState(true);
-  const [loadingState, setLoadingState] = useState<
-    "bootstrap" | "runs" | "sample" | "local" | "run" | null
-  >("bootstrap");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [playbackMode, setPlaybackMode] = useState<"playing" | "seeking" | null>(null);
-  const [playheadMs, setPlayheadMs] = useState<number | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"follow" | "overview">("follow");
-  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
 
   useEffect(() => {
     void bootstrap();
-  }, []);
-
-  const playbackTimeline = useMemo(() => (bundle ? buildPlaybackTimeline(bundle) : null), [bundle]);
-  const playbackPreview = useMemo(
-    () =>
-      playbackTimeline && playheadMs != null
-        ? derivePlaybackPreview(playbackTimeline, playheadMs)
-        : null,
-    [playbackTimeline, playheadMs],
-  );
+  }, [bootstrap]);
 
   useEffect(() => {
-    if (playbackMode !== "playing" || !playbackTimeline || playheadMs == null) {
-      return undefined;
-    }
-    if (playbackTimeline.segments.length === 0) {
-      return undefined;
-    }
-    let frameId = 0;
-    let lastTimestamp: number | null = null;
+    setActiveTab("session");
+    setViewMode("follow");
+  }, [bundle?.run.runId]);
 
-    const tick = (timestamp: number) => {
-      if (lastTimestamp == null) {
-        lastTimestamp = timestamp;
-      }
-      const deltaMs = timestamp - lastTimestamp;
-      lastTimestamp = timestamp;
-
-      setPlayheadMs((current) => {
-        if (current == null) {
-          return current;
-        }
-        return Math.min(current + deltaMs, playbackTimeline.totalDurationMs);
-      });
-      frameId = window.requestAnimationFrame(tick);
-    };
-
-    frameId = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(frameId);
-  }, [playbackMode, playbackTimeline, playheadMs]);
-
-  useEffect(() => {
-    if (
-      playbackMode === "playing" &&
-      playbackTimeline &&
-      playbackPreview &&
-      playbackPreview.playheadMs >= playbackTimeline.totalDurationMs
-    ) {
-      setSelectedStepIndex(Math.max(bundle?.steps.length ?? 1, 1) - 1);
-      setPlaybackMode(null);
-      setPlayheadMs(null);
-    }
-  }, [bundle?.steps.length, playbackMode, playbackPreview, playbackTimeline]);
-
-  const effectiveStepIndex = playbackPreview?.activeStepIndex ?? selectedStepIndex;
   const graph = bundle
-    ? buildGraph(bundle, effectiveStepIndex, playbackPreview)
+    ? buildGraph(bundle, playback.effectiveStepIndex, playback.playbackPreview)
     : { nodes: [], edges: [] };
   const graphLayoutKey = useMemo(
     () => graph.nodes.map((node) => `${node.id}:${node.position.x}:${node.position.y}`).join("|"),
     [graph.nodes],
   );
   const selectedAttempt = useMemo(
-    () => (bundle ? selectAttemptView(bundle, effectiveStepIndex) : null),
-    [bundle, effectiveStepIndex],
+    () => (bundle ? selectAttemptView(bundle, playback.effectiveStepIndex) : null),
+    [bundle, playback.effectiveStepIndex],
   );
   const sessionItems = useMemo(
     () => (bundle && selectedAttempt ? listSessionViews(bundle, selectedAttempt) : []),
     [bundle, selectedAttempt],
   );
-  const currentStep = bundle?.steps[effectiveStepIndex] ?? null;
+  const currentStep = bundle?.steps[playback.effectiveStepIndex] ?? null;
   const currentDuration = currentStep
-    ? `${effectiveStepIndex + 1} / ${bundle?.steps.length ?? 0} · ${currentStep.nodeType} · ${playbackPreview ? playbackProgressLabel(playbackPreview.stepProgress) : deriveStepDurationLabel(currentStep)}`
+    ? `${playback.effectiveStepIndex + 1} / ${bundle?.steps.length ?? 0} · ${currentStep.nodeType} · ${playback.playbackPreview ? playbackProgressLabel(playback.playbackPreview.stepProgress) : deriveStepDurationLabel(currentStep)}`
     : "n/a";
   const sessionRevealProgress =
-    playbackPreview && selectedAttempt?.step.attemptId === currentStep?.attemptId
-      ? playbackPreview.stepProgress
+    playback.playbackPreview && selectedAttempt?.step.attemptId === currentStep?.attemptId
+      ? playback.playbackPreview.stepProgress
       : null;
   const currentNodeId = currentStep?.nodeId ?? graph.nodes[0]?.id ?? null;
+  const playbackValue =
+    playback.playbackPreview?.playheadMs ??
+    playback.playbackTimeline?.segments[
+      Math.max(
+        Math.min(playback.selectedStepIndex, playback.playbackTimeline.segments.length - 1),
+        0,
+      )
+    ]?.endMs ??
+    0;
+
+  const { setFlowInstance } = useGraphCamera({
+    runId: bundle?.run.runId,
+    nodes: graph.nodes,
+    layoutKey: graphLayoutKey,
+    currentNodeId,
+    viewMode,
+  });
 
   useEffect(() => {
     const defaultSessionId =
@@ -140,179 +103,20 @@ export function App() {
     sessionItems[0]?.id,
   ]);
 
-  useEffect(() => {
-    if (!flowInstance?.viewportInitialized || !bundle || viewMode !== "overview") {
-      return;
-    }
-
-    let cancelled = false;
-    const frameId = window.requestAnimationFrame(() => {
-      if (cancelled) {
-        return;
-      }
-      void flowInstance.fitView({
-        padding: 0.34,
-        maxZoom: 1.02,
-        duration: 360,
-        ease: easeOutCubic,
-      });
-    });
-
-    return () => {
-      cancelled = true;
-      window.cancelAnimationFrame(frameId);
-    };
-  }, [bundle?.run.runId, flowInstance, graphLayoutKey, viewMode]);
-
-  useEffect(() => {
-    if (!flowInstance?.viewportInitialized || !bundle || viewMode !== "follow" || !currentNodeId) {
-      return;
-    }
-
-    let cancelled = false;
-    const frameId = window.requestAnimationFrame(() => {
-      if (cancelled) {
-        return;
-      }
-
-      const internalNode = flowInstance.getInternalNode(currentNodeId);
-      const graphNode = graph.nodes.find((node) => node.id === currentNodeId);
-      if (!graphNode) {
-        return;
-      }
-
-      const width = internalNode?.measured?.width ?? internalNode?.width ?? 284;
-      const height = internalNode?.measured?.height ?? internalNode?.height ?? 134;
-      const centerX = graphNode.position.x + width / 2;
-      const centerY = graphNode.position.y + height / 2 + 72;
-
-      void flowInstance.setCenter(centerX, centerY, {
-        zoom: 0.84,
-        duration: 320,
-        ease: easeOutCubic,
-      });
-    });
-
-    return () => {
-      cancelled = true;
-      window.cancelAnimationFrame(frameId);
-    };
-  }, [
-    bundle?.run.runId,
-    currentNodeId,
-    effectiveStepIndex,
-    flowInstance,
-    graphLayoutKey,
-    viewMode,
-  ]);
-
-  async function bootstrap(): Promise<void> {
-    setLoadingState("bootstrap");
-    setErrorMessage(null);
-    setPlaybackMode(null);
-    setPlayheadMs(null);
-    setViewMode("follow");
-
-    const runs = await refreshRuns();
-    if (runs && runs.length > 0) {
-      await loadRecentRun(runs[0]);
-      return;
-    }
-    await loadSample();
-  }
-
-  async function refreshRuns(): Promise<RunBundleSummary[] | null> {
-    setLoadingState("runs");
-    try {
-      const runs = await listRecentRuns();
-      if (runs) {
-        setRecentRuns(runs);
-      }
-      return runs;
-    } finally {
-      setLoadingState(null);
-    }
-  }
-
-  async function loadSample(): Promise<void> {
-    setLoadingState("sample");
-    setErrorMessage(null);
-    setPlaybackMode(null);
-    setPlayheadMs(null);
-
-    try {
-      const loaded = await loadRunBundle(createSampleBundleReader());
-      setBundle(loaded);
-      setActiveRunId(null);
-      setSelectedStepIndex(defaultSelectedStepIndex(loaded));
-      setActiveTab("session");
-      setViewMode("follow");
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setLoadingState(null);
-    }
-  }
-
-  async function loadLocalBundle(): Promise<void> {
-    setLoadingState("local");
-    setErrorMessage(null);
-    setPlaybackMode(null);
-    setPlayheadMs(null);
-
-    try {
-      const reader = await createDirectoryBundleReader();
-      const loaded = await loadRunBundle(reader);
-      setBundle(loaded);
-      setActiveRunId(null);
-      setSelectedStepIndex(defaultSelectedStepIndex(loaded));
-      setActiveTab("session");
-      setViewMode("follow");
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        return;
-      }
-      setErrorMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setLoadingState(null);
-    }
-  }
-
-  async function loadRecentRun(run: RunBundleSummary): Promise<void> {
-    setLoadingState("run");
-    setErrorMessage(null);
-    setPlaybackMode(null);
-    setPlayheadMs(null);
-
-    try {
-      const loaded = await loadRunBundle(createRecentRunBundleReader(run));
-      setBundle(loaded);
-      setActiveRunId(run.runId);
-      setSelectedStepIndex(defaultSelectedStepIndex(loaded));
-      setActiveTab("session");
-      setViewMode("follow");
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setLoadingState(null);
-    }
-  }
-
   function selectNode(nodeId: string): void {
     if (!bundle) {
       return;
     }
-    setPlaybackMode(null);
-    setPlayheadMs(null);
-    const visibleSteps = bundle.steps.slice(0, effectiveStepIndex + 1);
+    playback.clearPlayback();
+    const visibleSteps = bundle.steps.slice(0, playback.effectiveStepIndex + 1);
     const visibleIndex = visibleSteps.map((step) => step.nodeId).lastIndexOf(nodeId);
     if (visibleIndex >= 0) {
-      setSelectedStepIndex(visibleIndex);
+      playback.selectStep(visibleIndex);
       return;
     }
     const firstIndex = bundle.steps.findIndex((step) => step.nodeId === nodeId);
     if (firstIndex >= 0) {
-      setSelectedStepIndex(firstIndex);
+      playback.selectStep(firstIndex);
     }
   }
 
@@ -347,104 +151,46 @@ export function App() {
         <section className="viewer-layout">
           <section className="stage">
             {bundle ? (
-              (() => {
-                return (
-                  <section className="canvas-card">
-                    <div className="canvas-card__flow" style={{ minHeight: "360px" }}>
-                      <ReactFlow
-                        key={bundle.run.runId}
-                        nodes={graph.nodes}
-                        edges={graph.edges}
-                        nodeTypes={nodeTypes}
-                        defaultViewport={{ x: 0, y: 0, zoom: 0.84 }}
-                        nodesDraggable={false}
-                        nodesConnectable={false}
-                        onInit={setFlowInstance}
-                        onNodeClick={(_, node: Node) => selectNode(node.id)}
-                        minZoom={0.28}
-                        maxZoom={1.35}
-                        proOptions={{ hideAttribution: true }}
-                      >
-                        <Controls showInteractive={false} />
-                        <Background color="rgba(148, 163, 184, 0.08)" gap={40} />
-                      </ReactFlow>
-                    </div>
-                    <StepTimeline
-                      steps={bundle.steps}
-                      selectedIndex={effectiveStepIndex}
-                      playbackValue={
-                        playbackPreview?.playheadMs ??
-                        (playbackTimeline
-                          ? playbackAnchorMs(playbackTimeline, selectedStepIndex)
-                          : 0)
-                      }
-                      playbackMax={playbackTimeline?.totalDurationMs ?? 0}
-                      currentNodeLabel={
-                        currentStep ? humanizeIdentifier(currentStep.nodeId) : "n/a"
-                      }
-                      currentMeta={currentDuration}
-                      playing={playbackMode === "playing"}
-                      viewMode={viewMode}
-                      onSelect={(index) => {
-                        setPlaybackMode(null);
-                        setPlayheadMs(null);
-                        setSelectedStepIndex(index);
-                      }}
-                      onPlay={() => {
-                        if (!playbackTimeline) {
-                          return;
-                        }
-                        const resumeMs =
-                          playheadMs ?? playbackAnchorMs(playbackTimeline, selectedStepIndex);
-                        setPlayheadMs(resumeMs);
-                        setPlaybackMode("playing");
-                      }}
-                      onPause={() => {
-                        if (!playbackPreview) {
-                          setPlaybackMode(null);
-                          setPlayheadMs(null);
-                          return;
-                        }
-                        setSelectedStepIndex(playbackPreview.nearestStepIndex);
-                        setPlaybackMode(null);
-                        setPlayheadMs(null);
-                      }}
-                      onReset={() => {
-                        setPlaybackMode(null);
-                        setPlayheadMs(null);
-                        setSelectedStepIndex(0);
-                      }}
-                      onJumpToEnd={() => {
-                        setPlaybackMode(null);
-                        setPlayheadMs(null);
-                        setSelectedStepIndex(Math.max(bundle.steps.length - 1, 0));
-                      }}
-                      onSeekStart={() => {
-                        setPlaybackMode("seeking");
-                        setPlayheadMs(
-                          playbackPreview?.playheadMs ??
-                            (playbackTimeline
-                              ? playbackAnchorMs(playbackTimeline, selectedStepIndex)
-                              : 0),
-                        );
-                      }}
-                      onSeek={(value) => {
-                        setPlayheadMs(value);
-                      }}
-                      onSeekCommit={(value) => {
-                        if (!playbackTimeline) {
-                          return;
-                        }
-                        const preview = derivePlaybackPreview(playbackTimeline, value);
-                        setSelectedStepIndex(preview?.nearestStepIndex ?? selectedStepIndex);
-                        setPlaybackMode(null);
-                        setPlayheadMs(null);
-                      }}
-                      onViewModeChange={setViewMode}
-                    />
-                  </section>
-                );
-              })()
+              <section className="canvas-card">
+                <div className="canvas-card__flow" style={{ minHeight: "360px" }}>
+                  <ReactFlow
+                    key={bundle.run.runId}
+                    nodes={graph.nodes}
+                    edges={graph.edges}
+                    nodeTypes={nodeTypes}
+                    defaultViewport={{ x: 0, y: 0, zoom: 0.84 }}
+                    nodesDraggable={false}
+                    nodesConnectable={false}
+                    onInit={setFlowInstance}
+                    onNodeClick={(_, node: Node) => selectNode(node.id)}
+                    minZoom={0.28}
+                    maxZoom={1.35}
+                    proOptions={{ hideAttribution: true }}
+                  >
+                    <Controls showInteractive={false} />
+                    <Background color="rgba(148, 163, 184, 0.08)" gap={40} />
+                  </ReactFlow>
+                </div>
+                <StepTimeline
+                  steps={bundle.steps}
+                  selectedIndex={playback.effectiveStepIndex}
+                  playbackValue={playbackValue}
+                  playbackMax={playback.playbackTimeline?.totalDurationMs ?? 0}
+                  currentNodeLabel={currentStep ? humanizeIdentifier(currentStep.nodeId) : "n/a"}
+                  currentMeta={currentDuration}
+                  playing={playback.isPlaying}
+                  viewMode={viewMode}
+                  onSelect={playback.selectStep}
+                  onPlay={playback.play}
+                  onPause={playback.pause}
+                  onReset={playback.reset}
+                  onJumpToEnd={playback.jumpToEnd}
+                  onSeekStart={playback.startSeek}
+                  onSeek={playback.seek}
+                  onSeekCommit={playback.commitSeek}
+                  onViewModeChange={setViewMode}
+                />
+              </section>
             ) : (
               <div className="empty-state">
                 <h2>Load a run bundle</h2>
@@ -471,18 +217,10 @@ export function App() {
   );
 }
 
-function defaultSelectedStepIndex(bundle: LoadedRunBundle): number {
-  return Math.max(bundle.steps.length - 1, 0);
-}
-
 function deriveStepDurationLabel(step: LoadedRunBundle["steps"][number]): string {
   return `${Math.max(0, Date.parse(step.finishedAt) - Date.parse(step.startedAt))} ms`;
 }
 
 function playbackProgressLabel(progress: number): string {
   return `${Math.round(Math.max(0, Math.min(1, progress)) * 100)}%`;
-}
-
-function easeOutCubic(value: number): number {
-  return 1 - Math.pow(1 - value, 3);
 }
