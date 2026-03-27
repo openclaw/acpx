@@ -25,7 +25,7 @@ export function InspectorPanel({ selectedAttempt, activeTab, onTabChange }: Insp
     <aside className="inspector">
       <div className="inspector__header">
         <div>
-          <div className="inspector__eyebrow">{step.kind} attempt</div>
+          <div className="inspector__eyebrow">{step.nodeType} attempt</div>
           <h2 className="inspector__title">{step.nodeId}</h2>
           <div className="inspector__subtitle">{step.attemptId}</div>
         </div>

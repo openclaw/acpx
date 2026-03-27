@@ -12,49 +12,53 @@ export function defineFlow<TFlow extends FlowDefinition>(definition: TFlow): TFl
   return definition;
 }
 
-export function acp(definition: Omit<AcpNodeDefinition, "kind">): AcpNodeDefinition {
+export function acp(definition: Omit<AcpNodeDefinition, "nodeType">): AcpNodeDefinition {
   return {
-    kind: "acp",
+    nodeType: "acp",
     ...definition,
   };
 }
 
-export function compute(definition: Omit<ComputeNodeDefinition, "kind">): ComputeNodeDefinition {
+export function compute(
+  definition: Omit<ComputeNodeDefinition, "nodeType">,
+): ComputeNodeDefinition {
   return {
-    kind: "compute",
+    nodeType: "compute",
     ...definition,
   };
 }
 
 export function action(
-  definition: Omit<FunctionActionNodeDefinition, "kind">,
+  definition: Omit<FunctionActionNodeDefinition, "nodeType">,
 ): FunctionActionNodeDefinition;
 export function action(
-  definition: Omit<ShellActionNodeDefinition, "kind">,
+  definition: Omit<ShellActionNodeDefinition, "nodeType">,
 ): ShellActionNodeDefinition;
 export function action(
-  definition: Omit<FunctionActionNodeDefinition, "kind"> | Omit<ShellActionNodeDefinition, "kind">,
+  definition:
+    | Omit<FunctionActionNodeDefinition, "nodeType">
+    | Omit<ShellActionNodeDefinition, "nodeType">,
 ): ActionNodeDefinition {
   return {
-    kind: "action",
+    nodeType: "action",
     ...definition,
   } as ActionNodeDefinition;
 }
 
 export function shell(
-  definition: Omit<ShellActionNodeDefinition, "kind">,
+  definition: Omit<ShellActionNodeDefinition, "nodeType">,
 ): ShellActionNodeDefinition {
   return {
-    kind: "action",
+    nodeType: "action",
     ...definition,
   };
 }
 
 export function checkpoint(
-  definition: Omit<CheckpointNodeDefinition, "kind"> = {},
+  definition: Omit<CheckpointNodeDefinition, "nodeType"> = {},
 ): CheckpointNodeDefinition {
   return {
-    kind: "checkpoint",
+    nodeType: "checkpoint",
     ...definition,
   };
 }

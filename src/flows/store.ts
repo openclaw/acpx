@@ -41,7 +41,7 @@ type FlowLiveState = {
   status: FlowRunState["status"];
   currentNode?: string;
   currentAttemptId?: string;
-  currentNodeKind?: FlowRunState["currentNodeKind"];
+  currentNodeType?: FlowRunState["currentNodeType"];
   currentNodeStartedAt?: string;
   lastHeartbeatAt?: string;
   statusDetail?: string;
@@ -380,7 +380,7 @@ function createLiveState(state: FlowRunState): FlowLiveState {
     status: state.status,
     currentNode: state.currentNode,
     currentAttemptId: state.currentAttemptId,
-    currentNodeKind: state.currentNodeKind,
+    currentNodeType: state.currentNodeType,
     currentNodeStartedAt: state.currentNodeStartedAt,
     lastHeartbeatAt: state.lastHeartbeatAt,
     statusDetail: state.statusDetail,
@@ -404,13 +404,13 @@ function createFlowDefinitionSnapshot(flow: FlowDefinition): FlowDefinitionSnaps
 
 function snapshotNode(node: FlowNodeDefinition) {
   const common = {
-    kind: node.kind,
+    nodeType: node.nodeType,
     ...(node.timeoutMs !== undefined ? { timeoutMs: node.timeoutMs } : {}),
     ...(node.heartbeatMs !== undefined ? { heartbeatMs: node.heartbeatMs } : {}),
     ...(node.statusDetail ? { statusDetail: node.statusDetail } : {}),
   };
 
-  switch (node.kind) {
+  switch (node.nodeType) {
     case "acp":
       return {
         ...common,

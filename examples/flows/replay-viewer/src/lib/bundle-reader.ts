@@ -1,7 +1,7 @@
 import type { FlowRunManifest, RunBundleSummary } from "../types";
 
 export type BundleReader = {
-  kind: "sample" | "local" | "recent";
+  sourceType: "sample" | "local" | "recent";
   label: string;
   readText(relativePath: string): Promise<string>;
   readJson<T>(relativePath: string): Promise<T>;
@@ -23,7 +23,7 @@ export function createSampleBundleReader(basePath: string = "/sample-run"): Bund
   }
 
   return {
-    kind: "sample",
+    sourceType: "sample",
     label: "Bundled sample run",
     readText,
     async readJson<T>(relativePath: string): Promise<T> {
@@ -51,7 +51,7 @@ export function createRecentRunBundleReader(run: RunBundleSummary): BundleReader
   }
 
   return {
-    kind: "recent",
+    sourceType: "recent",
     label: `Recent run: ${run.runId}`,
     readText,
     async readJson<T>(relativePath: string): Promise<T> {
@@ -83,7 +83,7 @@ export async function createDirectoryBundleReader(): Promise<BundleReader> {
   }
 
   return {
-    kind: "local",
+    sourceType: "local",
     label: directoryHandle.name,
     readText,
     async readJson<T>(relativePath: string): Promise<T> {

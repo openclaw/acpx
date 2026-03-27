@@ -40,7 +40,7 @@ export type FlowEdge =
     };
 
 export type AcpNodeDefinition = FlowNodeCommon & {
-  kind: "acp";
+  nodeType: "acp";
   profile?: string;
   cwd?: string | ((context: FlowNodeContext) => MaybePromise<string | undefined>);
   session?: {
@@ -52,12 +52,12 @@ export type AcpNodeDefinition = FlowNodeCommon & {
 };
 
 export type ComputeNodeDefinition = FlowNodeCommon & {
-  kind: "compute";
+  nodeType: "compute";
   run: (context: FlowNodeContext) => MaybePromise<unknown>;
 };
 
 export type FunctionActionNodeDefinition = FlowNodeCommon & {
-  kind: "action";
+  nodeType: "action";
   run: (context: FlowNodeContext) => MaybePromise<unknown>;
 };
 
@@ -85,7 +85,7 @@ export type ShellActionResult = {
 };
 
 export type ShellActionNodeDefinition = FlowNodeCommon & {
-  kind: "action";
+  nodeType: "action";
   exec: (context: FlowNodeContext) => MaybePromise<ShellActionExecution>;
   parse?: (result: ShellActionResult, context: FlowNodeContext) => MaybePromise<unknown>;
 };
@@ -93,7 +93,7 @@ export type ShellActionNodeDefinition = FlowNodeCommon & {
 export type ActionNodeDefinition = FunctionActionNodeDefinition | ShellActionNodeDefinition;
 
 export type CheckpointNodeDefinition = FlowNodeCommon & {
-  kind: "checkpoint";
+  nodeType: "checkpoint";
   summary?: string;
   run?: (context: FlowNodeContext) => MaybePromise<unknown>;
 };
@@ -112,7 +112,7 @@ export type FlowDefinition = {
 };
 
 export type FlowNodeSnapshot = FlowNodeCommon & {
-  kind: FlowNodeDefinition["kind"];
+  nodeType: FlowNodeDefinition["nodeType"];
   profile?: string;
   session?: {
     handle?: string;
@@ -143,7 +143,7 @@ export type FlowNodeOutcome = "ok" | "timed_out" | "failed" | "cancelled";
 export type FlowNodeResult = {
   attemptId: string;
   nodeId: string;
-  kind: FlowNodeDefinition["kind"];
+  nodeType: FlowNodeDefinition["nodeType"];
   outcome: FlowNodeOutcome;
   startedAt: string;
   finishedAt: string;
@@ -168,7 +168,7 @@ export type FlowConversationTrace = {
 };
 
 export type FlowActionReceipt = {
-  kind: "shell" | "function";
+  actionType: "shell" | "function";
   command?: string;
   args?: string[];
   cwd?: string;
@@ -192,7 +192,7 @@ export type FlowStepTrace = {
 export type FlowStepRecord = {
   attemptId: string;
   nodeId: string;
-  kind: FlowNodeDefinition["kind"];
+  nodeType: FlowNodeDefinition["nodeType"];
   outcome: FlowNodeOutcome;
   startedAt: string;
   finishedAt: string;
@@ -238,7 +238,7 @@ export type FlowRunState = {
   sessionBindings: Record<string, FlowSessionBinding>;
   currentNode?: string;
   currentAttemptId?: string;
-  currentNodeKind?: FlowNodeDefinition["kind"];
+  currentNodeType?: FlowNodeDefinition["nodeType"];
   currentNodeStartedAt?: string;
   lastHeartbeatAt?: string;
   statusDetail?: string;

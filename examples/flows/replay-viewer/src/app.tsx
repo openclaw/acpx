@@ -320,7 +320,7 @@ export function App() {
 }
 
 function defaultSelectedStepIndex(bundle: LoadedRunBundle): number {
-  const lastAcpStepIndex = bundle.steps.findLastIndex((step) => step.kind === "acp");
+  const lastAcpStepIndex = bundle.steps.findLastIndex((step) => step.nodeType === "acp");
   if (lastAcpStepIndex >= 0) {
     return lastAcpStepIndex;
   }

@@ -1,22 +1,22 @@
 {
-  "runId": "2026-03-26T232115765Z-example-two-turn-5a8505cf",
+  "runId": "2026-03-27T082624978Z-example-two-turn-63806145",
   "flowName": "example-two-turn",
-  "flowPath": "/workspace/acpx/examples/flows/two-turn.flow.ts",
-  "startedAt": "2026-03-26T23:21:15.767Z",
-  "finishedAt": "2026-03-26T23:21:16.297Z",
-  "updatedAt": "2026-03-26T23:21:16.297Z",
+  "flowPath": "/Users/onur/offline/acpx/examples/flows/two-turn.flow.ts",
+  "startedAt": "2026-03-27T08:26:24.986Z",
+  "finishedAt": "2026-03-27T08:26:25.501Z",
+  "updatedAt": "2026-03-27T08:26:25.502Z",
   "status": "completed",
   "sessionBindings": {
-    "node /workspace/acpx/dist-test/test/mock-agent.js::/tmp/acpx-viewer-sample::main": {
-      "key": "node /workspace/acpx/dist-test/test/mock-agent.js::/tmp/acpx-viewer-sample::main",
+    "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js::/tmp/acpx-sample-home-kBDIgu/work::main": {
+      "key": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js::/tmp/acpx-sample-home-kBDIgu/work::main",
       "handle": "main",
-      "bundleId": "main-7d2ae03f",
-      "name": "example-two-turn-main-92244a3a-5a8505cf",
+      "bundleId": "main-87f32b36",
+      "name": "example-two-turn-main-e0cd2792-63806145",
       "agentName": "codex",
-      "agentCommand": "node /workspace/acpx/dist-test/test/mock-agent.js",
-      "cwd": "/tmp/acpx-viewer-sample",
-      "acpxRecordId": "fb5d3eb7-4a1c-406b-a3dd-67551aa67794",
-      "acpSessionId": "69f349e6-fc11-4360-9583-7eee631e4be6"
+      "agentCommand": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js",
+      "cwd": "/tmp/acpx-sample-home-kBDIgu/work",
+      "acpxRecordId": "294fd830-e856-431b-819e-789d0f27b642",
+      "acpSessionId": "6e433465-6bc7-427f-99f8-39de79a1c588"
     }
   }
 }

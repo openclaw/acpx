@@ -18,7 +18,7 @@ export type FlowDefinitionSnapshot = {
   nodes: Record<
     string,
     {
-      kind: "acp" | "compute" | "action" | "checkpoint";
+      nodeType: "acp" | "compute" | "action" | "checkpoint";
       profile?: string;
       session?: {
         handle?: string;
@@ -57,7 +57,7 @@ export type FlowConversationTrace = {
 };
 
 export type FlowActionReceipt = {
-  kind: "shell" | "function";
+  actionType: "shell" | "function";
   command?: string;
   args?: string[];
   cwd?: string;
@@ -95,7 +95,7 @@ export type FlowSessionBinding = {
 export type FlowStepRecord = {
   attemptId: string;
   nodeId: string;
-  kind: "acp" | "compute" | "action" | "checkpoint";
+  nodeType: "acp" | "compute" | "action" | "checkpoint";
   outcome: FlowNodeOutcome;
   startedAt: string;
   finishedAt: string;
@@ -115,7 +115,7 @@ export type FlowStepRecord = {
 export type FlowNodeResult = {
   attemptId: string;
   nodeId: string;
-  kind: FlowStepRecord["kind"];
+  nodeType: FlowStepRecord["nodeType"];
   outcome: FlowNodeOutcome;
   startedAt: string;
   finishedAt: string;
@@ -139,7 +139,7 @@ export type FlowRunState = {
   sessionBindings: Record<string, FlowSessionBinding>;
   currentNode?: string;
   currentAttemptId?: string;
-  currentNodeKind?: FlowStepRecord["kind"];
+  currentNodeType?: FlowStepRecord["nodeType"];
   currentNodeStartedAt?: string;
   lastHeartbeatAt?: string;
   statusDetail?: string;
@@ -223,7 +223,7 @@ export type SessionRecord = {
 };
 
 export type LoadedRunBundle = {
-  sourceKind: "sample" | "local" | "recent";
+  sourceType: "sample" | "local" | "recent";
   sourceLabel: string;
   manifest: FlowRunManifest;
   flow: FlowDefinitionSnapshot;

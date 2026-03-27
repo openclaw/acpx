@@ -278,7 +278,7 @@ have a narrow payload contract.
 
 ```json
 {
-  "kind": "acp",
+  "nodeType": "acp",
   "timeoutMs": 900000,
   "cwd": "/tmp/workdir",
   "statusDetail": "Extract the PR intent"
@@ -297,7 +297,7 @@ have a narrow payload contract.
 
 ```json
 {
-  "kind": "acp",
+  "nodeType": "acp",
   "outcome": "ok",
   "durationMs": 28764,
   "error": null,
@@ -315,7 +315,7 @@ If the output is naturally small and scalar, it may also be stored inline:
 
 ```json
 {
-  "kind": "compute",
+  "nodeType": "compute",
   "outcome": "ok",
   "durationMs": 2,
   "outputInline": {
@@ -389,7 +389,7 @@ Do not inline large or multi-line payloads.
 ```json
 {
   "action": {
-    "kind": "shell",
+    "actionType": "shell",
     "command": "pnpm",
     "args": ["run", "check"],
     "cwd": "/tmp/workdir"
@@ -402,7 +402,7 @@ Do not inline large or multi-line payloads.
 ```json
 {
   "action": {
-    "kind": "shell",
+    "actionType": "shell",
     "command": "pnpm",
     "args": ["run", "check"],
     "cwd": "/tmp/workdir",
@@ -519,7 +519,7 @@ For action node attempts, `node_outcome.payload` must include:
 ```json
 {
   "action": {
-    "kind": "shell",
+    "actionType": "shell",
     "command": "pnpm",
     "args": ["run", "check"],
     "cwd": "/tmp/workdir",
@@ -569,7 +569,7 @@ Write policy:
 Minimal liveness view:
 
 - current node
-- current node kind
+- current node type
 - current node started at
 - last heartbeat
 - waiting status
@@ -589,7 +589,7 @@ Ordered node-attempt receipts, one entry per attempt, with:
 
 - `attemptId`
 - `nodeId`
-- `kind`
+- `nodeType`
 - `outcome`
 - `startedAt`
 - `finishedAt`

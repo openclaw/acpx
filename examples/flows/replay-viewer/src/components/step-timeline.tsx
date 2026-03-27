@@ -44,7 +44,7 @@ export function StepTimeline({
           <div className="timeline__label">Replay progress</div>
           <div className="timeline__headline">{currentStep?.nodeId ?? "n/a"}</div>
           <div className="timeline__subheadline">
-            Step {selectedIndex + 1} of {steps.length} • {currentStep?.kind ?? "n/a"} •{" "}
+            Step {selectedIndex + 1} of {steps.length} • {currentStep?.nodeType ?? "n/a"} •{" "}
             {currentStep?.outcome ?? "n/a"} • {currentDuration}
           </div>
         </div>

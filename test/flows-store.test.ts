@@ -33,7 +33,7 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
       sessionBindings: {},
       currentNode: "prepare",
       currentAttemptId: "prepare#1",
-      currentNodeKind: "action",
+      currentNodeType: "action",
       currentNodeStartedAt: "2026-03-26T00:00:01.000Z",
       lastHeartbeatAt: "2026-03-26T00:00:01.000Z",
       statusDetail: "Preparing",
@@ -65,7 +65,7 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
     };
     const flowSnapshot = JSON.parse(await fs.readFile(path.join(runDir, "flow.json"), "utf8")) as {
       schema: string;
-      nodes: Record<string, { kind: string; actionExecution?: string }>;
+      nodes: Record<string, { nodeType: string; actionExecution?: string }>;
     };
     const snapshot = JSON.parse(
       await fs.readFile(path.join(runDir, "projections", "run.json"), "utf8"),
@@ -93,7 +93,7 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
     assert.equal(manifest.schema, "acpx.flow-run-bundle.v1");
     assert.equal(manifest.paths.runProjection, "projections/run.json");
     assert.equal(flowSnapshot.schema, "acpx.flow-definition-snapshot.v1");
-    assert.equal(flowSnapshot.nodes.prepare?.kind, "action");
+    assert.equal(flowSnapshot.nodes.prepare?.nodeType, "action");
     assert.equal(flowSnapshot.nodes.prepare?.actionExecution, "function");
     assert.equal(snapshot.runId, "run-123");
     assert.equal(snapshot.currentNode, "prepare");
@@ -161,7 +161,7 @@ test("FlowRunStore uses unique temp paths for concurrent live writes", async () 
       sessionBindings: {},
       currentNode: "step",
       currentAttemptId: "step#1",
-      currentNodeKind: "action",
+      currentNodeType: "action",
       currentNodeStartedAt: "2026-03-26T00:00:00.000Z",
       lastHeartbeatAt: "2026-03-26T00:00:00.000Z",
     };

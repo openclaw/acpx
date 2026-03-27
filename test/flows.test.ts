@@ -449,7 +449,7 @@ test("FlowRunner persists active node state while a shell step is running", asyn
     }, 2_000);
 
     assert.equal(activeState.currentNode, "slow");
-    assert.equal(activeState.currentNodeKind, "action");
+    assert.equal(activeState.currentNodeType, "action");
     assert.ok(typeof activeState.currentNodeStartedAt === "string");
     assert.ok(typeof activeState.lastHeartbeatAt === "string");
 
@@ -602,7 +602,7 @@ test("FlowRunner marks timed out shell steps explicitly", async () => {
     assert.match(String(state.error), /Timed out after 50ms/);
     const slowResult = (state.results as Record<string, Record<string, unknown>>).slow;
     assert.equal(slowResult.nodeId, "slow");
-    assert.equal(slowResult.kind, "action");
+    assert.equal(slowResult.nodeType, "action");
     assert.equal(slowResult.outcome, "timed_out");
     assert.equal(slowResult.error, "Timed out after 50ms");
     assert.equal(typeof slowResult.startedAt, "string");

@@ -183,14 +183,21 @@ export class FlowRunner {
         let sessionInfo: FlowSessionBinding | null = null;
         let agentInfo: ResolvedFlowAgent | null = null;
         let trace: FlowStepTrace | null = null;
-        this.markNodeStarted(state, current, attemptId, node.kind, startedAt, node.statusDetail);
+        this.markNodeStarted(
+          state,
+          current,
+          attemptId,
+          node.nodeType,
+          startedAt,
+          node.statusDetail,
+        );
         await this.store.writeSnapshot(runDir, state, {
           scope: "node",
           type: "node_started",
           nodeId: current,
           attemptId,
           payload: {
-            kind: node.kind,
+            nodeType: node.nodeType,
             ...(node.timeoutMs !== undefined
               ? { timeoutMs: node.timeoutMs ?? this.defaultNodeTimeoutMs }
               : { timeoutMs: this.defaultNodeTimeoutMs }),
@@ -212,7 +219,7 @@ export class FlowRunner {
           nodeResult = createNodeResult({
             attemptId,
             nodeId: current,
-            kind: node.kind,
+            nodeType: node.nodeType,
             outcome: "ok",
             startedAt,
             finishedAt: isoNow(),
@@ -225,7 +232,7 @@ export class FlowRunner {
           nodeResult = createNodeResult({
             attemptId,
             nodeId: current,
-            kind: node.kind,
+            nodeType: node.nodeType,
             outcome: outcomeForError(error),
             startedAt,
             finishedAt: isoNow(),
@@ -235,7 +242,7 @@ export class FlowRunner {
 
         state.results[current] = nodeResult;
 
-        if (nodeResult.outcome === "ok" && node.kind === "checkpoint") {
+        if (nodeResult.outcome === "ok" && node.nodeType === "checkpoint") {
           state.outputs[current] = output;
           state.waitingOn = current;
           state.updatedAt = isoNow();
@@ -244,7 +251,7 @@ export class FlowRunner {
           state.steps.push({
             attemptId,
             nodeId: current,
-            kind: node.kind,
+            nodeType: node.nodeType,
             outcome: nodeResult.outcome,
             startedAt,
             finishedAt: nodeResult.finishedAt,
@@ -276,7 +283,7 @@ export class FlowRunner {
         state.steps.push({
           attemptId,
           nodeId: current,
-          kind: node.kind,
+          nodeType: node.nodeType,
           outcome: nodeResult.outcome,
           startedAt,
           finishedAt: nodeResult.finishedAt,
@@ -364,7 +371,7 @@ export class FlowRunner {
     node: FlowNodeDefinition,
     context: FlowNodeContext,
   ): Promise<FlowNodeExecutionResult> {
-    switch (node.kind) {
+    switch (node.nodeType) {
       case "compute":
         return await this.executeComputeNode(runDir, state, node, context);
       case "action":
@@ -429,7 +436,7 @@ export class FlowRunner {
         agentInfo: null,
         trace: {
           action: {
-            kind: "function",
+            actionType: "function",
           },
         },
       };
@@ -465,7 +472,7 @@ export class FlowRunner {
           attemptId: state.currentAttemptId,
           payload: {
             action: {
-              kind: "shell",
+              actionType: "shell",
               command: effectiveExecution.command,
               args: effectiveExecution.args ?? [],
               cwd: effectiveExecution.cwd,
@@ -492,7 +499,7 @@ export class FlowRunner {
           attemptId: state.currentAttemptId,
           payload: {
             action: {
-              kind: "shell",
+              actionType: "shell",
               command: result.command,
               args: result.args,
               cwd: result.cwd,
@@ -506,7 +513,7 @@ export class FlowRunner {
         });
         const trace: FlowStepTrace = {
           action: {
-            kind: "shell",
+            actionType: "shell",
             command: result.command,
             args: result.args,
             cwd: result.cwd,
@@ -789,7 +796,7 @@ export class FlowRunner {
     state: FlowRunState,
     nodeId: string,
     attemptId: string,
-    kind: FlowNodeDefinition["kind"],
+    nodeType: FlowNodeDefinition["nodeType"],
     startedAt: string,
     detail?: string,
   ): void {
@@ -797,16 +804,16 @@ export class FlowRunner {
     state.waitingOn = undefined;
     state.currentNode = nodeId;
     state.currentAttemptId = attemptId;
-    state.currentNodeKind = kind;
+    state.currentNodeType = nodeType;
     state.currentNodeStartedAt = startedAt;
     state.lastHeartbeatAt = startedAt;
-    state.statusDetail = detail ?? `Running ${kind} node ${nodeId}`;
+    state.statusDetail = detail ?? `Running ${nodeType} node ${nodeId}`;
   }
 
   private clearActiveNode(state: FlowRunState, detail?: string): void {
     state.currentNode = undefined;
     state.currentAttemptId = undefined;
-    state.currentNodeKind = undefined;
+    state.currentNodeType = undefined;
     state.currentNodeStartedAt = undefined;
     state.lastHeartbeatAt = undefined;
     state.statusDetail = detail;
@@ -1245,7 +1252,7 @@ function createSyntheticSessionRecord(options: {
 function createNodeResult(options: {
   attemptId: string;
   nodeId: string;
-  kind: FlowNodeDefinition["kind"];
+  nodeType: FlowNodeDefinition["nodeType"];
   outcome: FlowNodeOutcome;
   startedAt: string;
   finishedAt: string;
@@ -1255,7 +1262,7 @@ function createNodeResult(options: {
   return {
     attemptId: options.attemptId,
     nodeId: options.nodeId,
-    kind: options.kind,
+    nodeType: options.nodeType,
     outcome: options.outcome,
     startedAt: options.startedAt,
     finishedAt: options.finishedAt,
@@ -1290,7 +1297,7 @@ function createNodeOutcomePayload(
   trace: FlowStepTrace | null,
 ): Record<string, unknown> {
   return {
-    kind: result.kind,
+    nodeType: result.nodeType,
     outcome: result.outcome,
     durationMs: result.durationMs,
     error: result.error ?? null,

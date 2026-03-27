@@ -236,7 +236,7 @@ function printFlowRunResult(
     flowPath: result.state.flowPath,
     status: result.state.status,
     currentNode: result.state.currentNode,
-    currentNodeKind: result.state.currentNodeKind,
+    currentNodeType: result.state.currentNodeType,
     currentNodeStartedAt: result.state.currentNodeStartedAt,
     lastHeartbeatAt: result.state.lastHeartbeatAt,
     statusDetail: result.state.statusDetail,

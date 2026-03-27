@@ -47,10 +47,10 @@ test("buildGraph marks attempted, active, and queued nodes across switched edges
       name: "branch-flow",
       startAt: "load_pr",
       nodes: {
-        load_pr: { kind: "action" },
-        review_loop: { kind: "acp", session: { handle: "main", isolated: false } },
-        check_ci: { kind: "action" },
-        escalate: { kind: "compute" },
+        load_pr: { nodeType: "action" },
+        review_loop: { nodeType: "acp", session: { handle: "main", isolated: false } },
+        check_ci: { nodeType: "action" },
+        escalate: { nodeType: "compute" },
       },
       edges: [
         { from: "load_pr", to: "review_loop" },
@@ -216,7 +216,7 @@ function makeBundle(
   };
 
   return {
-    sourceKind: "sample",
+    sourceType: "sample",
     sourceLabel: "sample",
     manifest,
     flow: overrides.flow ?? {
@@ -225,7 +225,7 @@ function makeBundle(
       startAt: "extract_intent",
       nodes: {
         extract_intent: {
-          kind: "acp",
+          nodeType: "acp",
           hasPrompt: true,
           session: { handle: "main", isolated: false },
           cwd: { mode: "default" },
@@ -321,13 +321,13 @@ function makeBundle(
 
 function baseStep(
   nodeId: string,
-  kind: FlowStepRecord["kind"],
+  nodeType: FlowStepRecord["nodeType"],
   outcome: FlowStepRecord["outcome"],
 ): FlowStepRecord {
   return {
     attemptId: `${nodeId}#1`,
     nodeId,
-    kind,
+    nodeType,
     outcome,
     startedAt: "2026-03-27T07:26:08.000Z",
     finishedAt: "2026-03-27T07:27:13.000Z",

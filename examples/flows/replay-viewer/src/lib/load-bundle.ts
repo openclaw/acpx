@@ -44,7 +44,7 @@ export async function loadRunBundle(reader: BundleReader): Promise<LoadedRunBund
   );
 
   return {
-    sourceKind: reader.kind,
+    sourceType: reader.sourceType,
     sourceLabel: reader.label,
     manifest,
     flow,

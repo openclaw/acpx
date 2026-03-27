@@ -13,7 +13,7 @@ export function FlowNodeCard({ data, selected = false }: FlowNodeCardProps) {
     >
       <Handle type="target" position={Position.Top} className="flow-node-card__handle" />
       <div className="flow-node-card__eyebrow">
-        <span className="flow-node-card__kind">{data.kind}</span>
+        <span className="flow-node-card__type">{data.nodeType}</span>
         <span className={`flow-node-card__status flow-node-card__status--${data.status}`}>
           {labelForStatus(data.status)}
         </span>

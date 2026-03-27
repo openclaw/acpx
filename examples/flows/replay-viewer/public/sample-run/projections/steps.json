@@ -2,47 +2,47 @@
   {
     "attemptId": "draft#1",
     "nodeId": "draft",
-    "kind": "acp",
+    "nodeType": "acp",
     "outcome": "ok",
-    "startedAt": "2026-03-26T23:21:15.769Z",
-    "finishedAt": "2026-03-26T23:21:16.157Z",
-    "promptText": "Write a short draft answer about the topic below.\nReturn exactly one JSON object with this shape:\n{\n  \"draft\": \"short paragraph\"\n}\n\nTopic: How should we visualize a flow trace elegantly?",
-    "rawText": "unrecognized prompt: Write a short draft answer about the topic below.\nReturn exactly one JSON object with this shape:\n{\n  \"draft\": \"short paragraph\"\n}\n\nTopic: How should we visualize a flow trace elegantly?",
+    "startedAt": "2026-03-27T08:26:24.988Z",
+    "finishedAt": "2026-03-27T08:26:25.343Z",
+    "promptText": "Write a short draft answer about the topic below.\nReturn exactly one JSON object with this shape:\n{\n  \"draft\": \"short paragraph\"\n}\n\nTopic: How should a replay viewer show ACP turns?",
+    "rawText": "unrecognized prompt: Write a short draft answer about the topic below.\nReturn exactly one JSON object with this shape:\n{\n  \"draft\": \"short paragraph\"\n}\n\nTopic: How should a replay viewer show ACP turns?",
     "output": {
       "draft": "short paragraph"
     },
     "session": {
-      "key": "node /workspace/acpx/dist-test/test/mock-agent.js::/tmp/acpx-viewer-sample::main",
+      "key": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js::/tmp/acpx-sample-home-kBDIgu/work::main",
       "handle": "main",
-      "bundleId": "main-7d2ae03f",
-      "name": "example-two-turn-main-92244a3a-5a8505cf",
+      "bundleId": "main-87f32b36",
+      "name": "example-two-turn-main-e0cd2792-63806145",
       "agentName": "codex",
-      "agentCommand": "node /workspace/acpx/dist-test/test/mock-agent.js",
-      "cwd": "/tmp/acpx-viewer-sample",
-      "acpxRecordId": "fb5d3eb7-4a1c-406b-a3dd-67551aa67794",
-      "acpSessionId": "b7387168-8a36-4374-ae3d-d75301c22be4"
+      "agentCommand": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js",
+      "cwd": "/tmp/acpx-sample-home-kBDIgu/work",
+      "acpxRecordId": "294fd830-e856-431b-819e-789d0f27b642",
+      "acpSessionId": "7df78b83-b5cd-4b49-8522-86efd50bfe7f"
     },
     "agent": {
       "agentName": "codex",
-      "agentCommand": "node /workspace/acpx/dist-test/test/mock-agent.js",
-      "cwd": "/tmp/acpx-viewer-sample"
+      "agentCommand": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js",
+      "cwd": "/tmp/acpx-sample-home-kBDIgu/work"
     },
     "trace": {
-      "sessionId": "main-7d2ae03f",
+      "sessionId": "main-87f32b36",
       "promptArtifact": {
-        "path": "artifacts/sha256-ceff117cb1c4e33ca1ee6fee42dd3fbff8b1ee987f007c467f747d9895d648fb.txt",
+        "path": "artifacts/sha256-fe7c508d77690ffc0980cb8df32001b9447de4247a08bfb967e6d66934bf121c.txt",
         "mediaType": "text/plain",
-        "bytes": 186,
-        "sha256": "ceff117cb1c4e33ca1ee6fee42dd3fbff8b1ee987f007c467f747d9895d648fb"
+        "bytes": 181,
+        "sha256": "fe7c508d77690ffc0980cb8df32001b9447de4247a08bfb967e6d66934bf121c"
       },
       "rawResponseArtifact": {
-        "path": "artifacts/sha256-b047c20d8605f5c87b4e8c858f42168972d477fed3f31ae84efe0499f08a437a.txt",
+        "path": "artifacts/sha256-5f490d19abc369e72146ddc6381599e495ef91fbe0110ddd82ea067123ab9293.txt",
         "mediaType": "text/plain",
-        "bytes": 207,
-        "sha256": "b047c20d8605f5c87b4e8c858f42168972d477fed3f31ae84efe0499f08a437a"
+        "bytes": 202,
+        "sha256": "5f490d19abc369e72146ddc6381599e495ef91fbe0110ddd82ea067123ab9293"
       },
       "conversation": {
-        "sessionId": "main-7d2ae03f",
+        "sessionId": "main-87f32b36",
         "messageStart": 0,
         "messageEnd": 1,
         "eventStartSeq": 1,
@@ -56,33 +56,33 @@
   {
     "attemptId": "refine#1",
     "nodeId": "refine",
-    "kind": "acp",
+    "nodeType": "acp",
     "outcome": "ok",
-    "startedAt": "2026-03-26T23:21:16.158Z",
-    "finishedAt": "2026-03-26T23:21:16.294Z",
+    "startedAt": "2026-03-27T08:26:25.344Z",
+    "finishedAt": "2026-03-27T08:26:25.498Z",
     "promptText": "Use the earlier draft already in this session.\nTurn it into a concise checklist.\nReturn exactly one JSON object with this shape:\n{\n  \"checklist\": [\"item\", \"item\"]\n}\n\nDraft: {\"draft\":\"short paragraph\"}",
     "rawText": "unrecognized prompt: Use the earlier draft already in this session.\nTurn it into a concise checklist.\nReturn exactly one JSON object with this shape:\n{\n  \"checklist\": [\"item\", \"item\"]\n}\n\nDraft: {\"draft\":\"short paragraph\"}",
     "output": {
       "checklist": ["item", "item"]
     },
     "session": {
-      "key": "node /workspace/acpx/dist-test/test/mock-agent.js::/tmp/acpx-viewer-sample::main",
+      "key": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js::/tmp/acpx-sample-home-kBDIgu/work::main",
       "handle": "main",
-      "bundleId": "main-7d2ae03f",
-      "name": "example-two-turn-main-92244a3a-5a8505cf",
+      "bundleId": "main-87f32b36",
+      "name": "example-two-turn-main-e0cd2792-63806145",
       "agentName": "codex",
-      "agentCommand": "node /workspace/acpx/dist-test/test/mock-agent.js",
-      "cwd": "/tmp/acpx-viewer-sample",
-      "acpxRecordId": "fb5d3eb7-4a1c-406b-a3dd-67551aa67794",
-      "acpSessionId": "69f349e6-fc11-4360-9583-7eee631e4be6"
+      "agentCommand": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js",
+      "cwd": "/tmp/acpx-sample-home-kBDIgu/work",
+      "acpxRecordId": "294fd830-e856-431b-819e-789d0f27b642",
+      "acpSessionId": "6e433465-6bc7-427f-99f8-39de79a1c588"
     },
     "agent": {
       "agentName": "codex",
-      "agentCommand": "node /workspace/acpx/dist-test/test/mock-agent.js",
-      "cwd": "/tmp/acpx-viewer-sample"
+      "agentCommand": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js",
+      "cwd": "/tmp/acpx-sample-home-kBDIgu/work"
     },
     "trace": {
-      "sessionId": "main-7d2ae03f",
+      "sessionId": "main-87f32b36",
       "promptArtifact": {
         "path": "artifacts/sha256-08d939bbb21657f868fde0eb6000a539388837f1b3800aae9a8889528c3a0cf6.txt",
         "mediaType": "text/plain",
@@ -96,7 +96,7 @@
         "sha256": "68f27508c95abf8a0995937491c392690cc55fc8305a9982f9082df5746c5cad"
       },
       "conversation": {
-        "sessionId": "main-7d2ae03f",
+        "sessionId": "main-87f32b36",
         "messageStart": 2,
         "messageEnd": 3,
         "eventStartSeq": 8,
@@ -110,10 +110,10 @@
   {
     "attemptId": "finalize#1",
     "nodeId": "finalize",
-    "kind": "compute",
+    "nodeType": "compute",
     "outcome": "ok",
-    "startedAt": "2026-03-26T23:21:16.295Z",
-    "finishedAt": "2026-03-26T23:21:16.296Z",
+    "startedAt": "2026-03-27T08:26:25.500Z",
+    "finishedAt": "2026-03-27T08:26:25.501Z",
     "promptText": null,
     "rawText": null,
     "output": {

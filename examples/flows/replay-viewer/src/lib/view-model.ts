@@ -20,7 +20,7 @@ export type ViewerNodeStatus =
 
 export type ViewerNodeData = {
   nodeId: string;
-  kind: FlowStepRecord["kind"];
+  nodeType: FlowStepRecord["nodeType"];
   status: ViewerNodeStatus;
   attempts: number;
   latestAttemptId?: string;
@@ -88,7 +88,7 @@ export function buildGraph(
   }
 
   const graphNodes = orderedNodeIds.map((nodeId) => {
-    const kind = bundle.flow.nodes[nodeId]?.kind ?? "compute";
+    const nodeType = bundle.flow.nodes[nodeId]?.nodeType ?? "compute";
     const attemptsForNode = bundle.steps.filter((step) => step.nodeId === nodeId);
     const visibleAttempt = findLatestVisibleAttempt(visibleSteps, nodeId);
     const status = deriveNodeStatus(nodeId, visibleAttempt, selectedStep);
@@ -104,7 +104,7 @@ export function buildGraph(
       type: "flowNode",
       data: {
         nodeId,
-        kind,
+        nodeType,
         status,
         attempts: attemptsForNode.length,
         latestAttemptId: visibleAttempt?.attemptId,

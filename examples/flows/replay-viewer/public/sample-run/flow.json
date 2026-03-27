@@ -4,7 +4,7 @@
   "startAt": "draft",
   "nodes": {
     "draft": {
-      "kind": "acp",
+      "nodeType": "acp",
       "session": {},
       "cwd": {
         "mode": "default"
@@ -13,7 +13,7 @@
       "hasParse": true
     },
     "refine": {
-      "kind": "acp",
+      "nodeType": "acp",
       "session": {},
       "cwd": {
         "mode": "default"
@@ -22,7 +22,7 @@
       "hasParse": true
     },
     "finalize": {
-      "kind": "compute",
+      "nodeType": "compute",
       "hasRun": true
     }
   },

@@ -703,7 +703,7 @@ code {
   font-size: 0.78rem;
 }
 
-.flow-node-card__kind {
+.flow-node-card__type {
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-weight: 700;

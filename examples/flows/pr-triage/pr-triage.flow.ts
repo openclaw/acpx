@@ -13,19 +13,19 @@ const flow = {
   startAt: "load_pr",
   nodes: {
     load_pr: {
-      kind: "compute",
+      nodeType: "compute",
       run: ({ input }) => loadPullRequestInput(input),
     },
 
     prepare_workspace: {
-      kind: "action",
+      nodeType: "action",
       timeoutMs: 20 * 60_000,
       statusDetail: "Create isolated PR workspace and fetch GitHub context",
       run: async ({ outputs }) => await prepareWorkspace(loadPrOutput(outputs)),
     },
 
     extract_intent: {
-      kind: "acp",
+      nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       async prompt({ outputs }) {
@@ -35,7 +35,7 @@ const flow = {
     },
 
     judge_solution: {
-      kind: "acp",
+      nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       async prompt({ outputs }) {
@@ -45,7 +45,7 @@ const flow = {
     },
 
     check_initial_conflicts: {
-      kind: "action",
+      nodeType: "action",
       timeoutMs: 20 * 60_000,
       statusDetail: "Check conflict status against the current base before validation",
       run: async ({ outputs }) =>
@@ -55,7 +55,7 @@ const flow = {
     },
 
     judge_initial_conflicts: {
-      kind: "acp",
+      nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       timeoutMs: 20 * 60_000,
@@ -66,7 +66,7 @@ const flow = {
     },
 
     resolve_initial_conflicts: {
-      kind: "acp",
+      nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       timeoutMs: 30 * 60_000,
@@ -77,7 +77,7 @@ const flow = {
     },
 
     bug_or_feature: {
-      kind: "acp",
+      nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       async prompt({ outputs }) {
@@ -87,7 +87,7 @@ const flow = {
     },
 
     reproduce_bug_and_test_fix: {
-      kind: "action",
+      nodeType: "action",
       timeoutMs: 30 * 60_000,
       statusDetail: "Reproduce the bug and validate the fix in the isolated workspace",
       run: async ({ outputs }) =>
@@ -95,7 +95,7 @@ const flow = {
     },
 
     test_feature_directly: {
-      kind: "action",
+      nodeType: "action",
       timeoutMs: 25 * 60_000,
       statusDetail: "Run direct feature validation in the isolated workspace",
       run: async ({ outputs }) =>
@@ -103,7 +103,7 @@ const flow = {
     },
 
     judge_refactor: {
-      kind: "acp",
+      nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       async prompt({ outputs }) {
@@ -113,7 +113,7 @@ const flow = {
     },
 
     do_superficial_refactor: {
-      kind: "acp",
+      nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       timeoutMs: 25 * 60_000,
@@ -124,14 +124,14 @@ const flow = {
     },
 
     collect_review_state: {
-      kind: "action",
+      nodeType: "action",
       timeoutMs: 60 * 60_000,
       statusDetail: "Collect GitHub review state and run local Codex review",
       run: async ({ outputs }) => await collectReviewState(prepared(outputs)),
     },
 
     review_loop: {
-      kind: "acp",
+      nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       timeoutMs: 90 * 60_000,
@@ -142,14 +142,14 @@ const flow = {
     },
 
     collect_ci_state: {
-      kind: "action",
+      nodeType: "action",
       timeoutMs: 15 * 60_000,
       statusDetail: "Collect CI state and approve workflow runs when possible",
       run: async ({ outputs }) => await collectCiState(prepared(outputs)),
     },
 
     fix_ci_failures: {
-      kind: "acp",
+      nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       timeoutMs: 30 * 60_000,
@@ -160,7 +160,7 @@ const flow = {
     },
 
     check_final_conflicts: {
-      kind: "action",
+      nodeType: "action",
       timeoutMs: 20 * 60_000,
       statusDetail: "Check conflict status against the current base before final handoff",
       run: async ({ outputs }) =>
@@ -170,7 +170,7 @@ const flow = {
     },
 
     judge_final_conflicts: {
-      kind: "acp",
+      nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       timeoutMs: 20 * 60_000,
@@ -181,7 +181,7 @@ const flow = {
     },
 
     resolve_final_conflicts: {
-      kind: "acp",
+      nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       timeoutMs: 30 * 60_000,
@@ -192,7 +192,7 @@ const flow = {
     },
 
     comment_and_close_pr: {
-      kind: "acp",
+      nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       async prompt({ outputs }) {
@@ -202,7 +202,7 @@ const flow = {
     },
 
     post_close_pr: {
-      kind: "action",
+      nodeType: "action",
       timeoutMs: 15 * 60_000,
       statusDetail: "Post close comment and close the PR",
       run: async ({ outputs }) =>
@@ -210,7 +210,7 @@ const flow = {
     },
 
     comment_and_escalate_to_human: {
-      kind: "acp",
+      nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       async prompt({ outputs }) {
@@ -220,7 +220,7 @@ const flow = {
     },
 
     post_escalation_comment: {
-      kind: "action",
+      nodeType: "action",
       timeoutMs: 10 * 60_000,
       statusDetail: "Post human handoff comment",
       run: async ({ outputs }) =>
@@ -228,7 +228,7 @@ const flow = {
     },
 
     finalize: {
-      kind: "compute",
+      nodeType: "compute",
       run: ({ outputs, state }) => ({
         final:
           outputs.post_close_pr ??
@@ -495,7 +495,7 @@ async function prepareWorkspace(pr) {
 }
 
 async function reproduceBugAndTestFix(pr, validationPath) {
-  if (validationPath?.kind !== "bug") {
+  if (validationPath?.classification !== "bug") {
     throw new Error("Bug validation action requires bug validation path");
   }
 
@@ -608,7 +608,7 @@ async function reproduceBugAndTestFix(pr, validationPath) {
 }
 
 async function testFeatureDirectly(pr, validationPath) {
-  if (validationPath?.kind !== "feature") {
+  if (validationPath?.classification !== "feature") {
     throw new Error("Feature validation action requires feature validation path");
   }
 
@@ -908,7 +908,7 @@ function promptBugOrFeature(pr) {
     "If you cannot classify it confidently, route to `comment_and_escalate_to_human`.",
     "Return exactly one JSON object and nothing else:",
     "{",
-    '  "kind": "bug" | "feature" | "unclear",',
+    '  "classification": "bug" | "feature" | "unclear",',
     '  "route": "reproduce_bug_and_test_fix" | "test_feature_directly" | "comment_and_escalate_to_human",',
     '  "reason": "short explanation"',
     "}",
