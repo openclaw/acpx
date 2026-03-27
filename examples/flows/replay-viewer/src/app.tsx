@@ -12,6 +12,7 @@ import {
   buildGraph,
   humanizeIdentifier,
   listSessionViews,
+  playbackAnchorMs,
   selectAttemptView,
 } from "./lib/view-model";
 import type { LoadedRunBundle } from "./types";
@@ -74,12 +75,9 @@ export function App() {
   const currentNodeId = currentStep?.nodeId ?? graph.nodes[0]?.id ?? null;
   const playbackValue =
     playback.playbackPreview?.playheadMs ??
-    playback.playbackTimeline?.segments[
-      Math.max(
-        Math.min(playback.selectedStepIndex, playback.playbackTimeline.segments.length - 1),
-        0,
-      )
-    ]?.endMs ??
+    (playback.playbackTimeline
+      ? playbackAnchorMs(playback.playbackTimeline, playback.selectedStepIndex)
+      : 0) ??
     0;
 
   const { setFlowInstance } = useGraphCamera({

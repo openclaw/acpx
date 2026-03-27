@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { buildPlaybackTimeline, derivePlaybackPreview, playbackAnchorMs } from "../lib/view-model";
+import {
+  buildPlaybackTimeline,
+  derivePlaybackPreview,
+  playbackAnchorMs,
+} from "../lib/view-model.js";
+import type { PlaybackTimeline } from "../lib/view-model.js";
 import type { LoadedRunBundle } from "../types";
 
 type PlaybackMode = "playing" | "seeking" | null;
@@ -83,7 +88,12 @@ export function usePlaybackController(bundle: LoadedRunBundle | null) {
     if (!playbackTimeline) {
       return;
     }
-    const resumeMs = playheadMs ?? playbackAnchorMs(playbackTimeline, selectedStepIndex);
+    const resumeMs = resolvePlaybackResumeMs(
+      playbackTimeline,
+      playheadMs,
+      selectedStepIndex,
+      bundle?.steps.length ?? 0,
+    );
     setPlayheadMs(resumeMs);
     setPlaybackMode("playing");
   }
@@ -145,6 +155,23 @@ export function usePlaybackController(bundle: LoadedRunBundle | null) {
     seek,
     commitSeek,
   };
+}
+
+export function resolvePlaybackResumeMs(
+  timeline: PlaybackTimeline,
+  playheadMs: number | null,
+  selectedStepIndex: number,
+  stepCount: number,
+): number {
+  if (playheadMs != null) {
+    return playheadMs;
+  }
+  const isTerminalSelection =
+    selectedStepIndex >= Math.max(stepCount - 1, 0) && timeline.segments.length > 0;
+  if (isTerminalSelection) {
+    return 0;
+  }
+  return playbackAnchorMs(timeline, selectedStepIndex);
 }
 
 function defaultSelectedStepIndex(bundle: LoadedRunBundle | null): number {

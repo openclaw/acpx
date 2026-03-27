@@ -56,7 +56,7 @@ export function derivePlaybackPreview(
 
 export function playbackAnchorMs(timeline: PlaybackTimeline, stepIndex: number): number {
   const segment = timeline.segments[clamp(stepIndex, 0, Math.max(timeline.segments.length - 1, 0))];
-  return segment?.endMs ?? 0;
+  return segment?.startMs ?? 0;
 }
 
 function estimatePlaybackDuration(bundle: LoadedRunBundle, stepIndex: number): number {
@@ -91,7 +91,7 @@ function findNearestStepIndex(timeline: PlaybackTimeline, playheadMs: number): n
   let bestDistance = Number.POSITIVE_INFINITY;
 
   for (const segment of timeline.segments) {
-    const distance = Math.abs(segment.endMs - playheadMs);
+    const distance = Math.abs(segment.startMs - playheadMs);
     if (distance < bestDistance) {
       bestDistance = distance;
       bestIndex = segment.stepIndex;

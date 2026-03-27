@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { resolvePlaybackResumeMs } from "../examples/flows/replay-viewer/src/hooks/use-playback-controller.js";
 import {
   buildGraph,
   buildPlaybackTimeline,
@@ -401,14 +402,28 @@ test("buildPlaybackTimeline and anchors support continuous preview with discrete
   const timeline = buildPlaybackTimeline(bundle);
 
   assert.equal(timeline.segments.length, 2);
-  assert.equal(playbackAnchorMs(timeline, 0), timeline.segments[0]?.endMs);
-  assert.equal(playbackAnchorMs(timeline, 1), timeline.totalDurationMs);
+  assert.equal(playbackAnchorMs(timeline, 0), 0);
+  assert.equal(playbackAnchorMs(timeline, 1), timeline.segments[1]?.startMs);
 
   const preview = derivePlaybackPreview(timeline, timeline.segments[1]!.startMs + 120);
 
   assert.equal(preview?.activeStepIndex, 1);
-  assert.equal(preview?.nearestStepIndex, 0);
+  assert.equal(preview?.nearestStepIndex, 1);
   assert.ok((preview?.stepProgress ?? 0) > 0);
+});
+
+test("resolvePlaybackResumeMs wraps terminal selections back to the start", () => {
+  const first = baseStep("load_pr", "action", "ok");
+  const second = baseStep("finalize", "compute", "ok");
+  const bundle = makeBundle(second, { steps: [first, second] });
+  const timeline = buildPlaybackTimeline(bundle);
+
+  assert.equal(resolvePlaybackResumeMs(timeline, null, 1, bundle.steps.length), 0);
+  assert.equal(
+    resolvePlaybackResumeMs(timeline, null, 0, bundle.steps.length),
+    playbackAnchorMs(timeline, 0),
+  );
+  assert.equal(resolvePlaybackResumeMs(timeline, 123, 1, bundle.steps.length), 123);
 });
 
 test("format helpers keep replay labels stable", () => {
