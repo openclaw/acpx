@@ -7,7 +7,7 @@ They range from small primitives to one larger end-to-end example.
 - `echo.flow.ts`: one ACP step that returns a JSON reply
 - `branch.flow.ts`: ACP classification followed by a deterministic branch into either `continue` or `checkpoint`
 - `pr-triage/pr-triage.flow.ts`: a larger single-PR workflow example with a colocated written spec in `pr-triage/README.md`
-- `replay-viewer/`: a browser app that visualizes saved flow run bundles with React Flow and ACP session inspection
+- `replay-viewer/`: a browser app that visualizes saved flow run bundles with React Flow, a recent-runs picker, and ACP session inspection
 - `shell.flow.ts`: one native runtime-owned shell action that returns structured JSON
 - `workdir.flow.ts`: native workspace prep followed by an ACP step that runs inside that isolated cwd
 - `two-turn.flow.ts`: two ACP prompts in the same implicit main session
@@ -36,7 +36,7 @@ acpx flow run examples/flows/two-turn.flow.ts \
 Run the replay viewer from the repo root:
 
 ```bash
-pnpm run viewer:dev
+pnpm run viewer:preview
 ```
 
 These examples are examples only. They do not define `acpx` core product

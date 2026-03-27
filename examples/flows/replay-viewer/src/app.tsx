@@ -2,15 +2,18 @@ import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
 import { useEffect, useState } from "react";
 import { FlowNodeCard } from "./components/flow-node-card";
 import { InspectorPanel } from "./components/inspector-panel";
+import { RunBrowser } from "./components/run-browser";
 import { StepTimeline } from "./components/step-timeline";
 import {
+  createRecentRunBundleReader,
   createDirectoryBundleReader,
   createSampleBundleReader,
   isDirectoryPickerSupported,
+  listRecentRuns,
 } from "./lib/bundle-reader";
 import { loadRunBundle } from "./lib/load-bundle";
 import { buildGraph, formatDate, formatDuration, selectAttemptView } from "./lib/view-model";
-import type { LoadedRunBundle } from "./types";
+import type { LoadedRunBundle, RunBundleSummary } from "./types";
 
 const nodeTypes = {
   flowNode: FlowNodeCard,
@@ -18,14 +21,18 @@ const nodeTypes = {
 
 export function App() {
   const [bundle, setBundle] = useState<LoadedRunBundle | null>(null);
+  const [recentRuns, setRecentRuns] = useState<RunBundleSummary[]>([]);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [selectedStepIndex, setSelectedStepIndex] = useState(0);
   const [activeTab, setActiveTab] = useState<"attempt" | "session" | "events">("attempt");
-  const [loadingState, setLoadingState] = useState<"sample" | "local" | null>("sample");
+  const [loadingState, setLoadingState] = useState<
+    "bootstrap" | "runs" | "sample" | "local" | "run" | null
+  >("bootstrap");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
 
   useEffect(() => {
-    void loadSample();
+    void bootstrap();
   }, []);
 
   useEffect(() => {
@@ -51,6 +58,32 @@ export function App() {
   const graph = bundle ? buildGraph(bundle, selectedStepIndex) : { nodes: [], edges: [] };
   const selectedAttempt = bundle ? selectAttemptView(bundle, selectedStepIndex) : null;
 
+  async function bootstrap(): Promise<void> {
+    setLoadingState("bootstrap");
+    setErrorMessage(null);
+    setPlaying(false);
+
+    const runs = await refreshRuns();
+    if (runs && runs.length > 0) {
+      await loadRecentRun(runs[0]);
+      return;
+    }
+    await loadSample();
+  }
+
+  async function refreshRuns(): Promise<RunBundleSummary[] | null> {
+    setLoadingState("runs");
+    try {
+      const runs = await listRecentRuns();
+      if (runs) {
+        setRecentRuns(runs);
+      }
+      return runs;
+    } finally {
+      setLoadingState(null);
+    }
+  }
+
   async function loadSample(): Promise<void> {
     setLoadingState("sample");
     setErrorMessage(null);
@@ -59,6 +92,7 @@ export function App() {
     try {
       const loaded = await loadRunBundle(createSampleBundleReader());
       setBundle(loaded);
+      setActiveRunId(null);
       setSelectedStepIndex(defaultSelectedStepIndex(loaded));
       setActiveTab("attempt");
     } catch (error) {
@@ -77,12 +111,31 @@ export function App() {
       const reader = await createDirectoryBundleReader();
       const loaded = await loadRunBundle(reader);
       setBundle(loaded);
+      setActiveRunId(null);
       setSelectedStepIndex(defaultSelectedStepIndex(loaded));
       setActiveTab("attempt");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
       }
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoadingState(null);
+    }
+  }
+
+  async function loadRecentRun(run: RunBundleSummary): Promise<void> {
+    setLoadingState("run");
+    setErrorMessage(null);
+    setPlaying(false);
+
+    try {
+      const loaded = await loadRunBundle(createRecentRunBundleReader(run));
+      setBundle(loaded);
+      setActiveRunId(run.runId);
+      setSelectedStepIndex(defaultSelectedStepIndex(loaded));
+      setActiveTab("attempt");
+    } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setLoadingState(null);
@@ -116,20 +169,26 @@ export function App() {
             slice that powered each ACP node.
           </p>
         </div>
-        <div className="hero__actions">
-          <button type="button" className="primary-button" onClick={() => void loadSample()}>
-            {loadingState === "sample" ? "Loading sample…" : "Load bundled sample"}
-          </button>
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={() => void loadLocalBundle()}
-            disabled={!isDirectoryPickerSupported() || loadingState === "local"}
-          >
-            {loadingState === "local" ? "Opening bundle…" : "Open local run bundle"}
-          </button>
-        </div>
       </header>
+
+      <RunBrowser
+        runs={recentRuns}
+        activeRunId={activeRunId ?? undefined}
+        loading={loadingState === "runs" || loadingState === "bootstrap" || loadingState === "run"}
+        directoryPickerSupported={isDirectoryPickerSupported()}
+        onRefresh={() => {
+          void refreshRuns();
+        }}
+        onLoadSample={() => {
+          void loadSample();
+        }}
+        onLoadRun={(run) => {
+          void loadRecentRun(run);
+        }}
+        onOpenLocal={() => {
+          void loadLocalBundle();
+        }}
+      />
 
       {bundle ? (
         <section className="run-summary">

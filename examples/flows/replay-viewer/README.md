@@ -19,23 +19,24 @@ The viewer uses:
 From the repo root:
 
 ```bash
-pnpm run viewer:dev
+pnpm run viewer:preview
 ```
 
-Then open:
+Then open [http://127.0.0.1:4173](http://127.0.0.1:4173).
 
-```text
-http://127.0.0.1:4173
-```
+The local viewer server always uses that fixed port. If another replay viewer is
+already running there, the command reuses it instead of bouncing to a random
+new port.
 
-The app ships with a bundled ACP-backed sample run so it is immediately usable.
-
-To inspect a real previous run, click **Open local run bundle** and pick a run
-directory from:
+The app ships with a bundled ACP-backed sample run so it is immediately usable,
+but the main path is the built-in **Recent runs** list sourced from:
 
 ```text
 ~/.acpx/flows/runs/<run-id>/
 ```
+
+You can still use **Open local run bundle** as a fallback to inspect an arbitrary
+bundle outside that default directory.
 
 ## What it shows
 

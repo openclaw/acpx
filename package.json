@@ -59,9 +59,9 @@
     "typecheck": "tsgo --noEmit",
     "typecheck:tsc": "tsc --noEmit",
     "viewer:build": "vite build --config examples/flows/replay-viewer/vite.config.ts",
-    "viewer:dev": "vite --config examples/flows/replay-viewer/vite.config.ts",
-    "viewer:preview": "vite preview --config examples/flows/replay-viewer/vite.config.ts",
-    "viewer:typecheck": "tsc -p examples/flows/replay-viewer/tsconfig.json --noEmit"
+    "viewer:dev": "tsx examples/flows/replay-viewer/server.ts",
+    "viewer:preview": "tsx examples/flows/replay-viewer/server.ts",
+    "viewer:typecheck": "tsc -p examples/flows/replay-viewer/tsconfig.json --noEmit && tsc -p examples/flows/replay-viewer/tsconfig.server.json --noEmit"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",

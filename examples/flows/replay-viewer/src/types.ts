@@ -174,6 +174,17 @@ export type FlowRunManifest = {
   }>;
 };
 
+export type RunBundleSummary = {
+  runId: string;
+  flowName: string;
+  status: FlowRunState["status"];
+  startedAt: string;
+  finishedAt?: string;
+  updatedAt?: string;
+  currentNode?: string;
+  path: string;
+};
+
 export type FlowTraceEvent = {
   seq: number;
   at: string;
@@ -212,7 +223,7 @@ export type SessionRecord = {
 };
 
 export type LoadedRunBundle = {
-  sourceKind: "sample" | "local";
+  sourceKind: "sample" | "local" | "recent";
   sourceLabel: string;
   manifest: FlowRunManifest;
   flow: FlowDefinitionSnapshot;
