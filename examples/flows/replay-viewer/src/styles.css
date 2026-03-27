@@ -952,7 +952,7 @@ code {
 }
 
 .conversation__message--user {
-  justify-items: start;
+  justify-items: stretch;
 }
 
 .conversation__message--highlighted {
@@ -982,7 +982,8 @@ code {
 }
 
 .conversation__message--user .conversation__text {
-  max-width: 88%;
+  width: 100%;
+  max-width: none;
   padding: 10px 12px;
   border-radius: 14px;
   background: rgba(62, 166, 198, 0.14);
