@@ -95,17 +95,14 @@ function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
 
   if (!sessionRecord) {
     return (
-      <div className="inspector__fill-pane">
-        <Section title="ACP session" fill>
-          <div className="empty-card empty-card--fill">This step did not use an ACP session.</div>
-        </Section>
+      <div className="session-pane session-pane--empty">
+        <div className="session-empty">This step did not use an ACP session.</div>
       </div>
     );
   }
 
   return (
-    <div className="inspector__section-stack">
-      <Section title="ACP session">
+    <div className="session-pane">
         {sessionFromFallback && sessionSourceStep ? (
           <div className="session-note">
             Showing the latest visible ACP conversation from{" "}
@@ -120,13 +117,6 @@ function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
               key={`${message.index}-${message.role}`}
               className={`conversation__message conversation__message--${message.role}${message.highlighted ? " conversation__message--highlighted" : ""}`}
             >
-              <div className="conversation__meta">
-                <span className={`conversation__role conversation__role--${message.role}`}>
-                  {message.title}
-                </span>
-                <span className="conversation__meta-index">#{message.index}</span>
-              </div>
-
               {message.textBlocks.length > 0 ? (
                 <div className="conversation__text">
                   {message.textBlocks.map((text, index) => (
@@ -200,7 +190,7 @@ function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
             </article>
           ))}
         </div>
-      </Section>
+      
 
       <DisclosureSection title="Session details">
         <dl className="definition-grid">
