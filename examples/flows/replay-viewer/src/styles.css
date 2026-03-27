@@ -107,11 +107,6 @@ code {
   gap: 12px;
 }
 
-.topbar__sidebar-toggle {
-  flex: 0 0 auto;
-  padding: 0.62rem 0.84rem;
-}
-
 .topbar__copy {
   min-width: 0;
 }
@@ -296,8 +291,14 @@ code {
 }
 
 .run-browser__toggle {
-  padding: 0.55rem 0.72rem;
-  min-width: 42px;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
 }
 
 .run-browser__list {
@@ -309,13 +310,16 @@ code {
 }
 
 .run-list-item {
-  display: grid;
-  gap: 4px;
-  padding: 10px 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px;
   text-align: left;
   border-radius: 12px;
   border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.03);
+  background: transparent;
   cursor: pointer;
   transition:
     border-color 140ms ease,
@@ -324,28 +328,32 @@ code {
 }
 
 .run-list-item:hover {
-  transform: translateY(-1px);
-  border-color: rgba(62, 166, 198, 0.28);
-  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(62, 166, 198, 0.22);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .run-list-item--active {
   border-color: rgba(62, 166, 198, 0.42);
-  background: rgba(62, 166, 198, 0.12);
+  background: rgba(255, 255, 255, 0.08);
 }
 
-.run-list-item__topline,
-.run-list-item__meta {
+.run-list-item__line {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
+  min-width: 0;
+  width: 100%;
 }
 
-.run-list-item__flow {
+.run-list-item__label {
   min-width: 0;
-  font-weight: 800;
-  font-size: 0.89rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  font-size: 0.92rem;
+  line-height: 1.2;
   font-family: "Manrope", "Inter", sans-serif;
 }
 
@@ -368,27 +376,6 @@ code {
 .run-list-item__status-dot--failed,
 .run-list-item__status-dot--timed_out {
   background: var(--danger);
-}
-
-.run-list-item__runid {
-  font-family: "IBM Plex Mono", "SFMono-Regular", "Cascadia Code", monospace;
-  font-size: 0.72rem;
-  color: var(--ink-soft);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.run-list-item__meta {
-  font-size: 0.73rem;
-  color: var(--ink-faint);
-  justify-content: flex-start;
-  gap: 10px;
-}
-
-.run-list-item__token {
-  font-family: "IBM Plex Mono", "SFMono-Regular", "Cascadia Code", monospace;
-  letter-spacing: 0.04em;
 }
 
 .run-browser__empty {
@@ -414,8 +401,14 @@ code {
 }
 
 .run-browser--collapsed .run-list-item {
-  place-items: center;
+  justify-content: center;
+  align-items: center;
+  min-height: 0;
   padding: 10px 6px;
+}
+
+.run-browser--collapsed .run-browser__header {
+  justify-content: center;
 }
 
 .stage {
@@ -1113,8 +1106,7 @@ code {
 
   .timeline__current-main,
   .timeline__current-meta,
-  .run-list-item__topline,
-  .run-list-item__meta {
+  .run-list-item__line {
     flex-direction: column;
     align-items: flex-start;
   }

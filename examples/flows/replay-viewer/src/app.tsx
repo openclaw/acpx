@@ -167,6 +167,9 @@ export function App() {
         collapsed={runsCollapsed}
         loading={loadingState === "runs" || loadingState === "bootstrap" || loadingState === "run"}
         directoryPickerSupported={isDirectoryPickerSupported()}
+        onToggleCollapsed={() => {
+          setRunsCollapsed((current) => !current);
+        }}
         onRefresh={() => {
           void refreshRuns();
         }}
@@ -184,16 +187,6 @@ export function App() {
       <main className="app-main">
         <header className="topbar">
           <div className="topbar__left">
-            <button
-              type="button"
-              className="ghost-button topbar__sidebar-toggle"
-              onClick={() => {
-                setRunsCollapsed((current) => !current);
-              }}
-              aria-label={runsCollapsed ? "Show runs sidebar" : "Hide runs sidebar"}
-            >
-              {runsCollapsed ? "Runs" : "Hide"}
-            </button>
             <div className="topbar__copy">
               <div className="hero__eyebrow">acpx flow replay</div>
               <h1>Trace Viewer</h1>

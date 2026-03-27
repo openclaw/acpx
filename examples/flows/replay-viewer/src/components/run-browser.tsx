@@ -1,4 +1,3 @@
-import { formatDate } from "../lib/view-model";
 import type { RunBundleSummary } from "../types";
 
 type RunBrowserProps = {
@@ -7,6 +6,7 @@ type RunBrowserProps = {
   collapsed: boolean;
   loading: boolean;
   directoryPickerSupported: boolean;
+  onToggleCollapsed: () => void;
   onRefresh: () => void;
   onLoadSample: () => void;
   onLoadRun: (run: RunBundleSummary) => void;
@@ -19,6 +19,7 @@ export function RunBrowser({
   collapsed,
   loading,
   directoryPickerSupported,
+  onToggleCollapsed,
   onRefresh,
   onLoadSample,
   onLoadRun,
@@ -31,6 +32,14 @@ export function RunBrowser({
           {!collapsed ? <div className="hero__eyebrow">Recent runs</div> : null}
           {!collapsed ? <h2>Flow runs</h2> : null}
         </div>
+        <button
+          type="button"
+          className="ghost-button run-browser__toggle"
+          onClick={onToggleCollapsed}
+          aria-label={collapsed ? "Expand runs sidebar" : "Collapse runs sidebar"}
+        >
+          {collapsed ? ">" : "<"}
+        </button>
       </div>
 
       {runs.length > 0 ? (
@@ -56,16 +65,12 @@ export function RunBrowser({
                   </>
                 ) : (
                   <>
-                    <div className="run-list-item__topline">
-                      <span className="run-list-item__flow">{run.flowName}</span>
+                    <div className="run-list-item__line">
+                      <span className="run-list-item__label">{compactRunLabel(run)}</span>
                       <span
                         className={`run-list-item__status-dot run-list-item__status-dot--${run.status}`}
                         aria-hidden="true"
                       />
-                    </div>
-                    <div className="run-list-item__meta">
-                      <span>{formatDate(run.startedAt)}</span>
-                      <span className="run-list-item__token">{shortRunToken(run.runId)}</span>
                     </div>
                   </>
                 )}
@@ -113,4 +118,8 @@ function abbreviateRun(flowName: string): string {
 function shortRunToken(runId: string): string {
   const parts = runId.split("-");
   return parts.at(-1) ?? runId;
+}
+
+function compactRunLabel(run: RunBundleSummary): string {
+  return `${run.flowName} · ${shortRunToken(run.runId)}`;
 }
