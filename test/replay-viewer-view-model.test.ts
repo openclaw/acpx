@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildGraph,
+  deriveRunOutcomeView,
   formatDuration,
   formatJson,
   selectAttemptView,
@@ -184,6 +185,36 @@ test("format helpers keep replay labels stable", () => {
   assert.equal(formatDuration(500), "500 ms");
   assert.equal(formatDuration(1_500), "1.5 s");
   assert.equal(formatJson({ ok: true }), '{\n  "ok": true\n}');
+});
+
+test("deriveRunOutcomeView separates replay position from a failed run outcome", () => {
+  const review = baseStep("review_loop", "acp", "failed");
+  const bundle = makeBundle(review, {});
+  bundle.run.status = "failed";
+  bundle.run.currentNode = "review_loop";
+  bundle.run.currentAttemptId = "review_loop#1";
+  bundle.run.error = "Timed out while waiting for review_loop JSON output.";
+
+  const outcome = deriveRunOutcomeView(bundle);
+
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.accent, "failed");
+  assert.equal(outcome.isTerminal, true);
+  assert.equal(outcome.nodeId, "review_loop");
+  assert.match(outcome.headline, /Stopped at review_loop/);
+  assert.match(outcome.detail, /Timed out while waiting/);
+});
+
+test("deriveRunOutcomeView reports completed runs independently of replay position", () => {
+  const finalize = baseStep("finalize", "compute", "ok");
+  const bundle = makeBundle(finalize, {});
+
+  const outcome = deriveRunOutcomeView(bundle);
+
+  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.accent, "ok");
+  assert.equal(outcome.isTerminal, true);
+  assert.match(outcome.headline, /Run completed/);
 });
 
 function makeBundle(

@@ -1,10 +1,11 @@
-import { formatDate, formatDuration } from "../lib/view-model";
+import { formatDate, formatDuration, type RunOutcomeView } from "../lib/view-model";
 import type { FlowStepRecord } from "../types";
 
 type StepTimelineProps = {
   steps: FlowStepRecord[];
   selectedIndex: number;
   playing: boolean;
+  runOutcome: RunOutcomeView;
   runStartedAt: string;
   runDurationLabel: string;
   onSelect(index: number): void;
@@ -18,6 +19,7 @@ export function StepTimeline({
   steps,
   selectedIndex,
   playing,
+  runOutcome,
   runStartedAt,
   runDurationLabel,
   onSelect,
@@ -35,7 +37,6 @@ export function StepTimeline({
   }
 
   const currentStep = steps[selectedIndex] ?? steps[0];
-  const progressPercent = ((selectedIndex + 1) / steps.length) * 100;
   const currentDuration =
     currentStep != null
       ? formatDuration(Date.parse(currentStep.finishedAt) - Date.parse(currentStep.startedAt))
@@ -43,9 +44,25 @@ export function StepTimeline({
 
   return (
     <section className="timeline">
+      <div className={`timeline__outcome timeline__outcome--${runOutcome.accent}`}>
+        <div className="timeline__outcome-copy">
+          <div className="timeline__label">Run outcome</div>
+          <div className="timeline__outcome-headline">{runOutcome.headline}</div>
+          <div className="timeline__outcome-detail">{runOutcome.detail}</div>
+        </div>
+        <div className="timeline__outcome-meta">
+          <span className={`topbar__pill topbar__pill--${runOutcome.status}`}>
+            {runOutcome.status}
+          </span>
+          {runOutcome.nodeId ? <span className="topbar__pill">{runOutcome.nodeId}</span> : null}
+          {runOutcome.attemptId ? (
+            <span className="topbar__pill">{runOutcome.attemptId}</span>
+          ) : null}
+        </div>
+      </div>
       <div className="timeline__toolbar">
         <div className="timeline__hero">
-          <div className="timeline__label">Replay progress</div>
+          <div className="timeline__label">Replay position</div>
           <div className="timeline__headline">{currentStep?.nodeId ?? "n/a"}</div>
           <div className="timeline__subheadline">
             Step {selectedIndex + 1} of {steps.length} • {currentStep?.nodeType ?? "n/a"} •{" "}
@@ -96,12 +113,11 @@ export function StepTimeline({
       </div>
       <div className="timeline__meter">
         <div className="timeline__meter-labels">
-          <span>{steps[0]?.nodeId ?? "start"}</span>
-          <span>{progressPercent.toFixed(0)}%</span>
+          <span>
+            Attempt {selectedIndex + 1} of {steps.length}
+          </span>
+          <span>{playing ? "playing" : "paused"}</span>
           <span>{steps.at(-1)?.nodeId ?? "latest"}</span>
-        </div>
-        <div className="timeline__progress" aria-hidden="true">
-          <div className="timeline__progress-bar" style={{ width: `${progressPercent}%` }} />
         </div>
         <input
           className="timeline__scrubber"

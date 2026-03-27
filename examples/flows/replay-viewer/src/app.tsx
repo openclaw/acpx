@@ -12,7 +12,12 @@ import {
   listRecentRuns,
 } from "./lib/bundle-reader";
 import { loadRunBundle } from "./lib/load-bundle";
-import { buildGraph, formatDuration, selectAttemptView } from "./lib/view-model";
+import {
+  buildGraph,
+  deriveRunOutcomeView,
+  formatDuration,
+  selectAttemptView,
+} from "./lib/view-model";
 import type { LoadedRunBundle, RunBundleSummary } from "./types";
 
 const nodeTypes = {
@@ -211,73 +216,80 @@ export function App() {
         <section className="viewer-layout">
           <section className="stage">
             {bundle ? (
-              <>
-                <section className="player-card">
-                  <StepTimeline
-                    steps={bundle.steps}
-                    selectedIndex={selectedStepIndex}
-                    playing={playing}
-                    onSelect={(index) => {
-                      setPlaying(false);
-                      setSelectedStepIndex(index);
-                    }}
-                    onPlay={() => {
-                      if (selectedStepIndex >= bundle.steps.length - 1) {
-                        setSelectedStepIndex(0);
-                      }
-                      setPlaying(true);
-                    }}
-                    onPause={() => setPlaying(false)}
-                    onReset={() => {
-                      setPlaying(false);
-                      setSelectedStepIndex(0);
-                    }}
-                    onJumpToEnd={() => {
-                      setPlaying(false);
-                      setSelectedStepIndex(Math.max(bundle.steps.length - 1, 0));
-                    }}
-                    runStartedAt={bundle.run.startedAt}
-                    runDurationLabel={formatDuration(
-                      (bundle.run.finishedAt ? Date.parse(bundle.run.finishedAt) : Date.now()) -
-                        Date.parse(bundle.run.startedAt),
-                    )}
-                  />
-                </section>
+              (() => {
+                const runOutcome = deriveRunOutcomeView(bundle);
 
-                <section className="canvas-card">
-                  <div className="canvas-card__header">
-                    <div>
-                      <div className="canvas-card__eyebrow">Graph replay</div>
-                      <h2>{bundle.flow.name}</h2>
-                    </div>
-                    <div className="legend">
-                      <span className="legend__item legend__item--completed">completed</span>
-                      <span className="legend__item legend__item--active">selected</span>
-                      <span className="legend__item legend__item--queued">queued</span>
-                      <span className="legend__item legend__item--failed">problem</span>
-                    </div>
-                  </div>
-                  <div className="canvas-card__flow" style={{ minHeight: "360px" }}>
-                    <ReactFlow
-                      key={bundle.run.runId}
-                      nodes={graph.nodes}
-                      edges={graph.edges}
-                      nodeTypes={nodeTypes}
-                      fitView
-                      fitViewOptions={{ padding: 0.34, maxZoom: 1.02 }}
-                      nodesDraggable={false}
-                      nodesConnectable={false}
-                      onNodeClick={(_, node: Node) => selectNode(node.id)}
-                      minZoom={0.28}
-                      maxZoom={1.35}
-                      proOptions={{ hideAttribution: true }}
-                    >
-                      <Controls showInteractive={false} />
-                      <Background color="rgba(148, 163, 184, 0.12)" gap={36} />
-                    </ReactFlow>
-                  </div>
-                </section>
-              </>
+                return (
+                  <>
+                    <section className="player-card">
+                      <StepTimeline
+                        steps={bundle.steps}
+                        selectedIndex={selectedStepIndex}
+                        playing={playing}
+                        runOutcome={runOutcome}
+                        onSelect={(index) => {
+                          setPlaying(false);
+                          setSelectedStepIndex(index);
+                        }}
+                        onPlay={() => {
+                          if (selectedStepIndex >= bundle.steps.length - 1) {
+                            setSelectedStepIndex(0);
+                          }
+                          setPlaying(true);
+                        }}
+                        onPause={() => setPlaying(false)}
+                        onReset={() => {
+                          setPlaying(false);
+                          setSelectedStepIndex(0);
+                        }}
+                        onJumpToEnd={() => {
+                          setPlaying(false);
+                          setSelectedStepIndex(Math.max(bundle.steps.length - 1, 0));
+                        }}
+                        runStartedAt={bundle.run.startedAt}
+                        runDurationLabel={formatDuration(
+                          (bundle.run.finishedAt ? Date.parse(bundle.run.finishedAt) : Date.now()) -
+                            Date.parse(bundle.run.startedAt),
+                        )}
+                      />
+                    </section>
+
+                    <section className="canvas-card">
+                      <div className="canvas-card__header">
+                        <div>
+                          <div className="canvas-card__eyebrow">Graph replay</div>
+                          <h2>{bundle.flow.name}</h2>
+                        </div>
+                        <div className="legend">
+                          <span className="legend__item legend__item--completed">completed</span>
+                          <span className="legend__item legend__item--active">selected</span>
+                          <span className="legend__item legend__item--queued">queued</span>
+                          <span className="legend__item legend__item--failed">problem</span>
+                        </div>
+                      </div>
+                      <div className="canvas-card__flow" style={{ minHeight: "360px" }}>
+                        <ReactFlow
+                          key={bundle.run.runId}
+                          nodes={graph.nodes}
+                          edges={graph.edges}
+                          nodeTypes={nodeTypes}
+                          fitView
+                          fitViewOptions={{ padding: 0.34, maxZoom: 1.02 }}
+                          nodesDraggable={false}
+                          nodesConnectable={false}
+                          onNodeClick={(_, node: Node) => selectNode(node.id)}
+                          minZoom={0.28}
+                          maxZoom={1.35}
+                          proOptions={{ hideAttribution: true }}
+                        >
+                          <Controls showInteractive={false} />
+                          <Background color="rgba(148, 163, 184, 0.12)" gap={36} />
+                        </ReactFlow>
+                      </div>
+                    </section>
+                  </>
+                );
+              })()
             ) : (
               <div className="empty-state">
                 <h2>Load a run bundle</h2>

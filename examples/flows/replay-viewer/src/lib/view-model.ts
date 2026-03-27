@@ -4,6 +4,7 @@ import type {
   FlowDefinitionSnapshot,
   FlowEdge,
   FlowNodeOutcome,
+  FlowRunState,
   FlowStepRecord,
   FlowTraceEvent,
   LoadedRunBundle,
@@ -61,6 +62,16 @@ export type SelectedAttemptView = {
   }>;
   rawEventSlice: FlowBundledSessionEvent[];
   traceEvents: FlowTraceEvent[];
+};
+
+export type RunOutcomeView = {
+  status: FlowRunState["status"];
+  headline: string;
+  detail: string;
+  accent: "ok" | "active" | "failed" | "timed_out";
+  nodeId: string | null;
+  attemptId: string | null;
+  isTerminal: boolean;
 };
 
 export function buildGraph(
@@ -217,6 +228,88 @@ export function selectAttemptView(
     rawEventSlice,
     traceEvents,
   };
+}
+
+export function deriveRunOutcomeView(bundle: LoadedRunBundle): RunOutcomeView {
+  const lastStep = bundle.steps.at(-1) ?? null;
+  const activeNodeId =
+    bundle.run.currentNode ?? bundle.live?.currentNode ?? lastStep?.nodeId ?? null;
+  const activeAttemptId =
+    bundle.run.currentAttemptId ?? bundle.live?.currentAttemptId ?? lastStep?.attemptId ?? null;
+  const errorText =
+    typeof bundle.run.error === "string" && bundle.run.error.trim().length > 0
+      ? bundle.run.error.trim()
+      : null;
+  const waitingOn =
+    typeof bundle.run.waitingOn === "string" && bundle.run.waitingOn.trim().length > 0
+      ? bundle.run.waitingOn.trim()
+      : null;
+
+  switch (bundle.run.status) {
+    case "completed":
+      return {
+        status: bundle.run.status,
+        headline: "Run completed",
+        detail: activeNodeId
+          ? `The final recorded step completed at ${activeNodeId}.`
+          : "The flow reached a completed terminal state.",
+        accent: "ok",
+        nodeId: activeNodeId,
+        attemptId: activeAttemptId,
+        isTerminal: true,
+      };
+    case "running":
+      return {
+        status: bundle.run.status,
+        headline: activeNodeId ? `Running at ${activeNodeId}` : "Run is still active",
+        detail:
+          bundle.run.statusDetail?.trim() ||
+          "The run is still in progress. Replay position shows recorded attempts only.",
+        accent: "active",
+        nodeId: activeNodeId,
+        attemptId: activeAttemptId,
+        isTerminal: false,
+      };
+    case "waiting":
+      return {
+        status: bundle.run.status,
+        headline: waitingOn
+          ? `Waiting at ${waitingOn}`
+          : activeNodeId
+            ? `Waiting at ${activeNodeId}`
+            : "Run is waiting",
+        detail:
+          bundle.run.statusDetail?.trim() ||
+          "The run paused at a checkpoint or external wait state.",
+        accent: "active",
+        nodeId: activeNodeId,
+        attemptId: activeAttemptId,
+        isTerminal: false,
+      };
+    case "timed_out":
+      return {
+        status: bundle.run.status,
+        headline: activeNodeId ? `Timed out at ${activeNodeId}` : "Run timed out",
+        detail: errorText || "The run stopped because a node exceeded its timeout budget.",
+        accent: "timed_out",
+        nodeId: activeNodeId,
+        attemptId: activeAttemptId,
+        isTerminal: true,
+      };
+    case "failed":
+    default:
+      return {
+        status: bundle.run.status,
+        headline: activeNodeId ? `Stopped at ${activeNodeId}` : "Run failed",
+        detail:
+          errorText ||
+          "The run exited early because a node failed before reaching a completed terminal state.",
+        accent: "failed",
+        nodeId: activeNodeId,
+        attemptId: activeAttemptId,
+        isTerminal: true,
+      };
+  }
 }
 
 function resolveSessionSourceStep(
