@@ -194,57 +194,52 @@ export function App() {
                 const runOutcome = deriveRunOutcomeView(bundle);
 
                 return (
-                  <>
-                    <section className="player-card">
-                      <StepTimeline
-                        steps={bundle.steps}
-                        selectedIndex={selectedStepIndex}
-                        playing={playing}
-                        runOutcome={runOutcome}
-                        onSelect={(index) => {
-                          setPlaying(false);
-                          setSelectedStepIndex(index);
-                        }}
-                        onPlay={() => {
-                          if (selectedStepIndex >= bundle.steps.length - 1) {
-                            setSelectedStepIndex(0);
-                          }
-                          setPlaying(true);
-                        }}
-                        onPause={() => setPlaying(false)}
-                        onReset={() => {
-                          setPlaying(false);
+                  <section className="canvas-card">
+                    <div className="canvas-card__flow" style={{ minHeight: "360px" }}>
+                      <ReactFlow
+                        key={bundle.run.runId}
+                        nodes={graph.nodes}
+                        edges={graph.edges}
+                        nodeTypes={nodeTypes}
+                        fitView
+                        fitViewOptions={{ padding: 0.34, maxZoom: 1.02 }}
+                        nodesDraggable={false}
+                        nodesConnectable={false}
+                        onNodeClick={(_, node: Node) => selectNode(node.id)}
+                        minZoom={0.28}
+                        maxZoom={1.35}
+                        proOptions={{ hideAttribution: true }}
+                      >
+                        <Controls showInteractive={false} />
+                        <Background color="rgba(148, 163, 184, 0.08)" gap={40} />
+                      </ReactFlow>
+                    </div>
+                    <StepTimeline
+                      steps={bundle.steps}
+                      selectedIndex={selectedStepIndex}
+                      playing={playing}
+                      runOutcome={runOutcome}
+                      onSelect={(index) => {
+                        setPlaying(false);
+                        setSelectedStepIndex(index);
+                      }}
+                      onPlay={() => {
+                        if (selectedStepIndex >= bundle.steps.length - 1) {
                           setSelectedStepIndex(0);
-                        }}
-                        onJumpToEnd={() => {
-                          setPlaying(false);
-                          setSelectedStepIndex(Math.max(bundle.steps.length - 1, 0));
-                        }}
-                      />
-                    </section>
-
-                    <section className="canvas-card">
-                      <div className="canvas-card__flow" style={{ minHeight: "360px" }}>
-                        <ReactFlow
-                          key={bundle.run.runId}
-                          nodes={graph.nodes}
-                          edges={graph.edges}
-                          nodeTypes={nodeTypes}
-                          fitView
-                          fitViewOptions={{ padding: 0.34, maxZoom: 1.02 }}
-                          nodesDraggable={false}
-                          nodesConnectable={false}
-                          onNodeClick={(_, node: Node) => selectNode(node.id)}
-                          minZoom={0.28}
-                          maxZoom={1.35}
-                          proOptions={{ hideAttribution: true }}
-                        >
-                          <Controls showInteractive={false} />
-                          <Background color="rgba(148, 163, 184, 0.08)" gap={40} />
-                        </ReactFlow>
-                      </div>
-                    </section>
-                  </>
+                        }
+                        setPlaying(true);
+                      }}
+                      onPause={() => setPlaying(false)}
+                      onReset={() => {
+                        setPlaying(false);
+                        setSelectedStepIndex(0);
+                      }}
+                      onJumpToEnd={() => {
+                        setPlaying(false);
+                        setSelectedStepIndex(Math.max(bundle.steps.length - 1, 0));
+                      }}
+                    />
+                  </section>
                 );
               })()
             ) : (

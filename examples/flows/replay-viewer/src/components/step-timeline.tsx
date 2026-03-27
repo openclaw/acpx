@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { formatDuration, humanizeIdentifier, type RunOutcomeView } from "../lib/view-model";
 import type { FlowStepRecord } from "../types";
 
@@ -38,61 +39,17 @@ export function StepTimeline({
       ? formatDuration(Date.parse(currentStep.finishedAt) - Date.parse(currentStep.startedAt))
       : "n/a";
   const currentNodeLabel = currentStep ? humanizeIdentifier(currentStep.nodeId) : "n/a";
+  const currentMeta = `${selectedIndex + 1} / ${steps.length} · ${currentStep?.nodeType ?? "n/a"} · ${currentDuration}`;
 
   return (
     <section className="timeline">
-      <div className="timeline__toolbar">
-        <div className="timeline__summary">
-          <div className="timeline__label">Replay position</div>
-          <div className="timeline__headline">{currentNodeLabel}</div>
-          <div className="timeline__subheadline">
-            Attempt {selectedIndex + 1} of {steps.length} · {currentStep?.nodeType ?? "n/a"} ·{" "}
-            {currentStep?.outcome ?? "n/a"} · {currentDuration}
-          </div>
-        </div>
-        <div className="timeline__actions">
-          <button type="button" className="ghost-button" onClick={onReset}>
-            Start
-          </button>
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={() => onSelect(Math.max(selectedIndex - 1, 0))}
-            disabled={selectedIndex === 0}
-          >
-            Back
-          </button>
-          <button type="button" className="primary-button" onClick={playing ? onPause : onPlay}>
-            {playing ? "Pause" : "Play"}
-          </button>
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={() => onSelect(Math.min(selectedIndex + 1, steps.length - 1))}
-            disabled={selectedIndex >= steps.length - 1}
-          >
-            Next
-          </button>
-          <button type="button" className="ghost-button" onClick={onJumpToEnd}>
-            Latest
-          </button>
-        </div>
-      </div>
       <div className={`timeline__outcome-strip timeline__outcome-strip--${runOutcome.accent}`}>
         <span className={`outcome-pill outcome-pill--${runOutcome.status}`}>
           {runOutcome.shortLabel}
         </span>
         <span>{runOutcome.headline}</span>
-        {runOutcome.nodeId ? (
-          <span className="timeline__outcome-node">{humanizeIdentifier(runOutcome.nodeId)}</span>
-        ) : null}
       </div>
       <div className="timeline__meter">
-        <div className="timeline__meter-labels">
-          <span>{currentStep?.attemptId ?? `step ${selectedIndex + 1}`}</span>
-          <span>{playing ? "playing" : "paused"}</span>
-          <span>{steps.length} recorded</span>
-        </div>
         <input
           className="timeline__scrubber"
           type="range"
@@ -104,12 +61,119 @@ export function StepTimeline({
           aria-label={`Replay position step ${selectedIndex + 1} of ${steps.length}`}
         />
       </div>
-      <div className="timeline__footer">
-        <span>{currentStep?.attemptId ?? "n/a"}</span>
-        <span>
-          {currentStep?.session?.handle ? `session ${currentStep.session.handle}` : "no session"}
-        </span>
+      <div className="timeline__transport">
+        <div className="timeline__current">
+          <div className="timeline__headline">{currentNodeLabel}</div>
+          <div className="timeline__subheadline">{currentMeta}</div>
+        </div>
+        <div className="timeline__actions">
+          <IconButton label="Jump to start" onClick={onReset}>
+            <FirstIcon />
+          </IconButton>
+          <IconButton
+            label="Previous step"
+            onClick={() => onSelect(Math.max(selectedIndex - 1, 0))}
+            disabled={selectedIndex === 0}
+          >
+            <PreviousIcon />
+          </IconButton>
+          <IconButton
+            label={playing ? "Pause replay" : "Play replay"}
+            onClick={playing ? onPause : onPlay}
+            primary
+          >
+            {playing ? <PauseIcon /> : <PlayIcon />}
+          </IconButton>
+          <IconButton
+            label="Next step"
+            onClick={() => onSelect(Math.min(selectedIndex + 1, steps.length - 1))}
+            disabled={selectedIndex >= steps.length - 1}
+          >
+            <NextIcon />
+          </IconButton>
+          <IconButton label="Jump to latest" onClick={onJumpToEnd}>
+            <LastIcon />
+          </IconButton>
+        </div>
       </div>
     </section>
+  );
+}
+
+function IconButton({
+  children,
+  label,
+  onClick,
+  disabled = false,
+  primary = false,
+}: {
+  children: ReactNode;
+  label: string;
+  onClick(): void;
+  disabled?: boolean;
+  primary?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={`timeline__icon-button${primary ? " timeline__icon-button--primary" : ""}`}
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+    >
+      {children}
+    </button>
+  );
+}
+
+function FirstIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 5v14" />
+      <path d="m18 6-8 6 8 6z" />
+    </svg>
+  );
+}
+
+function PreviousIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m15 18-6-6 6-6" />
+    </svg>
+  );
+}
+
+function PlayIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 6v12l10-6z" />
+    </svg>
+  );
+}
+
+function PauseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 6v12" />
+      <path d="M16 6v12" />
+    </svg>
+  );
+}
+
+function NextIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
+function LastIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m6 6 8 6-8 6z" />
+      <path d="M18 5v14" />
+    </svg>
   );
 }

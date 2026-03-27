@@ -75,8 +75,10 @@ So the main viewing surface should avoid a second heavy navigation layer.
 
 - no large persistent top navbar
 - no step-dependent global header that changes while replay advances
-- replay controls and run outcome should live in the player section, not a
+- replay controls should live at the bottom edge of the graph surface, not in a
   separate app bar
+- run outcome should live with the replay controls, not in a stacked summary
+  card above the graph
 
 If any top chrome remains, it should be minimal and stable.
 
@@ -104,6 +106,9 @@ should keep one canonical place for:
 - run outcome
 - selected node
 - ACP conversation
+
+It should not repeat the same replay-step metadata both above and below the
+scrubber.
 
 ### Playback stability
 
@@ -320,9 +325,13 @@ The transport should behave like a media player.
 
 - play
 - pause
+- previous
+- next
 - jump to start
 - jump to latest recorded attempt
 - draggable scrubber
+- compact icon buttons in the transport surface when space is tight
+- footer placement at the bottom of the graph card
 
 ### Replay timeline
 
@@ -339,7 +348,6 @@ The timeline should show:
 
 - `Attempt N of M`
 - current node
-- current attempt id
 - real run outcome separately
 
 It should not show multiple secondary status boxes that repeat the same replay
