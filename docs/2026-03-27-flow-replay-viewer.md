@@ -333,6 +333,30 @@ The transport should behave like a media player.
 - compact icon buttons in the transport surface when space is tight
 - footer placement at the bottom of the graph card
 
+### Camera modes
+
+The graph should support two viewing modes:
+
+- `follow`
+- `overview`
+
+`follow` should be the default.
+
+`follow` means:
+
+- the camera tracks the currently active node
+- the camera transition eases from node to node
+- switching steps should not cause a hard jump
+
+`overview` means:
+
+- the full definition graph is visible
+- the camera stops auto-following step changes
+- switching into overview should ease into a fit-to-view state
+
+The viewer should not require persisted coordinates or hand-authored camera
+positions for this behavior.
+
 ### Replay timeline
 
 The scrubber represents:
@@ -415,7 +439,9 @@ than appearing only at step boundaries.
 
 Required behavior:
 
-- user and assistant text should reveal character by character
+- user turns should appear as full turns, not type character by character
+- user-turn appearance should still ease in smoothly instead of popping
+- assistant text should reveal progressively
 - tool calls and tool results may appear once the playhead reaches the relevant
   message threshold
 - raw payload disclosures should stay closed by default during playback

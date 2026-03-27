@@ -1,4 +1,4 @@
-import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
+import { Background, Controls, ReactFlow, type Node, type ReactFlowInstance } from "@xyflow/react";
 import { useEffect, useMemo, useState } from "react";
 import { FlowNodeCard } from "./components/flow-node-card";
 import { InspectorPanel } from "./components/inspector-panel";
@@ -42,6 +42,8 @@ export function App() {
   const [playbackMode, setPlaybackMode] = useState<"playing" | "seeking" | null>(null);
   const [playheadMs, setPlayheadMs] = useState<number | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"follow" | "overview">("follow");
+  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
 
   useEffect(() => {
     void bootstrap();
@@ -103,6 +105,10 @@ export function App() {
   const graph = bundle
     ? buildGraph(bundle, effectiveStepIndex, playbackPreview)
     : { nodes: [], edges: [] };
+  const graphLayoutKey = useMemo(
+    () => graph.nodes.map((node) => `${node.id}:${node.position.x}:${node.position.y}`).join("|"),
+    [graph.nodes],
+  );
   const selectedAttempt = useMemo(
     () => (bundle ? selectAttemptView(bundle, effectiveStepIndex) : null),
     [bundle, effectiveStepIndex],
@@ -119,6 +125,7 @@ export function App() {
     playbackPreview && selectedAttempt?.step.attemptId === currentStep?.attemptId
       ? playbackPreview.stepProgress
       : null;
+  const currentNodeId = currentStep?.nodeId ?? graph.nodes[0]?.id ?? null;
 
   useEffect(() => {
     const defaultSessionId =
@@ -133,11 +140,78 @@ export function App() {
     sessionItems[0]?.id,
   ]);
 
+  useEffect(() => {
+    if (!flowInstance?.viewportInitialized || !bundle || viewMode !== "overview") {
+      return;
+    }
+
+    let cancelled = false;
+    const frameId = window.requestAnimationFrame(() => {
+      if (cancelled) {
+        return;
+      }
+      void flowInstance.fitView({
+        padding: 0.34,
+        maxZoom: 1.02,
+        duration: 360,
+        ease: easeOutCubic,
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [bundle?.run.runId, flowInstance, graphLayoutKey, viewMode]);
+
+  useEffect(() => {
+    if (!flowInstance?.viewportInitialized || !bundle || viewMode !== "follow" || !currentNodeId) {
+      return;
+    }
+
+    let cancelled = false;
+    const frameId = window.requestAnimationFrame(() => {
+      if (cancelled) {
+        return;
+      }
+
+      const internalNode = flowInstance.getInternalNode(currentNodeId);
+      const graphNode = graph.nodes.find((node) => node.id === currentNodeId);
+      if (!graphNode) {
+        return;
+      }
+
+      const width = internalNode?.measured?.width ?? internalNode?.width ?? 284;
+      const height = internalNode?.measured?.height ?? internalNode?.height ?? 134;
+      const centerX = graphNode.position.x + width / 2;
+      const centerY = graphNode.position.y + height / 2 + 72;
+
+      void flowInstance.setCenter(centerX, centerY, {
+        zoom: 0.84,
+        duration: 320,
+        ease: easeOutCubic,
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [
+    bundle?.run.runId,
+    currentNodeId,
+    effectiveStepIndex,
+    flowInstance,
+    graphLayoutKey,
+    viewMode,
+  ]);
+
   async function bootstrap(): Promise<void> {
     setLoadingState("bootstrap");
     setErrorMessage(null);
     setPlaybackMode(null);
     setPlayheadMs(null);
+    setViewMode("follow");
 
     const runs = await refreshRuns();
     if (runs && runs.length > 0) {
@@ -172,6 +246,7 @@ export function App() {
       setActiveRunId(null);
       setSelectedStepIndex(defaultSelectedStepIndex(loaded));
       setActiveTab("session");
+      setViewMode("follow");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -192,6 +267,7 @@ export function App() {
       setActiveRunId(null);
       setSelectedStepIndex(defaultSelectedStepIndex(loaded));
       setActiveTab("session");
+      setViewMode("follow");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
@@ -214,6 +290,7 @@ export function App() {
       setActiveRunId(run.runId);
       setSelectedStepIndex(defaultSelectedStepIndex(loaded));
       setActiveTab("session");
+      setViewMode("follow");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -279,10 +356,10 @@ export function App() {
                         nodes={graph.nodes}
                         edges={graph.edges}
                         nodeTypes={nodeTypes}
-                        fitView
-                        fitViewOptions={{ padding: 0.34, maxZoom: 1.02 }}
+                        defaultViewport={{ x: 0, y: 0, zoom: 0.84 }}
                         nodesDraggable={false}
                         nodesConnectable={false}
+                        onInit={setFlowInstance}
                         onNodeClick={(_, node: Node) => selectNode(node.id)}
                         minZoom={0.28}
                         maxZoom={1.35}
@@ -307,6 +384,7 @@ export function App() {
                       }
                       currentMeta={currentDuration}
                       playing={playbackMode === "playing"}
+                      viewMode={viewMode}
                       onSelect={(index) => {
                         setPlaybackMode(null);
                         setPlayheadMs(null);
@@ -317,8 +395,7 @@ export function App() {
                           return;
                         }
                         const resumeMs =
-                          playheadMs ??
-                          playbackAnchorMs(playbackTimeline, selectedStepIndex);
+                          playheadMs ?? playbackAnchorMs(playbackTimeline, selectedStepIndex);
                         setPlayheadMs(resumeMs);
                         setPlaybackMode("playing");
                       }}
@@ -363,6 +440,7 @@ export function App() {
                         setPlaybackMode(null);
                         setPlayheadMs(null);
                       }}
+                      onViewModeChange={setViewMode}
                     />
                   </section>
                 );
@@ -378,15 +456,15 @@ export function App() {
             )}
           </section>
 
-              <InspectorPanel
-                selectedAttempt={selectedAttempt}
-                sessionItems={sessionItems}
-                activeSessionId={activeSessionId}
-                sessionRevealProgress={sessionRevealProgress}
-                activeTab={activeTab}
-                onTabChange={setActiveTab}
-                onSessionChange={setActiveSessionId}
-              />
+          <InspectorPanel
+            selectedAttempt={selectedAttempt}
+            sessionItems={sessionItems}
+            activeSessionId={activeSessionId}
+            sessionRevealProgress={sessionRevealProgress}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onSessionChange={setActiveSessionId}
+          />
         </section>
       </main>
     </div>
@@ -403,4 +481,8 @@ function deriveStepDurationLabel(step: LoadedRunBundle["steps"][number]): string
 
 function playbackProgressLabel(progress: number): string {
   return `${Math.round(Math.max(0, Math.min(1, progress)) * 100)}%`;
+}
+
+function easeOutCubic(value: number): number {
+  return 1 - Math.pow(1 - value, 3);
 }
