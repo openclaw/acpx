@@ -95,7 +95,7 @@ function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
 
   if (!sessionRecord) {
     return (
-      <div className="inspector__section-stack inspector__section-stack--fill">
+      <div className="inspector__fill-pane">
         <Section title="ACP session" fill>
           <div className="empty-card empty-card--fill">This step did not use an ACP session.</div>
         </Section>

@@ -44,10 +44,7 @@ export function StepTimeline({
   return (
     <section className="timeline">
       <div className={`timeline__outcome-strip timeline__outcome-strip--${runOutcome.accent}`}>
-        <span className={`outcome-pill outcome-pill--${runOutcome.status}`}>
-          {runOutcome.shortLabel}
-        </span>
-        <span>{runOutcome.headline}</span>
+        <span className={`outcome-pill outcome-pill--${runOutcome.status}`}>{runOutcome.shortLabel}</span>
       </div>
       <div className="timeline__meter">
         <input
@@ -95,6 +92,7 @@ export function StepTimeline({
             <LastIcon />
           </IconButton>
         </div>
+        <div className="timeline__transport-spacer" aria-hidden="true" />
       </div>
     </section>
   );
