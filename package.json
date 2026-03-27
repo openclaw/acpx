@@ -65,7 +65,7 @@
     "viewer:typecheck": "tsc -p examples/flows/replay-viewer/tsconfig.json --noEmit && tsc -p examples/flows/replay-viewer/tsconfig.server.json --noEmit"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.15.0",
+    "@agentclientprotocol/sdk": "^0.17.0",
     "commander": "^14.0.3",
     "skillflag": "^0.1.4",
     "tsx": "^4.0.0"
