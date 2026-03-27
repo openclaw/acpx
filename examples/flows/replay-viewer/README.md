@@ -2,6 +2,9 @@
 
 This example app visualizes one saved flow run bundle at a time.
 
+For the viewer semantics and UX/layout rules, see
+[docs/2026-03-27-flow-replay-viewer.md](../../../docs/2026-03-27-flow-replay-viewer.md).
+
 It is separate from the `acpx` CLI surface on purpose:
 
 - `acpx` writes replayable run bundles under `~/.acpx/flows/runs/`
@@ -44,6 +47,9 @@ bundle outside that default directory.
 - selected step prompt, raw response, parsed output, and action receipts
 - the ACP conversation slice for the selected ACP step
 - the raw bundled ACP event slice for that step
+
+The full flow definition remains the main graph. The run is shown as an overlay
+on that graph rather than replacing it with an execution-only path.
 
 ## Included sample
 
