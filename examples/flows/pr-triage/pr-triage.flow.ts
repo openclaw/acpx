@@ -707,37 +707,16 @@ async function collectCiState(pr) {
   const workflowRuns = await ghApiJson(
     `repos/${pr.repo}/actions/runs?head_sha=${encodeURIComponent(headSha)}&per_page=20`,
   );
-
-  let workflowApprovalAttempted = false;
-  let workflowApproved = false;
-
   const runs = Array.isArray(workflowRuns?.workflow_runs) ? workflowRuns.workflow_runs : [];
-  for (const run of runs) {
-    if (String(run.status ?? "") === "action_required") {
-      workflowApprovalAttempted = true;
-      const approval = await runCommand(
-        "gh",
-        ["api", "-X", "POST", `repos/${pr.repo}/actions/runs/${run.id}/approve`],
-        { allowFailure: true },
-      );
-      if (approval.exitCode === 0) {
-        workflowApproved = true;
-      }
-    }
-  }
 
   const ciState = {
     statusCheckRollup: Array.isArray(prView?.statusCheckRollup) ? prView.statusCheckRollup : [],
     workflowRuns: runs,
-    workflowApprovalAttempted,
-    workflowApproved,
   };
   await writeJson(path.join(pr.flowDir, "ci-state.json"), ciState);
 
   return {
     ci_state_path: path.join(pr.flowDir, "ci-state.json"),
-    workflow_approval_attempted: workflowApprovalAttempted,
-    workflow_approved: workflowApproved,
   };
 }
 
@@ -1066,11 +1045,13 @@ function promptFixCiFailures(pr, outputs) {
     `The CI mechanics have already been collected by the flow runtime in ${ciStatePath}.`,
     "Read that local JSON file and the checked-out repo state instead of rerunning broad CI discovery yourself.",
     `Use the local branch ${pr.localBranch}. If you need to push, use remote ${pr.pushRemote} branch ${pr.pushRef}.`,
-    "If the runtime already approved or attempted to approve workflow runs, treat that as the current ground truth and focus on the remaining CI result.",
+    "If any relevant GitHub Actions workflow run is approval-blocked, approve it immediately yourself with `gh api -X POST repos/{owner}/{repo}/actions/runs/{run_id}/approve` before making any escalation decision.",
+    "Treat a workflow run as approval-blocked when its state clearly shows `action_required`, including cases where that appears in the conclusion rather than the status.",
+    "After you approve a blocked workflow run, route back to `collect_ci_state` so the flow runtime can re-check CI on the updated state.",
     "If related failures remain and you can fix them, fix them directly in the repo, run focused checks when feasible, rerun the earlier targeted validation, commit and push the branch yourself, and then route back to `collect_ci_state` so the flow runtime can re-check CI.",
     `Latest validation summary: ${validation?.summary ?? "none"}.`,
     "If CI is green or the remaining failures are clearly unrelated, route to `check_final_conflicts` so the final conflict gate can run before the human handoff.",
-    "If the only remaining blocker is workflow approval that the runtime could not clear, route to `comment_and_escalate_to_human` and make that the explicit human action needed next.",
+    "Only route to `comment_and_escalate_to_human` for workflow approval if you actually tried to approve the blocked run and could not clear it because of a real permission or platform failure.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
