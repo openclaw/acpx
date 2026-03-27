@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolvePlaybackResumeMs } from "../examples/flows/replay-viewer/src/hooks/use-playback-controller.js";
+import {
+  advancePlaybackPlayhead,
+  resolvePlaybackResumeMs,
+} from "../examples/flows/replay-viewer/src/hooks/use-playback-controller.js";
 import {
   buildGraph,
   buildGraphLayout,
@@ -486,6 +489,12 @@ test("playbackSelectionMs clamps the final discrete step to the true timeline en
 
   assert.equal(playbackSelectionMs(timeline, 0, bundle.steps.length), 0);
   assert.equal(playbackSelectionMs(timeline, 1, bundle.steps.length), timeline.totalDurationMs);
+});
+
+test("advancePlaybackPlayhead applies playback speed and clamps to the timeline end", () => {
+  assert.equal(advancePlaybackPlayhead(100, 400, 0.5, 1_000), 300);
+  assert.equal(advancePlaybackPlayhead(100, 400, 2, 1_000), 900);
+  assert.equal(advancePlaybackPlayhead(900, 400, 2, 1_000), 1_000);
 });
 
 test("format helpers keep replay labels stable", () => {

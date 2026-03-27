@@ -8,11 +8,14 @@ import type { PlaybackTimeline } from "../lib/view-model.js";
 import type { LoadedRunBundle } from "../types";
 
 type PlaybackMode = "playing" | "seeking" | null;
+export const PLAYBACK_SPEED_OPTIONS = [0.5, 1, 1.5, 2] as const;
+const DEFAULT_PLAYBACK_RATE = 1;
 
 export function usePlaybackController(bundle: LoadedRunBundle | null) {
   const [selectedStepIndex, setSelectedStepIndex] = useState(0);
   const [playbackMode, setPlaybackMode] = useState<PlaybackMode>(null);
   const [playheadMs, setPlayheadMs] = useState<number | null>(null);
+  const [playbackRate, setPlaybackRate] = useState<number>(DEFAULT_PLAYBACK_RATE);
 
   useEffect(() => {
     setSelectedStepIndex(defaultSelectedStepIndex(bundle));
@@ -50,14 +53,17 @@ export function usePlaybackController(bundle: LoadedRunBundle | null) {
         if (current == null) {
           return current;
         }
-        return Math.min(current + deltaMs, playbackTimeline.totalDurationMs);
+        return Math.min(
+          advancePlaybackPlayhead(current, deltaMs, playbackRate, playbackTimeline.totalDurationMs),
+          playbackTimeline.totalDurationMs,
+        );
       });
       frameId = window.requestAnimationFrame(tick);
     };
 
     frameId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frameId);
-  }, [playbackMode, playbackTimeline, playheadMs]);
+  }, [playbackMode, playbackRate, playbackTimeline, playheadMs]);
 
   useEffect(() => {
     if (
@@ -144,9 +150,11 @@ export function usePlaybackController(bundle: LoadedRunBundle | null) {
     selectedStepIndex,
     effectiveStepIndex,
     playbackMode,
+    playbackRate,
     playbackTimeline,
     playbackPreview,
     isPlaying: playbackMode === "playing",
+    setPlaybackRate,
     clearPlayback,
     selectStep,
     play,
@@ -174,6 +182,21 @@ export function resolvePlaybackResumeMs(
     return 0;
   }
   return playbackSelectionMs(timeline, selectedStepIndex, stepCount);
+}
+
+export function advancePlaybackPlayhead(
+  currentMs: number,
+  deltaMs: number,
+  playbackRate: number,
+  totalDurationMs: number,
+): number {
+  const safeDeltaMs = Math.max(0, deltaMs);
+  const safeRate = PLAYBACK_SPEED_OPTIONS.includes(
+    playbackRate as (typeof PLAYBACK_SPEED_OPTIONS)[number],
+  )
+    ? playbackRate
+    : DEFAULT_PLAYBACK_RATE;
+  return Math.min(currentMs + safeDeltaMs * safeRate, totalDurationMs);
 }
 
 function defaultSelectedStepIndex(bundle: LoadedRunBundle | null): number {

@@ -6,6 +6,8 @@ type StepTimelineProps = {
   selectedIndex: number;
   playbackValue: number;
   playbackMax: number;
+  playbackRate: number;
+  playbackSpeedOptions: readonly number[];
   currentNodeLabel: string;
   currentMeta: string;
   playing: boolean;
@@ -18,6 +20,7 @@ type StepTimelineProps = {
   onSeekStart(): void;
   onSeek(value: number): void;
   onSeekCommit(value: number): void;
+  onPlaybackRateChange(playbackRate: number): void;
   onViewModeChange(viewMode: "follow" | "overview"): void;
 };
 
@@ -26,6 +29,8 @@ export function StepTimeline({
   selectedIndex,
   playbackValue,
   playbackMax,
+  playbackRate,
+  playbackSpeedOptions,
   currentNodeLabel,
   currentMeta,
   playing,
@@ -38,6 +43,7 @@ export function StepTimeline({
   onSeekStart,
   onSeek,
   onSeekCommit,
+  onPlaybackRateChange,
   onViewModeChange,
 }: StepTimelineProps) {
   if (steps.length === 0) {
@@ -99,6 +105,18 @@ export function StepTimeline({
           <IconButton label="Jump to latest" onClick={onJumpToEnd}>
             <LastIcon />
           </IconButton>
+          <div className="timeline__speed-switcher" role="group" aria-label="Playback speed">
+            {playbackSpeedOptions.map((option) => (
+              <SpeedButton
+                key={option}
+                label={`${option}x playback`}
+                active={playbackRate === option}
+                onClick={() => onPlaybackRateChange(option)}
+              >
+                {formatPlaybackRate(option)}
+              </SpeedButton>
+            ))}
+          </div>
         </div>
         <div className="timeline__camera">
           <div className="timeline__mode-switcher" role="tablist" aria-label="Camera mode">
@@ -123,6 +141,10 @@ export function StepTimeline({
       </div>
     </section>
   );
+}
+
+function formatPlaybackRate(playbackRate: number): string {
+  return Number.isInteger(playbackRate) ? `${playbackRate}x` : `${playbackRate.toFixed(1)}x`;
 }
 
 function IconButton({
@@ -167,6 +189,31 @@ function ModeButton({
     <button
       type="button"
       className={`timeline__mode-button${active ? " timeline__mode-button--active" : ""}`}
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SpeedButton({
+  children,
+  label,
+  active,
+  onClick,
+}: {
+  children: ReactNode;
+  label: string;
+  active: boolean;
+  onClick(): void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`timeline__speed-button${active ? " timeline__speed-button--active" : ""}`}
       onClick={onClick}
       aria-label={label}
       title={label}

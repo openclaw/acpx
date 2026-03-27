@@ -512,6 +512,8 @@ code {
   align-items: center;
   gap: 6px;
   justify-self: center;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .timeline__camera {
@@ -605,6 +607,41 @@ code {
   stroke-linecap: round;
   stroke-linejoin: round;
   fill: none;
+}
+
+.timeline__speed-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid rgba(133, 146, 166, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.timeline__speed-button {
+  min-width: 40px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.timeline__speed-button--active {
+  background: rgba(62, 166, 198, 0.16);
+  color: var(--ink);
 }
 
 .timeline__empty,

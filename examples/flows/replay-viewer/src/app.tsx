@@ -7,7 +7,7 @@ import { RunBrowser } from "./components/run-browser";
 import { StepTimeline } from "./components/step-timeline";
 import { REPLAY_FIT_VIEW_OPTIONS, useGraphCamera } from "./hooks/use-graph-camera";
 import { useGraphLayout } from "./hooks/use-graph-layout";
-import { usePlaybackController } from "./hooks/use-playback-controller";
+import { PLAYBACK_SPEED_OPTIONS, usePlaybackController } from "./hooks/use-playback-controller";
 import { useRunBundleLoader } from "./hooks/use-run-bundle-loader";
 import { isDirectoryPickerSupported } from "./lib/bundle-reader";
 import {
@@ -200,6 +200,8 @@ export function App() {
                   selectedIndex={playback.effectiveStepIndex}
                   playbackValue={playbackValue}
                   playbackMax={playback.playbackTimeline?.totalDurationMs ?? 0}
+                  playbackRate={playback.playbackRate}
+                  playbackSpeedOptions={PLAYBACK_SPEED_OPTIONS}
                   currentNodeLabel={currentStep ? humanizeIdentifier(currentStep.nodeId) : "n/a"}
                   currentMeta={currentDuration}
                   playing={playback.isPlaying}
@@ -212,6 +214,7 @@ export function App() {
                   onSeekStart={playback.startSeek}
                   onSeek={playback.seek}
                   onSeekCommit={playback.commitSeek}
+                  onPlaybackRateChange={playback.setPlaybackRate}
                   onViewModeChange={setViewMode}
                 />
               </section>
