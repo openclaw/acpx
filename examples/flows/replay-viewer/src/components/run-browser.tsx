@@ -7,7 +7,6 @@ type RunBrowserProps = {
   collapsed: boolean;
   loading: boolean;
   directoryPickerSupported: boolean;
-  onToggleCollapsed: () => void;
   onRefresh: () => void;
   onLoadSample: () => void;
   onLoadRun: (run: RunBundleSummary) => void;
@@ -20,7 +19,6 @@ export function RunBrowser({
   collapsed,
   loading,
   directoryPickerSupported,
-  onToggleCollapsed,
   onRefresh,
   onLoadSample,
   onLoadRun,
@@ -30,16 +28,9 @@ export function RunBrowser({
     <aside className={`run-browser${collapsed ? " run-browser--collapsed" : ""}`}>
       <div className="run-browser__header">
         <div className="run-browser__header-copy">
-          <div className="hero__eyebrow">Flow runs</div>
-          {!collapsed ? <h2>Runs</h2> : null}
+          {!collapsed ? <div className="hero__eyebrow">Recent runs</div> : null}
+          {!collapsed ? <h2>Flow runs</h2> : null}
         </div>
-        <button
-          type="button"
-          className="ghost-button run-browser__toggle"
-          onClick={onToggleCollapsed}
-        >
-          {collapsed ? "Show" : "Hide"}
-        </button>
       </div>
 
       {runs.length > 0 ? (
@@ -72,12 +63,9 @@ export function RunBrowser({
                         aria-hidden="true"
                       />
                     </div>
-                    <div className="run-list-item__runid">
-                      {run.runId.replace(/^(\d{4}-\d{2}-\d{2}T\d{6}\d{3}Z-)/, "")}
-                    </div>
                     <div className="run-list-item__meta">
                       <span>{formatDate(run.startedAt)}</span>
-                      {run.currentNode ? <span>{run.currentNode}</span> : <span>{run.status}</span>}
+                      <span className="run-list-item__token">{shortRunToken(run.runId)}</span>
                     </div>
                   </>
                 )}
@@ -120,4 +108,9 @@ function abbreviateRun(flowName: string): string {
     return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
   }
   return flowName.slice(0, 2).toUpperCase();
+}
+
+function shortRunToken(runId: string): string {
+  const parts = runId.split("-");
+  return parts.at(-1) ?? runId;
 }

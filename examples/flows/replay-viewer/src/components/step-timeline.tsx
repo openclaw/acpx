@@ -5,6 +5,8 @@ type StepTimelineProps = {
   steps: FlowStepRecord[];
   selectedIndex: number;
   playing: boolean;
+  runStartedAt: string;
+  runDurationLabel: string;
   onSelect(index: number): void;
   onPlay(): void;
   onPause(): void;
@@ -16,6 +18,8 @@ export function StepTimeline({
   steps,
   selectedIndex,
   playing,
+  runStartedAt,
+  runDurationLabel,
   onSelect,
   onPlay,
   onPause,
@@ -40,12 +44,26 @@ export function StepTimeline({
   return (
     <section className="timeline">
       <div className="timeline__toolbar">
-        <div>
+        <div className="timeline__hero">
           <div className="timeline__label">Replay progress</div>
           <div className="timeline__headline">{currentStep?.nodeId ?? "n/a"}</div>
           <div className="timeline__subheadline">
             Step {selectedIndex + 1} of {steps.length} • {currentStep?.nodeType ?? "n/a"} •{" "}
             {currentStep?.outcome ?? "n/a"} • {currentDuration}
+          </div>
+          <div className="timeline__stats">
+            <span className="timeline__stat">
+              <span className="timeline__stat-label">Attempt</span>
+              <span>{currentStep?.attemptId ?? "n/a"}</span>
+            </span>
+            <span className="timeline__stat">
+              <span className="timeline__stat-label">Started</span>
+              <span>{formatDate(runStartedAt)}</span>
+            </span>
+            <span className="timeline__stat">
+              <span className="timeline__stat-label">Run</span>
+              <span>{runDurationLabel}</span>
+            </span>
           </div>
         </div>
         <div className="timeline__actions">

@@ -159,6 +159,26 @@ test("selectAttemptView summarizes encoded tool inputs and hidden tool results w
   );
 });
 
+test("selectAttemptView falls back to the latest visible ACP session for non-ACP steps", () => {
+  const acpStep = baseStep("review_loop", "acp", "ok");
+  const computeStep = baseStep("finalize", "compute", "ok");
+  computeStep.session = null;
+  computeStep.trace = undefined;
+
+  const bundle = makeBundle(computeStep, {
+    steps: [acpStep, computeStep],
+  });
+
+  const selected = selectAttemptView(bundle, 1);
+
+  assert.ok(selected);
+  assert.equal(selected.step.nodeId, "finalize");
+  assert.equal(selected.sessionFromFallback, true);
+  assert.equal(selected.sessionSourceStep?.nodeId, "review_loop");
+  assert.equal(selected.sessionSlice.length, 2);
+  assert.match(selected.sessionSlice[0]?.textBlocks[0] ?? "", /Please inspect the PR diff/);
+});
+
 test("format helpers keep replay labels stable", () => {
   assert.equal(formatDuration(undefined), "n/a");
   assert.equal(formatDuration(500), "500 ms");

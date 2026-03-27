@@ -99,7 +99,8 @@ function AttemptTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
 }
 
 function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView }) {
-  const { step, sessionRecord, sessionSlice } = selectedAttempt;
+  const { step, sessionRecord, sessionSlice, sessionSourceStep, sessionFromFallback } =
+    selectedAttempt;
 
   if (!sessionRecord) {
     return (
@@ -114,6 +115,13 @@ function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
   return (
     <div className="inspector__section-stack">
       <Section title="Session metadata">
+        {sessionFromFallback && sessionSourceStep ? (
+          <div className="session-note">
+            Showing the latest visible ACP conversation from{" "}
+            <strong>{sessionSourceStep.nodeId}</strong> because <code>{step.nodeId}</code> does not
+            carry its own session slice.
+          </div>
+        ) : null}
         <dl className="definition-grid">
           <div>
             <dt>Name</dt>

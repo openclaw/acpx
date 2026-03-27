@@ -30,6 +30,8 @@ export type ViewerNodeData = {
 
 export type SelectedAttemptView = {
   step: FlowStepRecord;
+  sessionSourceStep: FlowStepRecord | null;
+  sessionFromFallback: boolean;
   sessionRecord: SessionRecord | null;
   sessionEvents: FlowBundledSessionEvent[];
   sessionSlice: Array<{
@@ -94,10 +96,10 @@ export function buildGraph(
     const status = deriveNodeStatus(nodeId, visibleAttempt, selectedStep);
     const level = levelByNode.get(nodeId) ?? 0;
     const column = nodesByLevel.get(level)?.indexOf(nodeId) ?? 0;
-    const laneWidth = 390;
+    const laneWidth = 456;
     const laneNodes = nodesByLevel.get(level) ?? [];
     const x = (column - (laneNodes.length - 1) / 2) * laneWidth;
-    const y = level * 238;
+    const y = level * 284;
 
     return {
       id: nodeId,
@@ -185,11 +187,13 @@ export function selectAttemptView(
     return null;
   }
 
-  const sessionId = step.trace?.conversation?.sessionId ?? step.trace?.sessionId;
+  const sessionSourceStep = resolveSessionSourceStep(bundle.steps, selectedStepIndex);
+  const sessionId =
+    sessionSourceStep?.trace?.conversation?.sessionId ?? sessionSourceStep?.trace?.sessionId;
   const session = sessionId ? (bundle.sessions[sessionId] ?? null) : null;
   const sessionRecord = session?.record ?? null;
   const sessionEvents = session?.events ?? [];
-  const conversation = step.trace?.conversation;
+  const conversation = sessionSourceStep?.trace?.conversation;
   const sessionSlice = createSessionSlice(
     sessionRecord,
     conversation?.messageStart,
@@ -204,12 +208,38 @@ export function selectAttemptView(
 
   return {
     step,
+    sessionSourceStep,
+    sessionFromFallback:
+      sessionSourceStep != null && sessionSourceStep.attemptId !== step.attemptId,
     sessionRecord,
     sessionEvents,
     sessionSlice,
     rawEventSlice,
     traceEvents,
   };
+}
+
+function resolveSessionSourceStep(
+  steps: FlowStepRecord[],
+  selectedStepIndex: number,
+): FlowStepRecord | null {
+  const direct = steps[selectedStepIndex];
+  if (direct?.trace?.conversation) {
+    return direct;
+  }
+
+  for (let index = selectedStepIndex - 1; index >= 0; index -= 1) {
+    const candidate = steps[index];
+    if (candidate?.trace?.conversation || candidate?.session) {
+      return candidate;
+    }
+  }
+
+  if (direct?.session) {
+    return direct;
+  }
+
+  return null;
 }
 
 export function formatDuration(durationMs: number | undefined): string {
