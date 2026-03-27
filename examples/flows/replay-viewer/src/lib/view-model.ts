@@ -560,8 +560,8 @@ function estimatePlaybackDuration(bundle: LoadedRunBundle, stepIndex: number): n
           (sum, value) => sum + (typeof value === "string" ? value.length : 0),
           0,
         );
-    const revealDurationMs = 1_300 + visibleChars * 7;
-    return clamp(Math.max(actualScaledMs, revealDurationMs), 1_400, 7_000);
+    const revealDurationMs = 420 + visibleChars * 3;
+    return clamp(Math.max(actualScaledMs, revealDurationMs), 700, 3_800);
   }
 
   const minimumMs = step.nodeType === "action" ? 850 : step.nodeType === "checkpoint" ? 650 : 700;

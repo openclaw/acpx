@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import {
   formatDate,
   formatDuration,
@@ -99,15 +99,7 @@ function SessionTab({
   sessionRevealProgress: number | null;
 }) {
   const { step, sessionRecord, sessionSlice } = selectedAttempt;
-
-  if (!sessionRecord) {
-    return (
-      <div className="session-pane session-pane--empty">
-        <div className="session-empty">This step did not use an ACP session.</div>
-      </div>
-    );
-  }
-
+  const sessionEndRef = useRef<HTMLDivElement | null>(null);
   const highlightedSlice = sessionSlice.filter((message) => message.highlighted);
   const baseConversationSlice = highlightedSlice.length > 0 ? highlightedSlice : sessionSlice;
   const renderedSessionSlice =
@@ -116,6 +108,21 @@ function SessionTab({
     typeof sessionRevealProgress === "number"
       ? revealConversationSlice(baseConversationSlice, sessionRevealProgress)
       : baseConversationSlice;
+
+  useEffect(() => {
+    if (!sessionRecord || typeof sessionRevealProgress !== "number") {
+      return;
+    }
+    sessionEndRef.current?.scrollIntoView({ block: "end" });
+  }, [renderedSessionSlice, sessionRecord, sessionRevealProgress]);
+
+  if (!sessionRecord) {
+    return (
+      <div className="session-pane session-pane--empty">
+        <div className="session-empty">This step did not use an ACP session.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="session-pane">
@@ -197,6 +204,7 @@ function SessionTab({
             ) : null}
           </article>
         ))}
+        <div ref={sessionEndRef} aria-hidden="true" />
       </div>
 
       <DisclosureSection title="Session details">

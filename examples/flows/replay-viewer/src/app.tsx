@@ -294,8 +294,10 @@ export function App() {
                         if (!playbackTimeline) {
                           return;
                         }
-                        const startMs = playbackTimeline.segments[selectedStepIndex]?.startMs ?? 0;
-                        setPlayheadMs(startMs);
+                        const resumeMs =
+                          playheadMs ??
+                          playbackAnchorMs(playbackTimeline, selectedStepIndex);
+                        setPlayheadMs(resumeMs);
                         setPlaybackMode("playing");
                       }}
                       onPause={() => {
