@@ -445,6 +445,20 @@ test("listSessionViews returns all run sessions and marks the current streaming 
   assert.equal(sessions[1]?.sessionSlice[0]?.highlighted, false);
 });
 
+test("listSessionViews stays empty when the selected step has no ACP session source", () => {
+  const first = baseStep("load_pr", "action", "ok");
+  delete first.trace;
+  const second = baseStep("extract_intent", "acp", "ok");
+  const bundle = makeBundle(second, { steps: [first, second] });
+
+  const selected = selectAttemptView(bundle, 0);
+  const sessions = listSessionViews(bundle, selected);
+
+  assert.ok(selected);
+  assert.equal(selected.sessionRecord, null);
+  assert.equal(sessions.length, 0);
+});
+
 test("buildPlaybackTimeline and anchors support continuous preview with discrete snapping", () => {
   const first = baseStep("load_pr", "action", "ok");
   first.startedAt = "2026-03-27T07:26:00.000Z";

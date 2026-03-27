@@ -52,6 +52,9 @@ export function listSessionViews(
   bundle: LoadedRunBundle,
   selectedAttempt: SelectedAttemptView | null,
 ): SessionListItemView[] {
+  if (!selectedAttempt?.sessionRecord) {
+    return [];
+  }
   const streamingSessionId =
     selectedAttempt?.sessionSourceStep?.trace?.conversation?.sessionId ??
     selectedAttempt?.sessionSourceStep?.trace?.sessionId ??
