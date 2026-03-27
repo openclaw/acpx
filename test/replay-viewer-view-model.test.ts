@@ -12,6 +12,7 @@ import {
   humanizeIdentifier,
   listSessionViews,
   playbackAnchorMs,
+  playbackSelectionMs,
   revealConversationSlice,
   revealConversationTranscript,
   selectAttemptView,
@@ -475,6 +476,16 @@ test("resolvePlaybackResumeMs wraps terminal selections back to the start", () =
     playbackAnchorMs(timeline, 0),
   );
   assert.equal(resolvePlaybackResumeMs(timeline, 123, 1, bundle.steps.length), 123);
+});
+
+test("playbackSelectionMs clamps the final discrete step to the true timeline end", () => {
+  const first = baseStep("load_pr", "action", "ok");
+  const second = baseStep("finalize", "compute", "ok");
+  const bundle = makeBundle(second, { steps: [first, second] });
+  const timeline = buildPlaybackTimeline(bundle);
+
+  assert.equal(playbackSelectionMs(timeline, 0, bundle.steps.length), 0);
+  assert.equal(playbackSelectionMs(timeline, 1, bundle.steps.length), timeline.totalDurationMs);
 });
 
 test("format helpers keep replay labels stable", () => {

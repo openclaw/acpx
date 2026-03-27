@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   buildPlaybackTimeline,
   derivePlaybackPreview,
-  playbackAnchorMs,
+  playbackSelectionMs,
 } from "../lib/view-model.js";
 import type { PlaybackTimeline } from "../lib/view-model.js";
 import type { LoadedRunBundle } from "../types";
@@ -121,7 +121,9 @@ export function usePlaybackController(bundle: LoadedRunBundle | null) {
     setPlaybackMode("seeking");
     setPlayheadMs(
       playbackPreview?.playheadMs ??
-        (playbackTimeline ? playbackAnchorMs(playbackTimeline, selectedStepIndex) : 0),
+        (playbackTimeline
+          ? playbackSelectionMs(playbackTimeline, selectedStepIndex, bundle?.steps.length ?? 0)
+          : 0),
     );
   }
 
@@ -171,7 +173,7 @@ export function resolvePlaybackResumeMs(
   if (isTerminalSelection) {
     return 0;
   }
-  return playbackAnchorMs(timeline, selectedStepIndex);
+  return playbackSelectionMs(timeline, selectedStepIndex, stepCount);
 }
 
 function defaultSelectedStepIndex(bundle: LoadedRunBundle | null): number {

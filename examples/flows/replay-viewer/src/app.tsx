@@ -14,7 +14,7 @@ import {
   buildGraph,
   humanizeIdentifier,
   listSessionViews,
-  playbackAnchorMs,
+  playbackSelectionMs,
   selectAttemptView,
 } from "./lib/view-model";
 import type { LoadedRunBundle } from "./types";
@@ -90,7 +90,11 @@ export function App() {
   const playbackValue =
     playback.playbackPreview?.playheadMs ??
     (playback.playbackTimeline
-      ? playbackAnchorMs(playback.playbackTimeline, playback.selectedStepIndex)
+      ? playbackSelectionMs(
+          playback.playbackTimeline,
+          playback.selectedStepIndex,
+          bundle?.steps.length ?? 0,
+        )
       : 0) ??
     0;
 

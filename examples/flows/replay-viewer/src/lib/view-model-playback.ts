@@ -59,6 +59,19 @@ export function playbackAnchorMs(timeline: PlaybackTimeline, stepIndex: number):
   return segment?.startMs ?? 0;
 }
 
+export function playbackSelectionMs(
+  timeline: PlaybackTimeline,
+  stepIndex: number,
+  stepCount: number,
+): number {
+  const isTerminalSelection =
+    stepIndex >= Math.max(stepCount - 1, 0) && timeline.segments.length > 0;
+  if (isTerminalSelection) {
+    return timeline.totalDurationMs;
+  }
+  return playbackAnchorMs(timeline, stepIndex);
+}
+
 function estimatePlaybackDuration(bundle: LoadedRunBundle, stepIndex: number): number {
   const step = bundle.steps[stepIndex];
   if (!step) {

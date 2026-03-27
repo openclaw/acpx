@@ -11,6 +11,7 @@ export {
   buildPlaybackTimeline,
   derivePlaybackPreview,
   playbackAnchorMs,
+  playbackSelectionMs,
 } from "./view-model-playback.js";
 export type {
   PlaybackPreview,
