@@ -25,12 +25,7 @@ export function FlowNodeCard({ data, selected = false }: FlowNodeCardProps) {
         </span>
         {data.durationLabel ? <span>{data.durationLabel}</span> : null}
       </div>
-      {data.latestAttemptId ? (
-        <div className="flow-node-card__attempt">{data.latestAttemptId}</div>
-      ) : null}
-      {data.handleLabel ? (
-        <div className="flow-node-card__session">session {data.handleLabel}</div>
-      ) : null}
+      {data.handleLabel ? <div className="flow-node-card__session">{data.handleLabel}</div> : null}
       <Handle type="source" position={Position.Bottom} className="flow-node-card__handle" />
     </div>
   );

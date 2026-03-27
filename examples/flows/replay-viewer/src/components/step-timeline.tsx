@@ -32,6 +32,10 @@ export function StepTimeline({
 
   const currentStep = steps[selectedIndex] ?? steps[0];
   const progressPercent = ((selectedIndex + 1) / steps.length) * 100;
+  const currentDuration =
+    currentStep != null
+      ? formatDuration(Date.parse(currentStep.finishedAt) - Date.parse(currentStep.startedAt))
+      : "n/a";
 
   return (
     <section className="timeline">
@@ -40,29 +44,71 @@ export function StepTimeline({
           <div className="timeline__label">Replay progress</div>
           <div className="timeline__headline">{currentStep?.nodeId ?? "n/a"}</div>
           <div className="timeline__subheadline">
-            {currentStep?.attemptId ?? "n/a"} • Step {selectedIndex + 1} of {steps.length} •{" "}
-            {currentStep?.kind ?? "n/a"} • {currentStep?.outcome ?? "n/a"}
+            Step {selectedIndex + 1} of {steps.length} • {currentStep?.kind ?? "n/a"} •{" "}
+            {currentStep?.outcome ?? "n/a"} • {currentDuration}
           </div>
         </div>
         <div className="timeline__actions">
           <button type="button" className="ghost-button" onClick={onReset}>
             Start
           </button>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => onSelect(Math.max(selectedIndex - 1, 0))}
+            disabled={selectedIndex === 0}
+          >
+            Back
+          </button>
           <button type="button" className="primary-button" onClick={playing ? onPause : onPlay}>
             {playing ? "Pause" : "Play"}
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => onSelect(Math.min(selectedIndex + 1, steps.length - 1))}
+            disabled={selectedIndex >= steps.length - 1}
+          >
+            Next
           </button>
           <button type="button" className="ghost-button" onClick={onJumpToEnd}>
             Latest
           </button>
         </div>
       </div>
-      <div
-        className="timeline__progress"
-        aria-label={`Replay progress ${selectedIndex + 1} of ${steps.length}`}
-      >
-        <div className="timeline__progress-bar" style={{ width: `${progressPercent}%` }} />
+      <div className="timeline__meter">
+        <div className="timeline__meter-labels">
+          <span>{steps[0]?.nodeId ?? "start"}</span>
+          <span>{progressPercent.toFixed(0)}%</span>
+          <span>{steps.at(-1)?.nodeId ?? "latest"}</span>
+        </div>
+        <div className="timeline__progress" aria-hidden="true">
+          <div className="timeline__progress-bar" style={{ width: `${progressPercent}%` }} />
+        </div>
+        <input
+          className="timeline__scrubber"
+          type="range"
+          min={0}
+          max={Math.max(steps.length - 1, 0)}
+          step={1}
+          value={selectedIndex}
+          onChange={(event) => onSelect(Number(event.target.value))}
+          aria-label={`Replay position step ${selectedIndex + 1} of ${steps.length}`}
+        />
       </div>
-      <div className="timeline__rail">
+      <div className="timeline__current">
+        <div className="timeline__current-main">
+          <span className="timeline__current-node">{currentStep?.nodeId ?? "n/a"}</span>
+          <span className="timeline__current-attempt">{currentStep?.attemptId ?? "n/a"}</span>
+        </div>
+        <div className="timeline__current-meta">
+          <span>{formatDate(currentStep?.startedAt)}</span>
+          <span>
+            {currentStep?.session?.handle ? `session ${currentStep.session.handle}` : "no session"}
+          </span>
+        </div>
+      </div>
+      <div className="timeline__stops" aria-label="Replay step stops">
         {steps.map((step, index) => {
           const active = index === selectedIndex;
           const completed = index < selectedIndex;
@@ -70,16 +116,12 @@ export function StepTimeline({
             <button
               key={step.attemptId}
               type="button"
-              className={`timeline__step${active ? " timeline__step--active" : ""}${completed ? " timeline__step--completed" : ""}`}
+              className={`timeline__stop${active ? " timeline__stop--active" : ""}${completed ? " timeline__stop--completed" : ""}`}
               onClick={() => onSelect(index)}
+              aria-label={`Jump to step ${index + 1}: ${step.nodeId}`}
             >
-              <span className="timeline__step-index">{index + 1}</span>
-              <span className="timeline__step-title">{step.nodeId}</span>
-              <span className="timeline__step-meta">
-                {step.kind} •{" "}
-                {formatDuration(Date.parse(step.finishedAt) - Date.parse(step.startedAt))}
-              </span>
-              <span className="timeline__step-date">{formatDate(step.startedAt)}</span>
+              <span className="timeline__stop-dot" />
+              <span className="timeline__stop-label">{step.nodeId}</span>
             </button>
           );
         })}

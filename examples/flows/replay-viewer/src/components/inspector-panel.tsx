@@ -53,9 +53,11 @@ export function InspectorPanel({ selectedAttempt, activeTab, onTabChange }: Insp
         <TabButton tab="events" activeTab={activeTab} onTabChange={onTabChange} />
       </div>
 
-      {activeTab === "attempt" ? <AttemptTab selectedAttempt={selectedAttempt} /> : null}
-      {activeTab === "session" ? <SessionTab selectedAttempt={selectedAttempt} /> : null}
-      {activeTab === "events" ? <EventsTab selectedAttempt={selectedAttempt} /> : null}
+      <div className="inspector__body">
+        {activeTab === "attempt" ? <AttemptTab selectedAttempt={selectedAttempt} /> : null}
+        {activeTab === "session" ? <SessionTab selectedAttempt={selectedAttempt} /> : null}
+        {activeTab === "events" ? <EventsTab selectedAttempt={selectedAttempt} /> : null}
+      </div>
     </aside>
   );
 }
@@ -70,21 +72,21 @@ function AttemptTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
       </Section>
 
       {step.promptText ? (
-        <Section title="Prompt text">
+        <DisclosureSection title="Prompt text">
           <CodeBlock>{step.promptText}</CodeBlock>
-        </Section>
+        </DisclosureSection>
       ) : null}
 
       {step.rawText ? (
-        <Section title="Raw response">
+        <DisclosureSection title="Raw response">
           <CodeBlock>{step.rawText}</CodeBlock>
-        </Section>
+        </DisclosureSection>
       ) : null}
 
       {step.trace?.action ? (
-        <Section title="Action receipt">
+        <DisclosureSection title="Action receipt">
           <CodeBlock>{formatJson(step.trace.action)}</CodeBlock>
-        </Section>
+        </DisclosureSection>
       ) : null}
 
       {step.error ? (
@@ -140,10 +142,81 @@ function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
               className={`conversation__message conversation__message--${message.role}${message.highlighted ? " conversation__message--highlighted" : ""}`}
             >
               <div className="conversation__meta">
-                <span>{message.title}</span>
-                <span>#{message.index}</span>
+                <span className={`conversation__role conversation__role--${message.role}`}>
+                  {message.title}
+                </span>
+                <span className="conversation__meta-index">#{message.index}</span>
               </div>
-              <pre>{message.text}</pre>
+              {message.textBlocks.length > 0 ? (
+                <div className="conversation__text">
+                  {message.textBlocks.map((text, index) => (
+                    <p key={`${message.index}-text-${index}`}>{text}</p>
+                  ))}
+                </div>
+              ) : (
+                <div className="conversation__empty-text">No visible text content.</div>
+              )}
+
+              {message.toolUses.length > 0 ? (
+                <DisclosureSection title={`Tool calls (${message.toolUses.length})`} compact>
+                  <div className="conversation__tool-list">
+                    {message.toolUses.map((toolUse) => (
+                      <article key={toolUse.id} className="conversation__tool-card">
+                        <div className="conversation__tool-head">
+                          <strong>{toolUse.name}</strong>
+                          <span>{toolUse.id}</span>
+                        </div>
+                        <p>{toolUse.summary}</p>
+                        <details className="conversation__nested-details">
+                          <summary>Raw tool call</summary>
+                          <CodeBlock>{formatJson(toolUse.raw)}</CodeBlock>
+                        </details>
+                      </article>
+                    ))}
+                  </div>
+                </DisclosureSection>
+              ) : null}
+
+              {message.toolResults.length > 0 ? (
+                <DisclosureSection title={`Tool results (${message.toolResults.length})`} compact>
+                  <div className="conversation__tool-list">
+                    {message.toolResults.map((toolResult) => (
+                      <article key={toolResult.id} className="conversation__tool-card">
+                        <div className="conversation__tool-head">
+                          <strong>{toolResult.toolName}</strong>
+                          <span>{toolResult.status}</span>
+                        </div>
+                        <p>{toolResult.preview}</p>
+                        <details className="conversation__nested-details">
+                          <summary>Raw tool result</summary>
+                          <CodeBlock>{formatJson(toolResult.raw)}</CodeBlock>
+                        </details>
+                      </article>
+                    ))}
+                  </div>
+                </DisclosureSection>
+              ) : null}
+
+              {message.hiddenPayloads.length > 0 ? (
+                <DisclosureSection
+                  title={`Hidden structured data (${message.hiddenPayloads.length})`}
+                  compact
+                >
+                  <div className="conversation__tool-list">
+                    {message.hiddenPayloads.map((payload, index) => (
+                      <article
+                        key={`${message.index}-payload-${index}`}
+                        className="conversation__tool-card"
+                      >
+                        <div className="conversation__tool-head">
+                          <strong>{payload.label}</strong>
+                        </div>
+                        <CodeBlock>{formatJson(payload.raw)}</CodeBlock>
+                      </article>
+                    ))}
+                  </div>
+                </DisclosureSection>
+              ) : null}
             </article>
           ))}
         </div>
@@ -164,7 +237,10 @@ function EventsTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView }
                 <span>{event.scope}</span>
                 <span>{event.type}</span>
               </div>
-              <CodeBlock>{formatJson(event.payload)}</CodeBlock>
+              <details className="conversation__nested-details">
+                <summary>Show payload</summary>
+                <CodeBlock>{formatJson(event.payload)}</CodeBlock>
+              </details>
             </article>
           ))}
           {selectedAttempt.traceEvents.length === 0 ? (
@@ -181,7 +257,10 @@ function EventsTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView }
                 <span>{event.seq}</span>
                 <span>{event.direction}</span>
               </div>
-              <CodeBlock>{formatJson(event.message)}</CodeBlock>
+              <details className="conversation__nested-details">
+                <summary>Show event payload</summary>
+                <CodeBlock>{formatJson(event.message)}</CodeBlock>
+              </details>
             </article>
           ))}
           {selectedAttempt.rawEventSlice.length === 0 ? (
@@ -219,6 +298,23 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <h3>{title}</h3>
       {children}
     </section>
+  );
+}
+
+function DisclosureSection({
+  title,
+  children,
+  compact = false,
+}: {
+  title: string;
+  children: ReactNode;
+  compact?: boolean;
+}) {
+  return (
+    <details className={`panel-disclosure${compact ? " panel-disclosure--compact" : ""}`}>
+      <summary>{title}</summary>
+      <div className="panel-disclosure__body">{children}</div>
+    </details>
   );
 }
 

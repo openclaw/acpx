@@ -36,8 +36,26 @@ export type SelectedAttemptView = {
     index: number;
     role: "user" | "agent" | "unknown";
     title: string;
-    text: string;
     highlighted: boolean;
+    textBlocks: string[];
+    toolUses: Array<{
+      id: string;
+      name: string;
+      summary: string;
+      raw: unknown;
+    }>;
+    toolResults: Array<{
+      id: string;
+      toolName: string;
+      status: string;
+      preview: string;
+      isError: boolean;
+      raw: unknown;
+    }>;
+    hiddenPayloads: Array<{
+      label: string;
+      raw: unknown;
+    }>;
   }>;
   rawEventSlice: FlowBundledSessionEvent[];
   traceEvents: FlowTraceEvent[];
@@ -76,10 +94,10 @@ export function buildGraph(
     const status = deriveNodeStatus(nodeId, visibleAttempt, selectedStep);
     const level = levelByNode.get(nodeId) ?? 0;
     const column = nodesByLevel.get(level)?.indexOf(nodeId) ?? 0;
-    const laneWidth = 310;
+    const laneWidth = 390;
     const laneNodes = nodesByLevel.get(level) ?? [];
     const x = (column - (laneNodes.length - 1) / 2) * laneWidth;
-    const y = level * 190;
+    const y = level * 238;
 
     return {
       id: nodeId,
@@ -360,13 +378,17 @@ function createSessionSlice(
   const messages = Array.isArray(sessionRecord?.messages) ? sessionRecord.messages : [];
   return messages.map((message, index) => {
     const role = detectMessageRole(message);
+    const contentView = describeMessage(message, role);
     return {
       index,
       role,
       title: role === "agent" ? "Agent" : role === "user" ? "User" : "Message",
-      text: formatMessageText(message),
       highlighted:
         typeof start === "number" && typeof end === "number" && index >= start && index <= end,
+      textBlocks: contentView.textBlocks,
+      toolUses: contentView.toolUses,
+      toolResults: contentView.toolResults,
+      hiddenPayloads: contentView.hiddenPayloads,
     };
   });
 }
@@ -394,41 +416,262 @@ function detectMessageRole(message: unknown): "user" | "agent" | "unknown" {
   return "unknown";
 }
 
-function formatMessageText(message: unknown): string {
+function describeMessage(
+  message: unknown,
+  role: "user" | "agent" | "unknown",
+): Pick<
+  SelectedAttemptView["sessionSlice"][number],
+  "textBlocks" | "toolUses" | "toolResults" | "hiddenPayloads"
+> {
   if (!message || typeof message !== "object") {
-    return String(message ?? "");
+    return {
+      textBlocks: [String(message ?? "")].filter(Boolean),
+      toolUses: [],
+      toolResults: [],
+      hiddenPayloads: [],
+    };
   }
 
-  if ("User" in message) {
-    return formatMessageEntry((message as { User?: { content?: unknown[] } }).User?.content);
+  if (role === "user") {
+    const user = (message as { User?: { content?: unknown } }).User;
+    return describeStructuredMessage(user?.content, undefined);
   }
-  if ("Agent" in message) {
-    const agent = (message as { Agent?: { content?: unknown[]; tool_results?: unknown } }).Agent;
-    const contentText = formatMessageEntry(agent?.content);
-    if (
-      !agent?.tool_results ||
-      Object.keys(agent.tool_results as Record<string, unknown>).length === 0
-    ) {
-      return contentText;
-    }
-    return `${contentText}\n\nTool results:\n${JSON.stringify(agent.tool_results, null, 2)}`;
+
+  if (role === "agent") {
+    const agent = (
+      message as {
+        Agent?: {
+          content?: unknown;
+          tool_results?: unknown;
+        };
+      }
+    ).Agent;
+    return describeStructuredMessage(agent?.content, agent?.tool_results);
   }
-  return JSON.stringify(message, null, 2);
+
+  return {
+    textBlocks: [],
+    toolUses: [],
+    toolResults: [],
+    hiddenPayloads: [{ label: "Raw message", raw: message }],
+  };
 }
 
-function formatMessageEntry(content: unknown): string {
-  if (!Array.isArray(content)) {
-    return content == null ? "" : JSON.stringify(content, null, 2);
-  }
-  return content
-    .map((part) => {
+function describeStructuredMessage(
+  content: unknown,
+  toolResults: unknown,
+): Pick<
+  SelectedAttemptView["sessionSlice"][number],
+  "textBlocks" | "toolUses" | "toolResults" | "hiddenPayloads"
+> {
+  const textBlocks: string[] = [];
+  const toolUses: SelectedAttemptView["sessionSlice"][number]["toolUses"] = [];
+  const hiddenPayloads: SelectedAttemptView["sessionSlice"][number]["hiddenPayloads"] = [];
+
+  if (Array.isArray(content)) {
+    for (const [index, part] of content.entries()) {
       if (!part || typeof part !== "object") {
-        return String(part ?? "");
+        const text = String(part ?? "").trim();
+        if (text) {
+          textBlocks.push(text);
+        }
+        continue;
       }
+
       if ("Text" in part && typeof (part as { Text?: unknown }).Text === "string") {
-        return (part as { Text: string }).Text;
+        const text = (part as { Text: string }).Text.trim();
+        if (text) {
+          textBlocks.push(text);
+        }
+        continue;
       }
-      return JSON.stringify(part, null, 2);
-    })
-    .join("\n\n");
+
+      if ("ToolUse" in part) {
+        const toolUse = (part as { ToolUse?: Record<string, unknown> }).ToolUse;
+        if (toolUse && typeof toolUse === "object") {
+          toolUses.push({
+            id: String(toolUse.id ?? `tool-use-${index}`),
+            name: typeof toolUse.name === "string" ? toolUse.name : "Tool call",
+            summary: summarizeToolUse(toolUse),
+            raw: toolUse,
+          });
+          continue;
+        }
+      }
+
+      hiddenPayloads.push({
+        label: `Structured content ${index + 1}`,
+        raw: part,
+      });
+    }
+  } else if (content != null) {
+    hiddenPayloads.push({
+      label: "Structured content",
+      raw: content,
+    });
+  }
+
+  return {
+    textBlocks,
+    toolUses,
+    toolResults: describeToolResults(toolResults),
+    hiddenPayloads,
+  };
+}
+
+function describeToolResults(
+  toolResults: unknown,
+): SelectedAttemptView["sessionSlice"][number]["toolResults"] {
+  if (!toolResults || typeof toolResults !== "object") {
+    return [];
+  }
+
+  return Object.entries(toolResults as Record<string, unknown>).map(([id, entry]) => {
+    const result = entry as {
+      tool_name?: unknown;
+      is_error?: unknown;
+      output?: Record<string, unknown>;
+      content?: unknown;
+    };
+
+    const toolName =
+      typeof result.tool_name === "string" && result.tool_name.trim().length > 0
+        ? result.tool_name
+        : "Tool result";
+    const preview = summarizeToolResult(result);
+    const status =
+      typeof result.output?.status === "string"
+        ? result.output.status
+        : result.is_error
+          ? "error"
+          : "completed";
+
+    return {
+      id,
+      toolName,
+      status,
+      preview,
+      isError: Boolean(result.is_error),
+      raw: result,
+    };
+  });
+}
+
+function summarizeToolUse(toolUse: Record<string, unknown>): string {
+  const parsed =
+    parsePossiblyEncodedJson(toolUse.input) ?? parsePossiblyEncodedJson(toolUse.raw_input);
+  const parsedCommand = findFirstParsedCommand(parsed);
+  if (parsedCommand) {
+    return parsedCommand;
+  }
+  const command = findShellCommand(parsed);
+  if (command) {
+    return command;
+  }
+  return "Structured input hidden by default";
+}
+
+function summarizeToolResult(result: {
+  output?: Record<string, unknown>;
+  content?: unknown;
+}): string {
+  const output = result.output ?? {};
+  const preferredText = [
+    typeof output.formatted_output === "string" ? output.formatted_output : null,
+    typeof output.aggregated_output === "string" ? output.aggregated_output : null,
+    typeof output.stderr === "string" && output.stderr.trim().length > 0 ? output.stderr : null,
+    typeof output.stdout === "string" && output.stdout.trim().length > 0 ? output.stdout : null,
+    extractTextFromToolContent(result.content),
+  ].find((value): value is string => Boolean(value && value.trim().length > 0));
+
+  if (!preferredText) {
+    return "Structured result hidden by default";
+  }
+
+  const normalized = preferredText.replace(/\s+/g, " ").trim();
+  return normalized.length > 180 ? `${normalized.slice(0, 177)}…` : normalized;
+}
+
+function parsePossiblyEncodedJson(value: unknown): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function findFirstParsedCommand(payload: Record<string, unknown> | null): string | null {
+  const parsedCmd = payload?.parsed_cmd;
+  if (!Array.isArray(parsedCmd) || parsedCmd.length === 0) {
+    return null;
+  }
+  const first = parsedCmd[0] as Record<string, unknown> | undefined;
+  if (!first || typeof first !== "object") {
+    return null;
+  }
+  const name = typeof first.name === "string" ? first.name : null;
+  const cmd = typeof first.cmd === "string" ? first.cmd : null;
+  if (name && cmd) {
+    return `${name}: ${truncate(cmd, 96)}`;
+  }
+  if (cmd) {
+    return truncate(cmd, 96);
+  }
+  return name;
+}
+
+function findShellCommand(payload: Record<string, unknown> | null): string | null {
+  const command = payload?.command;
+  if (!Array.isArray(command) || command.length === 0) {
+    return null;
+  }
+  return truncate(
+    command.map((part) => (typeof part === "string" ? part : JSON.stringify(part))).join(" "),
+    96,
+  );
+}
+
+function extractTextFromToolContent(content: unknown): string | null {
+  if (!content) {
+    return null;
+  }
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    const text = content
+      .map((entry) =>
+        entry && typeof entry === "object" && "Text" in entry
+          ? (entry as { Text?: unknown }).Text
+          : null,
+      )
+      .filter((entry): entry is string => typeof entry === "string")
+      .join("\n");
+    return text || null;
+  }
+  if (typeof content === "object" && "Text" in content) {
+    const text = (content as { Text?: unknown }).Text;
+    return typeof text === "string" ? text : null;
+  }
+  return null;
+}
+
+function truncate(value: string, maxLength: number): string {
+  const normalized = value.trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
 }

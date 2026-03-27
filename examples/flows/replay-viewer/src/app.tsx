@@ -24,7 +24,8 @@ export function App() {
   const [recentRuns, setRecentRuns] = useState<RunBundleSummary[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [selectedStepIndex, setSelectedStepIndex] = useState(0);
-  const [activeTab, setActiveTab] = useState<"attempt" | "session" | "events">("attempt");
+  const [activeTab, setActiveTab] = useState<"attempt" | "session" | "events">("session");
+  const [runsCollapsed, setRunsCollapsed] = useState(false);
   const [loadingState, setLoadingState] = useState<
     "bootstrap" | "runs" | "sample" | "local" | "run" | null
   >("bootstrap");
@@ -94,7 +95,7 @@ export function App() {
       setBundle(loaded);
       setActiveRunId(null);
       setSelectedStepIndex(defaultSelectedStepIndex(loaded));
-      setActiveTab("attempt");
+      setActiveTab("session");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -113,7 +114,7 @@ export function App() {
       setBundle(loaded);
       setActiveRunId(null);
       setSelectedStepIndex(defaultSelectedStepIndex(loaded));
-      setActiveTab("attempt");
+      setActiveTab("session");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
@@ -134,7 +135,7 @@ export function App() {
       setBundle(loaded);
       setActiveRunId(run.runId);
       setSelectedStepIndex(defaultSelectedStepIndex(loaded));
-      setActiveTab("attempt");
+      setActiveTab("session");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -160,15 +161,23 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <header className="hero">
-        <div>
+      <header className="topbar">
+        <div className="topbar__copy">
           <div className="hero__eyebrow">acpx flow replay</div>
           <h1>Trace Viewer</h1>
-          <p>
-            Replay a flow run step by step, see the graph progression, and inspect the ACP session
-            slice that powered each ACP node.
-          </p>
         </div>
+        {bundle ? (
+          <div className="topbar__meta">
+            <span className="topbar__pill">{bundle.run.flowName}</span>
+            <span className={`topbar__pill topbar__pill--${bundle.run.status}`}>
+              {bundle.run.status}
+            </span>
+            <span className="topbar__pill">
+              {bundle.steps[selectedStepIndex]?.nodeId ?? bundle.live?.currentNode ?? "n/a"}
+            </span>
+            <span className="topbar__pill">{bundle.sourceLabel}</span>
+          </div>
+        ) : null}
       </header>
 
       {errorMessage ? <div className="error-banner">{errorMessage}</div> : null}
@@ -177,10 +186,14 @@ export function App() {
         <RunBrowser
           runs={recentRuns}
           activeRunId={activeRunId ?? undefined}
+          collapsed={runsCollapsed}
           loading={
             loadingState === "runs" || loadingState === "bootstrap" || loadingState === "run"
           }
           directoryPickerSupported={isDirectoryPickerSupported()}
+          onToggleCollapsed={() => {
+            setRunsCollapsed((current) => !current);
+          }}
           onRefresh={() => {
             void refreshRuns();
           }}
@@ -195,108 +208,95 @@ export function App() {
           }}
         />
 
-        <section className="canvas-card">
+        <section className="stage">
           {bundle ? (
             <>
-              <section className="run-summary">
-                <div className="summary-card">
-                  <span className="summary-card__label">Current node</span>
-                  <span className="summary-card__value">
-                    {bundle.steps[selectedStepIndex]?.nodeId ?? bundle.live?.currentNode ?? "n/a"}
-                  </span>
-                </div>
-                <div className="summary-card">
-                  <span className="summary-card__label">Current attempt</span>
-                  <span className="summary-card__value">
-                    {bundle.steps[selectedStepIndex]?.attemptId ?? "n/a"}
-                  </span>
-                </div>
-                <div className="summary-card">
-                  <span className="summary-card__label">Run</span>
-                  <span className="summary-card__value">{bundle.manifest.runId}</span>
-                </div>
-                <div className="summary-card">
-                  <span className="summary-card__label">Flow</span>
-                  <span className="summary-card__value">{bundle.run.flowName}</span>
-                </div>
-                <div className="summary-card">
-                  <span className="summary-card__label">Status</span>
-                  <span className={`summary-card__value summary-card__value--${bundle.run.status}`}>
-                    {bundle.run.status}
-                  </span>
-                </div>
-                <div className="summary-card">
-                  <span className="summary-card__label">Duration</span>
-                  <span className="summary-card__value">
-                    {formatDuration(
-                      (bundle.run.finishedAt ? Date.parse(bundle.run.finishedAt) : Date.now()) -
-                        Date.parse(bundle.run.startedAt),
-                    )}
-                  </span>
-                </div>
-                <div className="summary-card">
-                  <span className="summary-card__label">Started</span>
-                  <span className="summary-card__value">{formatDate(bundle.run.startedAt)}</span>
-                </div>
-                <div className="summary-card">
-                  <span className="summary-card__label">Source</span>
-                  <span className="summary-card__value">{bundle.sourceLabel}</span>
-                </div>
+              <section className="player-card">
+                <section className="run-summary">
+                  <div className="summary-card">
+                    <span className="summary-card__label">Current node</span>
+                    <span className="summary-card__value">
+                      {bundle.steps[selectedStepIndex]?.nodeId ?? bundle.live?.currentNode ?? "n/a"}
+                    </span>
+                  </div>
+                  <div className="summary-card">
+                    <span className="summary-card__label">Current attempt</span>
+                    <span className="summary-card__value">
+                      {bundle.steps[selectedStepIndex]?.attemptId ?? "n/a"}
+                    </span>
+                  </div>
+                  <div className="summary-card">
+                    <span className="summary-card__label">Run duration</span>
+                    <span className="summary-card__value">
+                      {formatDuration(
+                        (bundle.run.finishedAt ? Date.parse(bundle.run.finishedAt) : Date.now()) -
+                          Date.parse(bundle.run.startedAt),
+                      )}
+                    </span>
+                  </div>
+                  <div className="summary-card">
+                    <span className="summary-card__label">Started</span>
+                    <span className="summary-card__value">{formatDate(bundle.run.startedAt)}</span>
+                  </div>
+                </section>
+                <StepTimeline
+                  steps={bundle.steps}
+                  selectedIndex={selectedStepIndex}
+                  playing={playing}
+                  onSelect={(index) => {
+                    setPlaying(false);
+                    setSelectedStepIndex(index);
+                  }}
+                  onPlay={() => {
+                    if (selectedStepIndex >= bundle.steps.length - 1) {
+                      setSelectedStepIndex(0);
+                    }
+                    setPlaying(true);
+                  }}
+                  onPause={() => setPlaying(false)}
+                  onReset={() => {
+                    setPlaying(false);
+                    setSelectedStepIndex(0);
+                  }}
+                  onJumpToEnd={() => {
+                    setPlaying(false);
+                    setSelectedStepIndex(Math.max(bundle.steps.length - 1, 0));
+                  }}
+                />
               </section>
 
-              <div className="canvas-card__header">
-                <div>
-                  <div className="canvas-card__eyebrow">Graph replay</div>
-                  <h2>{bundle.flow.name}</h2>
+              <section className="canvas-card">
+                <div className="canvas-card__header">
+                  <div>
+                    <div className="canvas-card__eyebrow">Graph replay</div>
+                    <h2>{bundle.flow.name}</h2>
+                  </div>
+                  <div className="legend">
+                    <span className="legend__item legend__item--completed">completed</span>
+                    <span className="legend__item legend__item--active">selected</span>
+                    <span className="legend__item legend__item--queued">queued</span>
+                    <span className="legend__item legend__item--failed">problem</span>
+                  </div>
                 </div>
-                <div className="legend">
-                  <span className="legend__item legend__item--completed">completed</span>
-                  <span className="legend__item legend__item--active">selected</span>
-                  <span className="legend__item legend__item--queued">queued</span>
-                  <span className="legend__item legend__item--failed">problem</span>
+                <div className="canvas-card__flow">
+                  <ReactFlow
+                    nodes={graph.nodes}
+                    edges={graph.edges}
+                    nodeTypes={nodeTypes}
+                    fitView
+                    fitViewOptions={{ padding: 0.24, maxZoom: 1.05 }}
+                    nodesDraggable={false}
+                    nodesConnectable={false}
+                    onNodeClick={(_, node: Node) => selectNode(node.id)}
+                    minZoom={0.35}
+                    maxZoom={1.35}
+                    proOptions={{ hideAttribution: true }}
+                  >
+                    <Controls showInteractive={false} />
+                    <Background color="rgba(25, 48, 67, 0.05)" gap={28} />
+                  </ReactFlow>
                 </div>
-              </div>
-              <div className="canvas-card__flow">
-                <ReactFlow
-                  nodes={graph.nodes}
-                  edges={graph.edges}
-                  nodeTypes={nodeTypes}
-                  fitView
-                  nodesDraggable={false}
-                  nodesConnectable={false}
-                  onNodeClick={(_, node: Node) => selectNode(node.id)}
-                  minZoom={0.45}
-                  maxZoom={1.5}
-                  proOptions={{ hideAttribution: true }}
-                >
-                  <Controls showInteractive={false} />
-                  <Background color="rgba(25, 48, 67, 0.07)" gap={22} />
-                </ReactFlow>
-              </div>
-              <StepTimeline
-                steps={bundle.steps}
-                selectedIndex={selectedStepIndex}
-                playing={playing}
-                onSelect={(index) => {
-                  setPlaying(false);
-                  setSelectedStepIndex(index);
-                }}
-                onPlay={() => {
-                  if (selectedStepIndex >= bundle.steps.length - 1) {
-                    setSelectedStepIndex(0);
-                  }
-                  setPlaying(true);
-                }}
-                onPause={() => setPlaying(false)}
-                onReset={() => {
-                  setPlaying(false);
-                  setSelectedStepIndex(0);
-                }}
-                onJumpToEnd={() => {
-                  setPlaying(false);
-                  setSelectedStepIndex(Math.max(bundle.steps.length - 1, 0));
-                }}
-              />
+              </section>
             </>
           ) : (
             <div className="empty-state">
