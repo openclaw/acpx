@@ -47,9 +47,7 @@ export function FlowNodeCard({ data, selected = false }: FlowNodeCardProps) {
           {data.isTerminal ? <span className="flow-node-card__semantic">end</span> : null}
         </div>
         <span className={`flow-node-card__status flow-node-card__status--${data.status}`}>
-          {typeof data.playbackProgress === "number"
-            ? `${Math.round(data.playbackProgress * 100)}%`
-            : labelForStatus(data.status)}
+          {labelForStatus(data.status)}
         </span>
       </div>
       <div className="flow-node-card__title">{data.title}</div>

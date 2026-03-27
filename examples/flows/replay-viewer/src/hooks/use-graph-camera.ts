@@ -1,40 +1,44 @@
-import type { Node, ReactFlowInstance } from "@xyflow/react";
-import { useEffect, useState } from "react";
-import type { ViewerNodeData } from "../lib/view-model";
+import type { ReactFlowInstance } from "@xyflow/react";
+import { useEffect, useRef, useState } from "react";
 
 type UseGraphCameraOptions = {
   runId: string | undefined;
-  nodes: Node<ViewerNodeData>[];
   layoutKey: string;
   currentNodeId: string | null;
+  currentNodePosition: { x: number; y: number } | null;
   viewMode: "follow" | "overview";
 };
 
+export const REPLAY_FIT_VIEW_OPTIONS = {
+  padding: 0.56,
+  minZoom: 0.08,
+  maxZoom: 0.92,
+  duration: 360,
+  ease: easeOutCubic,
+} as const;
+
 export function useGraphCamera({
   runId,
-  nodes,
   layoutKey,
   currentNodeId,
+  currentNodePosition,
   viewMode,
 }: UseGraphCameraOptions) {
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const lastFollowTargetRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!flowInstance?.viewportInitialized || !runId || viewMode !== "overview") {
       return;
     }
+    lastFollowTargetRef.current = null;
 
     let cancelled = false;
     const frameId = window.requestAnimationFrame(() => {
       if (cancelled) {
         return;
       }
-      void flowInstance.fitView({
-        padding: 0.34,
-        maxZoom: 1.02,
-        duration: 360,
-        ease: easeOutCubic,
-      });
+      void flowInstance.fitView(REPLAY_FIT_VIEW_OPTIONS);
     });
 
     return () => {
@@ -44,9 +48,20 @@ export function useGraphCamera({
   }, [flowInstance, layoutKey, runId, viewMode]);
 
   useEffect(() => {
-    if (!flowInstance?.viewportInitialized || !runId || viewMode !== "follow" || !currentNodeId) {
+    if (
+      !flowInstance?.viewportInitialized ||
+      !runId ||
+      viewMode !== "follow" ||
+      !currentNodeId ||
+      !currentNodePosition
+    ) {
       return;
     }
+    const followTargetKey = `${runId}:${layoutKey}:${currentNodeId}`;
+    if (lastFollowTargetRef.current === followTargetKey) {
+      return;
+    }
+    lastFollowTargetRef.current = followTargetKey;
 
     let cancelled = false;
     const frameId = window.requestAnimationFrame(() => {
@@ -55,15 +70,10 @@ export function useGraphCamera({
       }
 
       const internalNode = flowInstance.getInternalNode(currentNodeId);
-      const graphNode = nodes.find((node) => node.id === currentNodeId);
-      if (!graphNode) {
-        return;
-      }
-
       const width = internalNode?.measured?.width ?? internalNode?.width ?? 284;
       const height = internalNode?.measured?.height ?? internalNode?.height ?? 134;
-      const centerX = graphNode.position.x + width / 2;
-      const centerY = graphNode.position.y + height / 2 + 72;
+      const centerX = currentNodePosition.x + width / 2;
+      const centerY = currentNodePosition.y + height / 2 + 72;
 
       void flowInstance.setCenter(centerX, centerY, {
         zoom: 0.84,
@@ -76,7 +86,7 @@ export function useGraphCamera({
       cancelled = true;
       window.cancelAnimationFrame(frameId);
     };
-  }, [currentNodeId, flowInstance, layoutKey, nodes, runId, viewMode]);
+  }, [currentNodeId, currentNodePosition, flowInstance, layoutKey, runId, viewMode]);
 
   return {
     flowInstance,

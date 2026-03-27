@@ -413,6 +413,11 @@ code {
   text-transform: uppercase;
 }
 
+.flow-node-card__status {
+  min-width: 72px;
+  justify-content: center;
+}
+
 .outcome-pill--ok,
 .outcome-pill--completed,
 .flow-node-card__status--completed {
@@ -623,7 +628,9 @@ code {
 .flow-node-card {
   position: relative;
   overflow: hidden;
-  min-width: 248px;
+  width: 264px;
+  min-width: 264px;
+  box-sizing: border-box;
   display: grid;
   gap: 6px;
   padding: 10px 11px;

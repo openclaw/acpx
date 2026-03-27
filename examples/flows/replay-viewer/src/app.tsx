@@ -4,7 +4,7 @@ import { FlowNodeCard } from "./components/flow-node-card";
 import { InspectorPanel } from "./components/inspector-panel";
 import { RunBrowser } from "./components/run-browser";
 import { StepTimeline } from "./components/step-timeline";
-import { useGraphCamera } from "./hooks/use-graph-camera";
+import { REPLAY_FIT_VIEW_OPTIONS, useGraphCamera } from "./hooks/use-graph-camera";
 import { usePlaybackController } from "./hooks/use-playback-controller";
 import { useRunBundleLoader } from "./hooks/use-run-bundle-loader";
 import { isDirectoryPickerSupported } from "./lib/bundle-reader";
@@ -73,6 +73,13 @@ export function App() {
       ? playback.playbackPreview.stepProgress
       : null;
   const currentNodeId = currentStep?.nodeId ?? graph.nodes[0]?.id ?? null;
+  const currentNodePosition = useMemo(() => {
+    if (!currentNodeId) {
+      return null;
+    }
+    const node = graph.nodes.find((candidate) => candidate.id === currentNodeId);
+    return node ? { x: node.position.x, y: node.position.y } : null;
+  }, [currentNodeId, graphLayoutKey]);
   const playbackValue =
     playback.playbackPreview?.playheadMs ??
     (playback.playbackTimeline
@@ -82,9 +89,9 @@ export function App() {
 
   const { setFlowInstance } = useGraphCamera({
     runId: bundle?.run.runId,
-    nodes: graph.nodes,
     layoutKey: graphLayoutKey,
     currentNodeId,
+    currentNodePosition,
     viewMode,
   });
 
@@ -161,11 +168,18 @@ export function App() {
                     nodesConnectable={false}
                     onInit={setFlowInstance}
                     onNodeClick={(_, node: Node) => selectNode(node.id)}
-                    minZoom={0.28}
+                    minZoom={REPLAY_FIT_VIEW_OPTIONS.minZoom}
                     maxZoom={1.35}
+                    fitViewOptions={REPLAY_FIT_VIEW_OPTIONS}
                     proOptions={{ hideAttribution: true }}
                   >
-                    <Controls showInteractive={false} />
+                    <Controls
+                      showInteractive={false}
+                      fitViewOptions={REPLAY_FIT_VIEW_OPTIONS}
+                      onFitView={() => {
+                        setViewMode("overview");
+                      }}
+                    />
                     <Background color="rgba(148, 163, 184, 0.08)" gap={40} />
                   </ReactFlow>
                 </div>
