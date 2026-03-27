@@ -12,12 +12,7 @@ import {
   listRecentRuns,
 } from "./lib/bundle-reader";
 import { loadRunBundle } from "./lib/load-bundle";
-import {
-  buildGraph,
-  deriveRunOutcomeView,
-  formatDuration,
-  selectAttemptView,
-} from "./lib/view-model";
+import { buildGraph, deriveRunOutcomeView, selectAttemptView } from "./lib/view-model";
 import type { LoadedRunBundle, RunBundleSummary } from "./types";
 
 const nodeTypes = {
@@ -190,27 +185,6 @@ export function App() {
       />
 
       <main className="app-main">
-        <header className="topbar">
-          <div className="topbar__left">
-            <div className="topbar__copy">
-              <div className="hero__eyebrow">acpx flow replay</div>
-              <h1>Trace Viewer</h1>
-            </div>
-          </div>
-          {bundle ? (
-            <div className="topbar__meta">
-              <span className="topbar__pill">{bundle.run.flowName}</span>
-              <span className={`topbar__pill topbar__pill--${bundle.run.status}`}>
-                {bundle.run.status}
-              </span>
-              <span className="topbar__pill">
-                {bundle.steps[selectedStepIndex]?.nodeId ?? bundle.live?.currentNode ?? "n/a"}
-              </span>
-              <span className="topbar__pill">{bundle.sourceLabel}</span>
-            </div>
-          ) : null}
-        </header>
-
         {errorMessage ? <div className="error-banner">{errorMessage}</div> : null}
 
         <section className="viewer-layout">
@@ -246,27 +220,10 @@ export function App() {
                           setPlaying(false);
                           setSelectedStepIndex(Math.max(bundle.steps.length - 1, 0));
                         }}
-                        runStartedAt={bundle.run.startedAt}
-                        runDurationLabel={formatDuration(
-                          (bundle.run.finishedAt ? Date.parse(bundle.run.finishedAt) : Date.now()) -
-                            Date.parse(bundle.run.startedAt),
-                        )}
                       />
                     </section>
 
                     <section className="canvas-card">
-                      <div className="canvas-card__header">
-                        <div>
-                          <div className="canvas-card__eyebrow">Graph replay</div>
-                          <h2>{bundle.flow.name}</h2>
-                        </div>
-                        <div className="legend">
-                          <span className="legend__item legend__item--completed">completed</span>
-                          <span className="legend__item legend__item--active">selected</span>
-                          <span className="legend__item legend__item--queued">queued</span>
-                          <span className="legend__item legend__item--failed">problem</span>
-                        </div>
-                      </div>
                       <div className="canvas-card__flow" style={{ minHeight: "360px" }}>
                         <ReactFlow
                           key={bundle.run.runId}
@@ -283,7 +240,7 @@ export function App() {
                           proOptions={{ hideAttribution: true }}
                         >
                           <Controls showInteractive={false} />
-                          <Background color="rgba(148, 163, 184, 0.12)" gap={36} />
+                          <Background color="rgba(148, 163, 184, 0.08)" gap={40} />
                         </ReactFlow>
                       </div>
                     </section>

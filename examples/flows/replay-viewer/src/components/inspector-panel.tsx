@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { formatDate, formatDuration, formatJson } from "../lib/view-model";
+import { formatDate, formatDuration, formatJson, humanizeIdentifier } from "../lib/view-model";
 import type { SelectedAttemptView } from "../lib/view-model";
 
 type InspectorPanelProps = {
@@ -13,49 +13,37 @@ export function InspectorPanel({ selectedAttempt, activeTab, onTabChange }: Insp
     return (
       <aside className="inspector">
         <div className="inspector__empty">
-          Pick a step attempt to inspect its prompt, ACP session slice, and replay data.
+          Pick a step attempt to inspect the ACP conversation, attempt output, and trace events.
         </div>
       </aside>
     );
   }
 
   const { step } = selectedAttempt;
+  const durationLabel = formatDuration(Date.parse(step.finishedAt) - Date.parse(step.startedAt));
 
   return (
     <aside className="inspector">
       <div className="inspector__header">
         <div>
-          <div className="inspector__eyebrow">{step.nodeType} attempt</div>
-          <h2 className="inspector__title">{step.nodeId}</h2>
-          <div className="inspector__subtitle">{step.attemptId}</div>
+          <div className="inspector__eyebrow">{labelForNodeType(step.nodeType)} step</div>
+          <h2 className="inspector__title">{humanizeIdentifier(step.nodeId)}</h2>
+          <div className="inspector__subtitle">
+            {step.nodeId} · {step.attemptId} · {durationLabel}
+          </div>
         </div>
         <span className={`outcome-pill outcome-pill--${step.outcome}`}>{step.outcome}</span>
       </div>
 
-      <div className="inspector__meta">
-        <div>
-          <span className="inspector__meta-label">Started</span>
-          <span>{formatDate(step.startedAt)}</span>
-        </div>
-        <div>
-          <span className="inspector__meta-label">Finished</span>
-          <span>{formatDate(step.finishedAt)}</span>
-        </div>
-        <div>
-          <span className="inspector__meta-label">Duration</span>
-          <span>{formatDuration(Date.parse(step.finishedAt) - Date.parse(step.startedAt))}</span>
-        </div>
-      </div>
-
       <div className="inspector__tabs">
-        <TabButton tab="attempt" activeTab={activeTab} onTabChange={onTabChange} />
         <TabButton tab="session" activeTab={activeTab} onTabChange={onTabChange} />
+        <TabButton tab="attempt" activeTab={activeTab} onTabChange={onTabChange} />
         <TabButton tab="events" activeTab={activeTab} onTabChange={onTabChange} />
       </div>
 
       <div className="inspector__body">
-        {activeTab === "attempt" ? <AttemptTab selectedAttempt={selectedAttempt} /> : null}
         {activeTab === "session" ? <SessionTab selectedAttempt={selectedAttempt} /> : null}
+        {activeTab === "attempt" ? <AttemptTab selectedAttempt={selectedAttempt} /> : null}
         {activeTab === "events" ? <EventsTab selectedAttempt={selectedAttempt} /> : null}
       </div>
     </aside>
@@ -67,7 +55,10 @@ function AttemptTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
 
   return (
     <div className="inspector__section-stack">
-      <Section title="Parsed output">
+      <Section
+        title="Output"
+        subtitle={`${formatDate(step.startedAt)} · ${formatDuration(Date.parse(step.finishedAt) - Date.parse(step.startedAt))}`}
+      >
         <CodeBlock>{formatJson(step.output)}</CodeBlock>
       </Section>
 
@@ -114,35 +105,15 @@ function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
 
   return (
     <div className="inspector__section-stack">
-      <Section title="Session metadata">
+      <Section title="ACP session">
         {sessionFromFallback && sessionSourceStep ? (
           <div className="session-note">
             Showing the latest visible ACP conversation from{" "}
-            <strong>{sessionSourceStep.nodeId}</strong> because <code>{step.nodeId}</code> does not
-            carry its own session slice.
+            <strong>{humanizeIdentifier(sessionSourceStep.nodeId)}</strong> because{" "}
+            <code>{step.nodeId}</code> does not carry its own session slice.
           </div>
         ) : null}
-        <dl className="definition-grid">
-          <div>
-            <dt>Name</dt>
-            <dd>{step.session?.name ?? sessionRecord.name ?? "n/a"}</dd>
-          </div>
-          <div>
-            <dt>Session id</dt>
-            <dd>{step.trace?.conversation?.sessionId ?? step.trace?.sessionId ?? "n/a"}</dd>
-          </div>
-          <div>
-            <dt>cwd</dt>
-            <dd>{sessionRecord.cwd ?? step.agent?.cwd ?? "n/a"}</dd>
-          </div>
-          <div>
-            <dt>Agent command</dt>
-            <dd>{sessionRecord.agentCommand ?? step.agent?.agentCommand ?? "n/a"}</dd>
-          </div>
-        </dl>
-      </Section>
 
-      <Section title="Conversation">
         <div className="conversation">
           {sessionSlice.map((message) => (
             <article
@@ -155,6 +126,7 @@ function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
                 </span>
                 <span className="conversation__meta-index">#{message.index}</span>
               </div>
+
               {message.textBlocks.length > 0 ? (
                 <div className="conversation__text">
                   {message.textBlocks.map((text, index) => (
@@ -229,6 +201,35 @@ function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
           ))}
         </div>
       </Section>
+
+      <DisclosureSection title="Session details">
+        <dl className="definition-grid">
+          <div>
+            <dt>Name</dt>
+            <dd>{step.session?.name ?? sessionRecord.name ?? "n/a"}</dd>
+          </div>
+          <div>
+            <dt>Session id</dt>
+            <dd>{step.trace?.conversation?.sessionId ?? step.trace?.sessionId ?? "n/a"}</dd>
+          </div>
+          <div>
+            <dt>Started</dt>
+            <dd>{formatDate(step.startedAt)}</dd>
+          </div>
+          <div>
+            <dt>Finished</dt>
+            <dd>{formatDate(step.finishedAt)}</dd>
+          </div>
+          <div>
+            <dt>cwd</dt>
+            <dd>{sessionRecord.cwd ?? step.agent?.cwd ?? "n/a"}</dd>
+          </div>
+          <div>
+            <dt>Agent command</dt>
+            <dd>{sessionRecord.agentCommand ?? step.agent?.agentCommand ?? "n/a"}</dd>
+          </div>
+        </dl>
+      </DisclosureSection>
     </div>
   );
 }
@@ -236,7 +237,7 @@ function SessionTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
 function EventsTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView }) {
   return (
     <div className="inspector__section-stack">
-      <Section title="Trace events for this attempt">
+      <Section title="Trace events">
         <div className="event-list">
           {selectedAttempt.traceEvents.map((event) => (
             <article key={`${event.seq}-${event.type}`} className="event-card">
@@ -300,10 +301,21 @@ function TabButton({
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+}) {
   return (
     <section className="panel-section">
-      <h3>{title}</h3>
+      <div className="panel-section__header">
+        <h3>{title}</h3>
+        {subtitle ? <div className="panel-section__subtitle">{subtitle}</div> : null}
+      </div>
       {children}
     </section>
   );
@@ -328,4 +340,18 @@ function DisclosureSection({
 
 function CodeBlock({ children }: { children: string }) {
   return <pre className="code-block">{children}</pre>;
+}
+
+function labelForNodeType(nodeType: SelectedAttemptView["step"]["nodeType"]): string {
+  switch (nodeType) {
+    case "acp":
+      return "ACP";
+    case "action":
+      return "Action";
+    case "checkpoint":
+      return "Checkpoint";
+    case "compute":
+    default:
+      return "Compute";
+  }
 }

@@ -2,7 +2,6 @@ import { Position, type Edge, type Node } from "@xyflow/react";
 import type {
   FlowBundledSessionEvent,
   FlowDefinitionSnapshot,
-  FlowEdge,
   FlowNodeOutcome,
   FlowRunState,
   FlowStepRecord,
@@ -21,12 +20,20 @@ export type ViewerNodeStatus =
 
 export type ViewerNodeData = {
   nodeId: string;
+  title: string;
+  subtitle: string;
   nodeType: FlowStepRecord["nodeType"];
   status: ViewerNodeStatus;
   attempts: number;
   latestAttemptId?: string;
   durationLabel?: string;
-  handleLabel?: string;
+  isStart: boolean;
+  isTerminal: boolean;
+  isDecision: boolean;
+  branchCount: number;
+  branchLabels: string[];
+  isRunOutcomeNode: boolean;
+  runOutcomeLabel?: string;
 };
 
 export type SelectedAttemptView = {
@@ -68,10 +75,25 @@ export type RunOutcomeView = {
   status: FlowRunState["status"];
   headline: string;
   detail: string;
+  shortLabel: string;
   accent: "ok" | "active" | "failed" | "timed_out";
   nodeId: string | null;
   attemptId: string | null;
   isTerminal: boolean;
+};
+
+type ExpandedFlowEdge = {
+  source: string;
+  target: string;
+  edgeId: string;
+};
+
+type NodeSemantics = {
+  startNodeId: string;
+  terminalNodeIds: Set<string>;
+  decisionNodeIds: Set<string>;
+  outgoingTargets: Map<string, string[]>;
+  outgoingLabels: Map<string, string[]>;
 };
 
 export function buildGraph(
@@ -85,19 +107,22 @@ export function buildGraph(
   const selectedStep = bundle.steps[selectedStepIndex] ?? null;
   const visibleSteps = bundle.steps.slice(0, Math.max(selectedStepIndex + 1, 0));
   const actualTransitions = new Set<string>();
+  const semantics = inferNodeSemantics(bundle.flow);
+  const expandedEdges = expandFlowEdges(bundle.flow);
+  const provisionalLevels = computeShortestLevels(bundle.flow, expandedEdges, orderedNodeIds);
+  const backEdgeIds = findBackEdgeIds(expandedEdges, provisionalLevels);
+  const levelByNode = computeLevels(
+    bundle.flow,
+    orderedNodeIds,
+    expandedEdges,
+    backEdgeIds,
+    semantics.terminalNodeIds,
+  );
+  const rankOrder = orderNodesWithinRanks(orderedNodeIds, expandedEdges, levelByNode, backEdgeIds);
+  const runOutcome = deriveRunOutcomeView(bundle);
 
   for (let index = 1; index < visibleSteps.length; index += 1) {
     actualTransitions.add(`${visibleSteps[index - 1]?.nodeId}->${visibleSteps[index]?.nodeId}`);
-  }
-
-  const levelByNode = computeLevels(bundle.flow, orderedNodeIds);
-  const nodesByLevel = new Map<number, string[]>();
-
-  for (const nodeId of orderedNodeIds) {
-    const level = levelByNode.get(nodeId) ?? 0;
-    const existing = nodesByLevel.get(level) ?? [];
-    existing.push(nodeId);
-    nodesByLevel.set(level, existing);
   }
 
   const graphNodes = orderedNodeIds.map((nodeId) => {
@@ -106,17 +131,24 @@ export function buildGraph(
     const visibleAttempt = findLatestVisibleAttempt(visibleSteps, nodeId);
     const status = deriveNodeStatus(nodeId, visibleAttempt, selectedStep);
     const level = levelByNode.get(nodeId) ?? 0;
-    const column = nodesByLevel.get(level)?.indexOf(nodeId) ?? 0;
-    const laneWidth = 456;
-    const laneNodes = nodesByLevel.get(level) ?? [];
+    const laneNodes = rankOrder.get(level) ?? [];
+    const column = laneNodes.indexOf(nodeId);
+    const laneWidth = 332;
     const x = (column - (laneNodes.length - 1) / 2) * laneWidth;
-    const y = level * 284;
+    const y = level * 236;
+    const isStart = nodeId === semantics.startNodeId;
+    const isTerminal = semantics.terminalNodeIds.has(nodeId);
+    const isDecision = semantics.decisionNodeIds.has(nodeId);
+    const branchCount = semantics.outgoingTargets.get(nodeId)?.length ?? 0;
+    const branchLabels = semantics.outgoingLabels.get(nodeId) ?? [];
 
     return {
       id: nodeId,
       type: "flowNode",
       data: {
         nodeId,
+        title: humanizeIdentifier(nodeId),
+        subtitle: nodeId,
         nodeType,
         status,
         attempts: attemptsForNode.length,
@@ -126,7 +158,14 @@ export function buildGraph(
               Date.parse(visibleAttempt.finishedAt) - Date.parse(visibleAttempt.startedAt),
             )
           : undefined,
-        handleLabel: visibleAttempt?.session?.handle ?? bundle.flow.nodes[nodeId]?.session?.handle,
+        isStart,
+        isTerminal,
+        isDecision,
+        branchCount,
+        branchLabels,
+        isRunOutcomeNode: runOutcome.nodeId === nodeId,
+        runOutcomeLabel:
+          runOutcome.nodeId === nodeId && runOutcome.isTerminal ? runOutcome.shortLabel : undefined,
       },
       position: { x, y },
       sourcePosition: Position.Bottom,
@@ -136,51 +175,44 @@ export function buildGraph(
     } satisfies Node<ViewerNodeData>;
   });
 
-  const graphEdges = bundle.flow.edges.flatMap((edge, index) =>
-    expandEdges(edge).map(({ target, label }, branchIndex) => {
-      const edgeId = `${edge.from}->${target}-${index}-${branchIndex}`;
-      const isTraversed = actualTransitions.has(`${edge.from}->${target}`);
-      const isSelected = Boolean(
-        selectedStep != null &&
-        visibleSteps.at(-2)?.nodeId === edge.from &&
-        selectedStep.nodeId === target,
-      );
+  const graphEdges = expandedEdges.map((edge) => {
+    const isTraversed = actualTransitions.has(`${edge.source}->${edge.target}`);
+    const isSelected = Boolean(
+      selectedStep != null &&
+      visibleSteps.at(-2)?.nodeId === edge.source &&
+      selectedStep.nodeId === edge.target,
+    );
+    const isBackEdge = backEdgeIds.has(edge.edgeId);
+    const sourceNode = graphNodes.find((node) => node.id === edge.source);
+    const targetNode = graphNodes.find((node) => node.id === edge.target);
+    const leftToRight = (sourceNode?.position.x ?? 0) <= (targetNode?.position.x ?? 0);
+    const stroke = isSelected
+      ? "var(--edge-active)"
+      : isTraversed
+        ? "var(--edge-complete)"
+        : "var(--edge-pending)";
 
-      return {
-        id: edgeId,
-        source: edge.from,
-        target,
-        type: "smoothstep",
-        animated: isSelected,
-        style: {
-          stroke: isSelected
-            ? "var(--edge-active)"
-            : isTraversed
-              ? "var(--edge-complete)"
-              : "var(--edge-pending)",
-          strokeWidth: isTraversed || isSelected ? 2.5 : 1.4,
-          opacity: 1,
-        },
-        label,
-        labelStyle: {
-          fill: "var(--ink-soft)",
-          fontSize: 11,
-          fontWeight: 600,
-        },
-        labelBgStyle: {
-          fill: "rgba(247, 244, 236, 0.9)",
-        },
-        markerEnd: {
-          type: "arrowclosed",
-          color: isSelected
-            ? "var(--edge-active)"
-            : isTraversed
-              ? "var(--edge-complete)"
-              : "var(--edge-pending)",
-        },
-      } satisfies Edge;
-    }),
-  );
+    return {
+      id: edge.edgeId,
+      source: edge.source,
+      target: edge.target,
+      type: isBackEdge ? "smoothstep" : "step",
+      sourceHandle: isBackEdge ? (leftToRight ? "out-right" : "out-left") : "out-bottom",
+      targetHandle: isBackEdge ? (leftToRight ? "in-left" : "in-right") : "in-top",
+      animated: isSelected,
+      style: {
+        stroke,
+        strokeWidth: isSelected || isTraversed ? 2.4 : 1.2,
+        opacity: isTraversed || isSelected ? 1 : 0.72,
+        strokeDasharray: isBackEdge ? "6 5" : undefined,
+      },
+      markerEnd: {
+        type: "arrowclosed",
+        color: stroke,
+      },
+      zIndex: isBackEdge ? 0 : 1,
+    } satisfies Edge;
+  });
 
   return {
     nodes: graphNodes,
@@ -234,6 +266,7 @@ export function deriveRunOutcomeView(bundle: LoadedRunBundle): RunOutcomeView {
   const lastStep = bundle.steps.at(-1) ?? null;
   const activeNodeId =
     bundle.run.currentNode ?? bundle.live?.currentNode ?? lastStep?.nodeId ?? null;
+  const activeNodeLabel = activeNodeId ? humanizeIdentifier(activeNodeId) : null;
   const activeAttemptId =
     bundle.run.currentAttemptId ?? bundle.live?.currentAttemptId ?? lastStep?.attemptId ?? null;
   const errorText =
@@ -250,9 +283,10 @@ export function deriveRunOutcomeView(bundle: LoadedRunBundle): RunOutcomeView {
       return {
         status: bundle.run.status,
         headline: "Run completed",
-        detail: activeNodeId
-          ? `The final recorded step completed at ${activeNodeId}.`
+        detail: activeNodeLabel
+          ? `The final recorded step completed at ${activeNodeLabel}.`
           : "The flow reached a completed terminal state.",
+        shortLabel: "completed",
         accent: "ok",
         nodeId: activeNodeId,
         attemptId: activeAttemptId,
@@ -261,10 +295,11 @@ export function deriveRunOutcomeView(bundle: LoadedRunBundle): RunOutcomeView {
     case "running":
       return {
         status: bundle.run.status,
-        headline: activeNodeId ? `Running at ${activeNodeId}` : "Run is still active",
+        headline: activeNodeLabel ? `Running at ${activeNodeLabel}` : "Run is still active",
         detail:
           bundle.run.statusDetail?.trim() ||
           "The run is still in progress. Replay position shows recorded attempts only.",
+        shortLabel: "running",
         accent: "active",
         nodeId: activeNodeId,
         attemptId: activeAttemptId,
@@ -275,12 +310,13 @@ export function deriveRunOutcomeView(bundle: LoadedRunBundle): RunOutcomeView {
         status: bundle.run.status,
         headline: waitingOn
           ? `Waiting at ${waitingOn}`
-          : activeNodeId
-            ? `Waiting at ${activeNodeId}`
+          : activeNodeLabel
+            ? `Waiting at ${activeNodeLabel}`
             : "Run is waiting",
         detail:
           bundle.run.statusDetail?.trim() ||
           "The run paused at a checkpoint or external wait state.",
+        shortLabel: "waiting",
         accent: "active",
         nodeId: activeNodeId,
         attemptId: activeAttemptId,
@@ -289,8 +325,9 @@ export function deriveRunOutcomeView(bundle: LoadedRunBundle): RunOutcomeView {
     case "timed_out":
       return {
         status: bundle.run.status,
-        headline: activeNodeId ? `Timed out at ${activeNodeId}` : "Run timed out",
+        headline: activeNodeLabel ? `Timed out at ${activeNodeLabel}` : "Run timed out",
         detail: errorText || "The run stopped because a node exceeded its timeout budget.",
+        shortLabel: "timed out",
         accent: "timed_out",
         nodeId: activeNodeId,
         attemptId: activeAttemptId,
@@ -300,16 +337,32 @@ export function deriveRunOutcomeView(bundle: LoadedRunBundle): RunOutcomeView {
     default:
       return {
         status: bundle.run.status,
-        headline: activeNodeId ? `Stopped at ${activeNodeId}` : "Run failed",
+        headline: activeNodeLabel ? `Stopped at ${activeNodeLabel}` : "Run failed",
         detail:
           errorText ||
           "The run exited early because a node failed before reaching a completed terminal state.",
+        shortLabel: "stopped",
         accent: "failed",
         nodeId: activeNodeId,
         attemptId: activeAttemptId,
         isTerminal: true,
       };
   }
+}
+
+export function humanizeIdentifier(value: string): string {
+  const normalized = value
+    .replace(/[_-]+/g, " ")
+    .replace(/\bpr\b/gi, "PR")
+    .replace(/\bci\b/gi, "CI")
+    .replace(/\bacp\b/gi, "ACP")
+    .trim();
+
+  if (!normalized) {
+    return value;
+  }
+
+  return normalized.replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
 function resolveSessionSourceStep(
@@ -365,6 +418,31 @@ export function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function humanizeBranchLabel(value: string): string {
+  const mapped = (
+    {
+      close_pr: "close",
+      comment_and_escalate_to_human: "human",
+      bug_or_feature: "classify",
+      judge_initial_conflicts: "assess",
+      resolve_initial_conflicts: "resolve",
+      reproduce_bug_and_test_fix: "bug path",
+      test_feature_directly: "feature path",
+      judge_refactor: "refactor",
+      collect_review_state: "review",
+      do_superficial_refactor: "refactor",
+      collect_ci_state: "ci",
+      check_final_conflicts: "final conflicts",
+      judge_final_conflicts: "assess",
+      resolve_final_conflicts: "resolve",
+      post_close_pr: "post close",
+      post_escalation_comment: "post comment",
+    } as Record<string, string | undefined>
+  )[value];
+
+  return mapped ?? humanizeIdentifier(value).toLowerCase();
+}
+
 function deriveNodeStatus(
   nodeId: string,
   visibleAttempt: FlowStepRecord | undefined,
@@ -402,14 +480,61 @@ function findLatestVisibleAttempt(
   return matching.at(-1);
 }
 
-function expandEdges(edge: FlowEdge): Array<{ target: string; label?: string }> {
-  if ("to" in edge) {
-    return [{ target: edge.to }];
+function expandFlowEdges(flow: FlowDefinitionSnapshot): ExpandedFlowEdge[] {
+  return flow.edges.flatMap((edge, index) => {
+    if ("to" in edge) {
+      return [
+        {
+          source: edge.from,
+          target: edge.to,
+          edgeId: `${edge.from}->${edge.to}-${index}-0`,
+        },
+      ];
+    }
+
+    return Object.values(edge.switch.cases).map((target, branchIndex) => ({
+      source: edge.from,
+      target,
+      edgeId: `${edge.from}->${target}-${index}-${branchIndex}`,
+    }));
+  });
+}
+
+function inferNodeSemantics(flow: FlowDefinitionSnapshot): NodeSemantics {
+  const outgoingTargets = new Map<string, string[]>();
+  const outgoingLabels = new Map<string, string[]>();
+
+  for (const edge of flow.edges) {
+    const targets = "to" in edge ? [edge.to] : Object.values(edge.switch.cases);
+    outgoingTargets.set(edge.from, [...(outgoingTargets.get(edge.from) ?? []), ...targets]);
+    if ("switch" in edge) {
+      outgoingLabels.set(edge.from, [
+        ...(outgoingLabels.get(edge.from) ?? []),
+        ...Object.keys(edge.switch.cases).map((caseKey) => humanizeBranchLabel(caseKey)),
+      ]);
+    }
   }
-  return Object.entries(edge.switch.cases).map(([caseKey, target]) => ({
-    target,
-    label: caseKey,
-  }));
+
+  const terminalNodeIds = new Set<string>();
+  const decisionNodeIds = new Set<string>();
+
+  for (const nodeId of Object.keys(flow.nodes)) {
+    const targets = outgoingTargets.get(nodeId) ?? [];
+    if (targets.length === 0) {
+      terminalNodeIds.add(nodeId);
+    }
+    if (new Set(targets).size > 1) {
+      decisionNodeIds.add(nodeId);
+    }
+  }
+
+  return {
+    startNodeId: flow.startAt,
+    terminalNodeIds,
+    decisionNodeIds,
+    outgoingTargets,
+    outgoingLabels,
+  };
 }
 
 function layoutNodeIds(flow: FlowDefinitionSnapshot, steps: FlowStepRecord[]): string[] {
@@ -459,6 +584,9 @@ function layoutNodeIds(flow: FlowDefinitionSnapshot, steps: FlowStepRecord[]): s
 function computeLevels(
   flow: FlowDefinitionSnapshot,
   orderedNodeIds: string[],
+  expandedEdges: ExpandedFlowEdge[],
+  backEdgeIds: Set<string>,
+  terminalNodeIds: Set<string>,
 ): Map<string, number> {
   const levelByNode = new Map<string, number>();
   levelByNode.set(flow.startAt, 0);
@@ -466,20 +594,13 @@ function computeLevels(
   for (const nodeId of orderedNodeIds) {
     const fromLevel = levelByNode.get(nodeId) ?? 0;
 
-    for (const edge of flow.edges) {
-      if (edge.from !== nodeId) {
+    for (const edge of expandedEdges) {
+      if (edge.source !== nodeId || backEdgeIds.has(edge.edgeId)) {
         continue;
       }
-      if ("to" in edge) {
-        if (!levelByNode.has(edge.to)) {
-          levelByNode.set(edge.to, fromLevel + 1);
-        }
-        continue;
-      }
-      for (const target of Object.values(edge.switch.cases)) {
-        if (!levelByNode.has(target)) {
-          levelByNode.set(target, fromLevel + 1);
-        }
+      const nextLevel = fromLevel + 1;
+      if (nextLevel > (levelByNode.get(edge.target) ?? -1)) {
+        levelByNode.set(edge.target, nextLevel);
       }
     }
   }
@@ -490,7 +611,135 @@ function computeLevels(
     }
   }
 
+  const maxLevel = Math.max(...levelByNode.values());
+  for (const nodeId of terminalNodeIds) {
+    if (levelByNode.has(nodeId)) {
+      levelByNode.set(nodeId, maxLevel);
+    }
+  }
+
   return levelByNode;
+}
+
+function computeShortestLevels(
+  flow: FlowDefinitionSnapshot,
+  expandedEdges: ExpandedFlowEdge[],
+  orderedNodeIds: string[],
+): Map<string, number> {
+  const levels = new Map<string, number>();
+  levels.set(flow.startAt, 0);
+
+  for (const nodeId of orderedNodeIds) {
+    const sourceLevel = levels.get(nodeId);
+    if (sourceLevel == null) {
+      continue;
+    }
+
+    for (const edge of expandedEdges) {
+      if (edge.source !== nodeId) {
+        continue;
+      }
+      const nextLevel = sourceLevel + 1;
+      const current = levels.get(edge.target);
+      if (current == null || nextLevel < current) {
+        levels.set(edge.target, nextLevel);
+      }
+    }
+  }
+
+  return levels;
+}
+
+function findBackEdgeIds(
+  expandedEdges: ExpandedFlowEdge[],
+  shortestLevels: Map<string, number>,
+): Set<string> {
+  const backEdgeIds = new Set<string>();
+
+  for (const edge of expandedEdges) {
+    const sourceLevel = shortestLevels.get(edge.source);
+    const targetLevel = shortestLevels.get(edge.target);
+    if (sourceLevel == null || targetLevel == null) {
+      continue;
+    }
+    if (targetLevel <= sourceLevel) {
+      backEdgeIds.add(edge.edgeId);
+    }
+  }
+
+  return backEdgeIds;
+}
+
+function orderNodesWithinRanks(
+  orderedNodeIds: string[],
+  expandedEdges: ExpandedFlowEdge[],
+  levelByNode: Map<string, number>,
+  backEdgeIds: Set<string>,
+): Map<number, string[]> {
+  const ranks = new Map<number, string[]>();
+  const orderIndex = new Map(orderedNodeIds.map((nodeId, index) => [nodeId, index]));
+  const parentOrder = new Map<string, number>();
+
+  for (const nodeId of orderedNodeIds) {
+    const level = levelByNode.get(nodeId) ?? 0;
+    const existing = ranks.get(level) ?? [];
+    existing.push(nodeId);
+    ranks.set(level, existing);
+  }
+
+  const maxLevel = Math.max(...ranks.keys());
+  for (let level = 0; level <= maxLevel; level += 1) {
+    const nodes = ranks.get(level) ?? [];
+    nodes.sort((left, right) => {
+      const leftScore = computeParentBarycenter(
+        left,
+        expandedEdges,
+        levelByNode,
+        parentOrder,
+        backEdgeIds,
+      );
+      const rightScore = computeParentBarycenter(
+        right,
+        expandedEdges,
+        levelByNode,
+        parentOrder,
+        backEdgeIds,
+      );
+      if (leftScore !== rightScore) {
+        return leftScore - rightScore;
+      }
+      return (orderIndex.get(left) ?? 0) - (orderIndex.get(right) ?? 0);
+    });
+    nodes.forEach((nodeId, index) => {
+      parentOrder.set(nodeId, index);
+    });
+  }
+
+  return ranks;
+}
+
+function computeParentBarycenter(
+  nodeId: string,
+  expandedEdges: ExpandedFlowEdge[],
+  levelByNode: Map<string, number>,
+  parentOrder: Map<string, number>,
+  backEdgeIds: Set<string>,
+): number {
+  const parents = expandedEdges
+    .filter(
+      (edge) =>
+        edge.target === nodeId &&
+        !backEdgeIds.has(edge.edgeId) &&
+        (levelByNode.get(edge.source) ?? 0) < (levelByNode.get(nodeId) ?? 0),
+    )
+    .map((edge) => parentOrder.get(edge.source))
+    .filter((value): value is number => typeof value === "number");
+
+  if (parents.length === 0) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  return parents.reduce((sum, value) => sum + value, 0) / parents.length;
 }
 
 function createSessionSlice(

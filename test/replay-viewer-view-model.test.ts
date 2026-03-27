@@ -5,6 +5,7 @@ import {
   deriveRunOutcomeView,
   formatDuration,
   formatJson,
+  humanizeIdentifier,
   selectAttemptView,
 } from "../examples/flows/replay-viewer/src/lib/view-model.js";
 import type {
@@ -33,7 +34,7 @@ test("selectAttemptView shapes ACP session content into readable conversation pa
   assert.equal(selected.traceEvents.length, 1);
 });
 
-test("buildGraph marks attempted, active, and queued nodes across switched edges", () => {
+test("buildGraph infers start terminal and branch semantics across the full definition", () => {
   const load = baseStep("load_pr", "action", "ok");
   load.startedAt = "2026-03-27T07:26:00.000Z";
   load.finishedAt = "2026-03-27T07:26:01.000Z";
@@ -70,15 +71,18 @@ test("buildGraph marks attempted, active, and queued nodes across switched edges
   });
 
   const graph = buildGraph(bundle, 1);
-  const nodeStatus = new Map(graph.nodes.map((node) => [node.id, node.data.status]));
-  const edgeLabels = new Map(graph.edges.map((edge) => [edge.target, edge.label]));
+  const nodeMap = new Map(graph.nodes.map((node) => [node.id, node.data]));
 
-  assert.equal(nodeStatus.get("load_pr"), "completed");
-  assert.equal(nodeStatus.get("review_loop"), "active");
-  assert.equal(nodeStatus.get("check_ci"), "queued");
-  assert.equal(nodeStatus.get("escalate"), "queued");
-  assert.equal(edgeLabels.get("check_ci"), "clear");
-  assert.equal(edgeLabels.get("escalate"), "blocked");
+  assert.equal(nodeMap.get("load_pr")?.status, "completed");
+  assert.equal(nodeMap.get("load_pr")?.isStart, true);
+  assert.equal(nodeMap.get("review_loop")?.status, "active");
+  assert.equal(nodeMap.get("review_loop")?.isDecision, true);
+  assert.deepEqual(nodeMap.get("review_loop")?.branchLabels, ["clear", "blocked"]);
+  assert.equal(nodeMap.get("check_ci")?.status, "queued");
+  assert.equal(nodeMap.get("check_ci")?.isTerminal, true);
+  assert.equal(nodeMap.get("escalate")?.status, "queued");
+  assert.equal(nodeMap.get("escalate")?.isTerminal, true);
+  assert.ok(graph.edges.every((edge) => edge.label == null));
 });
 
 test("selectAttemptView falls back to hidden payloads for unknown structured messages", () => {
@@ -185,6 +189,7 @@ test("format helpers keep replay labels stable", () => {
   assert.equal(formatDuration(500), "500 ms");
   assert.equal(formatDuration(1_500), "1.5 s");
   assert.equal(formatJson({ ok: true }), '{\n  "ok": true\n}');
+  assert.equal(humanizeIdentifier("collect_review_state"), "Collect Review State");
 });
 
 test("deriveRunOutcomeView separates replay position from a failed run outcome", () => {
@@ -201,7 +206,7 @@ test("deriveRunOutcomeView separates replay position from a failed run outcome",
   assert.equal(outcome.accent, "failed");
   assert.equal(outcome.isTerminal, true);
   assert.equal(outcome.nodeId, "review_loop");
-  assert.match(outcome.headline, /Stopped at review_loop/);
+  assert.match(outcome.headline, /Stopped at Review Loop/);
   assert.match(outcome.detail, /Timed out while waiting/);
 });
 
