@@ -171,67 +171,79 @@ export function App() {
         </div>
       </header>
 
-      <RunBrowser
-        runs={recentRuns}
-        activeRunId={activeRunId ?? undefined}
-        loading={loadingState === "runs" || loadingState === "bootstrap" || loadingState === "run"}
-        directoryPickerSupported={isDirectoryPickerSupported()}
-        onRefresh={() => {
-          void refreshRuns();
-        }}
-        onLoadSample={() => {
-          void loadSample();
-        }}
-        onLoadRun={(run) => {
-          void loadRecentRun(run);
-        }}
-        onOpenLocal={() => {
-          void loadLocalBundle();
-        }}
-      />
-
-      {bundle ? (
-        <section className="run-summary">
-          <div className="summary-card">
-            <span className="summary-card__label">Run</span>
-            <span className="summary-card__value">{bundle.manifest.runId}</span>
-          </div>
-          <div className="summary-card">
-            <span className="summary-card__label">Flow</span>
-            <span className="summary-card__value">{bundle.run.flowName}</span>
-          </div>
-          <div className="summary-card">
-            <span className="summary-card__label">Status</span>
-            <span className={`summary-card__value summary-card__value--${bundle.run.status}`}>
-              {bundle.run.status}
-            </span>
-          </div>
-          <div className="summary-card">
-            <span className="summary-card__label">Duration</span>
-            <span className="summary-card__value">
-              {formatDuration(
-                (bundle.run.finishedAt ? Date.parse(bundle.run.finishedAt) : Date.now()) -
-                  Date.parse(bundle.run.startedAt),
-              )}
-            </span>
-          </div>
-          <div className="summary-card">
-            <span className="summary-card__label">Started</span>
-            <span className="summary-card__value">{formatDate(bundle.run.startedAt)}</span>
-          </div>
-          <div className="summary-card">
-            <span className="summary-card__label">Source</span>
-            <span className="summary-card__value">{bundle.sourceLabel}</span>
-          </div>
-        </section>
-      ) : null}
-
       {errorMessage ? <div className="error-banner">{errorMessage}</div> : null}
 
       <main className="workspace">
+        <RunBrowser
+          runs={recentRuns}
+          activeRunId={activeRunId ?? undefined}
+          loading={
+            loadingState === "runs" || loadingState === "bootstrap" || loadingState === "run"
+          }
+          directoryPickerSupported={isDirectoryPickerSupported()}
+          onRefresh={() => {
+            void refreshRuns();
+          }}
+          onLoadSample={() => {
+            void loadSample();
+          }}
+          onLoadRun={(run) => {
+            void loadRecentRun(run);
+          }}
+          onOpenLocal={() => {
+            void loadLocalBundle();
+          }}
+        />
+
         <section className="canvas-card">
           {bundle ? (
             <>
+              <section className="run-summary">
+                <div className="summary-card">
+                  <span className="summary-card__label">Current node</span>
+                  <span className="summary-card__value">
+                    {bundle.steps[selectedStepIndex]?.nodeId ?? bundle.live?.currentNode ?? "n/a"}
+                  </span>
+                </div>
+                <div className="summary-card">
+                  <span className="summary-card__label">Current attempt</span>
+                  <span className="summary-card__value">
+                    {bundle.steps[selectedStepIndex]?.attemptId ?? "n/a"}
+                  </span>
+                </div>
+                <div className="summary-card">
+                  <span className="summary-card__label">Run</span>
+                  <span className="summary-card__value">{bundle.manifest.runId}</span>
+                </div>
+                <div className="summary-card">
+                  <span className="summary-card__label">Flow</span>
+                  <span className="summary-card__value">{bundle.run.flowName}</span>
+                </div>
+                <div className="summary-card">
+                  <span className="summary-card__label">Status</span>
+                  <span className={`summary-card__value summary-card__value--${bundle.run.status}`}>
+                    {bundle.run.status}
+                  </span>
+                </div>
+                <div className="summary-card">
+                  <span className="summary-card__label">Duration</span>
+                  <span className="summary-card__value">
+                    {formatDuration(
+                      (bundle.run.finishedAt ? Date.parse(bundle.run.finishedAt) : Date.now()) -
+                        Date.parse(bundle.run.startedAt),
+                    )}
+                  </span>
+                </div>
+                <div className="summary-card">
+                  <span className="summary-card__label">Started</span>
+                  <span className="summary-card__value">{formatDate(bundle.run.startedAt)}</span>
+                </div>
+                <div className="summary-card">
+                  <span className="summary-card__label">Source</span>
+                  <span className="summary-card__value">{bundle.sourceLabel}</span>
+                </div>
+              </section>
+
               <div className="canvas-card__header">
                 <div>
                   <div className="canvas-card__eyebrow">Graph replay</div>

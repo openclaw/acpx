@@ -23,12 +23,12 @@ export function RunBrowser({
   onOpenLocal,
 }: RunBrowserProps) {
   return (
-    <section className="run-browser">
+    <aside className="run-browser">
       <div className="run-browser__header">
         <div>
           <div className="hero__eyebrow">Recent runs</div>
-          <h2>Choose a saved flow run</h2>
-          <p>The local viewer server reads `~/.acpx/flows/runs/` and lists recent bundles here.</p>
+          <h2>Runs</h2>
+          <p>The viewer server reads `~/.acpx/flows/runs/` and keeps the newest bundles here.</p>
         </div>
         <div className="run-browser__actions">
           <button type="button" className="primary-button" onClick={onRefresh} disabled={loading}>
@@ -80,6 +80,6 @@ export function RunBrowser({
           <span>Run a flow first, or fall back to the bundled sample.</span>
         </div>
       )}
-    </section>
+    </aside>
   );
 }

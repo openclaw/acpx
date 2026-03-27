@@ -26,7 +26,8 @@ export function InspectorPanel({ selectedAttempt, activeTab, onTabChange }: Insp
       <div className="inspector__header">
         <div>
           <div className="inspector__eyebrow">{step.kind} attempt</div>
-          <h2 className="inspector__title">{step.attemptId}</h2>
+          <h2 className="inspector__title">{step.nodeId}</h2>
+          <div className="inspector__subtitle">{step.attemptId}</div>
         </div>
         <span className={`outcome-pill outcome-pill--${step.outcome}`}>{step.outcome}</span>
       </div>

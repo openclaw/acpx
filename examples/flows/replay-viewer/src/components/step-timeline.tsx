@@ -30,13 +30,18 @@ export function StepTimeline({
     );
   }
 
+  const currentStep = steps[selectedIndex] ?? steps[0];
+  const progressPercent = ((selectedIndex + 1) / steps.length) * 100;
+
   return (
     <section className="timeline">
       <div className="timeline__toolbar">
         <div>
-          <div className="timeline__label">Replay cursor</div>
-          <div className="timeline__headline">
-            Step {selectedIndex + 1} of {steps.length}
+          <div className="timeline__label">Replay progress</div>
+          <div className="timeline__headline">{currentStep?.nodeId ?? "n/a"}</div>
+          <div className="timeline__subheadline">
+            {currentStep?.attemptId ?? "n/a"} • Step {selectedIndex + 1} of {steps.length} •{" "}
+            {currentStep?.kind ?? "n/a"} • {currentStep?.outcome ?? "n/a"}
           </div>
         </div>
         <div className="timeline__actions">
@@ -50,6 +55,12 @@ export function StepTimeline({
             Latest
           </button>
         </div>
+      </div>
+      <div
+        className="timeline__progress"
+        aria-label={`Replay progress ${selectedIndex + 1} of ${steps.length}`}
+      >
+        <div className="timeline__progress-bar" style={{ width: `${progressPercent}%` }} />
       </div>
       <div className="timeline__rail">
         {steps.map((step, index) => {
