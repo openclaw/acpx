@@ -3,22 +3,28 @@ import {
   formatDate,
   formatDuration,
   formatJson,
-  revealConversationSlice,
+  revealConversationTranscript,
 } from "../lib/view-model";
-import type { SelectedAttemptView } from "../lib/view-model";
+import type { SelectedAttemptView, SessionListItemView } from "../lib/view-model";
 
 type InspectorPanelProps = {
   selectedAttempt: SelectedAttemptView | null;
+  sessionItems: SessionListItemView[];
+  activeSessionId: string | null;
   sessionRevealProgress: number | null;
   activeTab: "attempt" | "session" | "events";
   onTabChange(tab: "attempt" | "session" | "events"): void;
+  onSessionChange(sessionId: string): void;
 };
 
 export function InspectorPanel({
   selectedAttempt,
+  sessionItems,
+  activeSessionId,
   sessionRevealProgress,
   activeTab,
   onTabChange,
+  onSessionChange,
 }: InspectorPanelProps) {
   if (!selectedAttempt) {
     return (
@@ -42,7 +48,10 @@ export function InspectorPanel({
         {activeTab === "session" ? (
           <SessionTab
             selectedAttempt={selectedAttempt}
+            sessionItems={sessionItems}
+            activeSessionId={activeSessionId}
             sessionRevealProgress={sessionRevealProgress}
+            onSessionChange={onSessionChange}
           />
         ) : null}
         {activeTab === "attempt" ? <AttemptTab selectedAttempt={selectedAttempt} /> : null}
@@ -93,30 +102,35 @@ function AttemptTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView 
 
 function SessionTab({
   selectedAttempt,
+  sessionItems,
+  activeSessionId,
   sessionRevealProgress,
+  onSessionChange,
 }: {
   selectedAttempt: SelectedAttemptView;
+  sessionItems: SessionListItemView[];
+  activeSessionId: string | null;
   sessionRevealProgress: number | null;
+  onSessionChange(sessionId: string): void;
 }) {
-  const { step, sessionRecord, sessionSlice } = selectedAttempt;
+  const activeSession =
+    sessionItems.find((session) => session.id === activeSessionId) ?? sessionItems[0] ?? null;
   const sessionEndRef = useRef<HTMLDivElement | null>(null);
-  const highlightedSlice = sessionSlice.filter((message) => message.highlighted);
-  const baseConversationSlice = highlightedSlice.length > 0 ? highlightedSlice : sessionSlice;
+
   const renderedSessionSlice =
-    !selectedAttempt.sessionFromFallback &&
-    selectedAttempt.sessionSourceStep?.attemptId === step.attemptId &&
+    activeSession?.isStreamingSource &&
     typeof sessionRevealProgress === "number"
-      ? revealConversationSlice(baseConversationSlice, sessionRevealProgress)
-      : baseConversationSlice;
+      ? revealConversationTranscript(activeSession.sessionSlice, sessionRevealProgress)
+      : activeSession?.sessionSlice ?? [];
 
   useEffect(() => {
-    if (!sessionRecord || typeof sessionRevealProgress !== "number") {
+    if (!activeSession || typeof sessionRevealProgress !== "number") {
       return;
     }
     sessionEndRef.current?.scrollIntoView({ block: "end" });
-  }, [renderedSessionSlice, sessionRecord, sessionRevealProgress]);
+  }, [activeSession, renderedSessionSlice, sessionRevealProgress]);
 
-  if (!sessionRecord) {
+  if (!activeSession) {
     return (
       <div className="session-pane session-pane--empty">
         <div className="session-empty">This step did not use an ACP session.</div>
@@ -126,6 +140,21 @@ function SessionTab({
 
   return (
     <div className="session-pane">
+      {sessionItems.length > 1 ? (
+        <div className="session-switcher" role="tablist" aria-label="ACP sessions">
+          {sessionItems.map((session) => (
+            <button
+              key={session.id}
+              type="button"
+              className={`session-switcher__button${session.id === activeSession.id ? " session-switcher__button--active" : ""}`}
+              onClick={() => onSessionChange(session.id)}
+            >
+              {session.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div className="conversation">
         {renderedSessionSlice.map((message) => (
           <article
@@ -211,27 +240,31 @@ function SessionTab({
         <dl className="definition-grid">
           <div>
             <dt>Name</dt>
-            <dd>{step.session?.name ?? sessionRecord.name ?? "n/a"}</dd>
+            <dd>{activeSession.sessionRecord.name ?? "n/a"}</dd>
           </div>
           <div>
             <dt>Session id</dt>
-            <dd>{step.trace?.conversation?.sessionId ?? step.trace?.sessionId ?? "n/a"}</dd>
+            <dd>{activeSession.id}</dd>
           </div>
           <div>
             <dt>Started</dt>
-            <dd>{formatDate(step.startedAt)}</dd>
+            <dd>{formatDate(selectedAttempt.step.startedAt)}</dd>
           </div>
           <div>
             <dt>Finished</dt>
-            <dd>{formatDate(step.finishedAt)}</dd>
+            <dd>{formatDate(selectedAttempt.step.finishedAt)}</dd>
           </div>
           <div>
             <dt>cwd</dt>
-            <dd>{sessionRecord.cwd ?? step.agent?.cwd ?? "n/a"}</dd>
+            <dd>{activeSession.sessionRecord.cwd ?? selectedAttempt.step.agent?.cwd ?? "n/a"}</dd>
           </div>
           <div>
             <dt>Agent command</dt>
-            <dd>{sessionRecord.agentCommand ?? step.agent?.agentCommand ?? "n/a"}</dd>
+            <dd>
+              {activeSession.sessionRecord.agentCommand ??
+                selectedAttempt.step.agent?.agentCommand ??
+                "n/a"}
+            </dd>
           </div>
         </dl>
       </DisclosureSection>

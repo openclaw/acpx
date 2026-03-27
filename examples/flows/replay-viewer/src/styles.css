@@ -882,6 +882,31 @@ code {
   align-content: start;
 }
 
+.session-switcher {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.session-switcher__button {
+  appearance: none;
+  border: 1px solid rgba(133, 146, 166, 0.14);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.session-switcher__button--active {
+  border-color: rgba(62, 166, 198, 0.3);
+  background: rgba(62, 166, 198, 0.12);
+  color: var(--ink);
+}
+
 .session-pane--empty {
   min-height: 100%;
 }

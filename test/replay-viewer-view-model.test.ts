@@ -8,8 +8,10 @@ import {
   formatDuration,
   formatJson,
   humanizeIdentifier,
+  listSessionViews,
   playbackAnchorMs,
   revealConversationSlice,
+  revealConversationTranscript,
   selectAttemptView,
 } from "../examples/flows/replay-viewer/src/lib/view-model.js";
 import type {
@@ -238,6 +240,97 @@ test("revealConversationSlice reveals ACP text progressively and hides tool nois
   const full = revealConversationSlice(selected.sessionSlice, 1);
   assert.equal(full.length, selected.sessionSlice.length);
   assert.equal(full[1]?.toolUses.length, 1);
+});
+
+test("revealConversationTranscript keeps prior session messages visible while streaming the current slice", () => {
+  const step = baseStep("extract_intent", "acp", "ok");
+  const bundle = makeBundle(step, {
+    sessions: {
+      "main-bundle": {
+        id: "main-bundle",
+        binding: step.session!,
+        record: {
+          cwd: "/tmp/replay",
+          agentCommand: "codex",
+          name: "main",
+          messages: [
+            { User: { content: [{ Text: "Earlier context." }] } },
+            { Agent: { content: [{ Text: "Older reply." }] } },
+            { User: { content: [{ Text: "Current prompt." }] } },
+            { Agent: { content: [{ Text: "Current streamed answer." }] } },
+          ],
+        },
+        events: [],
+      },
+    },
+  });
+  bundle.steps[0]!.trace!.conversation = {
+    sessionId: "main-bundle",
+    messageStart: 2,
+    messageEnd: 3,
+    eventStartSeq: 0,
+    eventEndSeq: 0,
+  };
+
+  const selected = selectAttemptView(bundle, 0);
+
+  assert.ok(selected);
+
+  const partial = revealConversationTranscript(selected.sessionSlice, 0.25);
+
+  assert.equal(partial.length, 3);
+  assert.equal(partial[0]?.textBlocks[0], "Earlier context.");
+  assert.equal(partial[1]?.textBlocks[0], "Older reply.");
+  assert.match(partial[2]?.textBlocks[0] ?? "", /^Cur/);
+});
+
+test("listSessionViews returns all run sessions and marks the current streaming source", () => {
+  const step = baseStep("extract_intent", "acp", "ok");
+  const secondaryBinding = {
+    ...step.session!,
+    key: "secondary:/tmp",
+    handle: "secondary",
+    bundleId: "secondary-bundle",
+    name: "secondary",
+    acpxRecordId: "record-2",
+    acpSessionId: "session-2",
+  };
+  const bundle = makeBundle(step, {
+    sessions: {
+      "main-bundle": {
+        id: "main-bundle",
+        binding: step.session!,
+        record: {
+          cwd: "/tmp/replay",
+          agentCommand: "codex",
+          name: "main",
+          messages: [{ User: { content: [{ Text: "Main session." }] } }],
+        },
+        events: [],
+      },
+      "secondary-bundle": {
+        id: "secondary-bundle",
+        binding: secondaryBinding,
+        record: {
+          cwd: "/tmp/replay-secondary",
+          agentCommand: "codex",
+          name: "secondary",
+          messages: [{ User: { content: [{ Text: "Secondary session." }] } }],
+        },
+        events: [],
+      },
+    },
+  });
+
+  const selected = selectAttemptView(bundle, 0);
+  const sessions = listSessionViews(bundle, selected);
+
+  assert.equal(sessions.length, 2);
+  assert.equal(sessions[0]?.label, "main");
+  assert.equal(sessions[0]?.isStreamingSource, true);
+  assert.equal(sessions[1]?.label, "secondary");
+  assert.equal(sessions[1]?.isStreamingSource, false);
+  assert.equal(sessions[1]?.sessionSlice[0]?.highlighted, false);
 });
 
 test("buildPlaybackTimeline and anchors support continuous preview with discrete snapping", () => {

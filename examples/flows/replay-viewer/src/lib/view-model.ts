@@ -96,6 +96,14 @@ export type SelectedAttemptView = {
   traceEvents: FlowTraceEvent[];
 };
 
+export type SessionListItemView = {
+  id: string;
+  label: string;
+  sessionRecord: SessionRecord;
+  sessionSlice: SelectedAttemptView["sessionSlice"];
+  isStreamingSource: boolean;
+};
+
 export type RunOutcomeView = {
   status: FlowRunState["status"];
   headline: string;
@@ -366,6 +374,27 @@ export function revealConversationSlice(
   return revealed;
 }
 
+export function revealConversationTranscript(
+  sessionSlice: SelectedAttemptView["sessionSlice"],
+  progress: number,
+): SelectedAttemptView["sessionSlice"] {
+  const highlightedIndexes = sessionSlice
+    .map((message, index) => (message.highlighted ? index : -1))
+    .filter((index) => index >= 0);
+
+  if (highlightedIndexes.length === 0) {
+    return sessionSlice;
+  }
+
+  const firstHighlightedIndex = highlightedIndexes[0]!;
+  const lastHighlightedIndex = highlightedIndexes.at(-1)!;
+  const visiblePrefix = sessionSlice.slice(0, firstHighlightedIndex);
+  const highlightedSlice = sessionSlice.slice(firstHighlightedIndex, lastHighlightedIndex + 1);
+  const visibleHighlightedSlice = revealConversationSlice(highlightedSlice, progress);
+
+  return [...visiblePrefix, ...visibleHighlightedSlice];
+}
+
 export function selectAttemptView(
   bundle: LoadedRunBundle,
   selectedStepIndex: number,
@@ -406,6 +435,36 @@ export function selectAttemptView(
     rawEventSlice,
     traceEvents,
   };
+}
+
+export function listSessionViews(
+  bundle: LoadedRunBundle,
+  selectedAttempt: SelectedAttemptView | null,
+): SessionListItemView[] {
+  const streamingSessionId =
+    selectedAttempt?.sessionSourceStep?.trace?.conversation?.sessionId ??
+    selectedAttempt?.sessionSourceStep?.trace?.sessionId ??
+    null;
+  const conversation = selectedAttempt?.sessionSourceStep?.trace?.conversation;
+
+  return Object.values(bundle.sessions)
+    .slice()
+    .toSorted((left, right) =>
+      (left.record.name ?? left.binding.name ?? left.id).localeCompare(
+        right.record.name ?? right.binding.name ?? right.id,
+      ),
+    )
+    .map((session) => ({
+      id: session.id,
+      label: session.record.name ?? session.binding.name ?? session.id,
+      sessionRecord: session.record,
+      sessionSlice: createSessionSlice(
+        session.record,
+        session.id === streamingSessionId ? conversation?.messageStart : undefined,
+        session.id === streamingSessionId ? conversation?.messageEnd : undefined,
+      ),
+      isStreamingSource: session.id === streamingSessionId,
+    }));
 }
 
 export function deriveRunOutcomeView(bundle: LoadedRunBundle): RunOutcomeView {

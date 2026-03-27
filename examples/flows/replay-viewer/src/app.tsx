@@ -18,6 +18,7 @@ import {
   derivePlaybackPreview,
   formatDuration,
   humanizeIdentifier,
+  listSessionViews,
   playbackAnchorMs,
   selectAttemptView,
 } from "./lib/view-model";
@@ -40,6 +41,7 @@ export function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [playbackMode, setPlaybackMode] = useState<"playing" | "seeking" | null>(null);
   const [playheadMs, setPlayheadMs] = useState<number | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     void bootstrap();
@@ -101,7 +103,14 @@ export function App() {
   const graph = bundle
     ? buildGraph(bundle, effectiveStepIndex, playbackPreview)
     : { nodes: [], edges: [] };
-  const selectedAttempt = bundle ? selectAttemptView(bundle, effectiveStepIndex) : null;
+  const selectedAttempt = useMemo(
+    () => (bundle ? selectAttemptView(bundle, effectiveStepIndex) : null),
+    [bundle, effectiveStepIndex],
+  );
+  const sessionItems = useMemo(
+    () => (bundle && selectedAttempt ? listSessionViews(bundle, selectedAttempt) : []),
+    [bundle, selectedAttempt],
+  );
   const currentStep = bundle?.steps[effectiveStepIndex] ?? null;
   const currentDuration = currentStep
     ? `${effectiveStepIndex + 1} / ${bundle?.steps.length ?? 0} · ${currentStep.nodeType} · ${playbackPreview ? playbackProgressLabel(playbackPreview.stepProgress) : deriveStepDurationLabel(currentStep)}`
@@ -110,6 +119,19 @@ export function App() {
     playbackPreview && selectedAttempt?.step.attemptId === currentStep?.attemptId
       ? playbackPreview.stepProgress
       : null;
+
+  useEffect(() => {
+    const defaultSessionId =
+      selectedAttempt?.sessionSourceStep?.trace?.conversation?.sessionId ??
+      selectedAttempt?.sessionSourceStep?.trace?.sessionId ??
+      sessionItems[0]?.id ??
+      null;
+    setActiveSessionId(defaultSessionId);
+  }, [
+    selectedAttempt?.step.attemptId,
+    selectedAttempt?.sessionSourceStep?.attemptId,
+    sessionItems[0]?.id,
+  ]);
 
   async function bootstrap(): Promise<void> {
     setLoadingState("bootstrap");
@@ -356,12 +378,15 @@ export function App() {
             )}
           </section>
 
-          <InspectorPanel
-            selectedAttempt={selectedAttempt}
-            sessionRevealProgress={sessionRevealProgress}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-          />
+              <InspectorPanel
+                selectedAttempt={selectedAttempt}
+                sessionItems={sessionItems}
+                activeSessionId={activeSessionId}
+                sessionRevealProgress={sessionRevealProgress}
+                activeTab={activeTab}
+                onTabChange={setActiveTab}
+                onSessionChange={setActiveSessionId}
+              />
         </section>
       </main>
     </div>
