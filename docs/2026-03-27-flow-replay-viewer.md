@@ -80,6 +80,31 @@ So the main viewing surface should avoid a second heavy navigation layer.
 
 If any top chrome remains, it should be minimal and stable.
 
+### Delete the current redundant chrome
+
+The following current surfaces should be removed rather than restyled:
+
+- the large top navbar/header strip
+- the duplicated run name, status, node, and source pills in that strip
+- the separate run-outcome card when it duplicates the player state
+- duplicated current-step metadata chips such as attempt, started-at, or run
+  duration when that same information is already available in the player
+- the large selected-step summary card above the graph when it only repeats the
+  current replay position
+- the long row of visited-node pills beneath the player
+- the graph header legend pills such as `COMPLETED`, `SELECTED`, `QUEUED`, and
+  `PROBLEM`
+- redundant section titles when the surrounding layout already makes the section
+  obvious
+
+The viewer should not present the same state in multiple stacked boxes. It
+should keep one canonical place for:
+
+- current replay position
+- run outcome
+- selected node
+- ACP conversation
+
 ### Playback stability
 
 While replay is playing:
@@ -317,6 +342,9 @@ The timeline should show:
 - current attempt id
 - real run outcome separately
 
+It should not show multiple secondary status boxes that repeat the same replay
+state in different wordings.
+
 ## Layout shell
 
 The viewer should fit within the viewport.
@@ -365,6 +393,10 @@ switching.
 
 The session panel should not feel secondary to attempt metadata. It should be
 the main readable explanation of what happened at the selected point in replay.
+
+The viewer should prefer the ACP session pane over extra attempt-summary boxes.
+If space is tight, remove duplicate attempt summary surfaces before shrinking
+the session view.
 
 ### ACP session rendering
 
