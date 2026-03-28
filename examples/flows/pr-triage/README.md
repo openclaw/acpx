@@ -81,9 +81,9 @@ This prompt may process multiple items in one run. Use it for the triage lane, n
 
 4. **Close PRs that are wrong, too local, or too unclear.** If the item is a PR and your judgment is that the proposed solution is wrong-shaped for the problem, only treats a symptom, is just a localized fix that does not address the underlying issue, or the PR is not even clear enough to evaluate confidently, do not send it down the human-review lane by default. Instead, treat that as a rejection outcome for the PR: write a concise comment explaining the plain-language intention as best you can recover it, why the current implementation does not solve the right problem or is too unclear to keep moving, and what kind of reframing would be needed, then close the PR. Use the human-attention lane for cases that need a human product or architecture judgment before deciding whether the work should continue at all.
 
-5. **Classify how much refactoring is really needed.** As part of that judgment, explicitly decide whether the item needs a refactor, and if so what kind:
-   - no refactor needed: the current shape is acceptable for the intention
-   - superficial refactor: cleanup, reshaping, or local improvement is needed, but the work can still be completed autonomously without changing the core framing of the solution
+5. **Classify whether anything should still be added, removed, simplified, or refactored.** As part of that judgment, explicitly decide whether the item is ready as-is or whether something still needs to change before it continues. Do not only ask about refactor depth. Also ask whether the PR includes any small extra behavior, missing follow-through, unnecessary complexity, or wrong-shaped local addition that should be cleaned up first.
+   - no refactor needed: nothing should be added, removed, simplified, or reshaped before continuing
+   - superficial refactor: some cleanup, reshaping, addition, removal, or local improvement is still needed, but the work can still be completed autonomously without changing the core framing of the solution
    - fundamental refactor: the current approach is wrong-shaped for the problem and needs a deeper restructuring, reframing, or architectural change in order to solve the intention properly
 
 6. **Choose between continue, close, or escalate.** Based on that judgment, decide whether the item is safe to keep moving autonomously, should be closed, or needs human attention before landing. Close a PR if any of the following are true:
@@ -108,7 +108,7 @@ This prompt may process multiple items in one run. Use it for the triage lane, n
 
 12. **Escalate if the claimed work cannot actually be validated.** If a bug cannot be reproduced, the fix does not change the outcome, a feature change cannot be validated confidently, or validation is blocked by a real missing prerequisite or environment dependency, stop and escalate to a human rather than continuing into refactor, review, or CI as if the work were proven.
 
-13. **Do superficial refactors before continuing into review.** If the item only needs a superficial refactor, that does not require human attention by itself. Superficial refactors should be done on the autonomous lane before the item proceeds into Codex review. Only fundamental refactors trigger the human-attention path.
+13. **Do superficial cleanup before continuing into review.** If the item only needs a superficial refactor, that does not require human attention by itself. This includes small things that should be added, removed, simplified, or locally reshaped before the PR is really ready. Superficial refactors should be done on the autonomous lane before the item proceeds into Codex review. Only fundamental refactors trigger the human-attention path.
 
 14. **Keep moving when the work is good enough to continue.** If the item does not need human attention and is not a close outcome, continue autonomously. It is acceptable to proceed with automated conflict resolution, review, local validation, CI/CD checking, and follow-up fixes as long as the intention is clear, the work has been validated on the correct bug or feature path, and the item does not require a human product or architecture judgment. If the implementation looks acceptable enough to continue, keep going rather than blocking on perfectionism.
 
