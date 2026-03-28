@@ -68,22 +68,30 @@ test("maintenance PRs stay on the feature path without adding a new flow node", 
       source,
       /Dependency-only, tooling-only, docs-only, or lockfile-only maintenance PRs should still use the `feature` path\./,
     );
-    assert.match(source, /"feature_validation": "targeted_tests" \| "standard_checks" \| null,/);
     assert.match(
       source,
-      /validation_status:\s*"standard_checks_sufficient"[\s\S]*route:\s*"judge_refactor"/,
+      /validation_result": "validated" \| "standard_checks_sufficient" \| "blocked" \| "not_proven"/,
     );
     assert.doesNotMatch(source, /validate_via_standard_checks:/);
-    assert.doesNotMatch(source, /supportsStandardChecksValidation/);
+    assert.doesNotMatch(source, /buildTargetedTestPlan/);
+    assert.doesNotMatch(source, /ensureProjectDependencies/);
   });
 });
 
-test("validation shell helper does not hardcode zsh and falls back to bash/sh", () => {
+test("validation stays in ACP nodes instead of hardcoded runtime helpers", () => {
   const sourcePath = path.join(process.cwd(), "examples/flows/pr-triage/pr-triage.flow.ts");
 
   return fs.readFile(sourcePath, "utf8").then((source) => {
-    assert.doesNotMatch(source, /runCommand\("zsh", \["-lc", command\], options\)/);
-    assert.match(source, /command: "bash"/);
-    assert.match(source, /command: "sh"/);
+    assert.match(
+      source,
+      /reproduce_bug_and_test_fix:\s*\{[\s\S]*?nodeType:\s*"acp"[\s\S]*?promptReproduceBugAndTestFix/,
+    );
+    assert.match(
+      source,
+      /test_feature_directly:\s*\{[\s\S]*?nodeType:\s*"acp"[\s\S]*?promptTestFeatureDirectly/,
+    );
+    assert.match(source, /Own the validation plan yourself\./);
+    assert.doesNotMatch(source, /runValidationPlan/);
+    assert.doesNotMatch(source, /runShellLine/);
   });
 });

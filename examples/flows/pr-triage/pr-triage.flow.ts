@@ -95,19 +95,25 @@ const flow = {
     },
 
     reproduce_bug_and_test_fix: {
-      nodeType: "action",
+      nodeType: "acp",
+      session: MAIN_SESSION,
+      cwd: ({ outputs }) => prepared(outputs).workdir,
       timeoutMs: 30 * 60_000,
-      statusDetail: "Reproduce the bug and validate the fix in the isolated workspace",
-      run: async ({ outputs }) =>
-        await reproduceBugAndTestFix(prepared(outputs), outputs.bug_or_feature),
+      async prompt({ outputs }) {
+        return promptReproduceBugAndTestFix(prepared(outputs), outputs);
+      },
+      parse: (text) => extractJsonObject(text),
     },
 
     test_feature_directly: {
-      nodeType: "action",
+      nodeType: "acp",
+      session: MAIN_SESSION,
+      cwd: ({ outputs }) => prepared(outputs).workdir,
       timeoutMs: 25 * 60_000,
-      statusDetail: "Run direct feature validation in the isolated workspace",
-      run: async ({ outputs }) =>
-        await testFeatureDirectly(prepared(outputs), outputs.bug_or_feature),
+      async prompt({ outputs }) {
+        return promptTestFeatureDirectly(prepared(outputs), outputs);
+      },
+      parse: (text) => extractJsonObject(text),
     },
 
     judge_refactor: {
@@ -501,164 +507,6 @@ async function prepareWorkspace(pr) {
   };
 }
 
-async function reproduceBugAndTestFix(pr, validationPath) {
-  if (validationPath?.classification !== "bug") {
-    throw new Error("Bug validation action requires bug validation path");
-  }
-
-  await ensureProjectDependencies(pr.workdir);
-  const testPlan = buildTargetedTestPlan(pr.changedFiles);
-  if (testPlan.commands.length === 0) {
-    return {
-      validation_status: "fix_not_proven",
-      route: "comment_and_escalate_to_human",
-      summary: "No targeted test command could be derived from the PR changes.",
-      repro_steps: [],
-      targeted_tests: [],
-      integration_tests: [],
-      e2e_tests: [],
-      restored_branch_state: true,
-    };
-  }
-
-  const codeFiles = pr.changedFiles
-    .map((file) => String(file.filename ?? ""))
-    .filter((filename) => filename && !isTestFile(filename));
-  if (codeFiles.length === 0) {
-    return {
-      validation_status: "fix_not_proven",
-      route: "comment_and_escalate_to_human",
-      summary:
-        "Could not isolate a non-test code change to ablate while keeping the new validation intact.",
-      repro_steps: [],
-      targeted_tests: testPlan.commands,
-      integration_tests: [],
-      e2e_tests: [],
-      restored_branch_state: true,
-    };
-  }
-
-  const baseRef = `origin/${pr.baseRef}`;
-  await runCommand("git", ["-C", pr.workdir, "fetch", "origin", pr.baseRef]);
-  const mergeBase = (
-    await runCommand("git", ["-C", pr.workdir, "merge-base", "HEAD", baseRef])
-  ).stdout.trim();
-  const patch = (
-    await runCommand("git", [
-      "-C",
-      pr.workdir,
-      "diff",
-      "--binary",
-      `${mergeBase}..HEAD`,
-      "--",
-      ...codeFiles,
-    ])
-  ).stdout;
-  if (!patch.trim()) {
-    return {
-      validation_status: "fix_not_proven",
-      route: "comment_and_escalate_to_human",
-      summary: "Could not derive an ablation patch for the non-test code changes in this PR.",
-      repro_steps: [],
-      targeted_tests: testPlan.commands,
-      integration_tests: [],
-      e2e_tests: [],
-      restored_branch_state: true,
-    };
-  }
-
-  const initial = await runValidationPlan(pr.workdir, testPlan.commands);
-  if (!initial.ok) {
-    return {
-      validation_status: "fix_not_proven",
-      route: "comment_and_escalate_to_human",
-      summary:
-        "The targeted validation did not pass on the PR head before ablation, so the fix could not be proven.",
-      repro_steps: [],
-      targeted_tests: testPlan.commands,
-      integration_tests: [],
-      e2e_tests: [],
-      restored_branch_state: true,
-    };
-  }
-
-  const patchPath = path.join(pr.flowDir, "ablation.patch");
-  await fs.writeFile(patchPath, patch, "utf8");
-  await runCommand("git", ["-C", pr.workdir, "apply", "-R", patchPath]);
-  const ablated = await runValidationPlan(pr.workdir, testPlan.commands, {
-    allowFailure: true,
-  });
-  await runCommand("git", ["-C", pr.workdir, "reset", "--hard", "HEAD"]);
-
-  const restored = await runValidationPlan(pr.workdir, testPlan.commands);
-  const reproduced = !ablated.ok;
-
-  return {
-    validation_status: reproduced && restored.ok ? "reproduced_and_fixed" : "fix_not_proven",
-    route: reproduced && restored.ok ? "judge_refactor" : "comment_and_escalate_to_human",
-    summary:
-      reproduced && restored.ok
-        ? "The targeted regression test passed on the PR head, failed after local-only ablation of the code change, and passed again after restoring the PR branch state."
-        : "The bug could not be shown to fail on the local-only ablated state and pass again on the restored PR head.",
-    repro_steps: [
-      `Ran targeted validation on PR head in ${path.basename(pr.workdir)}`,
-      "Reverse-applied the non-test code patch locally without committing or pushing it",
-      "Reran the same targeted validation on the ablated state",
-      "Restored the tracked PR branch state with git reset --hard HEAD",
-      "Reran the same targeted validation on the restored PR head",
-    ],
-    targeted_tests: testPlan.commands,
-    integration_tests: [],
-    e2e_tests: [],
-    restored_branch_state: true,
-  };
-}
-
-async function testFeatureDirectly(pr, validationPath) {
-  if (validationPath?.classification !== "feature") {
-    throw new Error("Feature validation action requires feature validation path");
-  }
-
-  await ensureProjectDependencies(pr.workdir);
-  const testPlan = buildTargetedTestPlan(pr.changedFiles);
-  if (testPlan.commands.length === 0) {
-    if (validationPath?.feature_validation === "standard_checks") {
-      return {
-        validation_status: "standard_checks_sufficient",
-        route: "judge_refactor",
-        summary:
-          "This PR stays on the feature path, but normal repo review and CI are the meaningful validation rather than a bespoke targeted local test command.",
-        targeted_tests: [],
-        integration_tests: [],
-        e2e_tests: [],
-      };
-    }
-
-    return {
-      validation_status: "feature_not_validated",
-      route: "comment_and_escalate_to_human",
-      summary: "No targeted test command could be derived for direct feature validation.",
-      targeted_tests: [],
-      integration_tests: [],
-      e2e_tests: [],
-    };
-  }
-
-  const result = await runValidationPlan(pr.workdir, testPlan.commands, {
-    allowFailure: true,
-  });
-  return {
-    validation_status: result.ok ? "feature_validated" : "feature_not_validated",
-    route: result.ok ? "judge_refactor" : "comment_and_escalate_to_human",
-    summary: result.ok
-      ? "The targeted feature validation passed on the PR branch."
-      : "The targeted feature validation did not complete cleanly on the PR branch.",
-    targeted_tests: testPlan.commands,
-    integration_tests: [],
-    e2e_tests: [],
-  };
-}
-
 async function collectReviewState(pr) {
   const reviews = await ghApiJson(`repos/${pr.repo}/pulls/${pr.prNumber}/reviews?per_page=100`);
   const reviewComments = await ghApiJson(
@@ -914,15 +762,73 @@ function promptBugOrFeature(pr) {
     "Use `bug` if this PR primarily claims to fix a bug, regression, broken behavior, or other issue that should first be reproduced and then proven fixed.",
     "Use `feature` if this PR primarily adds or changes behavior that should be validated directly without first reproducing a prior failure.",
     "Dependency-only, tooling-only, docs-only, or lockfile-only maintenance PRs should still use the `feature` path.",
-    "For feature-path work, also decide whether direct targeted local testing is required or whether normal repo review and CI are the meaningful validation.",
+    "Do not decide the exact validation commands here. The validation step itself will choose and run the smallest credible validation plan.",
     "If you cannot classify it confidently, route to `comment_and_escalate_to_human`.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
       '  "classification": "bug" | "feature" | "unclear",',
       '  "route": "reproduce_bug_and_test_fix" | "test_feature_directly" | "comment_and_escalate_to_human",',
-      '  "feature_validation": "targeted_tests" | "standard_checks" | null,',
       '  "reason": "short explanation"',
+      "}",
+    ]),
+  ].join("\n");
+}
+
+function promptReproduceBugAndTestFix(pr, outputs) {
+  const validationPath = outputs.bug_or_feature ?? null;
+
+  return [
+    "You are on the bug-validation lane for this PR.",
+    `Target PR: ${prRef(pr)}`,
+    `Use the checked-out repo plus ${FLOW_DIR}/pr.json and ${FLOW_DIR}/issue.json.`,
+    `Classification summary: ${validationPath?.reason ?? "none"}`,
+    "Own the validation plan yourself. Decide the smallest credible way to reproduce the bug and show that the PR fixes it.",
+    "You may inspect the PR description, linked issue, changed code, local tests, scripts, and any repro steps already written in the PR or issue.",
+    "You may run installs, tests, commands, and other local checks when they are genuinely needed for validation.",
+    "Prefer the smallest focused validation that proves the claim. Do not fall back to broad generic checks if a narrower repro or test is enough.",
+    "If needed, you may locally ablate or temporarily undo part of the change to show broken behavior, but do not commit or push a broken state. Restore the real PR branch state before you return.",
+    "If the environment or external dependency needed for validation is missing, say that plainly as `blocked` instead of pretending the fix failed.",
+    "If you cannot credibly show that the PR changes the outcome after reasonable effort, route to `comment_and_escalate_to_human`.",
+    "If you do establish the bug and show the PR fixes it, route to `judge_refactor`.",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "route": "judge_refactor" | "comment_and_escalate_to_human",',
+      '  "validation_result": "validated" | "blocked" | "not_proven",',
+      '  "summary": "short explanation",',
+      '  "commands_run": ["command you actually ran"],',
+      '  "evidence": ["brief evidence item"]',
+      "}",
+    ]),
+  ].join("\n");
+}
+
+function promptTestFeatureDirectly(pr, outputs) {
+  const validationPath = outputs.bug_or_feature ?? null;
+
+  return [
+    "You are on the feature-validation lane for this PR.",
+    `Target PR: ${prRef(pr)}`,
+    `Use the checked-out repo plus ${FLOW_DIR}/pr.json and ${FLOW_DIR}/issue.json.`,
+    `Classification summary: ${validationPath?.reason ?? "none"}`,
+    "Own the validation plan yourself. Decide the smallest credible way to validate the changed behavior.",
+    "You may inspect the PR description, linked issue, changed code, local tests, scripts, and any test plan already written in the PR or issue.",
+    "You may run installs, tests, commands, and other local checks when they are genuinely needed for validation.",
+    "Prefer the smallest focused validation that shows the feature or behavior works as intended. Do not fall back to broad generic checks if a narrower check is enough.",
+    "For dependency-only, tooling-only, docs-only, or lockfile-only maintenance PRs, it is acceptable to decide that bespoke local testing is unnecessary and that normal repo review plus CI are the meaningful validation.",
+    "Use `standard_checks_sufficient` only for that maintenance-style case when extra local testing would be busywork rather than real proof.",
+    "If the environment or external dependency needed for validation is missing, say that plainly as `blocked` instead of pretending the feature failed.",
+    "If you validate the change directly or determine that standard repo checks are the right validation, route to `judge_refactor`.",
+    "If you cannot validate the change credibly after reasonable effort, route to `comment_and_escalate_to_human`.",
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "route": "judge_refactor" | "comment_and_escalate_to_human",',
+      '  "validation_result": "validated" | "standard_checks_sufficient" | "blocked" | "not_proven",',
+      '  "summary": "short explanation",',
+      '  "commands_run": ["command you actually ran"],',
+      '  "evidence": ["brief evidence item"]',
       "}",
     ]),
   ].join("\n");
@@ -982,7 +888,7 @@ function promptJudgeRefactor(pr, outputs) {
   return [
     "You are still in the same PR session inside the isolated workspace.",
     `Target PR: ${prRef(pr)}`,
-    "The validation step has already been run by the flow runtime.",
+    "The validation lane has already been run for this PR.",
     `Validation summary: ${validation?.summary ?? "none"}`,
     "This is a read-only judgment step. Do not rerun validation, CI checks, Codex review, or GitHub API commands here.",
     "Judge whether this PR needs no refactor, a superficial refactor, or a fundamental refactor.",
@@ -1007,7 +913,7 @@ function promptDoSuperficialRefactor(pr) {
     `Use the local branch ${pr.localBranch}. If you need to push, use remote ${pr.pushRemote} branch ${pr.pushRef}.`,
     "Perform only the superficial refactor directly in the checked-out repo.",
     "Keep it minor and maintainability-focused. Do not reframe the problem or turn this into a fundamental rewrite.",
-    "If you change files, run focused checks when feasible, rerun the earlier targeted validation before returning, then commit and push the branch yourself.",
+    "If you change files, run focused checks when feasible, rerun the earlier validation before returning, then commit and push the branch yourself.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
@@ -1037,7 +943,7 @@ function promptReviewLoop(pr, outputs) {
     "The local Codex review is plain text, not structured JSON. Read `localCodexReviewText`, and use `localCodexReviewStdout` and `localCodexReviewStderr` only as fallback context if needed.",
     "If valid P0 or P1 issues remain from either source, fix them directly in the repo, run focused checks when feasible, commit and push the branch yourself, and then route back to `collect_review_state` so the flow runtime can rerun the review mechanics.",
     "Do not keep looping just because only P2 or lower findings remain. Treat P2 and lower as non-blocking unless they materially change your judgment about whether the PR is safe to continue.",
-    `If you change code in this loop, rerun the earlier targeted validation before returning. Latest validation summary: ${validation?.summary ?? "none"}.`,
+    `If you change code in this loop, rerun the earlier validation before returning. Latest validation summary: ${validation?.summary ?? "none"}.`,
     "Treat the local Codex review as established if `localCodexReviewExitCode` is zero, `localCodexReviewTimedOut` is false, and there is substantive review text available.",
     "Only route to `comment_and_escalate_to_human` if the local Codex review actually failed, timed out, or produced no usable review text at all.",
     "If blocking review findings are cleared, route to `collect_ci_state`.",
@@ -1069,7 +975,7 @@ function promptFixCiFailures(pr, outputs) {
     "Treat a workflow run as approval-blocked when its state clearly shows `action_required`, including cases where that appears in the conclusion rather than the status.",
     "Do not bounce back to `collect_ci_state` just to wait for CI. If a relevant workflow run is queued or in progress, monitor it yourself with `gh run watch`, `gh pr checks --watch`, or direct `gh api` polling until it reaches a terminal state.",
     "If you approve a blocked workflow run successfully, keep monitoring inside this same step until the rerun finishes green, surfaces a real related failure, or hits a real platform/permission blocker.",
-    "If related failures remain and you can fix them, fix them directly in the repo, run focused checks when feasible, rerun the earlier targeted validation, commit and push the branch yourself, rerun or monitor CI yourself, and stay in this same step until the updated CI reaches a terminal state.",
+    "If related failures remain and you can fix them, fix them directly in the repo, run focused checks when feasible, rerun the earlier validation, commit and push the branch yourself, rerun or monitor CI yourself, and stay in this same step until the updated CI reaches a terminal state.",
     "Only return from this step once CI is actually green/unrelated, or once you have a real reason that a human must take over.",
     `Latest validation summary: ${validation?.summary ?? "none"}.`,
     "If CI is green or the remaining failures are clearly unrelated, route to `check_final_conflicts` so the final conflict gate can run before the human handoff.",
@@ -1125,7 +1031,7 @@ function promptResolveFinalConflicts(pr, outputs) {
     `Use the local branch ${pr.localBranch}. If you need to push, use remote ${pr.pushRemote} branch ${pr.pushRef}.`,
     "Resolve the conflict only because you already judged that it has a clear resolution path while preserving the intended PR behavior.",
     "If you cannot resolve the conflicts confidently, do not guess. Route to `comment_and_escalate_to_human` instead.",
-    `If you resolve them, rerun the earlier targeted validation before returning. Latest validation summary: ${validation?.summary ?? "none"}.`,
+    `If you resolve them, rerun the earlier validation before returning. Latest validation summary: ${validation?.summary ?? "none"}.`,
     "After resolving and pushing the branch, route back to `collect_ci_state` so the flow runtime can rerun the final CI path.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
@@ -1254,69 +1160,6 @@ function finalCommentSummary(outputs) {
   };
 }
 
-async function ensureProjectDependencies(workdir) {
-  const packageJson = path.join(workdir, "package.json");
-  const lockfile = path.join(workdir, "pnpm-lock.yaml");
-  const nodeModules = path.join(workdir, "node_modules");
-
-  if (!(await exists(packageJson)) || !(await exists(lockfile)) || (await exists(nodeModules))) {
-    return;
-  }
-
-  await runCommand("pnpm", ["install", "--frozen-lockfile"], {
-    cwd: workdir,
-    timeoutMs: 20 * 60_000,
-  });
-}
-
-function buildTargetedTestPlan(changedFiles) {
-  const changedTestFiles = changedFiles
-    .map((file) => String(file.filename ?? ""))
-    .filter((filename) => /^test\/.+\.test\.ts$/.test(filename));
-
-  if (changedTestFiles.length === 0) {
-    return {
-      commands: [],
-    };
-  }
-
-  return {
-    commands: [
-      "pnpm run build:test",
-      `node --test ${changedTestFiles.map((file) => `dist-test/${file.replace(/\.ts$/, ".js")}`).join(" ")}`,
-    ],
-  };
-}
-
-async function runValidationPlan(workdir, commands, options = {}) {
-  const results = [];
-  for (const command of commands) {
-    const result = await runShellLine(command, {
-      cwd: workdir,
-      allowFailure: options.allowFailure === true,
-      timeoutMs: 20 * 60_000,
-    });
-    results.push(result);
-    if (!result.ok && options.allowFailure !== true) {
-      return {
-        ok: false,
-        results,
-      };
-    }
-    if (!result.ok && options.allowFailure === true) {
-      return {
-        ok: false,
-        results,
-      };
-    }
-  }
-
-  return {
-    ok: true,
-    results,
-  };
-}
-
 async function ghApiJson(endpoint) {
   const result = await runCommand("gh", ["api", endpoint]);
   return JSON.parse(result.stdout);
@@ -1376,10 +1219,6 @@ function extractLinkedIssueNumber(body) {
   return match ? Number(match[1]) : null;
 }
 
-function isTestFile(filename) {
-  return /(^|\/)(test|tests|__tests__)\/|\.test\.[jt]sx?$|\.spec\.[jt]sx?$/.test(filename);
-}
-
 async function writeJson(filename, value) {
   await fs.writeFile(filename, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
@@ -1407,49 +1246,6 @@ function limitText(text, maxChars) {
     return value;
   }
   return `${value.slice(0, maxChars)}...`;
-}
-
-async function exists(filename) {
-  try {
-    await fs.access(filename);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function shellCandidates() {
-  return [
-    {
-      command: "bash",
-      args: ["-lc"],
-    },
-    {
-      command: "sh",
-      args: ["-c"],
-    },
-  ];
-}
-
-function isMissingExecutableError(error) {
-  return error != null && typeof error === "object" && "code" in error && error.code === "ENOENT";
-}
-
-async function runShellLine(command, options = {}) {
-  let lastError;
-
-  for (const shell of shellCandidates()) {
-    try {
-      return await runCommand(shell.command, [...shell.args, command], options);
-    } catch (error) {
-      if (!isMissingExecutableError(error)) {
-        throw error;
-      }
-      lastError = error;
-    }
-  }
-
-  throw lastError ?? new Error("No supported shell was available for validation commands");
 }
 
 async function runCommand(command, args, options = {}) {
