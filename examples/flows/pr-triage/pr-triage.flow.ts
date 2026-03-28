@@ -622,6 +622,18 @@ async function testFeatureDirectly(pr, validationPath) {
   await ensureProjectDependencies(pr.workdir);
   const testPlan = buildTargetedTestPlan(pr.changedFiles);
   if (testPlan.commands.length === 0) {
+    if (await supportsStandardChecksValidation(pr.workdir, pr.changedFiles)) {
+      return {
+        validation_status: "standard_checks_sufficient",
+        route: "judge_refactor",
+        summary:
+          "This PR is limited to dependency, tooling, docs, lockfile, or other maintenance scope where normal repo review and CI are the meaningful validation.",
+        targeted_tests: [],
+        integration_tests: [],
+        e2e_tests: [],
+      };
+    }
+
     return {
       validation_status: "feature_not_validated",
       route: "comment_and_escalate_to_human",
@@ -901,6 +913,8 @@ function promptBugOrFeature(pr) {
     "Decide which validation path this PR should take before refactor or review.",
     "Use `bug` if this PR primarily claims to fix a bug, regression, broken behavior, or other issue that should first be reproduced and then proven fixed.",
     "Use `feature` if this PR primarily adds or changes behavior that should be validated directly without first reproducing a prior failure.",
+    "Dependency-only, tooling-only, docs-only, or lockfile-only maintenance PRs should still use the `feature` path.",
+    "For those maintenance PRs, normal repo review and CI may be the meaningful validation even when there is no bespoke targeted local test command.",
     "If you cannot classify it confidently, route to `comment_and_escalate_to_human`.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
@@ -1271,6 +1285,101 @@ function buildTargetedTestPlan(changedFiles) {
       `node --test ${changedTestFiles.map((file) => `dist-test/${file.replace(/\.ts$/, ".js")}`).join(" ")}`,
     ],
   };
+}
+
+async function supportsStandardChecksValidation(workdir, changedFiles) {
+  const files = changedFiles
+    .map((file) => ({
+      filename: String(file.filename ?? ""),
+      patch: String(file.patch ?? ""),
+    }))
+    .filter((file) => file.filename);
+
+  if (files.length === 0) {
+    return false;
+  }
+
+  const results = await Promise.all(
+    files.map(async ({ filename, patch }) => {
+      if (filename === "package.json") {
+        return await packageJsonPatchIsMaintenanceOnly(workdir, patch);
+      }
+
+      if (filename === "pnpm-lock.yaml") {
+        return true;
+      }
+
+      if (
+        filename === "README.md" ||
+        filename === "AGENTS.md" ||
+        filename === "CHANGELOG.md" ||
+        filename.startsWith("docs/") ||
+        filename.startsWith("agents/") ||
+        filename.startsWith("skills/")
+      ) {
+        return true;
+      }
+
+      return false;
+    }),
+  );
+
+  return results.every(Boolean);
+}
+
+async function packageJsonPatchIsMaintenanceOnly(workdir, patch) {
+  if (!patch.trim()) {
+    return false;
+  }
+
+  const packageJson = JSON.parse(await fs.readFile(path.join(workdir, "package.json"), "utf8"));
+  const devDependencyKeys = new Set(Object.keys(packageJson.devDependencies ?? {}));
+  let currentTopLevelKey = "";
+
+  for (const rawLine of patch.split("\n")) {
+    if (
+      rawLine.startsWith("diff --git") ||
+      rawLine.startsWith("index ") ||
+      rawLine.startsWith("--- ") ||
+      rawLine.startsWith("+++ ") ||
+      rawLine.startsWith("@@")
+    ) {
+      continue;
+    }
+
+    const prefix = rawLine[0];
+    if (prefix !== " " && prefix !== "+" && prefix !== "-") {
+      continue;
+    }
+
+    const line = rawLine.slice(1);
+    const topLevelMatch = line.match(/^ {2}"([^"]+)": \{$/);
+    if (topLevelMatch) {
+      currentTopLevelKey = topLevelMatch[1];
+    }
+
+    if (prefix === " ") {
+      continue;
+    }
+
+    if (currentTopLevelKey === "devDependencies") {
+      continue;
+    }
+
+    const dependencyEntryMatch = line.match(/^ {4}"([^"]+)": /);
+    if (dependencyEntryMatch && devDependencyKeys.has(dependencyEntryMatch[1])) {
+      continue;
+    }
+
+    const allowedRootChange = /^ {2}"packageManager": /.test(line) || /^ {2}"pnpm": \{$/.test(line);
+    if (allowedRootChange) {
+      continue;
+    }
+
+    return false;
+  }
+
+  return true;
 }
 
 async function runValidationPlan(workdir, commands, options = {}) {

@@ -104,7 +104,7 @@ This prompt may process multiple items in one run. Use it for the triage lane, n
 
 10. **If it is a bug, reproduce it and then test the fix.** For a bug-fix, regression, or other failure claim, identify the smallest targeted repro or test that captures the issue. If needed, temporarily ablate the fix or the changed test setup so you can demonstrate failure on the refreshed base or ablated state. That temporary ablation must stay local only: do not commit it, do not push it, and do not leave the PR branch in the broken state. Restore the real PR fix in the working tree before continuing, then rerun the same repro or targeted test to prove that the fix changes the outcome. When feasible, also run relevant integration or end-to-end tests near that behavior.
 
-11. **If it is a feature, test the changed behavior directly.** For a feature or behavior change, validate the changed behavior directly on the PR branch with the smallest targeted test or check that shows the feature works as intended. When feasible, also run relevant integration or end-to-end tests near that behavior. Do not force an artificial “reproduce a prior failure” step for work that is not actually a bug fix.
+11. **If it is a feature, test the changed behavior directly.** For a feature or behavior change, validate the changed behavior directly on the PR branch with the smallest targeted test or check that shows the feature works as intended. When feasible, also run relevant integration or end-to-end tests near that behavior. Do not force an artificial “reproduce a prior failure” step for work that is not actually a bug fix. Dependency-only, tooling-only, docs-only, and lockfile-only maintenance PRs should still stay on this feature path. If a bespoke targeted local test command is not meaningful for that maintenance scope, treat normal repo review and CI as the meaningful validation instead of escalating just because there is no extra targeted command.
 
 12. **Escalate if the claimed work cannot actually be validated.** If a bug cannot be reproduced, the fix does not change the outcome, or a feature change cannot be validated confidently with targeted testing, stop and escalate to a human rather than continuing into refactor, review, or CI as if the work were proven.
 
@@ -215,7 +215,7 @@ Default comment template:
 
 - Intent valid: ✅ Yes / ❌ No
 - Solves the right problem: ✅ Yes / ⚠️ Partly / ❌ No / 🛑 Localized, bad, or unclear fix
-- Validation: ✅ Bug reproduced and fixed / ✅ Feature tested directly / ⚠️ Not validated / ➖ Not applicable / ⏸️ Not run
+- Validation: ✅ Bug reproduced and fixed / ✅ Feature tested directly / ✅ Standard repo checks are the right validation / ⚠️ Not validated / ➖ Not applicable / ⏸️ Not run
 - Close PR: 🛑 Yes / ✅ No
 - Refactor needed: ✅ None / 🔧 Superficial / 🧱 Fundamental
 - Human attention: ⚠️ Required / 🟢 Not required / 🛑 Not applicable because PR should close
