@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import {
   extractCodexReviewTail,
@@ -40,4 +42,20 @@ test("extractCodexReviewTail falls back to the final non-log block", () => {
       "P2: Minor wording cleanup in docs.",
     ].join("\n"),
   );
+});
+
+test("fix_ci_failures owns CI monitoring until a terminal state", () => {
+  const sourcePath = path.join(process.cwd(), "examples/flows/pr-triage/pr-triage.flow.ts");
+
+  return fs.readFile(sourcePath, "utf8").then((source) => {
+    assert.match(source, /fix_ci_failures:\s*\{[\s\S]*?timeoutMs:\s*60 \* 60_000,/);
+    const edgeBlock = source.match(/\{\s*from:\s*"fix_ci_failures",[\s\S]*?\n\s*\},\n\s*\{/)?.[0];
+
+    assert.ok(edgeBlock, "Expected a fix_ci_failures edge block");
+    assert.match(
+      edgeBlock,
+      /cases:\s*\{[\s\S]*?check_final_conflicts:\s*"check_final_conflicts",[\s\S]*?comment_and_escalate_to_human:\s*"comment_and_escalate_to_human",[\s\S]*?\}/,
+    );
+    assert.doesNotMatch(edgeBlock, /collect_ci_state:/);
+  });
 });

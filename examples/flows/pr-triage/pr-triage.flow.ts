@@ -154,7 +154,7 @@ const flow = {
       nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
-      timeoutMs: 30 * 60_000,
+      timeoutMs: 60 * 60_000,
       async prompt({ outputs }) {
         return promptFixCiFailures(prepared(outputs), outputs);
       },
@@ -366,7 +366,6 @@ const flow = {
       switch: {
         on: "$.route",
         cases: {
-          collect_ci_state: "collect_ci_state",
           check_final_conflicts: "check_final_conflicts",
           comment_and_escalate_to_human: "comment_and_escalate_to_human",
         },
@@ -1043,19 +1042,21 @@ function promptFixCiFailures(pr, outputs) {
     "Stay on the autonomous CI lane for this single PR.",
     `Target PR: ${prRef(pr)}`,
     `The CI mechanics have already been collected by the flow runtime in ${ciStatePath}.`,
-    "Read that local JSON file and the checked-out repo state instead of rerunning broad CI discovery yourself.",
+    "Start from that local JSON file and the checked-out repo state, then own the CI lane yourself until it reaches a stable green outcome or a real blocker forces escalation.",
     `Use the local branch ${pr.localBranch}. If you need to push, use remote ${pr.pushRemote} branch ${pr.pushRef}.`,
     "If any relevant GitHub Actions workflow run is approval-blocked, approve it immediately yourself with `gh api -X POST repos/{owner}/{repo}/actions/runs/{run_id}/approve` before making any escalation decision.",
     "Treat a workflow run as approval-blocked when its state clearly shows `action_required`, including cases where that appears in the conclusion rather than the status.",
-    "After you approve a blocked workflow run, route back to `collect_ci_state` so the flow runtime can re-check CI on the updated state.",
-    "If related failures remain and you can fix them, fix them directly in the repo, run focused checks when feasible, rerun the earlier targeted validation, commit and push the branch yourself, and then route back to `collect_ci_state` so the flow runtime can re-check CI.",
+    "Do not bounce back to `collect_ci_state` just to wait for CI. If a relevant workflow run is queued or in progress, monitor it yourself with `gh run watch`, `gh pr checks --watch`, or direct `gh api` polling until it reaches a terminal state.",
+    "If you approve a blocked workflow run successfully, keep monitoring inside this same step until the rerun finishes green, surfaces a real related failure, or hits a real platform/permission blocker.",
+    "If related failures remain and you can fix them, fix them directly in the repo, run focused checks when feasible, rerun the earlier targeted validation, commit and push the branch yourself, rerun or monitor CI yourself, and stay in this same step until the updated CI reaches a terminal state.",
+    "Only return from this step once CI is actually green/unrelated, or once you have a real reason that a human must take over.",
     `Latest validation summary: ${validation?.summary ?? "none"}.`,
     "If CI is green or the remaining failures are clearly unrelated, route to `check_final_conflicts` so the final conflict gate can run before the human handoff.",
     "Only route to `comment_and_escalate_to_human` for workflow approval if you actually tried to approve the blocked run and could not clear it because of a real permission or platform failure.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
-      '  "route": "collect_ci_state" | "check_final_conflicts" | "comment_and_escalate_to_human",',
+      '  "route": "check_final_conflicts" | "comment_and_escalate_to_human",',
       '  "ci_status": "related_failures_remain" | "green_or_unrelated" | "approval_blocked",',
       '  "summary": "short explanation",',
       '  "related_failures": ["brief failure"],',
