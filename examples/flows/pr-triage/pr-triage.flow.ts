@@ -923,6 +923,7 @@ function promptJudgeRefactor(pr, outputs) {
     "This is a read-only judgment step. Do not rerun validation, CI checks, Codex review, or GitHub API commands here.",
     "Judge whether this PR is ready as-is, or whether anything should be added, removed, simplified, or refactored before it continues.",
     "Do not only think about refactor depth. Also ask whether the PR includes any small extra behavior, missing follow-through, or unnecessary complexity that should be cleaned up before review and CI.",
+    "If a PR fixes the validated issue but also introduces extra behavior or special-case logic beyond the minimum needed for that fix, prefer `superficial` over `none` unless it was necessary to prove the issue resolved.",
     "Use `none` only if nothing should be added, removed, simplified, or reshaped before the PR continues.",
     "Use `superficial` if the main direction is fine but there is still some minor thing that should be added, removed, simplified, or locally refactored first.",
     "Use `fundamental` if the PR still needs a deeper rethink, reframing, or architectural change before it can be judged ready.",

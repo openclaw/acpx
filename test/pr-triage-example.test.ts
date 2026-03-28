@@ -126,5 +126,9 @@ test("judge_refactor asks whether anything should be added removed simplified or
       source,
       /Use `superficial` if the main direction is fine but there is still some minor thing that should be added, removed, simplified, or locally refactored first\./,
     );
+    assert.match(
+      source,
+      /If a PR fixes the validated issue but also introduces extra behavior or special-case logic beyond the minimum needed for that fix, prefer `superficial` over `none` unless it was necessary to prove the issue resolved\./,
+    );
   });
 });
