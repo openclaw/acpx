@@ -259,6 +259,26 @@ The important boundary is:
 - ACP for reasoning
 - runtime for supervision
 
+## Flow permissions
+
+Powerful flows should be able to declare permission requirements explicitly.
+
+That requirement should be enforced by the runner before the flow starts, not
+discovered mid-run after an ACP step hits write denials.
+
+The intended model is:
+
+- the flow declares the minimum permission mode it needs
+- the flow may require an explicit operator grant
+- the runner resolves both the effective mode and its source
+- the runner fails fast when the flow requires an explicit grant and the
+  operator did not supply one
+- the runtime must propagate the granted mode faithfully through queue-owner and
+  session-reuse paths
+
+This is specified in more detail in
+[`docs/2026-03-28-acpx-flow-permission-requirements.md`](2026-03-28-acpx-flow-permission-requirements.md).
+
 That boundary matters most when a workflow would otherwise ask the model to do
 open-ended orchestration inside one prompt turn.
 
