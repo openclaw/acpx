@@ -333,7 +333,7 @@ Built-ins:
 | `kiro`     | native (`kiro-cli acp`)                                                | [Kiro CLI](https://kiro.dev)                                                                                    |
 | `opencode` | `npx -y opencode-ai acp`                                               | [OpenCode](https://opencode.ai)                                                                                 |
 | `qwen`     | native (`qwen --acp`)                                                  | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
-| `trae`     | native (`trae-cli acp serve`)                                          | [Trae CLI](https://docs.trae.cn/cli)                                                                            |
+| `trae`     | native (`traecli acp serve`)                                           | [Trae CLI](https://docs.trae.cn/cli)                                                                            |
 
 `factory-droid` and `factorydroid` also resolve to the built-in `droid` adapter.
 

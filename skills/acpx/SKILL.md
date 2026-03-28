@@ -85,7 +85,7 @@ Friendly agent names resolve to commands:
 - `kiro` -> `kiro-cli acp`
 - `opencode` -> `npx -y opencode-ai acp`
 - `qwen` -> `qwen --acp`
-- `trae` -> `trae-cli acp serve`
+- `trae` -> `traecli acp serve`
 
 Rules:
 
