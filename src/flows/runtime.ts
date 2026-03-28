@@ -11,7 +11,12 @@ import {
 } from "../session-conversation-model.js";
 import { defaultSessionEventLog } from "../session-event-log.js";
 import { resolveSessionRecord } from "../session-persistence.js";
-import { InterruptedError, TimeoutError, withTimeout } from "../session-runtime-helpers.js";
+import {
+  InterruptedError,
+  TimeoutError,
+  withInterrupt,
+  withTimeout,
+} from "../session-runtime-helpers.js";
 import { cancelSessionPrompt, createSession, runOnce, sendSessionDirect } from "../session.js";
 import { SESSION_RECORD_SCHEMA } from "../types.js";
 import type { PromptInput, SessionRecord } from "../types.js";
@@ -169,190 +174,224 @@ export class FlowRunner {
     let current: string | null = flow.startAt;
     const attemptCounts = new Map<string, number>();
 
-    try {
-      while (current) {
-        const node = flow.nodes[current];
-        if (!node) {
-          throw new Error(`Unknown flow node: ${current}`);
-        }
-
-        const attemptId = nextAttemptId(attemptCounts, current);
-        const startedAt = isoNow();
-        const context = this.makeContext(state, input);
-        let output: unknown;
-        let promptText: string | null = null;
-        let rawText: string | null = null;
-        let sessionInfo: FlowSessionBinding | null = null;
-        let agentInfo: ResolvedFlowAgent | null = null;
-        let trace: FlowStepTrace | null = null;
-        this.markNodeStarted(
-          state,
-          current,
-          attemptId,
-          node.nodeType,
-          startedAt,
-          node.statusDetail,
-        );
-        await this.store.writeSnapshot(runDir, state, {
-          scope: "node",
-          type: "node_started",
-          nodeId: current,
-          attemptId,
-          payload: {
-            nodeType: node.nodeType,
-            ...(node.timeoutMs !== undefined
-              ? { timeoutMs: node.timeoutMs ?? this.defaultNodeTimeoutMs }
-              : { timeoutMs: this.defaultNodeTimeoutMs }),
-            ...(state.statusDetail ? { statusDetail: state.statusDetail } : {}),
-          },
-        });
-        let nodeResult: FlowNodeResult | undefined;
-        let executionError: unknown;
+    return await withInterrupt(
+      async () => {
         try {
-          ({ output, promptText, rawText, sessionInfo, agentInfo, trace } = await this.executeNode(
-            runDir,
-            state,
-            flow,
-            current,
-            node,
-            context,
-          ));
-          trace = await this.finalizeStepTrace(runDir, state, current, attemptId, output, trace);
-          nodeResult = createNodeResult({
-            attemptId,
-            nodeId: current,
-            nodeType: node.nodeType,
-            outcome: "ok",
-            startedAt,
-            finishedAt: isoNow(),
-            output,
-          });
-        } catch (error) {
-          executionError = error;
-          trace = extractAttachedStepTrace(error) ?? trace;
-          trace = await this.finalizeStepTrace(runDir, state, current, attemptId, undefined, trace);
-          nodeResult = createNodeResult({
-            attemptId,
-            nodeId: current,
-            nodeType: node.nodeType,
-            outcome: outcomeForError(error),
-            startedAt,
-            finishedAt: isoNow(),
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
+          while (current) {
+            const node = flow.nodes[current];
+            if (!node) {
+              throw new Error(`Unknown flow node: ${current}`);
+            }
 
-        state.results[current] = nodeResult;
+            const attemptId = nextAttemptId(attemptCounts, current);
+            const startedAt = isoNow();
+            const context = this.makeContext(state, input);
+            let output: unknown;
+            let promptText: string | null = null;
+            let rawText: string | null = null;
+            let sessionInfo: FlowSessionBinding | null = null;
+            let agentInfo: ResolvedFlowAgent | null = null;
+            let trace: FlowStepTrace | null = null;
+            this.markNodeStarted(
+              state,
+              current,
+              attemptId,
+              node.nodeType,
+              startedAt,
+              node.statusDetail,
+            );
+            await this.store.writeSnapshot(runDir, state, {
+              scope: "node",
+              type: "node_started",
+              nodeId: current,
+              attemptId,
+              payload: {
+                nodeType: node.nodeType,
+                ...(node.timeoutMs !== undefined
+                  ? { timeoutMs: node.timeoutMs ?? this.defaultNodeTimeoutMs }
+                  : { timeoutMs: this.defaultNodeTimeoutMs }),
+                ...(state.statusDetail ? { statusDetail: state.statusDetail } : {}),
+              },
+            });
+            let nodeResult: FlowNodeResult | undefined;
+            let executionError: unknown;
+            try {
+              ({ output, promptText, rawText, sessionInfo, agentInfo, trace } =
+                await this.executeNode(runDir, state, flow, current, node, context));
+              trace = await this.finalizeStepTrace(
+                runDir,
+                state,
+                current,
+                attemptId,
+                output,
+                trace,
+              );
+              nodeResult = createNodeResult({
+                attemptId,
+                nodeId: current,
+                nodeType: node.nodeType,
+                outcome: "ok",
+                startedAt,
+                finishedAt: isoNow(),
+                output,
+              });
+            } catch (error) {
+              executionError = error;
+              trace = extractAttachedStepTrace(error) ?? trace;
+              trace = await this.finalizeStepTrace(
+                runDir,
+                state,
+                current,
+                attemptId,
+                undefined,
+                trace,
+              );
+              nodeResult = createNodeResult({
+                attemptId,
+                nodeId: current,
+                nodeType: node.nodeType,
+                outcome: outcomeForError(error),
+                startedAt,
+                finishedAt: isoNow(),
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
 
-        if (nodeResult.outcome === "ok" && node.nodeType === "checkpoint") {
-          state.outputs[current] = output;
-          state.waitingOn = current;
-          state.updatedAt = isoNow();
-          state.status = "waiting";
-          this.clearActiveNode(state, (output as { summary?: string } | null)?.summary ?? current);
-          state.steps.push({
-            attemptId,
-            nodeId: current,
-            nodeType: node.nodeType,
-            outcome: nodeResult.outcome,
-            startedAt,
-            finishedAt: nodeResult.finishedAt,
-            promptText,
-            rawText,
-            output,
-            session: null,
-            agent: null,
-            ...(trace ? { trace } : {}),
-          });
+            state.results[current] = nodeResult;
+
+            if (nodeResult.outcome === "ok" && node.nodeType === "checkpoint") {
+              state.outputs[current] = output;
+              state.waitingOn = current;
+              state.updatedAt = isoNow();
+              state.status = "waiting";
+              this.clearActiveNode(
+                state,
+                (output as { summary?: string } | null)?.summary ?? current,
+              );
+              state.steps.push({
+                attemptId,
+                nodeId: current,
+                nodeType: node.nodeType,
+                outcome: nodeResult.outcome,
+                startedAt,
+                finishedAt: nodeResult.finishedAt,
+                promptText,
+                rawText,
+                output,
+                session: null,
+                agent: null,
+                ...(trace ? { trace } : {}),
+              });
+              await this.store.writeSnapshot(runDir, state, {
+                scope: "node",
+                type: "node_outcome",
+                nodeId: current,
+                attemptId,
+                payload: createNodeOutcomePayload(nodeResult, trace),
+              });
+              return {
+                runDir,
+                state,
+              };
+            }
+
+            if (nodeResult.outcome === "ok") {
+              state.outputs[current] = output;
+            }
+            state.updatedAt = isoNow();
+            this.clearActiveNode(state);
+            state.steps.push({
+              attemptId,
+              nodeId: current,
+              nodeType: node.nodeType,
+              outcome: nodeResult.outcome,
+              startedAt,
+              finishedAt: nodeResult.finishedAt,
+              promptText,
+              rawText,
+              output,
+              error: nodeResult.error,
+              session: sessionInfo,
+              agent: agentInfo,
+              ...(trace ? { trace } : {}),
+            });
+
+            await this.store.writeSnapshot(runDir, state, {
+              scope: "node",
+              type: "node_outcome",
+              nodeId: current,
+              attemptId,
+              payload: createNodeOutcomePayload(nodeResult, trace),
+            });
+
+            if (nodeResult.outcome === "ok") {
+              current = resolveNext(flow.edges, current, output, nodeResult);
+              continue;
+            }
+
+            const next = resolveNextForOutcome(flow.edges, current, nodeResult);
+            if (next) {
+              current = next;
+              continue;
+            }
+
+            throw executionError;
+          }
+
+          state.status = "completed";
+          state.finishedAt = isoNow();
+          state.updatedAt = state.finishedAt;
+          this.clearActiveNode(state);
           await this.store.writeSnapshot(runDir, state, {
-            scope: "node",
-            type: "node_outcome",
-            nodeId: current,
-            attemptId,
-            payload: createNodeOutcomePayload(nodeResult, trace),
+            scope: "run",
+            type: "run_completed",
+            payload: {
+              status: state.status,
+            },
           });
           return {
             runDir,
             state,
           };
+        } catch (error) {
+          await this.persistRunFailure(runDir, state, error);
+          throw error;
         }
+      },
+      async () => {
+        await this.persistRunFailure(runDir, state, new InterruptedError());
+      },
+    );
+  }
 
-        if (nodeResult.outcome === "ok") {
-          state.outputs[current] = output;
-        }
-        state.updatedAt = isoNow();
-        this.clearActiveNode(state);
-        state.steps.push({
-          attemptId,
-          nodeId: current,
-          nodeType: node.nodeType,
-          outcome: nodeResult.outcome,
-          startedAt,
-          finishedAt: nodeResult.finishedAt,
-          promptText,
-          rawText,
-          output,
-          error: nodeResult.error,
-          session: sessionInfo,
-          agent: agentInfo,
-          ...(trace ? { trace } : {}),
-        });
-
-        await this.store.writeSnapshot(runDir, state, {
-          scope: "node",
-          type: "node_outcome",
-          nodeId: current,
-          attemptId,
-          payload: createNodeOutcomePayload(nodeResult, trace),
-        });
-
-        if (nodeResult.outcome === "ok") {
-          current = resolveNext(flow.edges, current, output, nodeResult);
-          continue;
-        }
-
-        const next = resolveNextForOutcome(flow.edges, current, nodeResult);
-        if (next) {
-          current = next;
-          continue;
-        }
-
-        throw executionError;
-      }
-
-      state.status = "completed";
-      state.finishedAt = isoNow();
-      state.updatedAt = state.finishedAt;
-      this.clearActiveNode(state);
-      await this.store.writeSnapshot(runDir, state, {
-        scope: "run",
-        type: "run_completed",
-        payload: {
-          status: state.status,
-        },
-      });
-      return {
-        runDir,
-        state,
-      };
-    } catch (error) {
-      state.status = error instanceof TimeoutError ? "timed_out" : "failed";
-      state.updatedAt = isoNow();
-      state.finishedAt = state.updatedAt;
-      state.error = error instanceof Error ? error.message : String(error);
-      state.statusDetail = state.currentNode
-        ? `Failed in ${state.currentNode}: ${state.error}`
-        : state.error;
-      await this.store.writeSnapshot(runDir, state, {
-        scope: "run",
-        type: state.status === "timed_out" ? "run_failed" : "run_failed",
-        payload: {
-          status: state.status,
-          error: state.error,
-        },
-      });
-      throw error;
+  private async persistRunFailure(
+    runDir: string,
+    state: FlowRunState,
+    error: unknown,
+  ): Promise<void> {
+    if (
+      state.status === "waiting" ||
+      state.status === "completed" ||
+      (state.finishedAt !== undefined &&
+        (state.status === "failed" || state.status === "timed_out"))
+    ) {
+      return;
     }
+    state.status = error instanceof TimeoutError ? "timed_out" : "failed";
+    state.updatedAt = isoNow();
+    state.finishedAt = state.updatedAt;
+    state.error = error instanceof Error ? error.message : String(error);
+    state.statusDetail = state.currentNode
+      ? `Failed in ${state.currentNode}: ${state.error}`
+      : state.error;
+    await this.store.writeSnapshot(runDir, state, {
+      scope: "run",
+      type: "run_failed",
+      payload: {
+        status: state.status,
+        error: state.error,
+      },
+    });
   }
 
   private makeContext(state: FlowRunState, input: unknown): FlowNodeContext {

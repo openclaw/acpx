@@ -19,6 +19,9 @@ const FLOW_FIXTURE_PATH = fileURLToPath(new URL("./fixtures/flow-branch.flow.js"
 const FLOW_SHELL_FIXTURE_PATH = fileURLToPath(
   new URL("./fixtures/flow-shell.flow.js", import.meta.url),
 );
+const FLOW_INTERRUPT_FIXTURE_PATH = fileURLToPath(
+  new URL("./fixtures/flow-interrupt.flow.js", import.meta.url),
+);
 const FLOW_WAIT_FIXTURE_PATH = fileURLToPath(
   new URL("./fixtures/flow-wait.flow.js", import.meta.url),
 );
@@ -214,6 +217,77 @@ test("integration: flow run executes function and shell actions from --input-fil
         await fs.realpath(String(payload.outputs?.finalize?.cwd ?? "")),
         await fs.realpath(cwd),
       );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: flow run finalizes interrupted bundles on SIGHUP", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const child = spawn(
+        process.execPath,
+        [
+          CLI_PATH,
+          ...baseAgentArgs(cwd),
+          "--format",
+          "json",
+          "flow",
+          "run",
+          FLOW_INTERRUPT_FIXTURE_PATH,
+        ],
+        {
+          env: {
+            ...process.env,
+            HOME: homeDir,
+          },
+          cwd,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+
+      let stderr = "";
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+
+      const outputRoot = path.join(homeDir, ".acpx", "flows", "runs");
+      const runDir = await waitForFlowRunDir(outputRoot, "fixture-interrupt");
+      await waitFor(async () => {
+        const state = await readFlowRunJson(runDir);
+        if (state.currentNode === "slow" && state.status === "running") {
+          return state;
+        }
+        return null;
+      }, 5_000);
+
+      child.kill("SIGHUP");
+      const result = await awaitChildClose(child);
+      assert.equal(result.code, 130, stderr);
+
+      const finalState = await waitFor(async () => {
+        const state = await readFlowRunJson(runDir);
+        if (state.status === "failed" && state.error === "Interrupted") {
+          return state;
+        }
+        return null;
+      }, 5_000);
+
+      assert.equal(finalState.currentNode, "slow");
+      assert.equal(finalState.currentAttemptId, "slow#1");
+      assert.match(String(finalState.statusDetail ?? ""), /Failed in slow: Interrupted/);
+
+      const traceEvents = (await fs.readFile(path.join(runDir, "trace.ndjson"), "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { type?: string; payload?: { error?: string } });
+      const finalEvent = traceEvents.at(-1);
+      assert.equal(finalEvent?.type, "run_failed");
+      assert.equal(finalEvent?.payload?.error, "Interrupted");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -2290,6 +2364,38 @@ async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<vo
   }
 }
 
+async function waitForFlowRunDir(outputRoot: string, flowName: string): Promise<string> {
+  return await waitFor(async () => {
+    const entries = await fs.readdir(outputRoot).catch(() => []);
+    const match = entries.find((entry) => entry.includes(flowName));
+    return match ? path.join(outputRoot, match) : null;
+  }, 5_000);
+}
+
+async function readFlowRunJson(runDir: string): Promise<Record<string, unknown>> {
+  const payload = await fs.readFile(path.join(runDir, "projections", "run.json"), "utf8");
+  return JSON.parse(payload) as Record<string, unknown>;
+}
+
+async function waitFor<T>(fn: () => Promise<T | null>, timeoutMs: number): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+
+  while (Date.now() < deadline) {
+    try {
+      const value = await fn();
+      if (value != null) {
+        return value;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Timed out waiting for condition");
+}
+
 async function runCli(
   args: string[],
   homeDir: string,
@@ -2346,6 +2452,26 @@ async function runCliWithEntry(
         stdout,
         stderr,
       });
+    });
+  });
+}
+
+async function awaitChildClose(child: ReturnType<typeof spawn>): Promise<CliRunResult> {
+  return await new Promise<CliRunResult>((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      resolve({ code, signal, stdout, stderr });
     });
   });
 }
