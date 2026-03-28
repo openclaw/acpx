@@ -506,9 +506,9 @@ test("playbackSelectionMs clamps the final discrete step to the true timeline en
 });
 
 test("advancePlaybackPlayhead applies playback speed and clamps to the timeline end", () => {
-  assert.equal(advancePlaybackPlayhead(100, 400, 0.5, 1_000), 300);
   assert.equal(advancePlaybackPlayhead(100, 400, 2, 1_000), 900);
-  assert.equal(advancePlaybackPlayhead(900, 400, 2, 1_000), 1_000);
+  assert.equal(advancePlaybackPlayhead(100, 400, 5, 3_000), 2_100);
+  assert.equal(advancePlaybackPlayhead(900, 400, 10, 1_000), 1_000);
 });
 
 test("format helpers keep replay labels stable", () => {

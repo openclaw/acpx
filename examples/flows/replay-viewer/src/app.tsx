@@ -195,7 +195,11 @@ export function App() {
                     <Background color="rgba(148, 163, 184, 0.08)" gap={40} />
                   </ReactFlow>
                   <div className="canvas-card__camera">
-                    <div className="timeline__mode-switcher" role="tablist" aria-label="Camera mode">
+                    <div
+                      className="timeline__mode-switcher"
+                      role="tablist"
+                      aria-label="Camera mode"
+                    >
                       <ModeButton
                         label="Follow current node"
                         active={viewMode === "follow"}

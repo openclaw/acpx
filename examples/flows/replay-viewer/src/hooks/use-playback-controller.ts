@@ -8,7 +8,7 @@ import type { PlaybackTimeline } from "../lib/view-model.js";
 import type { LoadedRunBundle } from "../types";
 
 type PlaybackMode = "playing" | "seeking" | null;
-export const PLAYBACK_SPEED_OPTIONS = [0.5, 1, 1.5, 2] as const;
+export const PLAYBACK_SPEED_OPTIONS = [1, 2, 5, 10] as const;
 const DEFAULT_PLAYBACK_RATE = 1;
 
 export function usePlaybackController(bundle: LoadedRunBundle | null) {
