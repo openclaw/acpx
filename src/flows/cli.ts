@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { InvalidArgumentError, type Command } from "commander";
 import {
+  hasExplicitPermissionModeFlag,
   resolveAgentInvocation,
   resolveGlobalFlags,
   resolveOutputPolicy,
@@ -12,6 +13,8 @@ import {
 } from "../cli/flags.js";
 import type { ResolvedAcpxConfig } from "../config.js";
 import { type FlowDefinition, FlowRunner } from "../flows.js";
+import { permissionModeSatisfies } from "../permissions.js";
+import type { PermissionMode } from "../types.js";
 
 type FlowRunFlags = {
   inputJson?: string;
@@ -34,6 +37,7 @@ export async function handleFlowRun(
   const input = await readFlowInput(flags);
   const flowPath = path.resolve(flowFile);
   const flow = await loadFlowModule(flowPath);
+  assertFlowPermissionRequirements(flow, permissionMode, globalFlags);
 
   const runner = new FlowRunner({
     resolveAgent: (profile?: string) => {
@@ -60,6 +64,44 @@ export async function handleFlowRun(
   });
 
   printFlowRunResult(result, globalFlags);
+}
+
+function assertFlowPermissionRequirements(
+  flow: FlowDefinition,
+  permissionMode: PermissionMode,
+  globalFlags: GlobalFlags,
+): void {
+  const permissions = flow.permissions;
+  if (!permissions) {
+    return;
+  }
+
+  if (permissions.requireExplicitGrant && !hasExplicitPermissionModeFlag(globalFlags)) {
+    throw new InvalidArgumentError(
+      buildFlowPermissionFailureMessage(flow, permissions.requiredMode, permissions.reason, true),
+    );
+  }
+
+  if (!permissionModeSatisfies(permissionMode, permissions.requiredMode)) {
+    throw new InvalidArgumentError(
+      buildFlowPermissionFailureMessage(flow, permissions.requiredMode, permissions.reason, false),
+    );
+  }
+}
+
+function buildFlowPermissionFailureMessage(
+  flow: FlowDefinition,
+  requiredMode: PermissionMode,
+  reason?: string,
+  explicit = false,
+): string {
+  return [
+    explicit
+      ? `Flow "${flow.name}" requires an explicit ${requiredMode} grant.`
+      : `Flow "${flow.name}" requires permission mode ${requiredMode}.`,
+    `Rerun with --${requiredMode}.`,
+    ...(reason ? [`Reason: ${reason}`] : []),
+  ].join(" ");
 }
 
 async function readFlowInput(flags: FlowRunFlags): Promise<unknown> {

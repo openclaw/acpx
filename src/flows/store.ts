@@ -394,6 +394,7 @@ function createFlowDefinitionSnapshot(flow: FlowDefinition): FlowDefinitionSnaps
   return {
     schema: FLOW_SNAPSHOT_SCHEMA,
     name: flow.name,
+    ...(flow.permissions ? { permissions: structuredClone(flow.permissions) } : {}),
     startAt: flow.startAt,
     nodes: Object.fromEntries(
       Object.entries(flow.nodes).map(([nodeId, node]) => [nodeId, snapshotNode(node)]),

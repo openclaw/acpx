@@ -2,6 +2,9 @@
 description: Prompt for triaging PRs, issues, or issue descriptions by inferring the plain-language intent, judging whether the work actually solves the underlying problem, routing cases that still need human judgment to a human, and only landing changes after Codex review and CI are in an acceptable state
 ---
 
+This flow requires an explicit `--approve-all` grant when run through
+`acpx flow run`.
+
 ```mermaid
 flowchart TD
     classDef hidden fill:none,stroke:none,color:none,stroke-width:0px;

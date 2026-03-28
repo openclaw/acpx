@@ -220,6 +220,127 @@ test("integration: flow run executes function and shell actions from --input-fil
   });
 });
 
+test("integration: flow run fails fast when a flow requires an explicit approve-all grant", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-permission-cwd-"));
+    const flowDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-permission-"));
+    const flowPath = path.join(flowDir, "requires-approve-all.flow.ts");
+
+    try {
+      await fs.writeFile(
+        flowPath,
+        [
+          'import { compute, defineFlow } from "acpx/flows";',
+          "",
+          "export default defineFlow({",
+          '  name: "requires-explicit-approve-all",',
+          "  permissions: {",
+          '    requiredMode: "approve-all",',
+          "    requireExplicitGrant: true,",
+          '    reason: "This flow writes to the repo and needs full ACP permissions.",',
+          "  },",
+          '  startAt: "done",',
+          "  nodes: {",
+          "    done: compute({",
+          "      run: () => ({ ok: true }),",
+          "    }),",
+          "  },",
+          "  edges: [],",
+          "});",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = await runCli(
+        ["--agent", MOCK_AGENT_COMMAND, "--cwd", cwd, "flow", "run", flowPath],
+        homeDir,
+      );
+
+      assert.equal(result.code, 2);
+      assert.match(result.stderr, /requires an explicit approve-all grant/i);
+      assert.match(result.stderr, /Rerun with --approve-all/i);
+    } finally {
+      await fs.rm(flowDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: flow run preserves approve-all through persistent ACP writes", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-write-cwd-"));
+    const flowDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-write-"));
+    const flowPath = path.join(flowDir, "write-through-session.flow.ts");
+    const writePath = path.join(cwd, "flow-write.txt");
+
+    try {
+      await fs.writeFile(
+        flowPath,
+        [
+          'import { acp, defineFlow } from "acpx/flows";',
+          "",
+          "export default defineFlow({",
+          '  name: "write-through-session",',
+          "  permissions: {",
+          '    requiredMode: "approve-all",',
+          "    requireExplicitGrant: true,",
+          '    reason: "This flow writes files through ACP.",',
+          "  },",
+          '  startAt: "write_file",',
+          "  nodes: {",
+          "    write_file: acp({",
+          `      prompt: () => ${JSON.stringify(`write ${writePath} hello`)},`,
+          "      parse: (text) => ({ reply: text }),",
+          "    }),",
+          "  },",
+          "  edges: [],",
+          "});",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = await runCli(
+        [
+          "--agent",
+          MOCK_AGENT_COMMAND,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "--ttl",
+          "1",
+          "flow",
+          "run",
+          flowPath,
+        ],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      const payload = JSON.parse(result.stdout.trim()) as {
+        action?: string;
+        status?: string;
+        outputs?: {
+          write_file?: {
+            reply?: string;
+          };
+        };
+      };
+
+      assert.equal(payload.action, "flow_run_result");
+      assert.equal(payload.status, "completed");
+      assert.match(payload.outputs?.write_file?.reply ?? "", /wrote /i);
+      assert.equal(await fs.readFile(writePath, "utf8"), "hello");
+    } finally {
+      await fs.rm(flowDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test('integration: flow run resolves "acpx/flows" imports for external flow files', async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

@@ -76,6 +76,7 @@ acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>
 - Reuses one implicit main ACP session by default for non-isolated `acp` nodes.
 - `acp` nodes may override their working directory per step, which lets flows prepare an isolated workspace with an action node and then keep the agent session inside that cwd.
 - `acp` and `action` nodes use the global `--timeout` value as their default step timeout. If `--timeout` is omitted, flows default to 15 minutes per active step.
+- Flows may declare permission requirements. If a flow requires an explicit grant such as `approve-all`, `acpx` fails fast before starting the flow and tells you which permission flag to pass.
 - `--input-json` passes flow input inline as JSON.
 - `--input-file` reads flow input JSON from disk.
 - `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.
@@ -90,7 +91,7 @@ acpx flow run ./my-flow.ts --input-file ./flow-input.json
 acpx flow run examples/flows/branch.flow.ts \
   --input-json '{"task":"FIX: add a regression test for the reconnect bug"}'
 
-acpx flow run examples/flows/pr-triage/pr-triage.flow.ts \
+acpx --approve-all flow run examples/flows/pr-triage/pr-triage.flow.ts \
   --input-json '{"repo":"openclaw/acpx","prNumber":150}'
 ```
 

@@ -24,6 +24,10 @@ export type PermissionFlags = {
   denyAll?: boolean;
 };
 
+export function hasExplicitPermissionModeFlag(flags: PermissionFlags): boolean {
+  return flags.approveAll === true || flags.approveReads === true || flags.denyAll === true;
+}
+
 export type GlobalFlags = PermissionFlags & {
   agent?: string;
   cwd: string;
@@ -167,6 +171,9 @@ export function resolvePermissionMode(
 
   if (flags.approveAll) {
     return "approve-all";
+  }
+  if (flags.approveReads) {
+    return "approve-reads";
   }
   if (flags.denyAll) {
     return "deny-all";

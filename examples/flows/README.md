@@ -21,7 +21,7 @@ acpx flow run examples/flows/echo.flow.ts \
 acpx flow run examples/flows/branch.flow.ts \
   --input-json '{"task":"FIX: add a regression test for the reconnect bug"}'
 
-acpx flow run examples/flows/pr-triage/pr-triage.flow.ts \
+acpx --approve-all flow run examples/flows/pr-triage/pr-triage.flow.ts \
   --input-json '{"repo":"openclaw/acpx","prNumber":150}'
 
 acpx flow run examples/flows/shell.flow.ts \
@@ -44,3 +44,6 @@ behavior.
 
 The PR-triage example can comment on or close real GitHub PRs if you run it
 against a live repository.
+
+The PR-triage example declares an explicit `approve-all` requirement, so it
+must be run with `--approve-all`.

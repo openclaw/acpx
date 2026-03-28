@@ -104,8 +104,15 @@ export type FlowNodeDefinition =
   | ActionNodeDefinition
   | CheckpointNodeDefinition;
 
+export type FlowPermissionRequirements = {
+  requiredMode: PermissionMode;
+  requireExplicitGrant?: boolean;
+  reason?: string;
+};
+
 export type FlowDefinition = {
   name: string;
+  permissions?: FlowPermissionRequirements;
   startAt: string;
   nodes: Record<string, FlowNodeDefinition>;
   edges: FlowEdge[];
@@ -133,6 +140,7 @@ export type FlowNodeSnapshot = FlowNodeCommon & {
 export type FlowDefinitionSnapshot = {
   schema: "acpx.flow-definition-snapshot.v1";
   name: string;
+  permissions?: FlowPermissionRequirements;
   startAt: string;
   nodes: Record<string, FlowNodeSnapshot>;
   edges: FlowEdge[];

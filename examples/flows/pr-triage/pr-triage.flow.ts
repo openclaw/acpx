@@ -12,6 +12,12 @@ const MAIN_SESSION = {
 
 const flow = {
   name: "pr-triage",
+  permissions: {
+    requiredMode: "approve-all",
+    requireExplicitGrant: true,
+    reason:
+      "This flow edits files, pushes commits, comments on pull requests, and may approve CI workflow runs.",
+  },
   startAt: "load_pr",
   nodes: {
     load_pr: {

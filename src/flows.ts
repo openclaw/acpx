@@ -10,6 +10,7 @@ export type {
   FlowNodeCommon,
   FlowNodeContext,
   FlowNodeDefinition,
+  FlowPermissionRequirements,
   FlowRunResult,
   FlowRunState,
   FlowRunnerOptions,

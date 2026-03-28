@@ -964,7 +964,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     agentCommand: sessionRecord.agentCommand,
     cwd: absolutePath(sessionRecord.cwd),
     mcpServers: options.mcpServers,
-    permissionMode: "approve-reads",
+    permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,

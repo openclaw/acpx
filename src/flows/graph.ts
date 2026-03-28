@@ -4,6 +4,9 @@ export function validateFlowDefinition(flow: FlowDefinition): void {
   if (!flow.name.trim()) {
     throw new Error("Flow name must not be empty");
   }
+  if (flow.permissions?.reason !== undefined && !flow.permissions.reason.trim()) {
+    throw new Error("Flow permission reason must not be empty");
+  }
   if (!flow.nodes[flow.startAt]) {
     throw new Error(`Flow start node is missing: ${flow.startAt}`);
   }
