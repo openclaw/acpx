@@ -5,6 +5,8 @@ description: Prompt for triaging PRs, issues, or issue descriptions by inferring
 This flow requires an explicit `--approve-all` grant when run through
 `acpx flow run`.
 
+Tuning notes for this workflow live in [TUNING.md](./TUNING.md).
+
 ```mermaid
 flowchart TD
     classDef hidden fill:none,stroke:none,color:none,stroke-width:0px;
