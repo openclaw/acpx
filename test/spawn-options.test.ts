@@ -19,7 +19,7 @@ test("buildAgentSpawnOptions hides Windows console windows and preserves auth en
 });
 
 test("buildTerminalSpawnOptions hides Windows console windows and maps env entries", () => {
-  const options = buildTerminalSpawnOptions("/tmp/acpx-terminal", [
+  const options = buildTerminalSpawnOptions("node", "/tmp/acpx-terminal", [
     { name: "TMUX", value: "/tmp/tmux-1000/default,123,0" },
     { name: "TERM", value: "screen-256color" },
   ]);
@@ -102,9 +102,50 @@ test("buildSpawnCommandOptions keeps shell disabled for non-batch commands", asy
   }
 });
 
-test("buildTerminalSpawnOptions enables shell on Windows for PATH resolution", () => {
-  const options = buildTerminalSpawnOptions("/tmp/acpx-terminal", []);
+test("buildTerminalSpawnOptions enables shell for PATH-resolved .cmd wrappers on Windows", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-windows-spawn-"));
 
-  // shell should be set based on the current platform
-  assert.equal(typeof options.shell, "boolean");
+  try {
+    await fs.writeFile(path.join(tempDir, "npx.cmd"), "@echo off\r\n");
+
+    const options = buildTerminalSpawnOptions(
+      "npx",
+      "/tmp/acpx-terminal",
+      [
+        { name: "PATH", value: tempDir },
+        { name: "PATHEXT", value: ".COM;.EXE;.BAT;.CMD" },
+      ],
+      "win32",
+    );
+
+    assert.equal(options.shell, true);
+    assert.deepEqual(options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.equal(options.windowsHide, true);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("buildTerminalSpawnOptions keeps shell disabled for non-batch commands", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-windows-spawn-"));
+
+  try {
+    await fs.writeFile(path.join(tempDir, "node.exe"), "");
+
+    const options = buildTerminalSpawnOptions(
+      "node",
+      "/tmp/acpx-terminal",
+      [
+        { name: "PATH", value: tempDir },
+        { name: "PATHEXT", value: ".COM;.EXE;.BAT;.CMD" },
+      ],
+      "win32",
+    );
+
+    assert.equal(options.shell, undefined);
+    assert.deepEqual(options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.equal(options.windowsHide, true);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
