@@ -23,6 +23,7 @@ Global options apply to all commands.
 acpx [global_options] [prompt_text...]
 acpx [global_options] prompt [prompt_options] [prompt_text...]
 acpx [global_options] exec [prompt_options] [prompt_text...]
+acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>] [--default-agent <name>]
 acpx [global_options] cancel [-s <name>]
 acpx [global_options] set-mode <mode> [-s <name>]
 acpx [global_options] set <key> <value> [-s <name>]
@@ -59,9 +60,43 @@ Prompt options:
 Notes:
 
 - Top-level `prompt`, `exec`, `cancel`, `set-mode`, `set`, `sessions`, and bare `acpx <prompt>` default to `codex`.
+- Top-level `flow run <file>` executes a user-authored workflow module and persists run state under `~/.acpx/flows/runs/`.
 - If a prompt argument is omitted, `acpx` reads prompt text from stdin when piped.
 - `--file` works for implicit prompt, `prompt`, and `exec` commands.
 - `acpx` with no args in an interactive terminal shows help.
+
+## `flow run` subcommand
+
+```bash
+acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>] [--default-agent <name>]
+```
+
+- Runs a user-authored workflow module step by step through the `acpx/flows` runtime.
+- Persists run artifacts under `~/.acpx/flows/runs/<runId>/`.
+- Reuses one implicit main ACP session by default for non-isolated `acp` nodes.
+- `acp` nodes may override their working directory per step, which lets flows prepare an isolated workspace with an action node and then keep the agent session inside that cwd.
+- `acp` and `action` nodes use the global `--timeout` value as their default step timeout. If `--timeout` is omitted, flows default to 15 minutes per active step.
+- Flows may declare permission requirements. If a flow requires an explicit grant such as `approve-all`, `acpx` fails fast before starting the flow and tells you which permission flag to pass.
+- `--input-json` passes flow input inline as JSON.
+- `--input-file` reads flow input JSON from disk.
+- `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.
+- The file is always provided by the caller at runtime. `acpx` does not require any built-in flow registry.
+- The source repo includes example flow files under `examples/flows/`, including a larger PR-triage example under `examples/flows/pr-triage/`.
+
+Example invocations:
+
+```bash
+acpx flow run ./my-flow.ts --input-file ./flow-input.json
+
+acpx flow run examples/flows/branch.flow.ts \
+  --input-json '{"task":"FIX: add a regression test for the reconnect bug"}'
+
+acpx --approve-all flow run examples/flows/pr-triage/pr-triage.flow.ts \
+  --input-json '{"repo":"openclaw/acpx","prNumber":150}'
+```
+
+The PR-triage example is only an example workflow. It can post GitHub comments
+or close a PR if you run it against a live repository.
 
 ## Global options
 

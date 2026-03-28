@@ -47,23 +47,31 @@ export async function withInterrupt<T>(
       settled = true;
       process.off("SIGINT", onSigint);
       process.off("SIGTERM", onSigterm);
+      process.off("SIGHUP", onSighup);
       cb();
     };
 
-    const onSigint = () => {
+    const rejectInterrupted = () => {
       void onInterrupt().finally(() => {
         finish(() => reject(new InterruptedError()));
       });
     };
 
+    const onSigint = () => {
+      rejectInterrupted();
+    };
+
     const onSigterm = () => {
-      void onInterrupt().finally(() => {
-        finish(() => reject(new InterruptedError()));
-      });
+      rejectInterrupted();
+    };
+
+    const onSighup = () => {
+      rejectInterrupted();
     };
 
     process.once("SIGINT", onSigint);
     process.once("SIGTERM", onSigterm);
+    process.once("SIGHUP", onSighup);
 
     void run().then(
       (result) => finish(() => resolve(result)),

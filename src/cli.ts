@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 
 import { realpathSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { main } from "./cli-core.js";
+import { buildQueueOwnerArgOverride } from "./session-runtime/queue-owner-process.js";
 
 export { formatPromptSessionBannerLine } from "./cli-core.js";
 export { parseAllowedTools, parseMaxTurns, parseTtlSeconds } from "./cli/flags.js";
+
+const queueOwnerArgOverride = buildQueueOwnerArgOverride(fileURLToPath(import.meta.url));
+if (queueOwnerArgOverride) {
+  process.env.ACPX_QUEUE_OWNER_ARGS ??= queueOwnerArgOverride;
+}
 
 function isCliEntrypoint(argv: string[]): boolean {
   const entry = argv[1];

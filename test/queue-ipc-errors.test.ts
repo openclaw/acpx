@@ -8,6 +8,7 @@ import {
   SessionQueueOwner,
   releaseQueueOwnerLease,
   tryAcquireQueueOwnerLease,
+  trySetConfigOptionOnRunningOwner,
   trySetModeOnRunningOwner,
   trySubmitToRunningOwner,
 } from "../src/queue-ipc.js";
@@ -162,6 +163,59 @@ test("trySetModeOnRunningOwner propagates typed queue control errors", async () 
           return true;
         },
       );
+    } finally {
+      await closeServer(server);
+      await cleanupOwnerArtifacts({ socketPath, lockPath });
+      stopProcess(keeper);
+    }
+  });
+});
+
+test("trySetConfigOptionOnRunningOwner returns the queue owner response", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "control-config-success-session";
+    const keeper = await startKeeperProcess();
+    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
+    await writeQueueOwnerLock({
+      lockPath,
+      pid: keeper.pid,
+      sessionId,
+      socketPath,
+    });
+
+    const server = createSingleRequestServer((socket, request) => {
+      assert.equal(request.type, "set_config_option");
+      socket.write(
+        `${JSON.stringify({
+          type: "accepted",
+          requestId: request.requestId,
+        })}\n`,
+      );
+      socket.write(
+        `${JSON.stringify({
+          type: "set_config_option_result",
+          requestId: request.requestId,
+          response: {
+            configOptions: [],
+          },
+        })}\n`,
+      );
+      socket.end();
+    });
+
+    await listenServer(server, socketPath);
+
+    try {
+      const response = await trySetConfigOptionOnRunningOwner(
+        sessionId,
+        "thinking_level",
+        "high",
+        1_000,
+        true,
+      );
+      assert.deepEqual(response, {
+        configOptions: [],
+      });
     } finally {
       await closeServer(server);
       await cleanupOwnerArtifacts({ socketPath, lockPath });

@@ -32,6 +32,11 @@ test("resolveAgentCommand prefers explicit alias overrides over built-in alias m
   );
 });
 
+test("trae built-in uses the standard traecli executable", () => {
+  assert.equal(AGENT_REGISTRY.trae, "traecli acp serve");
+  assert.equal(resolveAgentCommand("trae"), "traecli acp serve");
+});
+
 test("listBuiltInAgents preserves the required example prefix and alphabetical tail", () => {
   const agents = listBuiltInAgents();
   assert.deepEqual(agents, Object.keys(AGENT_REGISTRY));
@@ -51,7 +56,9 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "kimi",
     "kiro",
     "opencode",
+    "qoder",
     "qwen",
+    "trae",
   ]);
 });
 

@@ -1,19 +1,13 @@
 import { randomUUID } from "node:crypto";
-import net from "node:net";
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { QueueConnectionError, QueueProtocolError } from "./errors.js";
-import { incrementPerfCounter, measurePerf } from "./perf-metrics.js";
+import { incrementPerfCounter } from "./perf-metrics.js";
+import { probeQueueOwnerHealth, type QueueOwnerHealth } from "./queue-ipc-health.js";
+import { QUEUE_CONNECT_RETRY_MS, connectToQueueOwner } from "./queue-ipc-transport.js";
 import {
-  type QueueOwnerLease,
   type QueueOwnerRecord,
-  isProcessAlive,
   readQueueOwnerRecord,
-  readQueueOwnerStatus,
-  releaseQueueOwnerLease,
-  terminateProcess,
   terminateQueueOwnerForSession,
-  tryAcquireQueueOwnerLease,
-  waitMs,
 } from "./queue-lease-store.js";
 import {
   parseQueueOwnerMessage,
@@ -37,8 +31,7 @@ import type {
   SessionSendOutcome,
 } from "./types.js";
 
-const QUEUE_CONNECT_ATTEMPTS = 40;
-export const QUEUE_CONNECT_RETRY_MS = 50;
+export { QUEUE_CONNECT_RETRY_MS } from "./queue-ipc-transport.js";
 export {
   isProcessAlive,
   releaseQueueOwnerLease,
@@ -82,123 +75,11 @@ async function maybeRecoverStaleOwnerAfterProtocolMismatch(params: {
 
   return true;
 }
-export type QueueOwnerHealth = {
-  sessionId: string;
-  hasLease: boolean;
-  healthy: boolean;
-  socketReachable: boolean;
-  pidAlive: boolean;
-  pid?: number;
-  socketPath?: string;
-  ownerGeneration?: number;
-  queueDepth?: number;
-};
-
+export { probeQueueOwnerHealth };
+export type { QueueOwnerHealth };
 export type { QueueOwnerMessage, QueueSubmitRequest } from "./queue-messages.js";
 export type { QueueOwnerControlHandlers, QueueTask } from "./queue-ipc-server.js";
 export { SessionQueueOwner } from "./queue-ipc-server.js";
-
-function shouldRetryQueueConnect(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException).code;
-  return code === "ENOENT" || code === "ECONNREFUSED";
-}
-
-async function connectToSocket(socketPath: string): Promise<net.Socket> {
-  return await new Promise<net.Socket>((resolve, reject) => {
-    const socket = net.createConnection(socketPath);
-
-    const onConnect = () => {
-      socket.off("error", onError);
-      resolve(socket);
-    };
-    const onError = (error: Error) => {
-      socket.off("connect", onConnect);
-      reject(error);
-    };
-
-    socket.once("connect", onConnect);
-    socket.once("error", onError);
-  });
-}
-
-async function connectToQueueOwner(
-  owner: QueueOwnerRecord,
-  maxAttempts = QUEUE_CONNECT_ATTEMPTS,
-): Promise<net.Socket | undefined> {
-  let lastError: unknown;
-
-  const attempts = Math.max(1, Math.trunc(maxAttempts));
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      return await measurePerf(
-        "queue.connect",
-        async () => await connectToSocket(owner.socketPath),
-      );
-    } catch (error) {
-      lastError = error;
-      if (!shouldRetryQueueConnect(error)) {
-        throw error;
-      }
-      await waitMs(QUEUE_CONNECT_RETRY_MS);
-    }
-  }
-
-  if (lastError && !shouldRetryQueueConnect(lastError)) {
-    throw lastError;
-  }
-
-  return undefined;
-}
-
-export async function probeQueueOwnerHealth(sessionId: string): Promise<QueueOwnerHealth> {
-  const ownerRecord = await readQueueOwnerRecord(sessionId);
-  if (!ownerRecord) {
-    return {
-      sessionId,
-      hasLease: false,
-      healthy: false,
-      socketReachable: false,
-      pidAlive: false,
-    };
-  }
-
-  const owner = await readQueueOwnerStatus(sessionId);
-  if (!owner) {
-    return {
-      sessionId,
-      hasLease: false,
-      healthy: false,
-      socketReachable: false,
-      pidAlive: false,
-    };
-  }
-
-  const pidAlive = owner.alive;
-  let socketReachable = false;
-  try {
-    const socket = await connectToQueueOwner(ownerRecord, 2);
-    if (socket) {
-      socketReachable = true;
-      if (!socket.destroyed) {
-        socket.end();
-      }
-    }
-  } catch {
-    socketReachable = false;
-  }
-
-  return {
-    sessionId,
-    hasLease: true,
-    healthy: socketReachable,
-    socketReachable,
-    pidAlive,
-    pid: owner.pid,
-    socketPath: owner.socketPath,
-    ownerGeneration: owner.ownerGeneration,
-    queueDepth: owner.queueDepth,
-  };
-}
 
 function assertOwnerGeneration(
   owner: QueueOwnerRecord,

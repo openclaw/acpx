@@ -1,0 +1,204 @@
+{
+  "runId": "2026-03-27T082624978Z-example-two-turn-63806145",
+  "flowName": "example-two-turn",
+  "flowPath": "/Users/onur/offline/acpx/examples/flows/two-turn.flow.ts",
+  "startedAt": "2026-03-27T08:26:24.986Z",
+  "updatedAt": "2026-03-27T08:26:25.502Z",
+  "status": "completed",
+  "input": {
+    "topic": "How should a replay viewer show ACP turns?"
+  },
+  "outputs": {
+    "draft": {
+      "draft": "short paragraph"
+    },
+    "refine": {
+      "checklist": ["item", "item"]
+    },
+    "finalize": {
+      "checklist": ["item", "item"]
+    }
+  },
+  "results": {
+    "draft": {
+      "attemptId": "draft#1",
+      "nodeId": "draft",
+      "nodeType": "acp",
+      "outcome": "ok",
+      "startedAt": "2026-03-27T08:26:24.988Z",
+      "finishedAt": "2026-03-27T08:26:25.343Z",
+      "durationMs": 355,
+      "output": {
+        "draft": "short paragraph"
+      }
+    },
+    "refine": {
+      "attemptId": "refine#1",
+      "nodeId": "refine",
+      "nodeType": "acp",
+      "outcome": "ok",
+      "startedAt": "2026-03-27T08:26:25.344Z",
+      "finishedAt": "2026-03-27T08:26:25.498Z",
+      "durationMs": 154,
+      "output": {
+        "checklist": ["item", "item"]
+      }
+    },
+    "finalize": {
+      "attemptId": "finalize#1",
+      "nodeId": "finalize",
+      "nodeType": "compute",
+      "outcome": "ok",
+      "startedAt": "2026-03-27T08:26:25.500Z",
+      "finishedAt": "2026-03-27T08:26:25.501Z",
+      "durationMs": 1,
+      "output": {
+        "checklist": ["item", "item"]
+      }
+    }
+  },
+  "steps": [
+    {
+      "attemptId": "draft#1",
+      "nodeId": "draft",
+      "nodeType": "acp",
+      "outcome": "ok",
+      "startedAt": "2026-03-27T08:26:24.988Z",
+      "finishedAt": "2026-03-27T08:26:25.343Z",
+      "promptText": "Write a short draft answer about the topic below.\nReturn exactly one JSON object with this shape:\n{\n  \"draft\": \"short paragraph\"\n}\n\nTopic: How should a replay viewer show ACP turns?",
+      "rawText": "unrecognized prompt: Write a short draft answer about the topic below.\nReturn exactly one JSON object with this shape:\n{\n  \"draft\": \"short paragraph\"\n}\n\nTopic: How should a replay viewer show ACP turns?",
+      "output": {
+        "draft": "short paragraph"
+      },
+      "session": {
+        "key": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js::/tmp/acpx-sample-home-kBDIgu/work::main",
+        "handle": "main",
+        "bundleId": "main-87f32b36",
+        "name": "example-two-turn-main-e0cd2792-63806145",
+        "agentName": "codex",
+        "agentCommand": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js",
+        "cwd": "/tmp/acpx-sample-home-kBDIgu/work",
+        "acpxRecordId": "294fd830-e856-431b-819e-789d0f27b642",
+        "acpSessionId": "7df78b83-b5cd-4b49-8522-86efd50bfe7f"
+      },
+      "agent": {
+        "agentName": "codex",
+        "agentCommand": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js",
+        "cwd": "/tmp/acpx-sample-home-kBDIgu/work"
+      },
+      "trace": {
+        "sessionId": "main-87f32b36",
+        "promptArtifact": {
+          "path": "artifacts/sha256-fe7c508d77690ffc0980cb8df32001b9447de4247a08bfb967e6d66934bf121c.txt",
+          "mediaType": "text/plain",
+          "bytes": 181,
+          "sha256": "fe7c508d77690ffc0980cb8df32001b9447de4247a08bfb967e6d66934bf121c"
+        },
+        "rawResponseArtifact": {
+          "path": "artifacts/sha256-5f490d19abc369e72146ddc6381599e495ef91fbe0110ddd82ea067123ab9293.txt",
+          "mediaType": "text/plain",
+          "bytes": 202,
+          "sha256": "5f490d19abc369e72146ddc6381599e495ef91fbe0110ddd82ea067123ab9293"
+        },
+        "conversation": {
+          "sessionId": "main-87f32b36",
+          "messageStart": 0,
+          "messageEnd": 1,
+          "eventStartSeq": 1,
+          "eventEndSeq": 7
+        },
+        "outputInline": {
+          "draft": "short paragraph"
+        }
+      }
+    },
+    {
+      "attemptId": "refine#1",
+      "nodeId": "refine",
+      "nodeType": "acp",
+      "outcome": "ok",
+      "startedAt": "2026-03-27T08:26:25.344Z",
+      "finishedAt": "2026-03-27T08:26:25.498Z",
+      "promptText": "Use the earlier draft already in this session.\nTurn it into a concise checklist.\nReturn exactly one JSON object with this shape:\n{\n  \"checklist\": [\"item\", \"item\"]\n}\n\nDraft: {\"draft\":\"short paragraph\"}",
+      "rawText": "unrecognized prompt: Use the earlier draft already in this session.\nTurn it into a concise checklist.\nReturn exactly one JSON object with this shape:\n{\n  \"checklist\": [\"item\", \"item\"]\n}\n\nDraft: {\"draft\":\"short paragraph\"}",
+      "output": {
+        "checklist": ["item", "item"]
+      },
+      "session": {
+        "key": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js::/tmp/acpx-sample-home-kBDIgu/work::main",
+        "handle": "main",
+        "bundleId": "main-87f32b36",
+        "name": "example-two-turn-main-e0cd2792-63806145",
+        "agentName": "codex",
+        "agentCommand": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js",
+        "cwd": "/tmp/acpx-sample-home-kBDIgu/work",
+        "acpxRecordId": "294fd830-e856-431b-819e-789d0f27b642",
+        "acpSessionId": "6e433465-6bc7-427f-99f8-39de79a1c588"
+      },
+      "agent": {
+        "agentName": "codex",
+        "agentCommand": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js",
+        "cwd": "/tmp/acpx-sample-home-kBDIgu/work"
+      },
+      "trace": {
+        "sessionId": "main-87f32b36",
+        "promptArtifact": {
+          "path": "artifacts/sha256-08d939bbb21657f868fde0eb6000a539388837f1b3800aae9a8889528c3a0cf6.txt",
+          "mediaType": "text/plain",
+          "bytes": 200,
+          "sha256": "08d939bbb21657f868fde0eb6000a539388837f1b3800aae9a8889528c3a0cf6"
+        },
+        "rawResponseArtifact": {
+          "path": "artifacts/sha256-68f27508c95abf8a0995937491c392690cc55fc8305a9982f9082df5746c5cad.txt",
+          "mediaType": "text/plain",
+          "bytes": 221,
+          "sha256": "68f27508c95abf8a0995937491c392690cc55fc8305a9982f9082df5746c5cad"
+        },
+        "conversation": {
+          "sessionId": "main-87f32b36",
+          "messageStart": 2,
+          "messageEnd": 3,
+          "eventStartSeq": 8,
+          "eventEndSeq": 14
+        },
+        "outputInline": {
+          "checklist": ["item", "item"]
+        }
+      }
+    },
+    {
+      "attemptId": "finalize#1",
+      "nodeId": "finalize",
+      "nodeType": "compute",
+      "outcome": "ok",
+      "startedAt": "2026-03-27T08:26:25.500Z",
+      "finishedAt": "2026-03-27T08:26:25.501Z",
+      "promptText": null,
+      "rawText": null,
+      "output": {
+        "checklist": ["item", "item"]
+      },
+      "session": null,
+      "agent": null,
+      "trace": {
+        "outputInline": {
+          "checklist": ["item", "item"]
+        }
+      }
+    }
+  ],
+  "sessionBindings": {
+    "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js::/tmp/acpx-sample-home-kBDIgu/work::main": {
+      "key": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js::/tmp/acpx-sample-home-kBDIgu/work::main",
+      "handle": "main",
+      "bundleId": "main-87f32b36",
+      "name": "example-two-turn-main-e0cd2792-63806145",
+      "agentName": "codex",
+      "agentCommand": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js",
+      "cwd": "/tmp/acpx-sample-home-kBDIgu/work",
+      "acpxRecordId": "294fd830-e856-431b-819e-789d0f27b642",
+      "acpSessionId": "6e433465-6bc7-427f-99f8-39de79a1c588"
+    }
+  },
+  "finishedAt": "2026-03-27T08:26:25.501Z"
+}

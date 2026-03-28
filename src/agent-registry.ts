@@ -18,7 +18,9 @@ export const AGENT_REGISTRY: Record<string, string> = {
   kimi: "kimi acp",
   kiro: "kiro-cli acp",
   opencode: "npx -y opencode-ai acp",
+  qoder: "qodercli --acp",
   qwen: "qwen --acp",
+  trae: "traecli acp serve",
 };
 
 const AGENT_ALIASES: Record<string, string> = {

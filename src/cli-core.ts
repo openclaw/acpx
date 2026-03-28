@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
 import { listBuiltInAgents } from "./agent-registry.js";
+import { registerConfigCommand } from "./cli/config-command.js";
 import {
   addGlobalFlags,
   addPromptInputOption,
@@ -26,12 +27,9 @@ import {
   type SessionsNewFlags,
   type StatusFlags,
 } from "./cli/flags.js";
-import {
-  initGlobalConfigFile,
-  loadResolvedConfig,
-  toConfigDisplay,
-  type ResolvedAcpxConfig,
-} from "./config.js";
+import { emitJsonResult } from "./cli/json-output.js";
+import { registerStatusCommand } from "./cli/status-command.js";
+import { loadResolvedConfig, type ResolvedAcpxConfig } from "./config.js";
 import {
   exitCodeForOutputErrorCode,
   normalizeOutputError,
@@ -70,10 +68,17 @@ class NoSessionError extends Error {
   }
 }
 
+type FlowRunFlags = {
+  inputJson?: string;
+  inputFile?: string;
+  defaultAgent?: string;
+};
+
 const TOP_LEVEL_VERBS = new Set([
   "prompt",
   "exec",
   "cancel",
+  "flow",
   "set-mode",
   "set",
   "sessions",
@@ -149,14 +154,6 @@ function applyPermissionExitCode(result: {
   }
 }
 
-function emitJsonResult(format: OutputFormat, payload: unknown): boolean {
-  if (format !== "json") {
-    return false;
-  }
-  process.stdout.write(`${JSON.stringify(payload)}\n`);
-  return true;
-}
-
 function isCodexAgentInvocation(agent: { agentName: string; agentCommand: string }): boolean {
   if (agent.agentName === "codex") {
     return true;
@@ -180,13 +177,11 @@ export { formatPromptSessionBannerLine } from "./cli/output-render.js";
 type SessionModule = typeof import("./session.js");
 type OutputModule = typeof import("./output.js");
 type OutputRenderModule = typeof import("./cli/output-render.js");
-type QueueIpcModule = typeof import("./queue-ipc.js");
 type SkillflagModule = typeof import("skillflag");
 
 let sessionModulePromise: Promise<SessionModule> | undefined;
 let outputModulePromise: Promise<OutputModule> | undefined;
 let outputRenderModulePromise: Promise<OutputRenderModule> | undefined;
-let queueIpcModulePromise: Promise<QueueIpcModule> | undefined;
 let skillflagModulePromise: Promise<SkillflagModule> | undefined;
 
 function loadSessionModule(): Promise<SessionModule> {
@@ -202,11 +197,6 @@ function loadOutputModule(): Promise<OutputModule> {
 function loadOutputRenderModule(): Promise<OutputRenderModule> {
   outputRenderModulePromise ??= import("./cli/output-render.js");
   return outputRenderModulePromise;
-}
-
-function loadQueueIpcModule(): Promise<QueueIpcModule> {
-  queueIpcModulePromise ??= import("./queue-ipc.js");
-  return queueIpcModulePromise;
 }
 
 function loadSkillflagModule(): Promise<SkillflagModule> {
@@ -917,167 +907,6 @@ async function handleSessionsHistory(
   printSessionHistoryByFormat(record, flags.limit, globalFlags.format);
 }
 
-function formatUptime(startedAt: string | undefined): string | undefined {
-  if (!startedAt) {
-    return undefined;
-  }
-
-  const startedMs = Date.parse(startedAt);
-  if (!Number.isFinite(startedMs)) {
-    return undefined;
-  }
-
-  const elapsedMs = Math.max(0, Date.now() - startedMs);
-  const seconds = Math.floor(elapsedMs / 1_000);
-  const hours = Math.floor(seconds / 3_600);
-  const minutes = Math.floor((seconds % 3_600) / 60);
-  const remSeconds = seconds % 60;
-  return `${hours.toString().padStart(2, "0")}:${minutes
-    .toString()
-    .padStart(2, "0")}:${remSeconds.toString().padStart(2, "0")}`;
-}
-
-async function handleStatus(
-  explicitAgentName: string | undefined,
-  flags: StatusFlags,
-  command: Command,
-  config: ResolvedAcpxConfig,
-): Promise<void> {
-  const globalFlags = resolveGlobalFlags(command, config);
-  const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
-  const [{ probeQueueOwnerHealth }, { agentSessionIdPayload, emitJsonResult }] = await Promise.all([
-    loadQueueIpcModule(),
-    loadOutputRenderModule(),
-  ]);
-  const record = await findSession({
-    agentCommand: agent.agentCommand,
-    cwd: agent.cwd,
-    name: resolveSessionNameFromFlags(flags, command),
-  });
-
-  if (!record) {
-    if (
-      emitJsonResult(globalFlags.format, {
-        action: "status_snapshot",
-        status: "no-session",
-        summary: "no active session",
-      })
-    ) {
-      return;
-    }
-
-    if (globalFlags.format === "quiet") {
-      process.stdout.write("no-session\n");
-      return;
-    }
-
-    process.stdout.write(`session: -\n`);
-    process.stdout.write(`agent: ${agent.agentCommand}\n`);
-    process.stdout.write(`pid: -\n`);
-    process.stdout.write(`status: no-session\n`);
-    process.stdout.write(`uptime: -\n`);
-    process.stdout.write(`lastPromptTime: -\n`);
-    return;
-  }
-
-  const health = await probeQueueOwnerHealth(record.acpxRecordId);
-  const running = health.healthy;
-  const payload = {
-    sessionId: record.acpxRecordId,
-    agentCommand: record.agentCommand,
-    pid: health.pid ?? record.pid ?? null,
-    status: running ? "running" : "dead",
-    uptime: running ? (formatUptime(record.agentStartedAt) ?? null) : null,
-    lastPromptTime: record.lastPromptAt ?? null,
-    exitCode: running ? null : (record.lastAgentExitCode ?? null),
-    signal: running ? null : (record.lastAgentExitSignal ?? null),
-    ...agentSessionIdPayload(record.agentSessionId),
-  };
-
-  if (
-    emitJsonResult(globalFlags.format, {
-      action: "status_snapshot",
-      status: running ? "alive" : "dead",
-      pid: payload.pid ?? undefined,
-      summary: running ? "queue owner healthy" : "queue owner unavailable",
-      uptime: payload.uptime ?? undefined,
-      lastPromptTime: payload.lastPromptTime ?? undefined,
-      exitCode: payload.exitCode ?? undefined,
-      signal: payload.signal ?? undefined,
-      acpxRecordId: record.acpxRecordId,
-      acpxSessionId: record.acpSessionId,
-      agentSessionId: record.agentSessionId,
-    })
-  ) {
-    return;
-  }
-
-  if (globalFlags.format === "quiet") {
-    process.stdout.write(`${payload.status}\n`);
-    return;
-  }
-
-  process.stdout.write(`session: ${payload.sessionId}\n`);
-  if ("agentSessionId" in payload) {
-    process.stdout.write(`agentSessionId: ${payload.agentSessionId}\n`);
-  }
-  process.stdout.write(`agent: ${payload.agentCommand}\n`);
-  process.stdout.write(`pid: ${payload.pid ?? "-"}\n`);
-  process.stdout.write(`status: ${payload.status}\n`);
-  process.stdout.write(`uptime: ${payload.uptime ?? "-"}\n`);
-  process.stdout.write(`lastPromptTime: ${payload.lastPromptTime ?? "-"}\n`);
-  if (payload.status === "dead") {
-    process.stdout.write(`exitCode: ${payload.exitCode ?? "-"}\n`);
-    process.stdout.write(`signal: ${payload.signal ?? "-"}\n`);
-  }
-}
-
-async function handleConfigShow(command: Command, config: ResolvedAcpxConfig): Promise<void> {
-  const globalFlags = resolveGlobalFlags(command, config);
-  const payload = {
-    ...toConfigDisplay(config),
-    paths: {
-      global: config.globalPath,
-      project: config.projectPath,
-    },
-    loaded: {
-      global: config.hasGlobalConfig,
-      project: config.hasProjectConfig,
-    },
-  };
-
-  if (globalFlags.format === "json") {
-    process.stdout.write(`${JSON.stringify(payload)}\n`);
-    return;
-  }
-
-  process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
-}
-
-async function handleConfigInit(command: Command, config: ResolvedAcpxConfig): Promise<void> {
-  const globalFlags = resolveGlobalFlags(command, config);
-  const result = await initGlobalConfigFile();
-  if (globalFlags.format === "json") {
-    process.stdout.write(
-      `${JSON.stringify({
-        path: result.path,
-        created: result.created,
-      })}\n`,
-    );
-    return;
-  }
-  if (globalFlags.format === "quiet") {
-    process.stdout.write(`${result.path}\n`);
-    return;
-  }
-
-  if (result.created) {
-    process.stdout.write(`Created ${result.path}\n`);
-    return;
-  }
-  process.stdout.write(`Config already exists: ${result.path}\n`);
-}
-
 function registerSessionsCommand(
   parent: Command,
   explicitAgentName: string | undefined,
@@ -1240,11 +1069,7 @@ function registerSharedAgentSubcommands(
     await handleSetConfigOption(explicitAgentName, key, value, flags, this, config);
   });
 
-  const statusCommand = parent.command("status").description(descriptions.status);
-  addSessionNameOption(statusCommand);
-  statusCommand.action(async function (this: Command, flags: StatusFlags) {
-    await handleStatus(explicitAgentName, flags, this, config);
-  });
+  registerStatusCommand(parent, explicitAgentName, config, descriptions.status);
 }
 
 function registerAgentCommand(
@@ -1278,28 +1103,26 @@ function registerAgentCommand(
   registerSessionsCommand(agentCommand, agentName, config);
 }
 
-function registerConfigCommand(program: Command, config: ResolvedAcpxConfig): void {
-  const configCommand = program
-    .command("config")
-    .description("Inspect and initialize acpx configuration");
+function registerFlowCommand(program: Command, config: ResolvedAcpxConfig): void {
+  const flowCommand = program
+    .command("flow")
+    .description("Run multi-step ACP workflows from flow files");
 
-  configCommand
-    .command("show")
-    .description("Show resolved config")
-    .action(async function (this: Command) {
-      await handleConfigShow(this, config);
+  flowCommand
+    .command("run")
+    .description("Run a flow file")
+    .argument("<file>", "Flow module path")
+    .option("--input-json <json>", "Flow input as JSON")
+    .option("--input-file <path>", "Read flow input JSON from file")
+    .option(
+      "--default-agent <name>",
+      "Default agent profile for ACP nodes without profile",
+      (value: string) => parseNonEmptyValue("Default agent", value),
+    )
+    .action(async function (this: Command, file: string, flags: FlowRunFlags) {
+      const { handleFlowRun } = await import("./flows/cli.js");
+      await handleFlowRun(file, flags, this, config);
     });
-
-  configCommand
-    .command("init")
-    .description("Create global config template")
-    .action(async function (this: Command) {
-      await handleConfigInit(this, config);
-    });
-
-  configCommand.action(async function (this: Command) {
-    await handleConfigShow(this, config);
-  });
 }
 
 function registerDefaultCommands(program: Command, config: ResolvedAcpxConfig): void {
@@ -1314,6 +1137,7 @@ function registerDefaultCommands(program: Command, config: ResolvedAcpxConfig): 
 
   registerSessionsCommand(program, undefined, config);
   registerConfigCommand(program, config);
+  registerFlowCommand(program, config);
 }
 
 type AgentTokenScan = {

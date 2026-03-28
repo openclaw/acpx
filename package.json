@@ -27,21 +27,28 @@
     "LICENSE"
   ],
   "type": "module",
+  "exports": {
+    ".": "./dist/cli.js",
+    "./flows": "./dist/flows.js",
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
+  },
   "scripts": {
-    "build": "tsdown src/cli.ts --format esm --dts --clean --platform node --target node22 --no-fixedExtension",
+    "build": "tsdown src/cli.ts src/flows.ts --format esm --dts --clean --platform node --target node22 --no-fixedExtension",
     "build:test": "node -e \"require('node:fs').rmSync('dist-test',{recursive:true,force:true})\" && tsc -p tsconfig.test.json",
-    "check": "pnpm run format:check && pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test:coverage",
+    "check": "pnpm run format:check && pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run viewer:typecheck && pnpm run viewer:build && pnpm run test:coverage",
     "check:docs": "pnpm run format:docs:check && pnpm run lint:docs",
     "conformance:run": "tsx conformance/runner/run.ts",
     "dev": "tsx src/cli.ts",
     "format": "oxfmt --write",
     "format:check": "oxfmt --check",
     "format:diff": "oxfmt --write && git --no-pager diff",
-    "format:docs": "git ls-files 'docs/**/*.md' 'README.md' | xargs oxfmt --write",
-    "format:docs:check": "git ls-files 'docs/**/*.md' 'README.md' | xargs oxfmt --check",
-    "lint": "oxlint --type-aware src && pnpm run lint:persisted-key-casing",
-    "lint:docs": "markdownlint-cli2 README.md docs/**/*.md",
+    "format:docs": "git ls-files 'docs/**/*.md' 'examples/flows/**/*.md' 'README.md' | xargs oxfmt --write",
+    "format:docs:check": "git ls-files 'docs/**/*.md' 'examples/flows/**/*.md' 'README.md' | xargs oxfmt --check",
+    "lint": "oxlint --type-aware src && pnpm run lint:persisted-key-casing && pnpm run lint:flow-schema-terms",
+    "lint:docs": "markdownlint-cli2 README.md docs/**/*.md examples/flows/**/*.md",
     "lint:fix": "oxlint --type-aware --fix src && pnpm run format",
+    "lint:flow-schema-terms": "tsx scripts/lint-flow-schema-terms.ts",
     "lint:persisted-key-casing": "tsx scripts/lint-persisted-key-casing.ts",
     "perf:report": "tsx scripts/perf-report.ts",
     "precommit": "pnpm exec lint-staged && pnpm run -s build",
@@ -51,25 +58,37 @@
     "test:coverage": "pnpm run build:test && node --experimental-test-coverage --test-coverage-lines=83 --test-coverage-branches=76 --test-coverage-functions=86 --test dist-test/test/*.test.js",
     "test:live": "pnpm run build:test && node --test dist-test/test/cursor-live.integration.js",
     "typecheck": "tsgo --noEmit",
-    "typecheck:tsc": "tsc --noEmit"
+    "typecheck:tsc": "tsc --noEmit",
+    "viewer:build": "vite build --config examples/flows/replay-viewer/vite.config.ts",
+    "viewer:dev": "tsx examples/flows/replay-viewer/server.ts",
+    "viewer:preview": "tsx examples/flows/replay-viewer/server.ts",
+    "viewer:typecheck": "tsc -p examples/flows/replay-viewer/tsconfig.json --noEmit && tsc -p examples/flows/replay-viewer/tsconfig.server.json --noEmit"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
     "commander": "^14.0.3",
-    "skillflag": "^0.1.4"
+    "skillflag": "^0.1.4",
+    "tsx": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.3.5",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@typescript/native-preview": "7.0.0-dev.20260310.1",
+    "@vitejs/plugin-react": "^6.0.1",
+    "@xyflow/react": "^12.10.1",
+    "elkjs": "^0.11.1",
     "husky": "^9.1.7",
     "lint-staged": "^16.3.2",
-    "markdownlint-cli2": "^0.21.0",
-    "oxfmt": "^0.37.0",
+    "markdownlint-cli2": "^0.22.0",
+    "oxfmt": "^0.42.0",
     "oxlint": "^1.51.0",
-    "oxlint-tsgolint": "^0.16.0",
+    "oxlint-tsgolint": "^0.17.4",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "tsdown": "^0.21.0-beta.2",
-    "tsx": "^4.0.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vite": "^8.0.3"
   },
   "lint-staged": {
     "*.{js,ts}": [

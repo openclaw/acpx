@@ -456,6 +456,15 @@ export function cloneSessionAcpxState(
     desired_mode_id: state.desired_mode_id,
     available_commands: state.available_commands ? [...state.available_commands] : undefined,
     config_options: state.config_options ? deepClone(state.config_options) : undefined,
+    session_options: state.session_options
+      ? {
+          model: state.session_options.model,
+          allowed_tools: state.session_options.allowed_tools
+            ? [...state.session_options.allowed_tools]
+            : undefined,
+          max_turns: state.session_options.max_turns,
+        }
+      : undefined,
   };
 }
 
