@@ -3,9 +3,164 @@
 This file records workflow tuning decisions that are easy to forget later.
 Keep it short, concrete, and tied to the checked-in flow.
 
+## 2026-03-26: Add conflict gates
+
+Change:
+
+We added explicit conflict checks:
+
+- before validation, so the flow does not keep reasoning over a stale head
+- after review and CI, so the flow does not hand off a PR that became stale
+  while the autonomous lane was working
+
+We also separated the two human handoff meanings in the diagram:
+
+- ready for landing
+- needs judgment
+
+Reason:
+
+The original shape was too optimistic about base stability. A PR could look
+clean early, then drift behind `main` while review or CI was running.
+
+That made the workflow vulnerable to a bad final handoff:
+
+- "this looks ready"
+- but only against an older base state
+
+The conflict gates fixed that by making the flow re-check mergeability at the
+two points that actually matter:
+
+- before spending time validating the work
+- before declaring the PR ready for human landing
+
+What we decided not to do:
+
+We did **not** add a separate standalone CI loop node just for late conflicts.
+
+Instead, the late conflict path routes back into the existing post-review lane,
+because the problem is still "is this PR still valid against current base,"
+not a fundamentally different workflow.
+
+References:
+
+- Flow policy: [README.md](./README.md)
+- Flow implementation: [pr-triage.flow.ts](./pr-triage.flow.ts)
+- PR that made this change: [#180](https://github.com/openclaw/acpx/pull/180)
+
+## 2026-03-28: Require explicit write-capable grants
+
+Change:
+
+This flow now requires an explicit `--approve-all` grant when run through
+`acpx flow run`.
+
+Reason:
+
+The PR-triage flow does real write-capable work:
+
+- it may edit files
+- it may push to the PR branch
+- it may approve GitHub Actions workflow runs
+
+When that permission was missing or silently downgraded, the flow could get
+deep into the autonomous lane and then fail in confusing ways.
+
+We wanted the permission rule to be obvious at the start:
+
+- if this flow is allowed to act, say so explicitly
+- if not, fail before doing work
+
+Related runtime lesson:
+
+Local `codex review --base ...` can take a long time in this repo. Long review
+time by itself is not evidence that the flow is stuck.
+
+References:
+
+- Flow policy: [README.md](./README.md)
+- Flow implementation: [pr-triage.flow.ts](./pr-triage.flow.ts)
+- PR that made this change: [#186](https://github.com/openclaw/acpx/pull/186)
+
+## 2026-03-28: Let maintenance PRs use standard checks
+
+Change:
+
+We stopped treating "no bespoke local validation command" as a reason to
+escalate routine maintenance PRs.
+
+For maintenance-scope work such as tooling, docs, or lockfile churn, the flow
+can accept standard repo checks as sufficient validation.
+
+Reason:
+
+The old behavior was too bureaucratic. A routine maintenance PR could get all
+the normal signals:
+
+- clear intent
+- acceptable implementation
+- green CI
+
+and still escalate just because the flow could not name one special targeted
+test command.
+
+That was wrong for this class of PR. In these cases, the normal repo checks are
+often the real validation.
+
+What we decided not to do:
+
+We did **not** add a new "maintenance validation" node.
+
+This is still a judgment question inside the existing validation lane, not a
+new runtime capability.
+
+References:
+
+- Flow policy: [README.md](./README.md)
+- Flow implementation: [pr-triage.flow.ts](./pr-triage.flow.ts)
+- PR that made this change: [#187](https://github.com/openclaw/acpx/pull/187)
+
+## 2026-03-28: Let ACP choose validation plans
+
+Change:
+
+We removed the hardcoded JS test-plan logic from the bug and feature validation
+lanes and moved validation planning back into ACP judgment.
+
+Plainly:
+
+- the model now decides what validation to run
+- the runtime no longer mostly guesses from changed test files
+
+Reason:
+
+The old behavior was too dumb for real PRs. It was especially bad on bug-fix
+PRs where the repro was already described in the PR text but no changed test
+file pointed to an obvious command.
+
+That led to bad escalations for the wrong reason:
+
+- not because the PR looked wrong
+- but because the deterministic helper did not know what command to run
+
+The fix was to let ACP do the planning, because choosing a repro or validation
+command is a judgment task, not a good place for rigid runtime rules.
+
+What we decided not to do:
+
+We did **not** add a new planning node.
+
+We kept the same graph shape and changed the existing validation lanes instead.
+
+References:
+
+- Flow policy: [README.md](./README.md)
+- Flow implementation: [pr-triage.flow.ts](./pr-triage.flow.ts)
+- PR that made this change: [#189](https://github.com/openclaw/acpx/pull/189)
+
 ## 2026-03-28: Broaden `judge_refactor`
 
-### What changed
+Change:
 
 We changed the `judge_refactor` step so it no longer asks only about
 "refactor depth."
@@ -24,7 +179,7 @@ We kept the same flow shape and the same categories:
 
 This was a wording and judgment-policy change, not a graph change.
 
-### Why we changed it
+Reason:
 
 The old wording was too narrow. It was good at catching code that looked like
 it needed cleanup or a deeper rewrite, but it was weaker at catching small
@@ -39,7 +194,7 @@ not push hard enough on the simpler question:
 
 That is the gap this wording change is meant to close.
 
-### What we decided not to do
+What we decided not to do:
 
 We did **not** add a new node.
 
@@ -52,7 +207,7 @@ Reason:
 So the correct fix here was to sharpen the existing judgment, not add more flow
 structure.
 
-### What this should catch better now
+What this should catch better now:
 
 This tuning is meant to catch cases like:
 
@@ -62,7 +217,7 @@ This tuning is meant to catch cases like:
 - a PR that is fine in direction but still needs a small simplification before
   review and CI
 
-### References
+References:
 
 - Flow prompt: [pr-triage.flow.ts](./pr-triage.flow.ts)
 - Workflow policy: [README.md](./README.md)
