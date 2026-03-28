@@ -91,7 +91,7 @@ export function formatUnknownErrorMessage(error: unknown): string {
 
 // Matches "session" followed by optional ID (quoted or unquoted) followed by "not found"
 // Examples: "Session \"abc\" not found", "Session abc-123 not found"
-const SESSION_NOT_FOUND_PATTERN = /session\s+["'\w\-]+\s+not found/i;
+const SESSION_NOT_FOUND_PATTERN = /session\s+["'\w-]+\s+not found/i;
 
 function isSessionNotFoundText(value: unknown): boolean {
   if (typeof value !== "string") {
