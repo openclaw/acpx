@@ -144,6 +144,9 @@ Harness documentation synchronization policy:
 
 - Repo-local `/landpr` instructions live at [`.pi/prompts/landpr.md`](.pi/prompts/landpr.md).
   When landing or merging a PR in this repo, follow that process.
+- Local `codex review --base ...` runs in this repo can legitimately take up to
+  30 minutes. Do not declare them stuck before that timeout unless you have
+  stronger evidence than elapsed time alone.
 - Before `/landpr`, run `/reviewpr` and require explicit evidence for bug-fix
   claims. Do not merge bug-fix PRs based only on issue text, PR text, or AI
   rationale.

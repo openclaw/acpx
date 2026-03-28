@@ -121,6 +121,8 @@ Use `action` for deterministic work supervised by the runtime:
 - call `gh api`
 - run tests
 - run local `codex review`
+  Local `codex review` can legitimately take up to 30 minutes. Do not treat it
+  as stuck before that timeout unless some stronger signal shows it is wedged.
 - post a comment
 - close a PR
 
