@@ -471,6 +471,23 @@ export function normalizeQueueOwnerTtlMs(ttlMs: number | undefined): number {
   return Math.round(ttlMs);
 }
 
+function emitPromptRetryNotice(params: {
+  error: unknown;
+  delayMs: number;
+  attempt: number;
+  maxRetries: number;
+  suppressSdkConsoleErrors?: boolean;
+}): void {
+  if (params.suppressSdkConsoleErrors) {
+    return;
+  }
+
+  process.stderr.write(
+    `[acpx] prompt failed (${formatErrorMessage(params.error)}), retrying in ${params.delayMs}ms ` +
+      `(attempt ${params.attempt}/${params.maxRetries})\n`,
+  );
+}
+
 async function runQueuedTask(
   sessionRecordId: string,
   task: QueueTask,
@@ -754,10 +771,13 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
               isRetryablePromptError(error)
             ) {
               const delayMs = Math.min(1_000 * 2 ** attempt, 10_000);
-              process.stderr.write(
-                `[acpx] prompt failed (${formatErrorMessage(error)}), retrying in ${delayMs}ms ` +
-                  `(attempt ${attempt + 1}/${maxRetries})\n`,
-              );
+              emitPromptRetryNotice({
+                error,
+                delayMs,
+                attempt: attempt + 1,
+                maxRetries,
+                suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
+              });
               await waitMs(delayMs);
               if (!promptTurnHadSideEffects) {
                 continue;
@@ -928,10 +948,13 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
               isRetryablePromptError(error)
             ) {
               const delayMs = Math.min(1_000 * 2 ** attempt, 10_000);
-              process.stderr.write(
-                `[acpx] prompt failed (${formatErrorMessage(error)}), retrying in ${delayMs}ms ` +
-                  `(attempt ${attempt + 1}/${maxRetries})\n`,
-              );
+              emitPromptRetryNotice({
+                error,
+                delayMs,
+                attempt: attempt + 1,
+                maxRetries,
+                suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
+              });
               await waitMs(delayMs);
               if (!promptTurnHadSideEffects) {
                 continue;

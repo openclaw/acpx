@@ -1542,6 +1542,44 @@ test("integration: json-strict exec success emits JSON-RPC lines only", async ()
   });
 });
 
+test("integration: json-strict exec retries without emitting stderr notices", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "json",
+          "--json-strict",
+          "--prompt-retries",
+          "1",
+          "exec",
+          "retryable-error-once",
+        ],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stderr.trim(), "");
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const promptRequests = payloads.filter((payload) => payload.method === "session/prompt");
+      assert.equal(promptRequests.length, 2, result.stdout);
+      assert.equal(
+        payloads.some(
+          (payload) => extractAgentMessageChunkText(payload) === "recovered after retry",
+        ),
+        true,
+        result.stdout,
+      );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: fs/read_text_file through mock agent", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
