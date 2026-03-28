@@ -54,9 +54,27 @@ test("fix_ci_failures owns CI monitoring until a terminal state", () => {
     assert.ok(edgeBlock, "Expected a fix_ci_failures edge block");
     assert.match(
       edgeBlock,
-      /cases:\s*\{[\s\S]*?check_final_conflicts:\s*"check_final_conflicts",[\s\S]*?comment_and_escalate_to_human:\s*"comment_and_escalate_to_human",[\s\S]*?\}/,
+      /cases:\s*\{[\s\S]*?check_final_conflicts:\s*"check_final_conflicts",[\s\S]*?comment_and_escalate_needs_judgment:\s*"comment_and_escalate_needs_judgment",[\s\S]*?\}/,
     );
     assert.doesNotMatch(edgeBlock, /collect_ci_state:/);
+  });
+});
+
+test("human handoff is split into ready-for-landing and needs-judgment lanes", () => {
+  const sourcePath = path.join(process.cwd(), "examples/flows/pr-triage/pr-triage.flow.ts");
+
+  return fs.readFile(sourcePath, "utf8").then((source) => {
+    assert.match(source, /comment_and_escalate_ready_for_landing:/);
+    assert.match(source, /comment_and_escalate_needs_judgment:/);
+    assert.match(source, /post_ready_for_landing_comment:/);
+    assert.match(source, /post_needs_judgment_comment:/);
+    assert.match(source, /"ready_for_human_landing_decision"/);
+    assert.match(source, /"needs_human_judgment"/);
+    assert.match(
+      source,
+      /const route = clean[\s\S]*options\.phase === "initial"[\s\S]*"bug_or_feature"[\s\S]*"comment_and_escalate_ready_for_landing"/,
+    );
+    assert.doesNotMatch(source, /comment_and_escalate_to_human:/);
   });
 });
 

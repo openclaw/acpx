@@ -223,22 +223,48 @@ const flow = {
         await postClosePr(prepared(outputs), outputs.comment_and_close_pr),
     },
 
-    comment_and_escalate_to_human: {
+    comment_and_escalate_ready_for_landing: {
       nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
       async prompt({ outputs }) {
-        return promptCommentAndEscalate(prepared(outputs), outputs);
+        return promptCommentAndEscalateReadyForLanding(prepared(outputs), outputs);
       },
       parse: (text) => extractJsonObject(text),
     },
 
-    post_escalation_comment: {
+    post_ready_for_landing_comment: {
       nodeType: "action",
       timeoutMs: 10 * 60_000,
-      statusDetail: "Post human handoff comment",
+      statusDetail: "Post ready-for-landing handoff comment",
       run: async ({ outputs }) =>
-        await postEscalationComment(prepared(outputs), outputs.comment_and_escalate_to_human),
+        await postEscalationComment(
+          prepared(outputs),
+          outputs.comment_and_escalate_ready_for_landing,
+          "ready_for_human_landing_decision",
+        ),
+    },
+
+    comment_and_escalate_needs_judgment: {
+      nodeType: "acp",
+      session: MAIN_SESSION,
+      cwd: ({ outputs }) => prepared(outputs).workdir,
+      async prompt({ outputs }) {
+        return promptCommentAndEscalateNeedsJudgment(prepared(outputs), outputs);
+      },
+      parse: (text) => extractJsonObject(text),
+    },
+
+    post_needs_judgment_comment: {
+      nodeType: "action",
+      timeoutMs: 10 * 60_000,
+      statusDetail: "Post needs-judgment handoff comment",
+      run: async ({ outputs }) =>
+        await postEscalationComment(
+          prepared(outputs),
+          outputs.comment_and_escalate_needs_judgment,
+          "needs_human_judgment",
+        ),
     },
 
     finalize: {
@@ -246,9 +272,11 @@ const flow = {
       run: ({ outputs, state }) => ({
         final:
           outputs.post_close_pr ??
-          outputs.post_escalation_comment ??
+          outputs.post_ready_for_landing_comment ??
+          outputs.post_needs_judgment_comment ??
           outputs.comment_and_close_pr ??
-          outputs.comment_and_escalate_to_human ??
+          outputs.comment_and_escalate_ready_for_landing ??
+          outputs.comment_and_escalate_needs_judgment ??
           null,
         intent: outputs.extract_intent ?? null,
         solution: outputs.judge_solution ?? null,
@@ -282,7 +310,7 @@ const flow = {
         on: "$.route",
         cases: {
           close_pr: "comment_and_close_pr",
-          comment_and_escalate_to_human: "comment_and_escalate_to_human",
+          comment_and_escalate_needs_judgment: "comment_and_escalate_needs_judgment",
           bug_or_feature: "check_initial_conflicts",
         },
       },
@@ -303,7 +331,7 @@ const flow = {
         on: "$.route",
         cases: {
           resolve_initial_conflicts: "resolve_initial_conflicts",
-          comment_and_escalate_to_human: "comment_and_escalate_to_human",
+          comment_and_escalate_needs_judgment: "comment_and_escalate_needs_judgment",
         },
       },
     },
@@ -313,7 +341,7 @@ const flow = {
         on: "$.route",
         cases: {
           bug_or_feature: "bug_or_feature",
-          comment_and_escalate_to_human: "comment_and_escalate_to_human",
+          comment_and_escalate_needs_judgment: "comment_and_escalate_needs_judgment",
         },
       },
     },
@@ -324,7 +352,7 @@ const flow = {
         cases: {
           reproduce_bug_and_test_fix: "reproduce_bug_and_test_fix",
           test_feature_directly: "test_feature_directly",
-          comment_and_escalate_to_human: "comment_and_escalate_to_human",
+          comment_and_escalate_needs_judgment: "comment_and_escalate_needs_judgment",
         },
       },
     },
@@ -334,7 +362,7 @@ const flow = {
         on: "$.route",
         cases: {
           judge_refactor: "judge_refactor",
-          comment_and_escalate_to_human: "comment_and_escalate_to_human",
+          comment_and_escalate_needs_judgment: "comment_and_escalate_needs_judgment",
         },
       },
     },
@@ -344,7 +372,7 @@ const flow = {
         on: "$.route",
         cases: {
           judge_refactor: "judge_refactor",
-          comment_and_escalate_to_human: "comment_and_escalate_to_human",
+          comment_and_escalate_needs_judgment: "comment_and_escalate_needs_judgment",
         },
       },
     },
@@ -355,7 +383,7 @@ const flow = {
         cases: {
           collect_review_state: "collect_review_state",
           do_superficial_refactor: "do_superficial_refactor",
-          comment_and_escalate_to_human: "comment_and_escalate_to_human",
+          comment_and_escalate_needs_judgment: "comment_and_escalate_needs_judgment",
         },
       },
     },
@@ -368,7 +396,7 @@ const flow = {
         cases: {
           collect_review_state: "collect_review_state",
           collect_ci_state: "collect_ci_state",
-          comment_and_escalate_to_human: "comment_and_escalate_to_human",
+          comment_and_escalate_needs_judgment: "comment_and_escalate_needs_judgment",
         },
       },
     },
@@ -379,7 +407,7 @@ const flow = {
         on: "$.route",
         cases: {
           check_final_conflicts: "check_final_conflicts",
-          comment_and_escalate_to_human: "comment_and_escalate_to_human",
+          comment_and_escalate_needs_judgment: "comment_and_escalate_needs_judgment",
         },
       },
     },
@@ -388,7 +416,7 @@ const flow = {
       switch: {
         on: "$.route",
         cases: {
-          comment_and_escalate_to_human: "comment_and_escalate_to_human",
+          comment_and_escalate_ready_for_landing: "comment_and_escalate_ready_for_landing",
           judge_final_conflicts: "judge_final_conflicts",
         },
       },
@@ -398,7 +426,7 @@ const flow = {
       switch: {
         on: "$.route",
         cases: {
-          comment_and_escalate_to_human: "comment_and_escalate_to_human",
+          comment_and_escalate_needs_judgment: "comment_and_escalate_needs_judgment",
           resolve_final_conflicts: "resolve_final_conflicts",
         },
       },
@@ -409,14 +437,16 @@ const flow = {
         on: "$.route",
         cases: {
           collect_ci_state: "collect_ci_state",
-          comment_and_escalate_to_human: "comment_and_escalate_to_human",
+          comment_and_escalate_needs_judgment: "comment_and_escalate_needs_judgment",
         },
       },
     },
     { from: "comment_and_close_pr", to: "post_close_pr" },
     { from: "post_close_pr", to: "finalize" },
-    { from: "comment_and_escalate_to_human", to: "post_escalation_comment" },
-    { from: "post_escalation_comment", to: "finalize" },
+    { from: "comment_and_escalate_ready_for_landing", to: "post_ready_for_landing_comment" },
+    { from: "post_ready_for_landing_comment", to: "finalize" },
+    { from: "comment_and_escalate_needs_judgment", to: "post_needs_judgment_comment" },
+    { from: "post_needs_judgment_comment", to: "finalize" },
   ],
 };
 
@@ -612,7 +642,7 @@ async function collectConflictState(pr, options) {
   const route = clean
     ? options.phase === "initial"
       ? "bug_or_feature"
-      : "comment_and_escalate_to_human"
+      : "comment_and_escalate_ready_for_landing"
     : options.phase === "initial"
       ? "judge_initial_conflicts"
       : "judge_final_conflicts";
@@ -678,7 +708,7 @@ async function postClosePr(pr, commentStep) {
   };
 }
 
-async function postEscalationComment(pr, commentStep) {
+async function postEscalationComment(pr, commentStep, route) {
   const comment = String(commentStep?.comment ?? "").trim();
   if (!comment) {
     throw new Error("Escalation comment step did not return a comment body");
@@ -696,7 +726,7 @@ async function postEscalationComment(pr, commentStep) {
     commentFile,
   ]);
   return {
-    route: "escalate_to_human",
+    route,
     summary: "Posted the human handoff comment.",
     comment_posted: true,
   };
@@ -738,13 +768,13 @@ function promptJudgeSolution(pr) {
     '- "unclear" if the PR is too unclear to evaluate confidently.',
     '- "needs_human_call" if it seems plausible but needs a design decision or human call before continuing.',
     "Route `close_pr` for localized_fix, bad_fix, or unclear.",
-    "Route `comment_and_escalate_to_human` for needs_human_call.",
+    "Route `comment_and_escalate_needs_judgment` for needs_human_call.",
     "Route `bug_or_feature` for good_enough. The conflict gate runs immediately after this step.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
       '  "verdict": "good_enough" | "localized_fix" | "bad_fix" | "unclear" | "needs_human_call",',
-      '  "route": "close_pr" | "comment_and_escalate_to_human" | "bug_or_feature",',
+      '  "route": "close_pr" | "comment_and_escalate_needs_judgment" | "bug_or_feature",',
       '  "reason": "short explanation",',
       '  "evidence": ["brief evidence item"]',
       "}",
@@ -763,12 +793,12 @@ function promptBugOrFeature(pr) {
     "Use `feature` if this PR primarily adds or changes behavior that should be validated directly without first reproducing a prior failure.",
     "Dependency-only, tooling-only, docs-only, or lockfile-only maintenance PRs should still use the `feature` path.",
     "Do not decide the exact validation commands here. The validation step itself will choose and run the smallest credible validation plan.",
-    "If you cannot classify it confidently, route to `comment_and_escalate_to_human`.",
+    "If you cannot classify it confidently, route to `comment_and_escalate_needs_judgment`.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
       '  "classification": "bug" | "feature" | "unclear",',
-      '  "route": "reproduce_bug_and_test_fix" | "test_feature_directly" | "comment_and_escalate_to_human",',
+      '  "route": "reproduce_bug_and_test_fix" | "test_feature_directly" | "comment_and_escalate_needs_judgment",',
       '  "reason": "short explanation"',
       "}",
     ]),
@@ -789,12 +819,12 @@ function promptReproduceBugAndTestFix(pr, outputs) {
     "Prefer the smallest focused validation that proves the claim. Do not fall back to broad generic checks if a narrower repro or test is enough.",
     "If needed, you may locally ablate or temporarily undo part of the change to show broken behavior, but do not commit or push a broken state. Restore the real PR branch state before you return.",
     "If the environment or external dependency needed for validation is missing, say that plainly as `blocked` instead of pretending the fix failed.",
-    "If you cannot credibly show that the PR changes the outcome after reasonable effort, route to `comment_and_escalate_to_human`.",
+    "If you cannot credibly show that the PR changes the outcome after reasonable effort, route to `comment_and_escalate_needs_judgment`.",
     "If you do establish the bug and show the PR fixes it, route to `judge_refactor`.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
-      '  "route": "judge_refactor" | "comment_and_escalate_to_human",',
+      '  "route": "judge_refactor" | "comment_and_escalate_needs_judgment",',
       '  "validation_result": "validated" | "blocked" | "not_proven",',
       '  "summary": "short explanation",',
       '  "commands_run": ["command you actually ran"],',
@@ -820,11 +850,11 @@ function promptTestFeatureDirectly(pr, outputs) {
     "Use `standard_checks_sufficient` only for that maintenance-style case when extra local testing would be busywork rather than real proof.",
     "If the environment or external dependency needed for validation is missing, say that plainly as `blocked` instead of pretending the feature failed.",
     "If you validate the change directly or determine that standard repo checks are the right validation, route to `judge_refactor`.",
-    "If you cannot validate the change credibly after reasonable effort, route to `comment_and_escalate_to_human`.",
+    "If you cannot validate the change credibly after reasonable effort, route to `comment_and_escalate_needs_judgment`.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
-      '  "route": "judge_refactor" | "comment_and_escalate_to_human",',
+      '  "route": "judge_refactor" | "comment_and_escalate_needs_judgment",',
       '  "validation_result": "validated" | "standard_checks_sufficient" | "blocked" | "not_proven",',
       '  "summary": "short explanation",',
       '  "commands_run": ["command you actually ran"],',
@@ -847,12 +877,12 @@ function promptJudgeInitialConflicts(pr, outputs) {
     "Use `needs_human_judgment` if resolving the conflict requires choosing behavior, design, or architecture rather than integrating both sides safely.",
     "If the correct move is to keep the current-base refactor and port the PR's behavior into the new structure, that still counts as `clear_resolution_path`.",
     "Route `resolve_initial_conflicts` for `clear_resolution_path`.",
-    "Route `comment_and_escalate_to_human` for `needs_human_judgment`.",
+    "Route `comment_and_escalate_needs_judgment` for `needs_human_judgment`.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
       '  "conflict_assessment": "clear_resolution_path" | "needs_human_judgment",',
-      '  "route": "resolve_initial_conflicts" | "comment_and_escalate_to_human",',
+      '  "route": "resolve_initial_conflicts" | "comment_and_escalate_needs_judgment",',
       '  "reason": "short explanation"',
       "}",
     ]),
@@ -869,12 +899,12 @@ function promptResolveInitialConflicts(pr, outputs) {
     `The runtime already prepared a merge-conflict state for this PR. Read ${conflictStatePath} for the conflict summary and inspect the conflicted files directly in the repo.`,
     `Use the local branch ${pr.localBranch}. If you need to push, use remote ${pr.pushRemote} branch ${pr.pushRef}.`,
     "Resolve the conflict only because you already judged that it has a clear resolution path while preserving the intended PR behavior.",
-    "If you cannot resolve the conflicts confidently, do not guess. Route to `comment_and_escalate_to_human` instead.",
+    "If you cannot resolve the conflicts confidently, do not guess. Route to `comment_and_escalate_needs_judgment` instead.",
     "If you resolve them, finish the merge, run focused checks when feasible, commit the merge result if needed, push the branch yourself, and route to `bug_or_feature`.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
-      '  "route": "bug_or_feature" | "comment_and_escalate_to_human",',
+      '  "route": "bug_or_feature" | "comment_and_escalate_needs_judgment",',
       '  "summary": "short explanation",',
       '  "files_touched": ["path/to/file"],',
       '  "committed": true | false',
@@ -894,12 +924,12 @@ function promptJudgeRefactor(pr, outputs) {
     "Judge whether this PR needs no refactor, a superficial refactor, or a fundamental refactor.",
     "Route `collect_review_state` for none.",
     "Route `do_superficial_refactor` for superficial.",
-    "Route `comment_and_escalate_to_human` for fundamental.",
+    "Route `comment_and_escalate_needs_judgment` for fundamental.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
       '  "refactor_needed": "none" | "superficial" | "fundamental",',
-      '  "route": "collect_review_state" | "do_superficial_refactor" | "comment_and_escalate_to_human",',
+      '  "route": "collect_review_state" | "do_superficial_refactor" | "comment_and_escalate_needs_judgment",',
       '  "reason": "short explanation"',
       "}",
     ]),
@@ -945,12 +975,12 @@ function promptReviewLoop(pr, outputs) {
     "Do not keep looping just because only P2 or lower findings remain. Treat P2 and lower as non-blocking unless they materially change your judgment about whether the PR is safe to continue.",
     `If you change code in this loop, rerun the earlier validation before returning. Latest validation summary: ${validation?.summary ?? "none"}.`,
     "Treat the local Codex review as established if `localCodexReviewExitCode` is zero, `localCodexReviewTimedOut` is false, and there is substantive review text available.",
-    "Only route to `comment_and_escalate_to_human` if the local Codex review actually failed, timed out, or produced no usable review text at all.",
+    "Only route to `comment_and_escalate_needs_judgment` if the local Codex review actually failed, timed out, or produced no usable review text at all.",
     "If blocking review findings are cleared, route to `collect_ci_state`.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
-      '  "route": "collect_review_state" | "collect_ci_state" | "comment_and_escalate_to_human",',
+      '  "route": "collect_review_state" | "collect_ci_state" | "comment_and_escalate_needs_judgment",',
       '  "review_status": "blocking_findings_remain" | "clear" | "could_not_establish",',
       '  "summary": "short explanation",',
       '  "github_codex_reviews_handled": true | false,',
@@ -979,11 +1009,11 @@ function promptFixCiFailures(pr, outputs) {
     "Only return from this step once CI is actually green/unrelated, or once you have a real reason that a human must take over.",
     `Latest validation summary: ${validation?.summary ?? "none"}.`,
     "If CI is green or the remaining failures are clearly unrelated, route to `check_final_conflicts` so the final conflict gate can run before the human handoff.",
-    "Only route to `comment_and_escalate_to_human` for workflow approval if you actually tried to approve the blocked run and could not clear it because of a real permission or platform failure.",
+    "Only route to `comment_and_escalate_needs_judgment` for workflow approval if you actually tried to approve the blocked run and could not clear it because of a real permission or platform failure.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
-      '  "route": "check_final_conflicts" | "comment_and_escalate_to_human",',
+      '  "route": "check_final_conflicts" | "comment_and_escalate_needs_judgment",',
       '  "ci_status": "related_failures_remain" | "green_or_unrelated" | "approval_blocked",',
       '  "summary": "short explanation",',
       '  "related_failures": ["brief failure"],',
@@ -1008,12 +1038,12 @@ function promptJudgeFinalConflicts(pr, outputs) {
     "Use `needs_human_judgment` if resolving the conflict requires choosing behavior, design, or architecture rather than integrating both sides safely.",
     "If the correct move is to keep the current-base refactor and port the PR's behavior into the new structure, that still counts as `clear_resolution_path`.",
     "Route `resolve_final_conflicts` for `clear_resolution_path`.",
-    "Route `comment_and_escalate_to_human` for `needs_human_judgment`.",
+    "Route `comment_and_escalate_needs_judgment` for `needs_human_judgment`.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
       '  "conflict_assessment": "clear_resolution_path" | "needs_human_judgment",',
-      '  "route": "resolve_final_conflicts" | "comment_and_escalate_to_human",',
+      '  "route": "resolve_final_conflicts" | "comment_and_escalate_needs_judgment",',
       '  "reason": "short explanation"',
       "}",
     ]),
@@ -1030,13 +1060,13 @@ function promptResolveFinalConflicts(pr, outputs) {
     `The runtime already prepared a merge-conflict state for this PR. Read ${conflictStatePath} for the conflict summary and inspect the conflicted files directly in the repo.`,
     `Use the local branch ${pr.localBranch}. If you need to push, use remote ${pr.pushRemote} branch ${pr.pushRef}.`,
     "Resolve the conflict only because you already judged that it has a clear resolution path while preserving the intended PR behavior.",
-    "If you cannot resolve the conflicts confidently, do not guess. Route to `comment_and_escalate_to_human` instead.",
+    "If you cannot resolve the conflicts confidently, do not guess. Route to `comment_and_escalate_needs_judgment` instead.",
     `If you resolve them, rerun the earlier validation before returning. Latest validation summary: ${validation?.summary ?? "none"}.`,
     "After resolving and pushing the branch, route back to `collect_ci_state` so the flow runtime can rerun the final CI path.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
-      '  "route": "collect_ci_state" | "comment_and_escalate_to_human",',
+      '  "route": "collect_ci_state" | "comment_and_escalate_needs_judgment",',
       '  "summary": "short explanation",',
       '  "files_touched": ["path/to/file"],',
       '  "committed": true | false',
@@ -1070,26 +1100,49 @@ function promptCommentAndClose(pr, outputs) {
   ].join("\n");
 }
 
-function promptCommentAndEscalate(pr, outputs) {
+function promptCommentAndEscalateReadyForLanding(pr, outputs) {
   const summary = finalCommentSummary(outputs);
   return [
-    "You are on the human handoff path for this PR.",
+    "You are on the ready-for-landing human handoff path for this PR.",
     `Target PR: ${prRef(pr)}`,
     "Write the exact comment to post. Do not post it yourself; the flow runtime will do that after this step.",
     "Use these exact headings in this order: `## Triage result`, `### Quick read`, `### Intent`, `### Why`, `### Codex review`, `### CI/CD`, `### Recommendation`.",
-    "For this human handoff path, the comment must make these top-line outcomes explicit:",
+    "For this ready-for-landing human handoff path, the comment must make these top-line outcomes explicit:",
     "- `Human attention: ⚠️ Required`",
+    "- `Human decision needed: ready for human landing decision`",
     "- `Recommendation: 🏁 escalate to a human`",
-    "- `Human decision needed: <explicit next human action>` near the top of the comment",
-    "If the final conflict gate is clean and CI is green or unrelated, make the human decision needed `ready for human landing decision`.",
-    "If the blocker is a conflict that still needs human judgment or another earlier stop condition, say that plainly in `Human decision needed`.",
-    "If the remaining blocker is workflow approval, say that plainly.",
     "Use the current run state below as the source of truth:",
     JSON.stringify(summary, null, 2),
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
-      '  "route": "escalate_to_human",',
+      '  "route": "ready_for_human_landing_decision",',
+      '  "summary": "short explanation",',
+      '  "comment_format_followed": true | false,',
+      '  "comment": "markdown comment to post"',
+      "}",
+    ]),
+  ].join("\n");
+}
+
+function promptCommentAndEscalateNeedsJudgment(pr, outputs) {
+  const summary = finalCommentSummary(outputs);
+  return [
+    "You are on the needs-judgment human handoff path for this PR.",
+    `Target PR: ${prRef(pr)}`,
+    "Write the exact comment to post. Do not post it yourself; the flow runtime will do that after this step.",
+    "Use these exact headings in this order: `## Triage result`, `### Quick read`, `### Intent`, `### Why`, `### Codex review`, `### CI/CD`, `### Recommendation`.",
+    "For this needs-judgment human handoff path, the comment must make these top-line outcomes explicit:",
+    "- `Human attention: ⚠️ Required`",
+    "- `Recommendation: 🏁 escalate to a human`",
+    "- `Human decision needed: <explicit next human action>` near the top of the comment",
+    "Say plainly what still needs human judgment, such as design direction, conflict resolution judgment, validation not established, or workflow approval that could not be cleared.",
+    "Use the current run state below as the source of truth:",
+    JSON.stringify(summary, null, 2),
+    ...exactJsonResponse([
+      "Return exactly one JSON object with this shape:",
+      "{",
+      '  "route": "needs_human_judgment",',
       '  "summary": "short explanation",',
       '  "human_decision_needed": "short explanation",',
       '  "comment_format_followed": true | false,',
