@@ -68,14 +68,12 @@ test("maintenance PRs stay on the feature path without adding a new flow node", 
       source,
       /Dependency-only, tooling-only, docs-only, or lockfile-only maintenance PRs should still use the `feature` path\./,
     );
-    assert.match(
-      source,
-      /normal repo review and CI may be the meaningful validation even when there is no bespoke targeted local test command\./,
-    );
+    assert.match(source, /"feature_validation": "targeted_tests" \| "standard_checks" \| null,/);
     assert.match(
       source,
       /validation_status:\s*"standard_checks_sufficient"[\s\S]*route:\s*"judge_refactor"/,
     );
     assert.doesNotMatch(source, /validate_via_standard_checks:/);
+    assert.doesNotMatch(source, /supportsStandardChecksValidation/);
   });
 });

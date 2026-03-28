@@ -147,6 +147,14 @@ Harness documentation synchronization policy:
 - Local `codex review --base ...` runs in this repo can legitimately take up to
   30 minutes. Do not declare them stuck before that timeout unless you have
   stronger evidence than elapsed time alone.
+- For workflow changes, prefer prompt and policy changes inside existing ACP
+  nodes over adding new workflow nodes, helper actions, or deterministic
+  side-logic.
+- If the problem is mainly judgment or policy, keep that judgment in the ACP
+  lane unless the runtime truly needs a distinct new execution capability.
+- Preserve the existing flow graph shape by default. Assume "no new node" unless
+  a new node adds a real execution boundary, timeout boundary, artifact
+  collection boundary, or capability the current node cannot own cleanly.
 - Before `/landpr`, run `/reviewpr` and require explicit evidence for bug-fix
   claims. Do not merge bug-fix PRs based only on issue text, PR text, or AI
   rationale.
