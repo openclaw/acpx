@@ -47,7 +47,7 @@ type SessionState = {
   pendingPrompt?: AbortController;
   hasCompletedPrompt: boolean;
   modeId: string;
-  configValues: Record<string, string>;
+  configValues: Record<string, string | boolean>;
 };
 
 class CancelledError extends Error {
@@ -402,6 +402,11 @@ function createSessionState(hasCompletedPrompt = false): SessionState {
 }
 
 function buildConfigOptions(state: SessionState): SetSessionConfigOptionResponse["configOptions"] {
+  const reasoningEffort =
+    typeof state.configValues.reasoning_effort === "string"
+      ? state.configValues.reasoning_effort
+      : "medium";
+
   return [
     {
       id: "mode",
@@ -422,7 +427,7 @@ function buildConfigOptions(state: SessionState): SetSessionConfigOptionResponse
       name: "Reasoning Effort",
       category: "thought_level",
       type: "select",
-      currentValue: state.configValues.reasoning_effort ?? "medium",
+      currentValue: reasoningEffort,
       options: [
         { value: "low", name: "Low" },
         { value: "medium", name: "Medium" },
@@ -583,7 +588,7 @@ class MockAgent implements Agent {
         data: {
           method: string;
           configId: string;
-          value: string;
+          value: string | boolean;
         };
       };
       error.code = -32602;
@@ -594,7 +599,7 @@ class MockAgent implements Agent {
       };
       throw error;
     }
-    if (params.configId === "mode") {
+    if (params.configId === "mode" && typeof params.value === "string") {
       session.modeId = params.value;
     } else {
       session.configValues[params.configId] = params.value;
