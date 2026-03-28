@@ -1,4 +1,4 @@
-export function selectLocalCodexReviewText(stdout: string, stderr: string): string {
+export function selectLocalCodexReviewText(stdout, stderr) {
   const stdoutText = String(stdout ?? "").trim();
   const stderrText = String(stderr ?? "").trim();
 
@@ -13,7 +13,7 @@ export function selectLocalCodexReviewText(stdout: string, stderr: string): stri
   return extractedTail || stderrText;
 }
 
-export function extractCodexReviewTail(text: string): string {
+export function extractCodexReviewTail(text) {
   const codexTailMatch = text.match(/(?:^|\n)codex\s*\n([\s\S]+)$/i);
   if (codexTailMatch?.[1]?.trim()) {
     return codexTailMatch[1].trim();
@@ -27,7 +27,7 @@ export function extractCodexReviewTail(text: string): string {
     return "";
   }
 
-  const tail: string[] = [];
+  const tail = [];
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const line = lines[index] ?? "";
     if (
