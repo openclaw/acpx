@@ -6,6 +6,7 @@ import {
   listRecentRuns,
 } from "../lib/bundle-reader";
 import { loadRunBundle } from "../lib/load-bundle";
+import { readRequestedRunIdFromWindow, syncRequestedRunId } from "../lib/run-url";
 import type { LoadedRunBundle, RunBundleSummary } from "../types";
 
 export type RunBundleLoadingState = "bootstrap" | "runs" | "sample" | "local" | "run" | null;
@@ -38,6 +39,7 @@ export function useRunBundleLoader() {
       const loaded = await loadRunBundle(createSampleBundleReader());
       setBundle(loaded);
       setActiveRunId(null);
+      syncRequestedRunId(null);
       return loaded;
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -56,6 +58,7 @@ export function useRunBundleLoader() {
       const loaded = await loadRunBundle(reader);
       setBundle(loaded);
       setActiveRunId(null);
+      syncRequestedRunId(null);
       return loaded;
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -77,6 +80,7 @@ export function useRunBundleLoader() {
         const loaded = await loadRunBundle(createRecentRunBundleReader(run));
         setBundle(loaded);
         setActiveRunId(run.runId);
+        syncRequestedRunId(run.runId);
         return loaded;
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -93,8 +97,12 @@ export function useRunBundleLoader() {
     setErrorMessage(null);
 
     const runs = await refreshRuns();
+    const requestedRunId = readRequestedRunIdFromWindow();
     if (runs && runs.length > 0) {
-      await loadRecentRun(runs[0]);
+      const requestedRun = requestedRunId
+        ? (runs.find((candidate) => candidate.runId === requestedRunId) ?? null)
+        : null;
+      await loadRecentRun(requestedRun ?? runs[0]);
       return;
     }
     await loadSample();
