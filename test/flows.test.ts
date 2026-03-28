@@ -335,6 +335,54 @@ test("FlowRunner stops at checkpoint nodes and marks the run as waiting", async 
   });
 });
 
+test("FlowRunner marks a checkpoint run failed when waiting snapshot persistence fails", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "unused",
+        agentCommand: "unused",
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+
+    const store = (
+      runner as unknown as { store: { writeSnapshot: (...args: unknown[]) => Promise<void> } }
+    ).store;
+    const originalWriteSnapshot = store.writeSnapshot.bind(store);
+    let injected = false;
+    store.writeSnapshot = async (...args: unknown[]) => {
+      const state = args[1] as { status?: string };
+      const event = args[2] as { type?: string };
+      if (!injected && state.status === "waiting" && event.type === "node_outcome") {
+        injected = true;
+        throw new Error("checkpoint snapshot failed");
+      }
+      await originalWriteSnapshot(...args);
+    };
+
+    const flow = defineFlow({
+      name: "checkpoint-persist-failure-test",
+      startAt: "wait_for_human",
+      nodes: {
+        wait_for_human: checkpoint({
+          summary: "needs review",
+        }),
+      },
+      edges: [],
+    });
+
+    await assert.rejects(async () => await runner.run(flow, {}), /checkpoint snapshot failed/);
+
+    const runDir = await waitForRunDir(outputRoot, "checkpoint-persist-failure-test");
+    const state = await readRunJson(runDir);
+    assert.equal(state.status, "failed");
+    assert.equal(state.error, "checkpoint snapshot failed");
+  });
+});
+
 test("FlowRunner executes native shell actions and parses structured output", async () => {
   await withTempHome(async () => {
     const runner = new FlowRunner({
@@ -365,6 +413,53 @@ test("FlowRunner executes native shell actions and parses structured output", as
     const result = await runner.run(flow, {});
     assert.equal(result.state.status, "completed");
     assert.deepEqual(result.state.outputs.transform, { ok: true, value: "shell" });
+  });
+});
+
+test("FlowRunner marks a completed run failed when the final snapshot write fails", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "unused",
+        agentCommand: "unused",
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+
+    const store = (
+      runner as unknown as { store: { writeSnapshot: (...args: unknown[]) => Promise<void> } }
+    ).store;
+    const originalWriteSnapshot = store.writeSnapshot.bind(store);
+    let injected = false;
+    store.writeSnapshot = async (...args: unknown[]) => {
+      const event = args[2] as { type?: string };
+      if (!injected && event.type === "run_completed") {
+        injected = true;
+        throw new Error("completion snapshot failed");
+      }
+      await originalWriteSnapshot(...args);
+    };
+
+    const flow = defineFlow({
+      name: "completion-persist-failure-test",
+      startAt: "done",
+      nodes: {
+        done: compute({
+          run: () => ({ ok: true }),
+        }),
+      },
+      edges: [],
+    });
+
+    await assert.rejects(async () => await runner.run(flow, {}), /completion snapshot failed/);
+
+    const runDir = await waitForRunDir(outputRoot, "completion-persist-failure-test");
+    const state = await readRunJson(runDir);
+    assert.equal(state.status, "failed");
+    assert.equal(state.error, "completion snapshot failed");
   });
 });
 

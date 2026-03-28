@@ -370,10 +370,8 @@ export class FlowRunner {
     error: unknown,
   ): Promise<void> {
     if (
-      state.status === "waiting" ||
-      state.status === "completed" ||
-      (state.finishedAt !== undefined &&
-        (state.status === "failed" || state.status === "timed_out"))
+      state.finishedAt !== undefined &&
+      (state.status === "failed" || state.status === "timed_out")
     ) {
       return;
     }
