@@ -64,3 +64,53 @@ test("resolveAcpxVersion falls back to unknown when version cannot be resolved",
   });
   assert.equal(version, "0.0.0-unknown");
 });
+
+test("resolveAcpxVersion ignores blank env versions and blank package versions", async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-version-test-"));
+  try {
+    const packagePath = path.join(tmpDir, "package.json");
+    await fs.writeFile(
+      packagePath,
+      `${JSON.stringify({ name: "acpx", version: "   " }, null, 2)}\n`,
+      "utf8",
+    );
+    const version = resolveAcpxVersion({
+      env: {
+        npm_package_name: "acpx",
+        npm_package_version: "   ",
+      },
+      packageJsonPath: packagePath,
+    });
+    assert.equal(version, "0.0.0-unknown");
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("getAcpxVersion caches the first resolved version", async () => {
+  const versionModuleUrl = new URL(`../src/version.js?cachebust=${Date.now()}`, import.meta.url);
+  const previousName = process.env.npm_package_name;
+  const previousVersion = process.env.npm_package_version;
+
+  process.env.npm_package_name = "acpx";
+  process.env.npm_package_version = "7.8.9";
+
+  try {
+    const freshModule = (await import(versionModuleUrl.href)) as typeof import("../src/version.js");
+    assert.equal(freshModule.getAcpxVersion(), "7.8.9");
+
+    process.env.npm_package_version = "9.9.9";
+    assert.equal(freshModule.getAcpxVersion(), "7.8.9");
+  } finally {
+    if (previousName === undefined) {
+      delete process.env.npm_package_name;
+    } else {
+      process.env.npm_package_name = previousName;
+    }
+    if (previousVersion === undefined) {
+      delete process.env.npm_package_version;
+    } else {
+      process.env.npm_package_version = previousVersion;
+    }
+  }
+});

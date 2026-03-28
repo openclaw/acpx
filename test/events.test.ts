@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isAcpJsonRpcMessage, isSessionUpdateNotification } from "../src/acp-jsonrpc.js";
+import {
+  isAcpJsonRpcMessage,
+  isJsonRpcNotification,
+  isSessionUpdateNotification,
+  parseJsonRpcErrorMessage,
+  parsePromptStopReason,
+} from "../src/acp-jsonrpc.js";
 
 test("isAcpJsonRpcMessage accepts JSON-RPC request", () => {
   assert.equal(
@@ -64,6 +70,42 @@ test("isAcpJsonRpcMessage rejects non-JSON-RPC payload", () => {
     isAcpJsonRpcMessage({
       type: "custom_event",
       content: "hello",
+    }),
+    false,
+  );
+});
+
+test("isAcpJsonRpcMessage rejects invalid request and response shapes", () => {
+  assert.equal(
+    isAcpJsonRpcMessage({
+      jsonrpc: "2.0",
+      id: {},
+      method: "session/prompt",
+    }),
+    false,
+  );
+
+  assert.equal(
+    isAcpJsonRpcMessage({
+      jsonrpc: "2.0",
+      id: "req-1",
+      result: {},
+      error: {
+        code: -32000,
+        message: "runtime error",
+      },
+    }),
+    false,
+  );
+
+  assert.equal(
+    isAcpJsonRpcMessage({
+      jsonrpc: "2.0",
+      id: "req-1",
+      error: {
+        code: "bad",
+        message: "runtime error",
+      },
     }),
     false,
   );
@@ -148,5 +190,45 @@ test("isSessionUpdateNotification matches session/update notifications only", ()
       result: { stopReason: "end_turn" },
     }),
     false,
+  );
+});
+
+test("notification and response helpers parse expected fields only", () => {
+  const notification = {
+    jsonrpc: "2.0",
+    method: "session/update",
+    params: {
+      sessionId: "session-1",
+    },
+  } as const;
+  assert.equal(isJsonRpcNotification(notification), true);
+
+  const response = {
+    jsonrpc: "2.0",
+    id: "req-1",
+    result: { stopReason: "end_turn" },
+  } as const;
+  assert.equal(parsePromptStopReason(response), "end_turn");
+  assert.equal(parsePromptStopReason(notification as never), undefined);
+
+  const errorResponse = {
+    jsonrpc: "2.0",
+    id: "req-2",
+    error: {
+      code: -32000,
+      message: "bad request",
+    },
+  } as const;
+  assert.equal(parseJsonRpcErrorMessage(errorResponse), "bad request");
+  assert.equal(parseJsonRpcErrorMessage(response as never), undefined);
+  assert.equal(
+    parseJsonRpcErrorMessage({
+      jsonrpc: "2.0",
+      id: "req-3",
+      error: {
+        code: -32000,
+      },
+    } as never),
+    undefined,
   );
 });

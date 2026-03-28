@@ -9,6 +9,11 @@ import { promptForPermission } from "./permission-prompt.js";
 import type { NonInteractivePermissionPolicy, PermissionMode } from "./types.js";
 
 type PermissionDecision = "approved" | "denied" | "cancelled";
+const PERMISSION_MODE_RANK: Record<PermissionMode, number> = {
+  "deny-all": 0,
+  "approve-reads": 1,
+  "approve-all": 2,
+};
 
 function selected(optionId: string): RequestPermissionResponse {
   return { outcome: { outcome: "selected", optionId } };
@@ -88,6 +93,10 @@ async function promptForToolPermission(params: RequestPermissionRequest): Promis
 
 function canPromptForPermission(): boolean {
   return Boolean(process.stdin.isTTY && process.stderr.isTTY);
+}
+
+export function permissionModeSatisfies(actual: PermissionMode, required: PermissionMode): boolean {
+  return PERMISSION_MODE_RANK[actual] >= PERMISSION_MODE_RANK[required];
 }
 
 export async function resolvePermissionRequest(

@@ -3,10 +3,11 @@
   "compilerOptions": {
     "outDir": "dist-test",
     "rootDir": ".",
+    "allowJs": true,
     "declaration": false,
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "examples/flows/pr-triage/review-text.js"],
   "exclude": ["node_modules", "dist", "dist-test"]
 }

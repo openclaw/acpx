@@ -70,6 +70,7 @@ test("withInterrupt rejects with InterruptedError on SIGINT and runs cleanup onc
 test("withInterrupt rejects with InterruptedError on SIGTERM and removes signal listeners", async () => {
   const sigintBefore = process.listenerCount("SIGINT");
   const sigtermBefore = process.listenerCount("SIGTERM");
+  const sighupBefore = process.listenerCount("SIGHUP");
 
   const pending = withInterrupt(
     async () => await new Promise<string>(() => {}),
@@ -78,10 +79,28 @@ test("withInterrupt rejects with InterruptedError on SIGTERM and removes signal 
 
   assert.equal(process.listenerCount("SIGINT"), sigintBefore + 1);
   assert.equal(process.listenerCount("SIGTERM"), sigtermBefore + 1);
+  assert.equal(process.listenerCount("SIGHUP"), sighupBefore + 1);
 
   process.emit("SIGTERM");
 
   await assert.rejects(async () => await pending, InterruptedError);
   assert.equal(process.listenerCount("SIGINT"), sigintBefore);
   assert.equal(process.listenerCount("SIGTERM"), sigtermBefore);
+  assert.equal(process.listenerCount("SIGHUP"), sighupBefore);
+});
+
+test("withInterrupt rejects with InterruptedError on SIGHUP", async () => {
+  let interruptCalls = 0;
+
+  const pending = withInterrupt(
+    async () => await new Promise<string>(() => {}),
+    async () => {
+      interruptCalls += 1;
+    },
+  );
+
+  process.emit("SIGHUP");
+
+  await assert.rejects(async () => await pending, InterruptedError);
+  assert.equal(interruptCalls, 1);
 });

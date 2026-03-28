@@ -73,7 +73,9 @@ import {
 import {
   SESSION_RECORD_SCHEMA,
   type AcpJsonRpcMessage,
+  type AcpMessageDirection,
   type AuthPolicy,
+  type ClientOperation,
   type McpServer,
   type NonInteractivePermissionPolicy,
   type OutputErrorEmissionPolicy,
@@ -84,6 +86,7 @@ import {
   type PermissionMode,
   type PromptInput,
   type RunPromptResult,
+  type SessionNotification,
   type SessionEnsureResult,
   type SessionRecord,
   type SessionSetConfigOptionResult,
@@ -107,6 +110,61 @@ export type SessionAgentOptions = {
   maxTurns?: number;
 };
 
+function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOptions | undefined {
+  const stored = record.acpx?.session_options;
+  if (!stored) {
+    return undefined;
+  }
+
+  const sessionOptions: SessionAgentOptions = {};
+
+  if (typeof stored.model === "string" && stored.model.trim().length > 0) {
+    sessionOptions.model = stored.model;
+  }
+  if (Array.isArray(stored.allowed_tools)) {
+    sessionOptions.allowedTools = [...stored.allowed_tools];
+  }
+  if (typeof stored.max_turns === "number") {
+    sessionOptions.maxTurns = stored.max_turns;
+  }
+
+  return Object.keys(sessionOptions).length > 0 ? sessionOptions : undefined;
+}
+
+function persistSessionOptions(
+  record: SessionRecord,
+  options: SessionAgentOptions | undefined,
+): void {
+  const next =
+    options &&
+    ({
+      model: typeof options.model === "string" ? options.model : undefined,
+      allowed_tools: Array.isArray(options.allowedTools) ? [...options.allowedTools] : undefined,
+      max_turns: typeof options.maxTurns === "number" ? options.maxTurns : undefined,
+    } satisfies NonNullable<NonNullable<SessionRecord["acpx"]>["session_options"]>);
+
+  const hasValues = Boolean(
+    next &&
+    ((typeof next.model === "string" && next.model.trim().length > 0) ||
+      (Array.isArray(next.allowed_tools) && next.allowed_tools.length > 0) ||
+      typeof next.max_turns === "number"),
+  );
+
+  if (hasValues && next) {
+    record.acpx = {
+      ...record.acpx,
+      session_options: next,
+    };
+    return;
+  }
+
+  if (!record.acpx) {
+    return;
+  }
+
+  delete record.acpx.session_options;
+}
+
 export type RunOnceOptions = {
   agentCommand: string;
   cwd: string;
@@ -117,6 +175,9 @@ export type RunOnceOptions = {
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   outputFormatter: OutputFormatter;
+  onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
+  onSessionUpdate?: (notification: SessionNotification) => void;
+  onClientOperation?: (operation: ClientOperation) => void;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   sessionOptions?: SessionAgentOptions;
@@ -146,6 +207,9 @@ export type SessionSendOptions = {
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   outputFormatter: OutputFormatter;
+  onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
+  onSessionUpdate?: (notification: SessionNotification) => void;
+  onClientOperation?: (operation: ClientOperation) => void;
   errorEmissionPolicy?: OutputErrorEmissionPolicy;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
@@ -222,6 +286,9 @@ type RunSessionPromptOptions = {
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   outputFormatter: OutputFormatter;
+  onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
+  onSessionUpdate?: (notification: SessionNotification) => void;
+  onClientOperation?: (operation: ClientOperation) => void;
   timeoutMs?: number;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
@@ -547,6 +614,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       authPolicy: options.authPolicy,
       suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
       verbose: options.verbose,
+      sessionOptions: sessionOptionsFromRecord(record),
     });
   client.updateRuntimeOptions({
     permissionMode: options.permissionMode,
@@ -555,9 +623,10 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     verbose: options.verbose,
   });
   client.setEventHandlers({
-    onAcpMessage: (_direction, message) => {
+    onAcpMessage: (direction, message) => {
       sawAcpMessage = true;
       pendingMessages.push(message);
+      options.onAcpMessage?.(direction, message);
     },
     onAcpOutputMessage: (_direction, message) => {
       if (bufferingConnectOutput) {
@@ -572,6 +641,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       }
       acpxState = recordConversationSessionUpdate(conversation, acpxState, notification);
       trimConversationForRuntime(conversation);
+      options.onSessionUpdate?.(notification);
     },
     onClientOperation: (operation) => {
       if (promptTurnActive) {
@@ -579,6 +649,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       }
       acpxState = recordConversationClientOperation(conversation, acpxState, operation);
       trimConversationForRuntime(conversation);
+      options.onClientOperation?.(operation);
     },
   });
   let activeSessionIdForControl = record.acpSessionId;
@@ -815,16 +886,19 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
     authPolicy: options.authPolicy,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
+    onAcpMessage: options.onAcpMessage,
     onAcpOutputMessage: (_direction, message) => output.onAcpMessage(message),
-    onSessionUpdate: () => {
+    onSessionUpdate: (notification) => {
       if (promptTurnActive) {
         promptTurnHadSideEffects = true;
       }
+      options.onSessionUpdate?.(notification);
     },
-    onClientOperation: () => {
+    onClientOperation: (operation) => {
       if (promptTurnActive) {
         promptTurnHadSideEffects = true;
       }
+      options.onClientOperation?.(operation);
     },
     sessionOptions: options.sessionOptions,
   });
@@ -972,6 +1046,8 @@ export async function createSession(options: SessionCreateOptions): Promise<Sess
           acpx: {},
         };
 
+        persistSessionOptions(record, options.sessionOptions);
+
         await writeSessionRecord(record);
         return record;
       },
@@ -1054,12 +1130,13 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     agentCommand: sessionRecord.agentCommand,
     cwd: absolutePath(sessionRecord.cwd),
     mcpServers: options.mcpServers,
-    permissionMode: "approve-reads",
+    permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
+    sessionOptions: sessionOptionsFromRecord(sessionRecord),
   });
   const ttlMs = normalizeQueueOwnerTtlMs(options.ttlMs);
   const maxQueueDepth = Math.max(1, Math.round(options.maxQueueDepth ?? 16));
@@ -1249,6 +1326,25 @@ export async function sendSession(options: SessionSendOptions): Promise<SessionS
   }
 
   throw new Error(`Session queue owner failed to start for session ${options.sessionId}`);
+}
+
+export async function sendSessionDirect(options: SessionSendOptions): Promise<SessionSendResult> {
+  return await runSessionPrompt({
+    sessionRecordId: options.sessionId,
+    prompt: options.prompt,
+    mcpServers: options.mcpServers,
+    permissionMode: options.permissionMode,
+    nonInteractivePermissions: options.nonInteractivePermissions,
+    authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
+    outputFormatter: options.outputFormatter,
+    onAcpMessage: options.onAcpMessage,
+    onSessionUpdate: options.onSessionUpdate,
+    onClientOperation: options.onClientOperation,
+    timeoutMs: options.timeoutMs,
+    suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
+    verbose: options.verbose,
+  });
 }
 
 export async function cancelSessionPrompt(

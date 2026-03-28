@@ -1,14 +1,14 @@
 const ACP_ADAPTER_PACKAGE_RANGES = {
   pi: "^0.0.22",
-  codex: "^0.9.5",
-  claude: "^0.21.0",
+  codex: "^0.10.0",
+  claude: "^0.24.2",
 } as const;
 
 export const AGENT_REGISTRY: Record<string, string> = {
   pi: `npx pi-acp@${ACP_ADAPTER_PACKAGE_RANGES.pi}`,
   openclaw: "openclaw acp",
   codex: `npx @zed-industries/codex-acp@${ACP_ADAPTER_PACKAGE_RANGES.codex}`,
-  claude: `npx -y @zed-industries/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
+  claude: `npx -y @agentclientprotocol/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
   gemini: "gemini --acp",
   cursor: "cursor-agent acp",
   copilot: "copilot --acp --stdio",
@@ -18,7 +18,14 @@ export const AGENT_REGISTRY: Record<string, string> = {
   kimi: "kimi acp",
   kiro: "kiro-cli acp",
   opencode: "npx -y opencode-ai acp",
+  qoder: "qodercli --acp",
   qwen: "qwen --acp",
+  trae: "traecli acp serve",
+};
+
+const AGENT_ALIASES: Record<string, string> = {
+  "factory-droid": "droid",
+  factorydroid: "droid",
 };
 
 export const DEFAULT_AGENT_NAME = "codex";
@@ -46,7 +53,7 @@ export function mergeAgentRegistry(overrides?: Record<string, string>): Record<s
 export function resolveAgentCommand(agentName: string, overrides?: Record<string, string>): string {
   const normalized = normalizeAgentName(agentName);
   const registry = mergeAgentRegistry(overrides);
-  return registry[normalized] ?? agentName;
+  return registry[normalized] ?? registry[AGENT_ALIASES[normalized] ?? normalized] ?? agentName;
 }
 
 export function listBuiltInAgents(overrides?: Record<string, string>): string[] {

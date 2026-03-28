@@ -1,5 +1,6 @@
 node_modules/
 dist/
 dist-test/
+examples/flows/replay-viewer/dist/
 *.tgz
 .worktrees/

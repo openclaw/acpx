@@ -1,11 +1,9 @@
 import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
-import fs from "node:fs";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
   ClientSideConnection,
   PROTOCOL_VERSION,
-  ndJsonStream,
   type AnyMessage,
   type AuthMethod,
   type CreateTerminalRequest,
@@ -46,6 +44,7 @@ import { classifyPermissionDecision, resolvePermissionRequest } from "./permissi
 import { textPrompt } from "./prompt-content.js";
 import { extractRuntimeSessionId } from "./runtime-session-id.js";
 import { TimeoutError, withTimeout } from "./session-runtime-helpers.js";
+import { buildSpawnCommandOptions } from "./spawn-command-options.js";
 import { TerminalManager } from "./terminal.js";
 import type {
   AcpClientOptions,
@@ -55,6 +54,8 @@ import type {
   PromptInput,
 } from "./types.js";
 
+export { buildSpawnCommandOptions };
+
 type CommandParts = {
   command: string;
   args: string[];
@@ -63,7 +64,8 @@ type CommandParts = {
 const REPLAY_IDLE_MS = 80;
 const REPLAY_DRAIN_TIMEOUT_MS = 5_000;
 const DRAIN_POLL_INTERVAL_MS = 20;
-const AGENT_CLOSE_AFTER_STDIN_END_MS = 100;
+const DEFAULT_AGENT_CLOSE_AFTER_STDIN_END_MS = 100;
+const QODER_AGENT_CLOSE_AFTER_STDIN_END_MS = 750;
 const AGENT_CLOSE_TERM_GRACE_MS = 1_500;
 const AGENT_CLOSE_KILL_GRACE_MS = 1_000;
 const GEMINI_ACP_STARTUP_TIMEOUT_MS = 15_000;
@@ -117,6 +119,10 @@ export type AgentLifecycleSnapshot = {
 };
 
 type ConsoleErrorMethod = typeof console.error;
+const QODER_BENIGN_STDOUT_LINES = new Set([
+  "Received interrupt signal. Cleaning up resources...",
+  "Cleanup completed. Exiting...",
+]);
 
 function shouldSuppressSdkConsoleError(args: unknown[]): boolean {
   if (args.length === 0) {
@@ -282,6 +288,83 @@ function basenameToken(value: string): string {
     .replace(/\.(cmd|exe|bat)$/u, "");
 }
 
+export function resolveAgentCloseAfterStdinEndMs(agentCommand: string): number {
+  const { command } = splitCommandLine(agentCommand);
+  return basenameToken(command) === "qodercli"
+    ? QODER_AGENT_CLOSE_AFTER_STDIN_END_MS
+    : DEFAULT_AGENT_CLOSE_AFTER_STDIN_END_MS;
+}
+
+export function shouldIgnoreNonJsonAgentOutputLine(
+  agentCommand: string,
+  trimmedLine: string,
+): boolean {
+  const { command } = splitCommandLine(agentCommand);
+  return basenameToken(command) === "qodercli" && QODER_BENIGN_STDOUT_LINES.has(trimmedLine);
+}
+
+function createNdJsonMessageStream(
+  agentCommand: string,
+  output: WritableStream<Uint8Array>,
+  input: ReadableStream<Uint8Array>,
+): {
+  readable: ReadableStream<AnyMessage>;
+  writable: WritableStream<AnyMessage>;
+} {
+  const textEncoder = new TextEncoder();
+  const textDecoder = new TextDecoder();
+
+  const readable = new ReadableStream<AnyMessage>({
+    async start(controller) {
+      let content = "";
+      const reader = input.getReader();
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) {
+            break;
+          }
+          if (!value) {
+            continue;
+          }
+          content += textDecoder.decode(value, { stream: true });
+          const lines = content.split("\n");
+          content = lines.pop() || "";
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (!trimmedLine || shouldIgnoreNonJsonAgentOutputLine(agentCommand, trimmedLine)) {
+              continue;
+            }
+            try {
+              const message = JSON.parse(trimmedLine) as AnyMessage;
+              controller.enqueue(message);
+            } catch (err) {
+              console.error("Failed to parse JSON message:", trimmedLine, err);
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+        controller.close();
+      }
+    },
+  });
+
+  const writable = new WritableStream<AnyMessage>({
+    async write(message) {
+      const content = JSON.stringify(message) + "\n";
+      const writer = output.getWriter();
+      try {
+        await writer.write(textEncoder.encode(content));
+      } finally {
+        writer.releaseLock();
+      }
+    },
+  });
+
+  return { readable, writable };
+}
+
 function isGeminiAcpCommand(command: string, args: readonly string[]): boolean {
   return (
     basenameToken(command) === "gemini" &&
@@ -301,79 +384,50 @@ function isCopilotAcpCommand(command: string, args: readonly string[]): boolean 
   return basenameToken(command) === "copilot" && args.includes("--acp");
 }
 
-function readWindowsEnvValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
-  const matchedKey = Object.keys(env).find((entry) => entry.toUpperCase() === key);
-  return matchedKey ? env[matchedKey] : undefined;
+function isQoderAcpCommand(command: string, args: readonly string[]): boolean {
+  return basenameToken(command) === "qodercli" && args.includes("--acp");
 }
 
-function resolveWindowsCommand(
-  command: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string | undefined {
-  const extensions = (readWindowsEnvValue(env, "PATHEXT") ?? ".COM;.EXE;.BAT;.CMD")
-    .split(";")
-    .map((value) => value.trim().toLowerCase())
-    .filter((value) => value.length > 0);
-  const commandExtension = path.extname(command);
-  const candidates =
-    commandExtension.length > 0
-      ? [command]
-      : extensions.map((extension) => `${command}${extension}`);
-  const hasPath = command.includes("/") || command.includes("\\") || path.isAbsolute(command);
-
-  if (hasPath) {
-    return candidates.find((candidate) => fs.existsSync(candidate));
-  }
-
-  const pathValue = readWindowsEnvValue(env, "PATH");
-  if (!pathValue) {
-    return undefined;
-  }
-
-  for (const directory of pathValue.split(";")) {
-    const trimmedDirectory = directory.trim();
-    if (trimmedDirectory.length === 0) {
-      continue;
-    }
-    for (const candidate of candidates) {
-      const resolved = path.join(trimmedDirectory, candidate);
-      if (fs.existsSync(resolved)) {
-        return resolved;
-      }
-    }
-  }
-
-  return undefined;
+function hasCommandFlag(args: readonly string[], flagName: string): boolean {
+  return args.some((arg) => arg === flagName || arg.startsWith(`${flagName}=`));
 }
 
-function shouldUseWindowsBatchShell(
-  command: string,
-  platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  if (platform !== "win32") {
-    return false;
+function normalizeQoderAllowedToolName(tool: string): string {
+  switch (tool.trim().toLowerCase()) {
+    case "bash":
+    case "glob":
+    case "grep":
+    case "ls":
+    case "read":
+    case "write":
+      return tool.trim().toUpperCase();
+    default:
+      return tool.trim();
   }
-  const resolvedCommand = resolveWindowsCommand(command, env) ?? command;
-  const ext = path.extname(resolvedCommand).toLowerCase();
-  return ext === ".cmd" || ext === ".bat";
 }
 
-export function buildSpawnCommandOptions(
-  command: string,
-  options: Parameters<typeof spawn>[2],
-  platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env,
-): Parameters<typeof spawn>[2] {
-  if (!shouldUseWindowsBatchShell(command, platform, env)) {
-    return options;
-  }
-  return {
-    ...options,
-    shell: true,
-  };
-}
+export function buildQoderAcpCommandArgs(
+  initialArgs: readonly string[],
+  options: Pick<AcpClientOptions, "sessionOptions">,
+): string[] {
+  const args = [...initialArgs];
+  const sessionOptions = options.sessionOptions;
 
+  if (typeof sessionOptions?.maxTurns === "number" && !hasCommandFlag(args, "--max-turns")) {
+    args.push(`--max-turns=${sessionOptions.maxTurns}`);
+  }
+
+  if (
+    Array.isArray(sessionOptions?.allowedTools) &&
+    !hasCommandFlag(args, "--allowed-tools") &&
+    !hasCommandFlag(args, "--disallowed-tools")
+  ) {
+    const encodedTools = sessionOptions.allowedTools.map(normalizeQoderAllowedToolName).join(",");
+    args.push(`--allowed-tools=${encodedTools}`);
+  }
+
+  return args;
+}
 function resolveGeminiAcpStartupTimeoutMs(): number {
   const raw = process.env.ACPX_GEMINI_ACP_STARTUP_TIMEOUT_MS;
   if (typeof raw === "string" && raw.trim().length > 0) {
@@ -564,7 +618,7 @@ async function buildGeminiAcpStartupTimeoutMessage(command: string): Promise<str
 function buildClaudeAcpSessionCreateTimeoutMessage(): string {
   return [
     "Claude ACP session creation timed out before session/new completed.",
-    "This matches the known persistent-session stall seen with some Claude Code and @zed-industries/claude-agent-acp combinations.",
+    "This matches the known persistent-session stall seen with some Claude Code and @agentclientprotocol/claude-agent-acp combinations.",
     "In harnessed or non-interactive runs, prefer --approve-all with nonInteractivePermissions=deny, upgrade Claude Code and the Claude ACP adapter, or use acpx claude exec as a one-shot fallback.",
   ].join(" ");
 }
@@ -928,7 +982,10 @@ export class AcpClient {
     }
 
     const { command, args: initialArgs } = splitCommandLine(this.options.agentCommand);
-    const args = await resolveGeminiCommandArgs(command, initialArgs);
+    let args = await resolveGeminiCommandArgs(command, initialArgs);
+    if (isQoderAcpCommand(command, args)) {
+      args = buildQoderAcpCommandArgs(args, this.options);
+    }
     this.log(`spawning agent: ${command} ${args.join(" ")}`);
     const geminiAcp = isGeminiAcpCommand(command, args);
     const copilotAcp = isCopilotAcpCommand(command, args);
@@ -967,7 +1024,9 @@ export class AcpClient {
 
     const input = Writable.toWeb(child.stdin);
     const output = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
-    const stream = this.createTappedStream(ndJsonStream(input, output));
+    const stream = this.createTappedStream(
+      createNdJsonMessageStream(this.options.agentCommand, input, output),
+    );
 
     const connection = new ClientSideConnection(
       () => ({
@@ -1339,6 +1398,8 @@ export class AcpClient {
   private async terminateAgentProcess(
     child: ChildProcessByStdio<Writable, Readable, Readable>,
   ): Promise<void> {
+    const stdinCloseGraceMs = resolveAgentCloseAfterStdinEndMs(this.options.agentCommand);
+
     // Closing stdin is the most graceful shutdown signal for stdio-based ACP agents.
     if (!child.stdin.destroyed) {
       try {
@@ -1348,7 +1409,7 @@ export class AcpClient {
       }
     }
 
-    let exited = await waitForChildExit(child, AGENT_CLOSE_AFTER_STDIN_END_MS);
+    let exited = await waitForChildExit(child, stdinCloseGraceMs);
     if (!exited && isChildProcessRunning(child)) {
       try {
         child.kill("SIGTERM");

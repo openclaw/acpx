@@ -1,0 +1,39 @@
+{
+  "schema": "acpx.flow-definition-snapshot.v1",
+  "name": "example-two-turn",
+  "startAt": "draft",
+  "nodes": {
+    "draft": {
+      "nodeType": "acp",
+      "session": {},
+      "cwd": {
+        "mode": "default"
+      },
+      "hasPrompt": true,
+      "hasParse": true
+    },
+    "refine": {
+      "nodeType": "acp",
+      "session": {},
+      "cwd": {
+        "mode": "default"
+      },
+      "hasPrompt": true,
+      "hasParse": true
+    },
+    "finalize": {
+      "nodeType": "compute",
+      "hasRun": true
+    }
+  },
+  "edges": [
+    {
+      "from": "draft",
+      "to": "refine"
+    },
+    {
+      "from": "refine",
+      "to": "finalize"
+    }
+  ]
+}

@@ -22,6 +22,37 @@ import { applyLifecycleSnapshotToRecord } from "./lifecycle.js";
 
 export type ActiveSessionController = QueueOwnerActiveSessionController;
 
+function sessionOptionsFromRecord(record: SessionRecord):
+  | {
+      model?: string;
+      allowedTools?: string[];
+      maxTurns?: number;
+    }
+  | undefined {
+  const stored = record.acpx?.session_options;
+  if (!stored) {
+    return undefined;
+  }
+
+  const sessionOptions: {
+    model?: string;
+    allowedTools?: string[];
+    maxTurns?: number;
+  } = {};
+
+  if (typeof stored.model === "string" && stored.model.trim().length > 0) {
+    sessionOptions.model = stored.model;
+  }
+  if (Array.isArray(stored.allowed_tools)) {
+    sessionOptions.allowedTools = [...stored.allowed_tools];
+  }
+  if (typeof stored.max_turns === "number") {
+    sessionOptions.maxTurns = stored.max_turns;
+  }
+
+  return Object.keys(sessionOptions).length > 0 ? sessionOptions : undefined;
+}
+
 type WithConnectedSessionOptions<T> = {
   sessionRecordId: string;
   mcpServers?: McpServer[];
@@ -56,6 +87,7 @@ async function withConnectedSession<T>(
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     verbose: options.verbose,
+    sessionOptions: sessionOptionsFromRecord(record),
   });
   let activeSessionIdForControl = record.acpSessionId;
   let notifiedClientAvailable = false;

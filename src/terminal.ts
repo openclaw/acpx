@@ -15,6 +15,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 import { PermissionDeniedError, PermissionPromptUnavailableError } from "./errors.js";
 import { promptForPermission } from "./permission-prompt.js";
+import { buildSpawnCommandOptions } from "./spawn-command-options.js";
 import type { ClientOperation, NonInteractivePermissionPolicy, PermissionMode } from "./types.js";
 
 const DEFAULT_TERMINAL_OUTPUT_LIMIT_BYTES = 64 * 1024;
@@ -40,6 +41,14 @@ export type TerminalManagerOptions = {
   killGraceMs?: number;
 };
 
+type TerminalSpawnOptions = {
+  cwd: string;
+  env: NodeJS.ProcessEnv | undefined;
+  stdio: ["ignore", "pipe", "pipe"];
+  shell?: true;
+  windowsHide: true;
+};
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -62,20 +71,24 @@ function toEnvObject(env: CreateTerminalRequest["env"]): NodeJS.ProcessEnv | und
 }
 
 export function buildTerminalSpawnOptions(
+  command: string,
   cwd: string,
   env: CreateTerminalRequest["env"],
-): {
-  cwd: string;
-  env: NodeJS.ProcessEnv | undefined;
-  stdio: ["ignore", "pipe", "pipe"];
-  windowsHide: true;
-} {
-  return {
+  platform: NodeJS.Platform = process.platform,
+): TerminalSpawnOptions {
+  const resolvedEnv = toEnvObject(env);
+  const options: TerminalSpawnOptions = {
     cwd,
-    env: toEnvObject(env),
+    env: resolvedEnv,
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   };
+  return buildSpawnCommandOptions(
+    command,
+    options,
+    platform,
+    resolvedEnv ?? process.env,
+  ) as TerminalSpawnOptions;
 }
 
 function trimToUtf8Boundary(buffer: Buffer, limit: number): Buffer {
@@ -180,7 +193,7 @@ export class TerminalManager {
       const proc = spawn(
         params.command,
         params.args ?? [],
-        buildTerminalSpawnOptions(params.cwd ?? this.cwd, params.env),
+        buildTerminalSpawnOptions(params.command, params.cwd ?? this.cwd, params.env),
       );
       await waitForSpawn(proc);
 
