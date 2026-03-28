@@ -540,9 +540,30 @@ class MockAgent implements Agent {
     session.pendingPrompt?.abort();
     const promptAbort = new AbortController();
     session.pendingPrompt = promptAbort;
+    const text = getPromptText(params.prompt);
+
+    if (text === "partial-retryable-error") {
+      try {
+        await this.sendAssistantMessage(params.sessionId, "partial update");
+        const error = new Error("Internal error") as Error & {
+          code: number;
+          data: {
+            details: string;
+          };
+        };
+        error.code = -32603;
+        error.data = {
+          details: "transient failure after partial output",
+        };
+        throw error;
+      } finally {
+        if (session.pendingPrompt === promptAbort) {
+          session.pendingPrompt = undefined;
+        }
+      }
+    }
 
     try {
-      const text = getPromptText(params.prompt);
       const response =
         text === "inspect-prompt"
           ? describePromptBlocks(params.prompt)

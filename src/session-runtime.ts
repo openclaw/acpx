@@ -570,6 +570,8 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
   const pendingMessages: AcpJsonRpcMessage[] = [];
   const pendingConnectOutputMessages: AcpJsonRpcMessage[] = [];
   let bufferingConnectOutput = true;
+  let promptTurnActive = false;
+  let promptTurnHadSideEffects = false;
   let sawAcpMessage = false;
   let eventWriterClosed = false;
 
@@ -627,11 +629,17 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       output.onAcpMessage(message);
     },
     onSessionUpdate: (notification) => {
+      if (promptTurnActive) {
+        promptTurnHadSideEffects = true;
+      }
       acpxState = recordConversationSessionUpdate(conversation, acpxState, notification);
       trimConversationForRuntime(conversation);
       options.onSessionUpdate?.(notification);
     },
     onClientOperation: (operation) => {
+      if (promptTurnActive) {
+        promptTurnHadSideEffects = true;
+      }
       acpxState = recordConversationClientOperation(conversation, acpxState, operation);
       trimConversationForRuntime(conversation);
       options.onClientOperation?.(operation);
@@ -709,6 +717,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
 
         const maxRetries = options.promptRetries ?? 0;
         let response;
+        promptTurnActive = true;
         for (let attempt = 0; ; attempt++) {
           try {
             const promptStartedAt = Date.now();
@@ -738,16 +747,24 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
             const agentCrashed = snapshot.lastExit?.unexpectedDuringPrompt === true;
 
             // Retry if: retries remain, agent is still alive, error is transient.
-            if (attempt < maxRetries && !agentCrashed && isRetryablePromptError(error)) {
+            if (
+              attempt < maxRetries &&
+              !agentCrashed &&
+              !promptTurnHadSideEffects &&
+              isRetryablePromptError(error)
+            ) {
               const delayMs = Math.min(1_000 * 2 ** attempt, 10_000);
               process.stderr.write(
                 `[acpx] prompt failed (${formatErrorMessage(error)}), retrying in ${delayMs}ms ` +
                   `(attempt ${attempt + 1}/${maxRetries})\n`,
               );
               await waitMs(delayMs);
-              continue;
+              if (!promptTurnHadSideEffects) {
+                continue;
+              }
             }
 
+            promptTurnActive = false;
             applyLifecycleSnapshotToRecord(record, snapshot);
             const lastExit = snapshot.lastExit;
             if (lastExit?.unexpectedDuringPrompt && options.verbose) {
@@ -784,6 +801,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
             throw propagated;
           }
         }
+        promptTurnActive = false;
 
         await flushPendingMessages(false);
         output.flush();
@@ -847,6 +865,8 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
 
 export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult> {
   const output = options.outputFormatter;
+  let promptTurnActive = false;
+  let promptTurnHadSideEffects = false;
   const client = new AcpClient({
     agentCommand: options.agentCommand,
     cwd: absolutePath(options.cwd),
@@ -859,8 +879,18 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
     verbose: options.verbose,
     onAcpMessage: options.onAcpMessage,
     onAcpOutputMessage: (_direction, message) => output.onAcpMessage(message),
-    onSessionUpdate: options.onSessionUpdate,
-    onClientOperation: options.onClientOperation,
+    onSessionUpdate: (notification) => {
+      if (promptTurnActive) {
+        promptTurnHadSideEffects = true;
+      }
+      options.onSessionUpdate?.(notification);
+    },
+    onClientOperation: (operation) => {
+      if (promptTurnActive) {
+        promptTurnHadSideEffects = true;
+      }
+      options.onClientOperation?.(operation);
+    },
     sessionOptions: options.sessionOptions,
   });
 
@@ -884,6 +914,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
 
         const maxRetries = options.promptRetries ?? 0;
         let response;
+        promptTurnActive = true;
         for (let attempt = 0; ; attempt++) {
           try {
             response = await measurePerf("runtime.exec.prompt", async () => {
@@ -891,18 +922,26 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
             });
             break;
           } catch (error) {
-            if (attempt < maxRetries && isRetryablePromptError(error)) {
+            if (
+              attempt < maxRetries &&
+              !promptTurnHadSideEffects &&
+              isRetryablePromptError(error)
+            ) {
               const delayMs = Math.min(1_000 * 2 ** attempt, 10_000);
               process.stderr.write(
                 `[acpx] prompt failed (${formatErrorMessage(error)}), retrying in ${delayMs}ms ` +
                   `(attempt ${attempt + 1}/${maxRetries})\n`,
               );
               await waitMs(delayMs);
-              continue;
+              if (!promptTurnHadSideEffects) {
+                continue;
+              }
             }
+            promptTurnActive = false;
             throw error;
           }
         }
+        promptTurnActive = false;
         output.flush();
         return toPromptResult(response.stopReason, sessionId, client);
       },
