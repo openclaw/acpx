@@ -164,7 +164,6 @@ function resolveCompatibleConfigId(
   }
   return configId;
 }
-
 export { parseAllowedTools, parseMaxTurns, parseTtlSeconds };
 export { formatPromptSessionBannerLine } from "./cli/output-render.js";
 

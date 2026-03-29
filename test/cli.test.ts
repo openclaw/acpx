@@ -834,7 +834,7 @@ test("codex thought_level aliases to reasoning_effort", async () => {
   });
 });
 
-test("codex model aliases normalize to codex-acp model ids", async () => {
+test("codex set model passes the requested model through unchanged", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
@@ -882,7 +882,7 @@ test("codex model aliases normalize to codex-acp model ids", async () => {
     assert.equal(payload.configId, "model");
     assert.equal(payload.value, "GPT-5-2");
     const model = payload.configOptions?.find((option) => option.id === "model");
-    assert.equal(model?.currentValue, "gpt-5.2");
+    assert.equal(model?.currentValue, "GPT-5-2");
     assert.equal(model?.category, "model");
   });
 });

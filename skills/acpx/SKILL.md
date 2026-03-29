@@ -154,7 +154,6 @@ Behavior:
 - `set-mode` mode ids are adapter-defined; unsupported values are rejected by the adapter (often `Invalid params`).
 - `set`: calls ACP `session/set_config_option`.
 - For codex, `--model <id>` is applied after session creation via `session/set_config_option`.
-- For codex, common model aliases like `GPT-5-2` are normalized to codex-acp ids like `gpt-5.2`.
 - For codex, `thought_level` is accepted as a compatibility alias for codex-acp `reasoning_effort`.
 - `set-mode`/`set` route through queue-owner IPC when active, otherwise reconnect directly.
 

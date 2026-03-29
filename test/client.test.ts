@@ -455,7 +455,7 @@ test("AcpClient createSession applies codex model via session/set_config_option"
   assert.deepEqual(capturedSetConfigParams, {
     sessionId: "session-456",
     configId: "model",
-    value: "gpt-5.2",
+    value: "GPT-5-2",
   });
 });
 
