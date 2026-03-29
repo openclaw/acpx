@@ -36,12 +36,21 @@ export type ConnectAndLoadSessionResult = {
   loadError?: string;
 };
 
+// JSON-RPC codes that indicate the agent does not support session/load.
+// -32601 = Method not found, -32602 = Invalid params.
+const SESSION_LOAD_UNSUPPORTED_CODES = new Set([-32601, -32602]);
+
 function shouldFallbackToNewSession(error: unknown, record: SessionRecord): boolean {
   if (error instanceof TimeoutError || error instanceof InterruptedError) {
     return false;
   }
 
   if (isAcpResourceNotFoundError(error)) {
+    return true;
+  }
+
+  const acp = extractAcpError(error);
+  if (acp && SESSION_LOAD_UNSUPPORTED_CODES.has(acp.code)) {
     return true;
   }
 
@@ -52,7 +61,6 @@ function shouldFallbackToNewSession(error: unknown, record: SessionRecord): bool
       return true;
     }
 
-    const acp = extractAcpError(error);
     if (acp?.code === -32603) {
       return true;
     }

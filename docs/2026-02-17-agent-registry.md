@@ -12,7 +12,7 @@ date: 2026-02-17
 - `pi -> npx pi-acp`
 - `openclaw -> openclaw acp`
 - `codex -> npx @zed-industries/codex-acp`
-- `claude -> npx -y @zed-industries/claude-agent-acp`
+- `claude -> npx -y @agentclientprotocol/claude-agent-acp`
 
 The built-in agents table lives in [../README.md](../README.md). Additional built-in agent docs live under [../agents/README.md](../agents/README.md).
 
@@ -27,6 +27,9 @@ When you run `acpx <agent> ...`:
 3. if it does not match, `acpx` treats it as a raw command
 
 This means custom names work without any registry file edits.
+
+`factory-droid` and `factorydroid` are built-in aliases for `droid`, so they
+resolve to the same `droid exec --output-format acp` command.
 
 ## `--agent` escape hatch
 

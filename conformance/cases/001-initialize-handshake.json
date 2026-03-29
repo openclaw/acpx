@@ -1,0 +1,15 @@
+{
+  "id": "acp.v1.initialize.handshake",
+  "profile": "acp-core-v1",
+  "title": "Initialize handshake succeeds",
+  "description": "Verify adapter initialize handshake exposes protocol metadata.",
+  "steps": [],
+  "checks": [
+    {
+      "type": "initialize_protocol_version_number"
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000
+  }
+}

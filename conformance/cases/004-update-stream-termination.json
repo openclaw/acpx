@@ -1,0 +1,42 @@
+{
+  "id": "acp.v1.session.update.termination",
+  "profile": "acp-core-v1",
+  "title": "Update stream references session and terminates cleanly",
+  "description": "Verify updates are bound to the active session id.",
+  "steps": [
+    {
+      "action": "new_session",
+      "save_as": "session_id"
+    },
+    {
+      "action": "prompt",
+      "session": "$session_id",
+      "prompt": [
+        {
+          "type": "text",
+          "text": "echo update-check"
+        }
+      ],
+      "save_as": "prompt_result"
+    }
+  ],
+  "checks": [
+    {
+      "type": "saved_stop_reason_in",
+      "key": "prompt_result",
+      "values": ["end_turn", "completed", "done"]
+    },
+    {
+      "type": "updates_count_at_least",
+      "min": 1
+    },
+    {
+      "type": "updates_all_session",
+      "session": "$session_id"
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000,
+    "update_timeout_ms": 30000
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "acp-core-v1",
+  "version": "0.3.0",
+  "status": "draft",
+  "description": "Minimal ACP core interoperability profile.",
+  "required_cases": [
+    "acp.v1.initialize.handshake",
+    "acp.v1.session.new.basic",
+    "acp.v1.session.prompt.single_turn",
+    "acp.v1.session.update.termination",
+    "acp.v1.session.cancel.in_flight",
+    "acp.v1.session.cancel.idle",
+    "acp.v1.session.prompt.multi_turn",
+    "acp.v1.errors.invalid_params",
+    "acp.v1.errors.invalid_prompt_session_type",
+    "acp.v1.errors.permission_denied",
+    "acp.v1.errors.permission_denied.write",
+    "acp.v1.errors.unknown_session",
+    "acp.v1.session.prompt.echo_empty",
+    "acp.v1.session.prompt.unrecognized",
+    "acp.v1.errors.invalid_params.cwd_null",
+    "acp.v1.session.prompt.structured_blocks",
+    "acp.v1.permissions.read.approved",
+    "acp.v1.permissions.write.approved",
+    "acp.v1.session.prompt.background_completion",
+    "acp.v1.session.cancel.followup_prompt"
+  ],
+  "optional_cases": []
+}

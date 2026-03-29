@@ -49,6 +49,39 @@ test("listSessions preserves acpx desired_mode_id", async () => {
   });
 });
 
+test("listSessions preserves acpx session_options", async () => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const cwd = path.join(homeDir, "workspace");
+
+    await writeSessionRecord(
+      homeDir,
+      makeSessionRecord({
+        acpxRecordId: "session-options",
+        acpSessionId: "session-options",
+        agentCommand: "agent-a",
+        cwd,
+        acpx: {
+          session_options: {
+            model: "sonnet",
+            allowed_tools: ["Read", "Grep"],
+            max_turns: 7,
+          },
+        },
+      }),
+    );
+
+    const sessions = await session.listSessions();
+    const record = sessions.find((entry) => entry.acpxRecordId === "session-options");
+    assert.ok(record);
+    assert.deepEqual(record.acpx?.session_options, {
+      model: "sonnet",
+      allowed_tools: ["Read", "Grep"],
+      max_turns: 7,
+    });
+  });
+});
+
 test("listSessions ignores unsupported conversation message shapes", async () => {
   await withTempHome(async (homeDir) => {
     const sessionDir = path.join(homeDir, ".acpx", "sessions");

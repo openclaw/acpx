@@ -1,0 +1,26 @@
+{
+  "id": "acp.v1.errors.invalid_params.cwd_null",
+  "profile": "acp-core-v1",
+  "title": "Null cwd is rejected",
+  "description": "Verify session/new with null cwd fails with explicit invalid params semantics.",
+  "steps": [
+    {
+      "action": "new_session",
+      "cwd": null,
+      "save_as": "invalid_cwd_null_error",
+      "expect_error": {
+        "codes": [-32602, -32600, -32000],
+        "message_any": ["invalid", "params", "cwd"]
+      }
+    }
+  ],
+  "checks": [
+    {
+      "type": "saved_error_present",
+      "key": "invalid_cwd_null_error"
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000
+  }
+}

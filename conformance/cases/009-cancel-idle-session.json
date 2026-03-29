@@ -1,0 +1,25 @@
+{
+  "id": "acp.v1.session.cancel.idle",
+  "profile": "acp-core-v1",
+  "title": "Cancel on idle session is acknowledged",
+  "description": "Verify cancel works even when no prompt is currently active.",
+  "steps": [
+    {
+      "action": "new_session",
+      "save_as": "session_id"
+    },
+    {
+      "action": "cancel",
+      "session": "$session_id"
+    }
+  ],
+  "checks": [
+    {
+      "type": "saved_non_empty_string",
+      "key": "session_id"
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000
+  }
+}

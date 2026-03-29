@@ -105,6 +105,8 @@ jobs:
             command: pnpm run lint
           - name: Build
             command: pnpm run build
+          - name: Conformance Smoke
+            command: pnpm run conformance:run -- --case acp.v1.initialize.handshake
           - name: Test
             node_version: 22
             command: pnpm run test:coverage
@@ -118,7 +120,7 @@ jobs:
           submodules: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: ${{ env.PNPM_VERSION }}
 
@@ -151,7 +153,7 @@ jobs:
           submodules: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: ${{ env.PNPM_VERSION }}
 

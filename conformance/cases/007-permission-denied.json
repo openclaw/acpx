@@ -1,0 +1,40 @@
+{
+  "id": "acp.v1.errors.permission_denied",
+  "profile": "acp-core-v1",
+  "title": "Permission denial is explicit and machine-readable",
+  "description": "Verify denied client-authority file read is surfaced clearly.",
+  "permission_mode": "deny-all",
+  "steps": [
+    {
+      "action": "new_session",
+      "save_as": "session_id"
+    },
+    {
+      "action": "prompt",
+      "session": "$session_id",
+      "prompt": [
+        {
+          "type": "text",
+          "text": "read README.md"
+        }
+      ],
+      "save_as": "permission_prompt_result",
+      "suppress_console_error": true
+    }
+  ],
+  "checks": [
+    {
+      "type": "updates_text_includes",
+      "text": "permission denied"
+    },
+    {
+      "type": "saved_stop_reason_in",
+      "key": "permission_prompt_result",
+      "values": ["end_turn", "cancelled", "failed"]
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000,
+    "update_timeout_ms": 30000
+  }
+}

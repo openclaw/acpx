@@ -1,0 +1,77 @@
+{
+  "schema": "acpx.session.v1",
+  "acpxRecordId": "294fd830-e856-431b-819e-789d0f27b642",
+  "acpSessionId": "6e433465-6bc7-427f-99f8-39de79a1c588",
+  "agentCommand": "node /Users/onur/offline/acpx/dist-test/test/mock-agent.js",
+  "cwd": "/tmp/acpx-sample-home-kBDIgu/work",
+  "name": "example-two-turn-main-e0cd2792-63806145",
+  "createdAt": "2026-03-27T08:26:25.177Z",
+  "lastUsedAt": "2026-03-27T08:26:25.490Z",
+  "lastSeq": 14,
+  "lastRequestId": "2",
+  "eventLog": {
+    "active_path": "sessions/main-87f32b36/events.ndjson",
+    "segment_count": 1,
+    "max_segment_bytes": 67108864,
+    "max_segments": 1,
+    "last_write_at": "2026-03-27T08:26:25.490Z",
+    "last_write_error": null
+  },
+  "closed": false,
+  "pid": 6795,
+  "agentStartedAt": "2026-03-27T08:26:25.348Z",
+  "lastPromptAt": "2026-03-27T08:26:25.487Z",
+  "lastAgentExitCode": null,
+  "lastAgentExitSignal": null,
+  "lastAgentExitAt": "2026-03-27T08:26:25.496Z",
+  "lastAgentDisconnectReason": "connection_close",
+  "protocolVersion": 1,
+  "agentCapabilities": {},
+  "title": null,
+  "messages": [
+    {
+      "User": {
+        "id": "7d63632b-2f70-49d0-8848-70981ed8c2ee",
+        "content": [
+          {
+            "Text": "Write a short draft answer about the topic below.\nReturn exactly one JSON object with this shape:\n{\n  \"draft\": \"short paragraph\"\n}\n\nTopic: How should a replay viewer show ACP turns?"
+          }
+        ]
+      }
+    },
+    {
+      "Agent": {
+        "content": [
+          {
+            "Text": "unrecognized prompt: Write a short draft answer about the topic below.\nReturn exactly one JSON object with this shape:\n{\n  \"draft\": \"short paragraph\"\n}\n\nTopic: How should a replay viewer show ACP turns?"
+          }
+        ],
+        "tool_results": {}
+      }
+    },
+    {
+      "User": {
+        "id": "60f59a76-2fa6-4362-91a5-f38acd2f3305",
+        "content": [
+          {
+            "Text": "Use the earlier draft already in this session.\nTurn it into a concise checklist.\nReturn exactly one JSON object with this shape:\n{\n  \"checklist\": [\"item\", \"item\"]\n}\n\nDraft: {\"draft\":\"short paragraph\"}"
+          }
+        ]
+      }
+    },
+    {
+      "Agent": {
+        "content": [
+          {
+            "Text": "unrecognized prompt: Use the earlier draft already in this session.\nTurn it into a concise checklist.\nReturn exactly one JSON object with this shape:\n{\n  \"checklist\": [\"item\", \"item\"]\n}\n\nDraft: {\"draft\":\"short paragraph\"}"
+          }
+        ],
+        "tool_results": {}
+      }
+    }
+  ],
+  "updated_at": "2026-03-27T08:26:25.490Z",
+  "cumulative_token_usage": {},
+  "request_token_usage": {},
+  "acpx": {}
+}

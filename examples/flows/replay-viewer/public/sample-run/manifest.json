@@ -1,0 +1,28 @@
+{
+  "schema": "acpx.flow-run-bundle.v1",
+  "runId": "2026-03-27T082624978Z-example-two-turn-63806145",
+  "flowName": "example-two-turn",
+  "flowPath": "/Users/onur/offline/acpx/examples/flows/two-turn.flow.ts",
+  "startedAt": "2026-03-27T08:26:24.986Z",
+  "finishedAt": "2026-03-27T08:26:25.501Z",
+  "status": "completed",
+  "traceSchema": "acpx.flow-trace-event.v1",
+  "paths": {
+    "flow": "flow.json",
+    "trace": "trace.ndjson",
+    "runProjection": "projections/run.json",
+    "liveProjection": "projections/live.json",
+    "stepsProjection": "projections/steps.json",
+    "sessionsDir": "sessions",
+    "artifactsDir": "artifacts"
+  },
+  "sessions": [
+    {
+      "id": "main-87f32b36",
+      "handle": "main",
+      "bindingPath": "sessions/main-87f32b36/binding.json",
+      "recordPath": "sessions/main-87f32b36/record.json",
+      "eventsPath": "sessions/main-87f32b36/events.ndjson"
+    }
+  ]
+}

@@ -241,6 +241,20 @@ test("sessions new command is present in help output", async () => {
   });
 });
 
+test("flow run command is present in help output", async () => {
+  await withTempHome(async (homeDir) => {
+    const flowHelp = await runCli(["flow", "--help"], homeDir);
+    assert.equal(flowHelp.code, 0, flowHelp.stderr);
+    assert.match(flowHelp.stdout, /\brun\b/);
+
+    const runHelp = await runCli(["flow", "run", "--help"], homeDir);
+    assert.equal(runHelp.code, 0, runHelp.stderr);
+    assert.match(runHelp.stdout, /--input-json <json>/);
+    assert.match(runHelp.stdout, /--input-file <path>/);
+    assert.match(runHelp.stdout, /--default-agent <name>/);
+  });
+});
+
 test("sessions new --resume-session loads ACP session and stores resumed ids", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");

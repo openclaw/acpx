@@ -1,0 +1,39 @@
+{
+  "id": "acp.v1.permissions.write.approved",
+  "profile": "acp-core-v1",
+  "title": "Write operation succeeds in approve-all mode",
+  "description": "Verify write_text_file client operation succeeds when permissions allow it.",
+  "permission_mode": "approve-all",
+  "steps": [
+    {
+      "action": "new_session",
+      "save_as": "session_id"
+    },
+    {
+      "action": "prompt",
+      "session": "$session_id",
+      "prompt": [
+        {
+          "type": "text",
+          "text": "write .acpx-conformance-write.txt hello"
+        }
+      ],
+      "save_as": "write_result"
+    }
+  ],
+  "checks": [
+    {
+      "type": "saved_stop_reason_in",
+      "key": "write_result",
+      "values": ["end_turn", "completed", "done"]
+    },
+    {
+      "type": "updates_text_includes",
+      "text": "wrote .acpx-conformance-write.txt"
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000,
+    "update_timeout_ms": 30000
+  }
+}

@@ -5,9 +5,11 @@ import test from "node:test";
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { QueueConnectionError, QueueProtocolError } from "../src/errors.js";
 import {
+  MAX_MESSAGE_BUFFER_SIZE,
   SessionQueueOwner,
   releaseQueueOwnerLease,
   tryAcquireQueueOwnerLease,
+  trySetConfigOptionOnRunningOwner,
   trySetModeOnRunningOwner,
   trySubmitToRunningOwner,
 } from "../src/queue-ipc.js";
@@ -170,6 +172,59 @@ test("trySetModeOnRunningOwner propagates typed queue control errors", async () 
   });
 });
 
+test("trySetConfigOptionOnRunningOwner returns the queue owner response", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "control-config-success-session";
+    const keeper = await startKeeperProcess();
+    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
+    await writeQueueOwnerLock({
+      lockPath,
+      pid: keeper.pid,
+      sessionId,
+      socketPath,
+    });
+
+    const server = createSingleRequestServer((socket, request) => {
+      assert.equal(request.type, "set_config_option");
+      socket.write(
+        `${JSON.stringify({
+          type: "accepted",
+          requestId: request.requestId,
+        })}\n`,
+      );
+      socket.write(
+        `${JSON.stringify({
+          type: "set_config_option_result",
+          requestId: request.requestId,
+          response: {
+            configOptions: [],
+          },
+        })}\n`,
+      );
+      socket.end();
+    });
+
+    await listenServer(server, socketPath);
+
+    try {
+      const response = await trySetConfigOptionOnRunningOwner(
+        sessionId,
+        "thinking_level",
+        "high",
+        1_000,
+        true,
+      );
+      assert.deepEqual(response, {
+        configOptions: [],
+      });
+    } finally {
+      await closeServer(server);
+      await cleanupOwnerArtifacts({ socketPath, lockPath });
+      stopProcess(keeper);
+    }
+  });
+});
+
 test("trySubmitToRunningOwner surfaces protocol invalid JSON detail code", async () => {
   await withTempHome(async (homeDir) => {
     const sessionId = "submit-invalid-json-session";
@@ -254,6 +309,55 @@ test("trySubmitToRunningOwner surfaces disconnect-before-ack detail code", async
           assert.equal(error.detailCode, "QUEUE_DISCONNECTED_BEFORE_ACK");
           assert.equal(error.origin, "queue");
           assert.equal(error.retryable, true);
+          return true;
+        },
+      );
+    } finally {
+      await closeServer(server);
+      await cleanupOwnerArtifacts({ socketPath, lockPath });
+      stopProcess(keeper);
+    }
+  });
+});
+
+test("trySubmitToRunningOwner rejects oversized queue messages", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "submit-oversized-message";
+    const keeper = await startKeeperProcess();
+    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
+    await writeQueueOwnerLock({
+      lockPath,
+      pid: keeper.pid,
+      sessionId,
+      socketPath,
+    });
+
+    const server = createSingleRequestServer((socket, request) => {
+      assert.equal(request.type, "submit_prompt");
+      socket.write(
+        `${JSON.stringify({
+          type: "accepted",
+          requestId: request.requestId,
+        })}\n`,
+      );
+      socket.write(`${"x".repeat(MAX_MESSAGE_BUFFER_SIZE + 1)}\n`);
+    });
+
+    await listenServer(server, socketPath);
+
+    try {
+      await assert.rejects(
+        async () =>
+          await trySubmitToRunningOwner({
+            sessionId,
+            message: "hello",
+            permissionMode: "approve-reads",
+            outputFormatter: NOOP_OUTPUT_FORMATTER,
+            waitForCompletion: true,
+          }),
+        (error: unknown) => {
+          assert(error instanceof Error);
+          assert.match(error.message, /Message buffer exceeded/);
           return true;
         },
       );

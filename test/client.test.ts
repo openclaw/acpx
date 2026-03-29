@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 import type { RequestPermissionRequest, RequestPermissionResponse } from "@agentclientprotocol/sdk";
-import { AcpClient, buildAgentSpawnOptions } from "../src/client.js";
+import {
+  AcpClient,
+  buildAgentSpawnOptions,
+  buildQoderAcpCommandArgs,
+  resolveAgentCloseAfterStdinEndMs,
+  shouldIgnoreNonJsonAgentOutputLine,
+} from "../src/client.js";
 import {
   AuthPolicyError,
   PermissionDeniedError,
@@ -130,6 +136,64 @@ test("buildAgentSpawnOptions normalizes auth env keys and preserves existing val
       assert.equal(options.env.ACPX_AUTH_BAD_KEY, "ignored-for-raw-key");
       assert.equal(options.env.empty, undefined);
     },
+  );
+});
+
+test("resolveAgentCloseAfterStdinEndMs gives qodercli extra EOF shutdown grace", () => {
+  assert.equal(resolveAgentCloseAfterStdinEndMs("qodercli --acp"), 750);
+  assert.equal(resolveAgentCloseAfterStdinEndMs("/Users/me/bin/qodercli --acp"), 750);
+  assert.equal(resolveAgentCloseAfterStdinEndMs("node ./test/mock-agent.js"), 100);
+});
+
+test("shouldIgnoreNonJsonAgentOutputLine ignores qoder shutdown chatter only", () => {
+  assert.equal(
+    shouldIgnoreNonJsonAgentOutputLine(
+      "qodercli --acp",
+      "Received interrupt signal. Cleaning up resources...",
+    ),
+    true,
+  );
+  assert.equal(
+    shouldIgnoreNonJsonAgentOutputLine("qodercli --acp", "Cleanup completed. Exiting..."),
+    true,
+  );
+  assert.equal(
+    shouldIgnoreNonJsonAgentOutputLine(
+      "node ./test/mock-agent.js",
+      "Cleanup completed. Exiting...",
+    ),
+    false,
+  );
+  assert.equal(
+    shouldIgnoreNonJsonAgentOutputLine("qodercli --acp", "unexpected non-json output"),
+    false,
+  );
+});
+
+test("buildQoderAcpCommandArgs forwards allowed-tools and max-turns", () => {
+  assert.deepEqual(
+    buildQoderAcpCommandArgs(["--acp"], {
+      sessionOptions: {
+        allowedTools: ["Read", "Grep", "custom_tool"],
+        maxTurns: 9,
+      },
+    }),
+    ["--acp", "--max-turns=9", "--allowed-tools=READ,GREP,custom_tool"],
+  );
+});
+
+test("buildQoderAcpCommandArgs preserves explicit qoder startup flags", () => {
+  assert.deepEqual(
+    buildQoderAcpCommandArgs(
+      ["--acp", "--max-turns=3", "--allowed-tools=READ", "--disallowed-tools=BASH"],
+      {
+        sessionOptions: {
+          allowedTools: ["Write"],
+          maxTurns: 7,
+        },
+      },
+    ),
+    ["--acp", "--max-turns=3", "--allowed-tools=READ", "--disallowed-tools=BASH"],
   );
 });
 

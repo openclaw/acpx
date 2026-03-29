@@ -2,6 +2,7 @@ import path from "node:path";
 import { probeQueueOwnerHealth } from "../queue-ipc.js";
 import { normalizeRuntimeSessionId } from "../runtime-session-id.js";
 import type { OutputFormat, SessionRecord } from "../types.js";
+import { emitJsonResult } from "./json-output.js";
 
 function formatSessionLabel(record: SessionRecord): string {
   return record.name ?? "cwd";
@@ -22,14 +23,6 @@ async function resolveSessionConnectionStatus(
 ): Promise<SessionConnectionStatus> {
   const health = await probeQueueOwnerHealth(record.acpxRecordId);
   return health.healthy ? "connected" : "needs reconnect";
-}
-
-export function emitJsonResult(format: OutputFormat, payload: unknown): boolean {
-  if (format !== "json") {
-    return false;
-  }
-  process.stdout.write(`${JSON.stringify(payload)}\n`);
-  return true;
 }
 
 export function printSessionsByFormat(sessions: SessionRecord[], format: OutputFormat): void {
