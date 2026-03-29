@@ -26,6 +26,7 @@ import {
   type SessionsNewFlags,
   type StatusFlags,
 } from "./cli/flags.js";
+import { isCodexInvocation, normalizeCodexModelId } from "./codex-compat.js";
 import {
   initGlobalConfigFile,
   loadResolvedConfig,
@@ -157,18 +158,11 @@ function emitJsonResult(format: OutputFormat, payload: unknown): boolean {
   return true;
 }
 
-function isCodexAgentInvocation(agent: { agentName: string; agentCommand: string }): boolean {
-  if (agent.agentName === "codex") {
-    return true;
-  }
-  return /\bcodex-acp\b/.test(agent.agentCommand);
-}
-
 function resolveCompatibleConfigId(
   agent: { agentName: string; agentCommand: string },
   configId: string,
 ): string {
-  if (isCodexAgentInvocation(agent) && configId === "thought_level") {
+  if (isCodexInvocation(agent.agentName, agent.agentCommand) && configId === "thought_level") {
     return "reasoning_effort";
   }
   return configId;
@@ -179,11 +173,8 @@ function resolveCompatibleConfigValue(
   configId: string,
   value: string,
 ): string {
-  if (isCodexAgentInvocation(agent) && configId === "model") {
-    return value
-      .trim()
-      .toLowerCase()
-      .replace(/^gpt-(\d+)-(\d+)(.*)$/u, "gpt-$1.$2$3");
+  if (isCodexInvocation(agent.agentName, agent.agentCommand) && configId === "model") {
+    return normalizeCodexModelId(value);
   }
   return value;
 }
