@@ -5,13 +5,13 @@ import {
   isAcpQueryClosedBeforeResponseError,
   isAcpResourceNotFoundError,
 } from "../error-normalization.js";
-import { SessionModeReplayError } from "../errors.js";
+import { SessionModeReplayError, SessionResumeRequiredError } from "../errors.js";
 import { incrementPerfCounter } from "../perf-metrics.js";
 import { isProcessAlive } from "../queue-ipc.js";
 import type { QueueOwnerActiveSessionController } from "../queue-owner-turn-controller.js";
 import { getDesiredModeId } from "../session-mode-preference.js";
 import { InterruptedError, TimeoutError, withTimeout } from "../session-runtime-helpers.js";
-import type { SessionRecord } from "../types.js";
+import type { SessionRecord, SessionResumePolicy } from "../types.js";
 import {
   applyLifecycleSnapshotToRecord,
   reconcileAgentSessionId,
@@ -21,6 +21,7 @@ import {
 export type ConnectAndLoadSessionOptions = {
   client: AcpClient;
   record: SessionRecord;
+  resumePolicy?: SessionResumePolicy;
   timeoutMs?: number;
   verbose?: boolean;
   activeController: QueueOwnerActiveSessionController;
@@ -69,11 +70,29 @@ function shouldFallbackToNewSession(error: unknown, record: SessionRecord): bool
   return false;
 }
 
+function requiresSameSession(resumePolicy: SessionResumePolicy | undefined): boolean {
+  return resumePolicy === "same-session-only";
+}
+
+function makeSessionResumeRequiredError(params: {
+  record: SessionRecord;
+  reason: string;
+  cause?: unknown;
+}): SessionResumeRequiredError {
+  return new SessionResumeRequiredError(
+    `Persistent ACP session ${params.record.acpSessionId} could not be resumed: ${params.reason}`,
+    {
+      cause: params.cause instanceof Error ? params.cause : undefined,
+    },
+  );
+}
+
 export async function connectAndLoadSession(
   options: ConnectAndLoadSessionOptions,
 ): Promise<ConnectAndLoadSessionResult> {
   const record = options.record;
   const client = options.client;
+  const sameSessionOnly = requiresSameSession(options.resumePolicy);
   const originalSessionId = record.acpSessionId;
   const originalAgentSessionId = record.agentSessionId;
   const desiredModeId = getDesiredModeId(record.acpx);
@@ -124,6 +143,13 @@ export async function connectAndLoadSession(
       resumed = true;
     } catch (error) {
       loadError = formatErrorMessage(error);
+      if (sameSessionOnly) {
+        throw makeSessionResumeRequiredError({
+          record,
+          reason: loadError,
+          cause: error,
+        });
+      }
       if (!shouldFallbackToNewSession(error, record)) {
         throw error;
       }
@@ -133,6 +159,12 @@ export async function connectAndLoadSession(
       pendingAgentSessionId = createdSession.agentSessionId;
     }
   } else {
+    if (sameSessionOnly) {
+      throw makeSessionResumeRequiredError({
+        record,
+        reason: "agent does not support session/load",
+      });
+    }
     const createdSession = await withTimeout(client.createSession(record.cwd), options.timeoutMs);
     sessionId = createdSession.sessionId;
     createdFreshSession = true;

@@ -8,7 +8,12 @@ import {
   type QueueOwnerErrorMessage,
   type QueueOwnerMessage,
 } from "./queue-messages.js";
-import type { NonInteractivePermissionPolicy, PermissionMode, PromptInput } from "./types.js";
+import type {
+  NonInteractivePermissionPolicy,
+  PermissionMode,
+  PromptInput,
+  SessionResumePolicy,
+} from "./types.js";
 
 type QueueOwnerSocketLease = {
   socketPath: string;
@@ -74,6 +79,7 @@ export type QueueTask = {
   message: string;
   prompt: PromptInput;
   permissionMode: PermissionMode;
+  resumePolicy?: SessionResumePolicy;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   timeoutMs?: number;
   suppressSdkConsoleErrors?: boolean;
@@ -424,6 +430,7 @@ export class SessionQueueOwner {
         message: request.message,
         prompt: request.prompt ?? textPrompt(request.message),
         permissionMode: request.permissionMode,
+        resumePolicy: request.resumePolicy,
         nonInteractivePermissions: request.nonInteractivePermissions,
         timeoutMs: request.timeoutMs,
         suppressSdkConsoleErrors: request.suppressSdkConsoleErrors,

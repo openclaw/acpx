@@ -51,6 +51,44 @@ export class AgentSpawnError extends AcpxOperationalError {
   }
 }
 
+export class AgentDisconnectedError extends AcpxOperationalError {
+  readonly reason: string;
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
+
+  constructor(
+    reason: string,
+    exitCode: number | null,
+    signal: NodeJS.Signals | null,
+    options?: AcpxErrorOptions,
+  ) {
+    super(
+      `ACP agent disconnected during request (${reason}, exit=${exitCode ?? "null"}, signal=${signal ?? "null"})`,
+      {
+        outputCode: "RUNTIME",
+        detailCode: "AGENT_DISCONNECTED",
+        origin: "acp",
+        ...options,
+      },
+    );
+    this.reason = reason;
+    this.exitCode = exitCode;
+    this.signal = signal;
+  }
+}
+
+export class SessionResumeRequiredError extends AcpxOperationalError {
+  constructor(message: string, options?: AcpxErrorOptions) {
+    super(message, {
+      outputCode: "RUNTIME",
+      detailCode: "SESSION_RESUME_REQUIRED",
+      origin: "acp",
+      retryable: true,
+      ...options,
+    });
+  }
+}
+
 export class GeminiAcpStartupTimeoutError extends AcpxOperationalError {
   constructor(message: string, options?: AcpxErrorOptions) {
     super(message, {

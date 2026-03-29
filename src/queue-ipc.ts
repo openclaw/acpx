@@ -27,6 +27,7 @@ import type {
   OutputFormatter,
   PermissionMode,
   PromptInput,
+  SessionResumePolicy,
   SessionEnqueueResult,
   SessionSendOutcome,
 } from "./types.js";
@@ -258,6 +259,7 @@ export type SubmitToQueueOwnerOptions = {
   message: string;
   prompt?: PromptInput;
   permissionMode: PermissionMode;
+  resumePolicy?: SessionResumePolicy;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   outputFormatter: OutputFormatter;
   errorEmissionPolicy?: OutputErrorEmissionPolicy;
@@ -279,6 +281,7 @@ async function submitToQueueOwner(
     message: options.message,
     prompt: options.prompt,
     permissionMode: options.permissionMode,
+    resumePolicy: options.resumePolicy,
     nonInteractivePermissions: options.nonInteractivePermissions,
     timeoutMs: options.timeoutMs,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,

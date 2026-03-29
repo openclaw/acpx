@@ -167,6 +167,55 @@ test("connectAndLoadSession falls back to createSession when load returns resour
   });
 });
 
+test("connectAndLoadSession fails instead of creating a fresh session when resume policy requires the same session", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "strict-resume-record",
+      acpSessionId: "strict-resume-session",
+      agentCommand: "agent",
+      cwd,
+    });
+
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({
+        running: true,
+      }),
+      supportsLoadSession: () => true,
+      loadSessionWithOptions: async () => {
+        throw {
+          error: {
+            code: -32002,
+            message: "session not found",
+          },
+        };
+      },
+      createSession: async () => {
+        throw new Error("createSession should not be called");
+      },
+      setSessionMode: async () => {},
+    };
+
+    await assert.rejects(
+      async () =>
+        await connectAndLoadSession({
+          client: client as never,
+          record,
+          resumePolicy: "same-session-only",
+          timeoutMs: 1_000,
+          activeController: ACTIVE_CONTROLLER,
+        }),
+      /Persistent ACP session strict-resume-session could not be resumed: .*session not found/i,
+    );
+
+    assert.equal(record.acpSessionId, "strict-resume-session");
+  });
+});
+
 test("connectAndLoadSession falls back to createSession for empty sessions on adapter internal errors", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
@@ -212,6 +261,48 @@ test("connectAndLoadSession falls back to createSession for empty sessions on ad
     assert.equal(result.resumed, false);
     assert.equal(record.acpSessionId, "created-for-empty");
     assert.equal(record.agentSessionId, "created-runtime");
+  });
+});
+
+test("connectAndLoadSession fails clearly when same-session resume is required but session/load is unsupported", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "unsupported-load-record",
+      acpSessionId: "unsupported-load-session",
+      agentCommand: "agent",
+      cwd,
+    });
+
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({
+        running: true,
+      }),
+      supportsLoadSession: () => false,
+      loadSessionWithOptions: async () => {
+        throw new Error("loadSession should not be called");
+      },
+      createSession: async () => {
+        throw new Error("createSession should not be called");
+      },
+      setSessionMode: async () => {},
+    };
+
+    await assert.rejects(
+      async () =>
+        await connectAndLoadSession({
+          client: client as never,
+          record,
+          resumePolicy: "same-session-only",
+          timeoutMs: 1_000,
+          activeController: ACTIVE_CONTROLLER,
+        }),
+      /Persistent ACP session unsupported-load-session could not be resumed: agent does not support session\/load/i,
+    );
   });
 });
 

@@ -717,6 +717,21 @@ class MockAgent implements Agent {
       return `slept ${Math.round(ms)}ms`;
     }
 
+    if (text.startsWith("disconnect ")) {
+      const rawMs = text.slice("disconnect ".length).trim();
+      if (!rawMs) {
+        throw new Error("Usage: disconnect <milliseconds>");
+      }
+
+      const ms = Number(rawMs);
+      if (!Number.isFinite(ms) || ms < 0) {
+        throw new Error("Usage: disconnect <milliseconds>");
+      }
+
+      await sleepWithCancel(Math.round(ms), signal);
+      process.exit(91);
+    }
+
     if (text.startsWith("kill-terminal ")) {
       const rawCommand = text.slice("kill-terminal ".length).trim();
       if (!rawCommand) {

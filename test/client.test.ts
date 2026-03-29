@@ -10,6 +10,7 @@ import {
   shouldIgnoreNonJsonAgentOutputLine,
 } from "../src/client.js";
 import {
+  AgentDisconnectedError,
   AuthPolicyError,
   PermissionDeniedError,
   PermissionPromptUnavailableError,
@@ -521,6 +522,33 @@ test("AcpClient lifecycle snapshot and cancel helpers reflect active prompt stat
 
   const cancelled = await client.cancelActivePrompt(50);
   assert.deepEqual(cancelled, { stopReason: "cancelled" });
+});
+
+test("AcpClient prompt rejects when the agent disconnects mid-prompt", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+
+  internals.connection = {
+    prompt: async () => await new Promise(() => {}),
+  };
+
+  const pending = client.prompt("session-5", "sleep 60000");
+  internals.recordAgentExit?.("connection_close", null, null);
+
+  const result = await Promise.race([
+    pending.then(
+      () => ({ type: "resolved" as const }),
+      (error) => ({ type: "rejected" as const, error }),
+    ),
+    new Promise<{ type: "timeout" }>((resolve) => {
+      setTimeout(() => resolve({ type: "timeout" }), 100);
+    }),
+  ]);
+
+  assert.equal(result.type, "rejected");
+  assert(result.error instanceof AgentDisconnectedError);
+  assert.match(result.error.message, /disconnected during request/i);
+  assert.equal(client.hasActivePrompt(), false);
 });
 
 test("AcpClient close resets in-memory state and shuts down terminal manager", async () => {

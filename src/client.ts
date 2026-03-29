@@ -32,6 +32,7 @@ import { extractAcpError } from "./acp-error-shapes.js";
 import { isSessionUpdateNotification } from "./acp-jsonrpc.js";
 import { isCodexAcpCommand } from "./codex-compat.js";
 import {
+  AgentDisconnectedError,
   AgentSpawnError,
   AuthPolicyError,
   ClaudeAcpSessionCreateTimeoutError,
@@ -92,6 +93,11 @@ export type SessionLoadResult = {
 };
 
 type AgentDisconnectReason = "process_exit" | "process_close" | "pipe_close" | "connection_close";
+
+type PendingConnectionRequest = {
+  settled: boolean;
+  reject: (error: unknown) => void;
+};
 
 type AuthSelection = {
   methodId: string;
@@ -849,6 +855,7 @@ export class AcpClient {
   private lastAgentExit?: AgentExitInfo;
   private lastKnownPid?: number;
   private readonly promptPermissionFailures = new Map<string, PermissionPromptUnavailableError>();
+  private readonly pendingConnectionRequests = new Set<PendingConnectionRequest>();
 
   constructor(options: AcpClientOptions) {
     this.options = {
@@ -1175,11 +1182,13 @@ export class AcpClient {
 
     let result: Awaited<ReturnType<typeof connection.newSession>>;
     try {
-      const createPromise = connection.newSession({
-        cwd: asAbsoluteCwd(cwd),
-        mcpServers: this.options.mcpServers ?? [],
-        _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions),
-      });
+      const createPromise = this.runConnectionRequest(() =>
+        connection.newSession({
+          cwd: asAbsoluteCwd(cwd),
+          mcpServers: this.options.mcpServers ?? [],
+          _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions),
+        }),
+      );
       result = claudeAcp
         ? await withTimeout(createPromise, resolveClaudeAcpSessionCreateTimeoutMs())
         : await createPromise;
@@ -1232,11 +1241,13 @@ export class AcpClient {
     let response: LoadSessionResponse | undefined;
 
     try {
-      response = await connection.loadSession({
-        sessionId,
-        cwd: asAbsoluteCwd(cwd),
-        mcpServers: this.options.mcpServers ?? [],
-      });
+      response = await this.runConnectionRequest(() =>
+        connection.loadSession({
+          sessionId,
+          cwd: asAbsoluteCwd(cwd),
+          mcpServers: this.options.mcpServers ?? [],
+        }),
+      );
 
       await this.waitForSessionUpdateDrain(
         options.replayIdleMs ?? REPLAY_IDLE_MS,
@@ -1261,10 +1272,12 @@ export class AcpClient {
 
     let promptPromise: Promise<PromptResponse>;
     try {
-      promptPromise = connection.prompt({
-        sessionId,
-        prompt: typeof prompt === "string" ? textPrompt(prompt) : prompt,
-      });
+      promptPromise = this.runConnectionRequest(() =>
+        connection.prompt({
+          sessionId,
+          prompt: typeof prompt === "string" ? textPrompt(prompt) : prompt,
+        }),
+      );
     } catch (error) {
       restoreConsoleError?.();
       throw error;
@@ -1301,10 +1314,12 @@ export class AcpClient {
   async setSessionMode(sessionId: string, modeId: string): Promise<void> {
     const connection = this.getConnection();
     try {
-      await connection.setSessionMode({
-        sessionId,
-        modeId,
-      });
+      await this.runConnectionRequest(() =>
+        connection.setSessionMode({
+          sessionId,
+          modeId,
+        }),
+      );
     } catch (error) {
       throw maybeWrapSessionControlError("session/set_mode", error, `for mode "${modeId}"`);
     }
@@ -1317,11 +1332,13 @@ export class AcpClient {
   ): Promise<SetSessionConfigOptionResponse> {
     const connection = this.getConnection();
     try {
-      return await connection.setSessionConfigOption({
-        sessionId,
-        configId,
-        value,
-      });
+      return await this.runConnectionRequest(() =>
+        connection.setSessionConfigOption({
+          sessionId,
+          configId,
+          value,
+        }),
+      );
     } catch (error) {
       throw maybeWrapSessionControlError(
         "session/set_config_option",
@@ -1334,9 +1351,11 @@ export class AcpClient {
   async cancel(sessionId: string): Promise<void> {
     const connection = this.getConnection();
     this.cancellingSessionIds.add(sessionId);
-    await connection.cancel({
-      sessionId,
-    });
+    await this.runConnectionRequest(() =>
+      connection.cancel({
+        sessionId,
+      }),
+    );
   }
 
   async requestCancelActivePrompt(): Promise<boolean> {
@@ -1393,6 +1412,22 @@ export class AcpClient {
     const agent = this.agent;
     if (agent) {
       await this.terminateAgentProcess(agent);
+    }
+    if (this.pendingConnectionRequests.size > 0) {
+      this.rejectPendingConnectionRequests(
+        this.lastAgentExit
+          ? new AgentDisconnectedError(
+              this.lastAgentExit.reason,
+              this.lastAgentExit.exitCode,
+              this.lastAgentExit.signal,
+              {
+                outputAlreadyEmitted: Boolean(this.activePrompt),
+              },
+            )
+          : new AgentDisconnectedError("connection_close", null, null, {
+              outputAlreadyEmitted: Boolean(this.activePrompt),
+            }),
+      );
     }
 
     this.sessionUpdateChain = Promise.resolve();
@@ -1604,6 +1639,11 @@ export class AcpClient {
       reason,
       unexpectedDuringPrompt: !this.closing && Boolean(this.activePrompt),
     };
+    this.rejectPendingConnectionRequests(
+      new AgentDisconnectedError(reason, exitCode, signal, {
+        outputAlreadyEmitted: Boolean(this.activePrompt),
+      }),
+    );
   }
 
   private notePromptPermissionFailure(
@@ -1623,6 +1663,44 @@ export class AcpClient {
       this.promptPermissionFailures.delete(sessionId);
     }
     return error;
+  }
+
+  private async runConnectionRequest<T>(run: () => Promise<T>): Promise<T> {
+    return await new Promise<T>((resolve, reject) => {
+      const pending: PendingConnectionRequest = {
+        settled: false,
+        reject,
+      };
+
+      const finish = (cb: () => void) => {
+        if (pending.settled) {
+          return;
+        }
+        pending.settled = true;
+        this.pendingConnectionRequests.delete(pending);
+        cb();
+      };
+
+      this.pendingConnectionRequests.add(pending);
+      void Promise.resolve()
+        .then(run)
+        .then(
+          (value) => finish(() => resolve(value)),
+          (error) => finish(() => reject(error)),
+        );
+    });
+  }
+
+  private rejectPendingConnectionRequests(error: unknown): void {
+    for (const pending of this.pendingConnectionRequests) {
+      if (pending.settled) {
+        this.pendingConnectionRequests.delete(pending);
+        continue;
+      }
+      pending.settled = true;
+      this.pendingConnectionRequests.delete(pending);
+      pending.reject(error);
+    }
   }
 
   private async handleReadTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {

@@ -22,6 +22,9 @@ const FLOW_SHELL_FIXTURE_PATH = fileURLToPath(
 const FLOW_INTERRUPT_FIXTURE_PATH = fileURLToPath(
   new URL("./fixtures/flow-interrupt.flow.js", import.meta.url),
 );
+const FLOW_ACP_DISCONNECT_FIXTURE_PATH = fileURLToPath(
+  new URL("./fixtures/flow-acp-disconnect.flow.js", import.meta.url),
+);
 const FLOW_WAIT_FIXTURE_PATH = fileURLToPath(
   new URL("./fixtures/flow-wait.flow.js", import.meta.url),
 );
@@ -29,6 +32,7 @@ const FLOW_WORKDIR_FIXTURE_PATH = fileURLToPath(
   new URL("./fixtures/flow-workdir.flow.js", import.meta.url),
 );
 const MOCK_AGENT_COMMAND = `node ${JSON.stringify(MOCK_AGENT_PATH)}`;
+const LOAD_CAPABLE_MOCK_AGENT_COMMAND = `${MOCK_AGENT_COMMAND} --supports-load-session`;
 
 type CliRunResult = {
   code: number | null;
@@ -92,7 +96,7 @@ test("integration: flow run executes multiple ACP steps in one session and branc
     try {
       const result = await runCli(
         [
-          ...baseAgentArgs(cwd),
+          ...baseLoadCapableAgentArgs(cwd),
           "--format",
           "json",
           "--ttl",
@@ -136,7 +140,7 @@ test("integration: flow run supports dynamic ACP working directories", async () 
     try {
       const result = await runCli(
         [
-          ...baseAgentArgs(cwd),
+          ...baseLoadCapableAgentArgs(cwd),
           "--format",
           "json",
           "--ttl",
@@ -294,6 +298,53 @@ test("integration: flow run finalizes interrupted bundles on SIGHUP", async () =
   });
 });
 
+test("integration: flow run fails ACP nodes promptly when the agent disconnects mid-prompt", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [
+          ...baseLoadCapableAgentArgs(cwd),
+          "--format",
+          "json",
+          "flow",
+          "run",
+          FLOW_ACP_DISCONNECT_FIXTURE_PATH,
+        ],
+        homeDir,
+        {
+          cwd,
+          timeoutMs: 5_000,
+        },
+      );
+
+      const outputRoot = path.join(homeDir, ".acpx", "flows", "runs");
+      const runDir = await waitForFlowRunDir(outputRoot, "fixture-acp-disconnect");
+      assert.notEqual(result.code, 0, result.stdout);
+
+      const finalState = await waitFor(async () => {
+        const state = await readFlowRunJson(runDir).catch(() => null);
+        return state && state.status === "failed" ? state : null;
+      }, 5_000);
+
+      assert.equal(finalState.status, "failed");
+      assert.equal(
+        (finalState.results as Record<string, { outcome?: string }>).slow?.outcome,
+        "failed",
+      );
+      assert.match(
+        String(
+          (finalState.results as Record<string, { error?: string }>).slow?.error ?? result.stderr,
+        ),
+        /agent disconnected/i,
+      );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: flow run fails fast when a flow requires an explicit approve-all grant", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-permission-cwd-"));
@@ -378,7 +429,7 @@ test("integration: flow run preserves approve-all through persistent ACP writes"
       const result = await runCli(
         [
           "--agent",
-          MOCK_AGENT_COMMAND,
+          LOAD_CAPABLE_MOCK_AGENT_COMMAND,
           "--approve-all",
           "--cwd",
           cwd,
@@ -2201,6 +2252,10 @@ test("integration: session remains resumable after queue owner exits and agent h
 
 function baseAgentArgs(cwd: string): string[] {
   return ["--agent", MOCK_AGENT_COMMAND, "--approve-all", "--cwd", cwd];
+}
+
+function baseLoadCapableAgentArgs(cwd: string): string[] {
+  return ["--agent", LOAD_CAPABLE_MOCK_AGENT_COMMAND, "--approve-all", "--cwd", cwd];
 }
 
 function baseExecArgs(cwd: string): string[] {

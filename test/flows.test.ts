@@ -129,7 +129,7 @@ test("FlowRunner writes isolated ACP bundle traces and artifacts", async () => {
       const runner = new FlowRunner({
         resolveAgent: () => ({
           agentName: "mock",
-          agentCommand: MOCK_AGENT_COMMAND,
+          agentCommand: `${MOCK_AGENT_COMMAND} --supports-load-session`,
           cwd,
         }),
         permissionMode: "approve-all",
@@ -223,7 +223,7 @@ test("FlowRunner writes persistent ACP bundle traces and session bindings", asyn
       const runner = new FlowRunner({
         resolveAgent: () => ({
           agentName: "mock",
-          agentCommand: MOCK_AGENT_COMMAND,
+          agentCommand: `${MOCK_AGENT_COMMAND} --supports-load-session`,
           cwd,
         }),
         permissionMode: "approve-all",
@@ -289,6 +289,92 @@ test("FlowRunner writes persistent ACP bundle traces and session bindings", asyn
       assert.ok(record.messages.length >= 2);
       assert.equal(record.lastSeq, bundledEvents.length);
       assert.equal(bundledEvents[0]?.seq, 1);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("FlowRunner fails persistent ACP sessions when session/load cannot resume the saved session", async () => {
+  await withTempHome(async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-persistent-resume-"));
+
+    try {
+      const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-not-found`,
+          cwd,
+        }),
+        permissionMode: "approve-all",
+        outputRoot,
+      });
+
+      const flow = defineFlow({
+        name: "persistent-resume-not-found-test",
+        startAt: "only",
+        nodes: {
+          only: acp({
+            prompt: () => 'echo {"ok":true}',
+            parse: (text) => extractJsonObject(text),
+          }),
+        },
+        edges: [],
+      });
+
+      await assert.rejects(
+        async () => await runner.run(flow, {}),
+        /Persistent ACP session .* could not be resumed: .*resource not found/i,
+      );
+
+      const runDir = await waitForRunDir(outputRoot, "persistent-resume-not-found-test");
+      const state = await readRunJson(runDir);
+      assert.equal(state.status, "failed");
+      assert.match(String(state.error), /Persistent ACP session .* could not be resumed/i);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("FlowRunner fails persistent ACP sessions when the agent cannot reload the same session", async () => {
+  await withTempHome(async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-persistent-no-load-"));
+
+    try {
+      const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: MOCK_AGENT_COMMAND,
+          cwd,
+        }),
+        permissionMode: "approve-all",
+        outputRoot,
+      });
+
+      const flow = defineFlow({
+        name: "persistent-resume-unsupported-test",
+        startAt: "only",
+        nodes: {
+          only: acp({
+            prompt: () => 'echo {"ok":true}',
+            parse: (text) => extractJsonObject(text),
+          }),
+        },
+        edges: [],
+      });
+
+      await assert.rejects(
+        async () => await runner.run(flow, {}),
+        /session\/load|loadSession|persistent ACP/i,
+      );
+
+      const runDir = await waitForRunDir(outputRoot, "persistent-resume-unsupported-test");
+      const state = await readRunJson(runDir);
+      assert.equal(state.status, "failed");
+      assert.match(String(state.error), /session\/load|loadSession|persistent ACP/i);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -564,7 +650,7 @@ test("FlowRunner lets ACP nodes run in a dynamic working directory", async () =>
       const runner = new FlowRunner({
         resolveAgent: () => ({
           agentName: "mock",
-          agentCommand: MOCK_AGENT_COMMAND,
+          agentCommand: `${MOCK_AGENT_COMMAND} --supports-load-session`,
           cwd: baseCwd,
         }),
         permissionMode: "approve-all",
@@ -616,7 +702,7 @@ test("FlowRunner keeps same session handles isolated by working directory", asyn
       const runner = new FlowRunner({
         resolveAgent: () => ({
           agentName: "mock",
-          agentCommand: MOCK_AGENT_COMMAND,
+          agentCommand: `${MOCK_AGENT_COMMAND} --supports-load-session`,
           cwd: baseCwd,
         }),
         permissionMode: "approve-all",

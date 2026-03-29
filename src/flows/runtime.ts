@@ -1016,6 +1016,7 @@ export class FlowRunner {
     await sendSessionDirect({
       sessionId: binding.acpxRecordId,
       prompt,
+      resumePolicy: "same-session-only",
       mcpServers: this.mcpServers,
       permissionMode: this.permissionMode,
       nonInteractivePermissions: this.nonInteractivePermissions,

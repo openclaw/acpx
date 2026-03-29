@@ -13,6 +13,7 @@ import type {
   NonInteractivePermissionPolicy,
   PermissionMode,
   PromptInput,
+  SessionResumePolicy,
   SessionSendResult,
 } from "./types.js";
 
@@ -23,6 +24,7 @@ export type QueueSubmitRequest = {
   message: string;
   prompt?: PromptInput;
   permissionMode: PermissionMode;
+  resumePolicy?: SessionResumePolicy;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   timeoutMs?: number;
   suppressSdkConsoleErrors?: boolean;
@@ -132,6 +134,10 @@ function isPermissionMode(value: unknown): value is PermissionMode {
   return value === "approve-all" || value === "approve-reads" || value === "deny-all";
 }
 
+function isSessionResumePolicy(value: unknown): value is SessionResumePolicy {
+  return value === "allow-new" || value === "same-session-only";
+}
+
 function isNonInteractivePermissionPolicy(value: unknown): value is NonInteractivePermissionPolicy {
   return value === "deny" || value === "fail";
 }
@@ -194,6 +200,12 @@ export function parseQueueRequest(raw: unknown): QueueRequest | null {
       : undefined;
 
   if (request.type === "submit_prompt") {
+    const resumePolicy =
+      request.resumePolicy == null
+        ? undefined
+        : isSessionResumePolicy(request.resumePolicy)
+          ? request.resumePolicy
+          : null;
     const nonInteractivePermissions =
       request.nonInteractivePermissions == null
         ? undefined
@@ -212,6 +224,7 @@ export function parseQueueRequest(raw: unknown): QueueRequest | null {
     if (
       typeof request.message !== "string" ||
       !isPermissionMode(request.permissionMode) ||
+      resumePolicy === null ||
       prompt === null ||
       nonInteractivePermissions === null ||
       suppressSdkConsoleErrors === null ||
@@ -227,6 +240,7 @@ export function parseQueueRequest(raw: unknown): QueueRequest | null {
       message: request.message,
       prompt: prompt ?? textPrompt(request.message),
       permissionMode: request.permissionMode,
+      ...(resumePolicy !== undefined ? { resumePolicy } : {}),
       nonInteractivePermissions,
       timeoutMs,
       ...(suppressSdkConsoleErrors !== undefined ? { suppressSdkConsoleErrors } : {}),

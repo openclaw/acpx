@@ -34,6 +34,9 @@ export type AuthPolicy = (typeof AUTH_POLICIES)[number];
 export const NON_INTERACTIVE_PERMISSION_POLICIES = ["deny", "fail"] as const;
 export type NonInteractivePermissionPolicy = (typeof NON_INTERACTIVE_PERMISSION_POLICIES)[number];
 
+export const SESSION_RESUME_POLICIES = ["allow-new", "same-session-only"] as const;
+export type SessionResumePolicy = (typeof SESSION_RESUME_POLICIES)[number];
+
 export const OUTPUT_STREAMS = ["prompt", "control"] as const;
 export type OutputStream = (typeof OUTPUT_STREAMS)[number];
 export type AcpJsonRpcMessage = AnyMessage;

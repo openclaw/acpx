@@ -89,6 +89,7 @@ import {
   type SessionSetModeResult,
   type SessionSendOutcome,
   type SessionSendResult,
+  type SessionResumePolicy,
 } from "./types.js";
 
 export const DEFAULT_QUEUE_OWNER_TTL_MS = 300_000;
@@ -196,6 +197,7 @@ export type SessionCreateOptions = {
 export type SessionSendOptions = {
   sessionId: string;
   prompt: PromptInput;
+  resumePolicy?: SessionResumePolicy;
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
@@ -274,6 +276,7 @@ function toPromptResult(
 type RunSessionPromptOptions = {
   sessionRecordId: string;
   prompt: PromptInput;
+  resumePolicy?: SessionResumePolicy;
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
@@ -481,6 +484,7 @@ async function runQueuedTask(
       mcpServers: options.mcpServers,
       prompt: task.prompt ?? textPrompt(task.message),
       permissionMode: task.permissionMode,
+      resumePolicy: task.resumePolicy,
       nonInteractivePermissions:
         task.nonInteractivePermissions ?? options.nonInteractivePermissions,
       authCredentials: options.authCredentials,
@@ -644,6 +648,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
             return await connectAndLoadSession({
               client,
               record,
+              resumePolicy: options.resumePolicy,
               timeoutMs: options.timeoutMs,
               verbose: options.verbose,
               activeController,
@@ -1225,6 +1230,7 @@ export async function sendSessionDirect(options: SessionSendOptions): Promise<Se
     prompt: options.prompt,
     mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,
+    resumePolicy: options.resumePolicy,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
