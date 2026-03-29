@@ -249,3 +249,66 @@ References:
 - Regression test: [../../../test/pr-triage-example.test.ts](../../../test/pr-triage-example.test.ts)
 - Example PR that motivated the change: [#128](https://github.com/openclaw/acpx/pull/128)
 - PR that made this wording change: [#190](https://github.com/openclaw/acpx/pull/190)
+
+## 2026-03-29: `#128` follow-up is only partially solved
+
+Observation:
+
+We reran the workflow on [#128](https://github.com/openclaw/acpx/pull/128)
+after broadening `judge_refactor`.
+
+That was only a partial success.
+
+What improved:
+
+- the workflow finally tipped toward `superficial`
+- it entered `do_superficial_refactor`
+- it no longer waved the PR through unchanged
+
+What still went wrong:
+
+- the model cleaned up the duplication
+- but it did **not** delete the unnecessary model-alias rewriting itself
+- we had to remove that extra behavior manually afterward
+
+Reason:
+
+The high-level refactor wording was strong enough to change the route, but not
+strong enough to make the model consistently choose the exact cleanup we
+wanted.
+
+In this case, the workflow still treated the alias behavior as too close to the
+"validated solution," so the model preferred centralizing it over deleting it.
+
+What we are deciding here:
+
+- stop tuning this blindly for now
+- do **not** treat [#128](https://github.com/openclaw/acpx/pull/128) as fully
+  solved from a workflow-policy point of view
+- come back later, reproduce this PR again, and continue tuning from that fresh
+  repro
+
+What this suggests for future tuning:
+
+We likely need finer-grained checks and finer-grained instructions for how the
+workflow should modify PRs from external contributors.
+
+In particular, future tuning should help the model distinguish:
+
+- the core fix that must stay
+- extra behavior that should be removed
+- duplication that can be centralized
+- small additions that should be added before landing
+- small local changes that should be separated out instead of bundled together
+
+Plainly:
+
+We made the workflow better at noticing "something here should change," but not
+yet good enough at deciding the exact shape of that change.
+
+References:
+
+- Example PR: [#128](https://github.com/openclaw/acpx/pull/128)
+- Workflow policy: [README.md](./README.md)
+- Flow prompt: [pr-triage.flow.ts](./pr-triage.flow.ts)
+- Current tuning notes PR: [#190](https://github.com/openclaw/acpx/pull/190)
