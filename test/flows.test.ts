@@ -295,6 +295,43 @@ test("FlowRunner writes persistent ACP bundle traces and session bindings", asyn
   });
 });
 
+test("FlowRunner keeps the first persistent prompt on the creating client when empty sessions cannot be reloaded", async () => {
+  await withTempHome(async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-persistent-first-turn-"));
+
+    try {
+      const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: `${MOCK_AGENT_COMMAND} --supports-load-session --load-session-fails-on-empty`,
+          cwd,
+        }),
+        permissionMode: "approve-all",
+        outputRoot,
+      });
+
+      const flow = defineFlow({
+        name: "persistent-first-turn-test",
+        startAt: "only",
+        nodes: {
+          only: acp({
+            prompt: () => 'echo {"ok":true}',
+            parse: (text) => extractJsonObject(text),
+          }),
+        },
+        edges: [],
+      });
+
+      const result = await runner.run(flow, {});
+      assert.equal(result.state.status, "completed");
+      assert.deepEqual(result.state.outputs.only, { ok: true });
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("FlowRunner fails persistent ACP sessions when session/load cannot resume the saved session", async () => {
   await withTempHome(async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-persistent-resume-"));
@@ -313,14 +350,18 @@ test("FlowRunner fails persistent ACP sessions when session/load cannot resume t
 
       const flow = defineFlow({
         name: "persistent-resume-not-found-test",
-        startAt: "only",
+        startAt: "first",
         nodes: {
-          only: acp({
+          first: acp({
+            prompt: () => 'echo {"ok":true}',
+            parse: (text) => extractJsonObject(text),
+          }),
+          second: acp({
             prompt: () => 'echo {"ok":true}',
             parse: (text) => extractJsonObject(text),
           }),
         },
-        edges: [],
+        edges: [{ from: "first", to: "second" }],
       });
 
       await assert.rejects(
@@ -356,14 +397,18 @@ test("FlowRunner fails persistent ACP sessions when the agent cannot reload the 
 
       const flow = defineFlow({
         name: "persistent-resume-unsupported-test",
-        startAt: "only",
+        startAt: "first",
         nodes: {
-          only: acp({
+          first: acp({
+            prompt: () => 'echo {"ok":true}',
+            parse: (text) => extractJsonObject(text),
+          }),
+          second: acp({
             prompt: () => 'echo {"ok":true}',
             parse: (text) => extractJsonObject(text),
           }),
         },
-        edges: [],
+        edges: [{ from: "first", to: "second" }],
       });
 
       await assert.rejects(
