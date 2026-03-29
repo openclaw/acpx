@@ -32,7 +32,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import { extractAcpError } from "./acp-error-shapes.js";
 import { isSessionUpdateNotification } from "./acp-jsonrpc.js";
-import { isCodexAcpCommand, normalizeCodexModelId } from "./codex-compat.js";
+import { isCodexAcpCommand } from "./codex-compat.js";
 import {
   AgentSpawnError,
   AuthPolicyError,
@@ -1143,7 +1143,7 @@ export class AcpClient {
       await this.setSessionConfigOption(
         result.sessionId,
         "model",
-        normalizeCodexModelId(this.options.sessionOptions.model),
+        this.options.sessionOptions.model,
       );
     }
 

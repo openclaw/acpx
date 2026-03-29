@@ -22,13 +22,3 @@ export function isCodexInvocation(agentName: string, agentCommand: string): bool
 
   return /\bcodex-acp\b/u.test(agentCommand);
 }
-
-export function normalizeCodexModelId(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return trimmed;
-  }
-
-  const lower = trimmed.toLowerCase();
-  return lower.replace(/^gpt-(\d+)-(\d+)(.*)$/u, "gpt-$1.$2$3");
-}

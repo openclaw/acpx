@@ -26,7 +26,7 @@ import {
   type SessionsNewFlags,
   type StatusFlags,
 } from "./cli/flags.js";
-import { isCodexInvocation, normalizeCodexModelId } from "./codex-compat.js";
+import { isCodexInvocation } from "./codex-compat.js";
 import {
   initGlobalConfigFile,
   loadResolvedConfig,
@@ -173,9 +173,6 @@ function resolveCompatibleConfigValue(
   configId: string,
   value: string,
 ): string {
-  if (isCodexInvocation(agent.agentName, agent.agentCommand) && configId === "model") {
-    return normalizeCodexModelId(value);
-  }
   return value;
 }
 
