@@ -7,6 +7,13 @@ This flow requires an explicit `--approve-all` grant when run through
 
 Tuning notes for this workflow live in [TUNING.md](./TUNING.md).
 
+This workflow intentionally keeps one persistent `main` ACP session across the
+judgment lane. That shared session is part of the workflow's reasoning state,
+not just a performance optimization. If the live ACP connection dies, the
+runtime should reconnect and try to load the same underlying agent session. If
+that resume fails, the workflow should fail clearly rather than silently
+starting a fresh persistent session and pretending context was preserved.
+
 ```mermaid
 flowchart TD
     classDef hidden fill:none,stroke:none,color:none,stroke-width:0px;

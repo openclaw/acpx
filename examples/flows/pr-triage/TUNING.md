@@ -3,6 +3,31 @@
 This file records workflow tuning decisions that are easy to forget later.
 Keep it short, concrete, and tied to the checked-in flow.
 
+## Persistent session rule
+
+The `main` ACP session in this workflow is shared reasoning state across
+multiple judgment steps.
+
+Do not treat a dead ACP transport as permission to start a fresh persistent
+session.
+
+Correct behavior:
+
+- reconnect
+- try to load the same underlying agent session
+- fail the workflow if that resume fails
+- implement that in one session-runtime helper, not in ad hoc flow logic
+
+Incorrect behavior:
+
+- silently create a fresh persistent session and keep going
+- scatter dead-session checks across individual workflow nodes
+
+Reason:
+
+That would throw away the worker's accumulated understanding of the PR while
+making the later steps look as if they still belonged to one continuous review.
+
 ## 2026-03-26: Add conflict gates
 
 Change:

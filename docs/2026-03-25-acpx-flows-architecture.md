@@ -238,6 +238,29 @@ The flow author should usually think in terms of:
 
 not low-level persistence details.
 
+Persistent session recovery rule:
+
+- a persistent ACP session is shared reasoning state, not just a transport handle
+- if the live ACP connection dies, the runtime should reconnect and try
+  `session/load` for the same underlying agent session
+- the runtime must not silently replace a dead persistent session with a fresh
+  one, because that would discard the worker's accumulated context and change
+  the meaning of later steps
+- if reconnect-and-load fails, fail the node or flow clearly instead of creating
+  a fresh persistent session behind the author's back
+
+Implementation guidance:
+
+- this should be a small session-runtime refactor, not a flow-level workaround
+- keep one helper responsible for "is this persistent session still usable"
+- that helper should:
+  - fail fast if the runtime already knows the current transport is dead
+  - reconnect the ACP client
+  - try `session/load` for the same underlying session
+  - throw a clear error if that load fails
+- both the direct persistent prompt path and the queue-owner path should use the
+  same helper instead of duplicating liveness logic
+
 ## Working directories
 
 `cwd` already exists in `acpx` session handling.

@@ -155,6 +155,11 @@ Harness documentation synchronization policy:
 - Preserve the existing flow graph shape by default. Assume "no new node" unless
   a new node adds a real execution boundary, timeout boundary, artifact
   collection boundary, or capability the current node cannot own cleanly.
+- For persistent ACP flow sessions, preserve the underlying agent session across
+  steps. If the live ACP connection dies, the correct recovery is reconnect and
+  `session/load` the same session. Do not silently replace a dead persistent
+  session with a fresh one. If the original persistent session cannot be
+  resumed, fail the node or workflow clearly instead.
 - Before `/landpr`, run `/reviewpr` and require explicit evidence for bug-fix
   claims. Do not merge bug-fix PRs based only on issue text, PR text, or AI
   rationale.
