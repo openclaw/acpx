@@ -22,6 +22,7 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
     const state: FlowRunState = {
       runId: "run-123",
       flowName: "demo",
+      runTitle: "Demo run title",
       flowPath: "/tmp/demo.flow.ts",
       startedAt: "2026-03-26T00:00:00.000Z",
       updatedAt: "2026-03-26T00:00:00.000Z",
@@ -56,6 +57,7 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
 
     const manifest = JSON.parse(await fs.readFile(path.join(runDir, "manifest.json"), "utf8")) as {
       schema: string;
+      runTitle?: string;
       paths: {
         runProjection: string;
         liveProjection: string;
@@ -71,6 +73,7 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
       await fs.readFile(path.join(runDir, "projections", "run.json"), "utf8"),
     ) as {
       runId: string;
+      runTitle?: string;
       currentNode?: string;
       statusDetail?: string;
     };
@@ -78,6 +81,7 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
       await fs.readFile(path.join(runDir, "projections", "live.json"), "utf8"),
     ) as {
       runId: string;
+      runTitle?: string;
       currentNode?: string;
       currentAttemptId?: string;
       statusDetail?: string;
@@ -91,13 +95,16 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
       .map((line) => JSON.parse(line) as { type?: string; at?: string; seq?: number });
 
     assert.equal(manifest.schema, "acpx.flow-run-bundle.v1");
+    assert.equal(manifest.runTitle, "Demo run title");
     assert.equal(manifest.paths.runProjection, "projections/run.json");
     assert.equal(flowSnapshot.schema, "acpx.flow-definition-snapshot.v1");
     assert.equal(flowSnapshot.nodes.prepare?.nodeType, "action");
     assert.equal(flowSnapshot.nodes.prepare?.actionExecution, "function");
     assert.equal(snapshot.runId, "run-123");
+    assert.equal(snapshot.runTitle, "Demo run title");
     assert.equal(snapshot.currentNode, "prepare");
     assert.equal(live.runId, "run-123");
+    assert.equal(live.runTitle, "Demo run title");
     assert.equal(live.currentAttemptId, "prepare#1");
     assert.equal(live.statusDetail, "Preparing");
     assert.deepEqual(steps, []);

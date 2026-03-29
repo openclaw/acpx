@@ -12,6 +12,16 @@ import type {
 
 type MaybePromise<T> = T | Promise<T>;
 
+export type FlowRunDefinition<TInput = unknown> = {
+  title?:
+    | string
+    | ((context: {
+        input: TInput;
+        flowName: string;
+        flowPath?: string;
+      }) => MaybePromise<string | undefined>);
+};
+
 export type FlowNodeContext<TInput = unknown> = {
   input: TInput;
   outputs: Record<string, unknown>;
@@ -112,6 +122,7 @@ export type FlowPermissionRequirements = {
 
 export type FlowDefinition = {
   name: string;
+  run?: FlowRunDefinition;
   permissions?: FlowPermissionRequirements;
   startAt: string;
   nodes: Record<string, FlowNodeDefinition>;
@@ -140,6 +151,9 @@ export type FlowNodeSnapshot = FlowNodeCommon & {
 export type FlowDefinitionSnapshot = {
   schema: "acpx.flow-definition-snapshot.v1";
   name: string;
+  run?: {
+    hasTitle?: boolean;
+  };
   permissions?: FlowPermissionRequirements;
   startAt: string;
   nodes: Record<string, FlowNodeSnapshot>;
@@ -234,6 +248,7 @@ export type FlowSessionBinding = {
 export type FlowRunState = {
   runId: string;
   flowName: string;
+  runTitle?: string;
   flowPath?: string;
   startedAt: string;
   finishedAt?: string;
@@ -271,6 +286,7 @@ export type FlowRunManifest = {
   schema: "acpx.flow-run-bundle.v1";
   runId: string;
   flowName: string;
+  runTitle?: string;
   flowPath?: string;
   startedAt: string;
   finishedAt?: string;

@@ -11,6 +11,7 @@ export type {
   FlowNodeContext,
   FlowNodeDefinition,
   FlowPermissionRequirements,
+  FlowRunDefinition,
   FlowRunResult,
   FlowRunState,
   FlowRunnerOptions,

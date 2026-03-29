@@ -153,10 +153,12 @@ export class FlowRunner {
     validateFlowDefinition(flow);
 
     const runId = createRunId(flow.name);
+    const runTitle = await resolveFlowRunTitle(flow, input, options.flowPath);
     const runDir = await this.store.createRunDir(runId);
     const state: FlowRunState = {
       runId,
       flowName: flow.name,
+      runTitle,
       flowPath: options.flowPath,
       startedAt: isoNow(),
       updatedAt: isoNow(),
@@ -1243,6 +1245,29 @@ function createQuietCaptureOutput(): {
     }),
     read: () => chunks.join("").trim(),
   };
+}
+
+async function resolveFlowRunTitle(
+  flow: FlowDefinition,
+  input: unknown,
+  flowPath?: string,
+): Promise<string | undefined> {
+  const titleDefinition = flow.run?.title;
+  if (titleDefinition === undefined) {
+    return undefined;
+  }
+
+  const resolved =
+    typeof titleDefinition === "function"
+      ? await Promise.resolve(titleDefinition({ input, flowName: flow.name, flowPath }))
+      : titleDefinition;
+
+  return normalizeFlowRunTitle(resolved);
+}
+
+function normalizeFlowRunTitle(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function createRunId(flowName: string): string {

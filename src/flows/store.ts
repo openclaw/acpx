@@ -34,6 +34,7 @@ const ARTIFACTS_DIR = "artifacts";
 type FlowLiveState = {
   runId: string;
   flowName: string;
+  runTitle?: string;
   flowPath?: string;
   startedAt: string;
   finishedAt?: string;
@@ -96,6 +97,7 @@ export class FlowRunStore {
       schema: FLOW_BUNDLE_SCHEMA,
       runId: options.state.runId,
       flowName: options.state.flowName,
+      runTitle: options.state.runTitle,
       flowPath: options.state.flowPath,
       startedAt: options.state.startedAt,
       finishedAt: options.state.finishedAt,
@@ -129,6 +131,7 @@ export class FlowRunStore {
       type: "run_started",
       payload: {
         flowName: options.state.flowName,
+        ...(options.state.runTitle ? { runTitle: options.state.runTitle } : {}),
         ...(options.state.flowPath ? { flowPath: options.state.flowPath } : {}),
         ...(options.inputArtifact ? { inputArtifact: options.inputArtifact } : {}),
       },
@@ -311,6 +314,7 @@ export class FlowRunStore {
       existing.status = state.status;
       existing.flowPath = state.flowPath;
       existing.flowName = state.flowName;
+      existing.runTitle = state.runTitle;
       return existing;
     }
 
@@ -318,6 +322,7 @@ export class FlowRunStore {
       schema: FLOW_BUNDLE_SCHEMA,
       runId: state.runId,
       flowName: state.flowName,
+      runTitle: state.runTitle,
       flowPath: state.flowPath,
       startedAt: state.startedAt,
       finishedAt: state.finishedAt,
@@ -373,6 +378,7 @@ function createLiveState(state: FlowRunState): FlowLiveState {
   return {
     runId: state.runId,
     flowName: state.flowName,
+    runTitle: state.runTitle,
     flowPath: state.flowPath,
     startedAt: state.startedAt,
     finishedAt: state.finishedAt,
@@ -394,6 +400,7 @@ function createFlowDefinitionSnapshot(flow: FlowDefinition): FlowDefinitionSnaps
   return {
     schema: FLOW_SNAPSHOT_SCHEMA,
     name: flow.name,
+    ...(flow.run?.title !== undefined ? { run: { hasTitle: true } } : {}),
     ...(flow.permissions ? { permissions: structuredClone(flow.permissions) } : {}),
     startAt: flow.startAt,
     nodes: Object.fromEntries(

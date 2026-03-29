@@ -15,6 +15,7 @@ test("listRunBundles returns newest valid bundles first", async () => {
     await writeRunBundle(runsDir, {
       runId: "2026-03-27T060000000Z-example-a",
       flowName: "flow-a",
+      runTitle: "PR-triage-acpx-171",
       status: "completed",
       startedAt: "2026-03-27T06:00:00.000Z",
       currentNode: "done",
@@ -36,6 +37,7 @@ test("listRunBundles returns newest valid bundles first", async () => {
     );
     assert.equal(runs[0]?.currentNode, "extract_intent");
     assert.equal(runs[1]?.flowName, "flow-a");
+    assert.equal(runs[1]?.runTitle, "PR-triage-acpx-171");
   } finally {
     await fs.rm(runsDir, { recursive: true, force: true });
   }
@@ -59,6 +61,7 @@ async function writeRunBundle(
   options: {
     runId: string;
     flowName: string;
+    runTitle?: string;
     status: "running" | "waiting" | "completed" | "failed" | "timed_out";
     startedAt: string;
     currentNode?: string;
@@ -74,6 +77,7 @@ async function writeRunBundle(
       schema: "acpx.flow-run-bundle.v1",
       runId: options.runId,
       flowName: options.flowName,
+      runTitle: options.runTitle,
       startedAt: options.startedAt,
       status: options.status,
       traceSchema: "acpx.flow-trace-event.v1",
@@ -95,6 +99,7 @@ async function writeRunBundle(
     JSON.stringify({
       runId: options.runId,
       flowName: options.flowName,
+      runTitle: options.runTitle,
       startedAt: options.startedAt,
       updatedAt: options.startedAt,
       status: options.status,
@@ -112,6 +117,7 @@ async function writeRunBundle(
     JSON.stringify({
       runId: options.runId,
       flowName: options.flowName,
+      runTitle: options.runTitle,
       startedAt: options.startedAt,
       updatedAt: options.startedAt,
       status: options.status,

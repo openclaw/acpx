@@ -14,6 +14,9 @@ export type FlowEdge =
 export type FlowDefinitionSnapshot = {
   schema: "acpx.flow-definition-snapshot.v1";
   name: string;
+  run?: {
+    hasTitle?: boolean;
+  };
   startAt: string;
   nodes: Record<
     string,
@@ -127,6 +130,7 @@ export type FlowNodeResult = {
 export type FlowRunState = {
   runId: string;
   flowName: string;
+  runTitle?: string;
   flowPath?: string;
   startedAt: string;
   finishedAt?: string;
@@ -151,6 +155,7 @@ export type FlowRunManifest = {
   schema: "acpx.flow-run-bundle.v1";
   runId: string;
   flowName: string;
+  runTitle?: string;
   flowPath?: string;
   startedAt: string;
   finishedAt?: string;
@@ -177,6 +182,7 @@ export type FlowRunManifest = {
 export type RunBundleSummary = {
   runId: string;
   flowName: string;
+  runTitle?: string;
   status: FlowRunState["status"];
   startedAt: string;
   finishedAt?: string;

@@ -12,6 +12,9 @@ const MAIN_SESSION = {
 
 const flow = {
   name: "pr-triage",
+  run: {
+    title: ({ input }) => formatPrTriageRunTitle(loadPullRequestInput(input)),
+  },
   permissions: {
     requiredMode: "approve-all",
     requireExplicitGrant: true,
@@ -1182,6 +1185,11 @@ function loadPullRequestInput(input) {
     prNumber,
     prUrl: `https://github.com/${repo}/pull/${prNumber}`,
   };
+}
+
+function formatPrTriageRunTitle(pr) {
+  const repoName = pr.repo.split("/").filter(Boolean).at(-1) ?? pr.repo;
+  return `PR-triage-${repoName}-${pr.prNumber}`;
 }
 
 function loadPrOutput(outputs) {

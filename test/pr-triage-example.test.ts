@@ -132,3 +132,15 @@ test("judge_refactor asks whether anything should be added removed simplified or
     );
   });
 });
+
+test("pr-triage configures a descriptive run title from repo and PR number", () => {
+  const sourcePath = path.join(process.cwd(), "examples/flows/pr-triage/pr-triage.flow.ts");
+
+  return fs.readFile(sourcePath, "utf8").then((source) => {
+    assert.match(
+      source,
+      /run:\s*\{[\s\S]*title:\s*\(\{\s*input\s*\}\)\s*=>\s*formatPrTriageRunTitle\(loadPullRequestInput\(input\)\)/,
+    );
+    assert.match(source, /return `PR-triage-\$\{repoName\}-\$\{pr\.prNumber\}`;/);
+  });
+});

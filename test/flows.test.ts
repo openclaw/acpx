@@ -120,6 +120,63 @@ test("FlowRunner executes isolated ACP nodes and branches deterministically", as
   });
 });
 
+test("FlowRunner resolves and persists dynamic run titles", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-run-title-"));
+
+    try {
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: MOCK_AGENT_COMMAND,
+          cwd: outputRoot,
+        }),
+        permissionMode: "approve-all",
+        outputRoot,
+      });
+
+      const flow = defineFlow({
+        name: "title-test",
+        run: {
+          title: ({ input }) => {
+            const payload = input as { repo: string; prNumber: number };
+            const repoName = payload.repo.split("/").at(-1);
+            return `PR-triage-${repoName}-${payload.prNumber}`;
+          },
+        },
+        startAt: "done",
+        nodes: {
+          done: compute({
+            run: () => ({ ok: true }),
+          }),
+        },
+        edges: [],
+      });
+
+      const result = await runner.run(flow, {
+        repo: "openclaw/acpx",
+        prNumber: 128,
+      });
+      const manifest = JSON.parse(
+        await fs.readFile(path.join(result.runDir, "manifest.json"), "utf8"),
+      ) as {
+        runTitle?: string;
+      };
+      const runProjection = JSON.parse(
+        await fs.readFile(path.join(result.runDir, "projections", "run.json"), "utf8"),
+      ) as {
+        runTitle?: string;
+      };
+
+      assert.equal(result.state.runTitle, "PR-triage-acpx-128");
+      assert.equal(manifest.runTitle, "PR-triage-acpx-128");
+      assert.equal(runProjection.runTitle, "PR-triage-acpx-128");
+    } finally {
+      await fs.rm(outputRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 test("FlowRunner writes isolated ACP bundle traces and artifacts", async () => {
   await withTempHome(async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-isolated-trace-"));

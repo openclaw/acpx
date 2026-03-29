@@ -46,14 +46,15 @@ export function RunBrowser({
         <div className="run-browser__list">
           {runs.map((run) => {
             const active = run.runId === activeRunId;
+            const displayName = run.runTitle ?? run.flowName;
             return (
               <button
                 key={run.runId}
                 type="button"
                 className={`run-list-item${active ? " run-list-item--active" : ""}`}
                 onClick={() => onLoadRun(run)}
-                aria-label={`${run.flowName} ${run.runId} ${run.status}`}
-                title={`${run.flowName} • ${run.runId}`}
+                aria-label={`${displayName} ${run.runId} ${run.status}`}
+                title={`${displayName} • ${run.runId}`}
               >
                 {collapsed ? (
                   <>
@@ -61,7 +62,7 @@ export function RunBrowser({
                       className={`run-list-item__status-dot run-list-item__status-dot--${run.status}`}
                       aria-hidden="true"
                     />
-                    <span className="run-list-item__abbr">{abbreviateRun(run.flowName)}</span>
+                    <span className="run-list-item__abbr">{abbreviateRun(displayName)}</span>
                   </>
                 ) : (
                   <>
@@ -121,5 +122,5 @@ function shortRunToken(runId: string): string {
 }
 
 function compactRunLabel(run: RunBundleSummary): string {
-  return `${run.flowName} · ${shortRunToken(run.runId)}`;
+  return `${run.runTitle ?? run.flowName} · ${shortRunToken(run.runId)}`;
 }

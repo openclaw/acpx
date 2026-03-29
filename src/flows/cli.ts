@@ -275,6 +275,7 @@ function printFlowRunResult(
     action: "flow_run_result",
     runId: result.state.runId,
     flowName: result.state.flowName,
+    runTitle: result.state.runTitle,
     flowPath: result.state.flowPath,
     status: result.state.status,
     currentNode: result.state.currentNode,
@@ -300,6 +301,9 @@ function printFlowRunResult(
 
   process.stdout.write(`runId: ${payload.runId}\n`);
   process.stdout.write(`flow: ${payload.flowName}\n`);
+  if (payload.runTitle) {
+    process.stdout.write(`title: ${payload.runTitle}\n`);
+  }
   process.stdout.write(`status: ${payload.status}\n`);
   process.stdout.write(`runDir: ${payload.runDir}\n`);
   if (payload.currentNode) {

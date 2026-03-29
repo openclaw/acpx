@@ -76,6 +76,7 @@ async function readRunBundleSummary(runsDir: string, runId: string): Promise<Run
   return {
     runId: manifest.runId,
     flowName: manifest.flowName,
+    runTitle: manifest.runTitle ?? run.runTitle,
     status: run.status,
     startedAt: manifest.startedAt,
     finishedAt: manifest.finishedAt,
