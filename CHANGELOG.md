@@ -7,6 +7,7 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - Conformance/ACP: add a data-driven ACP core v1 conformance suite with CI smoke coverage, nightly coverage, and a hardened runner that reports startup failures cleanly and scopes filesystem checks to the session cwd. (#130) Thanks @lynnzc.
+- Output: add `--suppress-reads` to mask raw file-read bodies in text and JSON output while keeping normal tool activity visible. (#136) Thanks @hayatosc.
 - Agents/droid: add `factory-droid` and `factorydroid` aliases for the built-in Factory Droid adapter and sync the built-in docs. Thanks @vincentkoc.
 - Flows/workflows: add an initial `flow run` command, an `acpx/flows` runtime surface, and file-backed flow run state under `~/.acpx/flows/runs` for user-authored workflow modules. Thanks @osolmaz.
 - Flows/workspaces: let `acp` nodes bind to an explicit per-step cwd, add a native isolated-workspace example, and default active flow steps to a 15 minute timeout unless overridden. Thanks @osolmaz.
