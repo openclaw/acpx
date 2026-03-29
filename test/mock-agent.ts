@@ -406,6 +406,8 @@ function buildConfigOptions(state: SessionState): SetSessionConfigOptionResponse
     typeof state.configValues.reasoning_effort === "string"
       ? state.configValues.reasoning_effort
       : "medium";
+  const modelId =
+    typeof state.configValues.model === "string" ? state.configValues.model : "default";
 
   return [
     {
@@ -427,7 +429,7 @@ function buildConfigOptions(state: SessionState): SetSessionConfigOptionResponse
       name: "Model",
       category: "model",
       type: "select",
-      currentValue: state.configValues.model ?? "default",
+      currentValue: modelId,
       options: [
         { value: "default", name: "Default" },
         { value: "gpt-5.4", name: "gpt-5.4" },
