@@ -30,6 +30,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import { extractAcpError } from "./acp-error-shapes.js";
 import { isSessionUpdateNotification } from "./acp-jsonrpc.js";
+import { isCodexAcpCommand, normalizeCodexModelId } from "./codex-compat.js";
 import {
   AgentSpawnError,
   AuthPolicyError,
@@ -378,24 +379,6 @@ function isClaudeAcpCommand(command: string, args: readonly string[]): boolean {
     return true;
   }
   return args.some((arg) => arg.includes("claude-agent-acp"));
-}
-
-function isCodexAcpCommand(command: string, args: readonly string[]): boolean {
-  const commandToken = basenameToken(command);
-  if (commandToken === "codex-acp") {
-    return true;
-  }
-  return args.some((arg) => arg.includes("codex-acp"));
-}
-
-function normalizeCodexModelId(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return trimmed;
-  }
-
-  const lower = trimmed.toLowerCase();
-  return lower.replace(/^gpt-(\d+)-(\d+)(.*)$/u, "gpt-$1.$2$3");
 }
 
 function isCopilotAcpCommand(command: string, args: readonly string[]): boolean {

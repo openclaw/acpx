@@ -27,6 +27,7 @@ import {
   type SessionsNewFlags,
   type StatusFlags,
 } from "./cli/flags.js";
+import { isCodexInvocation } from "./codex-compat.js";
 import { emitJsonResult } from "./cli/json-output.js";
 import { registerStatusCommand } from "./cli/status-command.js";
 import { loadResolvedConfig, type ResolvedAcpxConfig } from "./config.js";
@@ -154,35 +155,14 @@ function applyPermissionExitCode(result: {
   }
 }
 
-function isCodexAgentInvocation(agent: { agentName: string; agentCommand: string }): boolean {
-  if (agent.agentName === "codex") {
-    return true;
-  }
-  return /\bcodex-acp\b/.test(agent.agentCommand);
-}
-
 function resolveCompatibleConfigId(
   agent: { agentName: string; agentCommand: string },
   configId: string,
 ): string {
-  if (isCodexAgentInvocation(agent) && configId === "thought_level") {
+  if (isCodexInvocation(agent.agentName, agent.agentCommand) && configId === "thought_level") {
     return "reasoning_effort";
   }
   return configId;
-}
-
-function resolveCompatibleConfigValue(
-  agent: { agentName: string; agentCommand: string },
-  configId: string,
-  value: string,
-): string {
-  if (isCodexAgentInvocation(agent) && configId === "model") {
-    return value
-      .trim()
-      .toLowerCase()
-      .replace(/^gpt-(\d+)-(\d+)(.*)$/u, "gpt-$1.$2$3");
-  }
-  return value;
 }
 
 export { parseAllowedTools, parseMaxTurns, parseTtlSeconds };
@@ -542,7 +522,6 @@ async function handleSetConfigOption(
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
   const resolvedConfigId = resolveCompatibleConfigId(agent, configId);
-  const resolvedValue = resolveCompatibleConfigValue(agent, resolvedConfigId, value);
   const { setSessionConfigOption } = await loadSessionModule();
   const record = await findRoutedSessionOrThrow(
     agent.agentCommand,
@@ -553,7 +532,7 @@ async function handleSetConfigOption(
   const result = await setSessionConfigOption({
     sessionId: record.acpxRecordId,
     configId: resolvedConfigId,
-    value: resolvedValue,
+    value,
     mcpServers: config.mcpServers,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
