@@ -22,6 +22,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Sessions/load: fall back to a fresh ACP session when adapters reject `session/load` with JSON-RPC `-32601` or `-32602`, so persistent session reconnects do not crash on partial load support. (#174) Thanks @Bortlesboat.
 - Flows/runtime: finalize interrupted `flow run` bundles as failed instead of leaving them stuck at `running` when the process receives `SIGHUP`, `SIGINT`, or `SIGTERM`.
+- Agents/cursor: recognize Cursor's `Session \"...\" not found` `session/load` error format so reconnects fall back to `session/new` instead of failing. (#162) Thanks @log-li.
 
 ## 2026.3.12 (v0.3.0)
 
