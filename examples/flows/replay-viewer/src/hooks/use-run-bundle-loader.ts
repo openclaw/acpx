@@ -4,10 +4,10 @@ import {
   createRecentRunBundleReader,
   createSampleBundleReader,
   listRecentRuns,
-} from "../lib/bundle-reader";
-import { applyReplayPatch, buildReplayWebSocketUrl } from "../lib/live-sync";
-import { loadRunBundle } from "../lib/load-bundle";
-import { readRequestedRunIdFromWindow, syncRequestedRunId } from "../lib/run-url";
+} from "../lib/bundle-reader.js";
+import { applyReplayPatch, buildReplayWebSocketUrl } from "../lib/live-sync.js";
+import { loadRunBundle } from "../lib/load-bundle.js";
+import { readRequestedRunIdFromWindow, syncRequestedRunId } from "../lib/run-url.js";
 import type {
   LoadedRunBundle,
   ReplayClientMessage,
@@ -15,14 +15,30 @@ import type {
   RunBundleSummary,
   ViewerRunLiveState,
   ViewerRunsState,
-} from "../types";
+} from "../types.js";
 
 const REPLAY_PROTOCOL = "acpx.replay.v1";
 const RECONNECT_DELAY_MS = 1_000;
 
 export type RunBundleLoadingState = "bootstrap" | "runs" | "sample" | "local" | "run" | null;
 
-export function useRunBundleLoader() {
+export type RunBundleLoaderDeps = {
+  createDirectoryBundleReader: typeof createDirectoryBundleReader;
+  createRecentRunBundleReader: typeof createRecentRunBundleReader;
+  createSampleBundleReader: typeof createSampleBundleReader;
+  listRecentRuns: typeof listRecentRuns;
+  loadRunBundle: typeof loadRunBundle;
+};
+
+const DEFAULT_DEPS: RunBundleLoaderDeps = {
+  createDirectoryBundleReader,
+  createRecentRunBundleReader,
+  createSampleBundleReader,
+  listRecentRuns,
+  loadRunBundle,
+};
+
+export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
   const [bundle, setBundleState] = useState<LoadedRunBundle | null>(null);
   const [recentRuns, setRecentRunsState] = useState<RunBundleSummary[]>([]);
   const [activeRunId, setActiveRunIdState] = useState<string | null>(null);
@@ -30,6 +46,7 @@ export function useRunBundleLoader() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const bundleRef = useRef<LoadedRunBundle | null>(null);
+  const recentRunsRef = useRef<RunBundleSummary[]>([]);
   const recentRunsStateRef = useRef<ViewerRunsState | null>(null);
   const recentRunsVersionRef = useRef<number>(0);
   const runVersionRef = useRef<number>(0);
@@ -45,6 +62,7 @@ export function useRunBundleLoader() {
   }, []);
 
   const setRecentRuns = useCallback((next: RunBundleSummary[]) => {
+    recentRunsRef.current = next;
     setRecentRunsState(next);
   }, []);
 
@@ -64,12 +82,12 @@ export function useRunBundleLoader() {
   const refreshRuns = useCallback(async (): Promise<RunBundleSummary[] | null> => {
     if (liveReadyRef.current) {
       sendLiveMessage({ type: "resync_runs" });
-      return recentRunsStateRef.current?.runs ?? recentRuns;
+      return recentRunsStateRef.current?.runs ?? recentRunsRef.current;
     }
 
     setLoadingState("runs");
     try {
-      const runs = await listRecentRuns();
+      const runs = await deps.listRecentRuns();
       if (runs) {
         recentRunsStateRef.current = {
           schema: "acpx.viewer-runs.v1",
@@ -82,14 +100,14 @@ export function useRunBundleLoader() {
     } finally {
       setLoadingState(null);
     }
-  }, [recentRuns, sendLiveMessage, setRecentRuns]);
+  }, [deps, sendLiveMessage, setRecentRuns]);
 
   const loadSample = useCallback(async (): Promise<LoadedRunBundle | null> => {
     setLoadingState("sample");
     setErrorMessage(null);
 
     try {
-      const loaded = await loadRunBundle(createSampleBundleReader());
+      const loaded = await deps.loadRunBundle(deps.createSampleBundleReader());
       setBundle(loaded);
       setActiveRunId(null);
       runVersionRef.current = 0;
@@ -101,15 +119,15 @@ export function useRunBundleLoader() {
     } finally {
       setLoadingState(null);
     }
-  }, [setActiveRunId, setBundle]);
+  }, [deps, setActiveRunId, setBundle]);
 
   const loadLocalBundle = useCallback(async (): Promise<LoadedRunBundle | null> => {
     setLoadingState("local");
     setErrorMessage(null);
 
     try {
-      const reader = await createDirectoryBundleReader();
-      const loaded = await loadRunBundle(reader);
+      const reader = await deps.createDirectoryBundleReader();
+      const loaded = await deps.loadRunBundle(reader);
       setBundle(loaded);
       setActiveRunId(null);
       runVersionRef.current = 0;
@@ -124,7 +142,7 @@ export function useRunBundleLoader() {
     } finally {
       setLoadingState(null);
     }
-  }, [setActiveRunId, setBundle]);
+  }, [deps, setActiveRunId, setBundle]);
 
   const loadRecentRun = useCallback(
     async (run: RunBundleSummary): Promise<LoadedRunBundle | null> => {
@@ -132,7 +150,7 @@ export function useRunBundleLoader() {
       setErrorMessage(null);
 
       try {
-        const loaded = await loadRunBundle(createRecentRunBundleReader(run));
+        const loaded = await deps.loadRunBundle(deps.createRecentRunBundleReader(run));
         setBundle(loaded);
         setActiveRunId(run.runId);
         syncRequestedRunId(run.runId);
@@ -144,7 +162,7 @@ export function useRunBundleLoader() {
         setLoadingState(null);
       }
     },
-    [setActiveRunId, setBundle],
+    [deps, setActiveRunId, setBundle],
   );
 
   const bootstrap = useCallback(async (): Promise<void> => {
