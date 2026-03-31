@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   buildPlaybackTimeline,
   derivePlaybackPreview,
@@ -16,12 +16,27 @@ export function usePlaybackController(bundle: LoadedRunBundle | null) {
   const [playbackMode, setPlaybackMode] = useState<PlaybackMode>(null);
   const [playheadMs, setPlayheadMs] = useState<number | null>(null);
   const [playbackRate, setPlaybackRate] = useState<number>(DEFAULT_PLAYBACK_RATE);
+  const previousBundleRef = useRef<LoadedRunBundle | null>(null);
 
   useEffect(() => {
-    setSelectedStepIndex(defaultSelectedStepIndex(bundle));
-    setPlaybackMode(null);
-    setPlayheadMs(null);
-  }, [bundle?.run.runId]);
+    const previousBundle = previousBundleRef.current;
+    const nextSelection = resolveSelectedStepIndexAfterBundleUpdate(
+      previousBundle,
+      bundle,
+      selectedStepIndex,
+      playbackMode,
+    );
+    previousBundleRef.current = bundle;
+
+    if (previousBundle?.run.runId !== bundle?.run.runId) {
+      setPlaybackMode(null);
+      setPlayheadMs(null);
+    }
+
+    if (nextSelection !== selectedStepIndex) {
+      setSelectedStepIndex(nextSelection);
+    }
+  }, [bundle, playbackMode, selectedStepIndex]);
 
   const playbackTimeline = useMemo(() => (bundle ? buildPlaybackTimeline(bundle) : null), [bundle]);
   const playbackPreview = useMemo(
@@ -201,4 +216,32 @@ export function advancePlaybackPlayhead(
 
 function defaultSelectedStepIndex(bundle: LoadedRunBundle | null): number {
   return bundle ? Math.max(bundle.steps.length - 1, 0) : 0;
+}
+
+export function resolveSelectedStepIndexAfterBundleUpdate(
+  previousBundle: LoadedRunBundle | null,
+  nextBundle: LoadedRunBundle | null,
+  selectedStepIndex: number,
+  playbackMode: PlaybackMode,
+): number {
+  if (nextBundle == null) {
+    return 0;
+  }
+
+  if (previousBundle == null || previousBundle.run.runId !== nextBundle.run.runId) {
+    return defaultSelectedStepIndex(nextBundle);
+  }
+
+  const maxNextIndex = Math.max(nextBundle.steps.length - 1, 0);
+  const clampedSelection = Math.min(Math.max(selectedStepIndex, 0), maxNextIndex);
+  if (playbackMode != null) {
+    return clampedSelection;
+  }
+
+  const wasFollowingLiveEdge = selectedStepIndex >= Math.max(previousBundle.steps.length - 1, 0);
+  if (wasFollowingLiveEdge) {
+    return maxNextIndex;
+  }
+
+  return clampedSelection;
 }

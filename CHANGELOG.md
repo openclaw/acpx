@@ -14,6 +14,7 @@ Repo: https://github.com/openclaw/acpx
 - Flows/workspaces: let `acp` nodes bind to an explicit per-step cwd, add a native isolated-workspace example, and default active flow steps to a 15 minute timeout unless overridden. Thanks @osolmaz.
 - Flows/replay: store flow runs as trace bundles with `manifest.json`, `flow.json`, `trace.ndjson`, projections, bundled session replay data, and per-attempt ACP/action receipts for later inspection. Thanks @osolmaz.
 - Flows/replay viewer: add a React Flow-based replay viewer example that replays saved run bundles and shows the bundled ACP session beside the graph. Thanks @osolmaz.
+- Flows/replay viewer: keep recent runs and the active recent-run view live over a WebSocket snapshot/patch transport so in-progress runs update without manual refresh while rewind stays available.
 - Flows/permissions: let flows declare explicit required permission modes, fail fast when a flow requires an explicit `--approve-all` grant, and preserve the granted mode through persistent ACP queue-owner paths. Thanks @osolmaz.
 - Agents/qoder: add built-in Qoder CLI ACP support via `qoder -> qodercli --acp` and document Qoder-specific auth notes.
 - Agents/qoder: forward `--allowed-tools` and `--max-turns` session options into Qoder CLI startup flags, including persisted session reuse, without requiring a raw `--agent` override.

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { mergeLiveRunState } from "../src/lib/run-state.js";
 import type { FlowRunManifest, FlowRunState, RunBundleSummary } from "../src/types.js";
 
 const DEFAULT_MAX_RUNS = 24;
@@ -72,16 +73,17 @@ async function readRunBundleSummary(runsDir: string, runId: string): Promise<Run
     .readFile(path.join(runDir, manifest.paths.liveProjection), "utf8")
     .then((text) => JSON.parse(text) as Partial<FlowRunState>)
     .catch(() => null);
+  const mergedRun = mergeLiveRunState(run, live);
 
   return {
     runId: manifest.runId,
     flowName: manifest.flowName,
-    runTitle: manifest.runTitle ?? run.runTitle,
-    status: run.status,
+    runTitle: manifest.runTitle ?? mergedRun.runTitle,
+    status: mergedRun.status,
     startedAt: manifest.startedAt,
-    finishedAt: manifest.finishedAt,
-    updatedAt: live?.updatedAt ?? run.updatedAt,
-    currentNode: live?.currentNode ?? run.currentNode,
+    finishedAt: mergedRun.finishedAt ?? manifest.finishedAt,
+    updatedAt: mergedRun.updatedAt,
+    currentNode: mergedRun.currentNode,
     path: runDir,
   };
 }

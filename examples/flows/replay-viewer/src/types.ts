@@ -247,3 +247,99 @@ export type LoadedRunBundle = {
     }
   >;
 };
+
+export type ViewerRunsState = {
+  schema: "acpx.viewer-runs.v1";
+  runs: RunBundleSummary[];
+};
+
+export type ViewerRunLiveState = LoadedRunBundle & {
+  schema: "acpx.viewer-run-live.v1";
+};
+
+export type ReplayProtocol = "acpx.replay.v1";
+
+export type ReplayJsonPatchOperation =
+  | {
+      op: "add";
+      path: string;
+      value: unknown;
+    }
+  | {
+      op: "replace";
+      path: string;
+      value: unknown;
+    }
+  | {
+      op: "remove";
+      path: string;
+    };
+
+export type ReplayClientMessage =
+  | {
+      type: "hello";
+      protocol: ReplayProtocol;
+    }
+  | {
+      type: "subscribe_runs";
+    }
+  | {
+      type: "unsubscribe_runs";
+    }
+  | {
+      type: "subscribe_run";
+      runId: string;
+    }
+  | {
+      type: "unsubscribe_run";
+      runId: string;
+    }
+  | {
+      type: "resync_runs";
+    }
+  | {
+      type: "resync_run";
+      runId: string;
+    }
+  | {
+      type: "ping";
+    };
+
+export type ReplayServerMessage =
+  | {
+      type: "ready";
+      protocol: ReplayProtocol;
+    }
+  | {
+      type: "pong";
+    }
+  | {
+      type: "runs_snapshot";
+      version: number;
+      state: ViewerRunsState;
+    }
+  | {
+      type: "runs_patch";
+      fromVersion: number;
+      toVersion: number;
+      ops: ReplayJsonPatchOperation[];
+    }
+  | {
+      type: "run_snapshot";
+      runId: string;
+      version: number;
+      state: ViewerRunLiveState;
+    }
+  | {
+      type: "run_patch";
+      runId: string;
+      fromVersion: number;
+      toVersion: number;
+      ops: ReplayJsonPatchOperation[];
+    }
+  | {
+      type: "error";
+      code: "protocol_error" | "run_not_found" | "version_mismatch" | "internal_error";
+      message: string;
+      runId?: string;
+    };

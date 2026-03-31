@@ -43,6 +43,30 @@ test("listRunBundles returns newest valid bundles first", async () => {
   }
 });
 
+test("listRunBundles prefers live status over stale run projections", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-list-live-"));
+
+  try {
+    await writeRunBundle(runsDir, {
+      runId: "2026-03-27T080000000Z-example-live",
+      flowName: "flow-live",
+      projectedStatus: "completed",
+      status: "running",
+      startedAt: "2026-03-27T08:00:00.000Z",
+      currentNode: "extract_intent",
+      liveUpdatedAt: "2026-03-27T08:05:00.000Z",
+    });
+
+    const [run] = await listRunBundles(runsDir);
+
+    assert.equal(run?.status, "running");
+    assert.equal(run?.currentNode, "extract_intent");
+    assert.equal(run?.updatedAt, "2026-03-27T08:05:00.000Z");
+  } finally {
+    await fs.rm(runsDir, { recursive: true, force: true });
+  }
+});
+
 test("resolveRunBundleFilePath rejects traversal outside a run bundle", () => {
   const runsDir = path.join(os.tmpdir(), "acpx-run-list");
 
@@ -63,8 +87,10 @@ async function writeRunBundle(
     flowName: string;
     runTitle?: string;
     status: "running" | "waiting" | "completed" | "failed" | "timed_out";
+    projectedStatus?: "running" | "waiting" | "completed" | "failed" | "timed_out";
     startedAt: string;
     currentNode?: string;
+    liveUpdatedAt?: string;
   },
 ): Promise<void> {
   const runDir = path.join(runsDir, options.runId);
@@ -102,7 +128,7 @@ async function writeRunBundle(
       runTitle: options.runTitle,
       startedAt: options.startedAt,
       updatedAt: options.startedAt,
-      status: options.status,
+      status: options.projectedStatus ?? options.status,
       input: {},
       outputs: {},
       results: {},
@@ -119,7 +145,7 @@ async function writeRunBundle(
       flowName: options.flowName,
       runTitle: options.runTitle,
       startedAt: options.startedAt,
-      updatedAt: options.startedAt,
+      updatedAt: options.liveUpdatedAt ?? options.startedAt,
       status: options.status,
       currentNode: options.currentNode,
     }),

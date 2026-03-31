@@ -11,6 +11,9 @@ It covers:
 - panel structure
 - ACP conversation rendering
 
+For the real-time viewer transport and live state-sync model, see
+[docs/2026-03-31-flow-replay-live-transport.md](./2026-03-31-flow-replay-live-transport.md).
+
 It does not change the run-bundle storage model. The viewer derives its display
 semantics from the stored flow definition, trace, projections, and bundled
 session data.

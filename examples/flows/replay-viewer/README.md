@@ -4,6 +4,8 @@ This example app visualizes one saved flow run bundle at a time.
 
 For the viewer semantics and UX/layout rules, see
 [docs/2026-03-27-flow-replay-viewer.md](../../../docs/2026-03-27-flow-replay-viewer.md).
+For the live viewer transport and state-sync model, see
+[docs/2026-03-31-flow-replay-live-transport.md](../../../docs/2026-03-31-flow-replay-live-transport.md).
 
 It is separate from the `acpx` CLI surface on purpose:
 
@@ -40,6 +42,10 @@ but the main path is the built-in **Recent runs** list sourced from:
 
 You can still use **Open local run bundle** as a fallback to inspect an arbitrary
 bundle outside that default directory.
+
+When a recent run is still active, the sidebar and the selected run view update
+live over the viewer WebSocket transport. The viewer keeps the accumulated
+history locally, so you can still rewind while new steps continue to arrive.
 
 ## What it shows
 

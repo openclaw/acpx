@@ -8,8 +8,9 @@ import type {
   FlowTraceEvent,
   LoadedRunBundle,
   SessionRecord,
-} from "../types";
-import type { BundleReader } from "./bundle-reader";
+} from "../types.js";
+import type { BundleReader } from "./bundle-reader.js";
+import { mergeLiveRunState } from "./run-state.js";
 
 export async function loadRunBundle(reader: BundleReader): Promise<LoadedRunBundle> {
   const manifest = await reader.readJson<FlowRunManifest>("manifest.json");
@@ -48,7 +49,7 @@ export async function loadRunBundle(reader: BundleReader): Promise<LoadedRunBund
     sourceLabel: reader.label,
     manifest,
     flow,
-    run,
+    run: mergeLiveRunState(run, live),
     live,
     steps: steps.slice().toSorted(compareByAttemptStart),
     trace: trace.slice().toSorted((left, right) => left.seq - right.seq),

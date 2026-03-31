@@ -1,4 +1,4 @@
-import type { FlowRunManifest, RunBundleSummary } from "../types";
+import type { FlowRunManifest, RunBundleSummary } from "../types.js";
 
 export type BundleReader = {
   sourceType: "sample" | "local" | "recent";

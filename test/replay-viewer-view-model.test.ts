@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   advancePlaybackPlayhead,
   resolvePlaybackResumeMs,
+  resolveSelectedStepIndexAfterBundleUpdate,
 } from "../examples/flows/replay-viewer/src/hooks/use-playback-controller.js";
 import {
   buildGraph,
@@ -509,6 +510,30 @@ test("advancePlaybackPlayhead applies playback speed and clamps to the timeline 
   assert.equal(advancePlaybackPlayhead(100, 400, 2, 1_000), 900);
   assert.equal(advancePlaybackPlayhead(100, 400, 5, 3_000), 2_100);
   assert.equal(advancePlaybackPlayhead(900, 400, 10, 1_000), 1_000);
+});
+
+test("resolveSelectedStepIndexAfterBundleUpdate follows the live edge when new steps append", () => {
+  const first = baseStep("load_pr", "action", "ok");
+  const second = baseStep("extract_intent", "acp", "ok");
+  const third = baseStep("judge_solution", "acp", "ok");
+  const previousBundle = makeBundle(second, { steps: [first, second] });
+  const nextBundle = makeBundle(third, { steps: [first, second, third] });
+
+  assert.equal(resolveSelectedStepIndexAfterBundleUpdate(previousBundle, nextBundle, 1, null), 2);
+});
+
+test("resolveSelectedStepIndexAfterBundleUpdate preserves rewind position while a run grows", () => {
+  const first = baseStep("load_pr", "action", "ok");
+  const second = baseStep("extract_intent", "acp", "ok");
+  const third = baseStep("judge_solution", "acp", "ok");
+  const previousBundle = makeBundle(second, { steps: [first, second] });
+  const nextBundle = makeBundle(third, { steps: [first, second, third] });
+
+  assert.equal(resolveSelectedStepIndexAfterBundleUpdate(previousBundle, nextBundle, 0, null), 0);
+  assert.equal(
+    resolveSelectedStepIndexAfterBundleUpdate(previousBundle, nextBundle, 1, "playing"),
+    1,
+  );
 });
 
 test("format helpers keep replay labels stable", () => {
