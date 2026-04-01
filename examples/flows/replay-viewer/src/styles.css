@@ -1177,11 +1177,6 @@ code {
   font-size: 0.76rem;
 }
 
-.conversation__tool-list {
-  display: grid;
-  gap: 8px;
-}
-
 .conversation__tool-card {
   display: grid;
   gap: 6px;
@@ -1199,15 +1194,181 @@ code {
   overflow-wrap: anywhere;
 }
 
-.conversation__nested-details {
-  border-top: 1px solid rgba(133, 146, 166, 0.12);
-  padding-top: 6px;
+.conversation__tool-event {
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(133, 146, 166, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015)),
+    rgba(255, 255, 255, 0.02);
 }
 
-.conversation__nested-details summary {
+.conversation__tool-event summary {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding: 11px 13px 12px;
+}
+
+.conversation__tool-event summary::after {
+  content: "▾";
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  color: var(--ink-faint);
+  font-size: 0.74rem;
+  line-height: 1;
+  transition: transform 160ms ease;
+}
+
+.conversation__tool-event[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.conversation__tool-summary-top,
+.conversation__tool-summary-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.conversation__tool-summary-top {
+  min-width: 0;
+}
+
+.conversation__tool-summary-badges {
+  min-width: 0;
+  margin-left: auto;
+  padding-right: 18px;
+}
+
+.conversation__tool-kind,
+.conversation__tool-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.conversation__tool-kind--call {
+  background: rgba(62, 166, 198, 0.14);
+  color: #9eddf0;
+}
+
+.conversation__tool-kind--result {
+  background: rgba(88, 187, 129, 0.14);
+  color: #c7f0d7;
+}
+
+.conversation__tool-event--error .conversation__tool-kind--result {
+  background: rgba(216, 107, 107, 0.16);
+  color: #ffd4d4;
+}
+
+.conversation__tool-pill--completed {
+  background: rgba(88, 187, 129, 0.14);
+  color: #c7f0d7;
+}
+
+.conversation__tool-pill--running {
+  background: rgba(62, 166, 198, 0.14);
+  color: #9eddf0;
+}
+
+.conversation__tool-pill--error {
+  background: rgba(216, 107, 107, 0.16);
+  color: #ffd4d4;
+}
+
+.conversation__tool-pill--neutral {
+  background: rgba(255, 255, 255, 0.06);
   color: var(--ink-soft);
+}
+
+.conversation__tool-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+  font-family: "IBM Plex Mono", "SFMono-Regular", "Cascadia Code", monospace;
+}
+
+.conversation__tool-title {
+  color: var(--ink);
+  font-family: "Manrope", "Inter", sans-serif;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+
+.conversation__tool-preview {
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+
+.conversation__tool-preview--call {
+  font-family: "IBM Plex Mono", "SFMono-Regular", "Cascadia Code", monospace;
   font-size: 0.72rem;
-  font-weight: 700;
+}
+
+.conversation__tool-toggle {
+  color: var(--ink-faint);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.conversation__tool-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 13px 13px;
+  border-top: 1px solid rgba(133, 146, 166, 0.12);
+}
+
+.conversation__tool-section {
+  display: grid;
+  gap: 6px;
+}
+
+.conversation__tool-section-label {
+  color: var(--ink-faint);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.conversation__tool-section-copy {
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  line-height: 1.48;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.conversation__tool-section-copy--mono {
+  font-family: "IBM Plex Mono", "SFMono-Regular", "Cascadia Code", monospace;
+  font-size: 0.72rem;
 }
 
 .event-card {

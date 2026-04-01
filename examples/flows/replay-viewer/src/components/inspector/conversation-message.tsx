@@ -42,34 +42,30 @@ export function ConversationMessage({
           if (part.kind === "tool_use") {
             const toolUse = part.toolUse;
             return (
-              <article key={toolUse.id} className="conversation__tool-card">
-                <div className="conversation__tool-head">
-                  <strong>{toolUse.name}</strong>
-                  <span>{toolUse.id}</span>
-                </div>
-                <p>{toolUse.summary}</p>
-                <details className="conversation__nested-details">
-                  <summary>Raw tool call</summary>
-                  <CodeBlock>{formatJson(toolUse.raw)}</CodeBlock>
-                </details>
-              </article>
+              <ToolEventCard
+                key={toolUse.id}
+                kind="call"
+                title={toolUse.name}
+                meta={toolUse.id}
+                preview={toolUse.summary}
+                raw={toolUse.raw}
+              />
             );
           }
 
           if (part.kind === "tool_result") {
             const toolResult = part.toolResult;
             return (
-              <article key={`${toolResult.id}-result`} className="conversation__tool-card">
-                <div className="conversation__tool-head">
-                  <strong>{toolResult.toolName}</strong>
-                  <span>{toolResult.status}</span>
-                </div>
-                <p>{toolResult.preview}</p>
-                <details className="conversation__nested-details">
-                  <summary>Raw tool result</summary>
-                  <CodeBlock>{formatJson(toolResult.raw)}</CodeBlock>
-                </details>
-              </article>
+              <ToolEventCard
+                key={`${toolResult.id}-result`}
+                kind="result"
+                title={toolResult.toolName}
+                meta={toolResult.id}
+                status={toolResult.status}
+                preview={toolResult.preview}
+                raw={toolResult.raw}
+                isError={toolResult.isError}
+              />
             );
           }
 
@@ -90,4 +86,101 @@ export function ConversationMessage({
       )}
     </article>
   );
+}
+
+function ToolEventCard({
+  kind,
+  title,
+  meta,
+  status,
+  preview,
+  raw,
+  isError = false,
+}: {
+  kind: "call" | "result";
+  title: string;
+  meta: string;
+  status?: string;
+  preview: string;
+  raw: unknown;
+  isError?: boolean;
+}) {
+  const statusTone = resolveToolStatusTone(status, isError);
+
+  return (
+    <details
+      className={`conversation__tool-event conversation__tool-event--${kind}${isError ? " conversation__tool-event--error" : ""}`}
+    >
+      <summary className="conversation__tool-summary">
+        <div className="conversation__tool-summary-top">
+          <span className={`conversation__tool-kind conversation__tool-kind--${kind}`}>
+            {kind === "call" ? "Tool call" : "Tool result"}
+          </span>
+          <div className="conversation__tool-summary-badges">
+            {status ? (
+              <span className={`conversation__tool-pill conversation__tool-pill--${statusTone}`}>
+                {formatToolStatus(status)}
+              </span>
+            ) : null}
+            <span className="conversation__tool-meta">{meta}</span>
+          </div>
+        </div>
+        <div className="conversation__tool-title">{title}</div>
+        <div
+          className={`conversation__tool-preview${kind === "call" ? " conversation__tool-preview--call" : ""}`}
+        >
+          {preview}
+        </div>
+        <div className="conversation__tool-toggle">View details</div>
+      </summary>
+      <div className="conversation__tool-body">
+        <section className="conversation__tool-section">
+          <div className="conversation__tool-section-label">
+            {kind === "call" ? "Invocation" : "Output preview"}
+          </div>
+          <div
+            className={`conversation__tool-section-copy${kind === "call" ? " conversation__tool-section-copy--mono" : ""}`}
+          >
+            {preview}
+          </div>
+        </section>
+        <section className="conversation__tool-section">
+          <div className="conversation__tool-section-label">Raw payload</div>
+          <CodeBlock>{formatJson(raw)}</CodeBlock>
+        </section>
+      </div>
+    </details>
+  );
+}
+
+function formatToolStatus(status: string): string {
+  return status.replace(/_/g, " ");
+}
+
+function resolveToolStatusTone(
+  status: string | undefined,
+  isError: boolean,
+): "completed" | "running" | "error" | "neutral" {
+  if (isError) {
+    return "error";
+  }
+  if (!status) {
+    return "neutral";
+  }
+  const normalized = status.trim().toLowerCase();
+  if (
+    normalized === "ok" ||
+    normalized === "completed" ||
+    normalized === "done" ||
+    normalized === "success"
+  ) {
+    return "completed";
+  }
+  if (normalized === "running" || normalized === "pending" || normalized === "in_progress") {
+    return "running";
+  }
+  if (normalized === "error" || normalized === "failed" || normalized === "timed_out") {
+    return "error";
+  }
+  return "neutral";
 }
