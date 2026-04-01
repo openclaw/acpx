@@ -24,7 +24,7 @@ The viewer uses:
 From the repo root:
 
 ```bash
-pnpm run viewer:preview
+pnpm viewer
 ```
 
 Then open [http://127.0.0.1:4173](http://127.0.0.1:4173).
@@ -32,6 +32,14 @@ Then open [http://127.0.0.1:4173](http://127.0.0.1:4173).
 The local viewer server always uses that fixed port. If another replay viewer is
 already running there, the command reuses it instead of bouncing to a random
 new port.
+
+Useful helper commands:
+
+```bash
+pnpm viewer:open
+pnpm viewer:status
+pnpm viewer:stop
+```
 
 The main path is the built-in **Recent runs** list sourced from:
 

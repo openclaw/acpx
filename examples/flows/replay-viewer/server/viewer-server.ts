@@ -25,6 +25,11 @@ export type ReplayViewerServer = {
   close(): Promise<void>;
 };
 
+export type ReplayViewerServerHealth = {
+  service: string;
+  runsDir: string;
+};
+
 export async function createReplayViewerServer(
   options: ReplayViewerServerOptions = {},
 ): Promise<ReplayViewerServer> {
@@ -55,9 +60,21 @@ export async function createReplayViewerServer(
     source: createFilesystemRunSource(runsDir),
     pollIntervalMs: options.livePollIntervalMs,
   });
+  let closePromise: Promise<void> | null = null;
+
+  const requestClose = (): Promise<void> => {
+    if (!closePromise) {
+      closePromise = closeServer(server, vite, liveSyncServer);
+    }
+    return closePromise;
+  };
 
   const server = http.createServer(async (request, response) => {
-    if (await handleApiRequest(request, response, host, port, runsDir)) {
+    if (
+      await handleApiRequest(request, response, host, port, runsDir, {
+        requestClose,
+      })
+    ) {
       return;
     }
 
@@ -106,7 +123,7 @@ export async function createReplayViewerServer(
     port: actualPort,
     baseUrl: `http://${host}:${actualPort}`,
     async close(): Promise<void> {
-      await closeServer(server, vite, liveSyncServer);
+      await requestClose();
     },
   };
 }
@@ -125,6 +142,9 @@ export async function handleApiRequest(
   host: string,
   port: number,
   runsDir: string,
+  options: {
+    requestClose?: () => Promise<void>;
+  } = {},
 ): Promise<boolean> {
   const url = new URL(request.url ?? "/", `http://${host}:${port}`);
 
@@ -132,6 +152,16 @@ export async function handleApiRequest(
     writeJson(response, 200, {
       service: SERVER_ID,
       runsDir,
+    });
+    return true;
+  }
+
+  if (url.pathname === "/api/control/shutdown" && request.method === "POST") {
+    writeJson(response, 200, {
+      ok: true,
+    });
+    setImmediate(() => {
+      void options.requestClose?.();
     });
     return true;
   }
@@ -173,16 +203,44 @@ export async function handleApiRequest(
 }
 
 export async function isServerAlreadyRunning(baseUrl: string): Promise<boolean> {
+  return (await fetchViewerServerHealth(baseUrl)) != null;
+}
+
+export async function fetchViewerServerHealth(
+  baseUrl: string,
+): Promise<ReplayViewerServerHealth | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 500);
 
   try {
     const response = await fetch(`${baseUrl}/api/health`, { signal: controller.signal });
     if (!response.ok) {
-      return false;
+      return null;
     }
-    const payload = (await response.json()) as { service?: string };
-    return payload.service === SERVER_ID;
+    const payload = (await response.json()) as Partial<ReplayViewerServerHealth>;
+    return payload.service === SERVER_ID && typeof payload.runsDir === "string"
+      ? {
+          service: payload.service,
+          runsDir: payload.runsDir,
+        }
+      : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function requestViewerServerShutdown(baseUrl: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 500);
+
+  try {
+    const response = await fetch(`${baseUrl}/api/control/shutdown`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+    return response.ok;
   } catch {
     return false;
   } finally {

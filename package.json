@@ -59,9 +59,13 @@
     "test:live": "pnpm run build:test && node --test dist-test/test/cursor-live.integration.js",
     "typecheck": "tsgo --noEmit",
     "typecheck:tsc": "tsc --noEmit",
+    "viewer": "tsx examples/flows/replay-viewer/server.ts start",
     "viewer:build": "vite build --config examples/flows/replay-viewer/vite.config.ts",
-    "viewer:dev": "tsx examples/flows/replay-viewer/server.ts",
-    "viewer:preview": "tsx examples/flows/replay-viewer/server.ts",
+    "viewer:dev": "tsx examples/flows/replay-viewer/server.ts start",
+    "viewer:open": "tsx examples/flows/replay-viewer/server.ts start --open",
+    "viewer:preview": "tsx examples/flows/replay-viewer/server.ts start",
+    "viewer:status": "tsx examples/flows/replay-viewer/server.ts status",
+    "viewer:stop": "tsx examples/flows/replay-viewer/server.ts stop",
     "viewer:typecheck": "tsc -p examples/flows/replay-viewer/tsconfig.json --noEmit && tsc -p examples/flows/replay-viewer/tsconfig.server.json --noEmit"
   },
   "dependencies": {

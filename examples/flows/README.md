@@ -36,7 +36,7 @@ acpx flow run examples/flows/two-turn.flow.ts \
 Run the replay viewer from the repo root:
 
 ```bash
-pnpm run viewer:preview
+pnpm viewer
 ```
 
 These examples are examples only. They do not define `acpx` core product
