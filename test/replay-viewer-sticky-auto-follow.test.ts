@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isPinnedToBottom } from "../examples/flows/replay-viewer/src/hooks/use-sticky-auto-follow.js";
+import {
+  didUserScrollUp,
+  isPinnedToBottom,
+} from "../examples/flows/replay-viewer/src/hooks/use-sticky-auto-follow.js";
 
 test("isPinnedToBottom treats near-bottom scroll positions as sticky", () => {
   assert.equal(
@@ -36,4 +39,10 @@ test("isPinnedToBottom honors a custom threshold", () => {
     ),
     true,
   );
+});
+
+test("didUserScrollUp disables follow on small upward reader scrolls", () => {
+  assert.equal(didUserScrollUp(980, 968), true);
+  assert.equal(didUserScrollUp(980, 979), false);
+  assert.equal(didUserScrollUp(980, 1000), false);
 });
