@@ -6,6 +6,7 @@ import {
   useRunBundleLoader,
   type RunBundleLoaderDeps,
 } from "../examples/flows/replay-viewer/src/hooks/use-run-bundle-loader.js";
+import { buildViewerRunsState } from "../examples/flows/replay-viewer/src/lib/runs-state.js";
 import type {
   LoadedRunBundle,
   RunBundleSummary,
@@ -135,10 +136,7 @@ test("useRunBundleLoader ignores stale bootstrap results after a newer live runs
       socket?.emitMessage({
         type: "runs_snapshot",
         version: 1,
-        state: {
-          schema: "acpx.viewer-runs.v1",
-          runs: [run],
-        },
+        state: buildViewerRunsState([run]),
       });
       await flushReactWork();
     });
@@ -365,10 +363,7 @@ test("useRunBundleLoader ignores stale recent-run loads when a newer live select
       socket?.emitMessage({
         type: "runs_snapshot",
         version: 1,
-        state: {
-          schema: "acpx.viewer-runs.v1",
-          runs: [secondRun, firstRun],
-        },
+        state: buildViewerRunsState([secondRun, firstRun]),
       });
       await flushReactWork();
     });
@@ -389,6 +384,191 @@ test("useRunBundleLoader ignores stale recent-run loads when a newer live select
     });
 
     assert.equal(renderedRunId, secondRun.runId);
+  } finally {
+    await act(async () => {
+      renderer?.unmount();
+      await flushReactWork();
+    });
+    restoreBrowser();
+  }
+});
+
+test("useRunBundleLoader resyncs runs when a live runs patch cannot be applied", async () => {
+  const run: RunBundleSummary = {
+    runId: "2026-04-01T180000000Z-pr-triage-live",
+    flowName: "pr-triage",
+    runTitle: "PR-triage-acpx-205",
+    status: "running",
+    startedAt: "2026-04-01T18:00:00.000Z",
+    updatedAt: "2026-04-01T18:00:01.000Z",
+    currentNode: "extract_intent",
+    path: "/tmp/acpx-live-run",
+  };
+  const bundle = makeLoadedRunBundle(run);
+  let renderedRuns = 0;
+
+  const deps: RunBundleLoaderDeps = {
+    createRecentRunBundleReader: () => ({ source: "recent" }) as never,
+    listRecentRuns: async () => [],
+    loadRunBundle: async () => bundle,
+  };
+
+  const restoreBrowser = installFakeBrowser();
+
+  function Harness() {
+    const { bootstrap, recentRuns } = useRunBundleLoader(deps);
+
+    useEffect(() => {
+      void bootstrap();
+    }, [bootstrap]);
+
+    renderedRuns = recentRuns.length;
+    return createElement("div");
+  }
+
+  let renderer: ReturnType<typeof create> | null = null;
+  try {
+    await act(async () => {
+      renderer = create(createElement(Harness));
+      await flushReactWork();
+    });
+
+    const socket = FakeWebSocket.instances.at(-1);
+    assert.ok(socket);
+
+    await act(async () => {
+      socket?.emitMessage({ type: "ready", protocol: "acpx.replay.v1" });
+      socket?.emitMessage({
+        type: "runs_snapshot",
+        version: 1,
+        state: buildViewerRunsState([run]),
+      });
+      await flushReactWork();
+    });
+
+    assert.equal(renderedRuns, 1);
+
+    await act(async () => {
+      socket?.emitMessage({
+        type: "runs_patch",
+        fromVersion: 1,
+        toVersion: 2,
+        ops: [
+          {
+            op: "replace",
+            path: "/runs/0/finishedAt",
+            value: "2026-04-01T18:00:05.000Z",
+          },
+        ],
+      });
+      await flushReactWork();
+    });
+
+    assert.deepEqual(
+      socket.sent.map((entry) => JSON.parse(entry) as { type: string }),
+      [
+        { type: "hello", protocol: "acpx.replay.v1" },
+        { type: "subscribe_runs" },
+        { type: "subscribe_run", runId: run.runId },
+        { type: "resync_runs" },
+      ],
+    );
+    assert.equal(renderedRuns, 1);
+  } finally {
+    await act(async () => {
+      renderer?.unmount();
+      await flushReactWork();
+    });
+    restoreBrowser();
+  }
+});
+
+test("useRunBundleLoader resyncs the selected run when a live run patch cannot be applied", async () => {
+  const run: RunBundleSummary = {
+    runId: "2026-04-01T181000000Z-pr-triage-live",
+    flowName: "pr-triage",
+    runTitle: "PR-triage-acpx-206",
+    status: "running",
+    startedAt: "2026-04-01T18:10:00.000Z",
+    updatedAt: "2026-04-01T18:10:01.000Z",
+    currentNode: "extract_intent",
+    path: "/tmp/acpx-live-run-selected",
+  };
+  const bundle = makeLoadedRunBundle(run);
+  let renderedRunId: string | null = null;
+
+  const deps: RunBundleLoaderDeps = {
+    createRecentRunBundleReader: () => ({ source: "recent" }) as never,
+    listRecentRuns: async () => [],
+    loadRunBundle: async () => bundle,
+  };
+
+  const restoreBrowser = installFakeBrowser();
+
+  function Harness() {
+    const { bootstrap, bundle: loadedBundle } = useRunBundleLoader(deps);
+
+    useEffect(() => {
+      void bootstrap();
+    }, [bootstrap]);
+
+    renderedRunId = loadedBundle?.run.runId ?? null;
+    return createElement("div");
+  }
+
+  let renderer: ReturnType<typeof create> | null = null;
+  try {
+    await act(async () => {
+      renderer = create(createElement(Harness));
+      await flushReactWork();
+    });
+
+    const socket = FakeWebSocket.instances.at(-1);
+    assert.ok(socket);
+
+    await act(async () => {
+      socket?.emitMessage({ type: "ready", protocol: "acpx.replay.v1" });
+      socket?.emitMessage({
+        type: "runs_snapshot",
+        version: 1,
+        state: buildViewerRunsState([run]),
+      });
+      await flushReactWork();
+    });
+
+    await act(async () => {
+      await flushReactWork();
+    });
+
+    assert.equal(renderedRunId, run.runId);
+
+    await act(async () => {
+      socket?.emitMessage({
+        type: "run_patch",
+        runId: run.runId,
+        fromVersion: 1,
+        toVersion: 2,
+        ops: [
+          {
+            op: "replace",
+            path: "/run/finishedAt",
+            value: "2026-04-01T18:10:05.000Z",
+          },
+        ],
+      });
+      await flushReactWork();
+    });
+
+    assert.deepEqual(
+      socket.sent.map((entry) => JSON.parse(entry) as { type: string; runId?: string }),
+      [
+        { type: "hello", protocol: "acpx.replay.v1" },
+        { type: "subscribe_runs" },
+        { type: "subscribe_run", runId: run.runId },
+        { type: "resync_run", runId: run.runId },
+      ],
+    );
+    assert.equal(renderedRunId, run.runId);
   } finally {
     await act(async () => {
       renderer?.unmount();

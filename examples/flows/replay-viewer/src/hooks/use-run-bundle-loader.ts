@@ -3,6 +3,7 @@ import { createRecentRunBundleReader, listRecentRuns } from "../lib/bundle-reade
 import { applyReplayPatch, buildReplayWebSocketUrl } from "../lib/live-sync.js";
 import { loadRunBundle } from "../lib/load-bundle.js";
 import { readRequestedRunIdFromWindow, syncRequestedRunId } from "../lib/run-url.js";
+import { buildViewerRunsState, listViewerRuns } from "../lib/runs-state.js";
 import type {
   LoadedRunBundle,
   ReplayClientMessage,
@@ -76,17 +77,16 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
   const refreshRuns = useCallback(async (): Promise<RunBundleSummary[] | null> => {
     if (liveReadyRef.current) {
       sendLiveMessage({ type: "resync_runs" });
-      return recentRunsStateRef.current?.runs ?? recentRunsRef.current;
+      return recentRunsStateRef.current
+        ? listViewerRuns(recentRunsStateRef.current)
+        : recentRunsRef.current;
     }
 
     setLoadingState("runs");
     try {
       const runs = await deps.listRecentRuns();
       if (runs) {
-        recentRunsStateRef.current = {
-          schema: "acpx.viewer-runs.v1",
-          runs,
-        };
+        recentRunsStateRef.current = buildViewerRunsState(runs);
         recentRunsVersionRef.current = Math.max(recentRunsVersionRef.current, 1);
         setRecentRuns(runs);
       }
@@ -171,10 +171,7 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
       ) {
         return;
       }
-      recentRunsStateRef.current = {
-        schema: "acpx.viewer-runs.v1",
-        runs,
-      };
+      recentRunsStateRef.current = buildViewerRunsState(runs);
       recentRunsVersionRef.current = Math.max(recentRunsVersionRef.current, 1);
       setRecentRuns(runs);
 
@@ -295,7 +292,7 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
           case "runs_snapshot":
             recentRunsStateRef.current = message.state;
             recentRunsVersionRef.current = message.version;
-            setRecentRuns(message.state.runs);
+            setRecentRuns(listViewerRuns(message.state));
             return;
           case "runs_patch":
             if (
@@ -305,9 +302,16 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
               sendLiveMessage({ type: "resync_runs" });
               return;
             }
-            recentRunsStateRef.current = applyReplayPatch(recentRunsStateRef.current, message.ops);
-            recentRunsVersionRef.current = message.toVersion;
-            setRecentRuns(recentRunsStateRef.current.runs);
+            try {
+              recentRunsStateRef.current = applyReplayPatch(
+                recentRunsStateRef.current,
+                message.ops,
+              );
+              recentRunsVersionRef.current = message.toVersion;
+              setRecentRuns(listViewerRuns(recentRunsStateRef.current));
+            } catch {
+              sendLiveMessage({ type: "resync_runs" });
+            }
             return;
           case "run_snapshot":
             if (
@@ -333,8 +337,15 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
               });
               return;
             }
-            setBundle(applyReplayPatch(bundleRef.current as ViewerRunLiveState, message.ops));
-            runVersionRef.current = message.toVersion;
+            try {
+              setBundle(applyReplayPatch(bundleRef.current as ViewerRunLiveState, message.ops));
+              runVersionRef.current = message.toVersion;
+            } catch {
+              sendLiveMessage({
+                type: "resync_run",
+                runId: message.runId,
+              });
+            }
             return;
           case "error":
             if (!message.runId || message.runId === activeRunIdRef.current) {

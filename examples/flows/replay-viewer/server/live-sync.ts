@@ -5,6 +5,7 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { createReplayPatch } from "../src/lib/json-patch-plus.js";
 import type {
   ReplayClientMessage,
+  ReplayJsonPatchOperation,
   ReplayProtocol,
   ReplayServerMessage,
   ViewerRunLiveState,
@@ -25,6 +26,11 @@ type ResourceState<TState> = {
   state: TState | null;
 };
 
+type ResourceDelta<TState> =
+  | { kind: "noop" }
+  | { kind: "patch"; ops: ReplayJsonPatchOperation[] }
+  | { kind: "snapshot"; state: TState };
+
 type ClientSubscriptionState = {
   socket: WebSocket;
   wantsRuns: boolean;
@@ -39,6 +45,22 @@ export type ReplayLiveSyncServer = {
   ): Promise<boolean>;
   close(): Promise<void>;
 };
+
+export function computeResourceDelta<TState extends object>(
+  previousState: TState,
+  nextState: TState,
+  createPatch: typeof createReplayPatch<TState> = createReplayPatch,
+): ResourceDelta<TState> {
+  try {
+    const ops = createPatch(previousState, nextState);
+    if (ops.length === 0) {
+      return { kind: "noop" };
+    }
+    return { kind: "patch", ops };
+  } catch {
+    return { kind: "snapshot", state: nextState };
+  }
+}
 
 export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): ReplayLiveSyncServer {
   const source = options.source;
@@ -182,8 +204,8 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
       runsResource.state = nextState;
       runsResource.version = 1;
     } else {
-      const ops = createReplayPatch(runsResource.state, nextState);
-      if (ops.length > 0) {
+      const delta = computeResourceDelta(runsResource.state, nextState);
+      if (delta.kind !== "noop") {
         runsResource.version += 1;
         runsResource.state = nextState;
       }
@@ -220,8 +242,8 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
       resource.state = nextState;
       resource.version = 1;
     } else {
-      const ops = createReplayPatch(resource.state, nextState);
-      if (ops.length > 0) {
+      const delta = computeResourceDelta(resource.state, nextState);
+      if (delta.kind !== "noop") {
         resource.version += 1;
         resource.state = nextState;
       }
@@ -260,17 +282,25 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
       if (hasRunsSubscribers()) {
         const resource = await ensureRunsState();
         const nextState = await source.getRunsState();
-        const ops = createReplayPatch(resource.state, nextState);
-        if (ops.length > 0) {
+        const delta = computeResourceDelta(resource.state, nextState);
+        if (delta.kind !== "noop") {
           const fromVersion = runsResource.version;
           runsResource.version += 1;
           runsResource.state = nextState;
-          broadcast((client) => client.wantsRuns, {
-            type: "runs_patch",
-            fromVersion,
-            toVersion: runsResource.version,
-            ops,
-          });
+          if (delta.kind === "patch") {
+            broadcast((client) => client.wantsRuns, {
+              type: "runs_patch",
+              fromVersion,
+              toVersion: runsResource.version,
+              ops: delta.ops,
+            });
+          } else {
+            broadcast((client) => client.wantsRuns, {
+              type: "runs_snapshot",
+              version: runsResource.version,
+              state: nextState,
+            });
+          }
         }
       }
 
@@ -278,21 +308,30 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
         try {
           const resource = await ensureRunState(runId);
           const nextState = await source.getRunState(runId);
-          const ops = createReplayPatch(resource.state, nextState);
-          if (ops.length === 0) {
+          const delta = computeResourceDelta(resource.state, nextState);
+          if (delta.kind === "noop") {
             continue;
           }
           const fromVersion = resource.version;
           resource.version += 1;
           resource.state = nextState;
           runResources.set(runId, resource);
-          broadcast((client) => client.runIds.has(runId), {
-            type: "run_patch",
-            runId,
-            fromVersion,
-            toVersion: resource.version,
-            ops,
-          });
+          if (delta.kind === "patch") {
+            broadcast((client) => client.runIds.has(runId), {
+              type: "run_patch",
+              runId,
+              fromVersion,
+              toVersion: resource.version,
+              ops: delta.ops,
+            });
+          } else {
+            broadcast((client) => client.runIds.has(runId), {
+              type: "run_snapshot",
+              runId,
+              version: resource.version,
+              state: nextState,
+            });
+          }
         } catch (error) {
           for (const client of clients) {
             if (!client.runIds.has(runId)) {

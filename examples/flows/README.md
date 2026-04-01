@@ -10,7 +10,7 @@ They range from small primitives to one larger end-to-end example.
 - `replay-viewer/`: a browser app that visualizes saved flow run bundles with React Flow, a recent-runs picker, ACP session inspection, and a dedicated viewer spec in `docs/2026-03-27-flow-replay-viewer.md`
 - `shell.flow.ts`: one native runtime-owned shell action that returns structured JSON
 - `workdir.flow.ts`: native workspace prep followed by an ACP step that runs inside that isolated cwd
-- `two-turn.flow.ts`: two ACP prompts in the same implicit main session
+- `two-turn.flow.ts`: a longer same-session ACP example that inspects the workspace, uses tools, and refines a final answer across multiple steps
 
 Run them from the repo root:
 

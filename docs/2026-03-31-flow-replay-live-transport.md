@@ -209,21 +209,29 @@ dot.
 
 ```ts
 type ViewerRunsState = {
-  schema: "acpx.viewer-runs.v1";
+  schema: "acpx.viewer-runs.v2";
   version: number;
-  runs: Array<{
-    runId: string;
-    flowName: string;
-    runTitle?: string;
-    status: "running" | "waiting" | "completed" | "failed" | "timed_out";
-    statusDetail?: string;
-    currentNode?: string;
-    startedAt: string;
-    updatedAt: string;
-    finishedAt?: string;
-  }>;
+  order: string[];
+  runsById: Record<
+    string,
+    {
+      runId: string;
+      flowName: string;
+      runTitle?: string;
+      status: "running" | "waiting" | "completed" | "failed" | "timed_out";
+      statusDetail?: string;
+      currentNode?: string;
+      startedAt: string;
+      updatedAt: string;
+      finishedAt?: string;
+    }
+  >;
 };
 ```
+
+This state is intentionally keyed. The sidebar is a sorted, fast-changing list,
+so object-keyed summaries plus a separate `order` array produce much more
+stable live patches than index-based patching of an array of objects.
 
 ## Subscription model
 

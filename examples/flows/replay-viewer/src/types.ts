@@ -294,8 +294,9 @@ export type LoadedRunBundle = {
 };
 
 export type ViewerRunsState = {
-  schema: "acpx.viewer-runs.v1";
-  runs: RunBundleSummary[];
+  schema: "acpx.viewer-runs.v2";
+  order: string[];
+  runsById: Record<string, RunBundleSummary>;
 };
 
 export type ViewerRunLiveState = LoadedRunBundle & {

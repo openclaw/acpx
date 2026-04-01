@@ -6,8 +6,15 @@ import path from "node:path";
 import test from "node:test";
 import { WebSocket } from "ws";
 import { createFilesystemRunSource } from "../examples/flows/replay-viewer/server/live-source.js";
-import { createReplayLiveSyncServer } from "../examples/flows/replay-viewer/server/live-sync.js";
+import {
+  computeResourceDelta,
+  createReplayLiveSyncServer,
+} from "../examples/flows/replay-viewer/server/live-sync.js";
 import { applyReplayPatch } from "../examples/flows/replay-viewer/src/lib/live-sync.js";
+import {
+  buildViewerRunsState,
+  listViewerRuns,
+} from "../examples/flows/replay-viewer/src/lib/runs-state.js";
 import type {
   FlowBundledSessionEvent,
   FlowDefinitionSnapshot,
@@ -64,8 +71,8 @@ test("replay viewer streams live sidebar and run patches over websocket", async 
         message.type === "runs_snapshot",
     );
 
-    assert.equal(runsSnapshot.state.runs[0]?.status, "running");
-    assert.equal(runsSnapshot.state.runs[0]?.runTitle, "PR-triage-acpx-155");
+    assert.equal(listViewerRuns(runsSnapshot.state)[0]?.status, "running");
+    assert.equal(listViewerRuns(runsSnapshot.state)[0]?.runTitle, "PR-triage-acpx-155");
 
     const secondStep = makeStep(
       "judge_solution#1",
@@ -87,14 +94,70 @@ test("replay viewer streams live sidebar and run patches over websocket", async 
 
     const nextRunsState = applyReplayPatch<ViewerRunsState>(runsSnapshot.state, runsPatch.ops);
 
-    assert.equal(nextRunsState.runs[0]?.status, "waiting");
-    assert.equal(nextRunsState.runs[0]?.currentNode, "judge_solution");
+    assert.equal(listViewerRuns(nextRunsState)[0]?.status, "waiting");
+    assert.equal(listViewerRuns(nextRunsState)[0]?.currentNode, "judge_solution");
 
     socket.close();
   } finally {
     await viewerServer.close();
     await fs.rm(runsDir, { recursive: true, force: true });
   }
+});
+
+test("computeResourceDelta falls back to a snapshot when patch generation throws", () => {
+  const nextRun = {
+    runId: "2026-04-01T180000000Z-example-two-turn-live",
+    flowName: "example-two-turn",
+    status: "running" as const,
+    startedAt: "2026-04-01T18:00:00.000Z",
+    updatedAt: "2026-04-01T18:00:01.000Z",
+    path: "/tmp/acpx-live-run",
+  };
+  const previousState: ViewerRunsState = buildViewerRunsState([]);
+  const nextState: ViewerRunsState = buildViewerRunsState([nextRun]);
+
+  const delta = computeResourceDelta(previousState, nextState, () => {
+    throw new Error("patch exploded");
+  });
+
+  assert.deepEqual(delta, {
+    kind: "snapshot",
+    state: nextState,
+  });
+});
+
+test("computeResourceDelta produces a stable patch when recent runs reorder", () => {
+  const firstRun = {
+    runId: "2026-04-01T180100000Z-example-two-turn-a",
+    flowName: "example-two-turn",
+    status: "completed" as const,
+    startedAt: "2026-04-01T18:01:00.000Z",
+    updatedAt: "2026-04-01T18:01:05.000Z",
+    path: "/tmp/acpx-live-run-a",
+  };
+  const secondRun = {
+    runId: "2026-04-01T180200000Z-example-two-turn-b",
+    flowName: "example-two-turn",
+    status: "running" as const,
+    startedAt: "2026-04-01T18:02:00.000Z",
+    updatedAt: "2026-04-01T18:02:01.000Z",
+    currentNode: "inspect_workspace",
+    path: "/tmp/acpx-live-run-b",
+  };
+  const previousState = buildViewerRunsState([firstRun, secondRun]);
+  const nextState = buildViewerRunsState([
+    {
+      ...secondRun,
+      updatedAt: "2026-04-01T18:02:02.000Z",
+      currentNode: "draft",
+    },
+    firstRun,
+  ]);
+
+  const delta = computeResourceDelta(previousState, nextState);
+
+  assert.equal(delta.kind, "patch");
+  assert.deepEqual(applyReplayPatch(previousState, delta.ops), nextState);
 });
 
 test("replay viewer refreshes runs snapshots after idle periods", async () => {
@@ -140,7 +203,7 @@ test("replay viewer refreshes runs snapshots after idle periods", async () => {
       (message): message is Extract<ReplayServerMessage, { type: "runs_snapshot" }> =>
         message.type === "runs_snapshot",
     );
-    assert.equal(firstSnapshot.state.runs[0]?.runId, firstRunId);
+    assert.equal(listViewerRuns(firstSnapshot.state)[0]?.runId, firstRunId);
 
     await closeSocket(firstSocket);
 
@@ -174,8 +237,8 @@ test("replay viewer refreshes runs snapshots after idle periods", async () => {
       (message): message is Extract<ReplayServerMessage, { type: "runs_snapshot" }> =>
         message.type === "runs_snapshot",
     );
-    assert.equal(secondSnapshot.state.runs[0]?.runId, secondRunId);
-    assert.equal(secondSnapshot.state.runs[1]?.runId, firstRunId);
+    assert.equal(listViewerRuns(secondSnapshot.state)[0]?.runId, secondRunId);
+    assert.equal(listViewerRuns(secondSnapshot.state)[1]?.runId, firstRunId);
 
     await closeSocket(secondSocket);
   } finally {
