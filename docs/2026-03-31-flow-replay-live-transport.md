@@ -33,12 +33,15 @@ viewer backend.
 That connection should carry:
 
 - an initial **full snapshot**
-- then **RFC 6902 JSON Patch** updates against a single in-memory state object
+- then **JSON Patch+** updates against a single in-memory state object
 
 The important boundary is:
 
 - the browser patches **viewer state**
 - it does **not** patch individual bundle files on disk
+
+For the patch primitive itself, see
+[docs/json-patch-plus.md](./json-patch-plus.md).
 
 ## Goals
 
@@ -259,21 +262,14 @@ That gives the browser:
 
 ### Patch format
 
-Use standard RFC 6902 JSON Patch operations.
+Use **JSON Patch+** as defined in
+[docs/json-patch-plus.md](./json-patch-plus.md).
 
-Allowed operations:
+That means:
 
-- `add`
-- `remove`
-- `replace`
-
-Do not rely on:
-
-- `move`
-- `copy`
-- `test`
-
-That keeps client patch application simpler and more predictable.
+- all standard RFC 6902 JSON Patch operations remain valid
+- the transport also allows `append`
+- patch application failure triggers a resync
 
 ### Versioning
 
