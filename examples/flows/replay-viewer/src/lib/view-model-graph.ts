@@ -65,6 +65,13 @@ export function buildGraph(
     semantics.terminalNodeIds,
   );
   const runOutcome = deriveRunOutcomeView(bundle);
+  const terminalSelectionSettled = isSettledTerminalSelection(
+    bundle,
+    selectedStep,
+    runOutcome,
+    semantics.terminalNodeIds,
+    playback,
+  );
   const fallbackRankOrder = orderNodesWithinRanks(
     orderedNodeIds,
     expandedEdges,
@@ -80,7 +87,7 @@ export function buildGraph(
     const nodeType = bundle.flow.nodes[nodeId]?.nodeType ?? "compute";
     const attemptsForNode = bundle.steps.filter((step) => step.nodeId === nodeId);
     const visibleAttempt = findLatestVisibleAttempt(visibleSteps, nodeId);
-    const status = deriveNodeStatus(nodeId, visibleAttempt, selectedStep);
+    const status = deriveNodeStatus(nodeId, visibleAttempt, selectedStep, terminalSelectionSettled);
     const fallbackPosition = deriveFallbackNodePosition(nodeId, levelByNode, fallbackRankOrder);
     const layoutPosition = layout?.nodePositions[nodeId];
     const x = layoutPosition?.x ?? fallbackPosition.x;
@@ -115,8 +122,12 @@ export function buildGraph(
         isRunOutcomeNode: runOutcome.nodeId === nodeId,
         runOutcomeLabel:
           runOutcome.nodeId === nodeId && runOutcome.isTerminal ? runOutcome.shortLabel : undefined,
+        runOutcomeAccent:
+          runOutcome.nodeId === nodeId && runOutcome.isTerminal ? runOutcome.accent : undefined,
         playbackProgress:
-          playback && selectedStep?.nodeId === nodeId ? clamp01(playback.stepProgress) : undefined,
+          playback && selectedStep?.nodeId === nodeId && !terminalSelectionSettled
+            ? clamp01(playback.stepProgress)
+            : undefined,
       },
       position: { x, y },
       sourcePosition: Position.Bottom,
@@ -129,6 +140,7 @@ export function buildGraph(
   const graphEdges = expandedEdges.map((edge) => {
     const isTraversed = actualTransitions.has(`${edge.source}->${edge.target}`);
     const isSelected = Boolean(
+      !terminalSelectionSettled &&
       selectedStep != null &&
       visibleSteps.at(-2)?.nodeId === edge.source &&
       selectedStep.nodeId === edge.target,
@@ -395,8 +407,9 @@ function deriveNodeStatus(
   nodeId: string,
   visibleAttempt: FlowStepRecord | undefined,
   selectedStep: FlowStepRecord | null,
+  terminalSelectionSettled: boolean,
 ): ViewerNodeStatus {
-  if (selectedStep?.nodeId === nodeId) {
+  if (selectedStep?.nodeId === nodeId && !terminalSelectionSettled) {
     return "active";
   }
   if (!visibleAttempt) {
@@ -418,6 +431,32 @@ function mapOutcomeToStatus(outcome: FlowNodeOutcome): ViewerNodeStatus {
     default:
       return "queued";
   }
+}
+
+function isSettledTerminalSelection(
+  bundle: LoadedRunBundle,
+  selectedStep: FlowStepRecord | null,
+  runOutcome: RunOutcomeView,
+  terminalNodeIds: Set<string>,
+  playback: PlaybackPreview | null,
+): boolean {
+  const lastStep = bundle.steps.at(-1) ?? null;
+  if (!selectedStep || !lastStep || !runOutcome.isTerminal || playback) {
+    return false;
+  }
+  if (!terminalNodeIds.has(selectedStep.nodeId)) {
+    return false;
+  }
+  if (selectedStep.attemptId !== lastStep.attemptId) {
+    return false;
+  }
+  if (runOutcome.nodeId && runOutcome.nodeId !== selectedStep.nodeId) {
+    return false;
+  }
+  if (runOutcome.attemptId && runOutcome.attemptId !== selectedStep.attemptId) {
+    return false;
+  }
+  return true;
 }
 
 function findLatestVisibleAttempt(

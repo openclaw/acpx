@@ -72,7 +72,11 @@ export function FlowNodeCard({ data, selected = false }: FlowNodeCardProps) {
         {data.durationLabel ? <span>{data.durationLabel}</span> : null}
       </div>
       {data.runOutcomeLabel ? (
-        <div className="flow-node-card__outcome">{data.runOutcomeLabel}</div>
+        <div
+          className={`flow-node-card__outcome flow-node-card__outcome--${data.runOutcomeAccent ?? "active"}`}
+        >
+          {data.runOutcomeLabel}
+        </div>
       ) : null}
       <Handle
         id="out-bottom"

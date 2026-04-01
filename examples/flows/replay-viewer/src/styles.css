@@ -692,6 +692,7 @@ code {
 }
 
 .flow-node-card {
+  --flow-node-selected-ring: rgba(62, 166, 198, 0.24);
   position: relative;
   overflow: hidden;
   width: 264px;
@@ -754,25 +755,29 @@ code {
 }
 
 .flow-node-card--completed {
+  --flow-node-selected-ring: rgba(88, 187, 129, 0.24);
   border-top: 3px solid var(--node-completed);
 }
 
 .flow-node-card--failed {
+  --flow-node-selected-ring: rgba(216, 107, 107, 0.24);
   border-top: 3px solid var(--node-failed);
 }
 
 .flow-node-card--timed_out {
+  --flow-node-selected-ring: rgba(212, 155, 69, 0.24);
   border-top: 3px solid var(--node-timed_out);
 }
 
 .flow-node-card--cancelled {
+  --flow-node-selected-ring: rgba(159, 132, 224, 0.24);
   border-top: 3px solid var(--node-cancelled);
 }
 
 .flow-node-card--selected {
   box-shadow:
     0 18px 38px rgba(0, 0, 0, 0.3),
-    0 0 0 2px rgba(62, 166, 198, 0.24);
+    0 0 0 2px var(--flow-node-selected-ring);
 }
 
 .flow-node-card__eyebrow,
@@ -875,6 +880,26 @@ code {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.flow-node-card__outcome--ok {
+  background: rgba(88, 187, 129, 0.14);
+  color: #d7f6e3;
+}
+
+.flow-node-card__outcome--active {
+  background: rgba(62, 166, 198, 0.14);
+  color: var(--ink);
+}
+
+.flow-node-card__outcome--failed {
+  background: rgba(216, 107, 107, 0.16);
+  color: #ffd7d7;
+}
+
+.flow-node-card__outcome--timed_out {
+  background: rgba(212, 155, 69, 0.16);
+  color: #f6ddb1;
 }
 
 .flow-node-card__handle {

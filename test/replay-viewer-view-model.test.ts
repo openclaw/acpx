@@ -135,6 +135,42 @@ test("buildGraph applies playback progress to the active node during preview", (
   assert.ok((nodeMap.get("extract_intent")?.playbackProgress ?? 0) > 0);
 });
 
+test("buildGraph renders the last completed terminal step as completed instead of active", () => {
+  const polish = baseStep("polish", "acp", "ok");
+  polish.startedAt = "2026-03-27T07:26:02.000Z";
+  polish.finishedAt = "2026-03-27T07:26:20.000Z";
+  const finalize = baseStep("finalize", "compute", "ok");
+  finalize.startedAt = "2026-03-27T07:26:21.000Z";
+  finalize.finishedAt = "2026-03-27T07:26:22.000Z";
+
+  const bundle = makeBundle(finalize, {
+    steps: [polish, finalize],
+    flow: {
+      schema: "acpx.flow-definition-snapshot.v1",
+      name: "terminal-flow",
+      startAt: "polish",
+      nodes: {
+        polish: { nodeType: "acp", session: { handle: "main", isolated: false } },
+        finalize: { nodeType: "compute" },
+      },
+      edges: [{ from: "polish", to: "finalize" }],
+    },
+  });
+
+  const graph = buildGraph(bundle, 1);
+  const nodeMap = new Map(graph.nodes.map((node) => [node.id, node.data]));
+  const finalEdge = graph.edges.find(
+    (edge) => edge.source === "polish" && edge.target === "finalize",
+  );
+
+  assert.equal(nodeMap.get("finalize")?.status, "completed");
+  assert.equal(nodeMap.get("finalize")?.runOutcomeLabel, "completed");
+  assert.equal(nodeMap.get("finalize")?.runOutcomeAccent, "ok");
+  assert.equal(nodeMap.get("finalize")?.playbackProgress, undefined);
+  assert.equal(finalEdge?.animated, false);
+  assert.equal(finalEdge?.style?.stroke, "var(--edge-complete)");
+});
+
 test("buildGraph pulls pre-terminal handoff chains toward the bottom automatically", () => {
   const finalize = baseStep("finalize", "compute", "ok");
   finalize.startedAt = "2026-03-27T07:30:00.000Z";

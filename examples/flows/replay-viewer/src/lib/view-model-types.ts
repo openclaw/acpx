@@ -30,6 +30,7 @@ export type ViewerNodeData = {
   branchLabels: string[];
   isRunOutcomeNode: boolean;
   runOutcomeLabel?: string;
+  runOutcomeAccent?: RunOutcomeView["accent"];
   playbackProgress?: number;
 };
 
