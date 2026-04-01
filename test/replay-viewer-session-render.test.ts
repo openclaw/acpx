@@ -47,7 +47,7 @@ function makeSessionSlice(): SelectedAttemptView["sessionSlice"] {
       toolUses: [],
       toolResults: [],
       hiddenPayloads: [],
-      parts: [{ kind: "text", text: "Please inspect the PR." }],
+      parts: [{ type: "text", text: "Please inspect the PR." }],
     },
     {
       index: 1,
@@ -75,9 +75,9 @@ function makeSessionSlice(): SelectedAttemptView["sessionSlice"] {
       ],
       hiddenPayloads: [],
       parts: [
-        { kind: "text", text: "Running checks and collecting context." },
+        { type: "text", text: "Running checks and collecting context." },
         {
-          kind: "tool_use",
+          type: "tool_use",
           toolUse: {
             id: "tool-1",
             name: "shell",
@@ -86,7 +86,7 @@ function makeSessionSlice(): SelectedAttemptView["sessionSlice"] {
           },
         },
         {
-          kind: "tool_result",
+          type: "tool_result",
           toolResult: {
             id: "tool-1",
             toolName: "shell",

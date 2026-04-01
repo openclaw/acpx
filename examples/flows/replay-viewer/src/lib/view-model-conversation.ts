@@ -258,10 +258,10 @@ function revealMessageParts(
       break;
     }
 
-    if (part.kind === "text") {
+    if (part.type === "text") {
       const take = Math.min(part.text.length, remaining);
       if (take > 0) {
-        revealed.push({ kind: "text", text: part.text.slice(0, take) });
+        revealed.push({ type: "text", text: part.text.slice(0, take) });
         remaining -= take;
       }
       if (take < part.text.length) {
@@ -287,10 +287,10 @@ function buildPartialMessage(
 ): SelectedAttemptView["sessionSlice"][number] {
   return {
     ...message,
-    textBlocks: parts.flatMap((part) => (part.kind === "text" ? [part.text] : [])),
-    toolUses: parts.flatMap((part) => (part.kind === "tool_use" ? [part.toolUse] : [])),
-    toolResults: parts.flatMap((part) => (part.kind === "tool_result" ? [part.toolResult] : [])),
-    hiddenPayloads: parts.flatMap((part) => (part.kind === "hidden_payload" ? [part.payload] : [])),
+    textBlocks: parts.flatMap((part) => (part.type === "text" ? [part.text] : [])),
+    toolUses: parts.flatMap((part) => (part.type === "tool_use" ? [part.toolUse] : [])),
+    toolResults: parts.flatMap((part) => (part.type === "tool_result" ? [part.toolResult] : [])),
+    hiddenPayloads: parts.flatMap((part) => (part.type === "hidden_payload" ? [part.payload] : [])),
     parts,
   };
 }
@@ -298,7 +298,7 @@ function buildPartialMessage(
 function partRevealWeight(
   part: SelectedAttemptView["sessionSlice"][number]["parts"][number],
 ): number {
-  switch (part.kind) {
+  switch (part.type) {
     case "text":
       return Math.max(part.text.length, 1);
     case "tool_use":
@@ -349,7 +349,7 @@ function describeMessage(
       toolUses: [],
       toolResults: [],
       hiddenPayloads: [],
-      parts: text ? [{ kind: "text", text }] : [],
+      parts: text ? [{ type: "text", text }] : [],
     };
   }
 
@@ -375,7 +375,7 @@ function describeMessage(
     toolUses: [],
     toolResults: [],
     hiddenPayloads: [{ label: "Raw message", raw: message }],
-    parts: [{ kind: "hidden_payload", payload: { label: "Raw message", raw: message } }],
+    parts: [{ type: "hidden_payload", payload: { label: "Raw message", raw: message } }],
   };
 }
 
@@ -397,7 +397,7 @@ function describeStructuredMessage(
         const text = String(part ?? "").trim();
         if (text) {
           textBlocks.push(text);
-          contentParts.push({ kind: "text", text });
+          contentParts.push({ type: "text", text });
         }
         continue;
       }
@@ -406,7 +406,7 @@ function describeStructuredMessage(
         const text = (part as { Text: string }).Text.trim();
         if (text) {
           textBlocks.push(text);
-          contentParts.push({ kind: "text", text });
+          contentParts.push({ type: "text", text });
         }
         continue;
       }
@@ -421,7 +421,7 @@ function describeStructuredMessage(
             raw: toolUse,
           };
           toolUses.push(toolUseView);
-          contentParts.push({ kind: "tool_use", toolUse: toolUseView });
+          contentParts.push({ type: "tool_use", toolUse: toolUseView });
           continue;
         }
       }
@@ -431,7 +431,7 @@ function describeStructuredMessage(
         raw: part,
       };
       hiddenPayloads.push(payload);
-      contentParts.push({ kind: "hidden_payload", payload });
+      contentParts.push({ type: "hidden_payload", payload });
     }
   } else if (content != null) {
     const payload = {
@@ -439,7 +439,7 @@ function describeStructuredMessage(
       raw: content,
     };
     hiddenPayloads.push(payload);
-    contentParts.push({ kind: "hidden_payload", payload });
+    contentParts.push({ type: "hidden_payload", payload });
   }
 
   const resolvedToolResults = describeToolResults(toolResults);
@@ -528,12 +528,12 @@ function buildOrderedMessageParts(
   const ordered: SelectedAttemptView["sessionSlice"][number]["parts"] = [];
   for (const part of contentParts) {
     ordered.push(part);
-    if (part.kind !== "tool_use") {
+    if (part.type !== "tool_use") {
       continue;
     }
     const matchingResults = resultsByToolUseId.get(part.toolUse.id) ?? [];
     for (const toolResult of matchingResults) {
-      ordered.push({ kind: "tool_result", toolResult });
+      ordered.push({ type: "tool_result", toolResult });
     }
     resultsByToolUseId.delete(part.toolUse.id);
   }
@@ -543,7 +543,7 @@ function buildOrderedMessageParts(
   }
 
   for (const toolResult of unmatched) {
-    ordered.push({ kind: "tool_result", toolResult });
+    ordered.push({ type: "tool_result", toolResult });
   }
 
   return ordered;

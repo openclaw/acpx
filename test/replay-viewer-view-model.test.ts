@@ -44,7 +44,7 @@ test("selectAttemptView shapes ACP session content into readable conversation pa
   assert.equal(agentMessage?.toolResults.length, 1);
   assert.match(agentMessage?.toolResults[0]?.preview ?? "", /stdout: \{"number": 181\}/);
   assert.deepEqual(
-    agentMessage?.parts.map((part) => part.kind),
+    agentMessage?.parts.map((part) => part.type),
     ["text", "tool_use", "tool_result"],
   );
   assert.equal(selected.rawEventSlice.length, 2);

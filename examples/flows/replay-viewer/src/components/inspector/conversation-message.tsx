@@ -31,7 +31,7 @@ export function ConversationMessage({
     >
       {message.parts.length > 0 ? (
         message.parts.map((part, index) => {
-          if (part.kind === "text") {
+          if (part.type === "text") {
             return (
               <div key={`${message.index}-text-${index}`} className="conversation__text">
                 <p>{part.text}</p>
@@ -39,12 +39,12 @@ export function ConversationMessage({
             );
           }
 
-          if (part.kind === "tool_use") {
+          if (part.type === "tool_use") {
             const toolUse = part.toolUse;
             return (
               <ToolEventCard
                 key={toolUse.id}
-                kind="call"
+                variant="call"
                 title={toolUse.name}
                 preview={toolUse.summary}
                 raw={toolUse.raw}
@@ -52,12 +52,12 @@ export function ConversationMessage({
             );
           }
 
-          if (part.kind === "tool_result") {
+          if (part.type === "tool_result") {
             const toolResult = part.toolResult;
             return (
               <ToolEventCard
                 key={`${toolResult.id}-result`}
-                kind="result"
+                variant="result"
                 title={toolResult.toolName}
                 status={toolResult.status}
                 preview={toolResult.preview}
@@ -87,14 +87,14 @@ export function ConversationMessage({
 }
 
 function ToolEventCard({
-  kind,
+  variant,
   title,
   status,
   preview,
   raw,
   isError = false,
 }: {
-  kind: "call" | "result";
+  variant: "call" | "result";
   title: string;
   status?: string;
   preview: string;
@@ -105,12 +105,12 @@ function ToolEventCard({
 
   return (
     <details
-      className={`conversation__tool-event conversation__tool-event--${kind} conversation__tool-event--${statusTone}${isError ? " conversation__tool-event--error" : ""}`}
+      className={`conversation__tool-event conversation__tool-event--${variant} conversation__tool-event--${statusTone}${isError ? " conversation__tool-event--error" : ""}`}
     >
       <summary className="conversation__tool-summary">
         <div className="conversation__tool-title">{title}</div>
         <div
-          className={`conversation__tool-preview${kind === "call" ? " conversation__tool-preview--call" : ""}`}
+          className={`conversation__tool-preview${variant === "call" ? " conversation__tool-preview--call" : ""}`}
         >
           {preview}
         </div>

@@ -102,19 +102,19 @@ export type ConversationHiddenPayloadView = {
 
 export type ConversationMessagePart =
   | {
-      kind: "text";
+      type: "text";
       text: string;
     }
   | {
-      kind: "tool_use";
+      type: "tool_use";
       toolUse: ConversationToolUseView;
     }
   | {
-      kind: "tool_result";
+      type: "tool_result";
       toolResult: ConversationToolResultView;
     }
   | {
-      kind: "hidden_payload";
+      type: "hidden_payload";
       payload: ConversationHiddenPayloadView;
     };
 
