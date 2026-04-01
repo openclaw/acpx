@@ -48,6 +48,7 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
   const previousSubscribedRunIdRef = useRef<string | null>(null);
   const loadingRunIdRef = useRef<string | null>(null);
   const bootstrapSequenceRef = useRef(0);
+  const loadRunSequenceRef = useRef(0);
 
   const setBundle = useCallback((next: LoadedRunBundle | null) => {
     bundleRef.current = next;
@@ -118,24 +119,30 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
         return null;
       }
 
+      const loadSequence = ++loadRunSequenceRef.current;
       setLoadingState("run");
       setErrorMessage(null);
       loadingRunIdRef.current = run.runId;
 
       try {
         const loaded = await deps.loadRunBundle(deps.createRecentRunBundleReader(run));
+        if (loadRunSequenceRef.current !== loadSequence) {
+          return null;
+        }
         setBundle(loaded);
         setActiveRunId(run.runId);
         syncRequestedRunId(run.runId);
         return loaded;
       } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : String(error));
+        if (loadRunSequenceRef.current === loadSequence) {
+          setErrorMessage(error instanceof Error ? error.message : String(error));
+        }
         return null;
       } finally {
-        if (loadingRunIdRef.current === run.runId) {
+        if (loadRunSequenceRef.current === loadSequence && loadingRunIdRef.current === run.runId) {
           loadingRunIdRef.current = null;
+          setLoadingState(null);
         }
-        setLoadingState(null);
       }
     },
     [deps, setActiveRunId, setBundle],

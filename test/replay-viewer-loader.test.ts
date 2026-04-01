@@ -284,6 +284,120 @@ test("useRunBundleLoader auto-loads the first recent run when the list becomes n
   });
 });
 
+test("useRunBundleLoader ignores stale recent-run loads when a newer live selection wins", async () => {
+  const firstRun: RunBundleSummary = {
+    runId: "2026-04-01T151000000Z-pr-triage-first",
+    flowName: "pr-triage",
+    runTitle: "PR-triage-acpx-201",
+    status: "running",
+    startedAt: "2026-04-01T15:10:00.000Z",
+    updatedAt: "2026-04-01T15:10:01.000Z",
+    currentNode: "extract_intent",
+    path: "/tmp/acpx-live-first",
+  };
+  const secondRun: RunBundleSummary = {
+    runId: "2026-04-01T151100000Z-pr-triage-second",
+    flowName: "pr-triage",
+    runTitle: "PR-triage-acpx-202",
+    status: "running",
+    startedAt: "2026-04-01T15:11:00.000Z",
+    updatedAt: "2026-04-01T15:11:01.000Z",
+    currentNode: "judge_solution",
+    path: "/tmp/acpx-live-second",
+  };
+  const firstBundle = makeLoadedRunBundle(firstRun);
+  const secondBundle = makeLoadedRunBundle(secondRun);
+  let resolveFirstLoad!: (bundle: LoadedRunBundle) => void;
+  let resolveSecondLoad!: (bundle: LoadedRunBundle) => void;
+  const firstLoad = new Promise<LoadedRunBundle>((resolve) => {
+    resolveFirstLoad = resolve;
+  });
+  const secondLoad = new Promise<LoadedRunBundle>((resolve) => {
+    resolveSecondLoad = resolve;
+  });
+  let renderedRunId: string | null = null;
+  let renderedRuns = 0;
+
+  const deps: RunBundleLoaderDeps = {
+    createRecentRunBundleReader: (run) =>
+      ({
+        sourceType: "recent",
+        label: run.runId,
+      }) as never,
+    listRecentRuns: async () => [firstRun],
+    loadRunBundle: async (reader) => {
+      if ((reader as { label?: string }).label === firstRun.runId) {
+        return firstLoad;
+      }
+      if ((reader as { label?: string }).label === secondRun.runId) {
+        return secondLoad;
+      }
+      throw new Error("Unexpected recent run reader");
+    },
+  };
+
+  const restoreBrowser = installFakeBrowser();
+
+  function Harness() {
+    const { bootstrap, recentRuns, bundle } = useRunBundleLoader(deps);
+
+    useEffect(() => {
+      void bootstrap();
+    }, [bootstrap]);
+
+    renderedRuns = recentRuns.length;
+    renderedRunId = bundle?.run.runId ?? null;
+    return createElement("div");
+  }
+
+  let renderer: ReturnType<typeof create> | null = null;
+  try {
+    await act(async () => {
+      renderer = create(createElement(Harness));
+      await flushReactWork();
+    });
+
+    const socket = FakeWebSocket.instances.at(-1);
+    assert.ok(socket);
+
+    await act(async () => {
+      socket?.emitMessage({ type: "ready", protocol: "acpx.replay.v1" });
+      socket?.emitMessage({
+        type: "runs_snapshot",
+        version: 1,
+        state: {
+          schema: "acpx.viewer-runs.v1",
+          runs: [secondRun, firstRun],
+        },
+      });
+      await flushReactWork();
+    });
+
+    await act(async () => {
+      resolveSecondLoad(secondBundle);
+      await secondLoad;
+      await flushReactWork();
+    });
+
+    assert.equal(renderedRuns, 2);
+    assert.equal(renderedRunId, secondRun.runId);
+
+    await act(async () => {
+      resolveFirstLoad(firstBundle);
+      await firstLoad;
+      await flushReactWork();
+    });
+
+    assert.equal(renderedRunId, secondRun.runId);
+  } finally {
+    await act(async () => {
+      renderer?.unmount();
+      await flushReactWork();
+    });
+    restoreBrowser();
+  }
+});
+
 async function flushReactWork(): Promise<void> {
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
