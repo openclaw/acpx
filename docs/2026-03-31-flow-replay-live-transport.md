@@ -43,6 +43,28 @@ The important boundary is:
 For the patch primitive itself, see
 [docs/json-patch-plus.md](./json-patch-plus.md).
 
+## Pinned decisions
+
+These choices are fixed for the first implementation and should not be
+re-decided during coding:
+
+- Use **JSON Patch+ exactly as documented** in
+  [docs/json-patch-plus.md](./json-patch-plus.md).
+- Patch **one semantic viewer-state object** per subscription, not individual
+  bundle files.
+- Keep the subscription split:
+  - `runs` for sidebar summaries
+  - `run:<runId>` for the selected run's full live state
+- Use **snapshot first, then patches** for every subscription.
+- Every patch must carry `fromVersion` and `toVersion`.
+- On version mismatch or patch-application failure, the client must request a
+  fresh snapshot instead of attempting partial recovery.
+- In v1, only the **selected run** receives full live conversation and trace
+  growth. Other runs receive sidebar summary updates only.
+- The server computes patches from **semantic viewer state**, not by patching
+  storage files directly.
+- The on-disk bundle format stays unchanged in this work.
+
 ## Goals
 
 - Keep the existing replay viewer semantics and rewind model
@@ -217,6 +239,9 @@ That gives the browser:
 - a live sidebar runs index
 - a live detailed view for the selected run
 
+Only the selected run subscription receives full live history growth. The
+sidebar subscription remains summary-only.
+
 ## Message schema
 
 ### Client to server
@@ -271,6 +296,8 @@ That means:
 - the transport also allows `append`
 - patch application failure triggers a resync
 
+There are no extra transport-specific patch operations beyond JSON Patch+.
+
 ### Versioning
 
 Each subscribed state stream has its own monotonically increasing version:
@@ -293,6 +320,9 @@ The server may send a fresh snapshot instead of a patch when:
 - the state changed too much for a patch to be worth sending
 - the diff algorithm cannot produce a clean patch
 
+The client must not attempt best-effort recovery from partially applied
+patches. Any patch failure is a hard resync boundary.
+
 ## Structural invariants
 
 To keep live rewind simple, the transport must preserve these rules:
@@ -304,6 +334,25 @@ To keep live rewind simple, the transport must preserve these rules:
 - a terminal run state does not return to `running`
 
 The patch generator should preserve those invariants.
+
+## V1 live streaming scope
+
+The first implementation must stream enough information for the selected run to
+feel truly live.
+
+That includes:
+
+- live `run` status and `currentNode`
+- live `steps` growth and step state changes
+- live `trace` growth for the selected run
+- live `sessions.*.events` growth for the selected run, including streamed ACP
+  text as it arrives
+
+That does not include:
+
+- full history payloads for every run in the sidebar
+- operator-control messages yet
+- any storage-format rewrite
 
 ## Server architecture
 
@@ -335,6 +384,17 @@ The server-side source may then be implemented as:
 
 without changing the browser transport contract.
 
+### Patch source rule
+
+The viewer server may still read bundle files as inputs, but the websocket
+transport must operate on semantic state:
+
+1. load or update semantic viewer state on the server
+2. compute JSON Patch+ against that state
+3. emit snapshot or patch messages
+
+Do not treat the websocket protocol as "live diffs of bundle files."
+
 ## Initial source implementation
 
 The first server implementation may still read the existing run bundles from:
@@ -363,6 +423,15 @@ The important API rule is:
 
 - browser sees WebSocket snapshot + patch messages
 - not filesystem semantics
+
+## Update coalescing
+
+The server should coalesce bursty live updates briefly before emitting patches.
+
+For v1, use a target coalescing window of about `50ms` per subscription.
+
+That keeps streaming text responsive while avoiding one websocket frame per tiny
+token or filesystem write.
 
 ## Client architecture
 
@@ -422,6 +491,9 @@ If patch application fails:
 - request a fresh snapshot
 
 The client should not try to recover by guessing missing patches.
+
+Do not rely on replaying an unknown missed backlog after reconnect. Fresh
+snapshots are the canonical recovery path.
 
 ## Future operator actions
 
@@ -487,9 +559,11 @@ the chosen transport rather than a read-only push channel.
 The viewer should move to:
 
 - one WebSocket connection
-- snapshot + JSON Patch updates
+- snapshot + JSON Patch+ updates
 - patches against one semantic viewer state object
 - state that stays close to the existing replay bundle shape
+- full live history only for the selected run, with summary-only sidebar
+  updates for the rest
 
 It should not move to:
 
