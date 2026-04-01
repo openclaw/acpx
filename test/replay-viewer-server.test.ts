@@ -101,6 +101,28 @@ test("replay viewer CLI status prints running details", async () => {
   assert.match(lines.join(""), new RegExp(`Runs dir: ${escapeRegExp(runsDir)}`));
 });
 
+test("replay viewer start rejects reusing a server for a different runs dir", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-start-runs-a-"));
+  const otherRunsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-start-runs-b-"));
+  const viewerServer = await createReplayViewerServer({
+    host: "127.0.0.1",
+    port: 0,
+    runsDir,
+    disableDependencyOptimization: true,
+  });
+
+  try {
+    await assert.rejects(
+      replayViewerMain(["start", "--port", String(viewerServer.port), "--runs-dir", otherRunsDir]),
+      /Viewer is already running .* not .*acpx-replay-start-runs-b-/,
+    );
+  } finally {
+    await viewerServer.close().catch(() => {});
+    await fs.rm(runsDir, { recursive: true, force: true });
+    await fs.rm(otherRunsDir, { recursive: true, force: true });
+  }
+});
+
 async function waitFor(check: () => Promise<boolean>, timeoutMs: number = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
 

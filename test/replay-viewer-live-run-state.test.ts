@@ -110,12 +110,19 @@ test("synthesizeLiveRunState replays only new session events beyond record.lastS
   );
 
   const session = state.sessions[sessionId];
+  const liveStep = state.steps.at(-1);
   assert.ok(session);
+  assert.ok(liveStep);
   assert.ok(Array.isArray(session?.record.messages));
   const agent = session?.record.messages?.[1] as {
     Agent?: { content?: Array<{ Text?: string }> };
   };
 
+  assert.equal(liveStep?.promptText, "hello");
+  assert.equal(liveStep?.trace?.conversation?.messageStart, 0);
+  assert.equal(liveStep?.trace?.conversation?.messageEnd, 1);
+  assert.equal(liveStep?.trace?.conversation?.eventStartSeq, 1);
+  assert.equal(liveStep?.trace?.conversation?.eventEndSeq, 3);
   assert.equal(agent.Agent?.content?.[0]?.Text, "hello");
   assert.equal(session?.record.lastSeq, 3);
 });

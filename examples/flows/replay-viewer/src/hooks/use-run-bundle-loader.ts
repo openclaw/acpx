@@ -47,6 +47,7 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
   const reconnectTimerRef = useRef<number | null>(null);
   const previousSubscribedRunIdRef = useRef<string | null>(null);
   const loadingRunIdRef = useRef<string | null>(null);
+  const bootstrapSequenceRef = useRef(0);
 
   const setBundle = useCallback((next: LoadedRunBundle | null) => {
     bundleRef.current = next;
@@ -141,11 +142,28 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
   );
 
   const bootstrap = useCallback(async (): Promise<void> => {
+    const bootstrapSequence = ++bootstrapSequenceRef.current;
+    const bootstrapRecentRunsVersion = recentRunsVersionRef.current;
+    const bootstrapRunVersion = runVersionRef.current;
+    const bootstrapActiveRunId = activeRunIdRef.current;
+    const bootstrapBundle = bundleRef.current;
+    const bootstrapRecentRuns = recentRunsRef.current;
+
     setLoadingState("bootstrap");
     setErrorMessage(null);
 
     try {
       const runs = (await deps.listRecentRuns()) ?? [];
+      if (
+        bootstrapSequenceRef.current !== bootstrapSequence ||
+        recentRunsVersionRef.current !== bootstrapRecentRunsVersion ||
+        runVersionRef.current !== bootstrapRunVersion ||
+        activeRunIdRef.current !== bootstrapActiveRunId ||
+        bundleRef.current !== bootstrapBundle ||
+        recentRunsRef.current !== bootstrapRecentRuns
+      ) {
+        return;
+      }
       recentRunsStateRef.current = {
         schema: "acpx.viewer-runs.v1",
         runs,

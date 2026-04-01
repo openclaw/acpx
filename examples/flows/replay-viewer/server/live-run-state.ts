@@ -24,6 +24,11 @@ type LiveSessionReplay = {
   conversation: FlowConversationTrace | null;
 };
 
+type PersistedLiveTurn = {
+  promptText: string | null;
+  conversation: FlowConversationTrace;
+};
+
 export function synthesizeLiveRunState(bundle: ViewerRunLiveState): ViewerRunLiveState {
   const next = structuredClone(bundle);
   const liveReplayBySessionId = new Map<string, LiveSessionReplay>();
@@ -140,8 +145,14 @@ function replayBundledSession(
   });
   let acpxState = cloneSessionAcpxState(baseRecord.acpx as never);
   const baseLastSeq = typeof baseRecord.lastSeq === "number" ? baseRecord.lastSeq : 0;
-  let promptText: string | null = null;
-  let liveTurn: FlowConversationTrace | null = null;
+  const persistedTurn = inferPersistedLiveTurn(
+    sessionId,
+    conversation.messages,
+    events,
+    baseLastSeq,
+  );
+  let promptText: string | null = persistedTurn?.promptText ?? null;
+  let liveTurn: FlowConversationTrace | null = persistedTurn?.conversation ?? null;
   let maxSeq = baseLastSeq;
 
   for (const event of events) {
@@ -222,4 +233,100 @@ function extractPromptFromMessage(message: AcpJsonRpcMessage): PromptInput | und
   }
 
   return prompt;
+}
+
+function inferPersistedLiveTurn(
+  sessionId: string,
+  messages: SessionRecord["messages"],
+  events: ViewerRunLiveState["sessions"][string]["events"],
+  baseLastSeq: number,
+): PersistedLiveTurn | null {
+  if (baseLastSeq <= 0 || !Array.isArray(messages) || messages.length === 0) {
+    return null;
+  }
+
+  const normalizedMessages = messages as NonNullable<SessionRecord["messages"]>;
+
+  const messageStart = findLastUserMessageIndex(normalizedMessages);
+  if (messageStart == null) {
+    return null;
+  }
+
+  let promptText = promptTextFromUserMessage(normalizedMessages[messageStart]);
+  let eventStartSeq: number | null = null;
+
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (!event || event.seq > baseLastSeq) {
+      continue;
+    }
+
+    const prompt = extractPromptFromMessage(event.message as AcpJsonRpcMessage);
+    if (!prompt) {
+      continue;
+    }
+
+    promptText = promptToDisplayText(prompt);
+    eventStartSeq = event.seq;
+    break;
+  }
+
+  return {
+    promptText,
+    conversation: {
+      sessionId,
+      messageStart,
+      messageEnd: Math.max(messageStart, normalizedMessages.length - 1),
+      eventStartSeq: eventStartSeq ?? baseLastSeq,
+      eventEndSeq: baseLastSeq,
+    },
+  };
+}
+
+function findLastUserMessageIndex(messages: NonNullable<SessionRecord["messages"]>): number | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message && typeof message === "object" && "User" in message) {
+      return index;
+    }
+  }
+  return null;
+}
+
+function promptTextFromUserMessage(message: unknown): string | null {
+  if (!message || typeof message !== "object" || !("User" in message)) {
+    return null;
+  }
+
+  const userMessage = message as {
+    User?: {
+      content?: unknown[];
+    };
+  };
+  const content = Array.isArray(userMessage.User?.content) ? userMessage.User.content : [];
+  const text = content
+    .map((part: unknown) => {
+      if (!part || typeof part !== "object") {
+        return null;
+      }
+      if ("Text" in part && typeof part.Text === "string") {
+        return part.Text;
+      }
+      if ("Mention" in part && part.Mention && typeof part.Mention === "object") {
+        const mention = part.Mention as { content?: unknown; uri?: unknown };
+        return typeof mention.content === "string"
+          ? mention.content
+          : typeof mention.uri === "string"
+            ? mention.uri
+            : null;
+      }
+      return null;
+    })
+    .filter((value: string | null): value is string => {
+      return typeof value === "string" && value.trim().length > 0;
+    })
+    .join("\n\n")
+    .trim();
+
+  return text.length > 0 ? text : null;
 }

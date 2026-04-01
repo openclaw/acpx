@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { defaultRunsDir } from "./server/run-bundles.js";
 import {
@@ -83,6 +84,7 @@ export function parseReplayViewerCliArgs(argv: readonly string[]): ReplayViewerC
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
   const options = parseReplayViewerCliArgs(argv);
   const baseUrl = `http://${options.host}:${options.port}`;
+  const requestedRunsDir = normalizeRunsDirPath(options.runsDir);
 
   switch (options.command) {
     case "status": {
@@ -105,6 +107,12 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     case "start": {
       const health = await fetchViewerServerHealth(baseUrl);
       if (health) {
+        const runningRunsDir = normalizeRunsDirPath(health.runsDir);
+        if (runningRunsDir !== requestedRunsDir) {
+          throw new Error(
+            `Viewer is already running at ${baseUrl}/ for ${health.runsDir}, not ${options.runsDir}`,
+          );
+        }
         process.stdout.write(`Reused existing viewer at ${baseUrl}/\n`);
         process.stdout.write(`Runs dir: ${health.runsDir}\n`);
         if (options.open) {
@@ -170,6 +178,14 @@ function resolveOpenCommand(url: string): {
       return { command: "cmd", args: ["/c", "start", "", url] };
     default:
       return { command: "xdg-open", args: [url] };
+  }
+}
+
+function normalizeRunsDirPath(runsDir: string): string {
+  try {
+    return realpathSync(runsDir);
+  } catch {
+    return path.resolve(runsDir);
   }
 }
 
