@@ -20,21 +20,20 @@ test("resolveSessionRenderState keeps live tool calls and results visible while 
   assert.equal(rendered.renderedSessionSlice[1]?.toolResults.length, 1);
 });
 
-test("resolveSessionRenderState still uses replay reveal mode outside live streaming", () => {
+test("resolveSessionRenderState replays tool calls before the step fully completes", () => {
   const sessionSlice = makeSessionSlice();
 
   const rendered = resolveSessionRenderState({
     sessionSlice,
     isStreamingSource: true,
-    sessionRevealProgress: 0.25,
+    sessionRevealProgress: 0.8,
     liveStreaming: false,
   });
 
   assert.equal(rendered.animateConversation, true);
   assert.equal(rendered.autoFollowConversation, true);
   assert.notDeepEqual(rendered.renderedSessionSlice, sessionSlice);
-  assert.equal(rendered.renderedSessionSlice[1]?.toolUses.length ?? 0, 0);
-  assert.equal(rendered.renderedSessionSlice[1]?.toolResults.length ?? 0, 0);
+  assert.equal(rendered.renderedSessionSlice[1]?.toolUses.length ?? 0, 1);
 });
 
 function makeSessionSlice(): SelectedAttemptView["sessionSlice"] {

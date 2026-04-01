@@ -250,6 +250,20 @@ That gives the browser:
 Only the selected run subscription receives full live history growth. The
 sidebar subscription remains summary-only.
 
+For finished replay, the viewer may render session content from reconstructed
+session records. The active live ACP turn is different. Tool calls, tool
+updates, and streamed agent text arrive as lower-level session events first and
+may not yet be fully folded into a settled `record.messages` shape. If the
+viewer renders an active live turn only from reconstructed session records,
+tool calls and tool results can appear late or inconsistently during the
+in-progress turn.
+
+The rule is:
+
+- finished or scrubbed replay may render from reconstructed session records
+- the active live ACP turn should render directly from live session events
+- reconstructed session records remain the fallback once the turn is settled
+
 ## Message schema
 
 ### Client to server

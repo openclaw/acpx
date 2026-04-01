@@ -134,20 +134,13 @@ export function revealConversationSlice(
     const localProgress = clamp01(
       (clampedProgress - start) / Math.max(end - start, Number.EPSILON),
     );
-    const partialTextBlocks =
+    const revealedParts =
       charCount > 0
-        ? revealTextBlocks(message.textBlocks, Math.max(1, Math.round(charCount * localProgress)))
+        ? revealMessageParts(message.parts, Math.max(1, Math.round(charCount * localProgress)))
         : [];
 
-    if (partialTextBlocks.length > 0 || (message.textBlocks.length === 0 && localProgress >= 1)) {
-      revealed.push({
-        ...message,
-        textBlocks: partialTextBlocks,
-        toolUses: [],
-        toolResults: [],
-        hiddenPayloads: [],
-        parts: partialTextBlocks.map((text) => ({ kind: "text" as const, text })),
-      });
+    if (revealedParts.length > 0 || (message.parts.length === 0 && localProgress >= 1)) {
+      revealed.push(buildPartialMessage(message, revealedParts));
     }
     break;
   }
@@ -250,26 +243,73 @@ function messageRevealWeight(message: SelectedAttemptView["sessionSlice"][number
   if (message.role !== "agent") {
     return 0;
   }
-  return message.textBlocks.reduce((sum, block) => sum + block.length, 0);
+  return message.parts.reduce((sum, part) => sum + partRevealWeight(part), 0);
 }
 
-function revealTextBlocks(textBlocks: string[], charBudget: number): string[] {
-  const revealed: string[] = [];
-  let remainingChars = Math.max(0, charBudget);
+function revealMessageParts(
+  parts: SelectedAttemptView["sessionSlice"][number]["parts"],
+  budget: number,
+): SelectedAttemptView["sessionSlice"][number]["parts"] {
+  const revealed: SelectedAttemptView["sessionSlice"][number]["parts"] = [];
+  let remaining = Math.max(0, budget);
 
-  for (const block of textBlocks) {
-    if (remainingChars <= 0) {
+  for (const part of parts) {
+    if (remaining <= 0) {
       break;
     }
-    const take = Math.min(block.length, remainingChars);
-    revealed.push(block.slice(0, take));
-    remainingChars -= take;
-    if (take < block.length) {
+
+    if (part.kind === "text") {
+      const take = Math.min(part.text.length, remaining);
+      if (take > 0) {
+        revealed.push({ kind: "text", text: part.text.slice(0, take) });
+        remaining -= take;
+      }
+      if (take < part.text.length) {
+        break;
+      }
+      continue;
+    }
+
+    const weight = partRevealWeight(part);
+    if (remaining < weight) {
       break;
     }
+    revealed.push(part);
+    remaining -= weight;
   }
 
-  return revealed.filter((value) => value.length > 0);
+  return revealed;
+}
+
+function buildPartialMessage(
+  message: SelectedAttemptView["sessionSlice"][number],
+  parts: SelectedAttemptView["sessionSlice"][number]["parts"],
+): SelectedAttemptView["sessionSlice"][number] {
+  return {
+    ...message,
+    textBlocks: parts.flatMap((part) => (part.kind === "text" ? [part.text] : [])),
+    toolUses: parts.flatMap((part) => (part.kind === "tool_use" ? [part.toolUse] : [])),
+    toolResults: parts.flatMap((part) => (part.kind === "tool_result" ? [part.toolResult] : [])),
+    hiddenPayloads: parts.flatMap((part) => (part.kind === "hidden_payload" ? [part.payload] : [])),
+    parts,
+  };
+}
+
+function partRevealWeight(
+  part: SelectedAttemptView["sessionSlice"][number]["parts"][number],
+): number {
+  switch (part.kind) {
+    case "text":
+      return Math.max(part.text.length, 1);
+    case "tool_use":
+      return Math.max(part.toolUse.summary.length, 16);
+    case "tool_result":
+      return Math.max(part.toolResult.preview.length, 16);
+    case "hidden_payload":
+      return Math.max(part.payload.label.length, 12);
+    default:
+      return 1;
+  }
 }
 
 function createRawEventSlice(

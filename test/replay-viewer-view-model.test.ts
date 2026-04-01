@@ -374,20 +374,19 @@ test("selectAttemptView falls back to the latest visible ACP session for non-ACP
   assert.match(selected.sessionSlice[0]?.textBlocks[0] ?? "", /Please inspect the PR diff/);
 });
 
-test("revealConversationSlice shows user turns instantly and only streams assistant text", () => {
+test("revealConversationSlice progressively reveals tool calls before the full assistant turn completes", () => {
   const step = baseStep("extract_intent", "acp", "ok");
   const bundle = makeBundle(step, {});
   const selected = selectAttemptView(bundle, 0);
 
   assert.ok(selected);
 
-  const partial = revealConversationSlice(selected.sessionSlice, 0.25);
+  const partial = revealConversationSlice(selected.sessionSlice, 0.8);
 
   assert.equal(partial.length, 2);
   assert.equal(partial[0]?.textBlocks[0], "Please inspect the PR diff.");
-  assert.match(partial[1]?.textBlocks[0] ?? "", /^I am ch/);
-  assert.equal(partial[1]?.toolUses.length, 0);
-  assert.equal(partial[1]?.toolResults.length, 0);
+  assert.match(partial[1]?.textBlocks[0] ?? "", /^I am checking/);
+  assert.equal(partial[1]?.toolUses.length, 1);
 
   const full = revealConversationSlice(selected.sessionSlice, 1);
   assert.equal(full.length, selected.sessionSlice.length);
