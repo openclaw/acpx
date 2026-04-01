@@ -33,15 +33,15 @@ The local viewer server always uses that fixed port. If another replay viewer is
 already running there, the command reuses it instead of bouncing to a random
 new port.
 
-The app ships with a bundled ACP-backed sample run so it is immediately usable,
-but the main path is the built-in **Recent runs** list sourced from:
+The main path is the built-in **Recent runs** list sourced from:
 
 ```text
 ~/.acpx/flows/runs/<run-id>/
 ```
 
-You can still use **Open local run bundle** as a fallback to inspect an arbitrary
-bundle outside that default directory.
+If the viewer starts before any runs exist, it stays empty and waits for the
+first real run instead of falling back to a demo bundle. New runs appear in the
+left sidebar automatically, and the first recent run opens on its own.
 
 When a recent run is still active, the sidebar and the selected run view update
 live over the viewer WebSocket transport. The viewer keeps the accumulated
@@ -59,6 +59,7 @@ on that graph rather than replacing it with an execution-only path.
 
 ## Included sample
 
-The bundled sample under `public/sample-run/` comes from a real run of
-`examples/flows/two-turn.flow.ts` against the repo's mock ACP agent, with the
-machine-specific paths sanitized for readability.
+The bundled sample under `public/sample-run/` still exists for development and
+test fixtures. It comes from a real run of `examples/flows/two-turn.flow.ts`
+against the repo's mock ACP agent, with the machine-specific paths sanitized
+for readability.

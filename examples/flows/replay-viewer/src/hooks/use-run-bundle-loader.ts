@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  createDirectoryBundleReader,
-  createRecentRunBundleReader,
-  createSampleBundleReader,
-  listRecentRuns,
-} from "../lib/bundle-reader.js";
+import { createRecentRunBundleReader, listRecentRuns } from "../lib/bundle-reader.js";
 import { applyReplayPatch, buildReplayWebSocketUrl } from "../lib/live-sync.js";
 import { loadRunBundle } from "../lib/load-bundle.js";
 import { readRequestedRunIdFromWindow, syncRequestedRunId } from "../lib/run-url.js";
@@ -20,20 +15,16 @@ import type {
 const REPLAY_PROTOCOL = "acpx.replay.v1";
 const RECONNECT_DELAY_MS = 1_000;
 
-export type RunBundleLoadingState = "bootstrap" | "runs" | "sample" | "local" | "run" | null;
+export type RunBundleLoadingState = "bootstrap" | "runs" | "run" | null;
 
 export type RunBundleLoaderDeps = {
-  createDirectoryBundleReader: typeof createDirectoryBundleReader;
   createRecentRunBundleReader: typeof createRecentRunBundleReader;
-  createSampleBundleReader: typeof createSampleBundleReader;
   listRecentRuns: typeof listRecentRuns;
   loadRunBundle: typeof loadRunBundle;
 };
 
 const DEFAULT_DEPS: RunBundleLoaderDeps = {
-  createDirectoryBundleReader,
   createRecentRunBundleReader,
-  createSampleBundleReader,
   listRecentRuns,
   loadRunBundle,
 };
@@ -55,6 +46,7 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
   const liveReadyRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
   const previousSubscribedRunIdRef = useRef<string | null>(null);
+  const loadingRunIdRef = useRef<string | null>(null);
 
   const setBundle = useCallback((next: LoadedRunBundle | null) => {
     bundleRef.current = next;
@@ -102,52 +94,32 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
     }
   }, [deps, sendLiveMessage, setRecentRuns]);
 
-  const loadSample = useCallback(async (): Promise<LoadedRunBundle | null> => {
-    setLoadingState("sample");
-    setErrorMessage(null);
-
-    try {
-      const loaded = await deps.loadRunBundle(deps.createSampleBundleReader());
-      setBundle(loaded);
-      setActiveRunId(null);
-      runVersionRef.current = 0;
-      syncRequestedRunId(null);
-      return loaded;
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
-      return null;
-    } finally {
-      setLoadingState(null);
-    }
-  }, [deps, setActiveRunId, setBundle]);
-
-  const loadLocalBundle = useCallback(async (): Promise<LoadedRunBundle | null> => {
-    setLoadingState("local");
-    setErrorMessage(null);
-
-    try {
-      const reader = await deps.createDirectoryBundleReader();
-      const loaded = await deps.loadRunBundle(reader);
-      setBundle(loaded);
-      setActiveRunId(null);
-      runVersionRef.current = 0;
-      syncRequestedRunId(null);
-      return loaded;
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        return null;
+  const resolvePreferredRecentRun = useCallback(
+    (runs: RunBundleSummary[]): RunBundleSummary | null => {
+      const requestedRunId = readRequestedRunIdFromWindow();
+      if (requestedRunId) {
+        const requestedRun = runs.find((candidate) => candidate.runId === requestedRunId) ?? null;
+        if (requestedRun) {
+          return requestedRun;
+        }
       }
-      setErrorMessage(error instanceof Error ? error.message : String(error));
-      return null;
-    } finally {
-      setLoadingState(null);
-    }
-  }, [deps, setActiveRunId, setBundle]);
+      return runs[0] ?? null;
+    },
+    [],
+  );
 
   const loadRecentRun = useCallback(
     async (run: RunBundleSummary): Promise<LoadedRunBundle | null> => {
+      if (activeRunIdRef.current === run.runId && bundleRef.current?.sourceType === "recent") {
+        return bundleRef.current;
+      }
+      if (loadingRunIdRef.current === run.runId) {
+        return null;
+      }
+
       setLoadingState("run");
       setErrorMessage(null);
+      loadingRunIdRef.current = run.runId;
 
       try {
         const loaded = await deps.loadRunBundle(deps.createRecentRunBundleReader(run));
@@ -159,6 +131,9 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
         setErrorMessage(error instanceof Error ? error.message : String(error));
         return null;
       } finally {
+        if (loadingRunIdRef.current === run.runId) {
+          loadingRunIdRef.current = null;
+        }
         setLoadingState(null);
       }
     },
@@ -169,17 +144,51 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
     setLoadingState("bootstrap");
     setErrorMessage(null);
 
-    const runs = await refreshRuns();
-    const requestedRunId = readRequestedRunIdFromWindow();
-    if (runs && runs.length > 0) {
-      const requestedRun = requestedRunId
-        ? (runs.find((candidate) => candidate.runId === requestedRunId) ?? null)
-        : null;
-      await loadRecentRun(requestedRun ?? runs[0]);
+    try {
+      const runs = (await deps.listRecentRuns()) ?? [];
+      recentRunsStateRef.current = {
+        schema: "acpx.viewer-runs.v1",
+        runs,
+      };
+      recentRunsVersionRef.current = Math.max(recentRunsVersionRef.current, 1);
+      setRecentRuns(runs);
+
+      const preferredRun = resolvePreferredRecentRun(runs);
+      if (preferredRun) {
+        await loadRecentRun(preferredRun);
+        return;
+      }
+
+      setBundle(null);
+      setActiveRunId(null);
+      runVersionRef.current = 0;
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoadingState(null);
+    }
+  }, [deps, loadRecentRun, resolvePreferredRecentRun, setActiveRunId, setBundle, setRecentRuns]);
+
+  useEffect(() => {
+    if (recentRuns.length === 0) {
       return;
     }
-    await loadSample();
-  }, [loadRecentRun, loadSample, refreshRuns]);
+
+    const activeRecentRunStillPresent =
+      activeRunIdRef.current != null &&
+      bundleRef.current?.sourceType === "recent" &&
+      recentRuns.some((candidate) => candidate.runId === activeRunIdRef.current);
+    if (activeRecentRunStillPresent) {
+      return;
+    }
+
+    const preferredRun = resolvePreferredRecentRun(recentRuns);
+    if (!preferredRun || loadingRunIdRef.current === preferredRun.runId) {
+      return;
+    }
+
+    void loadRecentRun(preferredRun);
+  }, [loadRecentRun, recentRuns, resolvePreferredRecentRun]);
 
   useEffect(() => {
     const currentRunId = activeRunIdRef.current;
@@ -346,8 +355,6 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
     errorMessage,
     bootstrap,
     refreshRuns,
-    loadSample,
-    loadLocalBundle,
     loadRecentRun,
   };
 }

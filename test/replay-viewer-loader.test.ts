@@ -33,9 +33,7 @@ test("useRunBundleLoader bootstrap stays stable after recent-runs state updates"
   let renderedRunId: string | null = null;
 
   const deps: RunBundleLoaderDeps = {
-    createDirectoryBundleReader: async () => ({ source: "local" }) as never,
     createRecentRunBundleReader: () => ({ source: "recent" }) as never,
-    createSampleBundleReader: () => ({ source: "sample" }) as never,
     listRecentRuns: async () => {
       listRecentRunsCalls += 1;
       return [run];
@@ -71,6 +69,122 @@ test("useRunBundleLoader bootstrap stays stable after recent-runs state updates"
   assert.equal(listRecentRunsCalls, 1);
   assert.equal(loadRunBundleCalls, 1);
   assert.equal(renderedRuns, 1);
+  assert.equal(renderedRunId, run.runId);
+
+  await act(async () => {
+    renderer?.unmount();
+    await flushReactWork();
+  });
+});
+
+test("useRunBundleLoader waits for recent runs instead of loading the bundled sample", async () => {
+  let loadRunBundleCalls = 0;
+  let renderedRuns = 0;
+  let renderedRunId: string | null = "uninitialized";
+
+  const deps: RunBundleLoaderDeps = {
+    createRecentRunBundleReader: () => ({ source: "recent" }) as never,
+    listRecentRuns: async () => [],
+    loadRunBundle: async () => {
+      loadRunBundleCalls += 1;
+      throw new Error("loadRunBundle should not run when there are no recent runs");
+    },
+  };
+
+  function Harness() {
+    const { bootstrap, recentRuns, bundle: loadedBundle } = useRunBundleLoader(deps);
+
+    useEffect(() => {
+      void bootstrap();
+    }, [bootstrap]);
+
+    renderedRuns = recentRuns.length;
+    renderedRunId = loadedBundle?.run.runId ?? null;
+    return createElement("div");
+  }
+
+  let renderer: ReturnType<typeof create> | null = null;
+  await act(async () => {
+    renderer = create(createElement(Harness));
+    await flushReactWork();
+  });
+
+  await act(async () => {
+    await flushReactWork();
+  });
+
+  assert.equal(loadRunBundleCalls, 0);
+  assert.equal(renderedRuns, 0);
+  assert.equal(renderedRunId, null);
+
+  await act(async () => {
+    renderer?.unmount();
+    await flushReactWork();
+  });
+});
+
+test("useRunBundleLoader auto-loads the first recent run when the list becomes non-empty", async () => {
+  const run: RunBundleSummary = {
+    runId: "2026-03-31T210000000Z-pr-triage-live",
+    flowName: "pr-triage",
+    runTitle: "PR-triage-acpx-167",
+    status: "running",
+    startedAt: "2026-03-31T21:00:00.000Z",
+    updatedAt: "2026-03-31T21:00:01.000Z",
+    currentNode: "extract_intent",
+    path: "/tmp/acpx-live-run",
+  };
+  const bundle = makeLoadedRunBundle(run);
+  let currentRuns: RunBundleSummary[] = [];
+  let refreshRunsRef: (() => Promise<RunBundleSummary[] | null>) | null = null;
+  let loadRunBundleCalls = 0;
+  let renderedRunId: string | null = "uninitialized";
+
+  const deps: RunBundleLoaderDeps = {
+    createRecentRunBundleReader: () => ({ source: "recent" }) as never,
+    listRecentRuns: async () => currentRuns,
+    loadRunBundle: async () => {
+      loadRunBundleCalls += 1;
+      return bundle;
+    },
+  };
+
+  function Harness() {
+    const { bootstrap, refreshRuns, bundle: loadedBundle } = useRunBundleLoader(deps);
+
+    useEffect(() => {
+      refreshRunsRef = refreshRuns;
+      void bootstrap();
+    }, [bootstrap, refreshRuns]);
+
+    renderedRunId = loadedBundle?.run.runId ?? null;
+    return createElement("div");
+  }
+
+  let renderer: ReturnType<typeof create> | null = null;
+  await act(async () => {
+    renderer = create(createElement(Harness));
+    await flushReactWork();
+  });
+
+  await act(async () => {
+    await flushReactWork();
+  });
+
+  assert.equal(loadRunBundleCalls, 0);
+  assert.equal(renderedRunId, null);
+
+  currentRuns = [run];
+  await act(async () => {
+    await refreshRunsRef?.();
+    await flushReactWork();
+  });
+
+  await act(async () => {
+    await flushReactWork();
+  });
+
+  assert.equal(loadRunBundleCalls, 1);
   assert.equal(renderedRunId, run.runId);
 
   await act(async () => {

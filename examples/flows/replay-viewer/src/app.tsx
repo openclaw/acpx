@@ -9,7 +9,6 @@ import { REPLAY_FIT_VIEW_OPTIONS, useGraphCamera } from "./hooks/use-graph-camer
 import { useGraphLayout } from "./hooks/use-graph-layout";
 import { PLAYBACK_SPEED_OPTIONS, usePlaybackController } from "./hooks/use-playback-controller";
 import { useRunBundleLoader } from "./hooks/use-run-bundle-loader";
-import { isDirectoryPickerSupported } from "./lib/bundle-reader";
 import {
   buildGraph,
   humanizeIdentifier,
@@ -28,18 +27,8 @@ const edgeTypes = {
 };
 
 export function App() {
-  const {
-    bundle,
-    recentRuns,
-    activeRunId,
-    loadingState,
-    errorMessage,
-    bootstrap,
-    refreshRuns,
-    loadSample,
-    loadLocalBundle,
-    loadRecentRun,
-  } = useRunBundleLoader();
+  const { bundle, recentRuns, activeRunId, loadingState, errorMessage, bootstrap, loadRecentRun } =
+    useRunBundleLoader();
   const playback = usePlaybackController(bundle);
   const graphLayout = useGraphLayout(bundle);
   const [activeTab, setActiveTab] = useState<"attempt" | "session" | "events">("session");
@@ -79,6 +68,7 @@ export function App() {
     playback.playbackPreview && selectedAttempt?.step.attemptId === currentStep?.attemptId
       ? playback.playbackPreview.stepProgress
       : null;
+  const waitingForRecentRuns = loadingState === "bootstrap" || loadingState === "runs";
   const currentNodeId = currentStep?.nodeId ?? graph.nodes[0]?.id ?? null;
   const currentNodePosition = useMemo(() => {
     if (!currentNodeId) {
@@ -143,21 +133,11 @@ export function App() {
         activeRunId={activeRunId ?? undefined}
         collapsed={runsCollapsed}
         loading={loadingState === "runs" || loadingState === "bootstrap" || loadingState === "run"}
-        directoryPickerSupported={isDirectoryPickerSupported()}
         onToggleCollapsed={() => {
           setRunsCollapsed((current) => !current);
         }}
-        onRefresh={() => {
-          void refreshRuns();
-        }}
-        onLoadSample={() => {
-          void loadSample();
-        }}
         onLoadRun={(run) => {
           void loadRecentRun(run);
-        }}
-        onOpenLocal={() => {
-          void loadLocalBundle();
         }}
       />
 
@@ -242,10 +222,11 @@ export function App() {
               </section>
             ) : (
               <div className="empty-state">
-                <h2>Load a run bundle</h2>
+                <h2>{waitingForRecentRuns ? "Watching for recent runs…" : "No recent runs yet"}</h2>
                 <p>
-                  Start with the bundled sample, or open any saved run directory from
-                  `~/.acpx/flows/runs/`.
+                  {waitingForRecentRuns
+                    ? "The viewer is connected. Start a flow and it will open here automatically."
+                    : "Start a flow. The left sidebar will pick it up and open it automatically."}
                 </p>
               </div>
             )}
