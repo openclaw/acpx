@@ -173,6 +173,9 @@ code {
 }
 
 .run-list-item {
+  --run-status-color: var(--muted);
+  --run-status-border: rgba(133, 146, 166, 0.24);
+  --run-status-tint: rgba(133, 146, 166, 0.12);
   min-height: 34px;
   display: flex;
   align-items: center;
@@ -192,13 +195,39 @@ code {
 }
 
 .run-list-item:hover {
-  border-color: rgba(62, 166, 198, 0.24);
+  border-color: var(--run-status-border);
   background: var(--panel-hover);
 }
 
 .run-list-item--active {
-  border-color: rgba(62, 166, 198, 0.44);
-  background: var(--panel-selected);
+  border-color: var(--run-status-border);
+  background: var(--run-status-tint);
+}
+
+.run-list-item--status-completed {
+  --run-status-color: var(--success);
+  --run-status-border: rgba(88, 187, 129, 0.4);
+  --run-status-tint: rgba(88, 187, 129, 0.14);
+}
+
+.run-list-item--status-running,
+.run-list-item--status-waiting {
+  --run-status-color: var(--accent);
+  --run-status-border: rgba(62, 166, 198, 0.4);
+  --run-status-tint: rgba(62, 166, 198, 0.14);
+}
+
+.run-list-item--status-failed,
+.run-list-item--status-timed_out {
+  --run-status-color: var(--danger);
+  --run-status-border: rgba(216, 107, 107, 0.42);
+  --run-status-tint: rgba(216, 107, 107, 0.14);
+}
+
+.run-list-item--status-cancelled {
+  --run-status-color: var(--warning);
+  --run-status-border: rgba(212, 155, 69, 0.42);
+  --run-status-tint: rgba(212, 155, 69, 0.14);
 }
 
 .run-list-item__line {
@@ -233,24 +262,7 @@ code {
   height: 8px;
   flex: 0 0 auto;
   border-radius: 999px;
-}
-
-.run-list-item__status-dot--completed {
-  background: var(--success);
-}
-
-.run-list-item__status-dot--running,
-.run-list-item__status-dot--waiting {
-  background: var(--accent);
-}
-
-.run-list-item__status-dot--failed,
-.run-list-item__status-dot--timed_out {
-  background: var(--danger);
-}
-
-.run-list-item__status-dot--cancelled {
-  background: var(--warning);
+  background: var(--run-status-color);
 }
 
 .run-browser--collapsed .run-browser__header {

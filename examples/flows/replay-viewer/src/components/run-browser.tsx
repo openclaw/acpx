@@ -43,7 +43,7 @@ export function RunBrowser({
               <button
                 key={run.runId}
                 type="button"
-                className={`run-list-item${active ? " run-list-item--active" : ""}`}
+                className={`run-list-item run-list-item--status-${run.status}${active ? " run-list-item--active" : ""}`}
                 onClick={() => onLoadRun(run)}
                 aria-label={`${displayName} ${run.runId} ${run.status}`}
                 title={`${displayName} • ${run.runId}`}
