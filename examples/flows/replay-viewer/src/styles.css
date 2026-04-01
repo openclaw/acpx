@@ -1199,11 +1199,40 @@ code {
   padding-left: 10px;
 }
 
+.conversation__tool-event--call {
+  border-left-color: rgba(62, 166, 198, 0.32);
+}
+
+.conversation__tool-event--completed {
+  border-left-color: rgba(88, 187, 129, 0.34);
+}
+
+.conversation__tool-event--running {
+  border-left-color: rgba(62, 166, 198, 0.34);
+}
+
+.conversation__tool-event--error {
+  border-left-color: rgba(216, 107, 107, 0.38);
+}
+
 .conversation__tool-event summary {
   position: relative;
   display: grid;
   gap: 4px;
-  padding: 6px 18px 6px 0;
+  padding: 6px 20px 6px 4px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.conversation__tool-event summary:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.conversation__tool-event summary:active {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .conversation__tool-event summary::after {
@@ -1219,33 +1248,6 @@ code {
 
 .conversation__tool-event[open] summary::after {
   transform: rotate(180deg);
-}
-
-.conversation__tool-kicker {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.conversation__tool-label {
-  color: var(--ink-faint);
-  font-size: 0.66rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.conversation__tool-label--completed {
-  color: #9fd7b5;
-}
-
-.conversation__tool-label--running {
-  color: #8fd1e4;
-}
-
-.conversation__tool-label--error {
-  color: #f1aaaa;
 }
 
 .conversation__tool-title {
@@ -1280,38 +1282,10 @@ code {
 
 .conversation__tool-body {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   margin-top: 8px;
   padding: 10px 0 0;
   border-top: 1px solid rgba(133, 146, 166, 0.12);
-}
-
-.conversation__tool-meta-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 8px;
-  margin: 0;
-}
-
-.conversation__tool-meta-list div {
-  display: grid;
-  gap: 2px;
-}
-
-.conversation__tool-meta-list dt {
-  color: var(--ink-faint);
-  font-size: 0.64rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.conversation__tool-meta-list dd {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 0.72rem;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
 }
 
 .conversation__tool-section {

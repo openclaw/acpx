@@ -46,7 +46,6 @@ export function ConversationMessage({
                 key={toolUse.id}
                 kind="call"
                 title={toolUse.name}
-                meta={toolUse.id}
                 preview={toolUse.summary}
                 raw={toolUse.raw}
               />
@@ -60,7 +59,6 @@ export function ConversationMessage({
                 key={`${toolResult.id}-result`}
                 kind="result"
                 title={toolResult.toolName}
-                meta={toolResult.id}
                 status={toolResult.status}
                 preview={toolResult.preview}
                 raw={toolResult.raw}
@@ -91,7 +89,6 @@ export function ConversationMessage({
 function ToolEventCard({
   kind,
   title,
-  meta,
   status,
   preview,
   raw,
@@ -99,30 +96,18 @@ function ToolEventCard({
 }: {
   kind: "call" | "result";
   title: string;
-  meta: string;
   status?: string;
   preview: string;
   raw: unknown;
   isError?: boolean;
 }) {
   const statusTone = resolveToolStatusTone(status, isError);
-  const label =
-    kind === "call"
-      ? "Tool call"
-      : status
-        ? `Tool result · ${formatToolStatus(status)}`
-        : "Tool result";
 
   return (
     <details
-      className={`conversation__tool-event conversation__tool-event--${kind}${isError ? " conversation__tool-event--error" : ""}`}
+      className={`conversation__tool-event conversation__tool-event--${kind} conversation__tool-event--${statusTone}${isError ? " conversation__tool-event--error" : ""}`}
     >
       <summary className="conversation__tool-summary">
-        <div className="conversation__tool-kicker">
-          <span className={`conversation__tool-label conversation__tool-label--${statusTone}`}>
-            {label}
-          </span>
-        </div>
         <div className="conversation__tool-title">{title}</div>
         <div
           className={`conversation__tool-preview${kind === "call" ? " conversation__tool-preview--call" : ""}`}
@@ -131,32 +116,6 @@ function ToolEventCard({
         </div>
       </summary>
       <div className="conversation__tool-body">
-        <dl className="conversation__tool-meta-list">
-          <div>
-            <dt>Kind</dt>
-            <dd>{kind === "call" ? "Tool call" : "Tool result"}</dd>
-          </div>
-          {status ? (
-            <div>
-              <dt>Status</dt>
-              <dd>{formatToolStatus(status)}</dd>
-            </div>
-          ) : null}
-          <div>
-            <dt>Id</dt>
-            <dd>{meta}</dd>
-          </div>
-        </dl>
-        <section className="conversation__tool-section">
-          <div className="conversation__tool-section-label">
-            {kind === "call" ? "Invocation" : "Output preview"}
-          </div>
-          <div
-            className={`conversation__tool-section-copy${kind === "call" ? " conversation__tool-section-copy--mono" : ""}`}
-          >
-            {preview}
-          </div>
-        </section>
         <section className="conversation__tool-section">
           <div className="conversation__tool-section-label">Raw payload</div>
           <CodeBlock>{formatJson(raw)}</CodeBlock>
