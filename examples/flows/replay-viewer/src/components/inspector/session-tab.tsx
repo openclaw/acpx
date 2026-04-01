@@ -1,9 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useRef, type RefObject } from "react";
+import { useStickyAutoFollow } from "../../hooks/use-sticky-auto-follow";
 import { resolveSessionRenderState } from "../../lib/session-render-state";
 import type { SelectedAttemptView, SessionListItemView } from "../../lib/view-model";
 import { ConversationMessage } from "./conversation-message";
 
 export function SessionTab({
+  scrollContainerRef,
   selectedAttempt,
   sessionItems,
   activeSessionId,
@@ -11,6 +13,7 @@ export function SessionTab({
   liveStreaming,
   onSessionChange,
 }: {
+  scrollContainerRef: RefObject<HTMLDivElement | null>;
   selectedAttempt: SelectedAttemptView;
   sessionItems: SessionListItemView[];
   activeSessionId: string | null;
@@ -30,12 +33,13 @@ export function SessionTab({
       liveStreaming,
     });
 
-  useEffect(() => {
-    if (!activeSession || !autoFollowConversation) {
-      return;
-    }
-    sessionEndRef.current?.scrollIntoView({ block: "end" });
-  }, [activeSession, autoFollowConversation, renderedSessionSlice]);
+  useStickyAutoFollow({
+    scrollContainerRef,
+    endRef: sessionEndRef,
+    enabled: Boolean(activeSession) && autoFollowConversation,
+    resetKey: activeSession?.id ?? "none",
+    contentDependency: renderedSessionSlice,
+  });
 
   if (!activeSession) {
     return (
