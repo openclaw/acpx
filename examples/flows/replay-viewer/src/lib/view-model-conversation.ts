@@ -146,6 +146,7 @@ export function revealConversationSlice(
         toolUses: [],
         toolResults: [],
         hiddenPayloads: [],
+        parts: partialTextBlocks.map((text) => ({ kind: "text" as const, text })),
       });
     }
     break;
@@ -231,6 +232,7 @@ function createSessionSlice(
       toolUses: contentView.toolUses,
       toolResults: contentView.toolResults,
       hiddenPayloads: contentView.hiddenPayloads,
+      parts: contentView.parts,
     };
   });
 }
@@ -298,14 +300,16 @@ function describeMessage(
   role: "user" | "agent" | "unknown",
 ): Pick<
   SelectedAttemptView["sessionSlice"][number],
-  "textBlocks" | "toolUses" | "toolResults" | "hiddenPayloads"
+  "textBlocks" | "toolUses" | "toolResults" | "hiddenPayloads" | "parts"
 > {
   if (!message || typeof message !== "object") {
+    const text = String(message ?? "");
     return {
-      textBlocks: [String(message ?? "")].filter(Boolean),
+      textBlocks: [text].filter(Boolean),
       toolUses: [],
       toolResults: [],
       hiddenPayloads: [],
+      parts: text ? [{ kind: "text", text }] : [],
     };
   }
 
@@ -331,6 +335,7 @@ function describeMessage(
     toolUses: [],
     toolResults: [],
     hiddenPayloads: [{ label: "Raw message", raw: message }],
+    parts: [{ kind: "hidden_payload", payload: { label: "Raw message", raw: message } }],
   };
 }
 
@@ -339,11 +344,12 @@ function describeStructuredMessage(
   toolResults: unknown,
 ): Pick<
   SelectedAttemptView["sessionSlice"][number],
-  "textBlocks" | "toolUses" | "toolResults" | "hiddenPayloads"
+  "textBlocks" | "toolUses" | "toolResults" | "hiddenPayloads" | "parts"
 > {
   const textBlocks: string[] = [];
   const toolUses: SelectedAttemptView["sessionSlice"][number]["toolUses"] = [];
   const hiddenPayloads: SelectedAttemptView["sessionSlice"][number]["hiddenPayloads"] = [];
+  const contentParts: SelectedAttemptView["sessionSlice"][number]["parts"] = [];
 
   if (Array.isArray(content)) {
     for (const [index, part] of content.entries()) {
@@ -351,6 +357,7 @@ function describeStructuredMessage(
         const text = String(part ?? "").trim();
         if (text) {
           textBlocks.push(text);
+          contentParts.push({ kind: "text", text });
         }
         continue;
       }
@@ -359,6 +366,7 @@ function describeStructuredMessage(
         const text = (part as { Text: string }).Text.trim();
         if (text) {
           textBlocks.push(text);
+          contentParts.push({ kind: "text", text });
         }
         continue;
       }
@@ -366,33 +374,43 @@ function describeStructuredMessage(
       if ("ToolUse" in part) {
         const toolUse = (part as { ToolUse?: Record<string, unknown> }).ToolUse;
         if (toolUse && typeof toolUse === "object") {
-          toolUses.push({
+          const toolUseView = {
             id: String(toolUse.id ?? `tool-use-${index}`),
             name: typeof toolUse.name === "string" ? toolUse.name : "Tool call",
             summary: summarizeToolUse(toolUse),
             raw: toolUse,
-          });
+          };
+          toolUses.push(toolUseView);
+          contentParts.push({ kind: "tool_use", toolUse: toolUseView });
           continue;
         }
       }
 
-      hiddenPayloads.push({
+      const payload = {
         label: `Structured content ${index + 1}`,
         raw: part,
-      });
+      };
+      hiddenPayloads.push(payload);
+      contentParts.push({ kind: "hidden_payload", payload });
     }
   } else if (content != null) {
-    hiddenPayloads.push({
+    const payload = {
       label: "Structured content",
       raw: content,
-    });
+    };
+    hiddenPayloads.push(payload);
+    contentParts.push({ kind: "hidden_payload", payload });
   }
+
+  const resolvedToolResults = describeToolResults(toolResults);
+  const orderedParts = buildOrderedMessageParts(contentParts, resolvedToolResults);
 
   return {
     textBlocks,
     toolUses,
-    toolResults: describeToolResults(toolResults),
+    toolResults: resolvedToolResults,
     hiddenPayloads,
+    parts: orderedParts,
   };
 }
 
@@ -432,6 +450,63 @@ function describeToolResults(
       raw: result,
     };
   });
+}
+
+function buildOrderedMessageParts(
+  contentParts: SelectedAttemptView["sessionSlice"][number]["parts"],
+  toolResults: SelectedAttemptView["sessionSlice"][number]["toolResults"],
+): SelectedAttemptView["sessionSlice"][number]["parts"] {
+  if (toolResults.length === 0) {
+    return contentParts;
+  }
+
+  const resultsByToolUseId = new Map<
+    string,
+    SelectedAttemptView["sessionSlice"][number]["toolResults"]
+  >();
+  const unmatched: SelectedAttemptView["sessionSlice"][number]["toolResults"] = [];
+
+  for (const toolResult of toolResults) {
+    const toolUseId =
+      typeof toolResult.raw === "object" &&
+      toolResult.raw !== null &&
+      "tool_use_id" in toolResult.raw &&
+      typeof (toolResult.raw as { tool_use_id?: unknown }).tool_use_id === "string"
+        ? (toolResult.raw as { tool_use_id: string }).tool_use_id
+        : toolResult.id;
+
+    if (!toolUseId) {
+      unmatched.push(toolResult);
+      continue;
+    }
+
+    const bucket = resultsByToolUseId.get(toolUseId) ?? [];
+    bucket.push(toolResult);
+    resultsByToolUseId.set(toolUseId, bucket);
+  }
+
+  const ordered: SelectedAttemptView["sessionSlice"][number]["parts"] = [];
+  for (const part of contentParts) {
+    ordered.push(part);
+    if (part.kind !== "tool_use") {
+      continue;
+    }
+    const matchingResults = resultsByToolUseId.get(part.toolUse.id) ?? [];
+    for (const toolResult of matchingResults) {
+      ordered.push({ kind: "tool_result", toolResult });
+    }
+    resultsByToolUseId.delete(part.toolUse.id);
+  }
+
+  for (const remaining of resultsByToolUseId.values()) {
+    unmatched.push(...remaining);
+  }
+
+  for (const toolResult of unmatched) {
+    ordered.push({ kind: "tool_result", toolResult });
+  }
+
+  return ordered;
 }
 
 function summarizeToolUse(toolUse: Record<string, unknown>): string {

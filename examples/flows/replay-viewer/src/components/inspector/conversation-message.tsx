@@ -29,20 +29,19 @@ export function ConversationMessage({
     <article
       className={`conversation__message conversation__message--${message.role}${entered ? " conversation__message--entered" : ""}`}
     >
-      {message.textBlocks.length > 0 ? (
-        <div className="conversation__text">
-          {message.textBlocks.map((text, index) => (
-            <p key={`${message.index}-text-${index}`}>{text}</p>
-          ))}
-        </div>
-      ) : (
-        <div className="conversation__empty-text">No visible text content.</div>
-      )}
+      {message.parts.length > 0 ? (
+        message.parts.map((part, index) => {
+          if (part.kind === "text") {
+            return (
+              <div key={`${message.index}-text-${index}`} className="conversation__text">
+                <p>{part.text}</p>
+              </div>
+            );
+          }
 
-      {message.toolUses.length > 0 ? (
-        <DisclosureSection title={`Tool calls (${message.toolUses.length})`} compact>
-          <div className="conversation__tool-list">
-            {message.toolUses.map((toolUse) => (
+          if (part.kind === "tool_use") {
+            const toolUse = part.toolUse;
+            return (
               <article key={toolUse.id} className="conversation__tool-card">
                 <div className="conversation__tool-head">
                   <strong>{toolUse.name}</strong>
@@ -54,16 +53,13 @@ export function ConversationMessage({
                   <CodeBlock>{formatJson(toolUse.raw)}</CodeBlock>
                 </details>
               </article>
-            ))}
-          </div>
-        </DisclosureSection>
-      ) : null}
+            );
+          }
 
-      {message.toolResults.length > 0 ? (
-        <DisclosureSection title={`Tool results (${message.toolResults.length})`} compact>
-          <div className="conversation__tool-list">
-            {message.toolResults.map((toolResult) => (
-              <article key={toolResult.id} className="conversation__tool-card">
+          if (part.kind === "tool_result") {
+            const toolResult = part.toolResult;
+            return (
+              <article key={`${toolResult.id}-result`} className="conversation__tool-card">
                 <div className="conversation__tool-head">
                   <strong>{toolResult.toolName}</strong>
                   <span>{toolResult.status}</span>
@@ -74,31 +70,24 @@ export function ConversationMessage({
                   <CodeBlock>{formatJson(toolResult.raw)}</CodeBlock>
                 </details>
               </article>
-            ))}
-          </div>
-        </DisclosureSection>
-      ) : null}
+            );
+          }
 
-      {message.hiddenPayloads.length > 0 ? (
-        <DisclosureSection
-          title={`Hidden structured data (${message.hiddenPayloads.length})`}
-          compact
-        >
-          <div className="conversation__tool-list">
-            {message.hiddenPayloads.map((payload, index) => (
-              <article
-                key={`${message.index}-payload-${index}`}
-                className="conversation__tool-card"
-              >
-                <div className="conversation__tool-head">
-                  <strong>{payload.label}</strong>
-                </div>
-                <CodeBlock>{formatJson(payload.raw)}</CodeBlock>
+          return (
+            <DisclosureSection
+              key={`${message.index}-payload-${index}`}
+              title={part.payload.label}
+              compact
+            >
+              <article className="conversation__tool-card">
+                <CodeBlock>{formatJson(part.payload.raw)}</CodeBlock>
               </article>
-            ))}
-          </div>
-        </DisclosureSection>
-      ) : null}
+            </DisclosureSection>
+          );
+        })
+      ) : (
+        <div className="conversation__empty-text">No visible text content.</div>
+      )}
     </article>
   );
 }
