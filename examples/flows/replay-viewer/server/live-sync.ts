@@ -1,11 +1,10 @@
 import type http from "node:http";
 import type net from "node:net";
 import type { Duplex } from "node:stream";
-import fastJsonPatch from "fast-json-patch";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
+import { createReplayPatch } from "../src/lib/json-patch-plus.js";
 import type {
   ReplayClientMessage,
-  ReplayJsonPatchOperation,
   ReplayProtocol,
   ReplayServerMessage,
   ViewerRunLiveState,
@@ -14,8 +13,7 @@ import type {
 import type { ViewerRunSource } from "./live-source.js";
 
 const PROTOCOL: ReplayProtocol = "acpx.replay.v1";
-const DEFAULT_POLL_INTERVAL_MS = 1_000;
-const { compare } = fastJsonPatch;
+const DEFAULT_POLL_INTERVAL_MS = 50;
 
 type ReplayLiveSyncOptions = {
   source: ViewerRunSource;
@@ -218,7 +216,7 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
       if (hasRunsSubscribers()) {
         const resource = await ensureRunsState();
         const nextState = await source.getRunsState();
-        const ops = toPatch(compare(resource.state, nextState));
+        const ops = createReplayPatch(resource.state, nextState);
         if (ops.length > 0) {
           const fromVersion = runsResource.version;
           runsResource.version += 1;
@@ -236,7 +234,7 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
         try {
           const resource = await ensureRunState(runId);
           const nextState = await source.getRunState(runId);
-          const ops = toPatch(compare(resource.state, nextState));
+          const ops = createReplayPatch(resource.state, nextState);
           if (ops.length === 0) {
             continue;
           }
@@ -368,28 +366,6 @@ function decodeMessage(data: RawData): string {
     return Buffer.concat(data).toString("utf8");
   }
   return data.toString("utf8");
-}
-
-function toPatch(
-  ops: Array<{ op: string; path: string; value?: unknown }>,
-): ReplayJsonPatchOperation[] {
-  return ops
-    .filter((op): op is ReplayJsonPatchOperation => {
-      return op.op === "add" || op.op === "replace" || op.op === "remove";
-    })
-    .map((op) => {
-      if (op.op === "remove") {
-        return {
-          op: op.op,
-          path: op.path,
-        };
-      }
-      return {
-        op: op.op,
-        path: op.path,
-        value: op.value,
-      };
-    });
 }
 
 function sendMessage(socket: WebSocket, message: ReplayServerMessage): void {

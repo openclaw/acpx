@@ -1,4 +1,4 @@
-import type { AnyMessage } from "@agentclientprotocol/sdk";
+import type { AnyMessage, SessionNotification } from "@agentclientprotocol/sdk";
 
 type JsonRpcId = string | number | null;
 
@@ -84,6 +84,34 @@ export function isSessionUpdateNotification(message: AnyMessage): boolean {
   return (
     isJsonRpcNotification(message) && (message as { method?: unknown }).method === "session/update"
   );
+}
+
+export function extractSessionUpdateNotification(
+  message: AnyMessage,
+): SessionNotification | undefined {
+  if (!isSessionUpdateNotification(message)) {
+    return undefined;
+  }
+
+  const params = asRecord((message as { params?: unknown }).params);
+  if (!params) {
+    return undefined;
+  }
+
+  const sessionId = typeof params.sessionId === "string" ? params.sessionId : null;
+  if (!sessionId) {
+    return undefined;
+  }
+
+  const update = asRecord(params.update);
+  if (!update || typeof update.sessionUpdate !== "string") {
+    return undefined;
+  }
+
+  return {
+    sessionId,
+    update: update as SessionNotification["update"],
+  };
 }
 
 export function parsePromptStopReason(message: AnyMessage): string | undefined {

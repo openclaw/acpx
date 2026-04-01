@@ -1,7 +1,4 @@
-import fastJsonPatch from "fast-json-patch";
-import type { ReplayJsonPatchOperation } from "../types";
-
-const { applyPatch } = fastJsonPatch;
+import { applyReplayPatch } from "./json-patch-plus.js";
 
 export function buildReplayWebSocketUrl(currentUrl: string = window.location.href): string {
   const url = new URL(currentUrl);
@@ -12,9 +9,4 @@ export function buildReplayWebSocketUrl(currentUrl: string = window.location.hre
   return url.toString();
 }
 
-export function applyReplayPatch<TState extends object>(
-  state: TState,
-  ops: ReplayJsonPatchOperation[],
-): TState {
-  return applyPatch(structuredClone(state), ops).newDocument as TState;
-}
+export { applyReplayPatch };

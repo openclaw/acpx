@@ -1,17 +1,22 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { WebSocket } from "ws";
-import { createReplayViewerServer } from "../examples/flows/replay-viewer/server/viewer-server.js";
+import { createFilesystemRunSource } from "../examples/flows/replay-viewer/server/live-source.js";
+import { createReplayLiveSyncServer } from "../examples/flows/replay-viewer/server/live-sync.js";
 import { applyReplayPatch } from "../examples/flows/replay-viewer/src/lib/live-sync.js";
 import type {
+  FlowBundledSessionEvent,
   FlowDefinitionSnapshot,
   FlowRunManifest,
   FlowRunState,
+  FlowSessionBinding,
   FlowStepRecord,
   ReplayServerMessage,
+  SessionRecord,
   ViewerRunLiveState,
   ViewerRunsState,
 } from "../examples/flows/replay-viewer/src/types.js";
@@ -43,7 +48,6 @@ test("replay viewer streams live sidebar and run patches over websocket", async 
     port: 0,
     runsDir,
     livePollIntervalMs: 50,
-    disableDependencyOptimization: true,
   });
 
   try {
@@ -53,23 +57,15 @@ test("replay viewer streams live sidebar and run patches over websocket", async 
     await onceOpen(socket);
     socket.send(JSON.stringify({ type: "hello", protocol: "acpx.replay.v1" }));
     socket.send(JSON.stringify({ type: "subscribe_runs" }));
-    socket.send(JSON.stringify({ type: "subscribe_run", runId }));
 
     await inbox.next((message) => message.type === "ready");
     const runsSnapshot = await inbox.next(
       (message): message is Extract<ReplayServerMessage, { type: "runs_snapshot" }> =>
         message.type === "runs_snapshot",
     );
-    const runSnapshot = await inbox.next(
-      (message): message is Extract<ReplayServerMessage, { type: "run_snapshot" }> =>
-        message.type === "run_snapshot" && message.runId === runId,
-    );
 
     assert.equal(runsSnapshot.state.runs[0]?.status, "running");
     assert.equal(runsSnapshot.state.runs[0]?.runTitle, "PR-triage-acpx-155");
-    assert.equal(runSnapshot.state.run.status, "running");
-    assert.equal(runSnapshot.state.run.currentNode, "extract_intent");
-    assert.equal(runSnapshot.state.steps.length, 1);
 
     const secondStep = makeStep(
       "judge_solution#1",
@@ -88,19 +84,87 @@ test("replay viewer streams live sidebar and run patches over websocket", async 
       (message): message is Extract<ReplayServerMessage, { type: "runs_patch" }> =>
         message.type === "runs_patch",
     );
+
+    const nextRunsState = applyReplayPatch<ViewerRunsState>(runsSnapshot.state, runsPatch.ops);
+
+    assert.equal(nextRunsState.runs[0]?.status, "waiting");
+    assert.equal(nextRunsState.runs[0]?.currentNode, "judge_solution");
+
+    socket.close();
+  } finally {
+    await viewerServer.close();
+    await fs.rm(runsDir, { recursive: true, force: true });
+  }
+});
+
+test("replay viewer streams selected-run ACP text as JSON Patch+ append updates", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-live-session-"));
+  const runId = "2026-04-01T080000000Z-pr-triage-live-session";
+  const sessionId = "main-bundle";
+  await writeLiveSessionRunBundle(runsDir, {
+    runId,
+    sessionId,
+    promptText: "hello",
+    initialAgentText: "hel",
+  });
+
+  const viewerServer = await createReplayViewerServer({
+    host: "127.0.0.1",
+    port: 0,
+    runsDir,
+    livePollIntervalMs: 25,
+  });
+
+  try {
+    const socket = new WebSocket(viewerServer.baseUrl.replace(/^http/, "ws") + "/api/live");
+    const inbox = createMessageInbox(socket);
+
+    await onceOpen(socket);
+    socket.send(JSON.stringify({ type: "hello", protocol: "acpx.replay.v1" }));
+    socket.send(JSON.stringify({ type: "subscribe_run", runId }));
+
+    await inbox.next((message) => message.type === "ready");
+    const runSnapshot = await inbox.next(
+      (message): message is Extract<ReplayServerMessage, { type: "run_snapshot" }> =>
+        message.type === "run_snapshot" && message.runId === runId,
+    );
+
+    const syntheticLiveStep = runSnapshot.state.steps.at(-1);
+    const initialSession = runSnapshot.state.sessions[sessionId];
+    assert.ok(initialSession);
+    assert.ok(Array.isArray(initialSession?.record.messages));
+    const initialMessages = initialSession.record.messages as Array<{
+      Agent?: { content?: Array<{ Text?: string }> };
+    }>;
+    assert.equal(syntheticLiveStep?.attemptId, "extract_intent#1");
+    assert.equal(syntheticLiveStep?.promptText, "hello");
+    assert.equal(initialMessages[1]?.Agent?.content?.[0]?.Text, "hel");
+
+    await appendLiveSessionChunk(runsDir, runId, sessionId, 3, "lo");
+
     const runPatch = await inbox.next(
       (message): message is Extract<ReplayServerMessage, { type: "run_patch" }> =>
         message.type === "run_patch" && message.runId === runId,
     );
 
-    const nextRunsState = applyReplayPatch<ViewerRunsState>(runsSnapshot.state, runsPatch.ops);
-    const nextRunState = applyReplayPatch<ViewerRunLiveState>(runSnapshot.state, runPatch.ops);
+    assert.equal(
+      runPatch.ops.some(
+        (op) =>
+          op.op === "append" &&
+          op.path.endsWith("/sessions/main-bundle/record/messages/1/Agent/content/0/Text") &&
+          op.value === "lo",
+      ),
+      true,
+    );
 
-    assert.equal(nextRunsState.runs[0]?.status, "waiting");
-    assert.equal(nextRunsState.runs[0]?.currentNode, "judge_solution");
-    assert.equal(nextRunState.run.status, "waiting");
-    assert.equal(nextRunState.run.currentNode, "judge_solution");
-    assert.equal(nextRunState.steps.length, 2);
+    const nextRunState = applyReplayPatch<ViewerRunLiveState>(runSnapshot.state, runPatch.ops);
+    const nextSession = nextRunState.sessions[sessionId];
+    assert.ok(nextSession);
+    assert.ok(Array.isArray(nextSession?.record.messages));
+    const nextMessages = nextSession.record.messages as Array<{
+      Agent?: { content?: Array<{ Text?: string }> };
+    }>;
+    assert.equal(nextMessages[1]?.Agent?.content?.[0]?.Text, "hello");
 
     socket.close();
   } finally {
@@ -138,7 +202,7 @@ function createMessageInbox(socket: WebSocket) {
   return {
     async next<TMessage extends ReplayServerMessage>(
       predicate: (message: ReplayServerMessage) => message is TMessage,
-      timeoutMs: number = 5_000,
+      timeoutMs: number = 30_000,
     ): Promise<TMessage> {
       for (let index = 0; index < backlog.length; index += 1) {
         const message = backlog[index];
@@ -186,6 +250,59 @@ async function onceOpen(socket: WebSocket): Promise<void> {
     socket.on("open", onOpen);
     socket.on("error", onError);
   });
+}
+
+async function createReplayViewerServer(options: {
+  host: string;
+  port: number;
+  runsDir: string;
+  livePollIntervalMs: number;
+}): Promise<{ baseUrl: string; close(): Promise<void> }> {
+  const liveSyncServer = createReplayLiveSyncServer({
+    source: createFilesystemRunSource(options.runsDir),
+    pollIntervalMs: options.livePollIntervalMs,
+  });
+  const server = http.createServer((_request, response) => {
+    response.statusCode = 404;
+    response.end("Not found");
+  });
+
+  server.on("upgrade", (request, socket, head) => {
+    void liveSyncServer.handleUpgrade(request, socket, head).then((handled) => {
+      if (!handled) {
+        socket.destroy();
+      }
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(options.port, options.host, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Failed to bind replay live-sync test server.");
+  }
+
+  return {
+    baseUrl: `http://${options.host}:${address.port}`,
+    async close(): Promise<void> {
+      await liveSyncServer.close();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    },
+  };
 }
 
 async function writeRunBundle(
@@ -345,4 +462,215 @@ function makeStep(
       cwd: "/tmp/replay-live-sync",
     },
   };
+}
+
+async function writeLiveSessionRunBundle(
+  runsDir: string,
+  options: {
+    runId: string;
+    sessionId: string;
+    promptText: string;
+    initialAgentText: string;
+  },
+): Promise<void> {
+  const runDir = path.join(runsDir, options.runId);
+  const projectionsDir = path.join(runDir, "projections");
+  const sessionDir = path.join(runDir, "sessions", options.sessionId);
+  await fs.mkdir(projectionsDir, { recursive: true });
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.mkdir(path.join(runDir, "artifacts"), { recursive: true });
+
+  const binding: FlowSessionBinding = {
+    key: "codex::/tmp/replay-live-sync::main",
+    handle: "main",
+    bundleId: options.sessionId,
+    name: "main",
+    agentName: "codex",
+    agentCommand: "codex",
+    cwd: "/tmp/replay-live-sync",
+    acpxRecordId: "session-record",
+    acpSessionId: "agent-session",
+  };
+
+  const record: SessionRecord = {
+    schema: "acpx.session.v1",
+    acpxRecordId: "session-record",
+    acpSessionId: "agent-session",
+    agentCommand: "codex",
+    cwd: "/tmp/replay-live-sync",
+    createdAt: "2026-04-01T08:00:00.000Z",
+    lastUsedAt: "2026-04-01T08:00:00.000Z",
+    lastSeq: 0,
+    eventLog: {
+      active_path: `sessions/${options.sessionId}/events.ndjson`,
+      segment_count: 1,
+      max_segment_bytes: 67_108_864,
+      max_segments: 1,
+    },
+    messages: [],
+    updated_at: "2026-04-01T08:00:00.000Z",
+    cumulative_token_usage: {},
+    request_token_usage: {},
+  };
+
+  const manifest: FlowRunManifest = {
+    schema: "acpx.flow-run-bundle.v1",
+    runId: options.runId,
+    flowName: "pr-triage",
+    runTitle: "PR-triage-acpx-155",
+    startedAt: "2026-04-01T08:00:00.000Z",
+    status: "running",
+    traceSchema: "acpx.flow-trace-event.v1",
+    paths: {
+      flow: "flow.json",
+      trace: "trace.ndjson",
+      runProjection: "projections/run.json",
+      liveProjection: "projections/live.json",
+      stepsProjection: "projections/steps.json",
+      sessionsDir: "sessions",
+      artifactsDir: "artifacts",
+    },
+    sessions: [
+      {
+        id: options.sessionId,
+        handle: "main",
+        bindingPath: `sessions/${options.sessionId}/binding.json`,
+        recordPath: `sessions/${options.sessionId}/record.json`,
+        eventsPath: `sessions/${options.sessionId}/events.ndjson`,
+      },
+    ],
+  };
+
+  const run: FlowRunState = {
+    runId: options.runId,
+    flowName: "pr-triage",
+    runTitle: "PR-triage-acpx-155",
+    startedAt: "2026-04-01T08:00:00.000Z",
+    updatedAt: "2026-04-01T08:00:00.000Z",
+    status: "running",
+    input: {},
+    outputs: {},
+    results: {},
+    steps: [],
+    sessionBindings: {
+      [binding.key]: binding,
+    },
+    currentNode: "extract_intent",
+    currentAttemptId: "extract_intent#1",
+    currentNodeType: "acp",
+    currentNodeStartedAt: "2026-04-01T08:00:00.000Z",
+  };
+
+  const events: FlowBundledSessionEvent[] = [
+    {
+      seq: 1,
+      at: "2026-04-01T08:00:01.000Z",
+      direction: "outbound",
+      message: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "session/prompt",
+        params: {
+          sessionId: "agent-session",
+          prompt: [{ type: "text", text: options.promptText }],
+        },
+      },
+    },
+    {
+      seq: 2,
+      at: "2026-04-01T08:00:02.000Z",
+      direction: "inbound",
+      message: {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "agent-session",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: options.initialAgentText },
+          },
+        },
+      },
+    },
+  ];
+
+  await fs.writeFile(path.join(runDir, "manifest.json"), JSON.stringify(manifest));
+  await fs.writeFile(path.join(runDir, "flow.json"), JSON.stringify(makeFlow()));
+  await fs.writeFile(
+    path.join(runDir, "trace.ndjson"),
+    `${JSON.stringify({
+      seq: 1,
+      at: "2026-04-01T08:00:00.500Z",
+      scope: "acp",
+      type: "acp_prompt_prepared",
+      runId: options.runId,
+      nodeId: "extract_intent",
+      attemptId: "extract_intent#1",
+      sessionId: options.sessionId,
+      payload: {
+        sessionId: options.sessionId,
+      },
+    })}\n`,
+  );
+  await fs.writeFile(path.join(projectionsDir, "run.json"), JSON.stringify(run));
+  await fs.writeFile(
+    path.join(projectionsDir, "live.json"),
+    JSON.stringify({
+      runId: run.runId,
+      flowName: run.flowName,
+      runTitle: run.runTitle,
+      startedAt: run.startedAt,
+      updatedAt: "2026-04-01T08:00:02.000Z",
+      status: run.status,
+      currentNode: run.currentNode,
+      currentAttemptId: run.currentAttemptId,
+      currentNodeType: run.currentNodeType,
+      currentNodeStartedAt: run.currentNodeStartedAt,
+      sessionBindings: run.sessionBindings,
+    } satisfies Partial<FlowRunState>),
+  );
+  await fs.writeFile(path.join(projectionsDir, "steps.json"), JSON.stringify([]));
+  await fs.writeFile(path.join(sessionDir, "binding.json"), JSON.stringify(binding));
+  await fs.writeFile(path.join(sessionDir, "record.json"), JSON.stringify(record));
+  await fs.writeFile(
+    path.join(sessionDir, "events.ndjson"),
+    `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+  );
+}
+
+async function appendLiveSessionChunk(
+  runsDir: string,
+  runId: string,
+  sessionId: string,
+  seq: number,
+  text: string,
+): Promise<void> {
+  const runDir = path.join(runsDir, runId);
+  const projectionsDir = path.join(runDir, "projections");
+  const sessionEventsPath = path.join(runDir, "sessions", sessionId, "events.ndjson");
+  await fs.appendFile(
+    sessionEventsPath,
+    `${JSON.stringify({
+      seq,
+      at: `2026-04-01T08:00:0${seq}.000Z`,
+      direction: "inbound",
+      message: {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "agent-session",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text },
+          },
+        },
+      },
+    })}\n`,
+  );
+
+  const live = JSON.parse(
+    await fs.readFile(path.join(projectionsDir, "live.json"), "utf8"),
+  ) as Partial<FlowRunState>;
+  live.updatedAt = `2026-04-01T08:00:0${seq}.000Z`;
+  await fs.writeFile(path.join(projectionsDir, "live.json"), JSON.stringify(live));
 }

@@ -1,6 +1,7 @@
 import { loadRunBundle } from "../src/lib/load-bundle.js";
 import type { ViewerRunLiveState, ViewerRunsState } from "../src/types.js";
 import { createFilesystemBundleReader } from "./filesystem-bundle-reader.js";
+import { synthesizeLiveRunState } from "./live-run-state.js";
 import { defaultRunsDir, listRunBundles } from "./run-bundles.js";
 
 export type ViewerRunSource = {
@@ -18,10 +19,10 @@ export function createFilesystemRunSource(runsDir: string = defaultRunsDir()): V
     },
     async getRunState(runId: string): Promise<ViewerRunLiveState> {
       const bundle = await loadRunBundle(createFilesystemBundleReader(runsDir, { runId }));
-      return {
+      return synthesizeLiveRunState({
         ...bundle,
         schema: "acpx.viewer-run-live.v1",
-      };
+      });
     },
   };
 }

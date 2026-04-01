@@ -224,8 +224,53 @@ export type SessionRecord = {
   createdAt?: string;
   lastUsedAt?: string;
   lastSeq?: number;
+  lastRequestId?: string;
+  eventLog?: {
+    active_path: string;
+    segment_count: number;
+    max_segment_bytes: number;
+    max_segments: number;
+    last_write_at?: string;
+    last_write_error?: string | null;
+  };
+  pid?: number;
+  agentStartedAt?: string;
+  lastPromptAt?: string;
+  lastAgentExitCode?: number | null;
+  lastAgentExitSignal?: string | null;
+  lastAgentExitAt?: string;
+  lastAgentDisconnectReason?: string;
   protocolVersion?: number;
   closed?: boolean;
+  closedAt?: string;
+  cumulative_token_usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+  request_token_usage?: Record<
+    string,
+    {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    }
+  >;
+  acpx?: {
+    current_mode_id?: string;
+    desired_mode_id?: string;
+    current_model_id?: string;
+    available_models?: string[];
+    available_commands?: string[];
+    config_options?: unknown[];
+    session_options?: {
+      model?: string;
+      allowed_tools?: string[];
+      max_turns?: number;
+    };
+  };
 };
 
 export type LoadedRunBundle = {
@@ -273,6 +318,26 @@ export type ReplayJsonPatchOperation =
   | {
       op: "remove";
       path: string;
+    }
+  | {
+      op: "move";
+      from: string;
+      path: string;
+    }
+  | {
+      op: "copy";
+      from: string;
+      path: string;
+    }
+  | {
+      op: "test";
+      path: string;
+      value: unknown;
+    }
+  | {
+      op: "append";
+      path: string;
+      value: unknown;
     };
 
 export type ReplayClientMessage =

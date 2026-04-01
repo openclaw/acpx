@@ -8,7 +8,11 @@ import type {
   ToolCallStatus,
   ToolCallUpdate,
 } from "@agentclientprotocol/sdk";
-import { parseJsonRpcErrorMessage, parsePromptStopReason } from "./acp-jsonrpc.js";
+import {
+  extractSessionUpdateNotification,
+  parseJsonRpcErrorMessage,
+  parsePromptStopReason,
+} from "./acp-jsonrpc.js";
 import { createJsonOutputFormatter } from "./output-json-formatter.js";
 import { isReadLikeTool, SUPPRESSED_READ_OUTPUT } from "./read-output-suppression.js";
 import type {
@@ -95,32 +99,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     return undefined;
   }
   return value as Record<string, unknown>;
-}
-
-function extractSessionUpdate(message: AnyMessage): SessionNotification | undefined {
-  if (!Object.hasOwn(message, "method")) {
-    return undefined;
-  }
-  const method = (message as { method?: unknown }).method;
-  if (method !== "session/update") {
-    return undefined;
-  }
-  const params = asRecord((message as { params?: unknown }).params);
-  if (!params) {
-    return undefined;
-  }
-  const sessionId = typeof params.sessionId === "string" ? params.sessionId : null;
-  if (!sessionId) {
-    return undefined;
-  }
-  const update = asRecord(params.update);
-  if (!update || typeof update.sessionUpdate !== "string") {
-    return undefined;
-  }
-  return {
-    sessionId,
-    update: update as SessionNotification["update"],
-  };
 }
 
 function extractJsonRpcMethod(message: AnyMessage): string | undefined {
@@ -522,7 +500,7 @@ class TextOutputFormatter implements OutputFormatter {
   }
 
   onAcpMessage(message: AcpJsonRpcMessage): void {
-    const notification = extractSessionUpdate(message);
+    const notification = extractSessionUpdateNotification(message);
     if (notification) {
       this.renderSessionUpdate(notification);
       return;
@@ -858,7 +836,7 @@ class QuietOutputFormatter implements OutputFormatter {
   }
 
   onAcpMessage(message: AcpJsonRpcMessage): void {
-    const update = extractSessionUpdate(message);
+    const update = extractSessionUpdateNotification(message);
     if (
       update?.update.sessionUpdate === "agent_message_chunk" &&
       update.update.content.type === "text"
