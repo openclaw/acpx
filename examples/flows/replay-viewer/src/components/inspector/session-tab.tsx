@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { revealConversationTranscript } from "../../lib/view-model";
+import { resolveSessionRenderState } from "../../lib/session-render-state";
 import type { SelectedAttemptView, SessionListItemView } from "../../lib/view-model";
 import { ConversationMessage } from "./conversation-message";
 
@@ -8,31 +8,34 @@ export function SessionTab({
   sessionItems,
   activeSessionId,
   sessionRevealProgress,
+  liveStreaming,
   onSessionChange,
 }: {
   selectedAttempt: SelectedAttemptView;
   sessionItems: SessionListItemView[];
   activeSessionId: string | null;
   sessionRevealProgress: number | null;
+  liveStreaming: boolean;
   onSessionChange(sessionId: string): void;
 }) {
   const activeSession =
     sessionItems.find((session) => session.id === activeSessionId) ?? sessionItems[0] ?? null;
   const sessionEndRef = useRef<HTMLDivElement | null>(null);
 
-  const renderedSessionSlice =
-    activeSession?.isStreamingSource && typeof sessionRevealProgress === "number"
-      ? revealConversationTranscript(activeSession.sessionSlice, sessionRevealProgress)
-      : (activeSession?.sessionSlice ?? []);
-  const animateConversation =
-    activeSession?.isStreamingSource && typeof sessionRevealProgress === "number";
+  const { renderedSessionSlice, animateConversation, autoFollowConversation } =
+    resolveSessionRenderState({
+      sessionSlice: activeSession?.sessionSlice ?? [],
+      isStreamingSource: activeSession?.isStreamingSource ?? false,
+      sessionRevealProgress,
+      liveStreaming,
+    });
 
   useEffect(() => {
-    if (!activeSession || typeof sessionRevealProgress !== "number") {
+    if (!activeSession || !autoFollowConversation) {
       return;
     }
     sessionEndRef.current?.scrollIntoView({ block: "end" });
-  }, [activeSession, renderedSessionSlice, sessionRevealProgress]);
+  }, [activeSession, autoFollowConversation, renderedSessionSlice]);
 
   if (!activeSession) {
     return (

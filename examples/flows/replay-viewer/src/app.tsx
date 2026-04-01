@@ -68,6 +68,11 @@ export function App() {
     playback.playbackPreview && selectedAttempt?.step.attemptId === currentStep?.attemptId
       ? playback.playbackPreview.stepProgress
       : null;
+  const liveStreamingSession =
+    bundle?.run.status === "running" &&
+    bundle.run.currentAttemptId != null &&
+    selectedAttempt?.step.attemptId === bundle.run.currentAttemptId &&
+    selectedAttempt.step.nodeType === "acp";
   const waitingForRecentRuns = loadingState === "bootstrap" || loadingState === "runs";
   const currentNodeId = currentStep?.nodeId ?? graph.nodes[0]?.id ?? null;
   const currentNodePosition = useMemo(() => {
@@ -237,6 +242,7 @@ export function App() {
             sessionItems={sessionItems}
             activeSessionId={activeSessionId}
             sessionRevealProgress={sessionRevealProgress}
+            liveStreaming={liveStreamingSession}
             activeTab={activeTab}
             onTabChange={setActiveTab}
             onSessionChange={setActiveSessionId}

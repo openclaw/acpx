@@ -1,0 +1,79 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { resolveSessionRenderState } from "../examples/flows/replay-viewer/src/lib/session-render-state.js";
+import type { SelectedAttemptView } from "../examples/flows/replay-viewer/src/lib/view-model-types.js";
+
+test("resolveSessionRenderState keeps live tool calls and results visible while a run is streaming", () => {
+  const sessionSlice = makeSessionSlice();
+
+  const rendered = resolveSessionRenderState({
+    sessionSlice,
+    isStreamingSource: true,
+    sessionRevealProgress: 0.25,
+    liveStreaming: true,
+  });
+
+  assert.equal(rendered.animateConversation, false);
+  assert.equal(rendered.autoFollowConversation, true);
+  assert.deepEqual(rendered.renderedSessionSlice, sessionSlice);
+  assert.equal(rendered.renderedSessionSlice[1]?.toolUses.length, 1);
+  assert.equal(rendered.renderedSessionSlice[1]?.toolResults.length, 1);
+});
+
+test("resolveSessionRenderState still uses replay reveal mode outside live streaming", () => {
+  const sessionSlice = makeSessionSlice();
+
+  const rendered = resolveSessionRenderState({
+    sessionSlice,
+    isStreamingSource: true,
+    sessionRevealProgress: 0.25,
+    liveStreaming: false,
+  });
+
+  assert.equal(rendered.animateConversation, true);
+  assert.equal(rendered.autoFollowConversation, true);
+  assert.notDeepEqual(rendered.renderedSessionSlice, sessionSlice);
+  assert.equal(rendered.renderedSessionSlice[1]?.toolUses.length ?? 0, 0);
+  assert.equal(rendered.renderedSessionSlice[1]?.toolResults.length ?? 0, 0);
+});
+
+function makeSessionSlice(): SelectedAttemptView["sessionSlice"] {
+  return [
+    {
+      index: 0,
+      role: "user",
+      title: "User",
+      highlighted: true,
+      textBlocks: ["Please inspect the PR."],
+      toolUses: [],
+      toolResults: [],
+      hiddenPayloads: [],
+    },
+    {
+      index: 1,
+      role: "agent",
+      title: "Agent",
+      highlighted: true,
+      textBlocks: ["Running checks and collecting context."],
+      toolUses: [
+        {
+          id: "tool-1",
+          name: "shell",
+          summary: "rg -n session src",
+          raw: { name: "shell", input: "rg -n session src" },
+        },
+      ],
+      toolResults: [
+        {
+          id: "tool-1",
+          toolName: "shell",
+          status: "ok",
+          preview: "src/session-runtime.ts:12",
+          isError: false,
+          raw: { output: "src/session-runtime.ts:12" },
+        },
+      ],
+      hiddenPayloads: [],
+    },
+  ];
+}

@@ -8,6 +8,7 @@ type InspectorPanelProps = {
   sessionItems: SessionListItemView[];
   activeSessionId: string | null;
   sessionRevealProgress: number | null;
+  liveStreaming: boolean;
   activeTab: "attempt" | "session" | "events";
   onTabChange(tab: "attempt" | "session" | "events"): void;
   onSessionChange(sessionId: string): void;
@@ -18,6 +19,7 @@ export function InspectorPanel({
   sessionItems,
   activeSessionId,
   sessionRevealProgress,
+  liveStreaming,
   activeTab,
   onTabChange,
   onSessionChange,
@@ -47,6 +49,7 @@ export function InspectorPanel({
             sessionItems={sessionItems}
             activeSessionId={activeSessionId}
             sessionRevealProgress={sessionRevealProgress}
+            liveStreaming={liveStreaming}
             onSessionChange={onSessionChange}
           />
         ) : null}
