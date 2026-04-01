@@ -133,7 +133,7 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
 
   async function sendRunsSnapshot(client: ClientSubscriptionState): Promise<void> {
     try {
-      const resource = await ensureRunsState();
+      const resource = await refreshRunsState();
       sendMessage(client.socket, {
         type: "runs_snapshot",
         version: resource.version,
@@ -146,7 +146,7 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
 
   async function sendRunSnapshot(client: ClientSubscriptionState, runId: string): Promise<void> {
     try {
-      const resource = await ensureRunState(runId);
+      const resource = await refreshRunState(runId);
       sendMessage(client.socket, {
         type: "run_snapshot",
         runId,
@@ -175,6 +175,26 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
     };
   }
 
+  async function refreshRunsState(): Promise<{ version: number; state: ViewerRunsState }> {
+    const nextState = await source.getRunsState();
+
+    if (runsResource.state == null) {
+      runsResource.state = nextState;
+      runsResource.version = 1;
+    } else {
+      const ops = createReplayPatch(runsResource.state, nextState);
+      if (ops.length > 0) {
+        runsResource.version += 1;
+        runsResource.state = nextState;
+      }
+    }
+
+    return {
+      version: runsResource.version,
+      state: runsResource.state,
+    };
+  }
+
   async function ensureRunState(
     runId: string,
   ): Promise<{ version: number; state: ViewerRunLiveState }> {
@@ -184,6 +204,30 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
       resource.version = 1;
       runResources.set(runId, resource);
     }
+    return {
+      version: resource.version,
+      state: resource.state,
+    };
+  }
+
+  async function refreshRunState(
+    runId: string,
+  ): Promise<{ version: number; state: ViewerRunLiveState }> {
+    const resource = runResources.get(runId) ?? { version: 0, state: null };
+    const nextState = await source.getRunState(runId);
+
+    if (resource.state == null) {
+      resource.state = nextState;
+      resource.version = 1;
+    } else {
+      const ops = createReplayPatch(resource.state, nextState);
+      if (ops.length > 0) {
+        resource.version += 1;
+        resource.state = nextState;
+      }
+    }
+
+    runResources.set(runId, resource);
     return {
       version: resource.version,
       state: resource.state,

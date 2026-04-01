@@ -97,6 +97,93 @@ test("replay viewer streams live sidebar and run patches over websocket", async 
   }
 });
 
+test("replay viewer refreshes runs snapshots after idle periods", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-live-runs-refresh-"));
+  const firstRunId = "2026-03-31T080000000Z-pr-triage-live-a";
+  const secondRunId = "2026-03-31T080100000Z-pr-triage-live-b";
+  const firstStep = makeStep(
+    "extract_intent#1",
+    "extract_intent",
+    "2026-03-31T08:00:00.000Z",
+    "2026-03-31T08:00:04.000Z",
+  );
+
+  await writeRunBundle(runsDir, {
+    runId: firstRunId,
+    flowName: "pr-triage",
+    runTitle: "PR-triage-acpx-155",
+    startedAt: "2026-03-31T08:00:00.000Z",
+    projectedStatus: "completed",
+    liveStatus: "running",
+    updatedAt: "2026-03-31T08:00:05.000Z",
+    currentNode: "extract_intent",
+    steps: [firstStep],
+  });
+
+  const viewerServer = await createReplayViewerServer({
+    host: "127.0.0.1",
+    port: 0,
+    runsDir,
+    livePollIntervalMs: 50,
+  });
+
+  try {
+    const firstSocket = new WebSocket(viewerServer.baseUrl.replace(/^http/, "ws") + "/api/live");
+    const firstInbox = createMessageInbox(firstSocket);
+
+    await onceOpen(firstSocket);
+    firstSocket.send(JSON.stringify({ type: "hello", protocol: "acpx.replay.v1" }));
+    firstSocket.send(JSON.stringify({ type: "subscribe_runs" }));
+    await firstInbox.next((message) => message.type === "ready");
+
+    const firstSnapshot = await firstInbox.next(
+      (message): message is Extract<ReplayServerMessage, { type: "runs_snapshot" }> =>
+        message.type === "runs_snapshot",
+    );
+    assert.equal(firstSnapshot.state.runs[0]?.runId, firstRunId);
+
+    await closeSocket(firstSocket);
+
+    const secondStep = makeStep(
+      "judge_solution#1",
+      "judge_solution",
+      "2026-03-31T08:01:00.000Z",
+      "2026-03-31T08:01:03.000Z",
+    );
+    await writeRunBundle(runsDir, {
+      runId: secondRunId,
+      flowName: "pr-triage",
+      runTitle: "PR-triage-acpx-156",
+      startedAt: "2026-03-31T08:01:00.000Z",
+      projectedStatus: "completed",
+      liveStatus: "running",
+      updatedAt: "2026-03-31T08:01:04.000Z",
+      currentNode: "judge_solution",
+      steps: [secondStep],
+    });
+
+    const secondSocket = new WebSocket(viewerServer.baseUrl.replace(/^http/, "ws") + "/api/live");
+    const secondInbox = createMessageInbox(secondSocket);
+
+    await onceOpen(secondSocket);
+    secondSocket.send(JSON.stringify({ type: "hello", protocol: "acpx.replay.v1" }));
+    secondSocket.send(JSON.stringify({ type: "subscribe_runs" }));
+    await secondInbox.next((message) => message.type === "ready");
+
+    const secondSnapshot = await secondInbox.next(
+      (message): message is Extract<ReplayServerMessage, { type: "runs_snapshot" }> =>
+        message.type === "runs_snapshot",
+    );
+    assert.equal(secondSnapshot.state.runs[0]?.runId, secondRunId);
+    assert.equal(secondSnapshot.state.runs[1]?.runId, firstRunId);
+
+    await closeSocket(secondSocket);
+  } finally {
+    await viewerServer.close();
+    await fs.rm(runsDir, { recursive: true, force: true });
+  }
+});
+
 test("replay viewer streams selected-run ACP text as JSON Patch+ append updates", async () => {
   const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-live-session-"));
   const runId = "2026-04-01T080000000Z-pr-triage-live-session";
@@ -249,6 +336,17 @@ async function onceOpen(socket: WebSocket): Promise<void> {
 
     socket.on("open", onOpen);
     socket.on("error", onError);
+  });
+}
+
+async function closeSocket(socket: WebSocket): Promise<void> {
+  if (socket.readyState === WebSocket.CLOSED) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    socket.once("close", () => resolve());
+    socket.close();
   });
 }
 
