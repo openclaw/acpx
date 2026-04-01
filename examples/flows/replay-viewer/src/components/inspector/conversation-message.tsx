@@ -106,24 +106,22 @@ function ToolEventCard({
   isError?: boolean;
 }) {
   const statusTone = resolveToolStatusTone(status, isError);
+  const label =
+    kind === "call"
+      ? "Tool call"
+      : status
+        ? `Tool result · ${formatToolStatus(status)}`
+        : "Tool result";
 
   return (
     <details
       className={`conversation__tool-event conversation__tool-event--${kind}${isError ? " conversation__tool-event--error" : ""}`}
     >
       <summary className="conversation__tool-summary">
-        <div className="conversation__tool-summary-top">
-          <span className={`conversation__tool-kind conversation__tool-kind--${kind}`}>
-            {kind === "call" ? "Tool call" : "Tool result"}
+        <div className="conversation__tool-kicker">
+          <span className={`conversation__tool-label conversation__tool-label--${statusTone}`}>
+            {label}
           </span>
-          <div className="conversation__tool-summary-badges">
-            {status ? (
-              <span className={`conversation__tool-pill conversation__tool-pill--${statusTone}`}>
-                {formatToolStatus(status)}
-              </span>
-            ) : null}
-            <span className="conversation__tool-meta">{meta}</span>
-          </div>
         </div>
         <div className="conversation__tool-title">{title}</div>
         <div
@@ -131,9 +129,24 @@ function ToolEventCard({
         >
           {preview}
         </div>
-        <div className="conversation__tool-toggle">View details</div>
       </summary>
       <div className="conversation__tool-body">
+        <dl className="conversation__tool-meta-list">
+          <div>
+            <dt>Kind</dt>
+            <dd>{kind === "call" ? "Tool call" : "Tool result"}</dd>
+          </div>
+          {status ? (
+            <div>
+              <dt>Status</dt>
+              <dd>{formatToolStatus(status)}</dd>
+            </div>
+          ) : null}
+          <div>
+            <dt>Id</dt>
+            <dd>{meta}</dd>
+          </div>
+        </dl>
         <section className="conversation__tool-section">
           <div className="conversation__tool-section-label">
             {kind === "call" ? "Invocation" : "Output preview"}
@@ -154,7 +167,7 @@ function ToolEventCard({
 }
 
 function formatToolStatus(status: string): string {
-  return status.replace(/_/g, " ");
+  return status.replace(/_/g, " ").trim();
 }
 
 function resolveToolStatusTone(

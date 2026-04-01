@@ -1195,28 +1195,24 @@ code {
 }
 
 .conversation__tool-event {
-  overflow: hidden;
-  border-radius: 12px;
-  border: 1px solid rgba(133, 146, 166, 0.16);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015)),
-    rgba(255, 255, 255, 0.02);
+  border-left: 2px solid rgba(133, 146, 166, 0.18);
+  padding-left: 10px;
 }
 
 .conversation__tool-event summary {
   position: relative;
   display: grid;
-  gap: 8px;
-  padding: 11px 13px 12px;
+  gap: 4px;
+  padding: 6px 18px 6px 0;
 }
 
 .conversation__tool-event summary::after {
   content: "▾";
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 8px;
+  right: 0;
   color: var(--ink-faint);
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   line-height: 1;
   transition: transform 160ms ease;
 }
@@ -1225,99 +1221,51 @@ code {
   transform: rotate(180deg);
 }
 
-.conversation__tool-summary-top,
-.conversation__tool-summary-badges {
+.conversation__tool-kicker {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.conversation__tool-summary-top {
   min-width: 0;
 }
 
-.conversation__tool-summary-badges {
-  min-width: 0;
-  margin-left: auto;
-  padding-right: 18px;
-}
-
-.conversation__tool-kind,
-.conversation__tool-pill {
-  display: inline-flex;
-  align-items: center;
-  min-height: 22px;
-  padding: 0 8px;
-  border-radius: 999px;
+.conversation__tool-label {
+  color: var(--ink-faint);
   font-size: 0.66rem;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
-.conversation__tool-kind--call {
-  background: rgba(62, 166, 198, 0.14);
-  color: #9eddf0;
+.conversation__tool-label--completed {
+  color: #9fd7b5;
 }
 
-.conversation__tool-kind--result {
-  background: rgba(88, 187, 129, 0.14);
-  color: #c7f0d7;
+.conversation__tool-label--running {
+  color: #8fd1e4;
 }
 
-.conversation__tool-event--error .conversation__tool-kind--result {
-  background: rgba(216, 107, 107, 0.16);
-  color: #ffd4d4;
-}
-
-.conversation__tool-pill--completed {
-  background: rgba(88, 187, 129, 0.14);
-  color: #c7f0d7;
-}
-
-.conversation__tool-pill--running {
-  background: rgba(62, 166, 198, 0.14);
-  color: #9eddf0;
-}
-
-.conversation__tool-pill--error {
-  background: rgba(216, 107, 107, 0.16);
-  color: #ffd4d4;
-}
-
-.conversation__tool-pill--neutral {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--ink-soft);
-}
-
-.conversation__tool-meta {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink-faint);
-  font-size: 0.68rem;
-  font-family: "IBM Plex Mono", "SFMono-Regular", "Cascadia Code", monospace;
+.conversation__tool-label--error {
+  color: #f1aaaa;
 }
 
 .conversation__tool-title {
   color: var(--ink);
   font-family: "Manrope", "Inter", sans-serif;
-  font-size: 0.9rem;
-  font-weight: 800;
-  line-height: 1.18;
+  font-size: 0.82rem;
+  font-weight: 760;
+  line-height: 1.22;
   letter-spacing: -0.02em;
   overflow: hidden;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow-wrap: anywhere;
 }
 
 .conversation__tool-preview {
   color: var(--ink-soft);
-  font-size: 0.76rem;
-  line-height: 1.45;
+  font-size: 0.73rem;
+  line-height: 1.35;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 1;
@@ -1327,22 +1275,43 @@ code {
 
 .conversation__tool-preview--call {
   font-family: "IBM Plex Mono", "SFMono-Regular", "Cascadia Code", monospace;
-  font-size: 0.72rem;
-}
-
-.conversation__tool-toggle {
-  color: var(--ink-faint);
-  font-size: 0.66rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 0.69rem;
 }
 
 .conversation__tool-body {
   display: grid;
   gap: 10px;
-  padding: 0 13px 13px;
+  margin-top: 8px;
+  padding: 10px 0 0;
   border-top: 1px solid rgba(133, 146, 166, 0.12);
+}
+
+.conversation__tool-meta-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.conversation__tool-meta-list div {
+  display: grid;
+  gap: 2px;
+}
+
+.conversation__tool-meta-list dt {
+  color: var(--ink-faint);
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.conversation__tool-meta-list dd {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .conversation__tool-section {
