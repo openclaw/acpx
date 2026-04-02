@@ -26,15 +26,19 @@ import {
 } from "../session.js";
 import { SESSION_RECORD_SCHEMA } from "../types.js";
 import type { PromptInput, SessionRecord } from "../types.js";
-import { acp, action, checkpoint, compute, defineFlow, shell } from "./definition.js";
+import { acp, action, checkpoint, compute, decision, defineFlow, shell } from "./definition.js";
 import { formatShellActionSummary, runShellAction } from "./executors/shell.js";
 import { resolveNext, resolveNextForOutcome, validateFlowDefinition } from "./graph.js";
+import { extractJsonObject } from "./json.js";
 import { FlowRunStore } from "./store.js";
 import type {
   AcpNodeDefinition,
   ActionNodeDefinition,
   CheckpointNodeDefinition,
   ComputeNodeDefinition,
+  DecisionNodeDefinition,
+  DecisionResolverInput,
+  DecisionResult,
   FlowDefinition,
   FlowNodeCommon,
   FlowNodeContext,
@@ -56,12 +60,15 @@ import type {
   ShellActionResult,
 } from "./types.js";
 
-export { acp, action, checkpoint, compute, defineFlow, shell };
+export { acp, action, checkpoint, compute, decision, defineFlow, shell };
 export type {
   AcpNodeDefinition,
   ActionNodeDefinition,
   CheckpointNodeDefinition,
   ComputeNodeDefinition,
+  DecisionNodeDefinition,
+  DecisionResolverInput,
+  DecisionResult,
   FlowDefinition,
   FlowEdge,
   FlowNodeCommon,
@@ -112,6 +119,7 @@ type TracedPromptResult = {
 
 export class FlowRunner {
   private readonly resolveAgent;
+  private readonly resolveDecision?;
   private readonly defaultCwd;
   private readonly permissionMode;
   private readonly mcpServers?;
@@ -129,6 +137,7 @@ export class FlowRunner {
 
   constructor(options: FlowRunnerOptions) {
     this.resolveAgent = options.resolveAgent;
+    this.resolveDecision = options.resolveDecision;
     this.defaultCwd = options.resolveAgent(undefined).cwd;
     this.permissionMode = options.permissionMode;
     this.mcpServers = options.mcpServers;
@@ -432,6 +441,8 @@ export class FlowRunner {
         return await this.executeCheckpointNode(runDir, state, nodeId, node, context);
       case "acp":
         return await this.executeAcpNode(runDir, state, flow, node, context);
+      case "decision":
+        return await this.executeDecisionNode(runDir, state, flow, node, context);
       default: {
         const exhaustive: never = node;
         throw new Error(`Unsupported flow node: ${String(exhaustive)}`);
@@ -462,6 +473,157 @@ export class FlowRunner {
       agentInfo: null,
       trace: null,
     };
+  }
+
+  private async executeDecisionNode(
+    runDir: string,
+    state: FlowRunState,
+    flow: FlowDefinition,
+    node: DecisionNodeDefinition,
+    context: FlowNodeContext,
+  ): Promise<FlowNodeExecutionResult> {
+    const nodeTimeoutMs = node.timeoutMs ?? this.defaultNodeTimeoutMs;
+
+    return await this.runWithHeartbeat(
+      runDir,
+      state,
+      state.currentNode ?? "",
+      node,
+      nodeTimeoutMs,
+      async () => {
+        const promptText = await Promise.resolve(node.prompt(context));
+        const optionKeys = Object.keys(node.options).join(", ");
+        this.updateStatusDetail(state, node.statusDetail ?? `Deciding: ${optionKeys}`);
+
+        if (this.resolveDecision) {
+          const result = await this.resolveDecision({
+            prompt: promptText,
+            options: node.options,
+            model: node.model,
+          });
+          validateDecisionResult(result, node.options);
+          return {
+            output: result,
+            promptText,
+            rawText: JSON.stringify(result),
+            sessionInfo: null,
+            agentInfo: null,
+            trace: null,
+          };
+        }
+
+        // Fallback: use an isolated ACP agent session with a structured prompt
+        const resolvedAgent = this.resolveAgent(node.profile);
+        const agentInfo = { ...resolvedAgent };
+
+        const optionLines = Object.entries(node.options)
+          .map(([id, desc]) => `  - "${id}": ${desc}`)
+          .join("\n");
+
+        const acpPrompt = [
+          promptText,
+          "",
+          "Choose exactly one of the following options:",
+          optionLines,
+          "",
+          "Respond with ONLY a JSON object in this exact format:",
+          '{"choice": "<option_id>", "reasoning": "<brief explanation>"}',
+          "",
+          "Do not include any other text.",
+        ].join("\n");
+
+        const isolatedBinding = createIsolatedSessionBinding(
+          flow.name,
+          state.runId,
+          state.currentAttemptId ?? randomUUID(),
+          node.profile,
+          agentInfo,
+        );
+        const initialIsolatedRecord = createSyntheticSessionRecord({
+          binding: isolatedBinding,
+          createdAt: state.currentNodeStartedAt ?? isoNow(),
+          updatedAt: state.currentNodeStartedAt ?? isoNow(),
+          conversation: createSessionConversation(state.currentNodeStartedAt ?? isoNow()),
+          acpxState: undefined,
+          lastSeq: 0,
+        });
+        await this.store.ensureSessionBundle(runDir, state, isolatedBinding, initialIsolatedRecord);
+
+        const promptArtifact = await this.store.writeArtifact(runDir, state, acpPrompt, {
+          mediaType: "text/plain",
+          extension: "txt",
+          nodeId: state.currentNode,
+          attemptId: state.currentAttemptId,
+        });
+
+        await this.store.appendTrace(runDir, state, {
+          scope: "acp",
+          type: "acp_prompt_prepared",
+          nodeId: state.currentNode,
+          attemptId: state.currentAttemptId,
+          sessionId: isolatedBinding.bundleId,
+          payload: { sessionId: isolatedBinding.bundleId, promptArtifact },
+        });
+
+        const isolatedPrompt = await this.runIsolatedPrompt(
+          runDir,
+          state,
+          isolatedBinding,
+          agentInfo,
+          normalizePromptInput(acpPrompt),
+          nodeTimeoutMs,
+        );
+
+        const rawResponseArtifact = await this.store.writeArtifact(
+          runDir,
+          state,
+          isolatedPrompt.rawText,
+          {
+            mediaType: "text/plain",
+            extension: "txt",
+            nodeId: state.currentNode,
+            attemptId: state.currentAttemptId,
+            sessionId: isolatedBinding.bundleId,
+          },
+        );
+        await this.store.appendTrace(runDir, state, {
+          scope: "acp",
+          type: "acp_response_parsed",
+          nodeId: state.currentNode,
+          attemptId: state.currentAttemptId,
+          sessionId: isolatedBinding.bundleId,
+          payload: {
+            sessionId: isolatedBinding.bundleId,
+            conversation: isolatedPrompt.conversation,
+            rawResponseArtifact,
+          },
+        });
+
+        const trace: FlowStepTrace = {
+          sessionId: isolatedBinding.bundleId,
+          promptArtifact,
+          rawResponseArtifact,
+          conversation: isolatedPrompt.conversation,
+        };
+
+        let parsed: DecisionResult;
+        try {
+          parsed = extractJsonObject(isolatedPrompt.rawText) as DecisionResult;
+          validateDecisionResult(parsed, node.options);
+        } catch (error) {
+          throw attachStepTrace(error, trace);
+        }
+
+        return {
+          output: parsed,
+          promptText: acpPrompt,
+          rawText: isolatedPrompt.rawText,
+          sessionInfo: isolatedBinding,
+          agentInfo,
+          trace,
+        };
+      },
+    );
   }
 
   private async executeActionNode(
@@ -1419,6 +1581,28 @@ function extractAttachedStepTrace(error: unknown): FlowStepTrace | null | undefi
     return undefined;
   }
   return (error as Error & { flowStepTrace?: FlowStepTrace | null }).flowStepTrace;
+}
+
+function validateDecisionResult(
+  result: unknown,
+  options: Record<string, string>,
+): asserts result is DecisionResult {
+  if (
+    result == null ||
+    typeof result !== "object" ||
+    typeof (result as DecisionResult).choice !== "string" ||
+    typeof (result as DecisionResult).reasoning !== "string"
+  ) {
+    throw new Error(
+      `Decision result must have shape { choice: string, reasoning: string }, got: ${JSON.stringify(result)}`,
+    );
+  }
+  const choice = (result as DecisionResult).choice;
+  if (!(choice in options)) {
+    throw new Error(
+      `Decision choice "${choice}" is not one of the valid options: ${Object.keys(options).join(", ")}`,
+    );
+  }
 }
 
 function toInlineOutput(value: unknown): undefined | null | boolean | number | string | object {

@@ -11,6 +11,7 @@ import {
   action,
   checkpoint,
   compute,
+  decision,
   defineFlow,
   shell,
 } from "../src/flows/runtime.js";
@@ -1200,6 +1201,193 @@ test("FlowRunner stores successful node results separately from outputs", async 
     assert.equal(result.state.results.first?.outcome, "ok");
     assert.deepEqual(result.state.outputs.first, { next: "done" });
     assert.deepEqual(result.state.outputs.done, { firstOutcome: "ok" });
+  });
+});
+
+test("FlowRunner executes decision node with resolveDecision and routes via switch edge", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-decision-"));
+    try {
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: MOCK_AGENT_COMMAND,
+          cwd: outputRoot,
+        }),
+        permissionMode: "approve-all",
+        resolveDecision: async ({ options }) => {
+          return { choice: Object.keys(options)[0]!, reasoning: "test pick" };
+        },
+        outputRoot,
+      });
+
+      const flow = defineFlow({
+        name: "decision-route-test",
+        startAt: "decide",
+        nodes: {
+          decide: decision({
+            prompt: (ctx) => `Evaluate tone for ${(ctx.input as { audience: string }).audience}`,
+            options: {
+              good: "Tone is appropriate",
+              too_formal: "Too formal",
+              too_casual: "Too casual",
+            },
+          }),
+          good_path: compute({ run: () => ({ result: "good" }) }),
+          formal_path: compute({ run: () => ({ result: "formal" }) }),
+          casual_path: compute({ run: () => ({ result: "casual" }) }),
+        },
+        edges: [
+          {
+            from: "decide",
+            switch: {
+              on: "$.choice",
+              cases: {
+                good: "good_path",
+                too_formal: "formal_path",
+                too_casual: "casual_path",
+              },
+            },
+          },
+        ],
+      });
+
+      const result = await runner.run(flow, { audience: "engineers" });
+      assert.equal(result.state.status, "completed");
+      assert.deepEqual(result.state.outputs.good_path, { result: "good" });
+      assert.equal(result.state.outputs.formal_path, undefined);
+      assert.equal(result.state.outputs.casual_path, undefined);
+      const decisionOutput = result.state.outputs.decide as {
+        choice: string;
+        reasoning: string;
+      };
+      assert.equal(decisionOutput.choice, "good");
+      assert.equal(decisionOutput.reasoning, "test pick");
+    } finally {
+      await fs.rm(outputRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+test("FlowRunner decision node rejects invalid choice not in options", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-decision-invalid-"));
+    try {
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: MOCK_AGENT_COMMAND,
+          cwd: outputRoot,
+        }),
+        permissionMode: "approve-all",
+        resolveDecision: async () => ({
+          choice: "nonexistent",
+          reasoning: "bad choice",
+        }),
+        outputRoot,
+      });
+
+      const flow = defineFlow({
+        name: "decision-invalid-test",
+        startAt: "decide",
+        nodes: {
+          decide: decision({
+            prompt: () => "Pick one",
+            options: { a: "Option A", b: "Option B" },
+          }),
+        },
+        edges: [],
+      });
+
+      await assert.rejects(async () => await runner.run(flow, {}), /not one of the valid options/);
+
+      const runDir = await waitForRunDir(outputRoot, "decision-invalid-test");
+      const state = await readRunJson(runDir);
+      assert.equal(state.status, "failed");
+      assert.match(String(state.error), /not one of the valid options/);
+    } finally {
+      await fs.rm(outputRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+test("FlowRunner decision node prompt receives upstream outputs in context", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-decision-ctx-"));
+    try {
+      let capturedPrompt = "";
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: MOCK_AGENT_COMMAND,
+          cwd: outputRoot,
+        }),
+        permissionMode: "approve-all",
+        resolveDecision: async ({ prompt }) => {
+          capturedPrompt = prompt;
+          return { choice: "yes", reasoning: "looks good" };
+        },
+        outputRoot,
+      });
+
+      const flow = defineFlow({
+        name: "decision-context-test",
+        startAt: "prep",
+        nodes: {
+          prep: compute({ run: () => ({ summary: "all good" }) }),
+          decide: decision({
+            prompt: (ctx) => `Review: ${(ctx.outputs.prep as { summary: string }).summary}`,
+            options: { yes: "Approved", no: "Rejected" },
+          }),
+        },
+        edges: [{ from: "prep", to: "decide" }],
+      });
+
+      const result = await runner.run(flow, {});
+      assert.equal(result.state.status, "completed");
+      assert.equal(capturedPrompt, "Review: all good");
+    } finally {
+      await fs.rm(outputRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+test("FlowRunner decision node rejects result with missing reasoning field", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-decision-shape-"));
+    try {
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: MOCK_AGENT_COMMAND,
+          cwd: outputRoot,
+        }),
+        permissionMode: "approve-all",
+        resolveDecision: async () => ({ choice: "a" }) as never,
+        outputRoot,
+      });
+
+      const flow = defineFlow({
+        name: "decision-shape-test",
+        startAt: "decide",
+        nodes: {
+          decide: decision({
+            prompt: () => "Pick",
+            options: { a: "A", b: "B" },
+          }),
+        },
+        edges: [],
+      });
+
+      await assert.rejects(async () => await runner.run(flow, {}), /must have shape/);
+
+      const runDir = await waitForRunDir(outputRoot, "decision-shape-test");
+      const state = await readRunJson(runDir);
+      assert.equal(state.status, "failed");
+      assert.match(String(state.error), /must have shape/);
+    } finally {
+      await fs.rm(outputRoot, { recursive: true, force: true });
+    }
   });
 });
 

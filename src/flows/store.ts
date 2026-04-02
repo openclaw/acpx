@@ -452,6 +452,14 @@ function snapshotNode(node: FlowNodeDefinition) {
         ...(node.summary ? { summary: node.summary } : {}),
         hasRun: typeof node.run === "function",
       };
+    case "decision":
+      return {
+        ...common,
+        options: structuredClone(node.options),
+        ...(node.profile ? { profile: node.profile } : {}),
+        ...(node.model ? { model: node.model } : {}),
+        hasPrompt: true,
+      };
   }
 }
 

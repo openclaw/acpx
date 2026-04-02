@@ -108,11 +108,31 @@ export type CheckpointNodeDefinition = FlowNodeCommon & {
   run?: (context: FlowNodeContext) => MaybePromise<unknown>;
 };
 
+export type DecisionNodeDefinition = FlowNodeCommon & {
+  nodeType: "decision";
+  prompt: (context: FlowNodeContext) => MaybePromise<string>;
+  options: Record<string, string>;
+  model?: string;
+  profile?: string;
+};
+
+export type DecisionResolverInput = {
+  prompt: string;
+  options: Record<string, string>;
+  model?: string;
+};
+
+export type DecisionResult = {
+  choice: string;
+  reasoning: string;
+};
+
 export type FlowNodeDefinition =
   | AcpNodeDefinition
   | ComputeNodeDefinition
   | ActionNodeDefinition
-  | CheckpointNodeDefinition;
+  | CheckpointNodeDefinition
+  | DecisionNodeDefinition;
 
 export type FlowPermissionRequirements = {
   requiredMode: PermissionMode;
@@ -132,6 +152,7 @@ export type FlowDefinition = {
 export type FlowNodeSnapshot = FlowNodeCommon & {
   nodeType: FlowNodeDefinition["nodeType"];
   profile?: string;
+  model?: string;
   session?: {
     handle?: string;
     isolated?: boolean;
@@ -141,6 +162,7 @@ export type FlowNodeSnapshot = FlowNodeCommon & {
     value?: string;
   };
   summary?: string;
+  options?: Record<string, string>;
   actionExecution?: "function" | "shell";
   hasPrompt?: boolean;
   hasParse?: boolean;
@@ -339,6 +361,7 @@ export type ResolvedFlowAgent = {
 
 export type FlowRunnerOptions = {
   resolveAgent: (profile?: string) => ResolvedFlowAgent;
+  resolveDecision?: (input: DecisionResolverInput) => Promise<DecisionResult>;
   permissionMode: PermissionMode;
   mcpServers?: McpServer[];
   nonInteractivePermissions?: NonInteractivePermissionPolicy;

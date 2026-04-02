@@ -3,6 +3,7 @@ import type {
   ActionNodeDefinition,
   CheckpointNodeDefinition,
   ComputeNodeDefinition,
+  DecisionNodeDefinition,
   FlowDefinition,
   FunctionActionNodeDefinition,
   ShellActionNodeDefinition,
@@ -59,6 +60,15 @@ export function checkpoint(
 ): CheckpointNodeDefinition {
   return {
     nodeType: "checkpoint",
+    ...definition,
+  };
+}
+
+export function decision(
+  definition: Omit<DecisionNodeDefinition, "nodeType">,
+): DecisionNodeDefinition {
+  return {
+    nodeType: "decision",
     ...definition,
   };
 }
