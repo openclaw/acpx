@@ -39,6 +39,7 @@ import type {
   DecisionNodeDefinition,
   DecisionResolverInput,
   DecisionResult,
+  FlowArtifactRef,
   FlowDefinition,
   FlowNodeCommon,
   FlowNodeContext,
@@ -532,23 +533,6 @@ export class FlowRunner {
           "Do not include any other text.",
         ].join("\n");
 
-        const isolatedBinding = createIsolatedSessionBinding(
-          flow.name,
-          state.runId,
-          state.currentAttemptId ?? randomUUID(),
-          node.profile,
-          agentInfo,
-        );
-        const initialIsolatedRecord = createSyntheticSessionRecord({
-          binding: isolatedBinding,
-          createdAt: state.currentNodeStartedAt ?? isoNow(),
-          updatedAt: state.currentNodeStartedAt ?? isoNow(),
-          conversation: createSessionConversation(state.currentNodeStartedAt ?? isoNow()),
-          acpxState: undefined,
-          lastSeq: 0,
-        });
-        await this.store.ensureSessionBundle(runDir, state, isolatedBinding, initialIsolatedRecord);
-
         const promptArtifact = await this.store.writeArtifact(runDir, state, acpPrompt, {
           mediaType: "text/plain",
           extension: "txt",
@@ -556,59 +540,20 @@ export class FlowRunner {
           attemptId: state.currentAttemptId,
         });
 
-        await this.store.appendTrace(runDir, state, {
-          scope: "acp",
-          type: "acp_prompt_prepared",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-          sessionId: isolatedBinding.bundleId,
-          payload: { sessionId: isolatedBinding.bundleId, promptArtifact },
-        });
-
-        const isolatedPrompt = await this.runIsolatedPrompt(
+        const { rawText, binding, trace } = await this.runIsolatedAcpPromptWithTrace(
           runDir,
           state,
-          isolatedBinding,
+          flow,
+          node.profile,
           agentInfo,
           normalizePromptInput(acpPrompt),
+          promptArtifact,
           nodeTimeoutMs,
         );
 
-        const rawResponseArtifact = await this.store.writeArtifact(
-          runDir,
-          state,
-          isolatedPrompt.rawText,
-          {
-            mediaType: "text/plain",
-            extension: "txt",
-            nodeId: state.currentNode,
-            attemptId: state.currentAttemptId,
-            sessionId: isolatedBinding.bundleId,
-          },
-        );
-        await this.store.appendTrace(runDir, state, {
-          scope: "acp",
-          type: "acp_response_parsed",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-          sessionId: isolatedBinding.bundleId,
-          payload: {
-            sessionId: isolatedBinding.bundleId,
-            conversation: isolatedPrompt.conversation,
-            rawResponseArtifact,
-          },
-        });
-
-        const trace: FlowStepTrace = {
-          sessionId: isolatedBinding.bundleId,
-          promptArtifact,
-          rawResponseArtifact,
-          conversation: isolatedPrompt.conversation,
-        };
-
         let parsed: DecisionResult;
         try {
-          parsed = extractJsonObject(isolatedPrompt.rawText) as DecisionResult;
+          parsed = extractJsonObject(rawText) as DecisionResult;
           validateDecisionResult(parsed, node.options);
         } catch (error) {
           throw attachStepTrace(error, trace);
@@ -617,8 +562,8 @@ export class FlowRunner {
         return {
           output: parsed,
           promptText: acpPrompt,
-          rawText: isolatedPrompt.rawText,
-          sessionInfo: isolatedBinding,
+          rawText,
+          sessionInfo: binding,
           agentInfo,
           trace,
         };
@@ -834,89 +779,27 @@ export class FlowRunner {
         });
 
         if (node.session?.isolated) {
-          const isolatedBinding = createIsolatedSessionBinding(
-            flow.name,
-            state.runId,
-            state.currentAttemptId ?? randomUUID(),
+          const { rawText, binding, trace } = await this.runIsolatedAcpPromptWithTrace(
+            runDir,
+            state,
+            flow,
             node.profile,
             agentInfo,
-          );
-          const initialIsolatedRecord = createSyntheticSessionRecord({
-            binding: isolatedBinding,
-            createdAt: state.currentNodeStartedAt ?? isoNow(),
-            updatedAt: state.currentNodeStartedAt ?? isoNow(),
-            conversation: createSessionConversation(state.currentNodeStartedAt ?? isoNow()),
-            acpxState: undefined,
-            lastSeq: 0,
-          });
-          await this.store.ensureSessionBundle(
-            runDir,
-            state,
-            isolatedBinding,
-            initialIsolatedRecord,
-          );
-          await this.store.appendTrace(runDir, state, {
-            scope: "acp",
-            type: "acp_prompt_prepared",
-            nodeId: state.currentNode,
-            attemptId: state.currentAttemptId,
-            sessionId: isolatedBinding.bundleId,
-            payload: {
-              sessionId: isolatedBinding.bundleId,
-              promptArtifact,
-            },
-          });
-          const isolatedPrompt = await this.runIsolatedPrompt(
-            runDir,
-            state,
-            isolatedBinding,
-            agentInfo,
             prompt,
+            promptArtifact,
             nodeTimeoutMs,
           );
-          const rawResponseArtifact = await this.store.writeArtifact(
-            runDir,
-            state,
-            isolatedPrompt.rawText,
-            {
-              mediaType: "text/plain",
-              extension: "txt",
-              nodeId: state.currentNode,
-              attemptId: state.currentAttemptId,
-              sessionId: isolatedBinding.bundleId,
-            },
-          );
-          await this.store.appendTrace(runDir, state, {
-            scope: "acp",
-            type: "acp_response_parsed",
-            nodeId: state.currentNode,
-            attemptId: state.currentAttemptId,
-            sessionId: isolatedBinding.bundleId,
-            payload: {
-              sessionId: isolatedBinding.bundleId,
-              conversation: isolatedPrompt.conversation,
-              rawResponseArtifact,
-            },
-          });
-          const trace: FlowStepTrace = {
-            sessionId: isolatedBinding.bundleId,
-            promptArtifact,
-            rawResponseArtifact,
-            conversation: isolatedPrompt.conversation,
-          };
           let parsedOutput: unknown;
           try {
-            parsedOutput = node.parse
-              ? await node.parse(isolatedPrompt.rawText, context)
-              : isolatedPrompt.rawText;
+            parsedOutput = node.parse ? await node.parse(rawText, context) : rawText;
           } catch (error) {
             throw attachStepTrace(error, trace);
           }
           return {
             output: parsedOutput,
             promptText,
-            rawText: isolatedPrompt.rawText,
-            sessionInfo: isolatedBinding,
+            rawText,
+            sessionInfo: binding,
             agentInfo,
             trace,
           };
@@ -1269,6 +1152,95 @@ export class FlowRunner {
     );
   }
 
+  private async runIsolatedAcpPromptWithTrace(
+    runDir: string,
+    state: FlowRunState,
+    flow: FlowDefinition,
+    profile: string | undefined,
+    agentInfo: ResolvedFlowAgent,
+    prompt: PromptInput,
+    promptArtifact: FlowArtifactRef,
+    nodeTimeoutMs: number | undefined,
+  ): Promise<{
+    rawText: string;
+    binding: FlowSessionBinding;
+    rawResponseArtifact: FlowArtifactRef;
+    trace: FlowStepTrace;
+  }> {
+    const isolatedBinding = createIsolatedSessionBinding(
+      flow.name,
+      state.runId,
+      state.currentAttemptId ?? randomUUID(),
+      profile,
+      agentInfo,
+    );
+    const initialIsolatedRecord = createSyntheticSessionRecord({
+      binding: isolatedBinding,
+      createdAt: state.currentNodeStartedAt ?? isoNow(),
+      updatedAt: state.currentNodeStartedAt ?? isoNow(),
+      conversation: createSessionConversation(state.currentNodeStartedAt ?? isoNow()),
+      acpxState: undefined,
+      lastSeq: 0,
+    });
+    await this.store.ensureSessionBundle(runDir, state, isolatedBinding, initialIsolatedRecord);
+    await this.store.appendTrace(runDir, state, {
+      scope: "acp",
+      type: "acp_prompt_prepared",
+      nodeId: state.currentNode,
+      attemptId: state.currentAttemptId,
+      sessionId: isolatedBinding.bundleId,
+      payload: { sessionId: isolatedBinding.bundleId, promptArtifact },
+    });
+
+    const isolatedPrompt = await this.runIsolatedPrompt(
+      runDir,
+      state,
+      isolatedBinding,
+      agentInfo,
+      prompt,
+      nodeTimeoutMs,
+    );
+
+    const rawResponseArtifact = await this.store.writeArtifact(
+      runDir,
+      state,
+      isolatedPrompt.rawText,
+      {
+        mediaType: "text/plain",
+        extension: "txt",
+        nodeId: state.currentNode,
+        attemptId: state.currentAttemptId,
+        sessionId: isolatedBinding.bundleId,
+      },
+    );
+    await this.store.appendTrace(runDir, state, {
+      scope: "acp",
+      type: "acp_response_parsed",
+      nodeId: state.currentNode,
+      attemptId: state.currentAttemptId,
+      sessionId: isolatedBinding.bundleId,
+      payload: {
+        sessionId: isolatedBinding.bundleId,
+        conversation: isolatedPrompt.conversation,
+        rawResponseArtifact,
+      },
+    });
+
+    const trace: FlowStepTrace = {
+      sessionId: isolatedBinding.bundleId,
+      promptArtifact,
+      rawResponseArtifact,
+      conversation: isolatedPrompt.conversation,
+    };
+
+    return {
+      rawText: isolatedPrompt.rawText,
+      binding: isolatedBinding,
+      rawResponseArtifact,
+      trace,
+    };
+  }
+
   private async runIsolatedPrompt(
     runDir: string,
     state: FlowRunState,
@@ -1590,11 +1562,16 @@ function validateDecisionResult(
   if (
     result == null ||
     typeof result !== "object" ||
-    typeof (result as DecisionResult).choice !== "string" ||
-    typeof (result as DecisionResult).reasoning !== "string"
+    typeof (result as DecisionResult).choice !== "string"
   ) {
     throw new Error(
-      `Decision result must have shape { choice: string, reasoning: string }, got: ${JSON.stringify(result)}`,
+      `Decision result must have shape { choice: string, reasoning?: string }, got: ${JSON.stringify(result)}`,
+    );
+  }
+  const reasoning = (result as Record<string, unknown>).reasoning;
+  if (reasoning !== undefined && typeof reasoning !== "string") {
+    throw new Error(
+      `Decision result reasoning must be a string if provided, got: ${JSON.stringify(result)}`,
     );
   }
   const choice = (result as DecisionResult).choice;

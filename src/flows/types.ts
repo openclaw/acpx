@@ -124,7 +124,7 @@ export type DecisionResolverInput = {
 
 export type DecisionResult = {
   choice: string;
-  reasoning: string;
+  reasoning?: string;
 };
 
 export type FlowNodeDefinition =
