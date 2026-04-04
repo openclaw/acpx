@@ -10,6 +10,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI/prompts: add `--prompt-retries` to retry transient prompt failures with exponential backoff while preserving strict JSON behavior and avoiding replay after prompt side effects. (#142) Thanks @lupuletic and @dutifulbob.
 - Output: add `--suppress-reads` to mask raw file-read bodies in text and JSON output while keeping normal tool activity visible. (#136) Thanks @hayatosc.
 - Agents/droid: add `factory-droid` and `factorydroid` aliases for the built-in Factory Droid adapter and sync the built-in docs. Thanks @vincentkoc.
+- Agents/built-ins: bump the default pinned `@zed-industries/codex-acp` and `@agentclientprotocol/claude-agent-acp` package ranges to the latest published releases.
 - Flows/workflows: add an initial `flow run` command, an `acpx/flows` runtime surface, and file-backed flow run state under `~/.acpx/flows/runs` for user-authored workflow modules. Thanks @osolmaz.
 - Flows/workspaces: let `acp` nodes bind to an explicit per-step cwd, add a native isolated-workspace example, and default active flow steps to a 15 minute timeout unless overridden. Thanks @osolmaz.
 - Flows/replay: store flow runs as trace bundles with `manifest.json`, `flow.json`, `trace.ndjson`, projections, bundled session replay data, and per-attempt ACP/action receipts for later inspection. Thanks @osolmaz.
