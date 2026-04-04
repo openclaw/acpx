@@ -82,10 +82,13 @@ function isQueueOwnerHeartbeatStale(owner: QueueOwnerRecord): boolean {
 }
 
 async function ensureQueueDir(): Promise<void> {
-  await fs.mkdir(queueBaseDir(), { recursive: true, mode: 0o700 });
+  const baseDir = queueBaseDir();
+  await fs.mkdir(baseDir, { recursive: true, mode: 0o700 });
+  await fs.chmod(baseDir, 0o700);
   const socketDir = queueSocketBaseDir();
   if (socketDir) {
     await fs.mkdir(socketDir, { recursive: true, mode: 0o700 });
+    await fs.chmod(socketDir, 0o700);
   }
 }
 
