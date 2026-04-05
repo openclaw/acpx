@@ -18,8 +18,8 @@ const nonEmptyTrimmedStringSchema = z.string().refine((value) => value.trim().le
   message: "must not be empty",
 });
 
-function strictObject<TShape extends z.ZodRawShape>(shape: TShape) {
-  return z.object(shape).strict();
+function extensibleObject<TShape extends z.ZodRawShape>(shape: TShape) {
+  return z.object(shape).passthrough();
 }
 
 function functionSchema<T extends Function>(label: string): z.ZodType<T> {
@@ -34,13 +34,13 @@ const flowNodeCommonShape = {
   statusDetail: z.string().optional(),
 } satisfies z.ZodRawShape;
 
-const flowPermissionRequirementsSchema = strictObject({
+const flowPermissionRequirementsSchema = extensibleObject({
   requiredMode: z.enum(PERMISSION_MODES),
   requireExplicitGrant: z.boolean().optional(),
   reason: nonEmptyTrimmedStringSchema.optional(),
 });
 
-const flowRunDefinitionSchema = strictObject({
+const flowRunDefinitionSchema = extensibleObject({
   title: z
     .union([
       z.string(),
@@ -49,12 +49,12 @@ const flowRunDefinitionSchema = strictObject({
     .optional(),
 });
 
-const acpSessionSchema = strictObject({
+const acpSessionSchema = extensibleObject({
   handle: z.string().optional(),
   isolated: z.boolean().optional(),
 });
 
-const acpNodeSchema = strictObject({
+const acpNodeSchema = extensibleObject({
   ...flowNodeCommonShape,
   nodeType: z.literal("acp"),
   profile: z.string().optional(),
@@ -69,26 +69,26 @@ const acpNodeSchema = strictObject({
   parse: functionSchema<NonNullable<AcpNodeDefinition["parse"]>>("parse").optional(),
 });
 
-const computeNodeSchema = strictObject({
+const computeNodeSchema = extensibleObject({
   ...flowNodeCommonShape,
   nodeType: z.literal("compute"),
   run: functionSchema<ComputeNodeDefinition["run"]>("run"),
 });
 
-const functionActionNodeSchema = strictObject({
+const functionActionNodeSchema = extensibleObject({
   ...flowNodeCommonShape,
   nodeType: z.literal("action"),
   run: functionSchema<FunctionActionNodeDefinition["run"]>("run"),
 });
 
-const shellActionNodeSchema = strictObject({
+const shellActionNodeSchema = extensibleObject({
   ...flowNodeCommonShape,
   nodeType: z.literal("action"),
   exec: functionSchema<ShellActionNodeDefinition["exec"]>("exec"),
   parse: functionSchema<NonNullable<ShellActionNodeDefinition["parse"]>>("parse").optional(),
 });
 
-const checkpointNodeSchema = strictObject({
+const checkpointNodeSchema = extensibleObject({
   ...flowNodeCommonShape,
   nodeType: z.literal("checkpoint"),
   summary: z.string().optional(),
@@ -96,20 +96,20 @@ const checkpointNodeSchema = strictObject({
 });
 
 const flowEdgeSchema = z.union([
-  strictObject({
+  extensibleObject({
     from: z.string(),
     to: z.string(),
   }),
-  strictObject({
+  extensibleObject({
     from: z.string(),
-    switch: strictObject({
+    switch: extensibleObject({
       on: z.string(),
       cases: z.record(z.string(), z.string()),
     }),
   }),
 ]);
 
-const flowDefinitionSchema = strictObject({
+const flowDefinitionSchema = extensibleObject({
   name: nonEmptyTrimmedStringSchema,
   run: flowRunDefinitionSchema.optional(),
   permissions: flowPermissionRequirementsSchema.optional(),

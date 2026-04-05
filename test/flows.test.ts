@@ -49,6 +49,20 @@ test("parseJsonObject supports strict and fenced-only modes", () => {
 });
 
 test("flow node helpers validate node-local shape before runtime", () => {
+  const extensibleNode = compute({
+    run: () => ({ ok: true }),
+    metadata: {
+      label: "keep",
+    },
+  } as Parameters<typeof compute>[0] & {
+    metadata: {
+      label: string;
+    };
+  });
+  assert.deepEqual((extensibleNode as unknown as { metadata: { label: string } }).metadata, {
+    label: "keep",
+  });
+
   assert.throws(
     () =>
       acp({
@@ -78,6 +92,34 @@ test("flow node helpers validate node-local shape before runtime", () => {
 });
 
 test("defineFlow validates flow definition shape before execution", () => {
+  const extensibleFlow = defineFlow({
+    name: "extensible-flow",
+    startAt: "start",
+    metadata: {
+      keep: true,
+    },
+    nodes: {
+      start: {
+        ...compute({
+          run: () => ({ ok: true }),
+        }),
+        metadata: {
+          label: "start",
+        },
+      },
+    },
+    edges: [],
+  });
+  assert.deepEqual(extensibleFlow.metadata, {
+    keep: true,
+  });
+  assert.deepEqual(
+    (extensibleFlow.nodes.start as unknown as { metadata: { label: string } }).metadata,
+    {
+      label: "start",
+    },
+  );
+
   assert.throws(
     () =>
       defineFlow({
