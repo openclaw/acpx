@@ -144,6 +144,12 @@ Harness documentation synchronization policy:
 
 - Repo-local `/landpr` instructions live at [`.pi/prompts/landpr.md`](.pi/prompts/landpr.md).
   When landing or merging a PR in this repo, follow that process.
+- Pull request titles MUST use conventional prefixes such as `feat:`, `fix:`,
+  `docs:`, `chore:`, `refactor:`, or `test:` and should summarize the actual
+  change directly.
+- Do not prefix pull request titles with agent markers such as `[codex]` or
+  other AI-assistance tags. If AI assistance should be disclosed, put that in
+  the PR description instead.
 - Local `codex review --base ...` runs in this repo can legitimately take up to
   30 minutes. Do not declare them stuck before that timeout unless you have
   stronger evidence than elapsed time alone.
