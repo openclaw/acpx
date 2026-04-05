@@ -1,3 +1,11 @@
+import { validateFlowDefinition } from "./graph.js";
+import {
+  assertValidAcpNodeDefinition,
+  assertValidActionNodeDefinition,
+  assertValidCheckpointNodeDefinition,
+  assertValidComputeNodeDefinition,
+  assertValidShellActionNodeDefinition,
+} from "./schema.js";
 import type {
   AcpNodeDefinition,
   ActionNodeDefinition,
@@ -9,23 +17,28 @@ import type {
 } from "./types.js";
 
 export function defineFlow<TFlow extends FlowDefinition>(definition: TFlow): TFlow {
+  validateFlowDefinition(definition);
   return definition;
 }
 
 export function acp(definition: Omit<AcpNodeDefinition, "nodeType">): AcpNodeDefinition {
-  return {
+  const node: AcpNodeDefinition = {
     nodeType: "acp",
     ...definition,
   };
+  assertValidAcpNodeDefinition(node);
+  return node;
 }
 
 export function compute(
   definition: Omit<ComputeNodeDefinition, "nodeType">,
 ): ComputeNodeDefinition {
-  return {
+  const node: ComputeNodeDefinition = {
     nodeType: "compute",
     ...definition,
   };
+  assertValidComputeNodeDefinition(node);
+  return node;
 }
 
 export function action(
@@ -39,26 +52,32 @@ export function action(
     | Omit<FunctionActionNodeDefinition, "nodeType">
     | Omit<ShellActionNodeDefinition, "nodeType">,
 ): ActionNodeDefinition {
-  return {
+  const node: ActionNodeDefinition = {
     nodeType: "action",
     ...definition,
   } as ActionNodeDefinition;
+  assertValidActionNodeDefinition(node);
+  return node;
 }
 
 export function shell(
   definition: Omit<ShellActionNodeDefinition, "nodeType">,
 ): ShellActionNodeDefinition {
-  return {
+  const node: ShellActionNodeDefinition = {
     nodeType: "action",
     ...definition,
   };
+  assertValidShellActionNodeDefinition(node);
+  return node;
 }
 
 export function checkpoint(
   definition: Omit<CheckpointNodeDefinition, "nodeType"> = {},
 ): CheckpointNodeDefinition {
-  return {
+  const node: CheckpointNodeDefinition = {
     nodeType: "checkpoint",
     ...definition,
   };
+  assertValidCheckpointNodeDefinition(node);
+  return node;
 }

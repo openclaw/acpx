@@ -14,7 +14,12 @@ import {
   defineFlow,
   shell,
 } from "../src/flows/runtime.js";
-import type { ShellActionExecution } from "../src/flows/runtime.js";
+import type {
+  FlowDefinition,
+  FunctionActionNodeDefinition,
+  ShellActionExecution,
+  ShellActionNodeDefinition,
+} from "../src/flows/runtime.js";
 import { flowRunsBaseDir } from "../src/flows/store.js";
 import { TimeoutError } from "../src/session-runtime-helpers.js";
 import type { PromptInput } from "../src/types.js";
@@ -40,6 +45,78 @@ test("parseJsonObject supports strict and fenced-only modes", () => {
   assert.throws(
     () => parseJsonObject('before {"ok":true} after', { mode: "fenced" }),
     /Could not parse JSON/,
+  );
+});
+
+test("flow node helpers validate node-local shape before runtime", () => {
+  assert.throws(
+    () =>
+      acp({
+        parse: (text: string) => text,
+      } as unknown as Parameters<typeof acp>[0]),
+    /Invalid acp node definition: prompt: prompt must be a function/,
+  );
+
+  assert.throws(
+    () =>
+      action({
+        run: () => ({ ok: true }),
+        exec: () => ({
+          command: process.execPath,
+        }),
+      } as unknown as Omit<FunctionActionNodeDefinition & ShellActionNodeDefinition, "nodeType">),
+    /Invalid action node definition: action nodes must define exactly one of run or exec/,
+  );
+
+  assert.throws(
+    () =>
+      shell({
+        parse: (result: { stdout: string }) => result.stdout,
+      } as unknown as Omit<ShellActionNodeDefinition, "nodeType">),
+    /Invalid shell action node definition: exec: exec must be a function/,
+  );
+});
+
+test("defineFlow validates flow definition shape before execution", () => {
+  assert.throws(
+    () =>
+      defineFlow({
+        name: "invalid-node-flow",
+        startAt: "start",
+        nodes: {
+          start: {
+            nodeType: "acp",
+            prompt: "echo hello",
+          },
+        },
+        edges: [],
+      } as unknown as FlowDefinition),
+    /Invalid flow node "start": prompt: prompt must be a function/,
+  );
+
+  assert.throws(
+    () =>
+      defineFlow({
+        name: "invalid-edge-flow",
+        startAt: "start",
+        nodes: {
+          start: compute({
+            run: () => ({ ok: true }),
+          }),
+        },
+        edges: [
+          {
+            from: "start",
+            switch: {
+              on: 1,
+              cases: {
+                ok: "start",
+              },
+            },
+          },
+        ],
+      } as unknown as FlowDefinition),
+    /Invalid flow definition: edges\.0:/,
   );
 });
 
@@ -651,43 +728,30 @@ test("FlowRunner marks a completed run failed when the final snapshot write fail
   });
 });
 
-test("FlowRunner rejects multiple outgoing edges from the same node", async () => {
-  await withTempHome(async () => {
-    const runner = new FlowRunner({
-      resolveAgent: () => ({
-        agentName: "unused",
-        agentCommand: "unused",
-        cwd: process.cwd(),
+test("defineFlow rejects multiple outgoing edges from the same node", () => {
+  assert.throws(
+    () =>
+      defineFlow({
+        name: "ambiguous-edges",
+        startAt: "start",
+        nodes: {
+          start: compute({
+            run: () => ({ ok: true }),
+          }),
+          one: action({
+            run: () => ({ branch: 1 }),
+          }),
+          two: action({
+            run: () => ({ branch: 2 }),
+          }),
+        },
+        edges: [
+          { from: "start", to: "one" },
+          { from: "start", to: "two" },
+        ],
       }),
-      permissionMode: "approve-all",
-      outputRoot: await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-")),
-    });
-
-    const flow = defineFlow({
-      name: "ambiguous-edges",
-      startAt: "start",
-      nodes: {
-        start: compute({
-          run: () => ({ ok: true }),
-        }),
-        one: action({
-          run: () => ({ branch: 1 }),
-        }),
-        two: action({
-          run: () => ({ branch: 2 }),
-        }),
-      },
-      edges: [
-        { from: "start", to: "one" },
-        { from: "start", to: "two" },
-      ],
-    });
-
-    await assert.rejects(
-      async () => await runner.run(flow, {}),
-      /Flow node must not declare multiple outgoing edges: start/,
-    );
-  });
+    /Flow node must not declare multiple outgoing edges: start/,
+  );
 });
 
 test("FlowRunner persists active node state while a shell step is running", async () => {
