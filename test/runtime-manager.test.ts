@@ -160,6 +160,8 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
   assert.equal(created.acpSessionId, "new-session");
   assert.equal(created.agentSessionId, "agent-session");
   assert.equal(created.protocolVersion, 1);
+  assert.equal(created.eventLog.segment_count > 0, true);
+  assert.match(created.eventLog.active_path, /created-session/);
 
   const resumed = await manager.ensureSession({
     sessionKey: "resumed-session",

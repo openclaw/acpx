@@ -13,6 +13,7 @@ import {
   recordSessionUpdate,
   trimConversationForRuntime,
 } from "../session-conversation-model.js";
+import { defaultSessionEventLog } from "../session-event-log.js";
 import { setDesiredModeId } from "../session-mode-preference.js";
 import { withTimeout } from "../session-runtime-helpers.js";
 import type { ClientOperation, SessionRecord, SessionResumePolicy } from "../types.js";
@@ -180,14 +181,7 @@ function createInitialRecord(params: {
     createdAt: now,
     lastUsedAt: now,
     lastSeq: 0,
-    eventLog: {
-      active_path: "",
-      segment_count: 0,
-      max_segment_bytes: 0,
-      max_segments: 0,
-      last_write_at: undefined,
-      last_write_error: null,
-    },
+    eventLog: defaultSessionEventLog(params.recordId),
     closed: false,
     closedAt: undefined,
     ...createSessionConversation(now),
