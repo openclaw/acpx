@@ -564,6 +564,66 @@ test('integration: flow run resolves "acpx/flows" imports for external flow file
   });
 });
 
+test("integration: flow run supports staged defineFlow assembly in external modules", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const flowDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-staged-"));
+    const flowPath = path.join(flowDir, "staged.flow.ts");
+
+    try {
+      await fs.writeFile(
+        flowPath,
+        [
+          'import { compute, defineFlow } from "acpx/flows";',
+          "",
+          "const nodes = {};",
+          "const flow = defineFlow({",
+          '  name: "staged-flow-import",',
+          '  startAt: "done",',
+          "  nodes,",
+          "  edges: [],",
+          "});",
+          "",
+          "nodes.done = compute({",
+          '  run: () => ({ ok: true, source: "staged" }),',
+          "});",
+          "",
+          "export default flow;",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "json", "flow", "run", flowPath],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      const payload = JSON.parse(result.stdout.trim()) as {
+        action?: string;
+        status?: string;
+        outputs?: {
+          done?: {
+            ok?: boolean;
+            source?: string;
+          };
+        };
+      };
+
+      assert.equal(payload.action, "flow_run_result");
+      assert.equal(payload.status, "completed");
+      assert.deepEqual(payload.outputs?.done, {
+        ok: true,
+        source: "staged",
+      });
+    } finally {
+      await fs.rm(flowDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: flow run reports waiting checkpoints in json mode", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

@@ -1,9 +1,9 @@
-import { validateFlowDefinition } from "./graph.js";
 import {
   assertValidAcpNodeDefinition,
   assertValidActionNodeDefinition,
   assertValidCheckpointNodeDefinition,
   assertValidComputeNodeDefinition,
+  assertValidFlowDefinitionShape,
   assertValidShellActionNodeDefinition,
 } from "./schema.js";
 import type {
@@ -17,7 +17,7 @@ import type {
 } from "./types.js";
 
 export function defineFlow<TFlow extends FlowDefinition>(definition: TFlow): TFlow {
-  validateFlowDefinition(definition);
+  assertValidFlowDefinitionShape(definition);
   return definition;
 }
 

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { validateFlowDefinition } from "../src/flows/graph.js";
 import { extractJsonObject, parseJsonObject, parseStrictJsonObject } from "../src/flows/json.js";
 import {
   FlowRunner,
@@ -209,6 +210,23 @@ test("defineFlow validates flow definition shape before execution", () => {
       } as unknown as FlowDefinition),
     /Invalid flow definition: edges\.0:/,
   );
+});
+
+test("defineFlow allows staged assembly before full graph validation", () => {
+  const nodes: FlowDefinition["nodes"] = {};
+  const flow = defineFlow({
+    name: "staged-flow",
+    startAt: "start",
+    nodes,
+    edges: [],
+  });
+
+  nodes.start = compute({
+    run: () => ({ ok: true }),
+  });
+
+  assert.equal(flow.nodes.start?.nodeType, "compute");
+  assert.doesNotThrow(() => validateFlowDefinition(flow));
 });
 
 test("FlowRunner executes isolated ACP nodes and branches deterministically", async () => {
@@ -819,28 +837,29 @@ test("FlowRunner marks a completed run failed when the final snapshot write fail
   });
 });
 
-test("defineFlow rejects multiple outgoing edges from the same node", () => {
-  assert.throws(
-    () =>
-      defineFlow({
-        name: "ambiguous-edges",
-        startAt: "start",
-        nodes: {
-          start: compute({
-            run: () => ({ ok: true }),
-          }),
-          one: action({
-            run: () => ({ branch: 1 }),
-          }),
-          two: action({
-            run: () => ({ branch: 2 }),
-          }),
-        },
-        edges: [
-          { from: "start", to: "one" },
-          { from: "start", to: "two" },
-        ],
+test("full flow validation rejects multiple outgoing edges from the same node", () => {
+  const flow = defineFlow({
+    name: "ambiguous-edges",
+    startAt: "start",
+    nodes: {
+      start: compute({
+        run: () => ({ ok: true }),
       }),
+      one: action({
+        run: () => ({ branch: 1 }),
+      }),
+      two: action({
+        run: () => ({ branch: 2 }),
+      }),
+    },
+    edges: [
+      { from: "start", to: "one" },
+      { from: "start", to: "two" },
+    ],
+  });
+
+  assert.throws(
+    () => validateFlowDefinition(flow),
     /Flow node must not declare multiple outgoing edges: start/,
   );
 });

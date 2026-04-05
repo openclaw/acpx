@@ -218,12 +218,24 @@ existing graph validator as long as the runtime boundary stays clear.
 
 ### Where validation should run
 
-`defineFlow(...)` should validate the whole flow definition before returning it.
+`defineFlow(...)` should validate the immediate definition shape before
+returning it.
 
-That keeps the authoring contract simple:
+Full graph validation must still run after module evaluation in the loader or
+runtime.
+
+That preserves compatibility with staged module assembly patterns such as:
+
+- create `nodes` or `edges`
+- call `defineFlow(...)`
+- finish populating the graph before export evaluation completes
+
+That keeps the authoring contract simple without making `defineFlow(...)`
+stricter than plain exported flow objects:
 
 - user code exports a plain flow object
-- `defineFlow(...)` validates it
+- `defineFlow(...)` validates the current shape
+- the loader or runtime validates the completed graph
 - the runtime executes the validated graph
 
 Node helpers such as `acp(...)`, `action(...)`, `compute(...)`, and
