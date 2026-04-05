@@ -142,6 +142,125 @@ the visible graph shape, for example:
 
 Do not trade away inspectability just to make the surface feel clever.
 
+## Schema validation direction
+
+The next implementation step should add runtime schema validation for the
+existing flow definition model.
+
+Use `zod` for that validation layer.
+
+This is a validation change, not an authoring-model rewrite.
+
+Keep the current public field names:
+
+- `name`
+- `startAt`
+- `nodes`
+- `edges`
+
+Do not bundle API renames such as `start`, `steps`, or other new top-level
+names into the first `zod` pass.
+
+The core model should stay plain data:
+
+- a flow is a plain object
+- each node is a plain tagged object
+- edges are plain data connecting node ids
+
+Do not replace that with class instances or a builder-only runtime model.
+
+### What the schemas should cover
+
+The schema layer should describe the current flow graph directly:
+
+- one flow-definition schema
+- one discriminated union for node definitions keyed by `nodeType`
+- one edge schema that covers both direct edges and `switch` edges
+- shared validation for common node fields such as timeouts and heartbeat
+
+Function-valued fields are still allowed where the current API allows them, for
+example:
+
+- `prompt`
+- `parse`
+- `run`
+- `exec`
+- dynamic `cwd`
+
+In `zod`, those should be validated as functions, not serialized or re-shaped
+into something more magical.
+
+### Validation layers
+
+There are two different kinds of validation and the implementation should keep
+them conceptually separate:
+
+1. shape validation
+2. graph semantics validation
+
+Shape validation answers questions like:
+
+- is `name` a non-empty string
+- is `startAt` a string
+- is `nodes` a record of valid node definitions
+- is `edges` an array of valid edge objects
+- does a given node have the required callbacks for its `nodeType`
+
+Graph semantics validation answers questions like:
+
+- does `startAt` reference an existing node
+- does every edge reference real node ids
+- does each node have at most one outgoing edge
+- does every `switch` case point to a real target
+
+It is fine for the first implementation to keep some semantic checks in the
+existing graph validator as long as the runtime boundary stays clear.
+
+### Where validation should run
+
+`defineFlow(...)` should validate the whole flow definition before returning it.
+
+That keeps the authoring contract simple:
+
+- user code exports a plain flow object
+- `defineFlow(...)` validates it
+- the runtime executes the validated graph
+
+Node helpers such as `acp(...)`, `action(...)`, `compute(...)`, and
+`checkpoint(...)` may also validate node-local shape, but they should still
+return plain node-definition objects.
+
+### What should not change in the first PR
+
+The first `zod` implementation should not also try to solve unrelated API
+questions.
+
+Keep all of these unchanged:
+
+- the `defineFlow({ name, startAt, nodes, edges })` surface
+- string-keyed node ids
+- explicit `edges`
+- the existing node kinds
+- the current flow snapshot naming used in persisted run bundles
+
+Do not bundle these into the same PR:
+
+- renaming `nodes` to `steps`
+- renaming `startAt` to `start`
+- moving routing into a new top-level API
+- changing how the loader resolves `acpx/flows`
+- redesigning JSON output parsing at the same time
+
+### Follow-on work after definition schemas
+
+Once definition validation lands, later work may add optional validation for
+node outputs.
+
+That is a separate step.
+
+For example, an `acp` node may later support a dedicated output schema, but
+that should come after the base flow-definition schemas are in place.
+
 ## Step kinds
 
 Keep the primitive set small:
@@ -395,6 +514,14 @@ The flow store keeps orchestration state such as:
 The flow layer should reference session records, not duplicate full ACP
 transcripts.
 
+The persisted run snapshot should keep the same top-level flow fields so replay
+and inspection continue to describe the same graph the author wrote:
+
+- `name`
+- `startAt`
+- `nodes`
+- `edges`
+
 Trace and replay storage are specified separately in:
 
 - [`2026-03-26-acpx-flow-trace-replay.md`](2026-03-26-acpx-flow-trace-replay.md)
@@ -440,6 +567,11 @@ These are output-parsing helpers, not the flow format itself.
 
 They help one node turn assistant text into structured data after the runtime
 has already executed that step.
+
+The first `zod` implementation should not try to replace these helpers.
+
+Definition validation and output validation are related, but they are not the
+same thing and should not be collapsed into one change.
 
 Default rule:
 
