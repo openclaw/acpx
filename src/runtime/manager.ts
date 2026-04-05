@@ -2,6 +2,7 @@ import path from "node:path";
 import { AcpClient } from "../client.js";
 import { normalizeOutputError } from "../error-normalization.js";
 import { textPrompt, type PromptInput } from "../prompt-content.js";
+import { withConnectedSession } from "../runtime-core/connected-session.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,
@@ -11,13 +12,9 @@ import {
   recordSessionUpdate,
   trimConversationForRuntime,
 } from "../session-conversation-model.js";
+import { setDesiredModeId } from "../session-mode-preference.js";
 import { withTimeout } from "../session-runtime-helpers.js";
-import type {
-  ClientOperation,
-  SessionAcpxState,
-  SessionRecord,
-  SessionResumePolicy,
-} from "../types.js";
+import type { ClientOperation, SessionRecord, SessionResumePolicy } from "../types.js";
 import type {
   AcpRuntimeEvent,
   AcpRuntimeHandle,
@@ -42,7 +39,7 @@ type ActiveSessionController = {
   hasActivePrompt: () => boolean;
   requestCancelActivePrompt: () => Promise<boolean>;
   setSessionMode: (modeId: string) => Promise<void>;
-  setSessionConfigOption: (configId: string, value: string) => Promise<void>;
+  setSessionConfigOption: (configId: string, value: string) => Promise<unknown>;
 };
 
 type Deferred<T> = {
@@ -480,79 +477,62 @@ export class AcpRuntimeManager {
   async setMode(handle: AcpRuntimeHandle, mode: string): Promise<void> {
     const record = await this.requireRecord(handle.acpxRecordId ?? handle.sessionKey);
     const controller = this.activeControllers.get(record.acpxRecordId);
+    let targetRecord = record;
     if (controller) {
       await controller.setSessionMode(mode);
     } else {
-      const client = this.createClient({
-        agentCommand: record.agentCommand,
-        cwd: record.cwd,
+      const result = await withConnectedSession({
+        sessionRecordId: record.acpxRecordId,
+        loadRecord: async (sessionRecordId) => await this.requireRecord(sessionRecordId),
+        saveRecord: async (connectedRecord) =>
+          await this.options.sessionStore.save(connectedRecord),
+        createClient: (options) => this.createClient(options),
         mcpServers: [...(this.options.mcpServers ?? [])],
         permissionMode: this.options.permissionMode,
         nonInteractivePermissions: this.options.nonInteractivePermissions,
         verbose: this.options.verbose,
+        timeoutMs: this.options.timeoutMs,
+        run: async ({ client, sessionId }) => {
+          await client.setSessionMode(sessionId, mode);
+        },
       });
-      try {
-        await client.start();
-        const { sessionId } = await connectAndLoadSession({
-          client,
-          record,
-          timeoutMs: this.options.timeoutMs,
-          activeController: {
-            hasActivePrompt: () => false,
-            requestCancelActivePrompt: async () => false,
-            setSessionMode: async () => {},
-            setSessionConfigOption: async () => {},
-          },
-        });
-        await client.setSessionMode(sessionId, mode);
-      } finally {
-        applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-        await this.options.sessionStore.save(record).catch(() => {});
-        await client.close();
-      }
+      targetRecord = result.record;
     }
-    record.acpx = {
-      ...(record.acpx ?? ({} as SessionAcpxState)),
-      desired_mode_id: mode,
-    };
-    await this.options.sessionStore.save(record);
+    setDesiredModeId(targetRecord, mode);
+    await this.options.sessionStore.save(targetRecord);
   }
 
   async setConfigOption(handle: AcpRuntimeHandle, key: string, value: string): Promise<void> {
     const record = await this.requireRecord(handle.acpxRecordId ?? handle.sessionKey);
     const controller = this.activeControllers.get(record.acpxRecordId);
+    let targetRecord = record;
     if (controller) {
       await controller.setSessionConfigOption(key, value);
     } else {
-      const client = this.createClient({
-        agentCommand: record.agentCommand,
-        cwd: record.cwd,
+      const result = await withConnectedSession({
+        sessionRecordId: record.acpxRecordId,
+        loadRecord: async (sessionRecordId) => await this.requireRecord(sessionRecordId),
+        saveRecord: async (connectedRecord) =>
+          await this.options.sessionStore.save(connectedRecord),
+        createClient: (options) => this.createClient(options),
         mcpServers: [...(this.options.mcpServers ?? [])],
         permissionMode: this.options.permissionMode,
         nonInteractivePermissions: this.options.nonInteractivePermissions,
         verbose: this.options.verbose,
+        timeoutMs: this.options.timeoutMs,
+        run: async ({ client, sessionId, record: connectedRecord }) => {
+          await client.setSessionConfigOption(sessionId, key, value);
+          if (key === "mode") {
+            setDesiredModeId(connectedRecord, value);
+          }
+        },
       });
-      try {
-        await client.start();
-        const { sessionId } = await connectAndLoadSession({
-          client,
-          record,
-          timeoutMs: this.options.timeoutMs,
-          activeController: {
-            hasActivePrompt: () => false,
-            requestCancelActivePrompt: async () => false,
-            setSessionMode: async () => {},
-            setSessionConfigOption: async () => {},
-          },
-        });
-        await client.setSessionConfigOption(sessionId, key, value);
-      } finally {
-        applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-        await this.options.sessionStore.save(record).catch(() => {});
-        await client.close();
-      }
+      targetRecord = result.record;
     }
-    await this.options.sessionStore.save(record);
+    if (key === "mode") {
+      setDesiredModeId(targetRecord, value);
+    }
+    await this.options.sessionStore.save(targetRecord);
   }
 
   async cancel(handle: AcpRuntimeHandle): Promise<void> {

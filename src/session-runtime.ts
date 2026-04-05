@@ -43,6 +43,10 @@ import {
   QueueOwnerTurnController,
   type QueueOwnerActiveSessionController,
 } from "./queue-owner-turn-controller.js";
+import {
+  sessionOptionsFromRecord,
+  type SessionAgentOptions,
+} from "./runtime-core/session-options.js";
 import { normalizeRuntimeSessionId } from "./runtime-session-id.js";
 import {
   setCurrentModelId,
@@ -63,6 +67,7 @@ import {
   type QueueOwnerRuntimeOptions,
 } from "./session-runtime/queue-owner-process.js";
 export type { QueueOwnerRuntimeOptions } from "./session-runtime/queue-owner-process.js";
+export type { SessionAgentOptions } from "./runtime-core/session-options.js";
 import { promptToDisplayText, textPrompt } from "./prompt-content.js";
 import {
   DEFAULT_HISTORY_LIMIT,
@@ -112,33 +117,6 @@ const QUEUE_OWNER_HEARTBEAT_INTERVAL_MS = 5_000;
 type TimedRunOptions = {
   timeoutMs?: number;
 };
-
-export type SessionAgentOptions = {
-  model?: string;
-  allowedTools?: string[];
-  maxTurns?: number;
-};
-
-function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOptions | undefined {
-  const stored = record.acpx?.session_options;
-  if (!stored) {
-    return undefined;
-  }
-
-  const sessionOptions: SessionAgentOptions = {};
-
-  if (typeof stored.model === "string" && stored.model.trim().length > 0) {
-    sessionOptions.model = stored.model;
-  }
-  if (Array.isArray(stored.allowed_tools)) {
-    sessionOptions.allowedTools = [...stored.allowed_tools];
-  }
-  if (typeof stored.max_turns === "number") {
-    sessionOptions.maxTurns = stored.max_turns;
-  }
-
-  return Object.keys(sessionOptions).length > 0 ? sessionOptions : undefined;
-}
 
 function persistSessionOptions(
   record: SessionRecord,

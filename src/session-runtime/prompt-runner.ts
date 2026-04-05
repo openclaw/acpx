@@ -1,176 +1,25 @@
-import { AcpClient } from "../client.js";
 import type { QueueOwnerActiveSessionController } from "../queue-owner-turn-controller.js";
+import {
+  withConnectedSession,
+  type FullConnectedSessionController,
+} from "../runtime-core/connected-session.js";
 import {
   setCurrentModelId,
   setDesiredModeId,
   setDesiredModelId,
 } from "../session-mode-preference.js";
-import {
-  absolutePath,
-  isoNow,
-  resolveSessionRecord,
-  writeSessionRecord,
-} from "../session-persistence.js";
-import { withInterrupt, withTimeout } from "../session-runtime-helpers.js";
+import { resolveSessionRecord, writeSessionRecord } from "../session-persistence.js";
+import { withTimeout } from "../session-runtime-helpers.js";
 import type {
   AuthPolicy,
   McpServer,
   NonInteractivePermissionPolicy,
-  PermissionMode,
-  SessionRecord,
   SessionSetConfigOptionResult,
   SessionSetModelResult,
   SessionSetModeResult,
 } from "../types.js";
-import { connectAndLoadSession } from "./connect-load.js";
-import { applyLifecycleSnapshotToRecord } from "./lifecycle.js";
 
 export type ActiveSessionController = QueueOwnerActiveSessionController;
-
-function sessionOptionsFromRecord(record: SessionRecord):
-  | {
-      model?: string;
-      allowedTools?: string[];
-      maxTurns?: number;
-    }
-  | undefined {
-  const stored = record.acpx?.session_options;
-  if (!stored) {
-    return undefined;
-  }
-
-  const sessionOptions: {
-    model?: string;
-    allowedTools?: string[];
-    maxTurns?: number;
-  } = {};
-
-  if (typeof stored.model === "string" && stored.model.trim().length > 0) {
-    sessionOptions.model = stored.model;
-  }
-  if (Array.isArray(stored.allowed_tools)) {
-    sessionOptions.allowedTools = [...stored.allowed_tools];
-  }
-  if (typeof stored.max_turns === "number") {
-    sessionOptions.maxTurns = stored.max_turns;
-  }
-
-  return Object.keys(sessionOptions).length > 0 ? sessionOptions : undefined;
-}
-
-type WithConnectedSessionOptions<T> = {
-  sessionRecordId: string;
-  mcpServers?: McpServer[];
-  permissionMode?: PermissionMode;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  timeoutMs?: number;
-  verbose?: boolean;
-  onClientAvailable?: (controller: ActiveSessionController) => void;
-  onClientClosed?: () => void;
-  run: (client: AcpClient, sessionId: string, record: SessionRecord) => Promise<T>;
-};
-
-type WithConnectedSessionResult<T> = {
-  value: T;
-  record: SessionRecord;
-  resumed: boolean;
-  loadError?: string;
-};
-
-async function withConnectedSession<T>(
-  options: WithConnectedSessionOptions<T>,
-): Promise<WithConnectedSessionResult<T>> {
-  const record = await resolveSessionRecord(options.sessionRecordId);
-  const client = new AcpClient({
-    agentCommand: record.agentCommand,
-    cwd: absolutePath(record.cwd),
-    mcpServers: options.mcpServers,
-    permissionMode: options.permissionMode ?? "approve-reads",
-    nonInteractivePermissions: options.nonInteractivePermissions,
-    authCredentials: options.authCredentials,
-    authPolicy: options.authPolicy,
-    verbose: options.verbose,
-    sessionOptions: sessionOptionsFromRecord(record),
-  });
-  let activeSessionIdForControl = record.acpSessionId;
-  let notifiedClientAvailable = false;
-  const activeController: ActiveSessionController = {
-    hasActivePrompt: () => client.hasActivePrompt(),
-    requestCancelActivePrompt: async () => await client.requestCancelActivePrompt(),
-    setSessionMode: async (modeId: string) => {
-      await client.setSessionMode(activeSessionIdForControl, modeId);
-    },
-    setSessionModel: async (modelId: string) => {
-      await client.setSessionModel(activeSessionIdForControl, modelId);
-    },
-    setSessionConfigOption: async (configId: string, value: string) => {
-      return await client.setSessionConfigOption(activeSessionIdForControl, configId, value);
-    },
-  };
-
-  try {
-    return await withInterrupt(
-      async () => {
-        const {
-          sessionId: activeSessionId,
-          resumed,
-          loadError,
-        } = await connectAndLoadSession({
-          client,
-          record,
-          timeoutMs: options.timeoutMs,
-          verbose: options.verbose,
-          activeController,
-          onClientAvailable: (controller) => {
-            options.onClientAvailable?.(controller);
-            notifiedClientAvailable = true;
-          },
-          onSessionIdResolved: (sessionId) => {
-            activeSessionIdForControl = sessionId;
-          },
-        });
-
-        const value = await options.run(client, activeSessionId, record);
-
-        const now = isoNow();
-        record.lastUsedAt = now;
-        record.closed = false;
-        record.closedAt = undefined;
-        record.protocolVersion = client.initializeResult?.protocolVersion;
-        record.agentCapabilities = client.initializeResult?.agentCapabilities;
-        applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-        await writeSessionRecord(record);
-
-        return {
-          value,
-          record,
-          resumed,
-          loadError,
-        };
-      },
-      async () => {
-        await client.cancelActivePrompt(2_500);
-        applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-        record.lastUsedAt = isoNow();
-        await writeSessionRecord(record).catch(() => {
-          // best effort while process is being interrupted
-        });
-        await client.close();
-      },
-    );
-  } finally {
-    if (notifiedClientAvailable) {
-      options.onClientClosed?.();
-    }
-    await client.close();
-    applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-    await writeSessionRecord(record).catch(() => {
-      // best effort on close
-    });
-  }
-}
 
 export type RunSessionSetModeDirectOptions = {
   sessionRecordId: string;
@@ -217,15 +66,19 @@ export async function runSessionSetModeDirect(
 ): Promise<SessionSetModeResult> {
   const result = await withConnectedSession({
     sessionRecordId: options.sessionRecordId,
+    loadRecord: resolveSessionRecord,
+    saveRecord: writeSessionRecord,
     mcpServers: options.mcpServers,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
-    onClientAvailable: options.onClientAvailable,
+    onClientAvailable: (controller: FullConnectedSessionController) => {
+      options.onClientAvailable?.(controller);
+    },
     onClientClosed: options.onClientClosed,
-    run: async (client, sessionId, record) => {
+    run: async ({ client, sessionId, record }) => {
       await withTimeout(client.setSessionMode(sessionId, options.modeId), options.timeoutMs);
       setDesiredModeId(record, options.modeId);
     },
@@ -243,15 +96,19 @@ export async function runSessionSetModelDirect(
 ): Promise<SessionSetModelResult> {
   const result = await withConnectedSession({
     sessionRecordId: options.sessionRecordId,
+    loadRecord: resolveSessionRecord,
+    saveRecord: writeSessionRecord,
     mcpServers: options.mcpServers,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
-    onClientAvailable: options.onClientAvailable,
+    onClientAvailable: (controller: FullConnectedSessionController) => {
+      options.onClientAvailable?.(controller);
+    },
     onClientClosed: options.onClientClosed,
-    run: async (client, sessionId, record) => {
+    run: async ({ client, sessionId, record }) => {
       await withTimeout(client.setSessionModel(sessionId, options.modelId), options.timeoutMs);
       setDesiredModelId(record, options.modelId);
       setCurrentModelId(record, options.modelId);
@@ -270,15 +127,19 @@ export async function runSessionSetConfigOptionDirect(
 ): Promise<SessionSetConfigOptionResult> {
   const result = await withConnectedSession({
     sessionRecordId: options.sessionRecordId,
+    loadRecord: resolveSessionRecord,
+    saveRecord: writeSessionRecord,
     mcpServers: options.mcpServers,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
-    onClientAvailable: options.onClientAvailable,
+    onClientAvailable: (controller: FullConnectedSessionController) => {
+      options.onClientAvailable?.(controller);
+    },
     onClientClosed: options.onClientClosed,
-    run: async (client, sessionId, record) => {
+    run: async ({ client, sessionId, record }) => {
       const response = await withTimeout(
         client.setSessionConfigOption(sessionId, options.configId, options.value),
         options.timeoutMs,
