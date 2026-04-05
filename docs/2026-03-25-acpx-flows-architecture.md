@@ -52,15 +52,32 @@ The worker is not the workflow engine.
 
 ## Flow model
 
-Flows are `.ts` modules that export a graph definition.
+Flows are normal `.ts` modules that import helpers from `acpx/flows` and
+export a graph definition.
+
+They are not a special DSL file type and they are not meant to be importless
+"magic" files.
+
+How the CLI resolves that import at runtime is loader plumbing, not the
+author-facing design contract.
 
 The topology should read like data:
 
+- `name`
+- `startAt`
 - `nodes`
 - `edges`
 - declarative routing
 
 Node-local behavior can still be code.
+
+That split is deliberate:
+
+- keep the top-level workflow shape structured and inspectable
+- allow code inside nodes for prompts, deterministic actions, and local
+  transforms
+- do not turn the whole flow into an arbitrary program that owns traversal,
+  retries, or liveness itself
 
 Typical authoring shape:
 
@@ -69,6 +86,7 @@ import { defineFlow, acp, action, compute, checkpoint } from "acpx/flows";
 
 export default defineFlow({
   name: "example",
+  startAt: "analyze",
   nodes: {
     analyze: acp({ ... }),
     route: compute({ ... }),
@@ -90,6 +108,39 @@ export default defineFlow({
   ],
 });
 ```
+
+## Authoring API direction
+
+The current design should stay structured.
+
+That means:
+
+- keep flow definitions as exported graph objects
+- keep node-local callbacks for the parts that actually benefit from code
+- keep orchestration responsibilities in the runtime
+
+The flow author should describe the workflow.
+
+The runtime should still own:
+
+- step execution
+- routing
+- retries
+- persistence
+- timeouts
+- heartbeats
+
+`acpx` should not move toward a fully functional whole-flow API where user code
+manually decides every next step or reimplements the scheduler.
+
+If the authoring API becomes more ergonomic, prefer small helpers that preserve
+the visible graph shape, for example:
+
+- clearer output-contract helpers
+- clearer routing helpers
+- better names for the existing structured fields
+
+Do not trade away inspectability just to make the surface feel clever.
 
 ## Step kinds
 
@@ -385,6 +436,11 @@ The intended parsing layers are:
 - `parseStrictJsonObject(...)` when the contract must be exact
 - `parseJsonObject(..., { mode })` when a flow needs explicit control
 
+These are output-parsing helpers, not the flow format itself.
+
+They help one node turn assistant text into structured data after the runtime
+has already executed that step.
+
 Default rule:
 
 - use compatibility JSON unless the workflow truly needs strict parsing
@@ -397,7 +453,9 @@ Do not turn output parsing into a large framework.
 - Keep `acpx` generic
 - Prefer clear runtime boundaries over specialized built-ins
 - Add fewer conventions, not more
+- Keep the graph visible at the top level
 - Use one main session by default
+- Keep orchestration out of user callbacks when the runtime can own it clearly
 - Keep workload-specific logic in user flow files or example files, not in
   `acpx` core product behavior
 - Use compatibility JSON by default and strict JSON only when it pays for itself
@@ -461,6 +519,8 @@ What should stay outside core:
 The implemented direction in this branch is:
 
 - TypeScript flow modules
+- normal authoring imports from `acpx/flows`
+- structured top-level flow definitions
 - small node set
 - runtime-owned liveness and persistence
 - optional runtime actions for deterministic work
@@ -468,3 +528,6 @@ The implemented direction in this branch is:
 - one main ACP session by default
 
 That is the shape flows should continue to follow.
+
+Future ergonomics work should refine that shape, not replace it with a
+fully-functional workflow API.
