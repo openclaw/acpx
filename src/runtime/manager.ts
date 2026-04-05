@@ -283,13 +283,43 @@ export class AcpRuntimeManager {
     });
     let activeSessionId = record.acpSessionId;
     let sawDone = false;
+    let pendingCancel = false;
+    let turnActive = true;
+    const sessionReady = createDeferred<void>();
+
+    const applyPendingCancel = async (): Promise<boolean> => {
+      if (!pendingCancel || !client.hasActivePrompt()) {
+        return false;
+      }
+      const cancelled = await client.requestCancelActivePrompt();
+      if (cancelled) {
+        pendingCancel = false;
+      }
+      return cancelled;
+    };
+
     const activeController: ActiveSessionController = {
       hasActivePrompt: () => client.hasActivePrompt(),
-      requestCancelActivePrompt: async () => await client.requestCancelActivePrompt(),
+      requestCancelActivePrompt: async () => {
+        if (client.hasActivePrompt()) {
+          return await client.requestCancelActivePrompt();
+        }
+        if (!turnActive) {
+          return false;
+        }
+        pendingCancel = true;
+        return true;
+      },
       setSessionMode: async (modeId: string) => {
+        if (!client.hasActivePrompt()) {
+          await sessionReady.promise;
+        }
         await client.setSessionMode(activeSessionId, modeId);
       },
       setSessionConfigOption: async (configId: string, value: string) => {
+        if (!client.hasActivePrompt()) {
+          await sessionReady.promise;
+        }
         await client.setSessionConfigOption(activeSessionId, configId, value);
       },
     };
@@ -356,6 +386,7 @@ export class AcpRuntimeManager {
             activeSessionId = sessionIdValue;
           },
         });
+        sessionReady.resolve();
 
         record.lastRequestId = input.requestId;
         record.lastPromptAt = isoNow();
@@ -369,10 +400,23 @@ export class AcpRuntimeManager {
           });
         }
 
-        const response = await withTimeout(
+        if (pendingCancel || input.signal?.aborted) {
+          pendingCancel = false;
+          if (!sawDone) {
+            queue.push({
+              type: "done",
+              stopReason: "cancelled",
+            });
+          }
+          return;
+        }
+
+        const responsePromise = withTimeout(
           client.prompt(sessionId, toPromptInput(input.text, input.attachments)),
           this.options.timeoutMs,
         );
+        await applyPendingCancel();
+        const response = await responsePromise;
 
         record.acpSessionId = activeSessionId;
         reconcileAgentSessionId(record, record.agentSessionId);
@@ -390,6 +434,7 @@ export class AcpRuntimeManager {
           });
         }
       } catch (error) {
+        sessionReady.reject(error);
         const normalized = normalizeOutputError(error, { origin: "runtime" });
         queue.push({
           type: "error",
@@ -398,6 +443,7 @@ export class AcpRuntimeManager {
           retryable: normalized.retryable,
         });
       } finally {
+        turnActive = false;
         if (input.signal) {
           input.signal.removeEventListener("abort", abortHandler);
         }

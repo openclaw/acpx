@@ -333,6 +333,153 @@ test("AcpRuntimeManager routes controls through the active controller while a tu
   assert.equal(handlers.onSessionUpdate, undefined);
 });
 
+test("AcpRuntimeManager waits for load fallback to resolve before sending controls", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "fallback-session",
+    acpSessionId: "stale-session",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let promptActive = false;
+  let promptSessionId: string | undefined;
+  let setModeSessionId: string | undefined;
+  let resolveLoadFailure!: () => void;
+  const loadFailure = new Promise<void>((resolve) => {
+    resolveLoadFailure = resolve;
+  });
+  let resolvePromptStarted!: () => void;
+  const promptStarted = new Promise<void>((resolve) => {
+    resolvePromptStarted = resolve;
+  });
+  let resolvePrompt!: (value: { stopReason: string }) => void;
+  const promptResult = new Promise<{ stopReason: string }>((resolve) => {
+    resolvePrompt = resolve;
+  });
+  const client: FakeClient = {
+    start: async () => {},
+    close: async () => {},
+    createSession: async () => ({ sessionId: "fresh-session", agentSessionId: "fresh-agent" }),
+    loadSession: async () => ({ agentSessionId: "unused" }),
+    hasReusableSession: () => false,
+    supportsLoadSession: () => true,
+    loadSessionWithOptions: async () => {
+      await loadFailure;
+      throw { error: { code: -32002, message: "session not found" } };
+    },
+    getAgentLifecycleSnapshot: () => ({ running: true }),
+    prompt: async (sessionId) => {
+      promptActive = true;
+      promptSessionId = sessionId;
+      resolvePromptStarted();
+      return await promptResult;
+    },
+    requestCancelActivePrompt: async () => {
+      promptActive = false;
+      resolvePrompt({ stopReason: "cancelled" });
+      return true;
+    },
+    hasActivePrompt: () => promptActive,
+    setSessionMode: async (sessionId, modeId) => {
+      assert.equal(modeId, "plan");
+      setModeSessionId = sessionId;
+    },
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {},
+    setEventHandlers: () => {},
+  };
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () => client as never,
+    },
+  );
+
+  const eventsPromise = collectEvents(
+    manager.runTurn({
+      handle: createHandle("fallback-session"),
+      text: "hello",
+      requestId: "req-fallback",
+    }),
+  );
+  const setModePromise = manager.setMode(createHandle("fallback-session"), "plan");
+  resolveLoadFailure();
+  await setModePromise;
+  await promptStarted;
+  await manager.cancel(createHandle("fallback-session"));
+  const events = await eventsPromise;
+
+  assert.equal(setModeSessionId, "fresh-session");
+  assert.equal(promptSessionId, "fresh-session");
+  assert.deepEqual(events, [{ type: "done", stopReason: "cancelled" }]);
+});
+
+test("AcpRuntimeManager honors aborts requested before prompt starts after load fallback", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "aborted-session",
+    acpSessionId: "stale-session",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let promptCalled = false;
+  let cancelCalls = 0;
+  let resolveLoadFailure!: () => void;
+  const loadFailure = new Promise<void>((resolve) => {
+    resolveLoadFailure = resolve;
+  });
+  const client: FakeClient = {
+    start: async () => {},
+    close: async () => {},
+    createSession: async () => ({ sessionId: "fresh-session", agentSessionId: "fresh-agent" }),
+    loadSession: async () => ({ agentSessionId: "unused" }),
+    hasReusableSession: () => false,
+    supportsLoadSession: () => true,
+    loadSessionWithOptions: async () => {
+      await loadFailure;
+      throw { error: { code: -32002, message: "session not found" } };
+    },
+    getAgentLifecycleSnapshot: () => ({ running: true }),
+    prompt: async () => {
+      promptCalled = true;
+      return { stopReason: "end_turn" };
+    },
+    requestCancelActivePrompt: async () => {
+      cancelCalls += 1;
+      return true;
+    },
+    hasActivePrompt: () => false,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {},
+    setEventHandlers: () => {},
+  };
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () => client as never,
+    },
+  );
+  const controller = new AbortController();
+
+  const eventsPromise = collectEvents(
+    manager.runTurn({
+      handle: createHandle("aborted-session"),
+      text: "hello",
+      requestId: "req-abort",
+      signal: controller.signal,
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  controller.abort();
+  resolveLoadFailure();
+  const events = await eventsPromise;
+
+  assert.equal(promptCalled, false);
+  assert.equal(cancelCalls, 0);
+  assert.deepEqual(events, [{ type: "done", stopReason: "cancelled" }]);
+});
+
 test("AcpRuntimeManager handles offline controls, status, close, and missing records", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "offline-session",
