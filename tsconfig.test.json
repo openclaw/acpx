@@ -3,6 +3,9 @@
   "compilerOptions": {
     "outDir": "dist-test",
     "rootDir": ".",
+    "paths": {
+      "acpx/flows": ["./src/flows.ts"]
+    },
     "allowJs": true,
     "declaration": false,
     "declarationMap": false,
