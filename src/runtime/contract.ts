@@ -40,7 +40,6 @@ export type AcpRuntimeEnsureInput = {
   mode: AcpRuntimeSessionMode;
   resumeSessionId?: string;
   cwd?: string;
-  env?: Record<string, string>;
 };
 
 export type AcpRuntimeTurnAttachment = {
