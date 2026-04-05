@@ -1,11 +1,7 @@
-import { isDefinedFlow } from "./authoring.js";
 import { assertValidFlowDefinitionShape } from "./schema.js";
 import type { FlowDefinition, FlowEdge, FlowNodeResult } from "./types.js";
 
 export function validateFlowDefinition(flow: FlowDefinition): void {
-  if (!isDefinedFlow(flow)) {
-    throw new Error('Flow must be defined with defineFlow(...) from "acpx/flows"');
-  }
   assertValidFlowDefinitionShape(flow);
   if (!flow.nodes[flow.startAt]) {
     throw new Error(`Flow start node is missing: ${flow.startAt}`);

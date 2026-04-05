@@ -251,22 +251,21 @@ test("defineFlow allows staged assembly before full graph validation", () => {
   assert.doesNotThrow(() => validateFlowDefinition(flow));
 });
 
-test("validateFlowDefinition rejects flows that do not come from defineFlow(...)", () => {
+test("validateFlowDefinition accepts structural copies of defined flows", () => {
   const flow = {
-    name: "plain-flow",
-    startAt: "done",
-    nodes: {
-      done: compute({
-        run: () => ({ ok: true }),
-      }),
-    },
-    edges: [],
+    ...defineFlow({
+      name: "copied-flow",
+      startAt: "done",
+      nodes: {
+        done: compute({
+          run: () => ({ ok: true }),
+        }),
+      },
+      edges: [],
+    }),
   } as FlowDefinition;
 
-  assert.throws(
-    () => validateFlowDefinition(flow),
-    /Flow must be defined with defineFlow\(\.\.\.\) from "acpx\/flows"/,
-  );
+  assert.doesNotThrow(() => validateFlowDefinition(flow));
 });
 
 test('repo flow modules use defineFlow(...) and import from "acpx/flows"', async () => {
