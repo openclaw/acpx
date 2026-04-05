@@ -112,22 +112,31 @@ function makeSessionResumeRequiredError(params: {
 async function replayDesiredMode(params: {
   client: AcpClient;
   sessionId: string;
-  record: SessionRecord;
+  desiredModeId: string | undefined;
+  previousSessionId: string;
   timeoutMs?: number;
+  verbose?: boolean;
 }): Promise<void> {
-  const desiredModeId = getDesiredModeId(params.record.acpx);
-  if (!desiredModeId) {
+  if (!params.desiredModeId) {
     return;
   }
   try {
     await withTimeout(
-      params.client.setSessionMode(params.sessionId, desiredModeId),
+      params.client.setSessionMode(params.sessionId, params.desiredModeId),
       params.timeoutMs,
     );
+    if (params.verbose) {
+      process.stderr.write(
+        `[acpx] replayed desired mode ${params.desiredModeId} on fresh ACP session ${params.sessionId} (previous ${params.previousSessionId})\n`,
+      );
+    }
   } catch (error) {
     throw new SessionModeReplayError(
-      `Failed to restore session mode "${desiredModeId}": ${formatErrorMessage(error)}`,
-      { cause: error instanceof Error ? error : undefined },
+      `Failed to replay saved session mode ${params.desiredModeId} on fresh ACP session ${params.sessionId}: ${formatErrorMessage(error)}`,
+      {
+        cause: error instanceof Error ? error : undefined,
+        retryable: true,
+      },
     );
   }
 }
@@ -135,30 +144,46 @@ async function replayDesiredMode(params: {
 async function replayDesiredModel(params: {
   client: AcpClient;
   sessionId: string;
-  record: SessionRecord;
+  desiredModelId: string | undefined;
+  previousSessionId: string;
   models: import("../client.js").SessionLoadResult["models"] | undefined;
   timeoutMs?: number;
+  verbose?: boolean;
 }): Promise<void> {
-  const desiredModelId = getDesiredModelId(params.record.acpx);
-  if (!desiredModelId || !params.models) {
+  if (!params.desiredModelId || !params.models) {
     return;
   }
-  if (params.models.currentModelId === desiredModelId) {
-    setCurrentModelId(params.record, desiredModelId);
+  if (params.models.currentModelId === params.desiredModelId) {
     return;
   }
   try {
     await withTimeout(
-      params.client.setSessionModel(params.sessionId, desiredModelId),
+      params.client.setSessionModel(params.sessionId, params.desiredModelId),
       params.timeoutMs,
     );
-    setCurrentModelId(params.record, desiredModelId);
+    if (params.verbose) {
+      process.stderr.write(
+        `[acpx] replayed desired model ${params.desiredModelId} on fresh ACP session ${params.sessionId} (previous ${params.previousSessionId})\n`,
+      );
+    }
   } catch (error) {
     throw new SessionModelReplayError(
-      `Failed to restore session model "${desiredModelId}": ${formatErrorMessage(error)}`,
-      { cause: error instanceof Error ? error : undefined },
+      `Failed to replay saved session model ${params.desiredModelId} on fresh ACP session ${params.sessionId}: ${formatErrorMessage(error)}`,
+      {
+        cause: error instanceof Error ? error : undefined,
+        retryable: true,
+      },
     );
   }
+}
+
+function restoreOriginalSessionState(params: {
+  record: SessionRecord;
+  sessionId: string;
+  agentSessionId: string | undefined;
+}): void {
+  params.record.acpSessionId = params.sessionId;
+  params.record.agentSessionId = params.agentSessionId;
 }
 
 function updateLifecycleSnapshot(record: SessionRecord, client: AcpClient): void {
@@ -171,6 +196,7 @@ export async function connectAndLoadSession(
   const record = options.record;
   const client = options.client;
   const sameSessionOnly = requiresSameSession(options.resumePolicy);
+  const originalSessionId = record.acpSessionId;
   const originalAgentSessionId = record.agentSessionId;
   const desiredModeId = getDesiredModeId(record.acpx);
   const desiredModelId = getDesiredModelId(record.acpx);
@@ -254,33 +280,37 @@ export async function connectAndLoadSession(
   }
 
   if (createdFreshSession) {
+    try {
+      await replayDesiredMode({
+        client,
+        sessionId,
+        desiredModeId,
+        previousSessionId: originalSessionId,
+        timeoutMs: options.timeoutMs,
+        verbose: options.verbose,
+      });
+      await replayDesiredModel({
+        client,
+        sessionId,
+        desiredModelId,
+        previousSessionId: originalSessionId,
+        models: sessionModels,
+        timeoutMs: options.timeoutMs,
+        verbose: options.verbose,
+      });
+    } catch (error) {
+      restoreOriginalSessionState({
+        record,
+        sessionId: originalSessionId,
+        agentSessionId: originalAgentSessionId,
+      });
+      throw error;
+    }
+
     record.acpSessionId = sessionId;
     reconcileAgentSessionId(record, pendingAgentSessionId);
   }
-
   syncAdvertisedModelState(record, sessionModels);
-  if (createdFreshSession && desiredModeId) {
-    await replayDesiredMode({
-      client,
-      sessionId,
-      record,
-      timeoutMs: options.timeoutMs,
-    });
-  }
-  if (
-    createdFreshSession &&
-    desiredModelId &&
-    sessionModels &&
-    desiredModelId !== sessionModels.currentModelId
-  ) {
-    await replayDesiredModel({
-      client,
-      sessionId,
-      record,
-      models: sessionModels,
-      timeoutMs: options.timeoutMs,
-    });
-  }
   if (createdFreshSession && desiredModelId && sessionModels) {
     setCurrentModelId(record, desiredModelId);
   }

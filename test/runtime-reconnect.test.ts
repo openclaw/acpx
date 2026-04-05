@@ -434,6 +434,136 @@ test("connectAndLoadSession replays desired mode and model on fresh sessions", a
   );
 });
 
+test("connectAndLoadSession restores the original session when desired mode replay fails", async () => {
+  await withWorkspaceRecord(
+    "mode-replay-failure",
+    (cwd) =>
+      makeSessionRecord({
+        acpxRecordId: "mode-replay-record",
+        acpSessionId: "stale-session",
+        agentSessionId: "stale-runtime",
+        agentCommand: "agent",
+        cwd,
+        acpx: {
+          desired_mode_id: "plan",
+        },
+      }),
+    async (record) => {
+      const client: FakeClient = {
+        hasReusableSession: () => false,
+        start: async () => {},
+        getAgentLifecycleSnapshot: () => ({ running: true }),
+        supportsLoadSession: () => true,
+        loadSessionWithOptions: async () => {
+          throw {
+            error: {
+              code: -32002,
+              message: "session not found",
+            },
+          };
+        },
+        createSession: async () => ({
+          sessionId: "fresh-session",
+          agentSessionId: "fresh-runtime",
+        }),
+        setSessionMode: async (sessionId, modeId) => {
+          assert.equal(sessionId, "fresh-session");
+          assert.equal(modeId, "plan");
+          throw new Error("mode restore rejected");
+        },
+        setSessionModel: async () => {},
+      };
+
+      await assert.rejects(
+        async () =>
+          await connectAndLoadSession({
+            client: client as never,
+            record,
+            activeController: ACTIVE_CONTROLLER,
+          }),
+        (error: unknown) => {
+          assert(error instanceof Error);
+          assert.equal(error.name, "SessionModeReplayError");
+          assert.equal((error as Error & { retryable?: boolean }).retryable, true);
+          assert.match(error.message, /Failed to replay saved session mode plan/);
+          return true;
+        },
+      );
+
+      assert.equal(record.acpSessionId, "stale-session");
+      assert.equal(record.agentSessionId, "stale-runtime");
+      assert.equal(record.acpx?.current_model_id, undefined);
+    },
+  );
+});
+
+test("connectAndLoadSession restores the original session when desired model replay fails", async () => {
+  await withWorkspaceRecord(
+    "model-replay-failure",
+    (cwd) =>
+      makeSessionRecord({
+        acpxRecordId: "model-replay-record",
+        acpSessionId: "stale-session",
+        agentSessionId: "stale-runtime",
+        agentCommand: "agent",
+        cwd,
+        acpx: {
+          session_options: {
+            model: "gpt-5.4",
+          },
+        },
+      }),
+    async (record) => {
+      const client: FakeClient = {
+        hasReusableSession: () => false,
+        start: async () => {},
+        getAgentLifecycleSnapshot: () => ({ running: true }),
+        supportsLoadSession: () => true,
+        loadSessionWithOptions: async () => {
+          throw {
+            error: {
+              code: -32002,
+              message: "session not found",
+            },
+          };
+        },
+        createSession: async () => ({
+          sessionId: "fresh-session",
+          agentSessionId: "fresh-runtime",
+          models: buildModelsState("default-model"),
+        }),
+        setSessionMode: async () => {},
+        setSessionModel: async (sessionId, modelId) => {
+          assert.equal(sessionId, "fresh-session");
+          assert.equal(modelId, "gpt-5.4");
+          throw new Error("model restore rejected");
+        },
+      };
+
+      await assert.rejects(
+        async () =>
+          await connectAndLoadSession({
+            client: client as never,
+            record,
+            activeController: ACTIVE_CONTROLLER,
+          }),
+        (error: unknown) => {
+          assert(error instanceof Error);
+          assert.equal(error.name, "SessionModelReplayError");
+          assert.equal((error as Error & { retryable?: boolean }).retryable, true);
+          assert.match(error.message, /Failed to replay saved session model gpt-5\.4/);
+          return true;
+        },
+      );
+
+      assert.equal(record.acpSessionId, "stale-session");
+      assert.equal(record.agentSessionId, "stale-runtime");
+      assert.equal(record.acpx?.current_model_id, undefined);
+      assert.deepEqual(record.acpx?.available_models, undefined);
+    },
+  );
+});
+
 test("connectAndLoadSession reuses already loaded client sessions", async () => {
   await withWorkspaceRecord(
     "reused",
