@@ -86,6 +86,8 @@ const shellActionNodeSchema = extensibleObject({
   nodeType: z.literal("action"),
   exec: functionSchema<ShellActionNodeDefinition["exec"]>("exec"),
   parse: functionSchema<NonNullable<ShellActionNodeDefinition["parse"]>>("parse").optional(),
+}).refine((node) => !hasOwn(node, "run"), {
+  message: "shell action nodes must not define run",
 });
 
 const checkpointNodeSchema = extensibleObject({
@@ -95,19 +97,24 @@ const checkpointNodeSchema = extensibleObject({
   run: functionSchema<NonNullable<CheckpointNodeDefinition["run"]>>("run").optional(),
 });
 
-const flowEdgeSchema = z.union([
-  extensibleObject({
-    from: z.string(),
-    to: z.string(),
+const directFlowEdgeSchema = extensibleObject({
+  from: z.string(),
+  to: z.string(),
+}).refine((edge) => !hasOwn(edge, "switch"), {
+  message: 'direct flow edges must not define "switch"',
+});
+
+const switchFlowEdgeSchema = extensibleObject({
+  from: z.string(),
+  switch: extensibleObject({
+    on: z.string(),
+    cases: z.record(z.string(), z.string()),
   }),
-  extensibleObject({
-    from: z.string(),
-    switch: extensibleObject({
-      on: z.string(),
-      cases: z.record(z.string(), z.string()),
-    }),
-  }),
-]);
+}).refine((edge) => !hasOwn(edge, "to"), {
+  message: 'switch flow edges must not define "to"',
+});
+
+const flowEdgeSchema = z.union([directFlowEdgeSchema, switchFlowEdgeSchema]);
 
 const flowDefinitionSchema = extensibleObject({
   name: nonEmptyTrimmedStringSchema,

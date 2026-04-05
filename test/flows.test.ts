@@ -85,6 +85,17 @@ test("flow node helpers validate node-local shape before runtime", () => {
   assert.throws(
     () =>
       shell({
+        exec: () => ({
+          command: process.execPath,
+        }),
+        run: () => ({ ok: true }),
+      } as unknown as Omit<ShellActionNodeDefinition, "nodeType">),
+    /Invalid shell action node definition: shell action nodes must not define run/,
+  );
+
+  assert.throws(
+    () =>
+      shell({
         parse: (result: { stdout: string }) => result.stdout,
       } as unknown as Omit<ShellActionNodeDefinition, "nodeType">),
     /Invalid shell action node definition: exec: exec must be a function/,
@@ -134,6 +145,35 @@ test("defineFlow validates flow definition shape before execution", () => {
         edges: [],
       } as unknown as FlowDefinition),
     /Invalid flow node "start": prompt: prompt must be a function/,
+  );
+
+  assert.throws(
+    () =>
+      defineFlow({
+        name: "ambiguous-edge-flow",
+        startAt: "start",
+        nodes: {
+          start: compute({
+            run: () => ({ ok: true }),
+          }),
+          next: compute({
+            run: () => ({ ok: true }),
+          }),
+        },
+        edges: [
+          {
+            from: "start",
+            to: "next",
+            switch: {
+              on: "$.route",
+              cases: {
+                ok: "next",
+              },
+            },
+          },
+        ],
+      } as unknown as FlowDefinition),
+    /Invalid flow definition: edges\.0: direct flow edges must not define "switch"/,
   );
 
   assert.throws(
