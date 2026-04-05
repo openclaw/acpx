@@ -19,6 +19,7 @@ Repo: https://github.com/openclaw/acpx
 - Flows/permissions: let flows declare explicit required permission modes, fail fast when a flow requires an explicit `--approve-all` grant, and preserve the granted mode through persistent ACP queue-owner paths. Thanks @osolmaz.
 - Agents/qoder: add built-in Qoder CLI ACP support via `qoder -> qodercli --acp` and document Qoder-specific auth notes.
 - Agents/qoder: forward `--allowed-tools` and `--max-turns` session options into Qoder CLI startup flags, including persisted session reuse, without requiring a raw `--agent` override.
+- Runtime/embedding: add a supported `acpx/runtime` API for embedding ACPX session lifecycle, turn execution, status/control, and file-backed runtime storage. Thanks @osolmaz.
 
 ### Breaking
 
