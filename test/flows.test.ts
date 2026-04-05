@@ -66,6 +66,15 @@ test("flow node helpers validate node-local shape before runtime", () => {
   assert.throws(
     () =>
       acp({
+        prompt: () => "",
+        cwd: 1,
+      } as unknown as Parameters<typeof acp>[0]),
+    /Invalid acp node definition: cwd: .*cwd must be a function/,
+  );
+
+  assert.throws(
+    () =>
+      acp({
         parse: (text: string) => text,
       } as unknown as Parameters<typeof acp>[0]),
     /Invalid acp node definition: prompt: prompt must be a function/,
@@ -173,7 +182,7 @@ test("defineFlow validates flow definition shape before execution", () => {
           },
         ],
       } as unknown as FlowDefinition),
-    /Invalid flow definition: edges\.0: direct flow edges must not define "switch"/,
+    /Invalid flow definition: edges\.0: edge must define exactly one of to or switch/,
   );
 
   assert.throws(

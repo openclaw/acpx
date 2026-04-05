@@ -100,8 +100,6 @@ const checkpointNodeSchema = extensibleObject({
 const directFlowEdgeSchema = extensibleObject({
   from: z.string(),
   to: z.string(),
-}).refine((edge) => !hasOwn(edge, "switch"), {
-  message: 'direct flow edges must not define "switch"',
 });
 
 const switchFlowEdgeSchema = extensibleObject({
@@ -110,11 +108,7 @@ const switchFlowEdgeSchema = extensibleObject({
     on: z.string(),
     cases: z.record(z.string(), z.string()),
   }),
-}).refine((edge) => !hasOwn(edge, "to"), {
-  message: 'switch flow edges must not define "to"',
 });
-
-const flowEdgeSchema = z.union([directFlowEdgeSchema, switchFlowEdgeSchema]);
 
 const flowDefinitionSchema = extensibleObject({
   name: nonEmptyTrimmedStringSchema,
@@ -122,7 +116,7 @@ const flowDefinitionSchema = extensibleObject({
   permissions: flowPermissionRequirementsSchema.optional(),
   startAt: z.string(),
   nodes: z.record(z.string(), z.unknown()),
-  edges: z.array(flowEdgeSchema),
+  edges: z.array(z.unknown()),
 });
 
 const flowNodeTypeSchema = z.object({
@@ -135,6 +129,9 @@ export function assertValidFlowDefinitionShape(flow: FlowDefinition): void {
   for (const [nodeId, node] of Object.entries(parsed.nodes)) {
     assertValidFlowNodeDefinitionShape(node, `flow node "${nodeId}"`);
   }
+  parsed.edges.forEach((edge, index) => {
+    assertValidFlowEdgeShape(edge, `flow definition: edges.${index}`);
+  });
 }
 
 export function assertValidAcpNodeDefinition(node: AcpNodeDefinition): void {
@@ -192,6 +189,22 @@ function assertValidActionNodeDefinitionShape(node: unknown, label: string): voi
   parseWithSchema(label, functionActionNodeSchema, node);
 }
 
+function assertValidFlowEdgeShape(edge: unknown, label: string): void {
+  const hasTo = hasOwn(edge, "to");
+  const hasSwitch = hasOwn(edge, "switch");
+
+  if (hasTo === hasSwitch) {
+    throw new Error(`Invalid ${label}: edge must define exactly one of to or switch`);
+  }
+
+  if (hasTo) {
+    parseWithSchema(label, directFlowEdgeSchema, edge);
+    return;
+  }
+
+  parseWithSchema(label, switchFlowEdgeSchema, edge);
+}
+
 function parseWithSchema<T>(label: string, schema: z.ZodType<T>, value: unknown): T {
   try {
     return schema.parse(value);
@@ -204,13 +217,23 @@ function parseWithSchema<T>(label: string, schema: z.ZodType<T>, value: unknown)
 }
 
 function formatValidationError(label: string, error: ZodError): string {
-  const details = error.issues
-    .map((issue) => {
-      const path = issue.path.map(String).join(".");
-      return path ? `${path}: ${issue.message}` : issue.message;
-    })
-    .join("; ");
+  const details = Array.from(new Set(error.issues.flatMap((issue) => formatIssue(issue)))).join(
+    "; ",
+  );
   return `Invalid ${label}: ${details}`;
+}
+
+function formatIssue(issue: z.ZodIssue, parentPath: string[] = []): string[] {
+  const path = [...parentPath, ...issue.path.map(String)];
+
+  if (issue.code === "invalid_union") {
+    return issue.errors.flatMap((branch) =>
+      branch.flatMap((nestedIssue) => formatIssue(nestedIssue, path)),
+    );
+  }
+
+  const renderedPath = path.join(".");
+  return [renderedPath ? `${renderedPath}: ${issue.message}` : issue.message];
 }
 
 function hasOwn(value: unknown, key: string): boolean {
