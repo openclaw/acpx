@@ -392,6 +392,47 @@ test("integration: flow run fails fast when a flow requires an explicit approve-
   });
 });
 
+test("integration: flow run validates plain exported flow permissions before gating", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-permission-cwd-"));
+    const flowDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-permission-"));
+    const flowPath = path.join(flowDir, "invalid-permissions.flow.ts");
+
+    try {
+      await fs.writeFile(
+        flowPath,
+        [
+          "export default {",
+          '  name: "invalid-plain-export-permissions",',
+          "  permissions: {",
+          '    requiredMode: "bogus",',
+          "  },",
+          '  startAt: "done",',
+          "  nodes: {",
+          '    done: { nodeType: "compute", run: () => ({ ok: true }) },',
+          "  },",
+          "  edges: [],",
+          "};",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = await runCli(
+        ["--agent", MOCK_AGENT_COMMAND, "--cwd", cwd, "flow", "run", flowPath],
+        homeDir,
+      );
+
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /Invalid flow definition: permissions\.requiredMode:/);
+      assert.doesNotMatch(result.stderr, /Rerun with --bogus/i);
+    } finally {
+      await fs.rm(flowDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: flow run preserves approve-all through persistent ACP writes", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-write-cwd-"));

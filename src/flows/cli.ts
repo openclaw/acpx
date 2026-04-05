@@ -13,6 +13,7 @@ import {
 } from "../cli/flags.js";
 import type { ResolvedAcpxConfig } from "../config.js";
 import { type FlowDefinition, FlowRunner } from "../flows.js";
+import { validateFlowDefinition } from "./graph.js";
 import { permissionModeSatisfies } from "../permissions.js";
 import type { PermissionMode } from "../types.js";
 
@@ -132,6 +133,7 @@ async function loadFlowModule(flowPath: string): Promise<FlowDefinition> {
     if (!candidate) {
       throw new Error(`Flow module must export a flow object: ${flowPath}`);
     }
+    validateFlowDefinition(candidate);
     return candidate;
   } finally {
     await prepared.cleanup?.();
