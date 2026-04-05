@@ -202,6 +202,10 @@ function createRecordId(sessionKey: string, mode: "persistent" | "oneshot"): str
   return `${sessionKey}:oneshot:${randomUUID()}`;
 }
 
+function resumePolicyForSessionMode(mode: "persistent" | "oneshot"): SessionResumePolicy {
+  return mode === "persistent" ? "same-session-only" : "allow-new";
+}
+
 function statusSummary(record: SessionRecord): string {
   const parts = [
     `session=${record.acpxRecordId}`,
@@ -295,6 +299,7 @@ export class AcpRuntimeManager {
     text: string;
     attachments?: AcpRuntimeTurnAttachment[];
     mode: AcpRuntimePromptMode;
+    sessionMode: "persistent" | "oneshot";
     requestId: string;
     signal?: AbortSignal;
   }): AsyncIterable<AcpRuntimeEvent> {
@@ -319,6 +324,7 @@ export class AcpRuntimeManager {
     let pendingCancel = false;
     let turnActive = true;
     const sessionReady = createDeferred<void>();
+    void sessionReady.promise.catch(() => {});
 
     const applyPendingCancel = async (): Promise<boolean> => {
       if (!pendingCancel || !client.hasActivePrompt()) {
@@ -406,7 +412,7 @@ export class AcpRuntimeManager {
         const { sessionId, resumed, loadError } = await connectAndLoadSession({
           client,
           record,
-          resumePolicy: "allow-new" satisfies SessionResumePolicy,
+          resumePolicy: resumePolicyForSessionMode(input.sessionMode),
           timeoutMs: this.options.timeoutMs,
           activeController,
           onClientAvailable: (controller) => {
@@ -515,7 +521,11 @@ export class AcpRuntimeManager {
     };
   }
 
-  async setMode(handle: AcpRuntimeHandle, mode: string): Promise<void> {
+  async setMode(
+    handle: AcpRuntimeHandle,
+    mode: string,
+    sessionMode: "persistent" | "oneshot" = "persistent",
+  ): Promise<void> {
     const record = await this.requireRecord(handle.acpxRecordId ?? handle.sessionKey);
     const controller = this.activeControllers.get(record.acpxRecordId);
     let targetRecord = record;
@@ -533,6 +543,7 @@ export class AcpRuntimeManager {
         nonInteractivePermissions: this.options.nonInteractivePermissions,
         verbose: this.options.verbose,
         timeoutMs: this.options.timeoutMs,
+        resumePolicy: resumePolicyForSessionMode(sessionMode),
         run: async ({ client, sessionId }) => {
           await client.setSessionMode(sessionId, mode);
         },
@@ -543,7 +554,12 @@ export class AcpRuntimeManager {
     await this.options.sessionStore.save(targetRecord);
   }
 
-  async setConfigOption(handle: AcpRuntimeHandle, key: string, value: string): Promise<void> {
+  async setConfigOption(
+    handle: AcpRuntimeHandle,
+    key: string,
+    value: string,
+    sessionMode: "persistent" | "oneshot" = "persistent",
+  ): Promise<void> {
     const record = await this.requireRecord(handle.acpxRecordId ?? handle.sessionKey);
     const controller = this.activeControllers.get(record.acpxRecordId);
     let targetRecord = record;
@@ -561,6 +577,7 @@ export class AcpRuntimeManager {
         nonInteractivePermissions: this.options.nonInteractivePermissions,
         verbose: this.options.verbose,
         timeoutMs: this.options.timeoutMs,
+        resumePolicy: resumePolicyForSessionMode(sessionMode),
         run: async ({ client, sessionId, record: connectedRecord }) => {
           await client.setSessionConfigOption(sessionId, key, value);
           if (key === "mode") {

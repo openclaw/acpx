@@ -159,6 +159,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       text: input.text,
       attachments: input.attachments,
       mode: input.mode,
+      sessionMode: state.mode,
       requestId: input.requestId,
       signal: input.signal,
     });
@@ -189,6 +190,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
         acpxRecordId: state.acpxRecordId ?? input.handle.acpxRecordId ?? input.handle.sessionKey,
       },
       input.mode,
+      state.mode,
     );
   }
 
@@ -206,6 +208,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       },
       input.key,
       input.value,
+      state.mode,
     );
   }
 

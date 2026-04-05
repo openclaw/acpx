@@ -69,13 +69,15 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   const record = createSessionRecord();
   let ensuredMode: string | undefined;
   let turnMode: string | undefined;
+  let turnSessionMode: string | undefined;
   const manager = {
     ensureSession: async (input: { mode: string }) => {
       ensuredMode = input.mode;
       return record;
     },
-    async *runTurn(input: { mode: string }) {
+    async *runTurn(input: { mode: string; sessionMode: string }) {
       turnMode = input.mode;
+      turnSessionMode = input.sessionMode;
       yield { type: "text_delta" as const, text: "hello", stream: "output" as const };
       yield { type: "done" as const, stopReason: "end_turn" };
     },
@@ -123,6 +125,7 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   }
 
   assert.equal(turnMode, "steer");
+  assert.equal(turnSessionMode, "oneshot");
   assert.deepEqual(events, [
     { type: "text_delta", text: "hello", stream: "output" },
     { type: "done", stopReason: "end_turn" },

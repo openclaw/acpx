@@ -8,6 +8,7 @@ import type {
   NonInteractivePermissionPolicy,
   PermissionMode,
   SessionRecord,
+  SessionResumePolicy,
 } from "../types.js";
 import { applyLifecycleSnapshotToRecord } from "./lifecycle.js";
 import { connectAndLoadSession, type ConnectedSessionController } from "./reconnect.js";
@@ -40,6 +41,7 @@ export type WithConnectedSessionOptions<T> = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  resumePolicy?: SessionResumePolicy;
   timeoutMs?: number;
   verbose?: boolean;
   onClientAvailable?: (controller: FullConnectedSessionController) => void;
@@ -116,6 +118,7 @@ export async function withConnectedSession<T>(
         const { sessionId, resumed, loadError } = await connectAndLoadSession({
           client,
           record,
+          resumePolicy: options.resumePolicy,
           timeoutMs: options.timeoutMs,
           verbose: options.verbose,
           activeController,
