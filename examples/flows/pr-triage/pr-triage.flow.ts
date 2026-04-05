@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { extractJsonObject } from "../../../src/flows.js";
+import { defineFlow, extractJsonObject } from "acpx/flows";
 import { selectLocalCodexReviewText } from "./review-text.js";
 
 const FLOW_DIR = ".acpx-flow";
@@ -10,7 +10,7 @@ const MAIN_SESSION = {
   handle: "main",
 };
 
-const flow = {
+const flow = defineFlow({
   name: "pr-triage",
   run: {
     title: ({ input }) => formatPrTriageRunTitle(loadPullRequestInput(input)),
@@ -451,7 +451,7 @@ const flow = {
     { from: "comment_and_escalate_needs_judgment", to: "post_needs_judgment_comment" },
     { from: "post_needs_judgment_comment", to: "finalize" },
   ],
-};
+});
 
 export default flow;
 

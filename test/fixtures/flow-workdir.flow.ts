@@ -1,5 +1,4 @@
-import { extractJsonObject } from "../../src/flows/json.js";
-import { acp, compute, defineFlow, shell } from "../../src/flows/runtime.js";
+import { acp, compute, defineFlow, extractJsonObject, shell } from "acpx/flows";
 
 export default defineFlow({
   name: "fixture-workdir",

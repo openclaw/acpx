@@ -15,6 +15,7 @@ import type { ResolvedAcpxConfig } from "../config.js";
 import { type FlowDefinition, FlowRunner } from "../flows.js";
 import { permissionModeSatisfies } from "../permissions.js";
 import type { PermissionMode } from "../types.js";
+import { isDefinedFlow } from "./authoring.js";
 import { validateFlowDefinition } from "./graph.js";
 
 type FlowRunFlags = {
@@ -131,7 +132,9 @@ async function loadFlowModule(flowPath: string): Promise<FlowDefinition> {
 
     const candidate = findFlowDefinition(module);
     if (!candidate) {
-      throw new Error(`Flow module must export a flow object: ${flowPath}`);
+      throw new Error(
+        `Flow module must export default defineFlow({...}) from "acpx/flows": ${flowPath}`,
+      );
     }
     validateFlowDefinition(candidate);
     return candidate;
@@ -229,7 +232,7 @@ function findFlowDefinition(module: {
   ];
 
   for (const candidate of candidates) {
-    if (isFlowDefinition(candidate)) {
+    if (isDefinedFlow(candidate)) {
       return candidate;
     }
   }
@@ -242,21 +245,6 @@ function getNestedDefault(value: unknown): unknown {
     return null;
   }
   return (value as { default?: unknown }).default ?? null;
-}
-
-function isFlowDefinition(value: unknown): value is FlowDefinition {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as Partial<FlowDefinition>;
-  return (
-    typeof candidate.name === "string" &&
-    typeof candidate.startAt === "string" &&
-    candidate.nodes !== undefined &&
-    typeof candidate.nodes === "object" &&
-    Array.isArray(candidate.edges)
-  );
 }
 
 function parseJsonInput(raw: string, label: string): unknown {

@@ -1,5 +1,4 @@
-import { extractJsonObject } from "../../src/flows/json.js";
-import { defineFlow, shell } from "../../src/flows/runtime.js";
+import { defineFlow, extractJsonObject, shell } from "acpx/flows";
 
 export default defineFlow({
   name: "fixture-interrupt",

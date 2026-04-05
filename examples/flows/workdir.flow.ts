@@ -1,4 +1,4 @@
-import { acp, compute, defineFlow, extractJsonObject, shell } from "../../src/flows.js";
+import { acp, compute, defineFlow, extractJsonObject, shell } from "acpx/flows";
 
 export default defineFlow({
   name: "example-workdir",

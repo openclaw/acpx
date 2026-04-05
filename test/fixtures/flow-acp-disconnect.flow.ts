@@ -1,4 +1,4 @@
-import { acp, defineFlow } from "../../src/flows/runtime.js";
+import { acp, defineFlow } from "acpx/flows";
 
 export default defineFlow({
   name: "fixture-acp-disconnect",

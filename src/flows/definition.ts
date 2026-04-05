@@ -1,3 +1,4 @@
+import { markDefinedFlow } from "./authoring.js";
 import {
   assertValidAcpNodeDefinition,
   assertValidActionNodeDefinition,
@@ -18,7 +19,7 @@ import type {
 
 export function defineFlow<TFlow extends FlowDefinition>(definition: TFlow): TFlow {
   assertValidFlowDefinitionShape(definition);
-  return definition;
+  return markDefinedFlow(definition);
 }
 
 export function acp(definition: Omit<AcpNodeDefinition, "nodeType">): AcpNodeDefinition {

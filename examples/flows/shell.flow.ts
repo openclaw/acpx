@@ -1,4 +1,4 @@
-import { compute, defineFlow, extractJsonObject, shell } from "../../src/flows.js";
+import { compute, defineFlow, extractJsonObject, shell } from "acpx/flows";
 
 type ShellInput = {
   text?: string;

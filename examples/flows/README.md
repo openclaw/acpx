@@ -4,6 +4,11 @@ These are source-tree examples for `acpx flow run`.
 
 They range from small primitives to one larger end-to-end example.
 
+They intentionally use the public authoring surface:
+
+- import flow helpers from `acpx/flows`
+- export a flow via `defineFlow(...)`
+
 - `echo.flow.ts`: one ACP step that returns a JSON reply
 - `branch.flow.ts`: ACP classification followed by a deterministic branch into either `continue` or `checkpoint`
 - `pr-triage/pr-triage.flow.ts`: a larger single-PR workflow example with a colocated written spec in `pr-triage/README.md`

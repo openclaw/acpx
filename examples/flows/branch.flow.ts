@@ -1,4 +1,4 @@
-import { acp, checkpoint, defineFlow, extractJsonObject } from "../../src/flows.js";
+import { acp, checkpoint, defineFlow, extractJsonObject } from "acpx/flows";
 
 type BranchInput = {
   task?: string;

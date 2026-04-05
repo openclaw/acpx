@@ -53,10 +53,14 @@ The worker is not the workflow engine.
 ## Flow model
 
 Flows are normal `.ts` modules that import helpers from `acpx/flows` and
-export a graph definition.
+export a graph definition through `defineFlow(...)`.
 
 They are not a special DSL file type and they are not meant to be importless
 "magic" files.
+
+`defineFlow(...)` is the supported authoring entrypoint. Source-tree examples
+and external flow files should use that same public import surface instead of
+reaching into `src/flows`.
 
 How the CLI resolves that import at runtime is loader plumbing, not the
 author-facing design contract.
@@ -163,7 +167,7 @@ names into the first `zod` pass.
 
 The core model should stay plain data:
 
-- a flow is a plain object
+- a flow definition is still a plain object after `defineFlow(...)` brands it internally
 - each node is a plain tagged object
 - edges are plain data connecting node ids
 
@@ -221,22 +225,30 @@ existing graph validator as long as the runtime boundary stays clear.
 `defineFlow(...)` should validate the immediate definition shape before
 returning it.
 
+The object returned by `defineFlow(...)` should also carry the internal marker
+the loader uses to distinguish an intentional flow definition from an arbitrary
+exported object.
+
 Full graph validation must still run after module evaluation in the loader or
 runtime.
 
-That preserves compatibility with staged module assembly patterns such as:
+That still supports staged module assembly patterns such as:
 
 - create `nodes` or `edges`
 - call `defineFlow(...)`
 - finish populating the graph before export evaluation completes
+- export that defined flow object
 
-That keeps the authoring contract simple without making `defineFlow(...)`
-stricter than plain exported flow objects:
+The authoring contract should stay strict:
 
-- user code exports a plain flow object
-- `defineFlow(...)` validates the current shape
+- user code imports helpers from `acpx/flows`
+- user code exports `defineFlow(...)` or a variable returned by `defineFlow(...)`
+- `defineFlow(...)` validates the current shape and marks the definition as intentional
 - the loader or runtime validates the completed graph
 - the runtime executes the validated graph
+
+The loader should reject plain exported objects that were not created through
+`defineFlow(...)`.
 
 Node helpers such as `acp(...)`, `action(...)`, `compute(...)`, and
 `checkpoint(...)` may also validate node-local shape, but they should still

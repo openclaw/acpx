@@ -1,4 +1,4 @@
-import { acp, compute, defineFlow, extractJsonObject } from "../../src/flows.js";
+import { acp, compute, defineFlow, extractJsonObject } from "acpx/flows";
 
 type TwoTurnInput = {
   topic?: string;

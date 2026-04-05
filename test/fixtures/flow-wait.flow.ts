@@ -1,4 +1,4 @@
-import { action, checkpoint, defineFlow } from "../../src/flows/runtime.js";
+import { action, checkpoint, defineFlow } from "acpx/flows";
 
 export default defineFlow({
   name: "fixture-wait",

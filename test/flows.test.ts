@@ -29,6 +29,28 @@ const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url
 const MOCK_AGENT_COMMAND = `node ${JSON.stringify(MOCK_AGENT_PATH)}`;
 const TEST_CLI_PATH = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 const TEST_QUEUE_OWNER_ARGS = JSON.stringify([TEST_CLI_PATH, "__queue-owner"]);
+const FLOW_AUTHORING_TEST_ROOTS = [
+  path.resolve(process.cwd(), "examples/flows"),
+  path.resolve(process.cwd(), "test/fixtures"),
+];
+
+async function collectFlowFiles(root: string): Promise<string[]> {
+  const entries = await fs.readdir(root, { withFileTypes: true });
+  const flowFiles: string[] = [];
+
+  for (const entry of entries) {
+    const entryPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      flowFiles.push(...(await collectFlowFiles(entryPath)));
+      continue;
+    }
+    if (entry.isFile() && entry.name.endsWith(".flow.ts")) {
+      flowFiles.push(entryPath);
+    }
+  }
+
+  return flowFiles;
+}
 
 test("extractJsonObject parses direct, fenced, and embedded JSON", () => {
   assert.deepEqual(extractJsonObject('{"ok":true}'), { ok: true });
@@ -227,6 +249,51 @@ test("defineFlow allows staged assembly before full graph validation", () => {
 
   assert.equal(flow.nodes.start?.nodeType, "compute");
   assert.doesNotThrow(() => validateFlowDefinition(flow));
+});
+
+test("validateFlowDefinition rejects flows that do not come from defineFlow(...)", () => {
+  const flow = {
+    name: "plain-flow",
+    startAt: "done",
+    nodes: {
+      done: compute({
+        run: () => ({ ok: true }),
+      }),
+    },
+    edges: [],
+  } as FlowDefinition;
+
+  assert.throws(
+    () => validateFlowDefinition(flow),
+    /Flow must be defined with defineFlow\(\.\.\.\) from "acpx\/flows"/,
+  );
+});
+
+test('repo flow modules use defineFlow(...) and import from "acpx/flows"', async () => {
+  const flowPaths = (await Promise.all(FLOW_AUTHORING_TEST_ROOTS.map(collectFlowFiles))).flat();
+
+  assert.ok(flowPaths.length > 0, "expected repo flow modules to exist");
+
+  for (const flowPath of flowPaths) {
+    const source = await fs.readFile(flowPath, "utf8");
+    const relativePath = path.relative(process.cwd(), flowPath);
+
+    assert.match(
+      source,
+      /from ["']acpx\/flows["']/,
+      `${relativePath} must import flow helpers from "acpx/flows"`,
+    );
+    assert.doesNotMatch(
+      source,
+      /from ["'](?:\.\.\/)+src\/flows(?:\.js)?["']/,
+      `${relativePath} must not import flow helpers via relative src/flows paths`,
+    );
+    assert.match(
+      source,
+      /defineFlow\(/,
+      `${relativePath} must define its flow with defineFlow(...)`,
+    );
+  }
 });
 
 test("FlowRunner executes isolated ACP nodes and branches deterministically", async () => {
