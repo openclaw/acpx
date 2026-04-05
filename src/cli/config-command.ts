@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { initGlobalConfigFile, toConfigDisplay, type ResolvedAcpxConfig } from "../config.js";
+import { initGlobalConfigFile, toConfigDisplay, type ResolvedAcpxConfig } from "./config.js";
 import { resolveGlobalFlags } from "./flags.js";
 
 async function handleConfigShow(command: Command, config: ResolvedAcpxConfig): Promise<void> {

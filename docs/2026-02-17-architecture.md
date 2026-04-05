@@ -17,11 +17,12 @@ The CLI never scrapes terminal text from an interactive UI. It talks structured 
 
 ## Core components
 
-- `src/cli.ts`: command grammar, flags, output mode selection, and top-level command handling.
-- `src/client.ts`: ACP transport and protocol methods. Spawns the adapter process and connects with `ClientSideConnection` + `ndJsonStream`.
-- `src/session.ts`: session persistence, resume/create logic, queue ownership, soft-close lifecycle, timeout/interrupt handling, and cleanup.
+- `src/cli.ts`: CLI entrypoint.
+- `src/cli-core.ts`: top-level command wiring, output policy selection, and error emission.
+- `src/acp/client.ts`: ACP transport and protocol methods. Spawns the adapter process and connects with `ClientSideConnection` + `ndJsonStream`.
+- `src/session/session.ts`: session persistence, resume/create logic, queue ownership, soft-close lifecycle, timeout/interrupt handling, and cleanup.
 - `src/permissions.ts`: permission policy (`approve-all`, `approve-reads`, `deny-all`) and interactive fallback.
-- `src/output.ts`: streaming text/json/quiet output formatters.
+- `src/cli/output/output.ts`: streaming text/json/quiet output formatters.
 
 ## Protocol flow
 

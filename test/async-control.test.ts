@@ -5,7 +5,7 @@ import {
   TimeoutError,
   withInterrupt,
   withTimeout,
-} from "../src/session-runtime-helpers.js";
+} from "../src/async-control.js";
 
 test("withTimeout resolves when timeout is disabled", async () => {
   const result = await withTimeout(Promise.resolve("ok"), 0);

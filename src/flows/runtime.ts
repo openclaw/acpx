@@ -1,14 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
-import path from "node:path";
+import { randomUUID } from "node:crypto";
 import type { AcpClient } from "../acp/client.js";
-import { createOutputFormatter } from "../cli/output/output.js";
-import { promptToDisplayText, textPrompt } from "../prompt-content.js";
-import {
-  InterruptedError,
-  TimeoutError,
-  withInterrupt,
-  withTimeout,
-} from "../session-runtime-helpers.js";
+import { InterruptedError, TimeoutError, withInterrupt, withTimeout } from "../async-control.js";
+import { promptToDisplayText } from "../prompt-content.js";
 import {
   cloneSessionAcpxState,
   createSessionConversation,
@@ -16,7 +9,6 @@ import {
   recordPromptSubmission,
   recordSessionUpdate as recordConversationSessionUpdate,
 } from "../session/conversation-model.js";
-import { defaultSessionEventLog } from "../session/event-log.js";
 import { resolveSessionRecord } from "../session/persistence.js";
 import {
   cancelSessionPrompt,
@@ -24,11 +16,38 @@ import {
   runOnce,
   sendSessionDirect,
 } from "../session/session.js";
-import { SESSION_RECORD_SCHEMA } from "../types.js";
 import type { PromptInput, SessionRecord } from "../types.js";
 import { acp, action, checkpoint, compute, defineFlow, shell } from "./definition.js";
 import { formatShellActionSummary, runShellAction } from "./executors/shell.js";
 import { resolveNext, resolveNextForOutcome, validateFlowDefinition } from "./graph.js";
+import {
+  attachStepTrace,
+  clearActiveNode,
+  createIsolatedSessionBinding,
+  createNodeOutcomePayload,
+  createNodeResult,
+  createQuietCaptureOutput,
+  createRunId,
+  createSessionBindingKey,
+  createSessionBundleId,
+  createSessionName,
+  createSyntheticSessionRecord,
+  extractAttachedStepTrace,
+  finalizeStepTrace,
+  findConversationDeltaStart,
+  isoNow,
+  makeFlowNodeContext,
+  markNodeStarted,
+  nextAttemptId,
+  normalizePromptInput,
+  outcomeForError,
+  persistRunFailure,
+  resolveFlowRunTitle,
+  resolveNodeCwd,
+  resolveShellActionCwd,
+  summarizePrompt,
+  updateStatusDetail,
+} from "./runtime-support.js";
 import { FlowRunStore } from "./store.js";
 import type {
   AcpNodeDefinition,
@@ -84,10 +103,6 @@ export type {
 
 const DEFAULT_FLOW_HEARTBEAT_MS = 5_000;
 const DEFAULT_FLOW_STEP_TIMEOUT_MS = 15 * 60_000;
-
-type MemoryWritable = {
-  write(chunk: string): void;
-};
 
 type FlowNodeExecutionResult = {
   output: unknown;
@@ -195,14 +210,14 @@ export class FlowRunner {
 
               const attemptId = nextAttemptId(attemptCounts, current);
               const startedAt = isoNow();
-              const context = this.makeContext(state, input);
+              const context = makeFlowNodeContext(state, input, this.services);
               let output: unknown;
               let promptText: string | null = null;
               let rawText: string | null = null;
               let sessionInfo: FlowSessionBinding | null = null;
               let agentInfo: ResolvedFlowAgent | null = null;
               let trace: FlowStepTrace | null = null;
-              this.markNodeStarted(
+              markNodeStarted(
                 state,
                 current,
                 attemptId,
@@ -228,7 +243,8 @@ export class FlowRunner {
               try {
                 ({ output, promptText, rawText, sessionInfo, agentInfo, trace } =
                   await this.executeNode(runDir, state, flow, current, node, context));
-                trace = await this.finalizeStepTrace(
+                trace = await finalizeStepTrace(
+                  this.store,
                   runDir,
                   state,
                   current,
@@ -248,7 +264,8 @@ export class FlowRunner {
               } catch (error) {
                 executionError = error;
                 trace = extractAttachedStepTrace(error) ?? trace;
-                trace = await this.finalizeStepTrace(
+                trace = await finalizeStepTrace(
+                  this.store,
                   runDir,
                   state,
                   current,
@@ -274,10 +291,7 @@ export class FlowRunner {
                 state.waitingOn = current;
                 state.updatedAt = isoNow();
                 state.status = "waiting";
-                this.clearActiveNode(
-                  state,
-                  (output as { summary?: string } | null)?.summary ?? current,
-                );
+                clearActiveNode(state, (output as { summary?: string } | null)?.summary ?? current);
                 state.steps.push({
                   attemptId,
                   nodeId: current,
@@ -309,7 +323,7 @@ export class FlowRunner {
                 state.outputs[current] = output;
               }
               state.updatedAt = isoNow();
-              this.clearActiveNode(state);
+              clearActiveNode(state);
               state.steps.push({
                 attemptId,
                 nodeId: current,
@@ -351,7 +365,7 @@ export class FlowRunner {
             state.status = "completed";
             state.finishedAt = isoNow();
             state.updatedAt = state.finishedAt;
-            this.clearActiveNode(state);
+            clearActiveNode(state);
             await this.store.writeSnapshot(runDir, state, {
               scope: "run",
               type: "run_completed",
@@ -364,55 +378,17 @@ export class FlowRunner {
               state,
             };
           } catch (error) {
-            await this.persistRunFailure(runDir, state, error);
+            await persistRunFailure(this.store, runDir, state, error);
             throw error;
           }
         },
         async () => {
-          await this.persistRunFailure(runDir, state, new InterruptedError());
+          await persistRunFailure(this.store, runDir, state, new InterruptedError());
         },
       );
     } finally {
       await this.closePendingPersistentSessionClients();
     }
-  }
-
-  private async persistRunFailure(
-    runDir: string,
-    state: FlowRunState,
-    error: unknown,
-  ): Promise<void> {
-    if (
-      state.finishedAt !== undefined &&
-      (state.status === "failed" || state.status === "timed_out")
-    ) {
-      return;
-    }
-    state.status = error instanceof TimeoutError ? "timed_out" : "failed";
-    state.updatedAt = isoNow();
-    state.finishedAt = state.updatedAt;
-    state.error = error instanceof Error ? error.message : String(error);
-    state.statusDetail = state.currentNode
-      ? `Failed in ${state.currentNode}: ${state.error}`
-      : state.error;
-    await this.store.writeSnapshot(runDir, state, {
-      scope: "run",
-      type: "run_failed",
-      payload: {
-        status: state.status,
-        error: state.error,
-      },
-    });
-  }
-
-  private makeContext(state: FlowRunState, input: unknown): FlowNodeContext {
-    return {
-      input,
-      outputs: state.outputs,
-      results: state.results,
-      state,
-      services: this.services,
-    };
   }
 
   private async executeNode(
@@ -507,7 +483,7 @@ export class FlowRunner {
           cwd: resolveShellActionCwd(this.defaultCwd, execution.cwd),
           timeoutMs: execution.timeoutMs ?? nodeTimeoutMs,
         };
-        this.updateStatusDetail(state, formatShellActionSummary(effectiveExecution));
+        updateStatusDetail(state, formatShellActionSummary(effectiveExecution));
         await this.store.writeLive(runDir, state, {
           scope: "node",
           type: "node_heartbeat",
@@ -654,7 +630,7 @@ export class FlowRunner {
         };
         const prompt = normalizePromptInput(await Promise.resolve(node.prompt(context)));
         const promptText = promptToDisplayText(prompt);
-        this.updateStatusDetail(state, summarizePrompt(promptText, node.statusDetail));
+        updateStatusDetail(state, summarizePrompt(promptText, node.statusDetail));
         await this.store.writeLive(runDir, state, {
           scope: "node",
           type: "node_heartbeat",
@@ -842,65 +818,6 @@ export class FlowRunner {
         });
       },
     );
-  }
-
-  private markNodeStarted(
-    state: FlowRunState,
-    nodeId: string,
-    attemptId: string,
-    nodeType: FlowNodeDefinition["nodeType"],
-    startedAt: string,
-    detail?: string,
-  ): void {
-    state.status = "running";
-    state.waitingOn = undefined;
-    state.currentNode = nodeId;
-    state.currentAttemptId = attemptId;
-    state.currentNodeType = nodeType;
-    state.currentNodeStartedAt = startedAt;
-    state.lastHeartbeatAt = startedAt;
-    state.statusDetail = detail ?? `Running ${nodeType} node ${nodeId}`;
-  }
-
-  private clearActiveNode(state: FlowRunState, detail?: string): void {
-    state.currentNode = undefined;
-    state.currentAttemptId = undefined;
-    state.currentNodeType = undefined;
-    state.currentNodeStartedAt = undefined;
-    state.lastHeartbeatAt = undefined;
-    state.statusDetail = detail;
-  }
-
-  private updateStatusDetail(state: FlowRunState, detail?: string): void {
-    if (!detail) {
-      return;
-    }
-    state.statusDetail = detail;
-  }
-
-  private async finalizeStepTrace(
-    runDir: string,
-    state: FlowRunState,
-    nodeId: string,
-    attemptId: string,
-    output: unknown,
-    baseTrace: FlowStepTrace | null,
-  ): Promise<FlowStepTrace | null> {
-    const trace: FlowStepTrace = baseTrace ? structuredClone(baseTrace) : {};
-    if (output !== undefined) {
-      const inlineOutput = toInlineOutput(output);
-      if (inlineOutput !== undefined) {
-        trace.outputInline = inlineOutput;
-      } else {
-        trace.outputArtifact = await this.store.writeArtifact(runDir, state, output, {
-          mediaType: outputArtifactMediaType(output),
-          extension: outputArtifactExtension(output),
-          nodeId,
-          attemptId,
-        });
-      }
-    }
-    return Object.keys(trace).length > 0 ? trace : null;
   }
 
   private async runWithHeartbeat<T>(
@@ -1188,291 +1105,4 @@ export class FlowRunner {
       },
     };
   }
-}
-
-function normalizePromptInput(prompt: PromptInput | string): PromptInput {
-  return typeof prompt === "string" ? textPrompt(prompt) : prompt;
-}
-
-async function resolveNodeCwd(
-  defaultCwd: string,
-  cwd: AcpNodeDefinition["cwd"],
-  context: FlowNodeContext,
-): Promise<string> {
-  if (typeof cwd === "function") {
-    const resolved = (await cwd(context)) ?? defaultCwd;
-    return path.resolve(defaultCwd, resolved);
-  }
-  return path.resolve(defaultCwd, cwd ?? defaultCwd);
-}
-
-function resolveShellActionCwd(defaultCwd: string, cwd: string | undefined): string {
-  return path.resolve(defaultCwd, cwd ?? defaultCwd);
-}
-
-function summarizePrompt(promptText: string, explicitDetail?: string): string {
-  if (explicitDetail) {
-    return explicitDetail;
-  }
-
-  const line = promptText
-    .split("\n")
-    .map((candidate) => candidate.trim())
-    .find((candidate) => candidate.length > 0);
-
-  if (!line) {
-    return "Running ACP prompt";
-  }
-
-  const truncated = line.length > 120 ? `${line.slice(0, 117)}...` : line;
-  return `ACP: ${truncated}`;
-}
-
-function createQuietCaptureOutput(): {
-  formatter: ReturnType<typeof createOutputFormatter>;
-  read: () => string;
-} {
-  const chunks: string[] = [];
-  const stdout: MemoryWritable = {
-    write(chunk: string) {
-      chunks.push(chunk);
-    },
-  };
-
-  return {
-    formatter: createOutputFormatter("quiet", {
-      stdout,
-    }),
-    read: () => chunks.join("").trim(),
-  };
-}
-
-async function resolveFlowRunTitle(
-  flow: FlowDefinition,
-  input: unknown,
-  flowPath?: string,
-): Promise<string | undefined> {
-  const titleDefinition = flow.run?.title;
-  if (titleDefinition === undefined) {
-    return undefined;
-  }
-
-  const resolved =
-    typeof titleDefinition === "function"
-      ? await Promise.resolve(titleDefinition({ input, flowName: flow.name, flowPath }))
-      : titleDefinition;
-
-  return normalizeFlowRunTitle(resolved);
-}
-
-function normalizeFlowRunTitle(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function createRunId(flowName: string): string {
-  const stamp = isoNow().replaceAll(":", "").replaceAll(".", "");
-  const slug = flowName
-    .replace(/[^a-z0-9]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase();
-  return `${stamp}-${slug}-${randomUUID().slice(0, 8)}`;
-}
-
-function createSessionBindingKey(agentCommand: string, cwd: string, handle: string): string {
-  return `${agentCommand}::${cwd}::${handle}`;
-}
-
-function createSessionName(flowName: string, handle: string, cwd: string, runId: string): string {
-  const stamp = stableShortHash(cwd);
-  return `${flowName}-${handle}-${stamp}-${runId.slice(-8)}`;
-}
-
-function createSessionBundleId(handle: string, key: string): string {
-  const safeHandle = handle
-    .replace(/[^a-z0-9]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase();
-  return `${safeHandle || "session"}-${stableShortHash(key)}`;
-}
-
-function createIsolatedSessionBinding(
-  flowName: string,
-  runId: string,
-  attemptId: string,
-  profile: string | undefined,
-  agent: ResolvedFlowAgent,
-): FlowSessionBinding {
-  const key = `isolated::${attemptId}`;
-  const handle = "isolated";
-  return {
-    key,
-    handle,
-    bundleId: createSessionBundleId(`${handle}-${attemptId}`, `${key}::${agent.cwd}`),
-    name: `${flowName}-${attemptId}-${runId.slice(-8)}`,
-    profile,
-    agentName: agent.agentName,
-    agentCommand: agent.agentCommand,
-    cwd: agent.cwd,
-    acpxRecordId: key,
-    acpSessionId: key,
-  };
-}
-
-function createSyntheticSessionRecord(options: {
-  binding: FlowSessionBinding;
-  createdAt: string;
-  updatedAt: string;
-  conversation: ReturnType<typeof createSessionConversation>;
-  acpxState: SessionRecord["acpx"] | undefined;
-  lastSeq: number;
-}): SessionRecord {
-  return {
-    schema: SESSION_RECORD_SCHEMA,
-    acpxRecordId: options.binding.acpxRecordId,
-    acpSessionId: options.binding.acpSessionId,
-    agentSessionId: options.binding.agentSessionId,
-    agentCommand: options.binding.agentCommand,
-    cwd: options.binding.cwd,
-    name: options.binding.name,
-    createdAt: options.createdAt,
-    lastUsedAt: options.updatedAt,
-    lastSeq: options.lastSeq,
-    lastRequestId: undefined,
-    eventLog: defaultSessionEventLog(options.binding.acpxRecordId),
-    closed: true,
-    closedAt: options.updatedAt,
-    title: options.conversation.title,
-    messages: options.conversation.messages,
-    updated_at: options.conversation.updated_at,
-    cumulative_token_usage: options.conversation.cumulative_token_usage,
-    request_token_usage: options.conversation.request_token_usage,
-    acpx: options.acpxState,
-  };
-}
-
-function createNodeResult(options: {
-  attemptId: string;
-  nodeId: string;
-  nodeType: FlowNodeDefinition["nodeType"];
-  outcome: FlowNodeOutcome;
-  startedAt: string;
-  finishedAt: string;
-  output?: unknown;
-  error?: string;
-}): FlowNodeResult {
-  return {
-    attemptId: options.attemptId,
-    nodeId: options.nodeId,
-    nodeType: options.nodeType,
-    outcome: options.outcome,
-    startedAt: options.startedAt,
-    finishedAt: options.finishedAt,
-    durationMs: new Date(options.finishedAt).getTime() - new Date(options.startedAt).getTime(),
-    output: options.output,
-    error: options.error,
-  };
-}
-
-function outcomeForError(error: unknown): FlowNodeOutcome {
-  if (error instanceof TimeoutError) {
-    return "timed_out";
-  }
-  if (error instanceof InterruptedError) {
-    return "cancelled";
-  }
-  return "failed";
-}
-
-function stableShortHash(value: string): string {
-  return createHash("sha1").update(value).digest("hex").slice(0, 8);
-}
-
-function nextAttemptId(attemptCounts: Map<string, number>, nodeId: string): string {
-  const next = (attemptCounts.get(nodeId) ?? 0) + 1;
-  attemptCounts.set(nodeId, next);
-  return `${nodeId}#${next}`;
-}
-
-function createNodeOutcomePayload(
-  result: FlowNodeResult,
-  trace: FlowStepTrace | null,
-): Record<string, unknown> {
-  return {
-    nodeType: result.nodeType,
-    outcome: result.outcome,
-    durationMs: result.durationMs,
-    error: result.error ?? null,
-    ...trace,
-  };
-}
-
-function attachStepTrace(error: unknown, trace: FlowStepTrace | null): Error {
-  const attached =
-    error instanceof Error ? error : new Error(typeof error === "string" ? error : String(error));
-  (attached as Error & { flowStepTrace?: FlowStepTrace | null }).flowStepTrace = trace;
-  return attached;
-}
-
-function extractAttachedStepTrace(error: unknown): FlowStepTrace | null | undefined {
-  if (!(error instanceof Error)) {
-    return undefined;
-  }
-  return (error as Error & { flowStepTrace?: FlowStepTrace | null }).flowStepTrace;
-}
-
-function toInlineOutput(value: unknown): undefined | null | boolean | number | string | object {
-  if (value == null || typeof value === "number" || typeof value === "boolean") {
-    return value;
-  }
-  if (typeof value === "string") {
-    return value.length <= 200 && !value.includes("\n") ? value : undefined;
-  }
-  try {
-    const serialized = JSON.stringify(value);
-    if (serialized.length <= 200 && !serialized.includes("\n")) {
-      return value;
-    }
-  } catch {
-    return undefined;
-  }
-  return undefined;
-}
-
-function outputArtifactMediaType(value: unknown): string {
-  return typeof value === "string" ? "text/plain" : "application/json";
-}
-
-function outputArtifactExtension(value: unknown): string {
-  return typeof value === "string" ? "txt" : "json";
-}
-
-function findConversationDeltaStart(
-  before: SessionRecord["messages"],
-  after: SessionRecord["messages"],
-): number {
-  const maxOverlap = Math.min(before.length, after.length);
-  for (let overlap = maxOverlap; overlap >= 0; overlap -= 1) {
-    let matches = true;
-    for (let index = 0; index < overlap; index += 1) {
-      const beforeMessage = before[before.length - overlap + index];
-      const afterMessage = after[index];
-      if (!deepEqualJson(beforeMessage, afterMessage)) {
-        matches = false;
-        break;
-      }
-    }
-    if (matches) {
-      return overlap;
-    }
-  }
-  return 0;
-}
-
-function deepEqualJson(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function isoNow(): string {
-  return new Date().toISOString();
 }

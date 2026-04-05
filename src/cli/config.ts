@@ -1,15 +1,15 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_AGENT_NAME, normalizeAgentName } from "./agent-registry.js";
-import { parseMcpServers } from "./mcp-servers.js";
+import { DEFAULT_AGENT_NAME, normalizeAgentName } from "../agent-registry.js";
+import { parseMcpServers } from "../mcp-servers.js";
 import type {
   AuthPolicy,
   McpServer,
   NonInteractivePermissionPolicy,
   OutputFormat,
   PermissionMode,
-} from "./types.js";
+} from "../types.js";
 
 type ConfigAgentEntry = {
   command: string;

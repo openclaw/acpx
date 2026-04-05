@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { TimeoutError } from "../../session-runtime-helpers.js";
+import { TimeoutError } from "../../async-control.js";
 import type { ShellActionExecution, ShellActionResult } from "../runtime.js";
 
 export function formatShellActionSummary(spec: ShellActionExecution): string {

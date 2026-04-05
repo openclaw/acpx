@@ -5,7 +5,6 @@ import {
   DEFAULT_AGENT_NAME,
   resolveAgentCommand as resolveAgentCommandFromRegistry,
 } from "../agent-registry.js";
-import type { ResolvedAcpxConfig } from "../config.js";
 import { DEFAULT_QUEUE_OWNER_TTL_MS } from "../session/session.js";
 import {
   AUTH_POLICIES,
@@ -17,6 +16,7 @@ import {
   type OutputPolicy,
   type PermissionMode,
 } from "../types.js";
+import type { ResolvedAcpxConfig } from "./config.js";
 
 export type PermissionFlags = {
   approveAll?: boolean;

@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { AcpClient } from "../../acp/client.js";
 import { normalizeOutputError } from "../../acp/error-normalization.js";
+import { withTimeout } from "../../async-control.js";
 import { textPrompt, type PromptInput } from "../../prompt-content.js";
-import { withTimeout } from "../../session-runtime-helpers.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,

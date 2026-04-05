@@ -1,5 +1,8 @@
 import { parseOptionalMcpServers } from "../../mcp-servers.js";
-import { runSessionQueueOwner, type QueueOwnerRuntimeOptions } from "../session/runtime.js";
+import {
+  runSessionQueueOwner,
+  type QueueOwnerRuntimeOptions,
+} from "../session/queue-owner-runtime.js";
 
 type UnknownRecord = Record<string, unknown>;
 

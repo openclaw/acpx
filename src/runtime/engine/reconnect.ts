@@ -5,13 +5,13 @@ import {
   isAcpQueryClosedBeforeResponseError,
   isAcpResourceNotFoundError,
 } from "../../acp/error-normalization.js";
+import { InterruptedError, TimeoutError, withTimeout } from "../../async-control.js";
 import {
   SessionModeReplayError,
   SessionModelReplayError,
   SessionResumeRequiredError,
 } from "../../errors.js";
 import { incrementPerfCounter } from "../../perf-metrics.js";
-import { InterruptedError, TimeoutError, withTimeout } from "../../session-runtime-helpers.js";
 import {
   getDesiredModeId,
   getDesiredModelId,

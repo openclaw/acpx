@@ -1,6 +1,6 @@
 import { InvalidArgumentError } from "commander";
 import type { Command } from "commander";
-import type { ResolvedAcpxConfig } from "./config.js";
+import type { ResolvedAcpxConfig } from "./cli/config.js";
 
 type AgentTokenScan = {
   token?: string;

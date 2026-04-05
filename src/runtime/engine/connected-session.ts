@@ -1,6 +1,6 @@
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { AcpClient } from "../../acp/client.js";
-import { withInterrupt } from "../../session-runtime-helpers.js";
+import { withInterrupt } from "../../async-control.js";
 import { absolutePath, isoNow } from "../../session/persistence.js";
 import type {
   AuthPolicy,

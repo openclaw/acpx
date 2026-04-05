@@ -1,5 +1,4 @@
 import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
-import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
   ClientSideConnection,
@@ -29,12 +28,12 @@ import {
   type WriteTextFileResponse,
   type SessionModelState,
 } from "@agentclientprotocol/sdk";
+import { TimeoutError, withTimeout } from "../async-control.js";
 import {
   AgentDisconnectedError,
   AgentSpawnError,
   AuthPolicyError,
   ClaudeAcpSessionCreateTimeoutError,
-  CopilotAcpUnsupportedError,
   GeminiAcpStartupTimeoutError,
   PermissionDeniedError,
   PermissionPromptUnavailableError,
@@ -42,10 +41,8 @@ import {
 import { FileSystemHandlers } from "../filesystem.js";
 import { classifyPermissionDecision, resolvePermissionRequest } from "../permissions.js";
 import { textPrompt } from "../prompt-content.js";
-import { TimeoutError, withTimeout } from "../session-runtime-helpers.js";
 import { extractRuntimeSessionId } from "../session/runtime-session-id.js";
 import { buildSpawnCommandOptions } from "../spawn-command-options.js";
-import { TerminalManager } from "../terminal.js";
 import type {
   AcpClientOptions,
   NonInteractivePermissionPolicy,
@@ -53,29 +50,57 @@ import type {
   PermissionStats,
   PromptInput,
 } from "../types.js";
+import {
+  buildClaudeAcpSessionCreateTimeoutMessage,
+  buildClaudeCodeOptionsMeta,
+  buildGeminiAcpStartupTimeoutMessage,
+  buildQoderAcpCommandArgs,
+  ensureCopilotAcpSupport,
+  isClaudeAcpCommand,
+  isCopilotAcpCommand,
+  isGeminiAcpCommand,
+  isQoderAcpCommand,
+  resolveAgentCloseAfterStdinEndMs,
+  resolveClaudeAcpSessionCreateTimeoutMs,
+  resolveGeminiAcpStartupTimeoutMs,
+  resolveGeminiCommandArgs,
+  shouldIgnoreNonJsonAgentOutputLine,
+} from "./agent-command.js";
+import {
+  buildAgentSpawnOptions,
+  readEnvCredential,
+  resolveConfiguredAuthCredential,
+} from "./auth-env.js";
+import {
+  asAbsoluteCwd,
+  isoNow,
+  isChildProcessRunning,
+  requireAgentStdio,
+  splitCommandLine,
+  waitForChildExit,
+  waitForSpawn,
+} from "./client-process.js";
 import { extractAcpError } from "./error-shapes.js";
 import { isSessionUpdateNotification } from "./jsonrpc.js";
+import {
+  formatSessionControlAcpSummary,
+  maybeWrapSessionControlError,
+} from "./session-control-errors.js";
+import { TerminalManager } from "./terminal-manager.js";
 
 export { buildSpawnCommandOptions };
-
-type CommandParts = {
-  command: string;
-  args: string[];
+export {
+  buildAgentSpawnOptions,
+  buildQoderAcpCommandArgs,
+  resolveAgentCloseAfterStdinEndMs,
+  shouldIgnoreNonJsonAgentOutputLine,
 };
 
 const REPLAY_IDLE_MS = 80;
 const REPLAY_DRAIN_TIMEOUT_MS = 5_000;
 const DRAIN_POLL_INTERVAL_MS = 20;
-const DEFAULT_AGENT_CLOSE_AFTER_STDIN_END_MS = 100;
-const QODER_AGENT_CLOSE_AFTER_STDIN_END_MS = 750;
 const AGENT_CLOSE_TERM_GRACE_MS = 1_500;
 const AGENT_CLOSE_KILL_GRACE_MS = 1_000;
-const GEMINI_ACP_STARTUP_TIMEOUT_MS = 15_000;
-const CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS = 60_000;
-const GEMINI_VERSION_TIMEOUT_MS = 2_000;
-const GEMINI_ACP_FLAG_VERSION = [0, 33, 0] as const;
-const COPILOT_HELP_TIMEOUT_MS = 2_000;
-const SESSION_CONTROL_UNSUPPORTED_ACP_CODES = new Set([-32601, -32602]);
 
 type LoadSessionOptions = {
   suppressReplayUpdates?: boolean;
@@ -107,11 +132,6 @@ type AuthSelection = {
   source: "env" | "config";
 };
 
-type GeminiVersion = {
-  raw: string;
-  parts: [number, number, number];
-};
-
 export type AgentExitInfo = {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
@@ -128,10 +148,6 @@ export type AgentLifecycleSnapshot = {
 };
 
 type ConsoleErrorMethod = typeof console.error;
-const QODER_BENIGN_STDOUT_LINES = new Set([
-  "Received interrupt signal. Cleaning up resources...",
-  "Cleanup completed. Exiting...",
-]);
 
 function shouldSuppressSdkConsoleError(args: unknown[]): boolean {
   if (args.length === 0) {
@@ -151,165 +167,6 @@ function installSdkConsoleErrorSuppression(): () => void {
   return () => {
     console.error = originalConsoleError;
   };
-}
-
-function isoNow(): string {
-  return new Date().toISOString();
-}
-
-function waitForSpawn(child: ChildProcess): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onSpawn = () => {
-      child.off("error", onError);
-      resolve();
-    };
-    const onError = (error: Error) => {
-      child.off("spawn", onSpawn);
-      reject(error);
-    };
-
-    child.once("spawn", onSpawn);
-    child.once("error", onError);
-  });
-}
-
-function isChildProcessRunning(child: ChildProcess): boolean {
-  return child.exitCode == null && child.signalCode == null;
-}
-
-function requireAgentStdio(child: ChildProcess): ChildProcessByStdio<Writable, Readable, Readable> {
-  if (!child.stdin || !child.stdout || !child.stderr) {
-    throw new Error("ACP agent must be spawned with piped stdin/stdout/stderr");
-  }
-  return child as ChildProcessByStdio<Writable, Readable, Readable>;
-}
-
-function waitForChildExit(
-  child: ChildProcessByStdio<Writable, Readable, Readable>,
-  timeoutMs: number,
-): Promise<boolean> {
-  if (!isChildProcessRunning(child)) {
-    return Promise.resolve(true);
-  }
-
-  return new Promise<boolean>((resolve) => {
-    let settled = false;
-    const timer = setTimeout(
-      () => {
-        finish(false);
-      },
-      Math.max(0, timeoutMs),
-    );
-
-    const finish = (value: boolean) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      child.off("close", onExitLike);
-      child.off("exit", onExitLike);
-      clearTimeout(timer);
-      resolve(value);
-    };
-
-    const onExitLike = () => {
-      finish(true);
-    };
-
-    child.once("close", onExitLike);
-    child.once("exit", onExitLike);
-  });
-}
-
-function splitCommandLine(value: string): CommandParts {
-  const parts: string[] = [];
-  let current = "";
-  let quote: "'" | '"' | null = null;
-  let escaping = false;
-
-  for (const ch of value) {
-    if (escaping) {
-      current += ch;
-      escaping = false;
-      continue;
-    }
-
-    if (ch === "\\" && quote !== "'") {
-      escaping = true;
-      continue;
-    }
-
-    if (quote) {
-      if (ch === quote) {
-        quote = null;
-      } else {
-        current += ch;
-      }
-      continue;
-    }
-
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-      continue;
-    }
-
-    if (/\s/.test(ch)) {
-      if (current.length > 0) {
-        parts.push(current);
-        current = "";
-      }
-      continue;
-    }
-
-    current += ch;
-  }
-
-  if (escaping) {
-    current += "\\";
-  }
-
-  if (quote) {
-    throw new Error("Invalid --agent command: unterminated quote");
-  }
-
-  if (current.length > 0) {
-    parts.push(current);
-  }
-
-  if (parts.length === 0) {
-    throw new Error("Invalid --agent command: empty command");
-  }
-
-  return {
-    command: parts[0],
-    args: parts.slice(1),
-  };
-}
-
-function asAbsoluteCwd(cwd: string): string {
-  return path.resolve(cwd);
-}
-
-function basenameToken(value: string): string {
-  return path
-    .basename(value)
-    .toLowerCase()
-    .replace(/\.(cmd|exe|bat)$/u, "");
-}
-
-export function resolveAgentCloseAfterStdinEndMs(agentCommand: string): number {
-  const { command } = splitCommandLine(agentCommand);
-  return basenameToken(command) === "qodercli"
-    ? QODER_AGENT_CLOSE_AFTER_STDIN_END_MS
-    : DEFAULT_AGENT_CLOSE_AFTER_STDIN_END_MS;
-}
-
-export function shouldIgnoreNonJsonAgentOutputLine(
-  agentCommand: string,
-  trimmedLine: string,
-): boolean {
-  const { command } = splitCommandLine(agentCommand);
-  return basenameToken(command) === "qodercli" && QODER_BENIGN_STDOUT_LINES.has(trimmedLine);
 }
 
 function createNdJsonMessageStream(
@@ -372,468 +229,6 @@ function createNdJsonMessageStream(
   });
 
   return { readable, writable };
-}
-
-function isGeminiAcpCommand(command: string, args: readonly string[]): boolean {
-  return (
-    basenameToken(command) === "gemini" &&
-    (args.includes("--acp") || args.includes("--experimental-acp"))
-  );
-}
-
-function isClaudeAcpCommand(command: string, args: readonly string[]): boolean {
-  const commandToken = basenameToken(command);
-  if (commandToken === "claude-agent-acp") {
-    return true;
-  }
-  return args.some((arg) => arg.includes("claude-agent-acp"));
-}
-
-function isCopilotAcpCommand(command: string, args: readonly string[]): boolean {
-  return basenameToken(command) === "copilot" && args.includes("--acp");
-}
-
-function isQoderAcpCommand(command: string, args: readonly string[]): boolean {
-  return basenameToken(command) === "qodercli" && args.includes("--acp");
-}
-
-function hasCommandFlag(args: readonly string[], flagName: string): boolean {
-  return args.some((arg) => arg === flagName || arg.startsWith(`${flagName}=`));
-}
-
-function normalizeQoderAllowedToolName(tool: string): string {
-  switch (tool.trim().toLowerCase()) {
-    case "bash":
-    case "glob":
-    case "grep":
-    case "ls":
-    case "read":
-    case "write":
-      return tool.trim().toUpperCase();
-    default:
-      return tool.trim();
-  }
-}
-
-export function buildQoderAcpCommandArgs(
-  initialArgs: readonly string[],
-  options: Pick<AcpClientOptions, "sessionOptions">,
-): string[] {
-  const args = [...initialArgs];
-  const sessionOptions = options.sessionOptions;
-
-  if (typeof sessionOptions?.maxTurns === "number" && !hasCommandFlag(args, "--max-turns")) {
-    args.push(`--max-turns=${sessionOptions.maxTurns}`);
-  }
-
-  if (
-    Array.isArray(sessionOptions?.allowedTools) &&
-    !hasCommandFlag(args, "--allowed-tools") &&
-    !hasCommandFlag(args, "--disallowed-tools")
-  ) {
-    const encodedTools = sessionOptions.allowedTools.map(normalizeQoderAllowedToolName).join(",");
-    args.push(`--allowed-tools=${encodedTools}`);
-  }
-
-  return args;
-}
-function resolveGeminiAcpStartupTimeoutMs(): number {
-  const raw = process.env.ACPX_GEMINI_ACP_STARTUP_TIMEOUT_MS;
-  if (typeof raw === "string" && raw.trim().length > 0) {
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.round(parsed);
-    }
-  }
-  return GEMINI_ACP_STARTUP_TIMEOUT_MS;
-}
-
-function resolveClaudeAcpSessionCreateTimeoutMs(): number {
-  const raw = process.env.ACPX_CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS;
-  if (typeof raw === "string" && raw.trim().length > 0) {
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.round(parsed);
-    }
-  }
-  return CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS;
-}
-
-function parseGeminiVersion(value: string | undefined): GeminiVersion | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const normalized = value.trim();
-  const match = normalized.match(/(\d+)\.(\d+)\.(\d+)/);
-  if (!match) {
-    return undefined;
-  }
-
-  return {
-    raw: normalized,
-    parts: [Number(match[1]), Number(match[2]), Number(match[3])],
-  };
-}
-
-function compareVersionParts(left: readonly number[], right: readonly number[]): number {
-  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
-    const leftPart = left[index] ?? 0;
-    const rightPart = right[index] ?? 0;
-    if (leftPart !== rightPart) {
-      return leftPart - rightPart;
-    }
-  }
-  return 0;
-}
-
-async function detectGeminiVersion(command: string): Promise<GeminiVersion | undefined> {
-  return await new Promise<GeminiVersion | undefined>((resolve) => {
-    const child = spawn(
-      command,
-      ["--version"],
-      buildSpawnCommandOptions(command, {
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-      }),
-    );
-
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const finish = (value: GeminiVersion | undefined) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      child.removeAllListeners();
-      child.stdout?.removeAllListeners();
-      child.stderr?.removeAllListeners();
-      resolve(value);
-    };
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish(undefined);
-    }, GEMINI_VERSION_TIMEOUT_MS);
-
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.once("error", () => {
-      finish(undefined);
-    });
-    child.once("close", () => {
-      const versionLine = `${stdout}\n${stderr}`
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .find((line) => /\d+\.\d+\.\d+/.test(line));
-      finish(parseGeminiVersion(versionLine));
-    });
-  });
-}
-
-async function resolveGeminiCommandArgs(
-  command: string,
-  args: readonly string[],
-): Promise<string[]> {
-  if (basenameToken(command) !== "gemini" || !args.includes("--acp")) {
-    return [...args];
-  }
-
-  const version = await detectGeminiVersion(command);
-  if (version && compareVersionParts(version.parts, GEMINI_ACP_FLAG_VERSION) < 0) {
-    return args.map((arg) => (arg === "--acp" ? "--experimental-acp" : arg));
-  }
-
-  return [...args];
-}
-
-async function readCommandOutput(
-  command: string,
-  args: readonly string[],
-  timeoutMs: number,
-): Promise<string | undefined> {
-  return await new Promise<string | undefined>((resolve) => {
-    const child = spawn(
-      command,
-      [...args],
-      buildSpawnCommandOptions(command, {
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-      }),
-    );
-
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const finish = (value: string | undefined) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      child.removeAllListeners();
-      child.stdout?.removeAllListeners();
-      child.stderr?.removeAllListeners();
-      resolve(value);
-    };
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish(undefined);
-    }, timeoutMs);
-
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.once("error", () => {
-      finish(undefined);
-    });
-    child.once("close", () => {
-      finish(`${stdout}\n${stderr}`);
-    });
-  });
-}
-
-async function buildGeminiAcpStartupTimeoutMessage(command: string): Promise<string> {
-  const parts = [
-    "Gemini CLI ACP startup timed out before initialize completed.",
-    "This usually means the local Gemini CLI is waiting on interactive OAuth or has incompatible ACP subprocess behavior.",
-  ];
-
-  const version = await detectGeminiVersion(command);
-  if (version) {
-    parts.push(`Detected Gemini CLI version: ${version.raw}.`);
-  }
-
-  if (!process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
-    parts.push("No GEMINI_API_KEY or GOOGLE_API_KEY was set for non-interactive auth.");
-  }
-
-  parts.push("Try upgrading Gemini CLI and using API-key-based auth for non-interactive ACP runs.");
-  return parts.join(" ");
-}
-
-function buildClaudeAcpSessionCreateTimeoutMessage(): string {
-  return [
-    "Claude ACP session creation timed out before session/new completed.",
-    "This matches the known persistent-session stall seen with some Claude Code and @agentclientprotocol/claude-agent-acp combinations.",
-    "In harnessed or non-interactive runs, prefer --approve-all with nonInteractivePermissions=deny, upgrade Claude Code and the Claude ACP adapter, or use acpx claude exec as a one-shot fallback.",
-  ].join(" ");
-}
-
-async function buildCopilotAcpUnsupportedMessage(command: string): Promise<string> {
-  const parts = [
-    "GitHub Copilot CLI ACP stdio mode is not available in the installed copilot binary.",
-    "acpx copilot expects a Copilot CLI release that supports --acp --stdio.",
-  ];
-
-  const helpOutput = await readCommandOutput(command, ["--help"], COPILOT_HELP_TIMEOUT_MS);
-  if (typeof helpOutput === "string" && !helpOutput.includes("--acp")) {
-    parts.push("Detected copilot --help output without --acp support.");
-  }
-
-  parts.push(
-    "Upgrade GitHub Copilot CLI to a release with ACP stdio support, or use --agent with another ACP-compatible adapter in the meantime.",
-  );
-  return parts.join(" ");
-}
-
-async function ensureCopilotAcpSupport(command: string): Promise<void> {
-  const helpOutput = await readCommandOutput(command, ["--help"], COPILOT_HELP_TIMEOUT_MS);
-  if (typeof helpOutput === "string" && !helpOutput.includes("--acp")) {
-    throw new CopilotAcpUnsupportedError(await buildCopilotAcpUnsupportedMessage(command), {
-      retryable: false,
-    });
-  }
-}
-
-function toEnvToken(value: string): string {
-  return value
-    .trim()
-    .replace(/[^a-zA-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .toUpperCase();
-}
-
-function buildAuthEnvKeys(methodId: string): string[] {
-  const token = toEnvToken(methodId);
-  const keys = new Set<string>([methodId]);
-  if (token) {
-    keys.add(token);
-    keys.add(`ACPX_AUTH_${token}`);
-  }
-  return [...keys];
-}
-
-const authEnvKeysCache = new Map<string, string[]>();
-
-function authEnvKeys(methodId: string): string[] {
-  const cached = authEnvKeysCache.get(methodId);
-  if (cached) {
-    return cached;
-  }
-  const keys = buildAuthEnvKeys(methodId);
-  authEnvKeysCache.set(methodId, keys);
-  return keys;
-}
-
-function readEnvCredential(methodId: string): string | undefined {
-  for (const key of authEnvKeys(methodId)) {
-    const value = process.env[key];
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value;
-    }
-  }
-  return undefined;
-}
-
-function buildClaudeCodeOptionsMeta(
-  options: AcpClientOptions["sessionOptions"],
-): Record<string, unknown> | undefined {
-  if (!options) {
-    return undefined;
-  }
-
-  const claudeCodeOptions: Record<string, unknown> = {};
-  if (typeof options.model === "string" && options.model.trim().length > 0) {
-    claudeCodeOptions.model = options.model;
-  }
-  if (Array.isArray(options.allowedTools)) {
-    claudeCodeOptions.allowedTools = [...options.allowedTools];
-  }
-  if (typeof options.maxTurns === "number") {
-    claudeCodeOptions.maxTurns = options.maxTurns;
-  }
-
-  if (Object.keys(claudeCodeOptions).length === 0) {
-    return undefined;
-  }
-
-  return {
-    claudeCode: {
-      options: claudeCodeOptions,
-    },
-  };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
-}
-
-function isLikelySessionControlUnsupportedError(acp: {
-  code: number;
-  message: string;
-  data?: unknown;
-}): boolean {
-  if (SESSION_CONTROL_UNSUPPORTED_ACP_CODES.has(acp.code)) {
-    return true;
-  }
-
-  if (acp.code !== -32603) {
-    return false;
-  }
-
-  const details = asRecord(acp.data)?.details;
-  return typeof details === "string" && details.toLowerCase().includes("invalid params");
-}
-
-function formatSessionControlAcpSummary(acp: {
-  code: number;
-  message: string;
-  data?: unknown;
-}): string {
-  const details = asRecord(acp.data)?.details;
-  if (typeof details === "string" && details.trim().length > 0) {
-    return `${details.trim()} (ACP ${acp.code}, adapter reported "${acp.message}")`;
-  }
-  return `${acp.message} (ACP ${acp.code})`;
-}
-
-function maybeWrapSessionControlError(
-  method: "session/set_mode" | "session/set_config_option" | "session/set_model",
-  error: unknown,
-  context?: string,
-): unknown {
-  const acp = extractAcpError(error);
-  if (!acp || !isLikelySessionControlUnsupportedError(acp)) {
-    return error;
-  }
-
-  const acpSummary = formatSessionControlAcpSummary(acp);
-  const contextSuffix = context ? ` ${context}` : "";
-  const message =
-    `Agent rejected ${method}${contextSuffix}: ${acpSummary}. ` +
-    `The adapter may not implement ${method}, or the requested value is not supported.`;
-  const wrapped = new Error(message, {
-    cause: error instanceof Error ? error : undefined,
-  }) as Error & {
-    acp?: typeof acp;
-  };
-  wrapped.acp = acp;
-  return wrapped;
-}
-
-function buildAgentEnvironment(
-  authCredentials: Record<string, string> | undefined,
-): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  if (!authCredentials) {
-    return env;
-  }
-
-  for (const [methodId, credential] of Object.entries(authCredentials)) {
-    if (typeof credential !== "string" || credential.trim().length === 0) {
-      continue;
-    }
-
-    if (!methodId.includes("=") && !methodId.includes("\u0000") && env[methodId] == null) {
-      env[methodId] = credential;
-    }
-
-    const normalized = toEnvToken(methodId);
-    if (normalized) {
-      const prefixed = `ACPX_AUTH_${normalized}`;
-      if (env[prefixed] == null) {
-        env[prefixed] = credential;
-      }
-      if (env[normalized] == null) {
-        env[normalized] = credential;
-      }
-    }
-  }
-
-  return env;
-}
-
-export function buildAgentSpawnOptions(
-  cwd: string,
-  authCredentials: Record<string, string> | undefined,
-): {
-  cwd: string;
-  env: NodeJS.ProcessEnv;
-  stdio: ["pipe", "pipe", "pipe"];
-  windowsHide: true;
-} {
-  return {
-    cwd,
-    env: buildAgentEnvironment(authCredentials),
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-  };
 }
 
 export class AcpClient {
@@ -1555,8 +950,6 @@ export class AcpClient {
   }
 
   private selectAuthMethod(methods: AuthMethod[]): AuthSelection | undefined {
-    const configCredentials = this.options.authCredentials ?? {};
-
     for (const method of methods) {
       const envCredential = readEnvCredential(method.id);
       if (envCredential) {
@@ -1567,8 +960,10 @@ export class AcpClient {
         };
       }
 
-      const configCredential =
-        configCredentials[method.id] ?? configCredentials[toEnvToken(method.id)];
+      const configCredential = resolveConfiguredAuthCredential(
+        method.id,
+        this.options.authCredentials,
+      );
       if (typeof configCredential === "string" && configCredential.trim().length > 0) {
         return {
           methodId: method.id,

@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { InvalidArgumentError, type Command } from "commander";
+import type { ResolvedAcpxConfig } from "../cli/config.js";
 import {
   hasExplicitPermissionModeFlag,
   resolveAgentInvocation,
@@ -11,7 +12,6 @@ import {
   resolvePermissionMode,
   type GlobalFlags,
 } from "../cli/flags.js";
-import type { ResolvedAcpxConfig } from "../config.js";
 import { type FlowDefinition, FlowRunner } from "../flows.js";
 import { permissionModeSatisfies } from "../permissions.js";
 import type { PermissionMode } from "../types.js";

@@ -1,6 +1,6 @@
 import { Command } from "commander";
-import type { ResolvedAcpxConfig } from "../config.js";
 import { findSession } from "../session/persistence.js";
+import type { ResolvedAcpxConfig } from "./config.js";
 import {
   addSessionNameOption,
   resolveAgentInvocation,

@@ -4,8 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { buildAgentSpawnOptions, buildSpawnCommandOptions } from "../src/acp/client.js";
+import { buildTerminalSpawnOptions } from "../src/acp/terminal-manager.js";
 import { buildQueueOwnerSpawnOptions } from "../src/cli/session/queue-owner-process.js";
-import { buildTerminalSpawnOptions } from "../src/terminal.js";
 
 test("buildAgentSpawnOptions hides Windows console windows and preserves auth env", () => {
   const options = buildAgentSpawnOptions("/tmp/acpx-agent", {

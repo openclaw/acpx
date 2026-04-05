@@ -13,10 +13,10 @@ import type {
   WaitForTerminalExitRequest,
   WaitForTerminalExitResponse,
 } from "@agentclientprotocol/sdk";
-import { PermissionDeniedError, PermissionPromptUnavailableError } from "./errors.js";
-import { promptForPermission } from "./permission-prompt.js";
-import { buildSpawnCommandOptions } from "./spawn-command-options.js";
-import type { ClientOperation, NonInteractivePermissionPolicy, PermissionMode } from "./types.js";
+import { PermissionDeniedError, PermissionPromptUnavailableError } from "../errors.js";
+import { promptForPermission } from "../permission-prompt.js";
+import { buildSpawnCommandOptions } from "../spawn-command-options.js";
+import type { ClientOperation, NonInteractivePermissionPolicy, PermissionMode } from "../types.js";
 
 const DEFAULT_TERMINAL_OUTPUT_LIMIT_BYTES = 64 * 1024;
 const DEFAULT_KILL_GRACE_MS = 1_500;

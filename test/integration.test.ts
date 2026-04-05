@@ -3093,7 +3093,10 @@ async function awaitChildClose(child: ReturnType<typeof spawn>): Promise<CliRunR
 async function runPerfReport(filePath: string): Promise<CliRunResult> {
   return await new Promise<CliRunResult>((resolve, reject) => {
     const child = spawn("pnpm", ["exec", "tsx", "scripts/perf-report.ts", filePath], {
-      env: process.env,
+      env: {
+        ...process.env,
+        NODE_V8_COVERAGE: "",
+      },
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],
     });

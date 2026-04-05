@@ -182,21 +182,21 @@ Primary files:
 
 - `src/types.ts`
   - extend `OutputEvent` for `detailCode`, `origin`, optional `acp` payload
-- `src/errors.ts` (or new `src/error-normalization.ts`)
+- `src/errors.ts` or `src/acp/error-normalization.ts`
   - centralized error normalization to `acpx` machine codes
-- `src/output.ts`
+- `src/cli/output/output.ts`
   - emit envelope fields and `seq`
-- `src/session-runtime.ts`
+- `src/cli/session/runtime.ts`
   - plumb `sessionId/requestId` context and preserve structured error fields
-- `src/queue-ipc.ts`
+- `src/cli/queue/ipc.ts`
   - ensure request lifecycle always surfaces typed queue failures
-- `src/queue-messages.ts`
+- `src/cli/queue/messages.ts`
   - extend queue `error` message schema with typed fields and compatibility parser
 - `src/permissions.ts` + `src/permission-prompt.ts`
   - add non-interactive policy behavior
 - `src/cli.ts`
   - parse new flag/config and emit normalized structured errors in JSON mode
-- `src/config.ts`
+- `src/cli/config.ts`
   - config key for non-interactive policy
 
 ## Phased delivery

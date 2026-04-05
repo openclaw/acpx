@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { initGlobalConfigFile, loadResolvedConfig } from "../src/config.js";
+import { initGlobalConfigFile, loadResolvedConfig } from "../src/cli/config.js";
 
 test("loadResolvedConfig merges global and project config with project priority", async () => {
   await withTempEnv(async ({ homeDir }) => {

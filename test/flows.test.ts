@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { TimeoutError } from "../src/async-control.js";
 import { validateFlowDefinition } from "../src/flows/graph.js";
 import { extractJsonObject, parseJsonObject, parseStrictJsonObject } from "../src/flows/json.js";
 import {
@@ -22,7 +23,6 @@ import type {
   ShellActionNodeDefinition,
 } from "../src/flows/runtime.js";
 import { flowRunsBaseDir } from "../src/flows/store.js";
-import { TimeoutError } from "../src/session-runtime-helpers.js";
 import type { PromptInput } from "../src/types.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));

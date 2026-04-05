@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { TimeoutError } from "../src/async-control.js";
 import {
   formatShellActionSummary,
   renderShellCommand,
   runShellAction,
 } from "../src/flows/executors/shell.js";
-import { TimeoutError } from "../src/session-runtime-helpers.js";
 
 test("renderShellCommand quotes arguments consistently", () => {
   assert.equal(renderShellCommand("echo", ["hello", "two words"]), 'echo "hello" "two words"');

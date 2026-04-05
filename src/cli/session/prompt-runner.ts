@@ -1,8 +1,8 @@
+import { withTimeout } from "../../async-control.js";
 import {
   withConnectedSession,
   type FullConnectedSessionController,
 } from "../../runtime/engine/connected-session.js";
-import { withTimeout } from "../../session-runtime-helpers.js";
 import {
   setCurrentModelId,
   setDesiredModeId,
