@@ -5,7 +5,7 @@ import {
   playbackSelectionMs,
 } from "../lib/view-model.js";
 import type { PlaybackTimeline } from "../lib/view-model.js";
-import type { LoadedRunBundle } from "../types";
+import type { LoadedRunBundle } from "../types.js";
 
 type PlaybackMode = "playing" | "seeking" | null;
 export const PLAYBACK_SPEED_OPTIONS = [1, 2, 5, 10] as const;

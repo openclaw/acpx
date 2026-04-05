@@ -1,4 +1,4 @@
-import type { SessionAgentOptions } from "../session.js";
+import type { SessionAgentOptions } from "../session/session.js";
 import type {
   AcpJsonRpcMessage,
   AcpMessageDirection,

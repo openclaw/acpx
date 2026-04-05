@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isRetryablePromptError } from "../src/error-normalization.js";
+import { isRetryablePromptError } from "../src/acp/error-normalization.js";
 import { PermissionDeniedError, PermissionPromptUnavailableError } from "../src/errors.js";
 
 // --- isRetryablePromptError ---

@@ -4,7 +4,7 @@ import {
   getDesiredModeId,
   normalizeModeId,
   setDesiredModeId,
-} from "../src/session-mode-preference.js";
+} from "../src/session/mode-preference.js";
 import type { SessionRecord } from "../src/types.js";
 
 test("normalizeModeId trims valid values and drops blanks", () => {

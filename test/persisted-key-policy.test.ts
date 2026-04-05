@@ -5,7 +5,7 @@ import {
   assertPersistedKeyPolicy,
   findPersistedKeyPolicyViolations,
 } from "../src/persisted-key-policy.js";
-import { serializeSessionRecordForDisk } from "../src/session-persistence.js";
+import { serializeSessionRecordForDisk } from "../src/session/persistence.js";
 import type { SessionRecord } from "../src/types.js";
 
 function makeRecord(): SessionRecord {

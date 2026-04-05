@@ -1,8 +1,8 @@
 import { useRef, type RefObject } from "react";
-import { useStickyAutoFollow } from "../../hooks/use-sticky-auto-follow";
-import { resolveSessionRenderState } from "../../lib/session-render-state";
-import type { SelectedAttemptView, SessionListItemView } from "../../lib/view-model";
-import { ConversationMessage } from "./conversation-message";
+import { useStickyAutoFollow } from "../../hooks/use-sticky-auto-follow.js";
+import { resolveSessionRenderState } from "../../lib/session-render-state.js";
+import type { SelectedAttemptView, SessionListItemView } from "../../lib/view-model.js";
+import { ConversationMessage } from "./conversation-message.js";
 
 export function SessionTab({
   scrollContainerRef,

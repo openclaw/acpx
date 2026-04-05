@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { FlowStepRecord } from "../types";
+import type { FlowStepRecord } from "../types.js";
 
 type StepTimelineProps = {
   steps: FlowStepRecord[];

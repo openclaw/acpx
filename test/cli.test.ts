@@ -15,7 +15,7 @@ import {
   parseMaxTurns,
   parseTtlSeconds,
 } from "../src/cli.js";
-import { serializeSessionRecordForDisk } from "../src/session-persistence.js";
+import { serializeSessionRecordForDisk } from "../src/session/persistence.js";
 import type { SessionRecord } from "../src/types.js";
 import {
   cleanupOwnerArtifacts,

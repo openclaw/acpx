@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { formatJson } from "../../lib/view-model";
-import type { SelectedAttemptView } from "../../lib/view-model";
-import { CodeBlock, DisclosureSection } from "./common";
+import { formatJson } from "../../lib/view-model.js";
+import type { SelectedAttemptView } from "../../lib/view-model.js";
+import { CodeBlock, DisclosureSection } from "./common.js";
 
 export function ConversationMessage({
   message,

@@ -1,8 +1,8 @@
 import { useRef } from "react";
-import type { SelectedAttemptView, SessionListItemView } from "../lib/view-model";
-import { AttemptTab } from "./inspector/attempt-tab";
-import { EventsTab } from "./inspector/events-tab";
-import { SessionTab } from "./inspector/session-tab";
+import type { SelectedAttemptView, SessionListItemView } from "../lib/view-model.js";
+import { AttemptTab } from "./inspector/attempt-tab.js";
+import { EventsTab } from "./inspector/events-tab.js";
+import { SessionTab } from "./inspector/session-tab.js";
 
 type InspectorPanelProps = {
   selectedAttempt: SelectedAttemptView | null;

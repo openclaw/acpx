@@ -789,8 +789,8 @@ test("integration: qoder session reuse preserves persisted startup flags", async
 
     try {
       await writeFakeQoderAgent(fakeBinDir, argLogPath);
-      const { createSession } = await import("../src/session.js");
-      const { runSessionSetModeDirect } = await import("../src/session-runtime/prompt-runner.js");
+      const { createSession } = await import("../src/session/session.js");
+      const { runSessionSetModeDirect } = await import("../src/cli/session/prompt-runner.js");
       const previousHome = process.env.HOME;
       const previousPath = process.env.PATH;
       process.env.HOME = homeDir;

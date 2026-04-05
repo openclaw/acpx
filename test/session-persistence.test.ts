@@ -5,12 +5,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { serializeSessionRecordForDisk } from "../src/session-persistence.js";
+import { serializeSessionRecordForDisk } from "../src/session/persistence.js";
 import type { SessionRecord } from "../src/types.js";
 
-type SessionModule = typeof import("../src/session.js");
+type SessionModule = typeof import("../src/session/session.js");
 
-const SESSION_MODULE_URL = new URL("../src/session.js", import.meta.url);
+const SESSION_MODULE_URL = new URL("../src/session/session.js", import.meta.url);
 
 test("SessionRecord allows optional closed and closedAt fields", () => {
   const record = makeSessionRecord({

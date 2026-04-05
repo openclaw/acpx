@@ -4,7 +4,7 @@ import type {
   FlowStepRecord,
   FlowTraceEvent,
   SessionRecord,
-} from "../types";
+} from "../types.js";
 
 export type ViewerNodeStatus =
   | "queued"

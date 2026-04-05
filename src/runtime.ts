@@ -1,4 +1,5 @@
 import { DEFAULT_AGENT_NAME, listBuiltInAgents, resolveAgentCommand } from "./agent-registry.js";
+import { AcpRuntimeManager } from "./runtime/engine/manager.js";
 import type {
   AcpAgentRegistry,
   AcpRuntime,
@@ -9,21 +10,20 @@ import type {
   AcpRuntimeOptions,
   AcpRuntimeStatus,
   AcpSessionStore,
-} from "./runtime/contract.js";
-import { AcpRuntimeError } from "./runtime/errors.js";
-import { createFileSessionStore } from "./runtime/file-session-store.js";
-import { decodeAcpxRuntimeHandleState, writeHandleState } from "./runtime/handle-state.js";
-import { AcpRuntimeManager } from "./runtime/manager.js";
-import { probeRuntime } from "./runtime/probe.js";
-import { deriveAgentFromSessionKey, type AcpxHandleState } from "./runtime/shared.js";
+} from "./runtime/public/contract.js";
+import { AcpRuntimeError } from "./runtime/public/errors.js";
+import { createFileSessionStore } from "./runtime/public/file-session-store.js";
+import { decodeAcpxRuntimeHandleState, writeHandleState } from "./runtime/public/handle-state.js";
+import { probeRuntime } from "./runtime/public/probe.js";
+import { deriveAgentFromSessionKey, type AcpxHandleState } from "./runtime/public/shared.js";
 
 export { DEFAULT_AGENT_NAME, createFileSessionStore };
-export { AcpRuntimeError, isAcpRuntimeError } from "./runtime/errors.js";
-export type { AcpRuntimeErrorCode } from "./runtime/errors.js";
+export { AcpRuntimeError, isAcpRuntimeError } from "./runtime/public/errors.js";
+export type { AcpRuntimeErrorCode } from "./runtime/public/errors.js";
 export {
   decodeAcpxRuntimeHandleState,
   encodeAcpxRuntimeHandleState,
-} from "./runtime/handle-state.js";
+} from "./runtime/public/handle-state.js";
 export type {
   AcpAgentRegistry,
   AcpFileSessionStoreOptions,
@@ -42,7 +42,7 @@ export type {
   AcpSessionRecord,
   AcpSessionStore,
   AcpSessionUpdateTag,
-} from "./runtime/contract.js";
+} from "./runtime/public/contract.js";
 
 export const ACPX_BACKEND_ID = "acpx";
 
@@ -147,8 +147,8 @@ export class AcpxRuntime implements AcpxRuntimeLike {
   }
 
   async *runTurn(
-    input: import("./runtime/contract.js").AcpRuntimeTurnInput,
-  ): AsyncIterable<import("./runtime/contract.js").AcpRuntimeEvent> {
+    input: import("./runtime/public/contract.js").AcpRuntimeTurnInput,
+  ): AsyncIterable<import("./runtime/public/contract.js").AcpRuntimeEvent> {
     const state = this.resolveHandleState(input.handle);
     const manager = await this.getManager();
     yield* manager.runTurn({

@@ -6,7 +6,7 @@ import {
   SessionQueueOwner,
   releaseQueueOwnerLease,
   tryAcquireQueueOwnerLease,
-} from "../src/queue-ipc.js";
+} from "../src/cli/queue/ipc.js";
 import { connectSocket, nextJsonLine, withTempHome } from "./queue-test-helpers.js";
 
 test("SessionQueueOwner handles control requests and nextTask timeouts", async () => {

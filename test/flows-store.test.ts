@@ -5,8 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { defineFlow, action, type FlowRunState } from "../src/flows/runtime.js";
 import { FlowRunStore, flowRunsBaseDir } from "../src/flows/store.js";
-import { createSessionConversation } from "../src/session-conversation-model.js";
-import { defaultSessionEventLog } from "../src/session-event-log.js";
+import { createSessionConversation } from "../src/session/conversation-model.js";
+import { defaultSessionEventLog } from "../src/session/event-log.js";
 import { SESSION_RECORD_SCHEMA, type SessionRecord } from "../src/types.js";
 
 test("flowRunsBaseDir defaults under the acpx home directory", () => {

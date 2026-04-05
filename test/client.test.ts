@@ -8,7 +8,7 @@ import {
   buildQoderAcpCommandArgs,
   resolveAgentCloseAfterStdinEndMs,
   shouldIgnoreNonJsonAgentOutputLine,
-} from "../src/client.js";
+} from "../src/acp/client.js";
 import {
   AgentDisconnectedError,
   AuthPolicyError,

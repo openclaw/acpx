@@ -10,7 +10,7 @@ import type {
   FlowNodeOutcome,
   FlowStepRecord,
   LoadedRunBundle,
-} from "../types";
+} from "../types.js";
 import { formatDuration, humanizeIdentifier } from "./view-model-format.js";
 import type {
   PlaybackPreview,
@@ -19,7 +19,7 @@ import type {
   ViewerGraphLayout,
   ViewerNodeData,
   ViewerNodeStatus,
-} from "./view-model-types";
+} from "./view-model-types.js";
 
 type ExpandedFlowEdge = {
   source: string;

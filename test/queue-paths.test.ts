@@ -6,7 +6,7 @@ import {
   queueLockFilePath,
   queueSocketBaseDir,
   queueSocketPath,
-} from "../src/queue-paths.js";
+} from "../src/cli/queue/paths.js";
 
 test("queue path helpers derive stable lock and socket paths", () => {
   const homeDir = "/tmp/example-home";

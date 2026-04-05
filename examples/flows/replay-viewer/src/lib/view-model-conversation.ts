@@ -3,8 +3,8 @@ import type {
   FlowStepRecord,
   LoadedRunBundle,
   SessionRecord,
-} from "../types";
-import type { SelectedAttemptView, SessionListItemView } from "./view-model-types";
+} from "../types.js";
+import type { SelectedAttemptView, SessionListItemView } from "./view-model-types.js";
 
 export function selectAttemptView(
   bundle: LoadedRunBundle,

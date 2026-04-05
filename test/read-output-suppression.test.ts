@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isReadLikeTool, SUPPRESSED_READ_OUTPUT } from "../src/read-output-suppression.js";
+import { isReadLikeTool, SUPPRESSED_READ_OUTPUT } from "../src/cli/output/read-suppression.js";
 
 test("SUPPRESSED_READ_OUTPUT is stable", () => {
   assert.equal(SUPPRESSED_READ_OUTPUT, "[read output suppressed]");

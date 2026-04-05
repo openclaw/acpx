@@ -1,4 +1,4 @@
-import type { RunBundleSummary } from "../types";
+import type { RunBundleSummary } from "../types.js";
 
 type RunBrowserProps = {
   runs: RunBundleSummary[];

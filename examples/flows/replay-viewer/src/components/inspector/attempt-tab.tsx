@@ -1,6 +1,6 @@
-import { formatDate, formatDuration, formatJson } from "../../lib/view-model";
-import type { SelectedAttemptView } from "../../lib/view-model";
-import { CodeBlock, DisclosureSection, Section } from "./common";
+import { formatDate, formatDuration, formatJson } from "../../lib/view-model.js";
+import type { SelectedAttemptView } from "../../lib/view-model.js";
+import { CodeBlock, DisclosureSection, Section } from "./common.js";
 
 export function AttemptTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView }) {
   const { step } = selectedAttempt;

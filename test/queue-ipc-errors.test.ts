@@ -3,7 +3,6 @@ import fs from "node:fs/promises";
 import readline from "node:readline";
 import test from "node:test";
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
-import { QueueConnectionError, QueueProtocolError } from "../src/errors.js";
 import {
   MAX_MESSAGE_BUFFER_SIZE,
   SessionQueueOwner,
@@ -12,7 +11,8 @@ import {
   trySetConfigOptionOnRunningOwner,
   trySetModeOnRunningOwner,
   trySubmitToRunningOwner,
-} from "../src/queue-ipc.js";
+} from "../src/cli/queue/ipc.js";
+import { QueueConnectionError, QueueProtocolError } from "../src/errors.js";
 import type { OutputFormatter } from "../src/types.js";
 import {
   cleanupOwnerArtifacts,

@@ -8,7 +8,7 @@ import {
   buildQueueOwnerArgOverride,
   resolveQueueOwnerSpawnArgs,
   sanitizeQueueOwnerExecArgv,
-} from "../src/session-runtime/queue-owner-process.js";
+} from "../src/cli/session/queue-owner-process.js";
 
 async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "acpx-queue-owner-path-"));

@@ -2,18 +2,18 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 import {
-  applyConversation,
-  applyLifecycleSnapshotToRecord,
-  reconcileAgentSessionId,
-  sessionHasAgentMessages,
-} from "../src/runtime-core/lifecycle.js";
-import {
   AcpRuntimeError,
   decodeAcpxRuntimeHandleState,
   isAcpRuntimeError,
 } from "../src/runtime.js";
-import { encodeAcpxRuntimeHandleState } from "../src/runtime/handle-state.js";
-import { shouldReuseExistingRecord } from "../src/runtime/reuse-policy.js";
+import {
+  applyConversation,
+  applyLifecycleSnapshotToRecord,
+  reconcileAgentSessionId,
+  sessionHasAgentMessages,
+} from "../src/runtime/engine/lifecycle.js";
+import { shouldReuseExistingRecord } from "../src/runtime/engine/reuse-policy.js";
+import { encodeAcpxRuntimeHandleState } from "../src/runtime/public/handle-state.js";
 import {
   asOptionalBoolean,
   asOptionalString,
@@ -21,7 +21,7 @@ import {
   asTrimmedString,
   deriveAgentFromSessionKey,
   isRecord,
-} from "../src/runtime/shared.js";
+} from "../src/runtime/public/shared.js";
 import { makeSessionRecord } from "./runtime-test-helpers.js";
 
 test("runtime handle state codecs preserve valid payloads and reject invalid ones", () => {

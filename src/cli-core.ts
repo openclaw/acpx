@@ -3,6 +3,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
+import { isCodexInvocation } from "./acp/codex-compat.js";
+import {
+  exitCodeForOutputErrorCode,
+  normalizeOutputError,
+  type NormalizedOutputError,
+} from "./acp/error-normalization.js";
 import { listBuiltInAgents } from "./agent-registry.js";
 import { registerConfigCommand } from "./cli/config-command.js";
 import {
@@ -27,15 +33,10 @@ import {
   type SessionsNewFlags,
   type StatusFlags,
 } from "./cli/flags.js";
-import { emitJsonResult } from "./cli/json-output.js";
+import { emitJsonResult } from "./cli/output/json-output.js";
+import { runQueueOwnerFromEnv } from "./cli/queue/owner-env.js";
 import { registerStatusCommand } from "./cli/status-command.js";
-import { isCodexInvocation } from "./codex-compat.js";
 import { loadResolvedConfig, type ResolvedAcpxConfig } from "./config.js";
-import {
-  exitCodeForOutputErrorCode,
-  normalizeOutputError,
-  type NormalizedOutputError,
-} from "./error-normalization.js";
 import { flushPerfMetricsCapture, installPerfMetricsCapture } from "./perf-metrics-capture.js";
 import {
   mergePromptSourceWithText,
@@ -43,14 +44,13 @@ import {
   PromptInputValidationError,
   textPrompt,
 } from "./prompt-content.js";
-import { runQueueOwnerFromEnv } from "./queue-owner-env.js";
+import { InterruptedError } from "./session-runtime-helpers.js";
 import {
   DEFAULT_HISTORY_LIMIT,
   findGitRepositoryRoot,
   findSession,
   findSessionByDirectoryWalk,
-} from "./session-persistence.js";
-import { InterruptedError } from "./session-runtime-helpers.js";
+} from "./session/persistence.js";
 import {
   EXIT_CODES,
   OUTPUT_FORMATS,
@@ -165,7 +165,7 @@ function resolveCompatibleConfigId(
   return configId;
 }
 export { parseAllowedTools, parseMaxTurns, parseTtlSeconds };
-export { formatPromptSessionBannerLine } from "./cli/output-render.js";
+export { formatPromptSessionBannerLine } from "./cli/output/render.js";
 
 function resolveRequestedOutputPolicy(globalFlags: {
   format: OutputFormat;
@@ -178,9 +178,9 @@ function resolveRequestedOutputPolicy(globalFlags: {
   };
 }
 
-type SessionModule = typeof import("./session.js");
-type OutputModule = typeof import("./output.js");
-type OutputRenderModule = typeof import("./cli/output-render.js");
+type SessionModule = typeof import("./session/session.js");
+type OutputModule = typeof import("./cli/output/output.js");
+type OutputRenderModule = typeof import("./cli/output/render.js");
 type SkillflagModule = typeof import("skillflag");
 
 let sessionModulePromise: Promise<SessionModule> | undefined;
@@ -189,17 +189,17 @@ let outputRenderModulePromise: Promise<OutputRenderModule> | undefined;
 let skillflagModulePromise: Promise<SkillflagModule> | undefined;
 
 function loadSessionModule(): Promise<SessionModule> {
-  sessionModulePromise ??= import("./session.js");
+  sessionModulePromise ??= import("./session/session.js");
   return sessionModulePromise;
 }
 
 function loadOutputModule(): Promise<OutputModule> {
-  outputModulePromise ??= import("./output.js");
+  outputModulePromise ??= import("./cli/output/output.js");
   return outputModulePromise;
 }
 
 function loadOutputRenderModule(): Promise<OutputRenderModule> {
-  outputRenderModulePromise ??= import("./cli/output-render.js");
+  outputRenderModulePromise ??= import("./cli/output/render.js");
   return outputRenderModulePromise;
 }
 

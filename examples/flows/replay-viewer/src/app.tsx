@@ -1,22 +1,22 @@
 import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { FlowNodeCard } from "./components/flow-node-card";
-import { InspectorPanel } from "./components/inspector-panel";
-import { RoutedFlowEdge } from "./components/routed-flow-edge";
-import { RunBrowser } from "./components/run-browser";
-import { StepTimeline } from "./components/step-timeline";
-import { REPLAY_FIT_VIEW_OPTIONS, useGraphCamera } from "./hooks/use-graph-camera";
-import { useGraphLayout } from "./hooks/use-graph-layout";
-import { PLAYBACK_SPEED_OPTIONS, usePlaybackController } from "./hooks/use-playback-controller";
-import { useRunBundleLoader } from "./hooks/use-run-bundle-loader";
+import { FlowNodeCard } from "./components/flow-node-card.js";
+import { InspectorPanel } from "./components/inspector-panel.js";
+import { RoutedFlowEdge } from "./components/routed-flow-edge.js";
+import { RunBrowser } from "./components/run-browser.js";
+import { StepTimeline } from "./components/step-timeline.js";
+import { REPLAY_FIT_VIEW_OPTIONS, useGraphCamera } from "./hooks/use-graph-camera.js";
+import { useGraphLayout } from "./hooks/use-graph-layout.js";
+import { PLAYBACK_SPEED_OPTIONS, usePlaybackController } from "./hooks/use-playback-controller.js";
+import { useRunBundleLoader } from "./hooks/use-run-bundle-loader.js";
 import {
   buildGraph,
   humanizeIdentifier,
   listSessionViews,
   playbackSelectionMs,
   selectAttemptView,
-} from "./lib/view-model";
-import type { LoadedRunBundle } from "./types";
+} from "./lib/view-model.js";
+import type { LoadedRunBundle } from "./types.js";
 
 const nodeTypes = {
   flowNode: FlowNodeCard,

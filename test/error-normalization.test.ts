@@ -5,7 +5,7 @@ import {
   normalizeOutputError,
   isAcpQueryClosedBeforeResponseError,
   isAcpResourceNotFoundError,
-} from "../src/error-normalization.js";
+} from "../src/acp/error-normalization.js";
 import {
   PermissionPromptUnavailableError,
   QueueConnectionError,

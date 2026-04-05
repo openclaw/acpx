@@ -1,5 +1,5 @@
 import { Handle, Position } from "@xyflow/react";
-import type { ViewerNodeData } from "../lib/view-model";
+import type { ViewerNodeData } from "../lib/view-model.js";
 
 type FlowNodeCardProps = {
   data: ViewerNodeData;

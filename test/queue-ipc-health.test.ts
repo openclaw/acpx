@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import net from "node:net";
 import test from "node:test";
-import { probeQueueOwnerHealth } from "../src/queue-ipc.js";
+import { probeQueueOwnerHealth } from "../src/cli/queue/ipc.js";
 import {
   cleanupOwnerArtifacts,
   closeServer,

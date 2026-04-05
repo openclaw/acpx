@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createOutputFormatter } from "../src/output.js";
+import { createOutputFormatter } from "../src/cli/output/output.js";
 
 class CaptureWriter {
   public readonly chunks: string[] = [];

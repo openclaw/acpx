@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { buildGraphLayout } from "../lib/view-model.js";
 import type { ViewerGraphLayout } from "../lib/view-model.js";
-import type { LoadedRunBundle } from "../types";
+import type { LoadedRunBundle } from "../types.js";
 
 export function useGraphLayout(bundle: LoadedRunBundle | null) {
   const [layout, setLayout] = useState<ViewerGraphLayout | null>(null);

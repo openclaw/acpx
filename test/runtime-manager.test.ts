@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AcpRuntimeEvent, AcpRuntimeHandle } from "../src/runtime/contract.js";
-import { AcpRuntimeManager } from "../src/runtime/manager.js";
+import { AcpRuntimeManager } from "../src/runtime/engine/manager.js";
+import type { AcpRuntimeEvent, AcpRuntimeHandle } from "../src/runtime/public/contract.js";
 import {
   createRuntimeOptions,
   InMemorySessionStore,

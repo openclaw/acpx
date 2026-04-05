@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAgentRegistry } from "../src/runtime.js";
-import { probeRuntime } from "../src/runtime/probe.js";
+import { probeRuntime } from "../src/runtime/public/probe.js";
 import { createRuntimeOptions, InMemorySessionStore } from "./runtime-test-helpers.js";
 
 test("probeRuntime uses the default agent override and reports protocol details", async () => {

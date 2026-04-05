@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseQueueOwnerMessage, parseQueueRequest } from "../src/queue-messages.js";
+import { parseQueueOwnerMessage, parseQueueRequest } from "../src/cli/queue/messages.js";
 
 test("parseQueueRequest accepts submit_prompt with nonInteractivePermissions", () => {
   const parsed = parseQueueRequest({

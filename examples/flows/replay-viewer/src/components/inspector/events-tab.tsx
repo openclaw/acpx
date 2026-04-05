@@ -1,6 +1,6 @@
-import { formatJson } from "../../lib/view-model";
-import type { SelectedAttemptView } from "../../lib/view-model";
-import { CodeBlock, Section } from "./common";
+import { formatJson } from "../../lib/view-model.js";
+import type { SelectedAttemptView } from "../../lib/view-model.js";
+import { CodeBlock, Section } from "./common.js";
 
 export function EventsTab({ selectedAttempt }: { selectedAttempt: SelectedAttemptView }) {
   return (

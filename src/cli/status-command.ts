@@ -1,7 +1,6 @@
 import { Command } from "commander";
 import type { ResolvedAcpxConfig } from "../config.js";
-import { probeQueueOwnerHealth } from "../queue-ipc.js";
-import { findSession } from "../session-persistence.js";
+import { findSession } from "../session/persistence.js";
 import {
   addSessionNameOption,
   resolveAgentInvocation,
@@ -9,8 +8,9 @@ import {
   resolveSessionNameFromFlags,
   type StatusFlags,
 } from "./flags.js";
-import { emitJsonResult } from "./json-output.js";
-import { agentSessionIdPayload } from "./output-render.js";
+import { emitJsonResult } from "./output/json-output.js";
+import { agentSessionIdPayload } from "./output/render.js";
+import { probeQueueOwnerHealth } from "./queue/ipc.js";
 
 function formatUptime(startedAt: string | undefined): string | undefined {
   if (!startedAt) {

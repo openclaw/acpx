@@ -1,4 +1,4 @@
-import type { SelectedAttemptView } from "./view-model-types";
+import type { SelectedAttemptView } from "./view-model-types.js";
 import { revealConversationTranscript } from "./view-model.js";
 
 export type SessionRenderState = {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildJsonRpcErrorResponse } from "../src/jsonrpc-error.js";
+import { buildJsonRpcErrorResponse } from "../src/acp/jsonrpc-error.js";
 
 test("buildJsonRpcErrorResponse preserves ACP payload when available", () => {
   const response = buildJsonRpcErrorResponse({

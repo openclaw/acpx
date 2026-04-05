@@ -1,4 +1,4 @@
-import { extractSessionUpdateNotification } from "../../../../src/acp-jsonrpc.js";
+import { extractSessionUpdateNotification } from "../../../../src/acp/jsonrpc.js";
 import {
   isPromptInput,
   promptToDisplayText,
@@ -9,7 +9,7 @@ import {
   cloneSessionConversation,
   recordPromptSubmission,
   recordSessionUpdate,
-} from "../../../../src/session-conversation-model.js";
+} from "../../../../src/session/conversation-model.js";
 import type { AcpJsonRpcMessage } from "../../../../src/types.js";
 import type {
   FlowConversationTrace,

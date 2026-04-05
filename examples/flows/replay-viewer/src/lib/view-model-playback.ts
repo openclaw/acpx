@@ -1,6 +1,6 @@
-import type { LoadedRunBundle } from "../types";
+import type { LoadedRunBundle } from "../types.js";
 import { countStreamedConversationChars, selectAttemptView } from "./view-model-conversation.js";
-import type { PlaybackPreview, PlaybackSegment, PlaybackTimeline } from "./view-model-types";
+import type { PlaybackPreview, PlaybackSegment, PlaybackTimeline } from "./view-model-types.js";
 
 export function buildPlaybackTimeline(bundle: LoadedRunBundle): PlaybackTimeline {
   let cursorMs = 0;

@@ -7,7 +7,7 @@ import {
   recordClientOperation,
   recordPromptSubmission,
   recordSessionUpdate,
-} from "../src/session-conversation-model.js";
+} from "../src/session/conversation-model.js";
 
 test("conversation model captures prompt, chunks, tool calls, and metadata", () => {
   const conversation = createSessionConversation("2026-02-27T10:00:00.000Z");

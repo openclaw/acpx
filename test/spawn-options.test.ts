@@ -3,8 +3,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { buildAgentSpawnOptions, buildSpawnCommandOptions } from "../src/client.js";
-import { buildQueueOwnerSpawnOptions } from "../src/session-runtime/queue-owner-process.js";
+import { buildAgentSpawnOptions, buildSpawnCommandOptions } from "../src/acp/client.js";
+import { buildQueueOwnerSpawnOptions } from "../src/cli/session/queue-owner-process.js";
 import { buildTerminalSpawnOptions } from "../src/terminal.js";
 
 test("buildAgentSpawnOptions hides Windows console windows and preserves auth env", () => {

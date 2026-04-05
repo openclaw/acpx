@@ -12,9 +12,9 @@ import {
   writeQueueOwnerLock,
 } from "./queue-test-helpers.js";
 
-type SessionModule = typeof import("../src/session.js");
+type SessionModule = typeof import("../src/session/session.js");
 
-const SESSION_MODULE_URL = new URL("../src/session.js", import.meta.url);
+const SESSION_MODULE_URL = new URL("../src/session/session.js", import.meta.url);
 
 test("cancelSessionPrompt sends cancel request to active queue owner", async () => {
   await withTempHome(async (homeDir) => {

@@ -7,7 +7,7 @@ import type { SessionModelState, SetSessionConfigOptionResponse } from "@agentcl
 import {
   connectAndLoadSession,
   type ConnectedSessionController,
-} from "../src/runtime-core/reconnect.js";
+} from "../src/runtime/engine/reconnect.js";
 import type { SessionRecord } from "../src/types.js";
 
 type FakeClient = {

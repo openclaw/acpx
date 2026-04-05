@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { findPersistedKeyPolicyViolations } from "../src/persisted-key-policy.js";
-import { serializeSessionRecordForDisk } from "../src/session-persistence.js";
+import { serializeSessionRecordForDisk } from "../src/session/persistence.js";
 import type { SessionRecord } from "../src/types.js";
 
 function makeRecord(): SessionRecord {
@@ -106,7 +106,7 @@ function assertSerializationPolicy(): void {
 
 function assertSerializerSourceKeys(): void {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-  const sourcePath = path.join(scriptDir, "..", "src", "session-persistence", "serialize.ts");
+  const sourcePath = path.join(scriptDir, "..", "src", "session", "persistence", "serialize.ts");
   const source = fs.readFileSync(sourcePath, "utf8");
 
   const serializerStart = source.indexOf("export function serializeSessionRecordForDisk");

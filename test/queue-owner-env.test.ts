@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseQueueOwnerPayload, runQueueOwnerFromEnv } from "../src/queue-owner-env.js";
+import { parseQueueOwnerPayload, runQueueOwnerFromEnv } from "../src/cli/queue/owner-env.js";
 
 describe("parseQueueOwnerPayload", () => {
   it("parses valid payload", () => {

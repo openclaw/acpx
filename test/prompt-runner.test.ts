@@ -4,13 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { serializeSessionRecordForDisk } from "../src/session-persistence.js";
-import { resolveSessionRecord } from "../src/session-persistence/repository.js";
 import {
   runSessionSetConfigOptionDirect,
   runSessionSetModelDirect,
   runSessionSetModeDirect,
-} from "../src/session-runtime/prompt-runner.js";
+} from "../src/cli/session/prompt-runner.js";
+import { serializeSessionRecordForDisk } from "../src/session/persistence.js";
+import { resolveSessionRecord } from "../src/session/persistence/repository.js";
 import type { SessionRecord } from "../src/types.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));

@@ -25,4 +25,4 @@ export type {
   ViewerPoint,
   ViewerNodeData,
   ViewerNodeStatus,
-} from "./view-model-types";
+} from "./view-model-types.js";

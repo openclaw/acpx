@@ -1,17 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import type { AcpClient } from "../client.js";
-import { createOutputFormatter } from "../output.js";
+import type { AcpClient } from "../acp/client.js";
+import { createOutputFormatter } from "../cli/output/output.js";
 import { promptToDisplayText, textPrompt } from "../prompt-content.js";
-import {
-  cloneSessionAcpxState,
-  createSessionConversation,
-  recordClientOperation as recordConversationClientOperation,
-  recordPromptSubmission,
-  recordSessionUpdate as recordConversationSessionUpdate,
-} from "../session-conversation-model.js";
-import { defaultSessionEventLog } from "../session-event-log.js";
-import { resolveSessionRecord } from "../session-persistence.js";
 import {
   InterruptedError,
   TimeoutError,
@@ -19,11 +10,20 @@ import {
   withTimeout,
 } from "../session-runtime-helpers.js";
 import {
+  cloneSessionAcpxState,
+  createSessionConversation,
+  recordClientOperation as recordConversationClientOperation,
+  recordPromptSubmission,
+  recordSessionUpdate as recordConversationSessionUpdate,
+} from "../session/conversation-model.js";
+import { defaultSessionEventLog } from "../session/event-log.js";
+import { resolveSessionRecord } from "../session/persistence.js";
+import {
   cancelSessionPrompt,
   createSessionWithClient,
   runOnce,
   sendSessionDirect,
-} from "../session.js";
+} from "../session/session.js";
 import { SESSION_RECORD_SCHEMA } from "../types.js";
 import type { PromptInput, SessionRecord } from "../types.js";
 import { acp, action, checkpoint, compute, defineFlow, shell } from "./definition.js";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parsePromptEventLine } from "../src/runtime/events.js";
+import { parsePromptEventLine } from "../src/runtime/public/events.js";
 
 test("parsePromptEventLine handles text chunks, usage updates, tool updates, and compatibility lines", () => {
   assert.deepEqual(

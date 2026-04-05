@@ -6,7 +6,7 @@ import {
   isSessionUpdateNotification,
   parseJsonRpcErrorMessage,
   parsePromptStopReason,
-} from "../src/acp-jsonrpc.js";
+} from "../src/acp/jsonrpc.js";
 
 test("isAcpJsonRpcMessage accepts JSON-RPC request", () => {
   assert.equal(

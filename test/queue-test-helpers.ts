@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { queueLockFilePath, queueSocketPath } from "../src/queue-paths.js";
+import { queueLockFilePath, queueSocketPath } from "../src/cli/queue/paths.js";
 
 export type QueuePaths = {
   lockPath: string;
