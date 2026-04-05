@@ -29,12 +29,13 @@
   "type": "module",
   "exports": {
     ".": "./dist/cli.js",
+    "./runtime": "./dist/runtime.js",
     "./flows": "./dist/flows.js",
     "./dist/*": "./dist/*",
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsdown src/cli.ts src/flows.ts --format esm --dts --clean --platform node --target node22 --no-fixedExtension",
+    "build": "tsdown src/cli.ts src/flows.ts src/runtime.ts --format esm --dts --clean --platform node --target node22 --no-fixedExtension",
     "build:test": "node -e \"require('node:fs').rmSync('dist-test',{recursive:true,force:true})\" && tsc -p tsconfig.test.json",
     "check": "pnpm run format:check && pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run viewer:typecheck && pnpm run viewer:build && pnpm run test:coverage",
     "check:docs": "pnpm run format:docs:check && pnpm run lint:docs",
