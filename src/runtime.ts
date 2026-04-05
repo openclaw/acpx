@@ -120,6 +120,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     const record = await manager.ensureSession({
       sessionKey: sessionName,
       agent,
+      mode: input.mode,
       cwd: input.cwd ?? this.options.cwd,
       resumeSessionId: input.resumeSessionId,
     });
@@ -157,6 +158,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       },
       text: input.text,
       attachments: input.attachments,
+      mode: input.mode,
       requestId: input.requestId,
       signal: input.signal,
     });

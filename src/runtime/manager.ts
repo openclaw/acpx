@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { AcpClient } from "../client.js";
 import { normalizeOutputError } from "../error-normalization.js";
@@ -19,9 +20,11 @@ import type {
   AcpRuntimeEvent,
   AcpRuntimeHandle,
   AcpRuntimeOptions,
+  AcpRuntimePromptMode,
   AcpRuntimeStatus,
   AcpRuntimeTurnAttachment,
 } from "./contract.js";
+import { AcpRuntimeError } from "./errors.js";
 import { parsePromptEventLine } from "./events.js";
 import {
   applyConversation,
@@ -126,19 +129,40 @@ function toPromptInput(
     blocks.push({ type: "text", text });
   }
   for (const attachment of attachments) {
-    if (attachment.mediaType.startsWith("image/")) {
-      blocks.push({
-        type: "image",
-        mimeType: attachment.mediaType,
-        data: attachment.data,
-      });
+    if (!attachment.mediaType.startsWith("image/")) {
+      throw new AcpRuntimeError(
+        "ACP_TURN_FAILED",
+        `Unsupported ACP runtime attachment media type: ${attachment.mediaType}`,
+      );
     }
+    blocks.push({
+      type: "image",
+      mimeType: attachment.mediaType,
+      data: attachment.data,
+    });
   }
   return blocks.length > 0 ? blocks : textPrompt(text);
 }
 
+function startTurnPrompt(params: {
+  client: AcpClient;
+  sessionId: string;
+  promptInput: PromptInput | string;
+  mode: AcpRuntimePromptMode;
+}): Promise<{ stopReason: string }> {
+  switch (params.mode) {
+    case "prompt":
+      return params.client.prompt(params.sessionId, params.promptInput);
+    case "steer":
+      // ACP currently exposes a single prompt primitive, so ACPX routes steer instructions
+      // through the same transport while higher layers preserve steer-specific policy.
+      return params.client.prompt(params.sessionId, params.promptInput);
+  }
+}
+
 function createInitialRecord(params: {
-  sessionKey: string;
+  recordId: string;
+  sessionName: string;
   sessionId: string;
   agentCommand: string;
   cwd: string;
@@ -147,12 +171,12 @@ function createInitialRecord(params: {
   const now = isoNow();
   return {
     schema: "acpx.session.v1",
-    acpxRecordId: params.sessionKey,
+    acpxRecordId: params.recordId,
     acpSessionId: params.sessionId,
     agentSessionId: params.agentSessionId,
     agentCommand: params.agentCommand,
     cwd: params.cwd,
-    name: params.sessionKey,
+    name: params.sessionName,
     createdAt: now,
     lastUsedAt: now,
     lastSeq: 0,
@@ -169,6 +193,13 @@ function createInitialRecord(params: {
     ...createSessionConversation(now),
     acpx: {},
   };
+}
+
+function createRecordId(sessionKey: string, mode: "persistent" | "oneshot"): string {
+  if (mode === "persistent") {
+    return sessionKey;
+  }
+  return `${sessionKey}:oneshot:${randomUUID()}`;
 }
 
 function statusSummary(record: SessionRecord): string {
@@ -197,6 +228,7 @@ export class AcpRuntimeManager {
   async ensureSession(input: {
     sessionKey: string;
     agent: string;
+    mode: "persistent" | "oneshot";
     cwd?: string;
     resumeSessionId?: string;
   }): Promise<SessionRecord> {
@@ -204,6 +236,7 @@ export class AcpRuntimeManager {
     const agentCommand = this.options.agentRegistry.resolve(input.agent);
     const existing = await this.options.sessionStore.load(input.sessionKey);
     if (
+      input.mode === "persistent" &&
       existing &&
       shouldReuseExistingRecord(existing, {
         cwd,
@@ -240,7 +273,8 @@ export class AcpRuntimeManager {
         agentSessionId = created.agentSessionId;
       }
       const record = createInitialRecord({
-        sessionKey: input.sessionKey,
+        recordId: createRecordId(input.sessionKey, input.mode),
+        sessionName: input.sessionKey,
         sessionId,
         agentCommand,
         cwd,
@@ -260,13 +294,15 @@ export class AcpRuntimeManager {
     handle: AcpRuntimeHandle;
     text: string;
     attachments?: AcpRuntimeTurnAttachment[];
+    mode: AcpRuntimePromptMode;
     requestId: string;
     signal?: AbortSignal;
   }): AsyncIterable<AcpRuntimeEvent> {
     const record = await this.requireRecord(input.handle.acpxRecordId ?? input.handle.sessionKey);
     const conversation = cloneSessionConversation(record);
     let acpxState = cloneSessionAcpxState(record.acpx);
-    recordPromptSubmission(conversation, toPromptInput(input.text, input.attachments), isoNow());
+    const promptInput = toPromptInput(input.text, input.attachments);
+    recordPromptSubmission(conversation, promptInput, isoNow());
     trimConversationForRuntime(conversation);
 
     const queue = new AsyncEventQueue();
@@ -409,7 +445,12 @@ export class AcpRuntimeManager {
         }
 
         const responsePromise = withTimeout(
-          client.prompt(sessionId, toPromptInput(input.text, input.attachments)),
+          startTurnPrompt({
+            client,
+            sessionId,
+            promptInput,
+            mode: input.mode,
+          }),
           this.options.timeoutMs,
         );
         await applyPendingCancel();

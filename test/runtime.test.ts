@@ -67,9 +67,15 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   });
 
   const record = createSessionRecord();
+  let ensuredMode: string | undefined;
+  let turnMode: string | undefined;
   const manager = {
-    ensureSession: async () => record,
-    async *runTurn() {
+    ensureSession: async (input: { mode: string }) => {
+      ensuredMode = input.mode;
+      return record;
+    },
+    async *runTurn(input: { mode: string }) {
+      turnMode = input.mode;
       yield { type: "text_delta" as const, text: "hello", stream: "output" as const };
       yield { type: "done" as const, stopReason: "end_turn" };
     },
@@ -98,9 +104,10 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   const handle = await runtime.ensureSession({
     sessionKey: "agent:codex:acp:test",
     agent: "codex",
-    mode: "persistent",
+    mode: "oneshot",
   });
 
+  assert.equal(ensuredMode, "oneshot");
   assert.equal(handle.acpxRecordId, "agent:codex:acp:test");
   assert.equal(handle.backendSessionId, "sid-1");
   assert.equal(handle.agentSessionId, "inner-1");
@@ -109,12 +116,13 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   for await (const event of runtime.runTurn({
     handle,
     text: "hello",
-    mode: "prompt",
+    mode: "steer",
     requestId: "req-1",
   })) {
     events.push(event);
   }
 
+  assert.equal(turnMode, "steer");
   assert.deepEqual(events, [
     { type: "text_delta", text: "hello", stream: "output" },
     { type: "done", stopReason: "end_turn" },

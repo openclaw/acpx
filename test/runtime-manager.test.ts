@@ -54,12 +54,12 @@ type FakeClient = {
   setEventHandlers: (handlers: FakeClientHandlers) => void;
 };
 
-function createHandle(sessionKey: string): AcpRuntimeHandle {
+function createHandle(sessionKey: string, acpxRecordId = sessionKey): AcpRuntimeHandle {
   return {
     sessionKey,
     backend: "acpx",
     runtimeSessionName: sessionKey,
-    acpxRecordId: sessionKey,
+    acpxRecordId,
   };
 }
 
@@ -95,6 +95,7 @@ test("AcpRuntimeManager reuses compatible records without spawning a new client"
   const record = await manager.ensureSession({
     sessionKey: "session-key",
     agent: "codex",
+    mode: "persistent",
     cwd: "/workspace",
   });
 
@@ -154,6 +155,7 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
   const created = await manager.ensureSession({
     sessionKey: "created-session",
     agent: "codex",
+    mode: "persistent",
   });
   assert.equal(created.acpSessionId, "new-session");
   assert.equal(created.agentSessionId, "agent-session");
@@ -162,11 +164,63 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
   const resumed = await manager.ensureSession({
     sessionKey: "resumed-session",
     agent: "codex",
+    mode: "persistent",
     resumeSessionId: "resume-session",
   });
   assert.equal(resumed.acpSessionId, "resume-session");
   assert.equal(resumed.agentSessionId, "resumed-agent");
   assert.equal(constructed, 2);
+});
+
+test("AcpRuntimeManager creates a fresh record for each oneshot session", async () => {
+  const store = new InMemorySessionStore();
+  let createdSessions = 0;
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          initializeResult: {
+            protocolVersion: 1,
+            agentCapabilities: { loadSession: true },
+          },
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({
+            sessionId: `new-session-${++createdSessions}`,
+            agentSessionId: `agent-session-${createdSessions}`,
+          }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          loadSessionWithOptions: async () => ({ agentSessionId: "runtime-session" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  const first = await manager.ensureSession({
+    sessionKey: "oneshot-session",
+    agent: "codex",
+    mode: "oneshot",
+  });
+  const second = await manager.ensureSession({
+    sessionKey: "oneshot-session",
+    agent: "codex",
+    mode: "oneshot",
+  });
+
+  assert.notEqual(first.acpxRecordId, second.acpxRecordId);
+  assert.equal(first.name, "oneshot-session");
+  assert.equal(second.name, "oneshot-session");
+  assert.equal(store.records.size, 2);
 });
 
 test("AcpRuntimeManager streams runtime events and saves updated status", async () => {
@@ -234,6 +288,7 @@ test("AcpRuntimeManager streams runtime events and saves updated status", async 
     manager.runTurn({
       handle: createHandle("turn-session"),
       text: "hello",
+      mode: "prompt",
       requestId: "req-1",
     }),
   );
@@ -317,6 +372,7 @@ test("AcpRuntimeManager routes controls through the active controller while a tu
     manager.runTurn({
       handle: createHandle("live-session"),
       text: "hello",
+      mode: "prompt",
       requestId: "req-live",
     }),
   );
@@ -399,6 +455,7 @@ test("AcpRuntimeManager waits for load fallback to resolve before sending contro
     manager.runTurn({
       handle: createHandle("fallback-session"),
       text: "hello",
+      mode: "prompt",
       requestId: "req-fallback",
     }),
   );
@@ -466,6 +523,7 @@ test("AcpRuntimeManager honors aborts requested before prompt starts after load 
     manager.runTurn({
       handle: createHandle("aborted-session"),
       text: "hello",
+      mode: "prompt",
       requestId: "req-abort",
       signal: controller.signal,
     }),
@@ -577,6 +635,7 @@ test("AcpRuntimeManager surfaces normalized prompt failures", async () => {
     manager.runTurn({
       handle: createHandle("error-session"),
       text: "hello",
+      mode: "prompt",
       requestId: "req-error",
     }),
   );
@@ -584,4 +643,51 @@ test("AcpRuntimeManager surfaces normalized prompt failures", async () => {
   assert.equal(events.length, 1);
   assert.equal(events[0]?.type, "error");
   assert.match((events[0] as { message: string }).message, /prompt exploded/);
+});
+
+test("AcpRuntimeManager rejects unsupported runtime attachment media types", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "attachment-session",
+    acpSessionId: "attachment-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => true,
+          supportsLoadSession: () => true,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  await assert.rejects(
+    async () =>
+      await collectEvents(
+        manager.runTurn({
+          handle: createHandle("attachment-session"),
+          text: "",
+          attachments: [{ mediaType: "application/pdf", data: "Zm9v" }],
+          mode: "prompt",
+          requestId: "req-attachment",
+        }),
+      ),
+    /Unsupported ACP runtime attachment media type: application\/pdf/,
+  );
 });
