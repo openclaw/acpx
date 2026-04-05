@@ -504,18 +504,19 @@ export function recordPromptSubmission(
   conversation: SessionConversation,
   prompt: PromptInput | string,
   timestamp = isoNow(),
-): void {
+): string | undefined {
   const normalizedPrompt = typeof prompt === "string" ? textPrompt(prompt) : prompt;
   const userContent = normalizedPrompt
     .map((content) => contentToUserContent(content))
     .filter((content) => content !== undefined);
   if (userContent.length === 0) {
-    return;
+    return undefined;
   }
 
+  const promptMessageId = nextUserMessageId();
   conversation.messages.push({
     User: {
-      id: nextUserMessageId(),
+      id: promptMessageId,
       content: userContent.map((content) => {
         if ("Text" in content) {
           return {
@@ -528,6 +529,33 @@ export function recordPromptSubmission(
   });
   updateConversationTimestamp(conversation, timestamp);
   trimConversationForRuntime(conversation);
+  return promptMessageId;
+}
+
+function agentMessageHasObservedReply(message: SessionAgentMessage): boolean {
+  return message.content.length > 0 || Object.keys(message.tool_results).length > 0;
+}
+
+export function hasAgentReplyAfterPrompt(
+  conversation: SessionConversation,
+  promptMessageId: string,
+): boolean {
+  let sawPrompt = false;
+
+  for (const message of conversation.messages) {
+    if (!sawPrompt) {
+      if (isUserMessage(message) && message.User.id === promptMessageId) {
+        sawPrompt = true;
+      }
+      continue;
+    }
+
+    if (isAgentMessage(message) && agentMessageHasObservedReply(message.Agent)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function recordSessionUpdate(

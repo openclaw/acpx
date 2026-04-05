@@ -309,6 +309,73 @@ test("AcpRuntimeManager streams runtime events and saves updated status", async 
   assert.equal(saved?.protocolVersion, 1);
 });
 
+test("AcpRuntimeManager accepts a session reply even when the prompt RPC times out", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "late-reply-session",
+    acpSessionId: "late-reply-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let handlers: FakeClientHandlers = {};
+  const client: FakeClient = {
+    start: async () => {},
+    close: async () => {},
+    createSession: async () => ({ sessionId: "unused" }),
+    loadSession: async () => ({ agentSessionId: "unused" }),
+    hasReusableSession: () => true,
+    supportsLoadSession: () => true,
+    loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+    getAgentLifecycleSnapshot: () => ({ running: true }),
+    prompt: async () => {
+      setTimeout(() => {
+        handlers.onSessionUpdate?.({
+          sessionId: "late-reply-sid",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "late reply" },
+          },
+        });
+      }, 5);
+      return await new Promise<{ stopReason: string }>(() => {});
+    },
+    requestCancelActivePrompt: async () => false,
+    hasActivePrompt: () => true,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {
+      handlers = {};
+    },
+    setEventHandlers: (nextHandlers) => {
+      handlers = nextHandlers;
+    },
+  };
+  const manager = new AcpRuntimeManager(
+    {
+      ...createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+      timeoutMs: 20,
+    },
+    {
+      clientFactory: () => client as never,
+    },
+  );
+
+  const events = await collectEvents(
+    manager.runTurn({
+      handle: createHandle("late-reply-session"),
+      text: "hello",
+      mode: "prompt",
+      sessionMode: "persistent",
+      requestId: "req-late-reply",
+    }),
+  );
+
+  assert.deepEqual(events, [
+    { type: "text_delta", text: "late reply", stream: "output", tag: "agent_message_chunk" },
+    { type: "done", stopReason: "end_turn" },
+  ]);
+});
+
 test("AcpRuntimeManager routes controls through the active controller while a turn is running", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "live-session",

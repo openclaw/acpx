@@ -1262,4 +1262,11 @@ export class AcpClient {
 
     throw new Error(`Timed out waiting for session replay drain after ${normalizedTimeoutMs}ms`);
   }
+
+  async waitForSessionUpdatesIdle(options?: {
+    idleMs?: number;
+    timeoutMs?: number;
+  }): Promise<void> {
+    await this.waitForSessionUpdateDrain(options?.idleMs ?? 0, options?.timeoutMs ?? 0);
+  }
 }
