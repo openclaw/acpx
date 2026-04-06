@@ -222,13 +222,22 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     });
   }
 
-  async close(input: { handle: AcpRuntimeHandle; reason: string }): Promise<void> {
+  async close(input: {
+    handle: AcpRuntimeHandle;
+    reason: string;
+    discardPersistentState?: boolean;
+  }): Promise<void> {
     const state = this.resolveHandleState(input.handle);
     const manager = await this.getManager();
-    await manager.close({
-      ...input.handle,
-      acpxRecordId: state.acpxRecordId ?? input.handle.acpxRecordId ?? input.handle.sessionKey,
-    });
+    await manager.close(
+      {
+        ...input.handle,
+        acpxRecordId: state.acpxRecordId ?? input.handle.acpxRecordId ?? input.handle.sessionKey,
+      },
+      {
+        discardPersistentState: input.discardPersistentState,
+      },
+    );
   }
 
   private async getManager(): Promise<AcpRuntimeManager> {

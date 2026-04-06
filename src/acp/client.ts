@@ -331,6 +331,10 @@ export class AcpClient {
     return Boolean(this.initResult?.agentCapabilities?.loadSession);
   }
 
+  supportsCloseSession(): boolean {
+    return Boolean(this.initResult?.agentCapabilities?.sessionCapabilities?.close);
+  }
+
   setEventHandlers(
     handlers: Pick<
       AcpClientOptions,
@@ -825,6 +829,18 @@ export class AcpClient {
         sessionId,
       }),
     );
+  }
+
+  async closeSession(sessionId: string): Promise<void> {
+    const connection = this.getConnection();
+    await this.runConnectionRequest(() =>
+      connection.unstable_closeSession({
+        sessionId,
+      }),
+    );
+    if (this.loadedSessionId === sessionId) {
+      this.loadedSessionId = undefined;
+    }
   }
 
   async requestCancelActivePrompt(): Promise<boolean> {

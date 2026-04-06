@@ -24,6 +24,7 @@ type FakeClient = {
   loadSession: (sessionId: string, cwd: string) => Promise<{ agentSessionId?: string }>;
   hasReusableSession: (sessionId: string) => boolean;
   supportsLoadSession: () => boolean;
+  supportsCloseSession?: () => boolean;
   loadSessionWithOptions: (
     sessionId: string,
     cwd: string,
@@ -46,6 +47,7 @@ type FakeClient = {
   ) => Promise<{
     stopReason: string;
   }>;
+  closeSession?: (sessionId: string) => Promise<void>;
   waitForSessionUpdatesIdle?: (options?: { idleMs?: number; timeoutMs?: number }) => Promise<void>;
   requestCancelActivePrompt: () => Promise<boolean>;
   hasActivePrompt: () => boolean;
@@ -757,6 +759,61 @@ test("AcpRuntimeManager handles offline oneshot controls, status, close, and mis
     async () => await manager.getStatus(createHandle("missing-session")),
     /ACP session not found/,
   );
+});
+
+test("AcpRuntimeManager closes the backend session when discarding persistent state", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "discard-session",
+    acpSessionId: "discard-sid",
+    agentCommand: "claude --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let startCalls = 0;
+  let closeCalls = 0;
+  const closedSessionIds: string[] = [];
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {
+            startCalls += 1;
+          },
+          close: async () => {
+            closeCalls += 1;
+          },
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          supportsCloseSession: () => true,
+          closeSession: async (sessionId: string) => {
+            closedSessionIds.push(sessionId);
+          },
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  await manager.close(createHandle("discard-session"), {
+    discardPersistentState: true,
+  });
+
+  assert.equal(startCalls, 1);
+  assert.equal(closeCalls, 1);
+  assert.deepEqual(closedSessionIds, ["discard-sid"]);
+  const closed = await store.load("discard-session");
+  assert.equal(closed?.closed, true);
+  assert.equal(typeof closed?.closedAt, "string");
 });
 
 test("AcpRuntimeManager fails offline persistent controls clearly when session/load is unavailable", async () => {

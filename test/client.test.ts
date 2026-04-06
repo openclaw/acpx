@@ -104,6 +104,14 @@ type ClientInternals = {
     | undefined;
   cancellingSessionIds: Set<string>;
   promptPermissionFailures: Map<string, PermissionPromptUnavailableError>;
+  initResult?: {
+    agentCapabilities?: {
+      sessionCapabilities?: {
+        close?: Record<string, never>;
+      };
+    };
+  };
+  loadedSessionId?: string;
   lastKnownPid?: number;
   agentStartedAt?: string;
   closing: boolean;
@@ -467,6 +475,34 @@ test("AcpClient setSessionModel uses session/set_model", async () => {
     sessionId: "session-456",
     modelId: "GPT-5-2",
   });
+});
+
+test("AcpClient closes sessions through session/close and clears the loaded session id", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  let capturedCloseSessionParams: { sessionId: string } | undefined;
+  internals.initResult = {
+    agentCapabilities: {
+      sessionCapabilities: {
+        close: {},
+      },
+    },
+  };
+  internals.loadedSessionId = "session-close-1";
+  internals.connection = {
+    unstable_closeSession: async (params: { sessionId: string }) => {
+      capturedCloseSessionParams = params;
+      return {};
+    },
+  };
+
+  assert.equal(client.supportsCloseSession(), true);
+  await client.closeSession("session-close-1");
+
+  assert.deepEqual(capturedCloseSessionParams, {
+    sessionId: "session-close-1",
+  });
+  assert.equal(internals.loadedSessionId, undefined);
 });
 
 test("AcpClient session update handling drains queued callbacks and swallows handler failures", async () => {

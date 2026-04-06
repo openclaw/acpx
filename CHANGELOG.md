@@ -25,6 +25,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Sessions/reset: close the live backend session when discarding persistent state so reset flows start a fresh ACP session instead of silently reopening the old one.
 - Agents/kiro: use `kiro-cli-chat acp` for the built-in Kiro adapter command to avoid orphan child processes. (#129) Thanks @vokako.
 - Agents/cursor: recognize Cursor's `Session \"...\" not found` `session/load` error format so reconnects fall back to `session/new` instead of failing. (#162) Thanks @log-li.
 - Output/thinking: preserve line breaks in text-mode `[thinking]` output instead of flattening multi-line thought chunks into one line. (#144) Thanks @Huarong.

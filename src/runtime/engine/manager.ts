@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { AcpClient } from "../../acp/client.js";
 import { normalizeOutputError } from "../../acp/error-normalization.js";
+import { extractAcpError } from "../../acp/error-shapes.js";
 import { textPrompt, type PromptInput } from "../../prompt-content.js";
 import {
   cloneSessionAcpxState,
@@ -118,6 +119,21 @@ class AsyncEventQueue {
 
 function isoNow(): string {
   return new Date().toISOString();
+}
+
+function isUnsupportedSessionCloseError(error: unknown): boolean {
+  const acp = extractAcpError(error);
+  if (!acp) {
+    return false;
+  }
+  if (acp.code === -32601 || acp.code === -32602) {
+    return true;
+  }
+  if (acp.code !== -32603 || !acp.data || typeof acp.data !== "object") {
+    return false;
+  }
+  const details = (acp.data as { details?: unknown }).details;
+  return typeof details === "string" && details.toLowerCase().includes("invalid params");
 }
 
 function toPromptInput(
@@ -611,12 +627,65 @@ export class AcpRuntimeManager {
     await controller?.requestCancelActivePrompt();
   }
 
-  async close(handle: AcpRuntimeHandle): Promise<void> {
+  async close(
+    handle: AcpRuntimeHandle,
+    options: { discardPersistentState?: boolean } = {},
+  ): Promise<void> {
     const record = await this.requireRecord(handle.acpxRecordId ?? handle.sessionKey);
     await this.cancel(handle);
+    if (options.discardPersistentState) {
+      await this.closeBackendSession(record);
+    }
     record.closed = true;
     record.closedAt = isoNow();
     await this.options.sessionStore.save(record);
+  }
+
+  private async closeBackendSession(record: SessionRecord): Promise<void> {
+    const pendingClient = this.pendingPersistentClients.get(record.acpxRecordId);
+    if (pendingClient) {
+      this.pendingPersistentClients.delete(record.acpxRecordId);
+    }
+    const reusablePendingClient =
+      pendingClient?.hasReusableSession(record.acpSessionId) === true ? pendingClient : undefined;
+    if (pendingClient && !reusablePendingClient) {
+      await pendingClient.close().catch(() => {});
+    }
+
+    const client =
+      reusablePendingClient ??
+      this.createClient({
+        agentCommand: record.agentCommand,
+        cwd: record.cwd,
+        mcpServers: [...(this.options.mcpServers ?? [])],
+        permissionMode: this.options.permissionMode,
+        nonInteractivePermissions: this.options.nonInteractivePermissions,
+        verbose: this.options.verbose,
+      });
+
+    try {
+      if (!reusablePendingClient) {
+        await client.start();
+      }
+      if (!client.supportsCloseSession()) {
+        throw new AcpRuntimeError(
+          "ACP_BACKEND_UNSUPPORTED_CONTROL",
+          `Agent does not support session/close for ${record.acpxRecordId}.`,
+        );
+      }
+      await client.closeSession(record.acpSessionId);
+    } catch (error) {
+      if (isUnsupportedSessionCloseError(error)) {
+        throw new AcpRuntimeError(
+          "ACP_BACKEND_UNSUPPORTED_CONTROL",
+          `Agent does not support session/close for ${record.acpxRecordId}.`,
+          { cause: error },
+        );
+      }
+      throw error;
+    } finally {
+      await client.close().catch(() => {});
+    }
   }
 
   private async requireRecord(sessionId: string): Promise<SessionRecord> {

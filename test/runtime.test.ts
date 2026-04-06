@@ -71,6 +71,7 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   let turnMode: string | undefined;
   let turnSessionMode: string | undefined;
   let turnTimeoutMs: number | undefined;
+  let closeDiscardPersistentState: boolean | undefined;
   const manager = {
     ensureSession: async (input: { mode: string }) => {
       ensuredMode = input.mode;
@@ -90,7 +91,9 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
     setMode: async () => {},
     setConfigOption: async () => {},
     cancel: async () => {},
-    close: async () => {},
+    close: async (_handle: unknown, options?: { discardPersistentState?: boolean }) => {
+      closeDiscardPersistentState = options?.discardPersistentState;
+    },
   };
 
   const runtime = new AcpxRuntime(
@@ -139,7 +142,8 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   await runtime.setMode({ handle, mode: "architect" });
   await runtime.setConfigOption({ handle, key: "approval", value: "manual" });
   await runtime.cancel({ handle });
-  await runtime.close({ handle, reason: "test" });
+  await runtime.close({ handle, reason: "test", discardPersistentState: true });
+  assert.equal(closeDiscardPersistentState, true);
 });
 
 test("createFileSessionStore persists records inside the provided state directory", async (t) => {
