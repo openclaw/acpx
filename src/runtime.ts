@@ -161,6 +161,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       mode: input.mode,
       sessionMode: state.mode,
       requestId: input.requestId,
+      timeoutMs: input.timeoutMs,
       signal: input.signal,
     });
   }

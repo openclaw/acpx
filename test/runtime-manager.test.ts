@@ -351,10 +351,7 @@ test("AcpRuntimeManager accepts a session reply even when the prompt RPC times o
     },
   };
   const manager = new AcpRuntimeManager(
-    {
-      ...createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
-      timeoutMs: 20,
-    },
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
     {
       clientFactory: () => client as never,
     },
@@ -367,6 +364,7 @@ test("AcpRuntimeManager accepts a session reply even when the prompt RPC times o
       mode: "prompt",
       sessionMode: "persistent",
       requestId: "req-late-reply",
+      timeoutMs: 20,
     }),
   );
 

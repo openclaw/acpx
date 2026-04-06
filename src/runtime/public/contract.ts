@@ -53,6 +53,7 @@ export type AcpRuntimeTurnInput = {
   attachments?: AcpRuntimeTurnAttachment[];
   mode: AcpRuntimePromptMode;
   requestId: string;
+  timeoutMs?: number;
   signal?: AbortSignal;
 };
 

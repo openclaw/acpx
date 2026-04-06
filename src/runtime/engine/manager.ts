@@ -293,6 +293,7 @@ export class AcpRuntimeManager {
     mode: AcpRuntimePromptMode;
     sessionMode: "persistent" | "oneshot";
     requestId: string;
+    timeoutMs?: number;
     signal?: AbortSignal;
   }): AsyncIterable<AcpRuntimeEvent> {
     const record = await this.requireRecord(input.handle.acpxRecordId ?? input.handle.sessionKey);
@@ -465,7 +466,7 @@ export class AcpRuntimeManager {
           client,
           sessionId,
           prompt: promptInput,
-          timeoutMs: this.options.timeoutMs,
+          timeoutMs: input.timeoutMs ?? this.options.timeoutMs,
           conversation,
           promptMessageId,
         });
