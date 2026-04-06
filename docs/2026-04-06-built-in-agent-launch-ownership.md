@@ -67,15 +67,44 @@ In plain terms:
 This is the preferred path for embedded and supervised runtimes because it is
 deterministic and keeps the child on the same Node runtime as the parent.
 
-### 2. Dynamic fallback path
+### 2. Missing adapter path
 
-If the adapter package is not installed locally, `acpx` may fall back to a
-dynamic launcher path.
+If the adapter package is not installed locally, `acpx` still needs a way to
+make the built-in agent usable.
 
-That fallback exists to keep `acpx` practical as a small CLI without requiring
-every adapter package to be preinstalled for every user.
+The important rule is that this must remain ACPX-owned behavior. Downstream
+callers such as OpenClaw should not solve missing built-in adapters by adding
+their own default launcher logic or by bundling those adapters unconditionally.
 
-The fallback should still be owned by `acpx`, not by downstream callers.
+In the short term, a dynamic fallback path is acceptable if ACPX needs one to
+stay practical as a small CLI.
+
+However, that is not the cleanest end state. The cleaner long-term model is:
+
+- ACPX owns an explicit adapter cache or install area
+- ACPX knows how to materialize the pinned built-in adapter into that location
+- ACPX then launches the materialized adapter directly with `process.execPath`
+
+That is cleaner than relying on implicit `npx` or `npm exec` behavior every
+time a built-in adapter is missing.
+
+## Default install policy
+
+Built-in adapters such as Claude ACP and Codex ACP should not be installed by
+default just because an application embeds `acpx`.
+
+That means:
+
+- do not add built-in adapter packages as default runtime dependencies of
+  downstream embeddings such as OpenClaw
+- do not solve this by making every OpenClaw install carry Claude ACP or Codex
+  ACP up front
+- keep adapter materialization, caching, install, and fallback behavior owned
+  by `acpx`
+
+If a local adapter is already present, `acpx` should use it. If it is not
+present, `acpx` should decide how to fetch, install, or prepare it through its
+own built-in path.
 
 ## What embedding applications should do
 
@@ -108,8 +137,11 @@ management problem.
   dependency of the `acpx` package.
 - No requirement that embedding apps carry built-in adapter package logic of
   their own.
+- No requirement that embedding apps install built-in adapters by default just
+  to make `acpx` work.
 - No special-case launcher policy owned in downstream integrations just because
   one environment is unusual.
+- No claim that implicit `npx`-style fallback is the ideal long-term design.
 
 ## Desired end state
 
@@ -118,9 +150,14 @@ The clean end state is:
 - built-in agent ownership lives in `acpx`
 - built-in adapter pins live in `acpx`
 - local installed adapters are launched directly with the current Node runtime
-- dynamic fallback remains available when local installation is absent
-- downstream embeddings stop redefining built-in launch behavior
+- when an adapter is missing, ACPX owns the explicit materialization path
+- downstream embeddings do not install built-in adapters by default
+- downstream embeddings do not redefine built-in launch behavior
 - child startup crashes fail clearly instead of appearing stuck
+
+If ACPX temporarily keeps a dynamic fallback while moving toward that model,
+that fallback should be treated as a compatibility bridge, not as the ideal
+architecture.
 
 That keeps `acpx` small while still making built-in agent execution reliable in
 both direct CLI use and embedded runtime use.
