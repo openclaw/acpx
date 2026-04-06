@@ -20,12 +20,12 @@ export async function runPromptTurn(params: {
   timeoutMs?: number;
   conversation: SessionConversation;
   promptMessageId?: string;
+  onPromptStarted?: () => Promise<void> | void;
 }): Promise<{ stopReason: RunPromptResult["stopReason"]; source: "rpc" | "session" }> {
   try {
-    const response = await withTimeout(
-      params.client.prompt(params.sessionId, params.prompt),
-      params.timeoutMs,
-    );
+    const promptPromise = params.client.prompt(params.sessionId, params.prompt);
+    await params.onPromptStarted?.();
+    const response = await withTimeout(promptPromise, params.timeoutMs);
     return {
       stopReason: response.stopReason,
       source: "rpc",

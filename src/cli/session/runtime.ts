@@ -515,17 +515,6 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
         for (let attempt = 0; ; attempt++) {
           try {
             const promptStartedAt = Date.now();
-            if (attempt === 0 && options.onPromptActive) {
-              try {
-                await options.onPromptActive();
-              } catch (error) {
-                if (options.verbose) {
-                  process.stderr.write(
-                    "[acpx] onPromptActive hook failed: " + formatErrorMessage(error) + "\n",
-                  );
-                }
-              }
-            }
             response = await measurePerf("runtime.prompt.agent_turn", async () => {
               return await runPromptTurn({
                 client,
@@ -534,6 +523,22 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
                 timeoutMs: options.timeoutMs,
                 conversation,
                 promptMessageId,
+                onPromptStarted:
+                  attempt === 0 && options.onPromptActive
+                    ? async () => {
+                        try {
+                          await options.onPromptActive?.();
+                        } catch (error) {
+                          if (options.verbose) {
+                            process.stderr.write(
+                              "[acpx] onPromptActive hook failed: " +
+                                formatErrorMessage(error) +
+                                "\n",
+                            );
+                          }
+                        }
+                      }
+                    : undefined,
               });
             });
             if (options.verbose) {
