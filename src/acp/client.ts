@@ -28,10 +28,12 @@ import {
   type WriteTextFileResponse,
   type SessionModelState,
 } from "@agentclientprotocol/sdk";
+import { resolveInstalledBuiltInAgentLaunch } from "../agent-registry.js";
 import { TimeoutError, withTimeout } from "../async-control.js";
 import {
   AgentDisconnectedError,
   AgentSpawnError,
+  AgentStartupError,
   AuthPolicyError,
   ClaudeAcpSessionCreateTimeoutError,
   GeminiAcpStartupTimeoutError,
@@ -101,6 +103,7 @@ const REPLAY_DRAIN_TIMEOUT_MS = 5_000;
 const DRAIN_POLL_INTERVAL_MS = 20;
 const AGENT_CLOSE_TERM_GRACE_MS = 1_500;
 const AGENT_CLOSE_KILL_GRACE_MS = 1_000;
+const STARTUP_STDERR_MAX_CHARS = 8_192;
 
 type LoadSessionOptions = {
   suppressReplayUpdates?: boolean;
@@ -398,24 +401,33 @@ export class AcpClient {
       await this.close();
     }
 
-    const { command, args: initialArgs } = splitCommandLine(this.options.agentCommand);
-    let args = await resolveGeminiCommandArgs(command, initialArgs);
-    if (isQoderAcpCommand(command, args)) {
+    const configuredCommand = splitCommandLine(this.options.agentCommand);
+    const resolvedBuiltInLaunch = resolveInstalledBuiltInAgentLaunch(this.options.agentCommand);
+    const spawnCommand = resolvedBuiltInLaunch?.command ?? configuredCommand.command;
+    let args = resolvedBuiltInLaunch?.args ?? configuredCommand.args;
+    args = await resolveGeminiCommandArgs(spawnCommand, args);
+    if (isQoderAcpCommand(spawnCommand, args)) {
       args = buildQoderAcpCommandArgs(args, this.options);
     }
-    this.log(`spawning agent: ${command} ${args.join(" ")}`);
-    const geminiAcp = isGeminiAcpCommand(command, args);
-    const copilotAcp = isCopilotAcpCommand(command, args);
+    if (resolvedBuiltInLaunch) {
+      this.log(
+        `spawning installed built-in agent ${resolvedBuiltInLaunch.packageName}${resolvedBuiltInLaunch.packageVersion ? `@${resolvedBuiltInLaunch.packageVersion}` : ""} via ${spawnCommand} ${args.join(" ")}`,
+      );
+    } else {
+      this.log(`spawning agent: ${spawnCommand} ${args.join(" ")}`);
+    }
+    const geminiAcp = isGeminiAcpCommand(spawnCommand, args);
+    const copilotAcp = isCopilotAcpCommand(spawnCommand, args);
 
     if (copilotAcp) {
-      await ensureCopilotAcpSupport(command);
+      await ensureCopilotAcpSupport(spawnCommand);
     }
 
     const spawnedChild = spawn(
-      command,
+      spawnCommand,
       args,
       buildSpawnCommandOptions(
-        command,
+        spawnCommand,
         buildAgentSpawnOptions(this.options.cwd, this.options.authCredentials),
       ),
     ) as ChildProcessByStdio<Writable, Readable, Readable>;
@@ -431,8 +443,10 @@ export class AcpClient {
     this.lastAgentExit = undefined;
     this.lastKnownPid = child.pid ?? undefined;
     this.attachAgentLifecycleObservers(child);
+    const startupStderr: string[] = [];
 
     child.stderr.on("data", (chunk: Buffer | string) => {
+      this.captureStartupStderr(startupStderr, chunk);
       if (!this.options.verbose) {
         return;
       }
@@ -490,39 +504,55 @@ export class AcpClient {
       },
       { once: true },
     );
+    const startupFailure = this.createStartupFailureWatcher(child, startupStderr);
 
     try {
-      const initializePromise = connection.initialize({
-        protocolVersion: PROTOCOL_VERSION,
-        clientCapabilities: {
-          fs: {
-            readTextFile: true,
-            writeTextFile: true,
-          },
-          terminal: true,
-        },
-        clientInfo: {
-          name: "acpx",
-          version: "0.1.0",
-        },
-      });
-      const initResult = geminiAcp
-        ? await withTimeout(initializePromise, resolveGeminiAcpStartupTimeoutMs())
-        : await initializePromise;
+      const initResult = await Promise.race([
+        (async () => {
+          const initializePromise = connection.initialize({
+            protocolVersion: PROTOCOL_VERSION,
+            clientCapabilities: {
+              fs: {
+                readTextFile: true,
+                writeTextFile: true,
+              },
+              terminal: true,
+            },
+            clientInfo: {
+              name: "acpx",
+              version: "0.1.0",
+            },
+          });
+          const initialized = geminiAcp
+            ? await withTimeout(initializePromise, resolveGeminiAcpStartupTimeoutMs())
+            : await initializePromise;
 
-      await this.authenticateIfRequired(connection, initResult.authMethods ?? []);
+          await this.authenticateIfRequired(connection, initialized.authMethods ?? []);
+          return initialized;
+        })(),
+        startupFailure.promise,
+      ]);
+      startupFailure.dispose();
 
       this.connection = connection;
       this.agent = child;
       this.initResult = initResult;
       this.log(`initialized protocol version ${initResult.protocolVersion}`);
     } catch (error) {
-      child.kill();
+      startupFailure.dispose();
+      try {
+        child.kill();
+      } catch {
+        // best effort
+      }
       if (geminiAcp && error instanceof TimeoutError) {
-        throw new GeminiAcpStartupTimeoutError(await buildGeminiAcpStartupTimeoutMessage(command), {
-          cause: error,
-          retryable: true,
-        });
+        throw new GeminiAcpStartupTimeoutError(
+          await buildGeminiAcpStartupTimeoutMessage(spawnCommand),
+          {
+            cause: error,
+            retryable: true,
+          },
+        );
       }
       throw error;
     }
@@ -947,6 +977,94 @@ export class AcpClient {
       return;
     }
     process.stderr.write(`[acpx] ${message}\n`);
+  }
+
+  private captureStartupStderr(target: string[], chunk: Buffer | string): void {
+    const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    if (text.length === 0) {
+      return;
+    }
+    target.push(text);
+    const overflow = target.join("").length - STARTUP_STDERR_MAX_CHARS;
+    if (overflow <= 0) {
+      return;
+    }
+    const joined = target.join("");
+    target.splice(0, target.length, joined.slice(-STARTUP_STDERR_MAX_CHARS));
+  }
+
+  private summarizeStartupStderr(target: string[]): string | undefined {
+    const joined = target.join("").trim();
+    if (!joined) {
+      return undefined;
+    }
+    const collapsed = joined.replace(/\s+/gu, " ").trim();
+    return collapsed.slice(0, STARTUP_STDERR_MAX_CHARS);
+  }
+
+  private createStartupFailureWatcher(
+    child: ChildProcessByStdio<Writable, Readable, Readable>,
+    startupStderr: string[],
+  ): {
+    promise: Promise<never>;
+    dispose: () => void;
+  } {
+    let settled = false;
+    let rejectPromise: (error: unknown) => void;
+
+    const cleanup = () => {
+      child.off("error", onError);
+      child.off("exit", onExit);
+      child.off("close", onClose);
+    };
+
+    const finish = (error?: unknown) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      if (error) {
+        rejectPromise(error);
+      }
+    };
+
+    const createError = (params?: {
+      cause?: unknown;
+      exitCode?: number | null;
+      signal?: NodeJS.Signals | null;
+    }) =>
+      new AgentStartupError({
+        agentCommand: this.options.agentCommand,
+        exitCode: params?.exitCode ?? child.exitCode ?? null,
+        signal: params?.signal ?? child.signalCode ?? null,
+        stderrSummary: this.summarizeStartupStderr(startupStderr),
+        cause: params?.cause,
+      });
+
+    const onError = (error: Error) => {
+      finish(createError({ cause: error }));
+    };
+
+    const onExit = (exitCode: number | null, signal: NodeJS.Signals | null) => {
+      finish(createError({ exitCode, signal }));
+    };
+
+    const onClose = (exitCode: number | null, signal: NodeJS.Signals | null) => {
+      finish(createError({ exitCode, signal }));
+    };
+
+    const promise = new Promise<never>((_resolve, reject) => {
+      rejectPromise = reject;
+      child.once("error", onError);
+      child.once("exit", onExit);
+      child.once("close", onClose);
+    });
+
+    return {
+      promise,
+      dispose: () => finish(),
+    };
   }
 
   private selectAuthMethod(methods: AuthMethod[]): AuthSelection | undefined {

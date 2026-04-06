@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   AGENT_REGISTRY,
+  BUILT_IN_AGENT_PACKAGES,
   DEFAULT_AGENT_NAME,
   listBuiltInAgents,
+  resolveInstalledBuiltInAgentLaunch,
   resolveAgentCommand,
 } from "../src/agent-registry.js";
 
@@ -69,4 +74,48 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
 
 test("default agent is codex", () => {
   assert.equal(DEFAULT_AGENT_NAME, "codex");
+});
+
+test("resolveInstalledBuiltInAgentLaunch uses a locally installed adapter when available", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "acpx-agent-registry-"));
+  t.after(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const packageRoot = path.join(
+    tempDir,
+    "node_modules",
+    "@agentclientprotocol",
+    "claude-agent-acp",
+  );
+  fs.mkdirSync(path.join(packageRoot, "dist"), { recursive: true });
+  fs.mkdirSync(path.join(packageRoot, "bin"), { recursive: true });
+  fs.writeFileSync(
+    path.join(packageRoot, "package.json"),
+    JSON.stringify({
+      name: BUILT_IN_AGENT_PACKAGES.claude.packageName,
+      version: "0.25.0",
+      bin: {
+        "claude-agent-acp": "bin/claude-agent-acp.js",
+      },
+    }),
+  );
+  fs.writeFileSync(path.join(packageRoot, "dist", "index.js"), "export {};\n");
+  fs.writeFileSync(path.join(packageRoot, "bin", "claude-agent-acp.js"), "#!/usr/bin/env node\n");
+
+  const launch = resolveInstalledBuiltInAgentLaunch(AGENT_REGISTRY.claude, {
+    resolvePackageRoot: () => packageRoot,
+  });
+
+  assert.deepEqual(launch, {
+    command: process.execPath,
+    args: [path.join(packageRoot, "bin", "claude-agent-acp.js")],
+    packageName: BUILT_IN_AGENT_PACKAGES.claude.packageName,
+    packageVersion: "0.25.0",
+    binPath: path.join(packageRoot, "bin", "claude-agent-acp.js"),
+  });
+});
+
+test("resolveInstalledBuiltInAgentLaunch ignores non-built-in commands", () => {
+  assert.equal(resolveInstalledBuiltInAgentLaunch("custom-acp-server --stdio"), undefined);
 });

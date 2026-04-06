@@ -51,6 +51,37 @@ export class AgentSpawnError extends AcpxOperationalError {
   }
 }
 
+export class AgentStartupError extends AcpxOperationalError {
+  readonly agentCommand: string;
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly stderrSummary?: string;
+
+  constructor(params: {
+    agentCommand: string;
+    exitCode: number | null;
+    signal: NodeJS.Signals | null;
+    stderrSummary?: string;
+    cause?: unknown;
+  }) {
+    const exitSummary = `exit=${params.exitCode ?? "null"}, signal=${params.signal ?? "null"}`;
+    const stderrSuffix =
+      typeof params.stderrSummary === "string" && params.stderrSummary.trim().length > 0
+        ? `: ${params.stderrSummary.trim()}`
+        : "";
+    super(`ACP agent exited before initialize completed (${exitSummary})${stderrSuffix}`, {
+      cause: params.cause instanceof Error ? params.cause : undefined,
+      outputCode: "RUNTIME",
+      detailCode: "AGENT_STARTUP_FAILED",
+      origin: "acp",
+    });
+    this.agentCommand = params.agentCommand;
+    this.exitCode = params.exitCode;
+    this.signal = params.signal;
+    this.stderrSummary = params.stderrSummary?.trim() || undefined;
+  }
+}
+
 export class AgentDisconnectedError extends AcpxOperationalError {
   readonly reason: string;
   readonly exitCode: number | null;

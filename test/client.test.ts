@@ -11,6 +11,7 @@ import {
 } from "../src/acp/client.js";
 import {
   AgentDisconnectedError,
+  AgentStartupError,
   AuthPolicyError,
   PermissionDeniedError,
   PermissionPromptUnavailableError,
@@ -557,6 +558,28 @@ test("AcpClient prompt rejects when the agent disconnects mid-prompt", async () 
   assert(result.error instanceof AgentDisconnectedError);
   assert.match(result.error.message, /disconnected during request/i);
   assert.equal(client.hasActivePrompt(), false);
+});
+
+test("AcpClient start fails fast when the agent exits during initialize", async () => {
+  const stderrLine = "startup boom";
+  const client = makeClient({
+    agentCommand: `${JSON.stringify(process.execPath)} --eval ${JSON.stringify(
+      `process.stderr.write(${JSON.stringify(`${stderrLine}\n`)}); process.exit(1);`,
+    )}`,
+  });
+
+  const startedAt = Date.now();
+  await assert.rejects(
+    () => client.start(),
+    (error: unknown) => {
+      assert(error instanceof AgentStartupError);
+      assert.equal(error.exitCode, 1);
+      assert.equal(error.signal, null);
+      assert.match(error.message, /startup boom/);
+      return true;
+    },
+  );
+  assert(Date.now() - startedAt < 2_000);
 });
 
 test("AcpClient close resets in-memory state and shuts down terminal manager", async () => {
