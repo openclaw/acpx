@@ -8,7 +8,9 @@ import {
   BUILT_IN_AGENT_PACKAGES,
   DEFAULT_AGENT_NAME,
   listBuiltInAgents,
+  resolveBuiltInAgentLaunch,
   resolveInstalledBuiltInAgentLaunch,
+  resolvePackageExecBuiltInAgentLaunch,
   resolveAgentCommand,
 } from "../src/agent-registry.js";
 
@@ -108,9 +110,11 @@ test("resolveInstalledBuiltInAgentLaunch uses a locally installed adapter when a
   });
 
   assert.deepEqual(launch, {
+    source: "installed",
     command: process.execPath,
     args: [path.join(packageRoot, "bin", "claude-agent-acp.js")],
     packageName: BUILT_IN_AGENT_PACKAGES.claude.packageName,
+    packageRange: BUILT_IN_AGENT_PACKAGES.claude.packageRange,
     packageVersion: "0.25.0",
     binPath: path.join(packageRoot, "bin", "claude-agent-acp.js"),
   });
@@ -118,4 +122,60 @@ test("resolveInstalledBuiltInAgentLaunch uses a locally installed adapter when a
 
 test("resolveInstalledBuiltInAgentLaunch ignores non-built-in commands", () => {
   assert.equal(resolveInstalledBuiltInAgentLaunch("custom-acp-server --stdio"), undefined);
+});
+
+test("resolvePackageExecBuiltInAgentLaunch bridges built-ins through the current Node npm CLI", () => {
+  const npmCliPath = path.join(os.tmpdir(), "acpx-test-npm-cli.js");
+  const launch = resolvePackageExecBuiltInAgentLaunch(AGENT_REGISTRY.codex, {
+    execPath: "/tmp/node",
+    existsSync: (candidate) => candidate === npmCliPath,
+    resolveNpmCliPath: () => npmCliPath,
+  });
+
+  assert.deepEqual(launch, {
+    source: "package-exec",
+    command: "/tmp/node",
+    args: [
+      npmCliPath,
+      "exec",
+      "--yes",
+      `--package=${BUILT_IN_AGENT_PACKAGES.codex.packageName}@${BUILT_IN_AGENT_PACKAGES.codex.packageRange}`,
+      "--",
+      BUILT_IN_AGENT_PACKAGES.codex.preferredBinName,
+    ],
+    packageName: BUILT_IN_AGENT_PACKAGES.codex.packageName,
+    packageRange: BUILT_IN_AGENT_PACKAGES.codex.packageRange,
+    npmCliPath,
+  });
+});
+
+test("resolveBuiltInAgentLaunch accepts the legacy Claude npm exec default", () => {
+  const npmCliPath = path.join(os.tmpdir(), "acpx-test-claude-npm-cli.js");
+  const launch = resolveBuiltInAgentLaunch(
+    `npm exec @agentclientprotocol/claude-agent-acp@${BUILT_IN_AGENT_PACKAGES.claude.packageRange}`,
+    {
+      execPath: "/tmp/node",
+      existsSync: (candidate) => candidate === npmCliPath,
+      resolvePackageRoot: () => {
+        throw new Error("adapter not installed");
+      },
+      resolveNpmCliPath: () => npmCliPath,
+    },
+  );
+
+  assert.deepEqual(launch, {
+    source: "package-exec",
+    command: "/tmp/node",
+    args: [
+      npmCliPath,
+      "exec",
+      "--yes",
+      `--package=${BUILT_IN_AGENT_PACKAGES.claude.packageName}@${BUILT_IN_AGENT_PACKAGES.claude.packageRange}`,
+      "--",
+      BUILT_IN_AGENT_PACKAGES.claude.preferredBinName,
+    ],
+    packageName: BUILT_IN_AGENT_PACKAGES.claude.packageName,
+    packageRange: BUILT_IN_AGENT_PACKAGES.claude.packageRange,
+    npmCliPath,
+  });
 });

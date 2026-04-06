@@ -28,7 +28,7 @@ import {
   type WriteTextFileResponse,
   type SessionModelState,
 } from "@agentclientprotocol/sdk";
-import { resolveInstalledBuiltInAgentLaunch } from "../agent-registry.js";
+import { resolveBuiltInAgentLaunch } from "../agent-registry.js";
 import { TimeoutError, withTimeout } from "../async-control.js";
 import {
   AgentDisconnectedError,
@@ -402,16 +402,20 @@ export class AcpClient {
     }
 
     const configuredCommand = splitCommandLine(this.options.agentCommand);
-    const resolvedBuiltInLaunch = resolveInstalledBuiltInAgentLaunch(this.options.agentCommand);
+    const resolvedBuiltInLaunch = resolveBuiltInAgentLaunch(this.options.agentCommand);
     const spawnCommand = resolvedBuiltInLaunch?.command ?? configuredCommand.command;
     let args = resolvedBuiltInLaunch?.args ?? configuredCommand.args;
     args = await resolveGeminiCommandArgs(spawnCommand, args);
     if (isQoderAcpCommand(spawnCommand, args)) {
       args = buildQoderAcpCommandArgs(args, this.options);
     }
-    if (resolvedBuiltInLaunch) {
+    if (resolvedBuiltInLaunch?.source === "installed") {
       this.log(
         `spawning installed built-in agent ${resolvedBuiltInLaunch.packageName}${resolvedBuiltInLaunch.packageVersion ? `@${resolvedBuiltInLaunch.packageVersion}` : ""} via ${spawnCommand} ${args.join(" ")}`,
+      );
+    } else if (resolvedBuiltInLaunch?.source === "package-exec") {
+      this.log(
+        `spawning built-in agent ${resolvedBuiltInLaunch.packageName}@${resolvedBuiltInLaunch.packageRange} via current Node package exec bridge ${spawnCommand} ${args.join(" ")}`,
       );
     } else {
       this.log(`spawning agent: ${spawnCommand} ${args.join(" ")}`);

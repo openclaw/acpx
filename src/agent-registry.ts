@@ -13,20 +13,26 @@ type BuiltInAgentPackageSpec = {
   packageRange: string;
   preferredBinName: string;
   fallbackCommand: string;
+  legacyFallbackCommands?: string[];
 };
 
 type BuiltInAgentLaunch = {
+  source: "installed" | "package-exec";
   command: string;
   args: string[];
   packageName: string;
+  packageRange: string;
   packageVersion?: string;
-  binPath: string;
+  binPath?: string;
+  npmCliPath?: string;
 };
 
 type BuiltInLaunchResolverOptions = {
   existsSync?: (path: string) => boolean;
   readFileSync?: typeof fs.readFileSync;
   resolvePackageRoot?: (packageName: string) => string;
+  execPath?: string;
+  resolveNpmCliPath?: (execPath: string) => string;
 };
 
 export const AGENT_REGISTRY: Record<string, string> = {
@@ -54,12 +60,16 @@ export const BUILT_IN_AGENT_PACKAGES = {
     packageRange: ACP_ADAPTER_PACKAGE_RANGES.codex,
     preferredBinName: "codex-acp",
     fallbackCommand: AGENT_REGISTRY.codex,
+    legacyFallbackCommands: [],
   },
   claude: {
     packageName: "@agentclientprotocol/claude-agent-acp",
     packageRange: ACP_ADAPTER_PACKAGE_RANGES.claude,
     preferredBinName: "claude-agent-acp",
     fallbackCommand: AGENT_REGISTRY.claude,
+    legacyFallbackCommands: [
+      `npm exec @agentclientprotocol/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
+    ],
   },
 } as const satisfies Record<string, BuiltInAgentPackageSpec>;
 
@@ -98,7 +108,11 @@ export function resolveAgentCommand(agentName: string, overrides?: Record<string
 
 export function findBuiltInAgentPackage(agentCommand: string): BuiltInAgentPackageSpec | undefined {
   const normalized = agentCommand.trim();
-  return Object.values(BUILT_IN_AGENT_PACKAGES).find((spec) => spec.fallbackCommand === normalized);
+  const builtInAgentPackages = Object.values(BUILT_IN_AGENT_PACKAGES) as BuiltInAgentPackageSpec[];
+  return builtInAgentPackages.find(
+    (spec) =>
+      spec.fallbackCommand === normalized || spec.legacyFallbackCommands?.includes(normalized),
+  );
 }
 
 function defaultResolvePackageRoot(packageName: string): string {
@@ -147,6 +161,22 @@ function resolvePackageBin(
   );
 }
 
+function defaultResolveNpmCliPath(execPath: string): string {
+  const candidate = path.resolve(
+    path.dirname(execPath),
+    "..",
+    "lib",
+    "node_modules",
+    "npm",
+    "bin",
+    "npm-cli.js",
+  );
+  if (!fs.existsSync(candidate)) {
+    throw new Error(`npm CLI not found for execPath: ${execPath}`);
+  }
+  return candidate;
+}
+
 export function resolveInstalledBuiltInAgentLaunch(
   agentCommand: string,
   options: BuiltInLaunchResolverOptions = {},
@@ -182,15 +212,66 @@ export function resolveInstalledBuiltInAgentLaunch(
     }
 
     return {
+      source: "installed",
       command: process.execPath,
       args: [binPath],
       packageName: spec.packageName,
+      packageRange: spec.packageRange,
       packageVersion: manifest.version,
       binPath,
     };
   } catch {
     return undefined;
   }
+}
+
+export function resolvePackageExecBuiltInAgentLaunch(
+  agentCommand: string,
+  options: BuiltInLaunchResolverOptions = {},
+): BuiltInAgentLaunch | undefined {
+  const spec = findBuiltInAgentPackage(agentCommand);
+  if (!spec) {
+    return undefined;
+  }
+
+  const existsSync = options.existsSync ?? fs.existsSync;
+  const execPath = options.execPath ?? process.execPath;
+  const resolveNpmCliPath = options.resolveNpmCliPath ?? defaultResolveNpmCliPath;
+
+  try {
+    const npmCliPath = resolveNpmCliPath(execPath);
+    if (!existsSync(npmCliPath)) {
+      return undefined;
+    }
+
+    return {
+      source: "package-exec",
+      command: execPath,
+      args: [
+        npmCliPath,
+        "exec",
+        "--yes",
+        `--package=${spec.packageName}@${spec.packageRange}`,
+        "--",
+        spec.preferredBinName,
+      ],
+      packageName: spec.packageName,
+      packageRange: spec.packageRange,
+      npmCliPath,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolveBuiltInAgentLaunch(
+  agentCommand: string,
+  options: BuiltInLaunchResolverOptions = {},
+): BuiltInAgentLaunch | undefined {
+  return (
+    resolveInstalledBuiltInAgentLaunch(agentCommand, options) ??
+    resolvePackageExecBuiltInAgentLaunch(agentCommand, options)
+  );
 }
 
 export function listBuiltInAgents(overrides?: Record<string, string>): string[] {
