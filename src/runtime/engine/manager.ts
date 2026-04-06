@@ -304,9 +304,13 @@ export class AcpRuntimeManager {
     trimConversationForRuntime(conversation);
 
     const queue = new AsyncEventQueue();
-    const pendingClient = this.pendingPersistentClients.get(record.acpxRecordId);
+    let pendingClient = this.pendingPersistentClients.get(record.acpxRecordId);
     if (pendingClient) {
       this.pendingPersistentClients.delete(record.acpxRecordId);
+      if (!pendingClient.hasReusableSession(record.acpSessionId)) {
+        await pendingClient.close().catch(() => {});
+        pendingClient = undefined;
+      }
     }
     const client =
       pendingClient ??

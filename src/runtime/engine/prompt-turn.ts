@@ -2,8 +2,8 @@ import { TimeoutError, withTimeout } from "../../async-control.js";
 import { hasAgentReplyAfterPrompt } from "../../session/conversation-model.js";
 import type { PromptInput, RunPromptResult, SessionConversation } from "../../types.js";
 
-const SESSION_REPLY_IDLE_MS = 150;
-const SESSION_REPLY_DRAIN_TIMEOUT_MS = 2_000;
+const SESSION_REPLY_IDLE_MS = 1_000;
+const SESSION_REPLY_DRAIN_TIMEOUT_MS = 5_000;
 
 type PromptTurnClient = {
   prompt: (
