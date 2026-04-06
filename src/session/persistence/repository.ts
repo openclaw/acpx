@@ -297,6 +297,102 @@ function killSignalCandidates(signal: NodeJS.Signals | undefined): NodeJS.Signal
   return [normalized, "SIGKILL"];
 }
 
+export type PruneOptions = {
+  agentCommand?: string;
+  before?: Date;
+  olderThanMs?: number;
+  includeHistory?: boolean;
+  dryRun?: boolean;
+};
+
+export type PruneResult = {
+  pruned: SessionRecord[];
+  bytesFreed: number;
+  dryRun: boolean;
+};
+
+export async function pruneSessions(options: PruneOptions = {}): Promise<PruneResult> {
+  await ensureSessionDir();
+  const entries = await loadSessionIndexEntries();
+
+  let eligible = entries.filter((entry) => entry.closed);
+
+  if (options.agentCommand) {
+    eligible = eligible.filter((entry) => entry.agentCommand === options.agentCommand);
+  }
+
+  const cutoff =
+    options.before ??
+    (options.olderThanMs != null ? new Date(Date.now() - options.olderThanMs) : undefined);
+
+  if (cutoff) {
+    const cutoffIso = cutoff.toISOString();
+    eligible = eligible.filter((entry) => entry.lastUsedAt < cutoffIso);
+  }
+
+  const records: SessionRecord[] = [];
+  for (const entry of eligible) {
+    const record = await loadRecordFromIndexEntry(entry);
+    if (record) {
+      records.push(record);
+    }
+  }
+
+  if (options.dryRun) {
+    return { pruned: records, bytesFreed: 0, dryRun: true };
+  }
+
+  const sessionDir = sessionBaseDir();
+  let bytesFreed = 0;
+
+  // Read the directory once upfront so stream-file matching doesn't re-read
+  // it for every session in the loop.
+  let dirEntries: string[] = [];
+  if (options.includeHistory) {
+    try {
+      dirEntries = await fs.readdir(sessionDir);
+    } catch {
+      // ignore
+    }
+  }
+
+  for (const record of records) {
+    const safeId = encodeURIComponent(record.acpxRecordId);
+    const jsonFile = path.join(sessionDir, `${safeId}.json`);
+
+    try {
+      const stat = await fs.stat(jsonFile);
+      bytesFreed += stat.size;
+    } catch {
+      // file already gone
+    }
+    await fs.unlink(jsonFile).catch(() => undefined);
+
+    if (options.includeHistory) {
+      const prefix = `${safeId}.stream`;
+      for (const name of dirEntries) {
+        if (!name.startsWith(prefix)) {
+          continue;
+        }
+        const filePath = path.join(sessionDir, name);
+        try {
+          const stat = await fs.stat(filePath);
+          bytesFreed += stat.size;
+        } catch {
+          // ignore
+        }
+        await fs.unlink(filePath).catch(() => undefined);
+      }
+    }
+  }
+
+  await rebuildSessionIndex(sessionDir).catch(() => {
+    // best effort cache rebuild
+  });
+
+  return { pruned: records, bytesFreed, dryRun: false };
+}
+
 export async function closeSession(id: string): Promise<SessionRecord> {
   const record = await resolveSessionRecord(id);
   const now = isoNow();

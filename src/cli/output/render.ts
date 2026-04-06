@@ -205,6 +205,64 @@ export function printCreatedSessionBanner(
   process.stderr.write(`[acpx] cwd: ${record.cwd}\n`);
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes >= 1_073_741_824) {
+    return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
+  }
+  if (bytes >= 1_048_576) {
+    return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  }
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${bytes} B`;
+}
+
+export function printPruneResultByFormat(
+  result: { pruned: SessionRecord[]; bytesFreed: number; dryRun: boolean },
+  format: OutputFormat,
+): void {
+  const count = result.pruned.length;
+
+  if (
+    emitJsonResult(format, {
+      action: result.dryRun ? "sessions_prune_dry_run" : "sessions_pruned",
+      dryRun: result.dryRun,
+      count,
+      bytesFreed: result.bytesFreed,
+      pruned: result.pruned.map((r) => r.acpxRecordId),
+    })
+  ) {
+    return;
+  }
+
+  if (format === "quiet") {
+    for (const record of result.pruned) {
+      process.stdout.write(`${record.acpxRecordId}\n`);
+    }
+    return;
+  }
+
+  if (count === 0) {
+    process.stdout.write(
+      result.dryRun ? "[DRY RUN] No sessions to prune\n" : "No sessions pruned\n",
+    );
+    return;
+  }
+
+  const prefix = result.dryRun ? "[DRY RUN] Would prune" : "Pruned";
+  const bytesSuffix =
+    !result.dryRun && result.bytesFreed > 0 ? `, freed ${formatBytes(result.bytesFreed)}` : "";
+  process.stdout.write(`${prefix} ${count} session${count === 1 ? "" : "s"}${bytesSuffix}\n`);
+
+  for (const record of result.pruned) {
+    const label = record.name ? ` (${record.name})` : "";
+    process.stdout.write(
+      `  ${record.acpxRecordId}${label}\t${record.closedAt ?? record.lastUsedAt}\n`,
+    );
+  }
+}
+
 export function agentSessionIdPayload(agentSessionId: string | undefined): {
   agentSessionId?: string;
 } {

@@ -33,6 +33,7 @@ import {
   type PromptFlags,
   type SessionsHistoryFlags,
   type SessionsNewFlags,
+  type SessionsPruneFlags,
   type StatusFlags,
 } from "./flags.js";
 import { emitJsonResult } from "./output/json-output.js";
@@ -881,6 +882,32 @@ export async function handleSessionsHistory(
   }
 
   printSessionHistoryByFormat(record, flags.limit, globalFlags.format);
+}
+
+export async function handleSessionsPrune(
+  explicitAgentName: string | undefined,
+  flags: SessionsPruneFlags,
+  command: Command,
+  config: ResolvedAcpxConfig,
+): Promise<void> {
+  const globalFlags = resolveGlobalFlags(command, config);
+  const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const [{ pruneSessions }, { printPruneResultByFormat }] = await Promise.all([
+    loadSessionModule(),
+    loadOutputRenderModule(),
+  ]);
+
+  const olderThanMs = flags.olderThan != null ? flags.olderThan * 24 * 60 * 60 * 1000 : undefined;
+
+  const result = await pruneSessions({
+    agentCommand: agent.agentCommand,
+    before: flags.before,
+    olderThanMs,
+    includeHistory: flags.includeHistory,
+    dryRun: flags.dryRun,
+  });
+
+  printPruneResultByFormat(result, globalFlags.format);
 }
 
 export { parseHistoryLimit, NoSessionError, loadSessionModule };

@@ -9,6 +9,7 @@ import {
   handleSessionsHistory,
   handleSessionsList,
   handleSessionsNew,
+  handleSessionsPrune,
   handleSessionsShow,
   handleSetConfigOption,
   handleSetMode,
@@ -20,11 +21,14 @@ import {
   addPromptInputOption,
   addSessionNameOption,
   addSessionOption,
+  parseDaysOlderThan,
   parseNonEmptyValue,
+  parsePruneBeforeDate,
   parseSessionName,
   type PromptFlags,
   type SessionsHistoryFlags,
   type SessionsNewFlags,
+  type SessionsPruneFlags,
   type StatusFlags,
 } from "./flags.js";
 import { registerStatusCommand } from "./status-command.js";
@@ -133,6 +137,17 @@ export function registerSessionsCommand(
         this,
         config,
       );
+    });
+
+  sessionsCommand
+    .command("prune")
+    .description("Delete closed sessions and free disk space")
+    .option("--dry-run", "Preview what would be pruned without deleting anything")
+    .option("--before <date>", "Prune sessions closed before this date", parsePruneBeforeDate)
+    .option("--older-than <days>", "Prune sessions closed more than N days ago", parseDaysOlderThan)
+    .option("--include-history", "Also delete event stream files (.stream.ndjson)")
+    .action(async function (this: Command, flags: SessionsPruneFlags) {
+      await handleSessionsPrune(explicitAgentName, flags, this, config);
     });
 }
 

@@ -70,6 +70,13 @@ export type StatusFlags = {
   session?: string;
 };
 
+export type SessionsPruneFlags = {
+  dryRun?: boolean;
+  before?: Date;
+  olderThan?: number;
+  includeHistory?: boolean;
+};
+
 export function parseOutputFormat(value: string): OutputFormat {
   if (!OUTPUT_FORMATS.includes(value as OutputFormat)) {
     throw new InvalidArgumentError(
@@ -135,6 +142,24 @@ export function parseHistoryLimit(value: string): number {
     throw new InvalidArgumentError("Limit must be a positive integer");
   }
   return parsed;
+}
+
+export function parseDaysOlderThan(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new InvalidArgumentError("--older-than must be a positive integer number of days");
+  }
+  return parsed;
+}
+
+export function parsePruneBeforeDate(value: string): Date {
+  const date = new Date(value);
+  if (isNaN(date.getTime())) {
+    throw new InvalidArgumentError(
+      `--before must be a valid date (e.g. 2026-01-01 or 2026-01-01T00:00:00Z)`,
+    );
+  }
+  return date;
 }
 
 export function parseAllowedTools(value: string): string[] {
