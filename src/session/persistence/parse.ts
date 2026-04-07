@@ -275,6 +275,10 @@ function parseAcpxState(raw: unknown): SessionAcpxState | undefined {
 
   const state: SessionAcpxState = {};
 
+  if (record.reset_on_next_ensure === true) {
+    state.reset_on_next_ensure = true;
+  }
+
   if (typeof record.current_mode_id === "string") {
     state.current_mode_id = record.current_mode_id;
   }

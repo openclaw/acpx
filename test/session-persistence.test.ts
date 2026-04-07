@@ -49,6 +49,31 @@ test("listSessions preserves acpx desired_mode_id", async () => {
   });
 });
 
+test("listSessions preserves acpx reset_on_next_ensure", async () => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const cwd = path.join(homeDir, "workspace");
+
+    await writeSessionRecord(
+      homeDir,
+      makeSessionRecord({
+        acpxRecordId: "reset-on-next-ensure",
+        acpSessionId: "reset-on-next-ensure",
+        agentCommand: "agent-a",
+        cwd,
+        acpx: {
+          reset_on_next_ensure: true,
+        },
+      }),
+    );
+
+    const sessions = await session.listSessions();
+    const record = sessions.find((entry) => entry.acpxRecordId === "reset-on-next-ensure");
+    assert.ok(record);
+    assert.equal(record.acpx?.reset_on_next_ensure, true);
+  });
+});
+
 test("listSessions preserves acpx session_options", async () => {
   await withTempHome(async (homeDir) => {
     const session = await loadSessionModule();

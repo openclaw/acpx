@@ -170,6 +170,7 @@ test("runtime reuse policy only keeps compatible records", () => {
     cwd: path.resolve("/workspace"),
     agentCommand: "codex --acp",
     acpSessionId: "sid-1",
+    acpx: {},
   };
   assert.equal(
     shouldReuseExistingRecord(base, {
@@ -199,6 +200,21 @@ test("runtime reuse policy only keeps compatible records", () => {
       agentCommand: "codex --acp",
       resumeSessionId: "sid-2",
     }),
+    false,
+  );
+  assert.equal(
+    shouldReuseExistingRecord(
+      {
+        ...base,
+        acpx: {
+          reset_on_next_ensure: true,
+        },
+      },
+      {
+        cwd: "/workspace",
+        agentCommand: "codex --acp",
+      },
+    ),
     false,
   );
 });
