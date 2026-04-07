@@ -814,6 +814,166 @@ test("AcpRuntimeManager closes the backend session when discarding persistent st
   const closed = await store.load("discard-session");
   assert.equal(closed?.closed, true);
   assert.equal(typeof closed?.closedAt, "string");
+  assert.equal(closed?.acpx?.reset_on_next_ensure, true);
+
+  let recreatedSessions = 0;
+  const restartedManager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => {
+            recreatedSessions += 1;
+            return { sessionId: "fresh-discard-sid", agentSessionId: "fresh-agent" };
+          },
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          supportsCloseSession: () => true,
+          closeSession: async () => {},
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  const recreated = await restartedManager.ensureSession({
+    sessionKey: "discard-session",
+    agent: "claude",
+    mode: "persistent",
+    cwd: "/workspace",
+  });
+
+  assert.equal(recreatedSessions, 1);
+  assert.equal(recreated.acpSessionId, "fresh-discard-sid");
+  assert.equal(recreated.agentSessionId, "fresh-agent");
+  assert.equal(recreated.messages.length, 0);
+  assert.equal(recreated.acpx?.reset_on_next_ensure, undefined);
+});
+
+test("AcpRuntimeManager treats missing backend sessions as a successful discard reset", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "discard-missing-session",
+    acpSessionId: "missing-backend-session",
+    agentCommand: "claude --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let startCalls = 0;
+  let closeCalls = 0;
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {
+            startCalls += 1;
+          },
+          close: async () => {
+            closeCalls += 1;
+          },
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          supportsCloseSession: () => true,
+          closeSession: async () => {
+            throw { error: { code: -32002, message: "session not found" } };
+          },
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  await manager.close(createHandle("discard-missing-session"), {
+    discardPersistentState: true,
+  });
+
+  assert.equal(startCalls, 1);
+  assert.equal(closeCalls, 1);
+  const closed = await store.load("discard-missing-session");
+  assert.equal(closed?.closed, true);
+  assert.equal(typeof closed?.closedAt, "string");
+  assert.equal(closed?.acpx?.reset_on_next_ensure, true);
+});
+
+test("AcpRuntimeManager applies timeoutMs to backend session shutdown during discard reset", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "discard-timeout-session",
+    acpSessionId: "slow-backend-session",
+    agentCommand: "claude --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let startCalls = 0;
+  let closeCalls = 0;
+  let closeSessionCalls = 0;
+  const never = new Promise<void>(() => {});
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store, timeoutMs: 5 }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {
+            startCalls += 1;
+          },
+          close: async () => {
+            closeCalls += 1;
+          },
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          supportsCloseSession: () => true,
+          closeSession: async () => {
+            closeSessionCalls += 1;
+            await never;
+          },
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  await assert.rejects(
+    async () =>
+      await manager.close(createHandle("discard-timeout-session"), {
+        discardPersistentState: true,
+      }),
+    /Timed out after 5ms/,
+  );
+
+  assert.equal(startCalls, 1);
+  assert.equal(closeSessionCalls, 1);
+  assert.equal(closeCalls, 1);
+  const unchanged = await store.load("discard-timeout-session");
+  assert.equal(unchanged?.closed, false);
+  assert.equal(unchanged?.closedAt, undefined);
+  assert.equal(unchanged?.acpx?.reset_on_next_ensure, undefined);
 });
 
 test("AcpRuntimeManager fails offline persistent controls clearly when session/load is unavailable", async () => {

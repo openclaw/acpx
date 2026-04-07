@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { AcpClient } from "../../acp/client.js";
 import { normalizeOutputError } from "../../acp/error-normalization.js";
-import { extractAcpError } from "../../acp/error-shapes.js";
+import { extractAcpError, isAcpResourceNotFoundError } from "../../acp/error-shapes.js";
+import { withTimeout } from "../../async-control.js";
 import { textPrompt, type PromptInput } from "../../prompt-content.js";
 import {
   cloneSessionAcpxState,
@@ -635,6 +636,10 @@ export class AcpRuntimeManager {
     await this.cancel(handle);
     if (options.discardPersistentState) {
       await this.closeBackendSession(record);
+      record.acpx = {
+        ...record.acpx,
+        reset_on_next_ensure: true,
+      };
     }
     record.closed = true;
     record.closedAt = isoNow();
@@ -665,7 +670,7 @@ export class AcpRuntimeManager {
 
     try {
       if (!reusablePendingClient) {
-        await client.start();
+        await withTimeout(client.start(), this.options.timeoutMs);
       }
       if (!client.supportsCloseSession()) {
         throw new AcpRuntimeError(
@@ -673,7 +678,7 @@ export class AcpRuntimeManager {
           `Agent does not support session/close for ${record.acpxRecordId}.`,
         );
       }
-      await client.closeSession(record.acpSessionId);
+      await withTimeout(client.closeSession(record.acpSessionId), this.options.timeoutMs);
     } catch (error) {
       if (isUnsupportedSessionCloseError(error)) {
         throw new AcpRuntimeError(
@@ -681,6 +686,9 @@ export class AcpRuntimeManager {
           `Agent does not support session/close for ${record.acpxRecordId}.`,
           { cause: error },
         );
+      }
+      if (isAcpResourceNotFoundError(error)) {
+        return;
       }
       throw error;
     } finally {
