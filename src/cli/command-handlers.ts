@@ -308,6 +308,7 @@ export async function handleExec(
       model: globalFlags.model,
       allowedTools: globalFlags.allowedTools,
       maxTurns: globalFlags.maxTurns,
+      systemPrompt: globalFlags.systemPrompt,
     },
   });
 
@@ -628,6 +629,7 @@ export async function handleSessionsNew(
       model: globalFlags.model,
       allowedTools: globalFlags.allowedTools,
       maxTurns: globalFlags.maxTurns,
+      systemPrompt: globalFlags.systemPrompt,
     },
   });
 
@@ -668,6 +670,7 @@ export async function handleSessionsEnsure(
       model: globalFlags.model,
       allowedTools: globalFlags.allowedTools,
       maxTurns: globalFlags.maxTurns,
+      systemPrompt: globalFlags.systemPrompt,
     },
   });
 

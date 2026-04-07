@@ -446,6 +446,62 @@ test("AcpClient createSession forwards claudeCode options in _meta", async () =>
   });
 });
 
+test("AcpClient createSession forwards systemPrompt string in _meta", async () => {
+  const client = makeClient({
+    sessionOptions: {
+      systemPrompt: "you are an obsidian assistant",
+    },
+  });
+
+  let capturedParams: Record<string, unknown> | undefined;
+  asInternals(client).connection = {
+    newSession: async (params: Record<string, unknown>) => {
+      capturedParams = params;
+      return { sessionId: "session-sp-string" };
+    },
+  };
+
+  await client.createSession("/tmp/acpx-client-system-prompt");
+  assert.deepEqual(capturedParams, {
+    cwd: "/tmp/acpx-client-system-prompt",
+    mcpServers: [],
+    _meta: {
+      systemPrompt: "you are an obsidian assistant",
+    },
+  });
+});
+
+test("AcpClient createSession forwards systemPrompt append in _meta alongside claudeCode options", async () => {
+  const client = makeClient({
+    sessionOptions: {
+      model: "sonnet",
+      systemPrompt: { append: "always speak in spanish" },
+    },
+  });
+
+  let capturedParams: Record<string, unknown> | undefined;
+  asInternals(client).connection = {
+    newSession: async (params: Record<string, unknown>) => {
+      capturedParams = params;
+      return { sessionId: "session-sp-append" };
+    },
+  };
+
+  await client.createSession("/tmp/acpx-client-system-prompt-append");
+  assert.deepEqual(capturedParams, {
+    cwd: "/tmp/acpx-client-system-prompt-append",
+    mcpServers: [],
+    _meta: {
+      claudeCode: {
+        options: {
+          model: "sonnet",
+        },
+      },
+      systemPrompt: { append: "always speak in spanish" },
+    },
+  });
+});
+
 test("AcpClient createSession forwards codex model metadata without setting it explicitly", async () => {
   const client = makeClient({
     agentCommand: "npx @zed-industries/codex-acp",

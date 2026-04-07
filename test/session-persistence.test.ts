@@ -107,6 +107,59 @@ test("listSessions preserves acpx session_options", async () => {
   });
 });
 
+test("listSessions preserves acpx session_options system_prompt string and append", async () => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const cwd = path.join(homeDir, "workspace");
+
+    await writeSessionRecord(
+      homeDir,
+      makeSessionRecord({
+        acpxRecordId: "session-system-prompt-string",
+        acpSessionId: "session-system-prompt-string",
+        agentCommand: "agent-a",
+        cwd,
+        acpx: {
+          session_options: {
+            system_prompt: "you are an obsidian assistant",
+          },
+        },
+      }),
+    );
+    await writeSessionRecord(
+      homeDir,
+      makeSessionRecord({
+        acpxRecordId: "session-system-prompt-append",
+        acpSessionId: "session-system-prompt-append",
+        agentCommand: "agent-a",
+        cwd,
+        acpx: {
+          session_options: {
+            system_prompt: { append: "always speak in spanish" },
+          },
+        },
+      }),
+    );
+
+    const sessions = await session.listSessions();
+    const stringRecord = sessions.find(
+      (entry) => entry.acpxRecordId === "session-system-prompt-string",
+    );
+    const appendRecord = sessions.find(
+      (entry) => entry.acpxRecordId === "session-system-prompt-append",
+    );
+    assert.ok(stringRecord);
+    assert.ok(appendRecord);
+    assert.equal(
+      stringRecord.acpx?.session_options?.system_prompt,
+      "you are an obsidian assistant",
+    );
+    assert.deepEqual(appendRecord.acpx?.session_options?.system_prompt, {
+      append: "always speak in spanish",
+    });
+  });
+});
+
 test("listSessions ignores unsupported conversation message shapes", async () => {
   await withTempHome(async (homeDir) => {
     const sessionDir = path.join(homeDir, ".acpx", "sessions");

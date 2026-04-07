@@ -56,7 +56,8 @@ export function setDesiredModelId(record: SessionRecord, modelId: string | undef
   if (
     typeof sessionOptions.model === "string" ||
     Array.isArray(sessionOptions.allowed_tools) ||
-    typeof sessionOptions.max_turns === "number"
+    typeof sessionOptions.max_turns === "number" ||
+    sessionOptions.system_prompt !== undefined
   ) {
     acpx.session_options = sessionOptions;
   } else {

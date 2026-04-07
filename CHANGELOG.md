@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- CLI/claude: add `--system-prompt <text>` and `--append-system-prompt <text>` global flags that forward through ACP `_meta.systemPrompt` on `session/new`, letting callers replace or append to the Claude Code system prompt without dropping out of persistent acpx sessions. The value is persisted in `session_options.system_prompt` so ensure/reuse flows keep the override. Codex and other agents ignore the field. (#229) Thanks @Vercantez.
+
 ### Breaking
 
 ### Fixes

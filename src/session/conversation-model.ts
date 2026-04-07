@@ -465,6 +465,14 @@ export function cloneSessionAcpxState(
             ? [...state.session_options.allowed_tools]
             : undefined,
           max_turns: state.session_options.max_turns,
+          ...(state.session_options.system_prompt !== undefined
+            ? {
+                system_prompt:
+                  typeof state.session_options.system_prompt === "string"
+                    ? state.session_options.system_prompt
+                    : { append: state.session_options.system_prompt.append },
+              }
+            : {}),
         }
       : undefined,
   };

@@ -323,6 +323,20 @@ function parseAcpxState(raw: unknown): SessionAcpxState | undefined {
       parsedSessionOptions.max_turns = sessionOptions.max_turns;
     }
 
+    const rawSystemPrompt = sessionOptions.system_prompt;
+    if (typeof rawSystemPrompt === "string" && rawSystemPrompt.length > 0) {
+      parsedSessionOptions.system_prompt = rawSystemPrompt;
+    } else {
+      const appendRecord = asRecord(rawSystemPrompt);
+      if (
+        appendRecord &&
+        typeof appendRecord.append === "string" &&
+        appendRecord.append.length > 0
+      ) {
+        parsedSessionOptions.system_prompt = { append: appendRecord.append };
+      }
+    }
+
     if (Object.keys(parsedSessionOptions).length > 0) {
       state.session_options = parsedSessionOptions;
     }

@@ -5,6 +5,7 @@ import {
   DEFAULT_AGENT_NAME,
   resolveAgentCommand as resolveAgentCommandFromRegistry,
 } from "../agent-registry.js";
+import type { SystemPromptOption } from "../runtime/engine/session-options.js";
 import { DEFAULT_QUEUE_OWNER_TTL_MS } from "../session/session.js";
 import {
   AUTH_POLICIES,
@@ -42,6 +43,7 @@ export type GlobalFlags = PermissionFlags & {
   model?: string;
   allowedTools?: string[];
   maxTurns?: number;
+  systemPrompt?: SystemPromptOption;
   promptRetries?: number;
 };
 
@@ -159,6 +161,31 @@ export function parseMaxTurns(value: string): number {
   return parsed;
 }
 
+export function resolveSystemPromptFlag(opts: {
+  systemPrompt?: unknown;
+  appendSystemPrompt?: unknown;
+}): SystemPromptOption | undefined {
+  const replace =
+    typeof opts.systemPrompt === "string" && opts.systemPrompt.length > 0
+      ? opts.systemPrompt
+      : undefined;
+  const append =
+    typeof opts.appendSystemPrompt === "string" && opts.appendSystemPrompt.length > 0
+      ? opts.appendSystemPrompt
+      : undefined;
+
+  if (replace !== undefined && append !== undefined) {
+    throw new InvalidArgumentError("Use only one of --system-prompt or --append-system-prompt");
+  }
+  if (replace !== undefined) {
+    return replace;
+  }
+  if (append !== undefined) {
+    return { append };
+  }
+  return undefined;
+}
+
 export function parsePromptRetries(value: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
@@ -218,6 +245,16 @@ export function addGlobalFlags(command: Command): Command {
       parseAllowedTools,
     )
     .option("--max-turns <count>", "Maximum turns for the session", parseMaxTurns)
+    .option(
+      "--system-prompt <text>",
+      "Replace the agent system prompt (claude-agent-acp via ACP _meta.systemPrompt)",
+      (value: string) => parseNonEmptyValue("System prompt", value),
+    )
+    .option(
+      "--append-system-prompt <text>",
+      "Append text to the agent system prompt (claude-agent-acp via ACP _meta.systemPrompt.append)",
+      (value: string) => parseNonEmptyValue("Append system prompt", value),
+    )
     .option(
       "--prompt-retries <count>",
       "Retry failed prompt turns on transient errors (default: 0)",
@@ -309,6 +346,7 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
     model: typeof opts.model === "string" ? parseNonEmptyValue("Model", opts.model) : undefined,
     allowedTools: Array.isArray(opts.allowedTools) ? opts.allowedTools : undefined,
     maxTurns: typeof opts.maxTurns === "number" ? opts.maxTurns : undefined,
+    systemPrompt: resolveSystemPromptFlag(opts),
     promptRetries: typeof opts.promptRetries === "number" ? opts.promptRetries : undefined,
     approveAll: opts.approveAll ? true : undefined,
     approveReads: opts.approveReads ? true : undefined,

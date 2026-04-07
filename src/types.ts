@@ -173,6 +173,7 @@ export type AcpClientOptions = {
     model?: string;
     allowedTools?: string[];
     maxTurns?: number;
+    systemPrompt?: string | { append: string };
   };
   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onAcpOutputMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
@@ -292,6 +293,7 @@ export type SessionAcpxState = {
     model?: string;
     allowed_tools?: string[];
     max_turns?: number;
+    system_prompt?: string | { append: string };
   };
 };
 

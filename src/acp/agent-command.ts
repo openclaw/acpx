@@ -340,13 +340,26 @@ export function buildClaudeCodeOptionsMeta(
     claudeCodeOptions.maxTurns = options.maxTurns;
   }
 
-  if (Object.keys(claudeCodeOptions).length === 0) {
+  const meta: Record<string, unknown> = {};
+  if (Object.keys(claudeCodeOptions).length > 0) {
+    meta.claudeCode = { options: claudeCodeOptions };
+  }
+
+  const systemPrompt = options.systemPrompt;
+  if (typeof systemPrompt === "string" && systemPrompt.length > 0) {
+    meta.systemPrompt = systemPrompt;
+  } else if (
+    systemPrompt &&
+    typeof systemPrompt === "object" &&
+    typeof systemPrompt.append === "string" &&
+    systemPrompt.append.length > 0
+  ) {
+    meta.systemPrompt = { append: systemPrompt.append };
+  }
+
+  if (Object.keys(meta).length === 0) {
     return undefined;
   }
 
-  return {
-    claudeCode: {
-      options: claudeCodeOptions,
-    },
-  };
+  return meta;
 }
