@@ -98,7 +98,7 @@
     "react-test-renderer": "^19.2.0",
     "tsdown": "^0.21.0-beta.2",
     "typescript": "^6.0.2",
-    "vite": "^8.0.3",
+    "vite": "^8.0.7",
     "ws": "^8.18.3"
   },
   "lint-staged": {
