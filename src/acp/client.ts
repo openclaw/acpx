@@ -417,6 +417,10 @@ export class AcpClient {
       this.log(
         `spawning installed built-in agent ${resolvedBuiltInLaunch.packageName}${resolvedBuiltInLaunch.packageVersion ? `@${resolvedBuiltInLaunch.packageVersion}` : ""} via ${spawnCommand} ${args.join(" ")}`,
       );
+    } else if (resolvedBuiltInLaunch?.source === "global-path") {
+      this.log(
+        `spawning globally installed built-in agent ${resolvedBuiltInLaunch.packageName} via PATH binary ${spawnCommand}`,
+      );
     } else if (resolvedBuiltInLaunch?.source === "package-exec") {
       this.log(
         `spawning built-in agent ${resolvedBuiltInLaunch.packageName}@${resolvedBuiltInLaunch.packageRange} via current Node package exec bridge ${spawnCommand} ${args.join(" ")}`,

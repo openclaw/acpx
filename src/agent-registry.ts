@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +18,7 @@ type BuiltInAgentPackageSpec = {
 };
 
 type BuiltInAgentLaunch = {
-  source: "installed" | "package-exec";
+  source: "installed" | "global-path" | "package-exec";
   command: string;
   args: string[];
   packageName: string;
@@ -33,6 +34,7 @@ type BuiltInLaunchResolverOptions = {
   resolvePackageRoot?: (packageName: string) => string;
   execPath?: string;
   resolveNpmCliPath?: (execPath: string) => string;
+  resolveGlobalBinPath?: (binName: string) => string | undefined;
 };
 
 export const AGENT_REGISTRY: Record<string, string> = {
@@ -264,12 +266,54 @@ export function resolvePackageExecBuiltInAgentLaunch(
   }
 }
 
+function defaultResolveGlobalBinPath(binName: string): string | undefined {
+  try {
+    const result = execFileSync(process.platform === "win32" ? "where" : "which", [binName], {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    // `where` on Windows may return multiple lines; take the first
+    const firstLine = result.split(/\r?\n/)[0]?.trim();
+    return firstLine && firstLine.length > 0 ? firstLine : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolveGlobalPathAgentLaunch(
+  agentCommand: string,
+  options: BuiltInLaunchResolverOptions = {},
+): BuiltInAgentLaunch | undefined {
+  const spec = findBuiltInAgentPackage(agentCommand);
+  if (!spec) {
+    return undefined;
+  }
+
+  const resolveGlobalBinPath = options.resolveGlobalBinPath ?? defaultResolveGlobalBinPath;
+
+  const binPath = resolveGlobalBinPath(spec.preferredBinName);
+  if (!binPath) {
+    return undefined;
+  }
+
+  return {
+    source: "global-path",
+    command: binPath,
+    args: [],
+    packageName: spec.packageName,
+    packageRange: spec.packageRange,
+    binPath,
+  };
+}
+
 export function resolveBuiltInAgentLaunch(
   agentCommand: string,
   options: BuiltInLaunchResolverOptions = {},
 ): BuiltInAgentLaunch | undefined {
   return (
     resolveInstalledBuiltInAgentLaunch(agentCommand, options) ??
+    resolveGlobalPathAgentLaunch(agentCommand, options) ??
     resolvePackageExecBuiltInAgentLaunch(agentCommand, options)
   );
 }

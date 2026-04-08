@@ -9,6 +9,7 @@ import {
   DEFAULT_AGENT_NAME,
   listBuiltInAgents,
   resolveBuiltInAgentLaunch,
+  resolveGlobalPathAgentLaunch,
   resolveInstalledBuiltInAgentLaunch,
   resolvePackageExecBuiltInAgentLaunch,
   resolveAgentCommand,
@@ -149,6 +150,56 @@ test("resolvePackageExecBuiltInAgentLaunch bridges built-ins through the current
   });
 });
 
+test("resolveGlobalPathAgentLaunch uses a globally installed binary from PATH", () => {
+  const launch = resolveGlobalPathAgentLaunch(AGENT_REGISTRY.claude, {
+    resolveGlobalBinPath: (binName) =>
+      binName === "claude-agent-acp" ? "/usr/local/bin/claude-agent-acp" : undefined,
+  });
+
+  assert.deepEqual(launch, {
+    source: "global-path",
+    command: "/usr/local/bin/claude-agent-acp",
+    args: [],
+    packageName: BUILT_IN_AGENT_PACKAGES.claude.packageName,
+    packageRange: BUILT_IN_AGENT_PACKAGES.claude.packageRange,
+    binPath: "/usr/local/bin/claude-agent-acp",
+  });
+});
+
+test("resolveGlobalPathAgentLaunch returns undefined when binary is not on PATH", () => {
+  const launch = resolveGlobalPathAgentLaunch(AGENT_REGISTRY.claude, {
+    resolveGlobalBinPath: () => undefined,
+  });
+
+  assert.equal(launch, undefined);
+});
+
+test("resolveGlobalPathAgentLaunch ignores non-built-in commands", () => {
+  assert.equal(
+    resolveGlobalPathAgentLaunch("custom-acp-server --stdio", {
+      resolveGlobalBinPath: () => "/usr/local/bin/custom-acp-server",
+    }),
+    undefined,
+  );
+});
+
+test("resolveBuiltInAgentLaunch prefers global PATH over package-exec when local install unavailable", () => {
+  const npmCliPath = path.join(os.tmpdir(), "acpx-test-global-npm-cli.js");
+  const launch = resolveBuiltInAgentLaunch(AGENT_REGISTRY.codex, {
+    execPath: "/tmp/node",
+    resolvePackageRoot: () => {
+      throw new Error("adapter not installed locally");
+    },
+    resolveGlobalBinPath: (binName) =>
+      binName === "codex-acp" ? "/opt/homebrew/bin/codex-acp" : undefined,
+    existsSync: (candidate) => candidate === npmCliPath,
+    resolveNpmCliPath: () => npmCliPath,
+  });
+
+  assert.equal(launch?.source, "global-path");
+  assert.equal(launch?.command, "/opt/homebrew/bin/codex-acp");
+});
+
 test("resolveBuiltInAgentLaunch accepts the legacy Claude npm exec default", () => {
   const npmCliPath = path.join(os.tmpdir(), "acpx-test-claude-npm-cli.js");
   const launch = resolveBuiltInAgentLaunch(
@@ -159,6 +210,7 @@ test("resolveBuiltInAgentLaunch accepts the legacy Claude npm exec default", () 
       resolvePackageRoot: () => {
         throw new Error("adapter not installed");
       },
+      resolveGlobalBinPath: () => undefined,
       resolveNpmCliPath: () => npmCliPath,
     },
   );
