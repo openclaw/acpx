@@ -90,7 +90,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.3.2",
     "markdownlint-cli2": "^0.22.0",
-    "oxfmt": "^0.43.0",
+    "oxfmt": "^0.44.0",
     "oxlint": "^1.51.0",
     "oxlint-tsgolint": "^0.20.0",
     "react": "^19.2.4",
