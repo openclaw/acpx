@@ -1,6 +1,6 @@
 {
   "name": "acpx",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Headless CLI client for the Agent Client Protocol (ACP) — talk to coding agents from the command line",
   "keywords": [
     "acp",
@@ -70,7 +70,7 @@
     "viewer:typecheck": "tsc -p examples/flows/replay-viewer/tsconfig.json --noEmit && tsc -p examples/flows/replay-viewer/tsconfig.server.json --noEmit"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.17.0",
+    "@agentclientprotocol/sdk": "^0.18.0",
     "commander": "^14.0.3",
     "skillflag": "^0.1.4",
     "tsx": "^4.0.0",
@@ -82,7 +82,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/react-test-renderer": "^19.1.0",
     "@types/ws": "^8.18.1",
-    "@typescript/native-preview": "7.0.0-dev.20260328.1",
+    "@typescript/native-preview": "7.0.0-dev.20260406.1",
     "@vitejs/plugin-react": "^6.0.1",
     "@xyflow/react": "^12.10.1",
     "elkjs": "^0.11.1",
@@ -90,15 +90,15 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.3.2",
     "markdownlint-cli2": "^0.22.0",
-    "oxfmt": "^0.42.0",
+    "oxfmt": "^0.43.0",
     "oxlint": "^1.51.0",
-    "oxlint-tsgolint": "^0.18.1",
+    "oxlint-tsgolint": "^0.20.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-test-renderer": "^19.2.0",
     "tsdown": "^0.21.0-beta.2",
     "typescript": "^6.0.2",
-    "vite": "^8.0.3",
+    "vite": "^8.0.7",
     "ws": "^8.18.3"
   },
   "lint-staged": {
