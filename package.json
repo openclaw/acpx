@@ -82,7 +82,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/react-test-renderer": "^19.1.0",
     "@types/ws": "^8.18.1",
-    "@typescript/native-preview": "7.0.0-dev.20260406.1",
+    "@typescript/native-preview": "7.0.0-dev.20260407.1",
     "@vitejs/plugin-react": "^6.0.1",
     "@xyflow/react": "^12.10.1",
     "elkjs": "^0.11.1",
