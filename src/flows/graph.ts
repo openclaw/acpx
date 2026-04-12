@@ -101,7 +101,7 @@ function getByPath(value: unknown, jsonPath: string): unknown {
   return jsonPath
     .slice(2)
     .split(".")
-    .reduce<unknown>((current, key) => {
+    .reduce((current: unknown, key) => {
       if (current == null || typeof current !== "object") {
         return undefined;
       }

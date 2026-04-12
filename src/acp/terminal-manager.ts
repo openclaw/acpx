@@ -133,7 +133,7 @@ async function defaultConfirmExecute(commandLine: string): Promise<boolean> {
 }
 
 function canPromptForPermission(): boolean {
-  return Boolean(process.stdin.isTTY && process.stderr.isTTY);
+  return process.stdin.isTTY && process.stderr.isTTY;
 }
 
 function waitMs(ms: number): Promise<void> {

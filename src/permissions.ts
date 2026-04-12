@@ -92,7 +92,7 @@ async function promptForToolPermission(params: RequestPermissionRequest): Promis
 }
 
 function canPromptForPermission(): boolean {
-  return Boolean(process.stdin.isTTY && process.stderr.isTTY);
+  return process.stdin.isTTY && process.stderr.isTTY;
 }
 
 export function permissionModeSatisfies(actual: PermissionMode, required: PermissionMode): boolean {

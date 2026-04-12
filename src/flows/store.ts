@@ -410,7 +410,7 @@ function createFlowDefinitionSnapshot(flow: FlowDefinition): FlowDefinitionSnaps
   };
 }
 
-function snapshotNode(node: FlowNodeDefinition) {
+function snapshotNode(node: FlowNodeDefinition): FlowDefinitionSnapshot["nodes"][string] {
   const common = {
     nodeType: node.nodeType,
     ...(node.timeoutMs !== undefined ? { timeoutMs: node.timeoutMs } : {}),
@@ -453,6 +453,8 @@ function snapshotNode(node: FlowNodeDefinition) {
         hasRun: typeof node.run === "function",
       };
   }
+
+  throw new Error(`Unsupported flow node type: ${String(node satisfies never)}`);
 }
 
 function snapshotCwd(cwd: AcpNodeDefinition["cwd"]): {

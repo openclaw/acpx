@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildJsonRpcErrorResponse } from "../src/acp/jsonrpc-error.js";
 
-test("buildJsonRpcErrorResponse preserves ACP payload when available", () => {
+test("buildJsonRpcErrorResponse preserves ACP payload and ACPX metadata when available", () => {
   const response = buildJsonRpcErrorResponse({
     outputCode: "RUNTIME",
+    detailCode: "SESSION_MODE_REPLAY_FAILED",
+    origin: "acp",
     message: "fallback message",
+    retryable: true,
+    timestamp: "2026-02-28T00:00:00.000Z",
     sessionId: "session-1",
     acp: {
       code: -32099,
@@ -22,6 +26,12 @@ test("buildJsonRpcErrorResponse preserves ACP payload when available", () => {
   assert.equal(response.error.message, "adapter failure");
   assert.deepEqual(response.error.data, {
     reason: "boom",
+    acpxCode: "RUNTIME",
+    detailCode: "SESSION_MODE_REPLAY_FAILED",
+    origin: "acp",
+    retryable: true,
+    timestamp: "2026-02-28T00:00:00.000Z",
+    sessionId: "session-1",
   });
 });
 

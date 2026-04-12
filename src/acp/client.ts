@@ -548,6 +548,7 @@ export class AcpClient {
       this.log(`initialized protocol version ${initResult.protocolVersion}`);
     } catch (error) {
       startupFailure.dispose();
+      const normalizedError = await this.normalizeInitializeError(error, child, startupStderr);
       try {
         child.kill();
       } catch {
@@ -562,7 +563,7 @@ export class AcpClient {
           },
         );
       }
-      throw error;
+      throw normalizedError;
     }
   }
 
@@ -1085,6 +1086,31 @@ export class AcpClient {
       promise,
       dispose: () => finish(),
     };
+  }
+
+  private async normalizeInitializeError(
+    error: unknown,
+    child: ChildProcessByStdio<Writable, Readable, Readable>,
+    startupStderr: string[],
+  ): Promise<unknown> {
+    if (error instanceof AgentStartupError) {
+      return error;
+    }
+
+    const connectionClosedDuringInitialize =
+      error instanceof Error && /acp connection closed/i.test(error.message);
+    if (!connectionClosedDuringInitialize) {
+      return error;
+    }
+
+    await waitForChildExit(child, 100);
+    return new AgentStartupError({
+      agentCommand: this.options.agentCommand,
+      exitCode: child.exitCode ?? null,
+      signal: child.signalCode ?? null,
+      stderrSummary: this.summarizeStartupStderr(startupStderr),
+      cause: error,
+    });
   }
 
   private selectAuthMethod(methods: AuthMethod[]): AuthSelection | undefined {

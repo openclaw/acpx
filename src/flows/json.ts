@@ -8,7 +8,7 @@ export function parseJsonObject(
     mode?: JsonObjectParseMode;
   } = {},
 ): unknown {
-  const trimmed = String(text ?? "").trim();
+  const trimmed = text.trim();
   if (!trimmed) {
     throw new Error("Expected JSON output, got empty text");
   }

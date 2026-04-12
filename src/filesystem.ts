@@ -56,7 +56,7 @@ async function defaultConfirmWrite(filePath: string, preview: string): Promise<b
 }
 
 function canPromptForPermission(): boolean {
-  return Boolean(process.stdin.isTTY && process.stderr.isTTY);
+  return process.stdin.isTTY && process.stderr.isTTY;
 }
 
 export class FileSystemHandlers {

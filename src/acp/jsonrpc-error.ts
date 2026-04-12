@@ -57,16 +57,37 @@ function buildFallbackData(params: BuildJsonRpcErrorParams): Record<string, unkn
   return data;
 }
 
+function mergeAcpErrorData(acpData: unknown, fallbackData: Record<string, unknown>): unknown {
+  if (Object.keys(fallbackData).length === 0) {
+    return acpData;
+  }
+  if (acpData === undefined) {
+    return fallbackData;
+  }
+  if (acpData && typeof acpData === "object" && !Array.isArray(acpData)) {
+    return {
+      ...acpData,
+      ...fallbackData,
+    };
+  }
+  return {
+    acpData,
+    ...fallbackData,
+  };
+}
+
 function buildErrorObject(params: BuildJsonRpcErrorParams): JsonRpcErrorObject {
+  const fallbackData = buildFallbackData(params);
   if (hasValidAcpError(params.acp)) {
+    const data = mergeAcpErrorData(params.acp.data, fallbackData);
     return {
       code: params.acp.code,
       message: params.acp.message,
-      ...(params.acp.data !== undefined ? { data: params.acp.data } : {}),
+      ...(data !== undefined ? { data } : {}),
     };
   }
 
-  const data = buildFallbackData(params);
+  const data = fallbackData;
   return {
     code: OUTPUT_ERROR_JSONRPC_CODES[params.outputCode] ?? -32603,
     message: params.message,
