@@ -66,14 +66,11 @@ function mergeAcpErrorData(acpData: unknown, fallbackData: Record<string, unknow
   }
   if (acpData && typeof acpData === "object" && !Array.isArray(acpData)) {
     return {
-      ...acpData,
       ...fallbackData,
+      ...acpData,
     };
   }
-  return {
-    acpData,
-    ...fallbackData,
-  };
+  return acpData;
 }
 
 function buildErrorObject(params: BuildJsonRpcErrorParams): JsonRpcErrorObject {

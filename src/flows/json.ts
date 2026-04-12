@@ -1,5 +1,23 @@
 export type JsonObjectParseMode = "strict" | "fenced" | "compat";
 
+function normalizeJsonText(text: unknown): string {
+  if (typeof text === "string") {
+    return text.trim();
+  }
+  if (text == null) {
+    return "";
+  }
+  if (
+    typeof text === "number" ||
+    typeof text === "boolean" ||
+    typeof text === "bigint" ||
+    typeof text === "symbol"
+  ) {
+    return String(text).trim();
+  }
+  return "";
+}
+
 // The generic entrypoint when a workflow wants to choose its tolerance level
 // explicitly. Most callers should still use one of the small helpers below.
 export function parseJsonObject(
@@ -8,7 +26,7 @@ export function parseJsonObject(
     mode?: JsonObjectParseMode;
   } = {},
 ): unknown {
-  const trimmed = text.trim();
+  const trimmed = normalizeJsonText(text);
   if (!trimmed) {
     throw new Error("Expected JSON output, got empty text");
   }

@@ -25,14 +25,69 @@ test("buildJsonRpcErrorResponse preserves ACP payload and ACPX metadata when ava
   assert.equal(response.error.code, -32099);
   assert.equal(response.error.message, "adapter failure");
   assert.deepEqual(response.error.data, {
-    reason: "boom",
     acpxCode: "RUNTIME",
     detailCode: "SESSION_MODE_REPLAY_FAILED",
     origin: "acp",
     retryable: true,
     timestamp: "2026-02-28T00:00:00.000Z",
     sessionId: "session-1",
+    reason: "boom",
   });
+});
+
+test("buildJsonRpcErrorResponse preserves adapter keys when ACP payload overlaps metadata names", () => {
+  const response = buildJsonRpcErrorResponse({
+    outputCode: "RUNTIME",
+    detailCode: "SESSION_MODE_REPLAY_FAILED",
+    origin: "acp",
+    message: "fallback message",
+    retryable: true,
+    timestamp: "2026-02-28T00:00:00.000Z",
+    sessionId: "session-1",
+    acp: {
+      code: -32099,
+      message: "adapter failure",
+      data: {
+        sessionId: "adapter-session",
+        retryable: false,
+      },
+    },
+  });
+
+  assert.deepEqual(response.error.data, {
+    acpxCode: "RUNTIME",
+    detailCode: "SESSION_MODE_REPLAY_FAILED",
+    origin: "acp",
+    retryable: false,
+    timestamp: "2026-02-28T00:00:00.000Z",
+    sessionId: "adapter-session",
+  });
+});
+
+test("buildJsonRpcErrorResponse preserves scalar and array ACP payloads verbatim", () => {
+  const arrayResponse = buildJsonRpcErrorResponse({
+    outputCode: "RUNTIME",
+    message: "fallback message",
+    sessionId: "session-1",
+    acp: {
+      code: -32099,
+      message: "adapter failure",
+      data: ["boom"],
+    },
+  });
+  assert.deepEqual(arrayResponse.error.data, ["boom"]);
+
+  const scalarResponse = buildJsonRpcErrorResponse({
+    outputCode: "RUNTIME",
+    message: "fallback message",
+    sessionId: "session-1",
+    acp: {
+      code: -32099,
+      message: "adapter failure",
+      data: "boom",
+    },
+  });
+  assert.equal(scalarResponse.error.data, "boom");
 });
 
 test("buildJsonRpcErrorResponse shapes fallback ACPX metadata", () => {

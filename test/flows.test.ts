@@ -64,6 +64,14 @@ test("parseJsonObject supports strict and fenced-only modes", () => {
   assert.deepEqual(parseJsonObject('```json\n{"ok":true}\n```', { mode: "fenced" }), {
     ok: true,
   });
+  assert.throws(
+    () => parseJsonObject(undefined as unknown as string),
+    /Expected JSON output, got empty text/,
+  );
+  assert.throws(
+    () => parseJsonObject(null as unknown as string),
+    /Expected JSON output, got empty text/,
+  );
   assert.throws(() => parseStrictJsonObject('before {"ok":true} after'), /Could not parse JSON/);
   assert.throws(
     () => parseJsonObject('before {"ok":true} after', { mode: "fenced" }),
