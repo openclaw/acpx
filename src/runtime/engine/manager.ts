@@ -528,7 +528,11 @@ export class AcpRuntimeManager {
         applyConversation(record, conversation);
         record.lastUsedAt = isoNow();
         await this.options.sessionStore.save(record).catch(() => {});
-        await client.close().catch(() => {});
+        if (input.sessionMode === "persistent" && client.hasReusableSession(record.acpSessionId)) {
+          this.pendingPersistentClients.set(record.acpxRecordId, client);
+        } else {
+          await client.close().catch(() => {});
+        }
         queue.close();
       }
     })();
