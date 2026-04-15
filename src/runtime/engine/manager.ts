@@ -645,6 +645,11 @@ export class AcpRuntimeManager {
         reset_on_next_ensure: true,
       };
     }
+    const pendingClient = this.pendingPersistentClients.get(record.acpxRecordId);
+    if (pendingClient) {
+      this.pendingPersistentClients.delete(record.acpxRecordId);
+      await pendingClient.close().catch(() => {});
+    }
     record.closed = true;
     record.closedAt = isoNow();
     await this.options.sessionStore.save(record);
