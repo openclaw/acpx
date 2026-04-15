@@ -18,6 +18,32 @@ test("buildAgentSpawnOptions hides Windows console windows and preserves auth en
   assert.equal(options.env.ACPX_AUTH_TOKEN, "secret-token");
 });
 
+test("buildAgentSpawnOptions promotes explicit ACPX auth env vars into agent auth env", () => {
+  const previousPrefixed = process.env.ACPX_AUTH_OPENAI_API_KEY;
+  const previousNormalized = process.env.OPENAI_API_KEY;
+
+  process.env.ACPX_AUTH_OPENAI_API_KEY = "sk-explicit";
+  delete process.env.OPENAI_API_KEY;
+
+  try {
+    const options = buildAgentSpawnOptions("/tmp/acpx-agent", undefined);
+    assert.equal(options.env.ACPX_AUTH_OPENAI_API_KEY, "sk-explicit");
+    assert.equal(options.env.OPENAI_API_KEY, "sk-explicit");
+  } finally {
+    if (previousPrefixed == null) {
+      delete process.env.ACPX_AUTH_OPENAI_API_KEY;
+    } else {
+      process.env.ACPX_AUTH_OPENAI_API_KEY = previousPrefixed;
+    }
+
+    if (previousNormalized == null) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousNormalized;
+    }
+  }
+});
+
 test("buildTerminalSpawnOptions hides Windows console windows and maps env entries", () => {
   const options = buildTerminalSpawnOptions("node", "/tmp/acpx-terminal", [
     { name: "TMUX", value: "/tmp/tmux-1000/default,123,0" },

@@ -246,6 +246,34 @@ test("AcpClient prefers env auth credentials over config credentials", async () 
   );
 });
 
+test("AcpClient ignores ambient normalized provider env vars for auth selection", async () => {
+  await withEnv(
+    {
+      OPENAI_API_KEY: "sk-ambient",
+      ACPX_AUTH_OPENAI_API_KEY: undefined,
+    },
+    async () => {
+      const client = makeClient();
+      const internals = asInternals(client);
+
+      const selection = internals.selectAuthMethod?.([{ id: "openai-api-key" }]);
+      assert.equal(selection, undefined);
+
+      let authenticatedMethod: string | undefined;
+      await internals.authenticateIfRequired?.(
+        {
+          authenticate: async ({ methodId }: { methodId: string }) => {
+            authenticatedMethod = methodId;
+          },
+        },
+        [{ id: "openai-api-key" }],
+      );
+
+      assert.equal(authenticatedMethod, undefined);
+    },
+  );
+});
+
 test("AcpClient authenticateIfRequired throws when auth policy is fail and credentials are missing", async () => {
   const client = makeClient({ authPolicy: "fail" });
   const internals = asInternals(client);

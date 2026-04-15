@@ -1,5 +1,7 @@
 import type { AcpClientOptions } from "../types.js";
 
+const AUTH_ENV_PREFIX = "ACPX_AUTH_";
+
 function toEnvToken(value: string): string {
   return value
     .trim()
@@ -8,42 +10,58 @@ function toEnvToken(value: string): string {
     .toUpperCase();
 }
 
-function buildAuthEnvKeys(methodId: string): string[] {
+function buildAuthEnvKey(methodId: string): string | undefined {
   const token = toEnvToken(methodId);
-  const keys = new Set<string>([methodId]);
-  if (token) {
-    keys.add(token);
-    keys.add(`ACPX_AUTH_${token}`);
-  }
-  return [...keys];
+  return token.length > 0 ? `${AUTH_ENV_PREFIX}${token}` : undefined;
 }
 
-const authEnvKeysCache = new Map<string, string[]>();
+const authEnvKeyCache = new Map<string, string | undefined>();
 
-function authEnvKeys(methodId: string): string[] {
-  const cached = authEnvKeysCache.get(methodId);
-  if (cached) {
+function authEnvKey(methodId: string): string | undefined {
+  const cached = authEnvKeyCache.get(methodId);
+  if (cached !== undefined) {
     return cached;
   }
-  const keys = buildAuthEnvKeys(methodId);
-  authEnvKeysCache.set(methodId, keys);
-  return keys;
+  const key = buildAuthEnvKey(methodId);
+  authEnvKeyCache.set(methodId, key);
+  return key;
 }
 
 export function readEnvCredential(methodId: string): string | undefined {
-  for (const key of authEnvKeys(methodId)) {
-    const value = process.env[key];
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value;
-    }
+  const key = authEnvKey(methodId);
+  if (!key) {
+    return undefined;
+  }
+  const value = process.env[key];
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value;
   }
   return undefined;
+}
+
+function promotePrefixedAuthEnvironment(env: NodeJS.ProcessEnv): void {
+  for (const [key, value] of Object.entries(env)) {
+    if (!key.startsWith(AUTH_ENV_PREFIX)) {
+      continue;
+    }
+    if (typeof value !== "string" || value.trim().length === 0) {
+      continue;
+    }
+
+    const normalized = key.slice(AUTH_ENV_PREFIX.length);
+    if (!normalized || env[normalized] != null) {
+      continue;
+    }
+
+    env[normalized] = value;
+  }
 }
 
 function buildAgentEnvironment(
   authCredentials: Record<string, string> | undefined,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
+  promotePrefixedAuthEnvironment(env);
   if (!authCredentials) {
     return env;
   }
@@ -59,7 +77,7 @@ function buildAgentEnvironment(
 
     const normalized = toEnvToken(methodId);
     if (normalized) {
-      const prefixed = `ACPX_AUTH_${normalized}`;
+      const prefixed = `${AUTH_ENV_PREFIX}${normalized}`;
       if (env[prefixed] == null) {
         env[prefixed] = credential;
       }

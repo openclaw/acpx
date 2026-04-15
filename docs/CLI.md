@@ -380,6 +380,11 @@ Supported keys:
 
 CLI flags always override config values.
 
+For ACP `authenticate` handshakes, use either config `auth` entries or explicit
+`ACPX_AUTH_<METHOD_ID>` environment variables such as `ACPX_AUTH_OPENAI_API_KEY`.
+Ambient provider env vars such as `OPENAI_API_KEY` are still passed through to
+child agents, but they do not trigger ACP auth-method selection on their own.
+
 ## `--agent` escape hatch
 
 `--agent <command>` sets a raw adapter command explicitly.

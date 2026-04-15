@@ -226,6 +226,11 @@ Supported keys:
 
 Use `acpx config show` to inspect the resolved config and `acpx config init` to create the global template.
 
+For ACP `authenticate` handshakes, use either config `auth` entries or explicit
+`ACPX_AUTH_<METHOD_ID>` environment variables such as `ACPX_AUTH_OPENAI_API_KEY`.
+Ambient provider env vars such as `OPENAI_API_KEY` are still passed through to
+child agents, but they do not trigger ACP auth-method selection on their own.
+
 ## Session behavior
 
 Persistent prompt sessions are scoped by:

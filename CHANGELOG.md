@@ -35,6 +35,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/load: fall back to a fresh ACP session when adapters reject `session/load` with JSON-RPC `-32601` or `-32602`, so persistent session reconnects do not crash on partial load support. (#174) Thanks @Bortlesboat.
 - Flows/runtime: finalize interrupted `flow run` bundles as failed instead of leaving them stuck at `running` when the process receives `SIGHUP`, `SIGINT`, or `SIGTERM`.
 - Client/auth: cache derived auth env key lists per auth method to avoid repeated allocations during credential lookup. (#167) Thanks @Yuan-ManX.
+- Client/auth: require explicit `ACPX_AUTH_*` env vars or config `auth` entries for ACP auth-method selection, so ambient provider env like `OPENAI_API_KEY` no longer triggers unintended login flows in adapters such as `codex-acp`.
 
 ## 2026.3.12 (v0.3.0)
 
