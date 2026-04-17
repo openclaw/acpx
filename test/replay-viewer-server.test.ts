@@ -123,6 +123,33 @@ test("replay viewer start rejects reusing a server for a different runs dir", as
   }
 });
 
+test("replay viewer blocks file reads that escape the runs directory via runId", async () => {
+  const fakeHome = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-traversal-"));
+  const runsDir = path.join(fakeHome, ".acpx", "flows", "runs");
+  const sessionsDir = path.join(fakeHome, ".acpx", "sessions");
+  await fs.mkdir(runsDir, { recursive: true });
+  await fs.mkdir(sessionsDir, { recursive: true });
+  await fs.writeFile(path.join(sessionsDir, "session-secret.json"), '{"token":"SESSION_SECRET"}');
+
+  const viewerServer = await createReplayViewerServer({
+    host: "127.0.0.1",
+    port: 0,
+    runsDir,
+    disableDependencyOptimization: true,
+  });
+
+  try {
+    const response = await fetch(
+      `${viewerServer.baseUrl}/api/runs/..%2F..%2Fsessions/files/session-secret.json`,
+    );
+    assert.equal(response.status, 400);
+    assert.match(await response.text(), /outside runs directory/i);
+  } finally {
+    await viewerServer.close().catch(() => {});
+    await fs.rm(fakeHome, { recursive: true, force: true });
+  }
+});
+
 async function waitFor(check: () => Promise<boolean>, timeoutMs: number = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
 

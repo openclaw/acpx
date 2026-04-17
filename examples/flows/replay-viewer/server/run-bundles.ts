@@ -51,10 +51,14 @@ export function resolveRunBundleFilePath(
   relativePath: string,
 ): string {
   const normalizedRelativePath = normalizeRelativePath(relativePath);
-  const runDir = path.resolve(runsDir, runId);
+  const resolvedRunsDir = path.resolve(runsDir);
+  const runDir = path.resolve(resolvedRunsDir, runId);
+  if (!isPathInsideDirectory(resolvedRunsDir, runDir, { allowSamePath: false })) {
+    throw new Error(`Refusing to read run bundle outside runs directory: ${runId}`);
+  }
   const resolvedPath = path.resolve(runDir, normalizedRelativePath);
 
-  if (!resolvedPath.startsWith(`${runDir}${path.sep}`) && resolvedPath !== runDir) {
+  if (!isPathInsideDirectory(runDir, resolvedPath)) {
     throw new Error(`Refusing to read outside run bundle: ${relativePath}`);
   }
 
@@ -101,4 +105,21 @@ function normalizeRelativePath(relativePath: string): string {
     throw new Error("Parent directory traversal is not allowed");
   }
   return normalized;
+}
+
+function isPathInsideDirectory(
+  rootDir: string,
+  candidatePath: string,
+  options: { allowSamePath?: boolean } = {},
+): boolean {
+  const relativePath = path.relative(rootDir, candidatePath);
+  if (!options.allowSamePath && relativePath.length === 0) {
+    return false;
+  }
+  return (
+    relativePath.length === 0 ||
+    (!relativePath.startsWith(`..${path.sep}`) &&
+      relativePath !== ".." &&
+      !path.isAbsolute(relativePath))
+  );
 }

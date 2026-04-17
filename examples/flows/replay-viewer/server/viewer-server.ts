@@ -191,7 +191,8 @@ export async function handleApiRequest(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const code =
-        error instanceof Error && /outside run bundle|not allowed|required/.test(error.message)
+        error instanceof Error &&
+        /outside run bundle|outside runs directory|not allowed|required/.test(error.message)
           ? 400
           : 404;
       writeJson(response, code, { error: message });

@@ -78,6 +78,10 @@ test("resolveRunBundleFilePath rejects traversal outside a run bundle", () => {
     () => resolveRunBundleFilePath(runsDir, "run-id", "/tmp/manifest.json"),
     /not allowed/,
   );
+  assert.throws(
+    () => resolveRunBundleFilePath(runsDir, "../sessions", "session.json"),
+    /outside runs directory/,
+  );
 });
 
 async function writeRunBundle(
