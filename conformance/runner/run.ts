@@ -126,6 +126,10 @@ type CaseCheck =
   | {
       type: "updates_text_includes";
       text: string;
+    }
+  | {
+      type: "updates_session_update_includes";
+      values: string[];
     };
 
 type CaseResult = {
@@ -429,6 +433,14 @@ function resolveTimeoutMs(
     return Math.round(value);
   }
   return fallbackMs;
+}
+
+function resolveSettleTimeoutMs(caseDefinition: CaseDefinition): number {
+  const value = caseDefinition.timeouts?.settle_timeout_ms;
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.round(value);
+  }
+  return 0;
 }
 
 function splitCommandLine(value: string): ParsedCommand {
@@ -944,6 +956,22 @@ function evaluateCaseChecks(params: {
         assert.equal(matched, true, `expected at least one update text including "${check.text}"`);
         break;
       }
+      case "updates_session_update_includes": {
+        const seen = new Set(
+          params.harness.client.updates
+            .map((update) => update.update?.sessionUpdate)
+            .filter((value): value is string => typeof value === "string"),
+        );
+
+        for (const value of check.values) {
+          assert.equal(
+            seen.has(value),
+            true,
+            `expected at least one update with sessionUpdate="${value}"`,
+          );
+        }
+        break;
+      }
     }
   }
 }
@@ -954,6 +982,7 @@ async function runCase(
 ): Promise<{ passed: true } | { passed: false; error: string }> {
   const requestTimeoutMs = resolveTimeoutMs(caseDefinition, "request", DEFAULT_REQUEST_TIMEOUT_MS);
   const updateTimeoutMs = resolveTimeoutMs(caseDefinition, "update", DEFAULT_UPDATE_TIMEOUT_MS);
+  const settleTimeoutMs = resolveSettleTimeoutMs(caseDefinition);
   const effectiveOptions: CliOptions =
     caseDefinition.permission_mode && caseDefinition.permission_mode !== options.permissionMode
       ? { ...options, permissionMode: caseDefinition.permission_mode }
@@ -974,6 +1003,12 @@ async function runCase(
         options: effectiveOptions,
         requestTimeoutMs,
         updateTimeoutMs,
+      });
+    }
+
+    if (settleTimeoutMs > 0) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, settleTimeoutMs);
       });
     }
 

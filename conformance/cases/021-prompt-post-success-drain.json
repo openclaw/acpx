@@ -1,0 +1,51 @@
+{
+  "id": "acp.v1.session.prompt.post_success_drain",
+  "profile": "acp-core-v1",
+  "title": "Late post-success tool updates remain observable",
+  "description": "Verify the harness can still observe tool updates emitted shortly after a successful prompt response.",
+  "steps": [
+    {
+      "action": "new_session",
+      "save_as": "session_id"
+    },
+    {
+      "action": "prompt",
+      "session": "$session_id",
+      "prompt": [
+        {
+          "type": "text",
+          "text": "late-tool 40 follow-up"
+        }
+      ],
+      "save_as": "prompt_result"
+    }
+  ],
+  "checks": [
+    {
+      "type": "saved_stop_reason_in",
+      "key": "prompt_result",
+      "values": ["end_turn", "completed", "done"]
+    },
+    {
+      "type": "updates_count_at_least",
+      "min": 4
+    },
+    {
+      "type": "updates_all_session",
+      "session": "$session_id"
+    },
+    {
+      "type": "updates_text_includes",
+      "text": "сейчас пишу"
+    },
+    {
+      "type": "updates_session_update_includes",
+      "values": ["tool_call", "tool_call_update"]
+    }
+  ],
+  "timeouts": {
+    "request_timeout_ms": 10000,
+    "update_timeout_ms": 10000,
+    "settle_timeout_ms": 160
+  }
+}

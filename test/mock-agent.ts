@@ -755,6 +755,52 @@ class MockAgent implements Agent {
     });
   }
 
+  private emitLateToolCall(sessionId: SessionId, delayMs: number, text: string): void {
+    const scheduledDelay = Math.max(0, Math.round(delayMs));
+    const toolCallId = randomUUID();
+
+    setTimeout(() => {
+      void (async () => {
+        await this.connection.sessionUpdate({
+          sessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            title: "LateTool",
+            kind: "other",
+            status: "in_progress",
+            rawInput: {
+              text,
+            },
+          },
+        });
+
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 5);
+        });
+
+        await this.connection.sessionUpdate({
+          sessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            title: "LateTool",
+            kind: "other",
+            status: "completed",
+            rawInput: {
+              text,
+            },
+            rawOutput: {
+              echoedText: text,
+            },
+          },
+        });
+      })().catch((error: unknown) => {
+        process.stderr.write(`late-tool failed: ${toErrorMessage(error)}\n`);
+      });
+    }, scheduledDelay);
+  }
+
   private ensureSession(sessionId: SessionId): SessionState {
     let session = this.sessions.get(sessionId);
     if (!session) {
@@ -779,6 +825,27 @@ class MockAgent implements Agent {
     }
     if (text === "retryable-error-once") {
       return "recovered after retry";
+    }
+
+    if (text.startsWith("late-tool ")) {
+      const rest = text.slice("late-tool ".length).trim();
+      const firstSpace = rest.search(/\s/);
+
+      if (firstSpace <= 0) {
+        throw new Error("Usage: late-tool <milliseconds> <text>");
+      }
+
+      const rawMs = rest.slice(0, firstSpace).trim();
+      const lateText = rest.slice(firstSpace + 1).trim();
+      const delayMs = Number(rawMs);
+
+      if (!Number.isFinite(delayMs) || delayMs < 0 || lateText.length === 0) {
+        throw new Error("Usage: late-tool <milliseconds> <text>");
+      }
+
+      await this.sendAssistantMessage(sessionId, "сейчас пишу");
+      this.emitLateToolCall(sessionId, delayMs, lateText);
+      return `late-tool scheduled: ${lateText}`;
     }
 
     if (text.startsWith("read ")) {
