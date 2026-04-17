@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { runPromptTurn } from "../src/runtime/engine/prompt-turn.js";
+import { createSessionConversation } from "../src/session/conversation-model.js";
 import {
   extractAgentMessageChunkText,
   extractJsonRpcId,
@@ -3480,3 +3482,75 @@ async function sleep(ms: number): Promise<void> {
     setTimeout(resolve, ms);
   });
 }
+
+test("runPromptTurn: post-success drain runs before closing the turn", async () => {
+  const calls: string[] = [];
+  const client = {
+    prompt: async () => {
+      calls.push("prompt");
+      return { stopReason: "end_turn" as const };
+    },
+    waitForSessionUpdatesIdle: async (options?: { idleMs?: number; timeoutMs?: number }) => {
+      calls.push(`drain(${options?.idleMs ?? 0}/${options?.timeoutMs ?? 0})`);
+    },
+  };
+
+  const result = await runPromptTurn({
+    client,
+    sessionId: "session-under-test",
+    prompt: "hello",
+    conversation: createSessionConversation(),
+  });
+
+  assert.equal(result.source, "rpc");
+  assert.equal(result.stopReason, "end_turn");
+  assert.deepEqual(
+    calls,
+    ["prompt", "drain(1000/5000)"],
+    "post-success drain must run before runPromptTurn returns",
+  );
+});
+
+test("runPromptTurn: late session updates after successful prompt reach the drain", async () => {
+  const observed: string[] = [];
+  let lateUpdateEmitted = false;
+  const client = {
+    prompt: async () => {
+      observed.push("prompt-resolved");
+      return { stopReason: "end_turn" as const };
+    },
+    waitForSessionUpdatesIdle: async (options?: { idleMs?: number; timeoutMs?: number }) => {
+      // Simulate a late assistant_delta / tool_call arriving shortly after prompt resolves.
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      lateUpdateEmitted = true;
+      observed.push(`drain-completed(idle=${options?.idleMs ?? 0})`);
+    },
+  };
+
+  const result = await runPromptTurn({
+    client,
+    sessionId: "session-late-updates",
+    prompt: "hello",
+    conversation: createSessionConversation(),
+  });
+
+  assert.equal(result.source, "rpc");
+  assert.equal(lateUpdateEmitted, true, "late session update must be consumed before turn closes");
+  assert.deepEqual(observed, ["prompt-resolved", "drain-completed(idle=1000)"]);
+});
+
+test("runPromptTurn: missing waitForSessionUpdatesIdle still returns cleanly on success", async () => {
+  const client = {
+    prompt: async () => ({ stopReason: "end_turn" as const }),
+  };
+
+  const result = await runPromptTurn({
+    client,
+    sessionId: "session-no-drain",
+    prompt: "hello",
+    conversation: createSessionConversation(),
+  });
+
+  assert.equal(result.source, "rpc");
+  assert.equal(result.stopReason, "end_turn");
+});

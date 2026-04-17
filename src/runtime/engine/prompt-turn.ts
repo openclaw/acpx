@@ -26,6 +26,16 @@ export async function runPromptTurn(params: {
     const promptPromise = params.client.prompt(params.sessionId, params.prompt);
     await params.onPromptStarted?.();
     const response = await withTimeout(promptPromise, params.timeoutMs);
+    await params.client
+      .waitForSessionUpdatesIdle?.({
+        idleMs: SESSION_REPLY_IDLE_MS,
+        timeoutMs: SESSION_REPLY_DRAIN_TIMEOUT_MS,
+      })
+      .catch(() => {
+        // Best-effort post-success drain: give the adapter a bounded window to emit any
+        // late assistant_delta / tool_call updates that arrive just after client.prompt()
+        // resolves, so the prompt turn does not close before those updates are observed.
+      });
     return {
       stopReason: response.stopReason,
       source: "rpc",
