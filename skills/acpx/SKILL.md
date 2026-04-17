@@ -92,6 +92,7 @@ Friendly agent names resolve to commands:
 Rules:
 
 - Default agent is `codex` for top-level `prompt`, `exec`, and `sessions`.
+- The built-in `claude` route should use the shipped `claude-agent-acp` defaults unless you intentionally override it with `--agent` or config.
 - Unknown positional agent tokens are treated as raw agent commands.
 - `--agent <command>` explicitly sets a raw ACP adapter command.
 - Do not combine a positional agent and `--agent` in the same command.
