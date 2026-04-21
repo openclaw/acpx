@@ -104,6 +104,7 @@ const DRAIN_POLL_INTERVAL_MS = 20;
 const AGENT_CLOSE_TERM_GRACE_MS = 1_500;
 const AGENT_CLOSE_KILL_GRACE_MS = 1_000;
 const STARTUP_STDERR_MAX_CHARS = 8_192;
+const RUNTIME_STDERR_MAX_CHARS = 8_192;
 
 type LoadSessionOptions = {
   suppressReplayUpdates?: boolean;
@@ -170,6 +171,13 @@ function installSdkConsoleErrorSuppression(): () => void {
   return () => {
     console.error = originalConsoleError;
   };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
 }
 
 function createNdJsonMessageStream(
@@ -268,6 +276,7 @@ export class AcpClient {
   private lastKnownPid?: number;
   private readonly promptPermissionFailures = new Map<string, PermissionPromptUnavailableError>();
   private readonly pendingConnectionRequests = new Set<PendingConnectionRequest>();
+  private readonly runtimeStderrTail: string[] = [];
 
   constructor(options: AcpClientOptions) {
     this.options = {
@@ -450,11 +459,13 @@ export class AcpClient {
     this.agentStartedAt = isoNow();
     this.lastAgentExit = undefined;
     this.lastKnownPid = child.pid ?? undefined;
+    this.runtimeStderrTail.length = 0;
     this.attachAgentLifecycleObservers(child);
     const startupStderr: string[] = [];
 
     child.stderr.on("data", (chunk: Buffer | string) => {
       this.captureStartupStderr(startupStderr, chunk);
+      this.captureRuntimeStderr(chunk);
       if (!this.options.verbose) {
         return;
       }
@@ -739,7 +750,7 @@ export class AcpClient {
       if (permissionFailure) {
         throw permissionFailure;
       }
-      throw error;
+      throw this.decoratePromptError(error);
     } finally {
       restoreConsoleError?.();
       if (this.activePrompt?.promise === promptPromise) {
@@ -1014,6 +1025,24 @@ export class AcpClient {
     target.splice(0, target.length, joined.slice(-STARTUP_STDERR_MAX_CHARS));
   }
 
+  private captureRuntimeStderr(chunk: Buffer | string): void {
+    const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    if (text.length === 0) {
+      return;
+    }
+    this.runtimeStderrTail.push(text);
+    const overflow = this.runtimeStderrTail.join("").length - RUNTIME_STDERR_MAX_CHARS;
+    if (overflow <= 0) {
+      return;
+    }
+    const joined = this.runtimeStderrTail.join("");
+    this.runtimeStderrTail.splice(
+      0,
+      this.runtimeStderrTail.length,
+      joined.slice(-RUNTIME_STDERR_MAX_CHARS),
+    );
+  }
+
   private summarizeStartupStderr(target: string[]): string | undefined {
     const joined = target.join("").trim();
     if (!joined) {
@@ -1021,6 +1050,52 @@ export class AcpClient {
     }
     const collapsed = joined.replace(/\s+/gu, " ").trim();
     return collapsed.slice(0, STARTUP_STDERR_MAX_CHARS);
+  }
+
+  private summarizeRuntimeStderr(): string | undefined {
+    const joined = this.runtimeStderrTail.join("").trim();
+    if (!joined) {
+      return undefined;
+    }
+    const collapsed = joined.replace(/\s+/gu, " ").trim();
+    return collapsed.slice(0, RUNTIME_STDERR_MAX_CHARS);
+  }
+
+  private extractGenericInternalErrorHint(stderrSummary: string | undefined): string | undefined {
+    if (!stderrSummary) {
+      return undefined;
+    }
+    const unhandledTurnMatch = stderrSummary.match(
+      /Unhandled error during turn:\s*(.+?)(?:\s+Some\([^)]+\))?$/iu,
+    );
+    if (unhandledTurnMatch?.[1]) {
+      return unhandledTurnMatch[1].trim();
+    }
+    const agentErrorMatch = stderrSummary.match(/ERROR\s+[^:]+:\s*(.+)$/iu);
+    if (agentErrorMatch?.[1]) {
+      return agentErrorMatch[1].trim();
+    }
+    return stderrSummary;
+  }
+
+  private decoratePromptError(error: unknown): unknown {
+    const acp = extractAcpError(error);
+    if (!acp || acp.code !== -32603 || acp.message.trim().toLowerCase() !== "internal error") {
+      return error;
+    }
+    const acpData = asRecord(acp.data);
+    const acpDataMessage =
+      typeof acpData?.message === "string" && acpData.message.trim().length > 0
+        ? acpData.message.trim()
+        : undefined;
+    const hint =
+      acpDataMessage ?? this.extractGenericInternalErrorHint(this.summarizeRuntimeStderr());
+    if (!hint || hint.trim().toLowerCase() === "internal error") {
+      return error;
+    }
+    return new Error(hint, {
+      cause: error,
+    });
   }
 
   private createStartupFailureWatcher(

@@ -104,6 +104,7 @@ type ClientInternals = {
     | undefined;
   cancellingSessionIds: Set<string>;
   promptPermissionFailures: Map<string, PermissionPromptUnavailableError>;
+  runtimeStderrTail: string[];
   initResult?: {
     agentCapabilities?: {
       sessionCapabilities?: {
@@ -594,6 +595,58 @@ test("AcpClient prompt rejects when the agent disconnects mid-prompt", async () 
   assert(result.error instanceof AgentDisconnectedError);
   assert.match(result.error.message, /disconnected during request/i);
   assert.equal(client.hasActivePrompt(), false);
+});
+
+test("AcpClient prompt decorates generic internal ACP errors with ACP payload detail", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+
+  internals.connection = {
+    prompt: async () => {
+      throw {
+        code: -32603,
+        message: "Internal error",
+        data: {
+          message: "Quota exceeded. Check your plan and billing details.",
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    () => client.prompt("session-6", "hello"),
+    (error: unknown) => {
+      assert(error instanceof Error);
+      assert.match(error.message, /Quota exceeded\. Check your plan and billing details\./);
+      return true;
+    },
+  );
+});
+
+test("AcpClient prompt falls back to runtime stderr hints for generic internal ACP errors", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+
+  internals.connection = {
+    prompt: async () => {
+      throw {
+        code: -32603,
+        message: "Internal error",
+      };
+    },
+  };
+  internals.runtimeStderrTail.push(
+    "2026-04-15T22:43:52.311113Z ERROR codex_acp::thread: Unhandled error during turn: Quota exceeded. Check your plan and billing details. Some(UsageLimitExceeded)\n",
+  );
+
+  await assert.rejects(
+    () => client.prompt("session-7", "hello"),
+    (error: unknown) => {
+      assert(error instanceof Error);
+      assert.match(error.message, /Quota exceeded\. Check your plan and billing details\./);
+      return true;
+    },
+  );
 });
 
 test("AcpClient start fails fast when the agent exits during initialize", async () => {
