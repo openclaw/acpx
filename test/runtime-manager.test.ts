@@ -995,12 +995,22 @@ test("AcpRuntimeManager routes controls through the active controller while a tu
   await promptStarted;
   await manager.setMode(createHandle("live-session"), "plan");
   await manager.setConfigOption(createHandle("live-session"), "approval", "manual");
+  const liveStatus = await manager.getStatus(createHandle("live-session"));
   await turn.cancel();
   const events = await eventsPromise;
   const result = await turn.result;
 
   assert.equal(setModeCalls, 1);
   assert.equal(setConfigCalls, 1);
+  assert.deepEqual(liveStatus.details?.configOptions, [
+    {
+      id: "approval",
+      name: "Approval",
+      type: "select",
+      currentValue: "manual",
+      options: [{ value: "manual", name: "Manual" }],
+    },
+  ]);
   assert.equal(cancelRequested, 1);
   assert.deepEqual(events, []);
   assert.deepEqual(result, { status: "cancelled", stopReason: "cancelled" });
@@ -1788,4 +1798,119 @@ test("AcpRuntimeManager falls back when a kept-open persistent client is no long
   assert.equal(firstClientPromptCalls, 0);
   assert.equal(secondClientPromptCalls, 1);
   assert.equal(constructed, 2);
+});
+
+test("AcpRuntimeManager reuses a kept-open persistent client for controls before the first turn", async () => {
+  const store = new InMemorySessionStore();
+  let constructed = 0;
+  let createSessionCalls = 0;
+  let loadSessionCalls = 0;
+  let promptCalls = 0;
+  let closeCalls = 0;
+  const setModeSessions: string[] = [];
+  const setConfigCalls: Array<{ sessionId: string; key: string; value: string }> = [];
+
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () => {
+        constructed += 1;
+        return {
+          start: async () => {},
+          close: async () => {
+            closeCalls += 1;
+          },
+          createSession: async () => {
+            createSessionCalls += 1;
+            return {
+              sessionId: "pending-session-id",
+              agentSessionId: "pending-agent-id",
+            };
+          },
+          loadSession: async () => {
+            loadSessionCalls += 1;
+            return { agentSessionId: "unexpected-agent-id" };
+          },
+          hasReusableSession: (sessionId: string) => sessionId === "pending-session-id",
+          supportsLoadSession: () => true,
+          loadSessionWithOptions: async () => {
+            loadSessionCalls += 1;
+            return { agentSessionId: "unexpected-agent-id" };
+          },
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async (sessionId: string) => {
+            promptCalls += 1;
+            assert.equal(sessionId, "pending-session-id");
+            return { stopReason: "end_turn" };
+          },
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async (sessionId: string, modeId: string) => {
+            assert.equal(modeId, "auto");
+            setModeSessions.push(sessionId);
+          },
+          setSessionConfigOption: async (sessionId: string, key: string, value: string) => {
+            setConfigCalls.push({ sessionId, key, value });
+            return {
+              configOptions: [
+                {
+                  id: key,
+                  name: "Approval",
+                  type: "select",
+                  currentValue: value,
+                  options: [{ value, name: "Manual" }],
+                },
+              ],
+            };
+          },
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        } as never;
+      },
+    },
+  );
+
+  const record = await manager.ensureSession({
+    sessionKey: "pending-control-session",
+    agent: "codex",
+    mode: "persistent",
+  });
+  const handle = createHandle("pending-control-session", record.acpxRecordId);
+
+  await manager.setMode(handle, "auto");
+  await manager.setConfigOption(handle, "approval", "manual");
+  const status = await manager.getStatus(handle);
+  const events = await collectEvents(
+    manager.runTurn({
+      handle,
+      text: "hello",
+      mode: "prompt",
+      sessionMode: "persistent",
+      requestId: "req-pending-control-session",
+    }),
+  );
+
+  assert.deepEqual(events, [{ type: "done", stopReason: "end_turn" }]);
+  assert.equal(constructed, 1);
+  assert.equal(createSessionCalls, 1);
+  assert.equal(loadSessionCalls, 0);
+  assert.equal(promptCalls, 1);
+  assert.deepEqual(setModeSessions, ["pending-session-id"]);
+  assert.deepEqual(setConfigCalls, [
+    {
+      sessionId: "pending-session-id",
+      key: "approval",
+      value: "manual",
+    },
+  ]);
+  assert.deepEqual(status.details?.configOptions, [
+    {
+      id: "approval",
+      name: "Approval",
+      type: "select",
+      currentValue: "manual",
+      options: [{ value: "manual", name: "Manual" }],
+    },
+  ]);
+  assert.equal(closeCalls, 1);
 });
