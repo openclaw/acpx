@@ -96,15 +96,45 @@ test("parsePromptEventLine handles text chunks, usage updates, tool updates, and
     },
   );
 
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "s1",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "call_SEARCH",
+            title: "Search",
+            status: "in_progress",
+            rawInput: {
+              command: "rg",
+              args: ["-n", "needle"],
+            },
+          },
+        },
+      }),
+    ),
+    {
+      type: "tool_call",
+      text: "Search (in_progress): rg -n needle",
+      tag: "tool_call",
+      toolCallId: "call_SEARCH",
+      status: "in_progress",
+      title: "Search",
+    },
+  );
+
   assert.deepEqual(parsePromptEventLine(JSON.stringify({ type: "text", content: "alpha" })), {
     type: "text_delta",
     text: "alpha",
     stream: "output",
   });
-  assert.deepEqual(parsePromptEventLine(JSON.stringify({ type: "done", stopReason: "end_turn" })), {
-    type: "done",
-    stopReason: "end_turn",
-  });
+  assert.equal(
+    parsePromptEventLine(JSON.stringify({ type: "done", stopReason: "end_turn" })),
+    null,
+  );
 });
 
 test("parsePromptEventLine handles runtime status-style updates", () => {
@@ -202,16 +232,11 @@ test("parsePromptEventLine handles runtime status-style updates", () => {
     },
   );
 
-  assert.deepEqual(
+  assert.equal(
     parsePromptEventLine(
       JSON.stringify({ type: "error", message: "broken", code: "E1", retryable: true }),
     ),
-    {
-      type: "error",
-      message: "broken",
-      code: "E1",
-      retryable: true,
-    },
+    null,
   );
 });
 

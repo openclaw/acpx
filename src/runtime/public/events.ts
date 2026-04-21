@@ -1,11 +1,5 @@
 import type { AcpRuntimeEvent, AcpSessionUpdateTag } from "./contract.js";
-import {
-  asOptionalBoolean,
-  asOptionalString,
-  asString,
-  asTrimmedString,
-  isRecord,
-} from "./shared.js";
+import { asOptionalString, asString, asTrimmedString, isRecord } from "./shared.js";
 
 function safeParseJsonObject(line: string): Record<string, unknown> | null {
   try {
@@ -152,16 +146,86 @@ function createTextDeltaEvent(params: {
   };
 }
 
+function readFirstString(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): string | undefined {
+  for (const key of keys) {
+    const value = asOptionalString(record[key]);
+    if (value) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function readFirstStringArray(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): string[] | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (!Array.isArray(value)) {
+      continue;
+    }
+    const entries = value
+      .map((entry) => asOptionalString(entry))
+      .filter((entry): entry is string => entry !== undefined);
+    if (entries.length > 0) {
+      return entries;
+    }
+  }
+  return undefined;
+}
+
+function summarizeToolInput(rawInput: unknown): string | undefined {
+  if (rawInput == null) {
+    return undefined;
+  }
+  if (
+    typeof rawInput === "string" ||
+    typeof rawInput === "number" ||
+    typeof rawInput === "boolean"
+  ) {
+    return String(rawInput);
+  }
+  if (!isRecord(rawInput)) {
+    return undefined;
+  }
+
+  const command = readFirstString(rawInput, ["command", "cmd", "program"]);
+  const args = readFirstStringArray(rawInput, ["args", "arguments"]);
+  if (command) {
+    return [command, ...(args ?? [])].join(" ");
+  }
+
+  return readFirstString(rawInput, [
+    "path",
+    "file",
+    "filePath",
+    "filepath",
+    "target",
+    "uri",
+    "url",
+    "query",
+    "pattern",
+    "text",
+    "search",
+  ]);
+}
+
 function createToolCallEvent(params: {
   payload: Record<string, unknown>;
   tag: AcpSessionUpdateTag;
 }): AcpRuntimeEvent {
   const title = asTrimmedString(params.payload.title) || "tool call";
   const status = asTrimmedString(params.payload.status);
+  const inputSummary = summarizeToolInput(params.payload.rawInput);
   const toolCallId = asOptionalString(params.payload.toolCallId);
+  const summaryText = status ? `${title} (${status})` : title;
   return {
     type: "tool_call",
-    text: status ? `${title} (${status})` : title,
+    text: inputSummary ? `${summaryText}: ${inputSummary}` : summaryText,
     tag: params.tag,
     ...(toolCallId ? { toolCallId } : {}),
     ...(status ? { status } : {}),
@@ -271,19 +335,8 @@ export function parsePromptEventLine(line: string): AcpRuntimeEvent | null {
       return { type: "status", text: update, ...(tag ? { tag } : {}) };
     }
     case "done":
-      return {
-        type: "done",
-        stopReason: asOptionalString(payload.stopReason),
-      };
-    case "error": {
-      const message = asTrimmedString(payload.message) || "acpx runtime error";
-      return {
-        type: "error",
-        message,
-        code: asOptionalString(payload.code),
-        retryable: asOptionalBoolean(payload.retryable),
-      };
-    }
+    case "error":
+      return null;
     default:
       return null;
   }

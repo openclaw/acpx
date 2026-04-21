@@ -6,9 +6,11 @@ import type {
   AcpRuntimeCapabilities,
   AcpRuntimeDoctorReport,
   AcpRuntimeEnsureInput,
+  AcpRuntimeEvent,
   AcpRuntimeHandle,
   AcpRuntimeOptions,
   AcpRuntimeStatus,
+  AcpRuntimeTurnInput,
   AcpSessionStore,
 } from "./runtime/public/contract.js";
 import { AcpRuntimeError } from "./runtime/public/errors.js";
@@ -37,8 +39,11 @@ export type {
   AcpRuntimePromptMode,
   AcpRuntimeSessionMode,
   AcpRuntimeStatus,
+  AcpRuntimeTurn,
   AcpRuntimeTurnAttachment,
   AcpRuntimeTurnInput,
+  AcpRuntimeTurnResult,
+  AcpRuntimeTurnResultError,
   AcpSessionRecord,
   AcpSessionStore,
   AcpSessionUpdateTag,
@@ -146,16 +151,46 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     return handle;
   }
 
-  async *runTurn(
-    input: import("./runtime/public/contract.js").AcpRuntimeTurnInput,
-  ): AsyncIterable<import("./runtime/public/contract.js").AcpRuntimeEvent> {
-    const state = this.resolveHandleState(input.handle);
+  startTurn(input: AcpRuntimeTurnInput) {
+    const { handle, state } = this.resolveManagerHandle(input.handle);
+    const managerPromise = this.getManager();
+    const turnPromise = managerPromise.then((manager) =>
+      manager.startTurn({
+        handle,
+        text: input.text,
+        attachments: input.attachments,
+        mode: input.mode,
+        sessionMode: state.mode,
+        requestId: input.requestId,
+        timeoutMs: input.timeoutMs,
+        signal: input.signal,
+      }),
+    );
+    return {
+      requestId: input.requestId,
+      events: {
+        async *[Symbol.asyncIterator]() {
+          const turn = await turnPromise;
+          yield* turn.events;
+        },
+      },
+      get result() {
+        return turnPromise.then((turn) => turn.result).then(async (result) => await result);
+      },
+      cancel(inputArgs?: { reason?: string }) {
+        return turnPromise.then((turn) => turn.cancel(inputArgs));
+      },
+      closeStream(inputArgs?: { reason?: string }) {
+        return turnPromise.then((turn) => turn.closeStream(inputArgs));
+      },
+    };
+  }
+
+  async *runTurn(input: AcpRuntimeTurnInput): AsyncIterable<AcpRuntimeEvent> {
+    const { handle, state } = this.resolveManagerHandle(input.handle);
     const manager = await this.getManager();
     yield* manager.runTurn({
-      handle: {
-        ...input.handle,
-        acpxRecordId: state.acpxRecordId ?? input.handle.acpxRecordId ?? input.handle.sessionKey,
-      },
+      handle,
       text: input.text,
       attachments: input.attachments,
       mode: input.mode,
@@ -166,7 +201,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     });
   }
 
-  getCapabilities(): AcpRuntimeCapabilities {
+  getCapabilities(_input?: { handle?: AcpRuntimeHandle }): AcpRuntimeCapabilities {
     return ACPX_CAPABILITIES;
   }
 
@@ -174,25 +209,15 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     handle: AcpRuntimeHandle;
     signal?: AbortSignal;
   }): Promise<AcpRuntimeStatus> {
-    const state = this.resolveHandleState(input.handle);
+    const { handle } = this.resolveManagerHandle(input.handle);
     const manager = await this.getManager();
-    return await manager.getStatus({
-      ...input.handle,
-      acpxRecordId: state.acpxRecordId ?? input.handle.acpxRecordId ?? input.handle.sessionKey,
-    });
+    return await manager.getStatus(handle);
   }
 
   async setMode(input: { handle: AcpRuntimeHandle; mode: string }): Promise<void> {
-    const state = this.resolveHandleState(input.handle);
+    const { handle, state } = this.resolveManagerHandle(input.handle);
     const manager = await this.getManager();
-    await manager.setMode(
-      {
-        ...input.handle,
-        acpxRecordId: state.acpxRecordId ?? input.handle.acpxRecordId ?? input.handle.sessionKey,
-      },
-      input.mode,
-      state.mode,
-    );
+    await manager.setMode(handle, input.mode, state.mode);
   }
 
   async setConfigOption(input: {
@@ -200,26 +225,15 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     key: string;
     value: string;
   }): Promise<void> {
-    const state = this.resolveHandleState(input.handle);
+    const { handle, state } = this.resolveManagerHandle(input.handle);
     const manager = await this.getManager();
-    await manager.setConfigOption(
-      {
-        ...input.handle,
-        acpxRecordId: state.acpxRecordId ?? input.handle.acpxRecordId ?? input.handle.sessionKey,
-      },
-      input.key,
-      input.value,
-      state.mode,
-    );
+    await manager.setConfigOption(handle, input.key, input.value, state.mode);
   }
 
   async cancel(input: { handle: AcpRuntimeHandle; reason?: string }): Promise<void> {
-    const state = this.resolveHandleState(input.handle);
+    const { handle } = this.resolveManagerHandle(input.handle);
     const manager = await this.getManager();
-    await manager.cancel({
-      ...input.handle,
-      acpxRecordId: state.acpxRecordId ?? input.handle.acpxRecordId ?? input.handle.sessionKey,
-    });
+    await manager.cancel(handle);
   }
 
   async close(input: {
@@ -227,17 +241,11 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     reason: string;
     discardPersistentState?: boolean;
   }): Promise<void> {
-    const state = this.resolveHandleState(input.handle);
+    const { handle } = this.resolveManagerHandle(input.handle);
     const manager = await this.getManager();
-    await manager.close(
-      {
-        ...input.handle,
-        acpxRecordId: state.acpxRecordId ?? input.handle.acpxRecordId ?? input.handle.sessionKey,
-      },
-      {
-        discardPersistentState: input.discardPersistentState,
-      },
-    );
+    await manager.close(handle, {
+      discardPersistentState: input.discardPersistentState,
+    });
   }
 
   private async getManager(): Promise<AcpRuntimeManager> {
@@ -257,6 +265,20 @@ export class AcpxRuntime implements AcpxRuntimeLike {
 
   private async runProbe() {
     return await (this.testOptions?.probeRunner?.(this.options) ?? probeRuntime(this.options));
+  }
+
+  private resolveManagerHandle(handle: AcpRuntimeHandle): {
+    handle: AcpRuntimeHandle;
+    state: AcpxHandleState;
+  } {
+    const state = this.resolveHandleState(handle);
+    return {
+      handle: {
+        ...handle,
+        acpxRecordId: state.acpxRecordId ?? handle.acpxRecordId ?? handle.sessionKey,
+      },
+      state,
+    };
   }
 
   private resolveHandleState(handle: AcpRuntimeHandle): AcpxHandleState {

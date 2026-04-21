@@ -100,10 +100,18 @@ export type AcpRuntimeEvent =
       status?: string;
       title?: string;
     }
+  /**
+   * Compatibility terminal event emitted by runTurn(...). startTurn(...).events
+   * does not emit terminal events; use AcpRuntimeTurn.result instead.
+   */
   | {
       type: "done";
       stopReason?: string;
     }
+  /**
+   * Compatibility failure event emitted by runTurn(...). startTurn(...).events
+   * does not emit terminal events; use AcpRuntimeTurn.result instead.
+   */
   | {
       type: "error";
       message: string;
@@ -111,8 +119,42 @@ export type AcpRuntimeEvent =
       retryable?: boolean;
     };
 
+export type AcpRuntimeTurnResultError = {
+  message: string;
+  code?: string;
+  retryable?: boolean;
+};
+
+export type AcpRuntimeTurnResult =
+  | {
+      status: "completed";
+      stopReason?: string;
+    }
+  | {
+      status: "cancelled";
+      stopReason?: string;
+    }
+  | {
+      status: "failed";
+      error: AcpRuntimeTurnResultError;
+    };
+
+export interface AcpRuntimeTurn {
+  readonly requestId: string;
+  readonly events: AsyncIterable<AcpRuntimeEvent>;
+  readonly result: Promise<AcpRuntimeTurnResult>;
+  cancel(input?: { reason?: string }): Promise<void>;
+  closeStream(input?: { reason?: string }): Promise<void>;
+}
+
 export interface AcpRuntime {
   ensureSession(input: AcpRuntimeEnsureInput): Promise<AcpRuntimeHandle>;
+  startTurn(input: AcpRuntimeTurnInput): AcpRuntimeTurn;
+  /**
+   * Compatibility adapter for consumers that expect terminal status in the
+   * event stream. Prefer startTurn(...), which separates live events from the
+   * terminal result.
+   */
   runTurn(input: AcpRuntimeTurnInput): AsyncIterable<AcpRuntimeEvent>;
   getCapabilities?(input: {
     handle?: AcpRuntimeHandle;
