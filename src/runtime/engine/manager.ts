@@ -528,7 +528,21 @@ export class AcpRuntimeManager {
         applyConversation(record, conversation);
         record.lastUsedAt = isoNow();
         await this.options.sessionStore.save(record).catch(() => {});
-        await client.close().catch(() => {});
+        const isPersistentRecord = !record.acpxRecordId.includes(":oneshot:");
+        let pooled = false;
+        if (
+          isPersistentRecord &&
+          !record.closed &&
+          client.hasReusableSession(record.acpSessionId)
+        ) {
+          const previousClient = this.pendingPersistentClients.get(record.acpxRecordId);
+          this.pendingPersistentClients.set(record.acpxRecordId, client);
+          pooled = true;
+          if (previousClient && previousClient !== client) {
+            await previousClient.close().catch(() => {});
+          }
+        }
+        if (!pooled) {await client.close().catch(() => {});}
         queue.close();
       }
     })();
@@ -640,6 +654,12 @@ export class AcpRuntimeManager {
         ...record.acpx,
         reset_on_next_ensure: true,
       };
+    } else {
+      const pendingClient = this.pendingPersistentClients.get(record.acpxRecordId);
+      if (pendingClient) {
+        this.pendingPersistentClients.delete(record.acpxRecordId);
+        await pendingClient.close().catch(() => {});
+      }
     }
     record.closed = true;
     record.closedAt = isoNow();
