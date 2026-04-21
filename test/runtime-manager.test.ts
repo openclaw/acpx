@@ -495,6 +495,93 @@ test("AcpRuntimeManager runTurn remains a compatibility adapter over startTurn",
   ]);
 });
 
+test("AcpRuntimeManager retains a reusable persistent client across turns", async () => {
+  const store = new InMemorySessionStore();
+  let constructed = 0;
+  let createSessionCalls = 0;
+  let loadSessionCalls = 0;
+  let promptCalls = 0;
+  let closeCalls = 0;
+  const promptSessionIds: string[] = [];
+
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () => {
+        constructed += 1;
+        return {
+          initializeResult: {
+            protocolVersion: 1,
+            agentCapabilities: { loadSession: true },
+          },
+          start: async () => {},
+          close: async () => {
+            closeCalls += 1;
+          },
+          createSession: async () => {
+            createSessionCalls += 1;
+            return { sessionId: "pooled-persistent-sid", agentSessionId: "pooled-agent-id" };
+          },
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: (sessionId: string) => sessionId === "pooled-persistent-sid",
+          supportsLoadSession: () => true,
+          loadSessionWithOptions: async () => {
+            loadSessionCalls += 1;
+            return { agentSessionId: "unexpected-load-agent-id" };
+          },
+          getAgentLifecycleSnapshot: () => ({
+            pid: 1234,
+            startedAt: "2026-01-01T00:00:00.000Z",
+            running: true,
+          }),
+          prompt: async (sessionId: string) => {
+            promptCalls += 1;
+            promptSessionIds.push(sessionId);
+            return { stopReason: "end_turn" };
+          },
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        } as never;
+      },
+    },
+  );
+
+  const record = await manager.ensureSession({
+    sessionKey: "pooled-persistent-session",
+    agent: "codex",
+    mode: "persistent",
+  });
+  const handle = createHandle("pooled-persistent-session", record.acpxRecordId);
+
+  for (const requestId of ["req-pooled-1", "req-pooled-2"]) {
+    const turn = manager.startTurn({
+      handle,
+      text: "hello",
+      mode: "prompt",
+      sessionMode: "persistent",
+      requestId,
+    });
+    const { events, result } = await collectTurn(turn);
+    assert.deepEqual(events, []);
+    assert.deepEqual(result, { status: "completed", stopReason: "end_turn" });
+  }
+
+  assert.equal(constructed, 1);
+  assert.equal(createSessionCalls, 1);
+  assert.equal(loadSessionCalls, 0);
+  assert.equal(promptCalls, 2);
+  assert.deepEqual(promptSessionIds, ["pooled-persistent-sid", "pooled-persistent-sid"]);
+  assert.equal(closeCalls, 0);
+
+  await manager.close(handle);
+
+  assert.equal(closeCalls, 1);
+});
+
 test("AcpRuntimeManager closeStream suppresses future live events while preserving terminal completion", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "stream-close-session",
@@ -592,6 +679,85 @@ test("AcpRuntimeManager closeStream suppresses future live events while preservi
     done: true,
     value: undefined,
   });
+});
+
+test("AcpRuntimeManager does not pool a persistent client after active close", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "active-close-session",
+    acpSessionId: "active-close-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let closeCalls = 0;
+  let promptActive = false;
+  let resolvePromptStart!: () => void;
+  let resolvePrompt!: (value: { stopReason: string }) => void;
+  const promptStarted = new Promise<void>((resolve) => {
+    resolvePromptStart = resolve;
+  });
+  const promptResult = new Promise<{ stopReason: string }>((resolve) => {
+    resolvePrompt = resolve;
+  });
+  const client: FakeClient = {
+    start: async () => {},
+    close: async () => {
+      closeCalls += 1;
+      promptActive = false;
+    },
+    createSession: async () => ({ sessionId: "unused" }),
+    loadSession: async () => ({ agentSessionId: "unused" }),
+    hasReusableSession: (sessionId) => sessionId === "active-close-sid",
+    supportsLoadSession: () => true,
+    loadSessionWithOptions: async () => ({ agentSessionId: "active-close-agent-id" }),
+    getAgentLifecycleSnapshot: () => ({ running: promptActive }),
+    prompt: async () => {
+      promptActive = true;
+      resolvePromptStart();
+      return await promptResult;
+    },
+    requestCancelActivePrompt: async () => true,
+    hasActivePrompt: () => promptActive,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {},
+    setEventHandlers: () => {},
+  };
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () => client as never,
+    },
+  );
+  const handle = createHandle("active-close-session");
+
+  const turn = manager.startTurn({
+    handle,
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-active-close",
+  });
+  const eventsPromise = collectEvents(turn.events);
+  await promptStarted;
+
+  await manager.close(handle);
+
+  let closed = await store.load("active-close-session");
+  assert.equal(closed?.closed, true);
+  assert.equal(closeCalls, 0);
+
+  resolvePrompt({ stopReason: "cancelled" });
+
+  const events = await eventsPromise;
+  const result = await turn.result;
+  closed = await store.load("active-close-session");
+
+  assert.deepEqual(events, []);
+  assert.deepEqual(result, { status: "cancelled", stopReason: "cancelled" });
+  assert.equal(closeCalls, 1);
+  assert.equal(closed?.closed, true);
+  assert.equal(typeof closed?.closedAt, "string");
 });
 
 test("AcpRuntimeManager accepts a session reply even when the prompt RPC times out", async () => {
