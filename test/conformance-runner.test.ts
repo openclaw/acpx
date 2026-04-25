@@ -239,7 +239,7 @@ test("runner observes late post-success tool updates after settle timeout", asyn
           },
           {
             type: "updates_text_includes",
-            text: "сейчас пишу",
+            text: "writing now",
           },
           {
             type: "updates_session_update_includes",

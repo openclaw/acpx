@@ -26,20 +26,15 @@ export async function runPromptTurn(params: {
     const promptPromise = params.client.prompt(params.sessionId, params.prompt);
     await params.onPromptStarted?.();
     const response = await withTimeout(promptPromise, params.timeoutMs);
-    if (
-      params.promptMessageId &&
-      !hasAgentReplyAfterPrompt(params.conversation, params.promptMessageId)
-    ) {
-      await params.client
-        .waitForSessionUpdatesIdle?.({
-          idleMs: SESSION_REPLY_IDLE_MS,
-          timeoutMs: SESSION_REPLY_DRAIN_TIMEOUT_MS,
-        })
-        .catch(() => {
-          // Best effort. The prompt already completed successfully, so keep the
-          // original stop reason if late update draining itself times out.
-        });
-    }
+    await params.client
+      .waitForSessionUpdatesIdle?.({
+        idleMs: SESSION_REPLY_IDLE_MS,
+        timeoutMs: SESSION_REPLY_DRAIN_TIMEOUT_MS,
+      })
+      .catch(() => {
+        // Best effort. The prompt already completed successfully, so keep the
+        // original stop reason if late update draining itself times out.
+      });
     return {
       stopReason: response.stopReason,
       source: "rpc",

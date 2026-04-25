@@ -843,7 +843,7 @@ class MockAgent implements Agent {
         throw new Error("Usage: late-tool <milliseconds> <text>");
       }
 
-      await this.sendAssistantMessage(sessionId, "сейчас пишу");
+      await this.sendAssistantMessage(sessionId, "writing now");
       this.emitLateToolCall(sessionId, delayMs, lateText);
       return `late-tool scheduled: ${lateText}`;
     }

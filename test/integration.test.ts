@@ -2071,7 +2071,7 @@ test("integration: late post-success tool updates are rendered before prompt exi
         homeDir,
       );
       assert.equal(result.code, 0, result.stderr);
-      assert.match(result.stdout, /сейчас пишу/);
+      assert.match(result.stdout, /writing now/);
       assert.match(result.stdout, /\[tool\] LateTool/);
       assert.match(result.stdout, /follow-up/);
 
@@ -3599,7 +3599,7 @@ test("runPromptTurn: missing waitForSessionUpdatesIdle still returns cleanly on 
   assert.equal(result.stopReason, "end_turn");
 });
 
-test("runPromptTurn: existing agent reply skips post-success drain", async () => {
+test("runPromptTurn: existing agent reply still allows post-success drain", async () => {
   const calls: string[] = [];
   const conversation = createSessionConversation();
   const promptMessageId = recordPromptSubmission(conversation, "hello");
@@ -3631,5 +3631,5 @@ test("runPromptTurn: existing agent reply skips post-success drain", async () =>
 
   assert.equal(result.source, "rpc");
   assert.equal(result.stopReason, "end_turn");
-  assert.deepEqual(calls, ["prompt"]);
+  assert.deepEqual(calls, ["prompt", "drain"]);
 });
