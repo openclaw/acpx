@@ -13,7 +13,7 @@ import {
   terminateQueueOwnerForSession,
   tryAcquireQueueOwnerLease,
 } from "../src/cli/queue/lease-store.js";
-import { queueLockFilePath } from "../src/cli/queue/paths.js";
+import { queueBaseDir, queueLockFilePath, queueSocketBaseDir } from "../src/cli/queue/paths.js";
 import {
   queuePaths,
   startKeeperProcess,
@@ -58,6 +58,36 @@ test("tryAcquireQueueOwnerLease creates a lease that can be refreshed and releas
 
     await releaseQueueOwnerLease(lease);
     assert.equal(await readQueueOwnerRecord("lease-create"), undefined);
+  });
+});
+
+test("tryAcquireQueueOwnerLease tightens queue directory permissions", async () => {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  await withTempHome(async (homeDir) => {
+    const baseDir = queueBaseDir(homeDir);
+    const socketDir = queueSocketBaseDir(homeDir);
+    assert(socketDir);
+
+    await fs.mkdir(baseDir, { recursive: true, mode: 0o777 });
+    await fs.chmod(baseDir, 0o777);
+    await fs.mkdir(socketDir, { recursive: true, mode: 0o777 });
+    await fs.chmod(socketDir, 0o777);
+
+    const lease = await tryAcquireQueueOwnerLease("lease-permissions");
+    assert(lease);
+
+    try {
+      const baseMode = (await fs.stat(baseDir)).mode & 0o777;
+      const socketMode = (await fs.stat(socketDir)).mode & 0o777;
+      assert.equal(baseMode, 0o700);
+      assert.equal(socketMode, 0o700);
+    } finally {
+      await releaseQueueOwnerLease(lease);
+      await fs.rm(socketDir, { recursive: true, force: true });
+    }
   });
 });
 
