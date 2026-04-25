@@ -7,7 +7,11 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { runPromptTurn } from "../src/runtime/engine/prompt-turn.js";
-import { createSessionConversation } from "../src/session/conversation-model.js";
+import {
+  createSessionConversation,
+  recordPromptSubmission,
+  recordSessionUpdate,
+} from "../src/session/conversation-model.js";
 import {
   extractAgentMessageChunkText,
   extractJsonRpcId,
@@ -3495,11 +3499,14 @@ test("runPromptTurn: post-success drain runs before closing the turn", async () 
     },
   };
 
+  const conversation = createSessionConversation();
+  const promptMessageId = recordPromptSubmission(conversation, "hello");
   const result = await runPromptTurn({
     client,
     sessionId: "session-under-test",
     prompt: "hello",
-    conversation: createSessionConversation(),
+    conversation,
+    promptMessageId,
   });
 
   assert.equal(result.source, "rpc");
@@ -3527,11 +3534,14 @@ test("runPromptTurn: late session updates after successful prompt reach the drai
     },
   };
 
+  const conversation = createSessionConversation();
+  const promptMessageId = recordPromptSubmission(conversation, "hello");
   const result = await runPromptTurn({
     client,
     sessionId: "session-late-updates",
     prompt: "hello",
-    conversation: createSessionConversation(),
+    conversation,
+    promptMessageId,
   });
 
   assert.equal(result.source, "rpc");
@@ -3544,13 +3554,51 @@ test("runPromptTurn: missing waitForSessionUpdatesIdle still returns cleanly on 
     prompt: async () => ({ stopReason: "end_turn" as const }),
   };
 
+  const conversation = createSessionConversation();
+  const promptMessageId = recordPromptSubmission(conversation, "hello");
   const result = await runPromptTurn({
     client,
     sessionId: "session-no-drain",
     prompt: "hello",
-    conversation: createSessionConversation(),
+    conversation,
+    promptMessageId,
   });
 
   assert.equal(result.source, "rpc");
   assert.equal(result.stopReason, "end_turn");
+});
+
+test("runPromptTurn: existing agent reply skips post-success drain", async () => {
+  const calls: string[] = [];
+  const conversation = createSessionConversation();
+  const promptMessageId = recordPromptSubmission(conversation, "hello");
+  assert.ok(promptMessageId);
+  recordSessionUpdate(conversation, undefined, {
+    sessionId: "session-existing-reply",
+    update: {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "already visible" },
+    },
+  });
+  const client = {
+    prompt: async () => {
+      calls.push("prompt");
+      return { stopReason: "end_turn" as const };
+    },
+    waitForSessionUpdatesIdle: async () => {
+      calls.push("drain");
+    },
+  };
+
+  const result = await runPromptTurn({
+    client,
+    sessionId: "session-existing-reply",
+    prompt: "hello",
+    conversation,
+    promptMessageId,
+  });
+
+  assert.equal(result.source, "rpc");
+  assert.equal(result.stopReason, "end_turn");
+  assert.deepEqual(calls, ["prompt"]);
 });
