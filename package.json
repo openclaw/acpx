@@ -56,7 +56,7 @@
     "prepack": "pnpm run build",
     "prepare": "husky",
     "test": "pnpm run build:test && node --test dist-test/test/*.test.js",
-    "test:coverage": "pnpm run build:test && node --experimental-test-coverage --test-coverage-lines=83 --test-coverage-branches=76 --test-coverage-functions=86 --test dist-test/test/*.test.js",
+    "test:coverage": "pnpm run build:test && node --experimental-test-coverage --test-coverage-exclude=dist-test/test/**/*.js --test-coverage-lines=83 --test-coverage-branches=76 --test-coverage-functions=86 --test dist-test/test/*.test.js",
     "test:live": "pnpm run build:test && node --test dist-test/test/cursor-live.integration.js",
     "typecheck": "tsgo --noEmit",
     "typecheck:tsc": "tsc --noEmit",

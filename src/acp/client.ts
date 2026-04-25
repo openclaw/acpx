@@ -1099,11 +1099,12 @@ export class AcpClient {
 
     const connectionClosedDuringInitialize =
       error instanceof Error && /acp connection closed/i.test(error.message);
-    if (!connectionClosedDuringInitialize) {
+    await waitForChildExit(child, 100);
+    const childExited = child.exitCode !== null || child.signalCode !== null;
+    if (!connectionClosedDuringInitialize && !childExited) {
       return error;
     }
 
-    await waitForChildExit(child, 100);
     return new AgentStartupError({
       agentCommand: this.options.agentCommand,
       exitCode: child.exitCode ?? null,
