@@ -70,36 +70,36 @@
     "viewer:typecheck": "tsc -p examples/flows/replay-viewer/tsconfig.json --noEmit && tsc -p examples/flows/replay-viewer/tsconfig.server.json --noEmit"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.18.0",
+    "@agentclientprotocol/sdk": "^0.20.0",
     "commander": "^14.0.3",
     "skillflag": "^0.1.4",
-    "tsx": "^4.0.0",
+    "tsx": "^4.21.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/node": "^25.3.5",
+    "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/react-test-renderer": "^19.1.0",
     "@types/ws": "^8.18.1",
-    "@typescript/native-preview": "7.0.0-dev.20260407.1",
+    "@typescript/native-preview": "7.0.0-dev.20260424.2",
     "@vitejs/plugin-react": "^6.0.1",
-    "@xyflow/react": "^12.10.1",
+    "@xyflow/react": "^12.10.2",
     "elkjs": "^0.11.1",
     "fast-json-patch": "^3.1.1",
     "husky": "^9.1.7",
-    "lint-staged": "^16.3.2",
-    "markdownlint-cli2": "^0.22.0",
-    "oxfmt": "^0.44.0",
-    "oxlint": "^1.51.0",
-    "oxlint-tsgolint": "^0.20.0",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "react-test-renderer": "^19.2.0",
-    "tsdown": "^0.21.0-beta.2",
-    "typescript": "^6.0.2",
-    "vite": "^8.0.7",
-    "ws": "^8.18.3"
+    "lint-staged": "^16.4.0",
+    "markdownlint-cli2": "^0.22.1",
+    "oxfmt": "^0.46.0",
+    "oxlint": "^1.61.0",
+    "oxlint-tsgolint": "^0.21.1",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-test-renderer": "^19.2.5",
+    "tsdown": "^0.21.10",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10",
+    "ws": "^8.20.0"
   },
   "lint-staged": {
     "*.{js,ts}": [
@@ -113,5 +113,5 @@
   "engines": {
     "node": ">=22.12.0"
   },
-  "packageManager": "pnpm@10.23.0"
+  "packageManager": "pnpm@10.33.2"
 }

@@ -518,7 +518,7 @@ test("AcpClient closes sessions through session/close and clears the loaded sess
   };
   internals.loadedSessionId = "session-close-1";
   internals.connection = {
-    unstable_closeSession: async (params: { sessionId: string }) => {
+    closeSession: async (params: { sessionId: string }) => {
       capturedCloseSessionParams = params;
       return {};
     },
