@@ -8,6 +8,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Agents/built-ins: bump the default `@zed-industries/codex-acp` package range to `^0.12.0` and `pi-acp` to `^0.0.26` so fresh built-in launches pick up the latest adapter releases.
 - CLI/claude: add `--system-prompt <text>` and `--append-system-prompt <text>` global flags that forward through ACP `_meta.systemPrompt` on `session/new`, letting callers replace or append to the Claude Code system prompt without dropping out of persistent acpx sessions. The value is persisted in `session_options.system_prompt` so ensure/reuse flows keep the override. Codex and other agents ignore the field. (#229) Thanks @Vercantez.
 - CLI/sessions: add `sessions prune` with `--dry-run`, age filters, and `--include-history` so closed session records and optional event streams can be cleaned up explicitly. (#227) Thanks @coder999999999.
 - CLI/ACP: add `--no-terminal` to disable advertised ACP terminal capability for new agent clients. (#155) Thanks @DMQ.

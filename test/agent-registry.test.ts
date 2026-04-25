@@ -83,6 +83,12 @@ test("claude built-in uses the current ACP adapter package range", () => {
   assert.equal(AGENT_REGISTRY.claude, "npx -y @agentclientprotocol/claude-agent-acp@^0.31.0");
 });
 
+test("npm-backed built-ins use current adapter package ranges", () => {
+  assert.equal(BUILT_IN_AGENT_PACKAGES.codex.packageRange, "^0.12.0");
+  assert.equal(AGENT_REGISTRY.codex, "npx @zed-industries/codex-acp@^0.12.0");
+  assert.equal(AGENT_REGISTRY.pi, "npx pi-acp@^0.0.26");
+});
+
 test("resolveInstalledBuiltInAgentLaunch uses a locally installed adapter when available", (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "acpx-agent-registry-"));
   t.after(() => {
