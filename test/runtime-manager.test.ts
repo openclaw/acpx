@@ -312,6 +312,110 @@ test("AcpRuntimeManager streams runtime events and saves updated status", async 
   assert.equal(saved?.protocolVersion, 1);
 });
 
+test("AcpRuntimeManager keeps reusable persistent clients pooled across turns and closes them on runtime close", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "pooled-persistent-session",
+    acpSessionId: "pooled-sid",
+    agentCommand: "gemini --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let factoryCalls = 0;
+  let closeCalls = 0;
+  let promptCalls = 0;
+  let handlers: FakeClientHandlers = {};
+  const client: FakeClient = {
+    initializeResult: {
+      protocolVersion: 1,
+      agentCapabilities: { prompt: true },
+    },
+    start: async () => {},
+    close: async () => {
+      closeCalls += 1;
+    },
+    createSession: async () => ({ sessionId: "unused" }),
+    loadSession: async () => ({ agentSessionId: "unused" }),
+    hasReusableSession: (sessionId) => sessionId === "pooled-sid",
+    supportsLoadSession: () => true,
+    loadSessionWithOptions: async () => ({ agentSessionId: "pooled-agent" }),
+    getAgentLifecycleSnapshot: () => ({
+      pid: 104_981,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      running: true,
+    }),
+    prompt: async (sessionId) => {
+      promptCalls += 1;
+      assert.equal(sessionId, "pooled-sid");
+      handlers.onSessionUpdate?.({
+        sessionId: "pooled-sid",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: `turn ${promptCalls}` },
+        },
+      });
+      return { stopReason: "end_turn" };
+    },
+    waitForSessionUpdatesIdle: async () => {},
+    requestCancelActivePrompt: async () => false,
+    hasActivePrompt: () => false,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {
+      handlers = {};
+    },
+    setEventHandlers: (nextHandlers) => {
+      handlers = nextHandlers;
+    },
+  };
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () => {
+        factoryCalls += 1;
+        return client as never;
+      },
+    },
+  );
+
+  const firstEvents = await collectEvents(
+    manager.runTurn({
+      handle: createHandle("pooled-persistent-session"),
+      text: "first",
+      mode: "prompt",
+      sessionMode: "persistent",
+      requestId: "req-pooled-1",
+    }),
+  );
+  const secondEvents = await collectEvents(
+    manager.runTurn({
+      handle: createHandle("pooled-persistent-session"),
+      text: "second",
+      mode: "prompt",
+      sessionMode: "persistent",
+      requestId: "req-pooled-2",
+    }),
+  );
+
+  assert.equal(factoryCalls, 1);
+  assert.equal(promptCalls, 2);
+  assert.equal(closeCalls, 0);
+  assert.deepEqual(firstEvents, [
+    { type: "text_delta", text: "turn 1", stream: "output", tag: "agent_message_chunk" },
+    { type: "done", stopReason: "end_turn" },
+  ]);
+  assert.deepEqual(secondEvents, [
+    { type: "text_delta", text: "turn 2", stream: "output", tag: "agent_message_chunk" },
+    { type: "done", stopReason: "end_turn" },
+  ]);
+
+  await manager.close(createHandle("pooled-persistent-session"));
+
+  assert.equal(closeCalls, 1);
+  const closed = await store.load("pooled-persistent-session");
+  assert.equal(closed?.closed, true);
+  assert.equal(typeof closed?.closedAt, "string");
+});
+
 test("AcpRuntimeManager accepts a session reply even when the prompt RPC times out", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "late-reply-session",

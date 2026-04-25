@@ -542,7 +542,9 @@ export class AcpRuntimeManager {
             await previousClient.close().catch(() => {});
           }
         }
-        if (!pooled) {await client.close().catch(() => {});}
+        if (!pooled) {
+          await client.close().catch(() => {});
+        }
         queue.close();
       }
     })();
