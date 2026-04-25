@@ -43,12 +43,13 @@ function thoughtChunk(text: string): unknown {
   };
 }
 
-function doneResult(stopReason: string): unknown {
+function doneResult(stopReason: string, result: Record<string, unknown> = {}): unknown {
   return {
     jsonrpc: "2.0",
     id: "req-1",
     result: {
       stopReason,
+      ...result,
     },
   };
 }
@@ -470,4 +471,33 @@ test("quiet formatter outputs only agent text and flushes on prompt result", () 
   formatter.onAcpMessage(doneResult("end_turn") as never);
 
   assert.equal(writer.toString(), "Hello world\n");
+});
+
+test("quiet formatter emits final usage and cost metadata to stderr", () => {
+  const stdout = new CaptureWriter();
+  const stderr = new CaptureWriter();
+  const formatter = createOutputFormatter("quiet", { stdout, stderr });
+
+  formatter.onAcpMessage(messageChunk("OK") as never);
+  formatter.onAcpMessage(
+    doneResult("end_turn", {
+      usage: {
+        inputTokens: 17_030,
+        outputTokens: 4,
+        cachedReadTokens: 12,
+        cachedWriteTokens: 3,
+        totalTokens: 17_049,
+      },
+      cost: {
+        amount: 0.051276,
+        currency: "USD",
+      },
+    }) as never,
+  );
+
+  assert.equal(stdout.toString(), "OK\n");
+  assert.equal(
+    stderr.toString(),
+    "[acpx] tokens: input=17030 output=4 cache_read=12 cache_write=3 total=17049\n[acpx] cost: 0.051276 USD\n",
+  );
 });

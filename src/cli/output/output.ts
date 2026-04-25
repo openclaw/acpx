@@ -43,6 +43,7 @@ type RenderableOutputError = {
 
 type OutputFormatterOptions = {
   stdout?: WritableLike;
+  stderr?: WritableLike;
   jsonContext?: OutputFormatterContext;
   suppressReads?: boolean;
 };
@@ -200,6 +201,23 @@ function readFirstString(source: Record<string, unknown>, keys: string[]): strin
     }
   }
   return undefined;
+}
+
+function readFirstFiniteNumber(
+  source: Record<string, unknown>,
+  keys: string[],
+): number | undefined {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function formatMetadataNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(8)));
 }
 
 function readFirstStringArray(
@@ -957,11 +975,14 @@ class TextOutputFormatter implements OutputFormatter {
 
 class QuietOutputFormatter implements OutputFormatter {
   private readonly stdout: WritableLike;
+  private readonly stderr: WritableLike;
   private chunks: string[] = [];
   private flushed = false;
+  private metadataFlushed = false;
 
-  constructor(stdout: WritableLike) {
+  constructor(stdout: WritableLike, stderr: WritableLike) {
     this.stdout = stdout;
+    this.stderr = stderr;
   }
 
   setContext(_context: OutputFormatterContext): void {
@@ -980,6 +1001,7 @@ class QuietOutputFormatter implements OutputFormatter {
 
     if (parsePromptStopReason(message)) {
       this.flushBufferedOutput();
+      this.flushMetadata(message);
     }
   }
 
@@ -1008,6 +1030,81 @@ class QuietOutputFormatter implements OutputFormatter {
     const text = this.chunks.join("");
     this.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
   }
+
+  private flushMetadata(message: AcpJsonRpcMessage): void {
+    if (this.metadataFlushed) {
+      return;
+    }
+
+    this.metadataFlushed = true;
+    const result = asRecord((message as { result?: unknown }).result);
+    if (!result) {
+      return;
+    }
+
+    const usageLine = this.formatUsageLine(asRecord(result.usage));
+    if (usageLine) {
+      this.stderr.write(`${usageLine}\n`);
+    }
+
+    const costLine = this.formatCostLine(result.cost);
+    if (costLine) {
+      this.stderr.write(`${costLine}\n`);
+    }
+  }
+
+  private formatUsageLine(usage: Record<string, unknown> | undefined): string | undefined {
+    if (!usage) {
+      return undefined;
+    }
+
+    const parts: string[] = [];
+    const fields: Array<[string, string[]]> = [
+      ["input", ["inputTokens", "input_tokens"]],
+      ["output", ["outputTokens", "output_tokens"]],
+      ["cache_read", ["cachedReadTokens", "cacheReadInputTokens", "cache_read_input_tokens"]],
+      [
+        "cache_write",
+        ["cachedWriteTokens", "cacheCreationInputTokens", "cache_creation_input_tokens"],
+      ],
+      ["total", ["totalTokens", "total_tokens"]],
+    ];
+
+    for (const [label, keys] of fields) {
+      const value = readFirstFiniteNumber(usage, keys);
+      if (value !== undefined) {
+        parts.push(`${label}=${formatMetadataNumber(value)}`);
+      }
+    }
+
+    return parts.length > 0 ? `[acpx] tokens: ${parts.join(" ")}` : undefined;
+  }
+
+  private formatCostLine(cost: unknown): string | undefined {
+    if (typeof cost === "number" && Number.isFinite(cost)) {
+      return `[acpx] cost: ${formatMetadataNumber(cost)}`;
+    }
+
+    if (typeof cost === "string" && cost.trim()) {
+      return `[acpx] cost: ${cost.trim()}`;
+    }
+
+    const record = asRecord(cost);
+    if (!record) {
+      return undefined;
+    }
+
+    const amount = readFirstFiniteNumber(record, ["amount", "value", "total"]);
+    if (amount === undefined) {
+      return undefined;
+    }
+
+    const currency =
+      typeof record.currency === "string" && record.currency.trim()
+        ? ` ${record.currency.trim()}`
+        : "";
+    return `[acpx] cost: ${formatMetadataNumber(amount)}${currency}`;
+  }
 }
 
 export function createOutputFormatter(
@@ -1015,6 +1112,7 @@ export function createOutputFormatter(
   options: OutputFormatterOptions = {},
 ): OutputFormatter {
   const stdout = options.stdout ?? process.stdout;
+  const stderr = options.stderr ?? process.stderr;
   const suppressReads = options.suppressReads === true;
 
   switch (format) {
@@ -1023,7 +1121,7 @@ export function createOutputFormatter(
     case "json":
       return createJsonOutputFormatter(stdout, suppressReads, options.jsonContext);
     case "quiet":
-      return new QuietOutputFormatter(stdout);
+      return new QuietOutputFormatter(stdout, stderr);
     default: {
       const exhaustive: never = format;
       void exhaustive;
