@@ -70,3 +70,24 @@ test("probeRuntime reports failures and still closes the client", async () => {
   ]);
   assert.equal(closed, true);
 });
+
+test("probeRuntime stringifies non-Error thrown values in details", async () => {
+  const report = await probeRuntime(
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: new InMemorySessionStore(),
+    }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {
+            throw { code: "SPAWN_FAILED", reason: "missing binary" };
+          },
+          close: async () => {},
+        }) as never,
+    },
+  );
+
+  assert.equal(report.ok, false);
+  assert.equal(report.details?.[3], '{"code":"SPAWN_FAILED","reason":"missing binary"}');
+});

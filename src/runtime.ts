@@ -16,7 +16,7 @@ import type {
 import { AcpRuntimeError } from "./runtime/public/errors.js";
 import { createFileSessionStore } from "./runtime/public/file-session-store.js";
 import { decodeAcpxRuntimeHandleState, writeHandleState } from "./runtime/public/handle-state.js";
-import { probeRuntime } from "./runtime/public/probe.js";
+import { normalizeRuntimeDetails, probeRuntime } from "./runtime/public/probe.js";
 import { deriveAgentFromSessionKey, type AcpxHandleState } from "./runtime/public/shared.js";
 
 export { DEFAULT_AGENT_NAME, createFileSessionStore };
@@ -86,7 +86,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       probeRunner?: (options: AcpRuntimeOptions) => Promise<{
         ok: boolean;
         message: string;
-        details?: string[];
+        details?: unknown[];
       }>;
     },
   ) {}
@@ -107,7 +107,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       ok: report.ok,
       code: report.ok ? undefined : "ACP_BACKEND_UNAVAILABLE",
       message: report.message,
-      details: report.details,
+      details: normalizeRuntimeDetails(report.details),
     };
   }
 

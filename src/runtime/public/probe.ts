@@ -12,6 +12,52 @@ export type ProbeRuntimeDeps = {
   clientFactory?: (options: ConstructorParameters<typeof AcpClient>[0]) => AcpClient;
 };
 
+export function formatRuntimeDetail(value: unknown): string {
+  if (value instanceof Error) {
+    return value.message || value.name;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (
+    value == null ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint" ||
+    typeof value === "symbol"
+  ) {
+    return String(value);
+  }
+  if (typeof value === "function") {
+    return value.name ? `[Function ${value.name}]` : "[Function]";
+  }
+
+  const seen = new WeakSet<object>();
+  try {
+    const serialized = JSON.stringify(value, (_key, nested) => {
+      if (nested instanceof Error) {
+        return nested.message || nested.name;
+      }
+      if (nested && typeof nested === "object") {
+        if (seen.has(nested)) {
+          return "[Circular]";
+        }
+        seen.add(nested);
+      }
+      return nested;
+    });
+    return serialized ?? "undefined";
+  } catch {
+    return "unserializable object";
+  }
+}
+
+export function normalizeRuntimeDetails(
+  details: readonly unknown[] | undefined,
+): string[] | undefined {
+  return details?.map((detail) => formatRuntimeDetail(detail));
+}
+
 export async function probeRuntime(
   options: AcpRuntimeOptions,
   deps: ProbeRuntimeDeps = {},
@@ -58,7 +104,7 @@ export async function probeRuntime(
         `agent=${agentName}`,
         `command=${agentCommand}`,
         `cwd=${options.cwd}`,
-        error instanceof Error ? error.message : String(error),
+        formatRuntimeDetail(error),
       ],
     };
   } finally {

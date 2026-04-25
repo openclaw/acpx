@@ -265,6 +265,35 @@ test("doctor reports backend unavailable probe failures and agent registry honor
   assert.deepEqual(report.details, ["agent=codex", "command=codex-override --acp"]);
 });
 
+test("doctor coerces probe detail values to strings", async () => {
+  const circular: Record<string, unknown> = { code: "BROKEN" };
+  circular.self = circular;
+  const runtime = new AcpxRuntime(
+    {
+      cwd: "/workspace",
+      sessionStore: createFileSessionStore({ stateDir: "/tmp/acpx-runtime-doctor-details" }),
+      agentRegistry: createAgentRegistry(),
+      permissionMode: "approve-reads",
+    },
+    {
+      probeRunner: async () => ({
+        ok: false,
+        message: "embedded ACP runtime probe failed",
+        details: ["agent=codex", new Error("spawn failed"), circular],
+      }),
+    },
+  );
+
+  const report = await runtime.doctor();
+  assert.equal(report.ok, false);
+  assert.equal(
+    report.details?.every((detail) => typeof detail === "string"),
+    true,
+  );
+  assert.match(report.details?.[1] ?? "", /spawn failed/);
+  assert.equal(report.details?.[2], '{"code":"BROKEN","self":"[Circular]"}');
+});
+
 test("AcpxRuntime validates required ensureSession inputs and runtime handles", async () => {
   const runtime = createAcpRuntime({
     cwd: "/workspace",
