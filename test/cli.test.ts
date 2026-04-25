@@ -2095,7 +2095,7 @@ async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<vo
   try {
     await run(tempHome);
   } finally {
-    await fs.rm(tempHome, { recursive: true, force: true });
+    await fs.rm(tempHome, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 }
 

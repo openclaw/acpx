@@ -74,7 +74,7 @@ Friendly agent names resolve to commands:
 - `pi` -> `npx pi-acp`
 - `openclaw` -> `openclaw acp`
 - `codex` -> `npx @zed-industries/codex-acp`
-- `claude` -> `npx -y @agentclientprotocol/claude-agent-acp`
+- `claude` -> `npx -y @agentclientprotocol/claude-agent-acp` (ACPX-owned package range)
 - `gemini` -> `gemini --acp`
 - `cursor` -> `cursor-agent acp`
 - `copilot` -> `copilot --acp --stdio`
