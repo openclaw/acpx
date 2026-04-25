@@ -223,6 +223,7 @@ export async function handlePrompt(
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
+    terminal: globalFlags.terminal,
     outputFormatter,
     errorEmissionPolicy: {
       queueErrorAlreadyEmitted: outputPolicy.queueErrorAlreadyEmitted,
@@ -306,6 +307,7 @@ export async function handleExec(
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
+    terminal: globalFlags.terminal,
     outputFormatter,
     suppressSdkConsoleErrors: outputPolicy.suppressSdkConsoleErrors,
     timeoutMs: globalFlags.timeout,
@@ -463,6 +465,7 @@ export async function handleSetMode(
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
+    terminal: globalFlags.terminal,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
   });
@@ -497,6 +500,7 @@ export async function handleSetModel(
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
+    terminal: globalFlags.terminal,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
   });
@@ -538,6 +542,7 @@ export async function handleSetConfigOption(
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
+    terminal: globalFlags.terminal,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
   });
@@ -630,6 +635,7 @@ export async function handleSessionsNew(
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
+    terminal: globalFlags.terminal,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
     sessionOptions: {
@@ -671,6 +677,7 @@ export async function handleSessionsEnsure(
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
+    terminal: globalFlags.terminal,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
     sessionOptions: {

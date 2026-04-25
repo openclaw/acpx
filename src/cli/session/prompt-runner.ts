@@ -28,6 +28,7 @@ export type RunSessionSetModeDirectOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  terminal?: boolean;
   timeoutMs?: number;
   verbose?: boolean;
   onClientAvailable?: (controller: ActiveSessionController) => void;
@@ -42,6 +43,7 @@ export type RunSessionSetConfigOptionDirectOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  terminal?: boolean;
   timeoutMs?: number;
   verbose?: boolean;
   onClientAvailable?: (controller: ActiveSessionController) => void;
@@ -55,6 +57,7 @@ export type RunSessionSetModelDirectOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  terminal?: boolean;
   timeoutMs?: number;
   verbose?: boolean;
   onClientAvailable?: (controller: ActiveSessionController) => void;
@@ -72,6 +75,7 @@ export async function runSessionSetModeDirect(
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    terminal: options.terminal,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
     onClientAvailable: (controller: FullConnectedSessionController) => {
@@ -102,6 +106,7 @@ export async function runSessionSetModelDirect(
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    terminal: options.terminal,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
     onClientAvailable: (controller: FullConnectedSessionController) => {
@@ -133,6 +138,7 @@ export async function runSessionSetConfigOptionDirect(
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    terminal: options.terminal,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
     onClientAvailable: (controller: FullConnectedSessionController) => {

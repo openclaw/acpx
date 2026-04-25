@@ -6,6 +6,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import {
   buildQueueOwnerArgOverride,
+  queueOwnerRuntimeOptionsFromSend,
   resolveQueueOwnerSpawnArgs,
   sanitizeQueueOwnerExecArgv,
 } from "../src/cli/session/queue-owner-process.js";
@@ -109,5 +110,17 @@ describe("buildQueueOwnerArgOverride", () => {
       buildQueueOwnerArgOverride("/tmp/cli.js", ["--import", "tsx"]),
       JSON.stringify(["--import", "tsx", "/tmp/cli.js", "__queue-owner"]),
     );
+  });
+});
+
+describe("queueOwnerRuntimeOptionsFromSend", () => {
+  it("preserves terminal capability preference", () => {
+    const options = queueOwnerRuntimeOptionsFromSend({
+      sessionId: "session-1",
+      permissionMode: "approve-reads",
+      terminal: false,
+    });
+
+    assert.equal(options.terminal, false);
   });
 });

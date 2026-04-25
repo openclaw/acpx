@@ -80,6 +80,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    terminal: options.terminal,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
     sessionOptions: mergeSessionOptions(
@@ -102,6 +103,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
         nonInteractivePermissions: options.nonInteractivePermissions,
         authCredentials: options.authCredentials,
         authPolicy: options.authPolicy,
+        terminal: options.terminal,
         timeoutMs,
         verbose: options.verbose,
       });
@@ -114,6 +116,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
         nonInteractivePermissions: options.nonInteractivePermissions,
         authCredentials: options.authCredentials,
         authPolicy: options.authPolicy,
+        terminal: options.terminal,
         timeoutMs,
         verbose: options.verbose,
       });
@@ -127,6 +130,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
         nonInteractivePermissions: options.nonInteractivePermissions,
         authCredentials: options.authCredentials,
         authPolicy: options.authPolicy,
+        terminal: options.terminal,
         timeoutMs,
         verbose: options.verbose,
       });

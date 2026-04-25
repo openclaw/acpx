@@ -64,6 +64,7 @@ type RunSessionPromptOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  terminal?: boolean;
   outputFormatter: OutputFormatter;
   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onSessionUpdate?: (notification: SessionNotification) => void;
@@ -434,6 +435,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       nonInteractivePermissions: options.nonInteractivePermissions,
       authCredentials: options.authCredentials,
       authPolicy: options.authPolicy,
+      terminal: options.terminal,
       suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
       verbose: options.verbose,
       sessionOptions,
@@ -441,6 +443,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
   client.updateRuntimeOptions({
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
+    terminal: options.terminal,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
   });
@@ -728,6 +731,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    terminal: options.terminal,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
     onAcpMessage: options.onAcpMessage,
@@ -828,6 +832,7 @@ export async function sendSessionDirect(options: SessionSendOptions): Promise<Se
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    terminal: options.terminal,
     outputFormatter: options.outputFormatter,
     onAcpMessage: options.onAcpMessage,
     onSessionUpdate: options.onSessionUpdate,

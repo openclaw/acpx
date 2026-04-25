@@ -351,6 +351,7 @@ export class AcpClient {
   updateRuntimeOptions(options: {
     permissionMode?: PermissionMode;
     nonInteractivePermissions?: NonInteractivePermissionPolicy;
+    terminal?: boolean;
     suppressSdkConsoleErrors?: boolean;
     verbose?: boolean;
   }): void {
@@ -359,6 +360,9 @@ export class AcpClient {
     }
     if (options.nonInteractivePermissions !== undefined) {
       this.options.nonInteractivePermissions = options.nonInteractivePermissions;
+    }
+    if (options.terminal !== undefined) {
+      this.options.terminal = options.terminal;
     }
     if (options.permissionMode || options.nonInteractivePermissions !== undefined) {
       this.filesystem.updatePermissionPolicy(
@@ -524,7 +528,7 @@ export class AcpClient {
                 readTextFile: true,
                 writeTextFile: true,
               },
-              terminal: true,
+              terminal: this.options.terminal !== false,
             },
             clientInfo: {
               name: "acpx",

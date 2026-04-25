@@ -216,6 +216,7 @@ test("global passthrough flags are present in help output", async () => {
     assert.match(result.stdout, /--max-turns <count>/);
     assert.match(result.stdout, /text, json, quiet/);
     assert.match(result.stdout, /--suppress-reads/);
+    assert.match(result.stdout, /--no-terminal/);
   });
 });
 

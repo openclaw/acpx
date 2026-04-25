@@ -36,6 +36,7 @@ export type GlobalFlags = PermissionFlags & {
   nonInteractivePermissions: NonInteractivePermissionPolicy;
   jsonStrict?: boolean;
   suppressReads?: boolean;
+  terminal?: boolean;
   timeout?: number;
   ttl: number;
   verbose?: boolean;
@@ -289,6 +290,7 @@ export function addGlobalFlags(command: Command): Command {
       "--json-strict",
       "Strict JSON mode: requires --format json and suppresses non-JSON stderr output",
     )
+    .option("--no-terminal", "Do not advertise ACP terminal capability")
     .option("--timeout <seconds>", "Maximum time to wait for agent response", parseTimeoutSeconds)
     .option(
       "--ttl <seconds>",
@@ -364,6 +366,7 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
     nonInteractivePermissions: opts.nonInteractivePermissions ?? config.nonInteractivePermissions,
     jsonStrict,
     suppressReads: opts.suppressReads === true,
+    terminal: opts.terminal === false ? false : undefined,
     timeout: opts.timeout ?? config.timeoutMs,
     ttl: opts.ttl ?? config.ttlMs ?? DEFAULT_QUEUE_OWNER_TTL_MS,
     verbose,

@@ -112,6 +112,7 @@ All global options:
 | `--format <fmt>`                         | Output format                                  | `text` (default), `json`, `quiet`.                                                                                                                              |
 | `--suppress-reads`                       | Suppress read file contents                    | Replaces raw read payloads with `[read output suppressed]`.                                                                                                     |
 | `--json-strict`                          | Strict JSON mode                               | Requires `--format json`; suppresses non-JSON stderr output.                                                                                                    |
+| `--no-terminal`                          | Disable ACP terminal capability                | Advertises `clientCapabilities.terminal: false` during ACP initialize for new agent clients.                                                                    |
 | `--non-interactive-permissions <policy>` | Non-TTY prompt policy                          | `deny` (default) or `fail` when approval prompt cannot be shown.                                                                                                |
 | `--timeout <seconds>`                    | Max wait time for agent response               | Must be positive. Decimal seconds allowed.                                                                                                                      |
 | `--ttl <seconds>`                        | Queue owner idle TTL before shutdown           | Default `300`. `0` disables TTL.                                                                                                                                |
@@ -131,6 +132,7 @@ acpx --non-interactive-permissions fail codex 'fail fast when prompt cannot be s
 acpx --cwd ~/repos/api codex 'review auth middleware'
 acpx --format json codex exec 'summarize open TODO items'
 acpx --format json --json-strict codex exec 'machine-safe JSON output'
+acpx --no-terminal codex exec 'summarize without terminal capability'
 acpx --timeout 120 codex 'investigate flaky test failures'
 acpx --ttl 30 codex 'keep queue owner warm for quick follow-up'
 acpx --verbose codex 'debug adapter startup issues'

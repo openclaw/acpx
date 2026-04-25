@@ -23,6 +23,7 @@ describe("parseQueueOwnerPayload", () => {
         ],
         ttlMs: 1234,
         maxQueueDepth: 7,
+        terminal: false,
         sessionOptions: {
           model: "fast-model",
           allowedTools: ["Read"],
@@ -35,6 +36,7 @@ describe("parseQueueOwnerPayload", () => {
     assert.equal(parsed.permissionMode, "approve-reads");
     assert.equal(parsed.ttlMs, 1234);
     assert.equal(parsed.maxQueueDepth, 7);
+    assert.equal(parsed.terminal, false);
     assert.deepEqual(parsed.mcpServers, [
       {
         name: "linear-http",

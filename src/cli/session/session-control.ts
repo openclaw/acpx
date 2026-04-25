@@ -70,6 +70,7 @@ export async function setSessionMode(
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    terminal: options.terminal,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
   });
@@ -102,6 +103,7 @@ export async function setSessionModel(
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    terminal: options.terminal,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
   });
@@ -138,6 +140,7 @@ export async function setSessionConfigOption(
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    terminal: options.terminal,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
   });

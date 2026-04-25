@@ -41,6 +41,7 @@ export type WithConnectedSessionOptions<T> = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  terminal?: boolean;
   resumePolicy?: SessionResumePolicy;
   timeoutMs?: number;
   verbose?: boolean;
@@ -91,6 +92,7 @@ export async function withConnectedSession<T>(
       nonInteractivePermissions: options.nonInteractivePermissions,
       authCredentials: options.authCredentials,
       authPolicy: options.authPolicy,
+      terminal: options.terminal,
       verbose: options.verbose,
       sessionOptions: sessionOptionsFromRecord(record),
     }) ??
@@ -102,6 +104,7 @@ export async function withConnectedSession<T>(
       nonInteractivePermissions: options.nonInteractivePermissions,
       authCredentials: options.authCredentials,
       authPolicy: options.authPolicy,
+      terminal: options.terminal,
       verbose: options.verbose,
       sessionOptions: sessionOptionsFromRecord(record),
     });

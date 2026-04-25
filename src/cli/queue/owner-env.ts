@@ -59,6 +59,10 @@ export function parseQueueOwnerPayload(raw: string): QueueOwnerRuntimeOptions {
     options.authPolicy = record.authPolicy;
   }
 
+  if (typeof record.terminal === "boolean") {
+    options.terminal = record.terminal;
+  }
+
   if (typeof record.suppressSdkConsoleErrors === "boolean") {
     options.suppressSdkConsoleErrors = record.suppressSdkConsoleErrors;
   }

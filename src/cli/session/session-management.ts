@@ -194,6 +194,7 @@ export async function createSessionWithClient(
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    terminal: options.terminal,
     verbose: options.verbose,
     sessionOptions: options.sessionOptions,
   });
@@ -245,6 +246,7 @@ export async function ensureSession(options: SessionEnsureOptions): Promise<Sess
         nonInteractivePermissions: options.nonInteractivePermissions,
         authCredentials: options.authCredentials,
         authPolicy: options.authPolicy,
+        terminal: options.terminal,
         timeoutMs: options.timeoutMs,
         verbose: options.verbose,
       });
@@ -266,6 +268,7 @@ export async function ensureSession(options: SessionEnsureOptions): Promise<Sess
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    terminal: options.terminal,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
     sessionOptions: options.sessionOptions,
