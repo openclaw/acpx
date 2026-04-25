@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Flows/authoring: add `decision()` and `decisionEdge()` helpers for constrained LLM branching on top of the existing `acp`, `parse`, and `switch` machinery. (#278) Thanks @JoshuaLelon.
+
 ### Breaking
 
 ### Fixes

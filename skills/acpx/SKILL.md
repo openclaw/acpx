@@ -31,6 +31,7 @@ Core capabilities:
 - Stable ACP `authenticate` handshake via env/config credentials
 - Structured streaming output (`text`, `json`, `quiet`) with optional `--suppress-reads`
 - Built-in agent registry plus raw `--agent` escape hatch
+- Experimental `flow run` support with `acpx/flows` helpers, including constrained-choice `decision()` branching
 
 ## Install
 

@@ -225,6 +225,7 @@ runtime and persists run state under `~/.acpx/flows/runs/`.
 Flows are for multi-step ACP work where one prompt is not enough:
 
 - `acp` steps keep model-shaped work in ACP
+- `decision()` and `decisionEdge()` wrap constrained-choice ACP branching without adding a new node type
 - `action` steps handle deterministic mechanics like shell commands or GitHub calls
 - `compute` steps do local routing or shaping
 - `checkpoint` steps pause for something outside the runtime

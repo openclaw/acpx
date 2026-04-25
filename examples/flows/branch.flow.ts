@@ -1,32 +1,29 @@
-import { acp, checkpoint, defineFlow, extractJsonObject } from "acpx/flows";
+import { acp, checkpoint, decision, decisionEdge, defineFlow, extractJsonObject } from "acpx/flows";
 
 type BranchInput = {
   task?: string;
 };
 
+const classifyChoices = ["continue", "checkpoint"] as const;
+
 export default defineFlow({
   name: "example-branch",
   startAt: "classify",
   nodes: {
-    classify: acp({
-      async prompt({ input }) {
+    classify: decision({
+      choices: classifyChoices,
+      question: ({ input }) => {
         const task =
           (input as BranchInput).task ??
           "Investigate a flaky test and decide whether the request is clear enough to continue.";
         return [
           "Read the task below.",
-          "If it is concrete and scoped, route `continue`.",
-          "If it is ambiguous or needs clarification, route `checkpoint`.",
-          "Return exactly one JSON object with this shape:",
-          "{",
-          '  "route": "continue" | "checkpoint",',
-          '  "reason": "short explanation"',
-          "}",
+          "Pick `continue` if it is concrete and scoped.",
+          "Pick `checkpoint` if it is ambiguous or needs clarification.",
           "",
           `Task: ${task}`,
         ].join("\n");
       },
-      parse: (text) => extractJsonObject(text),
     }),
     continue_lane: acp({
       async prompt({ outputs }) {
@@ -52,15 +49,13 @@ export default defineFlow({
     }),
   },
   edges: [
-    {
+    decisionEdge({
       from: "classify",
-      switch: {
-        on: "$.route",
-        cases: {
-          continue: "continue_lane",
-          checkpoint: "checkpoint_lane",
-        },
+      choices: classifyChoices,
+      cases: {
+        continue: "continue_lane",
+        checkpoint: "checkpoint_lane",
       },
-    },
+    }),
   ],
 });

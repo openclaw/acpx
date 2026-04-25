@@ -1,5 +1,7 @@
 export { FlowRunner } from "./flows/runtime.js";
 export { acp, action, checkpoint, compute, defineFlow, shell } from "./flows/definition.js";
+export { decision, decisionEdge } from "./flows/decision.js";
+export type { DecisionDefinition } from "./flows/decision.js";
 export type {
   AcpNodeDefinition,
   ActionNodeDefinition,

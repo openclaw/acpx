@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { TimeoutError } from "../src/async-control.js";
+import { decision, decisionEdge } from "../src/flows/decision.js";
 import { validateFlowDefinition } from "../src/flows/graph.js";
 import { extractJsonObject, parseJsonObject, parseStrictJsonObject } from "../src/flows/json.js";
 import { createRunId } from "../src/flows/runtime-support.js";
@@ -92,6 +93,196 @@ test("createRunId slugifies flow names without regex backtracking", () => {
     createRunId("  Publish: BIG Result!!!  "),
     /^\d{4}-.*-publish-big-result-[a-f0-9-]+$/,
   );
+});
+
+test("decision builds an acp node that scaffolds the prompt and validates the choice", async () => {
+  const node = decision({
+    choices: ["continue", "checkpoint"] as const,
+    question: "Decide.",
+  });
+
+  assert.equal(node.nodeType, "acp");
+  assert.equal(typeof node.prompt, "function");
+  assert.equal(typeof node.parse, "function");
+
+  const promptText = (await node.prompt({
+    input: undefined,
+    outputs: {},
+    results: {},
+    state: {} as never,
+    services: {},
+  })) as string;
+  assert.match(promptText, /Decide\./);
+  assert.match(promptText, /Return exactly one JSON object with this shape:/);
+  assert.match(promptText, /"route": "continue" \| "checkpoint"/);
+  assert.match(promptText, /"reason": "short justification"/);
+
+  const valid = (await node.parse?.('{"route":"continue","reason":"clear"}', {} as never)) as
+    | Record<string, unknown>
+    | undefined;
+  assert.deepEqual(valid, { route: "continue", reason: "clear" });
+
+  await assert.rejects(
+    async () => node.parse?.('{"route":"sideways"}', {} as never),
+    /Decision returned invalid route="sideways"; expected one of "continue", "checkpoint"/,
+  );
+  await assert.rejects(
+    async () => node.parse?.('{"reason":"none"}', {} as never),
+    /Decision returned invalid route=undefined/,
+  );
+  await assert.rejects(
+    async () => node.parse?.("[1,2,3]", {} as never),
+    /Decision response must be a JSON object/,
+  );
+});
+
+test("decision honors a custom field name and forwards acp options", async () => {
+  const node = decision({
+    field: "verdict",
+    choices: ["yes", "no"] as const,
+    question: () => Promise.resolve("Approve?"),
+    profile: "claude",
+    timeoutMs: 1234,
+  });
+
+  assert.equal(node.profile, "claude");
+  assert.equal(node.timeoutMs, 1234);
+
+  const promptText = (await node.prompt({
+    input: undefined,
+    outputs: {},
+    results: {},
+    state: {} as never,
+    services: {},
+  })) as string;
+  assert.match(promptText, /"verdict": "yes" \| "no"/);
+
+  const valid = (await node.parse?.('{"verdict":"yes"}', {} as never)) as
+    | Record<string, unknown>
+    | undefined;
+  assert.deepEqual(valid, { verdict: "yes" });
+});
+
+test("decisionEdge produces a switch edge keyed on the chosen field", () => {
+  const edge = decisionEdge({
+    from: "classify",
+    choices: ["continue", "checkpoint"] as const,
+    cases: { continue: "continue_lane", checkpoint: "checkpoint_lane" },
+  });
+  assert.deepEqual(edge, {
+    from: "classify",
+    switch: {
+      on: "$.route",
+      cases: { continue: "continue_lane", checkpoint: "checkpoint_lane" },
+    },
+  });
+
+  const customField = decisionEdge({
+    from: "approve",
+    field: "verdict",
+    choices: ["yes", "no"] as const,
+    cases: { yes: "ship", no: "rollback" },
+  });
+  assert.equal("switch" in customField && customField.switch.on, "$.verdict");
+});
+
+test("decision validates choices, field names, and edge cases", () => {
+  assert.throws(
+    () =>
+      decision({
+        choices: [],
+        question: "Choose.",
+      }),
+    /Decision choices must include at least one value/,
+  );
+
+  assert.throws(
+    () =>
+      decision({
+        choices: ["yes", "yes"],
+        question: "Choose.",
+      }),
+    /Decision choices must be unique/,
+  );
+
+  assert.throws(
+    () =>
+      decision({
+        field: "bad.path",
+        choices: ["yes"],
+        question: "Choose.",
+      }),
+    /Decision field must be a simple JSON key/,
+  );
+
+  assert.throws(
+    () =>
+      decisionEdge({
+        from: "classify",
+        choices: ["yes", "no"] as const,
+        cases: { yes: "ship" } as Record<"yes" | "no", string>,
+      }),
+    /Decision edge is missing case for choice "no"/,
+  );
+});
+
+test("FlowRunner routes through decision helpers", async () => {
+  await withTempHome(async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-decision-cwd-"));
+
+    try {
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: MOCK_AGENT_COMMAND,
+          cwd,
+        }),
+        permissionMode: "approve-all",
+        ttlMs: 1_000,
+      });
+      const choices = ["continue", "checkpoint"] as const;
+      const flow = defineFlow({
+        name: "decision-branch-test",
+        startAt: "classify",
+        nodes: {
+          classify: decision({
+            session: {
+              isolated: true,
+            },
+            choices,
+            question: ({ input }) => {
+              const route = (input as { route: string }).route;
+              return `echo ${JSON.stringify({ route, reason: "mocked" })}`;
+            },
+          }),
+          continue_lane: action({
+            run: () => ({ ok: true }),
+          }),
+          checkpoint_lane: checkpoint({
+            run: () => ({ ok: false }),
+          }),
+        },
+        edges: [
+          decisionEdge({
+            from: "classify",
+            choices,
+            cases: {
+              continue: "continue_lane",
+              checkpoint: "checkpoint_lane",
+            },
+          }),
+        ],
+      });
+
+      const result = await runner.run(flow, { route: "continue" });
+      assert.equal(result.state.status, "completed");
+      assert.deepEqual(result.state.outputs.classify, { route: "continue", reason: "mocked" });
+      assert.deepEqual(result.state.outputs.continue_lane, { ok: true });
+      assert.equal(result.state.outputs.checkpoint_lane, undefined);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
 });
 
 test("flow node helpers validate node-local shape before runtime", () => {
