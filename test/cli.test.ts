@@ -226,6 +226,7 @@ test("sessions new command is present in help output", async () => {
     assert.match(result.stdout, /\bnew\b/);
     assert.match(result.stdout, /\bensure\b/);
     assert.match(result.stdout, /\bread\b/);
+    assert.match(result.stdout, /\bprune\b/);
 
     const newHelp = await runCli(["sessions", "new", "--help"], homeDir);
     assert.equal(newHelp.code, 0, newHelp.stderr);
@@ -240,6 +241,11 @@ test("sessions new command is present in help output", async () => {
     assert.equal(readHelp.code, 0, readHelp.stderr);
     assert.match(readHelp.stdout, /--tail <count>/);
     assert.match(ensureHelp.stdout, /--resume-session <id>/);
+
+    const pruneHelp = await runCli(["sessions", "prune", "--help"], homeDir);
+    assert.equal(pruneHelp.code, 0, pruneHelp.stderr);
+    assert.match(pruneHelp.stdout, /--dry-run/);
+    assert.match(pruneHelp.stdout, /--include-history/);
   });
 });
 
@@ -1850,6 +1856,86 @@ test("sessions history prints stored history entries", async () => {
   });
 });
 
+test("sessions prune dry-run previews closed sessions without deleting", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: "prune-dry-run",
+      acpSessionId: "prune-dry-run",
+      agentCommand: AGENT_REGISTRY.codex,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:10:00.000Z",
+      closed: true,
+      closedAt: "2026-01-01T00:10:00.000Z",
+    });
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: "prune-open",
+      acpSessionId: "prune-open",
+      agentCommand: AGENT_REGISTRY.codex,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:20:00.000Z",
+      closed: false,
+    });
+
+    const result = await runCli(["--cwd", cwd, "codex", "sessions", "prune", "--dry-run"], homeDir);
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /\[DRY RUN\] Would prune 1 session/);
+    assert.match(result.stdout, /prune-dry-run/);
+    assert.doesNotMatch(result.stdout, /prune-open/);
+    assert.ok(await fileExists(sessionFilePath(homeDir, "prune-dry-run")));
+    assert.ok(await fileExists(sessionFilePath(homeDir, "prune-open")));
+  });
+});
+
+test("sessions prune supports json output and include-history", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    const sessionDir = path.join(homeDir, ".acpx", "sessions");
+    await fs.mkdir(cwd, { recursive: true });
+
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: "prune-json",
+      acpSessionId: "prune-json",
+      agentCommand: AGENT_REGISTRY.codex,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:10:00.000Z",
+      closed: true,
+      closedAt: "2026-01-01T00:10:00.000Z",
+    });
+
+    const safeId = encodeURIComponent("prune-json");
+    const streamFile = path.join(sessionDir, `${safeId}.stream.ndjson`);
+    await fs.writeFile(streamFile, "event-data\n", "utf8");
+
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "sessions", "prune", "--include-history"],
+      homeDir,
+    );
+
+    assert.equal(result.code, 0, result.stderr);
+    const payload = JSON.parse(result.stdout) as {
+      action?: string;
+      dryRun?: boolean;
+      count?: number;
+      bytesFreed?: number;
+      pruned?: string[];
+    };
+    assert.equal(payload.action, "sessions_pruned");
+    assert.equal(payload.dryRun, false);
+    assert.equal(payload.count, 1);
+    assert.ok((payload.bytesFreed ?? 0) > 0);
+    assert.deepEqual(payload.pruned, ["prune-json"]);
+    assert.ok(!(await fileExists(sessionFilePath(homeDir, "prune-json"))));
+    assert.ok(!(await fileExists(streamFile)));
+  });
+});
+
 test("sessions read prints full history by default and supports --tail", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
@@ -2247,6 +2333,19 @@ async function writeSessionRecord(
     `${JSON.stringify(serializeSessionRecordForDisk(makeSessionRecord(record)), null, 2)}\n`,
     "utf8",
   );
+}
+
+function sessionFilePath(homeDir: string, acpxRecordId: string): string {
+  return path.join(homeDir, ".acpx", "sessions", `${encodeURIComponent(acpxRecordId)}.json`);
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function escapeRegex(value: string): string {

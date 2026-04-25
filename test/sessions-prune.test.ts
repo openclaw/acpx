@@ -184,7 +184,7 @@ test("pruneSessions --dry-run does not delete files but returns correct count", 
   });
 });
 
-test("pruneSessions --before only prunes sessions with lastUsedAt before the cutoff", async () => {
+test("pruneSessions --before uses closedAt before falling back to lastUsedAt", async () => {
   await withTempHome(async (homeDir) => {
     const session = await loadSessionModule();
     const cwd = path.join(homeDir, "workspace");
@@ -198,7 +198,7 @@ test("pruneSessions --before only prunes sessions with lastUsedAt before the cut
         cwd,
         closed: true,
         closedAt: "2025-06-01T00:00:00.000Z",
-        lastUsedAt: "2025-06-01T00:00:00.000Z",
+        lastUsedAt: "2026-03-01T00:00:00.000Z",
       }),
     );
 
@@ -211,7 +211,7 @@ test("pruneSessions --before only prunes sessions with lastUsedAt before the cut
         cwd,
         closed: true,
         closedAt: "2026-03-01T00:00:00.000Z",
-        lastUsedAt: "2026-03-01T00:00:00.000Z",
+        lastUsedAt: "2025-06-01T00:00:00.000Z",
       }),
     );
 
@@ -330,9 +330,14 @@ test("pruneSessions --include-history deletes stream files", async () => {
     const streamFile = path.join(sessionsDir, `${safeId}.stream.ndjson`);
     const streamSegment = path.join(sessionsDir, `${safeId}.stream.0.ndjson`);
     const streamLock = path.join(sessionsDir, `${safeId}.stream.lock`);
+    const neighborStreamFile = path.join(
+      sessionsDir,
+      `${encodeURIComponent("stream-session.stream-neighbor")}.stream.ndjson`,
+    );
     await fs.writeFile(streamFile, "event-data\n", "utf8");
     await fs.writeFile(streamSegment, "segment-data\n", "utf8");
     await fs.writeFile(streamLock, "", "utf8");
+    await fs.writeFile(neighborStreamFile, "neighbor-data\n", "utf8");
 
     const result = await session.pruneSessions({
       agentCommand: "agent-a",
@@ -343,6 +348,7 @@ test("pruneSessions --include-history deletes stream files", async () => {
     assert.ok(!(await fileExists(streamFile)));
     assert.ok(!(await fileExists(streamSegment)));
     assert.ok(!(await fileExists(streamLock)));
+    assert.ok(await fileExists(neighborStreamFile));
   });
 });
 

@@ -311,6 +311,18 @@ export type PruneResult = {
   dryRun: boolean;
 };
 
+function closedAtOrLastUsedAt(record: SessionRecord): string {
+  return record.closedAt ?? record.lastUsedAt;
+}
+
+function isSessionStreamFile(fileName: string, safeId: string): boolean {
+  return (
+    fileName === `${safeId}.stream.ndjson` ||
+    fileName === `${safeId}.stream.lock` ||
+    fileName.startsWith(`${safeId}.stream.`)
+  );
+}
+
 export async function pruneSessions(options: PruneOptions = {}): Promise<PruneResult> {
   await ensureSessionDir();
   const entries = await loadSessionIndexEntries();
@@ -325,15 +337,10 @@ export async function pruneSessions(options: PruneOptions = {}): Promise<PruneRe
     options.before ??
     (options.olderThanMs != null ? new Date(Date.now() - options.olderThanMs) : undefined);
 
-  if (cutoff) {
-    const cutoffIso = cutoff.toISOString();
-    eligible = eligible.filter((entry) => entry.lastUsedAt < cutoffIso);
-  }
-
   const records: SessionRecord[] = [];
   for (const entry of eligible) {
     const record = await loadRecordFromIndexEntry(entry);
-    if (record) {
+    if (record && (!cutoff || closedAtOrLastUsedAt(record) < cutoff.toISOString())) {
       records.push(record);
     }
   }
@@ -369,9 +376,8 @@ export async function pruneSessions(options: PruneOptions = {}): Promise<PruneRe
     await fs.unlink(jsonFile).catch(() => undefined);
 
     if (options.includeHistory) {
-      const prefix = `${safeId}.stream`;
       for (const name of dirEntries) {
-        if (!name.startsWith(prefix)) {
+        if (!isSessionStreamFile(name, safeId)) {
           continue;
         }
         const filePath = path.join(sessionDir, name);

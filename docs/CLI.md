@@ -305,6 +305,7 @@ acpx [global_options] <agent> sessions show
 acpx [global_options] <agent> sessions show <name>
 acpx [global_options] <agent> sessions history
 acpx [global_options] <agent> sessions history <name> [--limit <count>]
+acpx [global_options] <agent> sessions prune [--dry-run] [--before <date> | --older-than <days>] [--include-history]
 
 acpx [global_options] sessions ...   # defaults to codex
 ```
@@ -322,6 +323,9 @@ Behavior:
 - `sessions close <name>` soft-closes current cwd named session
 - `sessions show [name]` displays stored session metadata
 - `sessions history [name]` displays stored turn history previews (default 20, configurable with `--limit`)
+- `sessions prune --dry-run` previews closed sessions that can be deleted
+- `sessions prune` deletes closed session records for the selected agent; add `--include-history` to delete event stream files too
+- `sessions prune --before <date>` and `--older-than <days>` filter by close time, falling back to last-used time for older records
 - close errors if the target session does not exist
 
 ## `status` command
@@ -492,7 +496,7 @@ Hard rule for the ACP stream:
 When `--format json` is used:
 
 - commands that talk to an ACP adapter emit raw ACP JSON-RPC messages.
-- local query commands (`sessions list/show/history`) emit local JSON documents (not ACP stream traffic).
+- local query commands (`sessions list/show/history/prune`) emit local JSON documents (not ACP stream traffic).
 
 ### Sessions/query command output behavior
 
@@ -503,6 +507,9 @@ When `--format json` is used:
 - `sessions show` with `json`: full session record object
 - `sessions history` with `text`: tab-separated `timestamp role textPreview` entries
 - `sessions history` with `json`: object containing `entries` array
+- `sessions prune` with `text`: summary plus pruned ids and close/last-used time
+- `sessions prune` with `json`: object containing `action`, `dryRun`, `count`, `bytesFreed`, and `pruned`
+- `sessions prune` with `quiet`: one pruned session id per line
 - `status` with `text`: key/value process status lines
 
 ## Permission modes

@@ -9,6 +9,7 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - CLI/claude: add `--system-prompt <text>` and `--append-system-prompt <text>` global flags that forward through ACP `_meta.systemPrompt` on `session/new`, letting callers replace or append to the Claude Code system prompt without dropping out of persistent acpx sessions. The value is persisted in `session_options.system_prompt` so ensure/reuse flows keep the override. Codex and other agents ignore the field. (#229) Thanks @Vercantez.
+- CLI/sessions: add `sessions prune` with `--dry-run`, age filters, and `--include-history` so closed session records and optional event streams can be cleaned up explicitly. (#227) Thanks @coder999999999.
 - Runtime/embedding: add `startTurn(...)` turn handles so embedders can observe live runtime events separately from terminal completion, cancel a turn, or close only the event stream while preserving `runTurn(...)` compatibility. (#262) Thanks @enki.
 
 ### Breaking
