@@ -30,6 +30,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI/queue: tighten persistent queue and IPC socket directories to owner-only permissions, including previously-created permissive directories. (#216) Thanks @garagon.
 - Config/agents: honor custom agent `args` arrays from config instead of silently dropping required adapter subcommands. (#199) Thanks @log-li.
 - CLI/queue: use cryptographically random owner generation IDs so rapid queue owner restarts cannot reuse a stale generation token. (#207) Thanks @Yuan-ManX.
+- Output/errors: add text-mode remediation hints for auth-required, missing-session, and common ACP session failures while keeping JSON error payloads stable. (#256) Thanks @SJeffZhang.
 - Runtime/ACP: drain late post-success session updates before closing prompt turns so adapters that resolve `session/prompt` before final updates do not drop assistant output. (#251) Thanks @logofet85-ai.
 - Sessions/reset: close the live backend session when discarding persistent state so reset flows start a fresh ACP session instead of silently reopening the old one.
 - Agents/kiro: use `kiro-cli-chat acp` for the built-in Kiro adapter command to avoid orphan child processes. (#129) Thanks @vokako.

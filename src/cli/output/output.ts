@@ -31,6 +31,16 @@ type WritableLike = {
   isTTY?: boolean;
 };
 
+type RenderableOutputError = {
+  code: OutputErrorCode;
+  detailCode?: string;
+  origin?: OutputErrorOrigin;
+  message: string;
+  retryable?: boolean;
+  acp?: OutputErrorAcpPayload;
+  timestamp?: string;
+};
+
 type OutputFormatterOptions = {
   stdout?: WritableLike;
   jsonContext?: OutputFormatterContext;
@@ -209,6 +219,134 @@ function readFirstStringArray(
     }
   }
   return undefined;
+}
+
+function formatDisjunction(values: string[]): string {
+  if (values.length <= 1) {
+    return values[0] ?? "";
+  }
+  if (values.length === 2) {
+    return `${values[0]} or ${values[1]}`;
+  }
+  return `${values.slice(0, -1).join(", ")}, or ${values.at(-1)}`;
+}
+
+function parseAuthMethodIdsFromMessage(message: string): string[] {
+  const methods: string[] = [];
+  const methodListMatch = message.match(/auth methods \[([^\]]+)\]/iu);
+  if (methodListMatch) {
+    methods.push(
+      ...methodListMatch[1]
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+    );
+  }
+
+  const singleMethodMatch = message.match(/auth method ([\w.-]+)/iu);
+  if (singleMethodMatch) {
+    methods.push(singleMethodMatch[1]);
+  }
+
+  return dedupeStrings(methods);
+}
+
+function parseAuthMethodIdsFromAcpData(data: unknown): string[] {
+  const record = asRecord(data);
+  if (!record) {
+    return [];
+  }
+
+  const methodIds: string[] = [];
+  if (typeof record.methodId === "string" && record.methodId.trim().length > 0) {
+    methodIds.push(record.methodId.trim());
+  }
+
+  if (Array.isArray(record.methods)) {
+    for (const entry of record.methods) {
+      if (typeof entry === "string" && entry.trim().length > 0) {
+        methodIds.push(entry.trim());
+        continue;
+      }
+
+      const id = asRecord(entry)?.id;
+      if (typeof id === "string" && id.trim().length > 0) {
+        methodIds.push(id.trim());
+      }
+    }
+  }
+
+  return dedupeStrings(methodIds);
+}
+
+function renderAuthRequiredHint(params: RenderableOutputError): string {
+  const methodIds = dedupeStrings([
+    ...parseAuthMethodIdsFromAcpData(params.acp?.data),
+    ...parseAuthMethodIdsFromMessage(params.message),
+  ]);
+
+  if (methodIds.length === 0) {
+    return "hint: run `acpx config show` to locate the active config, then add the required credential under `auth` and retry.";
+  }
+
+  const configKeys = methodIds.map((methodId) => `\`auth.${methodId}\``);
+  return `hint: run \`acpx config show\` to locate the active config, then add ${formatDisjunction(configKeys)} and retry.`;
+}
+
+export function getTextErrorRemediationHints(params: RenderableOutputError): string[] {
+  const lowerMessage = params.message.toLowerCase();
+
+  if (params.detailCode === "AUTH_REQUIRED") {
+    return [renderAuthRequiredHint(params)];
+  }
+
+  if (params.code === "NO_SESSION") {
+    if (lowerMessage.includes("create one:")) {
+      return [];
+    }
+
+    return [
+      "hint: the saved ACP session is missing or stale; start a fresh session with `acpx <agent> sessions new`, then retry.",
+    ];
+  }
+
+  if (lowerMessage.includes("does not support session/load")) {
+    return [
+      "hint: this adapter cannot resume saved ACP sessions; create a fresh one with `acpx <agent> sessions new` instead of reusing `--resume-session`.",
+    ];
+  }
+
+  if (
+    lowerMessage.includes("failed to resume acp session") ||
+    lowerMessage.includes("session/load")
+  ) {
+    return [
+      "hint: rerun with `--verbose` to capture the ACP load failure details.",
+      "hint: if you do not need the old backend session, start a fresh one with `acpx <agent> sessions new` and retry.",
+    ];
+  }
+
+  if (
+    lowerMessage.includes("session/set_mode") ||
+    lowerMessage.includes("session/set_model") ||
+    lowerMessage.includes("session/set_config_option")
+  ) {
+    return [
+      "hint: rerun with `--verbose` to capture the ACP method/error details before retrying.",
+    ];
+  }
+
+  if (
+    params.origin === "acp" &&
+    params.code === "RUNTIME" &&
+    (params.acp?.code === -32602 ||
+      params.acp?.code === -32603 ||
+      lowerMessage.includes("internal error"))
+  ) {
+    return ["hint: rerun with `--verbose` to capture the underlying ACP error details."];
+  }
+
+  return [];
 }
 
 function summarizeToolInput(rawInput: unknown): string | undefined {
@@ -579,18 +717,13 @@ class TextOutputFormatter implements OutputFormatter {
     this.writeLine(this.dim(`[done] ${stopReason}`));
   }
 
-  onError(params: {
-    code: OutputErrorCode;
-    detailCode?: string;
-    origin?: OutputErrorOrigin;
-    message: string;
-    retryable?: boolean;
-    acp?: OutputErrorAcpPayload;
-    timestamp?: string;
-  }): void {
+  onError(params: RenderableOutputError): void {
     this.flushThoughtBuffer();
     this.beginSection("done");
     this.writeLine(this.formatAnsi(`[error] ${params.code}: ${params.message}`, "31"));
+    for (const hint of getTextErrorRemediationHints(params)) {
+      this.writeLine(this.dim(hint));
+    }
   }
 
   onClientOperation(operation: ClientOperation): void {

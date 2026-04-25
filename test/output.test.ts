@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createOutputFormatter } from "../src/cli/output/output.js";
+import { createOutputFormatter, getTextErrorRemediationHints } from "../src/cli/output/output.js";
 
 class CaptureWriter {
   public readonly chunks: string[] = [];
@@ -181,6 +181,86 @@ test("json formatter emits ACP JSON-RPC error response from onError", () => {
   assert.equal(parsed.error?.data?.acpxCode, "RUNTIME");
   assert.equal(parsed.error?.data?.origin, "runtime");
   assert.equal(parsed.error?.data?.sessionId, "session-err");
+});
+
+test("json formatter keeps remediation hints out of JSON error payloads", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("json", {
+    stdout: writer,
+    jsonContext: {
+      sessionId: "session-auth",
+    },
+  });
+
+  formatter.onError({
+    code: "RUNTIME",
+    detailCode: "AUTH_REQUIRED",
+    message: "missing credentials for auth method openai-api-key",
+    origin: "acp",
+    acp: {
+      code: -32000,
+      message: "Authentication required",
+      data: {
+        methodId: "openai-api-key",
+      },
+    },
+  });
+
+  const parsed = JSON.parse(writer.toString().trim()) as {
+    error?: {
+      message?: string;
+      data?: {
+        acpxCode?: string;
+        detailCode?: string;
+      };
+    };
+  };
+  assert.equal(parsed.error?.message, "Authentication required");
+  assert.equal(parsed.error?.data?.acpxCode, "RUNTIME");
+  assert.equal(parsed.error?.data?.detailCode, "AUTH_REQUIRED");
+  assert.doesNotMatch(writer.toString(), /hint:/);
+});
+
+test("text formatter prints auth remediation hints", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("text", { stdout: writer });
+
+  formatter.onError({
+    code: "RUNTIME",
+    detailCode: "AUTH_REQUIRED",
+    message: "missing credentials for auth method openai-api-key",
+    origin: "acp",
+    acp: {
+      code: -32000,
+      message: "Authentication required",
+      data: {
+        methodId: "openai-api-key",
+      },
+    },
+  });
+
+  const output = writer.toString();
+  assert.match(output, /\[error\] RUNTIME: missing credentials/);
+  assert.match(output, /hint: run `acpx config show`/);
+  assert.match(output, /`auth\.openai-api-key`/);
+});
+
+test("text remediation hints cover missing session and ACP runtime failures", () => {
+  assert.deepEqual(getTextErrorRemediationHints({ code: "NO_SESSION", message: "No session" }), [
+    "hint: the saved ACP session is missing or stale; start a fresh session with `acpx <agent> sessions new`, then retry.",
+  ]);
+  assert.deepEqual(
+    getTextErrorRemediationHints({
+      code: "RUNTIME",
+      message: "Failed session/set_mode for mode plan: Invalid params",
+      origin: "acp",
+      acp: {
+        code: -32602,
+        message: "Invalid params",
+      },
+    }),
+    ["hint: rerun with `--verbose` to capture the ACP method/error details before retrying."],
+  );
 });
 
 test("text formatter suppresses read output when requested", () => {

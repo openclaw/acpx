@@ -20,7 +20,7 @@ import {
   parseTtlSeconds,
   resolveOutputPolicy,
 } from "./cli/flags.js";
-import { createOutputFormatter } from "./cli/output/output.js";
+import { createOutputFormatter, getTextErrorRemediationHints } from "./cli/output/output.js";
 import { runQueueOwnerFromEnv } from "./cli/queue/owner-env.js";
 import { flushPerfMetricsCapture, installPerfMetricsCapture } from "./perf-metrics-capture.js";
 import { EXIT_CODES, OUTPUT_FORMATS, type OutputFormat, type OutputPolicy } from "./types.js";
@@ -245,6 +245,11 @@ async function emitRequestedError(
 
   if (!outputPolicy.suppressNonJsonStderr) {
     process.stderr.write(`${normalized.message}\n`);
+    if (outputPolicy.format === "text") {
+      for (const hint of getTextErrorRemediationHints(normalized)) {
+        process.stderr.write(`${hint}\n`);
+      }
+    }
   }
 }
 

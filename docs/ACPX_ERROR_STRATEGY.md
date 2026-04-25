@@ -22,7 +22,7 @@ This document defines how `acpx` should represent errors across:
 - Keep ACP semantics intact when available.
 - Provide stable `acpx` codes for orchestrator logic.
 - Avoid parsing free-form message text.
-- Keep text mode UX unchanged.
+- Keep the JSON/machine contract stable; text mode may add additive remediation hints.
 - Make changes additive to preserve backward compatibility.
 
 ## Two-layer contract
@@ -108,7 +108,7 @@ Cancellation is a normal completion path, not an error path:
 ## Rollout and compatibility
 
 - Queue error parsing should accept both old (`message` only) and new (`code/detailCode/message`) payload shapes during migration.
-- Text mode output and existing exit codes stay unchanged.
+- Text mode may add additive remediation hints; existing exit codes and JSON fields stay unchanged.
 - New JSON fields remain additive.
 - `--json-strict` is the recommended mode for orchestrators that need JSON-only output channels.
 
