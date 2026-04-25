@@ -9,6 +9,28 @@ export type SessionAgentOptions = {
   systemPrompt?: SystemPromptOption;
 };
 
+export function mergeSessionOptions(
+  preferred: SessionAgentOptions | undefined,
+  fallback: SessionAgentOptions | undefined,
+): SessionAgentOptions | undefined {
+  const merged: SessionAgentOptions = { ...fallback };
+
+  if (preferred?.model !== undefined) {
+    merged.model = preferred.model;
+  }
+  if (preferred?.allowedTools !== undefined) {
+    merged.allowedTools = preferred.allowedTools;
+  }
+  if (preferred?.maxTurns !== undefined) {
+    merged.maxTurns = preferred.maxTurns;
+  }
+  if (preferred?.systemPrompt !== undefined) {
+    merged.systemPrompt = preferred.systemPrompt;
+  }
+
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 export function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOptions | undefined {
   const stored = record.acpx?.session_options;
   if (!stored) {

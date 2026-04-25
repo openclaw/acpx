@@ -4,6 +4,7 @@ import { normalizeOutputError } from "../../acp/error-normalization.js";
 import { recordPerfDuration } from "../../perf-metrics.js";
 import { textPrompt } from "../../prompt-content.js";
 import type {
+  AcpClientOptions,
   NonInteractivePermissionPolicy,
   PermissionMode,
   PromptInput,
@@ -83,6 +84,7 @@ export type QueueTask = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   timeoutMs?: number;
   suppressSdkConsoleErrors?: boolean;
+  sessionOptions?: NonNullable<AcpClientOptions["sessionOptions"]>;
   waitForCompletion: boolean;
   enqueuedAt: number;
   send: (message: QueueOwnerMessage) => void;
@@ -451,6 +453,7 @@ export class SessionQueueOwner {
         nonInteractivePermissions: request.nonInteractivePermissions,
         timeoutMs: request.timeoutMs,
         suppressSdkConsoleErrors: request.suppressSdkConsoleErrors,
+        sessionOptions: request.sessionOptions,
         waitForCompletion: request.waitForCompletion,
         enqueuedAt: Date.now(),
         send: (message) => {

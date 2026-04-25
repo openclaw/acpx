@@ -14,6 +14,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- CLI/prompt: honor `--model` when sending prompts to existing persistent sessions, including queued owner paths. (#211) Thanks @skywills.
 - Claude/built-in: bump the owned `@agentclientprotocol/claude-agent-acp` package range to `^0.31.0` so fresh built-in launches include the Opus 4.7 adapter update and later ACP compatibility fixes. (#253) Thanks @flowforgelab.
 
 ## 2026.4.25 (v0.6.0)

@@ -3,6 +3,7 @@ import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { QueueConnectionError, QueueProtocolError } from "../../errors.js";
 import { incrementPerfCounter } from "../../perf-metrics.js";
 import type {
+  AcpClientOptions,
   NonInteractivePermissionPolicy,
   OutputErrorEmissionPolicy,
   OutputFormatter,
@@ -269,6 +270,7 @@ export type SubmitToQueueOwnerOptions = {
   suppressSdkConsoleErrors?: boolean;
   waitForCompletion: boolean;
   verbose?: boolean;
+  sessionOptions?: NonNullable<AcpClientOptions["sessionOptions"]>;
 };
 
 async function submitToQueueOwner(
@@ -288,6 +290,7 @@ async function submitToQueueOwner(
     timeoutMs: options.timeoutMs,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     waitForCompletion: options.waitForCompletion,
+    sessionOptions: options.sessionOptions,
   };
 
   options.outputFormatter.setContext({

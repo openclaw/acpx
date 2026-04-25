@@ -89,6 +89,7 @@ export type SessionSendOptions = {
   maxQueueDepth?: number;
   client?: AcpClient;
   promptRetries?: number;
+  sessionOptions?: SessionAgentOptions;
 } & TimedRunOptions;
 
 export type SessionEnsureOptions = {

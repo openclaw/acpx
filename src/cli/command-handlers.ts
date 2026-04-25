@@ -233,6 +233,12 @@ export async function handlePrompt(
     promptRetries: globalFlags.promptRetries,
     verbose: globalFlags.verbose,
     waitForCompletion: flags.wait !== false,
+    sessionOptions: {
+      model: globalFlags.model,
+      allowedTools: globalFlags.allowedTools,
+      maxTurns: globalFlags.maxTurns,
+      systemPrompt: globalFlags.systemPrompt,
+    },
   });
 
   if ("queued" in result) {

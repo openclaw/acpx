@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
+import type { SessionAgentOptions } from "../../runtime/engine/session-options.js";
 import type {
   AuthPolicy,
   McpServer,
@@ -19,6 +20,7 @@ export type QueueOwnerRuntimeOptions = {
   ttlMs?: number;
   maxQueueDepth?: number;
   promptRetries?: number;
+  sessionOptions?: SessionAgentOptions;
 };
 
 type SessionSendLike = {
@@ -33,6 +35,7 @@ type SessionSendLike = {
   ttlMs?: number;
   maxQueueDepth?: number;
   promptRetries?: number;
+  sessionOptions?: SessionAgentOptions;
 };
 
 export function sanitizeQueueOwnerExecArgv(
@@ -131,6 +134,7 @@ export function queueOwnerRuntimeOptionsFromSend(
     ttlMs: options.ttlMs,
     maxQueueDepth: options.maxQueueDepth,
     promptRetries: options.promptRetries,
+    sessionOptions: options.sessionOptions,
   };
 }
 

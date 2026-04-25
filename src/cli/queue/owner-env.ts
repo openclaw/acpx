@@ -79,6 +79,30 @@ export function parseQueueOwnerPayload(raw: string): QueueOwnerRuntimeOptions {
     options.promptRetries = Math.max(0, Math.round(record.promptRetries));
   }
 
+  const sessionOpts = asRecord(record.sessionOptions);
+  if (sessionOpts) {
+    options.sessionOptions = {};
+    if (typeof sessionOpts.model === "string" && sessionOpts.model.trim().length > 0) {
+      options.sessionOptions.model = sessionOpts.model;
+    }
+    if (Array.isArray(sessionOpts.allowedTools)) {
+      options.sessionOptions.allowedTools = sessionOpts.allowedTools.filter(
+        (tool): tool is string => typeof tool === "string",
+      );
+    }
+    if (typeof sessionOpts.maxTurns === "number" && Number.isFinite(sessionOpts.maxTurns)) {
+      options.sessionOptions.maxTurns = Math.max(1, Math.round(sessionOpts.maxTurns));
+    }
+    if (typeof sessionOpts.systemPrompt === "string") {
+      options.sessionOptions.systemPrompt = sessionOpts.systemPrompt;
+    } else {
+      const systemPrompt = asRecord(sessionOpts.systemPrompt);
+      if (typeof systemPrompt?.append === "string") {
+        options.sessionOptions.systemPrompt = { append: systemPrompt.append };
+      }
+    }
+  }
+
   return options;
 }
 

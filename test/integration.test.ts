@@ -978,6 +978,48 @@ test("integration: exec --model skips session/set_model when agent does not adve
   });
 });
 
+test("integration: prompt --model updates existing session model before prompt", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const modelAgentCommand = `${LOAD_CAPABLE_MOCK_AGENT_COMMAND} --advertise-models`;
+
+    try {
+      const created = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+
+      const result = await runCli(
+        [
+          "--agent",
+          modelAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "--model",
+          "fast-model",
+          "prompt",
+          "echo hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const setModelRequest = payloads.find((payload) => payload.method === "session/set_model") as
+        | { params?: { modelId?: string } }
+        | undefined;
+      assert(setModelRequest, "expected session/set_model before the persistent prompt");
+      assert.equal(setModelRequest.params?.modelId, "fast-model");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: exec --model fails when session/set_model fails", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

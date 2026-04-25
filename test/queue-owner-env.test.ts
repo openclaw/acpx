@@ -23,6 +23,12 @@ describe("parseQueueOwnerPayload", () => {
         ],
         ttlMs: 1234,
         maxQueueDepth: 7,
+        sessionOptions: {
+          model: "fast-model",
+          allowedTools: ["Read"],
+          maxTurns: 3,
+          systemPrompt: "stay concise",
+        },
       }),
     );
     assert.equal(parsed.sessionId, "session-1");
@@ -46,6 +52,12 @@ describe("parseQueueOwnerPayload", () => {
       },
     ]);
     assert.equal(parsed.maxQueueDepth, 7);
+    assert.deepEqual(parsed.sessionOptions, {
+      model: "fast-model",
+      allowedTools: ["Read"],
+      maxTurns: 3,
+      systemPrompt: "stay concise",
+    });
   });
 
   it("rejects invalid payloads", () => {

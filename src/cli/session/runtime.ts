@@ -14,7 +14,11 @@ import {
 } from "../../runtime/engine/lifecycle.js";
 import { runPromptTurn } from "../../runtime/engine/prompt-turn.js";
 import { connectAndLoadSession } from "../../runtime/engine/reconnect.js";
-import { sessionOptionsFromRecord } from "../../runtime/engine/session-options.js";
+import {
+  mergeSessionOptions,
+  sessionOptionsFromRecord,
+  type SessionAgentOptions,
+} from "../../runtime/engine/session-options.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,
@@ -24,6 +28,7 @@ import {
   trimConversationForRuntime,
 } from "../../session/conversation-model.js";
 import { SessionEventWriter } from "../../session/events.js";
+import { setCurrentModelId, setDesiredModelId } from "../../session/mode-preference.js";
 import { absolutePath, isoNow, resolveSessionRecord } from "../../session/persistence.js";
 import type {
   AcpJsonRpcMessage,
@@ -40,6 +45,7 @@ import type {
   PromptInput,
   RunPromptResult,
   SessionNotification,
+  SessionRecord,
   SessionResumePolicy,
   SessionSendResult,
 } from "../../types.js";
@@ -66,6 +72,7 @@ type RunSessionPromptOptions = {
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   promptRetries?: number;
+  sessionOptions?: SessionAgentOptions;
   onClientAvailable?: (controller: ActiveSessionController) => void;
   onClientClosed?: () => void;
   onPromptActive?: () => Promise<void> | void;
@@ -157,6 +164,31 @@ async function applyRequestedModelIfAdvertised(params: {
     params.timeoutMs,
   );
   return true;
+}
+
+async function applyPromptModelIfAdvertised(params: {
+  client: AcpClient;
+  sessionId: string;
+  requestedModel: string | undefined;
+  record: SessionRecord;
+  timeoutMs?: number;
+}): Promise<void> {
+  const requestedModel =
+    typeof params.requestedModel === "string" ? params.requestedModel.trim() : "";
+  if (!requestedModel || !Array.isArray(params.record.acpx?.available_models)) {
+    return;
+  }
+  if (params.record.acpx.current_model_id === requestedModel) {
+    setDesiredModelId(params.record, requestedModel);
+    return;
+  }
+
+  await withTimeout(
+    params.client.setSessionModel(params.sessionId, requestedModel),
+    params.timeoutMs,
+  );
+  setDesiredModelId(params.record, requestedModel);
+  setCurrentModelId(params.record, requestedModel);
 }
 
 function jsonRpcIdKey(value: unknown): string | undefined {
@@ -274,6 +306,7 @@ export async function runQueuedTask(
     authPolicy?: AuthPolicy;
     suppressSdkConsoleErrors?: boolean;
     promptRetries?: number;
+    sessionOptions?: SessionAgentOptions;
     onClientAvailable?: (controller: ActiveSessionController) => void;
     onClientClosed?: () => void;
     onPromptActive?: () => Promise<void> | void;
@@ -299,6 +332,7 @@ export async function runQueuedTask(
       suppressSdkConsoleErrors: task.suppressSdkConsoleErrors ?? options.suppressSdkConsoleErrors,
       verbose: options.verbose,
       promptRetries: options.promptRetries,
+      sessionOptions: mergeSessionOptions(task.sessionOptions, options.sessionOptions),
       onClientAvailable: options.onClientAvailable,
       onClientClosed: options.onClientClosed,
       onPromptActive: options.onPromptActive,
@@ -360,6 +394,10 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
   });
   const pendingMessages: AcpJsonRpcMessage[] = [];
   const pendingConnectOutputMessages: AcpJsonRpcMessage[] = [];
+  const sessionOptions = mergeSessionOptions(
+    options.sessionOptions,
+    sessionOptionsFromRecord(record),
+  );
   let bufferingConnectOutput = true;
   let promptTurnActive = false;
   let promptTurnHadSideEffects = false;
@@ -398,7 +436,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       authPolicy: options.authPolicy,
       suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
       verbose: options.verbose,
-      sessionOptions: sessionOptionsFromRecord(record),
+      sessionOptions,
     });
   client.updateRuntimeOptions({
     permissionMode: options.permissionMode,
@@ -503,6 +541,14 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
             `[acpx] ${formatPerfMetric("prompt.connect_and_load", Date.now() - connectStartedAt)}\n`,
           );
         }
+
+        await applyPromptModelIfAdvertised({
+          client,
+          sessionId: activeSessionId,
+          requestedModel: sessionOptions?.model,
+          record,
+          timeoutMs: options.timeoutMs,
+        });
 
         output.setContext({
           sessionId: record.acpxRecordId,

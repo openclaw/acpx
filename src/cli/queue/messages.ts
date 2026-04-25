@@ -4,6 +4,7 @@ import { isPromptInput, textPrompt } from "../../prompt-content.js";
 import {
   OUTPUT_ERROR_CODES,
   OUTPUT_ERROR_ORIGINS,
+  type AcpClientOptions,
   type OutputErrorAcpPayload,
   type OutputErrorCode,
   type OutputErrorOrigin,
@@ -17,6 +18,8 @@ import type {
   SessionSendResult,
 } from "../../types.js";
 
+type QueueSessionOptions = NonNullable<AcpClientOptions["sessionOptions"]>;
+
 export type QueueSubmitRequest = {
   type: "submit_prompt";
   requestId: string;
@@ -29,6 +32,7 @@ export type QueueSubmitRequest = {
   timeoutMs?: number;
   suppressSdkConsoleErrors?: boolean;
   waitForCompletion: boolean;
+  sessionOptions?: QueueSessionOptions;
 };
 
 export type QueueCancelRequest = {
@@ -186,6 +190,55 @@ function parseAcpError(value: unknown): OutputErrorAcpPayload | undefined {
   };
 }
 
+function parseSessionOptions(value: unknown): QueueSessionOptions | null | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const sessionOptions: QueueSessionOptions = {};
+  if (record.model != null) {
+    if (typeof record.model !== "string" || record.model.trim().length === 0) {
+      return null;
+    }
+    sessionOptions.model = record.model;
+  }
+  if (record.allowedTools != null) {
+    if (!Array.isArray(record.allowedTools)) {
+      return null;
+    }
+    const allowedTools = record.allowedTools.filter(
+      (tool): tool is string => typeof tool === "string",
+    );
+    if (allowedTools.length !== record.allowedTools.length) {
+      return null;
+    }
+    sessionOptions.allowedTools = allowedTools;
+  }
+  if (record.maxTurns != null) {
+    if (typeof record.maxTurns !== "number" || !Number.isFinite(record.maxTurns)) {
+      return null;
+    }
+    sessionOptions.maxTurns = Math.max(1, Math.round(record.maxTurns));
+  }
+  if (record.systemPrompt != null) {
+    if (typeof record.systemPrompt === "string") {
+      sessionOptions.systemPrompt = record.systemPrompt;
+    } else {
+      const systemPrompt = asRecord(record.systemPrompt);
+      if (!systemPrompt || typeof systemPrompt.append !== "string") {
+        return null;
+      }
+      sessionOptions.systemPrompt = { append: systemPrompt.append };
+    }
+  }
+
+  return sessionOptions;
+}
+
 function parseOwnerGeneration(value: unknown): number | undefined | null {
   if (value == null) {
     return undefined;
@@ -235,6 +288,7 @@ export function parseQueueRequest(raw: unknown): QueueRequest | null {
         : typeof request.suppressSdkConsoleErrors === "boolean"
           ? request.suppressSdkConsoleErrors
           : null;
+    const sessionOptions = parseSessionOptions(request.sessionOptions);
 
     const prompt =
       request.prompt == null ? undefined : isPromptInput(request.prompt) ? request.prompt : null;
@@ -245,6 +299,7 @@ export function parseQueueRequest(raw: unknown): QueueRequest | null {
       prompt === null ||
       nonInteractivePermissions === null ||
       suppressSdkConsoleErrors === null ||
+      sessionOptions === null ||
       typeof request.waitForCompletion !== "boolean"
     ) {
       return null;
@@ -262,6 +317,7 @@ export function parseQueueRequest(raw: unknown): QueueRequest | null {
       timeoutMs,
       ...(suppressSdkConsoleErrors !== undefined ? { suppressSdkConsoleErrors } : {}),
       waitForCompletion: request.waitForCompletion,
+      ...(sessionOptions !== undefined ? { sessionOptions } : {}),
     };
   }
 

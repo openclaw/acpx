@@ -5,7 +5,10 @@ import { checkpointPerfMetricsCapture } from "../../perf-metrics-capture.js";
 import { setPerfGauge } from "../../perf-metrics.js";
 import { promptToDisplayText } from "../../prompt-content.js";
 import { applyLifecycleSnapshotToRecord } from "../../runtime/engine/lifecycle.js";
-import { sessionOptionsFromRecord } from "../../runtime/engine/session-options.js";
+import {
+  mergeSessionOptions,
+  sessionOptionsFromRecord,
+} from "../../runtime/engine/session-options.js";
 import {
   absolutePath,
   resolveSessionRecord,
@@ -56,6 +59,7 @@ async function submitToRunningOwner(
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     waitForCompletion,
     verbose: options.verbose,
+    sessionOptions: options.sessionOptions,
   });
 }
 
@@ -78,7 +82,10 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     authPolicy: options.authPolicy,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
-    sessionOptions: sessionOptionsFromRecord(sessionRecord),
+    sessionOptions: mergeSessionOptions(
+      options.sessionOptions,
+      sessionOptionsFromRecord(sessionRecord),
+    ),
   });
   const ttlMs = normalizeQueueOwnerTtlMs(options.ttlMs);
   const maxQueueDepth = Math.max(1, Math.round(options.maxQueueDepth ?? 16));
@@ -226,6 +233,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
             authPolicy: options.authPolicy,
             suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
             promptRetries: options.promptRetries,
+            sessionOptions: options.sessionOptions,
             onClientAvailable: setActiveController,
             onClientClosed: clearActiveController,
             onPromptActive: async () => {

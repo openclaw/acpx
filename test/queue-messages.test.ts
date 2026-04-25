@@ -40,6 +40,69 @@ test("parseQueueRequest rejects invalid nonInteractivePermissions value", () => 
   assert.equal(parsed, null);
 });
 
+test("parseQueueRequest accepts prompt session options", () => {
+  const parsed = parseQueueRequest({
+    type: "submit_prompt",
+    requestId: "req-session-options",
+    message: "hello",
+    permissionMode: "approve-reads",
+    sessionOptions: {
+      model: "fast-model",
+      allowedTools: ["Read", "Grep"],
+      maxTurns: 4,
+      systemPrompt: { append: "keep it brief" },
+    },
+    waitForCompletion: true,
+  });
+
+  assert.deepEqual(parsed, {
+    type: "submit_prompt",
+    requestId: "req-session-options",
+    ownerGeneration: undefined,
+    message: "hello",
+    prompt: [{ type: "text", text: "hello" }],
+    permissionMode: "approve-reads",
+    nonInteractivePermissions: undefined,
+    timeoutMs: undefined,
+    waitForCompletion: true,
+    sessionOptions: {
+      model: "fast-model",
+      allowedTools: ["Read", "Grep"],
+      maxTurns: 4,
+      systemPrompt: { append: "keep it brief" },
+    },
+  });
+});
+
+test("parseQueueRequest rejects invalid prompt session options", () => {
+  assert.equal(
+    parseQueueRequest({
+      type: "submit_prompt",
+      requestId: "req-session-options-invalid-model",
+      message: "hello",
+      permissionMode: "approve-reads",
+      sessionOptions: {
+        model: "   ",
+      },
+      waitForCompletion: true,
+    }),
+    null,
+  );
+  assert.equal(
+    parseQueueRequest({
+      type: "submit_prompt",
+      requestId: "req-session-options-invalid-tools",
+      message: "hello",
+      permissionMode: "approve-reads",
+      sessionOptions: {
+        allowedTools: ["Read", 123],
+      },
+      waitForCompletion: true,
+    }),
+    null,
+  );
+});
+
 test("parseQueueOwnerMessage accepts typed queue error payload", () => {
   const parsed = parseQueueOwnerMessage({
     type: "error",
