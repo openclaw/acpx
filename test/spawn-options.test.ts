@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { resolveAgentSessionCwd } from "../src/acp/client-process.js";
 import { buildAgentSpawnOptions, buildSpawnCommandOptions } from "../src/acp/client.js";
 import { buildTerminalSpawnOptions } from "../src/acp/terminal-manager.js";
 import { buildQueueOwnerSpawnOptions } from "../src/cli/session/queue-owner-process.js";
@@ -126,6 +127,57 @@ test("buildSpawnCommandOptions keeps shell disabled for non-batch commands", asy
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
+});
+
+test("resolveAgentSessionCwd translates WSL cwd for Windows exe agents", async () => {
+  let capturedCwd: string | undefined;
+
+  const cwd = await resolveAgentSessionCwd(
+    "/home/user/project",
+    '"/mnt/c/Users/User/AppData/Local/GitHub CLI/copilot/copilot.exe" --acp --stdio',
+    {
+      platform: "linux",
+      existsSync: (filePath) => filePath === "/proc/sys/fs/binfmt_misc/WSLInterop",
+      runWslpath: async (value) => {
+        capturedCwd = value;
+        return "\\\\wsl.localhost\\Ubuntu\\home\\user\\project\n";
+      },
+    },
+  );
+
+  assert.equal(capturedCwd, "/home/user/project");
+  assert.equal(cwd, "\\\\wsl.localhost\\Ubuntu\\home\\user\\project");
+});
+
+test("resolveAgentSessionCwd leaves non-WSL and non-Windows agents on resolved cwd", async () => {
+  const nonWsl = await resolveAgentSessionCwd("relative/project", "/mnt/c/tools/copilot.exe", {
+    platform: "linux",
+    existsSync: () => false,
+    runWslpath: async () => {
+      throw new Error("wslpath should not run");
+    },
+  });
+  const wslNodeAgent = await resolveAgentSessionCwd("/home/user/project", "node ./agent.js", {
+    platform: "linux",
+    existsSync: (filePath) => filePath === "/proc/sys/fs/binfmt_misc/WSLInterop",
+    runWslpath: async () => {
+      throw new Error("wslpath should not run");
+    },
+  });
+
+  assert.equal(nonWsl, path.resolve("relative/project"));
+  assert.equal(wslNodeAgent, "/home/user/project");
+});
+
+test("resolveAgentSessionCwd rejects empty wslpath output", async () => {
+  await assert.rejects(
+    resolveAgentSessionCwd("/home/user/project", "/mnt/c/tools/copilot.exe --acp", {
+      platform: "linux",
+      existsSync: (filePath) => filePath === "/proc/sys/fs/binfmt_misc/WSLInterop",
+      runWslpath: async () => "\n",
+    }),
+    /wslpath returned an empty Windows path/,
+  );
 });
 
 test("buildTerminalSpawnOptions enables shell for PATH-resolved .cmd wrappers on Windows", async () => {

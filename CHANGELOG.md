@@ -20,6 +20,7 @@ Repo: https://github.com/openclaw/acpx
 
 - CLI/quiet output: emit final token usage and cost metadata to stderr when adapters include it in the ACP prompt result, while keeping quiet stdout as assistant text only. (#257)
 - Runtime/doctor: guarantee `doctor().details` contains strings even when probe failures include Error or object values. (#267)
+- Runtime/WSL: translate session cwd with `wslpath` when running under WSL and spawning Windows `.exe` ACP agents, so `session/new` and `session/load` receive paths the agent can access. (#232)
 - CLI/prompt: honor `--model` when sending prompts to existing persistent sessions, including queued owner paths. (#211) Thanks @skywills.
 - Claude/built-in: bump the owned `@agentclientprotocol/claude-agent-acp` package range to `^0.31.0` so fresh built-in launches include the Opus 4.7 adapter update and later ACP compatibility fixes. (#253) Thanks @flowforgelab.
 

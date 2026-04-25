@@ -1,10 +1,20 @@
-import type { ChildProcess, ChildProcessByStdio } from "node:child_process";
+import { execFile, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 export type CommandParts = {
   command: string;
   args: string[];
+};
+
+type ResolveSessionCwdOptions = {
+  platform?: NodeJS.Platform;
+  existsSync?: (filePath: string) => boolean;
+  runWslpath?: (cwd: string) => Promise<string>;
 };
 
 export function isoNow(): string {
@@ -144,6 +154,61 @@ export function splitCommandLine(value: string): CommandParts {
 
 export function asAbsoluteCwd(cwd: string): string {
   return path.resolve(cwd);
+}
+
+export async function resolveAgentSessionCwd(
+  cwd: string,
+  agentCommand: string,
+  options: ResolveSessionCwdOptions = {},
+): Promise<string> {
+  const resolved = asAbsoluteCwd(cwd);
+  if (!shouldTranslateWslWindowsCwd(agentCommand, options)) {
+    return resolved;
+  }
+
+  const translated = (await (options.runWslpath ?? runWslpath)(resolved)).trim();
+  if (!translated) {
+    throw new Error(`wslpath returned an empty Windows path for cwd: ${resolved}`);
+  }
+  return translated;
+}
+
+function shouldTranslateWslWindowsCwd(
+  agentCommand: string,
+  options: ResolveSessionCwdOptions,
+): boolean {
+  if (!isWsl(options)) {
+    return false;
+  }
+
+  try {
+    const { command } = splitCommandLine(agentCommand);
+    return isWindowsExecutableCommand(command);
+  } catch {
+    return false;
+  }
+}
+
+function isWsl(options: ResolveSessionCwdOptions): boolean {
+  const platform = options.platform ?? process.platform;
+  if (platform !== "linux") {
+    return false;
+  }
+
+  const existsSync = options.existsSync ?? fs.existsSync;
+  return existsSync("/proc/sys/fs/binfmt_misc/WSLInterop");
+}
+
+function isWindowsExecutableCommand(command: string): boolean {
+  const normalized = command.replace(/\\/g, "/").toLowerCase();
+  return normalized.endsWith(".exe") || normalized.startsWith("/mnt/c/");
+}
+
+async function runWslpath(cwd: string): Promise<string> {
+  const { stdout } = await execFileAsync("wslpath", ["-w", cwd], {
+    encoding: "utf8",
+  });
+  return stdout;
 }
 
 export function basenameToken(value: string): string {

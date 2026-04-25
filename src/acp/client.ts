@@ -78,6 +78,7 @@ import {
   isoNow,
   isChildProcessRunning,
   requireAgentStdio,
+  resolveAgentSessionCwd,
   splitCommandLine,
   waitForChildExit,
   waitForSpawn,
@@ -630,12 +631,13 @@ export class AcpClient {
     const connection = this.getConnection();
     const { command, args } = splitCommandLine(this.options.agentCommand);
     const claudeAcp = isClaudeAcpCommand(command, args);
+    const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
 
     let result: Awaited<ReturnType<typeof connection.newSession>>;
     try {
       const createPromise = this.runConnectionRequest(() =>
         connection.newSession({
-          cwd: asAbsoluteCwd(cwd),
+          cwd: sessionCwd,
           mcpServers: this.options.mcpServers ?? [],
           _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions),
         }),
@@ -673,6 +675,7 @@ export class AcpClient {
     options: LoadSessionOptions = {},
   ): Promise<SessionLoadResult> {
     const connection = this.getConnection();
+    const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
     const previousSuppression = this.suppressSessionUpdates;
     const previousReplaySuppression = this.suppressReplaySessionUpdateMessages;
     this.suppressSessionUpdates = previousSuppression || Boolean(options.suppressReplayUpdates);
@@ -685,7 +688,7 @@ export class AcpClient {
       response = await this.runConnectionRequest(() =>
         connection.loadSession({
           sessionId,
-          cwd: asAbsoluteCwd(cwd),
+          cwd: sessionCwd,
           mcpServers: this.options.mcpServers ?? [],
         }),
       );
