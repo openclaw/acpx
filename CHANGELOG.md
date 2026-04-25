@@ -28,6 +28,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Runtime/persistent sessions: keep reusable persistent ACP clients warm across turns and close pooled clients during runtime close. (#265) Thanks @Sway-Chan.
 - CLI/queue: tighten persistent queue and IPC socket directories to owner-only permissions, including previously-created permissive directories. (#216) Thanks @garagon.
+- Config/agents: honor custom agent `args` arrays from config instead of silently dropping required adapter subcommands. (#199) Thanks @log-li.
 - Runtime/ACP: drain late post-success session updates before closing prompt turns so adapters that resolve `session/prompt` before final updates do not drop assistant output. (#251) Thanks @logofet85-ai.
 - Sessions/reset: close the live backend session when discarding persistent state so reset flows start a fresh ACP session instead of silently reopening the old one.
 - Agents/kiro: use `kiro-cli-chat acp` for the built-in Kiro adapter command to avoid orphan child processes. (#129) Thanks @vokako.

@@ -370,7 +370,7 @@ Supported keys:
   "timeout": null,
   "format": "text",
   "agents": {
-    "my-custom": { "command": "./bin/my-acp-server" }
+    "my-custom": { "command": "./bin/my-acp-server", "args": ["acp"] }
   },
   "auth": {
     "my_auth_method_id": "credential-value"

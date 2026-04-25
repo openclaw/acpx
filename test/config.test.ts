@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { splitCommandLine } from "../src/acp/client-process.js";
 import { initGlobalConfigFile, loadResolvedConfig } from "../src/cli/config.js";
 
 test("loadResolvedConfig merges global and project config with project priority", async () => {
@@ -223,6 +224,70 @@ test("loadResolvedConfig rejects invalid disableExec value", async () => {
     await assert.rejects(async () => {
       await loadResolvedConfig(cwd);
     }, /Invalid config disableExec.*expected boolean/);
+  });
+});
+
+test("loadResolvedConfig merges agent args into the command safely", async () => {
+  await withTempEnv(async ({ homeDir }) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            custom: {
+              command: "node",
+              args: ["/usr/local/bin/my agent", "--profile", "with spaces", 'quote"me'],
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const config = await loadResolvedConfig(cwd);
+    assert.deepEqual(config.agents, {
+      custom: 'node "/usr/local/bin/my agent" "--profile" "with spaces" "quote\\"me"',
+    });
+    assert.deepEqual(splitCommandLine(config.agents.custom), {
+      command: "node",
+      args: ["/usr/local/bin/my agent", "--profile", "with spaces", 'quote"me'],
+    });
+  });
+});
+
+test("loadResolvedConfig rejects invalid agent args", async () => {
+  await withTempEnv(async ({ homeDir }) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            custom: {
+              command: "/usr/local/bin/my-agent",
+              args: ["acp", 123],
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await assert.rejects(
+      () => loadResolvedConfig(cwd),
+      /Invalid config agents\.custom\.args\[1\].*expected string/u,
+    );
   });
 });
 

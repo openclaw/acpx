@@ -221,7 +221,7 @@ Supported keys:
 - `ttl` (seconds)
 - `timeout` (seconds or `null`)
 - `format` (`text`, `json`, `quiet`)
-- `agents` map (`name -> { command }`)
+- `agents` map (`name -> { command, args? }`)
 - `auth` map (`authMethodId -> credential`)
 
 Use `acpx config show` to inspect the resolved config and `acpx config init` to create the global template.

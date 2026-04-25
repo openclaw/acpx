@@ -13,6 +13,7 @@ import type {
 
 type ConfigAgentEntry = {
   command: string;
+  args?: string[];
 };
 
 type ConfigFileShape = {
@@ -197,10 +198,35 @@ function parseAgents(value: unknown, sourcePath: string): Record<string, string>
         `Invalid config agents.${name}.command in ${sourcePath}: expected non-empty string`,
       );
     }
-    parsed[normalizeAgentName(name)] = command.trim();
+    const args = parseAgentArgs(raw.args, name, sourcePath);
+    parsed[normalizeAgentName(name)] =
+      args.length > 0 ? `${command.trim()} ${args.map(quoteCommandArg).join(" ")}` : command.trim();
   }
 
   return parsed;
+}
+
+function parseAgentArgs(value: unknown, agentName: string, sourcePath: string): string[] {
+  if (value == null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(
+      `Invalid config agents.${agentName}.args in ${sourcePath}: expected array of strings`,
+    );
+  }
+  return value.map((arg, index) => {
+    if (typeof arg !== "string") {
+      throw new Error(
+        `Invalid config agents.${agentName}.args[${index}] in ${sourcePath}: expected string`,
+      );
+    }
+    return arg;
+  });
+}
+
+function quoteCommandArg(value: string): string {
+  return JSON.stringify(value);
 }
 
 function parseAuth(value: unknown, sourcePath: string): Record<string, string> | undefined {
