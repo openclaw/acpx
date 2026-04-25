@@ -2824,6 +2824,57 @@ test("integration: prompt exits after done while detached owner stays warm", asy
   });
 });
 
+test("integration: prompt --no-wait is processed by the detached queue owner", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const created = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+
+      const queued = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "json",
+          "--ttl",
+          "5",
+          "prompt",
+          "--no-wait",
+          "say exactly: no-wait-done",
+        ],
+        homeDir,
+      );
+      assert.equal(queued.code, 0, queued.stderr);
+      const queuedPayload = JSON.parse(queued.stdout.trim()) as {
+        action?: string;
+        acpxRecordId?: string;
+      };
+      assert.equal(queuedPayload.action, "prompt_queued");
+
+      await waitFor(async () => {
+        const history = await runCli(
+          [...baseAgentArgs(cwd), "--format", "quiet", "sessions", "read"],
+          homeDir,
+        );
+        assert.equal(history.code, 0, history.stderr);
+        return history.stdout.includes("no-wait-done") ? history.stdout : null;
+      }, 5_000);
+
+      const closed = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "close"],
+        homeDir,
+      );
+      assert.equal(closed.code, 0, closed.stderr);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: session remains resumable after queue owner exits and agent has exited", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
