@@ -577,7 +577,17 @@ export class AcpRuntimeManager {
             if (!runtimeClient.hasActivePrompt()) {
               await sessionReady.promise;
             }
-            return await runtimeClient.setSessionConfigOption(activeSessionId, configId, value);
+            const response = await runtimeClient.setSessionConfigOption(
+              activeSessionId,
+              configId,
+              value,
+            );
+            if (response?.configOptions) {
+              const nextState = cloneSessionAcpxState(acpxState) ?? {};
+              nextState.config_options = structuredClone(response.configOptions);
+              acpxState = nextState;
+            }
+            return response;
           },
         };
 

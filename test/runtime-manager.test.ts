@@ -995,14 +995,15 @@ test("AcpRuntimeManager routes controls through the active controller while a tu
   await promptStarted;
   await manager.setMode(createHandle("live-session"), "plan");
   await manager.setConfigOption(createHandle("live-session"), "approval", "manual");
-  const liveStatus = await manager.getStatus(createHandle("live-session"));
+  const liveStatusDuringTurn = await manager.getStatus(createHandle("live-session"));
   await turn.cancel();
   const events = await eventsPromise;
   const result = await turn.result;
+  const liveStatusAfterTurn = await manager.getStatus(createHandle("live-session"));
 
   assert.equal(setModeCalls, 1);
   assert.equal(setConfigCalls, 1);
-  assert.deepEqual(liveStatus.details?.configOptions, [
+  const expectedConfigOptions = [
     {
       id: "approval",
       name: "Approval",
@@ -1010,7 +1011,9 @@ test("AcpRuntimeManager routes controls through the active controller while a tu
       currentValue: "manual",
       options: [{ value: "manual", name: "Manual" }],
     },
-  ]);
+  ];
+  assert.deepEqual(liveStatusDuringTurn.details?.configOptions, expectedConfigOptions);
+  assert.deepEqual(liveStatusAfterTurn.details?.configOptions, expectedConfigOptions);
   assert.equal(cancelRequested, 1);
   assert.deepEqual(events, []);
   assert.deepEqual(result, { status: "cancelled", stopReason: "cancelled" });
@@ -1912,5 +1915,9 @@ test("AcpRuntimeManager reuses a kept-open persistent client for controls before
       options: [{ value: "manual", name: "Manual" }],
     },
   ]);
+  assert.equal(closeCalls, 0);
+
+  await manager.close(handle);
+
   assert.equal(closeCalls, 1);
 });
