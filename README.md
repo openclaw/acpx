@@ -33,7 +33,7 @@ One command surface for Pi, OpenClaw ACP, Codex, Claude, and other ACP-compatibl
 - **Prompt from file/stdin**: `--file <path>` or piped stdin for prompt content
 - **Config files**: global + project JSON config with `acpx config show|init`
 - **Session inspect/history**: `sessions show` and `sessions history --limit <n>`
-- **Local status checks**: `status` reports running/dead/no-session, pid, uptime, last prompt
+- **Local status checks**: `status` reports running/idle/dead/no-session, pid, uptime, last prompt
 - **Client methods**: stable `fs/*` and `terminal/*` handlers with permission controls and cwd sandboxing
 - **Auth handshake**: stable `authenticate` support via env/config credentials
 - **Structured output**: typed ACP messages (thinking, tool calls, diffs) instead of ANSI scraping

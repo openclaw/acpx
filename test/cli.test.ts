@@ -1548,9 +1548,45 @@ test("status resolves named session when -s is before subcommand", async () => {
     const payload = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
     assert.equal(payload.action, "status_snapshot");
     assert.equal(payload.acpxRecordId, "named-status-session");
-    assert.equal(payload.status, "dead");
+    assert.equal(payload.status, "idle");
+    assert.equal(payload.summary, "session idle; queue owner will start on next prompt");
     assert.notEqual(payload.status, "no-session");
     assert.equal(payload.agentSessionId, undefined);
+  });
+});
+
+test("status reports idle for resumable sessions without a live queue owner", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: "idle-status-session",
+      acpSessionId: "idle-status-session",
+      agentCommand: AGENT_REGISTRY.codex,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:01:00.000Z",
+      lastPromptAt: "2026-01-01T00:01:00.000Z",
+      closed: false,
+      pid: 12345,
+      agentStartedAt: "2026-01-01T00:00:00.000Z",
+      lastAgentExitCode: 0,
+      lastAgentExitAt: "2026-01-01T00:02:00.000Z",
+    });
+
+    const json = await runCli(["--cwd", cwd, "--format", "json", "codex", "status"], homeDir);
+    assert.equal(json.code, 0, json.stderr);
+    const payload = JSON.parse(json.stdout.trim()) as Record<string, unknown>;
+    assert.equal(payload.action, "status_snapshot");
+    assert.equal(payload.status, "idle");
+    assert.equal(payload.summary, "session idle; queue owner will start on next prompt");
+    assert.equal(payload.exitCode, undefined);
+
+    const text = await runCli(["--cwd", cwd, "codex", "status"], homeDir);
+    assert.equal(text.code, 0, text.stderr);
+    assert.match(text.stdout, /status: idle/);
+    assert.doesNotMatch(text.stdout, /exitCode:/);
   });
 });
 
@@ -2024,6 +2060,48 @@ test("status reports running queue owner when owner socket is reachable", async 
       assert.match(result.stdout, /status: running/);
     } finally {
       await closeServer(server);
+      await cleanupOwnerArtifacts({ socketPath, lockPath });
+      stopProcess(keeper);
+    }
+  });
+});
+
+test("status reports dead when queue owner lease is present but unreachable", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const sessionId = "status-unreachable-owner";
+    const keeper = await startKeeperProcess();
+    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
+
+    try {
+      await writeSessionRecord(homeDir, {
+        acpxRecordId: sessionId,
+        acpSessionId: sessionId,
+        agentCommand: AGENT_REGISTRY.codex,
+        cwd,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        lastUsedAt: "2026-01-01T00:00:00.000Z",
+        lastPromptAt: "2026-01-01T00:00:00.000Z",
+        closed: false,
+        pid: keeper.pid,
+        agentStartedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      await writeQueueOwnerLock({
+        lockPath,
+        pid: keeper.pid,
+        sessionId,
+        socketPath,
+      });
+
+      const result = await runCli(["--cwd", cwd, "--format", "json", "codex", "status"], homeDir);
+      assert.equal(result.code, 0, result.stderr);
+      const payload = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
+      assert.equal(payload.status, "dead");
+      assert.equal(payload.summary, "queue owner unavailable");
+    } finally {
       await cleanupOwnerArtifacts({ socketPath, lockPath });
       stopProcess(keeper);
     }

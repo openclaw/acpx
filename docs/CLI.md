@@ -341,11 +341,15 @@ acpx [global_options] status -s <name>
 
 Shows local process status for the cwd-scoped session:
 
-- `running`, `dead`, or `no-session`
+- `running`, `idle`, `dead`, or `no-session`
 - session id, agent command, pid
 - uptime when running
 - last prompt timestamp
 - last known exit code/signal when dead
+
+`idle` means the persistent session is saved and resumable, but no queue owner is
+currently running. The next prompt starts a queue owner and reconnects the
+session.
 
 Status checks are local and PID-based (`kill(pid, 0)` semantics).
 

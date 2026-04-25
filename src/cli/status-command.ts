@@ -12,6 +12,8 @@ import { emitJsonResult } from "./output/json-output.js";
 import { agentSessionIdPayload } from "./output/render.js";
 import { probeQueueOwnerHealth } from "./queue/ipc.js";
 
+type SessionStatusState = "running" | "idle" | "dead";
+
 function formatUptime(startedAt: string | undefined): string | undefined {
   if (!startedAt) {
     return undefined;
@@ -30,6 +32,37 @@ function formatUptime(startedAt: string | undefined): string | undefined {
   return `${hours.toString().padStart(2, "0")}:${minutes
     .toString()
     .padStart(2, "0")}:${remSeconds.toString().padStart(2, "0")}`;
+}
+
+function resolveStatusState(
+  record: { lastAgentExitCode?: number | null; lastAgentExitSignal?: NodeJS.Signals | null },
+  health: Awaited<ReturnType<typeof probeQueueOwnerHealth>>,
+): SessionStatusState {
+  if (health.healthy) {
+    return "running";
+  }
+
+  if (health.hasLease) {
+    return "dead";
+  }
+
+  if (record.lastAgentExitSignal || (record.lastAgentExitCode ?? 0) !== 0) {
+    return "dead";
+  }
+
+  return "idle";
+}
+
+function statusSummary(state: SessionStatusState): string {
+  switch (state) {
+    case "running":
+      return "queue owner healthy";
+    case "idle":
+      return "session idle; queue owner will start on next prompt";
+    case "dead":
+      return "queue owner unavailable";
+  }
+  return "queue owner unavailable";
 }
 
 export async function handleStatus(
@@ -74,12 +107,14 @@ export async function handleStatus(
   }
 
   const health = await probeQueueOwnerHealth(record.acpxRecordId);
-  const running = health.healthy;
+  const statusState = resolveStatusState(record, health);
+  const running = statusState === "running";
+  const dead = statusState === "dead";
   const payload = {
     sessionId: record.acpxRecordId,
     agentCommand: record.agentCommand,
     pid: health.pid ?? record.pid ?? null,
-    status: running ? "running" : "dead",
+    status: statusState,
     model: record.acpx?.current_model_id ?? null,
     mode: record.acpx?.current_mode_id ?? null,
     availableModels: record.acpx?.available_models ?? null,
@@ -93,16 +128,16 @@ export async function handleStatus(
   if (
     emitJsonResult(globalFlags.format, {
       action: "status_snapshot",
-      status: running ? "alive" : "dead",
+      status: running ? "alive" : statusState,
       pid: payload.pid ?? undefined,
-      summary: running ? "queue owner healthy" : "queue owner unavailable",
+      summary: statusSummary(statusState),
       model: payload.model ?? undefined,
       mode: payload.mode ?? undefined,
       availableModels: payload.availableModels ?? undefined,
       uptime: payload.uptime ?? undefined,
       lastPromptTime: payload.lastPromptTime ?? undefined,
-      exitCode: payload.exitCode ?? undefined,
-      signal: payload.signal ?? undefined,
+      exitCode: dead ? (payload.exitCode ?? undefined) : undefined,
+      signal: dead ? (payload.signal ?? undefined) : undefined,
       acpxRecordId: record.acpxRecordId,
       acpxSessionId: record.acpSessionId,
       agentSessionId: record.agentSessionId,
@@ -127,7 +162,7 @@ export async function handleStatus(
   process.stdout.write(`mode: ${payload.mode ?? "-"}\n`);
   process.stdout.write(`uptime: ${payload.uptime ?? "-"}\n`);
   process.stdout.write(`lastPromptTime: ${payload.lastPromptTime ?? "-"}\n`);
-  if (payload.status === "dead") {
+  if (dead) {
     process.stdout.write(`exitCode: ${payload.exitCode ?? "-"}\n`);
     process.stdout.write(`signal: ${payload.signal ?? "-"}\n`);
   }
