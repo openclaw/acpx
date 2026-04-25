@@ -175,7 +175,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
         },
       },
       get result() {
-        return turnPromise.then((turn) => turn.result).then(async (result) => await result);
+        return turnPromise.then((turn) => turn.result);
       },
       cancel(inputArgs?: { reason?: string }) {
         return turnPromise.then((turn) => turn.cancel(inputArgs));
