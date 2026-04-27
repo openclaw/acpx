@@ -170,6 +170,54 @@ test("resolveAgentSessionCwd leaves non-WSL and non-Windows agents on resolved c
   assert.equal(wslNodeAgent, "/home/user/project");
 });
 
+test("resolveAgentSessionCwd translates WSL cwd for Windows .cmd wrappers", async () => {
+  let capturedCwd: string | undefined;
+
+  const cwd = await resolveAgentSessionCwd(
+    "/home/user/project",
+    '"/mnt/c/Program Files/nodejs/npx.cmd" some-acp-agent --stdio',
+    {
+      platform: "linux",
+      existsSync: (filePath) => filePath === "/proc/sys/fs/binfmt_misc/WSLInterop",
+      runWslpath: async (value) => {
+        capturedCwd = value;
+        return "\\\\wsl.localhost\\Ubuntu\\home\\user\\project\n";
+      },
+    },
+  );
+
+  assert.equal(capturedCwd, "/home/user/project");
+  assert.equal(cwd, "\\\\wsl.localhost\\Ubuntu\\home\\user\\project");
+});
+
+test("resolveAgentSessionCwd translates WSL cwd for Windows agents on non-C drives", async () => {
+  let capturedCwd: string | undefined;
+
+  const cwd = await resolveAgentSessionCwd("/home/user/project", "/mnt/d/tools/agent.bat --acp", {
+    platform: "linux",
+    existsSync: (filePath) => filePath === "/proc/sys/fs/binfmt_misc/WSLInterop",
+    runWslpath: async (value) => {
+      capturedCwd = value;
+      return "\\\\wsl.localhost\\Ubuntu\\home\\user\\project\n";
+    },
+  });
+
+  assert.equal(capturedCwd, "/home/user/project");
+  assert.equal(cwd, "\\\\wsl.localhost\\Ubuntu\\home\\user\\project");
+});
+
+test("resolveAgentSessionCwd does not translate WSL cwd for extension-less commands under /mnt/<drive>/", async () => {
+  const cwd = await resolveAgentSessionCwd("/home/user/project", "/mnt/c/tools/linux-agent --acp", {
+    platform: "linux",
+    existsSync: (filePath) => filePath === "/proc/sys/fs/binfmt_misc/WSLInterop",
+    runWslpath: async () => {
+      throw new Error("wslpath should not run for extension-less /mnt/<drive>/ commands");
+    },
+  });
+
+  assert.equal(cwd, "/home/user/project");
+});
+
 test("resolveAgentSessionCwd rejects empty wslpath output", async () => {
   await assert.rejects(
     resolveAgentSessionCwd("/home/user/project", "/mnt/c/tools/copilot.exe --acp", {

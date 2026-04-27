@@ -199,9 +199,11 @@ function isWsl(options: ResolveSessionCwdOptions): boolean {
   return existsSync("/proc/sys/fs/binfmt_misc/WSLInterop");
 }
 
+const WINDOWS_EXECUTABLE_EXTENSION_RE = /\.(?:exe|cmd|bat)$/u;
+
 function isWindowsExecutableCommand(command: string): boolean {
-  const normalized = command.replace(/\\/g, "/").toLowerCase();
-  return normalized.endsWith(".exe") || normalized.startsWith("/mnt/c/");
+  const normalized = command.toLowerCase();
+  return WINDOWS_EXECUTABLE_EXTENSION_RE.test(normalized);
 }
 
 async function runWslpath(cwd: string): Promise<string> {
