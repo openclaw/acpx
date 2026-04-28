@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Runtime/embedding: capture per-session advertised `configOptions` from `session/new` and `session/load` and surface them via handle-aware `getCapabilities`, so embedders can reconcile advertised keys before issuing `session/set_config_option` against adapters with narrow advertised configOption sets (e.g. `claude-agent-acp` v0.31+ which only advertises `mode | model | effort`). `getCapabilities()` and `getCapabilities({})` keep their synchronous return; only `getCapabilities({ handle })` becomes async. Thanks @samithaj.
+
 ### Breaking
 
 ### Fixes

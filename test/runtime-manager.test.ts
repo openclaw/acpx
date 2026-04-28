@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
+import type { SessionConfigOption, SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { AcpRuntimeManager } from "../src/runtime/engine/manager.js";
 import type {
   AcpRuntimeEvent,
@@ -26,8 +26,15 @@ type FakeClient = {
   };
   start: () => Promise<void>;
   close: () => Promise<void>;
-  createSession: (cwd: string) => Promise<{ sessionId: string; agentSessionId?: string }>;
-  loadSession: (sessionId: string, cwd: string) => Promise<{ agentSessionId?: string }>;
+  createSession: (cwd: string) => Promise<{
+    sessionId: string;
+    agentSessionId?: string;
+    configOptions?: SessionConfigOption[];
+  }>;
+  loadSession: (
+    sessionId: string,
+    cwd: string,
+  ) => Promise<{ agentSessionId?: string; configOptions?: SessionConfigOption[] }>;
   hasReusableSession: (sessionId: string) => boolean;
   supportsLoadSession: () => boolean;
   supportsCloseSession?: () => boolean;
@@ -35,7 +42,7 @@ type FakeClient = {
     sessionId: string,
     cwd: string,
     options: { suppressReplayUpdates: boolean },
-  ) => Promise<{ agentSessionId?: string }>;
+  ) => Promise<{ agentSessionId?: string; configOptions?: SessionConfigOption[] }>;
   getAgentLifecycleSnapshot: () => {
     pid?: number;
     startedAt?: string;
@@ -1923,4 +1930,120 @@ test("AcpRuntimeManager reuses a kept-open persistent client for controls before
   await manager.close(handle);
 
   assert.equal(closeCalls, 1);
+});
+
+test("AcpRuntimeManager captures advertised configOptions from session/new", async () => {
+  const store = new InMemorySessionStore();
+  const advertised: SessionConfigOption[] = [
+    {
+      id: "mode",
+      name: "Mode",
+      description: "Permission mode",
+      type: "select",
+      currentValue: "default",
+      options: [{ value: "default", name: "Default" }],
+    } as SessionConfigOption,
+    {
+      id: "effort",
+      name: "Effort",
+      description: "Reasoning effort",
+      type: "select",
+      currentValue: "medium",
+      options: [{ value: "medium", name: "Medium" }],
+    } as SessionConfigOption,
+  ];
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          initializeResult: { protocolVersion: 1, agentCapabilities: { loadSession: true } },
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({
+            sessionId: "claude-session",
+            agentSessionId: "claude-agent",
+            configOptions: advertised,
+          }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  const created = await manager.ensureSession({
+    sessionKey: "claude-session-key",
+    agent: "claude",
+    mode: "persistent",
+  });
+
+  const persisted = store.records.get(created.acpxRecordId);
+  assert.deepEqual(
+    persisted?.acpx?.config_options?.map((option) => option.id),
+    ["mode", "effort"],
+  );
+});
+
+test("AcpRuntimeManager captures advertised configOptions from session/load on resume", async () => {
+  const store = new InMemorySessionStore();
+  const advertised: SessionConfigOption[] = [
+    {
+      id: "model",
+      name: "Model",
+      description: "Model id",
+      type: "select",
+      currentValue: "claude-3.7",
+      options: [{ value: "claude-3.7", name: "Claude 3.7" }],
+    } as SessionConfigOption,
+  ];
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          initializeResult: { protocolVersion: 1, agentCapabilities: { loadSession: true } },
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({
+            agentSessionId: "resumed-agent",
+            configOptions: advertised,
+          }),
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  const resumed = await manager.ensureSession({
+    sessionKey: "resumed-session",
+    agent: "claude",
+    mode: "persistent",
+    resumeSessionId: "prior-acp-session",
+  });
+
+  const persisted = store.records.get(resumed.acpxRecordId);
+  assert.deepEqual(
+    persisted?.acpx?.config_options?.map((option) => option.id),
+    ["model"],
+  );
 });

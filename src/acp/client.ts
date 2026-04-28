@@ -18,6 +18,7 @@ import {
   type ReleaseTerminalResponse,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
+  type SessionConfigOption,
   type SessionNotification,
   type SetSessionConfigOptionResponse,
   type TerminalOutputRequest,
@@ -116,11 +117,13 @@ export type SessionCreateResult = {
   sessionId: string;
   agentSessionId?: string;
   models?: SessionModelState;
+  configOptions?: SessionConfigOption[];
 };
 
 export type SessionLoadResult = {
   agentSessionId?: string;
   models?: SessionModelState;
+  configOptions?: SessionConfigOption[];
 };
 
 type AgentDisconnectReason = "process_exit" | "process_close" | "pipe_close" | "connection_close";
@@ -661,6 +664,7 @@ export class AcpClient {
       sessionId: result.sessionId,
       agentSessionId: extractRuntimeSessionId(result._meta),
       models: result.models ?? undefined,
+      configOptions: result.configOptions ?? undefined,
     };
   }
 
@@ -707,6 +711,7 @@ export class AcpClient {
     return {
       agentSessionId: extractRuntimeSessionId(response?._meta),
       models: response?.models ?? undefined,
+      configOptions: response?.configOptions ?? undefined,
     };
   }
 

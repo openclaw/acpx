@@ -27,6 +27,7 @@ import {
   reconcileAgentSessionId,
   sessionHasAgentMessages,
 } from "./lifecycle.js";
+import { applyConfigOptionsToRecord } from "./session-config-options.js";
 
 export type ConnectedSessionController = {
   hasActivePrompt: () => boolean;
@@ -291,6 +292,7 @@ export async function connectAndLoadSession(
       );
       reconcileAgentSessionId(record, loadResult.agentSessionId);
       sessionModels = loadResult.models;
+      applyConfigOptionsToRecord(record, loadResult.configOptions);
       resumed = true;
     } catch (error) {
       loadError = formatErrorMessage(error);
@@ -309,6 +311,7 @@ export async function connectAndLoadSession(
       createdFreshSession = true;
       pendingAgentSessionId = createdSession.agentSessionId;
       sessionModels = createdSession.models;
+      applyConfigOptionsToRecord(record, createdSession.configOptions);
     }
   } else {
     if (sameSessionOnly) {
@@ -322,6 +325,7 @@ export async function connectAndLoadSession(
     createdFreshSession = true;
     pendingAgentSessionId = createdSession.agentSessionId;
     sessionModels = createdSession.models;
+    applyConfigOptionsToRecord(record, createdSession.configOptions);
   }
 
   if (createdFreshSession) {

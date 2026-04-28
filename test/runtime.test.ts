@@ -425,6 +425,98 @@ test("AcpxRuntime falls back to plain runtimeSessionName handles and reuses a si
   assert.equal(managerFactoryCalls, 1);
 });
 
+test("AcpxRuntime.getCapabilities is synchronous and returns base capabilities when no handle is supplied", () => {
+  const runtime = new AcpxRuntime({
+    cwd: "/workspace",
+    sessionStore: createFileSessionStore({ stateDir: "/tmp/acpx-runtime-caps-no-handle" }),
+    agentRegistry: createAgentRegistry(),
+    permissionMode: "approve-reads",
+  });
+
+  const capsNoArg = runtime.getCapabilities();
+  assert.deepEqual(capsNoArg, {
+    controls: ["session/set_mode", "session/set_config_option", "session/status"],
+  });
+
+  const capsEmpty = runtime.getCapabilities({});
+  assert.deepEqual(capsEmpty, {
+    controls: ["session/set_mode", "session/set_config_option", "session/status"],
+  });
+});
+
+test("AcpxRuntime.getCapabilities({ handle }) returns advertised configOptionKeys from the session record", async (t) => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-caps-handle-"));
+  t.after(async () => {
+    await fs.rm(stateDir, { recursive: true, force: true });
+  });
+
+  const store = createFileSessionStore({ stateDir });
+  const record = createSessionRecord({
+    acpxRecordId: "agent:claude:acp:caps",
+    acpSessionId: "claude-sid",
+    acpx: {
+      config_options: [
+        { id: "mode", name: "Mode", type: "select", currentValue: "default", options: [] },
+        { id: "model", name: "Model", type: "select", currentValue: "x", options: [] },
+        { id: "effort", name: "Effort", type: "select", currentValue: "high", options: [] },
+      ] as never,
+    },
+  });
+  await store.save(record);
+
+  const runtime = new AcpxRuntime({
+    cwd: "/workspace",
+    sessionStore: store,
+    agentRegistry: createAgentRegistry(),
+    permissionMode: "approve-reads",
+  });
+
+  const handle = {
+    sessionKey: record.acpxRecordId,
+    backend: "acpx",
+    runtimeSessionName: record.acpxRecordId,
+    acpxRecordId: record.acpxRecordId,
+  };
+  const caps = await runtime.getCapabilities({ handle });
+  assert.deepEqual(caps, {
+    controls: ["session/set_mode", "session/set_config_option", "session/status"],
+    configOptionKeys: ["mode", "model", "effort"],
+  });
+});
+
+test("AcpxRuntime.getCapabilities({ handle }) returns base capabilities when the record has no config_options", async (t) => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-caps-empty-"));
+  t.after(async () => {
+    await fs.rm(stateDir, { recursive: true, force: true });
+  });
+
+  const store = createFileSessionStore({ stateDir });
+  const record = createSessionRecord({
+    acpxRecordId: "agent:codex:acp:caps-empty",
+    acpSessionId: "codex-sid",
+    acpx: {},
+  });
+  await store.save(record);
+
+  const runtime = new AcpxRuntime({
+    cwd: "/workspace",
+    sessionStore: store,
+    agentRegistry: createAgentRegistry(),
+    permissionMode: "approve-reads",
+  });
+
+  const handle = {
+    sessionKey: record.acpxRecordId,
+    backend: "acpx",
+    runtimeSessionName: record.acpxRecordId,
+    acpxRecordId: record.acpxRecordId,
+  };
+  const caps = await runtime.getCapabilities({ handle });
+  assert.deepEqual(caps, {
+    controls: ["session/set_mode", "session/set_config_option", "session/status"],
+  });
+});
+
 test("createRuntimeStore is an alias for the file-backed session store", async (t) => {
   const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-store-alias-"));
   t.after(async () => {

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
+import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import { AcpClient } from "../../acp/client.js";
 import { normalizeOutputError } from "../../acp/error-normalization.js";
 import { extractAcpError, isAcpResourceNotFoundError } from "../../acp/error-shapes.js";
@@ -39,6 +39,7 @@ import {
 import { runPromptTurn } from "./prompt-turn.js";
 import { connectAndLoadSession } from "./reconnect.js";
 import { shouldReuseExistingRecord } from "./reuse-policy.js";
+import { applyConfigOptionsToRecord } from "./session-config-options.js";
 
 export type AcpRuntimeManagerDeps = {
   clientFactory?: (options: ConstructorParameters<typeof AcpClient>[0]) => AcpClient;
@@ -69,18 +70,6 @@ function createDeferred<T>(): Deferred<T> {
     reject = rej;
   });
   return { promise, resolve, reject };
-}
-
-function applyConfigOptionsToRecord(
-  record: SessionRecord,
-  configOptions: SetSessionConfigOptionResponse["configOptions"] | undefined,
-): void {
-  if (!configOptions) {
-    return;
-  }
-  const acpxState = cloneSessionAcpxState(record.acpx) ?? {};
-  acpxState.config_options = structuredClone(configOptions);
-  record.acpx = acpxState;
 }
 
 class AsyncEventQueue {
@@ -404,14 +393,17 @@ export class AcpRuntimeManager {
       await client.start();
       let sessionId: string;
       let agentSessionId: string | undefined;
+      let advertisedConfigOptions: SessionConfigOption[] | undefined;
       if (input.resumeSessionId) {
         const loaded = await client.loadSession(input.resumeSessionId, cwd);
         sessionId = input.resumeSessionId;
         agentSessionId = loaded.agentSessionId;
+        advertisedConfigOptions = loaded.configOptions;
       } else {
         const created = await client.createSession(cwd);
         sessionId = created.sessionId;
         agentSessionId = created.agentSessionId;
+        advertisedConfigOptions = created.configOptions;
       }
       const record = createInitialRecord({
         recordId: createRecordId(input.sessionKey, input.mode),
@@ -425,6 +417,7 @@ export class AcpRuntimeManager {
       record.protocolVersion = client.initializeResult?.protocolVersion;
       record.agentCapabilities = client.initializeResult?.agentCapabilities;
       applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
+      applyConfigOptionsToRecord(record, advertisedConfigOptions);
       await this.options.sessionStore.save(record);
       if (input.mode === "persistent") {
         const previousClient = this.pendingPersistentClients.get(record.acpxRecordId);

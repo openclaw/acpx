@@ -201,8 +201,25 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     });
   }
 
-  getCapabilities(_input?: { handle?: AcpRuntimeHandle }): AcpRuntimeCapabilities {
-    return ACPX_CAPABILITIES;
+  getCapabilities(input?: {
+    handle?: AcpRuntimeHandle;
+  }): AcpRuntimeCapabilities | Promise<AcpRuntimeCapabilities> {
+    if (!input?.handle) {
+      return ACPX_CAPABILITIES;
+    }
+    const recordId = input.handle.acpxRecordId ?? input.handle.sessionKey;
+    return this.options.sessionStore.load(recordId).then((record) => {
+      const ids = record?.acpx?.config_options
+        ?.map((option) => option.id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0);
+      if (!ids || ids.length === 0) {
+        return ACPX_CAPABILITIES;
+      }
+      return {
+        ...ACPX_CAPABILITIES,
+        configOptionKeys: Array.from(new Set(ids)),
+      };
+    });
   }
 
   async getStatus(input: {
