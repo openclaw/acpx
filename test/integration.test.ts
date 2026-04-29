@@ -68,6 +68,54 @@ test("integration: exec echo baseline", async () => {
   });
 });
 
+test("integration: exec sends session/close before teardown when supported", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const closeCapableAgentCommand = `${MOCK_AGENT_COMMAND} --supports-close-session`;
+
+    try {
+      const result = await runCli(
+        [
+          "--agent",
+          closeCapableAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "exec",
+          "echo hello",
+        ],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+
+      // session/close must appear after the prompt result
+      const promptResultIndex = payloads.findIndex(
+        (p) => "result" in p && (p.result as { stopReason?: string })?.stopReason === "end_turn",
+      );
+      const closeIndex = payloads.findIndex(
+        (p) => p.method === "session/close" && extractJsonRpcId(p) !== undefined,
+      );
+      assert.notEqual(promptResultIndex, -1, "expected prompt result in output");
+      assert.notEqual(closeIndex, -1, `expected session/close in output:\n${result.stdout}`);
+      assert.ok(
+        closeIndex > promptResultIndex,
+        `session/close (index ${closeIndex}) must come after prompt result (index ${promptResultIndex})`,
+      );
+
+      const closeRequest = payloads[closeIndex] as { params?: { sessionId?: string } };
+      assert.equal(typeof closeRequest.params?.sessionId, "string");
+      assert.notEqual(closeRequest.params?.sessionId?.length, 0);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: built-in cursor agent resolves to cursor-agent acp", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -1117,7 +1165,7 @@ test("integration: exec --model fails when session/set_model fails", async () =>
 test("integration: sessions new --model fails when session/set_model fails", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
-    const failModelAgentCommand = `${MOCK_AGENT_COMMAND} --set-session-model-fails`;
+    const failModelAgentCommand = `${MOCK_AGENT_COMMAND} --set-session-model-fails --supports-close-session`;
 
     try {
       const result = await runCli(
@@ -2311,6 +2359,107 @@ test("integration: prompt reuses warm queue owner and agent pid across turns", a
         throw new Error("queue owner lock missing pid");
       }
       assert.equal(await waitForPidExit(lockTwo.pid, 5_000), true);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+// Proves the SIGTERM teardown path: sessions close -> SIGTERM -> queue owner
+// finally block -> sharedClient.close() -> session/close sent to agent.
+// The mock agent writes a marker file when it receives closeSession, so the
+// file only exists if the full chain succeeded.
+test("integration: sessions close sends session/close to agent via queue owner SIGTERM teardown", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    // mock-agent writes the ACP session id here when it receives session/close
+    const markerPath = path.join(cwd, "close-session-marker.txt");
+
+    try {
+      const closeCapableAgentCommand = `${MOCK_AGENT_COMMAND} --close-session-marker ${JSON.stringify(markerPath)}`;
+
+      // Create a persistent session with a close-capable agent
+      const created = await runCli(
+        [
+          "--agent",
+          closeCapableAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "sessions",
+          "new",
+        ],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+      const createdEvent = JSON.parse(created.stdout.trim()) as {
+        acpxRecordId?: string;
+      };
+      const sessionId = createdEvent.acpxRecordId;
+      assert.equal(typeof sessionId, "string");
+
+      // Send a prompt to spawn the detached queue owner
+      const prompt = await runCli(
+        [
+          "--agent",
+          closeCapableAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "quiet",
+          "prompt",
+          "echo hello",
+        ],
+        homeDir,
+      );
+      assert.equal(prompt.code, 0, prompt.stderr);
+
+      // Record the queue owner PID so we can wait for it
+      const { lockPath } = queuePaths(homeDir, sessionId as string);
+      const lock = JSON.parse(await fs.readFile(lockPath, "utf8")) as {
+        pid?: number;
+      };
+      assert.equal(typeof lock.pid, "number");
+
+      // sessions close SIGTERMs the queue owner
+      const closed = await runCli(
+        [
+          "--agent",
+          closeCapableAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "sessions",
+          "close",
+        ],
+        homeDir,
+      );
+      assert.equal(closed.code, 0, closed.stderr);
+      assert.equal(await waitForPidExit(lock.pid as number, 5_000), true);
+
+      // The marker file proves session/close reached the agent
+      const markerContent = await fs.readFile(markerPath, "utf8");
+      assert.ok(markerContent.length > 0, "marker file should contain session id");
+
+      const sessionRecordPath = path.join(
+        homeDir,
+        ".acpx",
+        "sessions",
+        `${encodeURIComponent(sessionId as string)}.json`,
+      );
+      const record = JSON.parse(await fs.readFile(sessionRecordPath, "utf8")) as {
+        acp_session_id?: string;
+      };
+      assert.equal(
+        markerContent,
+        record.acp_session_id,
+        "marker should contain the ACP session id from the session record",
+      );
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }

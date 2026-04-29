@@ -178,7 +178,6 @@ export async function createSessionWithClient(
     verbose: options.verbose,
     sessionOptions: options.sessionOptions,
   });
-
   try {
     const record = await withInterrupt(
       async () => await createSessionRecordWithClient(client, options),

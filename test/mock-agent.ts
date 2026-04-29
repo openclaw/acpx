@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { Readable, Writable } from "node:stream";
 import {
   AgentSideConnection,
+  type CloseSessionRequest,
+  type CloseSessionResponse,
   PROTOCOL_VERSION,
   RequestError,
   ndJsonStream,
@@ -36,6 +39,8 @@ type MockAgentOptions = {
   newSessionMeta?: Record<string, string>;
   loadSessionMeta?: Record<string, string>;
   supportsLoadSession: boolean;
+  supportsCloseSession: boolean;
+  closeSessionMarker?: string;
   loadSessionNotFound: boolean;
   loadSessionFailsOnEmpty: boolean;
   setSessionModeFails: boolean;
@@ -300,6 +305,8 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   const newSessionMeta: Record<string, string> = {};
   const loadSessionMeta: Record<string, string> = {};
   let supportsLoadSession = false;
+  let supportsCloseSession = false;
+  let closeSessionMarker: string | undefined;
   let loadSessionNotFound = false;
   let loadSessionFailsOnEmpty = false;
   let setSessionModeFails = false;
@@ -318,6 +325,18 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
 
     if (token === "--supports-load-session") {
       supportsLoadSession = true;
+      continue;
+    }
+
+    if (token === "--supports-close-session") {
+      supportsCloseSession = true;
+      continue;
+    }
+
+    if (token === "--close-session-marker") {
+      supportsCloseSession = true;
+      closeSessionMarker = parseOptionValue(argv, index + 1, token);
+      index += 1;
       continue;
     }
 
@@ -416,6 +435,8 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     newSessionMeta: Object.keys(newSessionMeta).length > 0 ? { ...newSessionMeta } : undefined,
     loadSessionMeta: Object.keys(loadSessionMeta).length > 0 ? { ...loadSessionMeta } : undefined,
     supportsLoadSession,
+    supportsCloseSession,
+    closeSessionMarker,
     loadSessionNotFound,
     loadSessionFailsOnEmpty,
     setSessionModeFails,
@@ -512,10 +533,20 @@ class MockAgent implements Agent {
   }
 
   async initialize(): Promise<InitializeResponse> {
+    const agentCapabilities: NonNullable<InitializeResponse["agentCapabilities"]> = {};
+    if (this.options.supportsLoadSession) {
+      agentCapabilities.loadSession = true;
+    }
+    if (this.options.supportsCloseSession) {
+      agentCapabilities.sessionCapabilities = {
+        close: {},
+      };
+    }
+
     return {
       protocolVersion: PROTOCOL_VERSION,
       authMethods: [],
-      agentCapabilities: this.options.supportsLoadSession ? { loadSession: true } : {},
+      agentCapabilities,
     };
   }
 
@@ -668,6 +699,25 @@ class MockAgent implements Agent {
 
   async cancel(params: { sessionId: SessionId }): Promise<void> {
     this.sessions.get(params.sessionId)?.pendingPrompt?.abort();
+  }
+
+  async closeSession(params: CloseSessionRequest): Promise<CloseSessionResponse> {
+    if (!this.options.supportsCloseSession) {
+      throw new Error("closeSession is not supported");
+    }
+
+    const session = this.sessions.get(params.sessionId);
+    if (!session) {
+      throw RequestError.resourceNotFound(params.sessionId);
+    }
+
+    if (this.options.closeSessionMarker) {
+      writeFileSync(this.options.closeSessionMarker, params.sessionId, "utf8");
+    }
+
+    session.pendingPrompt?.abort();
+    this.sessions.delete(params.sessionId);
+    return {};
   }
 
   async setSessionMode(params: SetSessionModeRequest): Promise<SetSessionModeResponse> {

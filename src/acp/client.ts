@@ -104,6 +104,7 @@ const REPLAY_DRAIN_TIMEOUT_MS = 5_000;
 const DRAIN_POLL_INTERVAL_MS = 20;
 const AGENT_CLOSE_TERM_GRACE_MS = 1_500;
 const AGENT_CLOSE_KILL_GRACE_MS = 1_000;
+const SESSION_CLOSE_GRACE_MS = 1_500;
 const STARTUP_STDERR_MAX_CHARS = 8_192;
 
 type LoadSessionOptions = {
@@ -253,6 +254,7 @@ export class AcpClient {
   };
   private readonly filesystem: FileSystemHandlers;
   private readonly terminalManager: TerminalManager;
+  private readonly sessionCloseGraceMs: number;
   private sessionUpdateChain: Promise<void> = Promise.resolve();
   private observedSessionUpdates = 0;
   private processedSessionUpdates = 0;
@@ -299,10 +301,18 @@ export class AcpClient {
         this.eventHandlers.onClientOperation?.(operation);
       },
     });
+    this.sessionCloseGraceMs = Math.max(
+      0,
+      Math.round(this.options.sessionCloseGraceMs ?? SESSION_CLOSE_GRACE_MS),
+    );
   }
 
   get initializeResult(): InitializeResponse | undefined {
     return this.initResult;
+  }
+
+  get closeGraceMs(): number {
+    return this.sessionCloseGraceMs;
   }
 
   getAgentPid(): number | undefined {
@@ -842,13 +852,20 @@ export class AcpClient {
   async closeSession(sessionId: string): Promise<void> {
     const connection = this.getConnection();
     await this.runConnectionRequest(() =>
-      connection.unstable_closeNes({
+      connection.closeSession({
         sessionId,
       }),
     );
     if (this.loadedSessionId === sessionId) {
       this.loadedSessionId = undefined;
     }
+  }
+
+  private async tryCloseSession(sessionId: string | undefined): Promise<void> {
+    if (!sessionId || !this.supportsCloseSession()) {
+      return;
+    }
+    await withTimeout(this.closeSession(sessionId), this.sessionCloseGraceMs).catch(() => {});
   }
 
   async requestCancelActivePrompt(): Promise<boolean> {
@@ -897,9 +914,12 @@ export class AcpClient {
     }
   }
 
-  async close(): Promise<void> {
+  async close(options?: { sendSessionClose?: boolean }): Promise<void> {
     this.closing = true;
 
+    if (options?.sendSessionClose) {
+      await this.tryCloseSession(this.loadedSessionId);
+    }
     await this.terminalManager.shutdown();
 
     const agent = this.agent;

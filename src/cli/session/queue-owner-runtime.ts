@@ -170,6 +170,13 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     }
   };
 
+  // Handle SIGTERM so the finally block runs and sharedClient.close()
+  // sends session/close before the agent process is terminated.
+  const onSigterm = () => {
+    void owner?.close();
+  };
+  process.on("SIGTERM", onSigterm);
+
   try {
     owner = await SessionQueueOwner.start(
       lease,
@@ -251,6 +258,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
       });
     }
   } finally {
+    process.off("SIGTERM", onSigterm);
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer);
     }
@@ -258,7 +266,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     if (owner) {
       await owner.close();
     }
-    await sharedClient.close().catch(() => {
+    await sharedClient.close({ sendSessionClose: true }).catch(() => {
       // best effort while queue owner is shutting down
     });
     try {

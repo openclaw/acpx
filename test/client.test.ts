@@ -574,7 +574,7 @@ test("AcpClient closes sessions through session/close and clears the loaded sess
   };
   internals.loadedSessionId = "session-close-1";
   internals.connection = {
-    unstable_closeNes: async (params: { sessionId: string }) => {
+    closeSession: async (params: { sessionId: string }) => {
       capturedCloseSessionParams = params;
       return {};
     },
@@ -587,6 +587,72 @@ test("AcpClient closes sessions through session/close and clears the loaded sess
     sessionId: "session-close-1",
   });
   assert.equal(internals.loadedSessionId, undefined);
+});
+
+test("close skips session/close when sendSessionClose is not set", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  let calls = 0;
+  internals.connection = {
+    closeSession: async () => {
+      calls += 1;
+      return {};
+    },
+  };
+  internals.loadedSessionId = "some-session";
+  internals.initResult = { agentCapabilities: { sessionCapabilities: { close: {} } } };
+
+  await client.close();
+
+  assert.equal(calls, 0);
+});
+
+test("close skips session/close when capability is missing", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  let calls = 0;
+  internals.connection = {
+    closeSession: async () => {
+      calls += 1;
+      return {};
+    },
+  };
+  internals.loadedSessionId = "some-session";
+  internals.initResult = { agentCapabilities: {} };
+
+  await client.close({ sendSessionClose: true });
+
+  assert.equal(calls, 0);
+});
+
+test("close sends session/close for the loaded session when sendSessionClose is set", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  let closedSessionId: string | undefined;
+  internals.initResult = { agentCapabilities: { sessionCapabilities: { close: {} } } };
+  internals.loadedSessionId = "close-on-shutdown";
+  internals.connection = {
+    closeSession: async (params: { sessionId: string }) => {
+      closedSessionId = params.sessionId;
+      return {};
+    },
+  };
+
+  await client.close({ sendSessionClose: true });
+
+  assert.equal(closedSessionId, "close-on-shutdown");
+});
+
+test("close respects grace timeout when session/close hangs", async () => {
+  const client = makeClient({ sessionCloseGraceMs: 10 });
+  const internals = asInternals(client);
+  internals.initResult = { agentCapabilities: { sessionCapabilities: { close: {} } } };
+  internals.loadedSessionId = "hung-session";
+  internals.connection = { closeSession: () => new Promise<void>(() => {}) };
+
+  const start = Date.now();
+  await client.close({ sendSessionClose: true });
+  assert.ok(Date.now() - start < 200);
 });
 
 test("AcpClient session update handling drains queued callbacks and swallows handler failures", async () => {

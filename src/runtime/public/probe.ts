@@ -72,6 +72,7 @@ export async function probeRuntime(
       permissionMode: options.permissionMode,
       nonInteractivePermissions: options.nonInteractivePermissions,
       verbose: options.verbose,
+      sessionCloseGraceMs: options.sessionCloseGraceMs,
     }) ??
     new AcpClient({
       agentCommand,
@@ -80,6 +81,7 @@ export async function probeRuntime(
       permissionMode: options.permissionMode,
       nonInteractivePermissions: options.nonInteractivePermissions,
       verbose: options.verbose,
+      sessionCloseGraceMs: options.sessionCloseGraceMs,
     });
 
   try {

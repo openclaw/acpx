@@ -674,9 +674,6 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
         await flushPendingMessages(false).catch(() => {
           // best effort while process is being interrupted
         });
-        if (ownClient) {
-          await client.close();
-        }
       },
     );
   } finally {
@@ -690,7 +687,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     }
     client.clearEventHandlers();
     if (ownClient) {
-      await client.close();
+      await client.close({ sendSessionClose: true });
     }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     applyConversation(record, conversation);
@@ -800,11 +797,10 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
       },
       async () => {
         await client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS);
-        await client.close();
       },
     );
   } finally {
-    await client.close();
+    await client.close({ sendSessionClose: true });
   }
 }
 

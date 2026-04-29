@@ -191,6 +191,7 @@ export type AcpRuntimeOptions = {
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   timeoutMs?: number;
+  sessionCloseGraceMs?: number;
   probeAgent?: string;
   verbose?: boolean;
 };

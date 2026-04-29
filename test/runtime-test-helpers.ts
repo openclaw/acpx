@@ -144,11 +144,13 @@ export function createRuntimeOptions(params: {
   sessionStore: AcpSessionStore;
   agentRegistry?: AcpAgentRegistry;
   timeoutMs?: number;
+  sessionCloseGraceMs?: number;
 }): AcpRuntimeOptions {
   return {
     cwd: params.cwd,
     sessionStore: params.sessionStore,
     timeoutMs: params.timeoutMs,
+    sessionCloseGraceMs: params.sessionCloseGraceMs,
     agentRegistry: params.agentRegistry ?? {
       resolve(agentName: string) {
         return `${agentName} --acp`;

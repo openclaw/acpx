@@ -170,6 +170,7 @@ export type AcpClientOptions = {
   terminal?: boolean;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
+  sessionCloseGraceMs?: number;
   sessionOptions?: {
     model?: string;
     allowedTools?: string[];

@@ -246,6 +246,50 @@ test("AcpRuntimeManager creates a fresh record for each oneshot session", async 
   assert.equal(store.records.size, 2);
 });
 
+test("AcpRuntimeManager closes the client when record save fails during ensureSession", async () => {
+  const store = new InMemorySessionStore();
+  store.save = async () => {
+    throw new Error("save failed");
+  };
+
+  let closeCalls = 0;
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          initializeResult: {
+            protocolVersion: 1,
+            agentCapabilities: {},
+          },
+          start: async () => {},
+          close: async () => {
+            closeCalls += 1;
+          },
+          createSession: async () => ({
+            sessionId: "fresh-session",
+            agentSessionId: "fresh-agent-session",
+          }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+        }) as never,
+    },
+  );
+
+  await assert.rejects(
+    async () =>
+      await manager.ensureSession({
+        sessionKey: "failing-save-session",
+        agent: "codex",
+        mode: "persistent",
+        cwd: "/workspace",
+      }),
+    /save failed/,
+  );
+
+  assert.equal(closeCalls, 1);
+  assert.equal(store.records.size, 0);
+});
+
 test("AcpRuntimeManager streams runtime events and saves updated status", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "turn-session",
@@ -1261,6 +1305,7 @@ test("AcpRuntimeManager closes the backend session when discarding persistent st
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
           supportsCloseSession: () => true,
+          closeGraceMs: 1_500,
           closeSession: async (sessionId: string) => {
             closedSessionIds.push(sessionId);
           },
@@ -1305,6 +1350,7 @@ test("AcpRuntimeManager closes the backend session when discarding persistent st
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
           supportsCloseSession: () => true,
+          closeGraceMs: 1_500,
           closeSession: async () => {},
           loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
           getAgentLifecycleSnapshot: () => ({ running: true }),
@@ -1359,6 +1405,7 @@ test("AcpRuntimeManager treats missing backend sessions as a successful discard 
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
           supportsCloseSession: () => true,
+          closeGraceMs: 1_500,
           closeSession: async () => {
             throw { error: { code: -32002, message: "session not found" } };
           },
@@ -1387,7 +1434,7 @@ test("AcpRuntimeManager treats missing backend sessions as a successful discard 
   assert.equal(closed?.acpx?.reset_on_next_ensure, true);
 });
 
-test("AcpRuntimeManager applies timeoutMs to backend session shutdown during discard reset", async () => {
+test("AcpRuntimeManager applies sessionCloseGraceMs to backend session shutdown during discard reset", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "discard-timeout-session",
     acpSessionId: "slow-backend-session",
@@ -1400,7 +1447,11 @@ test("AcpRuntimeManager applies timeoutMs to backend session shutdown during dis
   let closeSessionCalls = 0;
   const never = new Promise<void>(() => {});
   const manager = new AcpRuntimeManager(
-    createRuntimeOptions({ cwd: "/workspace", sessionStore: store, timeoutMs: 5 }),
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: store,
+      sessionCloseGraceMs: 5,
+    }),
     {
       clientFactory: () =>
         ({
@@ -1415,6 +1466,7 @@ test("AcpRuntimeManager applies timeoutMs to backend session shutdown during dis
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
           supportsCloseSession: () => true,
+          closeGraceMs: 5,
           closeSession: async () => {
             closeSessionCalls += 1;
             await never;

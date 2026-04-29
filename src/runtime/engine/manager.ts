@@ -3,7 +3,7 @@ import path from "node:path";
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { AcpClient } from "../../acp/client.js";
 import { normalizeOutputError } from "../../acp/error-normalization.js";
-import { extractAcpError, isAcpResourceNotFoundError } from "../../acp/error-shapes.js";
+import { isAcpResourceNotFoundError } from "../../acp/error-shapes.js";
 import { withTimeout } from "../../async-control.js";
 import { textPrompt, type PromptInput } from "../../prompt-content.js";
 import {
@@ -139,21 +139,6 @@ class AsyncEventQueue {
 
 function isoNow(): string {
   return new Date().toISOString();
-}
-
-function isUnsupportedSessionCloseError(error: unknown): boolean {
-  const acp = extractAcpError(error);
-  if (!acp) {
-    return false;
-  }
-  if (acp.code === -32601 || acp.code === -32602) {
-    return true;
-  }
-  if (acp.code !== -32603 || !acp.data || typeof acp.data !== "object") {
-    return false;
-  }
-  const details = (acp.data as { details?: unknown }).details;
-  return typeof details === "string" && details.toLowerCase().includes("invalid params");
 }
 
 function toPromptInput(
@@ -356,6 +341,7 @@ export class AcpRuntimeManager {
       nonInteractivePermissions: this.options.nonInteractivePermissions,
       verbose: this.options.verbose,
       timeoutMs: this.options.timeoutMs,
+      sessionCloseGraceMs: this.options.sessionCloseGraceMs,
       resumePolicy: resumePolicyForSessionMode(sessionMode),
       run,
     });
@@ -397,6 +383,7 @@ export class AcpRuntimeManager {
       permissionMode: this.options.permissionMode,
       nonInteractivePermissions: this.options.nonInteractivePermissions,
       verbose: this.options.verbose,
+      sessionCloseGraceMs: this.options.sessionCloseGraceMs,
     });
     let keepClientOpen = false;
 
@@ -538,6 +525,7 @@ export class AcpRuntimeManager {
             permissionMode: this.options.permissionMode,
             nonInteractivePermissions: this.options.nonInteractivePermissions,
             verbose: this.options.verbose,
+            sessionCloseGraceMs: this.options.sessionCloseGraceMs,
           });
         const runtimeClient = client;
         const runtimeConversation = conversation;
@@ -745,8 +733,8 @@ export class AcpRuntimeManager {
             pooled = await this.retainPersistentClientAfterTurn({ record, client });
           }
         }
-        if (!pooled) {
-          await client?.close().catch(() => {});
+        if (!pooled && client) {
+          await client.close().catch(() => {});
         }
         if (record) {
           this.activeControllers.delete(record.acpxRecordId);
@@ -902,6 +890,7 @@ export class AcpRuntimeManager {
         permissionMode: this.options.permissionMode,
         nonInteractivePermissions: this.options.nonInteractivePermissions,
         verbose: this.options.verbose,
+        sessionCloseGraceMs: this.options.sessionCloseGraceMs,
       });
 
     try {
@@ -914,15 +903,8 @@ export class AcpRuntimeManager {
           `Agent does not support session/close for ${record.acpxRecordId}.`,
         );
       }
-      await withTimeout(client.closeSession(record.acpSessionId), this.options.timeoutMs);
+      await withTimeout(client.closeSession(record.acpSessionId), client.closeGraceMs);
     } catch (error) {
-      if (isUnsupportedSessionCloseError(error)) {
-        throw new AcpRuntimeError(
-          "ACP_BACKEND_UNSUPPORTED_CONTROL",
-          `Agent does not support session/close for ${record.acpxRecordId}.`,
-          { cause: error },
-        );
-      }
       if (isAcpResourceNotFoundError(error)) {
         return;
       }

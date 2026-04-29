@@ -44,6 +44,7 @@ export type WithConnectedSessionOptions<T> = {
   terminal?: boolean;
   resumePolicy?: SessionResumePolicy;
   timeoutMs?: number;
+  sessionCloseGraceMs?: number;
   verbose?: boolean;
   onClientAvailable?: (controller: FullConnectedSessionController) => void;
   onClientClosed?: () => void;
@@ -94,6 +95,7 @@ export async function withConnectedSession<T>(
       authPolicy: options.authPolicy,
       terminal: options.terminal,
       verbose: options.verbose,
+      sessionCloseGraceMs: options.sessionCloseGraceMs,
       sessionOptions: sessionOptionsFromRecord(record),
     }) ??
     new AcpClient({
@@ -106,6 +108,7 @@ export async function withConnectedSession<T>(
       authPolicy: options.authPolicy,
       terminal: options.terminal,
       verbose: options.verbose,
+      sessionCloseGraceMs: options.sessionCloseGraceMs,
       sessionOptions: sessionOptionsFromRecord(record),
     });
   let activeSessionIdForControl = record.acpSessionId;
@@ -171,7 +174,6 @@ export async function withConnectedSession<T>(
         await options.saveRecord(record).catch(() => {
           // best effort while process is being interrupted
         });
-        await client.close();
       },
     );
   } finally {
