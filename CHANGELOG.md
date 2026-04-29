@@ -13,7 +13,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - CLI/models: fail clearly when `--model` targets a non-Claude ACP agent that does not advertise ACP model support, and reject model ids outside an adapter's advertised `availableModels` instead of silently falling back to the adapter default.
-- Client/ACP: migrate from `nes/close` to `session/close`, add `sendSessionClose` option to `AcpClient.close()` so teardown paths send `session/close` before the agent is killed, and handle SIGTERM in the queue owner so it runs through the teardown path on `sessions close`.
+- Client/ACP: migrate from `nes/close` to `session/close`, have `AcpClient.close()` send `session/close` before the agent is killed, and handle SIGTERM in the queue owner so it runs through the teardown path on `sessions close`.
 
 ## 2026.4.25 (v0.6.0)
 

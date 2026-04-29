@@ -266,7 +266,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     if (owner) {
       await owner.close();
     }
-    await sharedClient.close({ sendSessionClose: true }).catch(() => {
+    await sharedClient.close().catch(() => {
       // best effort while queue owner is shutting down
     });
     try {

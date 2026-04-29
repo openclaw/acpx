@@ -31,6 +31,9 @@ const FLOW_INTERRUPT_FIXTURE_PATH = fileURLToPath(
 const FLOW_ACP_DISCONNECT_FIXTURE_PATH = fileURLToPath(
   new URL("./fixtures/flow-acp-disconnect.flow.js", import.meta.url),
 );
+const FLOW_SINGLE_ACP_FIXTURE_PATH = fileURLToPath(
+  new URL("./fixtures/flow-single-acp.flow.js", import.meta.url),
+);
 const FLOW_WAIT_FIXTURE_PATH = fileURLToPath(
   new URL("./fixtures/flow-wait.flow.js", import.meta.url),
 );
@@ -108,8 +111,18 @@ test("integration: exec sends session/close before teardown when supported", asy
       );
 
       const closeRequest = payloads[closeIndex] as { params?: { sessionId?: string } };
+      const closeRequestId = extractJsonRpcId(closeRequest);
       assert.equal(typeof closeRequest.params?.sessionId, "string");
       assert.notEqual(closeRequest.params?.sessionId?.length, 0);
+      assert.notEqual(closeRequestId, undefined);
+      assert.equal(
+        payloads.some(
+          (message) =>
+            extractJsonRpcId(message) === closeRequestId && Object.hasOwn(message, "result"),
+        ),
+        true,
+        result.stdout,
+      );
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -181,6 +194,46 @@ test("integration: flow run executes multiple ACP steps in one session and branc
         1,
         JSON.stringify(payload, null, 2),
       );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: flow run sends session/close when detaching the initial persistent ACP client", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const markerPath = path.join(cwd, "flow-close-session-marker.txt");
+    const closeCapableAgentCommand =
+      `${MOCK_AGENT_COMMAND} --supports-load-session ` +
+      `--close-session-marker ${JSON.stringify(markerPath)}`;
+
+    try {
+      const result = await runCli(
+        [
+          "--agent",
+          closeCapableAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "flow",
+          "run",
+          FLOW_SINGLE_ACP_FIXTURE_PATH,
+        ],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      const payload = JSON.parse(result.stdout.trim()) as {
+        sessionBindings?: Record<string, { acpSessionId: string }>;
+        outputs?: Record<string, unknown>;
+      };
+      const [binding] = Object.values(payload.sessionBindings ?? {});
+
+      assert.deepEqual(payload.outputs?.only, { ok: true });
+      assert.equal(await fs.readFile(markerPath, "utf8"), binding?.acpSessionId);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }

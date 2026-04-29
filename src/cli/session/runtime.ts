@@ -687,7 +687,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     }
     client.clearEventHandlers();
     if (ownClient) {
-      await client.close({ sendSessionClose: true });
+      await client.close();
     }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     applyConversation(record, conversation);
@@ -800,7 +800,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
       },
     );
   } finally {
-    await client.close({ sendSessionClose: true });
+    await client.close();
   }
 }
 

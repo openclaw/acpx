@@ -301,9 +301,14 @@ export class AcpClient {
         this.eventHandlers.onClientOperation?.(operation);
       },
     });
+    const envSessionCloseGraceMs = Number(process.env.ACPX_SESSION_CLOSE_GRACE_MS);
+    const defaultSessionCloseGraceMs =
+      Number.isFinite(envSessionCloseGraceMs) && envSessionCloseGraceMs > 0
+        ? envSessionCloseGraceMs
+        : SESSION_CLOSE_GRACE_MS;
     this.sessionCloseGraceMs = Math.max(
       0,
-      Math.round(this.options.sessionCloseGraceMs ?? SESSION_CLOSE_GRACE_MS),
+      Math.round(this.options.sessionCloseGraceMs ?? defaultSessionCloseGraceMs),
     );
   }
 
@@ -914,12 +919,10 @@ export class AcpClient {
     }
   }
 
-  async close(options?: { sendSessionClose?: boolean }): Promise<void> {
+  async close(): Promise<void> {
     this.closing = true;
 
-    if (options?.sendSessionClose) {
-      await this.tryCloseSession(this.loadedSessionId);
-    }
+    await this.tryCloseSession(this.loadedSessionId);
     await this.terminalManager.shutdown();
 
     const agent = this.agent;

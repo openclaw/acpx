@@ -1,6 +1,6 @@
 ---
 title: Guaranteed Session Closure
-description: How acpx ensures ACP session/close is sent to agents before process termination.
+description: How acpx sends ACP session/close before process termination.
 author: Adrian Cole <adrian@tetrate.io>
 date: 2026-04-29
 ---
@@ -16,29 +16,34 @@ terminating the agent process.
 
 ## Session close behavior
 
-`AcpClient.close({ sendSessionClose: true })` sends `session/close` for the
-loaded session before terminating the agent process. The call is gated by
-`sessionCapabilities.close`, bounded by `sessionCloseGraceMs` (default 1500 ms),
-and best-effort. Plain `close()` without the option releases the client
-connection and kills the agent without sending `session/close`.
+`AcpClient.close()` sends `session/close` for the loaded session before
+terminating the agent process. The call is gated by `sessionCapabilities.close`,
+bounded by `sessionCloseGraceMs` (default 1500 ms), and best-effort.
+If no session is loaded, or the agent does not advertise close, `close()`
+just releases the client connection and kills the agent.
 
-Callers that end the session pass the option:
+Callers that end the session call `close()`:
 
 - `runOnce` (exec/oneshot)
 - `runSessionPrompt` (prompt with own client)
+- `FlowRunner.runPersistentPrompt` after the first flow step detaches
+  and later resumes with `session/load`
+- `FlowRunner.closePendingPersistentSessionClients` when a flow run
+  finishes or fails
 - `runSessionQueueOwner` (queue owner via `sharedClient`)
 
-Callers that detach without ending the session (e.g. `sessions new`,
-`createSessionWithClient`) call plain `close()`.
+Callers that detach after creating a session (e.g. `sessions new`,
+`createSessionWithClient`) also call `close()`. Later reconnects can still use
+`session/load`.
 
-`session-control.ts` does not send `session/close`. It terminates the process
-that owns the client.
+`session-control.ts` does not send `session/close`. It terminates
+the process that owns the client.
 
 ## Queue owner graceful shutdown
 
 The queue owner runs detached. `sessions close` terminates it via SIGTERM.
-Node.js default SIGTERM exits immediately without running finally blocks, so
-`runSessionQueueOwner` registers a handler:
+Node.js default SIGTERM exits immediately without running finally
+blocks, so `runSessionQueueOwner` registers a handler:
 
 ```js
 const onSigterm = () => {
@@ -48,13 +53,12 @@ process.on("SIGTERM", onSigterm);
 ```
 
 This breaks the `nextTask()` loop so the finally block runs and
-`sharedClient.close()` sends `session/close`. The handler is removed in the
-finally block.
+`sharedClient.close()` sends `session/close`. The handler is
+removed in the finally block.
 
 `process.on` is used instead of `once` because the perf-metrics handler
-re-raises SIGTERM after removing itself. During an active prompt,
-`withInterrupt` also fires and cancels the prompt. Both coexist without
-conflict.
+re-raises SIGTERM after removing itself. During an active prompt, `withInterrupt`
+also fires and cancels the prompt. Both coexist without conflict.
 
 ## Teardown sequence
 
@@ -72,5 +76,5 @@ stateDiagram-v2
     record_closed --> [*]
 ```
 
-`session-control.ts` also attempts to kill the agent PID directly as a
-fallback when the queue owner was already dead.
+`session-control.ts` also attempts to kill the agent PID directly as a fallback
+when the queue owner was already dead.
