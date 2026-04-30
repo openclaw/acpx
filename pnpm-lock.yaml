@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@agentclientprotocol/sdk':
-        specifier: ^0.20.0
-        version: 0.20.0(zod@4.3.6)
+        specifier: ^0.21.0
+        version: 0.21.0(zod@4.3.6)
       commander:
         specifier: ^14.0.3
         version: 14.0.3
@@ -96,8 +96,8 @@ importers:
 
 packages:
 
-  '@agentclientprotocol/sdk@0.20.0':
-    resolution: {integrity: sha512-BxEHyE4MvwyOsdyVPub1vEtyrq8E0JSdjC+ckXWimY1VabFCTXdPyXv2y2Omz1j+iod7Z8oBJDXFCJptM0GBqQ==}
+  '@agentclientprotocol/sdk@0.21.0':
+    resolution: {integrity: sha512-ONj+Q8qOdNQp5XbH5jnMwzT9IKZJsSN0p0lkceS4GtUtNOPVLpNzSS8gqQdGMKfBvA0ESbkL8BTaSN1Rc9miEw==}
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
@@ -1745,7 +1745,7 @@ packages:
 
 snapshots:
 
-  '@agentclientprotocol/sdk@0.20.0(zod@4.3.6)':
+  '@agentclientprotocol/sdk@0.21.0(zod@4.3.6)':
     dependencies:
       zod: 4.3.6
 
