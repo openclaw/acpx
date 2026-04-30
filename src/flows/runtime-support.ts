@@ -214,10 +214,7 @@ export function normalizeFlowRunTitle(value: string | undefined): string | undef
 
 export function createRunId(flowName: string): string {
   const stamp = isoNow().replaceAll(":", "").replaceAll(".", "");
-  const slug = flowName
-    .replace(/[^a-z0-9]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase();
+  const slug = slugifyAsciiIdPart(flowName);
   return `${stamp}-${slug}-${randomUUID().slice(0, 8)}`;
 }
 
@@ -236,11 +233,43 @@ export function createSessionName(
 }
 
 export function createSessionBundleId(handle: string, key: string): string {
-  const safeHandle = handle
-    .replace(/[^a-z0-9]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase();
+  const safeHandle = slugifyAsciiIdPart(handle);
   return `${safeHandle || "session"}-${stableShortHash(key)}`;
+}
+
+function slugifyAsciiIdPart(value: string): string {
+  let slug = "";
+  let lastWasSeparator = false;
+
+  for (const char of value) {
+    const safeChar = toLowerAsciiAlphaNumeric(char);
+    if (safeChar) {
+      slug += safeChar;
+      lastWasSeparator = false;
+      continue;
+    }
+
+    if (slug.length > 0 && !lastWasSeparator) {
+      slug += "-";
+      lastWasSeparator = true;
+    }
+  }
+
+  return lastWasSeparator ? slug.slice(0, -1) : slug;
+}
+
+function toLowerAsciiAlphaNumeric(char: string): string | null {
+  const code = char.charCodeAt(0);
+  if (code >= 48 && code <= 57) {
+    return char;
+  }
+  if (code >= 65 && code <= 90) {
+    return String.fromCharCode(code + 32);
+  }
+  if (code >= 97 && code <= 122) {
+    return char;
+  }
+  return null;
 }
 
 export function createIsolatedSessionBinding(

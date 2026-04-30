@@ -38,9 +38,9 @@ export function parseJsonObject(
   }
 
   if (mode === "fenced" || mode === "compat") {
-    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fencedMatch) {
-      const fenced = tryParse(fencedMatch[1].trim());
+    const fencedText = extractFencedJsonText(trimmed);
+    if (fencedText !== null) {
+      const fenced = tryParse(fencedText);
       if (fenced.ok) {
         return fenced.value;
       }
@@ -82,6 +82,36 @@ function tryParse(text: string): { ok: true; value: unknown } | { ok: false } {
       ok: false,
     };
   }
+}
+
+function extractFencedJsonText(text: string): string | null {
+  const openingFenceIndex = text.indexOf("```");
+  if (openingFenceIndex === -1) {
+    return null;
+  }
+
+  let contentStart = openingFenceIndex + 3;
+  if (
+    text.slice(contentStart, contentStart + 4).toLowerCase() === "json" &&
+    isFenceWhitespace(text[contentStart + 4])
+  ) {
+    contentStart += 4;
+  }
+
+  while (isFenceWhitespace(text[contentStart])) {
+    contentStart += 1;
+  }
+
+  const closingFenceIndex = text.indexOf("```", contentStart);
+  if (closingFenceIndex === -1) {
+    return null;
+  }
+
+  return text.slice(contentStart, closingFenceIndex).trim();
+}
+
+function isFenceWhitespace(char: string | undefined): boolean {
+  return char === " " || char === "\n" || char === "\r" || char === "\t";
 }
 
 function extractBalancedJsonCandidates(text: string): string[] {

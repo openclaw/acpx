@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { TimeoutError } from "../src/async-control.js";
 import { validateFlowDefinition } from "../src/flows/graph.js";
 import { extractJsonObject, parseJsonObject, parseStrictJsonObject } from "../src/flows/json.js";
+import { createRunId } from "../src/flows/runtime-support.js";
 import {
   FlowRunner,
   acp,
@@ -76,6 +77,20 @@ test("parseJsonObject supports strict and fenced-only modes", () => {
   assert.throws(
     () => parseJsonObject('before {"ok":true} after', { mode: "fenced" }),
     /Could not parse JSON/,
+  );
+});
+
+test("parseJsonObject parses fenced JSON without regex backtracking", () => {
+  assert.deepEqual(parseJsonObject('```JSON\r\n{"ok":true}\n```', { mode: "fenced" }), {
+    ok: true,
+  });
+  assert.throws(() => parseJsonObject("```json\n", { mode: "fenced" }), /Could not parse JSON/);
+});
+
+test("createRunId slugifies flow names without regex backtracking", () => {
+  assert.match(
+    createRunId("  Publish: BIG Result!!!  "),
+    /^\d{4}-.*-publish-big-result-[a-f0-9-]+$/,
   );
 });
 

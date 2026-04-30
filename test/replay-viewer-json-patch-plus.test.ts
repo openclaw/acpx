@@ -54,3 +54,11 @@ test("createReplayPatch normalizes string growth and array growth to JSON Patch+
   );
   assert.deepEqual(applyReplayPatch(previous, ops), next);
 });
+
+test("applyReplayPatch rejects prototype pollution pointer keys", () => {
+  assert.throws(
+    () => applyReplayPatch({}, [{ op: "add", path: "/__proto__/polluted", value: true }]),
+    /Unsafe JSON Pointer key/,
+  );
+  assert.equal(({} as { polluted?: boolean }).polluted, undefined);
+});

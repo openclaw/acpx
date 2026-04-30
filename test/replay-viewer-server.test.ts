@@ -143,7 +143,7 @@ test("replay viewer blocks file reads that escape the runs directory via runId",
       `${viewerServer.baseUrl}/api/runs/..%2F..%2Fsessions/files/session-secret.json`,
     );
     assert.equal(response.status, 400);
-    assert.match(await response.text(), /outside runs directory/i);
+    assert.deepEqual(await response.json(), { error: "Invalid run bundle file request" });
   } finally {
     await viewerServer.close().catch(() => {});
     await fs.rm(fakeHome, { recursive: true, force: true });

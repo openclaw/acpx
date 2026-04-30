@@ -84,7 +84,7 @@ export async function createReplayViewerServer(
         response.setHeader("content-type", "application/json; charset=utf-8");
         response.end(
           JSON.stringify({
-            error: formatUnknownError(error),
+            error: formatPublicError(error),
           }),
         );
         return;
@@ -189,13 +189,14 @@ export async function handleApiRequest(
       response.setHeader("content-type", contentTypeFor(relativePath ?? ""));
       response.end(payload);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       const code =
         error instanceof Error &&
         /outside run bundle|outside runs directory|not allowed|required/.test(error.message)
           ? 400
           : 404;
-      writeJson(response, code, { error: message });
+      writeJson(response, code, {
+        error: code === 400 ? "Invalid run bundle file request" : "Run bundle file not found",
+      });
     }
     return true;
   }
@@ -274,9 +275,9 @@ function writeJson(response: http.ServerResponse, statusCode: number, value: unk
   response.end(JSON.stringify(value));
 }
 
-function formatUnknownError(error: unknown): string {
+function formatPublicError(error: unknown): string {
   if (error instanceof Error) {
-    return error.message;
+    return "Replay viewer request failed";
   }
   if (typeof error === "string") {
     return error;

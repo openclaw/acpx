@@ -43,6 +43,13 @@ const FLOW_WORKDIR_FIXTURE_PATH = fileURLToPath(
 const MOCK_AGENT_COMMAND = `node ${JSON.stringify(MOCK_AGENT_PATH)}`;
 const LOAD_CAPABLE_MOCK_AGENT_COMMAND = `${MOCK_AGENT_COMMAND} --supports-load-session`;
 
+const unsafeCodeCharEscapes = Object.freeze({
+  "<": "\\u003C",
+  ">": "\\u003E",
+  "\u2028": "\\u2028",
+  "\u2029": "\\u2029",
+});
+
 type CliRunResult = {
   code: number | null;
   signal: NodeJS.Signals | null;
@@ -563,7 +570,7 @@ test("integration: flow run preserves approve-all through persistent ACP writes"
           '  startAt: "write_file",',
           "  nodes: {",
           "    write_file: acp({",
-          `      prompt: () => ${JSON.stringify(`write ${writePath} hello`)},`,
+          `      prompt: () => ${jsStringLiteral(`write ${writePath} hello`)},`,
           "      parse: (text) => ({ reply: text }),",
           "    }),",
           "  },",
@@ -613,6 +620,17 @@ test("integration: flow run preserves approve-all through persistent ACP writes"
     }
   });
 });
+
+function jsStringLiteral(value: string): string {
+  return escapeUnsafeCodeChars(JSON.stringify(value));
+}
+
+function escapeUnsafeCodeChars(value: string): string {
+  return value.replace(
+    /[<>\u2028\u2029]/g,
+    (char) => unsafeCodeCharEscapes[char as keyof typeof unsafeCodeCharEscapes],
+  );
+}
 
 test('integration: flow run resolves "acpx/flows" imports for external flow files', async () => {
   await withTempHome(async (homeDir) => {
