@@ -722,6 +722,7 @@ export class AcpRuntimeManager {
             message: normalized.message,
             ...(normalized.code ? { code: normalized.code } : {}),
             ...(normalized.retryable !== undefined ? { retryable: normalized.retryable } : {}),
+            ...(normalized.detailCode ? { detailCode: normalized.detailCode } : {}),
           },
         });
       } finally {

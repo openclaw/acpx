@@ -123,6 +123,7 @@ export type AcpRuntimeTurnResultError = {
   message: string;
   code?: string;
   retryable?: boolean;
+  detailCode?: string;
 };
 
 export type AcpRuntimeTurnResult =

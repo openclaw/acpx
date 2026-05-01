@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
+import { AcpxOperationalError } from "../src/errors.js";
 import { AcpRuntimeManager } from "../src/runtime/engine/manager.js";
 import type {
   AcpRuntimeEvent,
@@ -1649,6 +1650,7 @@ test("AcpRuntimeManager fails persistent turns clearly when session/load is unav
     status: "failed",
     error: {
       code: "RUNTIME",
+      detailCode: "SESSION_RESUME_REQUIRED",
       message:
         "Persistent ACP session persistent-backend-session could not be resumed: agent does not support session/load",
       retryable: true,
@@ -1656,6 +1658,56 @@ test("AcpRuntimeManager fails persistent turns clearly when session/load is unav
   });
   assert.equal(createSessionCalls, 0);
   assert.equal(promptCalls, 0);
+});
+
+test("AcpRuntimeManager forwards normalized detailCode on turn failures", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "detail-code-session",
+    acpSessionId: "detail-code-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => true,
+          supportsLoadSession: () => true,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => {
+            throw new AcpxOperationalError("simulated adapter failure", {
+              detailCode: "AGENT_DISCONNECTED",
+              origin: "acp",
+            });
+          },
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  const turn = manager.startTurn({
+    handle: createHandle("detail-code-session"),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-detail-code",
+  });
+  const { result } = await collectTurn(turn);
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.error?.detailCode, "AGENT_DISCONNECTED");
 });
 
 test("AcpRuntimeManager still falls back to a fresh session for oneshot turns", async () => {
