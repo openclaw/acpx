@@ -120,7 +120,7 @@ jobs:
           submodules: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6.0.3
+        uses: pnpm/action-setup@v6.0.5
         with:
           version: ${{ env.PNPM_VERSION }}
 
@@ -153,7 +153,7 @@ jobs:
           submodules: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6.0.3
+        uses: pnpm/action-setup@v6.0.5
         with:
           version: ${{ env.PNPM_VERSION }}
 
