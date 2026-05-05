@@ -15,6 +15,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI/models: fail clearly when `--model` targets a non-Claude ACP agent that does not advertise ACP model support, and reject model ids outside an adapter's advertised `availableModels` instead of silently falling back to the adapter default.
 - Windows/Claude: resolve the `claude.exe` executable from PATH before spawning Claude ACP sessions, so native Windows launches do not depend on shell-specific command lookup. (#289) Thanks @MikeChongCan.
 - Client/ACP: send `session/close` from `closeSession()` instead of the experimental `nes/close` method, so adapters without NES support can tear down sessions cleanly. (#291) Thanks @hexsprite.
+- Runtime/WSL: recognize Windows `.cmd` and `.bat` ACP agent wrappers for cwd translation, including wrappers installed on non-C drives. (#280) Thanks @solomonneas.
 
 ## 2026.4.25 (v0.6.0)
 
