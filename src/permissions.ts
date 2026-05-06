@@ -6,7 +6,11 @@ import {
 } from "@agentclientprotocol/sdk";
 import { PermissionPromptUnavailableError } from "./errors.js";
 import { promptForPermission } from "./permission-prompt.js";
-import type { NonInteractivePermissionPolicy, PermissionMode } from "./types.js";
+import type {
+  AcpPermissionDecision,
+  NonInteractivePermissionPolicy,
+  PermissionMode,
+} from "./types.js";
 
 type PermissionDecision = "approved" | "denied" | "cancelled";
 const PERMISSION_MODE_RANK: Record<PermissionMode, number> = {
@@ -36,7 +40,7 @@ function pickOption(
   return undefined;
 }
 
-function inferToolKind(params: RequestPermissionRequest): ToolKind | undefined {
+export function inferToolKind(params: RequestPermissionRequest): ToolKind | undefined {
   if (params.toolCall.kind) {
     return params.toolCall.kind;
   }
@@ -149,6 +153,41 @@ export async function resolvePermissionRequest(
     return selected(rejectOption.optionId);
   }
   return cancelled();
+}
+
+/**
+ * Map a host-supplied `AcpPermissionDecision` to the ACP wire shape,
+ * picking the right `optionId` from whatever options the agent
+ * advertised. Pure function; no I/O.
+ *
+ * Pathological agent behavior (no allow option for an approve
+ * decision, no reject option for a deny decision) falls back to
+ * `cancelled` rather than guessing at semantics.
+ */
+export function decisionToResponse(
+  params: RequestPermissionRequest,
+  decision: AcpPermissionDecision,
+): RequestPermissionResponse {
+  const options = params.options ?? [];
+  if (decision.outcome === "cancel") {
+    return cancelled();
+  }
+  if (decision.outcome === "deny") {
+    const reject = pickOption(options, ["reject_once", "reject_always"]);
+    return reject ? selected(reject.optionId) : cancelled();
+  }
+  // approve_once / approve_always: prefer the matching kind, then the
+  // other allow kind, then the first option (defensive — every real
+  // agent advertises at least one allow option for non-deny choices).
+  const preferOrder: PermissionOption["kind"][] =
+    decision.outcome === "approve_always"
+      ? ["allow_always", "allow_once"]
+      : ["allow_once", "allow_always"];
+  const allow = pickOption(options, preferOrder);
+  if (allow) {
+    return selected(allow.optionId);
+  }
+  return options.length > 0 ? selected(options[0].optionId) : cancelled();
 }
 
 export function classifyPermissionDecision(

@@ -343,6 +343,7 @@ export class AcpRuntimeManager {
       mcpServers: [...(this.options.mcpServers ?? [])],
       permissionMode: this.options.permissionMode,
       nonInteractivePermissions: this.options.nonInteractivePermissions,
+      onPermissionRequest: this.options.onPermissionRequest,
       verbose: this.options.verbose,
       timeoutMs: this.options.timeoutMs,
       resumePolicy: resumePolicyForSessionMode(sessionMode),
@@ -385,6 +386,7 @@ export class AcpRuntimeManager {
       mcpServers: [...(this.options.mcpServers ?? [])],
       permissionMode: this.options.permissionMode,
       nonInteractivePermissions: this.options.nonInteractivePermissions,
+      onPermissionRequest: this.options.onPermissionRequest,
       verbose: this.options.verbose,
     });
     let keepClientOpen = false;
@@ -532,6 +534,7 @@ export class AcpRuntimeManager {
             mcpServers: [...(this.options.mcpServers ?? [])],
             permissionMode: this.options.permissionMode,
             nonInteractivePermissions: this.options.nonInteractivePermissions,
+            onPermissionRequest: this.options.onPermissionRequest,
             verbose: this.options.verbose,
           });
         const runtimeClient = client;
@@ -897,6 +900,7 @@ export class AcpRuntimeManager {
         mcpServers: [...(this.options.mcpServers ?? [])],
         permissionMode: this.options.permissionMode,
         nonInteractivePermissions: this.options.nonInteractivePermissions,
+        onPermissionRequest: this.options.onPermissionRequest,
         verbose: this.options.verbose,
       });
 
