@@ -1,16 +1,13 @@
 import type {
-  AcpOnPermissionRequest,
+  AcpPermissionDecision,
+  AcpPermissionRequest,
   McpServer,
   NonInteractivePermissionPolicy,
   PermissionMode,
   SessionRecord,
 } from "../../types.js";
 
-export type {
-  AcpOnPermissionRequest,
-  AcpPermissionDecision,
-  AcpPermissionRequest,
-} from "../../types.js";
+export type { AcpPermissionDecision, AcpPermissionRequest } from "../../types.js";
 
 export type AcpRuntimePromptMode = "prompt" | "steer";
 
@@ -202,13 +199,10 @@ export type AcpRuntimeOptions = {
   timeoutMs?: number;
   probeAgent?: string;
   verbose?: boolean;
-  /**
-   * Optional async hook for host-driven per-call permission gating.
-   * Forwarded as-is to the underlying `AcpClient`. Returning a
-   * decision short-circuits the mode-based resolver; returning
-   * `undefined` (or throwing) falls through to it.
-   */
-  onPermissionRequest?: AcpOnPermissionRequest;
+  onPermissionRequest?: (
+    req: AcpPermissionRequest,
+    ctx: { signal: AbortSignal },
+  ) => Promise<AcpPermissionDecision | undefined>;
 };
 
 export type AcpFileSessionStoreOptions = {

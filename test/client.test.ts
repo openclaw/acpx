@@ -358,17 +358,15 @@ test("AcpClient handlePermissionRequest records approved decisions", async () =>
 });
 
 test("AcpClient onPermissionRequest decision short-circuits the mode-based resolver", async () => {
-  let modeResolverCalls = 0;
+  let callbackInvocations = 0;
   const client = makeClient({
-    // Mode is approve-reads which would deny edit; the callback's
-    // approve_once decision must override that.
     permissionMode: "approve-reads",
     nonInteractivePermissions: "deny",
     onPermissionRequest: async (req) => {
-      modeResolverCalls += 1;
+      callbackInvocations += 1;
       assert.equal(req.sessionId, "session-cb-1");
       assert.equal(req.inferredKind, "edit");
-      return { outcome: "approve_once" };
+      return { outcome: "allow_once" };
     },
   });
 
@@ -382,7 +380,7 @@ test("AcpClient onPermissionRequest decision short-circuits the mode-based resol
       optionId: "allow",
     },
   });
-  assert.equal(modeResolverCalls, 1);
+  assert.equal(callbackInvocations, 1);
   assert.deepEqual(client.getPermissionStats(), {
     requested: 1,
     approved: 1,
@@ -405,7 +403,6 @@ test("AcpClient onPermissionRequest returning undefined falls through to mode-ba
     makePermissionRequest("session-cb-2", "edit"),
   );
 
-  // approve-all path picks the allow option after the callback abstains.
   assert.deepEqual(response, {
     outcome: {
       outcome: "selected",
@@ -421,7 +418,7 @@ test("AcpClient onPermissionRequest returning undefined falls through to mode-ba
   });
 });
 
-test("AcpClient onPermissionRequest throws fall through (turn does not fail)", async () => {
+test("AcpClient onPermissionRequest throws fall through to mode-based resolver", async () => {
   let callbackInvocations = 0;
   const client = makeClient({
     permissionMode: "approve-all",
@@ -435,7 +432,6 @@ test("AcpClient onPermissionRequest throws fall through (turn does not fail)", a
     makePermissionRequest("session-cb-3", "edit"),
   );
 
-  // Mode-based fallback runs regardless of the host's bug.
   assert.deepEqual(response, {
     outcome: {
       outcome: "selected",
@@ -451,7 +447,7 @@ test("AcpClient onPermissionRequest receives an AbortSignal that fires on sessio
     permissionMode: "approve-all",
     onPermissionRequest: async (_req, ctx) => {
       observedSignal = ctx.signal;
-      return { outcome: "approve_once" };
+      return { outcome: "allow_once" };
     },
   });
 
@@ -462,9 +458,6 @@ test("AcpClient onPermissionRequest receives an AbortSignal that fires on sessio
   assert(observedSignal instanceof AbortSignal);
   assert.equal(observedSignal?.aborted, false);
 
-  // Fire the same cancellation path the runtime uses on session cancel.
-  // (The full `client.cancel()` path also aborts but requires a live
-  // connection; the private helper exercises just the abort wiring.)
   const internals = asInternals(client) as unknown as {
     abortAndDropPermissionSignal: (sessionId: string) => void;
   };

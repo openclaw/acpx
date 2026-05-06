@@ -12,49 +12,18 @@ import type {
 export type { McpServer, SessionNotification } from "@agentclientprotocol/sdk";
 import type { PromptInput } from "./prompt-content.js";
 
-/**
- * Structured permission-request handed to a host's
- * `onPermissionRequest` callback. Wraps the raw ACP request with a
- * best-effort kind classification so hosts can branch UI without
- * re-parsing.
- */
 export type AcpPermissionRequest = {
   sessionId: string;
-  /** Full original RequestPermissionRequest from the ACP SDK. */
   raw: RequestPermissionRequest;
-  /** Inferred from `toolCall.kind` or `toolCall.title`; `"other"` when unknown. */
-  inferredKind: ToolKind | "other";
+  inferredKind: ToolKind | undefined;
 };
 
-/**
- * Decision a host returns from `onPermissionRequest`. acpx maps this
- * to the right ACP `RequestPermissionResponse` shape based on the
- * options the agent advertised — hosts don't need to know about
- * `optionId` strings.
- *
- *   approve_once   → pick `allow_once` (fall back to `allow_always`,
- *                    or first option, in that order)
- *   approve_always → pick `allow_always` (fall back to `allow_once`,
- *                    or first option)
- *   deny           → pick `reject_once` (fall back to `reject_always`,
- *                    or `cancelled`)
- *   cancel         → respond with `{ outcome: "cancelled" }`
- */
 export type AcpPermissionDecision =
-  | { outcome: "approve_once" }
-  | { outcome: "approve_always" }
-  | { outcome: "deny" }
+  | { outcome: "allow_once" }
+  | { outcome: "allow_always" }
+  | { outcome: "reject_once" }
+  | { outcome: "reject_always" }
   | { outcome: "cancel" };
-
-/**
- * Async hook invoked when the agent issues a permission request.
- * Return a decision to bypass the mode-based resolver; return
- * `undefined` (or throw) to fall through to it.
- */
-export type AcpOnPermissionRequest = (
-  req: AcpPermissionRequest,
-  ctx: { signal: AbortSignal },
-) => Promise<AcpPermissionDecision | undefined>;
 
 export const EXIT_CODES = {
   SUCCESS: 0,
@@ -226,14 +195,10 @@ export type AcpClientOptions = {
   onAcpOutputMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onSessionUpdate?: (notification: SessionNotification) => void;
   onClientOperation?: (operation: ClientOperation) => void;
-  /**
-   * Optional async hook invoked when the agent issues a permission
-   * request. Return a decision to bypass the mode-based resolver;
-   * return `undefined` to fall through to it. Throwing also falls
-   * through (and is logged) so a buggy host UI can't take down the
-   * agent turn.
-   */
-  onPermissionRequest?: AcpOnPermissionRequest;
+  onPermissionRequest?: (
+    req: AcpPermissionRequest,
+    ctx: { signal: AbortSignal },
+  ) => Promise<AcpPermissionDecision | undefined>;
 };
 
 export const SESSION_RECORD_SCHEMA = "acpx.session.v1" as const;

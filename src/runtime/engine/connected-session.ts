@@ -3,7 +3,8 @@ import { AcpClient } from "../../acp/client.js";
 import { withInterrupt } from "../../async-control.js";
 import { absolutePath, isoNow } from "../../session/persistence.js";
 import type {
-  AcpOnPermissionRequest,
+  AcpPermissionDecision,
+  AcpPermissionRequest,
   AuthPolicy,
   McpServer,
   NonInteractivePermissionPolicy,
@@ -40,7 +41,10 @@ export type WithConnectedSessionOptions<T> = {
   mcpServers?: McpServer[];
   permissionMode?: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  onPermissionRequest?: AcpOnPermissionRequest;
+  onPermissionRequest?: (
+    req: AcpPermissionRequest,
+    ctx: { signal: AbortSignal },
+  ) => Promise<AcpPermissionDecision | undefined>;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   terminal?: boolean;

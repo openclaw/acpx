@@ -272,11 +272,6 @@ export class AcpClient {
     promise: Promise<PromptResponse>;
   };
   private readonly cancellingSessionIds = new Set<string>();
-  /**
-   * Per-session AbortController for in-flight host-side
-   * permission-request callbacks. Lazily created on first call;
-   * aborted (and removed) when the session is cancelled or reset.
-   */
   private readonly permissionAbortControllers = new Map<string, AbortController>();
   private closing = false;
   private agentStartedAt?: string;
@@ -1221,8 +1216,6 @@ export class AcpClient {
       };
     }
 
-    // Host-controlled per-call gate. Returns a decision to bypass the
-    // mode-based resolver; returns undefined / throws to fall through.
     if (this.options.onPermissionRequest) {
       const signal = this.cancellationSignalForSession(params.sessionId);
       try {
@@ -1230,7 +1223,7 @@ export class AcpClient {
           {
             sessionId: params.sessionId,
             raw: params,
-            inferredKind: inferToolKind(params) ?? "other",
+            inferredKind: inferToolKind(params),
           },
           { signal },
         );
@@ -1240,8 +1233,8 @@ export class AcpClient {
           return response;
         }
       } catch (error) {
-        // Don't fail the whole turn just because the host's UI
-        // errored — log and fall through to mode-based logic.
+        // Fall through to the mode-based resolver so a host UI error
+        // doesn't take down the turn.
         this.log(
           `onPermissionRequest threw, falling through to mode-based resolver: ${
             error instanceof Error ? error.message : String(error)
@@ -1423,11 +1416,6 @@ export class AcpClient {
     return await this.terminalManager.releaseTerminal(params);
   }
 
-  /**
-   * Get-or-create an AbortSignal that fires when the session is
-   * cancelled or the client is reset. Hosts use this in their
-   * `onPermissionRequest` callback to short-circuit pending UI.
-   */
   private cancellationSignalForSession(sessionId: string): AbortSignal {
     let controller = this.permissionAbortControllers.get(sessionId);
     if (!controller) {
@@ -1437,7 +1425,6 @@ export class AcpClient {
     return controller.signal;
   }
 
-  /** Abort any in-flight permission callback for the given session. */
   private abortAndDropPermissionSignal(sessionId: string): void {
     const controller = this.permissionAbortControllers.get(sessionId);
     if (controller) {
