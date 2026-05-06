@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Runtime/embedding: add an optional `onPermissionRequest` callback to `AcpRuntimeOptions` and `AcpClientOptions` so embedders can intercept ACP per-call permission requests with their own UI. Returning a decision short-circuits the mode-based resolver; returning `undefined` falls through to it, leaving CLI behavior unchanged. Thanks @DaniAkash.
+
 ### Breaking
 
 ### Fixes
