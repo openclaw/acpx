@@ -10,7 +10,7 @@ importers:
     dependencies:
       '@agentclientprotocol/sdk':
         specifier: ^0.21.0
-        version: 0.21.0(zod@4.4.2)
+        version: 0.21.0(zod@4.4.3)
       commander:
         specifier: ^14.0.3
         version: 14.0.3
@@ -22,7 +22,7 @@ importers:
         version: 4.21.0
       zod:
         specifier: ^4.4.2
-        version: 4.4.2
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^25.6.0
@@ -1727,8 +1727,8 @@ packages:
     engines: {node: '>= 14.6'}
     hasBin: true
 
-  zod@4.4.2:
-    resolution: {integrity: sha512-IynmDyxsEsb9RKzO3J9+4SxXnl2FTFSzNBaKKaMV6tsSk0rw9gYw9gs+JFCq/qk2LCZ78KDwyj+Z289TijSkUw==}
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
   zustand@4.5.7:
     resolution: {integrity: sha512-CHOUy7mu3lbD6o6LJLfllpjkzhHXSBlX8B9+qPddUsIfeF5S/UZ5q0kmCsnRqT1UHFQZchNFDDzMbQsuesHWlw==}
@@ -1747,9 +1747,9 @@ packages:
 
 snapshots:
 
-  '@agentclientprotocol/sdk@0.21.0(zod@4.4.2)':
+  '@agentclientprotocol/sdk@0.21.0(zod@4.4.3)':
     dependencies:
-      zod: 4.4.2
+      zod: 4.4.3
 
   '@babel/generator@8.0.0-rc.3':
     dependencies:
@@ -3173,7 +3173,7 @@ snapshots:
 
   yaml@2.8.4: {}
 
-  zod@4.4.2: {}
+  zod@4.4.3: {}
 
   zustand@4.5.7(@types/react@19.2.14)(react@19.2.5):
     dependencies:
