@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Runtime/embedding: surface advertised models on `AcpRuntimeStatus.models` (a new optional `{ currentModelId?, availableModelIds }` field) so embedders can build model pickers without reaching into the private session record. Also captures `sessionResult.models` on first `ensureSession`, mirroring the existing reconnect-path behavior.
+
 ### Breaking
 
 ### Fixes

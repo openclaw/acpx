@@ -62,17 +62,6 @@ export type AcpRuntimeCapabilities = {
   configOptionKeys?: string[];
 };
 
-/**
- * Models advertised by the agent at session-creation time, plus the id
- * of the currently selected model.
- *
- * `currentModelId` will match an entry in `availableModelIds` when the
- * agent advertised a current selection. It may be undefined if the agent
- * didn't advertise one (some adapters omit it on first connect).
- *
- * Display names are not currently surfaced — see the runtime's release
- * notes for the follow-up that adds them.
- */
 export type AcpRuntimeSessionModels = {
   currentModelId?: string;
   availableModelIds: string[];
@@ -83,11 +72,6 @@ export type AcpRuntimeStatus = {
   acpxRecordId?: string;
   backendSessionId?: string;
   agentSessionId?: string;
-  /**
-   * Models advertised by the agent for this session. Undefined when the
-   * agent has not advertised any (Gemini CLI, custom adapters that don't
-   * populate `NewSessionResponse.models`).
-   */
   models?: AcpRuntimeSessionModels;
   details?: Record<string, unknown>;
 };

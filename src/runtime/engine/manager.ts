@@ -251,8 +251,6 @@ function buildModelsField(record: SessionRecord): { models?: AcpRuntimeSessionMo
     if (currentModelId === undefined) {
       return {};
     }
-    // Edge case: have a current id but no advertised list. Surface what
-    // we have so hosts that already know the registry can use it.
     return { models: { currentModelId, availableModelIds: [] } };
   }
   return {
