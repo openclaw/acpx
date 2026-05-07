@@ -16,13 +16,18 @@ import {
   trimConversationForRuntime,
 } from "../../session/conversation-model.js";
 import { defaultSessionEventLog } from "../../session/event-log.js";
-import { setDesiredConfigOption, setDesiredModeId } from "../../session/mode-preference.js";
+import {
+  setDesiredConfigOption,
+  setDesiredModeId,
+  syncAdvertisedModelState,
+} from "../../session/mode-preference.js";
 import type { ClientOperation, SessionRecord, SessionResumePolicy } from "../../types.js";
 import type {
   AcpRuntimeEvent,
   AcpRuntimeHandle,
   AcpRuntimeOptions,
   AcpRuntimePromptMode,
+  AcpRuntimeSessionModels,
   AcpRuntimeStatus,
   AcpRuntimeTurnAttachment,
   AcpRuntimeTurn,
@@ -239,6 +244,25 @@ function statusSummary(record: SessionRecord): string {
   return parts.join(" ");
 }
 
+function buildModelsField(record: SessionRecord): { models?: AcpRuntimeSessionModels } {
+  const available = record.acpx?.available_models;
+  const currentModelId = record.acpx?.current_model_id;
+  if (!available || available.length === 0) {
+    if (currentModelId === undefined) {
+      return {};
+    }
+    // Edge case: have a current id but no advertised list. Surface what
+    // we have so hosts that already know the registry can use it.
+    return { models: { currentModelId, availableModelIds: [] } };
+  }
+  return {
+    models: {
+      ...(currentModelId !== undefined ? { currentModelId } : {}),
+      availableModelIds: [...available],
+    },
+  };
+}
+
 export class AcpRuntimeManager {
   private readonly activeControllers = new Map<string, ActiveSessionController>();
   private readonly pendingPersistentClients = new Map<string, AcpClient>();
@@ -419,6 +443,7 @@ export class AcpRuntimeManager {
       record.protocolVersion = client.initializeResult?.protocolVersion;
       record.agentCapabilities = client.initializeResult?.agentCapabilities;
       applyConfigOptionsToRecord(record, sessionResult);
+      syncAdvertisedModelState(record, sessionResult.models);
       applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
       await this.options.sessionStore.save(record);
       if (input.mode === "persistent") {
@@ -787,6 +812,7 @@ export class AcpRuntimeManager {
       acpxRecordId: record.acpxRecordId,
       backendSessionId: record.acpSessionId,
       agentSessionId: record.agentSessionId,
+      ...buildModelsField(record),
       details: {
         cwd: record.cwd,
         lastUsedAt: record.lastUsedAt,

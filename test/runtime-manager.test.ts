@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
+import type { SessionModelState, SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { AcpxOperationalError } from "../src/errors.js";
 import { AcpRuntimeManager } from "../src/runtime/engine/manager.js";
 import type {
@@ -31,6 +31,7 @@ type FakeClient = {
     sessionId: string;
     agentSessionId?: string;
     configOptions?: SetSessionConfigOptionResponse["configOptions"];
+    models?: SessionModelState;
   }>;
   loadSession: (
     sessionId: string,
@@ -38,6 +39,7 @@ type FakeClient = {
   ) => Promise<{
     agentSessionId?: string;
     configOptions?: SetSessionConfigOptionResponse["configOptions"];
+    models?: SessionModelState;
   }>;
   hasReusableSession: (sessionId: string) => boolean;
   supportsLoadSession: () => boolean;
@@ -1996,4 +1998,128 @@ test("AcpRuntimeManager reuses a kept-open persistent client for controls before
   await manager.close(handle);
 
   assert.equal(closeCalls, 1);
+});
+
+function createModelsClientFactory(options: {
+  models?: SessionModelState;
+  onSetSessionModel?: (sessionId: string, modelId: string) => void;
+}): () => FakeClient {
+  return (): FakeClient =>
+    ({
+      initializeResult: { protocolVersion: 1 },
+      start: async () => {},
+      close: async () => {},
+      createSession: async () => ({
+        sessionId: "models-session",
+        agentSessionId: "models-agent",
+        ...(options.models !== undefined ? { models: options.models } : {}),
+      }),
+      loadSession: async () => ({ agentSessionId: "models-agent" }),
+      hasReusableSession: () => false,
+      supportsLoadSession: () => true,
+      loadSessionWithOptions: async () => ({ agentSessionId: "models-agent" }),
+      getAgentLifecycleSnapshot: () => ({ pid: 1, startedAt: "now", running: true }),
+      prompt: async () => ({ stopReason: "end_turn" }),
+      requestCancelActivePrompt: async () => false,
+      hasActivePrompt: () => false,
+      setSessionMode: async () => {},
+      setSessionConfigOption: async () => {},
+      setSessionModel: async (sessionId: string, modelId: string) => {
+        options.onSetSessionModel?.(sessionId, modelId);
+      },
+      clearEventHandlers: () => {},
+      setEventHandlers: () => {},
+    }) as unknown as FakeClient;
+}
+
+test("AcpRuntimeManager getStatus surfaces models advertised by the agent", async () => {
+  const store = new InMemorySessionStore();
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/tmp", sessionStore: store }),
+    {
+      clientFactory: createModelsClientFactory({
+        models: {
+          currentModelId: "opus",
+          availableModels: [
+            { modelId: "opus", name: "Opus" },
+            { modelId: "sonnet", name: "Sonnet" },
+          ],
+        },
+      }) as never,
+    },
+  );
+
+  const record = await manager.ensureSession({
+    sessionKey: "models-key",
+    agent: "claude",
+    mode: "persistent",
+  });
+  const handle = createHandle(record.acpxRecordId);
+  const status = await manager.getStatus(handle);
+
+  assert.deepEqual(status.models, {
+    currentModelId: "opus",
+    availableModelIds: ["opus", "sonnet"],
+  });
+});
+
+test("AcpRuntimeManager getStatus omits models when the agent did not advertise any", async () => {
+  const store = new InMemorySessionStore();
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/tmp", sessionStore: store }),
+    {
+      clientFactory: createModelsClientFactory({}) as never,
+    },
+  );
+
+  const record = await manager.ensureSession({
+    sessionKey: "no-models-key",
+    agent: "claude",
+    mode: "persistent",
+  });
+  const handle = createHandle(record.acpxRecordId);
+  const status = await manager.getStatus(handle);
+
+  assert.equal(status.models, undefined);
+});
+
+test("AcpRuntimeManager getStatus.models survives a save/reload cycle", async () => {
+  const store = new InMemorySessionStore();
+  const factory = createModelsClientFactory({
+    models: {
+      currentModelId: "opus",
+      availableModels: [
+        { modelId: "opus", name: "Opus" },
+        { modelId: "sonnet", name: "Sonnet" },
+      ],
+    },
+  }) as never;
+
+  const initial = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/tmp", sessionStore: store }),
+    {
+      clientFactory: factory,
+    },
+  );
+  const record = await initial.ensureSession({
+    sessionKey: "persisted-models-key",
+    agent: "claude",
+    mode: "persistent",
+  });
+  const handle = createHandle(record.acpxRecordId);
+  const beforeStatus = await initial.getStatus(handle);
+  assert.deepEqual(beforeStatus.models, {
+    currentModelId: "opus",
+    availableModelIds: ["opus", "sonnet"],
+  });
+
+  // Reload from the same persisted store with a fresh manager — proves the
+  // models field is read out of the persisted record, not just from
+  // in-process state.
+  const reloaded = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/tmp", sessionStore: store }),
+    { clientFactory: factory },
+  );
+  const afterStatus = await reloaded.getStatus(handle);
+  assert.deepEqual(afterStatus.models, beforeStatus.models);
 });

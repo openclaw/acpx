@@ -38,6 +38,7 @@ export type {
   AcpRuntimeOptions,
   AcpRuntimePromptMode,
   AcpRuntimeSessionMode,
+  AcpRuntimeSessionModels,
   AcpRuntimeStatus,
   AcpRuntimeTurn,
   AcpRuntimeTurnAttachment,
