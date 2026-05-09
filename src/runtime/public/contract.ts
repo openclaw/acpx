@@ -1,3 +1,4 @@
+import type { ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
 import type {
   McpServer,
   NonInteractivePermissionPolicy,
@@ -99,6 +100,11 @@ export type AcpRuntimeEvent =
       toolCallId?: string;
       status?: string;
       title?: string;
+      kind?: ToolKind;
+      locations?: ToolCallLocation[];
+      rawInput?: unknown;
+      rawOutput?: unknown;
+      content?: ToolCallContent[];
     }
   /**
    * Compatibility terminal event emitted by runTurn(...). startTurn(...).events

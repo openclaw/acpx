@@ -33,6 +33,65 @@ test("parsePromptEventLine handles text chunks, usage updates, tool updates, and
         params: {
           sessionId: "s1",
           update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "call_READ",
+            status: "in_progress",
+            rawOutput: {
+              content: [{ type: "text", text: "partial output" }],
+              details: { path: "src/app.ts" },
+            },
+            content: [
+              {
+                type: "content",
+                content: { type: "text", text: "partial output" },
+              },
+            ],
+            locations: [{ path: "src/app.ts", line: 12 }],
+          },
+        },
+      }),
+    ),
+    {
+      type: "tool_call",
+      text: "tool call (in_progress): partial output",
+      tag: "tool_call_update",
+      toolCallId: "call_READ",
+      status: "in_progress",
+      title: "tool call",
+      rawOutput: {
+        content: [{ type: "text", text: "partial output" }],
+        details: { path: "src/app.ts" },
+      },
+      content: [
+        {
+          type: "content",
+          content: { type: "text", text: "partial output" },
+        },
+      ],
+      locations: [{ path: "src/app.ts", line: 12 }],
+    },
+  );
+
+  const longOutput = "x".repeat(600);
+  const parsedLongUpdate = parsePromptEventLine(
+    JSON.stringify({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "call_LONG",
+      rawOutput: { stdout: longOutput },
+    }),
+  );
+  assert.equal(parsedLongUpdate?.type, "tool_call");
+  assert.equal(parsedLongUpdate?.text.length, 511);
+  assert.match(parsedLongUpdate?.text ?? "", /^tool call: x+…$/);
+
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "s1",
+          update: {
             sessionUpdate: "agent_thought_chunk",
             text: "thinking",
           },
@@ -122,6 +181,10 @@ test("parsePromptEventLine handles text chunks, usage updates, tool updates, and
       tag: "tool_call",
       toolCallId: "call_SEARCH",
       status: "in_progress",
+      rawInput: {
+        command: "rg",
+        args: ["-n", "needle"],
+      },
       title: "Search",
     },
   );
