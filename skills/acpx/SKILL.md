@@ -179,8 +179,8 @@ acpx sessions close
 acpx sessions close backend
 acpx sessions show
 acpx sessions history --limit 20
-acpx sessions prune --dry-run --older-than 7d
-acpx sessions prune --older-than 30d --include-history
+acpx sessions prune --dry-run --older-than 7
+acpx sessions prune --older-than 30 --include-history
 acpx status
 
 acpx codex sessions
@@ -253,10 +253,10 @@ Closed session records accumulate on disk by default. Use `sessions prune` to en
 
 ```bash
 # Preview what would be deleted (no writes)
-acpx codex sessions prune --dry-run --older-than 7d
+acpx codex sessions prune --dry-run --older-than 7
 
 # Remove records closed more than 30 days ago, including their event-stream files
-acpx codex sessions prune --older-than 30d --include-history
+acpx codex sessions prune --older-than 30 --include-history
 
 # Remove everything closed before a date
 acpx codex sessions prune --before 2026-04-01
@@ -531,8 +531,8 @@ acpx --agent './bin/custom-acp-server --profile ci' 'run validation checks'
 Periodic cleanup:
 
 ```bash
-acpx codex sessions prune --dry-run --older-than 14d
-acpx codex sessions prune --older-than 30d --include-history
+acpx codex sessions prune --dry-run --older-than 14
+acpx codex sessions prune --older-than 30 --include-history
 ```
 
 Multi-agent triage flow:
