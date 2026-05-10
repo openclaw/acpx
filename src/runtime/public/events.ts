@@ -326,7 +326,10 @@ function createToolCallEvent(params: {
   const toolCallId = asOptionalString(params.payload.toolCallId);
   const kind = readToolKind(params.payload.kind);
   const summaryText = status ? `${title} (${status})` : title;
-  const detailSummary = inputSummary ?? outputSummary;
+  const detailSummary =
+    params.tag === "tool_call_update"
+      ? (outputSummary ?? inputSummary)
+      : (inputSummary ?? outputSummary);
   return {
     type: "tool_call",
     text: detailSummary ? `${summaryText}: ${detailSummary}` : summaryText,

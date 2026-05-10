@@ -28,6 +28,27 @@ test("parsePromptEventLine handles text chunks, usage updates, tool updates, and
   assert.deepEqual(
     parsePromptEventLine(
       JSON.stringify({
+        sessionUpdate: "tool_call_update",
+        title: "Read",
+        toolCallId: "call_READ_WITH_INPUT",
+        rawInput: { path: "src/app.ts" },
+        rawOutput: { stdout: "fresh output" },
+      }),
+    ),
+    {
+      type: "tool_call",
+      text: "Read: fresh output",
+      tag: "tool_call_update",
+      toolCallId: "call_READ_WITH_INPUT",
+      title: "Read",
+      rawInput: { path: "src/app.ts" },
+      rawOutput: { stdout: "fresh output" },
+    },
+  );
+
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
         jsonrpc: "2.0",
         method: "session/update",
         params: {

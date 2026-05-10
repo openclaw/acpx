@@ -12,6 +12,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Runtime/embedding: preserve structured ACP `tool_call_update` details on public runtime events, including content, output, locations, kind, and raw payload fields, so embedders can display live tool progress. (#306) Thanks @joeia26.
+
 ## 2026.5.5 (v0.7.0)
 
 ### Changes
