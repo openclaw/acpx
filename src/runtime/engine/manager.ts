@@ -39,6 +39,7 @@ import {
 import { runPromptTurn } from "./prompt-turn.js";
 import { connectAndLoadSession } from "./reconnect.js";
 import { shouldReuseExistingRecord } from "./reuse-policy.js";
+import { persistSessionOptions, type SessionAgentOptions } from "./session-options.js";
 
 export type AcpRuntimeManagerDeps = {
   clientFactory?: (options: ConstructorParameters<typeof AcpClient>[0]) => AcpClient;
@@ -359,6 +360,7 @@ export class AcpRuntimeManager {
     mode: "persistent" | "oneshot";
     cwd?: string;
     resumeSessionId?: string;
+    sessionOptions?: SessionAgentOptions;
   }): Promise<SessionRecord> {
     const cwd = path.resolve(input.cwd?.trim() || this.options.cwd);
     const agentCommand = this.options.agentRegistry.resolve(input.agent);
@@ -372,6 +374,9 @@ export class AcpRuntimeManager {
         resumeSessionId: input.resumeSessionId,
       })
     ) {
+      // sessionOptions on a reused record are intentionally ignored: system
+      // prompts are fixed at newSession time; callers who need a different
+      // prompt must use a distinct sessionKey or close the prior record.
       existing.closed = false;
       existing.closedAt = undefined;
       this.closingActiveRecords.delete(existing.acpxRecordId);
@@ -386,6 +391,7 @@ export class AcpRuntimeManager {
       permissionMode: this.options.permissionMode,
       nonInteractivePermissions: this.options.nonInteractivePermissions,
       verbose: this.options.verbose,
+      sessionOptions: input.sessionOptions,
     });
     let keepClientOpen = false;
 
@@ -420,6 +426,7 @@ export class AcpRuntimeManager {
       record.agentCapabilities = client.initializeResult?.agentCapabilities;
       applyConfigOptionsToRecord(record, sessionResult);
       applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
+      persistSessionOptions(record, input.sessionOptions);
       await this.options.sessionStore.save(record);
       if (input.mode === "persistent") {
         const previousClient = this.pendingPersistentClients.get(record.acpxRecordId);

@@ -1997,3 +1997,133 @@ test("AcpRuntimeManager reuses a kept-open persistent client for controls before
 
   assert.equal(closeCalls, 1);
 });
+
+test("AcpRuntimeManager forwards sessionOptions to createClient on fresh session", async () => {
+  const store = new InMemorySessionStore();
+  const factoryCalls: Array<Record<string, unknown>> = [];
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: (options) => {
+        factoryCalls.push(options as Record<string, unknown>);
+        return {
+          initializeResult: { protocolVersion: 1, agentCapabilities: {} },
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "new-sid", agentSessionId: "agent-sid" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        } as never;
+      },
+    },
+  );
+
+  const record = await manager.ensureSession({
+    sessionKey: "system-prompt-session",
+    agent: "codex",
+    mode: "persistent",
+    sessionOptions: { systemPrompt: "Be terse." },
+  });
+
+  assert.equal(factoryCalls.length, 1);
+  assert.deepEqual(factoryCalls[0]?.sessionOptions, { systemPrompt: "Be terse." });
+  assert.deepEqual(record.acpx?.session_options, {
+    model: undefined,
+    allowed_tools: undefined,
+    max_turns: undefined,
+    system_prompt: "Be terse.",
+  });
+});
+
+test("AcpRuntimeManager persists sessionOptions { append } and model/allowedTools/maxTurns", async () => {
+  const store = new InMemorySessionStore();
+  const factoryCalls: Array<Record<string, unknown>> = [];
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: (options) => {
+        factoryCalls.push(options as Record<string, unknown>);
+        return {
+          initializeResult: { protocolVersion: 1, agentCapabilities: {} },
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "new-sid", agentSessionId: "agent-sid" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        } as never;
+      },
+    },
+  );
+
+  const sessionOptions = {
+    systemPrompt: { append: "Also review tests." },
+    model: "fast",
+    allowedTools: ["read", "edit"],
+    maxTurns: 5,
+  };
+  const record = await manager.ensureSession({
+    sessionKey: "append-session",
+    agent: "codex",
+    mode: "persistent",
+    sessionOptions,
+  });
+
+  assert.deepEqual(factoryCalls[0]?.sessionOptions, sessionOptions);
+  assert.deepEqual(record.acpx?.session_options, {
+    model: "fast",
+    allowed_tools: ["read", "edit"],
+    max_turns: 5,
+    system_prompt: { append: "Also review tests." },
+  });
+});
+
+test("AcpRuntimeManager ignores sessionOptions when reusing an existing persistent record", async () => {
+  const existing = makeSessionRecord({
+    acpxRecordId: "reuse-key",
+    acpSessionId: "sid-existing",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+    closed: true,
+    closedAt: "2026-01-01T00:05:00.000Z",
+  });
+  const store = new InMemorySessionStore([existing]);
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () => {
+        throw new Error("clientFactory should not be called when reusing");
+      },
+    },
+  );
+
+  const record = await manager.ensureSession({
+    sessionKey: "reuse-key",
+    agent: "codex",
+    mode: "persistent",
+    cwd: "/workspace",
+    sessionOptions: { systemPrompt: "ignored" },
+  });
+
+  assert.equal(record.acpSessionId, "sid-existing");
+  assert.equal(record.acpx?.session_options, undefined);
+});

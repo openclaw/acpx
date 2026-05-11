@@ -47,6 +47,8 @@ export type {
   AcpSessionRecord,
   AcpSessionStore,
   AcpSessionUpdateTag,
+  SessionAgentOptions,
+  SystemPromptOption,
 } from "./runtime/public/contract.js";
 
 export const ACPX_BACKEND_ID = "acpx";
@@ -128,6 +130,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       mode: input.mode,
       cwd: input.cwd ?? this.options.cwd,
       resumeSessionId: input.resumeSessionId,
+      sessionOptions: input.sessionOptions,
     });
 
     const handle: AcpRuntimeHandle = {
