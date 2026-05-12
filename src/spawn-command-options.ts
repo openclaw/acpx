@@ -74,3 +74,41 @@ export function buildSpawnCommandOptions(
     shell: true,
   };
 }
+
+export type ShellExec = {
+  command: string;
+  args: string[];
+};
+
+/**
+ * Resolve a `terminal/create` request into an actual `spawn()` argv pair.
+ *
+ * The ACP `CreateTerminalRequest` schema models `command` as the executable
+ * and `args` as its argument vector, mirroring `child_process.spawn(cmd, args)`.
+ * In practice, several agents (Claude Code, Codex-style wrappers, and others)
+ * place a full shell command line in the `command` field and leave `args`
+ * empty. Other ACP clients — notably Zed via its `ShellBuilder` — handle this
+ * by always running the request through the system shell, so those agents work
+ * out of the box. Spawning the unsplit string directly fails with `ENOENT`
+ * because the shell line is treated as an executable name.
+ *
+ * To match the de facto behavior of other ACP clients, when `args` is empty we
+ * route the command through `/bin/sh -c <command>` on Unix or `cmd.exe /C
+ * <command>` on Windows. When `args` is non-empty we honor the literal ACP
+ * contract and spawn `command` with the provided argv unchanged. This keeps
+ * well-behaved agents on the original direct-spawn fast path while letting
+ * "raw shell line" agents work transparently.
+ */
+export function buildShellExec(
+  command: string,
+  args: string[] | undefined,
+  platform: NodeJS.Platform = process.platform,
+): ShellExec {
+  if (args && args.length > 0) {
+    return { command, args };
+  }
+  if (platform === "win32") {
+    return { command: "cmd.exe", args: ["/d", "/s", "/c", command] };
+  }
+  return { command: "/bin/sh", args: ["-c", command] };
+}

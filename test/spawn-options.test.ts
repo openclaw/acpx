@@ -8,6 +8,7 @@ import { resolveAgentSessionCwd } from "../src/acp/client-process.js";
 import { buildAgentSpawnOptions, buildSpawnCommandOptions } from "../src/acp/client.js";
 import { buildTerminalSpawnOptions } from "../src/acp/terminal-manager.js";
 import { buildQueueOwnerSpawnOptions } from "../src/cli/session/queue-owner-process.js";
+import { buildShellExec } from "../src/spawn-command-options.js";
 
 test("buildAgentSpawnOptions hides Windows console windows and preserves auth env", () => {
   const options = buildAgentSpawnOptions("/tmp/acpx-agent", {
@@ -128,6 +129,38 @@ test("buildSpawnCommandOptions keeps shell disabled for non-batch commands", asy
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
+});
+
+test("buildShellExec passes through command and args verbatim when args are non-empty", () => {
+  const linuxExec = buildShellExec("node", ["-e", "console.log('ok')"], "linux");
+  assert.deepEqual(linuxExec, { command: "node", args: ["-e", "console.log('ok')"] });
+
+  const windowsExec = buildShellExec("npx", ["create-foo"], "win32");
+  assert.deepEqual(windowsExec, { command: "npx", args: ["create-foo"] });
+});
+
+test("buildShellExec wraps command in /bin/sh -c on Unix when args are missing or empty", () => {
+  const fromUndefined = buildShellExec("ls -la /Users/foo/", undefined, "linux");
+  assert.deepEqual(fromUndefined, { command: "/bin/sh", args: ["-c", "ls -la /Users/foo/"] });
+
+  const fromEmpty = buildShellExec("echo hello | tr a-z A-Z", [], "darwin");
+  assert.deepEqual(fromEmpty, {
+    command: "/bin/sh",
+    args: ["-c", "echo hello | tr a-z A-Z"],
+  });
+});
+
+test("buildShellExec wraps command in cmd.exe /d /s /c on Windows when args are empty", () => {
+  const exec = buildShellExec("dir C:\\Users", undefined, "win32");
+  assert.deepEqual(exec, { command: "cmd.exe", args: ["/d", "/s", "/c", "dir C:\\Users"] });
+});
+
+test("buildShellExec preserves bare commands without args by routing through the shell", () => {
+  // A bare token like "ls" still goes through the shell so PATH lookup,
+  // aliases, and shell builtins behave consistently regardless of whether
+  // an agent splits args or not.
+  const exec = buildShellExec("ls", undefined, "linux");
+  assert.deepEqual(exec, { command: "/bin/sh", args: ["-c", "ls"] });
 });
 
 test("resolveAgentSessionCwd translates WSL cwd for Windows exe agents", async () => {

@@ -15,7 +15,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 import { PermissionDeniedError, PermissionPromptUnavailableError } from "../errors.js";
 import { promptForPermission } from "../permission-prompt.js";
-import { buildSpawnCommandOptions } from "../spawn-command-options.js";
+import { buildShellExec, buildSpawnCommandOptions } from "../spawn-command-options.js";
 import type { ClientOperation, NonInteractivePermissionPolicy, PermissionMode } from "../types.js";
 
 const DEFAULT_TERMINAL_OUTPUT_LIMIT_BYTES = 64 * 1024;
@@ -190,10 +190,11 @@ export class TerminalManager {
         0,
         Math.round(params.outputByteLimit ?? DEFAULT_TERMINAL_OUTPUT_LIMIT_BYTES),
       );
+      const exec = buildShellExec(params.command, params.args);
       const proc = spawn(
-        params.command,
-        params.args ?? [],
-        buildTerminalSpawnOptions(params.command, params.cwd ?? this.cwd, params.env),
+        exec.command,
+        exec.args,
+        buildTerminalSpawnOptions(exec.command, params.cwd ?? this.cwd, params.env),
       );
       await waitForSpawn(proc);
 

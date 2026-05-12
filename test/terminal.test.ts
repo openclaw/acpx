@@ -133,3 +133,83 @@ test("terminal manager fails when prompt is unavailable and policy is fail", asy
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
+
+test("terminal manager runs an unsplit shell command line passed in the command field", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX-shell behavior; Windows path covered elsewhere");
+    return;
+  }
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
+  try {
+    const manager = new TerminalManager({
+      cwd: tmp,
+      permissionMode: "approve-all",
+    });
+
+    // The whole shell line lives in `command`; `args` is omitted on purpose,
+    // mirroring the request shape used by Claude Code, codebuddy, and other
+    // agents that don't pre-split their Bash tool input.
+    const created = await manager.createTerminal({
+      sessionId: "session-1",
+      command: "echo hello-from-shell",
+    });
+
+    const waitResult = await manager.waitForTerminalExit({
+      sessionId: "session-1",
+      terminalId: created.terminalId,
+    });
+    assert.equal(waitResult.exitCode, 0);
+
+    const outputResult = await manager.terminalOutput({
+      sessionId: "session-1",
+      terminalId: created.terminalId,
+    });
+    assert.match(outputResult.output, /hello-from-shell/);
+
+    await manager.releaseTerminal({
+      sessionId: "session-1",
+      terminalId: created.terminalId,
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("terminal manager honors shell metacharacters in an unsplit command", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX-shell behavior; Windows path covered elsewhere");
+    return;
+  }
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
+  try {
+    const manager = new TerminalManager({
+      cwd: tmp,
+      permissionMode: "approve-all",
+    });
+
+    const created = await manager.createTerminal({
+      sessionId: "session-1",
+      command: "printf 'one\\ntwo\\nthree\\n' | wc -l",
+    });
+
+    const waitResult = await manager.waitForTerminalExit({
+      sessionId: "session-1",
+      terminalId: created.terminalId,
+    });
+    assert.equal(waitResult.exitCode, 0);
+
+    const outputResult = await manager.terminalOutput({
+      sessionId: "session-1",
+      terminalId: created.terminalId,
+    });
+    // wc -l prints the count; tolerate leading whitespace from BSD/GNU wc.
+    assert.match(outputResult.output, /^\s*3\b/);
+
+    await manager.releaseTerminal({
+      sessionId: "session-1",
+      terminalId: created.terminalId,
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
