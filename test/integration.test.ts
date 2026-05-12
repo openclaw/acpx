@@ -1414,7 +1414,7 @@ test("integration: perf metrics capture checkpoints queue-owner turns before own
         );
       });
       assert(queueOwnerRecord, "expected queue owner checkpoint record before owner exit");
-      assert.equal(readPerfTimingCount(queueOwnerRecord, "session.write_record"), 2);
+      assert.equal((readPerfTimingCount(queueOwnerRecord, "session.write_record") ?? 0) >= 2, true);
 
       const status = await runCli([...baseAgentArgs(cwd), "--format", "json", "status"], homeDir);
       assert.equal(status.code, 0, status.stderr);
@@ -2984,6 +2984,122 @@ test("integration: sessions history shows in-flight prompt after prompt starts",
   });
 });
 
+test("integration: sessions read shows assistant updates before the prompt finishes", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const created = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+
+      const promptChild = spawn(
+        process.execPath,
+        [
+          CLI_PATH,
+          ...baseAgentArgs(cwd),
+          "--format",
+          "quiet",
+          "prompt",
+          "stream-sleep 2500 foreground-live-update",
+        ],
+        {
+          env: {
+            ...process.env,
+            HOME: homeDir,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+
+      try {
+        const history = await waitFor(async () => {
+          const result = await runCli(
+            [...baseAgentArgs(cwd), "--format", "quiet", "sessions", "read"],
+            homeDir,
+          );
+          assert.equal(result.code, 0, result.stderr);
+          return result.stdout.includes("foreground-live-update") ? result.stdout : null;
+        }, 5_000);
+
+        assert.equal(promptChild.exitCode, null, "prompt should still be running");
+        assert.match(history, /foreground-live-update/);
+        assert.doesNotMatch(history, /stream-sleep done/);
+
+        const promptResult = await awaitChildClose(promptChild);
+        assert.equal(promptResult.code, 0, promptResult.stderr);
+        assert.match(promptResult.stdout, /stream-sleep done: foreground-live-update/);
+      } finally {
+        if (promptChild.exitCode == null && promptChild.signalCode == null) {
+          promptChild.kill("SIGKILL");
+          await awaitChildClose(promptChild).catch(() => {});
+        }
+      }
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: --no-wait stdin prompt checkpoints live assistant updates", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const created = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+
+      const queued = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "json",
+          "--ttl",
+          "5",
+          "prompt",
+          "--no-wait",
+          "--file",
+          "-",
+        ],
+        homeDir,
+        {
+          stdin: "stream-sleep 5000 background-live-update",
+        },
+      );
+      assert.equal(queued.code, 0, queued.stderr);
+      const queuedPayload = JSON.parse(queued.stdout.trim()) as {
+        action?: string;
+      };
+      assert.equal(queuedPayload.action, "prompt_queued");
+
+      const history = await waitFor(async () => {
+        const result = await runCli(
+          [...baseAgentArgs(cwd), "--format", "quiet", "sessions", "read"],
+          homeDir,
+        );
+        assert.equal(result.code, 0, result.stderr);
+        return result.stdout.includes("background-live-update") ? result.stdout : null;
+      }, 5_000);
+
+      assert.match(history, /background-live-update/);
+      assert.doesNotMatch(history, /stream-sleep done/);
+
+      const closed = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "close"],
+        homeDir,
+      );
+      assert.equal(closed.code, 0, closed.stderr);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: session remains resumable after queue owner exits and agent has exited", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -3294,7 +3410,7 @@ async function runCliWithEntry(
         ...options.env,
       },
       cwd: options.cwd,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
 
     let stdout = "";
@@ -3314,6 +3430,12 @@ async function runCliWithEntry(
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
     });
+
+    if (options.stdin != null) {
+      child.stdin.end(options.stdin);
+    } else {
+      child.stdin.end();
+    }
 
     child.once("error", (error) => {
       clearTimeout(timer);

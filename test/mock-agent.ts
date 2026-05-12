@@ -1012,6 +1012,25 @@ class MockAgent implements Agent {
       return `slept ${Math.round(ms)}ms`;
     }
 
+    if (text.startsWith("stream-sleep ")) {
+      const rest = text.slice("stream-sleep ".length).trim();
+      const firstSpace = rest.search(/\s/);
+      if (firstSpace <= 0) {
+        throw new Error("Usage: stream-sleep <milliseconds> <text>");
+      }
+
+      const rawMs = rest.slice(0, firstSpace).trim();
+      const liveText = rest.slice(firstSpace + 1).trim();
+      const ms = Number(rawMs);
+      if (!Number.isFinite(ms) || ms < 0 || liveText.length === 0) {
+        throw new Error("Usage: stream-sleep <milliseconds> <text>");
+      }
+
+      await this.sendAssistantMessage(sessionId, liveText);
+      await sleepWithCancel(Math.round(ms), signal);
+      return `stream-sleep done: ${liveText}`;
+    }
+
     if (text.startsWith("disconnect ")) {
       const rawMs = text.slice("disconnect ".length).trim();
       if (!rawMs) {

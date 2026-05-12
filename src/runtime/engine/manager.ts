@@ -16,6 +16,7 @@ import {
   trimConversationForRuntime,
 } from "../../session/conversation-model.js";
 import { defaultSessionEventLog } from "../../session/event-log.js";
+import { LiveSessionCheckpoint } from "../../session/live-checkpoint.js";
 import { setDesiredConfigOption, setDesiredModeId } from "../../session/mode-preference.js";
 import type { ClientOperation, SessionRecord, SessionResumePolicy } from "../../types.js";
 import type {
@@ -509,6 +510,7 @@ export class AcpRuntimeManager {
       let record: SessionRecord | null = null;
       let conversation: ReturnType<typeof cloneSessionConversation> | null = null;
       let acpxState: ReturnType<typeof cloneSessionAcpxState>;
+      let liveCheckpoint: LiveSessionCheckpoint | undefined;
       let client: AcpClient | null = null;
       try {
         record = await this.requireRecord(input.handle.acpxRecordId ?? input.handle.sessionKey);
@@ -537,6 +539,14 @@ export class AcpRuntimeManager {
         const runtimeClient = client;
         const runtimeConversation = conversation;
         const runtimeRecord = record;
+        liveCheckpoint = new LiveSessionCheckpoint({
+          save: async () => {
+            runtimeRecord.lastUsedAt = isoNow();
+            runtimeRecord.acpx = acpxState;
+            applyConversation(runtimeRecord, runtimeConversation);
+            await this.options.sessionStore.save(runtimeRecord);
+          },
+        });
         let activeSessionId = record.acpSessionId;
 
         const applyPendingCancel = async (): Promise<boolean> => {
@@ -623,6 +633,7 @@ export class AcpRuntimeManager {
           onSessionUpdate: (notification) => {
             acpxState = recordSessionUpdate(runtimeConversation, acpxState, notification);
             trimConversationForRuntime(runtimeConversation);
+            liveCheckpoint?.request();
             emitParsed({
               jsonrpc: "2.0",
               method: "session/update",
@@ -632,6 +643,7 @@ export class AcpRuntimeManager {
           onClientOperation: (operation: ClientOperation) => {
             acpxState = recordClientOperation(runtimeConversation, acpxState, operation);
             trimConversationForRuntime(runtimeConversation);
+            liveCheckpoint?.request();
             emitParsed({
               type: "client_operation",
               ...operation,
@@ -663,12 +675,12 @@ export class AcpRuntimeManager {
               },
             });
         sessionReady.resolve();
-
         runtimeRecord.lastRequestId = input.requestId;
         runtimeRecord.lastPromptAt = isoNow();
         runtimeRecord.closed = false;
         runtimeRecord.closedAt = undefined;
         runtimeRecord.lastUsedAt = isoNow();
+        await liveCheckpoint.checkpoint();
         if (resumed || loadError) {
           emitParsed({
             type: "status",
@@ -735,6 +747,7 @@ export class AcpRuntimeManager {
           record.acpx = acpxState;
           applyConversation(record, conversation);
           record.lastUsedAt = isoNow();
+          await liveCheckpoint?.flush().catch(() => {});
           const closed = await this.refreshClosedState(record);
           await this.options.sessionStore.save(record).catch(() => {});
           if (!closed && client) {
