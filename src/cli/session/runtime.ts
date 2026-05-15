@@ -29,6 +29,7 @@ import {
   trimConversationForRuntime,
 } from "../../session/conversation-model.js";
 import { SessionEventWriter } from "../../session/events.js";
+import { LiveSessionCheckpoint } from "../../session/live-checkpoint.js";
 import { setCurrentModelId, setDesiredModelId } from "../../session/mode-preference.js";
 import {
   absolutePath,
@@ -408,6 +409,39 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       await eventWriter.appendMessages(batch, { checkpoint });
     });
   };
+  const preserveClosedState = async (): Promise<void> => {
+    const latest = await resolveSessionRecord(record.acpxRecordId).catch(() => undefined);
+    if (!latest?.closed) {
+      return;
+    }
+
+    record.closed = true;
+    record.closedAt = latest.closedAt ?? record.closedAt ?? isoNow();
+    record.pid = latest.pid;
+    if (latest.acpx) {
+      record.acpx = {
+        ...record.acpx,
+        ...latest.acpx,
+      };
+    }
+  };
+  const liveCheckpoint = new LiveSessionCheckpoint({
+    save: async () => {
+      await flushPendingMessages(false);
+      record.lastUsedAt = isoNow();
+      applyConversation(record, conversation);
+      record.acpx = acpxState;
+      await preserveClosedState();
+      await eventWriter.checkpoint();
+    },
+    onError: (error) => {
+      if (options.verbose) {
+        process.stderr.write(
+          "[acpx] live session checkpoint failed: " + formatErrorMessage(error) + "\n",
+        );
+      }
+    },
+  });
 
   const ownClient = options.client == null;
   const client =
@@ -451,6 +485,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       }
       acpxState = recordConversationSessionUpdate(conversation, acpxState, notification);
       trimConversationForRuntime(conversation);
+      liveCheckpoint.request();
       options.onSessionUpdate?.(notification);
     },
     onClientOperation: (operation) => {
@@ -459,6 +494,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       }
       acpxState = recordConversationClientOperation(conversation, acpxState, operation);
       trimConversationForRuntime(conversation);
+      liveCheckpoint.request();
       options.onClientOperation?.(operation);
     },
   });
@@ -541,7 +577,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
         output.setContext({
           sessionId: record.acpxRecordId,
         });
-        await flushPendingMessages(false);
+        await liveCheckpoint.checkpoint();
 
         const maxRetries = options.promptRetries ?? 0;
         let response;
@@ -695,7 +731,13 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     applyConversation(record, conversation);
     record.acpx = acpxState;
+    await liveCheckpoint.flush().catch(() => {
+      // best effort on close
+    });
     await flushPendingMessages(false).catch(() => {
+      // best effort on close
+    });
+    await preserveClosedState().catch(() => {
       // best effort on close
     });
     await closeEventWriter(true).catch(() => {

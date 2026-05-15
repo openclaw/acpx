@@ -378,14 +378,7 @@ Run artifacts persist under `~/.acpx/flows/runs/<runId>/`. Default per-step time
 The authoring surface lives in `acpx/flows`. The minimal example:
 
 ```ts
-import {
-  acp,
-  decision,
-  decisionEdge,
-  defineFlow,
-  checkpoint,
-  extractJsonObject,
-} from "acpx/flows";
+import { acp, decision, decisionEdge, defineFlow, checkpoint, extractJsonObject } from "acpx/flows";
 
 const choices = ["bug", "feat", "doc"] as const;
 
@@ -427,13 +420,13 @@ export default defineFlow({
 
 ### Node types
 
-| Type | Purpose |
-| --- | --- |
-| `acp({ prompt, parse?, agent?, cwd? })` | Model-driven step. The `prompt` builder receives `{ input, outputs }`. Optional `parse` coerces the raw text (e.g., `extractJsonObject`). |
-| `decision({ choices, question })` | Constrained-choice LLM step. `choices` is a `readonly` tuple; the runtime validates the model's reply against it and TypeScript infers the union from `choices`. |
-| `action(...)` | Runtime-supervised deterministic operation: shell, GitHub API, test execution, comment posting. |
-| `compute(...)` | Pure local data transform: normalization, routing key derivation, signal reduction. |
-| `checkpoint({ summary, run })` | Pause point for human or external trigger. `run` returns the outcome to record while paused. |
+| Type                                    | Purpose                                                                                                                                                          |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `acp({ prompt, parse?, agent?, cwd? })` | Model-driven step. The `prompt` builder receives `{ input, outputs }`. Optional `parse` coerces the raw text (e.g., `extractJsonObject`).                        |
+| `decision({ choices, question })`       | Constrained-choice LLM step. `choices` is a `readonly` tuple; the runtime validates the model's reply against it and TypeScript infers the union from `choices`. |
+| `action(...)`                           | Runtime-supervised deterministic operation: shell, GitHub API, test execution, comment posting.                                                                  |
+| `compute(...)`                          | Pure local data transform: normalization, routing key derivation, signal reduction.                                                                              |
+| `checkpoint({ summary, run })`          | Pause point for human or external trigger. `run` returns the outcome to record while paused.                                                                     |
 
 ### Edge shapes
 

@@ -802,6 +802,93 @@ test("AcpRuntimeManager does not pool a persistent client after active close", a
   assert.equal(typeof closed?.closedAt, "string");
 });
 
+test("AcpRuntimeManager live checkpoints preserve active close state", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "active-close-checkpoint-session",
+    acpSessionId: "active-close-checkpoint-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let handlers: FakeClientHandlers = {};
+  let promptActive = false;
+  let resolvePromptStart!: () => void;
+  let resolvePrompt!: (value: { stopReason: string }) => void;
+  const promptStarted = new Promise<void>((resolve) => {
+    resolvePromptStart = resolve;
+  });
+  const promptResult = new Promise<{ stopReason: string }>((resolve) => {
+    resolvePrompt = resolve;
+  });
+  const client: FakeClient = {
+    start: async () => {},
+    close: async () => {
+      promptActive = false;
+    },
+    createSession: async () => ({ sessionId: "unused" }),
+    loadSession: async () => ({ agentSessionId: "unused" }),
+    hasReusableSession: (sessionId) => sessionId === "active-close-checkpoint-sid",
+    supportsLoadSession: () => true,
+    supportsCloseSession: () => true,
+    closeSession: async () => {},
+    loadSessionWithOptions: async () => ({ agentSessionId: "active-close-checkpoint-agent-id" }),
+    getAgentLifecycleSnapshot: () => ({ running: promptActive }),
+    prompt: async () => {
+      promptActive = true;
+      handlers.onSessionUpdate?.({
+        sessionId: "active-close-checkpoint-sid",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "live checkpoint" },
+        },
+      });
+      resolvePromptStart();
+      return await promptResult;
+    },
+    requestCancelActivePrompt: async () => {
+      promptActive = false;
+      return true;
+    },
+    hasActivePrompt: () => promptActive,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {
+      handlers = {};
+    },
+    setEventHandlers: (nextHandlers) => {
+      handlers = nextHandlers;
+    },
+  };
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () => client as never,
+    },
+  );
+  const handle = createHandle("active-close-checkpoint-session");
+
+  const turn = manager.startTurn({
+    handle,
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-active-close-checkpoint",
+  });
+  const eventsPromise = collectEvents(turn.events);
+  await promptStarted;
+
+  await manager.close(handle, { discardPersistentState: true });
+  await new Promise((resolve) => setTimeout(resolve, 650));
+
+  const checkpointed = await store.load("active-close-checkpoint-session");
+  assert.equal(checkpointed?.closed, true);
+  assert.equal(checkpointed?.acpx?.reset_on_next_ensure, true);
+
+  resolvePrompt({ stopReason: "cancelled" });
+  await eventsPromise;
+  await turn.result;
+});
+
 test("AcpRuntimeManager accepts a session reply even when the prompt RPC times out", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "late-reply-session",
