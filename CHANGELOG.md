@@ -8,11 +8,17 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
-- Runtime/embedding: surface advertised models on `AcpRuntimeStatus.models` (a new optional `{ currentModelId?, availableModelIds }` field) so embedders can build model pickers without reaching into the private session record. Also captures `sessionResult.models` on first `ensureSession`, mirroring the existing reconnect-path behavior.
+- Runtime/embedding: `AcpRuntime.ensureSession` now accepts `sessionOptions` (`systemPrompt`, `model`, `allowedTools`, `maxTurns`) for fresh sessions, threading the values into `_meta.systemPrompt` (and `_meta.claudeCode.options.*`) on the underlying `session/new` request and persisting them onto the new record. Reusing an existing persistent record continues to ignore `sessionOptions` since system prompts are fixed at `newSession` time. `SessionAgentOptions` and `SystemPromptOption` are now re-exported from `acpx/runtime`. Thanks @DaniAkash.
+- Runtime/embedding: surface advertised models on `AcpRuntimeStatus.models` so embedders can build model pickers without reaching into private session records. Thanks @DaniAkash.
 
 ### Breaking
 
 ### Fixes
+
+- Runtime/embedding: preserve structured ACP `tool_call_update` details on public runtime events, including content, output, locations, kind, and raw payload fields, so embedders can display live tool progress. (#306) Thanks @joeia26.
+- CLI/sessions: checkpoint live assistant and tool updates while prompt turns are still running, so `sessions read` and `sessions history` can show in-flight progress instead of only the submitted prompt. (#314) Thanks @AndroidPoet.
+- Flows: keep external TypeScript flow modules that import `acpx/flows` compatible with current `tsx` loader behavior.
+- Terminal: run no-argument `terminal/create` command lines so agents that send an unsplit command do not fail with `ENOENT`. Thanks @xdjyxu.
 
 ## 2026.5.5 (v0.7.0)
 

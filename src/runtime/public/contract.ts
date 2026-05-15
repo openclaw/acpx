@@ -1,9 +1,13 @@
+import type { ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
 import type {
   McpServer,
   NonInteractivePermissionPolicy,
   PermissionMode,
   SessionRecord,
 } from "../../types.js";
+import type { SessionAgentOptions } from "../engine/session-options.js";
+
+export type { SessionAgentOptions, SystemPromptOption } from "../engine/session-options.js";
 
 export type AcpRuntimePromptMode = "prompt" | "steer";
 
@@ -40,6 +44,15 @@ export type AcpRuntimeEnsureInput = {
   mode: AcpRuntimeSessionMode;
   resumeSessionId?: string;
   cwd?: string;
+  /**
+   * Per-session agent options applied when a fresh ACP session is created.
+   * Threaded into `_meta.systemPrompt` (and `_meta.claudeCode.options.*`)
+   * on the underlying `session/new` request, and persisted onto the new
+   * record. Ignored when an existing persistent session is reused — system
+   * prompts are fixed at `newSession` time, so changing them requires a
+   * different sessionKey or closing the prior record first.
+   */
+  sessionOptions?: SessionAgentOptions;
 };
 
 export type AcpRuntimeTurnAttachment = {
@@ -105,6 +118,11 @@ export type AcpRuntimeEvent =
       toolCallId?: string;
       status?: string;
       title?: string;
+      kind?: ToolKind;
+      locations?: ToolCallLocation[];
+      rawInput?: unknown;
+      rawOutput?: unknown;
+      content?: ToolCallContent[];
     }
   /**
    * Compatibility terminal event emitted by runTurn(...). startTurn(...).events

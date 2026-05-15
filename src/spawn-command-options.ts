@@ -74,3 +74,26 @@ export function buildSpawnCommandOptions(
     shell: true,
   };
 }
+
+export type TerminalSpawnCommand = {
+  command: string;
+  args: string[];
+  killProcessGroup: boolean;
+};
+
+export function buildTerminalSpawnCommand(
+  command: string,
+  args: string[] | undefined,
+): TerminalSpawnCommand {
+  return { command, args: args ?? [], killProcessGroup: false };
+}
+
+export function buildTerminalShellSpawnCommand(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+): TerminalSpawnCommand {
+  if (platform === "win32") {
+    return { command: "cmd.exe", args: ["/d", "/s", "/c", command], killProcessGroup: true };
+  }
+  return { command: "/bin/sh", args: ["-c", command], killProcessGroup: true };
+}

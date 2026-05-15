@@ -1,6 +1,6 @@
-import type { AcpClient, SessionCreateResult } from "../../acp/client.js";
-import { assertRequestedModelSupported } from "../../acp/model-support.js";
-import { withTimeout } from "../../async-control.js";
+import type { AcpClient, SessionCreateResult } from "../acp/client.js";
+import { assertRequestedModelSupported } from "../acp/model-support.js";
+import { withTimeout } from "../async-control.js";
 
 export async function applyRequestedModelIfAdvertised(params: {
   client: AcpClient;
