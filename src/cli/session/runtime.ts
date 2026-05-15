@@ -409,12 +409,29 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       await eventWriter.appendMessages(batch, { checkpoint });
     });
   };
+  const preserveClosedState = async (): Promise<void> => {
+    const latest = await resolveSessionRecord(record.acpxRecordId).catch(() => undefined);
+    if (!latest?.closed) {
+      return;
+    }
+
+    record.closed = true;
+    record.closedAt = latest.closedAt ?? record.closedAt ?? isoNow();
+    record.pid = latest.pid;
+    if (latest.acpx) {
+      record.acpx = {
+        ...record.acpx,
+        ...latest.acpx,
+      };
+    }
+  };
   const liveCheckpoint = new LiveSessionCheckpoint({
     save: async () => {
       await flushPendingMessages(false);
       record.lastUsedAt = isoNow();
       applyConversation(record, conversation);
       record.acpx = acpxState;
+      await preserveClosedState();
       await eventWriter.checkpoint();
     },
     onError: (error) => {
@@ -718,6 +735,9 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       // best effort on close
     });
     await flushPendingMessages(false).catch(() => {
+      // best effort on close
+    });
+    await preserveClosedState().catch(() => {
       // best effort on close
     });
     await closeEventWriter(true).catch(() => {

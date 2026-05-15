@@ -544,6 +544,7 @@ export class AcpRuntimeManager {
             runtimeRecord.lastUsedAt = isoNow();
             runtimeRecord.acpx = acpxState;
             applyConversation(runtimeRecord, runtimeConversation);
+            await this.refreshClosedState(runtimeRecord);
             await this.options.sessionStore.save(runtimeRecord);
           },
         });

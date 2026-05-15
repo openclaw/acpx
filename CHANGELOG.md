@@ -13,6 +13,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Runtime/embedding: preserve structured ACP `tool_call_update` details on public runtime events, including content, output, locations, kind, and raw payload fields, so embedders can display live tool progress. (#306) Thanks @joeia26.
+- CLI/sessions: checkpoint live assistant and tool updates while prompt turns are still running, so `sessions read` and `sessions history` can show in-flight progress instead of only the submitted prompt. (#314) Thanks @AndroidPoet.
 
 ## 2026.5.5 (v0.7.0)
 

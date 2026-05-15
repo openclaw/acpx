@@ -3017,11 +3017,18 @@ test("integration: sessions read shows assistant updates before the prompt finis
       try {
         const history = await waitFor(async () => {
           const result = await runCli(
-            [...baseAgentArgs(cwd), "--format", "quiet", "sessions", "read"],
+            [...baseAgentArgs(cwd), "--format", "json", "sessions", "read"],
             homeDir,
           );
           assert.equal(result.code, 0, result.stderr);
-          return result.stdout.includes("foreground-live-update") ? result.stdout : null;
+          const payload = JSON.parse(result.stdout.trim()) as {
+            entries?: Array<{ role?: string; textPreview?: string }>;
+          };
+          const assistantEntry = payload.entries?.find(
+            (entry) =>
+              entry.role === "assistant" && entry.textPreview?.includes("foreground-live-update"),
+          );
+          return assistantEntry ? result.stdout : null;
         }, 5_000);
 
         assert.equal(promptChild.exitCode, null, "prompt should still be running");
@@ -3079,11 +3086,18 @@ test("integration: --no-wait stdin prompt checkpoints live assistant updates", a
 
       const history = await waitFor(async () => {
         const result = await runCli(
-          [...baseAgentArgs(cwd), "--format", "quiet", "sessions", "read"],
+          [...baseAgentArgs(cwd), "--format", "json", "sessions", "read"],
           homeDir,
         );
         assert.equal(result.code, 0, result.stderr);
-        return result.stdout.includes("background-live-update") ? result.stdout : null;
+        const payload = JSON.parse(result.stdout.trim()) as {
+          entries?: Array<{ role?: string; textPreview?: string }>;
+        };
+        const assistantEntry = payload.entries?.find(
+          (entry) =>
+            entry.role === "assistant" && entry.textPreview?.includes("background-live-update"),
+        );
+        return assistantEntry ? result.stdout : null;
       }, 5_000);
 
       assert.match(history, /background-live-update/);
@@ -3094,6 +3108,91 @@ test("integration: --no-wait stdin prompt checkpoints live assistant updates", a
         homeDir,
       );
       assert.equal(closed.code, 0, closed.stderr);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: sessions close stays closed after live checkpoints", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const created = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+      const createdPayload = JSON.parse(created.stdout.trim()) as {
+        acpxRecordId?: string;
+      };
+      const sessionId = createdPayload.acpxRecordId;
+      assert.equal(typeof sessionId, "string");
+
+      const promptChild = spawn(
+        process.execPath,
+        [
+          CLI_PATH,
+          ...baseAgentArgs(cwd),
+          "--format",
+          "quiet",
+          "prompt",
+          "stream-sleep 5000 close-live-update",
+        ],
+        {
+          env: {
+            ...process.env,
+            HOME: homeDir,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+
+      try {
+        await waitFor(async () => {
+          const result = await runCli(
+            [...baseAgentArgs(cwd), "--format", "json", "sessions", "read"],
+            homeDir,
+          );
+          assert.equal(result.code, 0, result.stderr);
+          const payload = JSON.parse(result.stdout.trim()) as {
+            entries?: Array<{ role?: string; textPreview?: string }>;
+          };
+          const assistantEntry = payload.entries?.find(
+            (entry) =>
+              entry.role === "assistant" && entry.textPreview?.includes("close-live-update"),
+          );
+          return assistantEntry ? true : null;
+        }, 5_000);
+
+        const closed = await runCli(
+          [...baseAgentArgs(cwd), "--format", "json", "sessions", "close"],
+          homeDir,
+        );
+        assert.equal(closed.code, 0, closed.stderr);
+        if (promptChild.exitCode == null && promptChild.signalCode == null) {
+          await awaitChildClose(promptChild).catch(() => {});
+        }
+
+        const recordPath = path.join(
+          homeDir,
+          ".acpx",
+          "sessions",
+          `${encodeURIComponent(sessionId as string)}.json`,
+        );
+        const storedRecord = JSON.parse(await fs.readFile(recordPath, "utf8")) as {
+          closed?: boolean;
+          closed_at?: string;
+        };
+        assert.equal(storedRecord.closed, true);
+        assert.equal(typeof storedRecord.closed_at, "string");
+      } finally {
+        if (promptChild.exitCode == null && promptChild.signalCode == null) {
+          promptChild.kill("SIGKILL");
+          await awaitChildClose(promptChild).catch(() => {});
+        }
+      }
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
