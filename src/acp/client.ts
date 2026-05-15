@@ -1227,6 +1227,14 @@ export class AcpClient {
           },
           { signal },
         );
+        if (signal.aborted || this.cancellingSessionIds.has(params.sessionId)) {
+          this.recordPermissionDecision("cancelled");
+          return {
+            outcome: {
+              outcome: "cancelled",
+            },
+          };
+        }
         if (decision) {
           const response = decisionToResponse(params, decision);
           this.recordPermissionDecision(classifyPermissionDecision(params, response));

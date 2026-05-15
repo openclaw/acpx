@@ -465,6 +465,54 @@ test("AcpClient onPermissionRequest receives an AbortSignal that fires on sessio
   assert.equal(observedSignal?.aborted, true);
 });
 
+test("AcpClient onPermissionRequest cancels a late decision after session cancel", async () => {
+  let resolveDecision!: (decision: { outcome: "allow_once" }) => void;
+  const decisionPromise = new Promise<{ outcome: "allow_once" }>((resolve) => {
+    resolveDecision = resolve;
+  });
+  let callbackStarted!: () => void;
+  const callbackStartedPromise = new Promise<void>((resolve) => {
+    callbackStarted = resolve;
+  });
+  let observedSignal: AbortSignal | undefined;
+
+  const client = makeClient({
+    permissionMode: "approve-all",
+    onPermissionRequest: async (_req, ctx) => {
+      observedSignal = ctx.signal;
+      callbackStarted();
+      return await decisionPromise;
+    },
+  });
+  const internals = asInternals(client) as ClientInternals & {
+    abortAndDropPermissionSignal: (sessionId: string) => void;
+  };
+
+  const responsePromise = internals.handlePermissionRequest?.(
+    makePermissionRequest("session-cb-5", "edit"),
+  );
+  await callbackStartedPromise;
+
+  internals.cancellingSessionIds.add("session-cb-5");
+  internals.abortAndDropPermissionSignal("session-cb-5");
+  assert.equal(observedSignal?.aborted, true);
+
+  resolveDecision({ outcome: "allow_once" });
+  const response = await responsePromise;
+
+  assert.deepEqual(response, {
+    outcome: {
+      outcome: "cancelled",
+    },
+  });
+  assert.deepEqual(client.getPermissionStats(), {
+    requested: 1,
+    approved: 0,
+    denied: 0,
+    cancelled: 1,
+  });
+});
+
 test("AcpClient client-method permission errors update permission stats", async () => {
   const client = makeClient();
   const internals = asInternals(client);
