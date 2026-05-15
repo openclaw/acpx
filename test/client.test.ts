@@ -513,6 +513,47 @@ test("AcpClient onPermissionRequest cancels a late decision after session cancel
   });
 });
 
+test("AcpClient onPermissionRequest treats abort rejections as cancelled", async () => {
+  let callbackStarted!: () => void;
+  const callbackStartedPromise = new Promise<void>((resolve) => {
+    callbackStarted = resolve;
+  });
+
+  const client = makeClient({
+    permissionMode: "approve-all",
+    onPermissionRequest: async (_req, ctx) => {
+      callbackStarted();
+      await new Promise<never>((_resolve, reject) => {
+        ctx.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    },
+  });
+  const internals = asInternals(client) as ClientInternals & {
+    abortAndDropPermissionSignal: (sessionId: string) => void;
+  };
+
+  const responsePromise = internals.handlePermissionRequest?.(
+    makePermissionRequest("session-cb-6", "edit"),
+  );
+  await callbackStartedPromise;
+
+  internals.cancellingSessionIds.add("session-cb-6");
+  internals.abortAndDropPermissionSignal("session-cb-6");
+  const response = await responsePromise;
+
+  assert.deepEqual(response, {
+    outcome: {
+      outcome: "cancelled",
+    },
+  });
+  assert.deepEqual(client.getPermissionStats(), {
+    requested: 1,
+    approved: 0,
+    denied: 0,
+    cancelled: 1,
+  });
+});
+
 test("AcpClient client-method permission errors update permission stats", async () => {
   const client = makeClient();
   const internals = asInternals(client);

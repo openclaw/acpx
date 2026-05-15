@@ -1241,6 +1241,14 @@ export class AcpClient {
           return response;
         }
       } catch (error) {
+        if (signal.aborted || this.cancellingSessionIds.has(params.sessionId)) {
+          this.recordPermissionDecision("cancelled");
+          return {
+            outcome: {
+              outcome: "cancelled",
+            },
+          };
+        }
         // Fall through to the mode-based resolver so a host UI error
         // doesn't take down the turn.
         this.log(
