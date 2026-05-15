@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
+import type { SessionModelState, SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { AcpxOperationalError } from "../src/errors.js";
 import { AcpRuntimeManager } from "../src/runtime/engine/manager.js";
+import { persistSessionOptions } from "../src/runtime/engine/session-options.js";
 import type {
   AcpRuntimeEvent,
   AcpRuntimeHandle,
@@ -31,6 +32,7 @@ type FakeClient = {
     sessionId: string;
     agentSessionId?: string;
     configOptions?: SetSessionConfigOptionResponse["configOptions"];
+    models?: SessionModelState;
   }>;
   loadSession: (
     sessionId: string,
@@ -38,6 +40,7 @@ type FakeClient = {
   ) => Promise<{
     agentSessionId?: string;
     configOptions?: SetSessionConfigOptionResponse["configOptions"];
+    models?: SessionModelState;
   }>;
   hasReusableSession: (sessionId: string) => boolean;
   supportsLoadSession: () => boolean;
@@ -69,6 +72,7 @@ type FakeClient = {
   requestCancelActivePrompt: () => Promise<boolean>;
   hasActivePrompt: () => boolean;
   setSessionMode: (sessionId: string, modeId: string) => Promise<void>;
+  setSessionModel?: (sessionId: string, modelId: string) => Promise<void>;
   setSessionConfigOption: (
     sessionId: string,
     configId: string,
@@ -2135,6 +2139,7 @@ test("AcpRuntimeManager forwards sessionOptions to createClient on fresh session
 test("AcpRuntimeManager persists sessionOptions { append } and model/allowedTools/maxTurns", async () => {
   const store = new InMemorySessionStore();
   const factoryCalls: Array<Record<string, unknown>> = [];
+  const setModelCalls: Array<{ sessionId: string; modelId: string }> = [];
   const manager = new AcpRuntimeManager(
     createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
     {
@@ -2144,7 +2149,17 @@ test("AcpRuntimeManager persists sessionOptions { append } and model/allowedTool
           initializeResult: { protocolVersion: 1, agentCapabilities: {} },
           start: async () => {},
           close: async () => {},
-          createSession: async () => ({ sessionId: "new-sid", agentSessionId: "agent-sid" }),
+          createSession: async () => ({
+            sessionId: "new-sid",
+            agentSessionId: "agent-sid",
+            models: {
+              currentModelId: "default",
+              availableModels: [
+                { modelId: "default", name: "Default" },
+                { modelId: "fast", name: "Fast" },
+              ],
+            },
+          }),
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
@@ -2154,6 +2169,9 @@ test("AcpRuntimeManager persists sessionOptions { append } and model/allowedTool
           requestCancelActivePrompt: async () => false,
           hasActivePrompt: () => false,
           setSessionMode: async () => {},
+          setSessionModel: async (sessionId: string, modelId: string) => {
+            setModelCalls.push({ sessionId, modelId });
+          },
           setSessionConfigOption: async () => {},
           clearEventHandlers: () => {},
           setEventHandlers: () => {},
@@ -2176,11 +2194,32 @@ test("AcpRuntimeManager persists sessionOptions { append } and model/allowedTool
   });
 
   assert.deepEqual(factoryCalls[0]?.sessionOptions, sessionOptions);
+  assert.deepEqual(setModelCalls, [{ sessionId: "new-sid", modelId: "fast" }]);
+  assert.equal(record.acpx?.current_model_id, "fast");
+  assert.deepEqual(record.acpx?.available_models, ["default", "fast"]);
   assert.deepEqual(record.acpx?.session_options, {
     model: "fast",
     allowed_tools: ["read", "edit"],
     max_turns: 5,
     system_prompt: { append: "Also review tests." },
+  });
+});
+
+test("persistSessionOptions preserves an explicit empty allowedTools list", () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "empty-tools-session",
+    acpSessionId: "empty-tools-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+
+  persistSessionOptions(record, { allowedTools: [] });
+
+  assert.deepEqual(record.acpx?.session_options, {
+    model: undefined,
+    allowed_tools: [],
+    max_turns: undefined,
+    system_prompt: undefined,
   });
 });
 

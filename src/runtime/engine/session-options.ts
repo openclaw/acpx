@@ -58,7 +58,7 @@ export function persistSessionOptions(
   const hasValues = Boolean(
     next &&
     ((typeof next.model === "string" && next.model.trim().length > 0) ||
-      (Array.isArray(next.allowed_tools) && next.allowed_tools.length > 0) ||
+      Array.isArray(next.allowed_tools) ||
       typeof next.max_turns === "number" ||
       next.system_prompt !== undefined),
   );

@@ -31,6 +31,7 @@ import {
 import { SessionEventWriter } from "../../session/events.js";
 import { LiveSessionCheckpoint } from "../../session/live-checkpoint.js";
 import { setCurrentModelId, setDesiredModelId } from "../../session/mode-preference.js";
+import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
 import {
   absolutePath,
   isoNow,
@@ -53,7 +54,6 @@ import type {
 import { type QueueOwnerMessage, type QueueTask, waitMs } from "../queue/ipc.js";
 import { type QueueOwnerActiveSessionController } from "../queue/owner-turn-controller.js";
 import type { RunOnceOptions, SessionSendOptions } from "./contracts.js";
-import { applyRequestedModelIfAdvertised } from "./model-helpers.js";
 
 const INTERRUPT_CANCEL_WAIT_MS = 2_500;
 

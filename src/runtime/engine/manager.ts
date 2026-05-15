@@ -17,7 +17,13 @@ import {
 } from "../../session/conversation-model.js";
 import { defaultSessionEventLog } from "../../session/event-log.js";
 import { LiveSessionCheckpoint } from "../../session/live-checkpoint.js";
-import { setDesiredConfigOption, setDesiredModeId } from "../../session/mode-preference.js";
+import {
+  setCurrentModelId,
+  setDesiredConfigOption,
+  setDesiredModeId,
+  syncAdvertisedModelState,
+} from "../../session/mode-preference.js";
+import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
 import type { ClientOperation, SessionRecord, SessionResumePolicy } from "../../types.js";
 import type {
   AcpRuntimeEvent,
@@ -426,6 +432,18 @@ export class AcpRuntimeManager {
       record.protocolVersion = client.initializeResult?.protocolVersion;
       record.agentCapabilities = client.initializeResult?.agentCapabilities;
       applyConfigOptionsToRecord(record, sessionResult);
+      const requestedModelApplied = await applyRequestedModelIfAdvertised({
+        client,
+        sessionId,
+        requestedModel: input.sessionOptions?.model,
+        models: sessionResult.models,
+        agentCommand,
+        timeoutMs: this.options.timeoutMs,
+      });
+      syncAdvertisedModelState(record, sessionResult.models);
+      if (requestedModelApplied) {
+        setCurrentModelId(record, input.sessionOptions?.model);
+      }
       applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
       persistSessionOptions(record, input.sessionOptions);
       await this.options.sessionStore.save(record);

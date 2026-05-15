@@ -6,6 +6,7 @@ import { applyConfigOptionsToRecord } from "../../session/config-options.js";
 import { createSessionConversation } from "../../session/conversation-model.js";
 import { defaultSessionEventLog } from "../../session/event-log.js";
 import { setCurrentModelId, syncAdvertisedModelState } from "../../session/mode-preference.js";
+import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
 import {
   absolutePath,
   findGitRepositoryRoot,
@@ -22,7 +23,6 @@ import type {
   SessionCreateWithClientResult,
   SessionEnsureOptions,
 } from "./contracts.js";
-import { applyRequestedModelIfAdvertised } from "./model-helpers.js";
 import { setSessionModel } from "./session-control.js";
 
 async function createSessionRecordWithClient(
