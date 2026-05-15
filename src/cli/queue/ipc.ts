@@ -14,7 +14,7 @@ import type {
   SessionSendOutcome,
 } from "../../types.js";
 import { probeQueueOwnerHealth, type QueueOwnerHealth } from "./ipc-health.js";
-import { QUEUE_CONNECT_RETRY_MS, connectToQueueOwner } from "./ipc-transport.js";
+import { connectToQueueOwner } from "./ipc-transport.js";
 import {
   type QueueOwnerRecord,
   readQueueOwnerRecord,

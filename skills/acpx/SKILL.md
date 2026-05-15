@@ -1,13 +1,13 @@
 ---
 name: acpx
-description: Use acpx as a headless ACP CLI for agent-to-agent communication, including prompt/exec/sessions workflows, session scoping, queueing, permissions, and output formats.
+description: Use acpx as a headless ACP CLI for agent-to-agent communication, including prompt/exec/sessions workflows, session scoping, queueing, permissions, output formats, system-prompt overrides, and multi-agent flows authored with defineFlow/decision/decisionEdge.
 ---
 
 # acpx
 
 ## When to use this skill
 
-Use this skill when you need to run coding agents through `acpx`, manage persistent ACP sessions, queue prompts, or consume structured agent output from scripts.
+Use this skill when you need to run coding agents through `acpx`, manage persistent ACP sessions, queue prompts, override the Claude system prompt, prune stale sessions, consume structured agent output from scripts, or compose multi-agent workflows declaratively with `acpx/flows`.
 
 ## What acpx is
 
@@ -18,6 +18,8 @@ Core capabilities:
 - Persistent multi-turn sessions per repo/cwd
 - One-shot execution mode (`exec`)
 - Named parallel sessions (`-s/--session`)
+- Idempotent session creation (`sessions ensure`)
+- Session retention controls (`sessions prune` with age filters and history cleanup)
 - Queue-aware prompt submission with optional fire-and-forget (`--no-wait`)
 - Cooperative cancel command (`cancel`) for in-flight turns
 - Graceful cancellation via ACP `session/cancel` on interrupt
@@ -31,7 +33,10 @@ Core capabilities:
 - Stable ACP `authenticate` handshake via env/config credentials
 - Structured streaming output (`text`, `json`, `quiet`) with optional `--suppress-reads`
 - Built-in agent registry plus raw `--agent` escape hatch
-- Experimental `flow run` support with `acpx/flows` helpers, including constrained-choice `decision()` branching
+- Claude system prompt override via `--system-prompt` / `--append-system-prompt`
+- Optional terminal capability disable via `--no-terminal` for review-only flows
+- Tool whitelist (`--allowed-tools`), turn cap (`--max-turns`), retry on transient failures (`--prompt-retries`)
+- Multi-agent flows via `acpx flow run` and the `acpx/flows` authoring API (`defineFlow`, `decision`, `decisionEdge`, `acp`, `action`, `compute`, `checkpoint`)
 
 ## Install
 
@@ -53,8 +58,9 @@ acpx [global_options] cancel [-s <name>]
 acpx [global_options] set-mode <mode> [-s <name>]
 acpx [global_options] set <key> <value> [-s <name>]
 acpx [global_options] status [-s <name>]
-acpx [global_options] sessions [list | new [--name <name>] | close [name] | show [name] | history [name] [--limit <count>]]
+acpx [global_options] sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | prune [--dry-run] [--before <date> | --older-than <days>] [--include-history]]
 acpx [global_options] config [show | init]
+acpx [global_options] flow run <file> [--input-json '<json>' | --input-file <path>] [--default-agent <name>]
 
 acpx [global_options] <agent> [prompt_options] [prompt_text...]
 acpx [global_options] <agent> prompt [prompt_options] [prompt_text...]
@@ -63,7 +69,7 @@ acpx [global_options] <agent> cancel [-s <name>]
 acpx [global_options] <agent> set-mode <mode> [-s <name>]
 acpx [global_options] <agent> set <key> <value> [-s <name>]
 acpx [global_options] <agent> status [-s <name>]
-acpx [global_options] <agent> sessions [list | new [--name <name>] | close [name] | show [name] | history [name] [--limit <count>]]
+acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | prune [--dry-run] [--before <date> | --older-than <days>] [--include-history]]
 ```
 
 If prompt text is omitted and stdin is piped, `acpx` reads prompt text from stdin.
@@ -167,17 +173,23 @@ acpx sessions
 acpx sessions list
 acpx sessions new
 acpx sessions new --name backend
+acpx sessions ensure
+acpx sessions ensure --name backend
 acpx sessions close
 acpx sessions close backend
 acpx sessions show
 acpx sessions history --limit 20
+acpx sessions prune --dry-run --older-than 7
+acpx sessions prune --older-than 30 --include-history
 acpx status
 
 acpx codex sessions
 acpx codex sessions new --name backend
+acpx codex sessions ensure --name backend
 acpx codex sessions close backend
 acpx codex sessions show backend
 acpx codex sessions history backend --limit 20
+acpx codex sessions prune --before 2026-04-01 --include-history
 acpx codex status
 ```
 
@@ -187,10 +199,15 @@ Behavior:
 - `new` creates a fresh session for the current `(agentCommand, cwd, optional name)` scope
 - `new --name <name>` targets a named session scope
 - when `new` replaces an existing open session in that scope, the old one is soft-closed
+- `ensure` returns the nearest matching active session for the scope, or creates one when none is open. Idempotent — safe to call before every prompt in scripts.
 - `close` targets current cwd default session
 - `close <name>` targets current cwd named session
 - `show [name]` prints stored metadata for that scoped session
 - `history [name]` prints stored turn history previews (default 20, use `--limit`)
+- `prune` deletes closed session records to reclaim disk space
+  - `--dry-run` previews what would be deleted without touching disk
+  - `--older-than <days>` and `--before <date>` filter by close time, falling back to last-used time when a record was never explicitly closed
+  - `--include-history` also removes per-session event stream files (otherwise only the JSON record is removed)
 
 ## Global options
 
@@ -199,14 +216,53 @@ Behavior:
 - `--approve-all`: auto-approve all permission requests
 - `--approve-reads`: auto-approve reads/searches, prompt for writes (default mode)
 - `--deny-all`: deny all permission requests
+- `--non-interactive-permissions <policy>`: when prompting is unavailable, choose `deny` or `fail`
 - `--format <fmt>`: output format (`text`, `json`, `quiet`)
+- `--json-strict`: strict JSON mode; requires `--format json` and suppresses non-JSON stderr output
 - `--suppress-reads`: suppress raw read-file contents while preserving the selected format
 - `--timeout <seconds>`: max wait time (positive number)
 - `--ttl <seconds>`: queue owner idle TTL before shutdown (default `300`, `0` disables TTL)
 - `--model <id>`: request an agent model during session creation; non-Claude agents must advertise ACP models and support `session/set_model`
+- `--system-prompt <text>`: replace the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt`; persisted in `session_options.system_prompt` so reuse keeps the override. Other agents ignore the field.
+- `--append-system-prompt <text>`: append text to the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt.append`; same persistence rules as `--system-prompt`.
+- `--allowed-tools <list>`: comma-separated tool whitelist (use `""` for no tools)
+- `--max-turns <count>`: cap session turn count
+- `--prompt-retries <count>`: retry failed prompt turns on transient errors (default `0`)
+- `--no-terminal`: do not advertise the ACP terminal capability — useful for review-only or sandboxed agent invocations
 - `--verbose`: verbose ACP/debug logs to stderr
 
 Permission flags are mutually exclusive.
+
+## System prompt override (Claude)
+
+`--system-prompt` and `--append-system-prompt` let you specialize a Claude session without leaving lingering one-off state, while still benefiting from persistent session reuse.
+
+```bash
+# Replace the system prompt for a named session, persisted across reuse
+acpx --system-prompt "You are a code reviewer who challenges every implicit assumption." claude -s review
+
+# Append a guideline on top of the default system prompt
+acpx --append-system-prompt "Always explain trade-offs before recommending a fix." claude -s impl
+```
+
+The override is forwarded via ACP `_meta.systemPrompt` (or `_meta.systemPrompt.append`) on `session/new` and stored in `session_options.system_prompt`. Subsequent `prompt`/`ensure` calls in the same scope keep the override unless you explicitly create a new session. Non-Claude adapters ignore the field, so the same flag is safe inside cross-agent scripts.
+
+## Sessions cleanup
+
+Closed session records accumulate on disk by default. Use `sessions prune` to enforce retention:
+
+```bash
+# Preview what would be deleted (no writes)
+acpx codex sessions prune --dry-run --older-than 7
+
+# Remove records closed more than 30 days ago, including their event-stream files
+acpx codex sessions prune --older-than 30 --include-history
+
+# Remove everything closed before a date
+acpx codex sessions prune --before 2026-04-01
+```
+
+Without `--include-history`, only the lightweight JSON record is removed; event-stream files are preserved for audit. With it, the per-session event log is also deleted to reclaim disk space.
 
 ## Config files
 
@@ -219,6 +275,7 @@ Supported keys:
 
 - `defaultAgent`
 - `defaultPermissions` (`approve-all`, `approve-reads`, `deny-all`)
+- `nonInteractivePermissions` (`deny`, `fail`)
 - `ttl` (seconds)
 - `timeout` (seconds or `null`)
 - `format` (`text`, `json`, `quiet`)
@@ -245,7 +302,7 @@ Persistence:
 - Session records are stored in `~/.acpx/sessions/*.json`.
 - `-s/--session` creates parallel named conversations in the same repo.
 - Changing `--cwd` changes scope and therefore session lookup.
-- closed sessions are retained on disk with `closed: true` and `closedAt`.
+- closed sessions are retained on disk with `closed: true` and `closedAt` until pruned.
 - auto-resume by scope skips closed sessions.
 
 Resume behavior:
@@ -282,6 +339,7 @@ Use `--format <fmt>`:
 - `json`: NDJSON event stream (good for automation)
 - `quiet`: final assistant text only
 - `--suppress-reads`: replace raw read-file contents with `[read output suppressed]` in `text` and `json` output
+- `--json-strict`: pair with `--format json` to suppress non-JSON stderr noise (logs, banners) for downstream consumers
 
 Example automation:
 
@@ -295,8 +353,118 @@ acpx --format json codex exec 'review changed files' \
 - `--approve-all`: no interactive permission prompts
 - `--approve-reads` (default): approve reads/searches, prompt for writes
 - `--deny-all`: deny all permission requests
+- `--non-interactive-permissions <deny|fail>`: chosen behavior when no TTY is available to prompt
 
 If every permission request is denied/cancelled and none approved, `acpx` exits with permission-denied status.
+
+## Flows (multi-agent workflows)
+
+Flows let you declare a multi-agent workflow as a graph of typed nodes connected by edges, executed by the `acpx` runtime. The runtime owns persistence, retries, timeouts, and routing — the flow file declares the shape, not the engine.
+
+### Run a flow
+
+```bash
+acpx flow run ./my-flow.flow.ts --input-file ./flow-input.json
+acpx flow run ./my-flow.flow.ts --input-json '{"task":"FIX: add a regression test"}'
+acpx --approve-all flow run examples/flows/pr-triage/pr-triage.flow.ts \
+  --input-json '{"repo":"openclaw/acpx","prNumber":150}'
+acpx flow run ./my-flow.flow.ts --default-agent claude
+```
+
+Run artifacts persist under `~/.acpx/flows/runs/<runId>/`. Default per-step timeout is 15 minutes when `--timeout` is unset; flows that declare permission requirements fail fast before starting.
+
+### Authoring a flow
+
+The authoring surface lives in `acpx/flows`. The minimal example:
+
+```ts
+import { acp, decision, decisionEdge, defineFlow, checkpoint, extractJsonObject } from "acpx/flows";
+
+const choices = ["bug", "feat", "doc"] as const;
+
+export default defineFlow({
+  name: "pr-triage",
+  startAt: "classify",
+  nodes: {
+    classify: decision({
+      choices,
+      question: ({ input }) =>
+        `Classify the PR description below. Reply with one of: ${choices.join(", ")}.\n\n${input.description}`,
+    }),
+    bug_lane: acp({
+      prompt: ({ outputs }) =>
+        `The PR is a bug. Write a regression test that reproduces it.\n\nDecision context: ${JSON.stringify(outputs.classify)}`,
+      parse: (text) => extractJsonObject(text),
+    }),
+    feat_lane: acp({
+      prompt: () => "List acceptance criteria for the feature, one bullet per criterion.",
+    }),
+    doc_lane: checkpoint({
+      summary: "doc change — needs human review",
+      run: ({ outputs }) => ({ route: "doc", note: outputs.classify }),
+    }),
+  },
+  edges: [
+    decisionEdge({
+      from: "classify",
+      choices,
+      cases: {
+        bug: "bug_lane",
+        feat: "feat_lane",
+        doc: "doc_lane",
+      },
+    }),
+  ],
+});
+```
+
+### Node types
+
+| Type                                    | Purpose                                                                                                                                                          |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `acp({ prompt, parse?, agent?, cwd? })` | Model-driven step. The `prompt` builder receives `{ input, outputs }`. Optional `parse` coerces the raw text (e.g., `extractJsonObject`).                        |
+| `decision({ choices, question })`       | Constrained-choice LLM step. `choices` is a `readonly` tuple; the runtime validates the model's reply against it and TypeScript infers the union from `choices`. |
+| `action(...)`                           | Runtime-supervised deterministic operation: shell, GitHub API, test execution, comment posting.                                                                  |
+| `compute(...)`                          | Pure local data transform: normalization, routing key derivation, signal reduction.                                                                              |
+| `checkpoint({ summary, run })`          | Pause point for human or external trigger. `run` returns the outcome to record while paused.                                                                     |
+
+### Edge shapes
+
+```ts
+// Linear edge
+{ from: "node", to: "next" }
+
+// JSONPath switch — non-decision routing
+{
+  from: "node",
+  switch: {
+    on: "$.route",
+    cases: { "value-a": "branch_a", "value-b": "branch_b" },
+  },
+}
+
+// Decision edge — exhaustive at compile time
+decisionEdge({
+  from: "classify",
+  choices,                                 // same readonly tuple as decision()
+  cases: {                                 // every choice must map to a node id
+    bug: "bug_lane",
+    feat: "feat_lane",
+    doc: "doc_lane",
+  },
+})
+```
+
+If a `decisionEdge` omits a case from `choices`, the TypeScript compiler refuses to compile — so a flow can't ship with a forgotten branch when new choices are added.
+
+### Why use flows
+
+- **Cross-vendor by construction**: classify with `codex`, write code with `claude`, summarize with `gemini` — same flow file, no glue.
+- **Persistence and replay**: every run streams events to disk, replayable via the flow viewer under `~/.acpx/flows/runs/`.
+- **Permission preflight**: flows declaring permission requirements fail before any agent starts, instead of mid-run.
+- **Typed routing**: the LLM is constrained to a literal union, the compiler verifies exhaustivity, the runtime validates the reply.
+
+See `examples/flows/` in the repo for working samples (`branch.flow.ts`, `pr-triage/`, `two-turn.flow.ts`, `shell.flow.ts`, `workdir.flow.ts`).
 
 ## Practical workflows
 
@@ -312,6 +480,20 @@ Parallel named streams:
 ```bash
 acpx codex -s backend 'fix API pagination bug'
 acpx codex -s docs 'draft changelog entry for release'
+```
+
+Specialized Claude reviewer that survives session reuse:
+
+```bash
+acpx --system-prompt "You are a reviewer who refuses to approve untested changes." claude -s reviewer
+acpx claude -s reviewer 'review the diff in src/auth/'
+```
+
+Idempotent session bootstrap (safe to call before every prompt in scripts):
+
+```bash
+acpx codex sessions ensure -s ci
+acpx codex -s ci 'run the smoke suite and report failures'
 ```
 
 Queue follow-up without waiting:
@@ -330,7 +512,7 @@ acpx --format quiet exec 'summarize repo purpose in 3 lines'
 Machine-readable output for orchestration:
 
 ```bash
-acpx --format json codex 'review current branch changes' > events.ndjson
+acpx --format json --json-strict codex 'review current branch changes' > events.ndjson
 ```
 
 Raw custom adapter command:
@@ -339,11 +521,17 @@ Raw custom adapter command:
 acpx --agent './bin/custom-acp-server --profile ci' 'run validation checks'
 ```
 
-Flow run:
+Periodic cleanup:
 
 ```bash
-acpx flow run ./my-flow.ts --input-file ./flow-input.json
-acpx flow run examples/flows/branch.flow.ts --input-json '{"task":"FIX: add a regression test"}'
+acpx codex sessions prune --dry-run --older-than 14
+acpx codex sessions prune --older-than 30 --include-history
+```
+
+Multi-agent triage flow:
+
+```bash
+acpx --approve-all flow run ./pr-triage.flow.ts --input-json '{"prNumber": 842}'
 ```
 
 Repo-scoped review with permissive mode:

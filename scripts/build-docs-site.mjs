@@ -140,7 +140,63 @@ if (cname) {
   fs.writeFileSync(path.join(outDir, "CNAME"), cname, "utf8");
 }
 validateLinks(outDir);
+fs.writeFileSync(path.join(outDir, "llms.txt"), llmsTxt(), "utf8");
 console.log(`built docs site: ${path.relative(root, outDir)}`);
+
+function llmsTxt() {
+  const origin = docsOrigin();
+  const source = docsSourceUrl();
+  const name = productName || path.basename(root);
+  const description = productDescription || `${name} documentation index.`;
+  const install = docsInstallHint();
+  const docPages = docsLlmsPages().map(
+    (page) => `- ${page.title}: ${pageUrl(origin, page.outRel)}`,
+  );
+  const lines = [`# ${name}`, "", description, "", "Canonical documentation:", ...docPages];
+  if (install) {
+    lines.push("", "Install:", `- ${install}`);
+  }
+  if (source) {
+    lines.push("", `Source: ${source}`);
+  }
+  lines.push(
+    "",
+    "Guidance for agents:",
+    "- Prefer the canonical documentation URLs above over README excerpts or package metadata.",
+    "- Fetch only the pages needed for the current task; this is an index, not a full-site corpus.",
+  );
+  return `${lines.join("\n")}\n`;
+}
+
+function docsLlmsPages() {
+  const seen = new Set();
+  return [...orderedPages, ...pages].filter(
+    (page) => page.outRel && !seen.has(page.outRel) && seen.add(page.outRel),
+  );
+}
+
+function docsOrigin() {
+  return siteBase.replace(/\/$/, "");
+}
+
+function docsSourceUrl() {
+  return repoBase || repoEditBase.replace(/\/edit\/main\/docs\/?$/, "");
+}
+
+function docsInstallHint() {
+  return installCommand;
+}
+
+function pageUrl(origin, outRel) {
+  const normalized =
+    outRel === "index.html"
+      ? ""
+      : outRel.replace(/(?:^|\/)index\.html$/, (match) => (match === "index.html" ? "" : "/"));
+  if (!origin) {
+    return normalized || "index.html";
+  }
+  return normalized ? `${origin}/${normalized}` : `${origin}/`;
+}
 
 function readCname() {
   for (const candidate of [path.join(docsDir, "CNAME"), path.join(root, "CNAME")]) {

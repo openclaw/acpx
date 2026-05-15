@@ -8,6 +8,10 @@ import { resolveAgentSessionCwd } from "../src/acp/client-process.js";
 import { buildAgentSpawnOptions, buildSpawnCommandOptions } from "../src/acp/client.js";
 import { buildTerminalSpawnOptions } from "../src/acp/terminal-manager.js";
 import { buildQueueOwnerSpawnOptions } from "../src/cli/session/queue-owner-process.js";
+import {
+  buildTerminalShellSpawnCommand,
+  buildTerminalSpawnCommand,
+} from "../src/spawn-command-options.js";
 
 test("buildAgentSpawnOptions hides Windows console windows and preserves auth env", () => {
   const options = buildAgentSpawnOptions("/tmp/acpx-agent", {
@@ -128,6 +132,37 @@ test("buildSpawnCommandOptions keeps shell disabled for non-batch commands", asy
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
+});
+
+test("buildTerminalSpawnCommand preserves explicit argv", () => {
+  assert.deepEqual(buildTerminalSpawnCommand("node", ["-e", "console.log('ok')"]), {
+    command: "node",
+    args: ["-e", "console.log('ok')"],
+    killProcessGroup: false,
+  });
+  assert.deepEqual(buildTerminalSpawnCommand("/tmp/tool with space", []), {
+    command: "/tmp/tool with space",
+    args: [],
+    killProcessGroup: false,
+  });
+  assert.deepEqual(buildTerminalSpawnCommand("/tmp/tool with space", undefined), {
+    command: "/tmp/tool with space",
+    args: [],
+    killProcessGroup: false,
+  });
+});
+
+test("buildTerminalShellSpawnCommand routes command lines through the shell", () => {
+  assert.deepEqual(buildTerminalShellSpawnCommand("echo hello | tr a-z A-Z", "darwin"), {
+    command: "/bin/sh",
+    args: ["-c", "echo hello | tr a-z A-Z"],
+    killProcessGroup: true,
+  });
+  assert.deepEqual(buildTerminalShellSpawnCommand("dir C:\\Users", "win32"), {
+    command: "cmd.exe",
+    args: ["/d", "/s", "/c", "dir C:\\Users"],
+    killProcessGroup: true,
+  });
 });
 
 test("resolveAgentSessionCwd translates WSL cwd for Windows exe agents", async () => {

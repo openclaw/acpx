@@ -339,6 +339,7 @@ async function runRunner(
       env: {
         ...process.env,
         NODE_V8_COVERAGE: "",
+        NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=DEP0205`.trim(),
       },
     });
 

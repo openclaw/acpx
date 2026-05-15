@@ -31,6 +31,53 @@ export function mergeSessionOptions(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+export function persistSessionOptions(
+  record: SessionRecord,
+  options: SessionAgentOptions | undefined,
+): void {
+  const systemPromptOption = options?.systemPrompt;
+  const normalizedSystemPrompt =
+    typeof systemPromptOption === "string" && systemPromptOption.length > 0
+      ? systemPromptOption
+      : systemPromptOption &&
+          typeof systemPromptOption === "object" &&
+          typeof systemPromptOption.append === "string" &&
+          systemPromptOption.append.length > 0
+        ? { append: systemPromptOption.append }
+        : undefined;
+
+  const next =
+    options &&
+    ({
+      model: typeof options.model === "string" ? options.model : undefined,
+      allowed_tools: Array.isArray(options.allowedTools) ? [...options.allowedTools] : undefined,
+      max_turns: typeof options.maxTurns === "number" ? options.maxTurns : undefined,
+      system_prompt: normalizedSystemPrompt,
+    } satisfies NonNullable<NonNullable<SessionRecord["acpx"]>["session_options"]>);
+
+  const hasValues = Boolean(
+    next &&
+    ((typeof next.model === "string" && next.model.trim().length > 0) ||
+      Array.isArray(next.allowed_tools) ||
+      typeof next.max_turns === "number" ||
+      next.system_prompt !== undefined),
+  );
+
+  if (hasValues && next) {
+    record.acpx = {
+      ...record.acpx,
+      session_options: next,
+    };
+    return;
+  }
+
+  if (!record.acpx) {
+    return;
+  }
+
+  delete record.acpx.session_options;
+}
+
 export function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOptions | undefined {
   const stored = record.acpx?.session_options;
   if (!stored) {
