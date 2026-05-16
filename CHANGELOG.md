@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- CLI: add `acpx compare` to run one prompt across multiple agents, summarize timing, token usage, stop reason, final output preview, and persisted per-agent transcripts.
+
 ### Breaking
 
 ### Fixes

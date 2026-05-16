@@ -35,6 +35,7 @@ const TOP_LEVEL_VERBS = new Set([
   "prompt",
   "exec",
   "cancel",
+  "compare",
   "flow",
   "set-mode",
   "set",
