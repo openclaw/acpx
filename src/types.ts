@@ -345,6 +345,13 @@ export type SessionAcpxState = {
   };
 };
 
+export type SessionImportedFrom = {
+  recordId: string;
+  cwdOriginal: string;
+  exportedBy: string;
+  exportedAt: string;
+};
+
 export type SessionRecord = {
   schema: typeof SESSION_RECORD_SCHEMA;
   acpxRecordId: string;
@@ -375,6 +382,7 @@ export type SessionRecord = {
   cumulative_token_usage: SessionTokenUsage;
   request_token_usage: Record<string, SessionTokenUsage>;
   acpx?: SessionAcpxState;
+  importedFrom?: SessionImportedFrom;
 };
 
 export type RunPromptResult = {

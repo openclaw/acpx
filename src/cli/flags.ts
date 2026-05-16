@@ -68,6 +68,16 @@ export type SessionsHistoryFlags = {
   limit: number;
 };
 
+export type SessionsExportFlags = {
+  output: string;
+  cwd?: string;
+};
+
+export type SessionsImportFlags = {
+  name?: string;
+  cwd?: string;
+};
+
 export type StatusFlags = {
   session?: string;
 };

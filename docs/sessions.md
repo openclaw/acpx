@@ -30,6 +30,8 @@ acpx codex sessions show             # metadata for the cwd-scoped default
 acpx codex sessions show api         # metadata for the named session
 acpx codex sessions history          # last 20 turn previews
 acpx codex sessions history --limit 50
+acpx codex sessions export api --output api-session.json
+acpx codex sessions import api-session.json --name api-restored
 acpx codex sessions close            # soft-close cwd default
 acpx codex sessions close api        # soft-close named session
 acpx codex sessions prune --dry-run
@@ -87,6 +89,22 @@ Named sessions are independent. They do not share state, queue owners, or histor
 - Auto-resume by scope skips closed sessions.
 - Closed sessions can still be loaded explicitly through embedding APIs.
 - `sessions prune` is the explicit way to delete closed records.
+
+## Export / import
+
+`acpx` persists sessions per cwd in `~/.acpx/sessions/`. To move a session between machines or share one with a teammate:
+
+```bash
+# On the source machine:
+acpx codex sessions export my-debug-session --output debug.json
+
+# On the destination machine:
+acpx codex sessions import debug.json --name debug-on-laptop
+```
+
+Export refuses to run if the session is locked by a live queue owner. Run `acpx codex sessions close my-debug-session` first.
+
+The archive is plain JSON. Paths are rewritten relative to home, so an imported session lands at `~/<original-cwd-relative>` on the destination machine. Override with `--cwd`.
 
 ## Prune
 

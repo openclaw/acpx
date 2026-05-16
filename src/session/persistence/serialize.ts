@@ -38,5 +38,13 @@ export function serializeSessionRecordForDisk(record: SessionRecord): Record<str
     cumulative_token_usage: canonical.cumulative_token_usage,
     request_token_usage: canonical.request_token_usage,
     acpx: canonical.acpx,
+    imported_from: canonical.importedFrom
+      ? {
+          record_id: canonical.importedFrom.recordId,
+          cwd_original: canonical.importedFrom.cwdOriginal,
+          exported_by: canonical.importedFrom.exportedBy,
+          exported_at: canonical.importedFrom.exportedAt,
+        }
+      : undefined,
   };
 }

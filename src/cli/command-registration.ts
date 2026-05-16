@@ -6,7 +6,9 @@ import {
   handlePrompt,
   handleSessionsClose,
   handleSessionsEnsure,
+  handleSessionsExport,
   handleSessionsHistory,
+  handleSessionsImport,
   handleSessionsList,
   handleSessionsNew,
   handleSessionsPrune,
@@ -26,7 +28,9 @@ import {
   parsePruneBeforeDate,
   parseSessionName,
   type PromptFlags,
+  type SessionsExportFlags,
   type SessionsHistoryFlags,
+  type SessionsImportFlags,
   type SessionsNewFlags,
   type SessionsPruneFlags,
   type StatusFlags,
@@ -137,6 +141,34 @@ export function registerSessionsCommand(
         this,
         config,
       );
+    });
+
+  sessionsCommand
+    .command("export")
+    .description("Export a portable session archive")
+    .argument("[name]", "Session name", parseSessionName)
+    .requiredOption("--output <path>", "Output archive path", (value: string) =>
+      parseNonEmptyValue("Output path", value),
+    )
+    .option("--cwd <cwd>", "Session cwd to export", (value: string) =>
+      parseNonEmptyValue("Session cwd", value),
+    )
+    .action(async function (this: Command, name: string | undefined, flags: SessionsExportFlags) {
+      await handleSessionsExport(explicitAgentName, name, flags, this, config);
+    });
+
+  sessionsCommand
+    .command("import")
+    .description("Import a portable session archive")
+    .argument("<archive-path>", "Archive path", (value: string) =>
+      parseNonEmptyValue("Archive path", value),
+    )
+    .option("--name <name>", "Imported session name", parseSessionName)
+    .option("--cwd <cwd>", "Imported session cwd", (value: string) =>
+      parseNonEmptyValue("Imported session cwd", value),
+    )
+    .action(async function (this: Command, archivePath: string, flags: SessionsImportFlags) {
+      await handleSessionsImport(archivePath, flags, this, config);
     });
 
   sessionsCommand

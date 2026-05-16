@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- CLI/sessions: add `sessions export` and `sessions import` for moving portable session archives between machines.
+
 ### Breaking
 
 ### Fixes

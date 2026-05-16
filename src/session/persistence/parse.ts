@@ -392,6 +392,30 @@ function parseEventLog(raw: unknown, sessionId: string): SessionEventLog {
   };
 }
 
+function parseImportedFrom(raw: unknown): SessionRecord["importedFrom"] | null | undefined {
+  if (raw == null) {
+    return undefined;
+  }
+
+  const record = asRecord(raw);
+  if (
+    !record ||
+    typeof record.record_id !== "string" ||
+    typeof record.cwd_original !== "string" ||
+    typeof record.exported_by !== "string" ||
+    typeof record.exported_at !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    recordId: record.record_id,
+    cwdOriginal: record.cwd_original,
+    exportedBy: record.exported_by,
+    exportedAt: record.exported_at,
+  };
+}
+
 function normalizeOptionalName(value: unknown): string | undefined | null {
   if (value == null) {
     return undefined;
@@ -509,7 +533,8 @@ export function parseSessionRecord(raw: unknown): SessionRecord | null {
 
   const eventLog = parseEventLog(record.event_log, record.acpx_record_id);
   const lastRequestId = normalizeOptionalString(record.last_request_id);
-  if (lastRequestId === null) {
+  const importedFrom = parseImportedFrom(record.imported_from);
+  if (lastRequestId === null || importedFrom === null) {
     return null;
   }
 
@@ -544,5 +569,6 @@ export function parseSessionRecord(raw: unknown): SessionRecord | null {
     cumulative_token_usage: conversation.cumulative_token_usage,
     request_token_usage: conversation.request_token_usage,
     acpx: parseAcpxState(record.acpx),
+    importedFrom,
   };
 }

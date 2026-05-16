@@ -9,6 +9,8 @@ import {
   PromptInputValidationError,
   textPrompt,
 } from "../prompt-content.js";
+import { exportSession } from "../session/export.js";
+import { importSession } from "../session/import.js";
 import {
   findGitRepositoryRoot,
   findSession,
@@ -33,7 +35,9 @@ import {
   resolveSessionNameFromFlags,
   type ExecFlags,
   type GlobalFlags,
+  type SessionsExportFlags,
   type PromptFlags,
+  type SessionsImportFlags,
   type SessionsHistoryFlags,
   type SessionsNewFlags,
   type SessionsPruneFlags,
@@ -925,6 +929,73 @@ export async function handleSessionsHistory(
   const record = await findScopedSessionOrThrow(agent, sessionName);
 
   printSessionHistoryByFormat(record, flags.limit, globalFlags.format);
+}
+
+export async function handleSessionsExport(
+  explicitAgentName: string | undefined,
+  sessionName: string | undefined,
+  flags: SessionsExportFlags,
+  command: Command,
+  config: ResolvedAcpxConfig,
+): Promise<void> {
+  const globalFlags = resolveGlobalFlags(command, config);
+  const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const cwd = flags.cwd ? path.resolve(flags.cwd) : agent.cwd;
+
+  await exportSession(
+    {
+      agentCommand: agent.agentCommand,
+      cwd,
+      name: sessionName,
+    },
+    flags.output,
+  );
+
+  if (
+    emitJsonResult(globalFlags.format, {
+      action: "session_exported",
+      output: flags.output,
+    })
+  ) {
+    return;
+  }
+
+  if (globalFlags.format === "quiet") {
+    process.stdout.write(`${flags.output}\n`);
+    return;
+  }
+
+  process.stdout.write(`exported session to ${flags.output}\n`);
+}
+
+export async function handleSessionsImport(
+  archivePath: string,
+  flags: SessionsImportFlags,
+  command: Command,
+  config: ResolvedAcpxConfig,
+): Promise<void> {
+  const globalFlags = resolveGlobalFlags(command, config);
+  const result = await importSession(archivePath, {
+    name: flags.name,
+    newCwd: flags.cwd,
+  });
+
+  if (
+    emitJsonResult(globalFlags.format, {
+      action: "session_imported",
+      record_id: result.record_id,
+      cwd: result.cwd,
+    })
+  ) {
+    return;
+  }
+
+  if (globalFlags.format === "quiet") {
+    process.stdout.write(`${result.record_id}\n`);
+    return;
+  }
+
+  process.stdout.write(`imported session ${result.record_id} at ${result.cwd}\n`);
 }
 
 export async function handleSessionsPrune(
