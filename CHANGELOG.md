@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- CLI/output: `--json-strict` now emits a terminal `acpx/prompt_result` JSON-RPC envelope as the last line of stdout per prompt, summarizing `stopReason`, `sessionId`, accumulated `finalText` (only when `stopReason === "end_turn"`), `hadMessageChunk`, `messageChunkCount`, `thoughtChunkCount`, and `elapsedMs`. Programmatic callers should branch on this envelope's `stopReason` rather than inferring completion from chunk-stream tail shape. Cancelled and errored prompts now emit the envelope too, so consumers can distinguish "no chunks because failure" from "no chunks because parser ran off the end of the stream". Non-strict modes (`--format text`, `--format json` without `--json-strict`, `--format quiet`) are unchanged.
+
 ### Breaking
 
 ### Fixes

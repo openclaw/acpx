@@ -47,6 +47,7 @@ type OutputFormatterOptions = {
   stderr?: WritableLike;
   jsonContext?: OutputFormatterContext;
   suppressReads?: boolean;
+  jsonStrict?: boolean;
 };
 
 type NormalizedToolStatus = ToolCallStatus | "unknown";
@@ -1168,7 +1169,12 @@ export function createOutputFormatter(
     case "text":
       return new TextOutputFormatter(stdout, suppressReads);
     case "json":
-      return createJsonOutputFormatter(stdout, suppressReads, options.jsonContext);
+      return createJsonOutputFormatter(
+        stdout,
+        suppressReads,
+        options.jsonContext,
+        options.jsonStrict === true,
+      );
     case "quiet":
       return new QuietOutputFormatter(stdout, stderr);
     default: {

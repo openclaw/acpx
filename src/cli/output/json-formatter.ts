@@ -1,10 +1,12 @@
 import { buildJsonRpcErrorResponse } from "../../acp/jsonrpc-error.js";
+import { extractSessionUpdateNotification } from "../../acp/jsonrpc.js";
 import type {
   OutputErrorAcpPayload,
   OutputErrorCode,
   OutputErrorOrigin,
   OutputFormatter,
   OutputFormatterContext,
+  PromptResultEnvelopeInput,
 } from "../../types.js";
 import { isReadLikeTool, SUPPRESSED_READ_OUTPUT } from "./read-suppression.js";
 
@@ -101,22 +103,84 @@ function sanitizeToolMessage(message: unknown): unknown {
 class JsonOutputFormatter implements OutputFormatter {
   private readonly stdout: WritableLike;
   private readonly suppressReads: boolean;
+  private readonly jsonStrict: boolean;
   private sessionId: string;
   private readonly requestMethodById = new Map<string, string>();
   private readonly toolStateById = new Map<string, { title?: string; kind?: string | null }>();
+  private chunkText = "";
+  private messageChunkCount = 0;
+  private thoughtChunkCount = 0;
+  private promptStartedAt: number | undefined;
 
-  constructor(stdout: WritableLike, suppressReads: boolean, context?: OutputFormatterContext) {
+  constructor(
+    stdout: WritableLike,
+    suppressReads: boolean,
+    context?: OutputFormatterContext,
+    jsonStrict = false,
+  ) {
     this.stdout = stdout;
     this.suppressReads = suppressReads;
     this.sessionId = context?.sessionId?.trim() || DEFAULT_JSON_SESSION_ID;
+    this.jsonStrict = jsonStrict;
   }
 
   setContext(context: OutputFormatterContext): void {
     this.sessionId = context.sessionId?.trim() || this.sessionId || DEFAULT_JSON_SESSION_ID;
   }
 
+  beginPrompt(): void {
+    this.chunkText = "";
+    this.messageChunkCount = 0;
+    this.thoughtChunkCount = 0;
+    this.promptStartedAt = Date.now();
+  }
+
   onAcpMessage(message: unknown): void {
+    if (this.jsonStrict) {
+      this.recordChunkSummary(message);
+    }
     this.stdout.write(`${JSON.stringify(this.sanitizeMessage(message))}\n`);
+  }
+
+  private recordChunkSummary(message: unknown): void {
+    const update = extractSessionUpdateNotification(message as never);
+    if (!update) {
+      return;
+    }
+    const sessionUpdate = update.update.sessionUpdate;
+    if (sessionUpdate === "agent_message_chunk") {
+      this.messageChunkCount += 1;
+      const content = update.update.content;
+      if (content?.type === "text" && typeof content.text === "string") {
+        this.chunkText += content.text;
+      }
+    } else if (sessionUpdate === "agent_thought_chunk") {
+      this.thoughtChunkCount += 1;
+    }
+  }
+
+  emitPromptResultEnvelope(result: PromptResultEnvelopeInput): void {
+    if (!this.jsonStrict) {
+      return;
+    }
+    const elapsedMs = this.promptStartedAt !== undefined ? Date.now() - this.promptStartedAt : 0;
+    const stopReason = result.stopReason ?? "unknown";
+    const finalText = stopReason === "end_turn" ? this.chunkText : null;
+    const envelope = {
+      jsonrpc: "2.0",
+      method: "acpx/prompt_result",
+      params: {
+        stopReason,
+        sessionId: result.sessionId,
+        finalText,
+        hadMessageChunk: this.messageChunkCount > 0,
+        messageChunkCount: this.messageChunkCount,
+        thoughtChunkCount: this.thoughtChunkCount,
+        elapsedMs,
+      },
+    };
+    this.stdout.write(`${JSON.stringify(envelope)}\n`);
+    this.promptStartedAt = undefined;
   }
 
   private sanitizeMessage(message: unknown): unknown {
@@ -249,6 +313,7 @@ export function createJsonOutputFormatter(
   stdout: WritableLike,
   suppressReads = false,
   context?: OutputFormatterContext,
+  jsonStrict = false,
 ): OutputFormatter {
-  return new JsonOutputFormatter(stdout, suppressReads, context);
+  return new JsonOutputFormatter(stdout, suppressReads, context, jsonStrict);
 }

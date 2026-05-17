@@ -183,6 +183,12 @@ export type OutputErrorEmissionPolicy = {
   queueErrorAlreadyEmitted: boolean;
 };
 
+export type PromptResultEnvelopeInput = {
+  // May contain unknown stopReason values from future protocol versions; normalize before branching.
+  stopReason: string | undefined;
+  sessionId: string;
+};
+
 export interface OutputFormatter {
   setContext(context: OutputFormatterContext): void;
   onAcpMessage(message: AcpJsonRpcMessage): void;
@@ -197,6 +203,8 @@ export interface OutputFormatter {
   }): void;
   onPermissionEscalation(event: PermissionEscalationEvent): void;
   flush(): void;
+  beginPrompt?(): void;
+  emitPromptResultEnvelope?(result: PromptResultEnvelopeInput): void;
 }
 
 export type AcpClientOptions = {

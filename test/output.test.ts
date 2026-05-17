@@ -147,6 +147,121 @@ test("json formatter passes through ACP messages", () => {
   assert.deepEqual(lines[1], second);
 });
 
+test("json-strict emits acpx/prompt_result envelope after end_turn", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("json", {
+    stdout: writer,
+    jsonContext: {
+      sessionId: "session-strict",
+    },
+    jsonStrict: true,
+  });
+
+  formatter.beginPrompt?.();
+  formatter.onAcpMessage(messageChunk("Hello, ") as never);
+  formatter.onAcpMessage(messageChunk("world!") as never);
+  formatter.onAcpMessage(thoughtChunk("thinking...") as never);
+  formatter.emitPromptResultEnvelope?.({
+    stopReason: "end_turn",
+    sessionId: "session-strict",
+  });
+
+  const lines = writer
+    .toString()
+    .trim()
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line));
+
+  const last = lines[lines.length - 1] as {
+    jsonrpc: string;
+    method: string;
+    params: {
+      stopReason: string;
+      sessionId: string;
+      finalText: string | null;
+      hadMessageChunk: boolean;
+      messageChunkCount: number;
+      thoughtChunkCount: number;
+      elapsedMs: number;
+    };
+  };
+  assert.equal(last.jsonrpc, "2.0");
+  assert.equal(last.method, "acpx/prompt_result");
+  assert.equal(last.params.stopReason, "end_turn");
+  assert.equal(last.params.sessionId, "session-strict");
+  assert.equal(last.params.finalText, "Hello, world!");
+  assert.equal(last.params.hadMessageChunk, true);
+  assert.equal(last.params.messageChunkCount, 2);
+  assert.equal(last.params.thoughtChunkCount, 1);
+  assert.equal(typeof last.params.elapsedMs, "number");
+});
+
+test("json-strict emits acpx/prompt_result envelope with stopReason cancelled and null finalText", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("json", {
+    stdout: writer,
+    jsonContext: {
+      sessionId: "session-cancelled",
+    },
+    jsonStrict: true,
+  });
+
+  formatter.beginPrompt?.();
+  formatter.emitPromptResultEnvelope?.({
+    stopReason: "cancelled",
+    sessionId: "session-cancelled",
+  });
+
+  const lines = writer
+    .toString()
+    .trim()
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line));
+
+  assert.equal(lines.length, 1);
+  const envelope = lines[0] as {
+    method: string;
+    params: {
+      stopReason: string;
+      finalText: string | null;
+      hadMessageChunk: boolean;
+      messageChunkCount: number;
+    };
+  };
+  assert.equal(envelope.method, "acpx/prompt_result");
+  assert.equal(envelope.params.stopReason, "cancelled");
+  assert.equal(envelope.params.finalText, null);
+  assert.equal(envelope.params.hadMessageChunk, false);
+  assert.equal(envelope.params.messageChunkCount, 0);
+});
+
+test("non-json-strict mode does not emit acpx/prompt_result envelope", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("json", {
+    stdout: writer,
+    jsonContext: {
+      sessionId: "session-loose",
+    },
+  });
+
+  formatter.beginPrompt?.();
+  formatter.onAcpMessage(messageChunk("hi") as never);
+  formatter.emitPromptResultEnvelope?.({
+    stopReason: "end_turn",
+    sessionId: "session-loose",
+  });
+
+  const output = writer.toString();
+  assert.doesNotMatch(output, /acpx\/prompt_result/);
+  const lines = output
+    .trim()
+    .split("\n")
+    .filter((line) => line.length > 0);
+  assert.equal(lines.length, 1);
+});
+
 test("json formatter emits ACP JSON-RPC error response from onError", () => {
   const writer = new CaptureWriter();
   const formatter = createOutputFormatter("json", {

@@ -293,6 +293,7 @@ export async function handlePrompt(
       sessionId: record.acpxRecordId,
     },
     suppressReads: outputPolicy.suppressReads,
+    jsonStrict: outputPolicy.jsonStrict,
   });
 
   await printPromptSessionBanner(record, agent.cwd, outputPolicy.format, outputPolicy.jsonStrict);
@@ -378,6 +379,7 @@ export async function handleExec(
   ]);
   const outputFormatter = createOutputFormatter(outputPolicy.format, {
     suppressReads: outputPolicy.suppressReads,
+    jsonStrict: outputPolicy.jsonStrict,
   });
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
 

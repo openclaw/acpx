@@ -601,6 +601,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
         const maxRetries = options.promptRetries ?? 0;
         let response;
         promptTurnActive = true;
+        output.beginPrompt?.();
         for (let attempt = 0; ; attempt++) {
           try {
             const promptStartedAt = Date.now();
@@ -694,6 +695,10 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
             (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted = sawAcpMessage;
             (propagated as { normalizedOutputError?: unknown }).normalizedOutputError =
               normalizedError;
+            output.emitPromptResultEnvelope?.({
+              stopReason: error instanceof InterruptedError ? "cancelled" : "unknown",
+              sessionId: record.acpxRecordId,
+            });
             throw propagated;
           }
         }
@@ -713,8 +718,13 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
         applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
         stopTotalTimer();
 
+        const promptResult = toPromptResult(response.stopReason, record.acpxRecordId, client);
+        output.emitPromptResultEnvelope?.({
+          stopReason: response.stopReason,
+          sessionId: record.acpxRecordId,
+        });
         return {
-          ...toPromptResult(response.stopReason, record.acpxRecordId, client),
+          ...promptResult,
           record,
           resumed,
           loadError,
@@ -728,6 +738,10 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
         record.acpx = acpxState;
         await flushPendingMessages(false).catch(() => {
           // best effort while process is being interrupted
+        });
+        output.emitPromptResultEnvelope?.({
+          stopReason: "cancelled",
+          sessionId: record.acpxRecordId,
         });
         if (ownClient) {
           await client.close();
@@ -831,6 +845,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
         const maxRetries = options.promptRetries ?? 0;
         let response;
         promptTurnActive = true;
+        output.beginPrompt?.();
         for (let attempt = 0; ; attempt++) {
           try {
             response = await measurePerf("runtime.exec.prompt", async () => {
@@ -857,12 +872,21 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
               }
             }
             promptTurnActive = false;
+            output.emitPromptResultEnvelope?.({
+              stopReason: error instanceof InterruptedError ? "cancelled" : "unknown",
+              sessionId,
+            });
             throw error;
           }
         }
         promptTurnActive = false;
         output.flush();
-        return toPromptResult(response.stopReason, sessionId, client);
+        const execResult = toPromptResult(response.stopReason, sessionId, client);
+        output.emitPromptResultEnvelope?.({
+          stopReason: response.stopReason,
+          sessionId,
+        });
+        return execResult;
       },
       async () => {
         await client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS);
