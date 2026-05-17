@@ -289,7 +289,7 @@ export function addGlobalFlags(command: Command): Command {
     )
     .option(
       "--prompt-retries <count>",
-      "Retry failed prompt turns on transient errors (default: 0)",
+      "Retry failed prompt turns on transient errors (default: 0, or 1 with --json-strict)",
       parsePromptRetries,
     )
     .option(
@@ -381,6 +381,11 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
     );
   }
 
+  // Strict mode = programmatic caller. Survive one transient stream cut by
+  // default. Explicit user value (including 0) always wins.
+  const promptRetries =
+    typeof opts.promptRetries === "number" ? opts.promptRetries : jsonStrict ? 1 : undefined;
+
   return {
     agent: opts.agent,
     cwd: opts.cwd ?? process.cwd(),
@@ -398,7 +403,7 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
     allowedTools: Array.isArray(opts.allowedTools) ? opts.allowedTools : undefined,
     maxTurns: typeof opts.maxTurns === "number" ? opts.maxTurns : undefined,
     systemPrompt: resolveSystemPromptFlag(opts),
-    promptRetries: typeof opts.promptRetries === "number" ? opts.promptRetries : undefined,
+    promptRetries,
     approveAll: opts.approveAll ? true : undefined,
     approveReads: opts.approveReads ? true : undefined,
     denyAll: opts.denyAll ? true : undefined,

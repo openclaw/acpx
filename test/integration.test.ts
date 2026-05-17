@@ -2313,7 +2313,7 @@ test("integration: queued prompt honors per-request prompt retries on warm owner
   });
 });
 
-test("integration: queued prompt without retry flag ignores warm owner startup retries", async () => {
+test("integration: queued prompt with explicit zero retries ignores warm owner startup retries", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
 
@@ -2347,6 +2347,8 @@ test("integration: queued prompt without retry flag ignores warm owner startup r
           "--format",
           "json",
           "--json-strict",
+          "--prompt-retries",
+          "0",
           "prompt",
           "retryable-error-once",
         ],

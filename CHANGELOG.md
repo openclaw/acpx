@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- CLI: when `--json-strict` is set and `--prompt-retries` is not explicitly provided, the default for `--prompt-retries` is now `1` (was `0`). Strict mode signals a programmatic caller, and surviving one transient stream cut by default is sane. Explicit `--prompt-retries 0` is still honored — operators who want to fail fast on the first transient error can. Non-strict mode is unchanged (default remains `0`).
+
 ### Breaking
 
 ### Fixes
