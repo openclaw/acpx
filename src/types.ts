@@ -32,10 +32,56 @@ export const EXIT_CODES = {
   TIMEOUT: 3,
   NO_SESSION: 4,
   PERMISSION_DENIED: 5,
+  STOP_REASON_CANCELLED: 7,
+  STOP_REASON_REFUSAL: 8,
+  STOP_REASON_LIMIT: 9,
+  STOP_REASON_TIMEOUT: 10,
+  STOP_REASON_OTHER: 11,
   INTERRUPTED: 130,
 } as const;
 
 export type ExitCode = (typeof EXIT_CODES)[keyof typeof EXIT_CODES];
+
+/**
+ * Known terminal stopReasons accepted by `--require-stop-reason`. Includes the
+ * SDK-defined StopReason variants plus a few commonly emitted by agents that
+ * are not yet in the typed schema (`max_turns_exceeded`, agent-side
+ * `timeout`). The set is permissive on input so that adding new variants in
+ * the SDK does not require bumping acpx; unknown variants flow into the
+ * `STOP_REASON_OTHER` (11) bucket at exit time.
+ */
+export const KNOWN_STOP_REASONS = [
+  "end_turn",
+  "cancelled",
+  "refusal",
+  "max_tokens",
+  "max_turn_requests",
+  "max_turns_exceeded",
+  "timeout",
+] as const;
+export type KnownStopReason = (typeof KNOWN_STOP_REASONS)[number];
+
+/**
+ * Map a terminal stopReason string to the matching exit code. Used by
+ * `--require-stop-reason` when the observed stopReason is not in the allowed
+ * set. Unknown / missing reasons map to STOP_REASON_OTHER.
+ */
+export function exitCodeForStopReason(reason: string | undefined): ExitCode {
+  switch ((reason ?? "").toLowerCase()) {
+    case "cancelled":
+      return EXIT_CODES.STOP_REASON_CANCELLED;
+    case "refusal":
+      return EXIT_CODES.STOP_REASON_REFUSAL;
+    case "max_tokens":
+    case "max_turn_requests":
+    case "max_turns_exceeded":
+      return EXIT_CODES.STOP_REASON_LIMIT;
+    case "timeout":
+      return EXIT_CODES.STOP_REASON_TIMEOUT;
+    default:
+      return EXIT_CODES.STOP_REASON_OTHER;
+  }
+}
 
 export const OUTPUT_FORMATS = ["text", "json", "quiet"] as const;
 export type OutputFormat = (typeof OUTPUT_FORMATS)[number];

@@ -9,6 +9,7 @@ import type { SystemPromptOption } from "../runtime/engine/session-options.js";
 import { DEFAULT_QUEUE_OWNER_TTL_MS } from "../session/session.js";
 import {
   AUTH_POLICIES,
+  KNOWN_STOP_REASONS,
   NON_INTERACTIVE_PERMISSION_POLICIES,
   OUTPUT_FORMATS,
   type AuthPolicy,
@@ -47,6 +48,7 @@ export type GlobalFlags = PermissionFlags & {
   systemPrompt?: SystemPromptOption;
   promptRetries?: number;
   permissionPolicy?: string;
+  requireStopReason?: ReadonlySet<string>;
 };
 
 export type PromptFlags = {
@@ -213,6 +215,24 @@ export function resolveSystemPromptFlag(opts: {
   return undefined;
 }
 
+export function parseRequireStopReason(value: string, previous?: string[]): string[] {
+  const tokens = value
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+  if (tokens.length === 0) {
+    throw new InvalidArgumentError("--require-stop-reason must not be empty");
+  }
+  for (const token of tokens) {
+    if (!(KNOWN_STOP_REASONS as readonly string[]).includes(token)) {
+      throw new InvalidArgumentError(
+        `Unknown stop reason "${token}". Expected one of: ${KNOWN_STOP_REASONS.join(", ")}`,
+      );
+    }
+  }
+  return [...(previous ?? []), ...tokens];
+}
+
 export function parsePromptRetries(value: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
@@ -291,6 +311,11 @@ export function addGlobalFlags(command: Command): Command {
       "--prompt-retries <count>",
       "Retry failed prompt turns on transient errors (default: 0)",
       parsePromptRetries,
+    )
+    .option(
+      "--require-stop-reason <reason>",
+      "Allowed terminal stopReason(s). Repeatable; comma-separated values also accepted. Exits non-zero with a typed code (7-11) on mismatch.",
+      parseRequireStopReason,
     )
     .option(
       "--json-strict",
@@ -399,6 +424,10 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
     maxTurns: typeof opts.maxTurns === "number" ? opts.maxTurns : undefined,
     systemPrompt: resolveSystemPromptFlag(opts),
     promptRetries: typeof opts.promptRetries === "number" ? opts.promptRetries : undefined,
+    requireStopReason:
+      Array.isArray(opts.requireStopReason) && opts.requireStopReason.length > 0
+        ? new Set(opts.requireStopReason as string[])
+        : undefined,
     approveAll: opts.approveAll ? true : undefined,
     approveReads: opts.approveReads ? true : undefined,
     denyAll: opts.denyAll ? true : undefined,

@@ -14,7 +14,7 @@ import {
   findSession,
   findSessionByDirectoryWalk,
 } from "../session/persistence.js";
-import { EXIT_CODES } from "../types.js";
+import { EXIT_CODES, exitCodeForStopReason } from "../types.js";
 import type {
   OutputFormat,
   OutputPolicy,
@@ -136,6 +136,32 @@ function applyPermissionExitCode(result: {
   if (stats.requested > 0 && stats.approved === 0 && deniedOrCancelled > 0) {
     process.exitCode = EXIT_CODES.PERMISSION_DENIED;
   }
+}
+
+/**
+ * If `--require-stop-reason` is set and the prompt's terminal stopReason is
+ * not in the allowed set, set `process.exitCode` to the typed code from
+ * `exitCodeForStopReason`. PERMISSION_DENIED (5) and other deterministic
+ * infra exit codes set earlier always win — we only assign here when
+ * `process.exitCode` is unset or 0.
+ */
+function applyStopReasonExitCode(
+  result: { stopReason?: string },
+  requireStopReason: ReadonlySet<string> | undefined,
+): void {
+  if (!requireStopReason) {
+    return;
+  }
+  // A previous step (e.g. applyPermissionExitCode) already flagged a hard
+  // failure; do not let a stopReason mismatch downgrade or override it.
+  if (typeof process.exitCode === "number" && process.exitCode !== 0) {
+    return;
+  }
+  const reason = (result.stopReason ?? "").toLowerCase();
+  if (reason && requireStopReason.has(reason)) {
+    return;
+  }
+  process.exitCode = exitCodeForStopReason(reason);
 }
 
 function resolveCompatibleConfigId(
@@ -331,6 +357,7 @@ export async function handlePrompt(
   }
 
   applyPermissionExitCode(result);
+  applyStopReasonExitCode(result, globalFlags.requireStopReason);
 
   if (globalFlags.verbose && result.loadError) {
     process.stderr.write(`[acpx] loadSession failed, started fresh session: ${result.loadError}\n`);
@@ -406,6 +433,7 @@ export async function handleExec(
   });
 
   applyPermissionExitCode(result);
+  applyStopReasonExitCode(result, globalFlags.requireStopReason);
 }
 
 function printCancelResultByFormat(

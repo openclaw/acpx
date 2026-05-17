@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- CLI: add `--require-stop-reason <reason>` global flag so programmatic callers can gate prompt success on the terminal `stopReason` instead of inferring it from message chunks. The flag is repeatable and accepts comma-separated values; mismatches exit with a typed code (`STOP_REASON_CANCELLED=7`, `STOP_REASON_REFUSAL=8`, `STOP_REASON_LIMIT=9`, `STOP_REASON_TIMEOUT=10`, `STOP_REASON_OTHER=11`). Existing exit codes (0/1/2/3/4/5/130) and the `process.exitCode` set by permission denial are unchanged when the flag is omitted, and they win over a stopReason mismatch when set.
+
 ### Breaking
 
 ### Fixes
