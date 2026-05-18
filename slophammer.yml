@@ -1,0 +1,47 @@
+typescript:
+  coverage_threshold: 85
+  complexity_max: 8
+  dry:
+    max_findings: 0
+    paths:
+      - src
+    exclude:
+      - "**/*.test.ts"
+      - "**/*.spec.ts"
+      - "dist/**"
+      - "dist-test/**"
+      - "node_modules/**"
+      - "examples/flows/replay-viewer/dist/**"
+    copied_blocks:
+      enabled: true
+      min_tokens: 100
+  mutation_targets:
+    - src/cli/flags.ts
+  dependency_boundaries:
+    - from: src/acp
+      allow:
+        - src
+        - src/session
+    - from: src/cli
+      allow:
+        - src
+        - src/acp
+        - src/flows
+        - src/runtime
+        - src/session
+    - from: src/flows
+      allow:
+        - src
+        - src/acp
+        - src/cli
+        - src/session
+    - from: src/runtime
+      allow:
+        - src
+        - src/acp
+        - src/session
+    - from: src/session
+      allow:
+        - src
+        - src/acp
+        - src/cli

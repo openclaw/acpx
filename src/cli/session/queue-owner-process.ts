@@ -40,6 +40,14 @@ type SessionSendLike = {
   sessionOptions?: SessionAgentOptions;
 };
 
+function isNonEmptyStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((entry) => typeof entry === "string" && entry.length > 0)
+  );
+}
+
 export function sanitizeQueueOwnerExecArgv(
   execArgv: readonly string[] = process.execArgv,
 ): string[] {
@@ -103,11 +111,7 @@ export function resolveQueueOwnerSpawnArgs(argv: readonly string[] = process.arg
   const override = process.env.ACPX_QUEUE_OWNER_ARGS;
   if (override) {
     const parsed = JSON.parse(override) as unknown;
-    if (
-      Array.isArray(parsed) &&
-      parsed.length > 0 &&
-      parsed.every((value) => typeof value === "string" && value.length > 0)
-    ) {
+    if (isNonEmptyStringArray(parsed)) {
       return [...parsed];
     }
     throw new Error("acpx self-spawn failed: invalid ACPX_QUEUE_OWNER_ARGS");

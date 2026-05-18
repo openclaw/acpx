@@ -111,6 +111,9 @@ jobs:
           - name: Test
             node_version: 22
             command: pnpm run test:coverage
+          - name: Mutation
+            node_version: 22
+            command: pnpm run mutate
 
     steps:
       - name: Checkout

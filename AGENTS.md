@@ -83,6 +83,40 @@ npx acpx@latest --help
 3. Run the smallest relevant validation command while iterating.
 4. Before opening or updating a PR, run the full checks for the scope you changed.
 
+## Slophammer Policy
+
+Slophammer standards for this TypeScript library are declared in
+[`slophammer.yml`](slophammer.yml). When applying or reviewing those standards,
+start from the upstream Slophammer agent entrypoint:
+`/home/bob/repos/slophammer/docs/AGENT_ENTRYPOINT.md` when it is available
+locally, or
+`https://raw.githubusercontent.com/dutifuldev/slophammer/refs/heads/main/docs/AGENT_ENTRYPOINT.md`
+otherwise.
+
+The enforceable local constraints are:
+
+- `pnpm run lint` must keep type-aware Oxlint enabled for `src/` and reject
+  explicit `any`, unsafe assignments, unsafe calls, unsafe member access, and
+  unsafe returns.
+- `pnpm run test:coverage` must keep line, branch, and function coverage gates.
+- `pnpm run mutate` runs Stryker against the current mutation target declared in
+  `slophammer.yml`.
+- `slophammer.yml` sets the TypeScript policy targets: coverage `85`,
+  complexity max `8`, zero production DRY findings for `src/`, mutation targets,
+  and import dependency boundaries.
+
+If a Slophammer TypeScript checker is available in the environment, run:
+
+```bash
+slophammer-ts rules --format json
+slophammer-ts check . --format json
+slophammer-ts dry . --format json
+```
+
+`slophammer-ts` is not published to npm yet, so do not claim the TypeScript
+checker passed unless that command actually ran from a local Slophammer checkout
+or a package artifact.
+
 ## Documentation Policy
 
 Example ordering policy:
@@ -124,6 +158,7 @@ Harness documentation synchronization policy:
 - `pnpm run typecheck` — TypeScript typecheck
 - `pnpm run lint` — source linting plus persisted-key casing checks
 - `pnpm run format:check` — formatting check
+- `pnpm run mutate` — Stryker mutation check for the configured target
 - `pnpm run check` — format, typecheck, lint, build, and coverage tests
 - `pnpm run check:docs` — docs format and markdown lint
 - `pnpm run perf:report` — performance reporting helper
@@ -237,6 +272,7 @@ CI lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
   - `pnpm run typecheck`
   - `pnpm run lint`
   - `pnpm run build`
+  - `pnpm run mutate`
   - `pnpm run test:coverage`
 - CI installs dependencies with `pnpm install --frozen-lockfile`
 - CI uses Node 24 by default; the `Test` job runs on Node 22

@@ -361,7 +361,7 @@ export async function listSessionEvents(sessionId: string): Promise<AcpJsonRpcMe
     const lines = payload.split("\n").filter((line) => line.trim().length > 0);
     for (const line of lines) {
       try {
-        const parsed = JSON.parse(line);
+        const parsed: unknown = JSON.parse(line);
         if (isAcpJsonRpcMessage(parsed)) {
           events.push(parsed);
         }

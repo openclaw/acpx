@@ -79,6 +79,26 @@ export type SessionsPruneFlags = {
   includeHistory?: boolean;
 };
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function stringOption(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function numberOption(value: unknown): number | undefined {
+  return typeof value === "number" ? value : undefined;
+}
+
+function stringArrayOption(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+    ? value
+    : undefined;
+}
+
 export function parseOutputFormat(value: string): OutputFormat {
   if (!OUTPUT_FORMATS.includes(value as OutputFormat)) {
     throw new InvalidArgumentError(
@@ -334,14 +354,18 @@ export function resolveSessionNameFromFlags(
   // Commander parses options on the parent command when flags appear before the
   // subcommand (e.g. `acpx codex -s foo cancel`). Use optsWithGlobals() so
   // subcommands can still access those values.
-  const allOpts = (command as unknown as { optsWithGlobals?: () => unknown }).optsWithGlobals?.();
-  if (allOpts && typeof (allOpts as { session?: unknown }).session === "string") {
-    return parseSessionName((allOpts as { session: string }).session);
+  const allOpts = asRecord(
+    (command as unknown as { optsWithGlobals?: () => unknown }).optsWithGlobals?.(),
+  );
+  const globalSession = stringOption(allOpts?.session);
+  if (globalSession !== undefined) {
+    return parseSessionName(globalSession);
   }
 
-  const parentOpts = command.parent?.opts?.();
-  if (parentOpts && typeof (parentOpts as { session?: unknown }).session === "string") {
-    return parseSessionName((parentOpts as { session: string }).session);
+  const parentOpts = asRecord(command.parent?.opts?.() as unknown);
+  const parentSession = stringOption(parentOpts?.session);
+  if (parentSession !== undefined) {
+    return parseSessionName(parentSession);
   }
 
   return undefined;
@@ -352,8 +376,17 @@ export function addPromptInputOption(command: Command): Command {
 }
 
 export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig): GlobalFlags {
-  const opts = command.optsWithGlobals();
-  const format = opts.format ?? config.format ?? "text";
+  const opts = asRecord(command.optsWithGlobals() as unknown) ?? {};
+  const format = parseOutputFormat(stringOption(opts.format) ?? config.format ?? "text");
+  const authPolicyOption = stringOption(opts.authPolicy);
+  const authPolicy =
+    authPolicyOption !== undefined ? parseAuthPolicy(authPolicyOption) : config.authPolicy;
+  const nonInteractivePermissionsOption = stringOption(opts.nonInteractivePermissions);
+  const nonInteractivePermissions =
+    nonInteractivePermissionsOption !== undefined
+      ? parseNonInteractivePermissionPolicy(nonInteractivePermissionsOption)
+      : config.nonInteractivePermissions;
+  const model = stringOption(opts.model);
   const jsonStrict = opts.jsonStrict === true;
   const verbose = opts.verbose === true;
   const permissionPolicy =
@@ -382,23 +415,23 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
   }
 
   return {
-    agent: opts.agent,
-    cwd: opts.cwd ?? process.cwd(),
-    authPolicy: opts.authPolicy ?? config.authPolicy,
-    nonInteractivePermissions: opts.nonInteractivePermissions ?? config.nonInteractivePermissions,
+    agent: stringOption(opts.agent),
+    cwd: stringOption(opts.cwd) ?? process.cwd(),
+    authPolicy,
+    nonInteractivePermissions,
     permissionPolicy,
     jsonStrict,
     suppressReads: opts.suppressReads === true,
     terminal: opts.terminal === false ? false : undefined,
-    timeout: opts.timeout ?? config.timeoutMs,
-    ttl: opts.ttl ?? config.ttlMs ?? DEFAULT_QUEUE_OWNER_TTL_MS,
+    timeout: numberOption(opts.timeout) ?? config.timeoutMs,
+    ttl: numberOption(opts.ttl) ?? config.ttlMs ?? DEFAULT_QUEUE_OWNER_TTL_MS,
     verbose,
     format,
-    model: typeof opts.model === "string" ? parseNonEmptyValue("Model", opts.model) : undefined,
-    allowedTools: Array.isArray(opts.allowedTools) ? opts.allowedTools : undefined,
-    maxTurns: typeof opts.maxTurns === "number" ? opts.maxTurns : undefined,
+    model: model !== undefined ? parseNonEmptyValue("Model", model) : undefined,
+    allowedTools: stringArrayOption(opts.allowedTools),
+    maxTurns: numberOption(opts.maxTurns),
     systemPrompt: resolveSystemPromptFlag(opts),
-    promptRetries: typeof opts.promptRetries === "number" ? opts.promptRetries : undefined,
+    promptRetries: numberOption(opts.promptRetries),
     approveAll: opts.approveAll ? true : undefined,
     approveReads: opts.approveReads ? true : undefined,
     denyAll: opts.denyAll ? true : undefined,
