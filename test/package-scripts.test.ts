@@ -5,6 +5,8 @@ import test from "node:test";
 
 type PackageJson = {
   scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
 };
 
 function readPackageJson(): PackageJson {
@@ -36,6 +38,20 @@ test("coverage script excludes generated package output", () => {
   assert.match(coverageScript, /dist-test\/test\/flows\.test\.js/);
   assert.match(coverageScript, /dist-test\/test\/runtime-manager\.test\.js/);
   assert.match(coverageScript, /--exclude ['"]?dist\/\*\*\/\*\.js['"]?/);
+});
+
+test("slophammer is CI-only and tracks the latest published checker", () => {
+  const pkg = readPackageJson();
+  const ciWorkflow = readFileSync(
+    path.join(process.cwd(), ".github", "workflows", "ci.yml"),
+    "utf8",
+  );
+
+  assert.equal(pkg.dependencies?.["slophammer-ts"], undefined);
+  assert.equal(pkg.devDependencies?.["slophammer-ts"], undefined);
+  assert.doesNotMatch(JSON.stringify(pkg.scripts ?? {}), /slophammer-ts/);
+  assert.match(ciWorkflow, /pnpm dlx slophammer-ts@latest rules --format text/);
+  assert.match(ciWorkflow, /pnpm dlx slophammer-ts@latest dry \./);
 });
 
 test("test scripts build packaged output before running package-bin smoke tests", () => {

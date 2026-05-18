@@ -105,17 +105,21 @@ The enforceable local constraints are:
   complexity max `8`, zero production DRY findings for `src/`, mutation targets,
   and import dependency boundaries.
 
-If a Slophammer TypeScript checker is available in the environment, run:
+CI runs the published Slophammer TypeScript checker with `@latest` so the
+policy check tracks the current Slophammer release without adding Slophammer as
+a package dependency. For manual parity with CI, run:
 
 ```bash
-slophammer-ts rules --format json
-slophammer-ts check . --format json
-slophammer-ts dry . --format json
+pnpm dlx slophammer-ts@latest rules --format text
+pnpm dlx slophammer-ts@latest dry .
 ```
 
-`slophammer-ts` is not published to npm yet, so do not claim the TypeScript
-checker passed unless that command actually ran from a local Slophammer checkout
-or a package artifact.
+Do not add `slophammer-ts` to `package.json`. `slophammer-ts check .` is
+intentionally not part of `pnpm run check` yet. The published checker still
+assumes ESLint, Prettier, Vitest, strict `tsconfig` conventions, and treats
+`examples/flows/replay-viewer` as a separate TypeScript project. Do not claim
+the full Slophammer checker passed unless `slophammer-ts check .` actually ran
+cleanly.
 
 ## Documentation Policy
 

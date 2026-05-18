@@ -114,6 +114,8 @@ jobs:
           - name: Mutation
             node_version: 22
             command: pnpm run mutate
+          - name: Slophammer
+            command: pnpm dlx slophammer-ts@latest rules --format text && pnpm dlx slophammer-ts@latest dry .
 
     steps:
       - name: Checkout
