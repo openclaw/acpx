@@ -1,13 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Command } from "commander";
+import { Command } from "commander";
 import type { ResolvedAcpxConfig } from "../src/cli/config.js";
 import {
+  addGlobalFlags,
+  addPromptInputOption,
+  addSessionNameOption,
+  addSessionOption,
   parseAllowedTools,
   parseAuthPolicy,
+  parseDaysOlderThan,
+  parseHistoryLimit,
   parseMaxTurns,
   parseNonInteractivePermissionPolicy,
+  parseNonEmptyValue,
   parseOutputFormat,
+  parsePruneBeforeDate,
   parsePromptRetries,
   parseSessionName,
   parseTimeoutSeconds,
@@ -46,6 +54,15 @@ function commandWithOptions(options: Record<string, unknown>): Command {
   return {
     optsWithGlobals: () => options,
   } as unknown as Command;
+}
+
+function parseCommand(command: Command, argv: string[]): Command {
+  command.exitOverride();
+  command.configureOutput({
+    writeOut: () => {},
+    writeErr: () => {},
+  });
+  return command.parse(["node", "acpx", ...argv], { from: "node" });
 }
 
 test("resolvePermissionMode honors explicit approve-reads overrides", () => {
@@ -124,9 +141,25 @@ test("string list flag parsers normalize valid values and reject empty entries",
   assert.equal(parseSessionName(" docs "), "docs");
   assert.throws(() => parseSessionName(" "), /must not be empty/);
 
+  assert.equal(parseNonEmptyValue("Model", " sonnet "), "sonnet");
+  assert.throws(() => parseNonEmptyValue("Model", " "), /Model must not be empty/);
+
   assert.deepEqual(parseAllowedTools(""), []);
   assert.deepEqual(parseAllowedTools("Read, Edit , Bash"), ["Read", "Edit", "Bash"]);
   assert.throws(() => parseAllowedTools("Read,,Edit"), /without empty entries/);
+});
+
+test("history and prune parsers validate positive numbers and dates", () => {
+  assert.equal(parseHistoryLimit("3"), 3);
+  assert.throws(() => parseHistoryLimit("0"), /positive integer/);
+  assert.throws(() => parseHistoryLimit("2.5"), /positive integer/);
+
+  assert.equal(parseDaysOlderThan("14"), 14);
+  assert.throws(() => parseDaysOlderThan("0"), /positive integer number of days/);
+  assert.throws(() => parseDaysOlderThan("tomorrow"), /positive integer number of days/);
+
+  assert.equal(parsePruneBeforeDate("2026-01-01").toISOString(), "2026-01-01T00:00:00.000Z");
+  assert.throws(() => parsePruneBeforeDate("not-a-date"), /valid date/);
 });
 
 test("resolvePermissionMode rejects conflicting permission flags", () => {
@@ -229,6 +262,112 @@ test("resolveGlobalFlags rejects conflicting permission policy aliases", () => {
   );
 });
 
+test("resolveGlobalFlags rejects invalid json-strict combinations", () => {
+  assert.throws(
+    () => resolveGlobalFlags(commandWithOptions({ jsonStrict: true, format: "text" }), config()),
+    /--json-strict requires --format json/,
+  );
+  assert.throws(
+    () =>
+      resolveGlobalFlags(
+        commandWithOptions({ jsonStrict: true, format: "json", verbose: true }),
+        config(),
+      ),
+    /--json-strict cannot be combined with --verbose/,
+  );
+});
+
+test("global flag registration parses each supported option", () => {
+  const command = parseCommand(addGlobalFlags(new Command()), [
+    "--agent",
+    "claude",
+    "--cwd",
+    "/tmp",
+    "--auth-policy",
+    "fail",
+    "--approve-all",
+    "--non-interactive-permissions",
+    "fail",
+    "--permission-policy",
+    '{"defaultAction":"deny"}',
+    "--format",
+    "json",
+    "--suppress-reads",
+    "--model",
+    "sonnet",
+    "--allowed-tools",
+    "Read,Edit",
+    "--max-turns",
+    "4",
+    "--system-prompt",
+    "be precise",
+    "--prompt-retries",
+    "2",
+    "--json-strict",
+    "--no-terminal",
+    "--timeout",
+    "1.5",
+    "--ttl",
+    "0",
+    "--verbose",
+  ]);
+
+  assert.deepEqual(command.opts(), {
+    agent: "claude",
+    cwd: "/tmp",
+    authPolicy: "fail",
+    approveAll: true,
+    nonInteractivePermissions: "fail",
+    permissionPolicy: '{"defaultAction":"deny"}',
+    format: "json",
+    suppressReads: true,
+    model: "sonnet",
+    allowedTools: ["Read", "Edit"],
+    maxTurns: 4,
+    systemPrompt: "be precise",
+    promptRetries: 2,
+    jsonStrict: true,
+    terminal: false,
+    timeout: 1500,
+    ttl: 0,
+    verbose: true,
+  });
+});
+
+test("global flag registration validates option parsers at parse time", () => {
+  assert.throws(
+    () => parseCommand(addGlobalFlags(new Command()), ["--auth-policy", "prompt"]),
+    /Invalid auth policy/,
+  );
+  assert.throws(
+    () => parseCommand(addGlobalFlags(new Command()), ["--max-turns", "0"]),
+    /Max turns must be a positive integer/,
+  );
+  assert.throws(
+    () => parseCommand(addGlobalFlags(new Command()), ["--system-prompt", ""]),
+    /System prompt must not be empty/,
+  );
+  assert.throws(
+    () => parseCommand(addGlobalFlags(new Command()), ["--append-system-prompt", ""]),
+    /Append system prompt must not be empty/,
+  );
+});
+
+test("session and prompt option registration parse command-local flags", () => {
+  const sessionCommand = parseCommand(addSessionOption(new Command()), [
+    "--session",
+    " docs ",
+    "--no-wait",
+  ]);
+  assert.deepEqual(sessionCommand.opts(), { session: "docs", wait: false });
+
+  const sessionNameCommand = parseCommand(addSessionNameOption(new Command()), ["-s", " review "]);
+  assert.deepEqual(sessionNameCommand.opts(), { session: "review" });
+
+  const promptCommand = parseCommand(addPromptInputOption(new Command()), ["--file", "-"]);
+  assert.deepEqual(promptCommand.opts(), { file: "-" });
+});
+
 test("resolveSessionNameFromFlags falls back through global and parent command options", () => {
   assert.equal(
     resolveSessionNameFromFlags({ session: "direct" }, commandWithOptions({})),
@@ -270,6 +409,39 @@ test("resolveOutputPolicy maps json-strict output behavior", () => {
 });
 
 test("resolveAgentInvocation rejects conflicting positional and override agents", () => {
+  const fallback = resolveAgentInvocation(
+    undefined,
+    {
+      cwd: "/repo",
+      nonInteractivePermissions: "deny",
+      ttl: 300_000,
+      format: "text",
+    },
+    config({ defaultAgent: undefined as never }),
+  );
+  assert.equal(fallback.agentName, "codex");
+  assert.match(fallback.agentCommand, /codex-acp/);
+  assert.equal(fallback.cwd, "/repo");
+
+  assert.deepEqual(
+    resolveAgentInvocation(
+      undefined,
+      {
+        agent: " custom-acp ",
+        cwd: "/repo",
+        nonInteractivePermissions: "deny",
+        ttl: 300_000,
+        format: "text",
+      },
+      config({ defaultAgent: "claude" }),
+    ),
+    {
+      agentName: "claude",
+      agentCommand: "custom-acp",
+      cwd: "/repo",
+    },
+  );
+
   assert.throws(
     () =>
       resolveAgentInvocation(
