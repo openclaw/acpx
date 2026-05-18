@@ -143,7 +143,7 @@ test("resolveGlobalFlags validates and normalizes dynamic Commander options", ()
       cwd: "/repo",
       authPolicy: "fail",
       nonInteractivePermissions: "fail",
-      permissionPolicy: "{\"defaultAction\":\"deny\"}",
+      permissionPolicy: '{"defaultAction":"deny"}',
       jsonStrict: true,
       suppressReads: true,
       terminal: false,
@@ -166,7 +166,7 @@ test("resolveGlobalFlags validates and normalizes dynamic Commander options", ()
     cwd: "/repo",
     authPolicy: "fail",
     nonInteractivePermissions: "fail",
-    permissionPolicy: "{\"defaultAction\":\"deny\"}",
+    permissionPolicy: '{"defaultAction":"deny"}',
     jsonStrict: true,
     suppressReads: true,
     terminal: false,
@@ -222,7 +222,7 @@ test("resolveGlobalFlags rejects conflicting permission policy aliases", () => {
   assert.throws(
     () =>
       resolveGlobalFlags(
-        commandWithOptions({ permissionPolicy: "{\"defaultAction\":\"deny\"}", policy: "file" }),
+        commandWithOptions({ permissionPolicy: '{"defaultAction":"deny"}', policy: "file" }),
         config(),
       ),
     /Use only one permission policy flag/,

@@ -40,6 +40,7 @@ typescript:
         - src/mcp-servers
         - src/perf-metrics
         - src/perf-metrics-capture
+        - src/permission-policy
         - src/prompt-content
         - src/runtime
         - src/session
@@ -50,6 +51,7 @@ typescript:
         - src/async-control
         - src/cli
         - src/permissions
+        - src/permission-policy
         - src/prompt-content
         - src/session
         - src/types
@@ -67,6 +69,7 @@ typescript:
     - from: src/session
       allow:
         - src/acp
+        - src/async-control
         - src/cli/queue/ipc
         - src/cli/queue/lease-store
         - src/cli/session
