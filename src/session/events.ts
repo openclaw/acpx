@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { isAcpJsonRpcMessage } from "../acp/jsonrpc.js";
-import { isProcessAlive } from "../cli/queue/lease-store.js";
 import { incrementPerfCounter, measurePerf } from "../perf-metrics.js";
+import { isProcessAlive } from "../process-liveness.js";
 import type { AcpJsonRpcMessage, SessionRecord } from "../types.js";
 import {
   DEFAULT_EVENT_MAX_SEGMENTS,

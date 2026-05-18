@@ -630,7 +630,7 @@ function parseTypedQueueOwnerMessage(
   message: TypedQueueOwnerRecord,
   context: QueueOwnerMessageContext,
 ): QueueOwnerMessage | null {
-  const parser = QUEUE_OWNER_MESSAGE_PARSERS[message.type];
+  const parser = queueOwnerMessageParser(message.type);
   return parser ? parser(message, context) : null;
 }
 
@@ -646,6 +646,8 @@ const QUEUE_OWNER_MESSAGE_PARSERS: Record<string, QueueOwnerMessageParser> = {
   result: parseResultOwnerMessage,
   cancel_result: (message, context) =>
     parseBooleanResultOwnerMessage(message, context, "cancel_result", "cancelled"),
+  close_session_result: (message, context) =>
+    parseBooleanResultOwnerMessage(message, context, "close_session_result", "closed"),
   set_mode_result: (message, context) =>
     parseStringResultOwnerMessage(message, context, "set_mode_result", "modeId"),
   set_model_result: (message, context) =>
@@ -653,6 +655,12 @@ const QUEUE_OWNER_MESSAGE_PARSERS: Record<string, QueueOwnerMessageParser> = {
   set_config_option_result: parseSetConfigOptionOwnerMessage,
   error: parseErrorOwnerMessage,
 };
+
+function queueOwnerMessageParser(type: string): QueueOwnerMessageParser | undefined {
+  return Object.hasOwn(QUEUE_OWNER_MESSAGE_PARSERS, type)
+    ? QUEUE_OWNER_MESSAGE_PARSERS[type]
+    : undefined;
+}
 
 function parseEventOwnerMessage(
   message: Record<string, unknown>,

@@ -8,6 +8,9 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Tooling: add Slophammer TypeScript quality gates for coverage, complexity,
+  unsafe types, mutation testing, DRY checks, and dependency boundaries.
+
 ### Breaking
 
 ### Fixes

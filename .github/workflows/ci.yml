@@ -115,7 +115,10 @@ jobs:
             node_version: 22
             command: pnpm run mutate
           - name: Slophammer
-            command: pnpm dlx slophammer-ts@latest rules --format text && pnpm dlx slophammer-ts@latest dry .
+            command: |
+              pnpm dlx slophammer-ts@latest rules --format text
+              pnpm dlx slophammer-ts@latest dry .
+              pnpm dlx slophammer-ts@latest check . --only ts.dependency-boundaries-required
 
     steps:
       - name: Checkout

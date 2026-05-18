@@ -98,12 +98,17 @@ The enforceable local constraints are:
 - `pnpm run lint` must keep type-aware Oxlint enabled for `src/` and reject
   explicit `any`, unsafe assignments, unsafe calls, unsafe member access, and
   unsafe returns.
-- `pnpm run test:coverage` must keep line, branch, and function coverage gates.
+- `pnpm run test:coverage` must keep the declared `85` line, branch,
+  function, and statement coverage gates for the current flows/runtime coverage
+  target. Do not describe this as whole-repository coverage unless the command
+  actually gates all `src/**` files at the same threshold.
 - `pnpm run mutate` runs Stryker against the current mutation target declared in
   `slophammer.yml`.
 - `slophammer.yml` sets the TypeScript policy targets: coverage `85`,
   complexity max `8`, zero production DRY findings for `src/`, mutation targets,
   and import dependency boundaries.
+- CI must run the published checker's direct dependency-boundary rule. `rules`
+  and `dry` alone are not a dependency-boundary gate.
 
 CI runs the published Slophammer TypeScript checker with `@latest` so the
 policy check tracks the current Slophammer release without adding Slophammer as
@@ -112,6 +117,7 @@ a package dependency. For manual parity with CI, run:
 ```bash
 pnpm dlx slophammer-ts@latest rules --format text
 pnpm dlx slophammer-ts@latest dry .
+pnpm dlx slophammer-ts@latest check . --only ts.dependency-boundaries-required
 ```
 
 Do not add `slophammer-ts` to `package.json`. `slophammer-ts check .` is

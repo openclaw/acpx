@@ -41,6 +41,7 @@ typescript:
         - src/perf-metrics
         - src/perf-metrics-capture
         - src/permission-policy
+        - src/process-liveness
         - src/prompt-content
         - src/runtime
         - src/session
@@ -70,11 +71,10 @@ typescript:
       allow:
         - src/acp
         - src/async-control
-        - src/cli/queue/ipc
-        - src/cli/queue/lease-store
         - src/cli/session
         - src/errors
         - src/perf-metrics
+        - src/process-liveness
         - src/persisted-key-policy
         - src/prompt-content
         - src/types

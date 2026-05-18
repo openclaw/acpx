@@ -1,6 +1,9 @@
 import { randomInt } from "node:crypto";
 import fs from "node:fs/promises";
+import { isProcessAlive } from "../../process-liveness.js";
 import { queueBaseDir, queueLockFilePath, queueSocketBaseDir, queueSocketPath } from "./paths.js";
+
+export { isProcessAlive } from "../../process-liveness.js";
 
 const PROCESS_EXIT_GRACE_MS = 1_500;
 const PROCESS_POLL_MS = 50;
@@ -167,19 +170,6 @@ export async function readQueueOwnerRecord(
     return parsed ?? undefined;
   } catch {
     return undefined;
-  }
-}
-
-export function isProcessAlive(pid: number | undefined): boolean {
-  if (!pid || !Number.isInteger(pid) || pid <= 0 || pid === process.pid) {
-    return false;
-  }
-
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
   }
 }
 

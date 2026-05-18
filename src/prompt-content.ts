@@ -95,6 +95,12 @@ const CONTENT_BLOCK_ERROR_VALIDATORS: Record<string, ContentBlockValidation> = {
   resource: validateResourceContentBlock,
 };
 
+function contentBlockErrorValidator(type: string): ContentBlockValidation | undefined {
+  return Object.hasOwn(CONTENT_BLOCK_ERROR_VALIDATORS, type)
+    ? CONTENT_BLOCK_ERROR_VALIDATORS[type]
+    : undefined;
+}
+
 function validateTextContentBlock(
   record: Record<string, unknown>,
   index: number,
@@ -156,7 +162,7 @@ function getContentBlockValidationError(value: unknown, index: number): string |
     return `prompt[${index}] must be an ACP content block object`;
   }
 
-  const validator = CONTENT_BLOCK_ERROR_VALIDATORS[record.type];
+  const validator = contentBlockErrorValidator(record.type);
   return validator
     ? validator(record, index)
     : `prompt[${index}] has unsupported content block type ${JSON.stringify(record.type)}`;

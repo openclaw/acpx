@@ -410,6 +410,22 @@ test("parsePromptEventLine ignores unsupported structured payloads and treats ra
       ],
     },
   );
+  assert.equal(parsePromptEventLine(JSON.stringify({ type: "__proto__", content: "x" })), null);
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        type: "tool_call_update",
+        content: [{ type: "__proto__", text: "x" }],
+      }),
+    ),
+    {
+      type: "tool_call",
+      text: "tool call",
+      tag: "tool_call_update",
+      title: "tool call",
+      content: [{ type: "__proto__", text: "x" }],
+    },
+  );
 });
 
 test("parsePromptEventLine covers status and tool summary fallbacks", () => {

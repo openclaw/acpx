@@ -242,7 +242,7 @@ function readToolContentText(value: unknown): string | undefined {
   if (record.type === "content") {
     return readToolContentText(record.content);
   }
-  const reader = TOOL_CONTENT_TEXT_READERS[String(record.type)];
+  const reader = toolContentTextReader(String(record.type));
   return reader?.(record);
 }
 
@@ -262,6 +262,12 @@ const TOOL_CONTENT_TEXT_READERS: Record<string, ToolContentTextReader> = {
     return terminalId ? `[terminal] ${terminalId}` : "[terminal]";
   },
 };
+
+function toolContentTextReader(type: string): ToolContentTextReader | undefined {
+  return Object.hasOwn(TOOL_CONTENT_TEXT_READERS, type)
+    ? TOOL_CONTENT_TEXT_READERS[type]
+    : undefined;
+}
 
 function summarizeToolContent(content: unknown): string | undefined {
   if (!Array.isArray(content)) {
@@ -400,7 +406,7 @@ export function parsePromptEventLine(line: string): AcpRuntimeEvent | null {
   const type = structured.type;
   const payload = structured.payload;
   const tag = structured.tag;
-  const parser = PROMPT_EVENT_PARSERS[type];
+  const parser = promptEventParser(type);
   return parser ? parser(payload, tag) : null;
 }
 
@@ -432,6 +438,10 @@ const PROMPT_EVENT_PARSERS: Record<string, PromptEventParser> = {
   done: () => null,
   error: () => null,
 };
+
+function promptEventParser(type: string): PromptEventParser | undefined {
+  return Object.hasOwn(PROMPT_EVENT_PARSERS, type) ? PROMPT_EVENT_PARSERS[type] : undefined;
+}
 
 function usageUpdateEvent(payload: Record<string, unknown>): AcpRuntimeEvent {
   const used = asOptionalFiniteNumber(payload.used);

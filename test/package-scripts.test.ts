@@ -26,6 +26,7 @@ test("coverage script excludes generated package output", () => {
   const coverageScript = pkg.scripts?.["test:coverage"] ?? "";
 
   assert.match(coverageScript, /\bc8\b/);
+  assert.match(coverageScript, /--all\b/);
   assert.match(coverageScript, /--check-coverage\b/);
   assert.match(coverageScript, /--lines 85\b/);
   assert.match(coverageScript, /--branches 85\b/);
@@ -40,7 +41,7 @@ test("coverage script excludes generated package output", () => {
   assert.match(coverageScript, /--exclude ['"]?dist\/\*\*\/\*\.js['"]?/);
 });
 
-test("slophammer is CI-only and tracks the latest published checker", () => {
+test("slophammer is CI-only and enforces latest DRY plus dependency boundaries", () => {
   const pkg = readPackageJson();
   const ciWorkflow = readFileSync(
     path.join(process.cwd(), ".github", "workflows", "ci.yml"),
@@ -52,6 +53,9 @@ test("slophammer is CI-only and tracks the latest published checker", () => {
   assert.doesNotMatch(JSON.stringify(pkg.scripts ?? {}), /slophammer-ts/);
   assert.match(ciWorkflow, /pnpm dlx slophammer-ts@latest rules --format text/);
   assert.match(ciWorkflow, /pnpm dlx slophammer-ts@latest dry \./);
+  assert.match(ciWorkflow, /pnpm dlx slophammer-ts@latest check \. --only/);
+  assert.match(ciWorkflow, /ts\.dependency-boundaries-required/);
+  assert.doesNotMatch(ciWorkflow, /assert-slophammer-rules-clean\.mjs/);
 });
 
 test("test scripts build packaged output before running package-bin smoke tests", () => {

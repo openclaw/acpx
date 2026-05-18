@@ -347,6 +347,20 @@ test("parseQueueOwnerMessage accepts structured non-error owner messages", () =>
 
   assert.deepEqual(
     parseQueueOwnerMessage({
+      type: "close_session_result",
+      requestId: "req-close",
+      closed: true,
+    }),
+    {
+      type: "close_session_result",
+      requestId: "req-close",
+      ownerGeneration: undefined,
+      closed: true,
+    },
+  );
+
+  assert.deepEqual(
+    parseQueueOwnerMessage({
       type: "set_mode_result",
       requestId: "req-mode",
       modeId: "plan",
@@ -480,6 +494,13 @@ test("parseQueueOwnerMessage accepts result payloads and optional emitted-error 
 test("parseQueueOwnerMessage rejects invalid structured owner message payloads", () => {
   assert.equal(
     parseQueueOwnerMessage({
+      type: "__proto__",
+      requestId: "req-prototype-type",
+    }),
+    null,
+  );
+  assert.equal(
+    parseQueueOwnerMessage({
       type: "accepted",
       requestId: "req-bad-owner-generation",
       ownerGeneration: 0,
@@ -511,6 +532,14 @@ test("parseQueueOwnerMessage rejects invalid structured owner message payloads",
       type: "cancel_result",
       requestId: "req-cancel",
       cancelled: "yes",
+    }),
+    null,
+  );
+  assert.equal(
+    parseQueueOwnerMessage({
+      type: "close_session_result",
+      requestId: "req-close",
+      closed: "yes",
     }),
     null,
   );

@@ -13,4 +13,4 @@ export {
   pruneSessions,
 } from "./persistence.js";
 export type { PruneOptions, PruneResult } from "./persistence.js";
-export { isProcessAlive } from "../cli/queue/ipc.js";
+export { isProcessAlive } from "../process-liveness.js";

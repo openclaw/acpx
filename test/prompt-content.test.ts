@@ -127,6 +127,15 @@ test("parsePromptSource rejects invalid text and resource block shapes", () => {
   );
 });
 
+test("parsePromptSource rejects prototype-named structured block types", () => {
+  assert.throws(
+    () => parsePromptSource(JSON.stringify([{ type: "__proto__", text: "x" }])),
+    (error: unknown) =>
+      error instanceof PromptInputValidationError &&
+      error.message.includes('unsupported content block type "__proto__"'),
+  );
+});
+
 test("parsePromptSource returns an empty prompt for blank input", () => {
   assert.deepEqual(parsePromptSource("   "), []);
 });
