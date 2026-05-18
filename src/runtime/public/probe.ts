@@ -34,7 +34,7 @@ export function formatRuntimeDetail(value: unknown): string {
 
   const seen = new WeakSet<object>();
   try {
-    const serialized = JSON.stringify(value, (_key, nested) => {
+    const serialized = JSON.stringify(value, (_key: string, nested: unknown): unknown => {
       if (nested instanceof Error) {
         return nested.message || nested.name;
       }
