@@ -191,38 +191,54 @@ export function resolveInstalledBuiltInAgentLaunch(
   const resolvePackageRoot = options.resolvePackageRoot ?? defaultResolvePackageRoot;
 
   try {
-    const packageRoot = resolvePackageRoot(spec.packageName);
-    const manifest = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8")) as {
-      name?: string;
-      version?: string;
-      bin?: string | Record<string, string>;
-    };
-    if (manifest.name !== spec.packageName) {
-      return undefined;
-    }
-
-    const relativeBinPath = resolvePackageBin(spec, manifest);
-    if (!relativeBinPath) {
-      return undefined;
-    }
-
-    const binPath = path.resolve(packageRoot, relativeBinPath);
-    if (!existsSync(binPath)) {
+    const resolved = resolveInstalledBuiltInAgentPackage(spec, {
+      readFileSync,
+      existsSync,
+      resolvePackageRoot,
+    });
+    if (!resolved) {
       return undefined;
     }
 
     return {
       source: "installed",
       command: process.execPath,
-      args: [binPath],
+      args: [resolved.binPath],
       packageName: spec.packageName,
       packageRange: spec.packageRange,
-      packageVersion: manifest.version,
-      binPath,
+      packageVersion: resolved.packageVersion,
+      binPath: resolved.binPath,
     };
   } catch {
     return undefined;
   }
+}
+
+function resolveInstalledBuiltInAgentPackage(
+  spec: BuiltInAgentPackageSpec,
+  options: Required<
+    Pick<BuiltInLaunchResolverOptions, "readFileSync" | "existsSync" | "resolvePackageRoot">
+  >,
+): { packageVersion?: string; binPath: string } | undefined {
+  const packageRoot = options.resolvePackageRoot(spec.packageName);
+  const manifest = JSON.parse(
+    options.readFileSync(path.join(packageRoot, "package.json"), "utf8"),
+  ) as {
+    name?: string;
+    version?: string;
+    bin?: string | Record<string, string>;
+  };
+  if (manifest.name !== spec.packageName) {
+    return undefined;
+  }
+
+  const relativeBinPath = resolvePackageBin(spec, manifest);
+  if (!relativeBinPath) {
+    return undefined;
+  }
+
+  const binPath = path.resolve(packageRoot, relativeBinPath);
+  return options.existsSync(binPath) ? { packageVersion: manifest.version, binPath } : undefined;
 }
 
 export function resolvePackageExecBuiltInAgentLaunch(

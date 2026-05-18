@@ -23,7 +23,19 @@ test("coverage script excludes generated package output", () => {
   const pkg = readPackageJson();
   const coverageScript = pkg.scripts?.["test:coverage"] ?? "";
 
-  assert.match(coverageScript, /--test-coverage-exclude=dist\/\*\*\/\*\.js\b/);
+  assert.match(coverageScript, /\bc8\b/);
+  assert.match(coverageScript, /--check-coverage\b/);
+  assert.match(coverageScript, /--lines 85\b/);
+  assert.match(coverageScript, /--branches 85\b/);
+  assert.match(coverageScript, /--functions 85\b/);
+  assert.match(coverageScript, /--statements 85\b/);
+  assert.match(coverageScript, /dist-test\/src\/flows\/schema\.js/);
+  assert.match(coverageScript, /dist-test\/src\/runtime\/public\/\*\*\/\*\.js/);
+  assert.match(coverageScript, /dist-test\/src\/runtime\/engine\/manager\.js/);
+  assert.match(coverageScript, /node --test dist-test\/test\/\*\.test\.js && c8\b/);
+  assert.match(coverageScript, /dist-test\/test\/flows\.test\.js/);
+  assert.match(coverageScript, /dist-test\/test\/runtime-manager\.test\.js/);
+  assert.match(coverageScript, /--exclude ['"]?dist\/\*\*\/\*\.js['"]?/);
 });
 
 test("test scripts build packaged output before running package-bin smoke tests", () => {

@@ -86,15 +86,7 @@ async function readPrompt(
 ): Promise<import("../types.js").PromptInput> {
   try {
     if (filePath) {
-      const source =
-        filePath === "-"
-          ? await readPromptInputFromStdin()
-          : await fs.readFile(path.resolve(cwd, filePath), "utf8");
-      const prompt = mergePromptSourceWithText(source, promptParts.join(" "));
-      if (prompt.length === 0) {
-        throw new InvalidArgumentError("Prompt from --file is empty");
-      }
-      return prompt;
+      return await readPromptFromFile(filePath, cwd, promptParts);
     }
 
     const joined = promptParts.join(" ").trim();
@@ -120,6 +112,22 @@ async function readPrompt(
     }
     throw error;
   }
+}
+
+async function readPromptFromFile(
+  filePath: string,
+  cwd: string,
+  promptParts: string[],
+): Promise<import("../types.js").PromptInput> {
+  const source =
+    filePath === "-"
+      ? await readPromptInputFromStdin()
+      : await fs.readFile(path.resolve(cwd, filePath), "utf8");
+  const prompt = mergePromptSourceWithText(source, promptParts.join(" "));
+  if (prompt.length === 0) {
+    throw new InvalidArgumentError("Prompt from --file is empty");
+  }
+  return prompt;
 }
 
 function applyPermissionExitCode(result: {
@@ -839,24 +847,36 @@ function printSessionDetailsByFormat(record: SessionRecord, format: OutputFormat
     process.stdout.write(`${record.acpxRecordId}\n`);
     return;
   }
-  process.stdout.write(`id: ${record.acpxRecordId}\n`);
-  process.stdout.write(`sessionId: ${record.acpSessionId}\n`);
-  process.stdout.write(`agentSessionId: ${record.agentSessionId ?? "-"}\n`);
-  process.stdout.write(`agent: ${record.agentCommand}\n`);
-  process.stdout.write(`cwd: ${record.cwd}\n`);
-  process.stdout.write(`name: ${record.name ?? "-"}\n`);
-  process.stdout.write(`created: ${record.createdAt}\n`);
-  process.stdout.write(`lastActivity: ${record.lastUsedAt}\n`);
-  process.stdout.write(`lastPrompt: ${record.lastPromptAt ?? "-"}\n`);
-  process.stdout.write(`closed: ${record.closed ? "yes" : "no"}\n`);
-  process.stdout.write(`closedAt: ${record.closedAt ?? "-"}\n`);
-  process.stdout.write(`pid: ${record.pid ?? "-"}\n`);
-  process.stdout.write(`agentStartedAt: ${record.agentStartedAt ?? "-"}\n`);
-  process.stdout.write(`lastExitCode: ${record.lastAgentExitCode ?? "-"}\n`);
-  process.stdout.write(`lastExitSignal: ${record.lastAgentExitSignal ?? "-"}\n`);
-  process.stdout.write(`lastExitAt: ${record.lastAgentExitAt ?? "-"}\n`);
-  process.stdout.write(`disconnectReason: ${record.lastAgentDisconnectReason ?? "-"}\n`);
-  process.stdout.write(`historyEntries: ${conversationHistoryEntries(record).length}\n`);
+  for (const line of sessionDetailsLines(record)) {
+    process.stdout.write(`${line}\n`);
+  }
+}
+
+function sessionDetailsLines(record: SessionRecord): string[] {
+  return [
+    `id: ${record.acpxRecordId}`,
+    `sessionId: ${record.acpSessionId}`,
+    `agentSessionId: ${displayValue(record.agentSessionId)}`,
+    `agent: ${record.agentCommand}`,
+    `cwd: ${record.cwd}`,
+    `name: ${displayValue(record.name)}`,
+    `created: ${record.createdAt}`,
+    `lastActivity: ${record.lastUsedAt}`,
+    `lastPrompt: ${displayValue(record.lastPromptAt)}`,
+    `closed: ${record.closed ? "yes" : "no"}`,
+    `closedAt: ${displayValue(record.closedAt)}`,
+    `pid: ${displayValue(record.pid)}`,
+    `agentStartedAt: ${displayValue(record.agentStartedAt)}`,
+    `lastExitCode: ${displayValue(record.lastAgentExitCode)}`,
+    `lastExitSignal: ${displayValue(record.lastAgentExitSignal)}`,
+    `lastExitAt: ${displayValue(record.lastAgentExitAt)}`,
+    `disconnectReason: ${displayValue(record.lastAgentDisconnectReason)}`,
+    `historyEntries: ${conversationHistoryEntries(record).length}`,
+  ];
+}
+
+function displayValue(value: string | number | boolean | null | undefined): string {
+  return value == null ? "-" : String(value);
 }
 
 function printSessionHistoryByFormat(

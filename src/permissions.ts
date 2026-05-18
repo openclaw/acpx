@@ -71,6 +71,17 @@ function pickOption(
   return undefined;
 }
 
+const TOOL_KIND_TITLE_MATCHERS: Array<{ kind: ToolKind; needles: readonly string[] }> = [
+  { kind: "read", needles: ["read", "cat"] },
+  { kind: "search", needles: ["search", "find", "grep"] },
+  { kind: "edit", needles: ["write", "edit", "patch"] },
+  { kind: "delete", needles: ["delete", "remove"] },
+  { kind: "move", needles: ["move", "rename"] },
+  { kind: "execute", needles: ["run", "execute", "bash"] },
+  { kind: "fetch", needles: ["fetch", "http", "url"] },
+  { kind: "think", needles: ["think"] },
+];
+
 export function inferToolKind(params: RequestPermissionRequest): ToolKind | undefined {
   if (params.toolCall.kind) {
     return params.toolCall.kind;
@@ -86,32 +97,13 @@ export function inferToolKind(params: RequestPermissionRequest): ToolKind | unde
     return undefined;
   }
 
-  if (head.includes("read") || head.includes("cat")) {
-    return "read";
-  }
-  if (head.includes("search") || head.includes("find") || head.includes("grep")) {
-    return "search";
-  }
-  if (head.includes("write") || head.includes("edit") || head.includes("patch")) {
-    return "edit";
-  }
-  if (head.includes("delete") || head.includes("remove")) {
-    return "delete";
-  }
-  if (head.includes("move") || head.includes("rename")) {
-    return "move";
-  }
-  if (head.includes("run") || head.includes("execute") || head.includes("bash")) {
-    return "execute";
-  }
-  if (head.includes("fetch") || head.includes("http") || head.includes("url")) {
-    return "fetch";
-  }
-  if (head.includes("think")) {
-    return "think";
-  }
+  return titleHeadToolKind(head) ?? "other";
+}
 
-  return "other";
+function titleHeadToolKind(head: string): ToolKind | undefined {
+  return TOOL_KIND_TITLE_MATCHERS.find(({ needles }) =>
+    needles.some((needle) => head.includes(needle)),
+  )?.kind;
 }
 
 function isAutoApprovedReadKind(kind: ToolKind | undefined): boolean {
@@ -248,6 +240,112 @@ function buildEscalationEvent(
   };
 }
 
+function selectedOrFirst(
+  options: PermissionOption[],
+  allowOption: PermissionOption | undefined,
+): ResolvedPermissionRequest {
+  return { response: selected((allowOption ?? options[0]).optionId) };
+}
+
+function selectedOrCancelled(option: PermissionOption | undefined): ResolvedPermissionRequest {
+  return { response: option ? selected(option.optionId) : cancelled() };
+}
+
+async function resolveEscalatingPermissionRequest(
+  params: RequestPermissionRequest,
+  policyMatch: PermissionPolicyMatch,
+  allowOption: PermissionOption | undefined,
+  rejectOption: PermissionOption | undefined,
+): Promise<ResolvedPermissionRequest> {
+  if (canPromptForPermission()) {
+    return resolveInteractivePromptResult(params, allowOption, rejectOption);
+  }
+
+  const escalation = buildEscalationEvent(params, policyMatch.matchedRule);
+  const response = rejectOption ? selected(rejectOption.optionId) : cancelled();
+  return {
+    response: withEscalationMetadata(response, escalation),
+    escalation,
+  };
+}
+
+async function resolveInteractivePromptResult(
+  params: RequestPermissionRequest,
+  allowOption: PermissionOption | undefined,
+  rejectOption: PermissionOption | undefined,
+): Promise<ResolvedPermissionRequest> {
+  const approved = await promptForToolPermission(params);
+  if (approved && allowOption) {
+    return { response: selected(allowOption.optionId) };
+  }
+  if (!approved && rejectOption) {
+    return { response: selected(rejectOption.optionId) };
+  }
+  return { response: cancelled() };
+}
+
+function resolvePolicyMatch(
+  params: RequestPermissionRequest,
+  policyMatch: PermissionPolicyMatch | undefined,
+  options: PermissionOption[],
+  allowOption: PermissionOption | undefined,
+  rejectOption: PermissionOption | undefined,
+): Promise<ResolvedPermissionRequest | undefined> | ResolvedPermissionRequest | undefined {
+  if (policyMatch?.action === "approve") {
+    return selectedOrFirst(options, allowOption);
+  }
+  if (policyMatch?.action === "deny") {
+    return selectedOrCancelled(rejectOption);
+  }
+  if (policyMatch?.action === "escalate") {
+    return resolveEscalatingPermissionRequest(params, policyMatch, allowOption, rejectOption);
+  }
+  return undefined;
+}
+
+function resolveModeMatch(
+  options: PermissionOption[],
+  mode: PermissionMode,
+  allowOption: PermissionOption | undefined,
+  rejectOption: PermissionOption | undefined,
+): ResolvedPermissionRequest | undefined {
+  if (mode === "approve-all") {
+    return selectedOrFirst(options, allowOption);
+  }
+  if (mode === "deny-all") {
+    return selectedOrCancelled(rejectOption);
+  }
+  return undefined;
+}
+
+function resolveNonInteractivePermission(
+  nonInteractivePolicy: NonInteractivePermissionPolicy,
+  rejectOption: PermissionOption | undefined,
+): ResolvedPermissionRequest {
+  if (nonInteractivePolicy === "fail") {
+    throw new PermissionPromptUnavailableError();
+  }
+  return selectedOrCancelled(rejectOption);
+}
+
+async function resolveReadOrPromptPermission(
+  params: RequestPermissionRequest,
+  nonInteractivePolicy: NonInteractivePermissionPolicy,
+  allowOption: PermissionOption | undefined,
+  rejectOption: PermissionOption | undefined,
+): Promise<ResolvedPermissionRequest> {
+  const kind = inferToolKind(params);
+  if (isAutoApprovedReadKind(kind) && allowOption) {
+    return { response: selected(allowOption.optionId) };
+  }
+
+  if (!canPromptForPermission()) {
+    return resolveNonInteractivePermission(nonInteractivePolicy, rejectOption);
+  }
+
+  return resolveInteractivePromptResult(params, allowOption, rejectOption);
+}
+
 export function permissionModeSatisfies(actual: PermissionMode, required: PermissionMode): boolean {
   return PERMISSION_MODE_RANK[actual] >= PERMISSION_MODE_RANK[required];
 }
@@ -282,77 +380,23 @@ export async function resolvePermissionRequestWithDetails(
   const rejectOption = pickOption(options, ["reject_once", "reject_always"]);
   const policyMatch = matchPermissionPolicy(params, policy);
 
-  if (policyMatch?.action === "approve") {
-    if (allowOption) {
-      return { response: selected(allowOption.optionId) };
-    }
-    return { response: selected(options[0].optionId) };
+  const resolvedByPolicy = await resolvePolicyMatch(
+    params,
+    policyMatch,
+    options,
+    allowOption,
+    rejectOption,
+  );
+  if (resolvedByPolicy) {
+    return resolvedByPolicy;
   }
 
-  if (policyMatch?.action === "deny") {
-    if (rejectOption) {
-      return { response: selected(rejectOption.optionId) };
-    }
-    return { response: cancelled() };
+  const resolvedByMode = resolveModeMatch(options, mode, allowOption, rejectOption);
+  if (resolvedByMode) {
+    return resolvedByMode;
   }
 
-  if (policyMatch?.action === "escalate") {
-    if (canPromptForPermission()) {
-      const approved = await promptForToolPermission(params);
-      if (approved && allowOption) {
-        return { response: selected(allowOption.optionId) };
-      }
-      if (!approved && rejectOption) {
-        return { response: selected(rejectOption.optionId) };
-      }
-      return { response: cancelled() };
-    }
-
-    const escalation = buildEscalationEvent(params, policyMatch.matchedRule);
-    const response = rejectOption ? selected(rejectOption.optionId) : cancelled();
-    return {
-      response: withEscalationMetadata(response, escalation),
-      escalation,
-    };
-  }
-
-  if (mode === "approve-all") {
-    if (allowOption) {
-      return { response: selected(allowOption.optionId) };
-    }
-    return { response: selected(options[0].optionId) };
-  }
-
-  if (mode === "deny-all") {
-    if (rejectOption) {
-      return { response: selected(rejectOption.optionId) };
-    }
-    return { response: cancelled() };
-  }
-
-  const kind = inferToolKind(params);
-  if (isAutoApprovedReadKind(kind) && allowOption) {
-    return { response: selected(allowOption.optionId) };
-  }
-
-  if (!canPromptForPermission()) {
-    if (nonInteractivePolicy === "fail") {
-      throw new PermissionPromptUnavailableError();
-    }
-    if (rejectOption) {
-      return { response: selected(rejectOption.optionId) };
-    }
-    return { response: cancelled() };
-  }
-
-  const approved = await promptForToolPermission(params);
-  if (approved && allowOption) {
-    return { response: selected(allowOption.optionId) };
-  }
-  if (!approved && rejectOption) {
-    return { response: selected(rejectOption.optionId) };
-  }
-  return { response: cancelled() };
+  return resolveReadOrPromptPermission(params, nonInteractivePolicy, allowOption, rejectOption);
 }
 
 const DECISION_FALLBACK_ORDER: Record<

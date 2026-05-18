@@ -74,6 +74,30 @@ const TOP_LEVEL_VERSION_BOOLEAN_FLAGS = new Set([
   "--verbose",
 ]);
 
+const AGENT_SCAN_VALUE_FLAGS = new Set([
+  "--cwd",
+  "--auth-policy",
+  "--non-interactive-permissions",
+  "--permission-policy",
+  "--policy",
+  "--format",
+  "--model",
+  "--allowed-tools",
+  "--max-turns",
+  "--timeout",
+  "--ttl",
+  "--file",
+]);
+
+const AGENT_SCAN_BOOLEAN_FLAGS = new Set([
+  "--approve-all",
+  "--approve-reads",
+  "--deny-all",
+  "--json-strict",
+  "--verbose",
+  "--suppress-reads",
+]);
+
 let skillflagModulePromise: Promise<SkillflagModule> | undefined;
 
 function loadSkillflagModule(): Promise<SkillflagModule> {
@@ -90,79 +114,74 @@ type AgentTokenScan = {
   hasAgentOverride: boolean;
 };
 
+type AgentTokenStep = {
+  result?: AgentTokenScan;
+  indexDelta: number;
+  hasAgentOverride?: true;
+};
+
+type AgentTokenFlagScan = "agent-value" | "skip-next" | "skip" | "unknown";
+
+function matchesLongFlagValue(token: string, flags: Iterable<string>): boolean {
+  for (const flag of flags) {
+    if (token.startsWith(`${flag}=`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function classifyAgentTokenFlag(token: string): AgentTokenFlagScan {
+  if (token === "--agent" || token.startsWith("--agent=")) {
+    return "agent-value";
+  }
+  if (AGENT_SCAN_VALUE_FLAGS.has(token)) {
+    return "skip-next";
+  }
+  if (
+    AGENT_SCAN_BOOLEAN_FLAGS.has(token) ||
+    matchesLongFlagValue(token, AGENT_SCAN_VALUE_FLAGS) ||
+    token.startsWith("--json-strict=")
+  ) {
+    return "skip";
+  }
+  return "unknown";
+}
+
+function scanAgentTokenStep(token: string, hasAgentOverride: boolean): AgentTokenStep {
+  if (token === "--") {
+    return { result: { hasAgentOverride }, indexDelta: 0 };
+  }
+  if (!token.startsWith("-") || token === "-") {
+    return { result: { token, hasAgentOverride }, indexDelta: 0 };
+  }
+
+  const flagScan = classifyAgentTokenFlag(token);
+  if (flagScan === "agent-value") {
+    return { indexDelta: token === "--agent" ? 1 : 0, hasAgentOverride: true };
+  }
+  if (flagScan === "skip-next") {
+    return { indexDelta: 1 };
+  }
+  if (flagScan === "skip") {
+    return { indexDelta: 0 };
+  }
+  return { result: { hasAgentOverride }, indexDelta: 0 };
+}
+
 function detectAgentToken(argv: string[]): AgentTokenScan {
   let hasAgentOverride = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-
-    if (token === "--") {
-      break;
+    const step = scanAgentTokenStep(token, hasAgentOverride);
+    if (step.result) {
+      return step.result;
     }
-
-    if (!token.startsWith("-") || token === "-") {
-      return { token, hasAgentOverride };
-    }
-
-    if (token === "--agent") {
+    if (step.hasAgentOverride) {
       hasAgentOverride = true;
-      index += 1;
-      continue;
     }
-
-    if (token.startsWith("--agent=")) {
-      hasAgentOverride = true;
-      continue;
-    }
-
-    if (
-      token === "--cwd" ||
-      token === "--auth-policy" ||
-      token === "--non-interactive-permissions" ||
-      token === "--permission-policy" ||
-      token === "--policy" ||
-      token === "--format" ||
-      token === "--model" ||
-      token === "--allowed-tools" ||
-      token === "--max-turns" ||
-      token === "--timeout" ||
-      token === "--ttl" ||
-      token === "--file"
-    ) {
-      index += 1;
-      continue;
-    }
-
-    if (
-      token.startsWith("--cwd=") ||
-      token.startsWith("--auth-policy=") ||
-      token.startsWith("--non-interactive-permissions=") ||
-      token.startsWith("--permission-policy=") ||
-      token.startsWith("--policy=") ||
-      token.startsWith("--format=") ||
-      token.startsWith("--model=") ||
-      token.startsWith("--allowed-tools=") ||
-      token.startsWith("--max-turns=") ||
-      token.startsWith("--json-strict=") ||
-      token.startsWith("--timeout=") ||
-      token.startsWith("--ttl=") ||
-      token.startsWith("--file=")
-    ) {
-      continue;
-    }
-
-    if (
-      token === "--approve-all" ||
-      token === "--approve-reads" ||
-      token === "--deny-all" ||
-      token === "--json-strict" ||
-      token === "--verbose" ||
-      token === "--suppress-reads"
-    ) {
-      continue;
-    }
-
-    return { hasAgentOverride };
+    index += step.indexDelta;
   }
 
   return { hasAgentOverride };
@@ -206,27 +225,40 @@ function detectRequestedOutputFormat(argv: string[], fallback: OutputFormat): Ou
       break;
     }
 
-    if (token === "--json-strict" || token.startsWith("--json-strict=")) {
+    if (isJsonStrictToken(token)) {
       return "json";
     }
 
-    if (token === "--format") {
-      const raw = argv[index + 1];
-      if (raw && OUTPUT_FORMATS.includes(raw as OutputFormat)) {
-        detectedFormat = raw as OutputFormat;
-      }
-      continue;
-    }
-
-    if (token.startsWith("--format=")) {
-      const raw = token.slice("--format=".length).trim();
-      if (OUTPUT_FORMATS.includes(raw as OutputFormat)) {
-        detectedFormat = raw as OutputFormat;
-      }
+    const format = readFormatFlagValue(token, argv[index + 1]);
+    if (format) {
+      detectedFormat = format;
     }
   }
 
   return detectedFormat;
+}
+
+function readFormatFlagValue(
+  token: string,
+  nextToken: string | undefined,
+): OutputFormat | undefined {
+  const raw = token === "--format" ? nextToken : readInlineFlagValue(token, "--format");
+  return isOutputFormat(raw) ? raw : undefined;
+}
+
+function readInlineFlagValue(token: string, flag: string): string | undefined {
+  if (!token.startsWith(`${flag}=`)) {
+    return undefined;
+  }
+  return token.slice(flag.length + 1).trim();
+}
+
+function isOutputFormat(value: unknown): value is OutputFormat {
+  return typeof value === "string" && OUTPUT_FORMATS.includes(value as OutputFormat);
+}
+
+function isJsonStrictToken(token: string): boolean {
+  return token === "--json-strict" || token.startsWith("--json-strict=");
 }
 
 function detectJsonStrict(argv: string[]): boolean {
@@ -237,12 +269,35 @@ function detectJsonStrict(argv: string[]): boolean {
       break;
     }
 
-    if (token === "--json-strict" || token.startsWith("--json-strict=")) {
+    if (isJsonStrictToken(token)) {
       return true;
     }
   }
 
   return false;
+}
+
+function shouldSkipTopLevelVersionToken(token: string): boolean {
+  return (
+    matchesLongFlagValue(token, TOP_LEVEL_VERSION_VALUE_FLAG_VALUES) ||
+    TOP_LEVEL_VERSION_BOOLEAN_FLAGS.has(token)
+  );
+}
+
+function topLevelVersionTokenDecision(token: string): "version" | "stop" | "skip-next" | "skip" {
+  if (token === "--version" || token === "-V") {
+    return "version";
+  }
+  if (!token.startsWith("-") || token === "-") {
+    return "stop";
+  }
+  if (TOP_LEVEL_VERSION_VALUE_FLAGS.has(token)) {
+    return "skip-next";
+  }
+  if (shouldSkipTopLevelVersionToken(token)) {
+    return "skip";
+  }
+  return "stop";
 }
 
 function isTopLevelVersionRequest(argv: string[]): boolean {
@@ -253,27 +308,16 @@ function isTopLevelVersionRequest(argv: string[]): boolean {
       return false;
     }
 
-    if (token === "--version" || token === "-V") {
+    const decision = topLevelVersionTokenDecision(token);
+    if (decision === "version") {
       return true;
     }
-
-    if (!token.startsWith("-") || token === "-") {
+    if (decision === "stop") {
       return false;
     }
-
-    if (TOP_LEVEL_VERSION_VALUE_FLAGS.has(token)) {
+    if (decision === "skip-next") {
       index += 1;
-      continue;
     }
-
-    if (
-      TOP_LEVEL_VERSION_VALUE_FLAG_VALUES.some((flag) => token.startsWith(`${flag}=`)) ||
-      TOP_LEVEL_VERSION_BOOLEAN_FLAGS.has(token)
-    ) {
-      continue;
-    }
-
-    return false;
   }
 
   return false;
@@ -328,46 +372,40 @@ async function runWithOutputPolicy<T>(
   return await run();
 }
 
-export async function main(argv: string[] = process.argv): Promise<void> {
-  const rawArgs = argv.slice(2);
-
+async function handleQueueOwnerCommand(argv: string[]): Promise<boolean> {
   installPerfMetricsCapture({
-    argv: rawArgs,
+    argv: argv.slice(2),
     role: argv[2] === "__queue-owner" ? "queue_owner" : "cli",
   });
 
-  if (isTopLevelVersionRequest(rawArgs)) {
-    process.stdout.write(`${getAcpxVersion()}\n`);
+  if (argv[2] !== "__queue-owner") {
+    return false;
+  }
+
+  try {
+    await runQueueOwnerFromEnv(process.env);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[acpx] queue owner failed: ${message}\n`);
+    process.exit(EXIT_CODES.ERROR);
+    return true;
+  }
+}
+
+async function maybeHandleSkillflag(argv: string[]): Promise<void> {
+  if (!shouldMaybeHandleSkillflag(argv)) {
     return;
   }
 
-  if (argv[2] === "__queue-owner") {
-    try {
-      await runQueueOwnerFromEnv(process.env);
-      return;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`[acpx] queue owner failed: ${message}\n`);
-      process.exit(EXIT_CODES.ERROR);
-    }
-  }
+  const { findSkillsRoot, maybeHandleSkillflag } = await loadSkillflagModule();
+  await maybeHandleSkillflag(argv, {
+    skillsRoot: findSkillsRoot(import.meta.url),
+    includeBundledSkill: false,
+  });
+}
 
-  if (shouldMaybeHandleSkillflag(argv)) {
-    const { findSkillsRoot, maybeHandleSkillflag } = await loadSkillflagModule();
-    await maybeHandleSkillflag(argv, {
-      skillsRoot: findSkillsRoot(import.meta.url),
-      includeBundledSkill: false,
-    });
-  }
-
-  const config = await loadResolvedConfig(detectInitialCwd(rawArgs));
-  const requestedJsonStrict = detectJsonStrict(rawArgs);
-  const requestedOutputFormat = detectRequestedOutputFormat(rawArgs, config.format);
-  const requestedOutputPolicy = {
-    ...resolveOutputPolicy(requestedOutputFormat, requestedJsonStrict),
-    suppressReads: rawArgs.some((token) => token === "--suppress-reads"),
-  };
-
+function createProgram(requestedJsonStrict: boolean): Command {
   const program = new Command();
   program
     .name("acpx")
@@ -386,6 +424,61 @@ export async function main(argv: string[] = process.argv): Promise<void> {
       },
     });
   }
+
+  return program;
+}
+
+async function handleProgramParseError(
+  error: unknown,
+  requestedOutputPolicy: OutputPolicy,
+): Promise<never> {
+  if (error instanceof CommanderError) {
+    if (error.code === "commander.helpDisplayed" || error.code === "commander.version") {
+      process.exit(EXIT_CODES.SUCCESS);
+    }
+
+    const normalized = normalizeOutputError(error, {
+      defaultCode: "USAGE",
+      origin: "cli",
+    });
+    await emitRequestedError(error, normalized, requestedOutputPolicy);
+    process.exit(exitCodeForOutputErrorCode(normalized.code));
+  }
+
+  if (error instanceof InterruptedError) {
+    process.exit(EXIT_CODES.INTERRUPTED);
+  }
+
+  const normalized = normalizeOutputError(error, {
+    origin: "cli",
+  });
+  await emitRequestedError(error, normalized, requestedOutputPolicy);
+  process.exit(exitCodeForOutputErrorCode(normalized.code));
+}
+
+export async function main(argv: string[] = process.argv): Promise<void> {
+  const rawArgs = argv.slice(2);
+
+  if (await handleQueueOwnerCommand(argv)) {
+    return;
+  }
+
+  if (isTopLevelVersionRequest(rawArgs)) {
+    process.stdout.write(`${getAcpxVersion()}\n`);
+    return;
+  }
+
+  await maybeHandleSkillflag(argv);
+
+  const config = await loadResolvedConfig(detectInitialCwd(rawArgs));
+  const requestedJsonStrict = detectJsonStrict(rawArgs);
+  const requestedOutputFormat = detectRequestedOutputFormat(rawArgs, config.format);
+  const requestedOutputPolicy = {
+    ...resolveOutputPolicy(requestedOutputFormat, requestedJsonStrict),
+    suppressReads: rawArgs.some((token) => token === "--suppress-reads"),
+  };
+
+  const program = createProgram(requestedJsonStrict);
 
   addGlobalFlags(program);
 
@@ -413,28 +506,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
       try {
         await program.parseAsync(argv);
       } catch (error) {
-        if (error instanceof CommanderError) {
-          if (error.code === "commander.helpDisplayed" || error.code === "commander.version") {
-            process.exit(EXIT_CODES.SUCCESS);
-          }
-
-          const normalized = normalizeOutputError(error, {
-            defaultCode: "USAGE",
-            origin: "cli",
-          });
-          await emitRequestedError(error, normalized, requestedOutputPolicy);
-          process.exit(exitCodeForOutputErrorCode(normalized.code));
-        }
-
-        if (error instanceof InterruptedError) {
-          process.exit(EXIT_CODES.INTERRUPTED);
-        }
-
-        const normalized = normalizeOutputError(error, {
-          origin: "cli",
-        });
-        await emitRequestedError(error, normalized, requestedOutputPolicy);
-        process.exit(exitCodeForOutputErrorCode(normalized.code));
+        await handleProgramParseError(error, requestedOutputPolicy);
       }
     });
   } finally {

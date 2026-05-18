@@ -45,10 +45,8 @@ export function resolveAcpxVersion(params?: {
   env?: NodeJS.ProcessEnv;
   packageJsonPath?: string;
 }): string {
-  const env = params?.env ?? process.env;
-  const envPackageName = parseVersion(env.npm_package_name);
-  const envVersion = parseVersion(env.npm_package_version);
-  if (envPackageName === "acpx" && envVersion) {
+  const envVersion = resolvePackageEnvVersion(params?.env ?? process.env);
+  if (envVersion) {
     return envVersion;
   }
 
@@ -57,6 +55,12 @@ export function resolveAcpxVersion(params?: {
   }
 
   return resolveVersionFromAncestors(MODULE_DIR) ?? UNKNOWN_VERSION;
+}
+
+function resolvePackageEnvVersion(env: NodeJS.ProcessEnv): string | null {
+  const envPackageName = parseVersion(env.npm_package_name);
+  const envVersion = parseVersion(env.npm_package_version);
+  return envPackageName === "acpx" ? envVersion : null;
 }
 
 export function getAcpxVersion(): string {

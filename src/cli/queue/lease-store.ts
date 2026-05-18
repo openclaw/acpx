@@ -40,30 +40,50 @@ function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
   }
   const record = raw as Record<string, unknown>;
 
-  if (
-    !Number.isInteger(record.pid) ||
-    (record.pid as number) <= 0 ||
-    typeof record.sessionId !== "string" ||
-    typeof record.socketPath !== "string" ||
-    typeof record.createdAt !== "string" ||
-    typeof record.heartbeatAt !== "string" ||
-    !Number.isInteger(record.ownerGeneration) ||
-    (record.ownerGeneration as number) <= 0 ||
-    !Number.isInteger(record.queueDepth) ||
-    (record.queueDepth as number) < 0
-  ) {
+  if (!hasValidQueueOwnerRecordFields(record)) {
     return null;
   }
 
   return {
-    pid: record.pid as number,
+    pid: record.pid,
     sessionId: record.sessionId,
     socketPath: record.socketPath,
     createdAt: record.createdAt,
     heartbeatAt: record.heartbeatAt,
-    ownerGeneration: record.ownerGeneration as number,
-    queueDepth: record.queueDepth as number,
+    ownerGeneration: record.ownerGeneration,
+    queueDepth: record.queueDepth,
   };
+}
+
+function hasValidQueueOwnerRecordFields(record: Record<string, unknown>): record is Record<
+  string,
+  unknown
+> & {
+  pid: number;
+  sessionId: string;
+  socketPath: string;
+  createdAt: string;
+  heartbeatAt: string;
+  ownerGeneration: number;
+  queueDepth: number;
+} {
+  return (
+    isPositiveInteger(record.pid) &&
+    typeof record.sessionId === "string" &&
+    typeof record.socketPath === "string" &&
+    typeof record.createdAt === "string" &&
+    typeof record.heartbeatAt === "string" &&
+    isPositiveInteger(record.ownerGeneration) &&
+    isNonNegativeInteger(record.queueDepth)
+  );
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) > 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 0;
 }
 
 function createOwnerGeneration(): number {

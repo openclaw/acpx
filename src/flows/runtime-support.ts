@@ -405,17 +405,21 @@ function toInlineOutput(value: unknown): undefined | null | boolean | number | s
     return value;
   }
   if (typeof value === "string") {
-    return value.length <= 200 && !value.includes("\n") ? value : undefined;
+    return isInlineSerializableText(value) ? value : undefined;
   }
   try {
     const serialized = JSON.stringify(value);
-    if (serialized.length <= 200 && !serialized.includes("\n")) {
+    if (isInlineSerializableText(serialized)) {
       return value;
     }
   } catch {
     return undefined;
   }
   return undefined;
+}
+
+function isInlineSerializableText(value: string): boolean {
+  return value.length <= 200 && !value.includes("\n");
 }
 
 function outputArtifactMediaType(value: unknown): string {

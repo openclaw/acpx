@@ -66,6 +66,7 @@ function parseCommand(command: Command, argv: string[]): Command {
 }
 
 test("resolvePermissionMode honors explicit approve-reads overrides", () => {
+  assert.equal(resolvePermissionMode({}, "approve-reads"), "approve-reads");
   assert.equal(resolvePermissionMode({ approveReads: true }, "approve-all"), "approve-reads");
   assert.equal(resolvePermissionMode({ approveAll: true }, "approve-reads"), "approve-all");
   assert.equal(resolvePermissionMode({ denyAll: true }, "approve-all"), "deny-all");
@@ -145,6 +146,7 @@ test("string list flag parsers normalize valid values and reject empty entries",
   assert.throws(() => parseNonEmptyValue("Model", " "), /Model must not be empty/);
 
   assert.deepEqual(parseAllowedTools(""), []);
+  assert.deepEqual(parseAllowedTools("   "), []);
   assert.deepEqual(parseAllowedTools("Read, Edit , Bash"), ["Read", "Edit", "Bash"]);
   assert.throws(() => parseAllowedTools("Read,,Edit"), /without empty entries/);
 });
@@ -249,6 +251,61 @@ test("resolveGlobalFlags ignores malformed dynamic options and keeps typed confi
   assert.equal(flags.allowedTools, undefined);
   assert.equal(flags.maxTurns, undefined);
   assert.equal(flags.promptRetries, undefined);
+});
+
+test("resolveGlobalFlags treats non-object Commander options as absent", () => {
+  const flags = resolveGlobalFlags(
+    {
+      optsWithGlobals: () => [],
+    } as unknown as Command,
+    config({
+      authPolicy: "fail",
+      nonInteractivePermissions: "fail",
+      ttlMs: 1_234,
+      format: "quiet",
+    }),
+  );
+
+  assert.equal(flags.authPolicy, "fail");
+  assert.equal(flags.nonInteractivePermissions, "fail");
+  assert.equal(flags.ttl, 1_234);
+  assert.equal(flags.format, "quiet");
+  assert.equal(flags.suppressReads, false);
+  assert.equal(flags.approveAll, undefined);
+  assert.equal(flags.approveReads, undefined);
+  assert.equal(flags.denyAll, undefined);
+});
+
+test("resolveGlobalFlags preserves boolean flag intent and alias-only policy values", () => {
+  const approveAllFlags = resolveGlobalFlags(
+    commandWithOptions({
+      approveAll: true,
+      policy: "policy.json",
+      terminal: true,
+    }),
+    config(),
+  );
+
+  assert.equal(approveAllFlags.approveAll, true);
+  assert.equal(approveAllFlags.approveReads, undefined);
+  assert.equal(approveAllFlags.denyAll, undefined);
+  assert.equal(approveAllFlags.permissionPolicy, "policy.json");
+  assert.equal(approveAllFlags.terminal, undefined);
+
+  const denyAllFlags = resolveGlobalFlags(
+    commandWithOptions({
+      denyAll: true,
+    }),
+    config(),
+  );
+  assert.equal(denyAllFlags.approveAll, undefined);
+  assert.equal(denyAllFlags.denyAll, true);
+
+  const fallbackFormat = resolveGlobalFlags(
+    commandWithOptions({}),
+    config({ format: undefined as never }),
+  );
+  assert.equal(fallbackFormat.format, "text");
 });
 
 test("resolveGlobalFlags rejects conflicting permission policy aliases", () => {
@@ -386,6 +443,9 @@ test("resolveSessionNameFromFlags falls back through global and parent command o
     },
   } as unknown as Command;
   assert.equal(resolveSessionNameFromFlags({}, command), "parent");
+
+  const commandWithoutCommanderHelpers = {} as unknown as Command;
+  assert.equal(resolveSessionNameFromFlags({}, commandWithoutCommanderHelpers), undefined);
 });
 
 test("resolveOutputPolicy maps json-strict output behavior", () => {

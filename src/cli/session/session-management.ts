@@ -38,37 +38,12 @@ async function createSessionRecordWithClient(
   let requestedModelApplied = false;
 
   if (options.resumeSessionId) {
-    if (!client.supportsLoadSession()) {
-      throw new Error(
-        `Agent command "${options.agentCommand}" does not support session/load; cannot resume session ${options.resumeSessionId}`,
-      );
-    }
-
-    try {
-      const loadedSession = await withTimeout(
-        client.loadSession(options.resumeSessionId, cwd),
-        options.timeoutMs,
-      );
-      sessionId = options.resumeSessionId;
-      agentSessionId = normalizeRuntimeSessionId(loadedSession.agentSessionId);
-      sessionResult = loadedSession;
-      sessionModels = loadedSession.models;
-      requestedModelApplied = await applyRequestedModelIfAdvertised({
-        client,
-        sessionId,
-        requestedModel: options.sessionOptions?.model,
-        models: sessionModels,
-        agentCommand: options.agentCommand,
-        timeoutMs: options.timeoutMs,
-      });
-    } catch (error) {
-      throw new Error(
-        `Failed to resume ACP session ${options.resumeSessionId}: ${formatErrorMessage(error)}`,
-        {
-          cause: error,
-        },
-      );
-    }
+    const resumed = await resumeSessionRecordWithClient(client, options, cwd);
+    sessionId = resumed.sessionId;
+    agentSessionId = resumed.agentSessionId;
+    sessionResult = resumed.sessionResult;
+    sessionModels = resumed.sessionModels;
+    requestedModelApplied = resumed.requestedModelApplied;
   } else {
     const createdSession = await withTimeout(client.createSession(cwd), options.timeoutMs);
     sessionId = createdSession.sessionId;
@@ -119,6 +94,58 @@ async function createSessionRecordWithClient(
 
   await writeSessionRecord(record);
   return record;
+}
+
+type CreatedSessionState = {
+  sessionId: string;
+  agentSessionId: string | undefined;
+  sessionResult: Awaited<ReturnType<AcpClient["createSession" | "loadSession"]>>;
+  sessionModels: SessionCreateResult["models"];
+  requestedModelApplied: boolean;
+};
+
+async function resumeSessionRecordWithClient(
+  client: AcpClient,
+  options: SessionCreateOptions,
+  cwd: string,
+): Promise<CreatedSessionState> {
+  if (!options.resumeSessionId) {
+    throw new Error("resumeSessionId is required");
+  }
+  if (!client.supportsLoadSession()) {
+    throw new Error(
+      `Agent command "${options.agentCommand}" does not support session/load; cannot resume session ${options.resumeSessionId}`,
+    );
+  }
+
+  try {
+    const loadedSession = await withTimeout(
+      client.loadSession(options.resumeSessionId, cwd),
+      options.timeoutMs,
+    );
+    const sessionModels = loadedSession.models;
+    return {
+      sessionId: options.resumeSessionId,
+      agentSessionId: normalizeRuntimeSessionId(loadedSession.agentSessionId),
+      sessionResult: loadedSession,
+      sessionModels,
+      requestedModelApplied: await applyRequestedModelIfAdvertised({
+        client,
+        sessionId: options.resumeSessionId,
+        requestedModel: options.sessionOptions?.model,
+        models: sessionModels,
+        agentCommand: options.agentCommand,
+        timeoutMs: options.timeoutMs,
+      }),
+    };
+  } catch (error) {
+    throw new Error(
+      `Failed to resume ACP session ${options.resumeSessionId}: ${formatErrorMessage(error)}`,
+      {
+        cause: error,
+      },
+    );
+  }
 }
 
 export async function createSessionWithClient(

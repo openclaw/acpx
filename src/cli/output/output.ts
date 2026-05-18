@@ -283,19 +283,23 @@ function parseAuthMethodIdsFromAcpData(data: unknown): string[] {
 
   if (Array.isArray(record.methods)) {
     for (const entry of record.methods) {
-      if (typeof entry === "string" && entry.trim().length > 0) {
-        methodIds.push(entry.trim());
-        continue;
-      }
-
-      const id = asRecord(entry)?.id;
-      if (typeof id === "string" && id.trim().length > 0) {
-        methodIds.push(id.trim());
+      const id = parseAuthMethodIdEntry(entry);
+      if (id) {
+        methodIds.push(id);
       }
     }
   }
 
   return dedupeStrings(methodIds);
+}
+
+function parseAuthMethodIdEntry(entry: unknown): string | undefined {
+  if (typeof entry === "string" && entry.trim().length > 0) {
+    return entry.trim();
+  }
+
+  const id = asRecord(entry)?.id;
+  return typeof id === "string" && id.trim().length > 0 ? id.trim() : undefined;
 }
 
 function renderAuthRequiredHint(params: RenderableOutputError): string {
@@ -326,72 +330,108 @@ export function getTextErrorRemediationHints(params: RenderableOutputError): str
   }
 
   if (params.code === "NO_SESSION") {
-    if (lowerMessage.includes("create one:")) {
-      return [];
-    }
-
-    return [
-      "hint: the saved ACP session is missing or stale; start a fresh session with `acpx <agent> sessions new`, then retry.",
-    ];
+    return noSessionHints(lowerMessage);
   }
 
-  if (lowerMessage.includes("does not support session/load")) {
-    return [
+  return matchingTextErrorRule(params, lowerMessage)?.hints ?? [];
+}
+
+type TextErrorHintRule = {
+  matches: (params: RenderableOutputError, lowerMessage: string) => boolean;
+  hints: string[];
+};
+
+const TEXT_ERROR_HINT_RULES: TextErrorHintRule[] = [
+  {
+    matches: (_params, lowerMessage) => isUnsupportedSessionLoadError(lowerMessage),
+    hints: [
       "hint: this adapter cannot resume saved ACP sessions; create a fresh one with `acpx <agent> sessions new` instead of reusing `--resume-session`.",
-    ];
-  }
-
-  if (
-    lowerMessage.includes("failed to resume acp session") ||
-    lowerMessage.includes("session/load")
-  ) {
-    return [
+    ],
+  },
+  {
+    matches: (_params, lowerMessage) => isSessionLoadError(lowerMessage),
+    hints: [
       "hint: rerun with `--verbose` to capture the ACP load failure details.",
       "hint: if you do not need the old backend session, start a fresh one with `acpx <agent> sessions new` and retry.",
-    ];
-  }
-
-  if (
-    /\b429\b/u.test(params.message) ||
-    lowerMessage.includes("rate limit") ||
-    lowerMessage.includes("quota exceeded")
-  ) {
-    return [
+    ],
+  },
+  {
+    matches: (params, lowerMessage) => isRateLimitError(params.message, lowerMessage),
+    hints: [
       "hint: the provider appears rate-limited; retry later, switch model, or check provider quota/billing.",
-    ];
-  }
-
-  if (
-    lowerMessage.includes("model not found") ||
-    lowerMessage.includes("unknown model") ||
-    lowerMessage.includes("invalid model")
-  ) {
-    return [
+    ],
+  },
+  {
+    matches: (_params, lowerMessage) => isModelLookupError(lowerMessage),
+    hints: [
       "hint: check the configured model name for this agent, then retry with `--model <model>` or `sessions set-model <model>`.",
-    ];
-  }
-
-  if (
-    lowerMessage.includes("session/set_mode") ||
-    lowerMessage.includes("session/set_model") ||
-    lowerMessage.includes("session/set_config_option")
-  ) {
-    return [
+    ],
+  },
+  {
+    matches: (_params, lowerMessage) => isSessionConfigMethodError(lowerMessage),
+    hints: [
       "hint: rerun with `--verbose` to capture the ACP method/error details before retrying.",
-    ];
-  }
+    ],
+  },
+  {
+    matches: isRuntimeAcpProtocolError,
+    hints: ["hint: rerun with `--verbose` to capture the underlying ACP error details."],
+  },
+];
 
-  if (
+function matchingTextErrorRule(
+  params: RenderableOutputError,
+  lowerMessage: string,
+): TextErrorHintRule | undefined {
+  return TEXT_ERROR_HINT_RULES.find((rule) => rule.matches(params, lowerMessage));
+}
+
+function noSessionHints(lowerMessage: string): string[] {
+  if (lowerMessage.includes("create one:")) {
+    return [];
+  }
+  return [
+    "hint: the saved ACP session is missing or stale; start a fresh session with `acpx <agent> sessions new`, then retry.",
+  ];
+}
+
+function isUnsupportedSessionLoadError(lowerMessage: string): boolean {
+  return lowerMessage.includes("does not support session/load");
+}
+
+function isSessionLoadError(lowerMessage: string): boolean {
+  return (
+    lowerMessage.includes("failed to resume acp session") || lowerMessage.includes("session/load")
+  );
+}
+
+function isRateLimitError(message: string, lowerMessage: string): boolean {
+  return (
+    /\b429\b/u.test(message) ||
+    ["rate limit", "quota exceeded"].some((text) => lowerMessage.includes(text))
+  );
+}
+
+function isModelLookupError(lowerMessage: string): boolean {
+  return ["model not found", "unknown model", "invalid model"].some((text) =>
+    lowerMessage.includes(text),
+  );
+}
+
+function isSessionConfigMethodError(lowerMessage: string): boolean {
+  return ["session/set_mode", "session/set_model", "session/set_config_option"].some((text) =>
+    lowerMessage.includes(text),
+  );
+}
+
+function isRuntimeAcpProtocolError(params: RenderableOutputError, lowerMessage: string): boolean {
+  return (
     params.origin === "acp" &&
     params.code === "RUNTIME" &&
     (params.acp?.code === -32602 ||
       params.acp?.code === -32603 ||
       lowerMessage.includes("internal error"))
-  ) {
-    return ["hint: rerun with `--verbose` to capture the underlying ACP error details."];
-  }
-
-  return [];
+  );
 }
 
 function summarizeToolInput(rawInput: unknown): string | undefined {
@@ -399,42 +439,43 @@ function summarizeToolInput(rawInput: unknown): string | undefined {
     return undefined;
   }
 
-  if (
-    typeof rawInput === "string" ||
-    typeof rawInput === "number" ||
-    typeof rawInput === "boolean"
-  ) {
+  if (isScalarToolInput(rawInput)) {
     return toInline(String(rawInput));
   }
 
   const record = asRecord(rawInput);
   if (record) {
-    const command = readFirstString(record, ["command", "cmd", "program"]);
-    const args = readFirstStringArray(record, ["args", "arguments"]);
-    if (command) {
-      const invocation = [command, ...(args ?? [])].join(" ");
-      return toInline(invocation);
-    }
-
-    const location = readFirstString(record, [
-      "path",
-      "file",
-      "filePath",
-      "filepath",
-      "target",
-      "uri",
-      "url",
-    ]);
-    if (location) {
-      return toInline(location);
-    }
-
-    const query = readFirstString(record, ["query", "pattern", "text", "search"]);
-    if (query) {
-      return toInline(query);
-    }
+    return summarizeToolInputRecord(record) ?? summarizeToolInputJson(rawInput);
   }
 
+  return summarizeToolInputJson(rawInput);
+}
+
+function isScalarToolInput(value: unknown): value is string | number | boolean {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function summarizeToolInputRecord(record: Record<string, unknown>): string | undefined {
+  const command = readFirstString(record, ["command", "cmd", "program"]);
+  const args = readFirstStringArray(record, ["args", "arguments"]);
+  if (command) {
+    return toInline([command, ...(args ?? [])].join(" "));
+  }
+
+  const location = readFirstString(record, [
+    "path",
+    "file",
+    "filePath",
+    "filepath",
+    "target",
+    "uri",
+    "url",
+  ]);
+  const query = readFirstString(record, ["query", "pattern", "text", "search"]);
+  return location || query ? toInline(location ?? query ?? "") : undefined;
+}
+
+function summarizeToolInputJson(rawInput: unknown): string | undefined {
   const json = safeJson(rawInput, 0);
   return json ? toInline(json) : undefined;
 }
@@ -448,16 +489,10 @@ function formatLocations(
 
   const unique = new Set<string>();
   for (const location of locations) {
-    const path = location.path?.trim();
-    if (!path) {
-      continue;
+    const formatted = formatLocation(location);
+    if (formatted) {
+      unique.add(formatted);
     }
-
-    const line =
-      typeof location.line === "number" && Number.isFinite(location.line)
-        ? `:${Math.max(1, Math.trunc(location.line))}`
-        : "";
-    unique.add(`${path}${line}`);
   }
 
   const items = [...unique];
@@ -472,6 +507,19 @@ function formatLocations(
   }
 
   return `${visible.join(", ")}, +${hidden} more`;
+}
+
+function formatLocation(location: ToolCallLocation): string | undefined {
+  const path = location.path?.trim();
+  if (!path) {
+    return undefined;
+  }
+
+  const line =
+    typeof location.line === "number" && Number.isFinite(location.line)
+      ? `:${Math.max(1, Math.trunc(location.line))}`
+      : "";
+  return `${path}${line}`;
 }
 
 function summarizeDiff(path: string, oldText: string | null | undefined, newText: string): string {
@@ -494,12 +542,7 @@ function textFromContentBlock(content: ContentBlock): string | undefined {
     case "resource_link":
       return content.title ?? content.name ?? content.uri;
     case "resource": {
-      if ("text" in content.resource && typeof content.resource.text === "string") {
-        return content.resource.text;
-      }
-      const uri = content.resource.uri;
-      const mimeType = content.resource.mimeType;
-      return `[resource] ${uri}${mimeType ? ` (${mimeType})` : ""}`;
+      return textFromResourceBlock(content);
     }
     case "image":
       return `[image] ${content.mimeType}`;
@@ -508,6 +551,15 @@ function textFromContentBlock(content: ContentBlock): string | undefined {
     default:
       return undefined;
   }
+}
+
+function textFromResourceBlock(content: Extract<ContentBlock, { type: "resource" }>): string {
+  if ("text" in content.resource && typeof content.resource.text === "string") {
+    return content.resource.text;
+  }
+  const uri = content.resource.uri;
+  const mimeType = content.resource.mimeType;
+  return `[resource] ${uri}${mimeType ? ` (${mimeType})` : ""}`;
 }
 
 function summarizeToolContent(
@@ -520,21 +572,9 @@ function summarizeToolContent(
   const fragments: string[] = [];
 
   for (const entry of content) {
-    if (entry.type === "content") {
-      const text = textFromContentBlock(entry.content);
-      if (text && text.trim()) {
-        fragments.push(text.trimEnd());
-      }
-      continue;
-    }
-
-    if (entry.type === "diff") {
-      fragments.push(summarizeDiff(entry.path, entry.oldText, entry.newText));
-      continue;
-    }
-
-    if (entry.type === "terminal") {
-      fragments.push(`[terminal] ${entry.terminalId}`);
+    const fragment = summarizeToolContentEntry(entry);
+    if (fragment) {
+      fragments.push(fragment);
     }
   }
 
@@ -548,6 +588,20 @@ function summarizeToolContent(
   return unique.join("\n\n");
 }
 
+function summarizeToolContentEntry(entry: ToolCallContent): string | undefined {
+  if (entry.type === "content") {
+    const text = textFromContentBlock(entry.content);
+    return text && text.trim() ? text.trimEnd() : undefined;
+  }
+  if (entry.type === "diff") {
+    return summarizeDiff(entry.path, entry.oldText, entry.newText);
+  }
+  if (entry.type === "terminal") {
+    return `[terminal] ${entry.terminalId}`;
+  }
+  return undefined;
+}
+
 function extractOutputText(
   value: unknown,
   depth = 0,
@@ -557,6 +611,38 @@ function extractOutputText(
     return undefined;
   }
 
+  const scalar = extractScalarOutputText(value);
+  if (scalar !== null) {
+    return scalar;
+  }
+
+  if (depth >= 4) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return extractOutputTextArray(value, depth, seen);
+  }
+
+  return extractOutputTextRecord(value, depth, seen);
+}
+
+function extractOutputTextRecord(
+  value: unknown,
+  depth: number,
+  seen: Set<unknown>,
+): string | undefined {
+  const record = asRecord(value);
+  if (!record || seen.has(record)) {
+    return undefined;
+  }
+
+  seen.add(record);
+
+  return extractPreferredOutputText(record, depth, seen) ?? extractJsonOutputText(record);
+}
+
+function extractScalarOutputText(value: unknown): string | undefined | null {
   if (typeof value === "string") {
     const trimmed = value.trimEnd();
     return trimmed.length > 0 ? trimmed : undefined;
@@ -566,50 +652,39 @@ function extractOutputText(
     return String(value);
   }
 
-  if (depth >= 4) {
-    return undefined;
-  }
+  return null;
+}
 
-  if (Array.isArray(value)) {
-    const parts = value
-      .map((entry) => extractOutputText(entry, depth + 1, seen))
-      .filter((entry): entry is string => Boolean(entry));
-    if (parts.length === 0) {
-      return undefined;
-    }
-    return dedupeStrings(parts).join("\n");
-  }
+function extractOutputTextArray(
+  value: unknown[],
+  depth: number,
+  seen: Set<unknown>,
+): string | undefined {
+  const parts = value
+    .map((entry) => extractOutputText(entry, depth + 1, seen))
+    .filter((entry): entry is string => Boolean(entry));
+  return parts.length > 0 ? dedupeStrings(parts).join("\n") : undefined;
+}
 
-  const record = asRecord(value);
-  if (!record) {
-    return undefined;
-  }
-  if (seen.has(record)) {
-    return undefined;
-  }
-  seen.add(record);
-
-  const preferred: string[] = [];
-  for (const key of OUTPUT_PRIORITY_KEYS) {
+function extractPreferredOutputText(
+  record: Record<string, unknown>,
+  depth: number,
+  seen: Set<unknown>,
+): string | undefined {
+  const preferred = OUTPUT_PRIORITY_KEYS.flatMap((key) => {
     if (!(key in record)) {
-      continue;
+      return [];
     }
     const extracted = extractOutputText(record[key], depth + 1, seen);
-    if (extracted) {
-      preferred.push(extracted);
-    }
-  }
-
+    return extracted ? [extracted] : [];
+  });
   const uniquePreferred = dedupeStrings(preferred);
-  if (uniquePreferred.length > 0) {
-    return uniquePreferred.join("\n");
-  }
+  return uniquePreferred.length > 0 ? uniquePreferred.join("\n") : undefined;
+}
 
+function extractJsonOutputText(record: Record<string, unknown>): string | undefined {
   const json = safeJson(record, 2);
-  if (!json || json === "{}") {
-    return undefined;
-  }
-  return json;
+  return !json || json === "{}" ? undefined : json;
 }
 
 function summarizeToolOutput(
@@ -721,7 +796,10 @@ class TextOutputFormatter implements OutputFormatter {
     if (update.sessionUpdate !== "agent_thought_chunk") {
       this.flushThoughtBuffer();
     }
+    this.renderSessionUpdateBody(update);
+  }
 
+  private renderSessionUpdateBody(update: SessionNotification["update"]): void {
     switch (update.sessionUpdate) {
       case "agent_message_chunk": {
         if (update.content.type === "text") {
@@ -744,15 +822,21 @@ class TextOutputFormatter implements OutputFormatter {
         return;
       }
       case "plan": {
-        this.beginSection("plan");
-        this.writeLine(this.bold("[plan]"));
-        for (const entry of update.entries) {
-          this.writeLine(`  - [${entry.status}] ${entry.content}`);
-        }
+        this.renderPlanUpdate(update.entries);
         return;
       }
       default:
         return;
+    }
+  }
+
+  private renderPlanUpdate(
+    entries: Extract<SessionNotification["update"], { sessionUpdate: "plan" }>["entries"],
+  ): void {
+    this.beginSection("plan");
+    this.writeLine(this.bold("[plan]"));
+    for (const entry of entries) {
+      this.writeLine(`  - [${entry.status}] ${entry.content}`);
     }
   }
 
@@ -897,10 +981,17 @@ class TextOutputFormatter implements OutputFormatter {
   }
 
   private mergeToolState(state: ToolRenderState, update: ToolCall | ToolCallUpdate): void {
-    if (typeof update.title === "string" && update.title.trim().length > 0) {
-      state.title = update.title;
-    }
+    this.mergeToolTitle(state, update.title);
+    this.mergeToolPayloadState(state, update);
+  }
 
+  private mergeToolTitle(state: ToolRenderState, title: string | null | undefined): void {
+    if (typeof title === "string" && title.trim().length > 0) {
+      state.title = title;
+    }
+  }
+
+  private mergeToolPayloadState(state: ToolRenderState, update: ToolCall | ToolCallUpdate): void {
     if (update.status !== undefined) {
       state.status = update.status;
     }
@@ -1130,14 +1221,10 @@ class QuietOutputFormatter implements OutputFormatter {
   }
 
   private formatCostLine(cost: unknown): string | undefined {
-    if (typeof cost === "number" && Number.isFinite(cost)) {
-      return `[acpx] cost: ${formatMetadataNumber(cost)}`;
+    const scalar = this.formatScalarCostLine(cost);
+    if (scalar) {
+      return scalar;
     }
-
-    if (typeof cost === "string" && cost.trim()) {
-      return `[acpx] cost: ${cost.trim()}`;
-    }
-
     const record = asRecord(cost);
     if (!record) {
       return undefined;
@@ -1153,6 +1240,18 @@ class QuietOutputFormatter implements OutputFormatter {
         ? ` ${record.currency.trim()}`
         : "";
     return `[acpx] cost: ${formatMetadataNumber(amount)}${currency}`;
+  }
+
+  private formatScalarCostLine(cost: unknown): string | undefined {
+    if (typeof cost === "number" && Number.isFinite(cost)) {
+      return `[acpx] cost: ${formatMetadataNumber(cost)}`;
+    }
+
+    if (typeof cost === "string" && cost.trim()) {
+      return `[acpx] cost: ${cost.trim()}`;
+    }
+
+    return undefined;
   }
 }
 

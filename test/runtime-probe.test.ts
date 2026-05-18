@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAgentRegistry } from "../src/runtime.js";
-import { probeRuntime } from "../src/runtime/public/probe.js";
+import {
+  formatRuntimeDetail,
+  normalizeRuntimeDetails,
+  probeRuntime,
+} from "../src/runtime/public/probe.js";
 import { createRuntimeOptions, InMemorySessionStore } from "./runtime-test-helpers.js";
 
 test("probeRuntime uses the default agent override and reports protocol details", async () => {
@@ -90,4 +94,26 @@ test("probeRuntime stringifies non-Error thrown values in details", async () => 
 
   assert.equal(report.ok, false);
   assert.equal(report.details?.[3], '{"code":"SPAWN_FAILED","reason":"missing binary"}');
+});
+
+test("formatRuntimeDetail handles primitive, function, and circular values", () => {
+  function namedProbeDetail() {}
+  const circular: { self?: unknown } = {};
+  circular.self = circular;
+
+  assert.equal(formatRuntimeDetail(undefined), "undefined");
+  assert.equal(formatRuntimeDetail(7n), "7");
+  assert.equal(formatRuntimeDetail(Symbol.for("acpx.test")), "Symbol(acpx.test)");
+  assert.equal(formatRuntimeDetail(namedProbeDetail), "[Function namedProbeDetail]");
+  assert.equal(
+    formatRuntimeDetail(() => undefined),
+    "[Function]",
+  );
+  assert.equal(formatRuntimeDetail(circular), '{"self":"[Circular]"}');
+  assert.deepEqual(normalizeRuntimeDetails([new Error("boom"), "ok", null]), [
+    "boom",
+    "ok",
+    "null",
+  ]);
+  assert.equal(normalizeRuntimeDetails(undefined), undefined);
 });

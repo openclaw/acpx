@@ -96,18 +96,7 @@ function contentToUserContent(content: ContentBlock): SessionUserContent | undef
   }
 
   if (content.type === "resource") {
-    if ("text" in content.resource && typeof content.resource.text === "string") {
-      return {
-        Text: content.resource.text,
-      };
-    }
-
-    return {
-      Mention: {
-        uri: content.resource.uri,
-        content: content.resource.uri,
-      },
-    };
+    return resourceToUserContent(content);
   }
 
   if (content.type === "image") {
@@ -120,6 +109,23 @@ function contentToUserContent(content: ContentBlock): SessionUserContent | undef
   }
 
   return undefined;
+}
+
+function resourceToUserContent(
+  content: Extract<ContentBlock, { type: "resource" }>,
+): SessionUserContent {
+  if ("text" in content.resource && typeof content.resource.text === "string") {
+    return {
+      Text: content.resource.text,
+    };
+  }
+
+  return {
+    Mention: {
+      uri: content.resource.uri,
+      content: content.resource.uri,
+    },
+  };
 }
 
 function nextUserMessageId(): string {
@@ -297,19 +303,40 @@ function upsertToolResult(
   patch: Partial<SessionToolResult>,
 ): void {
   const existing = agent.tool_results[toolCallId];
+  const fallback = existingToolResultValues(existing);
   const next: SessionToolResult = {
     tool_use_id: toolCallId,
-    tool_name: patch.tool_name ?? existing?.tool_name ?? "tool_call",
-    is_error: patch.is_error ?? existing?.is_error ?? false,
-    content: patch.content ?? existing?.content ?? { Text: "" },
-    output: patch.output ?? existing?.output,
+    tool_name: patch.tool_name ?? fallback.tool_name,
+    is_error: patch.is_error ?? fallback.is_error,
+    content: patch.content ?? fallback.content,
+    output: patch.output ?? fallback.output,
   };
   agent.tool_results[toolCallId] = next;
+}
+
+function existingToolResultValues(existing: SessionToolResult | undefined): SessionToolResult {
+  if (existing) {
+    return existing;
+  }
+  return {
+    tool_use_id: "",
+    tool_name: "tool_call",
+    is_error: false,
+    content: { Text: "" },
+    output: undefined,
+  };
 }
 
 function applyToolCallUpdate(agent: SessionAgentMessage, update: ToolCall | ToolCallUpdate): void {
   const tool = ensureToolUseContent(agent, update.toolCallId);
 
+  applyToolIdentityUpdate(tool, update);
+  applyToolInputUpdate(tool, update);
+  applyToolStatusUpdate(tool, update);
+  applyToolResultUpdate(agent, tool, update);
+}
+
+function applyToolIdentityUpdate(tool: SessionToolUse, update: ToolCall | ToolCallUpdate): void {
   if (hasOwn(update, "title")) {
     tool.name =
       normalizeAgentName((update as { title?: unknown }).title) ?? tool.name ?? "tool_call";
@@ -321,35 +348,46 @@ function applyToolCallUpdate(agent: SessionAgentMessage, update: ToolCall | Tool
       tool.name = kindName ?? tool.name;
     }
   }
+}
 
-  if (hasOwn(update, "rawInput")) {
-    const rawInput = deepClone((update as { rawInput?: unknown }).rawInput);
-    tool.input = rawInput ?? {};
-    tool.raw_input = toRawInput(rawInput);
+function applyToolInputUpdate(tool: SessionToolUse, update: ToolCall | ToolCallUpdate): void {
+  if (!hasOwn(update, "rawInput")) {
+    return;
   }
+  const rawInput = deepClone((update as { rawInput?: unknown }).rawInput);
+  tool.input = rawInput ?? {};
+  tool.raw_input = toRawInput(rawInput);
+}
 
+function applyToolStatusUpdate(tool: SessionToolUse, update: ToolCall | ToolCallUpdate): void {
   if (hasOwn(update, "status")) {
     tool.is_input_complete = statusIndicatesComplete((update as { status?: unknown }).status);
   }
+}
 
-  if (
-    hasOwn(update, "rawOutput") ||
-    hasOwn(update, "status") ||
-    hasOwn(update, "title") ||
-    hasOwn(update, "kind")
-  ) {
-    const status = (update as { status?: unknown }).status;
-    const output = hasOwn(update, "rawOutput")
-      ? deepClone((update as { rawOutput?: unknown }).rawOutput)
-      : undefined;
-
-    upsertToolResult(agent, update.toolCallId, {
-      tool_name: tool.name,
-      is_error: statusIndicatesError(status),
-      content: output === undefined ? undefined : toToolResultContent(output),
-      output,
-    });
+function applyToolResultUpdate(
+  agent: SessionAgentMessage,
+  tool: SessionToolUse,
+  update: ToolCall | ToolCallUpdate,
+): void {
+  if (!hasToolResultPatch(update)) {
+    return;
   }
+  const status = (update as { status?: unknown }).status;
+  const output = hasOwn(update, "rawOutput")
+    ? deepClone((update as { rawOutput?: unknown }).rawOutput)
+    : undefined;
+
+  upsertToolResult(agent, update.toolCallId, {
+    tool_name: tool.name,
+    is_error: statusIndicatesError(status),
+    content: output === undefined ? undefined : toToolResultContent(output),
+    output,
+  });
+}
+
+function hasToolResultPatch(update: ToolCall | ToolCallUpdate): boolean {
+  return ["rawOutput", "status", "title", "kind"].some((key) => hasOwn(update, key));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -392,16 +430,15 @@ function usageToTokenUsage(update: UsageUpdate): SessionTokenUsage | undefined {
     ]),
   };
 
-  if (
-    normalized.input_tokens === undefined &&
-    normalized.output_tokens === undefined &&
-    normalized.cache_creation_input_tokens === undefined &&
-    normalized.cache_read_input_tokens === undefined
-  ) {
+  if (!hasTokenUsageValue(normalized)) {
     return undefined;
   }
 
   return normalized;
+}
+
+function hasTokenUsageValue(usage: SessionTokenUsage): boolean {
+  return Object.values(usage).some((value) => value !== undefined);
 }
 
 function ensureAcpxState(state: SessionAcpxState | undefined): SessionAcpxState {
@@ -461,24 +498,30 @@ export function cloneSessionAcpxState(
     available_models: state.available_models ? [...state.available_models] : undefined,
     available_commands: state.available_commands ? [...state.available_commands] : undefined,
     config_options: state.config_options ? deepClone(state.config_options) : undefined,
-    session_options: state.session_options
-      ? {
-          model: state.session_options.model,
-          allowed_tools: state.session_options.allowed_tools
-            ? [...state.session_options.allowed_tools]
-            : undefined,
-          max_turns: state.session_options.max_turns,
-          ...(state.session_options.system_prompt !== undefined
-            ? {
-                system_prompt:
-                  typeof state.session_options.system_prompt === "string"
-                    ? state.session_options.system_prompt
-                    : { append: state.session_options.system_prompt.append },
-              }
-            : {}),
-        }
-      : undefined,
+    session_options: cloneSessionOptions(state.session_options),
   };
+}
+
+function cloneSessionOptions(
+  options: SessionAcpxState["session_options"],
+): SessionAcpxState["session_options"] {
+  if (!options) {
+    return undefined;
+  }
+  return {
+    model: options.model,
+    allowed_tools: options.allowed_tools ? [...options.allowed_tools] : undefined,
+    max_turns: options.max_turns,
+    ...(options.system_prompt !== undefined
+      ? { system_prompt: cloneSystemPromptOption(options.system_prompt) }
+      : {}),
+  };
+}
+
+function cloneSystemPromptOption(
+  option: NonNullable<NonNullable<SessionAcpxState["session_options"]>["system_prompt"]>,
+): NonNullable<NonNullable<SessionAcpxState["session_options"]>["system_prompt"]> {
+  return typeof option === "string" ? option : { append: option.append };
 }
 
 export function appendLegacyHistory(
@@ -578,82 +621,129 @@ export function recordSessionUpdate(
   const acpx = ensureAcpxState(state);
 
   const update: SessionUpdate = notification.update;
-  switch (update.sessionUpdate) {
-    case "user_message_chunk": {
-      const userContent = contentToUserContent(update.content);
-      if (userContent) {
-        conversation.messages.push({
-          User: {
-            id: nextUserMessageId(),
-            content: [userContent],
-          },
-        });
-      }
-      break;
-    }
-    case "agent_message_chunk": {
-      const text = extractText(update.content);
-      if (text) {
-        const agent = ensureAgentMessage(conversation);
-        appendAgentText(agent, text);
-      }
-      break;
-    }
-    case "agent_thought_chunk": {
-      const text = extractText(update.content);
-      if (text) {
-        const agent = ensureAgentMessage(conversation);
-        appendAgentThinking(agent, text);
-      }
-      break;
-    }
-    case "tool_call":
-    case "tool_call_update": {
-      const agent = ensureAgentMessage(conversation);
-      applyToolCallUpdate(agent, update);
-      break;
-    }
-    case "usage_update": {
-      const usage = usageToTokenUsage(update);
-      if (usage) {
-        conversation.cumulative_token_usage = usage;
-        const userId = lastUserMessageId(conversation);
-        if (userId) {
-          conversation.request_token_usage[userId] = usage;
-        }
-      }
-      break;
-    }
-    case "session_info_update": {
-      if (hasOwn(update, "title")) {
-        conversation.title = update.title ?? null;
-      }
-      if (hasOwn(update, "updatedAt")) {
-        conversation.updated_at = update.updatedAt ?? conversation.updated_at;
-      }
-      break;
-    }
-    case "available_commands_update": {
-      acpx.available_commands = update.availableCommands
-        .map((entry) => entry.name)
-        .filter((entry) => typeof entry === "string" && entry.trim().length > 0);
-      break;
-    }
-    case "current_mode_update": {
-      acpx.current_mode_id = update.currentModeId;
-      break;
-    }
-    case "config_option_update": {
-      acpx.config_options = deepClone(update.configOptions);
-      break;
-    }
-    default:
-      break;
-  }
+  applySessionUpdate(conversation, acpx, update);
 
   updateConversationTimestamp(conversation, timestamp);
   trimConversationForRuntime(conversation);
   return acpx;
+}
+
+function applySessionUpdate(
+  conversation: SessionConversation,
+  acpx: SessionAcpxState,
+  update: SessionUpdate,
+): void {
+  const handler = SESSION_UPDATE_HANDLERS[update.sessionUpdate];
+  handler?.(conversation, acpx, update);
+}
+
+type SessionUpdateHandler = (
+  conversation: SessionConversation,
+  acpx: SessionAcpxState,
+  update: SessionUpdate,
+) => void;
+
+const SESSION_UPDATE_HANDLERS: Record<string, SessionUpdateHandler> = {
+  user_message_chunk: (conversation, _acpx, update) => {
+    if (update.sessionUpdate === "user_message_chunk") {
+      appendUserMessageChunk(conversation, update.content);
+    }
+  },
+  agent_message_chunk: (conversation, _acpx, update) => {
+    if (update.sessionUpdate === "agent_message_chunk") {
+      appendAgentMessageChunk(conversation, update.content, appendAgentText);
+    }
+  },
+  agent_thought_chunk: (conversation, _acpx, update) => {
+    if (update.sessionUpdate === "agent_thought_chunk") {
+      appendAgentMessageChunk(conversation, update.content, appendAgentThinking);
+    }
+  },
+  tool_call: (conversation, _acpx, update) => {
+    if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
+      applyToolCallUpdate(ensureAgentMessage(conversation), update);
+    }
+  },
+  tool_call_update: (conversation, _acpx, update) => {
+    if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
+      applyToolCallUpdate(ensureAgentMessage(conversation), update);
+    }
+  },
+  usage_update: (conversation, _acpx, update) => {
+    if (update.sessionUpdate === "usage_update") {
+      applyUsageUpdate(conversation, update);
+    }
+  },
+  session_info_update: (conversation, _acpx, update) => {
+    if (update.sessionUpdate === "session_info_update") {
+      applySessionInfoUpdate(conversation, update);
+    }
+  },
+  available_commands_update: (_conversation, acpx, update) => {
+    if (update.sessionUpdate === "available_commands_update") {
+      acpx.available_commands = update.availableCommands
+        .map((entry) => entry.name)
+        .filter((entry) => typeof entry === "string" && entry.trim().length > 0);
+    }
+  },
+  current_mode_update: (_conversation, acpx, update) => {
+    if (update.sessionUpdate === "current_mode_update") {
+      acpx.current_mode_id = update.currentModeId;
+    }
+  },
+  config_option_update: (_conversation, acpx, update) => {
+    if (update.sessionUpdate === "config_option_update") {
+      acpx.config_options = deepClone(update.configOptions);
+    }
+  },
+};
+
+function appendUserMessageChunk(conversation: SessionConversation, content: ContentBlock): void {
+  const userContent = contentToUserContent(content);
+  if (!userContent) {
+    return;
+  }
+  conversation.messages.push({
+    User: {
+      id: nextUserMessageId(),
+      content: [userContent],
+    },
+  });
+}
+
+function appendAgentMessageChunk(
+  conversation: SessionConversation,
+  content: ContentBlock,
+  append: (agent: SessionAgentMessage, text: string) => void,
+): void {
+  const text = extractText(content);
+  if (text) {
+    append(ensureAgentMessage(conversation), text);
+  }
+}
+
+function applyUsageUpdate(conversation: SessionConversation, update: UsageUpdate): void {
+  const usage = usageToTokenUsage(update);
+  if (!usage) {
+    return;
+  }
+  conversation.cumulative_token_usage = usage;
+  const userId = lastUserMessageId(conversation);
+  if (userId) {
+    conversation.request_token_usage[userId] = usage;
+  }
+}
+
+function applySessionInfoUpdate(
+  conversation: SessionConversation,
+  update: Extract<SessionUpdate, { sessionUpdate: "session_info_update" }>,
+): void {
+  if (hasOwn(update, "title")) {
+    conversation.title = update.title ?? null;
+  }
+  if (hasOwn(update, "updatedAt")) {
+    conversation.updated_at = update.updatedAt ?? conversation.updated_at;
+  }
 }
 
 export function recordClientOperation(
@@ -674,41 +764,7 @@ export function trimConversationForRuntime(conversation: SessionConversation): v
   }
 
   for (const message of conversation.messages) {
-    if (!isAgentMessage(message)) {
-      if (isUserMessage(message)) {
-        message.User.content = message.User.content.map((content) => {
-          if ("Text" in content) {
-            return {
-              Text: trimRuntimeText(content.Text, MAX_RUNTIME_AGENT_TEXT_CHARS),
-            };
-          }
-          return content;
-        });
-      }
-      continue;
-    }
-
-    for (const content of message.Agent.content) {
-      if ("Text" in content) {
-        content.Text = trimRuntimeText(content.Text, MAX_RUNTIME_AGENT_TEXT_CHARS);
-      } else if ("Thinking" in content) {
-        content.Thinking.text = trimRuntimeText(content.Thinking.text, MAX_RUNTIME_THINKING_CHARS);
-      } else if ("ToolUse" in content) {
-        content.ToolUse.raw_input = trimRuntimeText(
-          content.ToolUse.raw_input,
-          MAX_RUNTIME_TOOL_IO_CHARS,
-        );
-      }
-    }
-
-    for (const result of Object.values(message.Agent.tool_results)) {
-      if ("Text" in result.content) {
-        result.content.Text = trimRuntimeText(result.content.Text, MAX_RUNTIME_TOOL_IO_CHARS);
-      }
-      if (typeof result.output === "string") {
-        result.output = trimRuntimeText(result.output, MAX_RUNTIME_TOOL_IO_CHARS);
-      }
-    }
+    trimRuntimeMessage(message);
   }
 
   const requestUsageEntries = Object.entries(conversation.request_token_usage);
@@ -716,5 +772,59 @@ export function trimConversationForRuntime(conversation: SessionConversation): v
     conversation.request_token_usage = Object.fromEntries(
       requestUsageEntries.slice(-MAX_RUNTIME_REQUEST_TOKEN_USAGE),
     );
+  }
+}
+
+function trimRuntimeMessage(message: SessionMessage): void {
+  if (isUserMessage(message)) {
+    trimRuntimeUserMessage(message.User);
+    return;
+  }
+
+  if (isAgentMessage(message)) {
+    trimRuntimeAgentMessage(message.Agent);
+  }
+}
+
+function trimRuntimeUserMessage(message: { content: SessionUserContent[] }): void {
+  message.content = message.content.map((content) => {
+    if ("Text" in content) {
+      return {
+        Text: trimRuntimeText(content.Text, MAX_RUNTIME_AGENT_TEXT_CHARS),
+      };
+    }
+    return content;
+  });
+}
+
+function trimRuntimeAgentMessage(message: SessionAgentMessage): void {
+  for (const content of message.content) {
+    trimRuntimeAgentContent(content);
+  }
+
+  for (const result of Object.values(message.tool_results)) {
+    trimRuntimeToolResult(result);
+  }
+}
+
+function trimRuntimeAgentContent(content: SessionAgentContent): void {
+  if ("Text" in content) {
+    content.Text = trimRuntimeText(content.Text, MAX_RUNTIME_AGENT_TEXT_CHARS);
+  } else if ("Thinking" in content) {
+    content.Thinking.text = trimRuntimeText(content.Thinking.text, MAX_RUNTIME_THINKING_CHARS);
+  } else if ("ToolUse" in content) {
+    content.ToolUse.raw_input = trimRuntimeText(
+      content.ToolUse.raw_input,
+      MAX_RUNTIME_TOOL_IO_CHARS,
+    );
+  }
+}
+
+function trimRuntimeToolResult(result: SessionToolResult): void {
+  if ("Text" in result.content) {
+    result.content.Text = trimRuntimeText(result.content.Text, MAX_RUNTIME_TOOL_IO_CHARS);
+  }
+  if (typeof result.output === "string") {
+    result.output = trimRuntimeText(result.output, MAX_RUNTIME_TOOL_IO_CHARS);
   }
 }

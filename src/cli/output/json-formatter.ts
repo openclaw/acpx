@@ -82,20 +82,31 @@ function sanitizeToolMessage(message: unknown): unknown {
     ...root,
     params: {
       ...params,
-      update: {
-        ...update,
-        rawOutput:
-          Object.prototype.hasOwnProperty.call(update, "rawOutput") &&
-          update.rawOutput !== undefined
-            ? { content: SUPPRESSED_READ_OUTPUT }
-            : update.rawOutput,
-        content:
-          Object.prototype.hasOwnProperty.call(update, "content") && update.content !== undefined
-            ? sanitizeToolContent(update.content)
-            : update.content,
-      },
+      update: sanitizeToolUpdate(update),
     },
   };
+}
+
+function sanitizeToolUpdate(update: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...update,
+    rawOutput: sanitizedRawOutput(update),
+    content: sanitizedContent(update),
+  };
+}
+
+function sanitizedRawOutput(update: Record<string, unknown>): unknown {
+  if (Object.prototype.hasOwnProperty.call(update, "rawOutput") && update.rawOutput !== undefined) {
+    return { content: SUPPRESSED_READ_OUTPUT };
+  }
+  return update.rawOutput;
+}
+
+function sanitizedContent(update: Record<string, unknown>): unknown {
+  if (Object.prototype.hasOwnProperty.call(update, "content") && update.content !== undefined) {
+    return sanitizeToolContent(update.content);
+  }
+  return update.content;
 }
 
 class JsonOutputFormatter implements OutputFormatter {
@@ -175,19 +186,8 @@ class JsonOutputFormatter implements OutputFormatter {
   }
 
   private sanitizeReadToolMessage(message: unknown): unknown {
-    const root = asRecord(message);
-    if (root?.method !== "session/update") {
-      return message;
-    }
-
-    const params = asRecord(root.params);
-    const update = asRecord(params?.update);
-    if (!params || !update) {
-      return message;
-    }
-
-    const sessionUpdate = update.sessionUpdate;
-    if (sessionUpdate !== "tool_call" && sessionUpdate !== "tool_call_update") {
+    const update = this.readToolUpdate(message);
+    if (!update) {
       return message;
     }
 
@@ -196,18 +196,39 @@ class JsonOutputFormatter implements OutputFormatter {
       return message;
     }
 
+    const current = this.mergeToolState(toolCallId, update);
+    this.toolStateById.set(toolCallId, current);
+
+    return isReadLikeTool(current) ? sanitizeToolMessage(message) : message;
+  }
+
+  private readToolUpdate(message: unknown): Record<string, unknown> | undefined {
+    const root = asRecord(message);
+    if (root?.method !== "session/update") {
+      return undefined;
+    }
+    const params = asRecord(root.params);
+    const update = asRecord(params?.update);
+    if (!params || !update) {
+      return undefined;
+    }
+
+    const sessionUpdate = update.sessionUpdate;
+    if (sessionUpdate !== "tool_call" && sessionUpdate !== "tool_call_update") {
+      return undefined;
+    }
+    return update;
+  }
+
+  private mergeToolState(
+    toolCallId: string,
+    update: Record<string, unknown>,
+  ): { title?: string; kind?: string | null } {
     const previous = this.toolStateById.get(toolCallId) ?? {};
-    const current = {
+    return {
       title: typeof update.title === "string" ? update.title : previous.title,
       kind: typeof update.kind === "string" || update.kind === null ? update.kind : previous.kind,
     };
-    this.toolStateById.set(toolCallId, current);
-
-    if (!isReadLikeTool(current)) {
-      return message;
-    }
-
-    return sanitizeToolMessage(message);
   }
 
   onError(params: {

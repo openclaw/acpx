@@ -97,6 +97,50 @@ function parseMeta(value: unknown, path: string): Record<string, unknown> | null
   return value as Record<string, unknown>;
 }
 
+function parseServerType(rawType: unknown, path: string): "http" | "sse" | "stdio" {
+  if (rawType === undefined) {
+    // Allow normalized stdio entries where type is omitted by ACP shape.
+    return "stdio";
+  }
+
+  const parsedType = parseNonEmptyString(rawType, `${path}.type`);
+  if (parsedType !== "http" && parsedType !== "sse" && parsedType !== "stdio") {
+    throw new Error(`Invalid ${path}.type: expected http, sse, or stdio`);
+  }
+  return parsedType;
+}
+
+function parseHttpServer(
+  serverRecord: UnknownRecord,
+  path: string,
+  type: "http" | "sse",
+  name: string,
+  _meta: Record<string, unknown> | null | undefined,
+): McpServer {
+  return {
+    type,
+    name,
+    url: parseNonEmptyString(serverRecord.url, `${path}.url`),
+    headers: parseHeaders(serverRecord.headers, `${path}.headers`),
+    _meta,
+  } satisfies McpServer;
+}
+
+function parseStdioServer(
+  serverRecord: UnknownRecord,
+  path: string,
+  name: string,
+  _meta: Record<string, unknown> | null | undefined,
+): McpServer {
+  return {
+    name,
+    command: parseNonEmptyString(serverRecord.command, `${path}.command`),
+    args: parseArgs(serverRecord.args, `${path}.args`),
+    env: parseEnv(serverRecord.env, `${path}.env`),
+    _meta,
+  } satisfies McpServer;
+}
+
 function parseServer(rawServer: unknown, path: string): McpServer {
   const serverRecord = asRecord(rawServer);
   if (!serverRecord) {
@@ -105,48 +149,13 @@ function parseServer(rawServer: unknown, path: string): McpServer {
 
   const name = parseNonEmptyString(serverRecord.name, `${path}.name`);
   const _meta = parseMeta(serverRecord._meta, `${path}._meta`);
-  const rawType = serverRecord.type;
-
-  let typeValue: "http" | "sse" | "stdio";
-  if (rawType === undefined) {
-    // Allow normalized stdio entries where type is omitted by ACP shape.
-    typeValue = "stdio";
-  } else {
-    const parsedType = parseNonEmptyString(rawType, `${path}.type`);
-    if (parsedType !== "http" && parsedType !== "sse" && parsedType !== "stdio") {
-      throw new Error(`Invalid ${path}.type: expected http, sse, or stdio`);
-    }
-    typeValue = parsedType;
-  }
+  const typeValue = parseServerType(serverRecord.type, path);
 
   if (typeValue === "http" || typeValue === "sse") {
-    const url = parseNonEmptyString(serverRecord.url, `${path}.url`);
-    const headers = parseHeaders(serverRecord.headers, `${path}.headers`);
-    const server = {
-      type: typeValue,
-      name,
-      url,
-      headers,
-      _meta,
-    } satisfies McpServer;
-    return server;
+    return parseHttpServer(serverRecord, path, typeValue, name, _meta);
   }
 
-  if (typeValue === "stdio") {
-    const command = parseNonEmptyString(serverRecord.command, `${path}.command`);
-    const args = parseArgs(serverRecord.args, `${path}.args`);
-    const env = parseEnv(serverRecord.env, `${path}.env`);
-    const server = {
-      name,
-      command,
-      args,
-      env,
-      _meta,
-    } satisfies McpServer;
-    return server;
-  }
-
-  throw new Error(`Invalid ${path}.type: expected http, sse, or stdio`);
+  return parseStdioServer(serverRecord, path, name, _meta);
 }
 
 export function parseMcpServers(

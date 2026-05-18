@@ -31,29 +31,35 @@ function buildPayload(reason: CaptureReason): Record<string, unknown> {
   };
 }
 
+function payloadHasMetrics(payload: Record<string, unknown>): boolean {
+  const metrics = payload.metrics as {
+    counters?: Record<string, number>;
+    gauges?: Record<string, number>;
+    timings?: Record<string, unknown>;
+  };
+  return [metrics.counters, metrics.gauges, metrics.timings].some(
+    (entries) => Object.keys(entries ?? {}).length > 0,
+  );
+}
+
+function appendPerfMetricsPayload(payload: Record<string, unknown>): void {
+  fs.mkdirSync(path.dirname(captureFilePath!), { recursive: true });
+  fs.appendFileSync(captureFilePath!, `${JSON.stringify(payload)}\n`, "utf8");
+  captureSequence += 1;
+}
+
 function writePerfMetricsCapture(reason: CaptureReason, resetAfterWrite: boolean): boolean {
   if (!shouldCapture()) {
     return false;
   }
 
   const payload = buildPayload(reason);
-  const metrics = payload.metrics as {
-    counters?: Record<string, number>;
-    gauges?: Record<string, number>;
-    timings?: Record<string, unknown>;
-  };
-  const hasData =
-    Object.keys(metrics.counters ?? {}).length > 0 ||
-    Object.keys(metrics.gauges ?? {}).length > 0 ||
-    Object.keys(metrics.timings ?? {}).length > 0;
-  if (!hasData) {
+  if (!payloadHasMetrics(payload)) {
     return false;
   }
 
   try {
-    fs.mkdirSync(path.dirname(captureFilePath!), { recursive: true });
-    fs.appendFileSync(captureFilePath!, `${JSON.stringify(payload)}\n`, "utf8");
-    captureSequence += 1;
+    appendPerfMetricsPayload(payload);
     if (resetAfterWrite) {
       resetPerfMetrics();
     }

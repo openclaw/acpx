@@ -411,26 +411,11 @@ function createFlowDefinitionSnapshot(flow: FlowDefinition): FlowDefinitionSnaps
 }
 
 function snapshotNode(node: FlowNodeDefinition): FlowDefinitionSnapshot["nodes"][string] {
-  const common = {
-    nodeType: node.nodeType,
-    ...(node.timeoutMs !== undefined ? { timeoutMs: node.timeoutMs } : {}),
-    ...(node.heartbeatMs !== undefined ? { heartbeatMs: node.heartbeatMs } : {}),
-    ...(node.statusDetail ? { statusDetail: node.statusDetail } : {}),
-  };
+  const common = snapshotCommonNodeFields(node);
 
   switch (node.nodeType) {
     case "acp":
-      return {
-        ...common,
-        ...(node.profile ? { profile: node.profile } : {}),
-        session: {
-          ...(node.session?.handle ? { handle: node.session.handle } : {}),
-          ...(node.session?.isolated ? { isolated: true } : {}),
-        },
-        cwd: snapshotCwd(node.cwd),
-        hasPrompt: true,
-        hasParse: typeof node.parse === "function",
-      };
+      return snapshotAcpNode(node, common);
     case "compute":
       return {
         ...common,
@@ -455,6 +440,37 @@ function snapshotNode(node: FlowNodeDefinition): FlowDefinitionSnapshot["nodes"]
   }
 
   throw new Error(`Unsupported flow node type: ${String(node satisfies never)}`);
+}
+
+function snapshotCommonNodeFields(node: FlowNodeDefinition): {
+  nodeType: FlowNodeDefinition["nodeType"];
+  timeoutMs?: number;
+  heartbeatMs?: number;
+  statusDetail?: string;
+} {
+  return {
+    nodeType: node.nodeType,
+    ...(node.timeoutMs !== undefined ? { timeoutMs: node.timeoutMs } : {}),
+    ...(node.heartbeatMs !== undefined ? { heartbeatMs: node.heartbeatMs } : {}),
+    ...(node.statusDetail ? { statusDetail: node.statusDetail } : {}),
+  };
+}
+
+function snapshotAcpNode(
+  node: Extract<FlowNodeDefinition, { nodeType: "acp" }>,
+  common: ReturnType<typeof snapshotCommonNodeFields>,
+): FlowDefinitionSnapshot["nodes"][string] {
+  return {
+    ...common,
+    ...(node.profile ? { profile: node.profile } : {}),
+    session: {
+      ...(node.session?.handle ? { handle: node.session.handle } : {}),
+      ...(node.session?.isolated ? { isolated: true } : {}),
+    },
+    cwd: snapshotCwd(node.cwd),
+    hasPrompt: true,
+    hasParse: typeof node.parse === "function",
+  };
 }
 
 function snapshotCwd(cwd: AcpNodeDefinition["cwd"]): {

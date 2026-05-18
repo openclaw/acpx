@@ -117,12 +117,49 @@ type QueueOwnerRequestControls<TResult> = {
   reject: (error: unknown) => void;
 };
 
+function queueConnectionErrorFromOwner(
+  message: Extract<QueueOwnerMessage, { type: "error" }>,
+  outputAlreadyEmitted: boolean,
+): QueueConnectionError {
+  return new QueueConnectionError(message.message, {
+    outputCode: message.code,
+    detailCode: message.detailCode,
+    origin: message.origin ?? "queue",
+    retryable: message.retryable,
+    acp: message.acp,
+    ...(outputAlreadyEmitted ? { outputAlreadyEmitted: true } : {}),
+  });
+}
+
 function makeMalformedQueueMessageError(): QueueProtocolError {
   return new QueueProtocolError("Queue owner sent malformed message", {
     detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
     origin: "queue",
     retryable: true,
   });
+}
+
+function emitQueueOwnerError(
+  formatter: OutputFormatter,
+  policy: OutputErrorEmissionPolicy | undefined,
+  sessionId: string,
+  message: Extract<QueueOwnerMessage, { type: "error" }>,
+): QueueConnectionError {
+  formatter.setContext({ sessionId });
+  const queueErrorAlreadyEmitted = policy?.queueErrorAlreadyEmitted ?? true;
+  const shouldEmitInFormatter = message.outputAlreadyEmitted !== true || !queueErrorAlreadyEmitted;
+  if (shouldEmitInFormatter) {
+    formatter.onError({
+      code: message.code ?? "RUNTIME",
+      detailCode: message.detailCode,
+      origin: message.origin ?? "queue",
+      message: message.message,
+      retryable: message.retryable,
+      acp: message.acp,
+    });
+    formatter.flush();
+  }
+  return queueConnectionErrorFromOwner(message, queueErrorAlreadyEmitted);
 }
 
 function parseQueueOwnerResponseLine(
@@ -278,6 +315,66 @@ export type SubmitToQueueOwnerOptions = {
   sessionOptions?: NonNullable<AcpClientOptions["sessionOptions"]>;
 };
 
+function missingQueueAckError(): QueueConnectionError {
+  return new QueueConnectionError("Queue owner did not acknowledge request", {
+    detailCode: "QUEUE_ACK_MISSING",
+    origin: "queue",
+    retryable: true,
+  });
+}
+
+function unexpectedQueueResponseError(): QueueProtocolError {
+  return new QueueProtocolError("Queue owner returned unexpected response", {
+    detailCode: "QUEUE_PROTOCOL_UNEXPECTED_RESPONSE",
+    origin: "queue",
+    retryable: true,
+  });
+}
+
+function handleAcknowledgedSubmitMessage(
+  message: QueueOwnerMessage,
+  controls: QueueOwnerRequestControls<SessionSendOutcome>,
+  formatter: OutputFormatter,
+): void {
+  if (message.type === "event") {
+    formatter.onAcpMessage(message.message);
+    return;
+  }
+  if (message.type === "permission_escalation") {
+    formatter.onPermissionEscalation(message.event);
+    return;
+  }
+  if (message.type === "result") {
+    formatter.flush();
+    controls.resolve(message.result);
+    return;
+  }
+  controls.reject(unexpectedQueueResponseError());
+}
+
+function handleSubmitQueueOwnerMessage(
+  message: QueueOwnerMessage,
+  controls: QueueOwnerRequestControls<SessionSendOutcome>,
+  options: SubmitToQueueOwnerOptions,
+): void {
+  if (message.type === "error") {
+    controls.reject(
+      emitQueueOwnerError(
+        options.outputFormatter,
+        options.errorEmissionPolicy,
+        options.sessionId,
+        message,
+      ),
+    );
+    return;
+  }
+  if (!controls.state.acknowledged) {
+    controls.reject(missingQueueAckError());
+    return;
+  }
+  handleAcknowledgedSubmitMessage(message, controls, options.outputFormatter);
+}
+
 async function submitToQueueOwner(
   owner: QueueOwnerRecord,
   options: SubmitToQueueOwnerOptions,
@@ -320,74 +417,8 @@ async function submitToQueueOwner(
         resolve(queued);
       }
     },
-    onMessage: (message, { state, resolve, reject }) => {
-      if (message.type === "error") {
-        options.outputFormatter.setContext({
-          sessionId: options.sessionId,
-        });
-
-        const queueErrorAlreadyEmitted =
-          options.errorEmissionPolicy?.queueErrorAlreadyEmitted ?? true;
-        const outputAlreadyEmitted = message.outputAlreadyEmitted === true;
-        const shouldEmitInFormatter = !outputAlreadyEmitted || !queueErrorAlreadyEmitted;
-        if (shouldEmitInFormatter) {
-          options.outputFormatter.onError({
-            code: message.code ?? "RUNTIME",
-            detailCode: message.detailCode,
-            origin: message.origin ?? "queue",
-            message: message.message,
-            retryable: message.retryable,
-            acp: message.acp,
-          });
-          options.outputFormatter.flush();
-        }
-        reject(
-          new QueueConnectionError(message.message, {
-            outputCode: message.code,
-            detailCode: message.detailCode,
-            origin: message.origin ?? "queue",
-            retryable: message.retryable,
-            acp: message.acp,
-            ...(queueErrorAlreadyEmitted ? { outputAlreadyEmitted: true } : {}),
-          }),
-        );
-        return;
-      }
-
-      if (!state.acknowledged) {
-        reject(
-          new QueueConnectionError("Queue owner did not acknowledge request", {
-            detailCode: "QUEUE_ACK_MISSING",
-            origin: "queue",
-            retryable: true,
-          }),
-        );
-        return;
-      }
-
-      if (message.type === "event") {
-        options.outputFormatter.onAcpMessage(message.message);
-        return;
-      }
-
-      if (message.type === "permission_escalation") {
-        options.outputFormatter.onPermissionEscalation(message.event);
-        return;
-      }
-
-      if (message.type === "result") {
-        options.outputFormatter.flush();
-        resolve(message.result);
-        return;
-      }
-
-      reject(
-        new QueueProtocolError("Queue owner returned unexpected response", {
-          detailCode: "QUEUE_PROTOCOL_UNEXPECTED_RESPONSE",
-          origin: "queue",
-          retryable: true,
-        }),
-      );
+    onMessage: (message, controls) => {
+      handleSubmitQueueOwnerMessage(message, controls, options);
     },
     onClose: ({ state, resolve, reject }) => {
       if (!state.acknowledged) {

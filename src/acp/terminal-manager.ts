@@ -467,42 +467,55 @@ export class TerminalManager {
   private async signalProcess(terminal: ManagedTerminal, signal: NodeJS.Signals): Promise<void> {
     const pid = terminal.process.pid;
     if (terminal.killProcessGroup && pid && process.platform === "win32") {
-      if (!this.isRunning(terminal)) {
-        await terminal.processGroupSnapshotPromise?.catch(() => {
-          // ignore best-effort process tree snapshot failures
-        });
-      }
-      for (const descendantPid of await listDescendantPids(pid)) {
-        terminal.descendantPids.add(descendantPid);
-      }
-      if (this.isRunning(terminal)) {
-        await killWindowsProcessTree(pid, signal);
-        return;
-      }
-      for (const descendantPid of terminal.descendantPids) {
-        await killWindowsProcessTree(descendantPid, signal);
-      }
+      await this.signalWindowsProcessGroup(terminal, pid, signal);
       return;
     }
     if (terminal.killProcessGroup && pid) {
-      if (!this.isRunning(terminal)) {
-        await terminal.processGroupSnapshotPromise?.catch(() => {
-          // ignore best-effort process group snapshot failures
-        });
-      }
-      for (const descendantPid of await listDescendantPids(pid)) {
-        terminal.descendantPids.add(descendantPid);
-      }
-      if (process.platform !== "win32" && hasLiveProcessGroup(pid)) {
-        sendSignal(-pid, signal);
-        return;
-      }
-      for (const descendantPid of terminal.descendantPids) {
-        sendSignal(descendantPid, signal);
-      }
+      await this.signalPosixProcessGroup(terminal, pid, signal);
       return;
     }
     terminal.process.kill(signal);
+  }
+
+  private async signalWindowsProcessGroup(
+    terminal: ManagedTerminal,
+    pid: number,
+    signal: NodeJS.Signals,
+  ): Promise<void> {
+    await this.captureDescendantPids(terminal, pid);
+    if (this.isRunning(terminal)) {
+      await killWindowsProcessTree(pid, signal);
+      return;
+    }
+    for (const descendantPid of terminal.descendantPids) {
+      await killWindowsProcessTree(descendantPid, signal);
+    }
+  }
+
+  private async signalPosixProcessGroup(
+    terminal: ManagedTerminal,
+    pid: number,
+    signal: NodeJS.Signals,
+  ): Promise<void> {
+    await this.captureDescendantPids(terminal, pid);
+    if (hasLiveProcessGroup(pid)) {
+      sendSignal(-pid, signal);
+      return;
+    }
+    for (const descendantPid of terminal.descendantPids) {
+      sendSignal(descendantPid, signal);
+    }
+  }
+
+  private async captureDescendantPids(terminal: ManagedTerminal, pid: number): Promise<void> {
+    if (!this.isRunning(terminal)) {
+      await terminal.processGroupSnapshotPromise?.catch(() => {
+        // ignore best-effort process group snapshot failures
+      });
+    }
+    for (const descendantPid of await listDescendantPids(pid)) {
+      terminal.descendantPids.add(descendantPid);
+    }
   }
 
   private async waitForCleanupAfterSignal(terminal: ManagedTerminal): Promise<boolean> {
@@ -621,23 +634,7 @@ async function listDescendantPids(rootPid: number): Promise<number[]> {
 
   const childrenByParent = new Map<number, number[]>();
   for (const line of output.split("\n")) {
-    const match = line.trim().match(/^(\d+)\s+(\d+)$/);
-    if (!match) {
-      continue;
-    }
-
-    const pid = Number(match[1]);
-    const parentPid = Number(match[2]);
-    if (!Number.isInteger(pid) || !Number.isInteger(parentPid) || pid <= 0 || parentPid <= 0) {
-      continue;
-    }
-
-    const children = childrenByParent.get(parentPid);
-    if (children) {
-      children.push(pid);
-    } else {
-      childrenByParent.set(parentPid, [pid]);
-    }
+    addProcessListLine(childrenByParent, line);
   }
 
   const descendants: number[] = [];
@@ -648,6 +645,34 @@ async function listDescendantPids(rootPid: number): Promise<number[]> {
     queue.push(...(childrenByParent.get(pid) ?? []));
   }
   return descendants;
+}
+
+function addProcessListLine(childrenByParent: Map<number, number[]>, line: string): void {
+  const parsed = parseProcessListLine(line);
+  if (!parsed) {
+    return;
+  }
+
+  const children = childrenByParent.get(parsed.parentPid);
+  if (children) {
+    children.push(parsed.pid);
+  } else {
+    childrenByParent.set(parsed.parentPid, [parsed.pid]);
+  }
+}
+
+function parseProcessListLine(line: string): { pid: number; parentPid: number } | undefined {
+  const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+  if (!match) {
+    return undefined;
+  }
+
+  const pid = Number(match[1]);
+  const parentPid = Number(match[2]);
+  if (!Number.isInteger(pid) || !Number.isInteger(parentPid) || pid <= 0 || parentPid <= 0) {
+    return undefined;
+  }
+  return { pid, parentPid };
 }
 
 async function runProcessListCommand(): Promise<string> {

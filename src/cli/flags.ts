@@ -99,6 +99,10 @@ function stringArrayOption(value: unknown): string[] | undefined {
     : undefined;
 }
 
+function nonEmptyStringOption(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 export function parseOutputFormat(value: string): OutputFormat {
   if (!OUTPUT_FORMATS.includes(value as OutputFormat)) {
     throw new InvalidArgumentError(
@@ -212,14 +216,8 @@ export function resolveSystemPromptFlag(opts: {
   systemPrompt?: unknown;
   appendSystemPrompt?: unknown;
 }): SystemPromptOption | undefined {
-  const replace =
-    typeof opts.systemPrompt === "string" && opts.systemPrompt.length > 0
-      ? opts.systemPrompt
-      : undefined;
-  const append =
-    typeof opts.appendSystemPrompt === "string" && opts.appendSystemPrompt.length > 0
-      ? opts.appendSystemPrompt
-      : undefined;
+  const replace = nonEmptyStringOption(opts.systemPrompt);
+  const append = nonEmptyStringOption(opts.appendSystemPrompt);
 
   if (replace !== undefined && append !== undefined) {
     throw new InvalidArgumentError("Use only one of --system-prompt or --append-system-prompt");
@@ -347,8 +345,9 @@ export function resolveSessionNameFromFlags(
   flags: StatusFlags,
   command: Command,
 ): string | undefined {
-  if (flags.session) {
-    return flags.session;
+  const directSession = parseOptionalSessionName(flags.session);
+  if (directSession !== undefined) {
+    return directSession;
   }
 
   // Commander parses options on the parent command when flags appear before the
@@ -357,18 +356,18 @@ export function resolveSessionNameFromFlags(
   const allOpts = asRecord(
     (command as unknown as { optsWithGlobals?: () => unknown }).optsWithGlobals?.(),
   );
-  const globalSession = stringOption(allOpts?.session);
+  const globalSession = parseOptionalSessionName(allOpts?.session);
   if (globalSession !== undefined) {
-    return parseSessionName(globalSession);
+    return globalSession;
   }
 
   const parentOpts = asRecord(command.parent?.opts?.() as unknown);
-  const parentSession = stringOption(parentOpts?.session);
-  if (parentSession !== undefined) {
-    return parseSessionName(parentSession);
-  }
+  return parseOptionalSessionName(parentOpts?.session);
+}
 
-  return undefined;
+function parseOptionalSessionName(value: unknown): string | undefined {
+  const session = stringOption(value);
+  return session === undefined ? undefined : parseSessionName(session);
 }
 
 export function addPromptInputOption(command: Command): Command {
@@ -378,56 +377,27 @@ export function addPromptInputOption(command: Command): Command {
 export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig): GlobalFlags {
   const opts = asRecord(command.optsWithGlobals() as unknown) ?? {};
   const format = parseOutputFormat(stringOption(opts.format) ?? config.format ?? "text");
-  const authPolicyOption = stringOption(opts.authPolicy);
-  const authPolicy =
-    authPolicyOption !== undefined ? parseAuthPolicy(authPolicyOption) : config.authPolicy;
-  const nonInteractivePermissionsOption = stringOption(opts.nonInteractivePermissions);
-  const nonInteractivePermissions =
-    nonInteractivePermissionsOption !== undefined
-      ? parseNonInteractivePermissionPolicy(nonInteractivePermissionsOption)
-      : config.nonInteractivePermissions;
-  const model = stringOption(opts.model);
   const jsonStrict = opts.jsonStrict === true;
   const verbose = opts.verbose === true;
-  const permissionPolicy =
-    typeof opts.permissionPolicy === "string"
-      ? opts.permissionPolicy
-      : typeof opts.policy === "string"
-        ? opts.policy
-        : undefined;
-
-  if (jsonStrict && format !== "json") {
-    throw new InvalidArgumentError("--json-strict requires --format json");
-  }
-
-  if (jsonStrict && verbose) {
-    throw new InvalidArgumentError("--json-strict cannot be combined with --verbose");
-  }
-
-  if (
-    typeof opts.permissionPolicy === "string" &&
-    typeof opts.policy === "string" &&
-    opts.permissionPolicy !== opts.policy
-  ) {
-    throw new InvalidArgumentError(
-      "Use only one permission policy flag: --permission-policy or --policy",
-    );
-  }
+  assertOutputFlagCompatibility(format, jsonStrict, verbose);
 
   return {
     agent: stringOption(opts.agent),
-    cwd: stringOption(opts.cwd) ?? process.cwd(),
-    authPolicy,
-    nonInteractivePermissions,
-    permissionPolicy,
+    cwd: resolveCwdOption(opts.cwd),
+    authPolicy: resolveAuthPolicy(opts.authPolicy, config),
+    nonInteractivePermissions: resolveNonInteractivePermissions(
+      opts.nonInteractivePermissions,
+      config,
+    ),
+    permissionPolicy: resolvePermissionPolicyOption(opts),
     jsonStrict,
     suppressReads: opts.suppressReads === true,
-    terminal: opts.terminal === false ? false : undefined,
-    timeout: numberOption(opts.timeout) ?? config.timeoutMs,
-    ttl: numberOption(opts.ttl) ?? config.ttlMs ?? DEFAULT_QUEUE_OWNER_TTL_MS,
+    terminal: resolveTerminalOption(opts.terminal),
+    timeout: resolveTimeoutOption(opts.timeout, config),
+    ttl: resolveTtlOption(opts.ttl, config),
     verbose,
     format,
-    model: model !== undefined ? parseNonEmptyValue("Model", model) : undefined,
+    model: resolveModelOption(opts.model),
     allowedTools: stringArrayOption(opts.allowedTools),
     maxTurns: numberOption(opts.maxTurns),
     systemPrompt: resolveSystemPromptFlag(opts),
@@ -436,6 +406,67 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
     approveReads: opts.approveReads ? true : undefined,
     denyAll: opts.denyAll ? true : undefined,
   };
+}
+
+function resolveCwdOption(value: unknown): string {
+  return stringOption(value) ?? process.cwd();
+}
+
+function resolveAuthPolicy(optsValue: unknown, config: ResolvedAcpxConfig): AuthPolicy {
+  const value = stringOption(optsValue);
+  return value === undefined ? config.authPolicy : parseAuthPolicy(value);
+}
+
+function resolveNonInteractivePermissions(
+  optsValue: unknown,
+  config: ResolvedAcpxConfig,
+): NonInteractivePermissionPolicy {
+  const value = stringOption(optsValue);
+  return value === undefined
+    ? config.nonInteractivePermissions
+    : parseNonInteractivePermissionPolicy(value);
+}
+
+function resolvePermissionPolicyOption(opts: Record<string, unknown>): string | undefined {
+  const primary = stringOption(opts.permissionPolicy);
+  const alias = stringOption(opts.policy);
+  if (primary !== undefined && alias !== undefined && primary !== alias) {
+    throw new InvalidArgumentError(
+      "Use only one permission policy flag: --permission-policy or --policy",
+    );
+  }
+  return primary ?? alias;
+}
+
+function resolveTerminalOption(value: unknown): boolean | undefined {
+  return value === false ? false : undefined;
+}
+
+function resolveTimeoutOption(value: unknown, config: ResolvedAcpxConfig): number | undefined {
+  return numberOption(value) ?? config.timeoutMs;
+}
+
+function resolveTtlOption(value: unknown, config: ResolvedAcpxConfig): number {
+  return numberOption(value) ?? config.ttlMs ?? DEFAULT_QUEUE_OWNER_TTL_MS;
+}
+
+function assertOutputFlagCompatibility(
+  format: OutputFormat,
+  jsonStrict: boolean,
+  verbose: boolean,
+): void {
+  if (jsonStrict && format !== "json") {
+    throw new InvalidArgumentError("--json-strict requires --format json");
+  }
+
+  if (jsonStrict && verbose) {
+    throw new InvalidArgumentError("--json-strict cannot be combined with --verbose");
+  }
+}
+
+function resolveModelOption(value: unknown): string | undefined {
+  const model = stringOption(value);
+  return model === undefined ? undefined : parseNonEmptyValue("Model", model);
 }
 
 export function resolveOutputPolicy(format: OutputFormat, jsonStrict: boolean): OutputPolicy {

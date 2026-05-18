@@ -3,7 +3,15 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { defineFlow, action, type FlowRunState } from "../src/flows/runtime.js";
+import {
+  defineFlow,
+  acp,
+  action,
+  checkpoint,
+  compute,
+  shell,
+  type FlowRunState,
+} from "../src/flows/runtime.js";
 import { FlowRunStore, flowRunsBaseDir } from "../src/flows/store.js";
 import { createSessionConversation } from "../src/session/conversation-model.js";
 import { defaultSessionEventLog } from "../src/session/event-log.js";
@@ -41,10 +49,45 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
     };
     const flow = defineFlow({
       name: "demo",
+      run: {
+        title: () => "Dynamic title",
+      },
+      permissions: {
+        requiredMode: "approve-all",
+        requireExplicitGrant: true,
+        reason: "store test",
+      },
       startAt: "prepare",
       nodes: {
         prepare: action({
+          timeoutMs: 500,
+          heartbeatMs: 50,
+          statusDetail: "Preparing",
           run: () => ({ ok: true }),
+        }),
+        prompt: acp({
+          profile: "mock",
+          session: {
+            handle: "review",
+            isolated: true,
+          },
+          cwd: () => "/tmp/workspace",
+          prompt: () => "echo ok",
+          parse: (text) => text,
+        }),
+        shell_step: shell({
+          exec: () => ({
+            command: process.execPath,
+            args: ["--version"],
+          }),
+          parse: (result) => result.stdout,
+        }),
+        compute_step: compute({
+          run: () => ({ computed: true }),
+        }),
+        checkpoint_step: checkpoint({
+          summary: "Review state",
+          run: () => ({ approved: true }),
         }),
       },
       edges: [],
@@ -67,7 +110,34 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
     };
     const flowSnapshot = JSON.parse(await fs.readFile(path.join(runDir, "flow.json"), "utf8")) as {
       schema: string;
-      nodes: Record<string, { nodeType: string; actionExecution?: string }>;
+      run?: { hasTitle?: boolean };
+      permissions?: {
+        requiredMode?: string;
+        requireExplicitGrant?: boolean;
+        reason?: string;
+      };
+      nodes: Record<
+        string,
+        {
+          nodeType: string;
+          timeoutMs?: number;
+          heartbeatMs?: number;
+          statusDetail?: string;
+          actionExecution?: string;
+          hasExec?: boolean;
+          hasParse?: boolean;
+          hasPrompt?: boolean;
+          cwd?: {
+            mode: string;
+          };
+          session?: {
+            handle?: string;
+            isolated?: boolean;
+          };
+          summary?: string;
+          hasRun?: boolean;
+        }
+      >;
     };
     const snapshot = JSON.parse(
       await fs.readFile(path.join(runDir, "projections", "run.json"), "utf8"),
@@ -98,8 +168,31 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
     assert.equal(manifest.runTitle, "Demo run title");
     assert.equal(manifest.paths.runProjection, "projections/run.json");
     assert.equal(flowSnapshot.schema, "acpx.flow-definition-snapshot.v1");
+    assert.deepEqual(flowSnapshot.run, { hasTitle: true });
+    assert.deepEqual(flowSnapshot.permissions, {
+      requiredMode: "approve-all",
+      requireExplicitGrant: true,
+      reason: "store test",
+    });
     assert.equal(flowSnapshot.nodes.prepare?.nodeType, "action");
     assert.equal(flowSnapshot.nodes.prepare?.actionExecution, "function");
+    assert.equal(flowSnapshot.nodes.prepare?.timeoutMs, 500);
+    assert.equal(flowSnapshot.nodes.prepare?.heartbeatMs, 50);
+    assert.equal(flowSnapshot.nodes.prepare?.statusDetail, "Preparing");
+    assert.equal(flowSnapshot.nodes.prompt?.nodeType, "acp");
+    assert.equal(flowSnapshot.nodes.prompt?.hasPrompt, true);
+    assert.equal(flowSnapshot.nodes.prompt?.hasParse, true);
+    assert.equal(flowSnapshot.nodes.prompt?.cwd?.mode, "dynamic");
+    assert.deepEqual(flowSnapshot.nodes.prompt?.session, {
+      handle: "review",
+      isolated: true,
+    });
+    assert.equal(flowSnapshot.nodes.shell_step?.actionExecution, "shell");
+    assert.equal(flowSnapshot.nodes.shell_step?.hasExec, true);
+    assert.equal(flowSnapshot.nodes.shell_step?.hasParse, true);
+    assert.equal(flowSnapshot.nodes.compute_step?.hasRun, true);
+    assert.equal(flowSnapshot.nodes.checkpoint_step?.summary, "Review state");
+    assert.equal(flowSnapshot.nodes.checkpoint_step?.hasRun, true);
     assert.equal(snapshot.runId, "run-123");
     assert.equal(snapshot.runTitle, "Demo run title");
     assert.equal(snapshot.currentNode, "prepare");
@@ -142,6 +235,143 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
     assert.equal(eventsAfterHeartbeat[1]?.type, "node_heartbeat");
     assert.equal(eventsAfterHeartbeat[1]?.nodeId, "prepare");
     assert.equal(eventsAfterHeartbeat[1]?.seq, 2);
+
+    state.status = "completed";
+    state.finishedAt = "2026-03-26T00:00:03.000Z";
+    state.steps = [
+      {
+        attemptId: "prepare#1",
+        nodeId: "prepare",
+        nodeType: "action",
+        outcome: "ok",
+        startedAt: "2026-03-26T00:00:01.000Z",
+        finishedAt: "2026-03-26T00:00:03.000Z",
+        promptText: null,
+        rawText: null,
+        output: { ok: true },
+        session: null,
+        agent: null,
+      },
+    ];
+    await store.writeSnapshot(runDir, state, {
+      scope: "run",
+      type: "run_completed",
+      payload: {
+        status: "completed",
+      },
+    });
+
+    const completedManifest = JSON.parse(
+      await fs.readFile(path.join(runDir, "manifest.json"), "utf8"),
+    ) as {
+      status?: string;
+      finishedAt?: string;
+    };
+    const completedSteps = JSON.parse(
+      await fs.readFile(path.join(runDir, "projections", "steps.json"), "utf8"),
+    ) as Array<{ nodeId?: string; outcome?: string }>;
+    assert.equal(completedManifest.status, "completed");
+    assert.equal(completedManifest.finishedAt, "2026-03-26T00:00:03.000Z");
+    assert.equal(completedSteps[0]?.nodeId, "prepare");
+    assert.equal(completedSteps[0]?.outcome, "ok");
+  } finally {
+    await fs.rm(outputRoot, { recursive: true, force: true });
+  }
+});
+
+test("FlowRunStore writes artifacts with stable hashes and optional trace emission", async () => {
+  const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-artifacts-"));
+
+  try {
+    const store = new FlowRunStore(outputRoot);
+    const runDir = await store.createRunDir("run-artifacts");
+    const state: FlowRunState = {
+      runId: "run-artifacts",
+      flowName: "artifacts",
+      startedAt: "2026-03-26T00:00:00.000Z",
+      updatedAt: "2026-03-26T00:00:00.000Z",
+      status: "running",
+      input: {},
+      outputs: {},
+      results: {},
+      steps: [],
+      sessionBindings: {},
+    };
+    const flow = defineFlow({
+      name: "artifacts",
+      startAt: "step",
+      nodes: {
+        step: action({
+          run: () => ({ ok: true }),
+        }),
+      },
+      edges: [],
+    });
+
+    await store.initializeRunBundle(runDir, {
+      flow,
+      state,
+    });
+
+    const jsonArtifact = await store.writeArtifact(
+      runDir,
+      state,
+      { answer: 42 },
+      {
+        mediaType: "application/json",
+        extension: "json",
+        nodeId: "step",
+        attemptId: "step#1",
+        sessionId: "session-1",
+      },
+    );
+    const bufferArtifact = await store.writeArtifact(runDir, state, Buffer.from("hello"), {
+      mediaType: "text/plain",
+      extension: ".txt",
+      emitTrace: false,
+    });
+    const uintArtifact = await store.writeArtifact(runDir, state, new Uint8Array([1, 2, 3]), {
+      mediaType: "application/octet-stream",
+      extension: "bin",
+      emitTrace: false,
+    });
+    const fallbackArtifact = await store.writeArtifact(runDir, state, 123, {
+      mediaType: "text/plain",
+      extension: "",
+      emitTrace: false,
+    });
+
+    assert.match(jsonArtifact.path, /^artifacts\/sha256-[a-f0-9]+\.json$/);
+    assert.match(bufferArtifact.path, /^artifacts\/sha256-[a-f0-9]+\.txt$/);
+    assert.match(uintArtifact.path, /^artifacts\/sha256-[a-f0-9]+\.bin$/);
+    assert.match(fallbackArtifact.path, /^artifacts\/sha256-[a-f0-9]+$/);
+
+    assert.equal(
+      await fs.readFile(path.join(runDir, ...jsonArtifact.path.split("/")), "utf8"),
+      '{\n  "answer": 42\n}\n',
+    );
+    assert.equal(
+      await fs.readFile(path.join(runDir, ...bufferArtifact.path.split("/")), "utf8"),
+      "hello",
+    );
+    assert.deepEqual(
+      Array.from(await fs.readFile(path.join(runDir, ...uintArtifact.path.split("/")))),
+      [1, 2, 3],
+    );
+    assert.equal(
+      await fs.readFile(path.join(runDir, ...fallbackArtifact.path.split("/")), "utf8"),
+      "123",
+    );
+
+    const events = (await fs.readFile(path.join(runDir, "trace.ndjson"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type?: string; artifact?: { path?: string } });
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["run_started", "artifact_written"],
+    );
+    assert.equal(events[1]?.artifact?.path, jsonArtifact.path);
   } finally {
     await fs.rm(outputRoot, { recursive: true, force: true });
   }

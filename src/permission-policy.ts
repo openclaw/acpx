@@ -31,6 +31,37 @@ function parseRuleList(value: unknown, key: string, source: string): string[] | 
   return parsed;
 }
 
+function isPermissionPolicyAction(value: unknown): value is PermissionPolicyAction {
+  return (
+    typeof value === "string" && PERMISSION_POLICY_ACTIONS.includes(value as PermissionPolicyAction)
+  );
+}
+
+function parseDefaultAction(
+  value: unknown,
+  source: string,
+): PermissionPolicy["defaultAction"] | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  if (!isPermissionPolicyAction(value)) {
+    throw new Error(
+      `${source}: permission policy defaultAction must be one of ${PERMISSION_POLICY_ACTIONS.join(", ")}`,
+    );
+  }
+  return value;
+}
+
+function assignRuleList(
+  policy: PermissionPolicy,
+  key: "autoApprove" | "autoDeny" | "escalate",
+  value: string[] | undefined,
+): void {
+  if (value) {
+    policy[key] = value;
+  }
+}
+
 export function parsePermissionPolicy(
   value: unknown,
   source = "permission policy",
@@ -40,33 +71,14 @@ export function parsePermissionPolicy(
     throw new Error(`${source}: permission policy must be a JSON object`);
   }
 
-  const defaultAction = record.defaultAction;
-  if (
-    defaultAction != null &&
-    (typeof defaultAction !== "string" ||
-      !PERMISSION_POLICY_ACTIONS.includes(defaultAction as PermissionPolicyAction))
-  ) {
-    throw new Error(
-      `${source}: permission policy defaultAction must be one of ${PERMISSION_POLICY_ACTIONS.join(", ")}`,
-    );
-  }
-
   const policy: PermissionPolicy = {};
-  const autoApprove = parseRuleList(record.autoApprove, "autoApprove", source);
-  const autoDeny = parseRuleList(record.autoDeny, "autoDeny", source);
-  const escalate = parseRuleList(record.escalate, "escalate", source);
+  assignRuleList(policy, "autoApprove", parseRuleList(record.autoApprove, "autoApprove", source));
+  assignRuleList(policy, "autoDeny", parseRuleList(record.autoDeny, "autoDeny", source));
+  assignRuleList(policy, "escalate", parseRuleList(record.escalate, "escalate", source));
 
-  if (autoApprove) {
-    policy.autoApprove = autoApprove;
-  }
-  if (autoDeny) {
-    policy.autoDeny = autoDeny;
-  }
-  if (escalate) {
-    policy.escalate = escalate;
-  }
-  if (typeof defaultAction === "string") {
-    policy.defaultAction = defaultAction as PermissionPolicy["defaultAction"];
+  const defaultAction = parseDefaultAction(record.defaultAction, source);
+  if (defaultAction) {
+    policy.defaultAction = defaultAction;
   }
 
   return policy;

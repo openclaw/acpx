@@ -75,30 +75,30 @@ export type ConnectAndLoadSessionResult = {
 const SESSION_LOAD_UNSUPPORTED_CODES = new Set([-32601, -32602]);
 
 function shouldFallbackToNewSession(error: unknown, record: SessionRecord): boolean {
-  if (error instanceof TimeoutError || error instanceof InterruptedError) {
+  if (isHardReconnectFailure(error)) {
     return false;
   }
-
-  if (isAcpResourceNotFoundError(error)) {
-    return true;
-  }
-
   const acp = extractAcpError(error);
-  if (acp && SESSION_LOAD_UNSUPPORTED_CODES.has(acp.code)) {
+  if (isAcpResourceNotFoundError(error) || isUnsupportedSessionLoadAcpError(acp)) {
     return true;
   }
 
-  if (!sessionHasAgentMessages(record)) {
-    if (isAcpQueryClosedBeforeResponseError(error)) {
-      return true;
-    }
+  return !sessionHasAgentMessages(record) && isFallbackSafeEmptySessionError(error, acp);
+}
 
-    if (acp?.code === -32603) {
-      return true;
-    }
-  }
+function isHardReconnectFailure(error: unknown): boolean {
+  return error instanceof TimeoutError || error instanceof InterruptedError;
+}
 
-  return false;
+function isUnsupportedSessionLoadAcpError(acp: ReturnType<typeof extractAcpError>): boolean {
+  return !!acp && SESSION_LOAD_UNSUPPORTED_CODES.has(acp.code);
+}
+
+function isFallbackSafeEmptySessionError(
+  error: unknown,
+  acp: ReturnType<typeof extractAcpError>,
+): boolean {
+  return isAcpQueryClosedBeforeResponseError(error) || acp?.code === -32603;
 }
 
 function requiresSameSession(resumePolicy: SessionResumePolicy | undefined): boolean {
@@ -249,17 +249,7 @@ export async function connectAndLoadSession(
   const storedProcessAlive = isProcessAlive(record.pid);
   const shouldReconnect = Boolean(record.pid) && !storedProcessAlive;
 
-  if (options.verbose) {
-    if (storedProcessAlive) {
-      process.stderr.write(
-        `[acpx] saved session pid ${record.pid} is running; reconnecting with loadSession\n`,
-      );
-    } else if (shouldReconnect) {
-      process.stderr.write(
-        `[acpx] saved session pid ${record.pid} is dead; respawning agent and attempting session/load\n`,
-      );
-    }
-  }
+  logReconnectAttempt(record, storedProcessAlive, shouldReconnect, options.verbose);
 
   const reusingLoadedSession = client.hasReusableSession(record.acpSessionId);
   if (reusingLoadedSession) {
@@ -280,102 +270,37 @@ export async function connectAndLoadSession(
   let pendingAgentSessionId = record.agentSessionId;
   let sessionModels: import("../../acp/client.js").SessionLoadResult["models"];
 
-  if (reusingLoadedSession) {
-    resumed = true;
-  } else if (client.supportsLoadSession()) {
-    try {
-      const loadResult = await withTimeout(
-        client.loadSessionWithOptions(record.acpSessionId, record.cwd, {
-          suppressReplayUpdates: true,
-        }),
-        options.timeoutMs,
-      );
-      reconcileAgentSessionId(record, loadResult.agentSessionId);
-      applyConfigOptionsToRecord(record, loadResult);
-      sessionModels = loadResult.models;
-      resumed = true;
-    } catch (error) {
-      loadError = formatErrorMessage(error);
-      if (sameSessionOnly) {
-        throw makeSessionResumeRequiredError({
-          record,
-          reason: loadError,
-          cause: error,
-        });
-      }
-      if (!shouldFallbackToNewSession(error, record)) {
-        throw error;
-      }
-      const createdSession = await withTimeout(client.createSession(record.cwd), options.timeoutMs);
-      sessionId = createdSession.sessionId;
-      createdFreshSession = true;
-      pendingAgentSessionId = createdSession.agentSessionId;
-      applyConfigOptionsToRecord(record, createdSession);
-      sessionModels = createdSession.models;
-    }
-  } else {
-    if (sameSessionOnly) {
-      throw makeSessionResumeRequiredError({
-        record,
-        reason: "agent does not support session/load",
-      });
-    }
-    const createdSession = await withTimeout(client.createSession(record.cwd), options.timeoutMs);
-    sessionId = createdSession.sessionId;
-    createdFreshSession = true;
-    pendingAgentSessionId = createdSession.agentSessionId;
-    applyConfigOptionsToRecord(record, createdSession);
-    sessionModels = createdSession.models;
-  }
+  const loadState = await loadOrCreateRuntimeSession({
+    client,
+    record,
+    reusingLoadedSession,
+    sameSessionOnly,
+    timeoutMs: options.timeoutMs,
+  });
+  resumed = loadState.resumed;
+  loadError = loadState.loadError;
+  sessionId = loadState.sessionId;
+  createdFreshSession = loadState.createdFreshSession;
+  pendingAgentSessionId = loadState.pendingAgentSessionId;
+  sessionModels = loadState.sessionModels;
 
-  if (createdFreshSession) {
-    try {
-      await replayDesiredMode({
-        client,
-        sessionId,
-        desiredModeId,
-        previousSessionId: originalSessionId,
-        timeoutMs: options.timeoutMs,
-        verbose: options.verbose,
-      });
-      await replayDesiredModel({
-        client,
-        sessionId,
-        desiredModelId,
-        previousSessionId: originalSessionId,
-        record,
-        models: sessionModels,
-        timeoutMs: options.timeoutMs,
-        verbose: options.verbose,
-      });
-      await replayDesiredConfigOptions({
-        client,
-        sessionId,
-        desiredConfigOptions,
-        previousSessionId: originalSessionId,
-        timeoutMs: options.timeoutMs,
-        verbose: options.verbose,
-      });
-    } catch (error) {
-      restoreOriginalSessionState({
-        record,
-        sessionId: originalSessionId,
-        agentSessionId: originalAgentSessionId,
-      });
-      if (options.verbose) {
-        process.stderr.write(`[acpx] ${formatErrorMessage(error)}\n`);
-      }
-      throw error;
-    }
+  await replayFreshSessionPreferences({
+    client,
+    record,
+    createdFreshSession,
+    sessionId,
+    pendingAgentSessionId,
+    originalSessionId,
+    originalAgentSessionId,
+    desiredModeId,
+    desiredModelId,
+    desiredConfigOptions,
+    sessionModels,
+    timeoutMs: options.timeoutMs,
+    verbose: options.verbose,
+  });
 
-    record.acpSessionId = sessionId;
-    reconcileAgentSessionId(record, pendingAgentSessionId);
-  }
-
-  syncAdvertisedModelState(record, sessionModels);
-  if (createdFreshSession && desiredModelId && sessionModels) {
-    setCurrentModelId(record, desiredModelId);
-  }
+  applyReconnectedModelState(record, sessionModels, createdFreshSession, desiredModelId);
 
   options.onSessionIdResolved?.(sessionId);
 
@@ -384,5 +309,210 @@ export async function connectAndLoadSession(
     agentSessionId: record.agentSessionId,
     resumed,
     loadError,
+  };
+}
+
+function applyReconnectedModelState(
+  record: SessionRecord,
+  sessionModels: import("../../acp/client.js").SessionLoadResult["models"],
+  createdFreshSession: boolean,
+  desiredModelId: string | undefined,
+): void {
+  syncAdvertisedModelState(record, sessionModels);
+  if (createdFreshSession && desiredModelId && sessionModels) {
+    setCurrentModelId(record, desiredModelId);
+  }
+}
+
+function logReconnectAttempt(
+  record: SessionRecord,
+  storedProcessAlive: boolean,
+  shouldReconnect: boolean,
+  verbose: boolean | undefined,
+): void {
+  if (!verbose) {
+    return;
+  }
+  if (storedProcessAlive) {
+    process.stderr.write(
+      `[acpx] saved session pid ${record.pid} is running; reconnecting with loadSession\n`,
+    );
+    return;
+  }
+  if (shouldReconnect) {
+    process.stderr.write(
+      `[acpx] saved session pid ${record.pid} is dead; respawning agent and attempting session/load\n`,
+    );
+  }
+}
+
+async function replayFreshSessionPreferences(params: {
+  client: AcpClient;
+  record: SessionRecord;
+  createdFreshSession: boolean;
+  sessionId: string;
+  pendingAgentSessionId: string | undefined;
+  originalSessionId: string;
+  originalAgentSessionId: string | undefined;
+  desiredModeId: string | undefined;
+  desiredModelId: string | undefined;
+  desiredConfigOptions: Record<string, string>;
+  sessionModels: import("../../acp/client.js").SessionLoadResult["models"];
+  timeoutMs?: number;
+  verbose?: boolean;
+}): Promise<void> {
+  if (!params.createdFreshSession) {
+    return;
+  }
+
+  try {
+    await replayDesiredMode({
+      client: params.client,
+      sessionId: params.sessionId,
+      desiredModeId: params.desiredModeId,
+      previousSessionId: params.originalSessionId,
+      timeoutMs: params.timeoutMs,
+      verbose: params.verbose,
+    });
+    await replayDesiredModel({
+      client: params.client,
+      sessionId: params.sessionId,
+      desiredModelId: params.desiredModelId,
+      previousSessionId: params.originalSessionId,
+      record: params.record,
+      models: params.sessionModels,
+      timeoutMs: params.timeoutMs,
+      verbose: params.verbose,
+    });
+    await replayDesiredConfigOptions({
+      client: params.client,
+      sessionId: params.sessionId,
+      desiredConfigOptions: params.desiredConfigOptions,
+      previousSessionId: params.originalSessionId,
+      timeoutMs: params.timeoutMs,
+      verbose: params.verbose,
+    });
+  } catch (error) {
+    restoreOriginalSessionState({
+      record: params.record,
+      sessionId: params.originalSessionId,
+      agentSessionId: params.originalAgentSessionId,
+    });
+    if (params.verbose) {
+      process.stderr.write(`[acpx] ${formatErrorMessage(error)}\n`);
+    }
+    throw error;
+  }
+
+  params.record.acpSessionId = params.sessionId;
+  reconcileAgentSessionId(params.record, params.pendingAgentSessionId);
+}
+
+type RuntimeSessionLoadState = {
+  sessionId: string;
+  pendingAgentSessionId: string | undefined;
+  sessionModels: import("../../acp/client.js").SessionLoadResult["models"];
+  resumed: boolean;
+  createdFreshSession: boolean;
+  loadError?: string;
+};
+
+async function loadOrCreateRuntimeSession(params: {
+  client: AcpClient;
+  record: SessionRecord;
+  reusingLoadedSession: boolean;
+  sameSessionOnly: boolean;
+  timeoutMs?: number;
+}): Promise<RuntimeSessionLoadState> {
+  if (params.reusingLoadedSession) {
+    return {
+      sessionId: params.record.acpSessionId,
+      pendingAgentSessionId: params.record.agentSessionId,
+      sessionModels: undefined,
+      resumed: true,
+      createdFreshSession: false,
+    };
+  }
+
+  if (params.client.supportsLoadSession()) {
+    return await loadRuntimeSession(params);
+  }
+
+  if (params.sameSessionOnly) {
+    throw makeSessionResumeRequiredError({
+      record: params.record,
+      reason: "agent does not support session/load",
+    });
+  }
+
+  return await createFreshRuntimeSession(params.client, params.record, params.timeoutMs);
+}
+
+async function loadRuntimeSession(params: {
+  client: AcpClient;
+  record: SessionRecord;
+  sameSessionOnly: boolean;
+  timeoutMs?: number;
+}): Promise<RuntimeSessionLoadState> {
+  try {
+    const loadResult = await withTimeout(
+      params.client.loadSessionWithOptions(params.record.acpSessionId, params.record.cwd, {
+        suppressReplayUpdates: true,
+      }),
+      params.timeoutMs,
+    );
+    reconcileAgentSessionId(params.record, loadResult.agentSessionId);
+    applyConfigOptionsToRecord(params.record, loadResult);
+    return {
+      sessionId: params.record.acpSessionId,
+      pendingAgentSessionId: params.record.agentSessionId,
+      sessionModels: loadResult.models,
+      resumed: true,
+      createdFreshSession: false,
+    };
+  } catch (error) {
+    return await recoverRuntimeSessionLoadFailure(params, error);
+  }
+}
+
+async function recoverRuntimeSessionLoadFailure(
+  params: {
+    client: AcpClient;
+    record: SessionRecord;
+    sameSessionOnly: boolean;
+    timeoutMs?: number;
+  },
+  error: unknown,
+): Promise<RuntimeSessionLoadState> {
+  const loadError = formatErrorMessage(error);
+  if (params.sameSessionOnly) {
+    throw makeSessionResumeRequiredError({
+      record: params.record,
+      reason: loadError,
+      cause: error,
+    });
+  }
+  if (!shouldFallbackToNewSession(error, params.record)) {
+    throw error;
+  }
+  return {
+    ...(await createFreshRuntimeSession(params.client, params.record, params.timeoutMs)),
+    loadError,
+  };
+}
+
+async function createFreshRuntimeSession(
+  client: AcpClient,
+  record: SessionRecord,
+  timeoutMs: number | undefined,
+): Promise<RuntimeSessionLoadState> {
+  const createdSession = await withTimeout(client.createSession(record.cwd), timeoutMs);
+  applyConfigOptionsToRecord(record, createdSession);
+  return {
+    sessionId: createdSession.sessionId,
+    pendingAgentSessionId: createdSession.agentSessionId,
+    sessionModels: createdSession.models,
+    resumed: false,
+    createdFreshSession: true,
   };
 }

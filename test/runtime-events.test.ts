@@ -351,4 +351,188 @@ test("parsePromptEventLine ignores unsupported structured payloads and treats ra
     text: "operation",
   });
   assert.equal(parsePromptEventLine(JSON.stringify({ type: "plan", entries: [] })), null);
+  assert.deepEqual(parsePromptEventLine(JSON.stringify(["not", "an", "object"])), {
+    type: "status",
+    text: '["not","an","object"]',
+  });
+  assert.deepEqual(parsePromptEventLine(JSON.stringify({ type: "usage_update", used: "bad" })), {
+    type: "status",
+    text: "usage updated",
+    tag: "usage_update",
+  });
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        type: "tool_call",
+        title: "run",
+        status: "started",
+        kind: "execute",
+        toolCallId: "tool-1",
+        rawInput: { command: "node", args: ["--version"] },
+        locations: [{ path: "package.json" }],
+      }),
+    ),
+    {
+      type: "tool_call",
+      text: "run (started): node --version",
+      tag: "tool_call",
+      title: "run",
+      toolCallId: "tool-1",
+      status: "started",
+      kind: "execute",
+      rawInput: { command: "node", args: ["--version"] },
+      locations: [{ path: "package.json" }],
+    },
+  );
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        type: "tool_call_update",
+        title: "read",
+        content: [
+          { type: "resource_link", title: "README.md", uri: "file:///README.md" },
+          { type: "resource", resource: { text: "body" } },
+          { type: "diff", path: "src/index.ts" },
+          { type: "terminal", terminalId: "term-1" },
+        ],
+      }),
+    ),
+    {
+      type: "tool_call",
+      text: "read: README.md\nbody\ndiff src/index.ts\n[terminal] term-1",
+      tag: "tool_call_update",
+      title: "read",
+      content: [
+        { type: "resource_link", title: "README.md", uri: "file:///README.md" },
+        { type: "resource", resource: { text: "body" } },
+        { type: "diff", path: "src/index.ts" },
+        { type: "terminal", terminalId: "term-1" },
+      ],
+    },
+  );
+});
+
+test("parsePromptEventLine covers status and tool summary fallbacks", () => {
+  assert.equal(
+    parsePromptEventLine(JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: {} })),
+    null,
+  );
+  assert.deepEqual(
+    parsePromptEventLine(JSON.stringify({ sessionUpdate: "available_commands_update" })),
+    {
+      type: "status",
+      text: "available commands updated",
+      tag: "available_commands_update",
+    },
+  );
+  assert.deepEqual(
+    parsePromptEventLine(JSON.stringify({ sessionUpdate: "current_mode_update", modeId: "fast" })),
+    {
+      type: "status",
+      text: "mode updated: fast",
+      tag: "current_mode_update",
+    },
+  );
+  assert.deepEqual(
+    parsePromptEventLine(JSON.stringify({ sessionUpdate: "config_option_update", id: "mode" })),
+    {
+      type: "status",
+      text: "config updated: mode",
+      tag: "config_option_update",
+    },
+  );
+  assert.deepEqual(
+    parsePromptEventLine(JSON.stringify({ sessionUpdate: "config_option_update" })),
+    {
+      type: "status",
+      text: "config updated",
+      tag: "config_option_update",
+    },
+  );
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({ sessionUpdate: "session_info_update", message: "ready" }),
+    ),
+    {
+      type: "status",
+      text: "ready",
+      tag: "session_info_update",
+    },
+  );
+  assert.equal(
+    parsePromptEventLine(JSON.stringify({ sessionUpdate: "plan", entries: ["skip"] })),
+    null,
+  );
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        sessionUpdate: "agent_message_chunk",
+        content: { text: "hello" },
+      }),
+    ),
+    {
+      type: "text_delta",
+      text: "hello",
+      stream: "output",
+      tag: "agent_message_chunk",
+    },
+  );
+  assert.equal(
+    parsePromptEventLine(
+      JSON.stringify({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "" } }),
+    ),
+    null,
+  );
+  assert.deepEqual(parsePromptEventLine(JSON.stringify({ type: "tool_call", rawInput: 42 })), {
+    type: "tool_call",
+    text: "tool call: 42",
+    tag: "tool_call",
+    title: "tool call",
+    rawInput: 42,
+  });
+  assert.deepEqual(
+    parsePromptEventLine(JSON.stringify({ type: "tool_call_update", rawOutput: true })),
+    {
+      type: "tool_call",
+      text: "tool call: true",
+      tag: "tool_call_update",
+      title: "tool call",
+      rawOutput: true,
+    },
+  );
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({ type: "tool_call_update", rawOutput: { stderr: "bad" } }),
+    ),
+    {
+      type: "tool_call",
+      text: "tool call: bad",
+      tag: "tool_call_update",
+      title: "tool call",
+      rawOutput: { stderr: "bad" },
+    },
+  );
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        type: "tool_call_update",
+        content: [
+          { type: "resource_link", uri: "file:///fallback" },
+          { type: "resource", resource: { uri: "file:///resource" } },
+          { type: "terminal" },
+        ],
+      }),
+    ),
+    {
+      type: "tool_call",
+      text: "tool call: file:///fallback\nfile:///resource\n[terminal]",
+      tag: "tool_call_update",
+      title: "tool call",
+      content: [
+        { type: "resource_link", uri: "file:///fallback" },
+        { type: "resource", resource: { uri: "file:///resource" } },
+        { type: "terminal" },
+      ],
+    },
+  );
 });

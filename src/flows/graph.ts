@@ -9,24 +9,30 @@ export function validateFlowDefinition(flow: FlowDefinition): void {
 
   const outgoingEdges = new Set<string>();
   for (const edge of flow.edges) {
-    if (!flow.nodes[edge.from]) {
-      throw new Error(`Flow edge references unknown from-node: ${edge.from}`);
-    }
-    if (outgoingEdges.has(edge.from)) {
-      throw new Error(`Flow node must not declare multiple outgoing edges: ${edge.from}`);
-    }
-    outgoingEdges.add(edge.from);
-    if ("to" in edge) {
-      if (!flow.nodes[edge.to]) {
-        throw new Error(`Flow edge references unknown to-node: ${edge.to}`);
-      }
-      continue;
-    }
-    for (const target of Object.values(edge.switch.cases)) {
-      if (!flow.nodes[target]) {
-        throw new Error(`Flow switch references unknown to-node: ${target}`);
-      }
-    }
+    validateFlowEdge(flow, edge, outgoingEdges);
+  }
+}
+
+function assertKnownFlowNode(flow: FlowDefinition, nodeId: string, description: string): void {
+  if (!flow.nodes[nodeId]) {
+    throw new Error(`${description}: ${nodeId}`);
+  }
+}
+
+function validateFlowEdge(flow: FlowDefinition, edge: FlowEdge, outgoingEdges: Set<string>): void {
+  assertKnownFlowNode(flow, edge.from, "Flow edge references unknown from-node");
+  if (outgoingEdges.has(edge.from)) {
+    throw new Error(`Flow node must not declare multiple outgoing edges: ${edge.from}`);
+  }
+  outgoingEdges.add(edge.from);
+
+  if ("to" in edge) {
+    assertKnownFlowNode(flow, edge.to, "Flow edge references unknown to-node");
+    return;
+  }
+
+  for (const target of Object.values(edge.switch.cases)) {
+    assertKnownFlowNode(flow, target, "Flow switch references unknown to-node");
   }
 }
 

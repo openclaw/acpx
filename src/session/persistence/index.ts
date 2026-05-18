@@ -34,15 +34,7 @@ function parseIndexEntry(raw: unknown): SessionIndexEntry | undefined {
   if (!record) {
     return undefined;
   }
-  if (
-    typeof record.file !== "string" ||
-    typeof record.acpxRecordId !== "string" ||
-    typeof record.acpSessionId !== "string" ||
-    typeof record.agentCommand !== "string" ||
-    typeof record.cwd !== "string" ||
-    typeof record.lastUsedAt !== "string" ||
-    typeof record.closed !== "boolean"
-  ) {
+  if (!hasRequiredIndexEntryFields(record)) {
     return undefined;
   }
   if (record.name !== undefined && typeof record.name !== "string") {
@@ -58,6 +50,25 @@ function parseIndexEntry(raw: unknown): SessionIndexEntry | undefined {
     closed: record.closed,
     lastUsedAt: record.lastUsedAt,
   };
+}
+
+function hasRequiredIndexEntryFields(record: Record<string, unknown>): record is Record<
+  string,
+  unknown
+> & {
+  file: string;
+  acpxRecordId: string;
+  acpSessionId: string;
+  agentCommand: string;
+  cwd: string;
+  lastUsedAt: string;
+  closed: boolean;
+} {
+  return (
+    ["file", "acpxRecordId", "acpSessionId", "agentCommand", "cwd", "lastUsedAt"].every(
+      (key) => typeof record[key] === "string",
+    ) && typeof record.closed === "boolean"
+  );
 }
 
 export function sessionIndexPath(sessionDir: string): string {

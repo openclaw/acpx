@@ -45,13 +45,17 @@ function shouldSkipDescend(path: string[]): boolean {
   return OPAQUE_VALUE_PATHS.has(joinPath(path)) || isToolResultOutputPath(path);
 }
 
+function isToolResultOutputTail(path: string[], toolResultsIndex: number): boolean {
+  return toolResultsIndex !== -1 && toolResultsIndex + 2 === path.length - 1;
+}
+
 function isToolResultOutputPath(path: string[]): boolean {
   if (path.length < 5 || path[path.length - 1] !== "output") {
     return false;
   }
 
   const toolResultsIndex = path.lastIndexOf("tool_results");
-  if (toolResultsIndex === -1 || toolResultsIndex + 2 !== path.length - 1) {
+  if (!isToolResultOutputTail(path, toolResultsIndex)) {
     return false;
   }
 
@@ -73,15 +77,23 @@ function collectViolations(value: unknown, path: string[], violations: string[])
 
   const skipKeyRule = shouldSkipKeyRule(path);
   for (const [key, child] of Object.entries(value)) {
-    if (!skipKeyRule && !SNAKE_CASE_KEY.test(key) && !isAllowedKey(path, key)) {
-      violations.push(`${joinPath(path)}.${key}`.replace(/^\./, ""));
-    }
+    collectKeyViolation(child, key, path, skipKeyRule, violations);
+  }
+}
 
-    const childPath = [...path, key];
-    if (shouldSkipDescend(childPath)) {
-      continue;
-    }
+function collectKeyViolation(
+  child: unknown,
+  key: string,
+  path: string[],
+  skipKeyRule: boolean,
+  violations: string[],
+): void {
+  if (!skipKeyRule && !SNAKE_CASE_KEY.test(key) && !isAllowedKey(path, key)) {
+    violations.push(`${joinPath(path)}.${key}`.replace(/^\./, ""));
+  }
 
+  const childPath = [...path, key];
+  if (!shouldSkipDescend(childPath)) {
     collectViolations(child, childPath, violations);
   }
 }

@@ -54,6 +54,16 @@ async function countExistingSegments(sessionId: string, maxSegments: number): Pr
   return count;
 }
 
+async function resolveInitialSegmentCount(
+  record: SessionRecord,
+  maxSegments: number,
+): Promise<number> {
+  if (Number.isInteger(record.eventLog.segment_count) && record.eventLog.segment_count > 0) {
+    return record.eventLog.segment_count;
+  }
+  return (await countExistingSegments(record.acpxRecordId, maxSegments)) || 1;
+}
+
 async function resolveSessionMaxSegments(sessionId: string): Promise<number> {
   try {
     const record = await resolveSessionRecord(sessionId);
@@ -234,10 +244,7 @@ export class SessionEventWriter {
       options.maxSegments ?? record.eventLog.max_segments ?? DEFAULT_EVENT_MAX_SEGMENTS;
     const activePath = activeEventPath(record.acpxRecordId);
     const activeSizeBytes = await statSize(activePath);
-    const segmentCount =
-      Number.isInteger(record.eventLog.segment_count) && record.eventLog.segment_count > 0
-        ? record.eventLog.segment_count
-        : (await countExistingSegments(record.acpxRecordId, maxSegments)) || 1;
+    const segmentCount = await resolveInitialSegmentCount(record, maxSegments);
     return new SessionEventWriter(
       record,
       lock,

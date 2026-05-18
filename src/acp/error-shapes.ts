@@ -44,27 +44,21 @@ function extractAcpErrorInternal(value: unknown, depth: number): OutputErrorAcpP
     return undefined;
   }
 
-  if ("error" in record) {
-    const nested = extractAcpErrorInternal(record.error, depth + 1);
-    if (nested) {
-      return nested;
+  return extractNestedAcpError(record, depth);
+}
+
+function extractNestedAcpError(
+  record: Record<string, unknown>,
+  depth: number,
+): OutputErrorAcpPayload | undefined {
+  for (const key of ["error", "acp", "cause"] as const) {
+    if (key in record) {
+      const nested = extractAcpErrorInternal(record[key], depth + 1);
+      if (nested) {
+        return nested;
+      }
     }
   }
-
-  if ("acp" in record) {
-    const nested = extractAcpErrorInternal(record.acp, depth + 1);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  if ("cause" in record) {
-    const nested = extractAcpErrorInternal(record.cause, depth + 1);
-    if (nested) {
-      return nested;
-    }
-  }
-
   return undefined;
 }
 
