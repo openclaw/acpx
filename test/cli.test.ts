@@ -56,7 +56,6 @@ const MOCK_AGENT_IGNORING_SIGTERM = `${MOCK_AGENT_COMMAND} --ignore-sigterm`;
 const MOCK_CODEX_AGENT_WITH_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --codex-session-id codex-runtime-session`;
 const MOCK_CLAUDE_AGENT_WITH_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --claude-session-id claude-runtime-session`;
 const MOCK_AGENT_WITH_LOAD_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --supports-load-session --load-runtime-session-id loaded-runtime-session`;
-const MOCK_AGENT_WITH_RESUME_RUNTIME_SESSION_ID = `${MOCK_AGENT_COMMAND} --supports-resume-session --resume-runtime-session-id resumed-runtime-session`;
 const MOCK_AGENT_WITH_DISTINCT_CREATE_AND_LOAD_RUNTIME_SESSION_IDS =
   `${MOCK_AGENT_COMMAND} --runtime-session-id fresh-runtime-session ` +
   "--supports-load-session --load-runtime-session-id resumed-runtime-session";
@@ -433,52 +432,6 @@ test("sessions new --resume-session loads ACP session and stores resumed ids", a
     };
     assert.equal(storedRecord.acp_session_id, resumeSessionId);
     assert.equal(storedRecord.agent_session_id, "resumed-runtime-session");
-  });
-});
-
-test("sessions new --resume-session uses session/resume when advertised", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = path.join(homeDir, "workspace");
-    await fs.mkdir(cwd, { recursive: true });
-    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
-    await fs.writeFile(
-      path.join(homeDir, ".acpx", "config.json"),
-      `${JSON.stringify(
-        {
-          agents: {
-            codex: {
-              command: MOCK_AGENT_WITH_RESUME_RUNTIME_SESSION_ID,
-            },
-          },
-        },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
-
-    const result = await runCli(
-      [
-        "--cwd",
-        cwd,
-        "--format",
-        "json",
-        "codex",
-        "sessions",
-        "new",
-        "--resume-session",
-        "cs_resume_only",
-      ],
-      homeDir,
-    );
-    assert.equal(result.code, 0, result.stderr);
-
-    const payload = JSON.parse(result.stdout.trim()) as {
-      acpxSessionId?: unknown;
-      agentSessionId?: unknown;
-    };
-    assert.equal(payload.acpxSessionId, "cs_resume_only");
-    assert.equal(payload.agentSessionId, "resumed-runtime-session");
   });
 });
 

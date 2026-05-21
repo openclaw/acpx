@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import { isCodexInvocation } from "../acp/codex-compat.js";
+import { AgentSpawnError } from "../errors.js";
 import { loadPermissionPolicySpec } from "../permission-policy.js";
 import {
   mergePromptSourceWithText,
@@ -41,6 +42,7 @@ import {
   type StatusFlags,
 } from "./flags.js";
 import { emitJsonResult } from "./output/json-output.js";
+import type { SessionListResult } from "./session/contracts.js";
 
 class NoSessionError extends Error {
   constructor(message: string) {
@@ -676,6 +678,39 @@ export async function handleSetConfigOption(
   printSetConfigOptionResultByFormat(configId, value, result, globalFlags.format);
 }
 
+async function tryListAgentSessions(
+  agent: ResolvedAgentInvocation,
+  flags: SessionsListFlags,
+  globalFlags: ReturnType<typeof resolveGlobalFlags>,
+  config: ResolvedAcpxConfig,
+): Promise<SessionListResult | "spawn-failed"> {
+  const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
+  const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
+  const { listAgentSessions } = await loadSessionModule();
+  try {
+    return await listAgentSessions({
+      agentCommand: agent.agentCommand,
+      cwd: agent.cwd,
+      cursor: flags.cursor,
+      filterCwd: resolveSessionListFilterCwd(flags, agent.cwd),
+      mcpServers: config.mcpServers,
+      permissionMode,
+      nonInteractivePermissions: globalFlags.nonInteractivePermissions,
+      permissionPolicy,
+      authCredentials: config.auth,
+      authPolicy: globalFlags.authPolicy,
+      terminal: globalFlags.terminal,
+      timeoutMs: globalFlags.timeout,
+      verbose: globalFlags.verbose,
+    });
+  } catch (error) {
+    if (error instanceof AgentSpawnError) {
+      return "spawn-failed";
+    }
+    throw error;
+  }
+}
+
 export async function handleSessionsList(
   explicitAgentName: string | undefined,
   flags: SessionsListFlags,
@@ -694,30 +729,13 @@ export async function handleSessionsList(
     return;
   }
 
-  const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
-  const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
-  const [{ listAgentSessions }, { printAgentSessionsByFormat }] = await Promise.all([
-    loadSessionModule(),
+  const [result, { printAgentSessionsByFormat }] = await Promise.all([
+    tryListAgentSessions(agent, flags, globalFlags, config),
     loadOutputRenderModule(),
   ]);
-  const result = await listAgentSessions({
-    agentCommand: agent.agentCommand,
-    cwd: agent.cwd,
-    cursor: flags.cursor,
-    filterCwd,
-    mcpServers: config.mcpServers,
-    permissionMode,
-    nonInteractivePermissions: globalFlags.nonInteractivePermissions,
-    permissionPolicy,
-    authCredentials: config.auth,
-    authPolicy: globalFlags.authPolicy,
-    terminal: globalFlags.terminal,
-    timeoutMs: globalFlags.timeout,
-    verbose: globalFlags.verbose,
-  });
 
-  if (!result) {
-    if (flags.cursor || flags.filterCwd) {
+  if (!result || result === "spawn-failed") {
+    if (result !== "spawn-failed" && (flags.cursor || flags.filterCwd)) {
       throw new Error(
         `Agent command "${agent.agentCommand}" does not advertise sessionCapabilities.list; cannot use agent-side session/list filters`,
       );
