@@ -277,6 +277,41 @@ test("CLI resolves unknown subcommand names as raw agent commands", async () => 
   });
 });
 
+test("CLI resolves unknown raw agent commands after newer global flags", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const session = makeSessionRecord({
+      acpxRecordId: "custom-session",
+      acpSessionId: "custom-session",
+      agentCommand: "custom-agent",
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+    });
+    await writeSessionRecord(homeDir, session);
+
+    const flagCases = [
+      ["--system-prompt", "be precise"],
+      ["--append-system-prompt", "be concise"],
+      ["--prompt-retries", "1"],
+      ["--no-terminal"],
+    ];
+
+    for (const flags of flagCases) {
+      const result = await runCli(
+        ["--cwd", cwd, "--format", "quiet", ...flags, "custom-agent", "sessions"],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, `${flags.join(" ")}\n${result.stderr}`);
+      assert.match(result.stdout, /custom-session/, flags.join(" "));
+    }
+  });
+});
+
 test("global passthrough flags are present in help output", async () => {
   await withTempHome(async (homeDir) => {
     const result = await runCli(["--help"], homeDir);

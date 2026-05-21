@@ -74,29 +74,11 @@ const TOP_LEVEL_VERSION_BOOLEAN_FLAGS = new Set([
   "--verbose",
 ]);
 
-const AGENT_SCAN_VALUE_FLAGS = new Set([
-  "--cwd",
-  "--auth-policy",
-  "--non-interactive-permissions",
-  "--permission-policy",
-  "--policy",
-  "--format",
-  "--model",
-  "--allowed-tools",
-  "--max-turns",
-  "--timeout",
-  "--ttl",
-  "--file",
-]);
+const AGENT_SCAN_VALUE_FLAG_VALUES = [...TOP_LEVEL_VERSION_VALUE_FLAG_VALUES, "--file"] as const;
 
-const AGENT_SCAN_BOOLEAN_FLAGS = new Set([
-  "--approve-all",
-  "--approve-reads",
-  "--deny-all",
-  "--json-strict",
-  "--verbose",
-  "--suppress-reads",
-]);
+const AGENT_SCAN_VALUE_FLAGS = new Set<string>(AGENT_SCAN_VALUE_FLAG_VALUES);
+
+const AGENT_SCAN_BOOLEAN_FLAGS = new Set<string>(TOP_LEVEL_VERSION_BOOLEAN_FLAGS);
 
 let skillflagModulePromise: Promise<SkillflagModule> | undefined;
 
