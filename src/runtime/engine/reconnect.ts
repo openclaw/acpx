@@ -72,11 +72,6 @@ export type ConnectAndLoadSessionResult = {
   loadError?: string;
 };
 
-type MaybeResumeClient = {
-  supportsResumeSession?: () => boolean;
-  resumeSession?: AcpClient["resumeSession"];
-};
-
 const SESSION_LOAD_UNSUPPORTED_CODES = new Set([-32601, -32602]);
 
 function shouldFallbackToNewSession(error: unknown, record: SessionRecord): boolean {
@@ -108,25 +103,6 @@ function isFallbackSafeEmptySessionError(
 
 function requiresSameSession(resumePolicy: SessionResumePolicy | undefined): boolean {
   return resumePolicy === "same-session-only";
-}
-
-function clientSupportsResumeSession(client: AcpClient): boolean {
-  const maybeClient = client as unknown as MaybeResumeClient;
-  return (
-    typeof maybeClient.supportsResumeSession === "function" && maybeClient.supportsResumeSession()
-  );
-}
-
-async function clientResumeSession(
-  client: AcpClient,
-  sessionId: string,
-  cwd: string,
-): ReturnType<AcpClient["resumeSession"]> {
-  const maybeClient = client as unknown as MaybeResumeClient;
-  if (typeof maybeClient.resumeSession !== "function") {
-    throw new Error("agent does not support session/resume");
-  }
-  return await maybeClient.resumeSession.call(client, sessionId, cwd);
 }
 
 function makeSessionResumeRequiredError(params: {
@@ -458,7 +434,7 @@ async function loadOrCreateRuntimeSession(params: {
     };
   }
 
-  if (clientSupportsResumeSession(params.client)) {
+  if (params.client.supportsResumeSession()) {
     return await resumeRuntimeSession(params);
   }
 
@@ -484,7 +460,7 @@ async function resumeRuntimeSession(params: {
 }): Promise<RuntimeSessionLoadState> {
   try {
     const resumeResult = await withTimeout(
-      clientResumeSession(params.client, params.record.acpSessionId, params.record.cwd),
+      params.client.resumeSession(params.record.acpSessionId, params.record.cwd),
       params.timeoutMs,
     );
     reconcileAgentSessionId(params.record, resumeResult.agentSessionId);

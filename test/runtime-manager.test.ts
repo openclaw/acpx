@@ -275,6 +275,7 @@ test("AcpRuntimeManager creates a fresh record for each oneshot session", async 
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => ({ agentSessionId: "runtime-session" }),
           getAgentLifecycleSnapshot: () => ({ running: true }),
           prompt: async () => ({ stopReason: "end_turn" }),
@@ -325,6 +326,7 @@ test("AcpRuntimeManager streams runtime events and saves updated status", async 
     loadSession: async () => ({ agentSessionId: "unused" }),
     hasReusableSession: (sessionId) => sessionId === "turn-sid",
     supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
     loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
     getAgentLifecycleSnapshot: () => ({
       pid: 999,
@@ -413,6 +415,7 @@ test("AcpRuntimeManager keeps reusable persistent clients pooled across turns an
     loadSession: async () => ({ agentSessionId: "unused" }),
     hasReusableSession: (sessionId) => sessionId === "pooled-sid",
     supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
     loadSessionWithOptions: async () => ({ agentSessionId: "pooled-agent" }),
     getAgentLifecycleSnapshot: () => ({
       pid: 104_981,
@@ -508,6 +511,7 @@ test("AcpRuntimeManager runTurn remains a compatibility adapter over startTurn",
     loadSession: async () => ({ agentSessionId: "unused" }),
     hasReusableSession: (sessionId) => sessionId === "legacy-turn-sid",
     supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
     loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
     getAgentLifecycleSnapshot: () => ({ running: true }),
     prompt: async () => {
@@ -584,6 +588,7 @@ test("AcpRuntimeManager retains a reusable persistent client across turns", asyn
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: (sessionId: string) => sessionId === "pooled-persistent-sid",
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => {
             loadSessionCalls += 1;
             return { agentSessionId: "unexpected-load-agent-id" };
@@ -665,6 +670,7 @@ test("AcpRuntimeManager closeStream suppresses future live events while preservi
     loadSession: async () => ({ agentSessionId: "unused" }),
     hasReusableSession: () => true,
     supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
     loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
     getAgentLifecycleSnapshot: () => ({ running: true }),
     prompt: async () => {
@@ -768,6 +774,7 @@ test("AcpRuntimeManager does not pool a persistent client after active close", a
     loadSession: async () => ({ agentSessionId: "unused" }),
     hasReusableSession: (sessionId) => sessionId === "active-close-sid",
     supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
     loadSessionWithOptions: async () => ({ agentSessionId: "active-close-agent-id" }),
     getAgentLifecycleSnapshot: () => ({ running: promptActive }),
     prompt: async () => {
@@ -846,6 +853,7 @@ test("AcpRuntimeManager live checkpoints preserve active close state", async () 
     loadSession: async () => ({ agentSessionId: "unused" }),
     hasReusableSession: (sessionId) => sessionId === "active-close-checkpoint-sid",
     supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
     supportsCloseSession: () => true,
     closeSession: async () => {},
     loadSessionWithOptions: async () => ({ agentSessionId: "active-close-checkpoint-agent-id" }),
@@ -922,6 +930,7 @@ test("AcpRuntimeManager accepts a session reply even when the prompt RPC times o
     loadSession: async () => ({ agentSessionId: "unused" }),
     hasReusableSession: () => true,
     supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
     loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
     getAgentLifecycleSnapshot: () => ({ running: true }),
     prompt: async () => {
@@ -987,6 +996,7 @@ test("AcpRuntimeManager waits for late reply chunks to settle before ending a sa
     loadSession: async () => ({ agentSessionId: "unused" }),
     hasReusableSession: () => true,
     supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
     loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
     getAgentLifecycleSnapshot: () => ({ running: true }),
     prompt: async () => {
@@ -1084,6 +1094,7 @@ test("AcpRuntimeManager routes controls through the active controller while a tu
     loadSession: async () => ({ agentSessionId: "unused" }),
     hasReusableSession: () => true,
     supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
     loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
     getAgentLifecycleSnapshot: () => ({ running: true }),
     prompt: async () => {
@@ -1207,6 +1218,7 @@ test("AcpRuntimeManager rejects unsupported advertised config option keys after 
           }),
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => ({
             configOptions: [
               {
@@ -1272,6 +1284,7 @@ test("AcpRuntimeManager maps generic thinking config to refreshed advertised eff
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => ({
             agentSessionId: "unused",
             configOptions: [
@@ -1361,6 +1374,7 @@ test("AcpRuntimeManager maps active generic thinking config against live adverti
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => ({
             agentSessionId: "unused",
             configOptions: [
@@ -1470,6 +1484,7 @@ test("AcpRuntimeManager waits for active load refresh before resolving generic c
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => {
             resolveLoadStarted();
             await loadGate;
@@ -1569,6 +1584,7 @@ test("AcpRuntimeManager waits for oneshot load fallback to resolve before sendin
     loadSession: async () => ({ agentSessionId: "unused" }),
     hasReusableSession: () => false,
     supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
     loadSessionWithOptions: async () => {
       await loadFailure;
       throw { error: { code: -32002, message: "session not found" } };
@@ -1644,6 +1660,7 @@ test("AcpRuntimeManager honors aborts requested before prompt starts after onesh
     loadSession: async () => ({ agentSessionId: "unused" }),
     hasReusableSession: () => false,
     supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
     loadSessionWithOptions: async () => {
       await loadFailure;
       throw { error: { code: -32002, message: "session not found" } };
@@ -1713,6 +1730,7 @@ test("AcpRuntimeManager handles offline oneshot controls, status, close, and mis
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => false,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
           getAgentLifecycleSnapshot: () => ({ running: true }),
           prompt: async () => ({ stopReason: "end_turn" }),
@@ -1779,6 +1797,7 @@ test("AcpRuntimeManager closes the backend session when discarding persistent st
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           supportsCloseSession: () => true,
           closeSession: async (sessionId: string) => {
             closedSessionIds.push(sessionId);
@@ -1823,6 +1842,7 @@ test("AcpRuntimeManager closes the backend session when discarding persistent st
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           supportsCloseSession: () => true,
           closeSession: async () => {},
           loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
@@ -1877,6 +1897,7 @@ test("AcpRuntimeManager treats missing backend sessions as a successful discard 
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           supportsCloseSession: () => true,
           closeSession: async () => {
             throw { error: { code: -32002, message: "session not found" } };
@@ -1933,6 +1954,7 @@ test("AcpRuntimeManager applies timeoutMs to backend session shutdown during dis
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           supportsCloseSession: () => true,
           closeSession: async () => {
             closeSessionCalls += 1;
@@ -1991,6 +2013,7 @@ test("AcpRuntimeManager fails offline persistent controls clearly when session r
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => false,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
           getAgentLifecycleSnapshot: () => ({ running: true }),
           prompt: async () => ({ stopReason: "end_turn" }),
@@ -2039,6 +2062,7 @@ test("AcpRuntimeManager surfaces normalized prompt failures", async () => {
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => true,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
           getAgentLifecycleSnapshot: () => ({ running: true }),
           prompt: async () => {
@@ -2117,6 +2141,7 @@ test("AcpRuntimeManager rejects unsupported runtime attachment media types", asy
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => true,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
           getAgentLifecycleSnapshot: () => ({ running: true }),
           prompt: async () => ({ stopReason: "end_turn" }),
@@ -2168,6 +2193,7 @@ test("AcpRuntimeManager fails persistent turns clearly when session reuse is una
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => false,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
           getAgentLifecycleSnapshot: () => ({ running: true }),
           prompt: async () => {
@@ -2231,6 +2257,7 @@ test("AcpRuntimeManager still falls back to a fresh session for oneshot turns", 
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => false,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
           getAgentLifecycleSnapshot: () => ({ running: true }),
           prompt: async (sessionId: string) => {
@@ -2290,6 +2317,7 @@ test("AcpRuntimeManager falls back when a kept-open persistent client is no long
             loadSession: async () => ({ agentSessionId: "unused" }),
             hasReusableSession: () => firstClientReusable,
             supportsLoadSession: () => true,
+            supportsResumeSession: () => false,
             loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
             getAgentLifecycleSnapshot: () => ({ running: firstClientReusable }),
             prompt: async () => {
@@ -2312,6 +2340,7 @@ test("AcpRuntimeManager falls back when a kept-open persistent client is no long
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => ({ agentSessionId: "resumed-agent-id" }),
           getAgentLifecycleSnapshot: () => ({ running: true }),
           prompt: async () => {
@@ -2386,6 +2415,7 @@ test("AcpRuntimeManager reuses a kept-open persistent client for controls before
           },
           hasReusableSession: (sessionId: string) => sessionId === "pending-session-id",
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => {
             loadSessionCalls += 1;
             return { agentSessionId: "unexpected-agent-id" };
@@ -2492,6 +2522,7 @@ function createModelsClientFactory(options: {
       loadSession: async () => ({ agentSessionId: "models-agent" }),
       hasReusableSession: () => false,
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => ({ agentSessionId: "models-agent" }),
       getAgentLifecycleSnapshot: () => ({ pid: 1, startedAt: "now", running: true }),
       prompt: async () => ({ stopReason: "end_turn" }),
@@ -2610,6 +2641,7 @@ test("AcpRuntimeManager forwards sessionOptions to createClient on fresh session
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
           getAgentLifecycleSnapshot: () => ({ running: true }),
           prompt: async () => ({ stopReason: "end_turn" }),
@@ -2668,6 +2700,7 @@ test("AcpRuntimeManager persists sessionOptions { append } and model/allowedTool
           loadSession: async () => ({ agentSessionId: "unused" }),
           hasReusableSession: () => false,
           supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
           loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
           getAgentLifecycleSnapshot: () => ({ running: true }),
           prompt: async () => ({ stopReason: "end_turn" }),

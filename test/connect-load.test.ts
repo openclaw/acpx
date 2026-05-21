@@ -152,6 +152,7 @@ test("connectAndLoadSession resumes an existing load-capable session", async () 
         running: true,
       }),
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async (sessionId, loadCwd, options) => {
         assert.equal(sessionId, "resume-session");
         assert.equal(loadCwd, cwd);
@@ -218,6 +219,7 @@ test("connectAndLoadSession falls back to createSession when load returns resour
         running: true,
       }),
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         throw {
           error: {
@@ -272,6 +274,7 @@ test("connectAndLoadSession fails instead of creating a fresh session when resum
         running: true,
       }),
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         throw {
           error: {
@@ -323,6 +326,7 @@ test("connectAndLoadSession falls back to createSession for empty sessions on ad
         running: true,
       }),
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         throw {
           error: {
@@ -371,6 +375,7 @@ test("connectAndLoadSession fails clearly when same-session resume is required b
         running: true,
       }),
       supportsLoadSession: () => false,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         throw new Error("loadSession should not be called");
       },
@@ -422,6 +427,7 @@ test("connectAndLoadSession falls back to session/new on -32602 Invalid params",
         running: true,
       }),
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         throw {
           error: {
@@ -477,6 +483,7 @@ test("connectAndLoadSession falls back to session/new on -32601 Method not found
         running: true,
       }),
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         throw {
           error: {
@@ -532,6 +539,7 @@ test("connectAndLoadSession rethrows load failures that should not create a new 
         running: true,
       }),
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         throw {
           error: {
@@ -590,6 +598,7 @@ test("connectAndLoadSession fails when desired mode replay cannot be restored on
         running: true,
       }),
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         throw {
           error: {
@@ -655,6 +664,7 @@ test("connectAndLoadSession replays desired model on a fresh session", async () 
         running: true,
       }),
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         throw {
           error: {
@@ -715,6 +725,7 @@ test("connectAndLoadSession fails clearly when saved model cannot be replayed ge
         running: true,
       }),
       supportsLoadSession: () => false,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         throw new Error("loadSessionWithOptions should not be called");
       },
@@ -772,6 +783,7 @@ test("connectAndLoadSession restores the original session when desired model rep
         running: true,
       }),
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         throw {
           error: {
@@ -840,6 +852,7 @@ test("connectAndLoadSession replays desired config options on a fresh session", 
         running: true,
       }),
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         throw {
           error: {
@@ -903,6 +916,7 @@ test("connectAndLoadSession restores the original session when desired config re
         running: true,
       }),
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         throw {
           error: {
@@ -974,6 +988,7 @@ test("connectAndLoadSession reuses an already loaded client session", async () =
         running: true,
       }),
       supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
       loadSessionWithOptions: async () => {
         loaded = true;
         return {};

@@ -350,38 +350,14 @@ type RunningRuntimeTurn = {
   activeSessionId: string;
 };
 
-type MaybeResumeClient = {
-  supportsResumeSession?: () => boolean;
-  resumeSession?: AcpClient["resumeSession"];
-};
-
-function clientSupportsResumeSession(client: AcpClient): boolean {
-  const maybeClient = client as unknown as MaybeResumeClient;
-  return (
-    typeof maybeClient.supportsResumeSession === "function" && maybeClient.supportsResumeSession()
-  );
-}
-
-async function clientResumeSession(
-  client: AcpClient,
-  sessionId: string,
-  cwd: string,
-): ReturnType<AcpClient["resumeSession"]> {
-  const maybeClient = client as unknown as MaybeResumeClient;
-  if (typeof maybeClient.resumeSession !== "function") {
-    throw new Error("Agent does not support session/resume");
-  }
-  return await maybeClient.resumeSession.call(client, sessionId, cwd);
-}
-
 async function createOrLoadRuntimeSession(
   client: AcpClient,
   resumeSessionId: string | undefined,
   cwd: string,
 ): Promise<CreatedRuntimeSession> {
   if (resumeSessionId) {
-    if (clientSupportsResumeSession(client)) {
-      const resumed = await clientResumeSession(client, resumeSessionId, cwd);
+    if (client.supportsResumeSession()) {
+      const resumed = await client.resumeSession(resumeSessionId, cwd);
       return {
         sessionId: resumeSessionId,
         agentSessionId: resumed.agentSessionId,
