@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const ACP_ADAPTER_PACKAGE_RANGES = {
   pi: "^0.0.26",
   codex: "^0.0.44",
-  claude: "^0.31.0",
+  claude: "^0.36.1",
 } as const;
 
 type BuiltInAgentPackageSpec = {
