@@ -396,12 +396,17 @@ function noSessionHints(lowerMessage: string): string[] {
 }
 
 function isUnsupportedSessionLoadError(lowerMessage: string): boolean {
-  return lowerMessage.includes("does not support session/load");
+  return (
+    lowerMessage.includes("does not support session/resume") ||
+    lowerMessage.includes("does not support session/load")
+  );
 }
 
 function isSessionLoadError(lowerMessage: string): boolean {
   return (
-    lowerMessage.includes("failed to resume acp session") || lowerMessage.includes("session/load")
+    lowerMessage.includes("failed to resume acp session") ||
+    lowerMessage.includes("session/resume") ||
+    lowerMessage.includes("session/load")
   );
 }
 

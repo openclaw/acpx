@@ -363,7 +363,9 @@ export async function handlePrompt(
   applyPermissionExitCode(result);
 
   if (globalFlags.verbose && result.loadError) {
-    process.stderr.write(`[acpx] loadSession failed, started fresh session: ${result.loadError}\n`);
+    process.stderr.write(
+      `[acpx] session reconnect failed, started fresh session: ${result.loadError}\n`,
+    );
   }
 }
 
@@ -585,7 +587,9 @@ export async function handleSetMode(
   });
 
   if (globalFlags.verbose && result.loadError) {
-    process.stderr.write(`[acpx] loadSession failed, started fresh session: ${result.loadError}\n`);
+    process.stderr.write(
+      `[acpx] session reconnect failed, started fresh session: ${result.loadError}\n`,
+    );
   }
 
   printSetModeResultByFormat(modeId, result, globalFlags.format);
@@ -620,7 +624,9 @@ export async function handleSetModel(
   });
 
   if (globalFlags.verbose && result.loadError) {
-    process.stderr.write(`[acpx] loadSession failed, started fresh session: ${result.loadError}\n`);
+    process.stderr.write(
+      `[acpx] session reconnect failed, started fresh session: ${result.loadError}\n`,
+    );
   }
 
   printSetModelResultByFormat(modelId, result, globalFlags.format);
@@ -662,7 +668,9 @@ export async function handleSetConfigOption(
   });
 
   if (globalFlags.verbose && result.loadError) {
-    process.stderr.write(`[acpx] loadSession failed, started fresh session: ${result.loadError}\n`);
+    process.stderr.write(
+      `[acpx] session reconnect failed, started fresh session: ${result.loadError}\n`,
+    );
   }
 
   printSetConfigOptionResultByFormat(configId, value, result, globalFlags.format);

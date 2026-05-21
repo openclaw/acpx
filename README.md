@@ -29,7 +29,7 @@ One command surface for Pi, OpenClaw ACP, Codex, Claude, and other ACP-compatibl
 - **Fire-and-forget**: `--no-wait` queues a prompt and returns immediately
 - **Graceful cancel**: `Ctrl+C` sends ACP `session/cancel` before force-kill fallback
 - **Session controls**: `set-mode` and `set <key> <value>` for `session/set_mode` and `session/set_config_option`
-- **Crash reconnect**: dead agent processes are detected and sessions are reloaded automatically
+- **Crash reconnect**: dead agent processes are detected and sessions are resumed or reloaded automatically
 - **Prompt from file/stdin**: `--file <path>` or piped stdin for prompt content
 - **Config files**: global + project JSON config with `acpx config show|init`
 - **Session inspect/history**: `sessions show` and `sessions history --limit <n>`
@@ -405,7 +405,7 @@ spawns the ACP bridge directly without `pnpm` wrapper noise:
 - Session metadata is stored under `~/.acpx/sessions/`.
 - Each successful prompt appends lightweight turn history previews (`role`, `timestamp`, `textPreview`) to session metadata.
 - `Ctrl+C` during a running turn sends ACP `session/cancel` and waits briefly for `stopReason=cancelled` before force-killing if needed.
-- If a saved session pid is dead on the next prompt, `acpx` respawns the agent, attempts `session/load`, and transparently falls back to `session/new` if loading fails.
+- If a saved session pid is dead on the next prompt, `acpx` respawns the agent, attempts `session/resume` when advertised or `session/load` otherwise, and transparently falls back to `session/new` if reconnecting fails.
 
 ## Full CLI reference
 

@@ -39,6 +39,7 @@ const FLOW_WORKDIR_FIXTURE_PATH = fileURLToPath(
 );
 const MOCK_AGENT_COMMAND = `node ${JSON.stringify(MOCK_AGENT_PATH)}`;
 const LOAD_CAPABLE_MOCK_AGENT_COMMAND = `${MOCK_AGENT_COMMAND} --supports-load-session`;
+const RESUME_CAPABLE_MOCK_AGENT_COMMAND = `${MOCK_AGENT_COMMAND} --supports-resume-session`;
 
 const unsafeCodeCharEscapes = Object.freeze({
   "<": "\\u003C",
@@ -1825,6 +1826,55 @@ test("integration: configured mcpServers are sent to session/new and session/loa
       if (sessionId) {
         await runCli([...loadCapableAgentArgs, "--format", "json", "sessions", "close"], homeDir);
       }
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: prompt reconnect uses session/resume when advertised", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const resumeAgentArgs = [
+      "--agent",
+      RESUME_CAPABLE_MOCK_AGENT_COMMAND,
+      "--approve-all",
+      "--cwd",
+      cwd,
+    ];
+
+    try {
+      const created = await runCli(
+        [...resumeAgentArgs, "--format", "json", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+      const createdPayload = JSON.parse(created.stdout.trim()) as {
+        acpxRecordId?: string;
+      };
+      assert.equal(typeof createdPayload.acpxRecordId, "string");
+
+      const prompt = await runCli(
+        [...resumeAgentArgs, "--format", "json", "prompt", "echo resume-method"],
+        homeDir,
+      );
+      assert.equal(prompt.code, 0, prompt.stderr);
+
+      const messages = parseJsonRpcOutputLines(prompt.stdout);
+      const resumeRequest = messages.find(
+        (message) => message.method === "session/resume" && extractJsonRpcId(message) !== undefined,
+      );
+      assert(resumeRequest, `expected session/resume request in output:\n${prompt.stdout}`);
+      assert.equal(
+        (resumeRequest.params as { sessionId?: unknown } | undefined)?.sessionId,
+        createdPayload.acpxRecordId,
+      );
+      assert.equal(
+        messages.some(
+          (message) => message.method === "session/load" && extractJsonRpcId(message) !== undefined,
+        ),
+        false,
+      );
+    } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });

@@ -114,22 +114,29 @@ async function resumeSessionRecordWithClient(
   if (!options.resumeSessionId) {
     throw new Error("resumeSessionId is required");
   }
-  if (!client.supportsLoadSession()) {
+  const resumeMethod = client.supportsResumeSession()
+    ? "session/resume"
+    : client.supportsLoadSession()
+      ? "session/load"
+      : undefined;
+  if (!resumeMethod) {
     throw new Error(
-      `Agent command "${options.agentCommand}" does not support session/load; cannot resume session ${options.resumeSessionId}`,
+      `Agent command "${options.agentCommand}" does not support session/resume or session/load; cannot resume session ${options.resumeSessionId}`,
     );
   }
 
   try {
-    const loadedSession = await withTimeout(
-      client.loadSession(options.resumeSessionId, cwd),
+    const resumedSession = await withTimeout(
+      resumeMethod === "session/resume"
+        ? client.resumeSession(options.resumeSessionId, cwd)
+        : client.loadSession(options.resumeSessionId, cwd),
       options.timeoutMs,
     );
-    const sessionModels = loadedSession.models;
+    const sessionModels = resumedSession.models;
     return {
       sessionId: options.resumeSessionId,
-      agentSessionId: normalizeRuntimeSessionId(loadedSession.agentSessionId),
-      sessionResult: loadedSession,
+      agentSessionId: normalizeRuntimeSessionId(resumedSession.agentSessionId),
+      sessionResult: resumedSession,
       sessionModels,
       requestedModelApplied: await applyRequestedModelIfAdvertised({
         client,

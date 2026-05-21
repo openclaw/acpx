@@ -21,6 +21,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI/sessions: use agent-side ACP `session/list` when available, including
   cursor pagination, cwd filtering, and agent-native session metadata. Thanks
   @amknight.
+- Sessions/reconnect: use ACP `session/resume` when adapters advertise it, so resume-only agents can reuse saved sessions without requiring `session/load`. Thanks @amknight.
 
 ## 2026.5.15 (v0.8.0)
 

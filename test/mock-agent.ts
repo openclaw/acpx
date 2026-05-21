@@ -23,6 +23,8 @@ import {
   type PromptRequest,
   type PromptResponse,
   type RequestPermissionRequest,
+  type ResumeSessionRequest,
+  type ResumeSessionResponse,
   type SessionId,
   type SetSessionConfigOptionRequest,
   type SetSessionConfigOptionResponse,
@@ -43,12 +45,15 @@ type MockAgentOptions = {
   hangOnNewSession: boolean;
   newSessionMeta?: Record<string, string>;
   loadSessionMeta?: Record<string, string>;
+  resumeSessionMeta?: Record<string, string>;
   supportsLoadSession: boolean;
+  supportsResumeSession: boolean;
   supportsCloseSession: boolean;
   supportsListSessions: boolean;
   listPageSize: number;
   closeSessionMarker?: string;
   loadSessionNotFound: boolean;
+  resumeSessionNotFound: boolean;
   loadSessionFailsOnEmpty: boolean;
   setSessionModeFails: boolean;
   setSessionModeInvalidParams: boolean;
@@ -271,12 +276,13 @@ function parsePositiveIntegerOption(args: string[], index: number, flag: string)
   return parsed;
 }
 
-type MetaFlagTarget = "newSessionMeta" | "loadSessionMeta";
+type MetaFlagTarget = "newSessionMeta" | "loadSessionMeta" | "resumeSessionMeta";
 
 type MetaFlagSpec = {
   target: MetaFlagTarget;
   key: string;
   supportsLoadSession?: boolean;
+  supportsResumeSession?: boolean;
 };
 
 const META_FLAG_SPECS: Record<string, MetaFlagSpec> = {
@@ -316,17 +322,40 @@ const META_FLAG_SPECS: Record<string, MetaFlagSpec> = {
     key: "agentSessionId",
     supportsLoadSession: true,
   },
+  "--resume-runtime-session-id": {
+    target: "resumeSessionMeta",
+    key: "agentSessionId",
+    supportsResumeSession: true,
+  },
+  "--resume-provider-session-id": {
+    target: "resumeSessionMeta",
+    key: "agentSessionId",
+    supportsResumeSession: true,
+  },
+  "--resume-codex-session-id": {
+    target: "resumeSessionMeta",
+    key: "agentSessionId",
+    supportsResumeSession: true,
+  },
+  "--resume-claude-session-id": {
+    target: "resumeSessionMeta",
+    key: "agentSessionId",
+    supportsResumeSession: true,
+  },
 };
 
 function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   const newSessionMeta: Record<string, string> = {};
   const loadSessionMeta: Record<string, string> = {};
+  const resumeSessionMeta: Record<string, string> = {};
   let supportsLoadSession = false;
+  let supportsResumeSession = false;
   let supportsCloseSession = false;
   let supportsListSessions = false;
   let listPageSize = 100;
   let closeSessionMarker: string | undefined;
   let loadSessionNotFound = false;
+  let resumeSessionNotFound = false;
   let loadSessionFailsOnEmpty = false;
   let setSessionModeFails = false;
   let setSessionModeInvalidParams = false;
@@ -348,6 +377,11 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
       continue;
     }
 
+    if (token === "--supports-resume-session") {
+      supportsResumeSession = true;
+      continue;
+    }
+
     if (token === "--load-session-fails-on-empty") {
       supportsLoadSession = true;
       loadSessionFailsOnEmpty = true;
@@ -357,6 +391,12 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     if (token === "--load-session-not-found") {
       supportsLoadSession = true;
       loadSessionNotFound = true;
+      continue;
+    }
+
+    if (token === "--resume-session-not-found") {
+      supportsResumeSession = true;
+      resumeSessionNotFound = true;
       continue;
     }
 
@@ -454,11 +494,16 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
       const value = parseOptionValue(argv, index + 1, token);
       if (metaFlag.target === "newSessionMeta") {
         newSessionMeta[metaFlag.key] = value;
-      } else {
+      } else if (metaFlag.target === "loadSessionMeta") {
         loadSessionMeta[metaFlag.key] = value;
+      } else {
+        resumeSessionMeta[metaFlag.key] = value;
       }
       if (metaFlag.supportsLoadSession) {
         supportsLoadSession = true;
+      }
+      if (metaFlag.supportsResumeSession) {
+        supportsResumeSession = true;
       }
       index += 1;
       continue;
@@ -471,12 +516,16 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     hangOnNewSession,
     newSessionMeta: Object.keys(newSessionMeta).length > 0 ? { ...newSessionMeta } : undefined,
     loadSessionMeta: Object.keys(loadSessionMeta).length > 0 ? { ...loadSessionMeta } : undefined,
+    resumeSessionMeta:
+      Object.keys(resumeSessionMeta).length > 0 ? { ...resumeSessionMeta } : undefined,
     supportsLoadSession,
+    supportsResumeSession,
     supportsCloseSession,
     supportsListSessions,
     listPageSize,
     closeSessionMarker,
     loadSessionNotFound,
+    resumeSessionNotFound,
     loadSessionFailsOnEmpty,
     setSessionModeFails,
     setSessionModeInvalidParams,
@@ -622,8 +671,8 @@ class MockAgent implements Agent {
     const sessionCapabilities = {
       ...(this.options.supportsCloseSession ? { close: {} } : {}),
       ...(this.options.supportsListSessions ? { list: {} } : {}),
+      ...(this.options.supportsResumeSession ? { resume: {} } : {}),
     };
-
     return {
       protocolVersion: PROTOCOL_VERSION,
       authMethods: [],
@@ -694,19 +743,41 @@ class MockAgent implements Agent {
       await this.sendAssistantMessage(params.sessionId, this.options.loadReplayText);
     }
 
+    return this.buildSessionReconnectResponse(params.sessionId, this.options.loadSessionMeta);
+  }
+
+  async resumeSession(params: ResumeSessionRequest): Promise<ResumeSessionResponse> {
+    if (!this.options.supportsResumeSession) {
+      throw new Error("resumeSession is not supported");
+    }
+
+    if (this.options.resumeSessionNotFound) {
+      throw RequestError.resourceNotFound(params.sessionId);
+    }
+
+    const existing = this.sessions.get(params.sessionId);
+    this.sessions.set(params.sessionId, existing ?? createSessionState(false));
+
+    return this.buildSessionReconnectResponse(params.sessionId, this.options.resumeSessionMeta);
+  }
+
+  private buildSessionReconnectResponse(
+    sessionId: SessionId,
+    responseMeta: Record<string, string> | undefined,
+  ): LoadSessionResponse {
     const response: LoadSessionResponse = {};
 
-    if (this.options.loadSessionMeta) {
-      response._meta = { ...this.options.loadSessionMeta };
+    if (responseMeta) {
+      response._meta = { ...responseMeta };
     }
 
     if (this.options.advertiseModels) {
-      const session = this.sessions.get(params.sessionId);
+      const session = this.sessions.get(sessionId);
       response.models = buildModelsState(session?.modelId ?? DEFAULT_MODEL_ID);
     }
     if (this.options.advertiseConfigOptions) {
       response.configOptions = buildConfigOptions(
-        this.sessions.get(params.sessionId) ?? createSessionState(false),
+        this.sessions.get(sessionId) ?? createSessionState(false),
       );
     }
 

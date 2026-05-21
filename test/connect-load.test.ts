@@ -27,6 +27,11 @@ type FakeClient = {
     };
   };
   supportsLoadSession: () => boolean;
+  supportsResumeSession?: () => boolean;
+  resumeSession?: (
+    sessionId: string,
+    cwd: string,
+  ) => Promise<{ agentSessionId?: string; models?: SessionModelState }>;
   loadSessionWithOptions: (
     sessionId: string,
     cwd: string,
@@ -68,6 +73,58 @@ function buildModelsState(currentModelId: string): SessionModelState {
     ],
   };
 }
+
+test("connectAndLoadSession prefers session/resume for resume-capable sessions", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "resume-record",
+      acpSessionId: "resume-session",
+      agentCommand: "agent",
+      cwd,
+    });
+
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({
+        running: true,
+      }),
+      supportsLoadSession: () => false,
+      supportsResumeSession: () => true,
+      resumeSession: async (sessionId, resumeCwd) => {
+        assert.equal(sessionId, "resume-session");
+        assert.equal(resumeCwd, cwd);
+        return { agentSessionId: "runtime-session" };
+      },
+      loadSessionWithOptions: async () => {
+        throw new Error("loadSessionWithOptions should not be called");
+      },
+      createSession: async () => {
+        throw new Error("createSession should not be called");
+      },
+      setSessionMode: async () => {},
+      setSessionModel: async () => {},
+    };
+
+    const result = await connectAndLoadSession({
+      client: client as never,
+      record,
+      timeoutMs: 1_000,
+      activeController: ACTIVE_CONTROLLER,
+    });
+
+    assert.deepEqual(result, {
+      sessionId: "resume-session",
+      agentSessionId: "runtime-session",
+      resumed: true,
+      loadError: undefined,
+    });
+    assert.equal(record.agentSessionId, "runtime-session");
+  });
+});
 
 test("connectAndLoadSession resumes an existing load-capable session", async () => {
   await withTempHome(async (homeDir) => {
@@ -295,7 +352,7 @@ test("connectAndLoadSession falls back to createSession for empty sessions on ad
   });
 });
 
-test("connectAndLoadSession fails clearly when same-session resume is required but session/load is unsupported", async () => {
+test("connectAndLoadSession fails clearly when same-session resume is required but session reuse is unsupported", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
@@ -333,7 +390,7 @@ test("connectAndLoadSession fails clearly when same-session resume is required b
           timeoutMs: 1_000,
           activeController: ACTIVE_CONTROLLER,
         }),
-      /Persistent ACP session unsupported-load-session could not be resumed: agent does not support session\/load/i,
+      /Persistent ACP session unsupported-load-session could not be resumed: agent does not support session\/resume or session\/load/i,
     );
   });
 });

@@ -44,6 +44,15 @@ type FakeClient = {
   }>;
   hasReusableSession: (sessionId: string) => boolean;
   supportsLoadSession: () => boolean;
+  supportsResumeSession?: () => boolean;
+  resumeSession?: (
+    sessionId: string,
+    cwd: string,
+  ) => Promise<{
+    agentSessionId?: string;
+    configOptions?: SetSessionConfigOptionResponse["configOptions"];
+    models?: SessionModelState;
+  }>;
   supportsCloseSession?: () => boolean;
   loadSessionWithOptions: (
     sessionId: string,
@@ -152,7 +161,7 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
     ({
       initializeResult: {
         protocolVersion: 1,
-        agentCapabilities: { loadSession: true },
+        agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } },
       },
       start: async () => {},
       close: async () => {},
@@ -172,7 +181,10 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
           ],
         };
       },
-      loadSession: async (sessionId, cwd) => {
+      loadSession: async () => {
+        throw new Error("loadSession should not be called");
+      },
+      resumeSession: async (sessionId, cwd) => {
         assert.equal(sessionId, "resume-session");
         assert.equal(cwd, "/workspace");
         return {
@@ -190,6 +202,7 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
       },
       hasReusableSession: () => false,
       supportsLoadSession: () => true,
+      supportsResumeSession: () => true,
       loadSessionWithOptions: async () => ({ agentSessionId: "runtime-session" }),
       getAgentLifecycleSnapshot: () => lifecycle,
       prompt: async () => ({ stopReason: "end_turn" }),
@@ -1955,7 +1968,7 @@ test("AcpRuntimeManager applies timeoutMs to backend session shutdown during dis
   assert.equal(unchanged?.acpx?.reset_on_next_ensure, undefined);
 });
 
-test("AcpRuntimeManager fails offline persistent controls clearly when session/load is unavailable", async () => {
+test("AcpRuntimeManager fails offline persistent controls clearly when session reuse is unavailable", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "offline-persistent-session",
     acpSessionId: "offline-persistent-backend-session",
@@ -1993,7 +2006,7 @@ test("AcpRuntimeManager fails offline persistent controls clearly when session/l
 
   await assert.rejects(
     async () => await manager.setMode(createHandle("offline-persistent-session"), "plan"),
-    /Persistent ACP session offline-persistent-backend-session could not be resumed: agent does not support session\/load/,
+    /Persistent ACP session offline-persistent-backend-session could not be resumed: agent does not support session\/resume or session\/load/,
   );
   await assert.rejects(
     async () =>
@@ -2002,7 +2015,7 @@ test("AcpRuntimeManager fails offline persistent controls clearly when session/l
         "approval",
         "manual",
       ),
-    /Persistent ACP session offline-persistent-backend-session could not be resumed: agent does not support session\/load/,
+    /Persistent ACP session offline-persistent-backend-session could not be resumed: agent does not support session\/resume or session\/load/,
   );
   assert.equal(createSessionCalls, 0);
 });
@@ -2131,7 +2144,7 @@ test("AcpRuntimeManager rejects unsupported runtime attachment media types", asy
   );
 });
 
-test("AcpRuntimeManager fails persistent turns clearly when session/load is unavailable", async () => {
+test("AcpRuntimeManager fails persistent turns clearly when session reuse is unavailable", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "persistent-session",
     acpSessionId: "persistent-backend-session",
@@ -2187,7 +2200,7 @@ test("AcpRuntimeManager fails persistent turns clearly when session/load is unav
       code: "RUNTIME",
       detailCode: "SESSION_RESUME_REQUIRED",
       message:
-        "Persistent ACP session persistent-backend-session could not be resumed: agent does not support session/load",
+        "Persistent ACP session persistent-backend-session could not be resumed: agent does not support session/resume or session/load",
       retryable: true,
     },
   });

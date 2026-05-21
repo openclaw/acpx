@@ -243,6 +243,8 @@ function extractJsonRpcResponseInfo(
   };
 }
 
+const SESSION_RECONNECT_METHODS = new Set(["session/load", "session/resume"]);
+
 function filterRecoverableLoadFallbackOutput(messages: AcpJsonRpcMessage[]): AcpJsonRpcMessage[] {
   const requestMethodById = new Map<string, string>();
   const failedLoadRequestIds = new Set<string>();
@@ -259,7 +261,8 @@ function filterRecoverableLoadFallbackOutput(messages: AcpJsonRpcMessage[]): Acp
       continue;
     }
 
-    if (requestMethodById.get(response.idKey) === "session/load") {
+    const requestMethod = requestMethodById.get(response.idKey);
+    if (requestMethod && SESSION_RECONNECT_METHODS.has(requestMethod)) {
       failedLoadRequestIds.add(response.idKey);
     }
   }
@@ -270,7 +273,11 @@ function filterRecoverableLoadFallbackOutput(messages: AcpJsonRpcMessage[]): Acp
 
   return messages.filter((message) => {
     const request = extractJsonRpcRequestInfo(message);
-    if (request && request.method === "session/load" && failedLoadRequestIds.has(request.idKey)) {
+    if (
+      request &&
+      SESSION_RECONNECT_METHODS.has(request.method) &&
+      failedLoadRequestIds.has(request.idKey)
+    ) {
       return false;
     }
 

@@ -449,7 +449,7 @@ For prompt commands:
 Use `sessions new [--name <name>]` when you explicitly want a fresh scoped session.
 Use `sessions ensure [--name <name>]` when you want idempotent "get-or-create" behavior.
 
-If a saved session PID is dead, `acpx` respawns the agent, tries `session/load`, and transparently falls back to `session/new` when loading fails.
+If a saved session PID is dead, `acpx` respawns the agent, tries `session/resume` when advertised or `session/load` otherwise, and transparently falls back to `session/new` when reconnecting fails.
 
 ### Prompt queueing
 

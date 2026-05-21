@@ -18,6 +18,7 @@ import {
   type ReadTextFileResponse,
   type ReleaseTerminalRequest,
   type ReleaseTerminalResponse,
+  type ResumeSessionResponse,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionNotification,
@@ -134,7 +135,13 @@ export type SessionLoadResult = {
   models?: SessionModelState;
 };
 
-function toSessionLoadResult(response: LoadSessionResponse | undefined): SessionLoadResult {
+export type SessionResumeResult = SessionLoadResult;
+
+type ReconnectedSessionResponse = LoadSessionResponse | ResumeSessionResponse;
+
+function toReconnectedSessionResult(
+  response: ReconnectedSessionResponse | undefined,
+): SessionLoadResult {
   return {
     agentSessionId: extractRuntimeSessionId(response?._meta),
     configOptions: response?.configOptions ?? undefined,
@@ -404,6 +411,10 @@ export class AcpClient {
 
   supportsLoadSession(): boolean {
     return Boolean(this.initResult?.agentCapabilities?.loadSession);
+  }
+
+  supportsResumeSession(): boolean {
+    return Boolean(this.initResult?.agentCapabilities?.sessionCapabilities?.resume);
   }
 
   supportsCloseSession(): boolean {
@@ -867,7 +878,23 @@ export class AcpClient {
 
     this.loadedSessionId = sessionId;
 
-    return toSessionLoadResult(response);
+    return toReconnectedSessionResult(response);
+  }
+
+  async resumeSession(sessionId: string, cwd = this.options.cwd): Promise<SessionResumeResult> {
+    const connection = this.getConnection();
+    const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
+    const response = await this.runConnectionRequest(() =>
+      connection.resumeSession({
+        sessionId,
+        cwd: sessionCwd,
+        mcpServers: this.options.mcpServers ?? [],
+      }),
+    );
+
+    this.loadedSessionId = sessionId;
+
+    return toReconnectedSessionResult(response);
   }
 
   private applySessionUpdateSuppression(enabled: boolean): SessionUpdateSuppressionState {

@@ -350,12 +350,49 @@ type RunningRuntimeTurn = {
   activeSessionId: string;
 };
 
+type MaybeResumeClient = {
+  supportsResumeSession?: () => boolean;
+  resumeSession?: AcpClient["resumeSession"];
+};
+
+function clientSupportsResumeSession(client: AcpClient): boolean {
+  const maybeClient = client as unknown as MaybeResumeClient;
+  return (
+    typeof maybeClient.supportsResumeSession === "function" && maybeClient.supportsResumeSession()
+  );
+}
+
+async function clientResumeSession(
+  client: AcpClient,
+  sessionId: string,
+  cwd: string,
+): ReturnType<AcpClient["resumeSession"]> {
+  const maybeClient = client as unknown as MaybeResumeClient;
+  if (typeof maybeClient.resumeSession !== "function") {
+    throw new Error("Agent does not support session/resume");
+  }
+  return await maybeClient.resumeSession.call(client, sessionId, cwd);
+}
+
 async function createOrLoadRuntimeSession(
   client: AcpClient,
   resumeSessionId: string | undefined,
   cwd: string,
 ): Promise<CreatedRuntimeSession> {
   if (resumeSessionId) {
+    if (clientSupportsResumeSession(client)) {
+      const resumed = await clientResumeSession(client, resumeSessionId, cwd);
+      return {
+        sessionId: resumeSessionId,
+        agentSessionId: resumed.agentSessionId,
+        sessionResult: resumed,
+      };
+    }
+    if (!client.supportsLoadSession()) {
+      throw new Error(
+        `Agent does not support session/resume or session/load; cannot resume session ${resumeSessionId}`,
+      );
+    }
     const loaded = await client.loadSession(resumeSessionId, cwd);
     return {
       sessionId: resumeSessionId,
@@ -993,7 +1030,7 @@ export class AcpRuntimeManager {
     }
     this.emitRuntimeTurnEvent(task, {
       type: "status",
-      text: loadError ? `load fallback: ${loadError}` : "session resumed",
+      text: loadError ? `session reconnect fallback: ${loadError}` : "session resumed",
     });
   }
 

@@ -168,8 +168,8 @@ See [Session control](session-control.md) for `set-mode`, `set <key> <value>`, a
 Saved sessions track adapter PIDs. If a saved PID is dead on the next prompt:
 
 1. `acpx` respawns the agent.
-2. Attempts ACP `session/load` with the saved provider session id.
-3. Falls back to `session/new` if loading fails, transparently updating the saved record.
+2. Attempts ACP `session/resume` with the saved provider session id when the agent advertises it, otherwise ACP `session/load`.
+3. Falls back to `session/new` if reconnecting fails, transparently updating the saved record.
 
 This makes long-running scripted sessions resilient to crashes, OS restarts, and adapter upgrades.
 
