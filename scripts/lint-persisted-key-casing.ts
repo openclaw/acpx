@@ -12,7 +12,7 @@ function makeRecord(): SessionRecord {
     acpxRecordId: "lint-record",
     acpSessionId: "lint-session",
     agentSessionId: "agent-session",
-    agentCommand: "npx @zed-industries/codex-acp",
+    agentCommand: "npx -y @agentclientprotocol/codex-acp",
     cwd: "/tmp/lint",
     createdAt: "2026-02-27T00:00:00.000Z",
     lastUsedAt: "2026-02-27T00:00:00.000Z",

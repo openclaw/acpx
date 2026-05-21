@@ -4,7 +4,7 @@ Built-in agents:
 
 - `pi -> npx pi-acp`
 - `openclaw -> openclaw acp`
-- `codex -> npx @zed-industries/codex-acp`
+- `codex -> npx -y @agentclientprotocol/codex-acp`
 - `claude -> npx -y @agentclientprotocol/claude-agent-acp`
 - `gemini -> gemini --acp`
 - `cursor -> cursor-agent acp`
@@ -21,7 +21,7 @@ Built-in agents:
 
 Harness-specific docs in this directory:
 
-- [Codex](Codex.md): built-in `codex -> npx @zed-industries/codex-acp`
+- [Codex](Codex.md): built-in `codex -> npx -y @agentclientprotocol/codex-acp`
 - [Claude](Claude.md): built-in `claude -> npx -y @agentclientprotocol/claude-agent-acp`
 - [Copilot](Copilot.md): built-in `copilot -> copilot --acp --stdio`
 - [Droid](Droid.md): built-in `droid -> droid exec --output-format acp` with `factory-droid` and `factorydroid` aliases

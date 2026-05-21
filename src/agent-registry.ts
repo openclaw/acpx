@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const ACP_ADAPTER_PACKAGE_RANGES = {
   pi: "^0.0.26",
-  codex: "^0.12.0",
+  codex: "^0.0.44",
   claude: "^0.31.0",
 } as const;
 
@@ -38,7 +38,7 @@ type BuiltInLaunchResolverOptions = {
 export const AGENT_REGISTRY: Record<string, string> = {
   pi: `npx pi-acp@${ACP_ADAPTER_PACKAGE_RANGES.pi}`,
   openclaw: "openclaw acp",
-  codex: `npx @zed-industries/codex-acp@${ACP_ADAPTER_PACKAGE_RANGES.codex}`,
+  codex: `npx -y @agentclientprotocol/codex-acp@${ACP_ADAPTER_PACKAGE_RANGES.codex}`,
   claude: `npx -y @agentclientprotocol/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
   gemini: "gemini --acp",
   cursor: "cursor-agent acp",
@@ -56,7 +56,7 @@ export const AGENT_REGISTRY: Record<string, string> = {
 
 export const BUILT_IN_AGENT_PACKAGES = {
   codex: {
-    packageName: "@zed-industries/codex-acp",
+    packageName: "@agentclientprotocol/codex-acp",
     packageRange: ACP_ADAPTER_PACKAGE_RANGES.codex,
     preferredBinName: "codex-acp",
     fallbackCommand: AGENT_REGISTRY.codex,

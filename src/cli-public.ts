@@ -69,7 +69,7 @@ Examples:
   acpx codex exec "what does this repo do"
   acpx codex cancel
   acpx codex set-mode plan
-  acpx codex set thought_level high
+  acpx codex set model 'gpt-5.2[high]'
   acpx codex -s backend "fix the API"
   acpx codex sessions
   acpx codex sessions new --name backend

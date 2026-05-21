@@ -748,7 +748,7 @@ test("AcpClient createSession forwards systemPrompt append in _meta alongside cl
 test("AcpClient createSession forwards codex model metadata without setting it explicitly", async () => {
   const cwd = path.resolve("/tmp/acpx-client-codex-model");
   const client = makeClient({
-    agentCommand: "npx @zed-industries/codex-acp",
+    agentCommand: "npx -y @agentclientprotocol/codex-acp",
     sessionOptions: {
       model: "GPT-5-2",
     },

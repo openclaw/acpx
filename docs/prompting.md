@@ -126,16 +126,6 @@ Behavior varies by adapter:
 
 For mid-session model switches, use `set model <id>` instead. See [Session control](session-control.md#set-key-value).
 
-## Codex compatibility aliases
-
-Some Codex-specific knobs are surfaced through generic ACP methods:
-
-```bash
-acpx codex set thought_level high     # alias -> codex-acp `reasoning_effort`
-```
-
-`thought_level` is intercepted and translated. Other keys pass through as-is via `session/set_config_option`.
-
 ## Permissions inside a prompt
 
 Prompts can trigger permission requests for tool calls. The default policy auto-approves reads and prompts for writes; non-interactive runs default to deny. See [Permissions](permissions.md).

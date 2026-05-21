@@ -19,7 +19,7 @@ If you would rather not install globally, every command below works with `npx ac
 `acpx` ships with adapters for a dozen coding agents. The two most common starting points:
 
 ```bash
-# Codex (OpenAI), via @zed-industries/codex-acp
+# Codex (OpenAI), via @agentclientprotocol/codex-acp
 acpx codex --help
 
 # Claude Code, via @agentclientprotocol/claude-agent-acp

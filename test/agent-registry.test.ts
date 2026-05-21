@@ -84,8 +84,8 @@ test("claude built-in uses the current ACP adapter package range", () => {
 });
 
 test("npm-backed built-ins use current adapter package ranges", () => {
-  assert.equal(BUILT_IN_AGENT_PACKAGES.codex.packageRange, "^0.12.0");
-  assert.equal(AGENT_REGISTRY.codex, "npx @zed-industries/codex-acp@^0.12.0");
+  assert.equal(BUILT_IN_AGENT_PACKAGES.codex.packageRange, "^0.0.44");
+  assert.equal(AGENT_REGISTRY.codex, "npx -y @agentclientprotocol/codex-acp@^0.0.44");
   assert.equal(AGENT_REGISTRY.pi, "npx pi-acp@^0.0.26");
 });
 

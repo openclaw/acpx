@@ -934,7 +934,7 @@ test("set-mode persists across load fallback and replays on fresh ACP sessions",
   });
 });
 
-test("codex thought_level aliases to reasoning_effort", async () => {
+test("codex thought_level passes through for current built-in adapter", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
@@ -976,16 +976,10 @@ test("codex thought_level aliases to reasoning_effort", async () => {
       action?: string;
       configId?: string;
       value?: string;
-      configOptions?: Array<{ id?: string; currentValue?: string; category?: string }>;
     };
     assert.equal(payload.action, "config_set");
     assert.equal(payload.configId, "thought_level");
     assert.equal(payload.value, "high");
-    const reasoningEffort = payload.configOptions?.find(
-      (option) => option.id === "reasoning_effort",
-    );
-    assert.equal(reasoningEffort?.currentValue, "high");
-    assert.equal(reasoningEffort?.category, "thought_level");
   });
 });
 

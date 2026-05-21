@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
-import { isCodexInvocation } from "../acp/codex-compat.js";
+import { isLegacyZedCodexAcpInvocation } from "../acp/codex-compat.js";
 import { AgentSpawnError } from "../errors.js";
 import { loadPermissionPolicySpec } from "../permission-policy.js";
 import {
@@ -149,11 +149,8 @@ function applyPermissionExitCode(result: {
   }
 }
 
-function resolveCompatibleConfigId(
-  agent: { agentName: string; agentCommand: string },
-  configId: string,
-): string {
-  if (isCodexInvocation(agent.agentName, agent.agentCommand) && configId === "thought_level") {
+function resolveCompatibleConfigId(agent: { agentCommand: string }, configId: string): string {
+  if (isLegacyZedCodexAcpInvocation(agent.agentCommand) && configId === "thought_level") {
     return "reasoning_effort";
   }
   return configId;

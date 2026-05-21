@@ -21,7 +21,7 @@ Some older Corepack builds bundled with supported Node.js versions have stale
 package-signing keys and fail while preparing current pnpm releases. Installing
 pnpm with npm avoids that bootstrap failure.
 
-`acpx` itself does not need a global install of every adapter. Built-in adapters that ship as npm packages (`pi-acp`, `@zed-industries/codex-acp`, `@agentclientprotocol/claude-agent-acp`, `@kilocode/cli`, `opencode-ai`) are auto-fetched with `npx` on first use.
+`acpx` itself does not need a global install of every adapter. Built-in adapters that ship as npm packages (`pi-acp`, `@agentclientprotocol/codex-acp`, `@agentclientprotocol/claude-agent-acp`, `@kilocode/cli`, `opencode-ai`) are auto-fetched with `npx` on first use.
 
 ## Global install (recommended)
 

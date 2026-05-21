@@ -10,6 +10,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Tooling: add Slophammer TypeScript quality gates for coverage, complexity,
   unsafe types, mutation testing, DRY checks, and dependency boundaries.
+- Agents/built-ins: switch the default Codex adapter to `@agentclientprotocol/codex-acp`, with Codex model selection handled through advertised ACP model ids.
 
 ### Breaking
 

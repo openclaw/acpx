@@ -187,7 +187,7 @@ acpx [global_options] codex exec [prompt_text...]
 acpx [global_options] codex sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
-Built-in command mapping: `codex -> npx @zed-industries/codex-acp`
+Built-in command mapping: `codex -> npx -y @agentclientprotocol/codex-acp`
 
 ### `claude`
 

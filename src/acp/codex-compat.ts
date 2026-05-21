@@ -15,10 +15,6 @@ export function isCodexAcpCommand(command: string, args: readonly string[]): boo
   return args.some((arg) => arg.includes("codex-acp"));
 }
 
-export function isCodexInvocation(agentName: string, agentCommand: string): boolean {
-  if (agentName === "codex") {
-    return true;
-  }
-
-  return /\bcodex-acp\b/u.test(agentCommand);
+export function isLegacyZedCodexAcpInvocation(agentCommand: string): boolean {
+  return /@zed-industries\/codex-acp\b/u.test(agentCommand);
 }

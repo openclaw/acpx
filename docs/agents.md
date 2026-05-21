@@ -13,7 +13,7 @@ The default agent for top-level commands like `acpx exec …` and `acpx prompt �
 | ---------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `pi`       | `npx pi-acp`                                   | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
 | `openclaw` | `openclaw acp`                                 | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
-| `codex`    | `npx @zed-industries/codex-acp`                | [Codex CLI](https://codex.openai.com)                                                                           |
+| `codex`    | `npx -y @agentclientprotocol/codex-acp`        | [Codex CLI](https://codex.openai.com)                                                                           |
 | `claude`   | `npx -y @agentclientprotocol/claude-agent-acp` | [Claude Code](https://claude.ai/code)                                                                           |
 | `gemini`   | `gemini --acp`                                 | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
 | `cursor`   | `cursor-agent acp`                             | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
@@ -54,11 +54,10 @@ Notes that override or extend the cross-agent behavior live below.
 ### Codex
 
 - Built-in name: `codex`
-- Default command: `npx @zed-industries/codex-acp`
-- Upstream: [zed-industries/codex-acp](https://github.com/zed-industries/codex-acp)
-- Runtime config keys exposed by current `codex-acp` releases: `mode`, `model`, `reasoning_effort`.
-- `acpx --model <id> codex …` applies the requested model after session creation via `session/set_config_option`.
-- `acpx codex set thought_level <value>` is accepted as a compatibility alias for codex-acp's `reasoning_effort`.
+- Default command: `npx -y @agentclientprotocol/codex-acp`
+- Upstream: [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)
+- Runtime controls exposed by current `codex-acp` releases: ACP modes, advertised models, and `session/set_model`.
+- `acpx --model <id> codex …` and `acpx codex set model <id>` apply the requested model through ACP model selection.
 
 ### Claude
 

@@ -44,24 +44,18 @@ Unsupported mode ids are rejected by the adapter, often as `Invalid params`. `ac
 ## `set <key> <value>`
 
 ```bash
-acpx codex set thought_level high
-acpx codex set reasoning_effort high
 acpx claude set verbosity terse
 acpx set model gpt-5.4         # defaults to codex
 ```
 
-Calls ACP `session/set_config_option` with the literal `<key>` and `<value>`. Non-mode `set_config_option` values are persisted by `acpx` and replayed onto fresh adapter sessions, so options like Codex `reasoning_effort` survive a session fallback or reuse.
-
-### Codex compatibility aliases
-
-For Codex specifically, `thought_level` is accepted as an alias and translated to codex-acp's `reasoning_effort`. Other keys pass through unchanged.
+Calls ACP `session/set_config_option` with the literal `<key>` and `<value>`. Non-mode `set_config_option` values are persisted by `acpx` and replayed onto fresh adapter sessions when the adapter supports those config keys.
 
 ### `set model <id>`
 
 `set model <id>` is a special-case interception. Some adapters expose model switching via ACP `session/set_model` rather than `session/set_config_option`. `acpx` always sends `session/set_model` for the `model` key so it works on every adapter that supports either method.
 
 ```bash
-acpx codex set model gpt-5.4
+acpx codex set model 'gpt-5.2[high]'
 acpx claude set model claude-sonnet-4-6
 ```
 

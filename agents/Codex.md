@@ -1,8 +1,8 @@
 # Codex
 
 - Built-in name: `codex`
-- Default command: `npx @zed-industries/codex-acp`
-- Upstream: https://github.com/zed-industries/codex-acp
-- Runtime config options exposed by current codex-acp releases include `mode`, `model`, and `reasoning_effort`.
-- `acpx --model <id> codex ...` applies the requested model after session creation via `session/set_config_option`.
-- `acpx codex set thought_level <value>` is supported as a compatibility alias and is translated to codex-acp `reasoning_effort`.
+- Default command: `npx -y @agentclientprotocol/codex-acp`
+- Upstream: https://github.com/agentclientprotocol/codex-acp
+- Runtime controls exposed by current codex-acp releases include ACP modes, advertised models, and `session/set_model`.
+- Reasoning effort is encoded in advertised Codex model ids such as `gpt-5.2[high]` when the adapter reports those variants.
+- `acpx --model <id> codex ...` and `acpx codex set model <id>` apply the requested model through ACP model selection.

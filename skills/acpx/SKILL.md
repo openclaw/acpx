@@ -80,7 +80,7 @@ Friendly agent names resolve to commands:
 
 - `pi` -> `npx pi-acp`
 - `openclaw` -> `openclaw acp`
-- `codex` -> `npx @zed-industries/codex-acp`
+- `codex` -> `npx -y @agentclientprotocol/codex-acp`
 - `claude` -> `npx -y @agentclientprotocol/claude-agent-acp` (ACPX-owned package range)
 - `gemini` -> `gemini --acp`
 - `cursor` -> `cursor-agent acp`
@@ -151,7 +151,7 @@ Behavior:
 ```bash
 acpx codex cancel
 acpx codex set-mode auto
-acpx codex set thought_level high
+acpx codex set model gpt-5.2[high]
 acpx codex set model gpt-5.4
 ```
 
@@ -161,7 +161,7 @@ Behavior:
 - `set-mode`: calls ACP `session/set_mode`.
 - `set-mode` mode ids are adapter-defined; unsupported values are rejected by the adapter (often `Invalid params`).
 - `set`: calls ACP `session/set_config_option`.
-- For codex, `thought_level` is accepted as a compatibility alias for codex-acp `reasoning_effort`.
+- For codex, reasoning effort is selected through advertised ACP model ids when the adapter reports model variants.
 - `--model <id>`: Claude-compatible adapters may consume session creation metadata; other agents must advertise ACP models and support `session/set_model`, otherwise `acpx` fails clearly instead of silently falling back.
 - `set model <id>`: calls `session/set_model`. This is the generic ACP method for mid-session model switching.
 - `set-mode`/`set` route through queue-owner IPC when active, otherwise reconnect directly.
