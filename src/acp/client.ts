@@ -43,6 +43,7 @@ import {
   GeminiAcpStartupTimeoutError,
   PermissionDeniedError,
   PermissionPromptUnavailableError,
+  UnsupportedPromptContentError,
 } from "../errors.js";
 import { FileSystemHandlers } from "../filesystem.js";
 import {
@@ -51,7 +52,7 @@ import {
   inferToolKind,
   resolvePermissionRequestWithDetails,
 } from "../permissions.js";
-import { textPrompt } from "../prompt-content.js";
+import { getUnsupportedPromptContentMessage, textPrompt } from "../prompt-content.js";
 import { extractRuntimeSessionId } from "../session/runtime-session-id.js";
 import { buildSpawnCommandOptions } from "../spawn-command-options.js";
 import type {
@@ -915,6 +916,7 @@ export class AcpClient {
 
   async prompt(sessionId: string, prompt: PromptInput | string): Promise<PromptResponse> {
     const connection = this.getConnection();
+    const normalizedPrompt = this.normalizePromptForAgent(prompt);
     const restoreConsoleError = this.options.suppressSdkConsoleErrors
       ? installSdkConsoleErrorSuppression()
       : undefined;
@@ -924,7 +926,7 @@ export class AcpClient {
       promptPromise = this.runConnectionRequest(() =>
         connection.prompt({
           sessionId,
-          prompt: typeof prompt === "string" ? textPrompt(prompt) : prompt,
+          prompt: normalizedPrompt,
         }),
       );
     } catch (error) {
@@ -951,6 +953,18 @@ export class AcpClient {
       this.abortAndDropPermissionSignal(sessionId);
       this.promptPermissionFailures.delete(sessionId);
     }
+  }
+
+  private normalizePromptForAgent(prompt: PromptInput | string): PromptInput {
+    const normalizedPrompt = typeof prompt === "string" ? textPrompt(prompt) : prompt;
+    const unsupportedPromptContent = getUnsupportedPromptContentMessage(
+      normalizedPrompt,
+      this.initResult?.agentCapabilities,
+    );
+    if (unsupportedPromptContent) {
+      throw new UnsupportedPromptContentError(unsupportedPromptContent);
+    }
+    return normalizedPrompt;
   }
 
   private returnPromptResponseOrPermissionFailure(

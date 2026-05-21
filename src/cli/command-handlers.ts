@@ -866,6 +866,9 @@ function userContentToText(content: SessionUserContent): string {
   if ("Image" in content) {
     return content.Image.source || "[image]";
   }
+  if ("Audio" in content) {
+    return `[audio] ${content.Audio.mime_type}`;
+  }
   return "";
 }
 

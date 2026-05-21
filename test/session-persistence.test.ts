@@ -253,7 +253,10 @@ test("listSessions preserves lifecycle and conversation metadata", async () => {
           {
             User: {
               id: "7c7615ad-5ba0-4cd3-a5f7-6ad9346dcfd5",
-              content: [{ Text: "hello" }],
+              content: [
+                { Text: "hello" },
+                { Audio: { source: "UklGRg==", mime_type: "audio/wav" } },
+              ],
             },
           },
           {
@@ -279,6 +282,12 @@ test("listSessions preserves lifecycle and conversation metadata", async () => {
     assert.equal(record.lastAgentExitAt, "2026-01-01T00:02:00.000Z");
     assert.equal(record.lastAgentDisconnectReason, "process_exit");
     assert.equal(record.messages.length, 2);
+    assert.deepEqual(record.messages[0], {
+      User: {
+        id: "7c7615ad-5ba0-4cd3-a5f7-6ad9346dcfd5",
+        content: [{ Text: "hello" }, { Audio: { source: "UklGRg==", mime_type: "audio/wav" } }],
+      },
+    });
     assert.equal(record.title, "My Thread");
   });
 });

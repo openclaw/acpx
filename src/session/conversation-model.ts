@@ -60,22 +60,24 @@ function normalizeAgentName(value: unknown): string | undefined {
 }
 
 function extractText(content: ContentBlock): string | undefined {
-  if (content.type === "text") {
-    return content.text;
+  switch (content.type) {
+    case "text":
+      return content.text;
+    case "resource_link":
+      return content.title ?? content.name ?? content.uri;
+    case "resource":
+      return extractResourceText(content);
+    case "audio":
+      return `[audio] ${content.mimeType}`;
+    default:
+      return undefined;
   }
+}
 
-  if (content.type === "resource_link") {
-    return content.title ?? content.name ?? content.uri;
-  }
-
-  if (content.type === "resource") {
-    if ("text" in content.resource && typeof content.resource.text === "string") {
-      return content.resource.text;
-    }
-    return content.resource.uri;
-  }
-
-  return undefined;
+function extractResourceText(content: Extract<ContentBlock, { type: "resource" }>): string {
+  return "text" in content.resource && typeof content.resource.text === "string"
+    ? content.resource.text
+    : content.resource.uri;
 }
 
 function contentToUserContent(content: ContentBlock): SessionUserContent | undefined {
@@ -104,6 +106,15 @@ function contentToUserContent(content: ContentBlock): SessionUserContent | undef
       Image: {
         source: content.data,
         size: null,
+      },
+    };
+  }
+
+  if (content.type === "audio") {
+    return {
+      Audio: {
+        source: content.data,
+        mime_type: content.mimeType,
       },
     };
   }

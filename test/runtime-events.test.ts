@@ -535,18 +535,20 @@ test("parsePromptEventLine covers status and tool summary fallbacks", () => {
         content: [
           { type: "resource_link", uri: "file:///fallback" },
           { type: "resource", resource: { uri: "file:///resource" } },
+          { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
           { type: "terminal" },
         ],
       }),
     ),
     {
       type: "tool_call",
-      text: "tool call: file:///fallback\nfile:///resource\n[terminal]",
+      text: "tool call: file:///fallback\nfile:///resource\n[audio] audio/wav\n[terminal]",
       tag: "tool_call_update",
       title: "tool call",
       content: [
         { type: "resource_link", uri: "file:///fallback" },
         { type: "resource", resource: { uri: "file:///resource" } },
+        { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
         { type: "terminal" },
       ],
     },

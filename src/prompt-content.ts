@@ -1,4 +1,4 @@
-import type { ContentBlock } from "@agentclientprotocol/sdk";
+import type { AgentCapabilities, ContentBlock } from "@agentclientprotocol/sdk";
 
 export type PromptInput = ContentBlock[];
 
@@ -31,6 +31,10 @@ function isImageMimeType(value: string): boolean {
   return /^image\/[A-Za-z0-9.+-]+$/i.test(value);
 }
 
+function isAudioMimeType(value: string): boolean {
+  return /^audio\/[A-Za-z0-9.+-]+$/i.test(value);
+}
+
 function isTextBlock(value: unknown): value is Extract<ContentBlock, { type: "text" }> {
   const record = asRecord(value);
   return record?.type === "text" && typeof record.text === "string";
@@ -42,6 +46,17 @@ function isImageBlock(value: unknown): value is Extract<ContentBlock, { type: "i
     record?.type === "image" &&
     isNonEmptyString(record.mimeType) &&
     isImageMimeType(record.mimeType) &&
+    typeof record.data === "string" &&
+    isBase64Data(record.data)
+  );
+}
+
+function isAudioBlock(value: unknown): value is Extract<ContentBlock, { type: "audio" }> {
+  const record = asRecord(value);
+  return (
+    record?.type === "audio" &&
+    isNonEmptyString(record.mimeType) &&
+    isAudioMimeType(record.mimeType) &&
     typeof record.data === "string" &&
     isBase64Data(record.data)
   );
@@ -75,6 +90,7 @@ function isResourceBlock(value: unknown): value is Extract<ContentBlock, { type:
 const CONTENT_BLOCK_VALIDATORS = [
   isTextBlock,
   isImageBlock,
+  isAudioBlock,
   isResourceLinkBlock,
   isResourceBlock,
 ] as const;
@@ -91,6 +107,7 @@ type ContentBlockValidation = (
 const CONTENT_BLOCK_ERROR_VALIDATORS: Record<string, ContentBlockValidation> = {
   text: validateTextContentBlock,
   image: validateImageContentBlock,
+  audio: validateAudioContentBlock,
   resource_link: validateResourceLinkContentBlock,
   resource: validateResourceContentBlock,
 };
@@ -126,6 +143,24 @@ function validateImageContentBlock(
   return isBase64Data(record.data)
     ? undefined
     : `prompt[${index}] image block data must be valid base64`;
+}
+
+function validateAudioContentBlock(
+  record: Record<string, unknown>,
+  index: number,
+): string | undefined {
+  if (!isNonEmptyString(record.mimeType)) {
+    return `prompt[${index}] audio block must include a non-empty mimeType`;
+  }
+  if (!isAudioMimeType(record.mimeType)) {
+    return `prompt[${index}] audio block mimeType must start with audio/`;
+  }
+  if (typeof record.data !== "string" || record.data.length === 0) {
+    return `prompt[${index}] audio block must include non-empty base64 data`;
+  }
+  return isBase64Data(record.data)
+    ? undefined
+    : `prompt[${index}] audio block data must be valid base64`;
 }
 
 function validateResourceLinkContentBlock(
@@ -170,6 +205,43 @@ function getContentBlockValidationError(value: unknown, index: number): string |
 
 export function isPromptInput(value: unknown): value is PromptInput {
   return Array.isArray(value) && value.every((entry) => isContentBlock(entry));
+}
+
+type PromptCapabilityName = "image" | "audio" | "embeddedContext";
+
+type PromptCapabilityRequirement = {
+  blockType: "image" | "audio" | "resource";
+  capability: PromptCapabilityName;
+};
+
+function promptCapabilityRequirement(block: ContentBlock): PromptCapabilityRequirement | undefined {
+  switch (block.type) {
+    case "image":
+      return { blockType: "image", capability: "image" };
+    case "audio":
+      return { blockType: "audio", capability: "audio" };
+    case "resource":
+      return { blockType: "resource", capability: "embeddedContext" };
+    default:
+      return undefined;
+  }
+}
+
+export function getUnsupportedPromptContentMessage(
+  prompt: PromptInput,
+  agentCapabilities: AgentCapabilities | undefined,
+): string | undefined {
+  for (const [index, block] of prompt.entries()) {
+    const requirement = promptCapabilityRequirement(block);
+    if (!requirement) {
+      continue;
+    }
+    if (agentCapabilities?.promptCapabilities?.[requirement.capability] === true) {
+      continue;
+    }
+    return `prompt[${index}] ${requirement.blockType} content requires agentCapabilities.promptCapabilities.${requirement.capability}`;
+  }
+  return undefined;
 }
 
 export function textPrompt(text: string): PromptInput {
@@ -249,6 +321,8 @@ function contentBlockDisplayText(block: ContentBlock): string {
       return resourceBlockDisplayText(block);
     case "image":
       return `[image] ${block.mimeType}`;
+    case "audio":
+      return `[audio] ${block.mimeType}`;
     default:
       return "";
   }

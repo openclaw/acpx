@@ -238,6 +238,11 @@ export type SessionMessageImage = {
   } | null;
 };
 
+export type SessionMessageAudio = {
+  source: string;
+  mime_type: string;
+};
+
 export type SessionUserContent =
   | {
       Text: string;
@@ -250,6 +255,9 @@ export type SessionUserContent =
     }
   | {
       Image: SessionMessageImage;
+    }
+  | {
+      Audio: SessionMessageAudio;
     };
 
 export type SessionToolUse = {

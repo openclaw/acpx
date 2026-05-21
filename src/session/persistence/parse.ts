@@ -99,6 +99,11 @@ function isSessionMessageImage(raw: unknown): boolean {
   return !!size && isFiniteNumber(size.width) && isFiniteNumber(size.height);
 }
 
+function isSessionMessageAudio(raw: unknown): boolean {
+  const record = asRecord(raw);
+  return !!record && typeof record.source === "string" && typeof record.mime_type === "string";
+}
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -120,6 +125,10 @@ function isUserContent(raw: unknown): boolean {
 
   if (record.Image !== undefined) {
     return isSessionMessageImage(record.Image);
+  }
+
+  if (record.Audio !== undefined) {
+    return isSessionMessageAudio(record.Audio);
   }
 
   return false;

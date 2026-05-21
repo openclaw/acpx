@@ -16,6 +16,7 @@ import {
   AuthPolicyError,
   PermissionDeniedError,
   PermissionPromptUnavailableError,
+  UnsupportedPromptContentError,
 } from "../src/errors.js";
 
 type ClientInternals = {
@@ -107,6 +108,11 @@ type ClientInternals = {
   promptPermissionFailures: Map<string, PermissionPromptUnavailableError>;
   initResult?: {
     agentCapabilities?: {
+      promptCapabilities?: {
+        image?: boolean;
+        audio?: boolean;
+        embeddedContext?: boolean;
+      };
       sessionCapabilities?: {
         close?: Record<string, never>;
         list?: Record<string, never>;
@@ -938,6 +944,61 @@ test("AcpClient lifecycle snapshot and cancel helpers reflect active prompt stat
 
   const cancelled = await client.cancelActivePrompt(50);
   assert.deepEqual(cancelled, { stopReason: "cancelled" });
+});
+
+test("AcpClient rejects rich prompt content not advertised by promptCapabilities", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  let promptCalled = false;
+  internals.initResult = {
+    agentCapabilities: {
+      promptCapabilities: {
+        image: true,
+      },
+    },
+  };
+  internals.connection = {
+    prompt: async () => {
+      promptCalled = true;
+      return { stopReason: "end_turn" };
+    },
+  };
+
+  await assert.rejects(
+    async () =>
+      await client.prompt("session-audio", [
+        { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
+      ]),
+    (error: unknown) =>
+      error instanceof UnsupportedPromptContentError &&
+      error.message.includes("promptCapabilities.audio"),
+  );
+  assert.equal(promptCalled, false);
+});
+
+test("AcpClient sends audio prompts when the agent advertises audio support", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  let capturedPrompt: unknown;
+  internals.initResult = {
+    agentCapabilities: {
+      promptCapabilities: {
+        audio: true,
+      },
+    },
+  };
+  internals.connection = {
+    prompt: async (params: { prompt: unknown }) => {
+      capturedPrompt = params.prompt;
+      return { stopReason: "end_turn" };
+    },
+  };
+
+  await client.prompt("session-audio", [
+    { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
+  ]);
+
+  assert.deepEqual(capturedPrompt, [{ type: "audio", mimeType: "audio/wav", data: "UklGRg==" }]);
 });
 
 test("AcpClient prompt rejects when the agent disconnects mid-prompt", async () => {

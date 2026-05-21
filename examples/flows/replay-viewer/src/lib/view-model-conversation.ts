@@ -411,6 +411,15 @@ function describeStructuredMessage(
         continue;
       }
 
+      if ("Audio" in part) {
+        const audio = (part as { Audio?: { mime_type?: unknown } }).Audio;
+        const text =
+          audio && typeof audio.mime_type === "string" ? `[audio] ${audio.mime_type}` : "[audio]";
+        textBlocks.push(text);
+        contentParts.push({ type: "text", text });
+        continue;
+      }
+
       if ("ToolUse" in part) {
         const toolUse = (part as { ToolUse?: Record<string, unknown> }).ToolUse;
         if (toolUse && typeof toolUse === "object") {

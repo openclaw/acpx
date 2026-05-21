@@ -678,6 +678,11 @@ class MockAgent implements Agent {
       authMethods: [],
       agentCapabilities: {
         ...(this.options.supportsLoadSession ? { loadSession: true } : {}),
+        promptCapabilities: {
+          image: true,
+          audio: true,
+          embeddedContext: true,
+        },
         ...(Object.keys(sessionCapabilities).length > 0 ? { sessionCapabilities } : {}),
       },
     };

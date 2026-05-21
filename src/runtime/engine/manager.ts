@@ -167,24 +167,31 @@ function toPromptInput(
   if (!attachments || attachments.length === 0) {
     return text;
   }
-  const blocks: Array<
-    { type: "text"; text: string } | { type: "image"; mimeType: string; data: string }
-  > = [];
+  const blocks: PromptInput = [];
   if (text) {
     blocks.push({ type: "text", text });
   }
   for (const attachment of attachments) {
-    if (!attachment.mediaType.startsWith("image/")) {
-      throw new AcpRuntimeError(
-        "ACP_TURN_FAILED",
-        `Unsupported ACP runtime attachment media type: ${attachment.mediaType}`,
-      );
+    if (attachment.mediaType.startsWith("image/")) {
+      blocks.push({
+        type: "image",
+        mimeType: attachment.mediaType,
+        data: attachment.data,
+      });
+      continue;
     }
-    blocks.push({
-      type: "image",
-      mimeType: attachment.mediaType,
-      data: attachment.data,
-    });
+    if (attachment.mediaType.startsWith("audio/")) {
+      blocks.push({
+        type: "audio",
+        mimeType: attachment.mediaType,
+        data: attachment.data,
+      });
+      continue;
+    }
+    throw new AcpRuntimeError(
+      "ACP_TURN_FAILED",
+      `Unsupported ACP runtime attachment media type: ${attachment.mediaType}`,
+    );
   }
   return blocks.length > 0 ? blocks : textPrompt(text);
 }

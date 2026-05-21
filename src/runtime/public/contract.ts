@@ -60,6 +60,10 @@ export type AcpRuntimeEnsureInput = {
 };
 
 export type AcpRuntimeTurnAttachment = {
+  /**
+   * Media type for binary prompt attachments. The runtime currently maps
+   * image/* and audio/* attachments to ACP prompt content blocks.
+   */
   mediaType: string;
   data: string;
 };

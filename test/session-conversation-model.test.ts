@@ -188,6 +188,37 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
   assert.deepEqual(acpxState?.available_commands, ["create_plan"]);
 });
 
+test("recordPromptSubmission preserves audio prompt content", () => {
+  const conversation = createSessionConversation("2026-02-27T10:00:00.000Z");
+
+  const messageId = recordPromptSubmission(
+    conversation,
+    [
+      { type: "text", text: "transcribe" },
+      { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
+    ],
+    "2026-02-27T10:00:01.000Z",
+  );
+
+  assert.equal(typeof messageId, "string");
+  assert.deepEqual(conversation.messages, [
+    {
+      User: {
+        id: messageId,
+        content: [
+          { Text: "transcribe" },
+          {
+            Audio: {
+              source: "UklGRg==",
+              mime_type: "audio/wav",
+            },
+          },
+        ],
+      },
+    },
+  ]);
+});
+
 test("recordClientOperation keeps state and advances timestamp", () => {
   const conversation = createSessionConversation("2026-02-27T10:00:00.000Z");
   const state = recordClientOperation(

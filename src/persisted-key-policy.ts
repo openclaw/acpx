@@ -7,6 +7,7 @@ const ZED_TAG_KEYS = new Set([
   "Text",
   "Mention",
   "Image",
+  "Audio",
   "Thinking",
   "RedactedThinking",
   "ToolUse",

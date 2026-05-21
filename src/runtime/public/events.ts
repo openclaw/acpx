@@ -250,6 +250,7 @@ type ToolContentTextReader = (record: Record<string, unknown>) => string | undef
 
 const TOOL_CONTENT_TEXT_READERS: Record<string, ToolContentTextReader> = {
   text: (record) => asString(record.text),
+  audio: (record) => `[audio] ${asOptionalString(record.mimeType) || "audio"}`,
   resource_link: (record) =>
     asOptionalString(record.title) || asOptionalString(record.name) || asOptionalString(record.uri),
   resource: (record) => {

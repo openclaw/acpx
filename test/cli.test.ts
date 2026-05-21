@@ -1883,6 +1883,7 @@ test("exec accepts structured ACP prompt blocks from stdin", async () => {
         stdin: JSON.stringify([
           { type: "text", text: "inspect-prompt" },
           { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+          { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
         ]),
       },
     );
@@ -1892,6 +1893,7 @@ test("exec accepts structured ACP prompt blocks from stdin", async () => {
     assert.deepEqual(payload, [
       { type: "text", text: "inspect-prompt" },
       { type: "image", mimeType: "image/png", bytes: 8 },
+      { type: "audio", mimeType: "audio/wav", bytes: 8 },
     ]);
   });
 });
@@ -1914,6 +1916,7 @@ test("prompt preserves structured ACP prompt blocks through the queue owner", as
         stdin: JSON.stringify([
           { type: "text", text: "inspect-prompt" },
           { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+          { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
         ]),
       },
     );
@@ -1923,6 +1926,7 @@ test("prompt preserves structured ACP prompt blocks through the queue owner", as
     assert.deepEqual(payload, [
       { type: "text", text: "inspect-prompt" },
       { type: "image", mimeType: "image/png", bytes: 8 },
+      { type: "audio", mimeType: "audio/wav", bytes: 8 },
     ]);
   });
 });

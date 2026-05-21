@@ -34,7 +34,7 @@ function makeRecord(): SessionRecord {
       {
         User: {
           id: "user-1",
-          content: [{ Text: "hello" }],
+          content: [{ Text: "hello" }, { Audio: { source: "UklGRg==", mime_type: "audio/wav" } }],
         },
       },
       {

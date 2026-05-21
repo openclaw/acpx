@@ -320,6 +320,10 @@ function promptTextFromUserMessage(message: unknown): string | null {
             ? mention.uri
             : null;
       }
+      if ("Audio" in part && part.Audio && typeof part.Audio === "object") {
+        const audio = part.Audio as { mime_type?: unknown };
+        return typeof audio.mime_type === "string" ? `[audio] ${audio.mime_type}` : "[audio]";
+      }
       return null;
     })
     .filter((value: string | null): value is string => {

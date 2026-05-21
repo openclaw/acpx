@@ -2169,6 +2169,60 @@ test("AcpRuntimeManager rejects unsupported runtime attachment media types", asy
   );
 });
 
+test("AcpRuntimeManager maps audio attachments into ACP prompt blocks", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "audio-attachment-session",
+    acpSessionId: "audio-attachment-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let capturedPrompt: unknown;
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => true,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async (_sessionId: string, input: unknown) => {
+            capturedPrompt = input;
+            return { stopReason: "end_turn" };
+          },
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  const turn = manager.startTurn({
+    handle: createHandle("audio-attachment-session"),
+    text: "transcribe",
+    attachments: [{ mediaType: "audio/wav", data: "UklGRg==" }],
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-audio-attachment",
+  });
+  const { result } = await collectTurn(turn);
+
+  assert.deepEqual(result, { status: "completed", stopReason: "end_turn" });
+  assert.deepEqual(capturedPrompt, [
+    { type: "text", text: "transcribe" },
+    { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
+  ]);
+});
+
 test("AcpRuntimeManager fails persistent turns clearly when session reuse is unavailable", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "persistent-session",

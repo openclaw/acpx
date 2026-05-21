@@ -108,6 +108,16 @@ export class AgentDisconnectedError extends AcpxOperationalError {
   }
 }
 
+export class UnsupportedPromptContentError extends AcpxOperationalError {
+  constructor(message: string) {
+    super(message, {
+      outputCode: "USAGE",
+      detailCode: "UNSUPPORTED_PROMPT_CONTENT",
+      origin: "acp",
+    });
+  }
+}
+
 export class SessionResumeRequiredError extends AcpxOperationalError {
   constructor(message: string, options?: AcpxErrorOptions) {
     super(message, {
