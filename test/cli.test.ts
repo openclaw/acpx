@@ -268,7 +268,7 @@ test("CLI resolves unknown subcommand names as raw agent commands", async () => 
     await writeSessionRecord(homeDir, session);
 
     const result = await runCli(
-      ["--cwd", cwd, "--format", "quiet", "custom-agent", "sessions"],
+      ["--cwd", cwd, "--format", "quiet", "custom-agent", "sessions", "--local"],
       homeDir,
     );
 
@@ -1150,7 +1150,7 @@ test("set returns an error when agent rejects unsupported session config params"
 
 test("--ttl flag is parsed for sessions commands", async () => {
   await withTempHome(async (homeDir) => {
-    const ok = await runCli(["--ttl", "30", "--format", "json", "sessions"], homeDir);
+    const ok = await runCli(["--ttl", "30", "--format", "json", "sessions", "--local"], homeDir);
     assert.equal(ok.code, 0, ok.stderr);
     assert.doesNotThrow(() => JSON.parse(ok.stdout.trim()));
 
@@ -1166,7 +1166,10 @@ test("--ttl flag is parsed for sessions commands", async () => {
 
 test("--auth-policy flag validates supported values", async () => {
   await withTempHome(async (homeDir) => {
-    const ok = await runCli(["--auth-policy", "skip", "--format", "json", "sessions"], homeDir);
+    const ok = await runCli(
+      ["--auth-policy", "skip", "--format", "json", "sessions", "--local"],
+      homeDir,
+    );
     assert.equal(ok.code, 0, ok.stderr);
 
     const invalid = await runCli(["--auth-policy", "bad", "sessions"], homeDir);
@@ -1178,7 +1181,7 @@ test("--auth-policy flag validates supported values", async () => {
 test("--non-interactive-permissions validates supported values", async () => {
   await withTempHome(async (homeDir) => {
     const ok = await runCli(
-      ["--non-interactive-permissions", "deny", "--format", "json", "sessions"],
+      ["--non-interactive-permissions", "deny", "--format", "json", "sessions", "--local"],
       homeDir,
     );
     assert.equal(ok.code, 0, ok.stderr);
@@ -2264,7 +2267,7 @@ test("config defaults are loaded from global and project config files", async ()
       closed: false,
     });
 
-    const result = await runCli(["--cwd", cwd, "my-custom", "sessions"], homeDir);
+    const result = await runCli(["--cwd", cwd, "my-custom", "sessions", "--local"], homeDir);
 
     assert.equal(result.code, 0, result.stderr);
     assert.doesNotThrow(() => JSON.parse(result.stdout.trim()));
