@@ -73,7 +73,7 @@
     "viewer:typecheck": "tsgo -p examples/flows/replay-viewer/tsconfig.json --noEmit && tsgo -p examples/flows/replay-viewer/tsconfig.server.json --noEmit"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.21.1",
+    "@agentclientprotocol/sdk": "^0.22.1",
     "commander": "^14.0.3",
     "skillflag": "^0.1.4",
     "tsx": "^4.22.0",
