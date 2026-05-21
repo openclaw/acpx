@@ -1405,6 +1405,119 @@ test("integration: status shows updated model after set model", async () => {
   });
 });
 
+test("integration: sessions list uses agent session/list pagination and metadata", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const listAgentCommand = `${MOCK_AGENT_COMMAND} --supports-list-sessions --list-page-size 1`;
+
+    try {
+      const firstPage = await runCli(
+        [
+          "--agent",
+          listAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "sessions",
+          "list",
+          "--filter-cwd",
+          ".",
+        ],
+        homeDir,
+      );
+      assert.equal(firstPage.code, 0, firstPage.stderr);
+      const firstPayload = JSON.parse(firstPage.stdout.trim()) as {
+        _meta?: { source?: string };
+        source?: string;
+        cwd?: string;
+        nextCursor?: string | null;
+        sessions?: Array<{
+          sessionId?: string;
+          cwd?: string;
+          title?: string | null;
+          _meta?: { messageCount?: number };
+        }>;
+      };
+      assert.equal(firstPayload._meta?.source, "mock-agent-list");
+      assert.equal(firstPayload.source, "agent");
+      assert.equal(firstPayload.cwd, cwd);
+      assert.equal(firstPayload.nextCursor, "1");
+      assert.equal(firstPayload.sessions?.length, 1);
+      assert.equal(firstPayload.sessions?.[0]?.sessionId, "mock-session-alpha");
+      assert.equal(firstPayload.sessions?.[0]?.cwd, cwd);
+      assert.equal(firstPayload.sessions?.[0]?.title, "Alpha task");
+      assert.equal(firstPayload.sessions?.[0]?._meta?.messageCount, 2);
+
+      const secondPage = await runCli(
+        [
+          "--agent",
+          listAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "sessions",
+          "list",
+          "--filter-cwd",
+          ".",
+          "--cursor",
+          "1",
+        ],
+        homeDir,
+      );
+      assert.equal(secondPage.code, 0, secondPage.stderr);
+      const secondPayload = JSON.parse(secondPage.stdout.trim()) as {
+        cursor?: string;
+        nextCursor?: string | null;
+        sessions?: Array<{ sessionId?: string }>;
+      };
+      assert.equal(secondPayload.cursor, "1");
+      assert.equal(secondPayload.nextCursor ?? null, null);
+      assert.equal(secondPayload.sessions?.length, 1);
+      assert.equal(secondPayload.sessions?.[0]?.sessionId, "mock-session-gamma");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: sessions list falls back to local records when agent lacks session/list", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const created = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+      const createdPayload = JSON.parse(created.stdout.trim()) as { acpxRecordId?: string };
+
+      const listed = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "list"],
+        homeDir,
+      );
+      assert.equal(listed.code, 0, listed.stderr);
+      const listedPayload = JSON.parse(listed.stdout.trim()) as Array<{
+        acpxRecordId?: string;
+        cwd?: string;
+      }>;
+      assert.equal(Array.isArray(listedPayload), true);
+      assert.equal(
+        listedPayload.some(
+          (session) => session.acpxRecordId === createdPayload.acpxRecordId && session.cwd === cwd,
+        ),
+        true,
+      );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: perf metrics capture writes ndjson records for CLI runs", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

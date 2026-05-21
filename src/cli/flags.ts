@@ -68,6 +68,12 @@ export type SessionsHistoryFlags = {
   limit: number;
 };
 
+export type SessionsListFlags = {
+  cursor?: string;
+  filterCwd?: string;
+  local?: boolean;
+};
+
 export type StatusFlags = {
   session?: string;
 };

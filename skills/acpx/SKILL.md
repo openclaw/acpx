@@ -171,6 +171,9 @@ Behavior:
 ```bash
 acpx sessions
 acpx sessions list
+acpx sessions list --filter-cwd .
+acpx sessions list --cursor <cursor>
+acpx sessions list --local
 acpx sessions new
 acpx sessions new --name backend
 acpx sessions ensure
@@ -196,6 +199,11 @@ acpx codex status
 Behavior:
 
 - `sessions` and `sessions list` are equivalent
+- `sessions list` uses ACP `session/list` when the agent advertises it; JSON
+  includes agent `SessionInfo`, `_meta`, and `nextCursor`
+- `sessions list --filter-cwd <dir>` applies the ACP cwd filter, and
+  `--cursor <cursor>` requests a specific page
+- `sessions list --local` reads saved acpx records instead
 - `new` creates a fresh session for the current `(agentCommand, cwd, optional name)` scope
 - `new --name <name>` targets a named session scope
 - when `new` replaces an existing open session in that scope, the old one is soft-closed

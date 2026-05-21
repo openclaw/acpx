@@ -13,6 +13,7 @@ import type {
   PermissionMode,
   PermissionPolicy,
   PromptInput,
+  AgentSessionListResult,
   SessionNotification,
   SessionResumePolicy,
   SessionRecord,
@@ -118,6 +119,23 @@ export type SessionEnsureOptions = {
   walkBoundary?: string;
   sessionOptions?: SessionAgentOptions;
 } & TimedRunOptions;
+
+export type SessionListOptions = {
+  agentCommand: string;
+  cwd: string;
+  cursor?: string;
+  filterCwd?: string;
+  mcpServers?: McpServer[];
+  permissionMode: PermissionMode;
+  nonInteractivePermissions?: NonInteractivePermissionPolicy;
+  permissionPolicy?: PermissionPolicy;
+  authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
+  terminal?: boolean;
+  verbose?: boolean;
+} & TimedRunOptions;
+
+export type SessionListResult = AgentSessionListResult | undefined;
 
 export type SessionCancelOptions = {
   sessionId: string;

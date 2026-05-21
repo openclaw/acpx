@@ -299,6 +299,7 @@ Behavior:
 ```bash
 acpx [global_options] <agent> sessions
 acpx [global_options] <agent> sessions list
+acpx [global_options] <agent> sessions list [--cursor <cursor>] [--filter-cwd <dir>] [--local]
 acpx [global_options] <agent> sessions new
 acpx [global_options] <agent> sessions new --name <name>
 acpx [global_options] <agent> sessions ensure
@@ -317,7 +318,17 @@ acpx [global_options] sessions ...   # defaults to codex
 Behavior:
 
 - `sessions` and `sessions list` are equivalent
-- list returns all saved sessions for selected `agentCommand` (across all cwd values)
+- list uses ACP `session/list` when the agent advertises
+  `sessionCapabilities.list`, returning agent-native `SessionInfo` metadata and
+  `nextCursor` in JSON output
+- `sessions list --cursor <cursor>` fetches an agent-side page from an ACP
+  cursor returned by a prior list response
+- `sessions list --filter-cwd <dir>` sends the ACP cwd filter; relative values
+  resolve against global `--cwd`
+- `sessions list --local` reads saved acpx records for selected `agentCommand`
+  instead of contacting the agent
+- when the agent does not support `session/list`, list falls back to local saved
+  records unless agent-side list filters were requested
 - `sessions new` creates a fresh cwd-scoped default session
 - `sessions new --name <name>` creates a fresh named session for cwd
 - creating a fresh session soft-closes the previous open session in that scope (if present)

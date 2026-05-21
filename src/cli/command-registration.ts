@@ -27,6 +27,7 @@ import {
   parseSessionName,
   type PromptFlags,
   type SessionsHistoryFlags,
+  type SessionsListFlags,
   type SessionsNewFlags,
   type SessionsPruneFlags,
   type StatusFlags,
@@ -48,6 +49,17 @@ type SharedSubcommandDescriptions = {
   status: string;
 };
 
+function addSessionsListOptions(command: Command): Command {
+  return command
+    .option("--local", "List local acpx session records instead of agent protocol sessions")
+    .option("--cursor <cursor>", "Opaque ACP session/list cursor", (value: string) =>
+      parseNonEmptyValue("Cursor", value),
+    )
+    .option("--filter-cwd <dir>", "Filter agent sessions by working directory", (value: string) =>
+      parseNonEmptyValue("Filter cwd", value),
+    );
+}
+
 export function registerSessionsCommand(
   parent: Command,
   explicitAgentName: string | undefined,
@@ -56,16 +68,16 @@ export function registerSessionsCommand(
   const sessionsCommand = parent
     .command("sessions")
     .description("List, ensure, create, or close sessions for this agent");
+  addSessionsListOptions(sessionsCommand);
 
-  sessionsCommand.action(async function (this: Command) {
-    await handleSessionsList(explicitAgentName, this, config);
+  sessionsCommand.action(async function (this: Command, flags: SessionsListFlags) {
+    await handleSessionsList(explicitAgentName, flags, this, config);
   });
 
-  sessionsCommand
-    .command("list")
+  addSessionsListOptions(sessionsCommand.command("list"))
     .description("List sessions")
-    .action(async function (this: Command) {
-      await handleSessionsList(explicitAgentName, this, config);
+    .action(async function (this: Command, flags: SessionsListFlags) {
+      await handleSessionsList(explicitAgentName, flags, this, config);
     });
 
   sessionsCommand

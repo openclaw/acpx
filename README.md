@@ -391,6 +391,9 @@ spawns the ACP bridge directly without `pnpm` wrapper noise:
 - `sessions new [--name <name>]` creates a fresh session for that scope and soft-closes the prior one.
 - `sessions ensure [--name <name>]` is idempotent: it returns an existing scoped session or creates one when missing.
 - `sessions close [name]` soft-closes the session: queue owner/processes are terminated, record is kept with `closed: true`.
+- `sessions list` uses agent-side ACP `session/list` when available; use
+  `--cursor`, `--filter-cwd`, or `--local` for pagination, cwd filtering, or
+  saved-record inspection.
 - Auto-resume for cwd scope skips sessions marked closed.
 - Prompt submissions are queue-aware per session. If a prompt is already running, new prompts are queued and drained by the running `acpx` process.
 - Queue owners use an idle TTL (default 300s). `--ttl <seconds>` overrides it; `--ttl 0` keeps owners alive indefinitely.

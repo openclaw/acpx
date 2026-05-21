@@ -2,6 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
   AgentSideConnection,
@@ -14,6 +15,8 @@ import {
   type AgentSideConnection as AgentConnection,
   type ContentBlock,
   type InitializeResponse,
+  type ListSessionsRequest,
+  type ListSessionsResponse,
   type LoadSessionRequest,
   type LoadSessionResponse,
   type NewSessionResponse,
@@ -27,6 +30,7 @@ import {
   type SetSessionModelResponse,
   type SetSessionModeRequest,
   type SetSessionModeResponse,
+  type SessionInfo,
   type SessionModelState,
 } from "@agentclientprotocol/sdk";
 
@@ -41,6 +45,8 @@ type MockAgentOptions = {
   loadSessionMeta?: Record<string, string>;
   supportsLoadSession: boolean;
   supportsCloseSession: boolean;
+  supportsListSessions: boolean;
+  listPageSize: number;
   closeSessionMarker?: string;
   loadSessionNotFound: boolean;
   loadSessionFailsOnEmpty: boolean;
@@ -256,6 +262,15 @@ function parseOptionValue(args: string[], index: number, flag: string): string {
   return value.trim();
 }
 
+function parsePositiveIntegerOption(args: string[], index: number, flag: string): number {
+  const value = parseOptionValue(args, index, flag);
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${flag} requires a positive integer`);
+  }
+  return parsed;
+}
+
 type MetaFlagTarget = "newSessionMeta" | "loadSessionMeta";
 
 type MetaFlagSpec = {
@@ -308,6 +323,8 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   const loadSessionMeta: Record<string, string> = {};
   let supportsLoadSession = false;
   let supportsCloseSession = false;
+  let supportsListSessions = false;
+  let listPageSize = 100;
   let closeSessionMarker: string | undefined;
   let loadSessionNotFound = false;
   let loadSessionFailsOnEmpty = false;
@@ -391,6 +408,18 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
       continue;
     }
 
+    if (token === "--supports-list-sessions") {
+      supportsListSessions = true;
+      continue;
+    }
+
+    if (token === "--list-page-size") {
+      supportsListSessions = true;
+      listPageSize = parsePositiveIntegerOption(argv, index + 1, token);
+      index += 1;
+      continue;
+    }
+
     if (token === "--close-session-marker") {
       supportsCloseSession = true;
       closeSessionMarker = parseOptionValue(argv, index + 1, token);
@@ -444,6 +473,8 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     loadSessionMeta: Object.keys(loadSessionMeta).length > 0 ? { ...loadSessionMeta } : undefined,
     supportsLoadSession,
     supportsCloseSession,
+    supportsListSessions,
+    listPageSize,
     closeSessionMarker,
     loadSessionNotFound,
     loadSessionFailsOnEmpty,
@@ -480,6 +511,52 @@ function createSessionState(hasCompletedPrompt = false): SessionState {
     },
     transientPromptAttempts: {},
   };
+}
+
+function buildMockSessionInventory(cwd: string): SessionInfo[] {
+  return [
+    {
+      sessionId: "mock-session-alpha",
+      cwd,
+      title: "Alpha task",
+      updatedAt: "2026-05-21T00:00:00.000Z",
+      _meta: {
+        source: "mock-agent",
+        messageCount: 2,
+      },
+    },
+    {
+      sessionId: "mock-session-beta",
+      cwd: path.join(cwd, "other"),
+      title: "Beta task",
+      updatedAt: "2026-05-20T00:00:00.000Z",
+      _meta: {
+        source: "mock-agent",
+        messageCount: 4,
+      },
+    },
+    {
+      sessionId: "mock-session-gamma",
+      cwd,
+      updatedAt: "2026-05-19T00:00:00.000Z",
+      _meta: {
+        source: "mock-agent",
+        messageCount: 6,
+      },
+    },
+  ];
+}
+
+function parseListCursor(cursor: string | null | undefined): number {
+  if (!cursor) {
+    return 0;
+  }
+
+  const parsed = Number(cursor);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw RequestError.invalidParams({ cursor }, "Invalid list cursor");
+  }
+  return parsed;
 }
 
 function buildConfigOptions(state: SessionState): SetSessionConfigOptionResponse["configOptions"] {
@@ -542,12 +619,17 @@ class MockAgent implements Agent {
   }
 
   async initialize(): Promise<InitializeResponse> {
+    const sessionCapabilities = {
+      ...(this.options.supportsCloseSession ? { close: {} } : {}),
+      ...(this.options.supportsListSessions ? { list: {} } : {}),
+    };
+
     return {
       protocolVersion: PROTOCOL_VERSION,
       authMethods: [],
       agentCapabilities: {
         ...(this.options.supportsLoadSession ? { loadSession: true } : {}),
-        ...(this.options.supportsCloseSession ? { sessionCapabilities: { close: {} } } : {}),
+        ...(Object.keys(sessionCapabilities).length > 0 ? { sessionCapabilities } : {}),
       },
     };
   }
@@ -637,6 +719,26 @@ class MockAgent implements Agent {
       writeFileSync(this.options.closeSessionMarker, `${params.sessionId}\n`, { flag: "a" });
     }
     return {};
+  }
+
+  async listSessions(params: ListSessionsRequest): Promise<ListSessionsResponse> {
+    if (!this.options.supportsListSessions) {
+      throw RequestError.methodNotFound("session/list");
+    }
+
+    const start = parseListCursor(params.cursor);
+    const cwd = params.cwd ?? undefined;
+    const sessions = buildMockSessionInventory(cwd ?? process.cwd()).filter((session) =>
+      cwd ? session.cwd === cwd : true,
+    );
+    const pageEnd = start + this.options.listPageSize;
+    return {
+      _meta: {
+        source: "mock-agent-list",
+      },
+      sessions: sessions.slice(start, pageEnd),
+      nextCursor: pageEnd < sessions.length ? String(pageEnd) : undefined,
+    };
   }
 
   async prompt(params: PromptRequest): Promise<PromptResponse> {

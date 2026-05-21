@@ -1,6 +1,6 @@
 import path from "node:path";
 import { normalizeRuntimeSessionId } from "../../session/runtime-session-id.js";
-import type { OutputFormat, SessionRecord } from "../../types.js";
+import type { AgentSessionListResult, OutputFormat, SessionRecord } from "../../types.js";
 import { probeQueueOwnerHealth } from "../queue/ipc.js";
 import { emitJsonResult } from "./json-output.js";
 
@@ -53,6 +53,48 @@ function printQuietSessions(sessions: SessionRecord[]): void {
   for (const session of sessions) {
     const closedMarker = session.closed ? " [closed]" : "";
     process.stdout.write(`${session.acpxRecordId}${closedMarker}\n`);
+  }
+}
+
+export function printAgentSessionsByFormat(
+  result: AgentSessionListResult,
+  format: OutputFormat,
+): void {
+  if (format === "json") {
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return;
+  }
+
+  if (format === "quiet") {
+    printQuietAgentSessions(result);
+    return;
+  }
+
+  printTextAgentSessions(result);
+}
+
+function printQuietAgentSessions(result: AgentSessionListResult): void {
+  for (const session of result.sessions) {
+    process.stdout.write(`${session.sessionId}\n`);
+  }
+}
+
+function printTextAgentSessions(result: AgentSessionListResult): void {
+  if (result.sessions.length === 0) {
+    process.stdout.write("No sessions\n");
+  } else {
+    for (const session of result.sessions) {
+      const title = session.title ?? "-";
+      const updatedAt = session.updatedAt ?? "-";
+      const meta = session._meta ? JSON.stringify(session._meta) : "-";
+      process.stdout.write(
+        `${session.sessionId}\t${title}\t${session.cwd}\t${updatedAt}\t${meta}\n`,
+      );
+    }
+  }
+
+  if (result.nextCursor) {
+    process.stdout.write(`Next cursor: ${result.nextCursor}\n`);
   }
 }
 

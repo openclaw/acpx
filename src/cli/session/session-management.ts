@@ -22,6 +22,8 @@ import type {
   SessionCreateOptions,
   SessionCreateWithClientResult,
   SessionEnsureOptions,
+  SessionListOptions,
+  SessionListResult,
 } from "./contracts.js";
 import { setSessionModel } from "./session-control.js";
 
@@ -187,6 +189,55 @@ export async function createSession(options: SessionCreateOptions): Promise<Sess
   const { record, client } = await createSessionWithClient(options);
   try {
     return record;
+  } finally {
+    await client.close();
+  }
+}
+
+export async function listAgentSessions(options: SessionListOptions): Promise<SessionListResult> {
+  const client = new AcpClient({
+    agentCommand: options.agentCommand,
+    cwd: absolutePath(options.cwd),
+    mcpServers: options.mcpServers,
+    permissionMode: options.permissionMode,
+    nonInteractivePermissions: options.nonInteractivePermissions,
+    permissionPolicy: options.permissionPolicy,
+    authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
+    terminal: options.terminal,
+    verbose: options.verbose,
+  });
+
+  try {
+    return await withInterrupt(
+      async () => {
+        await withTimeout(client.start(), options.timeoutMs);
+        if (!client.supportsListSessions()) {
+          return undefined;
+        }
+
+        const cwd = options.filterCwd ? absolutePath(options.filterCwd) : undefined;
+        const response = await withTimeout(
+          client.listSessions({
+            ...(cwd ? { cwd } : {}),
+            ...(options.cursor ? { cursor: options.cursor } : {}),
+          }),
+          options.timeoutMs,
+        );
+
+        return {
+          _meta: response._meta,
+          source: "agent",
+          sessions: response.sessions,
+          cursor: options.cursor,
+          cwd,
+          nextCursor: response.nextCursor,
+        };
+      },
+      async () => {
+        await client.close();
+      },
+    );
   } finally {
     await client.close();
   }

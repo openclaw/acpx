@@ -35,6 +35,7 @@ import {
   type GlobalFlags,
   type PromptFlags,
   type SessionsHistoryFlags,
+  type SessionsListFlags,
   type SessionsNewFlags,
   type SessionsPruneFlags,
   type StatusFlags,
@@ -215,6 +216,27 @@ function buildSessionStartOptions(params: {
     verbose: params.globalFlags.verbose,
     sessionOptions: sessionOptionsFromGlobalFlags(params.globalFlags),
   };
+}
+
+function resolveSessionListFilterCwd(
+  flags: Pick<SessionsListFlags, "filterCwd">,
+  agentCwd: string,
+): string | undefined {
+  return flags.filterCwd ? path.resolve(agentCwd, flags.filterCwd) : undefined;
+}
+
+async function printLocalSessionsList(
+  agentCommand: string,
+  filterCwd: string | undefined,
+  format: OutputFormat,
+): Promise<void> {
+  const [{ listSessionsForAgent }, { printSessionsByFormat }] = await Promise.all([
+    loadSessionModule(),
+    loadOutputRenderModule(),
+  ]);
+  const sessions = await listSessionsForAgent(agentCommand);
+  const filtered = filterCwd ? sessions.filter((session) => session.cwd === filterCwd) : sessions;
+  printSessionsByFormat(filtered, format);
 }
 
 function missingScopedSessionMessage(
@@ -648,17 +670,55 @@ export async function handleSetConfigOption(
 
 export async function handleSessionsList(
   explicitAgentName: string | undefined,
+  flags: SessionsListFlags,
   command: Command,
   config: ResolvedAcpxConfig,
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
-  const [{ listSessionsForAgent }, { printSessionsByFormat }] = await Promise.all([
+  const filterCwd = resolveSessionListFilterCwd(flags, agent.cwd);
+
+  if (flags.local) {
+    if (flags.cursor) {
+      throw new InvalidArgumentError("--cursor cannot be combined with --local");
+    }
+    await printLocalSessionsList(agent.agentCommand, filterCwd, globalFlags.format);
+    return;
+  }
+
+  const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
+  const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
+  const [{ listAgentSessions }, { printAgentSessionsByFormat }] = await Promise.all([
     loadSessionModule(),
     loadOutputRenderModule(),
   ]);
-  const sessions = await listSessionsForAgent(agent.agentCommand);
-  printSessionsByFormat(sessions, globalFlags.format);
+  const result = await listAgentSessions({
+    agentCommand: agent.agentCommand,
+    cwd: agent.cwd,
+    cursor: flags.cursor,
+    filterCwd,
+    mcpServers: config.mcpServers,
+    permissionMode,
+    nonInteractivePermissions: globalFlags.nonInteractivePermissions,
+    permissionPolicy,
+    authCredentials: config.auth,
+    authPolicy: globalFlags.authPolicy,
+    terminal: globalFlags.terminal,
+    timeoutMs: globalFlags.timeout,
+    verbose: globalFlags.verbose,
+  });
+
+  if (!result) {
+    if (flags.cursor || flags.filterCwd) {
+      throw new Error(
+        `Agent command "${agent.agentCommand}" does not advertise sessionCapabilities.list; cannot use agent-side session/list filters`,
+      );
+    }
+    await printLocalSessionsList(agent.agentCommand, undefined, globalFlags.format);
+    return;
+  }
+
+  printAgentSessionsByFormat(result, globalFlags.format);
 }
 
 export async function handleSessionsClose(

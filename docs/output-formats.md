@@ -101,16 +101,16 @@ The replacement preserves the surrounding ACP message shape so json consumers ca
 
 ## Session-control command output
 
-Local query commands emit local JSON shapes (not ACP wire traffic) under `--format json`:
+Session-control query commands emit summarized JSON shapes (not ACP wire traffic) under `--format json`:
 
-| Command                 | `text`                            | `json`                                                     | `quiet`                |
-| ----------------------- | --------------------------------- | ---------------------------------------------------------- | ---------------------- |
-| `sessions list`         | TSV: `id name cwd lastUsedAt`     | array of session records                                   | one id per line        |
-| `sessions show`         | key/value lines                   | full session record object                                 | record id              |
-| `sessions history`      | TSV: `timestamp role textPreview` | `{ entries: [...] }`                                       | record id              |
-| `sessions prune`        | summary + pruned ids and time     | `{ action, dryRun, count, bytesFreed, pruned }`            | one pruned id per line |
-| `sessions new`/`ensure` | record id                         | record + `acpxRecordId`/`acpxSessionId`/(`agentSessionId`) | record id              |
-| `status`                | key/value lines                   | full status object                                         | state token            |
+| Command                 | `text`                             | `json`                                                                                                        | `quiet`                |
+| ----------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `sessions list`         | TSV: `id title cwd updatedAt meta` | `{ _meta, source, sessions, cursor, cwd, nextCursor }` for ACP list, or local records with `--local`/fallback | one id per line        |
+| `sessions show`         | key/value lines                    | full session record object                                                                                    | record id              |
+| `sessions history`      | TSV: `timestamp role textPreview`  | `{ entries: [...] }`                                                                                          | record id              |
+| `sessions prune`        | summary + pruned ids and time      | `{ action, dryRun, count, bytesFreed, pruned }`                                                               | one pruned id per line |
+| `sessions new`/`ensure` | record id                          | record + `acpxRecordId`/`acpxSessionId`/(`agentSessionId`)                                                    | record id              |
+| `status`                | key/value lines                    | full status object                                                                                            | state token            |
 
 Closed sessions are marked `[closed]` in `text` and `quiet`.
 

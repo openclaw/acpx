@@ -8,6 +8,8 @@ import {
   type CreateTerminalRequest,
   type CreateTerminalResponse,
   type InitializeResponse,
+  type ListSessionsRequest,
+  type ListSessionsResponse,
   type KillTerminalRequest,
   type KillTerminalResponse,
   type LoadSessionResponse,
@@ -406,6 +408,10 @@ export class AcpClient {
 
   supportsCloseSession(): boolean {
     return Boolean(this.initResult?.agentCapabilities?.sessionCapabilities?.close);
+  }
+
+  supportsListSessions(): boolean {
+    return Boolean(this.initResult?.agentCapabilities?.sessionCapabilities?.list);
   }
 
   setEventHandlers(
@@ -1028,6 +1034,11 @@ export class AcpClient {
     if (this.loadedSessionId === sessionId) {
       this.loadedSessionId = undefined;
     }
+  }
+
+  async listSessions(params: ListSessionsRequest = {}): Promise<ListSessionsResponse> {
+    const connection = this.getConnection();
+    return await this.runConnectionRequest(() => connection.listSessions(params));
   }
 
   async requestCancelActivePrompt(): Promise<boolean> {

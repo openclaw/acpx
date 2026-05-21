@@ -5,6 +5,7 @@ import type {
   RequestPermissionRequest,
   SessionNotification,
   SessionConfigOption,
+  SessionInfo,
   SetSessionConfigOptionResponse,
   StopReason,
   ToolKind,
@@ -411,6 +412,17 @@ export type SessionSetModelResult = {
 export type SessionEnsureResult = {
   record: SessionRecord;
   created: boolean;
+};
+
+export type AgentSessionListResult = {
+  _meta?: {
+    [key: string]: unknown;
+  } | null;
+  source: "agent";
+  sessions: SessionInfo[];
+  cursor?: string;
+  cwd?: string;
+  nextCursor?: string | null;
 };
 
 export type SessionEnqueueResult = {

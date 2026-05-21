@@ -21,7 +21,9 @@ That is what makes `acpx codex` in `~/repos/api` and `acpx codex` in `~/repos/we
 
 ```bash
 acpx codex sessions                  # list (alias for `sessions list`)
-acpx codex sessions list             # list all sessions for codex (any cwd)
+acpx codex sessions list             # list agent sessions via ACP when supported
+acpx codex sessions list --filter-cwd . --cursor <cursor>
+acpx codex sessions list --local     # list saved acpx records
 acpx codex sessions new              # create a fresh cwd-scoped default session
 acpx codex sessions new --name api   # create a fresh named session
 acpx codex sessions ensure           # idempotent: existing or create
@@ -38,6 +40,13 @@ acpx codex sessions prune --before 2026-01-01 --include-history
 ```
 
 Top-level `acpx sessions …` defaults to `codex`.
+
+`sessions list` prefers the agent-side ACP `session/list` method when the
+selected agent advertises `sessionCapabilities.list`. JSON output includes the
+agent's `SessionInfo` fields, any `_meta` metadata, and `nextCursor` for manual
+pagination. Use `--filter-cwd <dir>` to send the ACP cwd filter; relative paths
+resolve against global `--cwd`. Use `--local` when you specifically want the
+saved `~/.acpx/sessions` records.
 
 ## Auto-resume by directory walk
 

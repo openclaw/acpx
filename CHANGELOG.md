@@ -17,6 +17,9 @@ Repo: https://github.com/openclaw/acpx
 
 - CLI: treat `--version` after `--` as prompt text instead of intercepting it as a top-level version request.
 - CLI/API: avoid installing CLI-only process handlers when the package entrypoint is imported as a module.
+- CLI/sessions: use agent-side ACP `session/list` when available, including
+  cursor pagination, cwd filtering, and agent-native session metadata. Thanks
+  @amknight.
 
 ## 2026.5.15 (v0.8.0)
 
