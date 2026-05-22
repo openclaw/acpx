@@ -1,6 +1,7 @@
 import { AcpClient, type SessionCreateResult } from "../../acp/client.js";
 import { formatErrorMessage } from "../../acp/error-normalization.js";
 import { withInterrupt, withTimeout } from "../../async-control.js";
+import { applyLifecycleSnapshotToRecord } from "../../runtime/engine/lifecycle.js";
 import { persistSessionOptions } from "../../runtime/engine/session-options.js";
 import { applyConfigOptionsToRecord } from "../../session/config-options.js";
 import { createSessionConversation } from "../../session/conversation-model.js";
@@ -79,7 +80,7 @@ async function createSessionRecordWithClient(
     eventLog: defaultSessionEventLog(sessionId),
     closed: false,
     closedAt: undefined,
-    pid: lifecycle.pid,
+    pid: lifecycle.running ? lifecycle.pid : undefined,
     agentStartedAt: lifecycle.startedAt,
     protocolVersion: client.initializeResult?.protocolVersion,
     agentCapabilities: client.initializeResult?.agentCapabilities,
@@ -198,6 +199,8 @@ export async function createSession(options: SessionCreateOptions): Promise<Sess
     return record;
   } finally {
     await client.close();
+    applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
+    await writeSessionRecord(record);
   }
 }
 

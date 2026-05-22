@@ -102,7 +102,7 @@ test("runtime lifecycle helpers update records from runtime snapshots and conver
   applyLifecycleSnapshotToRecord(record, {
     pid: 321,
     startedAt: "2026-01-01T00:01:00.000Z",
-    running: true,
+    running: false,
     lastExit: {
       exitCode: 9,
       signal: "SIGKILL",
@@ -111,7 +111,7 @@ test("runtime lifecycle helpers update records from runtime snapshots and conver
       unexpectedDuringPrompt: false,
     },
   });
-  assert.equal(record.pid, 321);
+  assert.equal(record.pid, undefined);
   assert.equal(record.agentStartedAt, "2026-01-01T00:01:00.000Z");
   assert.equal(record.lastAgentExitCode, 9);
   assert.equal(record.lastAgentExitSignal, "SIGKILL");

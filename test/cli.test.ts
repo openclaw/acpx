@@ -685,10 +685,7 @@ test("sessions ensure exits even when agent ignores SIGTERM", async () => {
       ),
     ) as SessionRecord;
 
-    if (storedRecord.pid != null) {
-      const exited = await waitForPidExit(storedRecord.pid, 2_000);
-      assert.equal(exited, true);
-    }
+    assert.equal(storedRecord.pid, undefined);
   });
 });
 
@@ -2510,21 +2507,6 @@ async function runCli(
       resolve({ code, stdout, stderr });
     });
   });
-}
-
-async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + Math.max(0, timeoutMs);
-  while (Date.now() < deadline) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return true;
-    }
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 50);
-    });
-  }
-  return false;
 }
 
 function makeSessionRecord(

@@ -10,7 +10,7 @@ export function applyLifecycleSnapshotToRecord(
     return;
   }
 
-  record.pid = snapshot.pid;
+  record.pid = snapshot.running ? snapshot.pid : undefined;
   record.agentStartedAt = snapshot.startedAt;
 
   if (snapshot.lastExit) {
