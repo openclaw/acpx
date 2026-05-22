@@ -186,7 +186,7 @@ This makes long-running scripted sessions resilient to crashes, OS restarts, and
 | `no-session` | No saved record matches this scope                                               |
 
 Status checks are local (`kill(pid, 0)` semantics) — they do not touch the agent.
-`closed` describes the logical session lifecycle. A helper process can exit while the session remains open and resumable. Cached PIDs from `~/.acpx/sessions/*.json` are only shown when the process is still live; queue owner liveness comes from `~/.acpx/queues/*.lock` plus its heartbeat and process probe.
+`closed` describes the logical session lifecycle. A helper process can exit while the session remains open and resumable. Status reports a PID only when a live queue-owner lease ties that process to the session; queue owner liveness comes from `~/.acpx/queues/*.lock` plus its heartbeat and process probe.
 
 ## CWD scoping
 
