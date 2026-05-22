@@ -71,16 +71,20 @@ acpx status              # defaults to codex
 
 Reports local process status for the cwd-scoped session:
 
-| State        | Meaning                                                        |
-| ------------ | -------------------------------------------------------------- |
-| `running`    | Queue owner alive and processing a prompt                      |
-| `idle`       | Saved session resumable, no queue owner running                |
-| `dead`       | Saved adapter PID is gone; next prompt will respawn and reload |
-| `no-session` | No saved record matches this scope                             |
+| State        | Meaning                                                                          |
+| ------------ | -------------------------------------------------------------------------------- |
+| `running`    | Queue owner alive and processing a prompt                                        |
+| `idle`       | Saved session resumable, no queue owner running                                  |
+| `dead`       | Queue owner was expected but is unavailable, or the last agent exit was abnormal |
+| `no-session` | No saved record matches this scope                                               |
 
-Plus, when applicable: session id, agent command, pid, uptime, last prompt timestamp, and last known exit code or signal for `dead`.
+Plus, when applicable: session id, agent command, live queue-owner pid, uptime,
+last prompt timestamp, and last known exit code or signal for `dead`.
 
-`status` is local — it uses `kill(pid, 0)` semantics and does not touch the agent. It is safe to run from automation that polls for queue readiness.
+`status` is local — it uses `kill(pid, 0)` semantics and does not touch the
+agent. Cached session PIDs are not reported unless a live queue-owner lease ties
+them to the session. It is safe to run from automation that polls for queue
+readiness.
 
 ### Output
 

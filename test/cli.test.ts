@@ -1702,36 +1702,41 @@ test("status reports idle for resumable sessions without a live queue owner", as
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
+    const keeper = await startKeeperProcess();
 
-    await writeSessionRecord(homeDir, {
-      acpxRecordId: "idle-status-session",
-      acpSessionId: "idle-status-session",
-      agentCommand: AGENT_REGISTRY.codex,
-      cwd,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      lastUsedAt: "2026-01-01T00:01:00.000Z",
-      lastPromptAt: "2026-01-01T00:01:00.000Z",
-      closed: false,
-      pid: 999_999,
-      agentStartedAt: "2026-01-01T00:00:00.000Z",
-      lastAgentExitCode: 0,
-      lastAgentExitAt: "2026-01-01T00:02:00.000Z",
-    });
+    try {
+      await writeSessionRecord(homeDir, {
+        acpxRecordId: "idle-status-session",
+        acpSessionId: "idle-status-session",
+        agentCommand: AGENT_REGISTRY.codex,
+        cwd,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        lastUsedAt: "2026-01-01T00:01:00.000Z",
+        lastPromptAt: "2026-01-01T00:01:00.000Z",
+        closed: false,
+        pid: keeper.pid,
+        agentStartedAt: "2026-01-01T00:00:00.000Z",
+        lastAgentExitCode: 0,
+        lastAgentExitAt: "2026-01-01T00:02:00.000Z",
+      });
 
-    const json = await runCli(["--cwd", cwd, "--format", "json", "codex", "status"], homeDir);
-    assert.equal(json.code, 0, json.stderr);
-    const payload = JSON.parse(json.stdout.trim()) as Record<string, unknown>;
-    assert.equal(payload.action, "status_snapshot");
-    assert.equal(payload.status, "idle");
-    assert.equal(payload.summary, "session idle; queue owner will start on next prompt");
-    assert.equal(payload.pid, undefined);
-    assert.equal(payload.exitCode, undefined);
+      const json = await runCli(["--cwd", cwd, "--format", "json", "codex", "status"], homeDir);
+      assert.equal(json.code, 0, json.stderr);
+      const payload = JSON.parse(json.stdout.trim()) as Record<string, unknown>;
+      assert.equal(payload.action, "status_snapshot");
+      assert.equal(payload.status, "idle");
+      assert.equal(payload.summary, "session idle; queue owner will start on next prompt");
+      assert.equal(payload.pid, undefined);
+      assert.equal(payload.exitCode, undefined);
 
-    const text = await runCli(["--cwd", cwd, "codex", "status"], homeDir);
-    assert.equal(text.code, 0, text.stderr);
-    assert.match(text.stdout, /status: idle/);
-    assert.match(text.stdout, /pid: -/);
-    assert.doesNotMatch(text.stdout, /exitCode:/);
+      const text = await runCli(["--cwd", cwd, "codex", "status"], homeDir);
+      assert.equal(text.code, 0, text.stderr);
+      assert.match(text.stdout, /status: idle/);
+      assert.match(text.stdout, /pid: -/);
+      assert.doesNotMatch(text.stdout, /exitCode:/);
+    } finally {
+      stopProcess(keeper);
+    }
   });
 });
 
