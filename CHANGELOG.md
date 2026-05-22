@@ -28,6 +28,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI/ACP: validate rich prompt blocks against advertised ACP
   `promptCapabilities` and support audio prompt content end-to-end. Thanks
   @amknight.
+- CLI/status: hide stale cached session PIDs when no live helper process exists. Thanks @dutifulbob.
 
 ## 2026.5.15 (v0.8.0)
 
