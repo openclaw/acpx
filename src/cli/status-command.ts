@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { isProcessAlive } from "../process-liveness.js";
 import { findSession } from "../session/persistence.js";
 import type { SessionRecord } from "../types.js";
 import type { ResolvedAcpxConfig } from "./config.js";
@@ -146,7 +147,7 @@ function createStatusPayload(
   return {
     sessionId: record.acpxRecordId,
     agentCommand: record.agentCommand,
-    pid: statusPid(health.pid, record.pid),
+    pid: statusPid(health, record.pid),
     status: statusState,
     model: acpx.model,
     mode: acpx.mode,
@@ -171,8 +172,17 @@ function statusAcpxFields(record: SessionRecord): {
   };
 }
 
-function statusPid(healthPid: number | undefined, recordPid: number | undefined): number | null {
-  return healthPid ?? recordPid ?? null;
+function statusPid(
+  health: Awaited<ReturnType<typeof probeQueueOwnerHealth>>,
+  recordPid: number | undefined,
+): number | null {
+  if (health.pidAlive) {
+    return health.pid ?? null;
+  }
+  if (isProcessAlive(recordPid)) {
+    return recordPid ?? null;
+  }
+  return null;
 }
 
 function optionalStatusString(value: string | undefined | null): string | null {

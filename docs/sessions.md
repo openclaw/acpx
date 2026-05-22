@@ -4,6 +4,7 @@ description: Persistent multi-turn ACP sessions in acpx — scope rules, named s
 ---
 
 `acpx` sessions are how multi-turn agent conversations survive between invocations. A session is a JSON record on disk plus, when active, a queue owner process that holds the live ACP connection.
+The session record tracks the logical conversation; the queue owner lease is the source of truth for whether `acpx` currently expects a helper process to be alive.
 
 ## Scope key
 
@@ -165,7 +166,7 @@ See [Session control](session-control.md) for `set-mode`, `set <key> <value>`, a
 
 ## Crash recovery
 
-Saved sessions track adapter PIDs. If a saved PID is dead on the next prompt:
+Saved sessions may include a cached adapter PID from the last connected helper process. That PID is a runtime hint, not proof that the logical session is closed or broken. If a cached PID is gone on the next prompt:
 
 1. `acpx` respawns the agent.
 2. Attempts ACP `session/resume` with the saved provider session id when the agent advertises it, otherwise ACP `session/load`.
@@ -177,14 +178,15 @@ This makes long-running scripted sessions resilient to crashes, OS restarts, and
 
 `acpx codex status` reports local process state:
 
-| State        | Meaning                                                |
-| ------------ | ------------------------------------------------------ |
-| `running`    | Queue owner alive and processing a prompt              |
-| `idle`       | Saved session resumable, no queue owner running        |
-| `dead`       | Saved PID is gone; next prompt will respawn and reload |
-| `no-session` | No saved record matches this scope                     |
+| State        | Meaning                                                                          |
+| ------------ | -------------------------------------------------------------------------------- |
+| `running`    | Queue owner alive and processing a prompt                                        |
+| `idle`       | Saved session resumable, no queue owner running                                  |
+| `dead`       | Queue owner was expected but is unavailable, or the last agent exit was abnormal |
+| `no-session` | No saved record matches this scope                                               |
 
 Status checks are local (`kill(pid, 0)` semantics) — they do not touch the agent.
+`closed` describes the logical session lifecycle. A helper process can exit while the session remains open and resumable. Cached PIDs from `~/.acpx/sessions/*.json` are only shown when the process is still live; queue owner liveness comes from `~/.acpx/queues/*.lock` plus its heartbeat and process probe.
 
 ## CWD scoping
 

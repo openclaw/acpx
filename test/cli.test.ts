@@ -1712,7 +1712,7 @@ test("status reports idle for resumable sessions without a live queue owner", as
       lastUsedAt: "2026-01-01T00:01:00.000Z",
       lastPromptAt: "2026-01-01T00:01:00.000Z",
       closed: false,
-      pid: 12345,
+      pid: 999_999,
       agentStartedAt: "2026-01-01T00:00:00.000Z",
       lastAgentExitCode: 0,
       lastAgentExitAt: "2026-01-01T00:02:00.000Z",
@@ -1724,11 +1724,13 @@ test("status reports idle for resumable sessions without a live queue owner", as
     assert.equal(payload.action, "status_snapshot");
     assert.equal(payload.status, "idle");
     assert.equal(payload.summary, "session idle; queue owner will start on next prompt");
+    assert.equal(payload.pid, undefined);
     assert.equal(payload.exitCode, undefined);
 
     const text = await runCli(["--cwd", cwd, "codex", "status"], homeDir);
     assert.equal(text.code, 0, text.stderr);
     assert.match(text.stdout, /status: idle/);
+    assert.match(text.stdout, /pid: -/);
     assert.doesNotMatch(text.stdout, /exitCode:/);
   });
 });
