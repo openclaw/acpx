@@ -76,7 +76,7 @@
     "@agentclientprotocol/sdk": "^0.22.1",
     "commander": "^14.0.3",
     "skillflag": "^0.1.4",
-    "tsx": "^4.21.0",
+    "tsx": "^4.22.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
