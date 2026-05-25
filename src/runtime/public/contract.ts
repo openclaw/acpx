@@ -88,12 +88,71 @@ export type AcpRuntimeSessionModels = {
   availableModelIds: string[];
 };
 
+/**
+ * Cumulative session cost as reported by the agent. Mirrors ACP's
+ * `Cost`, but both fields are optional here because not every adapter
+ * populates them on every event.
+ */
+export type AcpRuntimeUsageCost = {
+  amount?: number;
+  currency?: string;
+};
+
+/**
+ * Per-turn token breakdown. Sourced from `UsageUpdate._meta.usage` on
+ * adapters that populate it (Claude Code today; Codex and others may
+ * omit it). All fields optional — consumers should treat missing
+ * fields as "unknown", not "zero".
+ */
+export type AcpRuntimeUsageBreakdown = {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedReadTokens?: number;
+  cachedWriteTokens?: number;
+  thoughtTokens?: number;
+  totalTokens?: number;
+};
+
+/**
+ * Agent-advertised slash command. The runtime only surfaces enough to
+ * drive a picker UI ("does the agent advertise /compact?"). The full
+ * `AvailableCommandInput` schema from ACP is intentionally not plumbed
+ * through.
+ */
+export type AcpRuntimeAvailableCommand = {
+  name: string;
+  description?: string;
+  /** True if ACP advertised a non-null `input` schema for this command. */
+  hasInput: boolean;
+};
+
+/**
+ * Session-level usage roll-up surfaced through `getStatus()`. The
+ * reducer persists the breakdowns onto the session record; this type
+ * exposes them on the runtime contract.
+ */
+export type AcpRuntimeSessionUsage = {
+  cumulative?: AcpRuntimeUsageBreakdown;
+  /** Keyed by user-message id, matching the persisted reducer state. */
+  perRequest?: Record<string, AcpRuntimeUsageBreakdown>;
+};
+
 export type AcpRuntimeStatus = {
   summary?: string;
   acpxRecordId?: string;
   backendSessionId?: string;
   agentSessionId?: string;
   models?: AcpRuntimeSessionModels;
+  /** Token usage from the persisted session record. */
+  usage?: AcpRuntimeSessionUsage;
+  /**
+   * Commands the agent advertised via `available_commands_update`.
+   * Sourced from the persisted record — older session files only
+   * preserve `name`, so `description` may be undefined and `hasInput`
+   * may be `false` even when a more recent live event would have
+   * carried both.
+   */
+  availableCommands?: AcpRuntimeAvailableCommand[];
   details?: Record<string, unknown>;
 };
 
@@ -118,6 +177,21 @@ export type AcpRuntimeEvent =
       tag?: AcpSessionUpdateTag;
       used?: number;
       size?: number;
+      /** Populated on `usage_update` events when the agent reported a cost. */
+      cost?: AcpRuntimeUsageCost;
+      /**
+       * Populated on `usage_update` events when the agent attached a
+       * per-turn breakdown via `_meta.usage` (Claude Code does this; not
+       * every adapter does).
+       */
+      breakdown?: AcpRuntimeUsageBreakdown;
+      /**
+       * Populated on `available_commands_update` events. The list is a
+       * normalized view of the wire payload — names, descriptions, and
+       * a `hasInput` flag derived from whether the agent advertised a
+       * non-null `input` schema.
+       */
+      availableCommands?: AcpRuntimeAvailableCommand[];
     }
   | {
       type: "tool_call";

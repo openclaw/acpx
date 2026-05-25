@@ -2845,3 +2845,78 @@ test("AcpRuntimeManager ignores sessionOptions when reusing an existing persiste
   assert.equal(record.acpSessionId, "sid-existing");
   assert.equal(record.acpx?.session_options, undefined);
 });
+
+test("AcpRuntimeManager getStatus surfaces token usage breakdowns and available commands", async () => {
+  const record = makeSessionRecord(
+    {
+      acpxRecordId: "usage-status:1",
+      acpSessionId: "usage-sid",
+      agentCommand: "claude --acp",
+      cwd: "/workspace",
+      cumulative_token_usage: {
+        input_tokens: 1000,
+        output_tokens: 250,
+        cache_read_input_tokens: 800,
+        cache_creation_input_tokens: 100,
+      },
+      request_token_usage: {
+        "msg-1": {
+          input_tokens: 500,
+          output_tokens: 125,
+        },
+        "msg-2": {
+          input_tokens: 500,
+          output_tokens: 125,
+        },
+      },
+    },
+    { defaultAcpx: false },
+  );
+  record.acpx = {
+    available_commands: ["/compact", "/clear", "/cost"],
+  };
+
+  const store = new InMemorySessionStore([record]);
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+  );
+
+  const status = await manager.getStatus(createHandle("usage-status:1"));
+
+  assert.deepEqual(status.usage, {
+    cumulative: {
+      inputTokens: 1000,
+      outputTokens: 250,
+      cachedReadTokens: 800,
+      cachedWriteTokens: 100,
+    },
+    perRequest: {
+      "msg-1": { inputTokens: 500, outputTokens: 125 },
+      "msg-2": { inputTokens: 500, outputTokens: 125 },
+    },
+  });
+
+  assert.deepEqual(status.availableCommands, [
+    { name: "/compact", hasInput: false },
+    { name: "/clear", hasInput: false },
+    { name: "/cost", hasInput: false },
+  ]);
+});
+
+test("AcpRuntimeManager getStatus omits usage and availableCommands when the record carries neither", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "empty-status:1",
+    acpSessionId: "empty-sid",
+    agentCommand: "gemini --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+  );
+
+  const status = await manager.getStatus(createHandle("empty-status:1"));
+
+  assert.equal(status.usage, undefined);
+  assert.equal(status.availableCommands, undefined);
+});

@@ -24,17 +24,25 @@ import {
   syncAdvertisedModelState,
 } from "../../session/mode-preference.js";
 import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
-import type { ClientOperation, SessionRecord, SessionResumePolicy } from "../../types.js";
 import type {
+  ClientOperation,
+  SessionRecord,
+  SessionResumePolicy,
+  SessionTokenUsage,
+} from "../../types.js";
+import type {
+  AcpRuntimeAvailableCommand,
   AcpRuntimeEvent,
   AcpRuntimeHandle,
   AcpRuntimeOptions,
   AcpRuntimePromptMode,
   AcpRuntimeSessionModels,
+  AcpRuntimeSessionUsage,
   AcpRuntimeStatus,
   AcpRuntimeTurnAttachment,
   AcpRuntimeTurn,
   AcpRuntimeTurnResult,
+  AcpRuntimeUsageBreakdown,
 } from "../public/contract.js";
 import { AcpRuntimeError } from "../public/errors.js";
 import { parsePromptEventLine } from "../public/events.js";
@@ -275,6 +283,59 @@ function buildModelsField(record: SessionRecord): { models?: AcpRuntimeSessionMo
       ...(currentModelId !== undefined ? { currentModelId } : {}),
       availableModelIds: [...available],
     },
+  };
+}
+
+function tokenUsageToBreakdown(
+  usage: SessionTokenUsage | undefined,
+): AcpRuntimeUsageBreakdown | undefined {
+  if (!usage) {
+    return undefined;
+  }
+  const breakdown: AcpRuntimeUsageBreakdown = {
+    ...(usage.input_tokens !== undefined ? { inputTokens: usage.input_tokens } : {}),
+    ...(usage.output_tokens !== undefined ? { outputTokens: usage.output_tokens } : {}),
+    ...(usage.cache_read_input_tokens !== undefined
+      ? { cachedReadTokens: usage.cache_read_input_tokens }
+      : {}),
+    ...(usage.cache_creation_input_tokens !== undefined
+      ? { cachedWriteTokens: usage.cache_creation_input_tokens }
+      : {}),
+  };
+  return Object.keys(breakdown).length > 0 ? breakdown : undefined;
+}
+
+function buildUsageField(record: SessionRecord): { usage?: AcpRuntimeSessionUsage } {
+  const cumulative = tokenUsageToBreakdown(record.cumulative_token_usage);
+  const perRequestEntries = Object.entries(record.request_token_usage ?? {})
+    .map(([id, value]) => [id, tokenUsageToBreakdown(value)] as const)
+    .filter(
+      (entry): entry is readonly [string, AcpRuntimeUsageBreakdown] => entry[1] !== undefined,
+    );
+  const perRequest =
+    perRequestEntries.length > 0 ? Object.fromEntries(perRequestEntries) : undefined;
+  if (!cumulative && !perRequest) {
+    return {};
+  }
+  return {
+    usage: {
+      ...(cumulative ? { cumulative } : {}),
+      ...(perRequest ? { perRequest } : {}),
+    },
+  };
+}
+
+function buildAvailableCommandsField(record: SessionRecord): {
+  availableCommands?: AcpRuntimeAvailableCommand[];
+} {
+  const names = record.acpx?.available_commands;
+  if (!names || names.length === 0) {
+    return {};
+  }
+  // The session reducer persists names only (see conversation-model.ts).
+  // description / hasInput are out of reach here — surface what we have.
+  return {
+    availableCommands: names.map((name) => ({ name, hasInput: false })),
   };
 }
 
@@ -1129,6 +1190,8 @@ export class AcpRuntimeManager {
       backendSessionId: record.acpSessionId,
       agentSessionId: record.agentSessionId,
       ...buildModelsField(record),
+      ...buildUsageField(record),
+      ...buildAvailableCommandsField(record),
       details: {
         cwd: record.cwd,
         lastUsedAt: record.lastUsedAt,

@@ -1,5 +1,11 @@
 import type { ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
-import type { AcpRuntimeEvent, AcpSessionUpdateTag } from "./contract.js";
+import type {
+  AcpRuntimeAvailableCommand,
+  AcpRuntimeEvent,
+  AcpRuntimeUsageBreakdown,
+  AcpRuntimeUsageCost,
+  AcpSessionUpdateTag,
+} from "./contract.js";
 import { asOptionalString, asString, asTrimmedString, isRecord } from "./shared.js";
 
 const TOOL_OUTPUT_SUMMARY_MAX_CHARS = 500;
@@ -429,7 +435,7 @@ const PROMPT_EVENT_PARSERS: Record<string, PromptEventParser> = {
   agent_thought_chunk: (payload) =>
     resolveTextChunk({ payload, stream: "thought", tag: "agent_thought_chunk" }),
   usage_update: usageUpdateEvent,
-  available_commands_update: (payload) => statusUpdateEvent("available_commands_update", payload),
+  available_commands_update: availableCommandsUpdateEvent,
   current_mode_update: (payload) => statusUpdateEvent("current_mode_update", payload),
   config_option_update: (payload) => statusUpdateEvent("config_option_update", payload),
   session_info_update: (payload) => statusUpdateEvent("session_info_update", payload),
@@ -447,6 +453,22 @@ function promptEventParser(type: string): PromptEventParser | undefined {
 function usageUpdateEvent(payload: Record<string, unknown>): AcpRuntimeEvent {
   const used = asOptionalFiniteNumber(payload.used);
   const size = asOptionalFiniteNumber(payload.size);
+  const meta = isRecord(payload._meta) ? payload._meta : undefined;
+  return buildUsageUpdateEvent({
+    used,
+    size,
+    cost: normalizeUsageCost(payload.cost),
+    breakdown: normalizeUsageBreakdown(meta?.usage),
+  });
+}
+
+function buildUsageUpdateEvent(parts: {
+  used: number | undefined;
+  size: number | undefined;
+  cost: AcpRuntimeUsageCost | undefined;
+  breakdown: AcpRuntimeUsageBreakdown | undefined;
+}): AcpRuntimeEvent {
+  const { used, size, cost, breakdown } = parts;
   const text = used != null && size != null ? `usage updated: ${used}/${size}` : "usage updated";
   return {
     type: "status",
@@ -454,7 +476,73 @@ function usageUpdateEvent(payload: Record<string, unknown>): AcpRuntimeEvent {
     tag: "usage_update",
     ...(used != null ? { used } : {}),
     ...(size != null ? { size } : {}),
+    ...(cost ? { cost } : {}),
+    ...(breakdown ? { breakdown } : {}),
   };
+}
+
+function availableCommandsUpdateEvent(payload: Record<string, unknown>): AcpRuntimeEvent | null {
+  const raw = Array.isArray(payload.availableCommands) ? payload.availableCommands : [];
+  const availableCommands: AcpRuntimeAvailableCommand[] = [];
+  for (const entry of raw) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+    const name = asTrimmedString(entry.name);
+    if (!name) {
+      continue;
+    }
+    const description = asTrimmedString(entry.description);
+    availableCommands.push({
+      name,
+      ...(description ? { description } : {}),
+      hasInput: entry.input != null,
+    });
+  }
+  return {
+    type: "status",
+    text: `available commands updated (${availableCommands.length})`,
+    tag: "available_commands_update",
+    availableCommands,
+  };
+}
+
+function normalizeUsageCost(value: unknown): AcpRuntimeUsageCost | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const amount = asOptionalFiniteNumber(value.amount);
+  const currency = asTrimmedString(value.currency);
+  if (amount == null && !currency) {
+    return undefined;
+  }
+  return {
+    ...(amount != null ? { amount } : {}),
+    ...(currency ? { currency } : {}),
+  };
+}
+
+const USAGE_BREAKDOWN_KEYS: ReadonlyArray<keyof AcpRuntimeUsageBreakdown> = [
+  "inputTokens",
+  "outputTokens",
+  "cachedReadTokens",
+  "cachedWriteTokens",
+  "thoughtTokens",
+  "totalTokens",
+];
+
+function normalizeUsageBreakdown(value: unknown): AcpRuntimeUsageBreakdown | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const breakdown: AcpRuntimeUsageBreakdown = {};
+  for (const key of USAGE_BREAKDOWN_KEYS) {
+    const v = asOptionalFiniteNumber(value[key]);
+    if (v != null) {
+      breakdown[key] = v;
+    }
+  }
+  return Object.keys(breakdown).length > 0 ? breakdown : undefined;
 }
 
 function statusUpdateEvent(
