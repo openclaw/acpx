@@ -499,9 +499,13 @@ function availableCommandsUpdateEvent(payload: Record<string, unknown>): AcpRunt
       hasInput: entry.input != null,
     });
   }
+  const text =
+    availableCommands.length > 0
+      ? `available commands updated (${availableCommands.length})`
+      : "available commands updated";
   return {
     type: "status",
-    text: `available commands updated (${availableCommands.length})`,
+    text,
     tag: "available_commands_update",
     availableCommands,
   };

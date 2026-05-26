@@ -444,7 +444,7 @@ test("parsePromptEventLine covers status and tool summary fallbacks", () => {
     parsePromptEventLine(JSON.stringify({ sessionUpdate: "available_commands_update" })),
     {
       type: "status",
-      text: "available commands updated (0)",
+      text: "available commands updated",
       tag: "available_commands_update",
       availableCommands: [],
     },
