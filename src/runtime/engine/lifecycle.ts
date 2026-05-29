@@ -52,5 +52,6 @@ export function applyConversation(record: SessionRecord, conversation: SessionCo
   record.updated_at = conversation.updated_at;
   record.messages = conversation.messages;
   record.cumulative_token_usage = conversation.cumulative_token_usage;
+  record.cumulative_cost = conversation.cumulative_cost;
   record.request_token_usage = conversation.request_token_usage;
 }

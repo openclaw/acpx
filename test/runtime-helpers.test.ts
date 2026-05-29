@@ -146,6 +146,7 @@ test("runtime lifecycle helpers update records from runtime snapshots and conver
       },
     ],
     cumulative_token_usage: { input_tokens: 11 },
+    cumulative_cost: { amount: 0.02, currency: "USD" },
     request_token_usage: {
       req_1: {
         output_tokens: 22,
@@ -155,6 +156,7 @@ test("runtime lifecycle helpers update records from runtime snapshots and conver
   applyConversation(record, conversation);
   assert.equal(record.title, "Session title");
   assert.equal(record.updated_at, "2026-01-01T00:20:00.000Z");
+  assert.deepEqual(record.cumulative_cost, { amount: 0.02, currency: "USD" });
   assert.equal(sessionHasAgentMessages(conversation), true);
   assert.equal(
     sessionHasAgentMessages({

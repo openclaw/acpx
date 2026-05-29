@@ -301,7 +301,12 @@ export function createSyntheticSessionRecord(options: {
   updatedAt: string;
   conversation: Pick<
     SessionRecord,
-    "title" | "messages" | "updated_at" | "cumulative_token_usage" | "request_token_usage"
+    | "title"
+    | "messages"
+    | "updated_at"
+    | "cumulative_token_usage"
+    | "request_token_usage"
+    | "cumulative_cost"
   >;
   acpxState: SessionRecord["acpx"] | undefined;
   lastSeq: number;
@@ -325,6 +330,7 @@ export function createSyntheticSessionRecord(options: {
     messages: options.conversation.messages,
     updated_at: options.conversation.updated_at,
     cumulative_token_usage: options.conversation.cumulative_token_usage,
+    cumulative_cost: options.conversation.cumulative_cost,
     request_token_usage: options.conversation.request_token_usage,
     acpx: options.acpxState,
   };
