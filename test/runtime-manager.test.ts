@@ -2940,3 +2940,24 @@ test("AcpRuntimeManager getStatus omits usage and availableCommands when the rec
   assert.equal(status.usage, undefined);
   assert.equal(status.availableCommands, undefined);
 });
+
+test("AcpRuntimeManager getStatus accepts legacy available command names", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "legacy-commands:1",
+    acpSessionId: "legacy-commands-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  record.acpx = {
+    available_commands: ["/compact", "/clear"] as never,
+  };
+
+  const store = new InMemorySessionStore([record]);
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+  );
+
+  const status = await manager.getStatus(createHandle("legacy-commands:1"));
+
+  assert.deepEqual(status.availableCommands, [{ name: "/compact" }, { name: "/clear" }]);
+});

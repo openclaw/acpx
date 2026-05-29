@@ -333,22 +333,55 @@ function buildUsageField(record: SessionRecord): { usage?: AcpRuntimeSessionUsag
 function buildAvailableCommandsField(record: SessionRecord): {
   availableCommands?: AcpRuntimeAvailableCommand[];
 } {
-  const commands = record.acpx?.available_commands;
+  const commands = record.acpx?.available_commands as readonly unknown[] | undefined;
   if (!commands || commands.length === 0) {
     return {};
   }
-  return {
-    availableCommands: commands.map((command) => {
-      const runtimeCommand: AcpRuntimeAvailableCommand = { name: command.name };
-      if (command.description) {
-        runtimeCommand.description = command.description;
-      }
-      if (command.has_input !== undefined) {
-        runtimeCommand.hasInput = command.has_input;
-      }
-      return runtimeCommand;
-    }),
-  };
+  const availableCommands = commands
+    .map((command) => runtimeAvailableCommand(command))
+    .filter((command): command is AcpRuntimeAvailableCommand => command !== undefined);
+  return availableCommands.length > 0 ? { availableCommands } : {};
+}
+
+function runtimeAvailableCommand(command: unknown): AcpRuntimeAvailableCommand | undefined {
+  if (typeof command === "string") {
+    const name = command.trim();
+    return name ? { name } : undefined;
+  }
+  const record = commandRecord(command);
+  if (!record) {
+    return undefined;
+  }
+  const name = trimmedField(record.name);
+  if (!name) {
+    return undefined;
+  }
+  const runtimeCommand: AcpRuntimeAvailableCommand = { name };
+  const description = trimmedField(record.description);
+  if (description) {
+    runtimeCommand.description = description;
+  }
+  if (typeof record.has_input === "boolean") {
+    runtimeCommand.hasInput = record.has_input;
+  }
+  return runtimeCommand;
+}
+
+function commandRecord(
+  value: unknown,
+): { name?: unknown; description?: unknown; has_input?: unknown } | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as { name?: unknown; description?: unknown; has_input?: unknown };
+}
+
+function trimmedField(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function advertisedConfigOptionIds(record: SessionRecord): Set<string> | undefined {
