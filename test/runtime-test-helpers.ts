@@ -58,6 +58,7 @@ export function makeSessionRecord(
     messages: overrides.messages ?? [],
     updated_at: overrides.updated_at ?? overrides.lastUsedAt ?? timestamp,
     cumulative_token_usage: overrides.cumulative_token_usage ?? {},
+    cumulative_cost: overrides.cumulative_cost,
     request_token_usage: overrides.request_token_usage ?? {},
     acpx: overrides.acpx ?? (defaultAcpx ? {} : undefined),
     importedFrom: overrides.importedFrom,

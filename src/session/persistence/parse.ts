@@ -61,6 +61,50 @@ function isNonNegativeFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
+function parseUsageCost(raw: unknown): SessionConversation["cumulative_cost"] | null | undefined {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+  const record = asRecord(raw);
+  if (!record) {
+    return null;
+  }
+  return parseUsageCostRecord(record);
+}
+
+function parseUsageCostRecord(
+  record: Record<string, unknown>,
+): SessionConversation["cumulative_cost"] | null | undefined {
+  const amount = parseCostAmount(record.amount);
+  const currency = parseCostCurrency(record.currency);
+  if (amount === null || currency === null) {
+    return null;
+  }
+  const cost: NonNullable<SessionConversation["cumulative_cost"]> = {
+    ...(amount !== undefined ? { amount } : {}),
+    ...(currency !== undefined ? { currency } : {}),
+  };
+  return Object.keys(cost).length > 0 ? cost : undefined;
+}
+
+function parseCostAmount(value: unknown): number | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return isNonNegativeFiniteNumber(value) ? value : null;
+}
+
+function parseCostCurrency(value: unknown): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  const currency = value.trim();
+  return currency.length > 0 ? currency : undefined;
+}
+
 function parseRequestTokenUsage(
   raw: unknown,
 ): SessionConversation["request_token_usage"] | null | undefined {
@@ -260,8 +304,9 @@ function parseConversationRecord(record: Record<string, unknown>): SessionConver
   }
 
   const cumulativeTokenUsage = parseTokenUsage(record.cumulative_token_usage);
+  const cumulativeCost = parseUsageCost(record.cumulative_cost);
   const requestTokenUsage = parseRequestTokenUsage(record.request_token_usage);
-  if (cumulativeTokenUsage === null || requestTokenUsage === null) {
+  if (cumulativeTokenUsage === null || cumulativeCost === null || requestTokenUsage === null) {
     return undefined;
   }
 
@@ -270,6 +315,7 @@ function parseConversationRecord(record: Record<string, unknown>): SessionConver
     messages: record.messages,
     updated_at: record.updated_at,
     cumulative_token_usage: cumulativeTokenUsage ?? {},
+    cumulative_cost: cumulativeCost,
     request_token_usage: requestTokenUsage ?? {},
   };
 }
@@ -649,6 +695,7 @@ export function parseSessionRecord(raw: unknown): SessionRecord | null {
     messages: conversation.messages,
     updated_at: conversation.updated_at,
     cumulative_token_usage: conversation.cumulative_token_usage,
+    cumulative_cost: conversation.cumulative_cost,
     request_token_usage: conversation.request_token_usage,
     acpx: parseAcpxState(record.acpx),
     importedFrom: metadata.importedFrom,

@@ -314,15 +314,13 @@ function buildUsageField(record: SessionRecord): { usage?: AcpRuntimeSessionUsag
     );
   const perRequest =
     perRequestEntries.length > 0 ? Object.fromEntries(perRequestEntries) : undefined;
-  if (!cumulative && !perRequest) {
-    return {};
-  }
-  return {
-    usage: {
-      ...(cumulative ? { cumulative } : {}),
-      ...(perRequest ? { perRequest } : {}),
-    },
+  const cost = record.cumulative_cost;
+  const usage: AcpRuntimeSessionUsage = {
+    ...(cumulative ? { cumulative } : {}),
+    ...(cost ? { cost } : {}),
+    ...(perRequest ? { perRequest } : {}),
   };
+  return Object.keys(usage).length > 0 ? { usage } : {};
 }
 
 function buildAvailableCommandsField(record: SessionRecord): {

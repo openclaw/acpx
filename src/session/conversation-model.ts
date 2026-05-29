@@ -17,6 +17,7 @@ import type {
   SessionAgentMessage,
   SessionMessage,
   SessionTokenUsage,
+  SessionUsageCost,
   SessionToolResult,
   SessionToolResultContent,
   SessionToolUse,
@@ -452,6 +453,29 @@ function hasTokenUsageValue(usage: SessionTokenUsage): boolean {
   return Object.values(usage).some((value) => value !== undefined);
 }
 
+function usageCost(update: UsageUpdate): SessionUsageCost | undefined {
+  const cost = asRecord(asRecord(update)?.cost);
+  if (!cost) {
+    return undefined;
+  }
+  return buildUsageCost(numberField(cost, ["amount"]), stringField(cost.currency));
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function buildUsageCost(
+  amount: number | undefined,
+  currency: string | undefined,
+): SessionUsageCost | undefined {
+  const cost: SessionUsageCost = {
+    ...(amount !== undefined ? { amount } : {}),
+    ...(currency !== undefined ? { currency } : {}),
+  };
+  return Object.keys(cost).length > 0 ? cost : undefined;
+}
+
 function ensureAcpxState(state: SessionAcpxState | undefined): SessionAcpxState {
   return state ?? {};
 }
@@ -472,6 +496,7 @@ export function createSessionConversation(timestamp = isoNow()): SessionConversa
     messages: [],
     updated_at: timestamp,
     cumulative_token_usage: {},
+    cumulative_cost: undefined,
     request_token_usage: {},
   };
 }
@@ -488,8 +513,13 @@ export function cloneSessionConversation(
     messages: deepClone(conversation.messages ?? []),
     updated_at: conversation.updated_at,
     cumulative_token_usage: deepClone(conversation.cumulative_token_usage ?? {}),
+    cumulative_cost: cloneUsageCost(conversation.cumulative_cost),
     request_token_usage: deepClone(conversation.request_token_usage ?? {}),
   };
+}
+
+function cloneUsageCost(cost: SessionUsageCost | undefined): SessionUsageCost | undefined {
+  return cost ? { ...cost } : undefined;
 }
 
 export function cloneSessionAcpxState(
@@ -735,13 +765,19 @@ function appendAgentMessageChunk(
 
 function applyUsageUpdate(conversation: SessionConversation, update: UsageUpdate): void {
   const usage = usageToTokenUsage(update);
-  if (!usage) {
+  const cost = usageCost(update);
+  if (!usage && !cost) {
     return;
   }
-  conversation.cumulative_token_usage = usage;
-  const userId = lastUserMessageId(conversation);
-  if (userId) {
-    conversation.request_token_usage[userId] = usage;
+  if (usage) {
+    conversation.cumulative_token_usage = usage;
+    const userId = lastUserMessageId(conversation);
+    if (userId) {
+      conversation.request_token_usage[userId] = usage;
+    }
+  }
+  if (cost) {
+    conversation.cumulative_cost = cost;
   }
 }
 

@@ -122,6 +122,7 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
         sessionUpdate: "usage_update",
         used: 100,
         size: 1000,
+        cost: { amount: 0.051, currency: "USD" },
         _meta: {
           usage: {
             inputTokens: 60,
@@ -183,6 +184,7 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
     cache_creation_input_tokens: 10,
     cache_read_input_tokens: 15,
   });
+  assert.deepEqual(conversation.cumulative_cost, { amount: 0.051, currency: "USD" });
 
   assert.equal(acpxState?.current_mode_id, "code");
   assert.deepEqual(acpxState?.available_commands, ["create_plan"]);

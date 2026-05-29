@@ -329,11 +329,17 @@ export type SessionTokenUsage = {
   cache_read_input_tokens?: number;
 };
 
+export type SessionUsageCost = {
+  amount?: number;
+  currency?: string;
+};
+
 export type SessionConversation = {
   title?: string | null;
   messages: SessionMessage[];
   updated_at: string;
   cumulative_token_usage: SessionTokenUsage;
+  cumulative_cost?: SessionUsageCost;
   request_token_usage: Record<string, SessionTokenUsage>;
 };
 
@@ -389,6 +395,7 @@ export type SessionRecord = {
   messages: SessionMessage[];
   updated_at: string;
   cumulative_token_usage: SessionTokenUsage;
+  cumulative_cost?: SessionUsageCost;
   request_token_usage: Record<string, SessionTokenUsage>;
   acpx?: SessionAcpxState;
   importedFrom?: SessionImportedFrom;

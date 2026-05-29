@@ -36,6 +36,7 @@ export function serializeSessionRecordForDisk(record: SessionRecord): Record<str
     messages: canonical.messages,
     updated_at: canonical.updated_at,
     cumulative_token_usage: canonical.cumulative_token_usage,
+    cumulative_cost: canonical.cumulative_cost,
     request_token_usage: canonical.request_token_usage,
     acpx: canonical.acpx,
     imported_from: canonical.importedFrom

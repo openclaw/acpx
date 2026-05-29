@@ -2859,6 +2859,10 @@ test("AcpRuntimeManager getStatus surfaces token usage breakdowns and available 
         cache_read_input_tokens: 800,
         cache_creation_input_tokens: 100,
       },
+      cumulative_cost: {
+        amount: 0.0123,
+        currency: "USD",
+      },
       request_token_usage: {
         "msg-1": {
           input_tokens: 500,
@@ -2889,6 +2893,10 @@ test("AcpRuntimeManager getStatus surfaces token usage breakdowns and available 
       outputTokens: 250,
       cachedReadTokens: 800,
       cachedWriteTokens: 100,
+    },
+    cost: {
+      amount: 0.0123,
+      currency: "USD",
     },
     perRequest: {
       "msg-1": { inputTokens: 500, outputTokens: 125 },

@@ -133,6 +133,8 @@ export type AcpRuntimeAvailableCommand = {
  */
 export type AcpRuntimeSessionUsage = {
   cumulative?: AcpRuntimeUsageBreakdown;
+  /** Cumulative session cost when the agent reported it. */
+  cost?: AcpRuntimeUsageCost;
   /** Keyed by user-message id, matching the persisted reducer state. */
   perRequest?: Record<string, AcpRuntimeUsageBreakdown>;
 };
@@ -143,7 +145,7 @@ export type AcpRuntimeStatus = {
   backendSessionId?: string;
   agentSessionId?: string;
   models?: AcpRuntimeSessionModels;
-  /** Token usage from the persisted session record. */
+  /** Token usage and cost from the persisted session record. */
   usage?: AcpRuntimeSessionUsage;
   /**
    * Commands the agent advertised via `available_commands_update`.
