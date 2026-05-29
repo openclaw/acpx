@@ -2858,6 +2858,8 @@ test("AcpRuntimeManager getStatus surfaces token usage breakdowns and available 
         output_tokens: 250,
         cache_read_input_tokens: 800,
         cache_creation_input_tokens: 100,
+        thought_tokens: 75,
+        total_tokens: 1325,
       },
       cumulative_cost: {
         amount: 0.0123,
@@ -2867,17 +2869,25 @@ test("AcpRuntimeManager getStatus surfaces token usage breakdowns and available 
         "msg-1": {
           input_tokens: 500,
           output_tokens: 125,
+          thought_tokens: 25,
+          total_tokens: 650,
         },
         "msg-2": {
           input_tokens: 500,
           output_tokens: 125,
+          thought_tokens: 50,
+          total_tokens: 675,
         },
       },
     },
     { defaultAcpx: false },
   );
   record.acpx = {
-    available_commands: ["/compact", "/clear", "/cost"],
+    available_commands: [
+      { name: "/compact", description: "Compact context", has_input: false },
+      { name: "/clear", has_input: false },
+      { name: "/cost", description: "Show cost", has_input: true },
+    ],
   };
 
   const store = new InMemorySessionStore([record]);
@@ -2893,21 +2903,23 @@ test("AcpRuntimeManager getStatus surfaces token usage breakdowns and available 
       outputTokens: 250,
       cachedReadTokens: 800,
       cachedWriteTokens: 100,
+      thoughtTokens: 75,
+      totalTokens: 1325,
     },
     cost: {
       amount: 0.0123,
       currency: "USD",
     },
     perRequest: {
-      "msg-1": { inputTokens: 500, outputTokens: 125 },
-      "msg-2": { inputTokens: 500, outputTokens: 125 },
+      "msg-1": { inputTokens: 500, outputTokens: 125, thoughtTokens: 25, totalTokens: 650 },
+      "msg-2": { inputTokens: 500, outputTokens: 125, thoughtTokens: 50, totalTokens: 675 },
     },
   });
 
   assert.deepEqual(status.availableCommands, [
-    { name: "/compact" },
-    { name: "/clear" },
-    { name: "/cost" },
+    { name: "/compact", description: "Compact context", hasInput: false },
+    { name: "/clear", hasInput: false },
+    { name: "/cost", description: "Show cost", hasInput: true },
   ]);
 });
 

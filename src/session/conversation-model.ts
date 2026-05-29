@@ -13,6 +13,7 @@ import type {
   PromptInput,
   SessionAcpxState,
   SessionConversation,
+  SessionAvailableCommand,
   SessionAgentContent,
   SessionAgentMessage,
   SessionMessage,
@@ -53,11 +54,32 @@ function hasOwn(source: object, key: string): boolean {
 }
 
 function normalizeAgentName(value: unknown): string | undefined {
+  return trimmedString(value);
+}
+
+function trimmedString(value: unknown): string | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeAvailableCommand(value: unknown): SessionAvailableCommand | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const name = trimmedString(record.name);
+  if (!name) {
+    return undefined;
+  }
+  const description = trimmedString(record.description);
+  return {
+    name,
+    ...(description ? { description } : {}),
+    has_input: record.input != null,
+  };
 }
 
 function extractText(content: ContentBlock): string | undefined {
@@ -440,6 +462,8 @@ function usageToTokenUsage(update: UsageUpdate): SessionTokenUsage | undefined {
       "cacheReadInputTokens",
       "cachedReadTokens",
     ]),
+    thought_tokens: numberField(source, ["thought_tokens", "thoughtTokens"]),
+    total_tokens: numberField(source, ["total_tokens", "totalTokens"]),
   };
 
   if (!hasTokenUsageValue(normalized)) {
@@ -537,7 +561,9 @@ export function cloneSessionAcpxState(
       : undefined,
     current_model_id: state.current_model_id,
     available_models: state.available_models ? [...state.available_models] : undefined,
-    available_commands: state.available_commands ? [...state.available_commands] : undefined,
+    available_commands: state.available_commands
+      ? state.available_commands.map((command) => ({ ...command }))
+      : undefined,
     config_options: state.config_options ? deepClone(state.config_options) : undefined,
     session_options: cloneSessionOptions(state.session_options),
   };
@@ -723,8 +749,8 @@ const SESSION_UPDATE_HANDLERS: Record<string, SessionUpdateHandler> = {
   available_commands_update: (_conversation, acpx, update) => {
     if (update.sessionUpdate === "available_commands_update") {
       acpx.available_commands = update.availableCommands
-        .map((entry) => entry.name)
-        .filter((entry) => typeof entry === "string" && entry.trim().length > 0);
+        .map((entry) => normalizeAvailableCommand(entry))
+        .filter((entry): entry is SessionAvailableCommand => entry !== undefined);
     }
   },
   current_mode_update: (_conversation, acpx, update) => {

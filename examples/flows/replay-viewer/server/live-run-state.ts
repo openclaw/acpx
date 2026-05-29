@@ -205,6 +205,7 @@ function replayBundledSession(
       messages: conversation.messages,
       updated_at: conversation.updated_at,
       cumulative_token_usage: conversation.cumulative_token_usage,
+      cumulative_cost: conversation.cumulative_cost,
       request_token_usage: conversation.request_token_usage,
       acpx: acpxState,
     },

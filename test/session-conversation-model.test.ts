@@ -129,6 +129,8 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
             outputTokens: 40,
             cachedWriteTokens: 10,
             cachedReadTokens: 15,
+            thoughtTokens: 5,
+            totalTokens: 120,
           },
         },
       },
@@ -177,17 +179,23 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
     output_tokens: 40,
     cache_creation_input_tokens: 10,
     cache_read_input_tokens: 15,
+    thought_tokens: 5,
+    total_tokens: 120,
   });
   assert.deepEqual(conversation.cumulative_token_usage, {
     input_tokens: 60,
     output_tokens: 40,
     cache_creation_input_tokens: 10,
     cache_read_input_tokens: 15,
+    thought_tokens: 5,
+    total_tokens: 120,
   });
   assert.deepEqual(conversation.cumulative_cost, { amount: 0.051, currency: "USD" });
 
   assert.equal(acpxState?.current_mode_id, "code");
-  assert.deepEqual(acpxState?.available_commands, ["create_plan"]);
+  assert.deepEqual(acpxState?.available_commands, [
+    { name: "create_plan", description: "create plan", has_input: false },
+  ]);
 });
 
 test("recordPromptSubmission preserves audio prompt content", () => {
@@ -246,7 +254,7 @@ test("cloneSessionAcpxState preserves desired mode id", () => {
     desired_config_options: {
       reasoning_effort: "high",
     },
-    available_commands: ["review"],
+    available_commands: [{ name: "review", description: "Review changes", has_input: true }],
     session_options: {
       model: "sonnet",
       allowed_tools: ["Read", "Grep"],
@@ -259,7 +267,9 @@ test("cloneSessionAcpxState preserves desired mode id", () => {
   assert.deepEqual(cloned?.desired_config_options, {
     reasoning_effort: "high",
   });
-  assert.deepEqual(cloned?.available_commands, ["review"]);
+  assert.deepEqual(cloned?.available_commands, [
+    { name: "review", description: "Review changes", has_input: true },
+  ]);
   assert.deepEqual(cloned?.session_options, {
     model: "sonnet",
     allowed_tools: ["Read", "Grep"],

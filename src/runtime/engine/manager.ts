@@ -292,17 +292,24 @@ function tokenUsageToBreakdown(
   if (!usage) {
     return undefined;
   }
-  const breakdown: AcpRuntimeUsageBreakdown = {
-    ...(usage.input_tokens !== undefined ? { inputTokens: usage.input_tokens } : {}),
-    ...(usage.output_tokens !== undefined ? { outputTokens: usage.output_tokens } : {}),
-    ...(usage.cache_read_input_tokens !== undefined
-      ? { cachedReadTokens: usage.cache_read_input_tokens }
-      : {}),
-    ...(usage.cache_creation_input_tokens !== undefined
-      ? { cachedWriteTokens: usage.cache_creation_input_tokens }
-      : {}),
-  };
+  const breakdown: AcpRuntimeUsageBreakdown = {};
+  assignUsageBreakdownField(breakdown, "inputTokens", usage.input_tokens);
+  assignUsageBreakdownField(breakdown, "outputTokens", usage.output_tokens);
+  assignUsageBreakdownField(breakdown, "cachedReadTokens", usage.cache_read_input_tokens);
+  assignUsageBreakdownField(breakdown, "cachedWriteTokens", usage.cache_creation_input_tokens);
+  assignUsageBreakdownField(breakdown, "thoughtTokens", usage.thought_tokens);
+  assignUsageBreakdownField(breakdown, "totalTokens", usage.total_tokens);
   return Object.keys(breakdown).length > 0 ? breakdown : undefined;
+}
+
+function assignUsageBreakdownField(
+  breakdown: AcpRuntimeUsageBreakdown,
+  key: keyof AcpRuntimeUsageBreakdown,
+  value: number | undefined,
+): void {
+  if (value !== undefined) {
+    breakdown[key] = value;
+  }
 }
 
 function buildUsageField(record: SessionRecord): { usage?: AcpRuntimeSessionUsage } {
@@ -326,14 +333,21 @@ function buildUsageField(record: SessionRecord): { usage?: AcpRuntimeSessionUsag
 function buildAvailableCommandsField(record: SessionRecord): {
   availableCommands?: AcpRuntimeAvailableCommand[];
 } {
-  const names = record.acpx?.available_commands;
-  if (!names || names.length === 0) {
+  const commands = record.acpx?.available_commands;
+  if (!commands || commands.length === 0) {
     return {};
   }
-  // The session reducer persists names only (see conversation-model.ts).
-  // description / hasInput are out of reach here; leave them unknown.
   return {
-    availableCommands: names.map((name) => ({ name })),
+    availableCommands: commands.map((command) => {
+      const runtimeCommand: AcpRuntimeAvailableCommand = { name: command.name };
+      if (command.description) {
+        runtimeCommand.description = command.description;
+      }
+      if (command.has_input !== undefined) {
+        runtimeCommand.hasInput = command.has_input;
+      }
+      return runtimeCommand;
+    }),
   };
 }
 

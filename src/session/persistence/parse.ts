@@ -23,6 +23,50 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
+function parseAvailableCommand(
+  raw: unknown,
+): NonNullable<SessionAcpxState["available_commands"]>[number] | undefined {
+  if (typeof raw === "string") {
+    const name = raw.trim();
+    return name ? { name } : undefined;
+  }
+  const record = asRecord(raw);
+  if (!record) {
+    return undefined;
+  }
+  const name = parseNonEmptyString(record.name);
+  if (!name) {
+    return undefined;
+  }
+  const description = parseNonEmptyString(record.description);
+  return {
+    name,
+    ...(description ? { description } : {}),
+    ...(typeof record.has_input === "boolean" ? { has_input: record.has_input } : {}),
+  };
+}
+
+function parseAvailableCommands(raw: unknown): SessionAcpxState["available_commands"] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  const commands = raw
+    .map((entry) => parseAvailableCommand(entry))
+    .filter(
+      (entry): entry is NonNullable<SessionAcpxState["available_commands"]>[number] =>
+        entry !== undefined,
+    );
+  return commands.length > 0 ? commands : undefined;
+}
+
+function parseNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 function parseTokenUsage(
   raw: unknown,
 ): SessionConversation["cumulative_token_usage"] | null | undefined {
@@ -41,6 +85,8 @@ function parseTokenUsage(
     "output_tokens",
     "cache_creation_input_tokens",
     "cache_read_input_tokens",
+    "thought_tokens",
+    "total_tokens",
   ];
 
   for (const field of fields) {
@@ -363,8 +409,9 @@ function parseAcpxState(raw: unknown): SessionAcpxState | undefined {
     state.available_models = [...record.available_models];
   }
 
-  if (isStringArray(record.available_commands)) {
-    state.available_commands = [...record.available_commands];
+  const availableCommands = parseAvailableCommands(record.available_commands);
+  if (availableCommands) {
+    state.available_commands = availableCommands;
   }
 
   if (Array.isArray(record.config_options)) {
