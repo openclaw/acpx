@@ -621,6 +621,41 @@ test("parsePromptEventLine surfaces cost and _meta.usage breakdown on usage_upda
     },
   );
 
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        sessionUpdate: "usage_update",
+        used: 25,
+        size: 100,
+        _meta: {
+          usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_read_input_tokens: 3,
+            cache_creation_input_tokens: 2,
+            thought_tokens: 1,
+            total_tokens: 21,
+          },
+        },
+      }),
+    ),
+    {
+      type: "status",
+      text: "usage updated: 25/100",
+      tag: "usage_update",
+      used: 25,
+      size: 100,
+      breakdown: {
+        inputTokens: 10,
+        outputTokens: 5,
+        cachedReadTokens: 3,
+        cachedWriteTokens: 2,
+        thoughtTokens: 1,
+        totalTokens: 21,
+      },
+    },
+  );
+
   // _meta without a usage record is ignored — no synthetic breakdown.
   assert.deepEqual(
     parsePromptEventLine(

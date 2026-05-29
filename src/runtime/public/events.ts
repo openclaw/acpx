@@ -526,13 +526,16 @@ function normalizeUsageCost(value: unknown): AcpRuntimeUsageCost | undefined {
   };
 }
 
-const USAGE_BREAKDOWN_KEYS: ReadonlyArray<keyof AcpRuntimeUsageBreakdown> = [
-  "inputTokens",
-  "outputTokens",
-  "cachedReadTokens",
-  "cachedWriteTokens",
-  "thoughtTokens",
-  "totalTokens",
+const USAGE_BREAKDOWN_FIELDS: ReadonlyArray<readonly [keyof AcpRuntimeUsageBreakdown, string[]]> = [
+  ["inputTokens", ["inputTokens", "input_tokens"]],
+  ["outputTokens", ["outputTokens", "output_tokens"]],
+  ["cachedReadTokens", ["cachedReadTokens", "cacheReadInputTokens", "cache_read_input_tokens"]],
+  [
+    "cachedWriteTokens",
+    ["cachedWriteTokens", "cacheCreationInputTokens", "cache_creation_input_tokens"],
+  ],
+  ["thoughtTokens", ["thoughtTokens", "thought_tokens"]],
+  ["totalTokens", ["totalTokens", "total_tokens"]],
 ];
 
 function normalizeUsageBreakdown(value: unknown): AcpRuntimeUsageBreakdown | undefined {
@@ -540,13 +543,26 @@ function normalizeUsageBreakdown(value: unknown): AcpRuntimeUsageBreakdown | und
     return undefined;
   }
   const breakdown: AcpRuntimeUsageBreakdown = {};
-  for (const key of USAGE_BREAKDOWN_KEYS) {
-    const v = asOptionalFiniteNumber(value[key]);
+  for (const [key, aliases] of USAGE_BREAKDOWN_FIELDS) {
+    const v = firstFiniteNumber(value, aliases);
     if (v != null) {
       breakdown[key] = v;
     }
   }
   return Object.keys(breakdown).length > 0 ? breakdown : undefined;
+}
+
+function firstFiniteNumber(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): number | undefined {
+  for (const key of keys) {
+    const value = asOptionalFiniteNumber(record[key]);
+    if (value != null) {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 function statusUpdateEvent(

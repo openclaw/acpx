@@ -2897,9 +2897,9 @@ test("AcpRuntimeManager getStatus surfaces token usage breakdowns and available 
   });
 
   assert.deepEqual(status.availableCommands, [
-    { name: "/compact", hasInput: false },
-    { name: "/clear", hasInput: false },
-    { name: "/cost", hasInput: false },
+    { name: "/compact" },
+    { name: "/clear" },
+    { name: "/cost" },
   ]);
 });
 

@@ -333,9 +333,9 @@ function buildAvailableCommandsField(record: SessionRecord): {
     return {};
   }
   // The session reducer persists names only (see conversation-model.ts).
-  // description / hasInput are out of reach here — surface what we have.
+  // description / hasInput are out of reach here; leave them unknown.
   return {
-    availableCommands: names.map((name) => ({ name, hasInput: false })),
+    availableCommands: names.map((name) => ({ name })),
   };
 }
 

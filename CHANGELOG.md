@@ -9,6 +9,7 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - Agents/built-ins: bump the default Claude ACP adapter range to `@agentclientprotocol/claude-agent-acp@^0.37.0`. Thanks @trumpyla.
+- Runtime/embedding: surface cost, token usage breakdowns, and advertised command metadata on runtime status/events. Thanks @DaniAkash.
 
 ### Breaking
 

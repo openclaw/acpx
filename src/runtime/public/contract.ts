@@ -122,8 +122,8 @@ export type AcpRuntimeUsageBreakdown = {
 export type AcpRuntimeAvailableCommand = {
   name: string;
   description?: string;
-  /** True if ACP advertised a non-null `input` schema for this command. */
-  hasInput: boolean;
+  /** True/false when ACP advertised whether this command has an input schema. */
+  hasInput?: boolean;
 };
 
 /**
@@ -148,9 +148,8 @@ export type AcpRuntimeStatus = {
   /**
    * Commands the agent advertised via `available_commands_update`.
    * Sourced from the persisted record — older session files only
-   * preserve `name`, so `description` may be undefined and `hasInput`
-   * may be `false` even when a more recent live event would have
-   * carried both.
+   * preserve `name`, so `description` and `hasInput` may be undefined
+   * even when a more recent live event would have carried both.
    */
   availableCommands?: AcpRuntimeAvailableCommand[];
   details?: Record<string, unknown>;
