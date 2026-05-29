@@ -19,7 +19,7 @@ The default agent for top-level commands like `acpx exec â€¦` and `acpx prompt â
 | `cursor`     | `cursor-agent acp`                             | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
 | `copilot`    | `copilot --acp --stdio`                        | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
 | `droid`      | `droid exec --output-format acp`               | [Factory Droid](https://www.factory.ai)                                                                         |
-| `fast-agent` | `uvx fast-agent-mcp acp`                       | [EvalState fast-agent](https://github.com/evalstate/fast-agent)                                                 |
+| `fast-agent` | `uvx fast-agent-mcp acp`                       | [fast-agent](https://fast-agent.ai/)                                                                            |
 | `iflow`      | `iflow --experimental-acp`                     | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
 | `kilocode`   | `npx -y @kilocode/cli acp`                     | [Kilocode](https://kilocode.ai)                                                                                 |
 | `kimi`       | `kimi acp`                                     | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
@@ -124,12 +124,15 @@ If your Cursor install exposes ACP as `agent acp` instead of `cursor-agent acp`,
 - Default command: `droid exec --output-format acp`
 - Upstream: [factory.ai](https://www.factory.ai)
 
-### Fast Agent
+### fast-agent
 
 - Built-in name: `fast-agent`
 - Default command: `uvx fast-agent-mcp acp`
-- Upstream: [EvalState fast-agent](https://github.com/evalstate/fast-agent)
-- Requires `uvx` on `PATH`. Configure fast-agent model/provider settings through environment variables, fast-agent configuration, or an `acpx` agent override with additional `fast-agent-mcp acp` arguments.
+- Upstream: https://fast-agent.ai/acp
+
+`acpx fast-agent` starts fast-agent through its ACP entrypoint. It requires `uvx` on `PATH`.
+
+Configure model/provider settings through fast-agent environment variables, fast-agent configuration, or an `acpx` agent override with additional `fast-agent-mcp acp` arguments.
 
 ### Qoder
 

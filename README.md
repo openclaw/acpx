@@ -351,7 +351,7 @@ Built-ins:
 | `cursor`     | native (`cursor-agent acp`)                                                 | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
 | `copilot`    | native (`copilot --acp --stdio`)                                            | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
 | `droid`      | native (`droid exec --output-format acp`)                                   | [Factory Droid](https://www.factory.ai)                                                                         |
-| `fast-agent` | `uvx fast-agent-mcp acp`                                                    | [EvalState fast-agent](https://github.com/evalstate/fast-agent)                                                 |
+| `fast-agent` | `uvx fast-agent-mcp acp`                                                    | [fast-agent](https://fast-agent.ai)                                                                             |
 | `iflow`      | native (`iflow --experimental-acp`)                                         | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
 | `kilocode`   | `npx -y @kilocode/cli acp`                                                  | [Kilocode](https://kilocode.ai)                                                                                 |
 | `kimi`       | native (`kimi acp`)                                                         | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |

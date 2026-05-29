@@ -10,7 +10,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Agents/built-ins: bump the default Claude ACP adapter range to `@agentclientprotocol/claude-agent-acp@^0.37.0`. Thanks @trumpyla.
 - Runtime/embedding: surface cost, token usage breakdowns, and advertised command metadata on runtime status/events. Thanks @DaniAkash.
-- Agents/built-ins: add `fast-agent` as a built-in EvalState fast-agent ACP adapter via `uvx fast-agent-mcp acp`.
+- Agents/built-ins: add `fast-agent` as a built-in fast-agent ACP adapter via `uvx fast-agent-mcp acp`.
 
 ### Breaking
 
