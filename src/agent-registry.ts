@@ -6,6 +6,7 @@ const ACP_ADAPTER_PACKAGE_RANGES = {
   pi: "^0.0.26",
   codex: "^0.0.44",
   claude: "^0.37.0",
+  mux: "^0.26.0",
 } as const;
 
 type BuiltInAgentPackageSpec = {
@@ -49,6 +50,7 @@ export const AGENT_REGISTRY: Record<string, string> = {
   kilocode: "npx -y @kilocode/cli acp",
   kimi: "kimi acp",
   kiro: "kiro-cli-chat acp",
+  mux: `npx -y mux@${ACP_ADAPTER_PACKAGE_RANGES.mux} acp`,
   opencode: "npx -y opencode-ai acp",
   qoder: "qodercli --acp",
   qwen: "qwen --acp",
