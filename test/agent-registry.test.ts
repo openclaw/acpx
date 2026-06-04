@@ -54,6 +54,11 @@ test("fast-agent built-in runs the ACP entrypoint through uvx", () => {
   assert.equal(resolveAgentCommand("fast-agent"), "uvx fast-agent-mcp acp");
 });
 
+test("mux built-in runs the coder/mux ACP stdio bridge through npx", () => {
+  assert.equal(AGENT_REGISTRY.mux, "npx -y mux@^0.26.0 acp");
+  assert.equal(resolveAgentCommand("mux"), "npx -y mux@^0.26.0 acp");
+});
+
 test("listBuiltInAgents preserves the required example prefix and alphabetical tail", () => {
   const agents = listBuiltInAgents();
   assert.deepEqual(agents, Object.keys(AGENT_REGISTRY));
@@ -73,6 +78,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "kilocode",
     "kimi",
     "kiro",
+    "mux",
     "opencode",
     "qoder",
     "qwen",

@@ -24,6 +24,7 @@ The default agent for top-level commands like `acpx exec â€¦` and `acpx prompt â
 | `kilocode`   | `npx -y @kilocode/cli acp`                     | [Kilocode](https://kilocode.ai)                                                                                 |
 | `kimi`       | `kimi acp`                                     | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
 | `kiro`       | `kiro-cli-chat acp`                            | [Kiro CLI](https://kiro.dev)                                                                                    |
+| `mux`        | `npx -y mux acp`                               | [Mux](https://mux.coder.com)                                                                                    |
 | `opencode`   | `npx -y opencode-ai acp`                       | [OpenCode](https://opencode.ai)                                                                                 |
 | `qoder`      | `qodercli --acp`                               | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |
 | `qwen`       | `qwen --acp`                                   | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
@@ -165,6 +166,16 @@ Configure model/provider settings through fast-agent environment variables, fast
 - Built-in name: `kiro`
 - Default command: `kiro-cli-chat acp`
 - Upstream: [kiro.dev](https://kiro.dev)
+
+### Mux
+
+- Built-in name: `mux`
+- Default command: `npx -y mux acp`
+- Upstream: https://mux.coder.com/integrations/acp
+
+`acpx mux` starts coder/mux through its ACP stdio bridge (`mux acp`). `mux acp` auto-starts an in-process mux server, so a separate `mux server` is not required.
+
+Configure at least one model provider before prompting (for example `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`); see https://mux.coder.com/config/providers. To target a remote mux server, override the command with `mux acp --server-url <url> --auth-token <token>` (or set `MUX_SERVER_URL` / `MUX_SERVER_AUTH_TOKEN`).
 
 ### OpenCode
 
