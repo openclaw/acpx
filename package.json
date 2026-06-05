@@ -80,7 +80,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.23.0",
-    "commander": "^14.0.3",
+    "commander": "^15.0.0",
     "skillflag": "^0.1.4",
     "tsx": "^4.22.0",
     "zod": "^4.4.3"
