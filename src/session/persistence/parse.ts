@@ -23,6 +23,23 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
+function hasModelConfigOption(options: unknown): boolean {
+  if (!Array.isArray(options)) {
+    return false;
+  }
+  return options.some((entry) => {
+    const option = asRecord(entry);
+    return option?.category === "model" || option?.id === "model";
+  });
+}
+
+function parseConfigOptions(raw: unknown): SessionAcpxState["config_options"] | undefined {
+  if (!Array.isArray(raw) || !raw.every((entry) => asRecord(entry) !== undefined)) {
+    return undefined;
+  }
+  return raw as SessionAcpxState["config_options"];
+}
+
 function parseAvailableCommand(
   raw: unknown,
 ): NonNullable<SessionAcpxState["available_commands"]>[number] | undefined {
@@ -403,24 +420,35 @@ function parseAcpxState(raw: unknown): SessionAcpxState | undefined {
 
   assignDesiredConfigOptions(state, record.desired_config_options);
 
-  assignStringState(state, "current_model_id", record.current_model_id);
-
-  if (isStringArray(record.available_models)) {
-    state.available_models = [...record.available_models];
-  }
+  assignParsedModelState(state, record);
 
   const availableCommands = parseAvailableCommands(record.available_commands);
   if (availableCommands) {
     state.available_commands = availableCommands;
   }
 
-  if (Array.isArray(record.config_options)) {
-    state.config_options = record.config_options as SessionAcpxState["config_options"];
-  }
-
   assignParsedSessionOptions(state, record.session_options);
 
   return state;
+}
+
+function assignParsedModelState(state: SessionAcpxState, record: Record<string, unknown>): void {
+  assignStringState(state, "current_model_id", record.current_model_id);
+  if (isStringArray(record.available_models)) {
+    state.available_models = [...record.available_models];
+  }
+  if (record.model_control === "config_option" || record.model_control === "legacy_set_model") {
+    state.model_control = record.model_control;
+  }
+  const configOptions = parseConfigOptions(record.config_options);
+  if (configOptions) {
+    state.config_options = configOptions;
+  }
+  if (state.model_control === undefined && state.available_models !== undefined) {
+    state.model_control = hasModelConfigOption(state.config_options)
+      ? "config_option"
+      : "legacy_set_model";
+  }
 }
 
 function assignBooleanTrue(

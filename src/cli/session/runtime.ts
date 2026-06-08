@@ -4,7 +4,10 @@ import {
   isRetryablePromptError,
   normalizeOutputError,
 } from "../../acp/error-normalization.js";
-import { assertRequestedModelSupported } from "../../acp/model-support.js";
+import {
+  assertRequestedModelSupported,
+  modelStateFromConfigOptions,
+} from "../../acp/model-support.js";
 import { InterruptedError, withInterrupt, withTimeout } from "../../async-control.js";
 export { InterruptedError, TimeoutError } from "../../async-control.js";
 import { formatPerfMetric, measurePerf, startPerfTimer } from "../../perf-metrics.js";
@@ -21,6 +24,10 @@ import {
   type SessionAgentOptions,
 } from "../../runtime/engine/session-options.js";
 import {
+  applyConfigOptionsToRecord,
+  applyConfigOptionsToState,
+} from "../../session/config-options.js";
+import {
   cloneSessionAcpxState,
   cloneSessionConversation,
   recordClientOperation as recordConversationClientOperation,
@@ -30,8 +37,13 @@ import {
 } from "../../session/conversation-model.js";
 import { SessionEventWriter } from "../../session/events.js";
 import { LiveSessionCheckpoint } from "../../session/live-checkpoint.js";
-import { setCurrentModelId, setDesiredModelId } from "../../session/mode-preference.js";
+import {
+  clearDesiredConfigOption,
+  setCurrentModelId,
+  setDesiredModelId,
+} from "../../session/mode-preference.js";
 import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
+import { advertisedModelState } from "../../session/model-state.js";
 import {
   absolutePath,
   isoNow,
@@ -50,6 +62,7 @@ import type {
   PermissionEscalationEvent,
   PermissionPolicy,
   RunPromptResult,
+  SessionAcpxState,
   SessionRecord,
   SessionSendResult,
 } from "../../types.js";
@@ -146,20 +159,70 @@ function requestedModelId(value: string | undefined): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function advertisedModelsForRecord(record: SessionRecord):
-  | {
-      currentModelId: string;
-      availableModels: Array<{ modelId: string; name: string }>;
-    }
-  | undefined {
-  const availableModels = record.acpx?.available_models;
-  if (!Array.isArray(availableModels)) {
-    return undefined;
+function applyConfigOptionResponseToState(
+  state: SessionAcpxState | undefined,
+  response:
+    | Awaited<ReturnType<AcpClient["setSessionConfigOption"]>>
+    | Awaited<ReturnType<AcpClient["setSessionModel"]>>,
+): SessionAcpxState | undefined {
+  if (!response?.configOptions) {
+    return state;
   }
-  return {
-    currentModelId: record.acpx?.current_model_id ?? "",
-    availableModels: availableModels.map((modelId) => ({ modelId, name: modelId })),
-  };
+  return applyConfigOptionsToState(state, response.configOptions);
+}
+
+export function mergeConnectedModelState(
+  state: SessionAcpxState | undefined,
+  connectedState: SessionAcpxState | undefined,
+): SessionAcpxState | undefined {
+  if (!connectedState) {
+    return state;
+  }
+  const nextState = cloneSessionAcpxState(state) ?? {};
+  mergeConnectedAdvertisedModelState(nextState, connectedState);
+  mergeConnectedModelPreferences(nextState, connectedState);
+  return nextState;
+}
+
+function mergeConnectedAdvertisedModelState(
+  nextState: SessionAcpxState,
+  connectedState: SessionAcpxState,
+): void {
+  if (connectedState.config_options !== undefined) {
+    nextState.config_options = structuredClone(connectedState.config_options);
+  } else {
+    delete nextState.config_options;
+  }
+  if (connectedState.current_model_id !== undefined) {
+    nextState.current_model_id = connectedState.current_model_id;
+  } else {
+    delete nextState.current_model_id;
+  }
+  if (connectedState.available_models) {
+    nextState.available_models = [...connectedState.available_models];
+  } else {
+    delete nextState.available_models;
+  }
+  if (connectedState.model_control) {
+    nextState.model_control = connectedState.model_control;
+  } else {
+    delete nextState.model_control;
+  }
+}
+
+function mergeConnectedModelPreferences(
+  nextState: SessionAcpxState,
+  connectedState: SessionAcpxState,
+): void {
+  if (connectedState.session_options) {
+    nextState.session_options = cloneSessionAcpxState(connectedState)?.session_options;
+  }
+  if (connectedState.desired_mode_id !== undefined) {
+    nextState.desired_mode_id = connectedState.desired_mode_id;
+  }
+  if (connectedState.desired_config_options) {
+    nextState.desired_config_options = { ...connectedState.desired_config_options };
+  }
 }
 
 async function applyPromptModelIfAdvertised(params: {
@@ -174,7 +237,7 @@ async function applyPromptModelIfAdvertised(params: {
     return;
   }
 
-  const models = advertisedModelsForRecord(params.record);
+  const models = advertisedModelState(params.record.acpx);
   assertRequestedModelSupported({
     requestedModel,
     models,
@@ -185,15 +248,16 @@ async function applyPromptModelIfAdvertised(params: {
     return;
   }
   if (params.record.acpx?.current_model_id === requestedModel) {
-    setDesiredModelId(params.record, requestedModel);
+    setDesiredModelId(params.record, requestedModel, models.configId);
     return;
   }
 
-  await withTimeout(
-    params.client.setSessionModel(params.sessionId, requestedModel),
+  const response = await withTimeout(
+    params.client.setSessionModel(params.sessionId, requestedModel, models),
     params.timeoutMs,
   );
-  setDesiredModelId(params.record, requestedModel);
+  applyConfigOptionsToRecord(params.record, response);
+  setDesiredModelId(params.record, requestedModel, models.configId);
   setCurrentModelId(params.record, requestedModel);
 }
 
@@ -648,10 +712,38 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       await client.setSessionMode(activeSessionIdForControl, modeId);
     },
     setSessionModel: async (modelId: string) => {
-      await client.setSessionModel(activeSessionIdForControl, modelId);
+      const models = advertisedModelState(acpxState);
+      const response = await client.setSessionModel(activeSessionIdForControl, modelId, models);
+      acpxState = applyConfigOptionResponseToState(acpxState, response);
+      const nextState = cloneSessionAcpxState(acpxState) ?? {};
+      nextState.session_options = { ...nextState.session_options, model: modelId };
+      nextState.current_model_id = modelId;
+      clearDesiredConfigOption(nextState, models?.configId);
+      acpxState = nextState;
     },
     setSessionConfigOption: async (configId: string, value: string) => {
-      return await client.setSessionConfigOption(activeSessionIdForControl, configId, value);
+      const response = await client.setSessionConfigOption(
+        activeSessionIdForControl,
+        configId,
+        value,
+      );
+      acpxState = applyConfigOptionResponseToState(acpxState, response);
+      const nextState = cloneSessionAcpxState(acpxState) ?? {};
+      const modelConfigId = modelStateFromConfigOptions(nextState.config_options)?.configId;
+      if (configId === modelConfigId) {
+        nextState.session_options = { ...nextState.session_options, model: value };
+        nextState.current_model_id = value;
+        clearDesiredConfigOption(nextState, configId);
+      } else if (configId === "mode") {
+        nextState.desired_mode_id = value;
+      } else {
+        nextState.desired_config_options = {
+          ...nextState.desired_config_options,
+          [configId]: value,
+        };
+      }
+      acpxState = nextState;
+      return response;
     },
   };
 
@@ -690,6 +782,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
           },
         });
       });
+      acpxState = mergeConnectedModelState(acpxState, record.acpx);
       flushConnectOutput(connected.loadError);
       emitConnectPerfMetric(connectStartedAt, options.verbose);
       return connected;
@@ -813,6 +906,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
           record,
           timeoutMs: options.timeoutMs,
         });
+        acpxState = cloneSessionAcpxState(record.acpx);
 
         output.setContext({
           sessionId: record.acpxRecordId,

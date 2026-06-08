@@ -291,6 +291,18 @@ test("text remediation hints cover missing session and ACP runtime failures", ()
     }),
     ["hint: rerun with `--verbose` to capture the ACP method/error details before retrying."],
   );
+  assert.deepEqual(
+    getTextErrorRemediationHints({
+      code: "RUNTIME",
+      message: "Failed session/set_model for model legacy-model: Invalid params",
+      origin: "acp",
+      acp: {
+        code: -32602,
+        message: "Invalid params",
+      },
+    }),
+    ["hint: rerun with `--verbose` to capture the ACP method/error details before retrying."],
+  );
 });
 
 test("text formatter suppresses read output when requested", () => {

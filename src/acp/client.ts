@@ -30,7 +30,6 @@ import {
   type WriteTextFileRequest,
   type WriteTextFileResponse,
   type SessionConfigOption,
-  type SessionModelState,
 } from "@agentclientprotocol/sdk";
 import { resolveBuiltInAgentLaunch } from "../agent-registry.js";
 import { TimeoutError, withTimeout } from "../async-control.js";
@@ -97,6 +96,12 @@ import {
 import { extractAcpError } from "./error-shapes.js";
 import { isSessionUpdateNotification } from "./jsonrpc.js";
 import {
+  modelStateFromConfigOptions,
+  modelStateFromSessionResponse,
+  RequestedModelUnsupportedError,
+  type SessionModelState,
+} from "./model-support.js";
+import {
   formatSessionControlAcpSummary,
   maybeWrapSessionControlError,
 } from "./session-control-errors.js";
@@ -128,25 +133,45 @@ export type SessionCreateResult = {
   agentSessionId?: string;
   configOptions?: SessionConfigOption[];
   models?: SessionModelState;
+  configOptionsPresent: boolean;
+  legacyModelMetadataPresent: boolean;
 };
 
 export type SessionLoadResult = {
   agentSessionId?: string;
   configOptions?: SessionConfigOption[];
   models?: SessionModelState;
+  configOptionsPresent: boolean;
+  legacyModelMetadataPresent: boolean;
 };
 
 export type SessionResumeResult = SessionLoadResult;
 
 type ReconnectedSessionResponse = LoadSessionResponse | ResumeSessionResponse;
 
+function hasResponseField(response: unknown, field: string): boolean {
+  return !!response && typeof response === "object" && field in response;
+}
+
+function normalizeResponseConfigOptions(
+  response: { configOptions?: SessionConfigOption[] | null } | undefined,
+): SessionConfigOption[] | undefined {
+  if (!response || !("configOptions" in response)) {
+    return undefined;
+  }
+  return response.configOptions ?? [];
+}
+
 function toReconnectedSessionResult(
   response: ReconnectedSessionResponse | undefined,
 ): SessionLoadResult {
+  const configOptions = normalizeResponseConfigOptions(response);
   return {
     agentSessionId: extractRuntimeSessionId(response?._meta),
-    configOptions: response?.configOptions ?? undefined,
-    models: response?.models ?? undefined,
+    configOptions,
+    models: modelStateFromSessionResponse({ configOptions, response }),
+    configOptionsPresent: hasResponseField(response, "configOptions"),
+    legacyModelMetadataPresent: hasResponseField(response, "models"),
   };
 }
 
@@ -182,6 +207,9 @@ type SessionUpdateSuppressionState = {
   suppressSessionUpdates: boolean;
   suppressReplaySessionUpdateMessages: boolean;
 };
+
+type ModelControl = { kind: "config_option"; configId: string } | { kind: "legacy_set_model" };
+type ModelControlOverride = Pick<SessionModelState, "configId">;
 
 export type AgentExitInfo = {
   exitCode: number | null;
@@ -354,6 +382,8 @@ export class AcpClient {
   private lastKnownPid?: number;
   private readonly promptPermissionFailures = new Map<string, PermissionPromptUnavailableError>();
   private readonly pendingConnectionRequests = new Set<PendingConnectionRequest>();
+  private readonly modelConfigIds = new Map<string, string>();
+  private readonly legacyModelSessionIds = new Set<string>();
 
   constructor(options: AcpClientOptions) {
     this.options = {
@@ -833,12 +863,17 @@ export class AcpClient {
     }
 
     this.loadedSessionId = result.sessionId;
+    const configOptions = normalizeResponseConfigOptions(result);
+    const models = modelStateFromSessionResponse({ configOptions, response: result });
+    this.rememberSessionModels(result.sessionId, models);
 
     return {
       sessionId: result.sessionId,
       agentSessionId: extractRuntimeSessionId(result._meta),
-      configOptions: result.configOptions ?? undefined,
-      models: result.models ?? undefined,
+      configOptions,
+      models,
+      configOptionsPresent: hasResponseField(result, "configOptions"),
+      legacyModelMetadataPresent: hasResponseField(result, "models"),
     };
   }
 
@@ -878,8 +913,9 @@ export class AcpClient {
     }
 
     this.loadedSessionId = sessionId;
-
-    return toReconnectedSessionResult(response);
+    const result = toReconnectedSessionResult(response);
+    this.updateRememberedSessionModels(sessionId, result);
+    return result;
   }
 
   async resumeSession(sessionId: string, cwd = this.options.cwd): Promise<SessionResumeResult> {
@@ -894,8 +930,9 @@ export class AcpClient {
     );
 
     this.loadedSessionId = sessionId;
-
-    return toReconnectedSessionResult(response);
+    const result = toReconnectedSessionResult(response);
+    this.updateRememberedSessionModels(sessionId, result);
+    return result;
   }
 
   private applySessionUpdateSuppression(enabled: boolean): SessionUpdateSuppressionState {
@@ -1019,38 +1056,113 @@ export class AcpClient {
     }
   }
 
-  async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+  async setSessionModel(
+    sessionId: string,
+    modelId: string,
+    controlOverride?: ModelControlOverride,
+  ): Promise<SetSessionConfigOptionResponse | undefined> {
+    const control = this.resolveModelControl(sessionId, controlOverride);
+    if (!control) {
+      throw new RequestedModelUnsupportedError(
+        `Cannot set model "${modelId}": the ACP session did not advertise a model config option or legacy session/set_model support.`,
+      );
+    }
+    return control.kind === "config_option"
+      ? await this.setSessionModelThroughConfig(sessionId, modelId, control.configId)
+      : await this.setSessionModelThroughLegacyMethod(sessionId, modelId);
+  }
+
+  private async setSessionModelThroughConfig(
+    sessionId: string,
+    modelId: string,
+    configId: string,
+  ): Promise<SetSessionConfigOptionResponse> {
+    const connection = this.getConnection();
+    try {
+      const response = await this.runConnectionRequest(() =>
+        connection.setSessionConfigOption({
+          sessionId,
+          configId,
+          value: modelId,
+        }),
+      );
+      this.rememberSessionModels(sessionId, modelStateFromConfigOptions(response.configOptions));
+      return response;
+    } catch (error) {
+      return this.throwSessionModelError("session/set_config_option", modelId, error);
+    }
+  }
+
+  private async setSessionModelThroughLegacyMethod(
+    sessionId: string,
+    modelId: string,
+  ): Promise<undefined> {
     const connection = this.getConnection();
     try {
       await this.runConnectionRequest(() =>
-        connection.unstable_setSessionModel({
-          sessionId,
-          modelId,
-        }),
+        connection.extMethod("session/set_model", { sessionId, modelId }),
       );
+      return undefined;
     } catch (error) {
-      const wrapped = maybeWrapSessionControlError(
-        "session/set_model",
-        error,
-        `for model "${modelId}"`,
-      );
-      if (wrapped !== error) {
-        throw wrapped;
-      }
-      const acp = extractAcpError(error);
-      const summary = acp
-        ? formatSessionControlAcpSummary(acp)
-        : error instanceof Error
-          ? error.message
-          : String(error);
-      if (error instanceof Error) {
-        throw new Error(`Failed session/set_model for model "${modelId}": ${summary}`, {
-          cause: error,
-        });
-      }
-      throw new Error(`Failed session/set_model for model "${modelId}": ${summary}`, {
-        cause: error,
-      });
+      return this.throwSessionModelError("session/set_model", modelId, error);
+    }
+  }
+
+  private throwSessionModelError(
+    method: "session/set_model" | "session/set_config_option",
+    modelId: string,
+    error: unknown,
+  ): never {
+    const wrapped = maybeWrapSessionControlError(method, error, `for model "${modelId}"`);
+    if (wrapped !== error) {
+      throw wrapped;
+    }
+    const acp = extractAcpError(error);
+    const summary = acp
+      ? formatSessionControlAcpSummary(acp)
+      : error instanceof Error
+        ? error.message
+        : String(error);
+    throw new Error(`Failed ${method} for model "${modelId}": ${summary}`, {
+      cause: error,
+    });
+  }
+
+  private resolveModelControl(
+    sessionId: string,
+    controlOverride: ModelControlOverride | undefined,
+  ): ModelControl | undefined {
+    if (controlOverride) {
+      return controlOverride.configId
+        ? { kind: "config_option", configId: controlOverride.configId }
+        : { kind: "legacy_set_model" };
+    }
+    const configId = this.modelConfigIds.get(sessionId);
+    if (configId) {
+      return { kind: "config_option", configId };
+    }
+    return this.legacyModelSessionIds.has(sessionId) ? { kind: "legacy_set_model" } : undefined;
+  }
+
+  private rememberSessionModels(sessionId: string, models: SessionModelState | undefined): void {
+    if (!models) {
+      this.modelConfigIds.delete(sessionId);
+      this.legacyModelSessionIds.delete(sessionId);
+      return;
+    }
+    if (models.configId) {
+      this.modelConfigIds.set(sessionId, models.configId);
+      this.legacyModelSessionIds.delete(sessionId);
+      return;
+    }
+    this.modelConfigIds.delete(sessionId);
+    this.legacyModelSessionIds.add(sessionId);
+  }
+
+  private updateRememberedSessionModels(sessionId: string, result: SessionLoadResult): void {
+    const explicitConfigRemoval = result.configOptionsPresent && this.modelConfigIds.has(sessionId);
+    if (result.models || result.legacyModelMetadataPresent || explicitConfigRemoval) {
+      this.rememberSessionModels(sessionId, result.models);
     }
   }
 
@@ -1075,6 +1187,8 @@ export class AcpClient {
     if (this.loadedSessionId === sessionId) {
       this.loadedSessionId = undefined;
     }
+    this.modelConfigIds.delete(sessionId);
+    this.legacyModelSessionIds.delete(sessionId);
   }
 
   async listSessions(params: ListSessionsRequest = {}): Promise<ListSessionsResponse> {
@@ -1167,6 +1281,8 @@ export class AcpClient {
     this.permissionAbortControllers.clear();
     this.promptPermissionFailures.clear();
     this.loadedSessionId = undefined;
+    this.modelConfigIds.clear();
+    this.legacyModelSessionIds.clear();
     this.initResult = undefined;
     this.connection = undefined;
     this.agent = undefined;

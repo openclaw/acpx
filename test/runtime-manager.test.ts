@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SessionModelState, SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
+import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
+import type { SessionModelState } from "../src/acp/model-support.js";
 import { AcpxOperationalError } from "../src/errors.js";
 import { AcpRuntimeManager } from "../src/runtime/engine/manager.js";
 import { persistSessionOptions } from "../src/runtime/engine/session-options.js";
@@ -1335,6 +1336,72 @@ test("AcpRuntimeManager maps generic thinking config to refreshed advertised eff
   assert.deepEqual(stored?.acpx?.desired_config_options, { effort: "high" });
 });
 
+test("AcpRuntimeManager persists advertised model config as desired model", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "model-config-session",
+    acpSessionId: "model-config-backend-session",
+    agentCommand: "agent",
+    cwd: "/workspace",
+    acpx: {
+      desired_config_options: {
+        effort: "high",
+        llm: "stale-model",
+      },
+      config_options: [
+        {
+          id: "llm",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "default-model",
+          options: [{ value: "smart-model", name: "Smart Model" }],
+        },
+      ],
+    },
+  });
+  const store = new InMemorySessionStore([record]);
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {},
+          close: async () => {},
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => ({
+            configOptions: record.acpx?.config_options,
+          }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => ({
+            configOptions: [
+              {
+                id: "llm",
+                name: "Model",
+                category: "model",
+                type: "select",
+                currentValue: "smart-model",
+                options: [{ value: "smart-model", name: "Smart Model" }],
+              },
+            ],
+          }),
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  await manager.setConfigOption(createHandle("model-config-session"), "llm", "smart-model");
+
+  const stored = await store.load("model-config-session");
+  assert.equal(stored?.acpx?.session_options?.model, "smart-model");
+  assert.deepEqual(stored?.acpx?.desired_config_options, { effort: "high" });
+});
+
 test("AcpRuntimeManager maps active generic thinking config against live advertised effort key", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "active-thinking-alias-session",
@@ -2599,6 +2666,7 @@ test("AcpRuntimeManager getStatus surfaces models advertised by the agent", asyn
     {
       clientFactory: createModelsClientFactory({
         models: {
+          configId: "model",
           currentModelId: "opus",
           availableModels: [
             { modelId: "opus", name: "Opus" },
@@ -2647,6 +2715,7 @@ test("AcpRuntimeManager getStatus.models survives a save/reload cycle", async ()
   const store = new InMemorySessionStore();
   const factory = createModelsClientFactory({
     models: {
+      configId: "model",
       currentModelId: "opus",
       availableModels: [
         { modelId: "opus", name: "Opus" },
@@ -2744,6 +2813,7 @@ test("AcpRuntimeManager persists sessionOptions { append } and model/allowedTool
             sessionId: "new-sid",
             agentSessionId: "agent-sid",
             models: {
+              configId: "model",
               currentModelId: "default",
               availableModels: [
                 { modelId: "default", name: "Default" },

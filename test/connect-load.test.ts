@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import type { SessionModelState, SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
+import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
+import type { SessionModelState } from "../src/acp/model-support.js";
 import {
   connectAndLoadSession,
   type ConnectedSessionController,
@@ -31,19 +32,37 @@ type FakeClient = {
   resumeSession?: (
     sessionId: string,
     cwd: string,
-  ) => Promise<{ agentSessionId?: string; models?: SessionModelState }>;
+  ) => Promise<{
+    agentSessionId?: string;
+    configOptions?: SetSessionConfigOptionResponse["configOptions"];
+    models?: SessionModelState;
+    configOptionsPresent?: boolean;
+    legacyModelMetadataPresent?: boolean;
+  }>;
   loadSessionWithOptions: (
     sessionId: string,
     cwd: string,
     options: { suppressReplayUpdates: boolean },
-  ) => Promise<{ agentSessionId?: string; models?: SessionModelState }>;
+  ) => Promise<{
+    agentSessionId?: string;
+    configOptions?: SetSessionConfigOptionResponse["configOptions"];
+    models?: SessionModelState;
+    configOptionsPresent?: boolean;
+    legacyModelMetadataPresent?: boolean;
+  }>;
   createSession: (cwd: string) => Promise<{
     sessionId: string;
     agentSessionId?: string;
+    configOptions?: SetSessionConfigOptionResponse["configOptions"];
     models?: SessionModelState;
+    configOptionsPresent?: boolean;
+    legacyModelMetadataPresent?: boolean;
   }>;
   setSessionMode: (sessionId: string, modeId: string) => Promise<void>;
-  setSessionModel: (sessionId: string, modelId: string) => Promise<void>;
+  setSessionModel: (
+    sessionId: string,
+    modelId: string,
+  ) => Promise<void | SetSessionConfigOptionResponse>;
   setSessionConfigOption?: (
     sessionId: string,
     configId: string,
@@ -66,6 +85,7 @@ const ACTIVE_CONTROLLER: ConnectedSessionController & {
 
 function buildModelsState(currentModelId: string): SessionModelState {
   return {
+    configId: "model",
     currentModelId,
     availableModels: [
       { modelId: "default-model", name: "default-model" },
@@ -200,6 +220,132 @@ test("connectAndLoadSession resumes an existing load-capable session", async () 
   });
 });
 
+test("connectAndLoadSession retains legacy model state when load omits model metadata", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "legacy-model-record",
+      acpSessionId: "legacy-model-session",
+      agentCommand: "agent",
+      cwd,
+      acpx: {
+        current_model_id: "legacy-model",
+        available_models: ["legacy-model"],
+        model_control: "legacy_set_model",
+        config_options: [],
+      },
+    });
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({ running: true }),
+      supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
+      loadSessionWithOptions: async () => ({
+        configOptions: [
+          {
+            id: "reasoning_effort",
+            name: "Reasoning Effort",
+            type: "select",
+            currentValue: "medium",
+            options: [{ value: "medium", name: "Medium" }],
+          },
+        ],
+        configOptionsPresent: true,
+        legacyModelMetadataPresent: false,
+      }),
+      createSession: async () => {
+        throw new Error("createSession should not be called");
+      },
+      setSessionMode: async () => {},
+      setSessionModel: async () => {},
+    };
+
+    await connectAndLoadSession({
+      client: client as never,
+      record,
+      timeoutMs: 1_000,
+      activeController: ACTIVE_CONTROLLER,
+    });
+
+    assert.equal(record.acpx?.current_model_id, "legacy-model");
+    assert.deepEqual(record.acpx?.available_models, ["legacy-model"]);
+    assert.equal(record.acpx?.model_control, "legacy_set_model");
+  });
+});
+
+test("connectAndLoadSession lets explicit legacy metadata replace stale model config", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "legacy-replacement-record",
+      acpSessionId: "legacy-replacement-session",
+      agentCommand: "agent",
+      cwd,
+      acpx: {
+        current_model_id: "config-model",
+        available_models: ["config-model"],
+        model_control: "config_option",
+        config_options: [
+          {
+            id: "llm",
+            name: "Model",
+            category: "model",
+            type: "select",
+            currentValue: "config-model",
+            options: [{ value: "config-model", name: "Config Model" }],
+          },
+          {
+            id: "reasoning_effort",
+            name: "Reasoning Effort",
+            type: "select",
+            currentValue: "medium",
+            options: [{ value: "medium", name: "Medium" }],
+          },
+        ],
+      },
+    });
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({ running: true }),
+      supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
+      loadSessionWithOptions: async () => ({
+        models: {
+          currentModelId: "legacy-model",
+          availableModels: [{ modelId: "legacy-model", name: "Legacy Model" }],
+        },
+        configOptionsPresent: false,
+        legacyModelMetadataPresent: true,
+      }),
+      createSession: async () => {
+        throw new Error("createSession should not be called");
+      },
+      setSessionMode: async () => {},
+      setSessionModel: async () => {},
+    };
+
+    await connectAndLoadSession({
+      client: client as never,
+      record,
+      timeoutMs: 1_000,
+      activeController: ACTIVE_CONTROLLER,
+    });
+
+    assert.equal(record.acpx?.current_model_id, "legacy-model");
+    assert.equal(record.acpx?.model_control, "legacy_set_model");
+    assert.deepEqual(
+      record.acpx?.config_options?.map((option) => option.id),
+      ["reasoning_effort"],
+    );
+  });
+});
+
 test("connectAndLoadSession falls back to createSession when load returns resource-not-found", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
@@ -210,6 +356,21 @@ test("connectAndLoadSession falls back to createSession when load returns resour
       acpSessionId: "old-session",
       agentCommand: "agent",
       cwd,
+      acpx: {
+        current_model_id: "old-model",
+        available_models: ["old-model"],
+        model_control: "config_option",
+        config_options: [
+          {
+            id: "old-model-selector",
+            name: "Old Model",
+            category: "model",
+            type: "select",
+            currentValue: "old-model",
+            options: [{ value: "old-model", name: "Old Model" }],
+          },
+        ],
+      },
     });
 
     const client: FakeClient = {
@@ -233,6 +394,8 @@ test("connectAndLoadSession falls back to createSession when load returns resour
         return {
           sessionId: "new-session",
           agentSessionId: "new-runtime",
+          configOptionsPresent: false,
+          legacyModelMetadataPresent: false,
         };
       },
       setSessionMode: async () => {},
@@ -252,6 +415,9 @@ test("connectAndLoadSession falls back to createSession when load returns resour
     assert.match(result.loadError ?? "", /session not found/);
     assert.equal(record.acpSessionId, "new-session");
     assert.equal(record.agentSessionId, "new-runtime");
+    assert.equal(record.acpx?.config_options, undefined);
+    assert.equal(record.acpx?.current_model_id, undefined);
+    assert.equal(record.acpx?.model_control, undefined);
   });
 });
 
@@ -644,6 +810,9 @@ test("connectAndLoadSession fails when desired mode replay cannot be restored on
       cwd,
       acpx: {
         desired_mode_id: "plan",
+        current_model_id: "old-model",
+        available_models: ["old-model"],
+        model_control: "legacy_set_model",
       },
     });
 
@@ -666,6 +835,23 @@ test("connectAndLoadSession fails when desired mode replay cannot be restored on
       createSession: async () => ({
         sessionId: "fresh-session",
         agentSessionId: "fresh-runtime",
+        configOptions: [
+          {
+            id: "model",
+            name: "Model",
+            category: "model",
+            type: "select",
+            currentValue: "fresh-model",
+            options: [{ value: "fresh-model", name: "Fresh Model" }],
+          },
+        ],
+        configOptionsPresent: true,
+        legacyModelMetadataPresent: false,
+        models: {
+          configId: "model",
+          currentModelId: "fresh-model",
+          availableModels: [{ modelId: "fresh-model", name: "Fresh Model" }],
+        },
       }),
       setSessionMode: async (sessionId, modeId) => {
         assert.equal(sessionId, "fresh-session");
@@ -692,6 +878,9 @@ test("connectAndLoadSession fails when desired mode replay cannot be restored on
     );
     assert.equal(record.acpSessionId, "stale-session");
     assert.equal(record.agentSessionId, "stale-runtime");
+    assert.equal(record.acpx?.current_model_id, "old-model");
+    assert.deepEqual(record.acpx?.available_models, ["old-model"]);
+    assert.equal(record.acpx?.model_control, "legacy_set_model");
   });
 });
 
@@ -739,6 +928,18 @@ test("connectAndLoadSession replays desired model on a fresh session", async () 
         setModelCalls += 1;
         assert.equal(sessionId, "fresh-session");
         assert.equal(modelId, "gpt-5.4");
+        return {
+          configOptions: [
+            {
+              id: "model",
+              name: "Model",
+              category: "model",
+              type: "select",
+              currentValue: "gpt-5.4",
+              options: [{ value: "gpt-5.4", name: "gpt-5.4" }],
+            },
+          ],
+        };
       },
     };
 
@@ -753,7 +954,7 @@ test("connectAndLoadSession replays desired model on a fresh session", async () 
     assert.equal(setModelCalls, 1);
     assert.equal(record.acpSessionId, "fresh-session");
     assert.equal(record.acpx?.current_model_id, "gpt-5.4");
-    assert.deepEqual(record.acpx?.available_models, ["default-model", "gpt-5.4"]);
+    assert.deepEqual(record.acpx?.available_models, ["gpt-5.4"]);
   });
 });
 
@@ -925,7 +1126,25 @@ test("connectAndLoadSession replays desired config options on a fresh session", 
       setSessionModel: async () => {},
       setSessionConfigOption: async (sessionId, configId, value) => {
         configCalls.push({ sessionId, configId, value });
-        return { configOptions: [] };
+        return {
+          configOptions: [
+            {
+              id: "llm",
+              name: "Model",
+              category: "model",
+              type: "select",
+              currentValue: "replayed-model",
+              options: [{ value: "replayed-model", name: "Replayed Model" }],
+            },
+            {
+              id: "reasoning_effort",
+              name: "Reasoning Effort",
+              type: "select",
+              currentValue: "high",
+              options: [{ value: "high", name: "High" }],
+            },
+          ],
+        };
       },
     };
 
@@ -944,6 +1163,86 @@ test("connectAndLoadSession replays desired config options on a fresh session", 
         value: "high",
       },
     ]);
+    assert.equal(record.acpx?.current_model_id, "replayed-model");
+    assert.equal(record.acpx?.model_control, "config_option");
+    assert.deepEqual(
+      record.acpx?.config_options?.map((option) => option.id),
+      ["llm", "reasoning_effort"],
+    );
+  });
+});
+
+test("connectAndLoadSession preserves legacy models after config option replay", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "legacy-model-config-replay-record",
+      acpSessionId: "stale-session",
+      agentCommand: "agent",
+      cwd,
+      acpx: {
+        current_model_id: "legacy-model",
+        available_models: ["legacy-model"],
+        model_control: "legacy_set_model",
+        desired_config_options: {
+          reasoning_effort: "high",
+        },
+      },
+    });
+
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({ running: true }),
+      supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
+      loadSessionWithOptions: async () => {
+        throw {
+          error: {
+            code: -32002,
+            message: "session not found",
+          },
+        };
+      },
+      createSession: async () => ({
+        sessionId: "fresh-session",
+        models: {
+          currentModelId: "legacy-model",
+          availableModels: [{ modelId: "legacy-model", name: "Legacy Model" }],
+        },
+        configOptionsPresent: false,
+        legacyModelMetadataPresent: true,
+      }),
+      setSessionMode: async () => {},
+      setSessionModel: async () => {},
+      setSessionConfigOption: async () => ({
+        configOptions: [
+          {
+            id: "reasoning_effort",
+            name: "Reasoning Effort",
+            type: "select",
+            currentValue: "high",
+            options: [{ value: "high", name: "High" }],
+          },
+        ],
+      }),
+    };
+
+    await connectAndLoadSession({
+      client: client as never,
+      record,
+      activeController: ACTIVE_CONTROLLER,
+    });
+
+    assert.equal(record.acpx?.current_model_id, "legacy-model");
+    assert.deepEqual(record.acpx?.available_models, ["legacy-model"]);
+    assert.equal(record.acpx?.model_control, "legacy_set_model");
+    assert.deepEqual(
+      record.acpx?.config_options?.map((option) => option.id),
+      ["reasoning_effort"],
+    );
   });
 });
 

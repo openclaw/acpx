@@ -52,7 +52,7 @@ Calls ACP `session/set_config_option` with the literal `<key>` and `<value>`. No
 
 ### `set model <id>`
 
-`set model <id>` is a special-case interception. Some adapters expose model switching via ACP `session/set_model` rather than `session/set_config_option`. `acpx` always sends `session/set_model` for the `model` key so it works on every adapter that supports either method.
+`set model <id>` is a special-case interception. `acpx` prefers an advertised model session config option and updates it through `session/set_config_option`. If an adapter explicitly advertises legacy `models` metadata instead, `acpx` preserves compatibility through `session/set_model`.
 
 ```bash
 acpx codex set model 'gpt-5.2[high]'

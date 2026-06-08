@@ -1,5 +1,6 @@
 import { AcpClient, type SessionCreateResult } from "../../acp/client.js";
 import { formatErrorMessage } from "../../acp/error-normalization.js";
+import { modelStateFromConfigOptions } from "../../acp/model-support.js";
 import { withInterrupt, withTimeout } from "../../async-control.js";
 import { applyLifecycleSnapshotToRecord } from "../../runtime/engine/lifecycle.js";
 import { persistSessionOptions } from "../../runtime/engine/session-options.js";
@@ -28,40 +29,25 @@ import type {
 } from "./contracts.js";
 import { setSessionModel } from "./session-control.js";
 
+type CreatedSessionState = {
+  sessionId: string;
+  agentSessionId: string | undefined;
+  sessionResult: Awaited<ReturnType<AcpClient["createSession" | "loadSession"]>>;
+  sessionModels: SessionCreateResult["models"];
+  requestedModelApplied: boolean;
+  requestedModelResponse?: Awaited<ReturnType<AcpClient["setSessionModel"]>>;
+};
+
 async function createSessionRecordWithClient(
   client: AcpClient,
   options: SessionCreateOptions,
 ): Promise<SessionRecord> {
   const cwd = absolutePath(options.cwd);
   await withTimeout(client.start(), options.timeoutMs);
-  let sessionId: string;
-  let agentSessionId: string | undefined;
-  let sessionResult: Awaited<ReturnType<AcpClient["createSession" | "loadSession"]>>;
-  let sessionModels: SessionCreateResult["models"];
-  let requestedModelApplied = false;
-
-  if (options.resumeSessionId) {
-    const resumed = await resumeSessionRecordWithClient(client, options, cwd);
-    sessionId = resumed.sessionId;
-    agentSessionId = resumed.agentSessionId;
-    sessionResult = resumed.sessionResult;
-    sessionModels = resumed.sessionModels;
-    requestedModelApplied = resumed.requestedModelApplied;
-  } else {
-    const createdSession = await withTimeout(client.createSession(cwd), options.timeoutMs);
-    sessionId = createdSession.sessionId;
-    agentSessionId = normalizeRuntimeSessionId(createdSession.agentSessionId);
-    sessionResult = createdSession;
-    sessionModels = createdSession.models;
-    requestedModelApplied = await applyRequestedModelIfAdvertised({
-      client,
-      sessionId,
-      requestedModel: options.sessionOptions?.model,
-      models: sessionModels,
-      agentCommand: options.agentCommand,
-      timeoutMs: options.timeoutMs,
-    });
-  }
+  const createdState = options.resumeSessionId
+    ? await resumeSessionRecordWithClient(client, options, cwd)
+    : await createFreshSessionState(client, options, cwd);
+  const { sessionId, agentSessionId } = createdState;
 
   const lifecycle = client.getAgentLifecycleSnapshot();
   const now = isoNow();
@@ -89,23 +75,53 @@ async function createSessionRecordWithClient(
   };
 
   persistSessionOptions(record, options.sessionOptions);
-  applyConfigOptionsToRecord(record, sessionResult);
-  syncAdvertisedModelState(record, sessionModels);
-  if (requestedModelApplied) {
-    setCurrentModelId(record, options.sessionOptions?.model);
-  }
+  applyCreatedSessionModelState(record, createdState, options.sessionOptions?.model);
 
   await writeSessionRecord(record);
   return record;
 }
 
-type CreatedSessionState = {
-  sessionId: string;
-  agentSessionId: string | undefined;
-  sessionResult: Awaited<ReturnType<AcpClient["createSession" | "loadSession"]>>;
-  sessionModels: SessionCreateResult["models"];
-  requestedModelApplied: boolean;
-};
+function applyCreatedSessionModelState(
+  record: SessionRecord,
+  state: CreatedSessionState,
+  requestedModel: string | undefined,
+): void {
+  applyConfigOptionsToRecord(record, state.sessionResult);
+  applyConfigOptionsToRecord(record, state.requestedModelResponse);
+  syncAdvertisedModelState(
+    record,
+    state.requestedModelResponse
+      ? modelStateFromConfigOptions(state.requestedModelResponse.configOptions)
+      : state.sessionModels,
+  );
+  if (state.requestedModelApplied) {
+    setCurrentModelId(record, requestedModel);
+  }
+}
+
+async function createFreshSessionState(
+  client: AcpClient,
+  options: SessionCreateOptions,
+  cwd: string,
+): Promise<CreatedSessionState> {
+  const createdSession = await withTimeout(client.createSession(cwd), options.timeoutMs);
+  const modelApplication = await applyRequestedModelIfAdvertised({
+    client,
+    sessionId: createdSession.sessionId,
+    requestedModel: options.sessionOptions?.model,
+    models: createdSession.models,
+    agentCommand: options.agentCommand,
+    timeoutMs: options.timeoutMs,
+  });
+  return {
+    sessionId: createdSession.sessionId,
+    agentSessionId: normalizeRuntimeSessionId(createdSession.agentSessionId),
+    sessionResult: createdSession,
+    sessionModels: createdSession.models,
+    requestedModelApplied: modelApplication.applied,
+    requestedModelResponse: modelApplication.response,
+  };
+}
 
 async function resumeSessionRecordWithClient(
   client: AcpClient,
@@ -134,19 +150,21 @@ async function resumeSessionRecordWithClient(
       options.timeoutMs,
     );
     const sessionModels = resumedSession.models;
+    const modelApplication = await applyRequestedModelIfAdvertised({
+      client,
+      sessionId: options.resumeSessionId,
+      requestedModel: options.sessionOptions?.model,
+      models: sessionModels,
+      agentCommand: options.agentCommand,
+      timeoutMs: options.timeoutMs,
+    });
     return {
       sessionId: options.resumeSessionId,
       agentSessionId: normalizeRuntimeSessionId(resumedSession.agentSessionId),
       sessionResult: resumedSession,
       sessionModels,
-      requestedModelApplied: await applyRequestedModelIfAdvertised({
-        client,
-        sessionId: options.resumeSessionId,
-        requestedModel: options.sessionOptions?.model,
-        models: sessionModels,
-        agentCommand: options.agentCommand,
-        timeoutMs: options.timeoutMs,
-      }),
+      requestedModelApplied: modelApplication.applied,
+      requestedModelResponse: modelApplication.response,
     };
   } catch (error) {
     throw new Error(

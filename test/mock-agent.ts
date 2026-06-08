@@ -28,12 +28,9 @@ import {
   type SessionId,
   type SetSessionConfigOptionRequest,
   type SetSessionConfigOptionResponse,
-  type SetSessionModelRequest,
-  type SetSessionModelResponse,
   type SetSessionModeRequest,
   type SetSessionModeResponse,
   type SessionInfo,
-  type SessionModelState,
 } from "@agentclientprotocol/sdk";
 
 type ParsedCommand = {
@@ -62,6 +59,9 @@ type MockAgentOptions = {
   setSessionModelInvalidParams: boolean;
   advertiseConfigOptions: boolean;
   advertiseModels: boolean;
+  advertiseLegacyModels: boolean;
+  modelConfigId: string;
+  omitReconnectConfigOptions: boolean;
   replayLoadSessionUpdates: boolean;
   loadReplayText: string;
   ignoreSigterm: boolean;
@@ -364,6 +364,9 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let setSessionModelInvalidParams = false;
   let advertiseConfigOptions = false;
   let advertiseModels = false;
+  let advertiseLegacyModels = false;
+  let modelConfigId = "model";
+  let omitReconnectConfigOptions = false;
   let replayLoadSessionUpdates = false;
   let loadReplayText = "replayed load session update";
   let ignoreSigterm = false;
@@ -429,6 +432,23 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
 
     if (token === "--advertise-models") {
       advertiseModels = true;
+      continue;
+    }
+
+    if (token === "--advertise-legacy-models") {
+      advertiseLegacyModels = true;
+      continue;
+    }
+
+    if (token === "--model-config-id") {
+      modelConfigId = argv[index + 1] ?? "model";
+      advertiseModels = true;
+      index += 1;
+      continue;
+    }
+
+    if (token === "--omit-reconnect-config-options") {
+      omitReconnectConfigOptions = true;
       continue;
     }
 
@@ -534,6 +554,9 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     setSessionModelInvalidParams,
     advertiseConfigOptions,
     advertiseModels,
+    advertiseLegacyModels,
+    modelConfigId,
+    omitReconnectConfigOptions,
     replayLoadSessionUpdates,
     loadReplayText,
     ignoreSigterm,
@@ -541,13 +564,24 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
 }
 
 const DEFAULT_MODEL_ID = "default-model";
-const AVAILABLE_MODELS = ["default-model", "fast-model", "smart-model"];
 
-function buildModelsState(currentModelId: string): SessionModelState {
-  return {
-    currentModelId,
-    availableModels: AVAILABLE_MODELS.map((id) => ({ modelId: id, name: id })),
-  };
+function attachLegacyModels<T extends object>(
+  response: T,
+  session: SessionState,
+  enabled: boolean,
+): T {
+  if (!enabled) {
+    return response;
+  }
+  return Object.assign(response, {
+    models: {
+      currentModelId: session.modelId,
+      availableModels: [
+        { modelId: DEFAULT_MODEL_ID, name: "Default Model" },
+        { modelId: "alternate-model", name: "Alternate Model" },
+      ],
+    },
+  });
 }
 
 function createSessionState(hasCompletedPrompt = false): SessionState {
@@ -608,7 +642,10 @@ function parseListCursor(cursor: string | null | undefined): number {
   return parsed;
 }
 
-function buildConfigOptions(state: SessionState): SetSessionConfigOptionResponse["configOptions"] {
+function buildConfigOptions(
+  state: SessionState,
+  modelConfigId: string,
+): SetSessionConfigOptionResponse["configOptions"] {
   const reasoningEffort =
     typeof state.configValues.reasoning_effort === "string"
       ? state.configValues.reasoning_effort
@@ -630,13 +667,15 @@ function buildConfigOptions(state: SessionState): SetSessionConfigOptionResponse
       ],
     },
     {
-      id: "model",
+      id: modelConfigId,
       name: "Model",
       category: "model",
       type: "select",
       currentValue: state.modelId,
       options: [
-        { value: "default", name: "Default" },
+        { value: DEFAULT_MODEL_ID, name: DEFAULT_MODEL_ID },
+        { value: "fast-model", name: "fast-model" },
+        { value: "smart-model", name: "smart-model" },
         { value: "gpt-5.4", name: "gpt-5.4" },
         { value: "gpt-5.2", name: "gpt-5.2" },
       ],
@@ -706,16 +745,18 @@ class MockAgent implements Agent {
       response._meta = { ...this.options.newSessionMeta };
     }
 
-    if (this.options.advertiseModels) {
-      response.models = buildModelsState(DEFAULT_MODEL_ID);
-    }
-    if (this.options.advertiseConfigOptions) {
+    if (this.options.advertiseModels || this.options.advertiseConfigOptions) {
       response.configOptions = buildConfigOptions(
         this.sessions.get(sessionId) ?? createSessionState(false),
+        this.options.modelConfigId,
       );
     }
 
-    return response;
+    return attachLegacyModels(
+      response,
+      this.ensureSession(sessionId),
+      this.options.advertiseLegacyModels,
+    );
   }
 
   async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
@@ -776,17 +817,21 @@ class MockAgent implements Agent {
       response._meta = { ...responseMeta };
     }
 
-    if (this.options.advertiseModels) {
-      const session = this.sessions.get(sessionId);
-      response.models = buildModelsState(session?.modelId ?? DEFAULT_MODEL_ID);
-    }
-    if (this.options.advertiseConfigOptions) {
+    if (
+      !this.options.omitReconnectConfigOptions &&
+      (this.options.advertiseModels || this.options.advertiseConfigOptions)
+    ) {
       response.configOptions = buildConfigOptions(
         this.sessions.get(sessionId) ?? createSessionState(false),
+        this.options.modelConfigId,
       );
     }
 
-    return response;
+    return attachLegacyModels(
+      response,
+      this.ensureSession(sessionId),
+      this.options.advertiseLegacyModels,
+    );
   }
 
   async closeSession(params: CloseSessionRequest): Promise<CloseSessionResponse> {
@@ -926,35 +971,14 @@ class MockAgent implements Agent {
     return {};
   }
 
-  async unstable_setSessionModel(params: SetSessionModelRequest): Promise<SetSessionModelResponse> {
-    const session = this.ensureSession(params.sessionId);
-    if (this.options.setSessionModelInvalidParams) {
-      const error = new Error("Invalid params") as Error & {
-        code: number;
-        data: {
-          method: string;
-          modelId: string;
-        };
-      };
-      error.code = -32602;
-      error.data = {
-        method: "session/set_model",
-        modelId: params.modelId,
-      };
-      throw error;
-    }
-    if (this.options.setSessionModelFails) {
-      throw new Error("setSessionModel failed");
-    }
-    session.modelId = params.modelId;
-    return {};
-  }
-
   async setSessionConfigOption(
     params: SetSessionConfigOptionRequest,
   ): Promise<SetSessionConfigOptionResponse> {
     const session = this.ensureSession(params.sessionId);
-    if (this.options.setSessionConfigInvalidParams) {
+    if (
+      this.options.setSessionConfigInvalidParams ||
+      (params.configId === this.options.modelConfigId && this.options.setSessionModelInvalidParams)
+    ) {
       const error = new Error("Invalid params") as Error & {
         code: number;
         data: {
@@ -973,13 +997,40 @@ class MockAgent implements Agent {
     }
     if (params.configId === "mode" && typeof params.value === "string") {
       session.modeId = params.value;
+    } else if (params.configId === this.options.modelConfigId && typeof params.value === "string") {
+      if (this.options.setSessionModelFails) {
+        throw new Error("setSessionModel failed");
+      }
+      session.modelId = params.value;
     } else {
       session.configValues[params.configId] = params.value;
     }
 
     return {
-      configOptions: buildConfigOptions(session),
+      configOptions: buildConfigOptions(session, this.options.modelConfigId),
     };
+  }
+
+  async extMethod(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (method !== "session/set_model") {
+      throw RequestError.methodNotFound(method);
+    }
+    const sessionId = typeof params.sessionId === "string" ? params.sessionId : "";
+    const modelId = typeof params.modelId === "string" ? params.modelId : "";
+    if (!sessionId || !modelId) {
+      throw RequestError.invalidParams({ method, params });
+    }
+    if (this.options.setSessionModelInvalidParams) {
+      throw RequestError.invalidParams({ method, params });
+    }
+    if (this.options.setSessionModelFails) {
+      throw new Error("setSessionModel failed");
+    }
+    this.ensureSession(sessionId).modelId = modelId;
+    return {};
   }
 
   private async sendAssistantMessage(sessionId: SessionId, text: string): Promise<void> {

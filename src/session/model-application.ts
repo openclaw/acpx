@@ -1,3 +1,4 @@
+import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import type { AcpClient, SessionCreateResult } from "../acp/client.js";
 import { assertRequestedModelSupported } from "../acp/model-support.js";
 import { withTimeout } from "../async-control.js";
@@ -9,11 +10,14 @@ export async function applyRequestedModelIfAdvertised(params: {
   models: SessionCreateResult["models"];
   agentCommand?: string;
   timeoutMs?: number;
-}): Promise<boolean> {
+}): Promise<{
+  applied: boolean;
+  response?: SetSessionConfigOptionResponse;
+}> {
   const requestedModel =
     typeof params.requestedModel === "string" ? params.requestedModel.trim() : "";
   if (!requestedModel) {
-    return false;
+    return { applied: false };
   }
   assertRequestedModelSupported({
     requestedModel,
@@ -22,15 +26,15 @@ export async function applyRequestedModelIfAdvertised(params: {
     context: "apply",
   });
   if (!params.models) {
-    return false;
+    return { applied: false };
   }
   if (params.models.currentModelId === requestedModel) {
-    return true;
+    return { applied: true };
   }
 
-  await withTimeout(
-    params.client.setSessionModel(params.sessionId, requestedModel),
+  const response = await withTimeout(
+    params.client.setSessionModel(params.sessionId, requestedModel, params.models),
     params.timeoutMs,
   );
-  return true;
+  return { applied: true, response };
 }

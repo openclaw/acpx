@@ -24,6 +24,7 @@ import type {
   SessionToolUse,
   SessionUserContent,
 } from "../types.js";
+import { applyConfigOptionsModelState } from "./model-state.js";
 
 export type LegacyHistoryEntry = {
   role: "user" | "assistant";
@@ -561,6 +562,7 @@ export function cloneSessionAcpxState(
       : undefined,
     current_model_id: state.current_model_id,
     available_models: state.available_models ? [...state.available_models] : undefined,
+    model_control: state.model_control,
     available_commands: state.available_commands
       ? state.available_commands.map((command) => ({ ...command }))
       : undefined,
@@ -760,7 +762,8 @@ const SESSION_UPDATE_HANDLERS: Record<string, SessionUpdateHandler> = {
   },
   config_option_update: (_conversation, acpx, update) => {
     if (update.sessionUpdate === "config_option_update") {
-      acpx.config_options = deepClone(update.configOptions);
+      const configOptions = deepClone(update.configOptions);
+      applyConfigOptionsModelState(acpx, configOptions);
     }
   },
 };

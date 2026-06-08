@@ -74,7 +74,7 @@ A custom agent must:
 
 - Speak ACP over stdio (or whatever transport the adapter supports — most are stdio).
 - Implement the standard ACP methods (`initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/resume` or `session/load`, `session/close`).
-- Advertise `agentCapabilities` and `availableModels` honestly. `--model <id>` requires `availableModels` to include the requested id, and `set model <id>` calls `session/set_model`.
+- Advertise `agentCapabilities` and model controls honestly. Prefer a categorized model config option for ACP 0.25; existing adapters may continue to return legacy `models` metadata and implement `session/set_model`.
 
 `fs/*` and `terminal/*` client methods are stable on the `acpx` side and respect cwd sandboxing — your adapter can request file reads, writes, and terminal calls and they will be routed through `acpx`'s permission policy.
 

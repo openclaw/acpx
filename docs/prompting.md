@@ -121,8 +121,8 @@ acpx --model gpt-5.4 codex exec 'one-shot summary'
 Behavior varies by adapter:
 
 - **Claude** consumes the value as session-creation metadata.
-- Other agents must advertise ACP models and support `session/set_model`. If they do not, `acpx` fails clearly instead of silently falling back to the adapter's default.
-- Model ids must appear in the adapter's advertised `availableModels`. Unknown ids are rejected.
+- Other agents must advertise a model session config option or legacy `models` metadata. Config options use `session/set_config_option`; explicitly advertised legacy models use `session/set_model`.
+- Model ids must appear in the adapter's advertised values. Unknown ids are rejected.
 
 For mid-session model switches, use `set model <id>` instead. See [Session control](session-control.md#set-key-value).
 

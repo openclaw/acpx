@@ -21,6 +21,7 @@ What acpx implements from the ACP spec today and what is not yet implemented.
 | `session/request_permission` | `--approve-all`, `--approve-reads`, `--deny-all` | yes       |
 | `session/set_mode`           | `acpx <agent> set-mode <mode>`                   | yes       |
 | `session/set_config_option`  | `acpx <agent> set <key> <value>`                 | yes       |
+| `session/set_model`          | Legacy advertised model fallback                 | yes       |
 | `fs/read_text_file`          | ACP client file read handler                     | yes       |
 | `fs/write_text_file`         | ACP client file write handler                    | yes       |
 | `terminal/create`            | ACP client terminal spawn handler                | yes       |
@@ -37,6 +38,7 @@ What acpx implements from the ACP spec today and what is not yet implemented.
 - `acpx <agent> cancel` sends `session/cancel` through the queue path and keeps the session alive for follow-up prompts.
 - This is intentionally different from process-level SIGINT behavior, which can tear down the running process.
 - `session/set_mode` and `session/set_config_option` are exposed as `set-mode` and `set` commands and return agent-side validation errors when invalid.
+- Model config options are preferred; `session/set_model` remains available only when an adapter explicitly advertises legacy `models` metadata.
 
 #### Filesystem client methods
 
@@ -56,20 +58,18 @@ What acpx implements from the ACP spec today and what is not yet implemented.
 
 ## Not Yet Supported
 
-| ACP Method          | What it does                        | Spec status |
-| ------------------- | ----------------------------------- | ----------- |
-| `session/fork`      | Branch a session into two           | unstable    |
-| `session/list`      | List sessions server-side           | unstable    |
-| `session/resume`    | Resume a paused session             | unstable    |
-| `session/set_model` | Change model mid-session            | unstable    |
-| `$/cancel_request`  | Cancel any pending JSON-RPC request | unstable    |
+| ACP Method         | What it does                        | Spec status |
+| ------------------ | ----------------------------------- | ----------- |
+| `session/fork`     | Branch a session into two           | unstable    |
+| `session/list`     | List sessions server-side           | unstable    |
+| `session/resume`   | Resume a paused session             | unstable    |
+| `$/cancel_request` | Cancel any pending JSON-RPC request | unstable    |
 
 ### Not Yet Supported Notes
 
 - `session/fork`: would allow branching one conversation into parallel alternatives.
 - `session/list`: would expose adapter-side session inventory in addition to acpx local store listing.
 - `session/resume`: distinct from `session/load`; expected to support resume semantics without replay-like behavior.
-- `session/set_model`: mid-session model switching command surface.
 - `$/cancel_request`: transport-level JSON-RPC cancellation beyond session-scoped cancel.
 
 ## ACP-Adjacent Features Not Yet Supported

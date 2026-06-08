@@ -3,9 +3,13 @@ import path from "node:path";
 import { AcpClient } from "../../acp/client.js";
 import { normalizeOutputError } from "../../acp/error-normalization.js";
 import { extractAcpError, isAcpResourceNotFoundError } from "../../acp/error-shapes.js";
+import { modelStateFromConfigOptions } from "../../acp/model-support.js";
 import { withTimeout } from "../../async-control.js";
 import { textPrompt, type PromptInput } from "../../prompt-content.js";
-import { applyConfigOptionsToRecord } from "../../session/config-options.js";
+import {
+  applyConfigOptionsToRecord,
+  applyConfigOptionsToState,
+} from "../../session/config-options.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,
@@ -18,12 +22,15 @@ import {
 import { defaultSessionEventLog } from "../../session/event-log.js";
 import { LiveSessionCheckpoint } from "../../session/live-checkpoint.js";
 import {
+  clearDesiredConfigOption,
   setCurrentModelId,
   setDesiredConfigOption,
+  setDesiredModelId,
   setDesiredModeId,
   syncAdvertisedModelState,
 } from "../../session/mode-preference.js";
 import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
+import { advertisedModelState } from "../../session/model-state.js";
 import type {
   ClientOperation,
   SessionRecord,
@@ -463,6 +470,54 @@ type RunningRuntimeTurn = {
   activeSessionId: string;
 };
 
+function applyConfigOptionResponseToTurn(
+  turn: RunningRuntimeTurn,
+  response:
+    | Awaited<ReturnType<AcpClient["setSessionConfigOption"]>>
+    | Awaited<ReturnType<AcpClient["setSessionModel"]>>,
+): void {
+  if (!response?.configOptions) {
+    return;
+  }
+  turn.acpxState = applyConfigOptionsToState(turn.acpxState, response.configOptions);
+}
+
+function applyDesiredConfigOptionToTurn(
+  turn: RunningRuntimeTurn,
+  configId: string,
+  value: string,
+): void {
+  const nextState = cloneSessionAcpxState(turn.acpxState) ?? {};
+  const modelConfigId = modelStateFromConfigOptions(nextState.config_options)?.configId;
+  if (configId === modelConfigId) {
+    nextState.session_options = { ...nextState.session_options, model: value };
+    clearDesiredConfigOption(nextState, configId);
+  } else if (configId === "mode") {
+    nextState.desired_mode_id = value;
+  } else {
+    nextState.desired_config_options = {
+      ...nextState.desired_config_options,
+      [configId]: value,
+    };
+  }
+  turn.acpxState = nextState;
+}
+
+function applyDesiredConfigOptionToRecord(
+  record: SessionRecord,
+  configId: string,
+  value: string,
+): void {
+  const modelConfigId = modelStateFromConfigOptions(record.acpx?.config_options)?.configId;
+  if (configId === modelConfigId) {
+    setDesiredModelId(record, value, configId);
+  } else if (configId === "mode") {
+    setDesiredModeId(record, value);
+  } else {
+    setDesiredConfigOption(record, configId, value);
+  }
+}
+
 async function createOrLoadRuntimeSession(
   client: AcpClient,
   resumeSessionId: string | undefined,
@@ -698,7 +753,7 @@ export class AcpRuntimeManager {
     record.protocolVersion = client.initializeResult?.protocolVersion;
     record.agentCapabilities = client.initializeResult?.agentCapabilities;
     applyConfigOptionsToRecord(record, session.sessionResult);
-    const requestedModelApplied = await applyRequestedModelIfAdvertised({
+    const modelApplication = await applyRequestedModelIfAdvertised({
       client,
       sessionId: session.sessionId,
       requestedModel: input.sessionOptions?.model,
@@ -706,8 +761,14 @@ export class AcpRuntimeManager {
       agentCommand,
       timeoutMs: this.options.timeoutMs,
     });
-    syncAdvertisedModelState(record, session.sessionResult.models);
-    if (requestedModelApplied) {
+    applyConfigOptionsToRecord(record, modelApplication.response);
+    syncAdvertisedModelState(
+      record,
+      modelApplication.response
+        ? modelStateFromConfigOptions(modelApplication.response.configOptions)
+        : session.sessionResult.models,
+    );
+    if (modelApplication.applied) {
       setCurrentModelId(record, input.sessionOptions?.model);
     }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
@@ -932,7 +993,14 @@ export class AcpRuntimeManager {
       },
       setSessionModel: async (modelId: string) => {
         await this.waitForRuntimeControlSession(task, turn);
-        await turn.client.setSessionModel(turn.activeSessionId, modelId);
+        const models = advertisedModelState(turn.acpxState);
+        const response = await turn.client.setSessionModel(turn.activeSessionId, modelId, models);
+        applyConfigOptionResponseToTurn(turn, response);
+        const nextState = cloneSessionAcpxState(turn.acpxState) ?? {};
+        nextState.session_options = { ...nextState.session_options, model: modelId };
+        nextState.current_model_id = modelId;
+        clearDesiredConfigOption(nextState, models?.configId);
+        turn.acpxState = nextState;
       },
       setSessionConfigOption: async (configId: string, value: string) => {
         const result = await task.state.activeController!.setResolvedSessionConfigOption(
@@ -1002,25 +1070,8 @@ export class AcpRuntimeManager {
     value: string,
     response: Awaited<ReturnType<AcpClient["setSessionConfigOption"]>>,
   ): void {
-    if (response?.configOptions) {
-      const nextState = cloneSessionAcpxState(turn.acpxState) ?? {};
-      nextState.config_options = structuredClone(response.configOptions);
-      turn.acpxState = nextState;
-    }
-    if (configId === "mode") {
-      const nextState = cloneSessionAcpxState(turn.acpxState) ?? {};
-      nextState.desired_mode_id = value;
-      turn.acpxState = nextState;
-      return;
-    }
-    if (configId !== "model") {
-      const nextState = cloneSessionAcpxState(turn.acpxState) ?? {};
-      nextState.desired_config_options = {
-        ...nextState.desired_config_options,
-        [configId]: value,
-      };
-      turn.acpxState = nextState;
-    }
+    applyConfigOptionResponseToTurn(turn, response);
+    applyDesiredConfigOptionToTurn(turn, configId, value);
   }
 
   private installRuntimeTurnEventHandlers(task: RuntimeTurnTask, turn: RunningRuntimeTurn): void {
@@ -1283,11 +1334,7 @@ export class AcpRuntimeManager {
     if (controller) {
       const { configId, response } = await controller.setResolvedSessionConfigOption(key, value);
       applyConfigOptionsToRecord(record, response);
-      if (configId === "mode") {
-        setDesiredModeId(record, value);
-      } else {
-        setDesiredConfigOption(record, configId, value);
-      }
+      applyDesiredConfigOptionToRecord(record, configId, value);
       await this.options.sessionStore.save(record);
       return;
     }
@@ -1299,11 +1346,7 @@ export class AcpRuntimeManager {
         const configId = resolveSupportedConfigOptionId(connectedRecord, key);
         const response = await client.setSessionConfigOption(sessionId, configId, value);
         applyConfigOptionsToRecord(connectedRecord, response);
-        if (configId === "mode") {
-          setDesiredModeId(connectedRecord, value);
-        } else {
-          setDesiredConfigOption(connectedRecord, configId, value);
-        }
+        applyDesiredConfigOptionToRecord(connectedRecord, configId, value);
       },
     );
     await this.options.sessionStore.save(result.record);

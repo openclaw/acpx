@@ -132,8 +132,16 @@ test("runSessionSetConfigOptionDirect falls back to createSession and returns up
         currentValue: "default-model",
         options: [
           {
-            value: "default",
-            name: "Default",
+            value: "default-model",
+            name: "default-model",
+          },
+          {
+            value: "fast-model",
+            name: "fast-model",
+          },
+          {
+            value: "smart-model",
+            name: "smart-model",
           },
           {
             value: "gpt-5.4",
@@ -182,6 +190,44 @@ test("runSessionSetConfigOptionDirect falls back to createSession and returns up
   });
 });
 
+test("runSessionSetConfigOptionDirect promotes a custom model config preference", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "prompt-runner-custom-model-config",
+      acpSessionId: "prompt-runner-custom-model-config-session",
+      agentCommand: `node ${JSON.stringify(MOCK_AGENT_PATH)} --supports-load-session --advertise-models --model-config-id llm`,
+      cwd,
+      acpx: {
+        desired_config_options: {
+          llm: "stale-model",
+          reasoning_effort: "high",
+        },
+      },
+    });
+    await writeSessionRecord(homeDir, record);
+
+    const result = await runSessionSetConfigOptionDirect({
+      sessionRecordId: record.acpxRecordId,
+      configId: "llm",
+      value: "smart-model",
+      timeoutMs: 5_000,
+    });
+
+    assert.equal(result.record.acpx?.current_model_id, "smart-model");
+    assert.equal(result.record.acpx?.session_options?.model, "smart-model");
+    assert.deepEqual(result.record.acpx?.desired_config_options, {
+      reasoning_effort: "high",
+    });
+    assert.equal(
+      result.record.acpx?.config_options?.find((option) => option.id === "llm")?.currentValue,
+      "smart-model",
+    );
+  });
+});
+
 test("runSessionSetModelDirect updates current and desired model", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
@@ -190,10 +236,16 @@ test("runSessionSetModelDirect updates current and desired model", async () => {
     const record = makeSessionRecord({
       acpxRecordId: "prompt-runner-model",
       acpSessionId: "prompt-runner-model-session",
-      agentCommand: `node ${JSON.stringify(MOCK_AGENT_PATH)} --supports-load-session --advertise-models`,
+      agentCommand: `node ${JSON.stringify(MOCK_AGENT_PATH)} --supports-load-session --advertise-models --model-config-id llm`,
       cwd,
       closed: true,
       closedAt: "2026-01-01T00:05:00.000Z",
+      acpx: {
+        desired_config_options: {
+          llm: "stale-model",
+          reasoning_effort: "high",
+        },
+      },
     });
     await writeSessionRecord(homeDir, record);
 
@@ -206,10 +258,25 @@ test("runSessionSetModelDirect updates current and desired model", async () => {
     assert.equal(result.resumed, true);
     assert.equal(result.record.acpx?.current_model_id, "gpt-5.4");
     assert.equal(result.record.acpx?.session_options?.model, "gpt-5.4");
+    assert.deepEqual(result.record.acpx?.desired_config_options, {
+      reasoning_effort: "high",
+    });
+    assert.equal(
+      result.record.acpx?.config_options?.find((option) => option.category === "model")
+        ?.currentValue,
+      "gpt-5.4",
+    );
 
     const persisted = await resolveSessionRecord(record.acpxRecordId);
     assert.equal(persisted.acpx?.current_model_id, "gpt-5.4");
     assert.equal(persisted.acpx?.session_options?.model, "gpt-5.4");
+    assert.deepEqual(persisted.acpx?.desired_config_options, {
+      reasoning_effort: "high",
+    });
+    assert.equal(
+      persisted.acpx?.config_options?.find((option) => option.category === "model")?.currentValue,
+      "gpt-5.4",
+    );
   });
 });
 

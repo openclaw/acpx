@@ -358,6 +358,7 @@ export type SessionAcpxState = {
   desired_config_options?: Record<string, string>;
   current_model_id?: string;
   available_models?: string[];
+  model_control?: "config_option" | "legacy_set_model";
   available_commands?: SessionAvailableCommand[];
   config_options?: SessionConfigOption[];
   session_options?: {

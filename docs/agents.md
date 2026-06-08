@@ -57,8 +57,8 @@ Notes that override or extend the cross-agent behavior live below.
 - Built-in name: `codex`
 - Default command: `npx -y @agentclientprotocol/codex-acp`
 - Upstream: [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)
-- Runtime controls exposed by current `codex-acp` releases: ACP modes, advertised models, and `session/set_model`.
-- `acpx --model <id> codex …` and `acpx codex set model <id>` apply the requested model through ACP model selection.
+- Runtime controls exposed by current `codex-acp` releases: ACP modes and session config options, including the advertised model selector.
+- `acpx --model <id> codex …` and `acpx codex set model <id>` apply the requested model through the advertised ACP config option. Legacy adapters that advertise `models` use `session/set_model`.
 
 ### Claude
 

@@ -835,7 +835,7 @@ export async function trySetModelOnRunningOwner(
   if (submitted) {
     if (verbose) {
       process.stderr.write(
-        `[acpx] requested session/set_model on owner pid ${owner.pid} for session ${sessionId}\n`,
+        `[acpx] requested a model config update on owner pid ${owner.pid} for session ${sessionId}\n`,
       );
     }
     return true;

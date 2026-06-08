@@ -4,7 +4,7 @@ import { once } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { serializeSessionRecordForDisk } from "../src/session/persistence.js";
+import { parseSessionRecord, serializeSessionRecordForDisk } from "../src/session/persistence.js";
 import {
   fileExists,
   makeSessionRecord as makeSessionRecordFixture,
@@ -27,6 +27,30 @@ test("SessionRecord allows optional closed and closedAt fields", () => {
 
   assert.equal(record.closed, false);
   assert.equal(record.closedAt, undefined);
+});
+
+test("parseSessionRecord ignores malformed config options during model-control migration", () => {
+  const serialized = serializeSessionRecordForDisk(
+    makeSessionRecord({
+      acpxRecordId: "malformed-config-options",
+      acpSessionId: "malformed-config-options",
+      agentCommand: "agent",
+      cwd: "/tmp/malformed-config-options",
+      acpx: {
+        current_model_id: "legacy-model",
+        available_models: ["legacy-model"],
+      },
+    }),
+  );
+  const acpx = serialized.acpx as Record<string, unknown>;
+  acpx.config_options = [null];
+  delete acpx.model_control;
+
+  const parsed = parseSessionRecord(serialized);
+
+  assert.ok(parsed);
+  assert.equal(parsed.acpx?.config_options, undefined);
+  assert.equal(parsed.acpx?.model_control, "legacy_set_model");
 });
 
 test("listSessions preserves acpx desired_mode_id", async () => {
@@ -80,6 +104,59 @@ test("listSessions preserves acpx desired_config_options", async () => {
     assert.deepEqual(record.acpx?.desired_config_options, {
       reasoning_effort: "high",
     });
+  });
+});
+
+test("listSessions migrates persisted legacy model control", async () => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const cwd = path.join(homeDir, "workspace");
+
+    await writeSessionRecord(
+      homeDir,
+      makeSessionRecord({
+        acpxRecordId: "legacy-model-control",
+        acpSessionId: "legacy-model-control",
+        agentCommand: "agent-a",
+        cwd,
+        acpx: {
+          current_model_id: "legacy-model",
+          available_models: ["legacy-model"],
+          config_options: [],
+        },
+      }),
+    );
+    await writeSessionRecord(
+      homeDir,
+      makeSessionRecord({
+        acpxRecordId: "config-model-control",
+        acpSessionId: "config-model-control",
+        agentCommand: "agent-a",
+        cwd,
+        acpx: {
+          current_model_id: "config-model",
+          available_models: ["config-model"],
+          config_options: [
+            {
+              id: "llm",
+              name: "Model",
+              category: "model",
+              type: "select",
+              currentValue: "config-model",
+              options: [{ value: "config-model", name: "Config Model" }],
+            },
+          ],
+        },
+      }),
+    );
+
+    const sessions = await session.listSessions();
+    const record = sessions.find((entry) => entry.acpxRecordId === "legacy-model-control");
+    assert.ok(record);
+    assert.equal(record.acpx?.model_control, "legacy_set_model");
+    const configRecord = sessions.find((entry) => entry.acpxRecordId === "config-model-control");
+    assert.ok(configRecord);
+    assert.equal(configRecord.acpx?.model_control, "config_option");
   });
 });
 

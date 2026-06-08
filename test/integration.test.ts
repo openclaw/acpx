@@ -1057,7 +1057,7 @@ test("integration: exec --no-terminal disables advertised terminal capability", 
   });
 });
 
-test("integration: exec --model calls session/set_model when agent advertises models", async () => {
+test("integration: exec --model sets the advertised model config option", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const modelAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-models`;
@@ -1082,11 +1082,13 @@ test("integration: exec --model calls session/set_model when agent advertises mo
       assert.equal(result.code, 0, result.stderr);
 
       const payloads = parseJsonRpcOutputLines(result.stdout);
-      const setModelRequest = payloads.find((payload) => payload.method === "session/set_model") as
-        | { params?: { modelId?: string } }
-        | undefined;
-      assert(setModelRequest, "expected session/set_model request in JSON-RPC output");
-      assert.equal(setModelRequest.params?.modelId, "fast-model");
+      const setModelRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "model",
+      ) as { params?: { configId?: string; value?: string } } | undefined;
+      assert(setModelRequest, "expected model session config request in JSON-RPC output");
+      assert.equal(setModelRequest.params?.value, "fast-model");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -1115,9 +1117,12 @@ test("integration: exec --model fails when agent does not advertise models", asy
         options: { model: "sonnet" },
       });
 
-      // session/set_model should NOT be called
-      const setModelRequest = payloads.find((payload) => payload.method === "session/set_model");
-      assert.equal(setModelRequest, undefined, "session/set_model should not be called");
+      const setModelRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "model",
+      );
+      assert.equal(setModelRequest, undefined, "model session config should not be changed");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -1151,8 +1156,12 @@ test("integration: exec --model rejects models not advertised by the agent", asy
       assert.match(`${result.stderr}\n${result.stdout}`, /default-model, fast-model, smart-model/);
 
       const payloads = parseJsonRpcOutputLines(result.stdout);
-      const setModelRequest = payloads.find((payload) => payload.method === "session/set_model");
-      assert.equal(setModelRequest, undefined, "session/set_model should not be called");
+      const setModelRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "model",
+      );
+      assert.equal(setModelRequest, undefined, "model session config should not be changed");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -1162,7 +1171,7 @@ test("integration: exec --model rejects models not advertised by the agent", asy
 test("integration: prompt --model updates existing session model before prompt", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
-    const modelAgentCommand = `${LOAD_CAPABLE_MOCK_AGENT_COMMAND} --advertise-models`;
+    const modelAgentCommand = `${LOAD_CAPABLE_MOCK_AGENT_COMMAND} --model-config-id llm --omit-reconnect-config-options`;
 
     try {
       const created = await runCli(
@@ -1190,18 +1199,28 @@ test("integration: prompt --model updates existing session model before prompt",
       assert.equal(result.code, 0, result.stderr);
 
       const payloads = parseJsonRpcOutputLines(result.stdout);
-      const setModelRequest = payloads.find((payload) => payload.method === "session/set_model") as
-        | { params?: { modelId?: string } }
-        | undefined;
-      assert(setModelRequest, "expected session/set_model before the persistent prompt");
-      assert.equal(setModelRequest.params?.modelId, "fast-model");
+      const setModelRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "llm",
+      ) as { params?: { configId?: string; value?: string } } | undefined;
+      assert(setModelRequest, "expected model session config before the persistent prompt");
+      assert.equal(setModelRequest.params?.configId, "llm");
+      assert.equal(setModelRequest.params?.value, "fast-model");
+
+      const status = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "--format", "json", "status"],
+        homeDir,
+      );
+      assert.equal(status.code, 0, status.stderr);
+      assert.equal((JSON.parse(status.stdout.trim()) as { model?: string }).model, "fast-model");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
 });
 
-test("integration: exec --model fails when session/set_model fails", async () => {
+test("integration: exec --model fails when the model config update fails", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const failModelAgentCommand = `${MOCK_AGENT_COMMAND} --set-session-model-fails`;
@@ -1225,14 +1244,14 @@ test("integration: exec --model fails when session/set_model fails", async () =>
       );
       assert.notEqual(result.code, 0, "expected non-zero exit");
       assert.equal(result.stdout, "");
-      assert.match(result.stderr, /setSessionModel failed|session\/set_model/i);
+      assert.match(result.stderr, /setSessionModel failed|session\/set_config_option/i);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
 });
 
-test("integration: sessions new --model fails when session/set_model fails", async () => {
+test("integration: sessions new --model fails when the model config update fails", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const failModelAgentCommand = `${MOCK_AGENT_COMMAND} --set-session-model-fails`;
@@ -1253,14 +1272,14 @@ test("integration: sessions new --model fails when session/set_model fails", asy
         homeDir,
       );
       assert.notEqual(result.code, 0, "expected non-zero exit");
-      assert.match(result.stderr, /setSessionModel failed|session\/set_model/i);
+      assert.match(result.stderr, /setSessionModel failed|session\/set_config_option/i);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
 });
 
-test("integration: set model routes through session/set_model and succeeds", async () => {
+test("integration: set model routes through the advertised config option and succeeds", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const modelAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-models`;
@@ -1273,7 +1292,7 @@ test("integration: set model routes through session/set_model and succeeds", asy
       );
       assert.equal(created.code, 0, created.stderr);
 
-      // Switch model mid-session via set command (uses session/set_model internally)
+      // Switch model mid-session through the advertised model config option.
       const setResult = await runCli(
         [
           "--agent",
@@ -1296,6 +1315,64 @@ test("integration: set model routes through session/set_model and succeeds", asy
       };
       assert.equal(payload.action, "model_set");
       assert.equal(payload.modelId, "gpt-5.4");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: legacy model metadata preserves session/set_model compatibility", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const modelAgentCommand = `${LOAD_CAPABLE_MOCK_AGENT_COMMAND} --advertise-legacy-models`;
+
+    try {
+      const created = await runCli(
+        [
+          "--agent",
+          modelAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--model",
+          "alternate-model",
+          "sessions",
+          "new",
+        ],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+
+      const status = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "--format", "json", "status"],
+        homeDir,
+      );
+      assert.equal(status.code, 0, status.stderr);
+      assert.equal(
+        (JSON.parse(status.stdout.trim()) as { model?: string }).model,
+        "alternate-model",
+      );
+
+      const setResult = await runCli(
+        [
+          "--agent",
+          modelAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "set",
+          "model",
+          "default-model",
+        ],
+        homeDir,
+      );
+      assert.equal(setResult.code, 0, setResult.stderr);
+      assert.equal(
+        (JSON.parse(setResult.stdout.trim()) as { modelId?: string }).modelId,
+        "default-model",
+      );
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -1330,7 +1407,7 @@ test("integration: set model rejects with clear error on ACP invalid params", as
         homeDir,
       );
       assert.notEqual(setResult.code, 0, "expected non-zero exit");
-      assert.match(setResult.stderr, /rejected session\/set_model/i);
+      assert.match(setResult.stderr, /rejected session\/set_config_option/i);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -1411,12 +1488,24 @@ test("integration: status shows updated model after set model", async () => {
       );
       assert.equal(created.code, 0, created.stderr);
 
+      const warmPrompt = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "prompt", "echo warm"],
+        homeDir,
+      );
+      assert.equal(warmPrompt.code, 0, warmPrompt.stderr);
+
       // Switch model
       const setResult = await runCli(
         ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "set", "model", "gpt-5.4"],
         homeDir,
       );
       assert.equal(setResult.code, 0, setResult.stderr);
+
+      const followUp = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "prompt", "echo follow-up"],
+        homeDir,
+      );
+      assert.equal(followUp.code, 0, followUp.stderr);
 
       // Check status JSON — should show updated model
       const status = await runCli(

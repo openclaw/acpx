@@ -1003,6 +1003,7 @@ test("codex thought_level passes through for current built-in adapter", async ()
 test("codex set model passes the requested model through unchanged", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
+    const modelAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-models`;
     await fs.mkdir(cwd, { recursive: true });
     await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
     await fs.writeFile(
@@ -1011,7 +1012,7 @@ test("codex set model passes the requested model through unchanged", async () =>
         {
           agents: {
             codex: {
-              command: MOCK_AGENT_COMMAND,
+              command: modelAgentCommand,
             },
           },
         },
@@ -1025,7 +1026,7 @@ test("codex set model passes the requested model through unchanged", async () =>
     await writeSessionRecord(homeDir, {
       acpxRecordId: sessionId,
       acpSessionId: sessionId,
-      agentCommand: MOCK_AGENT_COMMAND,
+      agentCommand: modelAgentCommand,
       cwd,
       createdAt: "2026-01-01T00:00:00.000Z",
       lastUsedAt: "2026-01-01T00:00:00.000Z",
@@ -1033,7 +1034,7 @@ test("codex set model passes the requested model through unchanged", async () =>
     });
 
     const result = await runCli(
-      ["--cwd", cwd, "--format", "json", "codex", "set", "model", "GPT-5-2"],
+      ["--cwd", cwd, "--format", "json", "codex", "set", "model", "gpt-5.2"],
       homeDir,
     );
     assert.equal(result.code, 0, result.stderr);
@@ -1043,7 +1044,7 @@ test("codex set model passes the requested model through unchanged", async () =>
       modelId?: string;
     };
     assert.equal(payload.action, "model_set");
-    assert.equal(payload.modelId, "GPT-5-2");
+    assert.equal(payload.modelId, "gpt-5.2");
   });
 });
 

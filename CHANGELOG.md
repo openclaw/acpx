@@ -16,6 +16,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- ACP/models: support SDK 0.25 model config options while preserving `session/set_model` compatibility for adapters that explicitly advertise legacy model metadata.
+
 ## 2026.5.23 (v0.10.0)
 
 ### Changes
