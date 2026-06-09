@@ -319,7 +319,7 @@ export async function handlePrompt(
     agent.agentCommand,
     agent.agentName,
     agent.cwd,
-    flags.session,
+    resolveSessionNameFromFlags(flags, command),
   );
   const outputFormatter = createOutputFormatter(outputPolicy.format, {
     jsonContext: {

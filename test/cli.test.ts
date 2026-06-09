@@ -1844,6 +1844,46 @@ test("set resolves named session when -s is before subcommand", async () => {
   });
 });
 
+test("prompt resolves named session when -s is before subcommand", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+
+    const missingAgentCommand = "acpx-test-missing-agent-binary-3";
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: { command: missingAgentCommand },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: "named-prompt-session",
+      acpSessionId: "named-prompt-session",
+      agentCommand: missingAgentCommand,
+      cwd,
+      name: "named",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+    });
+
+    const result = await runCli(["--cwd", cwd, "codex", "-s", "named", "prompt", "ping"], homeDir);
+
+    assert.equal(result.code, 1);
+    assert.doesNotMatch(result.stderr, /No acpx session found/);
+    assert.match(result.stderr, /session named \(named-prompt-session\)/);
+  });
+});
+
 test("prompt reads from stdin when no prompt argument is provided", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
