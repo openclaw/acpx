@@ -1057,6 +1057,46 @@ test("integration: exec --no-terminal disables advertised terminal capability", 
   });
 });
 
+test("integration: non-Devin ACP launch advertises standard acpx client capabilities", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "exec", "echo hello"],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const initializeRequest = payloads.find((payload) => payload.method === "initialize") as
+        | {
+            params?: {
+              clientCapabilities?: {
+                _meta?: unknown;
+                elicitation?: unknown;
+                fs?: { readTextFile?: unknown; writeTextFile?: unknown };
+                terminal?: unknown;
+              };
+              clientInfo?: { name?: unknown; version?: unknown };
+            };
+          }
+        | undefined;
+      assert(initializeRequest, result.stdout);
+      assert.equal(initializeRequest.params?.clientInfo?.name, "acpx");
+      assert.equal(initializeRequest.params?.clientCapabilities?.terminal, true);
+      assert.deepEqual(initializeRequest.params?.clientCapabilities?.fs, {
+        readTextFile: true,
+        writeTextFile: true,
+      });
+      assert.equal(initializeRequest.params?.clientCapabilities?._meta, undefined);
+      assert.equal(initializeRequest.params?.clientCapabilities?.elicitation, undefined);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: exec accepts agent extension notifications", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -1082,7 +1122,7 @@ test("integration: exec accepts agent extension notifications", async () => {
   });
 });
 
-test("integration: exec answers Devin diagnostics extension requests", async () => {
+test("integration: non-Devin ACP launch rejects Devin diagnostics extension requests", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
 
@@ -1098,6 +1138,45 @@ test("integration: exec answers Devin diagnostics extension requests", async () 
         homeDir,
       );
       assert.equal(result.code, 0, result.stderr);
+      assert.doesNotMatch(
+        result.stdout,
+        /extension request accepted: _cognition\.ai\/request_diagnostics/,
+      );
+      assert.match(result.stderr, /"Method not found": _cognition\.ai\/request_diagnostics/);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: exec answers Devin diagnostics extension requests", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-devin-"));
+
+    try {
+      await writeFakeDevinAgent(fakeBinDir);
+
+      const result = await runCli(
+        [
+          "--agent",
+          "devin --model swe-1-6 acp",
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "quiet",
+          "exec",
+          "extension-request _cognition.ai/request_diagnostics hello",
+        ],
+        homeDir,
+        {
+          env: {
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+      assert.equal(result.code, 0, result.stderr);
       assert.match(
         result.stdout,
         /extension request accepted: _cognition\.ai\/request_diagnostics \{\}/,
@@ -1105,12 +1184,13 @@ test("integration: exec answers Devin diagnostics extension requests", async () 
       assert.doesNotMatch(result.stderr, /Method not found/);
       assert.doesNotMatch(result.stderr, /Error handling request/);
     } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
 });
 
-test("integration: Devin ACP launch advertises Windsurf client info", async () => {
+test("integration: Devin ACP launch advertises scoped Windsurf client info", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-devin-"));
@@ -1146,7 +1226,9 @@ test("integration: Devin ACP launch advertises Windsurf client info", async () =
             params?: {
               clientCapabilities?: {
                 _meta?: Record<string, unknown> | null;
-                elicitation?: { form?: unknown } | null;
+                elicitation?: unknown;
+                fs?: { readTextFile?: unknown; writeTextFile?: unknown };
+                terminal?: unknown;
               };
               clientInfo?: {
                 name?: unknown;
@@ -1160,25 +1242,15 @@ test("integration: Devin ACP launch advertises Windsurf client info", async () =
         name: "windsurf",
         version: "9.9.9-test",
       });
-      assert.deepEqual(initializeRequest.params?.clientCapabilities?.elicitation, { form: {} });
-
-      const meta = initializeRequest.params?.clientCapabilities?._meta;
-      for (const key of [
-        "cognition.ai/groupedSessionConfigOptions",
-        "cognition.ai/lazyEditorFiles",
-        "cognition.ai/mcp",
-        "cognition.ai/messageGrouping",
-        "cognition.ai/multiRootWorkspace",
-        "cognition.ai/partialContent",
-        "cognition.ai/requestDiagnostics",
-        "cognition.ai/revert",
-        "cognition.ai/subagentSupport",
-        "cognition.ai/toolCallQuestions",
-        "cognition.ai/windsurfConfigBridge",
-        "terminal_output",
-      ]) {
-        assert.equal(meta?.[key], true, key);
-      }
+      assert.equal(initializeRequest.params?.clientCapabilities?.terminal, true);
+      assert.deepEqual(initializeRequest.params?.clientCapabilities?.fs, {
+        readTextFile: true,
+        writeTextFile: true,
+      });
+      assert.deepEqual(initializeRequest.params?.clientCapabilities?._meta, {
+        "cognition.ai/requestDiagnostics": true,
+      });
+      assert.equal(initializeRequest.params?.clientCapabilities?.elicitation, undefined);
     } finally {
       await fs.rm(fakeBinDir, { recursive: true, force: true });
       await fs.rm(cwd, { recursive: true, force: true });

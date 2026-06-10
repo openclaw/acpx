@@ -126,18 +126,7 @@ const AGENT_CLOSE_TERM_GRACE_MS = 1_500;
 const AGENT_CLOSE_KILL_GRACE_MS = 1_000;
 const STARTUP_STDERR_MAX_CHARS = 8_192;
 const DEVIN_COMPATIBILITY_CLIENT_CAPABILITIES_META = Object.freeze({
-  "cognition.ai/groupedSessionConfigOptions": true,
-  "cognition.ai/lazyEditorFiles": true,
-  "cognition.ai/mcp": true,
-  "cognition.ai/messageGrouping": true,
-  "cognition.ai/multiRootWorkspace": true,
-  "cognition.ai/partialContent": true,
   "cognition.ai/requestDiagnostics": true,
-  "cognition.ai/revert": true,
-  "cognition.ai/subagentSupport": true,
-  "cognition.ai/toolCallQuestions": true,
-  "cognition.ai/windsurfConfigBridge": true,
-  terminal_output: true,
 });
 const DEVIN_COMPATIBILITY_CLIENT_NAME = "windsurf";
 // This is the embedded Windsurf IDE version bundled with Devin Desktop 3.1.7, the first locally verified version that passes Devin's server-side ACP precondition.
@@ -176,9 +165,6 @@ function resolveClientCapabilities(params: {
   return {
     ...baseCapabilities,
     _meta: DEVIN_COMPATIBILITY_CLIENT_CAPABILITIES_META,
-    elicitation: {
-      form: {},
-    },
   };
 }
 
@@ -635,7 +621,7 @@ export class AcpClient {
       createNdJsonMessageStream(this.options.agentCommand, input, output),
     );
 
-    const connection = this.createConnection(stream);
+    const connection = this.createConnection(stream, launch);
     connection.signal.addEventListener(
       "abort",
       () => {
@@ -722,10 +708,13 @@ export class AcpClient {
     return requireAgentStdio(spawnedChild);
   }
 
-  private createConnection(stream: {
-    readable: ReadableStream<AnyMessage>;
-    writable: WritableStream<AnyMessage>;
-  }): ClientSideConnection {
+  private createConnection(
+    stream: {
+      readable: ReadableStream<AnyMessage>;
+      writable: WritableStream<AnyMessage>;
+    },
+    launch: Pick<AgentLaunchPlan, "devinAcp">,
+  ): ClientSideConnection {
     return new ClientSideConnection(
       () => ({
         sessionUpdate: async (params: SessionNotification) => {
@@ -737,7 +726,7 @@ export class AcpClient {
           return this.handlePermissionRequest(params);
         },
         extMethod: async (method: string): Promise<Record<string, unknown>> => {
-          if (isDevinRequestDiagnosticsMethod(method)) {
+          if (launch.devinAcp && isDevinRequestDiagnosticsMethod(method)) {
             return {};
           }
           throw RequestError.methodNotFound(method);
@@ -767,7 +756,7 @@ export class AcpClient {
         ): Promise<ReleaseTerminalResponse> => {
           return this.handleReleaseTerminal(params);
         },
-        extNotification: async () => {},
+        extNotification: async (): Promise<void> => {},
       }),
       stream,
     );
