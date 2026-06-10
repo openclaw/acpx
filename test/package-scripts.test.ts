@@ -58,6 +58,18 @@ test("slophammer is CI-only and enforces latest DRY plus dependency boundaries",
   assert.doesNotMatch(ciWorkflow, /assert-slophammer-rules-clean\.mjs/);
 });
 
+test("slophammer config uses the published v0.2 TypeScript schema", () => {
+  const config = readFileSync(path.join(process.cwd(), "slophammer.yml"), "utf8");
+
+  assert.match(config, /typescript:\n/);
+  assert.match(config, /coverage:\n\s+threshold: 85/);
+  assert.match(config, /complexity:\n\s+max: 8/);
+  assert.match(config, /mutation:\n\s+targets:\n\s+- src\/cli\/flags\.ts/);
+  assert.doesNotMatch(config, /coverage_threshold/);
+  assert.doesNotMatch(config, /complexity_max/);
+  assert.doesNotMatch(config, /mutation_targets/);
+});
+
 test("test scripts build packaged output before running package-bin smoke tests", () => {
   const pkg = readPackageJson();
 

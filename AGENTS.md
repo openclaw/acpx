@@ -104,9 +104,9 @@ The enforceable local constraints are:
   actually gates all `src/**` files at the same threshold.
 - `pnpm run mutate` runs Stryker against the current mutation target declared in
   `slophammer.yml`.
-- `slophammer.yml` sets the TypeScript policy targets: coverage `85`,
-  complexity max `8`, zero production DRY findings for `src/`, mutation targets,
-  and import dependency boundaries.
+- `slophammer.yml` uses the Slophammer v0.2 TypeScript policy schema:
+  `coverage.threshold: 85`, `complexity.max: 8`, zero production DRY findings
+  for `src/`, mutation targets, and import dependency boundaries.
 - CI must run the published checker's direct dependency-boundary rule. `rules`
   and `dry` alone are not a dependency-boundary gate.
 
