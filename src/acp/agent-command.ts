@@ -65,6 +65,13 @@ export function isQoderAcpCommand(command: string, args: readonly string[]): boo
   return basenameToken(command) === "qodercli" && args.includes("--acp");
 }
 
+export function isDevinAcpCommand(command: string, args: readonly string[]): boolean {
+  return (
+    basenameToken(command) === "devin" &&
+    (args.includes("acp") || args.includes("--acp") || args.includes("--experimental-acp"))
+  );
+}
+
 function hasCommandFlag(args: readonly string[], flagName: string): boolean {
   return args.some((arg) => arg === flagName || arg.startsWith(`${flagName}=`));
 }

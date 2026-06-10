@@ -1118,6 +1118,38 @@ class MockAgent implements Agent {
       return "recovered after retry";
     }
 
+    if (text.startsWith("extension-notification ")) {
+      const rest = text.slice("extension-notification ".length).trim();
+      const firstSpace = rest.search(/\s/);
+
+      if (firstSpace <= 0) {
+        throw new Error("Usage: extension-notification <method> <message>");
+      }
+
+      const method = rest.slice(0, firstSpace).trim();
+      const message = rest.slice(firstSpace + 1).trim();
+      if (message.length === 0) {
+        throw new Error("Usage: extension-notification <method> <message>");
+      }
+
+      await this.connection.extNotification(method, { message });
+      return `extension notification accepted: ${method}`;
+    }
+
+    if (text.startsWith("extension-request ")) {
+      const rest = text.slice("extension-request ".length).trim();
+      const firstSpace = rest.search(/\s/);
+
+      if (firstSpace <= 0) {
+        throw new Error("Usage: extension-request <method> <message>");
+      }
+
+      const method = rest.slice(0, firstSpace).trim();
+      const message = rest.slice(firstSpace + 1).trim();
+      const response = await this.connection.extMethod(method, { message });
+      return `extension request accepted: ${method} ${JSON.stringify(response)}`;
+    }
+
     if (text.startsWith("late-tool ")) {
       const rest = text.slice("late-tool ".length).trim();
       const firstSpace = rest.search(/\s/);

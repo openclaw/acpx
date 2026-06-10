@@ -1057,6 +1057,135 @@ test("integration: exec --no-terminal disables advertised terminal capability", 
   });
 });
 
+test("integration: exec accepts agent extension notifications", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "quiet",
+          "exec",
+          "extension-notification _cognition.ai/output hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /extension notification accepted: _cognition\.ai\/output/);
+      assert.doesNotMatch(result.stderr, /Method not found/);
+      assert.doesNotMatch(result.stderr, /Error handling notification/);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: exec answers Devin diagnostics extension requests", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "quiet",
+          "exec",
+          "extension-request _cognition.ai/request_diagnostics hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(
+        result.stdout,
+        /extension request accepted: _cognition\.ai\/request_diagnostics \{\}/,
+      );
+      assert.doesNotMatch(result.stderr, /Method not found/);
+      assert.doesNotMatch(result.stderr, /Error handling request/);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: Devin ACP launch advertises Windsurf client info", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-devin-"));
+
+    try {
+      await writeFakeDevinAgent(fakeBinDir);
+
+      const result = await runCli(
+        [
+          "--agent",
+          "devin --model swe-1-6 --acp",
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "exec",
+          "echo hello",
+        ],
+        homeDir,
+        {
+          env: {
+            ACPX_DEVIN_WINDSURF_VERSION: "9.9.9-test",
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const initializeRequest = payloads.find((payload) => payload.method === "initialize") as
+        | {
+            params?: {
+              clientCapabilities?: {
+                _meta?: Record<string, unknown> | null;
+                elicitation?: { form?: unknown } | null;
+              };
+              clientInfo?: {
+                name?: unknown;
+                version?: unknown;
+              };
+            };
+          }
+        | undefined;
+      assert(initializeRequest, result.stdout);
+      assert.deepEqual(initializeRequest.params?.clientInfo, {
+        name: "windsurf",
+        version: "9.9.9-test",
+      });
+      assert.deepEqual(initializeRequest.params?.clientCapabilities?.elicitation, { form: {} });
+
+      const meta = initializeRequest.params?.clientCapabilities?._meta;
+      for (const key of [
+        "cognition.ai/groupedSessionConfigOptions",
+        "cognition.ai/lazyEditorFiles",
+        "cognition.ai/mcp",
+        "cognition.ai/messageGrouping",
+        "cognition.ai/multiRootWorkspace",
+        "cognition.ai/partialContent",
+        "cognition.ai/requestDiagnostics",
+        "cognition.ai/revert",
+        "cognition.ai/subagentSupport",
+        "cognition.ai/toolCallQuestions",
+        "cognition.ai/windsurfConfigBridge",
+        "terminal_output",
+      ]) {
+        assert.equal(meta?.[key], true, key);
+      }
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: exec --model sets the advertised model config option", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -3976,6 +4105,51 @@ async function writeFakeDroidAgent(binDir: string): Promise<void> {
       'if [ "$1" = "acp" ]; then',
       "  shift",
       "fi",
+      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
+      "",
+    ].join("\n"),
+    { encoding: "utf8", mode: 0o755 },
+  );
+}
+
+async function writeFakeDevinAgent(binDir: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(binDir, "devin.cmd"),
+      [
+        "@echo off",
+        "setlocal",
+        ":shift_known",
+        'if "%~1"=="--model" shift & shift & goto shift_known',
+        'if "%~1"=="acp" shift & goto shift_known',
+        'if "%~1"=="--acp" shift & goto shift_known',
+        'if "%~1"=="--experimental-acp" shift & goto shift_known',
+        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
+        "",
+      ].join("\r\n"),
+      { encoding: "utf8" },
+    );
+    return;
+  }
+
+  await fs.writeFile(
+    path.join(binDir, "devin"),
+    [
+      "#!/bin/sh",
+      'while [ "$#" -gt 0 ]; do',
+      '  case "$1" in',
+      "    --model)",
+      "      shift",
+      '      [ "$#" -gt 0 ] && shift',
+      "      ;;",
+      "    acp|--acp|--experimental-acp)",
+      "      shift",
+      "      ;;",
+      "    *)",
+      "      break",
+      "      ;;",
+      "  esac",
+      "done",
       `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
       "",
     ].join("\n"),

@@ -97,6 +97,7 @@ Friendly agent names resolve to commands:
   Forwards Qoder-native `--allowed-tools` and `--max-turns` startup flags from `acpx` session options.
 - `qwen` -> `qwen --acp`
 - `trae` -> `traecli acp serve`
+- `devin` -> `devin <model> acp` (requires `--model` flag before `acp`)
 
 Rules:
 
@@ -307,6 +308,31 @@ For ACP `authenticate` handshakes, use either config `auth` entries or explicit
 `ACPX_AUTH_<METHOD_ID>` environment variables such as `ACPX_AUTH_OPENAI_API_KEY`.
 Ambient provider env vars such as `OPENAI_API_KEY` are still passed through to
 child agents, but they do not trigger ACP auth-method selection on their own.
+
+## Devin ACP compatibility
+
+When `acpx` detects a Devin ACP launch (`devin <model> acp`), it advertises Windsurf-compatible client metadata to satisfy Devin's client requirements:
+
+- **Client identity**: Advertises `clientInfo.name` as `windsurf` instead of `acpx`
+- **Version override**: Uses `ACPX_DEVIN_WINDSURF_VERSION` env var (default: `1.110.1`) for `clientInfo.version`
+- **Capability flags**: Advertises Cognition/Windsurf-specific capability flags under `_meta` including:
+  - `cognition.ai/groupedSessionConfigOptions`
+  - `cognition.ai/lazyEditorFiles`
+  - `cognition.ai/mcp`
+  - `cognition.ai/messageGrouping`
+  - `cognition.ai/multiRootWorkspace`
+  - `cognition.ai/partialContent`
+  - `cognition.ai/requestDiagnostics`
+  - `cognition.ai/revert`
+  - `cognition.ai/subagentSupport`
+  - `cognition.ai/toolCallQuestions`
+  - `cognition.ai/windsurfConfigBridge`
+  - `terminal_output`
+- **Extension handling**: Handles Devin's `_cognition.ai/request_diagnostics` extension request (returns empty object) and silences method-not-found noise for vendor extension notifications
+
+This compatibility shim is scoped to Devin ACP launches only. Other agents continue to receive standard `acpx` identity and capabilities.
+
+See [`agents/Devin.md`](agents/Devin.md) for the full Devin compatibility contract.
 
 ## Session behavior
 
