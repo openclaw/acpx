@@ -88,6 +88,10 @@ export type StatusFlags = {
   session?: string;
 };
 
+type SessionSelectionFlags = {
+  session?: string;
+};
+
 export type SessionsPruneFlags = {
   dryRun?: boolean;
   before?: Date;
@@ -358,7 +362,7 @@ export function addSessionNameOption(command: Command): Command {
 }
 
 export function resolveSessionNameFromFlags(
-  flags: StatusFlags,
+  flags: SessionSelectionFlags,
   command: Command,
 ): string | undefined {
   const directSession = parseOptionalSessionName(flags.session);

@@ -1844,7 +1844,7 @@ test("set resolves named session when -s is before subcommand", async () => {
   });
 });
 
-test("prompt resolves named session when -s is before subcommand", async () => {
+test("prompt resolves named session across session flag placements", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
@@ -1876,11 +1876,20 @@ test("prompt resolves named session when -s is before subcommand", async () => {
       closed: false,
     });
 
-    const result = await runCli(["--cwd", cwd, "codex", "-s", "named", "prompt", "ping"], homeDir);
+    const cases = [
+      ["codex", "-s", "named", "prompt", "ping"],
+      ["codex", "--session", "named", "prompt", "ping"],
+      ["codex", "prompt", "-s", "named", "ping"],
+      ["codex", "prompt", "--session", "named", "ping"],
+    ];
 
-    assert.equal(result.code, 1);
-    assert.doesNotMatch(result.stderr, /No acpx session found/);
-    assert.match(result.stderr, /session named \(named-prompt-session\)/);
+    for (const args of cases) {
+      const result = await runCli(["--cwd", cwd, ...args], homeDir);
+
+      assert.equal(result.code, 1, args.join(" "));
+      assert.doesNotMatch(result.stderr, /No acpx session found/, args.join(" "));
+      assert.match(result.stderr, /session named \(named-prompt-session\)/, args.join(" "));
+    }
   });
 });
 
