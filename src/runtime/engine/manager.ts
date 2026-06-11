@@ -29,7 +29,10 @@ import {
   setDesiredModeId,
   syncAdvertisedModelState,
 } from "../../session/mode-preference.js";
-import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
+import {
+  applyRequestedModelIfAdvertised,
+  currentModelIdFromSetModelResponse,
+} from "../../session/model-application.js";
 import { advertisedModelState } from "../../session/model-state.js";
 import type {
   ClientOperation,
@@ -72,7 +75,7 @@ type ActiveSessionController = {
   hasActivePrompt: () => boolean;
   requestCancelActivePrompt: () => Promise<boolean>;
   setSessionMode: (modeId: string) => Promise<void>;
-  setSessionModel: (modelId: string) => Promise<void>;
+  setSessionModel: (modelId: string) => ReturnType<AcpClient["setSessionModel"]>;
   setSessionConfigOption: (
     configId: string,
     value: string,
@@ -769,7 +772,10 @@ export class AcpRuntimeManager {
         : session.sessionResult.models,
     );
     if (modelApplication.applied) {
-      setCurrentModelId(record, input.sessionOptions?.model);
+      setCurrentModelId(
+        record,
+        currentModelIdFromSetModelResponse(modelApplication.response, input.sessionOptions?.model),
+      );
     }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     persistSessionOptions(record, input.sessionOptions);
@@ -998,9 +1004,10 @@ export class AcpRuntimeManager {
         applyConfigOptionResponseToTurn(turn, response);
         const nextState = cloneSessionAcpxState(turn.acpxState) ?? {};
         nextState.session_options = { ...nextState.session_options, model: modelId };
-        nextState.current_model_id = modelId;
+        nextState.current_model_id = currentModelIdFromSetModelResponse(response, modelId);
         clearDesiredConfigOption(nextState, models?.configId);
         turn.acpxState = nextState;
+        return response;
       },
       setSessionConfigOption: async (configId: string, value: string) => {
         const result = await task.state.activeController!.setResolvedSessionConfigOption(

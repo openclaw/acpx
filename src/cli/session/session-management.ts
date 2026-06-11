@@ -8,7 +8,10 @@ import { applyConfigOptionsToRecord } from "../../session/config-options.js";
 import { createSessionConversation } from "../../session/conversation-model.js";
 import { defaultSessionEventLog } from "../../session/event-log.js";
 import { setCurrentModelId, syncAdvertisedModelState } from "../../session/mode-preference.js";
-import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
+import {
+  applyRequestedModelIfAdvertised,
+  currentModelIdFromSetModelResponse,
+} from "../../session/model-application.js";
 import {
   absolutePath,
   findGitRepositoryRoot,
@@ -95,7 +98,10 @@ function applyCreatedSessionModelState(
       : state.sessionModels,
   );
   if (state.requestedModelApplied) {
-    setCurrentModelId(record, requestedModel);
+    setCurrentModelId(
+      record,
+      currentModelIdFromSetModelResponse(state.requestedModelResponse, requestedModel),
+    );
   }
 }
 
@@ -112,6 +118,7 @@ async function createFreshSessionState(
     models: createdSession.models,
     agentCommand: options.agentCommand,
     timeoutMs: options.timeoutMs,
+    onWarning: options.onModelWarning,
   });
   return {
     sessionId: createdSession.sessionId,
@@ -157,6 +164,7 @@ async function resumeSessionRecordWithClient(
       models: sessionModels,
       agentCommand: options.agentCommand,
       timeoutMs: options.timeoutMs,
+      onWarning: options.onModelWarning,
     });
     return {
       sessionId: options.resumeSessionId,

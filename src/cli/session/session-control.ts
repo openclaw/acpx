@@ -7,6 +7,7 @@ import {
   setDesiredModeId,
   setDesiredModelId,
 } from "../../session/mode-preference.js";
+import { currentModelIdFromSetModelResponse } from "../../session/model-application.js";
 import { advertisedModelState } from "../../session/model-state.js";
 import { resolveSessionRecord, writeSessionRecord, isoNow } from "../../session/persistence.js";
 import type {
@@ -91,11 +92,16 @@ export async function setSessionModel(
   );
   if (submittedToOwner) {
     const record = await resolveSessionRecord(options.sessionId);
+    applyConfigOptionsToRecord(record, submittedToOwner.response);
     setDesiredModelId(record, options.modelId, advertisedModelState(record.acpx)?.configId);
-    setCurrentModelId(record, options.modelId);
+    setCurrentModelId(
+      record,
+      currentModelIdFromSetModelResponse(submittedToOwner.response, options.modelId),
+    );
     await writeSessionRecord(record);
     return {
       record,
+      response: submittedToOwner.response,
       resumed: false,
     };
   }
@@ -129,7 +135,7 @@ export async function setSessionConfigOption(
     applyConfigOptionsToRecord(record, ownerResponse);
     if (options.configId === modelConfigId) {
       setDesiredModelId(record, options.value, options.configId);
-      setCurrentModelId(record, options.value);
+      setCurrentModelId(record, currentModelIdFromSetModelResponse(ownerResponse, options.value));
     } else if (options.configId === "mode") {
       setDesiredModeId(record, options.value);
     } else {

@@ -580,7 +580,7 @@ async function submitSetModelToQueueOwner(
   owner: QueueOwnerRecord,
   modelId: string,
   timeoutMs?: number,
-): Promise<boolean | undefined> {
+): Promise<QueueOwnerSetModelResultMessage | undefined> {
   const request: QueueSetModelRequest = {
     type: "set_model",
     requestId: randomUUID(),
@@ -603,7 +603,7 @@ async function submitSetModelToQueueOwner(
       retryable: true,
     });
   }
-  return true;
+  return response;
 }
 
 async function submitSetConfigOptionToQueueOwner(
@@ -825,7 +825,7 @@ export async function trySetModelOnRunningOwner(
   modelId: string,
   timeoutMs: number | undefined,
   verbose: boolean | undefined,
-): Promise<boolean | undefined> {
+): Promise<QueueOwnerSetModelResultMessage | undefined> {
   const owner = await readQueueOwnerRecord(sessionId);
   if (!owner) {
     return undefined;
@@ -838,7 +838,7 @@ export async function trySetModelOnRunningOwner(
         `[acpx] requested a model config update on owner pid ${owner.pid} for session ${sessionId}\n`,
       );
     }
-    return true;
+    return submitted;
   }
 
   const health = await probeQueueOwnerHealth(sessionId);

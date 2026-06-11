@@ -98,7 +98,10 @@ export type QueueOwnerControlHandlers = {
   cancelPrompt: () => Promise<boolean>;
   closeSession: (timeoutMs?: number) => Promise<boolean>;
   setSessionMode: (modeId: string, timeoutMs?: number) => Promise<void>;
-  setSessionModel: (modelId: string, timeoutMs?: number) => Promise<void>;
+  setSessionModel: (
+    modelId: string,
+    timeoutMs?: number,
+  ) => Promise<SetSessionConfigOptionResponse | undefined>;
   setSessionConfigOption: (
     configId: string,
     value: string,
@@ -427,11 +430,15 @@ export class SessionQueueOwner {
         socket,
         requestId: request.requestId,
         run: async () => {
-          await this.controlHandlers.setSessionModel(request.modelId, request.timeoutMs);
+          const response = await this.controlHandlers.setSessionModel(
+            request.modelId,
+            request.timeoutMs,
+          );
           return {
             type: "set_model_result",
             requestId: request.requestId,
             modelId: request.modelId,
+            response,
           };
         },
       });

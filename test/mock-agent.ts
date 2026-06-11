@@ -62,6 +62,8 @@ type MockAgentOptions = {
   advertiseLegacyModels: boolean;
   modelConfigId: string;
   omitReconnectConfigOptions: boolean;
+  omitReconnectModelId?: string;
+  reportModelAs?: string;
   replayLoadSessionUpdates: boolean;
   loadReplayText: string;
   ignoreSigterm: boolean;
@@ -367,6 +369,8 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let advertiseLegacyModels = false;
   let modelConfigId = "model";
   let omitReconnectConfigOptions = false;
+  let omitReconnectModelId: string | undefined;
+  let reportModelAs: string | undefined;
   let replayLoadSessionUpdates = false;
   let loadReplayText = "replayed load session update";
   let ignoreSigterm = false;
@@ -449,6 +453,18 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
 
     if (token === "--omit-reconnect-config-options") {
       omitReconnectConfigOptions = true;
+      continue;
+    }
+
+    if (token === "--omit-reconnect-model") {
+      omitReconnectModelId = argv[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (token === "--report-model-as") {
+      reportModelAs = argv[index + 1];
+      index += 1;
       continue;
     }
 
@@ -557,6 +573,8 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     advertiseLegacyModels,
     modelConfigId,
     omitReconnectConfigOptions,
+    omitReconnectModelId,
+    reportModelAs,
     replayLoadSessionUpdates,
     loadReplayText,
     ignoreSigterm,
@@ -645,11 +663,21 @@ function parseListCursor(cursor: string | null | undefined): number {
 function buildConfigOptions(
   state: SessionState,
   modelConfigId: string,
+  omitModelId?: string,
+  currentModelId = state.modelId,
 ): SetSessionConfigOptionResponse["configOptions"] {
   const reasoningEffort =
     typeof state.configValues.reasoning_effort === "string"
       ? state.configValues.reasoning_effort
       : "medium";
+
+  const modelOptions = [
+    { value: DEFAULT_MODEL_ID, name: DEFAULT_MODEL_ID },
+    { value: "fast-model", name: "fast-model" },
+    { value: "smart-model", name: "smart-model" },
+    { value: "gpt-5.4", name: "gpt-5.4" },
+    { value: "gpt-5.2", name: "gpt-5.2" },
+  ].filter((option) => option.value !== omitModelId);
 
   return [
     {
@@ -671,14 +699,8 @@ function buildConfigOptions(
       name: "Model",
       category: "model",
       type: "select",
-      currentValue: state.modelId,
-      options: [
-        { value: DEFAULT_MODEL_ID, name: DEFAULT_MODEL_ID },
-        { value: "fast-model", name: "fast-model" },
-        { value: "smart-model", name: "smart-model" },
-        { value: "gpt-5.4", name: "gpt-5.4" },
-        { value: "gpt-5.2", name: "gpt-5.2" },
-      ],
+      currentValue: currentModelId,
+      options: modelOptions,
     },
     {
       id: "reasoning_effort",
@@ -749,6 +771,7 @@ class MockAgent implements Agent {
       response.configOptions = buildConfigOptions(
         this.sessions.get(sessionId) ?? createSessionState(false),
         this.options.modelConfigId,
+        this.options.omitReconnectModelId,
       );
     }
 
@@ -1007,7 +1030,12 @@ class MockAgent implements Agent {
     }
 
     return {
-      configOptions: buildConfigOptions(session, this.options.modelConfigId),
+      configOptions: buildConfigOptions(
+        session,
+        this.options.modelConfigId,
+        this.options.omitReconnectModelId,
+        this.options.reportModelAs,
+      ),
     };
   }
 

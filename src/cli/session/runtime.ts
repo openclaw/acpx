@@ -42,7 +42,10 @@ import {
   setCurrentModelId,
   setDesiredModelId,
 } from "../../session/mode-preference.js";
-import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
+import {
+  applyRequestedModelIfAdvertised,
+  currentModelIdFromSetModelResponse,
+} from "../../session/model-application.js";
 import { advertisedModelState } from "../../session/model-state.js";
 import {
   absolutePath,
@@ -231,6 +234,7 @@ async function applyPromptModelIfAdvertised(params: {
   requestedModel: string | undefined;
   record: SessionRecord;
   timeoutMs?: number;
+  suppressWarnings?: boolean;
 }): Promise<void> {
   const requestedModel = requestedModelId(params.requestedModel);
   if (!requestedModel) {
@@ -238,12 +242,13 @@ async function applyPromptModelIfAdvertised(params: {
   }
 
   const models = advertisedModelState(params.record.acpx);
-  assertRequestedModelSupported({
+  const warning = assertRequestedModelSupported({
     requestedModel,
     models,
     agentCommand: params.record.agentCommand,
     context: "apply",
   });
+  emitModelSupportWarning(warning, params.suppressWarnings);
   if (!models) {
     return;
   }
@@ -258,7 +263,13 @@ async function applyPromptModelIfAdvertised(params: {
   );
   applyConfigOptionsToRecord(params.record, response);
   setDesiredModelId(params.record, requestedModel, models.configId);
-  setCurrentModelId(params.record, requestedModel);
+  setCurrentModelId(params.record, currentModelIdFromSetModelResponse(response, requestedModel));
+}
+
+function emitModelSupportWarning(warning: string | undefined, suppressWarnings?: boolean): void {
+  if (warning && !suppressWarnings) {
+    process.stderr.write(`[acpx] warning: ${warning}\n`);
+  }
 }
 
 function jsonRpcIdKey(value: unknown): string | undefined {
@@ -717,9 +728,10 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       acpxState = applyConfigOptionResponseToState(acpxState, response);
       const nextState = cloneSessionAcpxState(acpxState) ?? {};
       nextState.session_options = { ...nextState.session_options, model: modelId };
-      nextState.current_model_id = modelId;
+      nextState.current_model_id = currentModelIdFromSetModelResponse(response, modelId);
       clearDesiredConfigOption(nextState, models?.configId);
       acpxState = nextState;
+      return response;
     },
     setSessionConfigOption: async (configId: string, value: string) => {
       const response = await client.setSessionConfigOption(
@@ -732,7 +744,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       const modelConfigId = modelStateFromConfigOptions(nextState.config_options)?.configId;
       if (configId === modelConfigId) {
         nextState.session_options = { ...nextState.session_options, model: value };
-        nextState.current_model_id = value;
+        nextState.current_model_id = currentModelIdFromSetModelResponse(response, value);
         clearDesiredConfigOption(nextState, configId);
       } else if (configId === "mode") {
         nextState.desired_mode_id = value;
@@ -769,6 +781,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
           resumePolicy: options.resumePolicy,
           timeoutMs: options.timeoutMs,
           verbose: options.verbose,
+          suppressWarnings: options.suppressSdkConsoleErrors,
           activeController,
           onClientAvailable: (controller) => {
             options.onClientAvailable?.(controller);
@@ -905,6 +918,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
           requestedModel: sessionOptions?.model,
           record,
           timeoutMs: options.timeoutMs,
+          suppressWarnings: options.suppressSdkConsoleErrors,
         });
         acpxState = cloneSessionAcpxState(record.acpx);
 
@@ -1050,6 +1064,9 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
           models: createdSession.models,
           agentCommand: options.agentCommand,
           timeoutMs: options.timeoutMs,
+          onWarning: options.suppressSdkConsoleErrors
+            ? undefined
+            : (message) => process.stderr.write(`[acpx] warning: ${message}\n`),
         });
 
         output.setContext({

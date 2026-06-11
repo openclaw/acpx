@@ -1,7 +1,17 @@
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import type { AcpClient, SessionCreateResult } from "../acp/client.js";
-import { assertRequestedModelSupported } from "../acp/model-support.js";
+import {
+  assertRequestedModelSupported,
+  modelStateFromConfigOptions,
+} from "../acp/model-support.js";
 import { withTimeout } from "../async-control.js";
+
+export function currentModelIdFromSetModelResponse(
+  response: SetSessionConfigOptionResponse | undefined,
+  fallbackModelId: string | undefined,
+): string | undefined {
+  return modelStateFromConfigOptions(response?.configOptions)?.currentModelId ?? fallbackModelId;
+}
 
 export async function applyRequestedModelIfAdvertised(params: {
   client: AcpClient;
@@ -10,6 +20,7 @@ export async function applyRequestedModelIfAdvertised(params: {
   models: SessionCreateResult["models"];
   agentCommand?: string;
   timeoutMs?: number;
+  onWarning?: (message: string) => void;
 }): Promise<{
   applied: boolean;
   response?: SetSessionConfigOptionResponse;
@@ -19,12 +30,15 @@ export async function applyRequestedModelIfAdvertised(params: {
   if (!requestedModel) {
     return { applied: false };
   }
-  assertRequestedModelSupported({
+  const warning = assertRequestedModelSupported({
     requestedModel,
     models: params.models,
     agentCommand: params.agentCommand,
     context: "apply",
   });
+  if (warning) {
+    params.onWarning?.(warning);
+  }
   if (!params.models) {
     return { applied: false };
   }

@@ -74,6 +74,7 @@ export type SessionCreateOptions = {
   terminal?: boolean;
   verbose?: boolean;
   sessionOptions?: SessionAgentOptions;
+  onModelWarning?: (message: string) => void;
 } & TimedRunOptions;
 
 export type SessionSendOptions = {
@@ -118,6 +119,7 @@ export type SessionEnsureOptions = {
   verbose?: boolean;
   walkBoundary?: string;
   sessionOptions?: SessionAgentOptions;
+  onModelWarning?: (message: string) => void;
 } & TimedRunOptions;
 
 export type SessionListOptions = {

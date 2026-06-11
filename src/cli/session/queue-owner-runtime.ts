@@ -107,7 +107,7 @@ function createQueueOwnerTurnController(
       });
     },
     setSessionModelFallback: async (modelId: string, timeoutMs?: number) => {
-      await runSessionSetModelDirect({
+      const result = await runSessionSetModelDirect({
         sessionRecordId: options.sessionId,
         modelId,
         mcpServers: options.mcpServers,
@@ -118,6 +118,7 @@ function createQueueOwnerTurnController(
         timeoutMs,
         verbose: options.verbose,
       });
+      return result.response;
     },
     setSessionConfigOptionFallback: async (configId: string, value: string, timeoutMs?: number) => {
       const result = await runSessionSetConfigOptionDirect({
@@ -265,9 +266,8 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
         setSessionMode: async (modeId: string, timeoutMs?: number) => {
           await turnController.setSessionMode(modeId, timeoutMs);
         },
-        setSessionModel: async (modelId: string, timeoutMs?: number) => {
-          await turnController.setSessionModel(modelId, timeoutMs);
-        },
+        setSessionModel: async (modelId: string, timeoutMs?: number) =>
+          await turnController.setSessionModel(modelId, timeoutMs),
         setSessionConfigOption: async (configId: string, value: string, timeoutMs?: number) => {
           return await turnController.setSessionConfigOption(configId, value, timeoutMs);
         },

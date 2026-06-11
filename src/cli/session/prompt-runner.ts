@@ -12,6 +12,7 @@ import {
   setDesiredModeId,
   setDesiredModelId,
 } from "../../session/mode-preference.js";
+import { currentModelIdFromSetModelResponse } from "../../session/model-application.js";
 import { advertisedModelState } from "../../session/model-state.js";
 import { resolveSessionRecord, writeSessionRecord } from "../../session/persistence.js";
 import type {
@@ -140,11 +141,12 @@ export async function runSessionSetModelDirect(
       );
       applyConfigOptionsToRecord(record, response);
       setDesiredModelId(record, options.modelId, models?.configId);
-      setCurrentModelId(record, options.modelId);
+      setCurrentModelId(record, currentModelIdFromSetModelResponse(response, options.modelId));
+      return response;
     }),
   );
 
-  return toSessionMutationResult(result);
+  return { ...toSessionMutationResult(result), response: result.value };
 }
 
 export async function runSessionSetConfigOptionDirect(
@@ -160,7 +162,7 @@ export async function runSessionSetConfigOptionDirect(
       applyConfigOptionsToRecord(record, response);
       if (options.configId === modelConfigId) {
         setDesiredModelId(record, options.value, options.configId);
-        setCurrentModelId(record, options.value);
+        setCurrentModelId(record, currentModelIdFromSetModelResponse(response, options.value));
       } else if (options.configId === "mode") {
         setDesiredModeId(record, options.value);
       } else {

@@ -1369,6 +1369,63 @@ test("integration: exec --model rejects models not advertised by the agent", asy
   });
 });
 
+test("integration: Claude ACP prompt forwards saved model missing from reconnect advertisement", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-claude-"));
+
+    try {
+      const fakeClaude = await writeFakeClaudeAgent(fakeBinDir);
+      const modelAgentCommand = `${JSON.stringify(fakeClaude)} --supports-load-session --advertise-models --omit-reconnect-model gpt-5.4`;
+      const created = await runCli(
+        [
+          "--agent",
+          modelAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--model",
+          "gpt-5.4",
+          "sessions",
+          "new",
+        ],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+
+      const result = await runCli(
+        [
+          "--agent",
+          modelAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "--model",
+          "gpt-5.4",
+          "prompt",
+          "echo hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const setModelRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "model",
+      ) as { params?: { configId?: string; value?: string } } | undefined;
+      assert(setModelRequest, "expected model session config despite stale advertisement");
+      assert.equal(setModelRequest.params?.value, "gpt-5.4");
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: prompt --model updates existing session model before prompt", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -1408,6 +1465,36 @@ test("integration: prompt --model updates existing session model before prompt",
       assert(setModelRequest, "expected model session config before the persistent prompt");
       assert.equal(setModelRequest.params?.configId, "llm");
       assert.equal(setModelRequest.params?.value, "fast-model");
+
+      const status = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "--format", "json", "status"],
+        homeDir,
+      );
+      assert.equal(status.code, 0, status.stderr);
+      assert.equal((JSON.parse(status.stdout.trim()) as { model?: string }).model, "fast-model");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: status preserves model actually reported after set model", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const modelAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-models --report-model-as fast-model`;
+
+    try {
+      const created = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+
+      const setResult = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "set", "model", "gpt-5.4"],
+        homeDir,
+      );
+      assert.equal(setResult.code, 0, setResult.stderr);
 
       const status = await runCli(
         ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "--format", "json", "status"],
@@ -4182,6 +4269,26 @@ async function writeFakeDroidAgent(binDir: string): Promise<void> {
     ].join("\n"),
     { encoding: "utf8", mode: 0o755 },
   );
+}
+
+async function writeFakeClaudeAgent(binDir: string): Promise<string> {
+  const binName = process.platform === "win32" ? "claude-agent-acp.cmd" : "claude-agent-acp";
+  const binPath = path.join(binDir, binName);
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      binPath,
+      ["@echo off", "setlocal", `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`, ""].join("\r\n"),
+      { encoding: "utf8" },
+    );
+    return binPath;
+  }
+
+  await fs.writeFile(
+    binPath,
+    ["#!/bin/sh", `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`, ""].join("\n"),
+    { encoding: "utf8", mode: 0o755 },
+  );
+  return binPath;
 }
 
 async function writeFakeDevinAgent(binDir: string): Promise<void> {

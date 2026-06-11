@@ -437,6 +437,7 @@ export type SessionSetConfigOptionResult = {
 
 export type SessionSetModelResult = {
   record: SessionRecord;
+  response?: SetSessionConfigOptionResponse;
   resumed: boolean;
   loadError?: string;
 };

@@ -19,7 +19,7 @@ import { connectAndLoadSession, type ConnectedSessionController } from "./reconn
 import { sessionOptionsFromRecord } from "./session-options.js";
 
 export type FullConnectedSessionController = ConnectedSessionController & {
-  setSessionModel: (modelId: string) => Promise<void>;
+  setSessionModel: (modelId: string) => Promise<SetSessionConfigOptionResponse | undefined>;
   setSessionConfigOption: (
     configId: string,
     value: string,
@@ -83,6 +83,7 @@ function createActiveSessionController(params: {
       const models = advertisedModelState(params.record.acpx);
       const response = await params.client.setSessionModel(getActiveSessionId(), modelId, models);
       applyConfigOptionsToRecord(params.record, response);
+      return response;
     },
     setSessionConfigOption: async (configId: string, value: string) => {
       return await params.client.setSessionConfigOption(getActiveSessionId(), configId, value);

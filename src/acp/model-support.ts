@@ -166,10 +166,10 @@ export function assertRequestedModelSupported(params: {
   models: SessionModelState | undefined;
   agentCommand?: string;
   context: "apply" | "replay";
-}): void {
+}): string | undefined {
   if (!params.models) {
     if (supportsLegacyClaudeCodeModelMetadata(params.agentCommand)) {
-      return;
+      return undefined;
     }
     const action = params.context === "replay" ? "replay saved model" : "apply --model";
     throw new RequestedModelUnsupportedError(
@@ -179,9 +179,13 @@ export function assertRequestedModelSupported(params: {
 
   const advertised = new Set(params.models.availableModels.map((model) => model.modelId));
   if (!advertised.has(params.requestedModel)) {
+    if (supportsLegacyClaudeCodeModelMetadata(params.agentCommand)) {
+      return `requested model "${params.requestedModel}" was not in the Claude ACP advertised model list (${formatAvailableModelIds(params.models)}); forwarding it to Claude Code so the adapter can accept or reject it.`;
+    }
     const action = params.context === "replay" ? "replay saved model" : "apply --model";
     throw new RequestedModelUnsupportedError(
       `Cannot ${action} "${params.requestedModel}": the ACP agent did not advertise that model. Available models: ${formatAvailableModelIds(params.models)}.`,
     );
   }
+  return undefined;
 }

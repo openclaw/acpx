@@ -38,7 +38,7 @@ export type ConnectedSessionController = {
   hasActivePrompt: () => boolean;
   requestCancelActivePrompt: () => Promise<boolean>;
   setSessionMode: (modeId: string) => Promise<void>;
-  setSessionModel: (modelId: string) => Promise<void>;
+  setSessionModel: (modelId: string) => ReturnType<AcpClient["setSessionModel"]>;
   setSessionConfigOption: (
     configId: string,
     value: string,
@@ -64,6 +64,7 @@ export type ConnectAndLoadSessionOptions = {
   resumePolicy?: SessionResumePolicy;
   timeoutMs?: number;
   verbose?: boolean;
+  suppressWarnings?: boolean;
   activeController: ConnectedSessionController;
   onClientAvailable?: (controller: ConnectedSessionController) => void;
   onConnectedRecord?: (record: SessionRecord) => void;
@@ -165,18 +166,20 @@ async function replayDesiredModel(params: {
   models: import("../../acp/client.js").SessionLoadResult["models"] | undefined;
   timeoutMs?: number;
   verbose?: boolean;
+  suppressWarnings?: boolean;
 }): Promise<ModelReplayResult> {
   if (!params.desiredModelId) {
     return { replayed: false };
   }
 
   try {
-    assertRequestedModelSupported({
+    const warning = assertRequestedModelSupported({
       requestedModel: params.desiredModelId,
       models: params.models,
       agentCommand: params.record.agentCommand,
       context: "replay",
     });
+    emitModelSupportWarning(warning, params.suppressWarnings);
     if (!params.models || params.models.currentModelId === params.desiredModelId) {
       return { replayed: false };
     }
@@ -206,6 +209,12 @@ async function replayDesiredModel(params: {
         retryable: true,
       },
     );
+  }
+}
+
+function emitModelSupportWarning(warning: string | undefined, suppressWarnings?: boolean): void {
+  if (warning && !suppressWarnings) {
+    process.stderr.write(`[acpx] warning: ${warning}\n`);
   }
 }
 
@@ -342,6 +351,7 @@ export async function connectAndLoadSession(
     sessionModels,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
+    suppressWarnings: options.suppressWarnings,
   });
 
   applyReconnectedModelState(
@@ -463,6 +473,7 @@ async function replayFreshSessionPreferences(params: {
   sessionModels: import("../../acp/client.js").SessionLoadResult["models"];
   timeoutMs?: number;
   verbose?: boolean;
+  suppressWarnings?: boolean;
 }): Promise<FreshPreferenceReplayResult> {
   if (!params.createdFreshSession) {
     return {
@@ -491,6 +502,7 @@ async function replayFreshSessionPreferences(params: {
       models: params.sessionModels,
       timeoutMs: params.timeoutMs,
       verbose: params.verbose,
+      suppressWarnings: params.suppressWarnings,
     });
     configReplay = await replayDesiredConfigOptions({
       client: params.client,
