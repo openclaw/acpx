@@ -464,7 +464,7 @@ function updateCompareExitCode(rows: CompareRow[]): void {
     process.exitCode = EXIT_CODES.PERMISSION_DENIED;
     return;
   }
-  if (rows.length > 0 && rows.every((row) => row.status === "cancelled")) {
+  if (rows.some((row) => row.status === "cancelled")) {
     process.exitCode = EXIT_CODES.TIMEOUT;
   }
 }

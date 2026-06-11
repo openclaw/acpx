@@ -294,7 +294,7 @@ test("compare timeout marks slow agents as cancelled", async () => {
       cwd,
     );
 
-    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.code, 3, result.stderr);
     const rows = JSON.parse(result.stdout) as CompareRow[];
     assert.equal(rows.find((row) => row.agent === "fast")?.status, "ok");
     assert.equal(rows.find((row) => row.agent === "slow")?.status, "cancelled");
