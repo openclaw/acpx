@@ -55,8 +55,8 @@ test("fast-agent built-in runs the ACP entrypoint through uvx", () => {
 });
 
 test("mux built-in runs the coder/mux ACP stdio bridge through npx", () => {
-  assert.equal(AGENT_REGISTRY.mux, "npx -y mux@^0.26.0 acp");
-  assert.equal(resolveAgentCommand("mux"), "npx -y mux@^0.26.0 acp");
+  assert.equal(AGENT_REGISTRY.mux, "npx -y mux@^0.27.0 acp");
+  assert.equal(resolveAgentCommand("mux"), "npx -y mux@^0.27.0 acp");
 });
 
 test("listBuiltInAgents preserves the required example prefix and alphabetical tail", () => {
