@@ -519,10 +519,7 @@ function tocFromHtml(html) {
   const re = /<h([23]) id="([^"]+)">([\s\S]*?)<\/h[23]>/g;
   let m;
   while ((m = re.exec(html))) {
-    const text = m[3]
-      .replace(/<a class="anchor"[^>]*>.*?<\/a>/, "")
-      .replace(/<[^>]+>/g, "")
-      .trim();
+    const text = textFromHtml(m[3]).trim();
     items.push({ level: Number(m[1]), id: m[2], text });
   }
   if (items.length < 2) {
@@ -531,6 +528,25 @@ function tocFromHtml(html) {
   return `<nav class="toc" aria-label="On this page"><h2>On this page</h2>${items
     .map((i) => `<a class="toc-l${i.level}" href="#${i.id}">${escapeHtml(i.text)}</a>`)
     .join("")}</nav>`;
+}
+
+function textFromHtml(html) {
+  let text = "";
+  let inTag = false;
+  for (const char of String(html)) {
+    if (char === "<") {
+      inTag = true;
+      continue;
+    }
+    if (char === ">") {
+      inTag = false;
+      continue;
+    }
+    if (!inTag) {
+      text += char;
+    }
+  }
+  return text;
 }
 
 function isHomePage(page) {

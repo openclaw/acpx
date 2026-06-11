@@ -248,6 +248,12 @@ export type SessionRecord = {
     output_tokens?: number;
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
+    thought_tokens?: number;
+    total_tokens?: number;
+  };
+  cumulative_cost?: {
+    amount?: number;
+    currency?: string;
   };
   request_token_usage?: Record<
     string,
@@ -256,6 +262,8 @@ export type SessionRecord = {
       output_tokens?: number;
       cache_creation_input_tokens?: number;
       cache_read_input_tokens?: number;
+      thought_tokens?: number;
+      total_tokens?: number;
     }
   >;
   acpx?: {
@@ -263,7 +271,11 @@ export type SessionRecord = {
     desired_mode_id?: string;
     current_model_id?: string;
     available_models?: string[];
-    available_commands?: string[];
+    available_commands?: Array<{
+      name: string;
+      description?: string;
+      has_input?: boolean;
+    }>;
     config_options?: unknown[];
     session_options?: {
       model?: string;

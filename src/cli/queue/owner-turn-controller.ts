@@ -7,7 +7,7 @@ export type QueueOwnerActiveSessionController = {
   hasActivePrompt: () => boolean;
   requestCancelActivePrompt: () => Promise<boolean>;
   setSessionMode: (modeId: string) => Promise<void>;
-  setSessionModel: (modelId: string) => Promise<void>;
+  setSessionModel: (modelId: string) => Promise<SetSessionConfigOptionResponse | undefined>;
   setSessionConfigOption: (
     configId: string,
     value: string,
@@ -17,7 +17,10 @@ export type QueueOwnerActiveSessionController = {
 type QueueOwnerTurnControllerOptions = {
   withTimeout: <T>(run: () => Promise<T>, timeoutMs?: number) => Promise<T>;
   setSessionModeFallback: (modeId: string, timeoutMs?: number) => Promise<void>;
-  setSessionModelFallback: (modelId: string, timeoutMs?: number) => Promise<void>;
+  setSessionModelFallback: (
+    modelId: string,
+    timeoutMs?: number,
+  ) => Promise<SetSessionConfigOptionResponse | undefined>;
   setSessionConfigOptionFallback: (
     configId: string,
     value: string,
@@ -128,18 +131,20 @@ export class QueueOwnerTurnController {
     await this.options.setSessionModeFallback(modeId, timeoutMs);
   }
 
-  async setSessionModel(modelId: string, timeoutMs?: number): Promise<void> {
+  async setSessionModel(
+    modelId: string,
+    timeoutMs?: number,
+  ): Promise<SetSessionConfigOptionResponse | undefined> {
     this.assertCanHandleControlRequest();
     const activeController = this.activeController;
     if (activeController) {
-      await this.options.withTimeout(
+      return await this.options.withTimeout(
         async () => await activeController.setSessionModel(modelId),
         timeoutMs,
       );
-      return;
     }
 
-    await this.options.setSessionModelFallback(modelId, timeoutMs);
+    return await this.options.setSessionModelFallback(modelId, timeoutMs);
   }
 
   async setSessionConfigOption(

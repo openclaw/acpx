@@ -40,47 +40,76 @@ type SessionSendLike = {
   sessionOptions?: SessionAgentOptions;
 };
 
+function isNonEmptyStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((entry) => typeof entry === "string" && entry.length > 0)
+  );
+}
+
+const NODE_TEST_FLAGS = new Set([
+  "--experimental-test-coverage",
+  "--test",
+  "--test-name-pattern",
+  "--test-reporter",
+  "--test-reporter-destination",
+]);
+
+const NODE_TEST_FLAGS_WITH_VALUE = new Set([
+  "--test-name-pattern",
+  "--test-reporter",
+  "--test-reporter-destination",
+]);
+
+const INSPECTOR_FLAGS_WITH_VALUE = new Set([
+  "--inspect",
+  "--inspect-brk",
+  "--inspect-port",
+  "--inspect-publish-uid",
+  "--debug-port",
+]);
+
+const INSPECTOR_FLAG_PREFIXES = [
+  "--inspect=",
+  "--inspect-brk=",
+  "--inspect-port=",
+  "--inspect-publish-uid=",
+  "--debug-port=",
+];
+
+type ExecArgvDecision = "keep" | "drop" | "drop-with-value";
+
+function classifyExecArgv(value: string | undefined): ExecArgvDecision {
+  if (value === undefined) {
+    return "drop";
+  }
+  if (NODE_TEST_FLAGS_WITH_VALUE.has(value) || INSPECTOR_FLAGS_WITH_VALUE.has(value)) {
+    return "drop-with-value";
+  }
+  return dropSingleExecArgv(value) ? "drop" : "keep";
+}
+
+function dropSingleExecArgv(value: string): boolean {
+  return (
+    NODE_TEST_FLAGS.has(value) ||
+    value.startsWith("--test-") ||
+    INSPECTOR_FLAG_PREFIXES.some((prefix) => value.startsWith(prefix))
+  );
+}
+
 export function sanitizeQueueOwnerExecArgv(
   execArgv: readonly string[] = process.execArgv,
 ): string[] {
   const sanitized: string[] = [];
   for (let index = 0; index < execArgv.length; index += 1) {
-    const value = execArgv[index];
-    if (value === "--experimental-test-coverage" || value === "--test") {
+    const value = execArgv[index] ?? "";
+    const decision = classifyExecArgv(value);
+    if (decision === "drop") {
       continue;
     }
-    if (
-      value === "--test-name-pattern" ||
-      value === "--test-reporter" ||
-      value === "--test-reporter-destination"
-    ) {
+    if (decision === "drop-with-value") {
       index += 1;
-      continue;
-    }
-    if (value.startsWith("--test-")) {
-      continue;
-    }
-    if (
-      value === "--inspect" ||
-      value === "--inspect-brk" ||
-      value === "--inspect-port" ||
-      value === "--inspect-publish-uid" ||
-      value.startsWith("--inspect=") ||
-      value.startsWith("--inspect-brk=") ||
-      value.startsWith("--inspect-port=") ||
-      value.startsWith("--inspect-publish-uid=") ||
-      value === "--debug-port" ||
-      value.startsWith("--debug-port=")
-    ) {
-      if (
-        value === "--inspect" ||
-        value === "--inspect-brk" ||
-        value === "--inspect-port" ||
-        value === "--inspect-publish-uid" ||
-        value === "--debug-port"
-      ) {
-        index += 1;
-      }
       continue;
     }
     sanitized.push(value);
@@ -103,11 +132,7 @@ export function resolveQueueOwnerSpawnArgs(argv: readonly string[] = process.arg
   const override = process.env.ACPX_QUEUE_OWNER_ARGS;
   if (override) {
     const parsed = JSON.parse(override) as unknown;
-    if (
-      Array.isArray(parsed) &&
-      parsed.length > 0 &&
-      parsed.every((value) => typeof value === "string" && value.length > 0)
-    ) {
+    if (isNonEmptyStringArray(parsed)) {
       return [...parsed];
     }
     throw new Error("acpx self-spawn failed: invalid ACPX_QUEUE_OWNER_ARGS");

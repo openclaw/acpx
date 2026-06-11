@@ -39,7 +39,7 @@ export function formatSessionControlAcpSummary(acp: {
 }
 
 export function maybeWrapSessionControlError(
-  method: "session/set_mode" | "session/set_config_option" | "session/set_model",
+  method: "session/set_mode" | "session/set_model" | "session/set_config_option",
   error: unknown,
   context?: string,
 ): unknown {

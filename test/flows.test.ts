@@ -56,9 +56,19 @@ async function collectFlowFiles(root: string): Promise<string[]> {
 
 test("extractJsonObject parses direct, fenced, and embedded JSON", () => {
   assert.deepEqual(extractJsonObject('{"ok":true}'), { ok: true });
+  assert.deepEqual(extractJsonObject("[1,2,3]"), [1, 2, 3]);
   assert.deepEqual(extractJsonObject('```json\n{"ok":true}\n```'), { ok: true });
   assert.deepEqual(extractJsonObject('before {"ok":true} after'), { ok: true });
   assert.deepEqual(extractJsonObject('status {not json} then {"ok":true}'), { ok: true });
+  assert.deepEqual(extractJsonObject('before [{"ok":"yes"}] after'), [{ ok: "yes" }]);
+  assert.deepEqual(extractJsonObject('before {"message":"brace } in string","ok":true} after'), {
+    message: "brace } in string",
+    ok: true,
+  });
+  assert.deepEqual(extractJsonObject('before {"quote":"\\"","ok":true} after'), {
+    quote: '"',
+    ok: true,
+  });
 });
 
 test("parseJsonObject supports strict and fenced-only modes", () => {
@@ -74,15 +84,26 @@ test("parseJsonObject supports strict and fenced-only modes", () => {
     () => parseJsonObject(null as unknown as string),
     /Expected JSON output, got empty text/,
   );
+  assert.throws(
+    () => parseJsonObject(Symbol("empty") as unknown as string),
+    /Could not parse JSON from assistant output:\nSymbol\(empty\)/,
+  );
   assert.throws(() => parseStrictJsonObject('before {"ok":true} after'), /Could not parse JSON/);
   assert.throws(
     () => parseJsonObject('before {"ok":true} after', { mode: "fenced" }),
+    /Could not parse JSON/,
+  );
+  assert.throws(
+    () => parseJsonObject("before [1, 2} after", { mode: "compat" }),
     /Could not parse JSON/,
   );
 });
 
 test("parseJsonObject parses fenced JSON without regex backtracking", () => {
   assert.deepEqual(parseJsonObject('```JSON\r\n{"ok":true}\n```', { mode: "fenced" }), {
+    ok: true,
+  });
+  assert.deepEqual(parseJsonObject('```\n{"ok":true}\n```', { mode: "fenced" }), {
     ok: true,
   });
   assert.throws(() => parseJsonObject("```json\n", { mode: "fenced" }), /Could not parse JSON/);
@@ -286,6 +307,21 @@ test("FlowRunner routes through decision helpers", async () => {
 });
 
 test("flow node helpers validate node-local shape before runtime", () => {
+  const acpNode = acp({
+    prompt: () => "hello",
+    cwd: ({ state }) => state.runId,
+    session: {
+      handle: "main",
+      isolated: true,
+    },
+    parse: (text) => ({ text }),
+    timeoutMs: 100,
+    heartbeatMs: 10,
+    statusDetail: "Prompting",
+  });
+  assert.equal(acpNode.nodeType, "acp");
+  assert.equal(acpNode.session?.handle, "main");
+
   const extensibleNode = compute({
     run: () => ({ ok: true }),
     metadata: {
@@ -346,10 +382,29 @@ test("flow node helpers validate node-local shape before runtime", () => {
       } as unknown as Omit<ShellActionNodeDefinition, "nodeType">),
     /Invalid shell action node definition: exec: exec must be a function/,
   );
+
+  const checkpointNode = checkpoint({
+    summary: "Ready for review",
+    run: () => ({ approved: true }),
+  });
+  assert.equal(checkpointNode.summary, "Ready for review");
+  assert.equal(typeof checkpointNode.run, "function");
+
+  assert.deepEqual(checkpoint(), {
+    nodeType: "checkpoint",
+  });
 });
 
 test("defineFlow validates flow definition shape before execution", () => {
   const extensibleFlow = defineFlow({
+    run: {
+      title: "Extensible flow",
+    },
+    permissions: {
+      requiredMode: "approve-all",
+      requireExplicitGrant: true,
+      reason: "integration test",
+    },
     name: "extensible-flow",
     startAt: "start",
     metadata: {
@@ -375,6 +430,43 @@ test("defineFlow validates flow definition shape before execution", () => {
     {
       label: "start",
     },
+  );
+
+  assert.throws(
+    () =>
+      defineFlow({
+        run: {
+          title: 1,
+        },
+        name: "invalid-node-flow",
+        startAt: "start",
+        nodes: {
+          start: {
+            nodeType: "acp",
+            prompt: "echo hello",
+          },
+        },
+        edges: [],
+      } as unknown as FlowDefinition),
+    /Invalid flow definition: run\.title:/,
+  );
+
+  assert.throws(
+    () =>
+      defineFlow({
+        permissions: {
+          requiredMode: "bad-mode",
+        },
+        name: "invalid-permissions-flow",
+        startAt: "start",
+        nodes: {
+          start: compute({
+            run: () => ({ ok: true }),
+          }),
+        },
+        edges: [],
+      } as unknown as FlowDefinition),
+    /Invalid flow definition: permissions\.requiredMode:/,
   );
 
   assert.throws(

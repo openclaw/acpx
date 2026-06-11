@@ -25,7 +25,7 @@ jobs:
       docs_changed: ${{ steps.scope.outputs.docs_changed }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.3
         with:
           fetch-depth: 0
           fetch-tags: false
@@ -111,10 +111,18 @@ jobs:
           - name: Test
             node_version: 22
             command: pnpm run test:coverage
+          - name: Mutation
+            node_version: 22
+            command: pnpm run mutate
+          - name: Slophammer
+            command: |
+              pnpm dlx slophammer-ts@latest rules --format text
+              pnpm dlx slophammer-ts@latest dry .
+              pnpm dlx slophammer-ts@latest check . --only ts.dependency-boundaries-required
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.3
         with:
           fetch-depth: 1
           fetch-tags: false
@@ -147,7 +155,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.3
         with:
           fetch-depth: 1
           fetch-tags: false

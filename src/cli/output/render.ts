@@ -1,6 +1,6 @@
 import path from "node:path";
 import { normalizeRuntimeSessionId } from "../../session/runtime-session-id.js";
-import type { OutputFormat, SessionRecord } from "../../types.js";
+import type { AgentSessionListResult, OutputFormat, SessionRecord } from "../../types.js";
 import { probeQueueOwnerHealth } from "../queue/ipc.js";
 import { emitJsonResult } from "./json-output.js";
 
@@ -32,10 +32,7 @@ export function printSessionsByFormat(sessions: SessionRecord[], format: OutputF
   }
 
   if (format === "quiet") {
-    for (const session of sessions) {
-      const closedMarker = session.closed ? " [closed]" : "";
-      process.stdout.write(`${session.acpxRecordId}${closedMarker}\n`);
-    }
+    printQuietSessions(sessions);
     return;
   }
 
@@ -49,6 +46,55 @@ export function printSessionsByFormat(sessions: SessionRecord[], format: OutputF
     process.stdout.write(
       `${session.acpxRecordId}${closedMarker}\t${session.name ?? "-"}\t${session.cwd}\t${session.lastUsedAt}\n`,
     );
+  }
+}
+
+function printQuietSessions(sessions: SessionRecord[]): void {
+  for (const session of sessions) {
+    const closedMarker = session.closed ? " [closed]" : "";
+    process.stdout.write(`${session.acpxRecordId}${closedMarker}\n`);
+  }
+}
+
+export function printAgentSessionsByFormat(
+  result: AgentSessionListResult,
+  format: OutputFormat,
+): void {
+  if (format === "json") {
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return;
+  }
+
+  if (format === "quiet") {
+    printQuietAgentSessions(result);
+    return;
+  }
+
+  printTextAgentSessions(result);
+}
+
+function printQuietAgentSessions(result: AgentSessionListResult): void {
+  for (const session of result.sessions) {
+    process.stdout.write(`${session.sessionId}\n`);
+  }
+}
+
+function printTextAgentSessions(result: AgentSessionListResult): void {
+  if (result.sessions.length === 0) {
+    process.stdout.write("No sessions\n");
+  } else {
+    for (const session of result.sessions) {
+      const title = session.title ?? "-";
+      const updatedAt = session.updatedAt ?? "-";
+      const meta = session._meta ? JSON.stringify(session._meta) : "-";
+      process.stdout.write(
+        `${session.sessionId}\t${title}\t${session.cwd}\t${updatedAt}\t${meta}\n`,
+      );
+    }
+  }
+
+  if (result.nextCursor) {
+    process.stdout.write(`Next cursor: ${result.nextCursor}\n`);
   }
 }
 
@@ -224,22 +270,12 @@ export function printPruneResultByFormat(
 ): void {
   const count = result.pruned.length;
 
-  if (
-    emitJsonResult(format, {
-      action: result.dryRun ? "sessions_prune_dry_run" : "sessions_pruned",
-      dryRun: result.dryRun,
-      count,
-      bytesFreed: result.bytesFreed,
-      pruned: result.pruned.map((r) => r.acpxRecordId),
-    })
-  ) {
+  if (emitPruneJsonResult(result, format, count)) {
     return;
   }
 
   if (format === "quiet") {
-    for (const record of result.pruned) {
-      process.stdout.write(`${record.acpxRecordId}\n`);
-    }
+    printQuietPruneResult(result.pruned);
     return;
   }
 
@@ -250,10 +286,7 @@ export function printPruneResultByFormat(
     return;
   }
 
-  const prefix = result.dryRun ? "[DRY RUN] Would prune" : "Pruned";
-  const bytesSuffix =
-    !result.dryRun && result.bytesFreed > 0 ? `, freed ${formatBytes(result.bytesFreed)}` : "";
-  process.stdout.write(`${prefix} ${count} session${count === 1 ? "" : "s"}${bytesSuffix}\n`);
+  process.stdout.write(`${formatPruneSummaryLine(result, count)}\n`);
 
   for (const record of result.pruned) {
     const label = record.name ? ` (${record.name})` : "";
@@ -261,6 +294,36 @@ export function printPruneResultByFormat(
       `  ${record.acpxRecordId}${label}\t${record.closedAt ?? record.lastUsedAt}\n`,
     );
   }
+}
+
+function emitPruneJsonResult(
+  result: { pruned: SessionRecord[]; bytesFreed: number; dryRun: boolean },
+  format: OutputFormat,
+  count: number,
+): boolean {
+  return emitJsonResult(format, {
+    action: result.dryRun ? "sessions_prune_dry_run" : "sessions_pruned",
+    dryRun: result.dryRun,
+    count,
+    bytesFreed: result.bytesFreed,
+    pruned: result.pruned.map((r) => r.acpxRecordId),
+  });
+}
+
+function printQuietPruneResult(pruned: SessionRecord[]): void {
+  for (const record of pruned) {
+    process.stdout.write(`${record.acpxRecordId}\n`);
+  }
+}
+
+function formatPruneSummaryLine(
+  result: { bytesFreed: number; dryRun: boolean },
+  count: number,
+): string {
+  const prefix = result.dryRun ? "[DRY RUN] Would prune" : "Pruned";
+  const bytesSuffix =
+    !result.dryRun && result.bytesFreed > 0 ? `, freed ${formatBytes(result.bytesFreed)}` : "";
+  return `${prefix} ${count} session${count === 1 ? "" : "s"}${bytesSuffix}`;
 }
 
 export function agentSessionIdPayload(agentSessionId: string | undefined): {

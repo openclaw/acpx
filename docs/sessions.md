@@ -4,6 +4,7 @@ description: Persistent multi-turn ACP sessions in acpx — scope rules, named s
 ---
 
 `acpx` sessions are how multi-turn agent conversations survive between invocations. A session is a JSON record on disk plus, when active, a queue owner process that holds the live ACP connection.
+The session record tracks the logical conversation; the queue owner lease is the source of truth for whether `acpx` currently expects a helper process to be alive.
 
 ## Scope key
 
@@ -21,7 +22,9 @@ That is what makes `acpx codex` in `~/repos/api` and `acpx codex` in `~/repos/we
 
 ```bash
 acpx codex sessions                  # list (alias for `sessions list`)
-acpx codex sessions list             # list all sessions for codex (any cwd)
+acpx codex sessions list             # list agent sessions via ACP when supported
+acpx codex sessions list --filter-cwd . --cursor <cursor>
+acpx codex sessions list --local     # list saved acpx records
 acpx codex sessions new              # create a fresh cwd-scoped default session
 acpx codex sessions new --name api   # create a fresh named session
 acpx codex sessions ensure           # idempotent: existing or create
@@ -30,6 +33,8 @@ acpx codex sessions show             # metadata for the cwd-scoped default
 acpx codex sessions show api         # metadata for the named session
 acpx codex sessions history          # last 20 turn previews
 acpx codex sessions history --limit 50
+acpx codex sessions export api --output api-session.json
+acpx codex sessions import api-session.json --name api-restored
 acpx codex sessions close            # soft-close cwd default
 acpx codex sessions close api        # soft-close named session
 acpx codex sessions prune --dry-run
@@ -38,6 +43,13 @@ acpx codex sessions prune --before 2026-01-01 --include-history
 ```
 
 Top-level `acpx sessions …` defaults to `codex`.
+
+`sessions list` prefers the agent-side ACP `session/list` method when the
+selected agent advertises `sessionCapabilities.list`. JSON output includes the
+agent's `SessionInfo` fields, any `_meta` metadata, and `nextCursor` for manual
+pagination. Use `--filter-cwd <dir>` to send the ACP cwd filter; relative paths
+resolve against global `--cwd`. Use `--local` when you specifically want the
+saved `~/.acpx/sessions` records.
 
 ## Auto-resume by directory walk
 
@@ -87,6 +99,24 @@ Named sessions are independent. They do not share state, queue owners, or histor
 - Auto-resume by scope skips closed sessions.
 - Closed sessions can still be loaded explicitly through embedding APIs.
 - `sessions prune` is the explicit way to delete closed records.
+
+## Export / import
+
+`acpx` persists sessions per cwd in `~/.acpx/sessions/`. To move a session between machines or share one with a teammate:
+
+```bash
+# On the source machine:
+acpx codex sessions export my-debug-session --output debug.json
+
+# On the destination machine:
+acpx codex sessions import debug.json --name debug-on-laptop
+```
+
+Export refuses to run if the session is locked by a live queue owner. Run `acpx codex sessions close my-debug-session` first.
+
+The archive is plain JSON. Paths are stored relative to home, so an imported session lands at `~/<original-cwd-relative>` on the destination machine without embedding the source machine's absolute cwd. Override with `--cwd`.
+
+Imports keep the archive's provider session id, reopen the copied session as an idle local record, and clear source-machine process metadata. Imported sessions must resume that provider session; if the destination agent cannot load it, prompts fail clearly instead of starting an empty conversation. If the destination already has an active session for the same `(agent, cwd, name)` scope, import fails; pass `--name` or `--cwd` to choose a different scope. If a local record already uses the same provider session id, prune or remove that record before importing.
 
 ## Prune
 
@@ -156,11 +186,11 @@ See [Session control](session-control.md) for `set-mode`, `set <key> <value>`, a
 
 ## Crash recovery
 
-Saved sessions track adapter PIDs. If a saved PID is dead on the next prompt:
+Saved sessions may include a cached adapter PID from the last connected helper process. That PID is a runtime hint, not proof that the logical session is closed or broken. If a cached PID is gone on the next prompt:
 
 1. `acpx` respawns the agent.
-2. Attempts ACP `session/load` with the saved provider session id.
-3. Falls back to `session/new` if loading fails, transparently updating the saved record.
+2. Attempts ACP `session/resume` with the saved provider session id when the agent advertises it, otherwise ACP `session/load`.
+3. Falls back to `session/new` if reconnecting fails, transparently updating the saved record.
 
 This makes long-running scripted sessions resilient to crashes, OS restarts, and adapter upgrades.
 
@@ -168,14 +198,15 @@ This makes long-running scripted sessions resilient to crashes, OS restarts, and
 
 `acpx codex status` reports local process state:
 
-| State        | Meaning                                                |
-| ------------ | ------------------------------------------------------ |
-| `running`    | Queue owner alive and processing a prompt              |
-| `idle`       | Saved session resumable, no queue owner running        |
-| `dead`       | Saved PID is gone; next prompt will respawn and reload |
-| `no-session` | No saved record matches this scope                     |
+| State        | Meaning                                                                          |
+| ------------ | -------------------------------------------------------------------------------- |
+| `running`    | Queue owner alive and processing a prompt                                        |
+| `idle`       | Saved session resumable, no queue owner running                                  |
+| `dead`       | Queue owner was expected but is unavailable, or the last agent exit was abnormal |
+| `no-session` | No saved record matches this scope                                               |
 
 Status checks are local (`kill(pid, 0)` semantics) — they do not touch the agent.
+`closed` describes the logical session lifecycle. A helper process can exit while the session remains open and resumable. Status reports a PID only when a live queue-owner lease ties that process to the session; queue owner liveness comes from `~/.acpx/queues/*.lock` plus its heartbeat and process probe.
 
 ## CWD scoping
 

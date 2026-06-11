@@ -8,14 +8,55 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
-- CLI: add `acpx compare` to run one prompt across multiple agents, summarize timing, token usage, stop reason, final output preview, and persisted per-agent transcripts.
+- Agents/built-ins: bump the default Claude ACP adapter range to `@agentclientprotocol/claude-agent-acp@^0.37.0`. Thanks @trumpyla.
+- Runtime/embedding: surface cost, token usage breakdowns, and advertised command metadata on runtime status/events. Thanks @DaniAkash.
+- Agents/built-ins: add `fast-agent` as a built-in fast-agent ACP adapter via `uvx fast-agent-mcp acp`.
+- Agents/built-ins: add `mux` as a built-in coder/mux ACP adapter via `npx -y mux@^0.27.0 acp`. Thanks @ThomasK33.
+- CLI: add `acpx compare` to run one prompt across multiple agents and summarize timing, token usage, stop reason, permissions, and final output side by side. Thanks @mvanhorn.
+
+### Breaking
+
+### Fixes
+
+- ACP/models: support SDK 0.25 model config options while preserving `session/set_model` compatibility for adapters that explicitly advertise legacy model metadata.
+- CLI/Claude: let Claude Code adjudicate model selectors missing from a stale advertised model list on later persistent turns, and preserve the adapter-reported current model after model switches. Thanks @oakif.
+- Client/ACP: advertise scoped Devin/Windsurf-compatible client metadata and handle Devin extension requests/notifications without noisy method-not-found logs. Thanks @LivioGama.
+
+## 2026.5.23 (v0.10.0)
+
+### Changes
+
+- CLI/sessions: add `sessions export` and `sessions import` for moving portable session archives between machines. Thanks @mvanhorn.
+
+### Breaking
+
+### Fixes
+
+## 2026.5.22 (v0.9.0)
+
+### Changes
+
+- Tooling: add Slophammer TypeScript quality gates for coverage, complexity,
+  unsafe types, mutation testing, DRY checks, and dependency boundaries.
+- Agents/built-ins: switch the default Codex adapter to `@agentclientprotocol/codex-acp`, with Codex model selection handled through advertised ACP model ids, and bump the default Claude ACP adapter range.
+- Tooling: add a repo-local autoreview skill and helper for Codex-first
+  closeout review with acpx checks in parallel.
 
 ### Breaking
 
 ### Fixes
 
 - CLI: treat `--version` after `--` as prompt text instead of intercepting it as a top-level version request.
+- CLI: keep custom raw agent commands routed correctly when global flags such as `--system-prompt`, `--append-system-prompt`, `--prompt-retries`, or `--no-terminal` appear before the agent name. Thanks @amknight.
 - CLI/API: avoid installing CLI-only process handlers when the package entrypoint is imported as a module.
+- CLI/sessions: use agent-side ACP `session/list` when available, including
+  cursor pagination, cwd filtering, and agent-native session metadata. Thanks
+  @amknight.
+- Sessions/reconnect: use ACP `session/resume` when adapters advertise it, so resume-only agents can reuse saved sessions without requiring `session/load`. Thanks @amknight.
+- CLI/ACP: validate rich prompt blocks against advertised ACP
+  `promptCapabilities` and support audio prompt content end-to-end. Thanks
+  @amknight.
+- CLI/status: hide stale cached session PIDs when no live helper process exists. Thanks @dutifulbob.
 
 ## 2026.5.15 (v0.8.0)
 

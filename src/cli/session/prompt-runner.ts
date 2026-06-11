@@ -5,12 +5,15 @@ import {
   type WithConnectedSessionOptions,
   type WithConnectedSessionResult,
 } from "../../runtime/engine/connected-session.js";
+import { applyConfigOptionsToRecord } from "../../session/config-options.js";
 import {
   setCurrentModelId,
   setDesiredConfigOption,
   setDesiredModeId,
   setDesiredModelId,
 } from "../../session/mode-preference.js";
+import { currentModelIdFromSetModelResponse } from "../../session/model-application.js";
+import { advertisedModelState } from "../../session/model-state.js";
 import { resolveSessionRecord, writeSessionRecord } from "../../session/persistence.js";
 import type {
   AuthPolicy,
@@ -131,13 +134,19 @@ export async function runSessionSetModelDirect(
 ): Promise<SessionSetModelResult> {
   const result = await withConnectedSession(
     buildDirectConnectedSessionOptions(options, async ({ client, sessionId, record }) => {
-      await withTimeout(client.setSessionModel(sessionId, options.modelId), options.timeoutMs);
-      setDesiredModelId(record, options.modelId);
-      setCurrentModelId(record, options.modelId);
+      const models = advertisedModelState(record.acpx);
+      const response = await withTimeout(
+        client.setSessionModel(sessionId, options.modelId, models),
+        options.timeoutMs,
+      );
+      applyConfigOptionsToRecord(record, response);
+      setDesiredModelId(record, options.modelId, models?.configId);
+      setCurrentModelId(record, currentModelIdFromSetModelResponse(response, options.modelId));
+      return response;
     }),
   );
 
-  return toSessionMutationResult(result);
+  return { ...toSessionMutationResult(result), response: result.value };
 }
 
 export async function runSessionSetConfigOptionDirect(
@@ -145,11 +154,16 @@ export async function runSessionSetConfigOptionDirect(
 ): Promise<SessionSetConfigOptionResult> {
   const result = await withConnectedSession(
     buildDirectConnectedSessionOptions(options, async ({ client, sessionId, record }) => {
+      const modelConfigId = advertisedModelState(record.acpx)?.configId;
       const response = await withTimeout(
         client.setSessionConfigOption(sessionId, options.configId, options.value),
         options.timeoutMs,
       );
-      if (options.configId === "mode") {
+      applyConfigOptionsToRecord(record, response);
+      if (options.configId === modelConfigId) {
+        setDesiredModelId(record, options.value, options.configId);
+        setCurrentModelId(record, currentModelIdFromSetModelResponse(response, options.value));
+      } else if (options.configId === "mode") {
         setDesiredModeId(record, options.value);
       } else {
         setDesiredConfigOption(record, options.configId, options.value);

@@ -124,6 +124,16 @@
   ],
   "overrides": [
     {
+      "files": ["src/**/*.ts"],
+      "rules": {
+        "eslint/complexity": ["error", 8],
+        "typescript/no-unsafe-assignment": "error",
+        "typescript/no-unsafe-call": "error",
+        "typescript/no-unsafe-member-access": "error",
+        "typescript/no-unsafe-return": "error"
+      }
+    },
+    {
       "files": [
         "**/*.test.ts",
         "**/*.test.tsx",

@@ -1,0 +1,84 @@
+typescript:
+  coverage:
+    threshold: 85
+  complexity:
+    max: 8
+  dry:
+    max_findings: 0
+    paths:
+      - src
+    exclude:
+      - "**/*.test.ts"
+      - "**/*.spec.ts"
+      - "dist/**"
+      - "dist-test/**"
+      - "node_modules/**"
+      - "examples/flows/replay-viewer/dist/**"
+    copied_blocks:
+      enabled: true
+      min_tokens: 100
+  mutation:
+    targets:
+      - src/cli/flags.ts
+  dependency_boundaries:
+    - from: src/acp
+      allow:
+        - src/agent-registry
+        - src/async-control
+        - src/errors
+        - src/filesystem
+        - src/permission-prompt
+        - src/permissions
+        - src/prompt-content
+        - src/session/runtime-session-id
+        - src/spawn-command-options
+        - src/types
+        - src/version
+    - from: src/cli
+      allow:
+        - src/acp
+        - src/agent-registry
+        - src/async-control
+        - src/errors
+        - src/flows/cli
+        - src/mcp-servers
+        - src/perf-metrics
+        - src/perf-metrics-capture
+        - src/permission-policy
+        - src/process-liveness
+        - src/prompt-content
+        - src/runtime
+        - src/session
+        - src/types
+    - from: src/flows
+      allow:
+        - src/acp
+        - src/async-control
+        - src/cli
+        - src/permissions
+        - src/permission-policy
+        - src/prompt-content
+        - src/session
+        - src/types
+    - from: src/runtime
+      allow:
+        - src/acp
+        - src/agent-registry
+        - src/async-control
+        - src/errors
+        - src/perf-metrics
+        - src/persisted-key-policy
+        - src/prompt-content
+        - src/session
+        - src/types
+    - from: src/session
+      allow:
+        - src/acp
+        - src/async-control
+        - src/cli/session
+        - src/errors
+        - src/perf-metrics
+        - src/process-liveness
+        - src/persisted-key-policy
+        - src/prompt-content
+        - src/types

@@ -4,8 +4,9 @@ import { fileURLToPath } from "node:url";
 
 const ACP_ADAPTER_PACKAGE_RANGES = {
   pi: "^0.0.26",
-  codex: "^0.12.0",
-  claude: "^0.31.0",
+  codex: "^0.0.44",
+  claude: "^0.37.0",
+  mux: "^0.27.0",
 } as const;
 
 type BuiltInAgentPackageSpec = {
@@ -38,16 +39,18 @@ type BuiltInLaunchResolverOptions = {
 export const AGENT_REGISTRY: Record<string, string> = {
   pi: `npx pi-acp@${ACP_ADAPTER_PACKAGE_RANGES.pi}`,
   openclaw: "openclaw acp",
-  codex: `npx @zed-industries/codex-acp@${ACP_ADAPTER_PACKAGE_RANGES.codex}`,
+  codex: `npx -y @agentclientprotocol/codex-acp@${ACP_ADAPTER_PACKAGE_RANGES.codex}`,
   claude: `npx -y @agentclientprotocol/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
   gemini: "gemini --acp",
   cursor: "cursor-agent acp",
   copilot: "copilot --acp --stdio",
   droid: "droid exec --output-format acp",
+  "fast-agent": "uvx fast-agent-mcp acp",
   iflow: "iflow --experimental-acp",
   kilocode: "npx -y @kilocode/cli acp",
   kimi: "kimi acp",
   kiro: "kiro-cli-chat acp",
+  mux: `npx -y mux@${ACP_ADAPTER_PACKAGE_RANGES.mux} acp`,
   opencode: "npx -y opencode-ai acp",
   qoder: "qodercli --acp",
   qwen: "qwen --acp",
@@ -56,7 +59,7 @@ export const AGENT_REGISTRY: Record<string, string> = {
 
 export const BUILT_IN_AGENT_PACKAGES = {
   codex: {
-    packageName: "@zed-industries/codex-acp",
+    packageName: "@agentclientprotocol/codex-acp",
     packageRange: ACP_ADAPTER_PACKAGE_RANGES.codex,
     preferredBinName: "codex-acp",
     fallbackCommand: AGENT_REGISTRY.codex,
@@ -191,38 +194,54 @@ export function resolveInstalledBuiltInAgentLaunch(
   const resolvePackageRoot = options.resolvePackageRoot ?? defaultResolvePackageRoot;
 
   try {
-    const packageRoot = resolvePackageRoot(spec.packageName);
-    const manifest = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8")) as {
-      name?: string;
-      version?: string;
-      bin?: string | Record<string, string>;
-    };
-    if (manifest.name !== spec.packageName) {
-      return undefined;
-    }
-
-    const relativeBinPath = resolvePackageBin(spec, manifest);
-    if (!relativeBinPath) {
-      return undefined;
-    }
-
-    const binPath = path.resolve(packageRoot, relativeBinPath);
-    if (!existsSync(binPath)) {
+    const resolved = resolveInstalledBuiltInAgentPackage(spec, {
+      readFileSync,
+      existsSync,
+      resolvePackageRoot,
+    });
+    if (!resolved) {
       return undefined;
     }
 
     return {
       source: "installed",
       command: process.execPath,
-      args: [binPath],
+      args: [resolved.binPath],
       packageName: spec.packageName,
       packageRange: spec.packageRange,
-      packageVersion: manifest.version,
-      binPath,
+      packageVersion: resolved.packageVersion,
+      binPath: resolved.binPath,
     };
   } catch {
     return undefined;
   }
+}
+
+function resolveInstalledBuiltInAgentPackage(
+  spec: BuiltInAgentPackageSpec,
+  options: Required<
+    Pick<BuiltInLaunchResolverOptions, "readFileSync" | "existsSync" | "resolvePackageRoot">
+  >,
+): { packageVersion?: string; binPath: string } | undefined {
+  const packageRoot = options.resolvePackageRoot(spec.packageName);
+  const manifest = JSON.parse(
+    options.readFileSync(path.join(packageRoot, "package.json"), "utf8"),
+  ) as {
+    name?: string;
+    version?: string;
+    bin?: string | Record<string, string>;
+  };
+  if (manifest.name !== spec.packageName) {
+    return undefined;
+  }
+
+  const relativeBinPath = resolvePackageBin(spec, manifest);
+  if (!relativeBinPath) {
+    return undefined;
+  }
+
+  const binPath = path.resolve(packageRoot, relativeBinPath);
+  return options.existsSync(binPath) ? { packageVersion: manifest.version, binPath } : undefined;
 }
 
 export function resolvePackageExecBuiltInAgentLaunch(

@@ -12,6 +12,37 @@ export type ProbeRuntimeDeps = {
   clientFactory?: (options: ConstructorParameters<typeof AcpClient>[0]) => AcpClient;
 };
 
+function isPrimitiveDetail(value: unknown): boolean {
+  return (
+    value == null ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint" ||
+    typeof value === "symbol"
+  );
+}
+
+function formatFunctionDetail(value: Function): string {
+  return value.name ? `[Function ${value.name}]` : "[Function]";
+}
+
+function serializeRuntimeDetail(value: unknown): string {
+  const seen = new WeakSet<object>();
+  const serialized = JSON.stringify(value, (_key: string, nested: unknown): unknown => {
+    if (nested instanceof Error) {
+      return nested.message || nested.name;
+    }
+    if (nested && typeof nested === "object") {
+      if (seen.has(nested)) {
+        return "[Circular]";
+      }
+      seen.add(nested);
+    }
+    return nested;
+  });
+  return serialized ?? "undefined";
+}
+
 export function formatRuntimeDetail(value: unknown): string {
   if (value instanceof Error) {
     return value.message || value.name;
@@ -19,34 +50,15 @@ export function formatRuntimeDetail(value: unknown): string {
   if (typeof value === "string") {
     return value;
   }
-  if (
-    value == null ||
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    typeof value === "bigint" ||
-    typeof value === "symbol"
-  ) {
+  if (isPrimitiveDetail(value)) {
     return String(value);
   }
   if (typeof value === "function") {
-    return value.name ? `[Function ${value.name}]` : "[Function]";
+    return formatFunctionDetail(value);
   }
 
-  const seen = new WeakSet<object>();
   try {
-    const serialized = JSON.stringify(value, (_key, nested) => {
-      if (nested instanceof Error) {
-        return nested.message || nested.name;
-      }
-      if (nested && typeof nested === "object") {
-        if (seen.has(nested)) {
-          return "[Circular]";
-        }
-        seen.add(nested);
-      }
-      return nested;
-    });
-    return serialized ?? "undefined";
+    return serializeRuntimeDetail(value);
   } catch {
     return "unserializable object";
   }
@@ -64,23 +76,7 @@ export async function probeRuntime(
 ): Promise<RuntimeHealthReport> {
   const agentName = options.probeAgent?.trim() || DEFAULT_AGENT_NAME;
   const agentCommand = options.agentRegistry.resolve(agentName);
-  const client =
-    deps.clientFactory?.({
-      agentCommand,
-      cwd: options.cwd,
-      mcpServers: [...(options.mcpServers ?? [])],
-      permissionMode: options.permissionMode,
-      nonInteractivePermissions: options.nonInteractivePermissions,
-      verbose: options.verbose,
-    }) ??
-    new AcpClient({
-      agentCommand,
-      cwd: options.cwd,
-      mcpServers: [...(options.mcpServers ?? [])],
-      permissionMode: options.permissionMode,
-      nonInteractivePermissions: options.nonInteractivePermissions,
-      verbose: options.verbose,
-    });
+  const client = createProbeClient(options, agentCommand, deps);
 
   try {
     await client.start();
@@ -110,4 +106,20 @@ export async function probeRuntime(
   } finally {
     await client.close().catch(() => {});
   }
+}
+
+function createProbeClient(
+  options: AcpRuntimeOptions,
+  agentCommand: string,
+  deps: ProbeRuntimeDeps,
+): AcpClient {
+  const clientOptions = {
+    agentCommand,
+    cwd: options.cwd,
+    mcpServers: [...(options.mcpServers ?? [])],
+    permissionMode: options.permissionMode,
+    nonInteractivePermissions: options.nonInteractivePermissions,
+    verbose: options.verbose,
+  };
+  return deps.clientFactory?.(clientOptions) ?? new AcpClient(clientOptions);
 }

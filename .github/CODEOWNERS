@@ -1,0 +1,18 @@
+# Protect ownership and automation rules.
+/.github/CODEOWNERS @openclaw/openclaw-secops
+/.github/actionlint.yaml @openclaw/openclaw-secops
+/.github/dependabot.yml @openclaw/openclaw-secops
+/.github/workflows/ @openclaw/openclaw-secops
+/.agents/skills/ @openclaw/openclaw-secops
+/.crabbox.yaml @openclaw/openclaw-secops
+/SECURITY.md @openclaw/openclaw-secops
+
+# Package integrity surfaces.
+/package.json @openclaw/openclaw-secops
+/pnpm-lock.yaml @openclaw/openclaw-secops
+
+# Agent execution and ACP runtime surfaces.
+/src/ @openclaw/openclaw-secops
+/skills/ @openclaw/openclaw-secops
+/agents/ @openclaw/openclaw-secops
+/docs/CLI.md @openclaw/openclaw-secops

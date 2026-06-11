@@ -83,6 +83,50 @@ npx acpx@latest --help
 3. Run the smallest relevant validation command while iterating.
 4. Before opening or updating a PR, run the full checks for the scope you changed.
 
+## Slophammer Policy
+
+Slophammer standards for this TypeScript library are declared in
+[`slophammer.yml`](slophammer.yml). When applying or reviewing those standards,
+start from the upstream Slophammer agent entrypoint:
+`/home/bob/repos/slophammer/docs/AGENT_ENTRYPOINT.md` when it is available
+locally, or
+`https://raw.githubusercontent.com/dutifuldev/slophammer/refs/heads/main/docs/AGENT_ENTRYPOINT.md`
+otherwise.
+
+The enforceable local constraints are:
+
+- `pnpm run lint` must keep type-aware Oxlint enabled for `src/` and reject
+  explicit `any`, unsafe assignments, unsafe calls, unsafe member access, and
+  unsafe returns.
+- `pnpm run test:coverage` must keep the declared `85` line, branch,
+  function, and statement coverage gates for the current flows/runtime coverage
+  target. Do not describe this as whole-repository coverage unless the command
+  actually gates all `src/**` files at the same threshold.
+- `pnpm run mutate` runs Stryker against the current mutation target declared in
+  `slophammer.yml`.
+- `slophammer.yml` uses the Slophammer v0.2 TypeScript policy schema:
+  `coverage.threshold: 85`, `complexity.max: 8`, zero production DRY findings
+  for `src/`, mutation targets, and import dependency boundaries.
+- CI must run the published checker's direct dependency-boundary rule. `rules`
+  and `dry` alone are not a dependency-boundary gate.
+
+CI runs the published Slophammer TypeScript checker with `@latest` so the
+policy check tracks the current Slophammer release without adding Slophammer as
+a package dependency. For manual parity with CI, run:
+
+```bash
+pnpm dlx slophammer-ts@latest rules --format text
+pnpm dlx slophammer-ts@latest dry .
+pnpm dlx slophammer-ts@latest check . --only ts.dependency-boundaries-required
+```
+
+Do not add `slophammer-ts` to `package.json`. `slophammer-ts check .` is
+intentionally not part of `pnpm run check` yet. The published checker still
+assumes ESLint, Prettier, Vitest, strict `tsconfig` conventions, and treats
+`examples/flows/replay-viewer` as a separate TypeScript project. Do not claim
+the full Slophammer checker passed unless `slophammer-ts check .` actually ran
+cleanly.
+
 ## Documentation Policy
 
 Example ordering policy:
@@ -107,7 +151,7 @@ Main landing documentation policy:
 6. Harness-specific docs for other supported agents MUST live under `agents/` and MUST use capitalized filenames, for example `agents/Cursor.md` and `agents/Copilot.md`.
 7. No other specific harness MUST BE ALLOWED to receive special placement, singled-out examples, or harness-specific promotion in main landing docs. This rule applies even when the change is framed as harmless, helpful, or accidental.
 8. Other harnesses may still be supported elsewhere in the repo, but main landing docs must describe them impartially and MUST NOT promote them unjustly.
-9. Documentation MUST NOT include adapter package version specifiers or semver ranges such as `pi-acp@^0.0.22` or `@zed-industries/codex-acp@^0.9.5`. Keep documentation generic. Keep actual adapter pinning in code, config, or release logic instead.
+9. Documentation MUST NOT include adapter package version specifiers or semver ranges such as `pi-acp@^0.0.22` or `@agentclientprotocol/codex-acp@^0.0.44`. Keep documentation generic. Keep actual adapter pinning in code, config, or release logic instead.
 
 Harness documentation synchronization policy:
 
@@ -124,6 +168,7 @@ Harness documentation synchronization policy:
 - `pnpm run typecheck` — TypeScript typecheck
 - `pnpm run lint` — source linting plus persisted-key casing checks
 - `pnpm run format:check` — formatting check
+- `pnpm run mutate` — Stryker mutation check for the configured target
 - `pnpm run check` — format, typecheck, lint, build, and coverage tests
 - `pnpm run check:docs` — docs format and markdown lint
 - `pnpm run perf:report` — performance reporting helper
@@ -152,6 +197,10 @@ Harness documentation synchronization policy:
 - Do not prefix pull request titles with agent markers such as `[codex]` or
   other AI-assistance tags. If AI assistance should be disclosed, put that in
   the PR description instead.
+- For non-trivial local code changes, run
+  `.agents/skills/autoreview/scripts/autoreview` until no accepted/actionable
+  findings remain before final handoff or merge. Use commit mode for already
+  landed main commits and branch mode for branch or PR work.
 - Local `codex review --base ...` runs in this repo can legitimately take up to
   30 minutes. Do not declare them stuck before that timeout unless you have
   stronger evidence than elapsed time alone.
@@ -237,6 +286,7 @@ CI lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
   - `pnpm run typecheck`
   - `pnpm run lint`
   - `pnpm run build`
+  - `pnpm run mutate`
   - `pnpm run test:coverage`
 - CI installs dependencies with `pnpm install --frozen-lockfile`
 - CI uses Node 24 by default; the `Test` job runs on Node 22

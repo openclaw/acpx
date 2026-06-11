@@ -3,9 +3,13 @@ import path from "node:path";
 import { AcpClient } from "../../acp/client.js";
 import { normalizeOutputError } from "../../acp/error-normalization.js";
 import { extractAcpError, isAcpResourceNotFoundError } from "../../acp/error-shapes.js";
+import { modelStateFromConfigOptions } from "../../acp/model-support.js";
 import { withTimeout } from "../../async-control.js";
 import { textPrompt, type PromptInput } from "../../prompt-content.js";
-import { applyConfigOptionsToRecord } from "../../session/config-options.js";
+import {
+  applyConfigOptionsToRecord,
+  applyConfigOptionsToState,
+} from "../../session/config-options.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,
@@ -18,23 +22,37 @@ import {
 import { defaultSessionEventLog } from "../../session/event-log.js";
 import { LiveSessionCheckpoint } from "../../session/live-checkpoint.js";
 import {
+  clearDesiredConfigOption,
   setCurrentModelId,
   setDesiredConfigOption,
+  setDesiredModelId,
   setDesiredModeId,
   syncAdvertisedModelState,
 } from "../../session/mode-preference.js";
-import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
-import type { ClientOperation, SessionRecord, SessionResumePolicy } from "../../types.js";
+import {
+  applyRequestedModelIfAdvertised,
+  currentModelIdFromSetModelResponse,
+} from "../../session/model-application.js";
+import { advertisedModelState } from "../../session/model-state.js";
 import type {
+  ClientOperation,
+  SessionRecord,
+  SessionResumePolicy,
+  SessionTokenUsage,
+} from "../../types.js";
+import type {
+  AcpRuntimeAvailableCommand,
   AcpRuntimeEvent,
   AcpRuntimeHandle,
   AcpRuntimeOptions,
   AcpRuntimePromptMode,
   AcpRuntimeSessionModels,
+  AcpRuntimeSessionUsage,
   AcpRuntimeStatus,
   AcpRuntimeTurnAttachment,
   AcpRuntimeTurn,
   AcpRuntimeTurnResult,
+  AcpRuntimeUsageBreakdown,
 } from "../public/contract.js";
 import { AcpRuntimeError } from "../public/errors.js";
 import { parsePromptEventLine } from "../public/events.js";
@@ -45,7 +63,7 @@ import {
   reconcileAgentSessionId,
 } from "./lifecycle.js";
 import { runPromptTurn } from "./prompt-turn.js";
-import { connectAndLoadSession } from "./reconnect.js";
+import { connectAndLoadSession, type ConnectAndLoadSessionResult } from "./reconnect.js";
 import { shouldReuseExistingRecord } from "./reuse-policy.js";
 import { persistSessionOptions, type SessionAgentOptions } from "./session-options.js";
 
@@ -57,7 +75,7 @@ type ActiveSessionController = {
   hasActivePrompt: () => boolean;
   requestCancelActivePrompt: () => Promise<boolean>;
   setSessionMode: (modeId: string) => Promise<void>;
-  setSessionModel: (modelId: string) => Promise<void>;
+  setSessionModel: (modelId: string) => ReturnType<AcpClient["setSessionModel"]>;
   setSessionConfigOption: (
     configId: string,
     value: string,
@@ -167,24 +185,31 @@ function toPromptInput(
   if (!attachments || attachments.length === 0) {
     return text;
   }
-  const blocks: Array<
-    { type: "text"; text: string } | { type: "image"; mimeType: string; data: string }
-  > = [];
+  const blocks: PromptInput = [];
   if (text) {
     blocks.push({ type: "text", text });
   }
   for (const attachment of attachments) {
-    if (!attachment.mediaType.startsWith("image/")) {
-      throw new AcpRuntimeError(
-        "ACP_TURN_FAILED",
-        `Unsupported ACP runtime attachment media type: ${attachment.mediaType}`,
-      );
+    if (attachment.mediaType.startsWith("image/")) {
+      blocks.push({
+        type: "image",
+        mimeType: attachment.mediaType,
+        data: attachment.data,
+      });
+      continue;
     }
-    blocks.push({
-      type: "image",
-      mimeType: attachment.mediaType,
-      data: attachment.data,
-    });
+    if (attachment.mediaType.startsWith("audio/")) {
+      blocks.push({
+        type: "audio",
+        mimeType: attachment.mediaType,
+        data: attachment.data,
+      });
+      continue;
+    }
+    throw new AcpRuntimeError(
+      "ACP_TURN_FAILED",
+      `Unsupported ACP runtime attachment media type: ${attachment.mediaType}`,
+    );
   }
   return blocks.length > 0 ? blocks : textPrompt(text);
 }
@@ -271,6 +296,104 @@ function buildModelsField(record: SessionRecord): { models?: AcpRuntimeSessionMo
   };
 }
 
+function tokenUsageToBreakdown(
+  usage: SessionTokenUsage | undefined,
+): AcpRuntimeUsageBreakdown | undefined {
+  if (!usage) {
+    return undefined;
+  }
+  const breakdown: AcpRuntimeUsageBreakdown = {};
+  assignUsageBreakdownField(breakdown, "inputTokens", usage.input_tokens);
+  assignUsageBreakdownField(breakdown, "outputTokens", usage.output_tokens);
+  assignUsageBreakdownField(breakdown, "cachedReadTokens", usage.cache_read_input_tokens);
+  assignUsageBreakdownField(breakdown, "cachedWriteTokens", usage.cache_creation_input_tokens);
+  assignUsageBreakdownField(breakdown, "thoughtTokens", usage.thought_tokens);
+  assignUsageBreakdownField(breakdown, "totalTokens", usage.total_tokens);
+  return Object.keys(breakdown).length > 0 ? breakdown : undefined;
+}
+
+function assignUsageBreakdownField(
+  breakdown: AcpRuntimeUsageBreakdown,
+  key: keyof AcpRuntimeUsageBreakdown,
+  value: number | undefined,
+): void {
+  if (value !== undefined) {
+    breakdown[key] = value;
+  }
+}
+
+function buildUsageField(record: SessionRecord): { usage?: AcpRuntimeSessionUsage } {
+  const cumulative = tokenUsageToBreakdown(record.cumulative_token_usage);
+  const perRequestEntries = Object.entries(record.request_token_usage ?? {})
+    .map(([id, value]) => [id, tokenUsageToBreakdown(value)] as const)
+    .filter(
+      (entry): entry is readonly [string, AcpRuntimeUsageBreakdown] => entry[1] !== undefined,
+    );
+  const perRequest =
+    perRequestEntries.length > 0 ? Object.fromEntries(perRequestEntries) : undefined;
+  const cost = record.cumulative_cost;
+  const usage: AcpRuntimeSessionUsage = {
+    ...(cumulative ? { cumulative } : {}),
+    ...(cost ? { cost } : {}),
+    ...(perRequest ? { perRequest } : {}),
+  };
+  return Object.keys(usage).length > 0 ? { usage } : {};
+}
+
+function buildAvailableCommandsField(record: SessionRecord): {
+  availableCommands?: AcpRuntimeAvailableCommand[];
+} {
+  const commands = record.acpx?.available_commands as readonly unknown[] | undefined;
+  if (!commands || commands.length === 0) {
+    return {};
+  }
+  const availableCommands = commands
+    .map((command) => runtimeAvailableCommand(command))
+    .filter((command): command is AcpRuntimeAvailableCommand => command !== undefined);
+  return availableCommands.length > 0 ? { availableCommands } : {};
+}
+
+function runtimeAvailableCommand(command: unknown): AcpRuntimeAvailableCommand | undefined {
+  if (typeof command === "string") {
+    const name = command.trim();
+    return name ? { name } : undefined;
+  }
+  const record = commandRecord(command);
+  if (!record) {
+    return undefined;
+  }
+  const name = trimmedField(record.name);
+  if (!name) {
+    return undefined;
+  }
+  const runtimeCommand: AcpRuntimeAvailableCommand = { name };
+  const description = trimmedField(record.description);
+  if (description) {
+    runtimeCommand.description = description;
+  }
+  if (typeof record.has_input === "boolean") {
+    runtimeCommand.hasInput = record.has_input;
+  }
+  return runtimeCommand;
+}
+
+function commandRecord(
+  value: unknown,
+): { name?: unknown; description?: unknown; has_input?: unknown } | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as { name?: unknown; description?: unknown; has_input?: unknown };
+}
+
+function trimmedField(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 function advertisedConfigOptionIds(record: SessionRecord): Set<string> | undefined {
   const configOptions = record.acpx?.config_options;
   if (!configOptions) {
@@ -304,6 +427,133 @@ function resolveSupportedConfigOptionId(record: SessionRecord, configId: string)
     "ACP_BACKEND_UNSUPPORTED_CONTROL",
     `ACP session ${record.acpxRecordId} does not advertise config option '${configId}'. Supported config options: ${supportedText}.`,
   );
+}
+
+type CreatedRuntimeSession = {
+  sessionId: string;
+  agentSessionId: string | undefined;
+  sessionResult:
+    | Awaited<ReturnType<AcpClient["createSession"]>>
+    | Awaited<ReturnType<AcpClient["loadSession"]>>;
+};
+
+type RuntimeTurnTaskState = {
+  pendingCancel: boolean;
+  turnActive: boolean;
+  activeController: ActiveSessionController | null;
+};
+
+type RuntimeTurnTask = {
+  input: {
+    handle: AcpRuntimeHandle;
+    text: string;
+    attachments?: AcpRuntimeTurnAttachment[];
+    mode: AcpRuntimePromptMode;
+    sessionMode: "persistent" | "oneshot";
+    requestId: string;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  };
+  promptInput: PromptInput | string;
+  queue: AsyncEventQueue;
+  sessionReady: Deferred<void>;
+  state: RuntimeTurnTaskState;
+  settleResult: (next: AcpRuntimeTurnResult) => void;
+  abortHandler: () => void;
+};
+
+type RunningRuntimeTurn = {
+  record: SessionRecord;
+  conversation: ReturnType<typeof cloneSessionConversation>;
+  acpxState: ReturnType<typeof cloneSessionAcpxState>;
+  liveCheckpoint: LiveSessionCheckpoint;
+  client: AcpClient;
+  pendingClient: AcpClient | undefined;
+  promptMessageId: string | undefined;
+  activeSessionId: string;
+};
+
+function applyConfigOptionResponseToTurn(
+  turn: RunningRuntimeTurn,
+  response:
+    | Awaited<ReturnType<AcpClient["setSessionConfigOption"]>>
+    | Awaited<ReturnType<AcpClient["setSessionModel"]>>,
+): void {
+  if (!response?.configOptions) {
+    return;
+  }
+  turn.acpxState = applyConfigOptionsToState(turn.acpxState, response.configOptions);
+}
+
+function applyDesiredConfigOptionToTurn(
+  turn: RunningRuntimeTurn,
+  configId: string,
+  value: string,
+): void {
+  const nextState = cloneSessionAcpxState(turn.acpxState) ?? {};
+  const modelConfigId = modelStateFromConfigOptions(nextState.config_options)?.configId;
+  if (configId === modelConfigId) {
+    nextState.session_options = { ...nextState.session_options, model: value };
+    clearDesiredConfigOption(nextState, configId);
+  } else if (configId === "mode") {
+    nextState.desired_mode_id = value;
+  } else {
+    nextState.desired_config_options = {
+      ...nextState.desired_config_options,
+      [configId]: value,
+    };
+  }
+  turn.acpxState = nextState;
+}
+
+function applyDesiredConfigOptionToRecord(
+  record: SessionRecord,
+  configId: string,
+  value: string,
+): void {
+  const modelConfigId = modelStateFromConfigOptions(record.acpx?.config_options)?.configId;
+  if (configId === modelConfigId) {
+    setDesiredModelId(record, value, configId);
+  } else if (configId === "mode") {
+    setDesiredModeId(record, value);
+  } else {
+    setDesiredConfigOption(record, configId, value);
+  }
+}
+
+async function createOrLoadRuntimeSession(
+  client: AcpClient,
+  resumeSessionId: string | undefined,
+  cwd: string,
+): Promise<CreatedRuntimeSession> {
+  if (resumeSessionId) {
+    if (client.supportsResumeSession()) {
+      const resumed = await client.resumeSession(resumeSessionId, cwd);
+      return {
+        sessionId: resumeSessionId,
+        agentSessionId: resumed.agentSessionId,
+        sessionResult: resumed,
+      };
+    }
+    if (!client.supportsLoadSession()) {
+      throw new Error(
+        `Agent does not support session/resume or session/load; cannot resume session ${resumeSessionId}`,
+      );
+    }
+    const loaded = await client.loadSession(resumeSessionId, cwd);
+    return {
+      sessionId: resumeSessionId,
+      agentSessionId: loaded.agentSessionId,
+      sessionResult: loaded,
+    };
+  }
+
+  const created = await client.createSession(cwd);
+  return {
+    sessionId: created.sessionId,
+    agentSessionId: created.agentSessionId,
+    sessionResult: created,
+  };
 }
 
 export class AcpRuntimeManager {
@@ -465,61 +715,86 @@ export class AcpRuntimeManager {
 
     try {
       await client.start();
-      let sessionId: string;
-      let agentSessionId: string | undefined;
-      let sessionResult:
-        | Awaited<ReturnType<AcpClient["createSession"]>>
-        | Awaited<ReturnType<AcpClient["loadSession"]>>;
-      if (input.resumeSessionId) {
-        const loaded = await client.loadSession(input.resumeSessionId, cwd);
-        sessionId = input.resumeSessionId;
-        agentSessionId = loaded.agentSessionId;
-        sessionResult = loaded;
-      } else {
-        const created = await client.createSession(cwd);
-        sessionId = created.sessionId;
-        agentSessionId = created.agentSessionId;
-        sessionResult = created;
-      }
-      const record = createInitialRecord({
-        recordId: createRecordId(input.sessionKey, input.mode),
-        sessionName: input.sessionKey,
-        sessionId,
+      const session = await createOrLoadRuntimeSession(client, input.resumeSessionId, cwd);
+      const record = await this.createAndSaveRuntimeRecord({
+        input,
+        client,
         agentCommand,
         cwd,
-        agentSessionId,
+        session,
       });
-      this.closingActiveRecords.delete(record.acpxRecordId);
-      record.protocolVersion = client.initializeResult?.protocolVersion;
-      record.agentCapabilities = client.initializeResult?.agentCapabilities;
-      applyConfigOptionsToRecord(record, sessionResult);
-      const requestedModelApplied = await applyRequestedModelIfAdvertised({
-        client,
-        sessionId,
-        requestedModel: input.sessionOptions?.model,
-        models: sessionResult.models,
-        agentCommand,
-        timeoutMs: this.options.timeoutMs,
-      });
-      syncAdvertisedModelState(record, sessionResult.models);
-      if (requestedModelApplied) {
-        setCurrentModelId(record, input.sessionOptions?.model);
-      }
-      applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-      persistSessionOptions(record, input.sessionOptions);
-      await this.options.sessionStore.save(record);
-      if (input.mode === "persistent") {
-        const previousClient = this.pendingPersistentClients.get(record.acpxRecordId);
-        this.pendingPersistentClients.set(record.acpxRecordId, client);
-        keepClientOpen = true;
-        await previousClient?.close().catch(() => {});
-      }
+      keepClientOpen = await this.keepPersistentClient(input.mode, record.acpxRecordId, client);
       return record;
     } finally {
       if (!keepClientOpen) {
         await client.close();
       }
     }
+  }
+
+  private async createAndSaveRuntimeRecord(params: {
+    input: {
+      sessionKey: string;
+      mode: "persistent" | "oneshot";
+      sessionOptions?: SessionAgentOptions;
+    };
+    client: AcpClient;
+    agentCommand: string;
+    cwd: string;
+    session: CreatedRuntimeSession;
+  }): Promise<SessionRecord> {
+    const { input, client, agentCommand, cwd, session } = params;
+    const record = createInitialRecord({
+      recordId: createRecordId(input.sessionKey, input.mode),
+      sessionName: input.sessionKey,
+      sessionId: session.sessionId,
+      agentCommand,
+      cwd,
+      agentSessionId: session.agentSessionId,
+    });
+    this.closingActiveRecords.delete(record.acpxRecordId);
+    record.protocolVersion = client.initializeResult?.protocolVersion;
+    record.agentCapabilities = client.initializeResult?.agentCapabilities;
+    applyConfigOptionsToRecord(record, session.sessionResult);
+    const modelApplication = await applyRequestedModelIfAdvertised({
+      client,
+      sessionId: session.sessionId,
+      requestedModel: input.sessionOptions?.model,
+      models: session.sessionResult.models,
+      agentCommand,
+      timeoutMs: this.options.timeoutMs,
+    });
+    applyConfigOptionsToRecord(record, modelApplication.response);
+    syncAdvertisedModelState(
+      record,
+      modelApplication.response
+        ? modelStateFromConfigOptions(modelApplication.response.configOptions)
+        : session.sessionResult.models,
+    );
+    if (modelApplication.applied) {
+      setCurrentModelId(
+        record,
+        currentModelIdFromSetModelResponse(modelApplication.response, input.sessionOptions?.model),
+      );
+    }
+    applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
+    persistSessionOptions(record, input.sessionOptions);
+    await this.options.sessionStore.save(record);
+    return record;
+  }
+
+  private async keepPersistentClient(
+    mode: "persistent" | "oneshot",
+    recordId: string,
+    client: AcpClient,
+  ): Promise<boolean> {
+    if (mode !== "persistent") {
+      return false;
+    }
+    const previousClient = this.pendingPersistentClients.get(recordId);
+    this.pendingPersistentClients.set(recordId, client);
+    await previousClient?.close().catch(() => {});
+    return true;
   }
 
   startTurn(input: {
@@ -538,10 +813,12 @@ export class AcpRuntimeManager {
     const sessionReady = createDeferred<void>();
     void sessionReady.promise.catch(() => {});
     let resultSettled = false;
-    let pendingCancel = false;
-    let turnActive = true;
+    const state: RuntimeTurnTaskState = {
+      pendingCancel: false,
+      turnActive: true,
+      activeController: null,
+    };
     let streamClosed = false;
-    let activeController: ActiveSessionController | null = null;
 
     const settleResult = (next: AcpRuntimeTurnResult): void => {
       if (resultSettled) {
@@ -561,13 +838,13 @@ export class AcpRuntimeManager {
     };
 
     const requestCancel = async (): Promise<boolean> => {
-      if (activeController) {
-        return await activeController.requestCancelActivePrompt();
+      if (state.activeController) {
+        return await state.activeController.requestCancelActivePrompt();
       }
-      if (!turnActive) {
+      if (!state.turnActive) {
         return false;
       }
-      pendingCancel = true;
+      state.pendingCancel = true;
       return true;
     };
 
@@ -592,279 +869,15 @@ export class AcpRuntimeManager {
       input.signal.addEventListener("abort", abortHandler, { once: true });
     }
 
-    void (async () => {
-      let record: SessionRecord | null = null;
-      let conversation: ReturnType<typeof cloneSessionConversation> | null = null;
-      let acpxState: ReturnType<typeof cloneSessionAcpxState>;
-      let liveCheckpoint: LiveSessionCheckpoint | undefined;
-      let client: AcpClient | null = null;
-      try {
-        record = await this.requireRecord(input.handle.acpxRecordId ?? input.handle.sessionKey);
-        conversation = cloneSessionConversation(record);
-        acpxState = cloneSessionAcpxState(record.acpx);
-        const promptStartedAt = isoNow();
-        const promptMessageId = recordPromptSubmission(conversation, promptInput, promptStartedAt);
-        trimConversationForRuntime(conversation);
-        record.lastPromptAt = promptStartedAt;
-        record.lastUsedAt = promptStartedAt;
-        record.acpx = acpxState;
-        applyConversation(record, conversation);
-        await this.options.sessionStore.save(record);
-
-        const pendingClient = await this.readPendingPersistentClient(record, { consume: true });
-        client =
-          pendingClient ??
-          this.createClient({
-            agentCommand: record.agentCommand,
-            cwd: record.cwd,
-            mcpServers: [...(this.options.mcpServers ?? [])],
-            permissionMode: this.options.permissionMode,
-            nonInteractivePermissions: this.options.nonInteractivePermissions,
-            onPermissionRequest: this.options.onPermissionRequest,
-            verbose: this.options.verbose,
-          });
-        const runtimeClient = client;
-        const runtimeConversation = conversation;
-        const runtimeRecord = record;
-        liveCheckpoint = new LiveSessionCheckpoint({
-          save: async () => {
-            runtimeRecord.lastUsedAt = isoNow();
-            runtimeRecord.acpx = acpxState;
-            applyConversation(runtimeRecord, runtimeConversation);
-            await this.refreshClosedState(runtimeRecord);
-            await this.options.sessionStore.save(runtimeRecord);
-          },
-        });
-        let activeSessionId = record.acpSessionId;
-
-        const applyPendingCancel = async (): Promise<boolean> => {
-          if (!pendingCancel || !runtimeClient.hasActivePrompt()) {
-            return false;
-          }
-          const cancelled = await runtimeClient.requestCancelActivePrompt();
-          if (cancelled) {
-            pendingCancel = false;
-          }
-          return cancelled;
-        };
-
-        activeController = {
-          hasActivePrompt: () => runtimeClient.hasActivePrompt(),
-          requestCancelActivePrompt: async () => {
-            if (runtimeClient.hasActivePrompt()) {
-              return await runtimeClient.requestCancelActivePrompt();
-            }
-            if (!turnActive) {
-              return false;
-            }
-            pendingCancel = true;
-            return true;
-          },
-          setSessionMode: async (modeId: string) => {
-            if (!runtimeClient.hasActivePrompt()) {
-              await sessionReady.promise;
-            }
-            await runtimeClient.setSessionMode(activeSessionId, modeId);
-            const nextState = cloneSessionAcpxState(acpxState) ?? {};
-            nextState.desired_mode_id = modeId;
-            acpxState = nextState;
-          },
-          setSessionModel: async (modelId: string) => {
-            if (!runtimeClient.hasActivePrompt()) {
-              await sessionReady.promise;
-            }
-            await runtimeClient.setSessionModel(activeSessionId, modelId);
-          },
-          setSessionConfigOption: async (configId: string, value: string) => {
-            const result = await activeController!.setResolvedSessionConfigOption(configId, value);
-            return result.response;
-          },
-          setResolvedSessionConfigOption: async (configId: string, value: string) => {
-            if (!runtimeClient.hasActivePrompt()) {
-              await sessionReady.promise;
-            }
-            const resolvedConfigId = resolveSupportedConfigOptionId(
-              {
-                ...runtimeRecord,
-                acpx: acpxState ?? undefined,
-              },
-              configId,
-            );
-            const response = await runtimeClient.setSessionConfigOption(
-              activeSessionId,
-              resolvedConfigId,
-              value,
-            );
-            if (response?.configOptions) {
-              const nextState = cloneSessionAcpxState(acpxState) ?? {};
-              nextState.config_options = structuredClone(response.configOptions);
-              acpxState = nextState;
-            }
-            if (resolvedConfigId === "mode") {
-              const nextState = cloneSessionAcpxState(acpxState) ?? {};
-              nextState.desired_mode_id = value;
-              acpxState = nextState;
-            } else if (resolvedConfigId !== "model") {
-              const nextState = cloneSessionAcpxState(acpxState) ?? {};
-              nextState.desired_config_options = {
-                ...nextState.desired_config_options,
-                [resolvedConfigId]: value,
-              };
-              acpxState = nextState;
-            }
-            return { configId: resolvedConfigId, response };
-          },
-        };
-
-        const emitParsed = (payload: Record<string, unknown>): void => {
-          if (streamClosed) {
-            return;
-          }
-          const parsed = parsePromptEventLine(JSON.stringify(payload));
-          if (!parsed) {
-            return;
-          }
-          queue.push(parsed);
-        };
-
-        this.activeControllers.set(runtimeRecord.acpxRecordId, activeController);
-        runtimeClient.setEventHandlers({
-          onSessionUpdate: (notification) => {
-            acpxState = recordSessionUpdate(runtimeConversation, acpxState, notification);
-            trimConversationForRuntime(runtimeConversation);
-            liveCheckpoint?.request();
-            emitParsed({
-              jsonrpc: "2.0",
-              method: "session/update",
-              params: notification,
-            });
-          },
-          onClientOperation: (operation: ClientOperation) => {
-            acpxState = recordClientOperation(runtimeConversation, acpxState, operation);
-            trimConversationForRuntime(runtimeConversation);
-            liveCheckpoint?.request();
-            emitParsed({
-              type: "client_operation",
-              ...operation,
-            });
-          },
-        });
-
-        const { sessionId, resumed, loadError } = pendingClient
-          ? {
-              sessionId: record.acpSessionId,
-              resumed: false,
-              loadError: undefined,
-            }
-          : await connectAndLoadSession({
-              client: runtimeClient,
-              record: runtimeRecord,
-              resumePolicy: resumePolicyForSessionMode(input.sessionMode),
-              timeoutMs: this.options.timeoutMs,
-              activeController,
-              onClientAvailable: () => {
-                if (activeController) {
-                  this.activeControllers.set(runtimeRecord.acpxRecordId, activeController);
-                }
-              },
-              onConnectedRecord: (connectedRecord) => {
-                connectedRecord.lastPromptAt = isoNow();
-              },
-              onSessionIdResolved: (sessionIdValue) => {
-                activeSessionId = sessionIdValue;
-              },
-            });
-        acpxState = cloneSessionAcpxState(runtimeRecord.acpx);
-        sessionReady.resolve();
-        runtimeRecord.lastRequestId = input.requestId;
-        runtimeRecord.lastPromptAt = isoNow();
-        runtimeRecord.closed = false;
-        runtimeRecord.closedAt = undefined;
-        runtimeRecord.lastUsedAt = isoNow();
-        await liveCheckpoint.checkpoint();
-        if (resumed || loadError) {
-          emitParsed({
-            type: "status",
-            text: loadError ? `load fallback: ${loadError}` : "session resumed",
-          });
-        }
-
-        if (pendingCancel || input.signal?.aborted) {
-          pendingCancel = false;
-          settleResult({
-            status: "cancelled",
-            stopReason: "cancelled",
-          });
-          return;
-        }
-
-        await applyPendingCancel();
-        const response = await runPromptTurn({
-          client: runtimeClient,
-          sessionId,
-          prompt: promptInput,
-          timeoutMs: input.timeoutMs ?? this.options.timeoutMs,
-          conversation: runtimeConversation,
-          promptMessageId,
-        });
-
-        runtimeRecord.acpSessionId = activeSessionId;
-        reconcileAgentSessionId(runtimeRecord, runtimeRecord.agentSessionId);
-        runtimeRecord.protocolVersion = runtimeClient.initializeResult?.protocolVersion;
-        runtimeRecord.agentCapabilities = runtimeClient.initializeResult?.agentCapabilities;
-        runtimeRecord.acpx = acpxState;
-        applyConversation(runtimeRecord, runtimeConversation);
-        applyLifecycleSnapshotToRecord(runtimeRecord, runtimeClient.getAgentLifecycleSnapshot());
-        await this.options.sessionStore.save(runtimeRecord);
-
-        settleResult({
-          status: response.stopReason === "cancelled" ? "cancelled" : "completed",
-          ...(response.stopReason ? { stopReason: response.stopReason } : {}),
-        });
-      } catch (error) {
-        sessionReady.reject(error);
-        const normalized = normalizeOutputError(error, { origin: "runtime" });
-        settleResult({
-          status: "failed",
-          error: {
-            message: normalized.message,
-            ...(normalized.code ? { code: normalized.code } : {}),
-            ...(normalized.detailCode ? { detailCode: normalized.detailCode } : {}),
-            ...(normalized.retryable !== undefined ? { retryable: normalized.retryable } : {}),
-          },
-        });
-      } finally {
-        turnActive = false;
-        if (input.signal) {
-          input.signal.removeEventListener("abort", abortHandler);
-        }
-        client?.clearEventHandlers();
-        let pooled = false;
-        if (record && conversation) {
-          applyLifecycleSnapshotToRecord(
-            record,
-            client?.getAgentLifecycleSnapshot() ?? { running: false },
-          );
-          record.acpx = acpxState;
-          applyConversation(record, conversation);
-          record.lastUsedAt = isoNow();
-          await liveCheckpoint?.flush().catch(() => {});
-          const closed = await this.refreshClosedState(record);
-          await this.options.sessionStore.save(record).catch(() => {});
-          if (!closed && client) {
-            pooled = await this.retainPersistentClientAfterTurn({ record, client });
-          }
-        }
-        if (!pooled) {
-          await client?.close().catch(() => {});
-        }
-        if (record) {
-          this.activeControllers.delete(record.acpxRecordId);
-          this.closingActiveRecords.delete(record.acpxRecordId);
-        }
-        queue.close();
-      }
-    })();
+    void this.runRuntimeTurnTask({
+      input,
+      promptInput,
+      queue,
+      sessionReady,
+      state,
+      settleResult,
+      abortHandler,
+    });
 
     return {
       requestId: input.requestId,
@@ -877,6 +890,384 @@ export class AcpRuntimeManager {
         closeStream();
       },
     };
+  }
+
+  private async runRuntimeTurnTask(task: RuntimeTurnTask): Promise<void> {
+    let turn: RunningRuntimeTurn | undefined;
+    try {
+      turn = await this.prepareRuntimeTurn(task);
+      const { sessionId, resumed, loadError } = await this.connectRuntimeTurn(task, turn);
+      await this.resolveRuntimeTurnReady(task, turn, resumed, loadError);
+      if (this.cancelRuntimeTurnBeforePrompt(task)) {
+        return;
+      }
+      await this.applyPendingRuntimeTurnCancel(task, turn);
+      const response = await runPromptTurn({
+        client: turn.client,
+        sessionId,
+        prompt: task.promptInput,
+        timeoutMs: task.input.timeoutMs ?? this.options.timeoutMs,
+        conversation: turn.conversation,
+        promptMessageId: turn.promptMessageId,
+      });
+      await this.saveCompletedRuntimeTurn(turn, response.stopReason);
+      task.settleResult({
+        status: response.stopReason === "cancelled" ? "cancelled" : "completed",
+        ...(response.stopReason ? { stopReason: response.stopReason } : {}),
+      });
+    } catch (error) {
+      this.failRuntimeTurn(task, error);
+    } finally {
+      await this.finalizeRuntimeTurn(task, turn);
+    }
+  }
+
+  private async prepareRuntimeTurn(task: RuntimeTurnTask): Promise<RunningRuntimeTurn> {
+    const record = await this.requireRecord(
+      task.input.handle.acpxRecordId ?? task.input.handle.sessionKey,
+    );
+    const conversation = cloneSessionConversation(record);
+    let acpxState = cloneSessionAcpxState(record.acpx);
+    const promptStartedAt = isoNow();
+    const promptMessageId = recordPromptSubmission(conversation, task.promptInput, promptStartedAt);
+    trimConversationForRuntime(conversation);
+    record.lastPromptAt = promptStartedAt;
+    record.lastUsedAt = promptStartedAt;
+    record.acpx = acpxState;
+    applyConversation(record, conversation);
+    await this.options.sessionStore.save(record);
+
+    const pendingClient = await this.readPendingPersistentClient(record, { consume: true });
+    const client = pendingClient ?? this.createTurnClient(record);
+    const turn: RunningRuntimeTurn = {
+      record,
+      conversation,
+      acpxState,
+      liveCheckpoint: this.createRuntimeTurnCheckpoint(record, conversation, () => turn.acpxState),
+      client,
+      pendingClient,
+      promptMessageId,
+      activeSessionId: record.acpSessionId,
+    };
+    task.state.activeController = this.buildRuntimeTurnController(task, turn);
+    this.activeControllers.set(record.acpxRecordId, task.state.activeController);
+    this.installRuntimeTurnEventHandlers(task, turn);
+    return turn;
+  }
+
+  private createTurnClient(record: SessionRecord): AcpClient {
+    return this.createClient({
+      agentCommand: record.agentCommand,
+      cwd: record.cwd,
+      mcpServers: [...(this.options.mcpServers ?? [])],
+      permissionMode: this.options.permissionMode,
+      nonInteractivePermissions: this.options.nonInteractivePermissions,
+      onPermissionRequest: this.options.onPermissionRequest,
+      verbose: this.options.verbose,
+    });
+  }
+
+  private createRuntimeTurnCheckpoint(
+    record: SessionRecord,
+    conversation: ReturnType<typeof cloneSessionConversation>,
+    readAcpxState: () => ReturnType<typeof cloneSessionAcpxState>,
+  ): LiveSessionCheckpoint {
+    return new LiveSessionCheckpoint({
+      save: async () => {
+        record.lastUsedAt = isoNow();
+        record.acpx = readAcpxState();
+        applyConversation(record, conversation);
+        await this.refreshClosedState(record);
+        await this.options.sessionStore.save(record);
+      },
+    });
+  }
+
+  private buildRuntimeTurnController(
+    task: RuntimeTurnTask,
+    turn: RunningRuntimeTurn,
+  ): ActiveSessionController {
+    return {
+      hasActivePrompt: () => turn.client.hasActivePrompt(),
+      requestCancelActivePrompt: async () => await this.requestRuntimeTurnCancel(task, turn),
+      setSessionMode: async (modeId: string) => {
+        await this.waitForRuntimeControlSession(task, turn);
+        await turn.client.setSessionMode(turn.activeSessionId, modeId);
+        const nextState = cloneSessionAcpxState(turn.acpxState) ?? {};
+        nextState.desired_mode_id = modeId;
+        turn.acpxState = nextState;
+      },
+      setSessionModel: async (modelId: string) => {
+        await this.waitForRuntimeControlSession(task, turn);
+        const models = advertisedModelState(turn.acpxState);
+        const response = await turn.client.setSessionModel(turn.activeSessionId, modelId, models);
+        applyConfigOptionResponseToTurn(turn, response);
+        const nextState = cloneSessionAcpxState(turn.acpxState) ?? {};
+        nextState.session_options = { ...nextState.session_options, model: modelId };
+        nextState.current_model_id = currentModelIdFromSetModelResponse(response, modelId);
+        clearDesiredConfigOption(nextState, models?.configId);
+        turn.acpxState = nextState;
+        return response;
+      },
+      setSessionConfigOption: async (configId: string, value: string) => {
+        const result = await task.state.activeController!.setResolvedSessionConfigOption(
+          configId,
+          value,
+        );
+        return result.response;
+      },
+      setResolvedSessionConfigOption: async (configId: string, value: string) =>
+        await this.setRuntimeResolvedSessionConfigOption(task, turn, configId, value),
+    };
+  }
+
+  private async waitForRuntimeControlSession(
+    task: RuntimeTurnTask,
+    turn: RunningRuntimeTurn,
+  ): Promise<void> {
+    if (turn.client.hasActivePrompt()) {
+      return;
+    }
+    await task.sessionReady.promise;
+  }
+
+  private async requestRuntimeTurnCancel(
+    task: RuntimeTurnTask,
+    turn: RunningRuntimeTurn,
+  ): Promise<boolean> {
+    if (turn.client.hasActivePrompt()) {
+      return await turn.client.requestCancelActivePrompt();
+    }
+    if (!task.state.turnActive) {
+      return false;
+    }
+    task.state.pendingCancel = true;
+    return true;
+  }
+
+  private async setRuntimeResolvedSessionConfigOption(
+    task: RuntimeTurnTask,
+    turn: RunningRuntimeTurn,
+    configId: string,
+    value: string,
+  ): Promise<{
+    configId: string;
+    response: Awaited<ReturnType<AcpClient["setSessionConfigOption"]>>;
+  }> {
+    await this.waitForRuntimeControlSession(task, turn);
+    const resolvedConfigId = resolveSupportedConfigOptionId(
+      {
+        ...turn.record,
+        acpx: turn.acpxState ?? undefined,
+      },
+      configId,
+    );
+    const response = await turn.client.setSessionConfigOption(
+      turn.activeSessionId,
+      resolvedConfigId,
+      value,
+    );
+    this.applyRuntimeConfigOptionState(turn, resolvedConfigId, value, response);
+    return { configId: resolvedConfigId, response };
+  }
+
+  private applyRuntimeConfigOptionState(
+    turn: RunningRuntimeTurn,
+    configId: string,
+    value: string,
+    response: Awaited<ReturnType<AcpClient["setSessionConfigOption"]>>,
+  ): void {
+    applyConfigOptionResponseToTurn(turn, response);
+    applyDesiredConfigOptionToTurn(turn, configId, value);
+  }
+
+  private installRuntimeTurnEventHandlers(task: RuntimeTurnTask, turn: RunningRuntimeTurn): void {
+    turn.client.setEventHandlers({
+      onSessionUpdate: (notification) => {
+        turn.acpxState = recordSessionUpdate(turn.conversation, turn.acpxState, notification);
+        trimConversationForRuntime(turn.conversation);
+        turn.liveCheckpoint.request();
+        this.emitRuntimeTurnEvent(task, {
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: notification,
+        });
+      },
+      onClientOperation: (operation: ClientOperation) => {
+        turn.acpxState = recordClientOperation(turn.conversation, turn.acpxState, operation);
+        trimConversationForRuntime(turn.conversation);
+        turn.liveCheckpoint.request();
+        this.emitRuntimeTurnEvent(task, {
+          type: "client_operation",
+          ...operation,
+        });
+      },
+    });
+  }
+
+  private emitRuntimeTurnEvent(task: RuntimeTurnTask, payload: Record<string, unknown>): void {
+    const parsed = parsePromptEventLine(JSON.stringify(payload));
+    if (!parsed) {
+      return;
+    }
+    task.queue.push(parsed);
+  }
+
+  private async connectRuntimeTurn(
+    task: RuntimeTurnTask,
+    turn: RunningRuntimeTurn,
+  ): Promise<ConnectAndLoadSessionResult> {
+    const loaded = turn.pendingClient
+      ? { sessionId: turn.record.acpSessionId, resumed: false, loadError: undefined }
+      : await this.connectRuntimeTurnClient(task, turn);
+    turn.acpxState = cloneSessionAcpxState(turn.record.acpx);
+    return loaded;
+  }
+
+  private async connectRuntimeTurnClient(
+    task: RuntimeTurnTask,
+    turn: RunningRuntimeTurn,
+  ): Promise<ConnectAndLoadSessionResult> {
+    return await connectAndLoadSession({
+      client: turn.client,
+      record: turn.record,
+      resumePolicy: resumePolicyForSessionMode(task.input.sessionMode),
+      timeoutMs: this.options.timeoutMs,
+      activeController: task.state.activeController!,
+      onClientAvailable: () => this.publishRuntimeTurnController(task, turn),
+      onConnectedRecord: (connectedRecord) => {
+        connectedRecord.lastPromptAt = isoNow();
+      },
+      onSessionIdResolved: (sessionIdValue) => {
+        turn.activeSessionId = sessionIdValue;
+      },
+    });
+  }
+
+  private publishRuntimeTurnController(task: RuntimeTurnTask, turn: RunningRuntimeTurn): void {
+    const controller = task.state.activeController;
+    if (controller) {
+      this.activeControllers.set(turn.record.acpxRecordId, controller);
+    }
+  }
+
+  private async resolveRuntimeTurnReady(
+    task: RuntimeTurnTask,
+    turn: RunningRuntimeTurn,
+    resumed: boolean,
+    loadError: string | undefined,
+  ): Promise<void> {
+    task.sessionReady.resolve();
+    turn.record.lastRequestId = task.input.requestId;
+    turn.record.lastPromptAt = isoNow();
+    turn.record.closed = false;
+    turn.record.closedAt = undefined;
+    turn.record.lastUsedAt = isoNow();
+    await turn.liveCheckpoint.checkpoint();
+    this.emitRuntimeTurnLoadStatus(task, resumed, loadError);
+  }
+
+  private emitRuntimeTurnLoadStatus(
+    task: RuntimeTurnTask,
+    resumed: boolean,
+    loadError: string | undefined,
+  ): void {
+    if (!resumed && !loadError) {
+      return;
+    }
+    this.emitRuntimeTurnEvent(task, {
+      type: "status",
+      text: loadError ? `session reconnect fallback: ${loadError}` : "session resumed",
+    });
+  }
+
+  private cancelRuntimeTurnBeforePrompt(task: RuntimeTurnTask): boolean {
+    if (!task.state.pendingCancel && !task.input.signal?.aborted) {
+      return false;
+    }
+    task.state.pendingCancel = false;
+    task.settleResult({
+      status: "cancelled",
+      stopReason: "cancelled",
+    });
+    return true;
+  }
+
+  private async applyPendingRuntimeTurnCancel(
+    task: RuntimeTurnTask,
+    turn: RunningRuntimeTurn,
+  ): Promise<boolean> {
+    if (!task.state.pendingCancel || !turn.client.hasActivePrompt()) {
+      return false;
+    }
+    const cancelled = await turn.client.requestCancelActivePrompt();
+    if (cancelled) {
+      task.state.pendingCancel = false;
+    }
+    return cancelled;
+  }
+
+  private async saveCompletedRuntimeTurn(
+    turn: RunningRuntimeTurn,
+    _stopReason: string | undefined,
+  ): Promise<void> {
+    turn.record.acpSessionId = turn.activeSessionId;
+    reconcileAgentSessionId(turn.record, turn.record.agentSessionId);
+    turn.record.protocolVersion = turn.client.initializeResult?.protocolVersion;
+    turn.record.agentCapabilities = turn.client.initializeResult?.agentCapabilities;
+    turn.record.acpx = turn.acpxState;
+    applyConversation(turn.record, turn.conversation);
+    applyLifecycleSnapshotToRecord(turn.record, turn.client.getAgentLifecycleSnapshot());
+    await this.options.sessionStore.save(turn.record);
+  }
+
+  private failRuntimeTurn(task: RuntimeTurnTask, error: unknown): void {
+    task.sessionReady.reject(error);
+    const normalized = normalizeOutputError(error, { origin: "runtime" });
+    task.settleResult({
+      status: "failed",
+      error: {
+        message: normalized.message,
+        ...(normalized.code ? { code: normalized.code } : {}),
+        ...(normalized.detailCode ? { detailCode: normalized.detailCode } : {}),
+        ...(normalized.retryable !== undefined ? { retryable: normalized.retryable } : {}),
+      },
+    });
+  }
+
+  private async finalizeRuntimeTurn(
+    task: RuntimeTurnTask,
+    turn: RunningRuntimeTurn | undefined,
+  ): Promise<void> {
+    task.state.turnActive = false;
+    task.input.signal?.removeEventListener("abort", task.abortHandler);
+    turn?.client.clearEventHandlers();
+    const pooled = turn ? await this.finalizeRuntimeTurnRecord(turn) : false;
+    if (!pooled) {
+      await turn?.client.close().catch(() => {});
+    }
+    if (turn) {
+      this.activeControllers.delete(turn.record.acpxRecordId);
+      this.closingActiveRecords.delete(turn.record.acpxRecordId);
+    }
+    task.queue.close();
+  }
+
+  private async finalizeRuntimeTurnRecord(turn: RunningRuntimeTurn): Promise<boolean> {
+    applyLifecycleSnapshotToRecord(turn.record, turn.client.getAgentLifecycleSnapshot());
+    turn.record.acpx = turn.acpxState;
+    applyConversation(turn.record, turn.conversation);
+    turn.record.lastUsedAt = isoNow();
+    await turn.liveCheckpoint.flush().catch(() => {});
+    const closed = await this.refreshClosedState(turn.record);
+    await this.options.sessionStore.save(turn.record).catch(() => {});
+    if (closed) {
+      return false;
+    }
+    return await this.retainPersistentClientAfterTurn({
+      record: turn.record,
+      client: turn.client,
+    });
   }
 
   async *runTurn(input: {
@@ -902,6 +1293,8 @@ export class AcpRuntimeManager {
       backendSessionId: record.acpSessionId,
       agentSessionId: record.agentSessionId,
       ...buildModelsField(record),
+      ...buildUsageField(record),
+      ...buildAvailableCommandsField(record),
       details: {
         cwd: record.cwd,
         lastUsedAt: record.lastUsedAt,
@@ -948,11 +1341,7 @@ export class AcpRuntimeManager {
     if (controller) {
       const { configId, response } = await controller.setResolvedSessionConfigOption(key, value);
       applyConfigOptionsToRecord(record, response);
-      if (configId === "mode") {
-        setDesiredModeId(record, value);
-      } else {
-        setDesiredConfigOption(record, configId, value);
-      }
+      applyDesiredConfigOptionToRecord(record, configId, value);
       await this.options.sessionStore.save(record);
       return;
     }
@@ -964,11 +1353,7 @@ export class AcpRuntimeManager {
         const configId = resolveSupportedConfigOptionId(connectedRecord, key);
         const response = await client.setSessionConfigOption(sessionId, configId, value);
         applyConfigOptionsToRecord(connectedRecord, response);
-        if (configId === "mode") {
-          setDesiredModeId(connectedRecord, value);
-        } else {
-          setDesiredConfigOption(connectedRecord, configId, value);
-        }
+        applyDesiredConfigOptionToRecord(connectedRecord, configId, value);
       },
     );
     await this.options.sessionStore.save(result.record);

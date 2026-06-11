@@ -42,34 +42,34 @@ function hasResultOrError(value: Record<string, unknown>): boolean {
   return true;
 }
 
+function hasMethod(value: Record<string, unknown>): boolean {
+  return typeof value.method === "string" && value.method.length > 0;
+}
+
+function isJsonRpcRequest(value: Record<string, unknown>): boolean {
+  return hasMethod(value) && Object.hasOwn(value, "id") && hasValidId(value.id);
+}
+
+function isJsonRpcNotificationRecord(value: Record<string, unknown>): boolean {
+  return hasMethod(value) && !Object.hasOwn(value, "id");
+}
+
+function isJsonRpcResponse(value: Record<string, unknown>): boolean {
+  if (hasMethod(value) || !Object.hasOwn(value, "id") || !hasValidId(value.id)) {
+    return false;
+  }
+  return hasResultOrError(value);
+}
+
 export function isAcpJsonRpcMessage(value: unknown): value is AnyMessage {
   const record = asRecord(value);
   if (!record || record.jsonrpc !== "2.0") {
     return false;
   }
 
-  const hasMethod = typeof record.method === "string" && record.method.length > 0;
-  const hasId = Object.hasOwn(record, "id");
-
-  if (hasMethod && !hasId) {
-    // Notification
-    return true;
-  }
-
-  if (hasMethod && hasId) {
-    // Request
-    return hasValidId(record.id);
-  }
-
-  if (!hasMethod && hasId) {
-    // Response
-    if (!hasValidId(record.id)) {
-      return false;
-    }
-    return hasResultOrError(record);
-  }
-
-  return false;
+  return (
+    isJsonRpcNotificationRecord(record) || isJsonRpcRequest(record) || isJsonRpcResponse(record)
+  );
 }
 
 export function isJsonRpcNotification(message: AnyMessage): boolean {

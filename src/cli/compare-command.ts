@@ -1,13 +1,15 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
-import { promisify } from "node:util";
 import { Command, InvalidArgumentError } from "commander";
-import { resolveAgentCommand } from "../agent-registry.js";
 import { TimeoutError } from "../async-control.js";
-import { mergePromptSourceWithText, textPrompt } from "../prompt-content.js";
+import { loadPermissionPolicySpec } from "../permission-policy.js";
+import {
+  mergePromptSourceWithText,
+  parsePromptSource,
+  PromptInputValidationError,
+  textPrompt,
+} from "../prompt-content.js";
 import { runOnce } from "../session/session.js";
 import type {
   AcpJsonRpcMessage,
@@ -17,29 +19,39 @@ import type {
   OutputFormatter,
   OutputFormatterContext,
   PermissionEscalationEvent,
-  PermissionMode,
+  PermissionPolicy,
+  PermissionStats,
   PromptInput,
+  SessionNotification,
+  SessionTokenUsage,
 } from "../types.js";
+import { EXIT_CODES } from "../types.js";
 import type { ResolvedAcpxConfig } from "./config.js";
-import { parseNonEmptyValue, parseTimeoutSeconds, resolvePermissionMode } from "./flags.js";
+import {
+  parseNonEmptyValue,
+  parseOutputFormat,
+  parseTimeoutSeconds,
+  resolveAgentInvocation,
+  resolveGlobalFlags,
+  resolveOutputPolicy,
+  resolvePermissionMode,
+} from "./flags.js";
 
-const execFileAsync = promisify(execFile);
 const DEFAULT_COMPARE_TIMEOUT_MS = 300_000;
 const FINAL_MESSAGE_PREVIEW_CHARS = 200;
 
 export type CompareRow = {
   agent: string;
-  status: "ok" | "cancelled" | "error";
+  status: "ok" | "cancelled" | "error" | "permission_denied";
   stop_reason: string | null;
   wall_ms: number;
   input_tokens: number | null;
   output_tokens: number | null;
-  context_used: number | null;
+  total_tokens: number | null;
   final_message: string;
-  transcript_path: string;
   error: string | null;
-  diff_stat: string | null;
-  diff_path: string | null;
+  permission_requests: number;
+  permission_denied: number;
 };
 
 type CompareFlags = {
@@ -48,43 +60,25 @@ type CompareFlags = {
   approveReads?: boolean;
   denyAll?: boolean;
   timeout?: number;
+  format?: string;
   json?: boolean;
-  diff?: boolean;
+  file?: string;
   promptFile?: string;
 };
 
-type CompareOptions = {
-  cwd: string;
-  runId: string;
-  permissionMode: PermissionMode;
-  timeoutMs: number;
-  diff: boolean;
-  transcriptDir: string;
-};
-
-type TranscriptSummary = {
-  stopReason: string | null;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  contextUsed: number | null;
+type RunCapture = {
   finalMessage: string;
+  usage: SessionTokenUsage;
+  errors: string[];
 };
 
-type WorktreeInfo = {
-  cwd: string;
-  root: string;
-  worktreePath: string;
-};
-
-class TranscriptFormatter implements OutputFormatter {
-  private lines: string[] = [];
-
+class CaptureFormatter implements OutputFormatter {
   setContext(_context: OutputFormatterContext): void {
-    // The raw ACP stream already carries session ids.
+    // Compare renders one summarized row per agent instead of streaming each turn.
   }
 
-  onAcpMessage(message: AcpJsonRpcMessage): void {
-    this.lines.push(`${JSON.stringify(message)}\n`);
+  onAcpMessage(_message: AcpJsonRpcMessage): void {
+    // The live update callback below owns summary extraction.
   }
 
   onError(params: {
@@ -96,46 +90,28 @@ class TranscriptFormatter implements OutputFormatter {
     acp?: OutputErrorAcpPayload;
     timestamp?: string;
   }): void {
-    this.lines.push(
-      `${JSON.stringify({
-        jsonrpc: "2.0",
-        error: {
-          code: -32603,
-          message: params.message,
-          data: {
-            acpxCode: params.code,
-            detailCode: params.detailCode,
-            origin: params.origin,
-            retryable: params.retryable,
-            timestamp: params.timestamp,
-            acp: params.acp,
-          },
-        },
-      })}\n`,
-    );
+    void params;
   }
 
   onPermissionEscalation(_event: PermissionEscalationEvent): void {
-    // Permission details are represented by the ACP request/response messages.
+    // Permission counts come from RunPromptResult.permissionStats.
   }
 
   flush(): void {
     // no-op
   }
-
-  async writeToFile(filePath: string): Promise<void> {
-    await fs.writeFile(filePath, this.lines.join(""), "utf8");
-  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
-function readNumber(source: Record<string, unknown>, keys: string[]): number | null {
+function numberField(source: Record<string, unknown> | undefined, keys: string[]): number | null {
+  if (!source) {
+    return null;
+  }
   for (const key of keys) {
     const value = source[key];
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -156,36 +132,6 @@ function truncate(value: string, maxChars: number): string {
   return `${value.slice(0, Math.max(0, maxChars - 3))}...`;
 }
 
-function compareRunId(): string {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return `${timestamp}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function safeAgentFileName(agent: string): string {
-  return encodeURIComponent(agent).replace(/%/g, "_");
-}
-
-async function readPromptInput(
-  filePath: string | undefined,
-  promptText: string,
-  cwd: string,
-): Promise<PromptInput> {
-  if (!filePath) {
-    if (promptText.trim().length === 0) {
-      throw new InvalidArgumentError("Prompt is required unless --prompt-file is provided");
-    }
-    return textPrompt(promptText);
-  }
-
-  const source =
-    filePath === "-" ? await readStdin() : await fs.readFile(path.resolve(cwd, filePath), "utf8");
-  const prompt = mergePromptSourceWithText(source, promptText);
-  if (prompt.length === 0) {
-    throw new InvalidArgumentError("Prompt from --prompt-file is empty");
-  }
-  return prompt;
-}
-
 async function readStdin(): Promise<string> {
   let data = "";
   for await (const chunk of process.stdin) {
@@ -194,69 +140,56 @@ async function readStdin(): Promise<string> {
   return data;
 }
 
-async function summarizeTranscript(transcriptPath: string): Promise<TranscriptSummary> {
-  const content = await fs.readFile(transcriptPath, "utf8").catch((error: unknown) => {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return "";
-    }
-    throw error;
-  });
-  let finalMessage = "";
-  let stopReason: string | null = null;
-  let inputTokens: number | null = null;
-  let outputTokens: number | null = null;
-  let contextUsed: number | null = null;
+async function readPromptFile(
+  filePath: string,
+  promptText: string,
+  cwd: string,
+): Promise<PromptInput> {
+  const source =
+    filePath === "-" ? await readStdin() : await fs.readFile(path.resolve(cwd, filePath), "utf8");
+  const prompt = mergePromptSourceWithText(source, promptText);
+  if (prompt.length === 0) {
+    throw new InvalidArgumentError("Prompt from --file is empty");
+  }
+  return prompt;
+}
 
-  for (const line of content.split(/\r?\n/)) {
-    if (!line.trim()) {
-      continue;
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      continue;
-    }
-
-    const message = asRecord(parsed);
-    const params = asRecord(message?.params);
-    const update = asRecord(params?.update);
-    if (message && Object.hasOwn(message, "result")) {
-      const result = asRecord(message.result);
-      if (typeof result?.stopReason === "string") {
-        stopReason = result.stopReason;
-      }
-    }
-
-    if (message?.method !== "session/update" || !update) {
-      continue;
-    }
-
-    if (update.sessionUpdate === "agent_message_chunk") {
-      const contentBlock = asRecord(update.content);
-      if (contentBlock?.type === "text" && typeof contentBlock.text === "string") {
-        finalMessage += contentBlock.text;
-      }
-      continue;
-    }
-
-    if (update.sessionUpdate === "usage_update") {
-      const usageMeta = asRecord(asRecord(update._meta)?.usage);
-      const source = usageMeta ?? update;
-      inputTokens = readNumber(source, ["input_tokens", "inputTokens", "input", "used"]);
-      outputTokens = readNumber(source, ["output_tokens", "outputTokens", "output"]);
-      contextUsed = readNumber(source, ["context_used", "contextUsed", "size", "used"]);
-    }
+async function readPromptFromStdin(): Promise<PromptInput> {
+  if (process.stdin.isTTY) {
+    throw new InvalidArgumentError(
+      "Prompt is required (pass as final argument, --file, or pipe via stdin)",
+    );
   }
 
-  return {
-    stopReason,
-    inputTokens,
-    outputTokens,
-    contextUsed,
-    finalMessage: collapseWhitespace(finalMessage),
-  };
+  const prompt = parsePromptSource(await readStdin());
+  if (prompt.length === 0) {
+    throw new InvalidArgumentError("Prompt from stdin is empty");
+  }
+  return prompt;
+}
+
+async function readPromptInput(
+  filePath: string | undefined,
+  promptText: string,
+  cwd: string,
+): Promise<PromptInput> {
+  try {
+    if (filePath) {
+      return await readPromptFile(filePath, promptText, cwd);
+    }
+
+    const joined = promptText.trim();
+    if (joined.length > 0) {
+      return textPrompt(joined);
+    }
+
+    return await readPromptFromStdin();
+  } catch (error) {
+    if (error instanceof PromptInputValidationError) {
+      throw new InvalidArgumentError(error.message);
+    }
+    throw error;
+  }
 }
 
 function promptTokensAfterDoubleDash(command: Command): string[] {
@@ -275,13 +208,13 @@ function promptTokensAfterDoubleDash(command: Command): string[] {
 
 function splitCompareArgs(
   args: string[],
-  promptFile: string | undefined,
+  filePath: string | undefined,
   command: Command,
 ): {
   agents: string[];
   promptText: string;
 } {
-  if (promptFile) {
+  if (filePath) {
     if (args.length === 0) {
       throw new InvalidArgumentError("At least one agent is required");
     }
@@ -307,165 +240,147 @@ function splitCompareArgs(
   };
 }
 
-function resolveCompareCwd(command: Command, flags: CompareFlags): string {
-  const opts = command.optsWithGlobals() as { cwd?: unknown };
-  const cwd =
-    typeof flags.cwd === "string"
-      ? flags.cwd
-      : typeof opts.cwd === "string"
-        ? opts.cwd
-        : process.cwd();
-  return path.resolve(cwd);
-}
-
-function resolveCompareTimeout(command: Command, flags: CompareFlags): number {
-  const opts = command.optsWithGlobals() as { timeout?: unknown };
-  if (typeof flags.timeout === "number") {
-    return flags.timeout;
-  }
-  if (typeof opts.timeout === "number") {
-    return opts.timeout;
-  }
-  return DEFAULT_COMPARE_TIMEOUT_MS;
-}
-
-function resolveComparePermissionMode(command: Command, flags: CompareFlags): PermissionMode {
-  const opts = command.optsWithGlobals() as {
-    approveAll?: unknown;
-    approveReads?: unknown;
-    denyAll?: unknown;
-  };
-  return resolvePermissionMode(
-    {
-      approveAll: flags.approveAll === true || opts.approveAll === true ? true : undefined,
-      approveReads: flags.approveReads === true || opts.approveReads === true ? true : undefined,
-      denyAll: flags.denyAll === true || opts.denyAll === true ? true : undefined,
-    },
-    "deny-all",
-  );
-}
-
-async function prepareWorktree(agent: string, cwd: string, runId: string): Promise<WorktreeInfo> {
-  const rootResult = await execFileAsync("git", ["-C", cwd, "rev-parse", "--show-toplevel"]);
-  const root = rootResult.stdout.trim();
-  const relativeCwd = path.relative(root, cwd);
-  const worktreePath = path.join(os.tmpdir(), `acpx-compare-${runId}-${safeAgentFileName(agent)}`);
-  await fs.rm(worktreePath, { recursive: true, force: true });
-  await execFileAsync("git", ["-C", root, "worktree", "add", "--detach", worktreePath, "HEAD"]);
-  return {
-    root,
-    worktreePath,
-    cwd: path.resolve(worktreePath, relativeCwd),
+function captureUsage(update: Record<string, unknown>, capture: RunCapture): void {
+  const usageMeta = asRecord(asRecord(update._meta)?.usage);
+  const source = usageMeta ?? update;
+  capture.usage = {
+    input_tokens: numberField(source, ["input_tokens", "inputTokens"]) ?? undefined,
+    output_tokens: numberField(source, ["output_tokens", "outputTokens"]) ?? undefined,
+    total_tokens: numberField(source, ["total_tokens", "totalTokens", "size", "used"]) ?? undefined,
   };
 }
 
-async function collectDiff(
-  agent: string,
-  transcriptDir: string,
-  worktree: WorktreeInfo | undefined,
-): Promise<Pick<CompareRow, "diff_stat" | "diff_path">> {
-  if (!worktree) {
-    return { diff_stat: null, diff_path: null };
-  }
-
-  const diffPath = path.join(transcriptDir, `${safeAgentFileName(agent)}.diff`);
-  const [stat, diff] = await Promise.all([
-    execFileAsync("git", ["-C", worktree.worktreePath, "diff", "--stat"]).catch(
-      (error: unknown) => ({
-        stdout: "",
-        stderr: error instanceof Error ? error.message : String(error),
-      }),
-    ),
-    execFileAsync("git", ["-C", worktree.worktreePath, "diff"]).catch((error: unknown) => ({
-      stdout: "",
-      stderr: error instanceof Error ? error.message : String(error),
-    })),
-  ]);
-  const diffContent = diff.stdout || diff.stderr || "";
-  await fs.writeFile(diffPath, diffContent, "utf8");
-
-  return {
-    diff_stat: collapseWhitespace(stat.stdout || stat.stderr || "no changes"),
-    diff_path: diffPath,
-  };
-}
-
-async function removeWorktree(worktree: WorktreeInfo | undefined): Promise<void> {
-  if (!worktree) {
+function captureSessionUpdate(notification: SessionNotification, capture: RunCapture): void {
+  const update = asRecord(notification.update);
+  if (!update) {
     return;
   }
-  await execFileAsync("git", [
-    "-C",
-    worktree.root,
-    "worktree",
-    "remove",
-    "--force",
-    worktree.worktreePath,
-  ]).catch(() => undefined);
-}
 
-async function runAgentForCompare(
-  agent: string,
-  prompt: PromptInput,
-  options: CompareOptions,
-  config: ResolvedAcpxConfig,
-): Promise<CompareRow> {
-  const transcriptPath = path.join(options.transcriptDir, `${safeAgentFileName(agent)}.ndjson`);
-  await fs.mkdir(path.dirname(transcriptPath), { recursive: true });
-
-  let worktree: WorktreeInfo | undefined;
-  const formatter = new TranscriptFormatter();
-  const t0 = performance.now();
-  let status: CompareRow["status"] = "ok";
-  let error: string | null = null;
-
-  try {
-    worktree = options.diff ? await prepareWorktree(agent, options.cwd, options.runId) : undefined;
-    const agentCommand = resolveAgentCommand(agent, config.agents);
-    const result = await runOnce({
-      agentCommand,
-      cwd: worktree?.cwd ?? options.cwd,
-      prompt,
-      mcpServers: config.mcpServers,
-      permissionMode: options.permissionMode,
-      nonInteractivePermissions: config.nonInteractivePermissions,
-      authCredentials: config.auth,
-      authPolicy: config.authPolicy,
-      outputFormatter: formatter,
-      suppressSdkConsoleErrors: true,
-      timeoutMs: options.timeoutMs,
-    });
-    if (result.stopReason === "cancelled") {
-      status = "cancelled";
+  if (update.sessionUpdate === "agent_message_chunk") {
+    const content = asRecord(update.content);
+    if (content?.type === "text" && typeof content.text === "string") {
+      capture.finalMessage += content.text;
     }
-  } catch (caught) {
-    status = caught instanceof TimeoutError ? "cancelled" : "error";
-    error = caught instanceof Error ? caught.message : String(caught);
-  } finally {
-    await formatter.writeToFile(transcriptPath);
+    return;
   }
 
-  const wallMs = Math.round(performance.now() - t0);
-  const [summary, diff] = await Promise.all([
-    summarizeTranscript(transcriptPath),
-    collectDiff(agent, options.transcriptDir, worktree),
-  ]);
-  await removeWorktree(worktree);
+  if (update.sessionUpdate === "usage_update") {
+    captureUsage(update, capture);
+  }
+}
 
+function rowStatusFromPermissionStats(stats: PermissionStats): CompareRow["status"] {
+  const deniedOrCancelled = stats.denied + stats.cancelled;
+  return stats.requested > 0 && stats.approved === 0 && deniedOrCancelled > 0
+    ? "permission_denied"
+    : "ok";
+}
+
+function sessionOptionsFromGlobalFlags(globalFlags: ReturnType<typeof resolveGlobalFlags>) {
   return {
-    agent,
-    status,
-    stop_reason: summary.stopReason,
-    wall_ms: wallMs,
-    input_tokens: summary.inputTokens,
-    output_tokens: summary.outputTokens,
-    context_used: summary.contextUsed,
-    final_message: truncate(summary.finalMessage, FINAL_MESSAGE_PREVIEW_CHARS),
-    transcript_path: transcriptPath,
-    error: error ? truncate(collapseWhitespace(error), FINAL_MESSAGE_PREVIEW_CHARS) : null,
-    diff_stat: diff.diff_stat,
-    diff_path: diff.diff_path,
+    model: globalFlags.model,
+    allowedTools: globalFlags.allowedTools,
+    maxTurns: globalFlags.maxTurns,
+    systemPrompt: globalFlags.systemPrompt,
   };
+}
+
+async function resolvePermissionPolicyFromFlags(
+  globalFlags: ReturnType<typeof resolveGlobalFlags>,
+): Promise<PermissionPolicy | undefined> {
+  try {
+    return await loadPermissionPolicySpec(globalFlags.permissionPolicy, globalFlags.cwd);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new InvalidArgumentError(`Invalid permission policy: ${message}`);
+  }
+}
+
+function buildSuccessRow(
+  agentName: string,
+  result: Awaited<ReturnType<typeof runOnce>>,
+  capture: RunCapture,
+  startedAt: number,
+): CompareRow {
+  const permissionStats = result.permissionStats;
+  return {
+    agent: agentName,
+    status:
+      result.stopReason === "cancelled"
+        ? "cancelled"
+        : rowStatusFromPermissionStats(permissionStats),
+    stop_reason: result.stopReason,
+    wall_ms: Math.round(performance.now() - startedAt),
+    input_tokens: capture.usage.input_tokens ?? null,
+    output_tokens: capture.usage.output_tokens ?? null,
+    total_tokens: capture.usage.total_tokens ?? null,
+    final_message: truncate(collapseWhitespace(capture.finalMessage), FINAL_MESSAGE_PREVIEW_CHARS),
+    error: null,
+    permission_requests: permissionStats.requested,
+    permission_denied: permissionStats.denied + permissionStats.cancelled,
+  };
+}
+
+function buildErrorRow(
+  agentName: string,
+  caught: unknown,
+  capture: RunCapture,
+  startedAt: number,
+): CompareRow {
+  return {
+    agent: agentName,
+    status: caught instanceof TimeoutError ? "cancelled" : "error",
+    stop_reason: null,
+    wall_ms: Math.round(performance.now() - startedAt),
+    input_tokens: capture.usage.input_tokens ?? null,
+    output_tokens: capture.usage.output_tokens ?? null,
+    total_tokens: capture.usage.total_tokens ?? null,
+    final_message: truncate(collapseWhitespace(capture.finalMessage), FINAL_MESSAGE_PREVIEW_CHARS),
+    error: truncate(
+      collapseWhitespace(caught instanceof Error ? caught.message : String(caught)),
+      FINAL_MESSAGE_PREVIEW_CHARS,
+    ),
+    permission_requests: 0,
+    permission_denied: 0,
+  };
+}
+
+async function runAgentForCompare(params: {
+  agentName: string;
+  prompt: PromptInput;
+  config: ResolvedAcpxConfig;
+  globalFlags: ReturnType<typeof resolveGlobalFlags>;
+  permissionPolicy: PermissionPolicy | undefined;
+}): Promise<CompareRow> {
+  const capture: RunCapture = { finalMessage: "", usage: {}, errors: [] };
+  const formatter = new CaptureFormatter();
+  const t0 = performance.now();
+
+  try {
+    const agent = resolveAgentInvocation(params.agentName, params.globalFlags, params.config);
+    const result = await runOnce({
+      agentCommand: agent.agentCommand,
+      cwd: agent.cwd,
+      prompt: params.prompt,
+      mcpServers: params.config.mcpServers,
+      permissionMode: resolvePermissionMode(params.globalFlags, params.config.defaultPermissions),
+      nonInteractivePermissions: params.globalFlags.nonInteractivePermissions,
+      permissionPolicy: params.permissionPolicy,
+      authCredentials: params.config.auth,
+      authPolicy: params.globalFlags.authPolicy,
+      terminal: params.globalFlags.terminal,
+      outputFormatter: formatter,
+      suppressSdkConsoleErrors: true,
+      timeoutMs: params.globalFlags.timeout ?? DEFAULT_COMPARE_TIMEOUT_MS,
+      verbose: params.globalFlags.verbose,
+      promptRetries: params.globalFlags.promptRetries,
+      sessionOptions: sessionOptionsFromGlobalFlags(params.globalFlags),
+      onSessionUpdate: (notification) => captureSessionUpdate(notification, capture),
+    });
+    return buildSuccessRow(params.agentName, result, capture, t0);
+  } catch (caught) {
+    return buildErrorRow(params.agentName, caught, capture, t0);
+  }
 }
 
 function formatCell(value: unknown): string {
@@ -481,18 +396,17 @@ function formatCell(value: unknown): string {
   return collapseWhitespace(JSON.stringify(value));
 }
 
-function renderTable(rows: CompareRow[], includeDiff: boolean): string {
+function renderTable(rows: CompareRow[]): string {
   const headers = [
     "agent",
     "status",
     "wall_ms",
     "input",
     "output",
-    "context",
+    "total",
+    "permissions",
     "stop_reason",
     "final_message",
-    "transcript",
-    ...(includeDiff ? ["diff"] : []),
     "error",
   ];
   const body = rows.map((row) => [
@@ -501,11 +415,10 @@ function renderTable(rows: CompareRow[], includeDiff: boolean): string {
     row.wall_ms,
     row.input_tokens,
     row.output_tokens,
-    row.context_used,
+    row.total_tokens,
+    `${row.permission_denied}/${row.permission_requests}`,
     row.stop_reason,
     row.final_message,
-    row.transcript_path,
-    ...(includeDiff ? [row.diff_stat] : []),
     row.error,
   ]);
   const widths = headers.map((header, index) =>
@@ -526,72 +439,95 @@ function renderTable(rows: CompareRow[], includeDiff: boolean): string {
   ].join("\n");
 }
 
+function printRows(rows: CompareRow[], format: "text" | "json" | "quiet"): void {
+  if (format === "json") {
+    process.stdout.write(`${JSON.stringify(rows)}\n`);
+    return;
+  }
+
+  if (format === "quiet") {
+    for (const row of rows) {
+      process.stdout.write(`${row.agent}\t${row.status}\n`);
+    }
+    return;
+  }
+
+  process.stdout.write(`${renderTable(rows)}\n`);
+}
+
+function updateCompareExitCode(rows: CompareRow[]): void {
+  if (rows.some((row) => row.status === "error")) {
+    process.exitCode = EXIT_CODES.ERROR;
+    return;
+  }
+  if (rows.some((row) => row.status === "permission_denied")) {
+    process.exitCode = EXIT_CODES.PERMISSION_DENIED;
+    return;
+  }
+  if (rows.length > 0 && rows.every((row) => row.status === "cancelled")) {
+    process.exitCode = EXIT_CODES.TIMEOUT;
+  }
+}
+
+function resolvePromptFile(flags: CompareFlags): string | undefined {
+  if (flags.file && flags.promptFile && flags.file !== flags.promptFile) {
+    throw new InvalidArgumentError("Use only one prompt file flag: --file or --prompt-file");
+  }
+  return flags.file ?? flags.promptFile;
+}
+
 export function registerCompareCommand(program: Command, config: ResolvedAcpxConfig): void {
   program
     .command("compare")
-    .description("Run one prompt across multiple agents and compare the results")
-    .argument("<args...>", "Agents followed by prompt text, or agents with --prompt-file")
+    .description("Run one prompt across multiple agents and summarize the results")
+    .argument("<args...>", "Agents followed by prompt text, or agents with --file")
     .option("--cwd <dir>", "Target workspace")
     .option("--approve-all", "Auto-approve all permission requests")
     .option("--approve-reads", "Auto-approve read/search requests and prompt for writes")
     .option("--deny-all", "Deny all permission requests")
     .option("--timeout <seconds>", "Per-agent timeout in seconds", parseTimeoutSeconds)
-    .option("--json", "Emit CompareRow[] as JSON")
-    .option("--diff", "Run each agent in an isolated git worktree and report diff summaries")
+    .option("--format <fmt>", "Output format: text, json, quiet", parseOutputFormat)
+    .option("--json", "Alias for --format json")
     .option(
-      "-f, --prompt-file <path>",
+      "-f, --file <path>",
       "Read prompt text from file path (use - for stdin)",
       (value: string) => parseNonEmptyValue("Prompt file", value),
+    )
+    .option("--prompt-file <path>", "Alias for --file", (value: string) =>
+      parseNonEmptyValue("Prompt file", value),
     )
     .action(async function (this: Command, args: string[], flags: CompareFlags) {
       if (config.disableExec) {
         throw new Error("compare subcommand is disabled by configuration (disableExec: true)");
       }
 
-      const cwd = resolveCompareCwd(this, flags);
-      const { agents, promptText } = splitCompareArgs(args, flags.promptFile, this);
-      const prompt = await readPromptInput(flags.promptFile, promptText, cwd);
-      const runId = compareRunId();
-      const transcriptDir = path.join(os.homedir(), ".acpx", "compare", runId);
-      const permissionMode = resolveComparePermissionMode(this, flags);
-      const timeoutMs = resolveCompareTimeout(this, flags);
+      const globalFlags = resolveGlobalFlags(this, config);
+      if (globalFlags.agent) {
+        throw new InvalidArgumentError("Do not combine compare with --agent; pass agent names");
+      }
+
+      const outputPolicy = resolveOutputPolicy(
+        flags.json === true ? "json" : globalFlags.format,
+        globalFlags.jsonStrict === true,
+      );
+      const promptFile = resolvePromptFile(flags);
+      const { agents, promptText } = splitCompareArgs(args, promptFile, this);
+      const prompt = await readPromptInput(promptFile, promptText, globalFlags.cwd);
+      const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
 
       const rows = await Promise.all(
-        agents.map((agent) =>
-          runAgentForCompare(
-            agent,
+        agents.map((agentName) =>
+          runAgentForCompare({
+            agentName,
             prompt,
-            {
-              cwd,
-              runId,
-              permissionMode,
-              timeoutMs,
-              diff: flags.diff === true,
-              transcriptDir,
-            },
             config,
-          ).catch((error: unknown) => ({
-            agent,
-            status: "error" as const,
-            stop_reason: null,
-            wall_ms: 0,
-            input_tokens: null,
-            output_tokens: null,
-            context_used: null,
-            final_message: "",
-            transcript_path: path.join(transcriptDir, `${safeAgentFileName(agent)}.ndjson`),
-            error: error instanceof Error ? error.message : String(error),
-            diff_stat: null,
-            diff_path: null,
-          })),
+            globalFlags,
+            permissionPolicy,
+          }),
         ),
       );
 
-      if (flags.json) {
-        process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
-        return;
-      }
-
-      process.stdout.write(`${renderTable(rows, flags.diff === true)}\n`);
+      printRows(rows, outputPolicy.format);
+      updateCompareExitCode(rows);
     });
 }

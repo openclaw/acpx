@@ -49,6 +49,16 @@ test("kiro built-in uses kiro-cli-chat directly", () => {
   assert.equal(resolveAgentCommand("kiro"), "kiro-cli-chat acp");
 });
 
+test("fast-agent built-in runs the ACP entrypoint through uvx", () => {
+  assert.equal(AGENT_REGISTRY["fast-agent"], "uvx fast-agent-mcp acp");
+  assert.equal(resolveAgentCommand("fast-agent"), "uvx fast-agent-mcp acp");
+});
+
+test("mux built-in runs the coder/mux ACP stdio bridge through npx", () => {
+  assert.equal(AGENT_REGISTRY.mux, "npx -y mux@^0.27.0 acp");
+  assert.equal(resolveAgentCommand("mux"), "npx -y mux@^0.27.0 acp");
+});
+
 test("listBuiltInAgents preserves the required example prefix and alphabetical tail", () => {
   const agents = listBuiltInAgents();
   assert.deepEqual(agents, Object.keys(AGENT_REGISTRY));
@@ -63,10 +73,12 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
   ]);
   assert.deepEqual(agents.slice(7), [
     "droid",
+    "fast-agent",
     "iflow",
     "kilocode",
     "kimi",
     "kiro",
+    "mux",
     "opencode",
     "qoder",
     "qwen",
@@ -79,13 +91,13 @@ test("default agent is codex", () => {
 });
 
 test("claude built-in uses the current ACP adapter package range", () => {
-  assert.equal(BUILT_IN_AGENT_PACKAGES.claude.packageRange, "^0.31.0");
-  assert.equal(AGENT_REGISTRY.claude, "npx -y @agentclientprotocol/claude-agent-acp@^0.31.0");
+  assert.equal(BUILT_IN_AGENT_PACKAGES.claude.packageRange, "^0.37.0");
+  assert.equal(AGENT_REGISTRY.claude, "npx -y @agentclientprotocol/claude-agent-acp@^0.37.0");
 });
 
 test("npm-backed built-ins use current adapter package ranges", () => {
-  assert.equal(BUILT_IN_AGENT_PACKAGES.codex.packageRange, "^0.12.0");
-  assert.equal(AGENT_REGISTRY.codex, "npx @zed-industries/codex-acp@^0.12.0");
+  assert.equal(BUILT_IN_AGENT_PACKAGES.codex.packageRange, "^0.0.44");
+  assert.equal(AGENT_REGISTRY.codex, "npx -y @agentclientprotocol/codex-acp@^0.0.44");
   assert.equal(AGENT_REGISTRY.pi, "npx pi-acp@^0.0.26");
 });
 
@@ -107,7 +119,7 @@ test("resolveInstalledBuiltInAgentLaunch uses a locally installed adapter when a
     path.join(packageRoot, "package.json"),
     JSON.stringify({
       name: BUILT_IN_AGENT_PACKAGES.claude.packageName,
-      version: "0.31.0",
+      version: "0.37.0",
       bin: {
         "claude-agent-acp": "bin/claude-agent-acp.js",
       },
@@ -126,7 +138,7 @@ test("resolveInstalledBuiltInAgentLaunch uses a locally installed adapter when a
     args: [path.join(packageRoot, "bin", "claude-agent-acp.js")],
     packageName: BUILT_IN_AGENT_PACKAGES.claude.packageName,
     packageRange: BUILT_IN_AGENT_PACKAGES.claude.packageRange,
-    packageVersion: "0.31.0",
+    packageVersion: "0.37.0",
     binPath: path.join(packageRoot, "bin", "claude-agent-acp.js"),
   });
 });

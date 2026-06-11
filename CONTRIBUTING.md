@@ -24,8 +24,10 @@ For the current maintainer list, check the original OpenClaw contributing guide:
 
 ## Before You PR
 
-- Test locally with your OpenClaw instance
-- Run tests: `pnpm build && pnpm check && pnpm test:coverage`
+- Test locally with the smallest relevant `acpx` command or test
+- Run checks for your scope, usually `pnpm run check`
+- For non-trivial code changes, run the repo-local autoreview helper before
+  asking for review: `.agents/skills/autoreview/scripts/autoreview`
 - Ensure CI checks pass
 - Keep PRs focused (one thing per PR; do not mix unrelated concerns)
 - Keep built-in agent docs, examples, and links consistent with the existing docs structure.

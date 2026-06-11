@@ -39,6 +39,7 @@ const FLOW_WORKDIR_FIXTURE_PATH = fileURLToPath(
 );
 const MOCK_AGENT_COMMAND = `node ${JSON.stringify(MOCK_AGENT_PATH)}`;
 const LOAD_CAPABLE_MOCK_AGENT_COMMAND = `${MOCK_AGENT_COMMAND} --supports-load-session`;
+const RESUME_CAPABLE_MOCK_AGENT_COMMAND = `${MOCK_AGENT_COMMAND} --supports-resume-session`;
 
 const unsafeCodeCharEscapes = Object.freeze({
   "<": "\\u003C",
@@ -820,6 +821,33 @@ test("integration: factory-droid alias resolves to droid exec --output-format ac
   });
 });
 
+test("integration: built-in fast-agent resolves to uvx fast-agent-mcp acp", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-fast-agent-"));
+
+    try {
+      await writeFakeUvxFastAgentAcp(fakeBinDir);
+
+      const result = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "quiet", "fast-agent", "exec", "echo hello"],
+        homeDir,
+        {
+          env: {
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /hello/);
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: built-in iflow agent resolves to iflow --experimental-acp", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -1029,7 +1057,208 @@ test("integration: exec --no-terminal disables advertised terminal capability", 
   });
 });
 
-test("integration: exec --model calls session/set_model when agent advertises models", async () => {
+test("integration: non-Devin ACP launch advertises standard acpx client capabilities", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "exec", "echo hello"],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const initializeRequest = payloads.find((payload) => payload.method === "initialize") as
+        | {
+            params?: {
+              clientCapabilities?: {
+                _meta?: unknown;
+                elicitation?: unknown;
+                fs?: { readTextFile?: unknown; writeTextFile?: unknown };
+                terminal?: unknown;
+              };
+              clientInfo?: { name?: unknown; version?: unknown };
+            };
+          }
+        | undefined;
+      assert(initializeRequest, result.stdout);
+      assert.equal(initializeRequest.params?.clientInfo?.name, "acpx");
+      assert.equal(initializeRequest.params?.clientCapabilities?.terminal, true);
+      assert.deepEqual(initializeRequest.params?.clientCapabilities?.fs, {
+        readTextFile: true,
+        writeTextFile: true,
+      });
+      assert.equal(initializeRequest.params?.clientCapabilities?._meta, undefined);
+      assert.equal(initializeRequest.params?.clientCapabilities?.elicitation, undefined);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: exec accepts agent extension notifications", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "quiet",
+          "exec",
+          "extension-notification _cognition.ai/output hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /extension notification accepted: _cognition\.ai\/output/);
+      assert.doesNotMatch(result.stderr, /Method not found/);
+      assert.doesNotMatch(result.stderr, /Error handling notification/);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: non-Devin ACP launch rejects Devin diagnostics extension requests", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "quiet",
+          "exec",
+          "extension-request _cognition.ai/request_diagnostics hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+      assert.doesNotMatch(
+        result.stdout,
+        /extension request accepted: _cognition\.ai\/request_diagnostics/,
+      );
+      assert.match(result.stderr, /"Method not found": _cognition\.ai\/request_diagnostics/);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: exec answers Devin diagnostics extension requests", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-devin-"));
+
+    try {
+      await writeFakeDevinAgent(fakeBinDir);
+
+      const result = await runCli(
+        [
+          "--agent",
+          "devin --model swe-1-6 acp",
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "quiet",
+          "exec",
+          "extension-request _cognition.ai/request_diagnostics hello",
+        ],
+        homeDir,
+        {
+          env: {
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(
+        result.stdout,
+        /extension request accepted: _cognition\.ai\/request_diagnostics \{\}/,
+      );
+      assert.doesNotMatch(result.stderr, /Method not found/);
+      assert.doesNotMatch(result.stderr, /Error handling request/);
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: Devin ACP launch advertises scoped Windsurf client info", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-devin-"));
+
+    try {
+      await writeFakeDevinAgent(fakeBinDir);
+
+      const result = await runCli(
+        [
+          "--agent",
+          "devin --model swe-1-6 --acp",
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "exec",
+          "echo hello",
+        ],
+        homeDir,
+        {
+          env: {
+            ACPX_DEVIN_WINDSURF_VERSION: "9.9.9-test",
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const initializeRequest = payloads.find((payload) => payload.method === "initialize") as
+        | {
+            params?: {
+              clientCapabilities?: {
+                _meta?: Record<string, unknown> | null;
+                elicitation?: unknown;
+                fs?: { readTextFile?: unknown; writeTextFile?: unknown };
+                terminal?: unknown;
+              };
+              clientInfo?: {
+                name?: unknown;
+                version?: unknown;
+              };
+            };
+          }
+        | undefined;
+      assert(initializeRequest, result.stdout);
+      assert.deepEqual(initializeRequest.params?.clientInfo, {
+        name: "windsurf",
+        version: "9.9.9-test",
+      });
+      assert.equal(initializeRequest.params?.clientCapabilities?.terminal, true);
+      assert.deepEqual(initializeRequest.params?.clientCapabilities?.fs, {
+        readTextFile: true,
+        writeTextFile: true,
+      });
+      assert.deepEqual(initializeRequest.params?.clientCapabilities?._meta, {
+        "cognition.ai/requestDiagnostics": true,
+      });
+      assert.equal(initializeRequest.params?.clientCapabilities?.elicitation, undefined);
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: exec --model sets the advertised model config option", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const modelAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-models`;
@@ -1054,11 +1283,13 @@ test("integration: exec --model calls session/set_model when agent advertises mo
       assert.equal(result.code, 0, result.stderr);
 
       const payloads = parseJsonRpcOutputLines(result.stdout);
-      const setModelRequest = payloads.find((payload) => payload.method === "session/set_model") as
-        | { params?: { modelId?: string } }
-        | undefined;
-      assert(setModelRequest, "expected session/set_model request in JSON-RPC output");
-      assert.equal(setModelRequest.params?.modelId, "fast-model");
+      const setModelRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "model",
+      ) as { params?: { configId?: string; value?: string } } | undefined;
+      assert(setModelRequest, "expected model session config request in JSON-RPC output");
+      assert.equal(setModelRequest.params?.value, "fast-model");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -1087,9 +1318,12 @@ test("integration: exec --model fails when agent does not advertise models", asy
         options: { model: "sonnet" },
       });
 
-      // session/set_model should NOT be called
-      const setModelRequest = payloads.find((payload) => payload.method === "session/set_model");
-      assert.equal(setModelRequest, undefined, "session/set_model should not be called");
+      const setModelRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "model",
+      );
+      assert.equal(setModelRequest, undefined, "model session config should not be changed");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -1123,9 +1357,70 @@ test("integration: exec --model rejects models not advertised by the agent", asy
       assert.match(`${result.stderr}\n${result.stdout}`, /default-model, fast-model, smart-model/);
 
       const payloads = parseJsonRpcOutputLines(result.stdout);
-      const setModelRequest = payloads.find((payload) => payload.method === "session/set_model");
-      assert.equal(setModelRequest, undefined, "session/set_model should not be called");
+      const setModelRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "model",
+      );
+      assert.equal(setModelRequest, undefined, "model session config should not be changed");
     } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: Claude ACP prompt forwards saved model missing from reconnect advertisement", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-claude-"));
+
+    try {
+      const fakeClaude = await writeFakeClaudeAgent(fakeBinDir);
+      const modelAgentCommand = `${JSON.stringify(fakeClaude)} --supports-load-session --advertise-models --omit-reconnect-model gpt-5.4`;
+      const created = await runCli(
+        [
+          "--agent",
+          modelAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--model",
+          "gpt-5.4",
+          "sessions",
+          "new",
+        ],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+
+      const result = await runCli(
+        [
+          "--agent",
+          modelAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "--model",
+          "gpt-5.4",
+          "prompt",
+          "echo hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const setModelRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "model",
+      ) as { params?: { configId?: string; value?: string } } | undefined;
+      assert(setModelRequest, "expected model session config despite stale advertisement");
+      assert.equal(setModelRequest.params?.value, "gpt-5.4");
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
@@ -1134,7 +1429,7 @@ test("integration: exec --model rejects models not advertised by the agent", asy
 test("integration: prompt --model updates existing session model before prompt", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
-    const modelAgentCommand = `${LOAD_CAPABLE_MOCK_AGENT_COMMAND} --advertise-models`;
+    const modelAgentCommand = `${LOAD_CAPABLE_MOCK_AGENT_COMMAND} --model-config-id llm --omit-reconnect-config-options`;
 
     try {
       const created = await runCli(
@@ -1162,18 +1457,58 @@ test("integration: prompt --model updates existing session model before prompt",
       assert.equal(result.code, 0, result.stderr);
 
       const payloads = parseJsonRpcOutputLines(result.stdout);
-      const setModelRequest = payloads.find((payload) => payload.method === "session/set_model") as
-        | { params?: { modelId?: string } }
-        | undefined;
-      assert(setModelRequest, "expected session/set_model before the persistent prompt");
-      assert.equal(setModelRequest.params?.modelId, "fast-model");
+      const setModelRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "llm",
+      ) as { params?: { configId?: string; value?: string } } | undefined;
+      assert(setModelRequest, "expected model session config before the persistent prompt");
+      assert.equal(setModelRequest.params?.configId, "llm");
+      assert.equal(setModelRequest.params?.value, "fast-model");
+
+      const status = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "--format", "json", "status"],
+        homeDir,
+      );
+      assert.equal(status.code, 0, status.stderr);
+      assert.equal((JSON.parse(status.stdout.trim()) as { model?: string }).model, "fast-model");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
 });
 
-test("integration: exec --model fails when session/set_model fails", async () => {
+test("integration: status preserves model actually reported after set model", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const modelAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-models --report-model-as fast-model`;
+
+    try {
+      const created = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+
+      const setResult = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "set", "model", "gpt-5.4"],
+        homeDir,
+      );
+      assert.equal(setResult.code, 0, setResult.stderr);
+
+      const status = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "--format", "json", "status"],
+        homeDir,
+      );
+      assert.equal(status.code, 0, status.stderr);
+      assert.equal((JSON.parse(status.stdout.trim()) as { model?: string }).model, "fast-model");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: exec --model fails when the model config update fails", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const failModelAgentCommand = `${MOCK_AGENT_COMMAND} --set-session-model-fails`;
@@ -1197,14 +1532,14 @@ test("integration: exec --model fails when session/set_model fails", async () =>
       );
       assert.notEqual(result.code, 0, "expected non-zero exit");
       assert.equal(result.stdout, "");
-      assert.match(result.stderr, /setSessionModel failed|session\/set_model/i);
+      assert.match(result.stderr, /setSessionModel failed|session\/set_config_option/i);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
 });
 
-test("integration: sessions new --model fails when session/set_model fails", async () => {
+test("integration: sessions new --model fails when the model config update fails", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const failModelAgentCommand = `${MOCK_AGENT_COMMAND} --set-session-model-fails`;
@@ -1225,14 +1560,14 @@ test("integration: sessions new --model fails when session/set_model fails", asy
         homeDir,
       );
       assert.notEqual(result.code, 0, "expected non-zero exit");
-      assert.match(result.stderr, /setSessionModel failed|session\/set_model/i);
+      assert.match(result.stderr, /setSessionModel failed|session\/set_config_option/i);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
 });
 
-test("integration: set model routes through session/set_model and succeeds", async () => {
+test("integration: set model routes through the advertised config option and succeeds", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const modelAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-models`;
@@ -1245,7 +1580,7 @@ test("integration: set model routes through session/set_model and succeeds", asy
       );
       assert.equal(created.code, 0, created.stderr);
 
-      // Switch model mid-session via set command (uses session/set_model internally)
+      // Switch model mid-session through the advertised model config option.
       const setResult = await runCli(
         [
           "--agent",
@@ -1268,6 +1603,64 @@ test("integration: set model routes through session/set_model and succeeds", asy
       };
       assert.equal(payload.action, "model_set");
       assert.equal(payload.modelId, "gpt-5.4");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: legacy model metadata preserves session/set_model compatibility", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const modelAgentCommand = `${LOAD_CAPABLE_MOCK_AGENT_COMMAND} --advertise-legacy-models`;
+
+    try {
+      const created = await runCli(
+        [
+          "--agent",
+          modelAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--model",
+          "alternate-model",
+          "sessions",
+          "new",
+        ],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+
+      const status = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "--format", "json", "status"],
+        homeDir,
+      );
+      assert.equal(status.code, 0, status.stderr);
+      assert.equal(
+        (JSON.parse(status.stdout.trim()) as { model?: string }).model,
+        "alternate-model",
+      );
+
+      const setResult = await runCli(
+        [
+          "--agent",
+          modelAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "set",
+          "model",
+          "default-model",
+        ],
+        homeDir,
+      );
+      assert.equal(setResult.code, 0, setResult.stderr);
+      assert.equal(
+        (JSON.parse(setResult.stdout.trim()) as { modelId?: string }).modelId,
+        "default-model",
+      );
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -1302,7 +1695,7 @@ test("integration: set model rejects with clear error on ACP invalid params", as
         homeDir,
       );
       assert.notEqual(setResult.code, 0, "expected non-zero exit");
-      assert.match(setResult.stderr, /rejected session\/set_model/i);
+      assert.match(setResult.stderr, /rejected session\/set_config_option/i);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -1383,12 +1776,24 @@ test("integration: status shows updated model after set model", async () => {
       );
       assert.equal(created.code, 0, created.stderr);
 
+      const warmPrompt = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "prompt", "echo warm"],
+        homeDir,
+      );
+      assert.equal(warmPrompt.code, 0, warmPrompt.stderr);
+
       // Switch model
       const setResult = await runCli(
         ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "set", "model", "gpt-5.4"],
         homeDir,
       );
       assert.equal(setResult.code, 0, setResult.stderr);
+
+      const followUp = await runCli(
+        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "prompt", "echo follow-up"],
+        homeDir,
+      );
+      assert.equal(followUp.code, 0, followUp.stderr);
 
       // Check status JSON — should show updated model
       const status = await runCli(
@@ -1399,6 +1804,119 @@ test("integration: status shows updated model after set model", async () => {
 
       const statusPayload = JSON.parse(status.stdout.trim()) as { model?: string };
       assert.equal(statusPayload.model, "gpt-5.4");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: sessions list uses agent session/list pagination and metadata", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const listAgentCommand = `${MOCK_AGENT_COMMAND} --supports-list-sessions --list-page-size 1`;
+
+    try {
+      const firstPage = await runCli(
+        [
+          "--agent",
+          listAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "sessions",
+          "list",
+          "--filter-cwd",
+          ".",
+        ],
+        homeDir,
+      );
+      assert.equal(firstPage.code, 0, firstPage.stderr);
+      const firstPayload = JSON.parse(firstPage.stdout.trim()) as {
+        _meta?: { source?: string };
+        source?: string;
+        cwd?: string;
+        nextCursor?: string | null;
+        sessions?: Array<{
+          sessionId?: string;
+          cwd?: string;
+          title?: string | null;
+          _meta?: { messageCount?: number };
+        }>;
+      };
+      assert.equal(firstPayload._meta?.source, "mock-agent-list");
+      assert.equal(firstPayload.source, "agent");
+      assert.equal(firstPayload.cwd, cwd);
+      assert.equal(firstPayload.nextCursor, "1");
+      assert.equal(firstPayload.sessions?.length, 1);
+      assert.equal(firstPayload.sessions?.[0]?.sessionId, "mock-session-alpha");
+      assert.equal(firstPayload.sessions?.[0]?.cwd, cwd);
+      assert.equal(firstPayload.sessions?.[0]?.title, "Alpha task");
+      assert.equal(firstPayload.sessions?.[0]?._meta?.messageCount, 2);
+
+      const secondPage = await runCli(
+        [
+          "--agent",
+          listAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "sessions",
+          "list",
+          "--filter-cwd",
+          ".",
+          "--cursor",
+          "1",
+        ],
+        homeDir,
+      );
+      assert.equal(secondPage.code, 0, secondPage.stderr);
+      const secondPayload = JSON.parse(secondPage.stdout.trim()) as {
+        cursor?: string;
+        nextCursor?: string | null;
+        sessions?: Array<{ sessionId?: string }>;
+      };
+      assert.equal(secondPayload.cursor, "1");
+      assert.equal(secondPayload.nextCursor ?? null, null);
+      assert.equal(secondPayload.sessions?.length, 1);
+      assert.equal(secondPayload.sessions?.[0]?.sessionId, "mock-session-gamma");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: sessions list falls back to local records when agent lacks session/list", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const created = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+      const createdPayload = JSON.parse(created.stdout.trim()) as { acpxRecordId?: string };
+
+      const listed = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "sessions", "list"],
+        homeDir,
+      );
+      assert.equal(listed.code, 0, listed.stderr);
+      const listedPayload = JSON.parse(listed.stdout.trim()) as Array<{
+        acpxRecordId?: string;
+        cwd?: string;
+      }>;
+      assert.equal(Array.isArray(listedPayload), true);
+      assert.equal(
+        listedPayload.some(
+          (session) => session.acpxRecordId === createdPayload.acpxRecordId && session.cwd === cwd,
+        ),
+        true,
+      );
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -1712,6 +2230,55 @@ test("integration: configured mcpServers are sent to session/new and session/loa
       if (sessionId) {
         await runCli([...loadCapableAgentArgs, "--format", "json", "sessions", "close"], homeDir);
       }
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: prompt reconnect uses session/resume when advertised", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const resumeAgentArgs = [
+      "--agent",
+      RESUME_CAPABLE_MOCK_AGENT_COMMAND,
+      "--approve-all",
+      "--cwd",
+      cwd,
+    ];
+
+    try {
+      const created = await runCli(
+        [...resumeAgentArgs, "--format", "json", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+      const createdPayload = JSON.parse(created.stdout.trim()) as {
+        acpxRecordId?: string;
+      };
+      assert.equal(typeof createdPayload.acpxRecordId, "string");
+
+      const prompt = await runCli(
+        [...resumeAgentArgs, "--format", "json", "prompt", "echo resume-method"],
+        homeDir,
+      );
+      assert.equal(prompt.code, 0, prompt.stderr);
+
+      const messages = parseJsonRpcOutputLines(prompt.stdout);
+      const resumeRequest = messages.find(
+        (message) => message.method === "session/resume" && extractJsonRpcId(message) !== undefined,
+      );
+      assert(resumeRequest, `expected session/resume request in output:\n${prompt.stdout}`);
+      assert.equal(
+        (resumeRequest.params as { sessionId?: unknown } | undefined)?.sessionId,
+        createdPayload.acpxRecordId,
+      );
+      assert.equal(
+        messages.some(
+          (message) => message.method === "session/load" && extractJsonRpcId(message) !== undefined,
+        ),
+        false,
+      );
+    } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
@@ -3692,6 +4259,105 @@ async function writeFakeDroidAgent(binDir: string): Promise<void> {
       "  shift",
       "fi",
       'if [ "$1" = "--output-format" ]; then',
+      "  shift",
+      "fi",
+      'if [ "$1" = "acp" ]; then',
+      "  shift",
+      "fi",
+      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
+      "",
+    ].join("\n"),
+    { encoding: "utf8", mode: 0o755 },
+  );
+}
+
+async function writeFakeClaudeAgent(binDir: string): Promise<string> {
+  const binName = process.platform === "win32" ? "claude-agent-acp.cmd" : "claude-agent-acp";
+  const binPath = path.join(binDir, binName);
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      binPath,
+      ["@echo off", "setlocal", `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`, ""].join("\r\n"),
+      { encoding: "utf8" },
+    );
+    return binPath;
+  }
+
+  await fs.writeFile(
+    binPath,
+    ["#!/bin/sh", `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`, ""].join("\n"),
+    { encoding: "utf8", mode: 0o755 },
+  );
+  return binPath;
+}
+
+async function writeFakeDevinAgent(binDir: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(binDir, "devin.cmd"),
+      [
+        "@echo off",
+        "setlocal",
+        ":shift_known",
+        'if "%~1"=="--model" shift & shift & goto shift_known',
+        'if "%~1"=="acp" shift & goto shift_known',
+        'if "%~1"=="--acp" shift & goto shift_known',
+        'if "%~1"=="--experimental-acp" shift & goto shift_known',
+        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
+        "",
+      ].join("\r\n"),
+      { encoding: "utf8" },
+    );
+    return;
+  }
+
+  await fs.writeFile(
+    path.join(binDir, "devin"),
+    [
+      "#!/bin/sh",
+      'while [ "$#" -gt 0 ]; do',
+      '  case "$1" in',
+      "    --model)",
+      "      shift",
+      '      [ "$#" -gt 0 ] && shift',
+      "      ;;",
+      "    acp|--acp|--experimental-acp)",
+      "      shift",
+      "      ;;",
+      "    *)",
+      "      break",
+      "      ;;",
+      "  esac",
+      "done",
+      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
+      "",
+    ].join("\n"),
+    { encoding: "utf8", mode: 0o755 },
+  );
+}
+
+async function writeFakeUvxFastAgentAcp(binDir: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(binDir, "uvx.cmd"),
+      [
+        "@echo off",
+        "setlocal",
+        'if "%~1"=="fast-agent-mcp" shift',
+        'if "%~1"=="acp" shift',
+        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
+        "",
+      ].join("\r\n"),
+      { encoding: "utf8" },
+    );
+    return;
+  }
+
+  await fs.writeFile(
+    path.join(binDir, "uvx"),
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "fast-agent-mcp" ]; then',
       "  shift",
       "fi",
       'if [ "$1" = "acp" ]; then',

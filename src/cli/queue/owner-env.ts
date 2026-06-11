@@ -36,16 +36,20 @@ export function parseQueueOwnerPayload(raw: string): QueueOwnerRuntimeOptions {
     permissionMode: record.permissionMode,
   };
 
+  assignQueueOwnerTransportOptions(options, record);
+  assignQueueOwnerScalarOptions(options, record);
+  assignQueueOwnerSessionOptions(options, record.sessionOptions);
+
+  return options;
+}
+
+function assignQueueOwnerTransportOptions(
+  options: QueueOwnerRuntimeOptions,
+  record: UnknownRecord,
+): void {
   const parsedMcpServers = parseOptionalMcpServers(record.mcpServers, "queue owner payload");
   if (parsedMcpServers) {
     options.mcpServers = parsedMcpServers;
-  }
-
-  if (typeof record.nonInteractivePermissions === "string") {
-    options.nonInteractivePermissions =
-      record.nonInteractivePermissions === "deny" || record.nonInteractivePermissions === "fail"
-        ? record.nonInteractivePermissions
-        : undefined;
   }
 
   if (record.authCredentials && typeof record.authCredentials === "object") {
@@ -54,60 +58,113 @@ export function parseQueueOwnerPayload(raw: string): QueueOwnerRuntimeOptions {
     ) as Array<[string, string]>;
     options.authCredentials = Object.fromEntries(entries);
   }
+}
 
+function assignQueueOwnerScalarOptions(
+  options: QueueOwnerRuntimeOptions,
+  record: UnknownRecord,
+): void {
+  if (record.nonInteractivePermissions === "deny" || record.nonInteractivePermissions === "fail") {
+    options.nonInteractivePermissions = record.nonInteractivePermissions;
+  }
   if (record.authPolicy === "skip" || record.authPolicy === "fail") {
     options.authPolicy = record.authPolicy;
   }
+  assignBooleanOption(options, "terminal", record.terminal);
+  assignBooleanOption(options, "suppressSdkConsoleErrors", record.suppressSdkConsoleErrors);
+  assignBooleanOption(options, "verbose", record.verbose);
+  assignFiniteNumberOption(options, "ttlMs", record.ttlMs);
+  assignRoundedNumberOption(options, "maxQueueDepth", record.maxQueueDepth, 1);
+  assignRoundedNumberOption(options, "promptRetries", record.promptRetries, 0);
+}
 
-  if (typeof record.terminal === "boolean") {
-    options.terminal = record.terminal;
+function assignBooleanOption(
+  options: QueueOwnerRuntimeOptions,
+  key: "terminal" | "suppressSdkConsoleErrors" | "verbose",
+  value: unknown,
+): void {
+  if (typeof value === "boolean") {
+    options[key] = value;
+  }
+}
+
+function assignFiniteNumberOption(
+  options: QueueOwnerRuntimeOptions,
+  key: "ttlMs",
+  value: unknown,
+): void {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    options[key] = value;
+  }
+}
+
+function assignRoundedNumberOption(
+  options: QueueOwnerRuntimeOptions,
+  key: "maxQueueDepth" | "promptRetries",
+  value: unknown,
+  min: number,
+): void {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    options[key] = Math.max(min, Math.round(value));
+  }
+}
+
+function assignQueueOwnerSessionOptions(
+  options: QueueOwnerRuntimeOptions,
+  rawSessionOptions: unknown,
+): void {
+  const sessionOpts = asRecord(rawSessionOptions);
+  if (!sessionOpts) {
+    return;
   }
 
-  if (typeof record.suppressSdkConsoleErrors === "boolean") {
-    options.suppressSdkConsoleErrors = record.suppressSdkConsoleErrors;
+  options.sessionOptions = {};
+  assignSessionModel(options.sessionOptions, sessionOpts.model);
+  assignSessionAllowedTools(options.sessionOptions, sessionOpts.allowedTools);
+  assignSessionMaxTurns(options.sessionOptions, sessionOpts.maxTurns);
+  assignSessionSystemPrompt(options.sessionOptions, sessionOpts.systemPrompt);
+}
+
+function assignSessionModel(
+  options: NonNullable<QueueOwnerRuntimeOptions["sessionOptions"]>,
+  value: unknown,
+): void {
+  if (typeof value === "string" && value.trim().length > 0) {
+    options.model = value;
+  }
+}
+
+function assignSessionAllowedTools(
+  options: NonNullable<QueueOwnerRuntimeOptions["sessionOptions"]>,
+  value: unknown,
+): void {
+  if (Array.isArray(value)) {
+    options.allowedTools = value.filter((tool): tool is string => typeof tool === "string");
+  }
+}
+
+function assignSessionMaxTurns(
+  options: NonNullable<QueueOwnerRuntimeOptions["sessionOptions"]>,
+  value: unknown,
+): void {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    options.maxTurns = Math.max(1, Math.round(value));
+  }
+}
+
+function assignSessionSystemPrompt(
+  options: NonNullable<QueueOwnerRuntimeOptions["sessionOptions"]>,
+  value: unknown,
+): void {
+  if (typeof value === "string") {
+    options.systemPrompt = value;
+    return;
   }
 
-  if (typeof record.verbose === "boolean") {
-    options.verbose = record.verbose;
+  const systemPrompt = asRecord(value);
+  if (typeof systemPrompt?.append === "string") {
+    options.systemPrompt = { append: systemPrompt.append };
   }
-
-  if (typeof record.ttlMs === "number" && Number.isFinite(record.ttlMs)) {
-    options.ttlMs = record.ttlMs;
-  }
-
-  if (typeof record.maxQueueDepth === "number" && Number.isFinite(record.maxQueueDepth)) {
-    options.maxQueueDepth = Math.max(1, Math.round(record.maxQueueDepth));
-  }
-
-  if (typeof record.promptRetries === "number" && Number.isFinite(record.promptRetries)) {
-    options.promptRetries = Math.max(0, Math.round(record.promptRetries));
-  }
-
-  const sessionOpts = asRecord(record.sessionOptions);
-  if (sessionOpts) {
-    options.sessionOptions = {};
-    if (typeof sessionOpts.model === "string" && sessionOpts.model.trim().length > 0) {
-      options.sessionOptions.model = sessionOpts.model;
-    }
-    if (Array.isArray(sessionOpts.allowedTools)) {
-      options.sessionOptions.allowedTools = sessionOpts.allowedTools.filter(
-        (tool): tool is string => typeof tool === "string",
-      );
-    }
-    if (typeof sessionOpts.maxTurns === "number" && Number.isFinite(sessionOpts.maxTurns)) {
-      options.sessionOptions.maxTurns = Math.max(1, Math.round(sessionOpts.maxTurns));
-    }
-    if (typeof sessionOpts.systemPrompt === "string") {
-      options.sessionOptions.systemPrompt = sessionOpts.systemPrompt;
-    } else {
-      const systemPrompt = asRecord(sessionOpts.systemPrompt);
-      if (typeof systemPrompt?.append === "string") {
-        options.sessionOptions.systemPrompt = { append: systemPrompt.append };
-      }
-    }
-  }
-
-  return options;
 }
 
 export async function runQueueOwnerFromEnv(env: NodeJS.ProcessEnv): Promise<void> {

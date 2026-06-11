@@ -11,6 +11,35 @@ export function renderShellCommand(command: string, args: string[]): string {
   return renderedArgs.length > 0 ? `${command} ${renderedArgs}` : command;
 }
 
+function createShellFailureError(
+  spec: ShellActionExecution,
+  args: string[],
+  exitCode: number | null,
+  signal: NodeJS.Signals | null,
+  stderr: string,
+): Error {
+  const status = signal ? `signal ${signal}` : `exit ${String(exitCode)}`;
+  const details = stderr.length > 0 ? `\n${stderr.trim()}` : "";
+  return new Error(
+    `Shell action failed (${renderShellCommand(spec.command, args)}): ${status}${details}`,
+  );
+}
+
+function rejectIfShellFailed(
+  spec: ShellActionExecution,
+  args: string[],
+  result: ShellActionResult,
+  timedOut: boolean,
+): Error | undefined {
+  if (timedOut) {
+    return new TimeoutError(spec.timeoutMs ?? 0);
+  }
+  if (((result.exitCode ?? 0) !== 0 || result.signal != null) && spec.allowNonZeroExit !== true) {
+    return createShellFailureError(spec, args, result.exitCode, result.signal, result.stderr);
+  }
+  return undefined;
+}
+
 export async function runShellAction(spec: ShellActionExecution): Promise<ShellActionResult> {
   const cwd = spec.cwd ?? process.cwd();
   const args = spec.args ?? [];
@@ -55,17 +84,9 @@ export async function runShellAction(spec: ShellActionExecution): Promise<ShellA
         durationMs: Date.now() - startMs,
       };
 
-      if (timedOut) {
-        reject(new TimeoutError(spec.timeoutMs ?? 0));
-        return;
-      }
-
-      if (((exitCode ?? 0) !== 0 || signal != null) && spec.allowNonZeroExit !== true) {
-        reject(
-          new Error(
-            `Shell action failed (${renderShellCommand(spec.command, args)}): ${signal ? `signal ${signal}` : `exit ${String(exitCode)}`}${stderr.length > 0 ? `\n${stderr.trim()}` : ""}`,
-          ),
-        );
+      const error = rejectIfShellFailed(spec, args, result, timedOut);
+      if (error) {
+        reject(error);
         return;
       }
 

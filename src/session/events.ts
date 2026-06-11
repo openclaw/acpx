@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { isAcpJsonRpcMessage } from "../acp/jsonrpc.js";
-import { isProcessAlive } from "../cli/queue/lease-store.js";
 import { incrementPerfCounter, measurePerf } from "../perf-metrics.js";
+import { isProcessAlive } from "../process-liveness.js";
 import type { AcpJsonRpcMessage, SessionRecord } from "../types.js";
 import {
   DEFAULT_EVENT_MAX_SEGMENTS,
@@ -52,6 +52,16 @@ async function countExistingSegments(sessionId: string, maxSegments: number): Pr
   }
 
   return count;
+}
+
+async function resolveInitialSegmentCount(
+  record: SessionRecord,
+  maxSegments: number,
+): Promise<number> {
+  if (Number.isInteger(record.eventLog.segment_count) && record.eventLog.segment_count > 0) {
+    return record.eventLog.segment_count;
+  }
+  return (await countExistingSegments(record.acpxRecordId, maxSegments)) || 1;
 }
 
 async function resolveSessionMaxSegments(sessionId: string): Promise<number> {
@@ -234,10 +244,7 @@ export class SessionEventWriter {
       options.maxSegments ?? record.eventLog.max_segments ?? DEFAULT_EVENT_MAX_SEGMENTS;
     const activePath = activeEventPath(record.acpxRecordId);
     const activeSizeBytes = await statSize(activePath);
-    const segmentCount =
-      Number.isInteger(record.eventLog.segment_count) && record.eventLog.segment_count > 0
-        ? record.eventLog.segment_count
-        : (await countExistingSegments(record.acpxRecordId, maxSegments)) || 1;
+    const segmentCount = await resolveInitialSegmentCount(record, maxSegments);
     return new SessionEventWriter(
       record,
       lock,
@@ -361,7 +368,7 @@ export async function listSessionEvents(sessionId: string): Promise<AcpJsonRpcMe
     const lines = payload.split("\n").filter((line) => line.trim().length > 0);
     for (const line of lines) {
       try {
-        const parsed = JSON.parse(line);
+        const parsed: unknown = JSON.parse(line);
         if (isAcpJsonRpcMessage(parsed)) {
           events.push(parsed);
         }

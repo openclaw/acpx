@@ -20,6 +20,7 @@ Core capabilities:
 - Named parallel sessions (`-s/--session`)
 - Idempotent session creation (`sessions ensure`)
 - Session retention controls (`sessions prune` with age filters and history cleanup)
+- Portable session export/import for moving records and history across machines
 - Queue-aware prompt submission with optional fire-and-forget (`--no-wait`)
 - Cooperative cancel command (`cancel`) for in-flight turns
 - Graceful cancellation via ACP `session/cancel` on interrupt
@@ -54,11 +55,13 @@ For normal session reuse, prefer a global install over `npx`.
 acpx [global_options] [prompt_text...]
 acpx [global_options] prompt [prompt_options] [prompt_text...]
 acpx [global_options] exec [prompt_options] [prompt_text...]
+acpx [global_options] compare <agent>... '<prompt_text>'
+acpx [global_options] compare <agent>... --file <path>
 acpx [global_options] cancel [-s <name>]
 acpx [global_options] set-mode <mode> [-s <name>]
 acpx [global_options] set <key> <value> [-s <name>]
 acpx [global_options] status [-s <name>]
-acpx [global_options] sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | prune [--dry-run] [--before <date> | --older-than <days>] [--include-history]]
+acpx [global_options] sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | export [name] --output <path> | import <archive> [--name <name>] [--cwd <dir>] | prune [--dry-run] [--before <date> | --older-than <days>] [--include-history]]
 acpx [global_options] config [show | init]
 acpx [global_options] flow run <file> [--input-json '<json>' | --input-file <path>] [--default-agent <name>]
 
@@ -69,7 +72,7 @@ acpx [global_options] <agent> cancel [-s <name>]
 acpx [global_options] <agent> set-mode <mode> [-s <name>]
 acpx [global_options] <agent> set <key> <value> [-s <name>]
 acpx [global_options] <agent> status [-s <name>]
-acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | prune [--dry-run] [--before <date> | --older-than <days>] [--include-history]]
+acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | export [name] --output <path> | import <archive> [--name <name>] [--cwd <dir>] | prune [--dry-run] [--before <date> | --older-than <days>] [--include-history]]
 ```
 
 If prompt text is omitted and stdin is piped, `acpx` reads prompt text from stdin.
@@ -80,16 +83,18 @@ Friendly agent names resolve to commands:
 
 - `pi` -> `npx pi-acp`
 - `openclaw` -> `openclaw acp`
-- `codex` -> `npx @zed-industries/codex-acp`
+- `codex` -> `npx -y @agentclientprotocol/codex-acp`
 - `claude` -> `npx -y @agentclientprotocol/claude-agent-acp` (ACPX-owned package range)
 - `gemini` -> `gemini --acp`
 - `cursor` -> `cursor-agent acp`
 - `copilot` -> `copilot --acp --stdio`
 - `droid` -> `droid exec --output-format acp` (`factory-droid` and `factorydroid` also resolve to `droid`)
+- `fast-agent` -> `uvx fast-agent-mcp acp`
 - `iflow` -> `iflow --experimental-acp`
 - `kilocode` -> `npx -y @kilocode/cli acp`
 - `kimi` -> `kimi acp`
 - `kiro` -> `kiro-cli-chat acp`
+- `mux` -> `npx -y mux@^0.27.0 acp`
 - `opencode` -> `npx -y opencode-ai acp`
 - `qoder` -> `qodercli --acp`
   Forwards Qoder-native `--allowed-tools` and `--max-turns` startup flags from `acpx` session options.
@@ -146,12 +151,28 @@ Behavior:
 - Runs a single prompt in a temporary ACP session
 - Does not reuse or save persistent session state
 
+### Compare (multi-agent one-shot)
+
+```bash
+acpx compare pi openclaw codex 'summarize this checkout'
+acpx --format json compare codex claude --file prompt.md
+```
+
+Behavior:
+
+- Runs the same temporary-session prompt against each listed agent
+- Reuses the global `exec` controls: cwd, timeout, permissions, `--policy`, auth, terminal, retries, model/system options, and output format
+- `--format text` prints one summary table row per agent
+- `--format json` or `--json` prints `CompareRow[]`
+- `--format quiet` prints `<agent>\t<status>` per row
+- Does not create saved sessions or separate compare transcript directories
+
 ### Cancel / Mode / Config / Model
 
 ```bash
 acpx codex cancel
 acpx codex set-mode auto
-acpx codex set thought_level high
+acpx codex set model gpt-5.2[high]
 acpx codex set model gpt-5.4
 ```
 
@@ -161,9 +182,9 @@ Behavior:
 - `set-mode`: calls ACP `session/set_mode`.
 - `set-mode` mode ids are adapter-defined; unsupported values are rejected by the adapter (often `Invalid params`).
 - `set`: calls ACP `session/set_config_option`.
-- For codex, `thought_level` is accepted as a compatibility alias for codex-acp `reasoning_effort`.
-- `--model <id>`: Claude-compatible adapters may consume session creation metadata; other agents must advertise ACP models and support `session/set_model`, otherwise `acpx` fails clearly instead of silently falling back.
-- `set model <id>`: calls `session/set_model`. This is the generic ACP method for mid-session model switching.
+- For codex, reasoning effort is selected through advertised ACP model ids when the adapter reports model variants.
+- `--model <id>`: Claude-compatible adapters may consume session creation metadata; other agents must advertise a model config option or legacy `models` metadata.
+- `set model <id>`: uses `session/set_config_option` for advertised model config options and preserves `session/set_model` for explicitly advertised legacy models.
 - `set-mode`/`set` route through queue-owner IPC when active, otherwise reconnect directly.
 
 ### Sessions
@@ -171,6 +192,9 @@ Behavior:
 ```bash
 acpx sessions
 acpx sessions list
+acpx sessions list --filter-cwd .
+acpx sessions list --cursor <cursor>
+acpx sessions list --local
 acpx sessions new
 acpx sessions new --name backend
 acpx sessions ensure
@@ -179,6 +203,8 @@ acpx sessions close
 acpx sessions close backend
 acpx sessions show
 acpx sessions history --limit 20
+acpx sessions export backend --output backend-session.json
+acpx sessions import backend-session.json --name backend-restored
 acpx sessions prune --dry-run --older-than 7
 acpx sessions prune --older-than 30 --include-history
 acpx status
@@ -189,6 +215,8 @@ acpx codex sessions ensure --name backend
 acpx codex sessions close backend
 acpx codex sessions show backend
 acpx codex sessions history backend --limit 20
+acpx codex sessions export backend --output backend-session.json
+acpx codex sessions import backend-session.json --name backend-restored
 acpx codex sessions prune --before 2026-04-01 --include-history
 acpx codex status
 ```
@@ -196,6 +224,11 @@ acpx codex status
 Behavior:
 
 - `sessions` and `sessions list` are equivalent
+- `sessions list` uses ACP `session/list` when the agent advertises it; JSON
+  includes agent `SessionInfo`, `_meta`, and `nextCursor`
+- `sessions list --filter-cwd <dir>` applies the ACP cwd filter, and
+  `--cursor <cursor>` requests a specific page
+- `sessions list --local` reads saved acpx records instead
 - `new` creates a fresh session for the current `(agentCommand, cwd, optional name)` scope
 - `new --name <name>` targets a named session scope
 - when `new` replaces an existing open session in that scope, the old one is soft-closed
@@ -204,6 +237,10 @@ Behavior:
 - `close <name>` targets current cwd named session
 - `show [name]` prints stored metadata for that scoped session
 - `history [name]` prints stored turn history previews (default 20, use `--limit`)
+- `export [name] --output <path>` writes a portable JSON archive containing session state and event history
+- `import <archive>` creates a fresh local record, reopens the copied session as idle, keeps the provider session id, and clears source-machine process metadata
+- imported sessions must resume that provider session; if the destination agent cannot load it, prompts fail clearly instead of starting an empty conversation
+- `import --name <name>` and `--cwd <dir>` override the destination scope; import fails if that scope already has an active session or another local record already uses the same provider session id
 - `prune` deletes closed session records to reclaim disk space
   - `--dry-run` previews what would be deleted without touching disk
   - `--older-than <days>` and `--before <date>` filter by close time, falling back to last-used time when a record was never explicitly closed
@@ -223,7 +260,7 @@ Behavior:
 - `--suppress-reads`: suppress raw read-file contents while preserving the selected format
 - `--timeout <seconds>`: max wait time (positive number)
 - `--ttl <seconds>`: queue owner idle TTL before shutdown (default `300`, `0` disables TTL)
-- `--model <id>`: request an agent model during session creation; non-Claude agents must advertise ACP models and support `session/set_model`
+- `--model <id>`: request an agent model during session creation; non-Claude agents must advertise a model config option or legacy `models` metadata
 - `--system-prompt <text>`: replace the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt`; persisted in `session_options.system_prompt` so reuse keeps the override. Other agents ignore the field.
 - `--append-system-prompt <text>`: append text to the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt.append`; same persistence rules as `--system-prompt`.
 - `--allowed-tools <list>`: comma-separated tool whitelist (use `""` for no tools)
@@ -289,6 +326,27 @@ For ACP `authenticate` handshakes, use either config `auth` entries or explicit
 `ACPX_AUTH_<METHOD_ID>` environment variables such as `ACPX_AUTH_OPENAI_API_KEY`.
 Ambient provider env vars such as `OPENAI_API_KEY` are still passed through to
 child agents, but they do not trigger ACP auth-method selection on their own.
+
+## Devin ACP compatibility
+
+Devin is not a built-in agent shortcut. Use the raw command escape hatch:
+
+```bash
+acpx --agent 'devin acp' exec 'summarize this repo'
+```
+
+Pass Devin global flags such as `--model <model>` before `acp` when needed.
+
+When `acpx` detects a Devin ACP launch (`devin ... acp`, `devin ... --acp`, or `devin ... --experimental-acp`), it advertises the minimum Windsurf-compatible metadata needed for Devin's ACP gate:
+
+- `clientInfo.name`: `windsurf` instead of `acpx`
+- `clientInfo.version`: `ACPX_DEVIN_WINDSURF_VERSION` env var, default `1.110.1`
+- `clientCapabilities`: standard `fs` and `terminal` support, plus `_meta["cognition.ai/requestDiagnostics"] = true`
+- Extension handling: returns `{}` for Devin `_cognition.ai/request_diagnostics` requests and accepts extension notifications without method-not-found noise
+
+This compatibility shim is scoped to Devin ACP launches only. Other agents continue to receive standard `acpx` identity and capabilities.
+
+See the repository [`agents/Devin.md`](https://github.com/openclaw/acpx/blob/main/agents/Devin.md) for the full Devin compatibility contract.
 
 ## Session behavior
 

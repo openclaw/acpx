@@ -16,12 +16,7 @@ function inferToolKindFromTitle(title: string | undefined): string | undefined {
     return undefined;
   }
 
-  if (
-    head.includes("read") ||
-    head.includes("cat") ||
-    head.includes("open") ||
-    head.includes("view")
-  ) {
+  if (["read", "cat", "open", "view"].some((needle) => head.includes(needle))) {
     return "read";
   }
 

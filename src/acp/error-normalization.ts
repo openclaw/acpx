@@ -58,15 +58,15 @@ function isAuthRequiredMessage(value: string | undefined): boolean {
     return false;
   }
   const normalized = value.toLowerCase();
-  return (
-    normalized.includes("auth required") ||
-    normalized.includes("authentication required") ||
-    normalized.includes("authorization required") ||
-    normalized.includes("credential required") ||
-    normalized.includes("credentials required") ||
-    normalized.includes("token required") ||
-    normalized.includes("login required")
-  );
+  return [
+    "auth required",
+    "authentication required",
+    "authorization required",
+    "credential required",
+    "credentials required",
+    "token required",
+    "login required",
+  ].some((needle) => normalized.includes(needle));
 }
 
 function isAcpAuthRequiredPayload(acp: OutputErrorAcpPayload | undefined): boolean {
@@ -85,21 +85,21 @@ function isAcpAuthRequiredPayload(acp: OutputErrorAcpPayload | undefined): boole
     return false;
   }
 
-  if (data.authRequired === true) {
-    return true;
-  }
+  return hasAuthRequiredData(data);
+}
 
-  const methodId = data.methodId;
-  if (typeof methodId === "string" && methodId.trim().length > 0) {
-    return true;
-  }
+function hasAuthRequiredData(data: Record<string, unknown>): boolean {
+  return (
+    data.authRequired === true || hasNonEmptyString(data.methodId) || hasNonEmptyArray(data.methods)
+  );
+}
 
-  const methods = data.methods;
-  if (Array.isArray(methods) && methods.length > 0) {
-    return true;
-  }
+function hasNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
 
-  return false;
+function hasNonEmptyArray(value: unknown): value is unknown[] {
+  return Array.isArray(value) && value.length > 0;
 }
 
 function isOutputErrorCode(value: unknown): value is OutputErrorCode {
@@ -198,32 +198,43 @@ export function normalizeOutputError(
   options: NormalizeOutputErrorOptions = {},
 ): NormalizedOutputError {
   const meta = readOutputErrorMeta(error);
-  const mapped = mapErrorCode(error);
-  let code = mapped ?? options.defaultCode ?? "RUNTIME";
-
-  if (meta.outputCode) {
-    code = meta.outputCode;
-  }
-
-  if (code === "RUNTIME" && isAcpResourceNotFoundError(error)) {
-    code = "NO_SESSION";
-  }
-
+  const code = resolveOutputErrorCode(error, options, meta);
   const acp = options.acp ?? meta.acp ?? extractAcpError(error);
-  const detailCode =
-    meta.detailCode ??
-    options.detailCode ??
-    (error instanceof AuthPolicyError || isAcpAuthRequiredPayload(acp)
-      ? "AUTH_REQUIRED"
-      : undefined);
   return {
     code,
     message: formatErrorMessage(error),
-    detailCode,
+    detailCode: resolveDetailCode(error, acp, options, meta),
     origin: meta.origin ?? options.origin,
     retryable: meta.retryable ?? options.retryable,
     acp,
   };
+}
+
+function resolveOutputErrorCode(
+  error: unknown,
+  options: NormalizeOutputErrorOptions,
+  meta: ErrorMeta,
+): OutputErrorCode {
+  const code = meta.outputCode ?? mapErrorCode(error) ?? options.defaultCode ?? "RUNTIME";
+  if (code === "RUNTIME" && isAcpResourceNotFoundError(error)) {
+    return "NO_SESSION";
+  }
+  return code;
+}
+
+function resolveDetailCode(
+  error: unknown,
+  acp: OutputErrorAcpPayload | undefined,
+  options: NormalizeOutputErrorOptions,
+  meta: ErrorMeta,
+): string | undefined {
+  return (
+    meta.detailCode ??
+    options.detailCode ??
+    (error instanceof AuthPolicyError || isAcpAuthRequiredPayload(acp)
+      ? "AUTH_REQUIRED"
+      : undefined)
+  );
 }
 
 /**
@@ -235,10 +246,7 @@ export function normalizeOutputError(
  * invalid params, timeout, permission) return false.
  */
 export function isRetryablePromptError(error: unknown): boolean {
-  if (error instanceof PermissionDeniedError || error instanceof PermissionPromptUnavailableError) {
-    return false;
-  }
-  if (isTimeoutLike(error) || isNoSessionLike(error) || isUsageLike(error)) {
+  if (isNonRetryablePromptError(error)) {
     return false;
   }
 
@@ -249,24 +257,33 @@ export function isRetryablePromptError(error: unknown): boolean {
     return false;
   }
 
-  // Resource-not-found (session gone) — check using the already-extracted payload.
-  if (acp.code === -32001 || acp.code === -32002) {
-    return false;
-  }
-
-  // Auth-required errors are never retryable. Use the same thorough check as normalizeOutputError.
-  if (isAcpAuthRequiredPayload(acp)) {
-    return false;
-  }
-
-  // Method-not-found or invalid-params are permanent protocol errors.
-  if (acp.code === -32601 || acp.code === -32602) {
+  if (isPermanentPromptAcpError(acp)) {
     return false;
   }
 
   // ACP internal errors (-32603) typically wrap model-API failures → retryable.
   // Parse errors (-32700) can also be transient.
   return acp.code === -32603 || acp.code === -32700;
+}
+
+function isNonRetryablePromptError(error: unknown): boolean {
+  return (
+    error instanceof PermissionDeniedError ||
+    error instanceof PermissionPromptUnavailableError ||
+    isTimeoutLike(error) ||
+    isNoSessionLike(error) ||
+    isUsageLike(error)
+  );
+}
+
+function isPermanentPromptAcpError(acp: OutputErrorAcpPayload): boolean {
+  return (
+    acp.code === -32001 ||
+    acp.code === -32002 ||
+    acp.code === -32601 ||
+    acp.code === -32602 ||
+    isAcpAuthRequiredPayload(acp)
+  );
 }
 
 export function exitCodeForOutputErrorCode(code: OutputErrorCode): ExitCode {

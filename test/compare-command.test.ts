@@ -105,15 +105,44 @@ class CompareAgent {
 
   async prompt(params) {
     const text = promptText(params.prompt);
+    if (mode === "permission") {
+      const response = await this.connection.requestPermission({
+        sessionId: params.sessionId,
+        toolCall: {
+          toolCallId: randomUUID(),
+          title: "Bash",
+          kind: "execute",
+        },
+        options: [
+          { optionId: "allow", name: "Allow", kind: "allow_once" },
+          { optionId: "reject", name: "Reject", kind: "reject_once" },
+        ],
+      });
+      await this.connection.sessionUpdate({
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "permission selected:" + response.outcome.optionId },
+        },
+      });
+      return { stopReason: "end_turn" };
+    }
+
     const delay = mode === "slow" ? 1200 : 10;
     await sleep(delay);
     await this.connection.sessionUpdate({
       sessionId: params.sessionId,
       update: {
         sessionUpdate: "usage_update",
-        input_tokens: mode === "slow" ? 30 : 10,
-        output_tokens: mode === "slow" ? 40 : 20,
         size: mode === "slow" ? 70 : 30,
+        used: mode === "slow" ? 70 : 30,
+        _meta: {
+          usage: {
+            inputTokens: mode === "slow" ? 30 : 10,
+            outputTokens: mode === "slow" ? 40 : 20,
+            totalTokens: mode === "slow" ? 70 : 30,
+          },
+        },
       },
     });
     await this.connection.sessionUpdate({
@@ -150,6 +179,7 @@ async function writeCompareConfig(homeDir: string, agentPath: string): Promise<v
           fast: { command: process.execPath, args: [agentPath, "fast"] },
           slow: { command: process.execPath, args: [agentPath, "slow"] },
           error: { command: process.execPath, args: [agentPath, "error"] },
+          permission: { command: process.execPath, args: [agentPath, "permission"] },
         },
       },
       null,
@@ -173,10 +203,11 @@ type CompareRow = {
   stop_reason: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
-  context_used: number | null;
+  total_tokens: number | null;
   final_message: string;
-  transcript_path: string;
   error: string | null;
+  permission_requests: number;
+  permission_denied: number;
 };
 
 test("compare fast slow renders a table with both successful rows", async () => {
@@ -194,10 +225,14 @@ test("compare fast slow renders a table with both successful rows", async () => 
   });
 });
 
-test("compare --json emits CompareRow array and persists transcripts", async () => {
+test("compare --format json emits CompareRow array", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await setupCompareFixture(homeDir);
-    const result = await runCli(["compare", "fast", "slow", "--json", "summarize"], homeDir, cwd);
+    const result = await runCli(
+      ["--format", "json", "compare", "fast", "slow", "summarize"],
+      homeDir,
+      cwd,
+    );
 
     assert.equal(result.code, 0, result.stderr);
     const rows = JSON.parse(result.stdout) as CompareRow[];
@@ -210,16 +245,23 @@ test("compare --json emits CompareRow array and persists transcripts", async () 
     );
     assert.equal(rows[0]?.input_tokens, 10);
     assert.equal(rows[0]?.output_tokens, 20);
-    assert.equal(rows[0]?.context_used, 30);
+    assert.equal(rows[0]?.total_tokens, 30);
     assert.equal(rows[1]?.input_tokens, 30);
     assert.equal(rows[1]?.output_tokens, 40);
+  });
+});
 
-    for (const row of rows) {
-      assert.match(row.transcript_path, /\.acpx\/compare\/.+\/.+\.ndjson$/);
-      const transcript = await fs.readFile(row.transcript_path, "utf8");
-      assert.match(transcript, /session\/update/);
-      assert.match(transcript, /usage_update/);
-    }
+test("compare --json is an alias for machine-readable rows", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    const result = await runCli(["compare", "fast", "--json", "summarize"], homeDir, cwd);
+
+    assert.equal(result.code, 0, result.stderr);
+    const rows = JSON.parse(result.stdout) as CompareRow[];
+    assert.deepEqual(
+      rows.map((row) => [row.agent, row.status]),
+      [["fast", "ok"]],
+    );
   });
 });
 
@@ -232,7 +274,7 @@ test("compare keeps successful rows when one agent errors", async () => {
       cwd,
     );
 
-    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.code, 1, result.stderr);
     const rows = JSON.parse(result.stdout) as CompareRow[];
     assert.equal(rows.find((row) => row.agent === "fast")?.status, "ok");
     assert.equal(rows.find((row) => row.agent === "slow")?.status, "ok");
@@ -256,5 +298,33 @@ test("compare timeout marks slow agents as cancelled", async () => {
     const rows = JSON.parse(result.stdout) as CompareRow[];
     assert.equal(rows.find((row) => row.agent === "fast")?.status, "ok");
     assert.equal(rows.find((row) => row.agent === "slow")?.status, "cancelled");
+  });
+});
+
+test("compare applies global permission policy to every agent run", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    const result = await runCli(
+      [
+        "--approve-all",
+        "--policy",
+        '{"autoDeny":["execute"]}',
+        "--format",
+        "json",
+        "compare",
+        "permission",
+        "summarize",
+      ],
+      homeDir,
+      cwd,
+    );
+
+    assert.equal(result.code, 5, result.stderr);
+    const rows = JSON.parse(result.stdout) as CompareRow[];
+    assert.equal(rows[0]?.agent, "permission");
+    assert.equal(rows[0]?.status, "permission_denied");
+    assert.equal(rows[0]?.permission_requests, 1);
+    assert.equal(rows[0]?.permission_denied, 1);
+    assert.match(rows[0]?.final_message ?? "", /permission selected:reject/);
   });
 });

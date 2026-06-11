@@ -4,7 +4,10 @@ import {
   isRetryablePromptError,
   normalizeOutputError,
 } from "../../acp/error-normalization.js";
-import { assertRequestedModelSupported } from "../../acp/model-support.js";
+import {
+  assertRequestedModelSupported,
+  modelStateFromConfigOptions,
+} from "../../acp/model-support.js";
 import { InterruptedError, withInterrupt, withTimeout } from "../../async-control.js";
 export { InterruptedError, TimeoutError } from "../../async-control.js";
 import { formatPerfMetric, measurePerf, startPerfTimer } from "../../perf-metrics.js";
@@ -21,6 +24,10 @@ import {
   type SessionAgentOptions,
 } from "../../runtime/engine/session-options.js";
 import {
+  applyConfigOptionsToRecord,
+  applyConfigOptionsToState,
+} from "../../session/config-options.js";
+import {
   cloneSessionAcpxState,
   cloneSessionConversation,
   recordClientOperation as recordConversationClientOperation,
@@ -30,8 +37,16 @@ import {
 } from "../../session/conversation-model.js";
 import { SessionEventWriter } from "../../session/events.js";
 import { LiveSessionCheckpoint } from "../../session/live-checkpoint.js";
-import { setCurrentModelId, setDesiredModelId } from "../../session/mode-preference.js";
-import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
+import {
+  clearDesiredConfigOption,
+  setCurrentModelId,
+  setDesiredModelId,
+} from "../../session/mode-preference.js";
+import {
+  applyRequestedModelIfAdvertised,
+  currentModelIdFromSetModelResponse,
+} from "../../session/model-application.js";
+import { advertisedModelState } from "../../session/model-state.js";
 import {
   absolutePath,
   isoNow,
@@ -50,6 +65,7 @@ import type {
   PermissionEscalationEvent,
   PermissionPolicy,
   RunPromptResult,
+  SessionAcpxState,
   SessionRecord,
   SessionSendResult,
 } from "../../types.js";
@@ -142,45 +158,118 @@ function toPromptResult(
   };
 }
 
+function requestedModelId(value: string | undefined): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function applyConfigOptionResponseToState(
+  state: SessionAcpxState | undefined,
+  response:
+    | Awaited<ReturnType<AcpClient["setSessionConfigOption"]>>
+    | Awaited<ReturnType<AcpClient["setSessionModel"]>>,
+): SessionAcpxState | undefined {
+  if (!response?.configOptions) {
+    return state;
+  }
+  return applyConfigOptionsToState(state, response.configOptions);
+}
+
+export function mergeConnectedModelState(
+  state: SessionAcpxState | undefined,
+  connectedState: SessionAcpxState | undefined,
+): SessionAcpxState | undefined {
+  if (!connectedState) {
+    return state;
+  }
+  const nextState = cloneSessionAcpxState(state) ?? {};
+  mergeConnectedAdvertisedModelState(nextState, connectedState);
+  mergeConnectedModelPreferences(nextState, connectedState);
+  return nextState;
+}
+
+function mergeConnectedAdvertisedModelState(
+  nextState: SessionAcpxState,
+  connectedState: SessionAcpxState,
+): void {
+  if (connectedState.config_options !== undefined) {
+    nextState.config_options = structuredClone(connectedState.config_options);
+  } else {
+    delete nextState.config_options;
+  }
+  if (connectedState.current_model_id !== undefined) {
+    nextState.current_model_id = connectedState.current_model_id;
+  } else {
+    delete nextState.current_model_id;
+  }
+  if (connectedState.available_models) {
+    nextState.available_models = [...connectedState.available_models];
+  } else {
+    delete nextState.available_models;
+  }
+  if (connectedState.model_control) {
+    nextState.model_control = connectedState.model_control;
+  } else {
+    delete nextState.model_control;
+  }
+}
+
+function mergeConnectedModelPreferences(
+  nextState: SessionAcpxState,
+  connectedState: SessionAcpxState,
+): void {
+  if (connectedState.session_options) {
+    nextState.session_options = cloneSessionAcpxState(connectedState)?.session_options;
+  }
+  if (connectedState.desired_mode_id !== undefined) {
+    nextState.desired_mode_id = connectedState.desired_mode_id;
+  }
+  if (connectedState.desired_config_options) {
+    nextState.desired_config_options = { ...connectedState.desired_config_options };
+  }
+}
+
 async function applyPromptModelIfAdvertised(params: {
   client: AcpClient;
   sessionId: string;
   requestedModel: string | undefined;
   record: SessionRecord;
   timeoutMs?: number;
+  suppressWarnings?: boolean;
 }): Promise<void> {
-  const requestedModel =
-    typeof params.requestedModel === "string" ? params.requestedModel.trim() : "";
+  const requestedModel = requestedModelId(params.requestedModel);
   if (!requestedModel) {
     return;
   }
 
-  const availableModels = params.record.acpx?.available_models;
-  assertRequestedModelSupported({
+  const models = advertisedModelState(params.record.acpx);
+  const warning = assertRequestedModelSupported({
     requestedModel,
-    models: Array.isArray(availableModels)
-      ? {
-          currentModelId: params.record.acpx?.current_model_id ?? "",
-          availableModels: availableModels.map((modelId) => ({ modelId, name: modelId })),
-        }
-      : undefined,
+    models,
     agentCommand: params.record.agentCommand,
     context: "apply",
   });
-  if (!Array.isArray(availableModels)) {
+  emitModelSupportWarning(warning, params.suppressWarnings);
+  if (!models) {
     return;
   }
   if (params.record.acpx?.current_model_id === requestedModel) {
-    setDesiredModelId(params.record, requestedModel);
+    setDesiredModelId(params.record, requestedModel, models.configId);
     return;
   }
 
-  await withTimeout(
-    params.client.setSessionModel(params.sessionId, requestedModel),
+  const response = await withTimeout(
+    params.client.setSessionModel(params.sessionId, requestedModel, models),
     params.timeoutMs,
   );
-  setDesiredModelId(params.record, requestedModel);
-  setCurrentModelId(params.record, requestedModel);
+  applyConfigOptionsToRecord(params.record, response);
+  setDesiredModelId(params.record, requestedModel, models.configId);
+  setCurrentModelId(params.record, currentModelIdFromSetModelResponse(response, requestedModel));
+}
+
+function emitModelSupportWarning(warning: string | undefined, suppressWarnings?: boolean): void {
+  if (warning && !suppressWarnings) {
+    process.stderr.write(`[acpx] warning: ${warning}\n`);
+  }
 }
 
 function jsonRpcIdKey(value: unknown): string | undefined {
@@ -229,6 +318,8 @@ function extractJsonRpcResponseInfo(
   };
 }
 
+const SESSION_RECONNECT_METHODS = new Set(["session/load", "session/resume"]);
+
 function filterRecoverableLoadFallbackOutput(messages: AcpJsonRpcMessage[]): AcpJsonRpcMessage[] {
   const requestMethodById = new Map<string, string>();
   const failedLoadRequestIds = new Set<string>();
@@ -245,7 +336,8 @@ function filterRecoverableLoadFallbackOutput(messages: AcpJsonRpcMessage[]): Acp
       continue;
     }
 
-    if (requestMethodById.get(response.idKey) === "session/load") {
+    const requestMethod = requestMethodById.get(response.idKey);
+    if (requestMethod && SESSION_RECONNECT_METHODS.has(requestMethod)) {
       failedLoadRequestIds.add(response.idKey);
     }
   }
@@ -256,7 +348,11 @@ function filterRecoverableLoadFallbackOutput(messages: AcpJsonRpcMessage[]): Acp
 
   return messages.filter((message) => {
     const request = extractJsonRpcRequestInfo(message);
-    if (request && request.method === "session/load" && failedLoadRequestIds.has(request.idKey)) {
+    if (
+      request &&
+      SESSION_RECONNECT_METHODS.has(request.method) &&
+      failedLoadRequestIds.has(request.idKey)
+    ) {
       return false;
     }
 
@@ -286,6 +382,152 @@ function emitPromptRetryNotice(params: {
   );
 }
 
+function emitConnectPerfMetric(startedAt: number, verbose?: boolean): void {
+  if (!verbose) {
+    return;
+  }
+  process.stderr.write(
+    `[acpx] ${formatPerfMetric("prompt.connect_and_load", Date.now() - startedAt)}\n`,
+  );
+}
+
+function emitPromptPerfMetric(startedAt: number, verbose?: boolean): void {
+  if (!verbose) {
+    return;
+  }
+  process.stderr.write(`[acpx] ${formatPerfMetric("prompt.agent_turn", Date.now() - startedAt)}\n`);
+}
+
+function emitPromptHookError(error: unknown, verbose?: boolean): void {
+  if (!verbose) {
+    return;
+  }
+  process.stderr.write("[acpx] onPromptActive hook failed: " + formatErrorMessage(error) + "\n");
+}
+
+function emitPromptDisconnectNotice(
+  snapshot: ReturnType<AcpClient["getAgentLifecycleSnapshot"]>,
+  verbose?: boolean,
+): void {
+  const lastExit = snapshot.lastExit;
+  if (!lastExit?.unexpectedDuringPrompt || !verbose) {
+    return;
+  }
+  process.stderr.write(
+    "[acpx] agent disconnected during prompt (" +
+      lastExit.reason +
+      ", exit=" +
+      lastExit.exitCode +
+      ", signal=" +
+      (lastExit.signal ?? "none") +
+      ")\n",
+  );
+}
+
+function shouldRetryRuntimePrompt(
+  error: unknown,
+  attempt: number,
+  maxRetries: number,
+  snapshot: ReturnType<AcpClient["getAgentLifecycleSnapshot"]>,
+  hasSideEffects: () => boolean,
+): boolean {
+  if (!shouldRetryPromptAttempt(error, attempt, maxRetries, hasSideEffects)) {
+    return false;
+  }
+  return snapshot.lastExit?.unexpectedDuringPrompt !== true;
+}
+
+function shouldRetryPromptAttempt(
+  error: unknown,
+  attempt: number,
+  maxRetries: number,
+  hasSideEffects: () => boolean,
+): boolean {
+  return attempt < maxRetries && !hasSideEffects() && isRetryablePromptError(error);
+}
+
+async function waitBeforePromptRetry(
+  error: unknown,
+  attempt: number,
+  maxRetries: number,
+  suppressSdkConsoleErrors?: boolean,
+): Promise<void> {
+  const delayMs = Math.min(1_000 * 2 ** attempt, 10_000);
+  emitPromptRetryNotice({
+    error,
+    delayMs,
+    attempt: attempt + 1,
+    maxRetries,
+    suppressSdkConsoleErrors,
+  });
+  await waitMs(delayMs);
+}
+
+type QueuedTaskRuntimeOptions = Parameters<typeof runQueuedTask>[2];
+
+function buildQueuedTaskRunOptions(
+  sessionRecordId: string,
+  task: QueueTask,
+  options: QueuedTaskRuntimeOptions,
+  outputFormatter: OutputFormatter,
+): RunSessionPromptOptions {
+  return {
+    sessionRecordId,
+    mcpServers: options.mcpServers,
+    prompt: task.prompt ?? textPrompt(task.message),
+    permissionMode: task.permissionMode,
+    resumePolicy: task.resumePolicy,
+    nonInteractivePermissions: task.nonInteractivePermissions ?? options.nonInteractivePermissions,
+    permissionPolicy: task.permissionPolicy,
+    authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
+    outputFormatter,
+    timeoutMs: task.timeoutMs,
+    suppressSdkConsoleErrors: task.suppressSdkConsoleErrors ?? options.suppressSdkConsoleErrors,
+    verbose: options.verbose,
+    promptRetries: task.promptRetries ?? options.promptRetries ?? 0,
+    sessionOptions: mergeSessionOptions(task.sessionOptions, options.sessionOptions),
+    onClientAvailable: options.onClientAvailable,
+    onClientClosed: options.onClientClosed,
+    onPromptActive: options.onPromptActive,
+    client: options.sharedClient,
+  };
+}
+
+function sendQueuedTaskResult(task: QueueTask, result: SessionSendResult): void {
+  if (!task.waitForCompletion) {
+    return;
+  }
+  task.send({
+    type: "result",
+    requestId: task.requestId,
+    result,
+  });
+}
+
+function sendQueuedTaskError(task: QueueTask, error: unknown): void {
+  if (!task.waitForCompletion) {
+    return;
+  }
+  const normalizedError = normalizeOutputError(error, {
+    origin: "runtime",
+    detailCode: "QUEUE_RUNTIME_PROMPT_FAILED",
+  });
+  const alreadyEmitted =
+    (error as { outputAlreadyEmitted?: unknown }).outputAlreadyEmitted === true;
+  task.send({
+    type: "error",
+    requestId: task.requestId,
+    code: normalizedError.code,
+    detailCode: normalizedError.detailCode,
+    origin: normalizedError.origin,
+    message: normalizedError.message,
+    retryable: normalizedError.retryable,
+    acp: normalizedError.acp,
+    outputAlreadyEmitted: alreadyEmitted,
+  });
+}
+
 export async function runQueuedTask(
   sessionRecordId: string,
   task: QueueTask,
@@ -310,57 +552,12 @@ export async function runQueuedTask(
     : DISCARD_OUTPUT_FORMATTER;
 
   try {
-    const result = await runSessionPrompt({
-      sessionRecordId,
-      mcpServers: options.mcpServers,
-      prompt: task.prompt ?? textPrompt(task.message),
-      permissionMode: task.permissionMode,
-      resumePolicy: task.resumePolicy,
-      nonInteractivePermissions:
-        task.nonInteractivePermissions ?? options.nonInteractivePermissions,
-      permissionPolicy: task.permissionPolicy,
-      authCredentials: options.authCredentials,
-      authPolicy: options.authPolicy,
-      outputFormatter,
-      timeoutMs: task.timeoutMs,
-      suppressSdkConsoleErrors: task.suppressSdkConsoleErrors ?? options.suppressSdkConsoleErrors,
-      verbose: options.verbose,
-      promptRetries: task.promptRetries ?? options.promptRetries ?? 0,
-      sessionOptions: mergeSessionOptions(task.sessionOptions, options.sessionOptions),
-      onClientAvailable: options.onClientAvailable,
-      onClientClosed: options.onClientClosed,
-      onPromptActive: options.onPromptActive,
-      client: options.sharedClient,
-    });
-
-    if (task.waitForCompletion) {
-      task.send({
-        type: "result",
-        requestId: task.requestId,
-        result,
-      });
-    }
+    const result = await runSessionPrompt(
+      buildQueuedTaskRunOptions(sessionRecordId, task, options, outputFormatter),
+    );
+    sendQueuedTaskResult(task, result);
   } catch (error) {
-    const normalizedError = normalizeOutputError(error, {
-      origin: "runtime",
-      detailCode: "QUEUE_RUNTIME_PROMPT_FAILED",
-    });
-    const alreadyEmitted =
-      (error as { outputAlreadyEmitted?: unknown }).outputAlreadyEmitted === true;
-    if (task.waitForCompletion) {
-      task.send({
-        type: "error",
-        requestId: task.requestId,
-        code: normalizedError.code,
-        detailCode: normalizedError.detailCode,
-        origin: normalizedError.origin,
-        message: normalizedError.message,
-        retryable: normalizedError.retryable,
-        acp: normalizedError.acp,
-        outputAlreadyEmitted: alreadyEmitted,
-      });
-    }
-
+    sendQueuedTaskError(task, error);
     if (error instanceof InterruptedError) {
       throw error;
     }
@@ -526,64 +723,194 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       await client.setSessionMode(activeSessionIdForControl, modeId);
     },
     setSessionModel: async (modelId: string) => {
-      await client.setSessionModel(activeSessionIdForControl, modelId);
+      const models = advertisedModelState(acpxState);
+      const response = await client.setSessionModel(activeSessionIdForControl, modelId, models);
+      acpxState = applyConfigOptionResponseToState(acpxState, response);
+      const nextState = cloneSessionAcpxState(acpxState) ?? {};
+      nextState.session_options = { ...nextState.session_options, model: modelId };
+      nextState.current_model_id = currentModelIdFromSetModelResponse(response, modelId);
+      clearDesiredConfigOption(nextState, models?.configId);
+      acpxState = nextState;
+      return response;
     },
     setSessionConfigOption: async (configId: string, value: string) => {
-      return await client.setSessionConfigOption(activeSessionIdForControl, configId, value);
+      const response = await client.setSessionConfigOption(
+        activeSessionIdForControl,
+        configId,
+        value,
+      );
+      acpxState = applyConfigOptionResponseToState(acpxState, response);
+      const nextState = cloneSessionAcpxState(acpxState) ?? {};
+      const modelConfigId = modelStateFromConfigOptions(nextState.config_options)?.configId;
+      if (configId === modelConfigId) {
+        nextState.session_options = { ...nextState.session_options, model: value };
+        nextState.current_model_id = currentModelIdFromSetModelResponse(response, value);
+        clearDesiredConfigOption(nextState, configId);
+      } else if (configId === "mode") {
+        nextState.desired_mode_id = value;
+      } else {
+        nextState.desired_config_options = {
+          ...nextState.desired_config_options,
+          [configId]: value,
+        };
+      }
+      acpxState = nextState;
+      return response;
     },
+  };
+
+  const flushConnectOutput = (loadError?: string): void => {
+    bufferingConnectOutput = false;
+    const messages =
+      loadError == null
+        ? pendingConnectOutputMessages
+        : filterRecoverableLoadFallbackOutput(pendingConnectOutputMessages);
+    for (const message of messages) {
+      output.onAcpMessage(message);
+    }
+    pendingConnectOutputMessages.length = 0;
+  };
+
+  const connectForPrompt = async () => {
+    const connectStartedAt = Date.now();
+    try {
+      const connected = await measurePerf("runtime.connect_and_load", async () => {
+        return await connectAndLoadSession({
+          client,
+          record,
+          resumePolicy: options.resumePolicy,
+          timeoutMs: options.timeoutMs,
+          verbose: options.verbose,
+          suppressWarnings: options.suppressSdkConsoleErrors,
+          activeController,
+          onClientAvailable: (controller) => {
+            options.onClientAvailable?.(controller);
+            notifiedClientAvailable = true;
+          },
+          onConnectedRecord: (connectedRecord) => {
+            connectedRecord.lastPromptAt = isoNow();
+          },
+          onSessionIdResolved: (sessionId) => {
+            activeSessionIdForControl = sessionId;
+          },
+        });
+      });
+      acpxState = mergeConnectedModelState(acpxState, record.acpx);
+      flushConnectOutput(connected.loadError);
+      emitConnectPerfMetric(connectStartedAt, options.verbose);
+      return connected;
+    } catch (error) {
+      flushConnectOutput();
+      throw error;
+    }
+  };
+
+  const buildPromptStartedHook = (attempt: number) => {
+    if (attempt !== 0 || !options.onPromptActive) {
+      return undefined;
+    }
+    return async () => {
+      try {
+        await options.onPromptActive?.();
+      } catch (error) {
+        emitPromptHookError(error, options.verbose);
+      }
+    };
+  };
+
+  const runPromptAttempt = async (sessionId: string, attempt: number) => {
+    const promptStartedAt = Date.now();
+    const response = await measurePerf("runtime.prompt.agent_turn", async () => {
+      return await runPromptTurn({
+        client,
+        sessionId,
+        prompt: options.prompt,
+        timeoutMs: options.timeoutMs,
+        conversation,
+        promptMessageId,
+        onPromptStarted: buildPromptStartedHook(attempt),
+      });
+    });
+    emitPromptPerfMetric(promptStartedAt, options.verbose);
+    return response;
+  };
+
+  const handlePromptFailure = async (error: unknown, attempt: number): Promise<"retry"> => {
+    const snapshot = client.getAgentLifecycleSnapshot();
+    if (
+      shouldRetryRuntimePrompt(
+        error,
+        attempt,
+        options.promptRetries ?? 0,
+        snapshot,
+        () => promptTurnHadSideEffects,
+      )
+    ) {
+      await waitBeforePromptRetry(
+        error,
+        attempt,
+        options.promptRetries ?? 0,
+        options.suppressSdkConsoleErrors,
+      );
+      return promptTurnHadSideEffects ? await failRuntimePrompt(error, snapshot) : "retry";
+    }
+    return await failRuntimePrompt(error, snapshot);
+  };
+
+  const failRuntimePrompt = async (
+    error: unknown,
+    snapshot: ReturnType<AcpClient["getAgentLifecycleSnapshot"]>,
+  ): Promise<never> => {
+    promptTurnActive = false;
+    applyLifecycleSnapshotToRecord(record, snapshot);
+    emitPromptDisconnectNotice(snapshot, options.verbose);
+    const normalizedError = normalizeOutputError(error, { origin: "runtime" });
+    await flushPendingMessages(false).catch(() => {
+      // best effort while bubbling prompt failure
+    });
+    output.flush();
+    record.lastUsedAt = isoNow();
+    applyConversation(record, conversation);
+    record.acpx = acpxState;
+    const propagated = error instanceof Error ? error : new Error(formatErrorMessage(error));
+    (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted = sawAcpMessage;
+    (propagated as { normalizedOutputError?: unknown }).normalizedOutputError = normalizedError;
+    throw propagated;
+  };
+
+  const runPromptWithRetries = async (sessionId: string) => {
+    promptTurnActive = true;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await runPromptAttempt(sessionId, attempt);
+      } catch (error) {
+        if ((await handlePromptFailure(error, attempt)) === "retry") {
+          continue;
+        }
+      }
+    }
+  };
+
+  const savePromptSuccess = async (response: Awaited<ReturnType<typeof runPromptTurn>>) => {
+    await flushPendingMessages(false);
+    output.flush();
+    const now = isoNow();
+    record.lastUsedAt = now;
+    record.closed = false;
+    record.closedAt = undefined;
+    record.protocolVersion = client.initializeResult?.protocolVersion;
+    record.agentCapabilities = client.initializeResult?.agentCapabilities;
+    applyConversation(record, conversation);
+    record.acpx = acpxState;
+    applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
+    stopTotalTimer();
+    return response;
   };
 
   try {
     return await withInterrupt(
       async () => {
-        const connectStartedAt = Date.now();
-        const {
-          sessionId: activeSessionId,
-          resumed,
-          loadError,
-        } = await measurePerf("runtime.connect_and_load", async () => {
-          try {
-            return await connectAndLoadSession({
-              client,
-              record,
-              resumePolicy: options.resumePolicy,
-              timeoutMs: options.timeoutMs,
-              verbose: options.verbose,
-              activeController,
-              onClientAvailable: (controller) => {
-                options.onClientAvailable?.(controller);
-                notifiedClientAvailable = true;
-              },
-              onConnectedRecord: (connectedRecord) => {
-                connectedRecord.lastPromptAt = isoNow();
-              },
-              onSessionIdResolved: (sessionId) => {
-                activeSessionIdForControl = sessionId;
-              },
-            });
-          } catch (error) {
-            bufferingConnectOutput = false;
-            for (const message of pendingConnectOutputMessages) {
-              output.onAcpMessage(message);
-            }
-            pendingConnectOutputMessages.length = 0;
-            throw error;
-          }
-        });
-        bufferingConnectOutput = false;
-        const connectOutputMessages =
-          loadError == null
-            ? pendingConnectOutputMessages
-            : filterRecoverableLoadFallbackOutput(pendingConnectOutputMessages);
-        for (const message of connectOutputMessages) {
-          output.onAcpMessage(message);
-        }
-        pendingConnectOutputMessages.length = 0;
-        if (options.verbose) {
-          process.stderr.write(
-            `[acpx] ${formatPerfMetric("prompt.connect_and_load", Date.now() - connectStartedAt)}\n`,
-          );
-        }
+        const { sessionId: activeSessionId, resumed, loadError } = await connectForPrompt();
 
         await applyPromptModelIfAdvertised({
           client,
@@ -591,127 +918,17 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
           requestedModel: sessionOptions?.model,
           record,
           timeoutMs: options.timeoutMs,
+          suppressWarnings: options.suppressSdkConsoleErrors,
         });
+        acpxState = cloneSessionAcpxState(record.acpx);
 
         output.setContext({
           sessionId: record.acpxRecordId,
         });
         await liveCheckpoint.checkpoint();
 
-        const maxRetries = options.promptRetries ?? 0;
-        let response;
-        promptTurnActive = true;
-        for (let attempt = 0; ; attempt++) {
-          try {
-            const promptStartedAt = Date.now();
-            response = await measurePerf("runtime.prompt.agent_turn", async () => {
-              return await runPromptTurn({
-                client,
-                sessionId: activeSessionId,
-                prompt: options.prompt,
-                timeoutMs: options.timeoutMs,
-                conversation,
-                promptMessageId,
-                onPromptStarted:
-                  attempt === 0 && options.onPromptActive
-                    ? async () => {
-                        try {
-                          await options.onPromptActive?.();
-                        } catch (error) {
-                          if (options.verbose) {
-                            process.stderr.write(
-                              "[acpx] onPromptActive hook failed: " +
-                                formatErrorMessage(error) +
-                                "\n",
-                            );
-                          }
-                        }
-                      }
-                    : undefined,
-              });
-            });
-            if (options.verbose) {
-              process.stderr.write(
-                `[acpx] ${formatPerfMetric("prompt.agent_turn", Date.now() - promptStartedAt)}\n`,
-              );
-            }
-            break;
-          } catch (error) {
-            const snapshot = client.getAgentLifecycleSnapshot();
-            const agentCrashed = snapshot.lastExit?.unexpectedDuringPrompt === true;
-
-            if (
-              attempt < maxRetries &&
-              !agentCrashed &&
-              !promptTurnHadSideEffects &&
-              isRetryablePromptError(error)
-            ) {
-              const delayMs = Math.min(1_000 * 2 ** attempt, 10_000);
-              emitPromptRetryNotice({
-                error,
-                delayMs,
-                attempt: attempt + 1,
-                maxRetries,
-                suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
-              });
-              await waitMs(delayMs);
-              if (!promptTurnHadSideEffects) {
-                continue;
-              }
-            }
-
-            promptTurnActive = false;
-            applyLifecycleSnapshotToRecord(record, snapshot);
-            const lastExit = snapshot.lastExit;
-            if (lastExit?.unexpectedDuringPrompt && options.verbose) {
-              process.stderr.write(
-                "[acpx] agent disconnected during prompt (" +
-                  lastExit.reason +
-                  ", exit=" +
-                  lastExit.exitCode +
-                  ", signal=" +
-                  (lastExit.signal ?? "none") +
-                  ")\n",
-              );
-            }
-
-            const normalizedError = normalizeOutputError(error, {
-              origin: "runtime",
-            });
-
-            await flushPendingMessages(false).catch(() => {
-              // best effort while bubbling prompt failure
-            });
-
-            output.flush();
-
-            record.lastUsedAt = isoNow();
-            applyConversation(record, conversation);
-            record.acpx = acpxState;
-
-            const propagated =
-              error instanceof Error ? error : new Error(formatErrorMessage(error));
-            (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted = sawAcpMessage;
-            (propagated as { normalizedOutputError?: unknown }).normalizedOutputError =
-              normalizedError;
-            throw propagated;
-          }
-        }
+        const response = await savePromptSuccess(await runPromptWithRetries(activeSessionId));
         promptTurnActive = false;
-
-        await flushPendingMessages(false);
-        output.flush();
-
-        const now = isoNow();
-        record.lastUsedAt = now;
-        record.closed = false;
-        record.closedAt = undefined;
-        record.protocolVersion = client.initializeResult?.protocolVersion;
-        record.agentCapabilities = client.initializeResult?.agentCapabilities;
-        applyConversation(record, conversation);
-        record.acpx = acpxState;
-        applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-        stopTotalTimer();
 
         return {
           ...toPromptResult(response.stopReason, record.acpxRecordId, client),
@@ -802,6 +1019,31 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
     sessionOptions: options.sessionOptions,
   });
 
+  const runExecPromptAttempt = async (sessionId: string) => {
+    return await measurePerf("runtime.exec.prompt", async () => {
+      return await withTimeout(client.prompt(sessionId, options.prompt), options.timeoutMs);
+    });
+  };
+
+  const runExecPromptWithRetries = async (sessionId: string) => {
+    const maxRetries = options.promptRetries ?? 0;
+    promptTurnActive = true;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await runExecPromptAttempt(sessionId);
+      } catch (error) {
+        if (shouldRetryPromptAttempt(error, attempt, maxRetries, () => promptTurnHadSideEffects)) {
+          await waitBeforePromptRetry(error, attempt, maxRetries, options.suppressSdkConsoleErrors);
+          if (!promptTurnHadSideEffects) {
+            continue;
+          }
+        }
+        promptTurnActive = false;
+        throw error;
+      }
+    }
+  };
+
   try {
     return await withInterrupt(
       async () => {
@@ -822,44 +1064,16 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
           models: createdSession.models,
           agentCommand: options.agentCommand,
           timeoutMs: options.timeoutMs,
+          onWarning: options.suppressSdkConsoleErrors
+            ? undefined
+            : (message) => process.stderr.write(`[acpx] warning: ${message}\n`),
         });
 
         output.setContext({
           sessionId,
         });
 
-        const maxRetries = options.promptRetries ?? 0;
-        let response;
-        promptTurnActive = true;
-        for (let attempt = 0; ; attempt++) {
-          try {
-            response = await measurePerf("runtime.exec.prompt", async () => {
-              return await withTimeout(client.prompt(sessionId, options.prompt), options.timeoutMs);
-            });
-            break;
-          } catch (error) {
-            if (
-              attempt < maxRetries &&
-              !promptTurnHadSideEffects &&
-              isRetryablePromptError(error)
-            ) {
-              const delayMs = Math.min(1_000 * 2 ** attempt, 10_000);
-              emitPromptRetryNotice({
-                error,
-                delayMs,
-                attempt: attempt + 1,
-                maxRetries,
-                suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
-              });
-              await waitMs(delayMs);
-              if (!promptTurnHadSideEffects) {
-                continue;
-              }
-            }
-            promptTurnActive = false;
-            throw error;
-          }
-        }
+        const response = await runExecPromptWithRetries(sessionId);
         promptTurnActive = false;
         output.flush();
         return toPromptResult(response.stopReason, sessionId, client);

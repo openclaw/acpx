@@ -1,6 +1,9 @@
 import { randomInt } from "node:crypto";
 import fs from "node:fs/promises";
+import { isProcessAlive } from "../../process-liveness.js";
 import { queueBaseDir, queueLockFilePath, queueSocketBaseDir, queueSocketPath } from "./paths.js";
+
+export { isProcessAlive } from "../../process-liveness.js";
 
 const PROCESS_EXIT_GRACE_MS = 1_500;
 const PROCESS_POLL_MS = 50;
@@ -40,30 +43,50 @@ function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
   }
   const record = raw as Record<string, unknown>;
 
-  if (
-    !Number.isInteger(record.pid) ||
-    (record.pid as number) <= 0 ||
-    typeof record.sessionId !== "string" ||
-    typeof record.socketPath !== "string" ||
-    typeof record.createdAt !== "string" ||
-    typeof record.heartbeatAt !== "string" ||
-    !Number.isInteger(record.ownerGeneration) ||
-    (record.ownerGeneration as number) <= 0 ||
-    !Number.isInteger(record.queueDepth) ||
-    (record.queueDepth as number) < 0
-  ) {
+  if (!hasValidQueueOwnerRecordFields(record)) {
     return null;
   }
 
   return {
-    pid: record.pid as number,
+    pid: record.pid,
     sessionId: record.sessionId,
     socketPath: record.socketPath,
     createdAt: record.createdAt,
     heartbeatAt: record.heartbeatAt,
-    ownerGeneration: record.ownerGeneration as number,
-    queueDepth: record.queueDepth as number,
+    ownerGeneration: record.ownerGeneration,
+    queueDepth: record.queueDepth,
   };
+}
+
+function hasValidQueueOwnerRecordFields(record: Record<string, unknown>): record is Record<
+  string,
+  unknown
+> & {
+  pid: number;
+  sessionId: string;
+  socketPath: string;
+  createdAt: string;
+  heartbeatAt: string;
+  ownerGeneration: number;
+  queueDepth: number;
+} {
+  return (
+    isPositiveInteger(record.pid) &&
+    typeof record.sessionId === "string" &&
+    typeof record.socketPath === "string" &&
+    typeof record.createdAt === "string" &&
+    typeof record.heartbeatAt === "string" &&
+    isPositiveInteger(record.ownerGeneration) &&
+    isNonNegativeInteger(record.queueDepth)
+  );
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) > 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 0;
 }
 
 function createOwnerGeneration(): number {
@@ -147,19 +170,6 @@ export async function readQueueOwnerRecord(
     return parsed ?? undefined;
   } catch {
     return undefined;
-  }
-}
-
-export function isProcessAlive(pid: number | undefined): boolean {
-  if (!pid || !Number.isInteger(pid) || pid <= 0 || pid === process.pid) {
-    return false;
-  }
-
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
   }
 }
 

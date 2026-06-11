@@ -9,24 +9,26 @@ The default agent for top-level commands like `acpx exec …` and `acpx prompt �
 
 ## Built-in registry
 
-| Agent      | Adapter command                                | Wraps                                                                                                           |
-| ---------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `pi`       | `npx pi-acp`                                   | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
-| `openclaw` | `openclaw acp`                                 | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
-| `codex`    | `npx @zed-industries/codex-acp`                | [Codex CLI](https://codex.openai.com)                                                                           |
-| `claude`   | `npx -y @agentclientprotocol/claude-agent-acp` | [Claude Code](https://claude.ai/code)                                                                           |
-| `gemini`   | `gemini --acp`                                 | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
-| `cursor`   | `cursor-agent acp`                             | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
-| `copilot`  | `copilot --acp --stdio`                        | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
-| `droid`    | `droid exec --output-format acp`               | [Factory Droid](https://www.factory.ai)                                                                         |
-| `iflow`    | `iflow --experimental-acp`                     | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
-| `kilocode` | `npx -y @kilocode/cli acp`                     | [Kilocode](https://kilocode.ai)                                                                                 |
-| `kimi`     | `kimi acp`                                     | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
-| `kiro`     | `kiro-cli-chat acp`                            | [Kiro CLI](https://kiro.dev)                                                                                    |
-| `opencode` | `npx -y opencode-ai acp`                       | [OpenCode](https://opencode.ai)                                                                                 |
-| `qoder`    | `qodercli --acp`                               | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |
-| `qwen`     | `qwen --acp`                                   | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
-| `trae`     | `traecli acp serve`                            | [Trae CLI](https://docs.trae.cn/cli)                                                                            |
+| Agent        | Adapter command                                | Wraps                                                                                                           |
+| ------------ | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `pi`         | `npx pi-acp`                                   | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
+| `openclaw`   | `openclaw acp`                                 | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
+| `codex`      | `npx -y @agentclientprotocol/codex-acp`        | [Codex CLI](https://codex.openai.com)                                                                           |
+| `claude`     | `npx -y @agentclientprotocol/claude-agent-acp` | [Claude Code](https://claude.ai/code)                                                                           |
+| `gemini`     | `gemini --acp`                                 | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
+| `cursor`     | `cursor-agent acp`                             | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
+| `copilot`    | `copilot --acp --stdio`                        | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
+| `droid`      | `droid exec --output-format acp`               | [Factory Droid](https://www.factory.ai)                                                                         |
+| `fast-agent` | `uvx fast-agent-mcp acp`                       | [fast-agent](https://fast-agent.ai/)                                                                            |
+| `iflow`      | `iflow --experimental-acp`                     | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
+| `kilocode`   | `npx -y @kilocode/cli acp`                     | [Kilocode](https://kilocode.ai)                                                                                 |
+| `kimi`       | `kimi acp`                                     | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
+| `kiro`       | `kiro-cli-chat acp`                            | [Kiro CLI](https://kiro.dev)                                                                                    |
+| `mux`        | `npx -y mux@^0.27.0 acp`                       | [Mux](https://mux.coder.com)                                                                                    |
+| `opencode`   | `npx -y opencode-ai acp`                       | [OpenCode](https://opencode.ai)                                                                                 |
+| `qoder`      | `qodercli --acp`                               | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |
+| `qwen`       | `qwen --acp`                                   | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
+| `trae`       | `traecli acp serve`                            | [Trae CLI](https://docs.trae.cn/cli)                                                                            |
 
 `factory-droid` and `factorydroid` also resolve to the built-in `droid` adapter.
 
@@ -54,11 +56,10 @@ Notes that override or extend the cross-agent behavior live below.
 ### Codex
 
 - Built-in name: `codex`
-- Default command: `npx @zed-industries/codex-acp`
-- Upstream: [zed-industries/codex-acp](https://github.com/zed-industries/codex-acp)
-- Runtime config keys exposed by current `codex-acp` releases: `mode`, `model`, `reasoning_effort`.
-- `acpx --model <id> codex …` applies the requested model after session creation via `session/set_config_option`.
-- `acpx codex set thought_level <value>` is accepted as a compatibility alias for codex-acp's `reasoning_effort`.
+- Default command: `npx -y @agentclientprotocol/codex-acp`
+- Upstream: [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)
+- Runtime controls exposed by current `codex-acp` releases: ACP modes and session config options, including the advertised model selector.
+- `acpx --model <id> codex …` and `acpx codex set model <id>` apply the requested model through the advertised ACP config option. Legacy adapters that advertise `models` use `session/set_model`.
 
 ### Claude
 
@@ -124,6 +125,16 @@ If your Cursor install exposes ACP as `agent acp` instead of `cursor-agent acp`,
 - Default command: `droid exec --output-format acp`
 - Upstream: [factory.ai](https://www.factory.ai)
 
+### fast-agent
+
+- Built-in name: `fast-agent`
+- Default command: `uvx fast-agent-mcp acp`
+- Upstream: https://fast-agent.ai/acp
+
+`acpx fast-agent` starts fast-agent through its ACP entrypoint. It requires `uvx` on `PATH`.
+
+Configure model/provider settings through fast-agent environment variables, fast-agent configuration, or an `acpx` agent override with additional `fast-agent-mcp acp` arguments.
+
 ### Qoder
 
 - Built-in name: `qoder`
@@ -155,6 +166,16 @@ If your Cursor install exposes ACP as `agent acp` instead of `cursor-agent acp`,
 - Built-in name: `kiro`
 - Default command: `kiro-cli-chat acp`
 - Upstream: [kiro.dev](https://kiro.dev)
+
+### Mux
+
+- Built-in name: `mux`
+- Default command: `npx -y mux@^0.27.0 acp`
+- Upstream: https://mux.coder.com/integrations/acp
+
+`acpx mux` starts coder/mux through its ACP stdio bridge (`mux acp`). `mux acp` auto-starts an in-process mux server, so a separate `mux server` is not required.
+
+Configure at least one model provider before prompting (for example `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`); see https://mux.coder.com/config/providers. When using direct provider keys, make sure mux route priority includes `direct` before providers you have not authenticated. To target a remote mux server, override the command with `mux acp --server-url <url> --auth-token <token>` (or set `MUX_SERVER_URL` / `MUX_SERVER_AUTH_TOKEN`).
 
 ### OpenCode
 

@@ -67,27 +67,36 @@ function buildAgentEnvironment(
   }
 
   for (const [methodId, credential] of Object.entries(authCredentials)) {
-    if (typeof credential !== "string" || credential.trim().length === 0) {
-      continue;
-    }
-
-    if (!methodId.includes("=") && !methodId.includes("\u0000") && env[methodId] == null) {
-      env[methodId] = credential;
-    }
-
-    const normalized = toEnvToken(methodId);
-    if (normalized) {
-      const prefixed = `${AUTH_ENV_PREFIX}${normalized}`;
-      if (env[prefixed] == null) {
-        env[prefixed] = credential;
-      }
-      if (env[normalized] == null) {
-        env[normalized] = credential;
-      }
-    }
+    assignAuthCredentialEnv(env, methodId, credential);
   }
 
   return env;
+}
+
+function assignAuthCredentialEnv(
+  env: NodeJS.ProcessEnv,
+  methodId: string,
+  credential: string,
+): void {
+  if (typeof credential !== "string" || credential.trim().length === 0) {
+    return;
+  }
+
+  if (!methodId.includes("=") && !methodId.includes("\u0000") && env[methodId] == null) {
+    env[methodId] = credential;
+  }
+
+  const normalized = toEnvToken(methodId);
+  if (normalized) {
+    assignIfMissing(env, `${AUTH_ENV_PREFIX}${normalized}`, credential);
+    assignIfMissing(env, normalized, credential);
+  }
+}
+
+function assignIfMissing(env: NodeJS.ProcessEnv, key: string, value: string): void {
+  if (env[key] == null) {
+    env[key] = value;
+  }
 }
 
 export function resolveConfiguredAuthCredential(

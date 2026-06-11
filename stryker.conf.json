@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "packageManager": "pnpm",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "pnpm run build:test && node --test dist-test/test/cli-flags.test.js"
+  },
+  "concurrency": 1,
+  "mutate": ["src/cli/flags.ts"],
+  "coverageAnalysis": "off",
+  "reporters": ["clear-text", "progress"],
+  "thresholds": {
+    "high": 85,
+    "low": 80,
+    "break": 80
+  }
+}

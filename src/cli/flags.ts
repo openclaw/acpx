@@ -68,7 +68,27 @@ export type SessionsHistoryFlags = {
   limit: number;
 };
 
+export type SessionsListFlags = {
+  cursor?: string;
+  filterCwd?: string;
+  local?: boolean;
+};
+
+export type SessionsExportFlags = {
+  output: string;
+  sourceCwd?: string;
+};
+
+export type SessionsImportFlags = {
+  name?: string;
+  destinationCwd?: string;
+};
+
 export type StatusFlags = {
+  session?: string;
+};
+
+type SessionSelectionFlags = {
   session?: string;
 };
 
@@ -78,6 +98,30 @@ export type SessionsPruneFlags = {
   olderThan?: number;
   includeHistory?: boolean;
 };
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function stringOption(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function numberOption(value: unknown): number | undefined {
+  return typeof value === "number" ? value : undefined;
+}
+
+function stringArrayOption(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+    ? value
+    : undefined;
+}
+
+function nonEmptyStringOption(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
 
 export function parseOutputFormat(value: string): OutputFormat {
   if (!OUTPUT_FORMATS.includes(value as OutputFormat)) {
@@ -192,14 +236,8 @@ export function resolveSystemPromptFlag(opts: {
   systemPrompt?: unknown;
   appendSystemPrompt?: unknown;
 }): SystemPromptOption | undefined {
-  const replace =
-    typeof opts.systemPrompt === "string" && opts.systemPrompt.length > 0
-      ? opts.systemPrompt
-      : undefined;
-  const append =
-    typeof opts.appendSystemPrompt === "string" && opts.appendSystemPrompt.length > 0
-      ? opts.appendSystemPrompt
-      : undefined;
+  const replace = nonEmptyStringOption(opts.systemPrompt);
+  const append = nonEmptyStringOption(opts.appendSystemPrompt);
 
   if (replace !== undefined && append !== undefined) {
     throw new InvalidArgumentError("Use only one of --system-prompt or --append-system-prompt");
@@ -324,27 +362,32 @@ export function addSessionNameOption(command: Command): Command {
 }
 
 export function resolveSessionNameFromFlags(
-  flags: StatusFlags,
+  flags: SessionSelectionFlags,
   command: Command,
 ): string | undefined {
-  if (flags.session) {
-    return flags.session;
+  const directSession = parseOptionalSessionName(flags.session);
+  if (directSession !== undefined) {
+    return directSession;
   }
 
   // Commander parses options on the parent command when flags appear before the
   // subcommand (e.g. `acpx codex -s foo cancel`). Use optsWithGlobals() so
   // subcommands can still access those values.
-  const allOpts = (command as unknown as { optsWithGlobals?: () => unknown }).optsWithGlobals?.();
-  if (allOpts && typeof (allOpts as { session?: unknown }).session === "string") {
-    return parseSessionName((allOpts as { session: string }).session);
+  const allOpts = asRecord(
+    (command as unknown as { optsWithGlobals?: () => unknown }).optsWithGlobals?.(),
+  );
+  const globalSession = parseOptionalSessionName(allOpts?.session);
+  if (globalSession !== undefined) {
+    return globalSession;
   }
 
-  const parentOpts = command.parent?.opts?.();
-  if (parentOpts && typeof (parentOpts as { session?: unknown }).session === "string") {
-    return parseSessionName((parentOpts as { session: string }).session);
-  }
+  const parentOpts = asRecord(command.parent?.opts?.() as unknown);
+  return parseOptionalSessionName(parentOpts?.session);
+}
 
-  return undefined;
+function parseOptionalSessionName(value: unknown): string | undefined {
+  const session = stringOption(value);
+  return session === undefined ? undefined : parseSessionName(session);
 }
 
 export function addPromptInputOption(command: Command): Command {
@@ -352,17 +395,86 @@ export function addPromptInputOption(command: Command): Command {
 }
 
 export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig): GlobalFlags {
-  const opts = command.optsWithGlobals();
-  const format = opts.format ?? config.format ?? "text";
+  const opts = asRecord(command.optsWithGlobals() as unknown) ?? {};
+  const format = parseOutputFormat(stringOption(opts.format) ?? config.format ?? "text");
   const jsonStrict = opts.jsonStrict === true;
   const verbose = opts.verbose === true;
-  const permissionPolicy =
-    typeof opts.permissionPolicy === "string"
-      ? opts.permissionPolicy
-      : typeof opts.policy === "string"
-        ? opts.policy
-        : undefined;
+  assertOutputFlagCompatibility(format, jsonStrict, verbose);
 
+  return {
+    agent: stringOption(opts.agent),
+    cwd: resolveCwdOption(opts.cwd),
+    authPolicy: resolveAuthPolicy(opts.authPolicy, config),
+    nonInteractivePermissions: resolveNonInteractivePermissions(
+      opts.nonInteractivePermissions,
+      config,
+    ),
+    permissionPolicy: resolvePermissionPolicyOption(opts),
+    jsonStrict,
+    suppressReads: opts.suppressReads === true,
+    terminal: resolveTerminalOption(opts.terminal),
+    timeout: resolveTimeoutOption(opts.timeout, config),
+    ttl: resolveTtlOption(opts.ttl, config),
+    verbose,
+    format,
+    model: resolveModelOption(opts.model),
+    allowedTools: stringArrayOption(opts.allowedTools),
+    maxTurns: numberOption(opts.maxTurns),
+    systemPrompt: resolveSystemPromptFlag(opts),
+    promptRetries: numberOption(opts.promptRetries),
+    approveAll: opts.approveAll ? true : undefined,
+    approveReads: opts.approveReads ? true : undefined,
+    denyAll: opts.denyAll ? true : undefined,
+  };
+}
+
+function resolveCwdOption(value: unknown): string {
+  return stringOption(value) ?? process.cwd();
+}
+
+function resolveAuthPolicy(optsValue: unknown, config: ResolvedAcpxConfig): AuthPolicy {
+  const value = stringOption(optsValue);
+  return value === undefined ? config.authPolicy : parseAuthPolicy(value);
+}
+
+function resolveNonInteractivePermissions(
+  optsValue: unknown,
+  config: ResolvedAcpxConfig,
+): NonInteractivePermissionPolicy {
+  const value = stringOption(optsValue);
+  return value === undefined
+    ? config.nonInteractivePermissions
+    : parseNonInteractivePermissionPolicy(value);
+}
+
+function resolvePermissionPolicyOption(opts: Record<string, unknown>): string | undefined {
+  const primary = stringOption(opts.permissionPolicy);
+  const alias = stringOption(opts.policy);
+  if (primary !== undefined && alias !== undefined && primary !== alias) {
+    throw new InvalidArgumentError(
+      "Use only one permission policy flag: --permission-policy or --policy",
+    );
+  }
+  return primary ?? alias;
+}
+
+function resolveTerminalOption(value: unknown): boolean | undefined {
+  return value === false ? false : undefined;
+}
+
+function resolveTimeoutOption(value: unknown, config: ResolvedAcpxConfig): number | undefined {
+  return numberOption(value) ?? config.timeoutMs;
+}
+
+function resolveTtlOption(value: unknown, config: ResolvedAcpxConfig): number {
+  return numberOption(value) ?? config.ttlMs ?? DEFAULT_QUEUE_OWNER_TTL_MS;
+}
+
+function assertOutputFlagCompatibility(
+  format: OutputFormat,
+  jsonStrict: boolean,
+  verbose: boolean,
+): void {
   if (jsonStrict && format !== "json") {
     throw new InvalidArgumentError("--json-strict requires --format json");
   }
@@ -370,39 +482,11 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
   if (jsonStrict && verbose) {
     throw new InvalidArgumentError("--json-strict cannot be combined with --verbose");
   }
+}
 
-  if (
-    typeof opts.permissionPolicy === "string" &&
-    typeof opts.policy === "string" &&
-    opts.permissionPolicy !== opts.policy
-  ) {
-    throw new InvalidArgumentError(
-      "Use only one permission policy flag: --permission-policy or --policy",
-    );
-  }
-
-  return {
-    agent: opts.agent,
-    cwd: opts.cwd ?? process.cwd(),
-    authPolicy: opts.authPolicy ?? config.authPolicy,
-    nonInteractivePermissions: opts.nonInteractivePermissions ?? config.nonInteractivePermissions,
-    permissionPolicy,
-    jsonStrict,
-    suppressReads: opts.suppressReads === true,
-    terminal: opts.terminal === false ? false : undefined,
-    timeout: opts.timeout ?? config.timeoutMs,
-    ttl: opts.ttl ?? config.ttlMs ?? DEFAULT_QUEUE_OWNER_TTL_MS,
-    verbose,
-    format,
-    model: typeof opts.model === "string" ? parseNonEmptyValue("Model", opts.model) : undefined,
-    allowedTools: Array.isArray(opts.allowedTools) ? opts.allowedTools : undefined,
-    maxTurns: typeof opts.maxTurns === "number" ? opts.maxTurns : undefined,
-    systemPrompt: resolveSystemPromptFlag(opts),
-    promptRetries: typeof opts.promptRetries === "number" ? opts.promptRetries : undefined,
-    approveAll: opts.approveAll ? true : undefined,
-    approveReads: opts.approveReads ? true : undefined,
-    denyAll: opts.denyAll ? true : undefined,
-  };
+function resolveModelOption(value: unknown): string | undefined {
+  const model = stringOption(value);
+  return model === undefined ? undefined : parseNonEmptyValue("Model", model);
 }
 
 export function resolveOutputPolicy(format: OutputFormat, jsonStrict: boolean): OutputPolicy {

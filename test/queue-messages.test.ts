@@ -228,7 +228,10 @@ test("parseQueueRequest accepts control requests and explicit prompt blocks", ()
       type: "submit_prompt",
       requestId: "req-prompt",
       message: "ignored text fallback",
-      prompt: [{ type: "text", text: "structured" }],
+      prompt: [
+        { type: "text", text: "structured" },
+        { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
+      ],
       permissionMode: "approve-all",
       suppressSdkConsoleErrors: false,
       waitForCompletion: false,
@@ -238,7 +241,10 @@ test("parseQueueRequest accepts control requests and explicit prompt blocks", ()
       requestId: "req-prompt",
       ownerGeneration: undefined,
       message: "ignored text fallback",
-      prompt: [{ type: "text", text: "structured" }],
+      prompt: [
+        { type: "text", text: "structured" },
+        { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
+      ],
       permissionMode: "approve-all",
       nonInteractivePermissions: undefined,
       timeoutMs: undefined,
@@ -342,6 +348,20 @@ test("parseQueueOwnerMessage accepts structured non-error owner messages", () =>
       requestId: "req-cancel",
       ownerGeneration: undefined,
       cancelled: true,
+    },
+  );
+
+  assert.deepEqual(
+    parseQueueOwnerMessage({
+      type: "close_session_result",
+      requestId: "req-close",
+      closed: true,
+    }),
+    {
+      type: "close_session_result",
+      requestId: "req-close",
+      ownerGeneration: undefined,
+      closed: true,
     },
   );
 
@@ -480,6 +500,13 @@ test("parseQueueOwnerMessage accepts result payloads and optional emitted-error 
 test("parseQueueOwnerMessage rejects invalid structured owner message payloads", () => {
   assert.equal(
     parseQueueOwnerMessage({
+      type: "__proto__",
+      requestId: "req-prototype-type",
+    }),
+    null,
+  );
+  assert.equal(
+    parseQueueOwnerMessage({
       type: "accepted",
       requestId: "req-bad-owner-generation",
       ownerGeneration: 0,
@@ -511,6 +538,14 @@ test("parseQueueOwnerMessage rejects invalid structured owner message payloads",
       type: "cancel_result",
       requestId: "req-cancel",
       cancelled: "yes",
+    }),
+    null,
+  );
+  assert.equal(
+    parseQueueOwnerMessage({
+      type: "close_session_result",
+      requestId: "req-close",
+      closed: "yes",
     }),
     null,
   );

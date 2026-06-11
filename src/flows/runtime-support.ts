@@ -301,7 +301,12 @@ export function createSyntheticSessionRecord(options: {
   updatedAt: string;
   conversation: Pick<
     SessionRecord,
-    "title" | "messages" | "updated_at" | "cumulative_token_usage" | "request_token_usage"
+    | "title"
+    | "messages"
+    | "updated_at"
+    | "cumulative_token_usage"
+    | "request_token_usage"
+    | "cumulative_cost"
   >;
   acpxState: SessionRecord["acpx"] | undefined;
   lastSeq: number;
@@ -325,6 +330,7 @@ export function createSyntheticSessionRecord(options: {
     messages: options.conversation.messages,
     updated_at: options.conversation.updated_at,
     cumulative_token_usage: options.conversation.cumulative_token_usage,
+    cumulative_cost: options.conversation.cumulative_cost,
     request_token_usage: options.conversation.request_token_usage,
     acpx: options.acpxState,
   };
@@ -405,17 +411,21 @@ function toInlineOutput(value: unknown): undefined | null | boolean | number | s
     return value;
   }
   if (typeof value === "string") {
-    return value.length <= 200 && !value.includes("\n") ? value : undefined;
+    return isInlineSerializableText(value) ? value : undefined;
   }
   try {
     const serialized = JSON.stringify(value);
-    if (serialized.length <= 200 && !serialized.includes("\n")) {
+    if (isInlineSerializableText(serialized)) {
       return value;
     }
   } catch {
     return undefined;
   }
   return undefined;
+}
+
+function isInlineSerializableText(value: string): boolean {
+  return value.length <= 200 && !value.includes("\n");
 }
 
 function outputArtifactMediaType(value: unknown): string {

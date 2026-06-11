@@ -1,6 +1,8 @@
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { AcpClient } from "../../acp/client.js";
 import { withInterrupt } from "../../async-control.js";
+import { applyConfigOptionsToRecord } from "../../session/config-options.js";
+import { advertisedModelState } from "../../session/model-state.js";
 import { absolutePath, isoNow } from "../../session/persistence.js";
 import type {
   AcpPermissionDecision,
@@ -17,7 +19,7 @@ import { connectAndLoadSession, type ConnectedSessionController } from "./reconn
 import { sessionOptionsFromRecord } from "./session-options.js";
 
 export type FullConnectedSessionController = ConnectedSessionController & {
-  setSessionModel: (modelId: string) => Promise<void>;
+  setSessionModel: (modelId: string) => Promise<SetSessionConfigOptionResponse | undefined>;
   setSessionConfigOption: (
     configId: string,
     value: string,
@@ -67,6 +69,7 @@ export type WithConnectedSessionResult<T> = {
 
 function createActiveSessionController(params: {
   client: AcpClient;
+  record: SessionRecord;
   getActiveSessionId: () => string;
 }): FullConnectedSessionController {
   const getActiveSessionId = () => params.getActiveSessionId();
@@ -77,7 +80,10 @@ function createActiveSessionController(params: {
       await params.client.setSessionMode(getActiveSessionId(), modeId);
     },
     setSessionModel: async (modelId: string) => {
-      await params.client.setSessionModel(getActiveSessionId(), modelId);
+      const models = advertisedModelState(params.record.acpx);
+      const response = await params.client.setSessionModel(getActiveSessionId(), modelId, models);
+      applyConfigOptionsToRecord(params.record, response);
+      return response;
     },
     setSessionConfigOption: async (configId: string, value: string) => {
       return await params.client.setSessionConfigOption(getActiveSessionId(), configId, value);
@@ -120,6 +126,7 @@ export async function withConnectedSession<T>(
   let notifiedClientAvailable = false;
   const activeController = createActiveSessionController({
     client,
+    record,
     getActiveSessionId: () => activeSessionIdForControl,
   });
 

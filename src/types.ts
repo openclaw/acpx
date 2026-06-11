@@ -5,6 +5,7 @@ import type {
   RequestPermissionRequest,
   SessionNotification,
   SessionConfigOption,
+  SessionInfo,
   SetSessionConfigOptionResponse,
   StopReason,
   ToolKind,
@@ -237,6 +238,11 @@ export type SessionMessageImage = {
   } | null;
 };
 
+export type SessionMessageAudio = {
+  source: string;
+  mime_type: string;
+};
+
 export type SessionUserContent =
   | {
       Text: string;
@@ -249,6 +255,9 @@ export type SessionUserContent =
     }
   | {
       Image: SessionMessageImage;
+    }
+  | {
+      Audio: SessionMessageAudio;
     };
 
 export type SessionToolUse = {
@@ -318,6 +327,19 @@ export type SessionTokenUsage = {
   output_tokens?: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
+  thought_tokens?: number;
+  total_tokens?: number;
+};
+
+export type SessionUsageCost = {
+  amount?: number;
+  currency?: string;
+};
+
+export type SessionAvailableCommand = {
+  name: string;
+  description?: string;
+  has_input?: boolean;
 };
 
 export type SessionConversation = {
@@ -325,6 +347,7 @@ export type SessionConversation = {
   messages: SessionMessage[];
   updated_at: string;
   cumulative_token_usage: SessionTokenUsage;
+  cumulative_cost?: SessionUsageCost;
   request_token_usage: Record<string, SessionTokenUsage>;
 };
 
@@ -335,7 +358,8 @@ export type SessionAcpxState = {
   desired_config_options?: Record<string, string>;
   current_model_id?: string;
   available_models?: string[];
-  available_commands?: string[];
+  model_control?: "config_option" | "legacy_set_model";
+  available_commands?: SessionAvailableCommand[];
   config_options?: SessionConfigOption[];
   session_options?: {
     model?: string;
@@ -343,6 +367,13 @@ export type SessionAcpxState = {
     max_turns?: number;
     system_prompt?: string | { append: string };
   };
+};
+
+export type SessionImportedFrom = {
+  recordId: string;
+  cwdOriginal: string;
+  exportedBy: string;
+  exportedAt: string;
 };
 
 export type SessionRecord = {
@@ -373,8 +404,10 @@ export type SessionRecord = {
   messages: SessionMessage[];
   updated_at: string;
   cumulative_token_usage: SessionTokenUsage;
+  cumulative_cost?: SessionUsageCost;
   request_token_usage: Record<string, SessionTokenUsage>;
   acpx?: SessionAcpxState;
+  importedFrom?: SessionImportedFrom;
 };
 
 export type RunPromptResult = {
@@ -404,6 +437,7 @@ export type SessionSetConfigOptionResult = {
 
 export type SessionSetModelResult = {
   record: SessionRecord;
+  response?: SetSessionConfigOptionResponse;
   resumed: boolean;
   loadError?: string;
 };
@@ -411,6 +445,17 @@ export type SessionSetModelResult = {
 export type SessionEnsureResult = {
   record: SessionRecord;
   created: boolean;
+};
+
+export type AgentSessionListResult = {
+  _meta?: {
+    [key: string]: unknown;
+  } | null;
+  source: "agent";
+  sessions: SessionInfo[];
+  cursor?: string;
+  cwd?: string;
+  nextCursor?: string | null;
 };
 
 export type SessionEnqueueResult = {

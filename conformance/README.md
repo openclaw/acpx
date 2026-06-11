@@ -57,7 +57,7 @@ Run against another adapter command:
 
 ```bash
 pnpm run conformance:run -- \
-  --agent-command "npx -y @zed-industries/codex-acp"
+  --agent-command "npx -y @agentclientprotocol/codex-acp"
 ```
 
 Emit machine-readable JSON and write a report file:

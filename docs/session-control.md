@@ -44,24 +44,18 @@ Unsupported mode ids are rejected by the adapter, often as `Invalid params`. `ac
 ## `set <key> <value>`
 
 ```bash
-acpx codex set thought_level high
-acpx codex set reasoning_effort high
 acpx claude set verbosity terse
 acpx set model gpt-5.4         # defaults to codex
 ```
 
-Calls ACP `session/set_config_option` with the literal `<key>` and `<value>`. Non-mode `set_config_option` values are persisted by `acpx` and replayed onto fresh adapter sessions, so options like Codex `reasoning_effort` survive a session fallback or reuse.
-
-### Codex compatibility aliases
-
-For Codex specifically, `thought_level` is accepted as an alias and translated to codex-acp's `reasoning_effort`. Other keys pass through unchanged.
+Calls ACP `session/set_config_option` with the literal `<key>` and `<value>`. Non-mode `set_config_option` values are persisted by `acpx` and replayed onto fresh adapter sessions when the adapter supports those config keys.
 
 ### `set model <id>`
 
-`set model <id>` is a special-case interception. Some adapters expose model switching via ACP `session/set_model` rather than `session/set_config_option`. `acpx` always sends `session/set_model` for the `model` key so it works on every adapter that supports either method.
+`set model <id>` is a special-case interception. `acpx` prefers an advertised model session config option and updates it through `session/set_config_option`. If an adapter explicitly advertises legacy `models` metadata instead, `acpx` preserves compatibility through `session/set_model`.
 
 ```bash
-acpx codex set model gpt-5.4
+acpx codex set model 'gpt-5.2[high]'
 acpx claude set model claude-sonnet-4-6
 ```
 
@@ -77,16 +71,20 @@ acpx status              # defaults to codex
 
 Reports local process status for the cwd-scoped session:
 
-| State        | Meaning                                                        |
-| ------------ | -------------------------------------------------------------- |
-| `running`    | Queue owner alive and processing a prompt                      |
-| `idle`       | Saved session resumable, no queue owner running                |
-| `dead`       | Saved adapter PID is gone; next prompt will respawn and reload |
-| `no-session` | No saved record matches this scope                             |
+| State        | Meaning                                                                          |
+| ------------ | -------------------------------------------------------------------------------- |
+| `running`    | Queue owner alive and processing a prompt                                        |
+| `idle`       | Saved session resumable, no queue owner running                                  |
+| `dead`       | Queue owner was expected but is unavailable, or the last agent exit was abnormal |
+| `no-session` | No saved record matches this scope                                               |
 
-Plus, when applicable: session id, agent command, pid, uptime, last prompt timestamp, and last known exit code or signal for `dead`.
+Plus, when applicable: session id, agent command, live queue-owner pid, uptime,
+last prompt timestamp, and last known exit code or signal for `dead`.
 
-`status` is local — it uses `kill(pid, 0)` semantics and does not touch the agent. It is safe to run from automation that polls for queue readiness.
+`status` is local — it uses `kill(pid, 0)` semantics and does not touch the
+agent. Cached session PIDs are not reported unless a live queue-owner lease ties
+them to the session. It is safe to run from automation that polls for queue
+readiness.
 
 ### Output
 

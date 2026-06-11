@@ -59,6 +59,7 @@ import type {
   FlowNodeContext,
   FlowNodeDefinition,
   FlowStepTrace,
+  FlowArtifactRef,
   FlowRunResult,
   FlowRunState,
   FlowRunnerOptions,
@@ -106,6 +107,21 @@ type FlowNodeExecutionResult = {
   trace: FlowStepTrace | null;
 };
 
+type FlowRunExecutionResult = {
+  runDir: string;
+  state: FlowRunState;
+};
+
+type FlowStepExecutionResult = FlowNodeExecutionResult & {
+  attemptId: string;
+  nodeResult: FlowNodeResult;
+  nodeId: string;
+  node: FlowNodeDefinition;
+  startedAt: string;
+  state: FlowRunState;
+  executionError?: unknown;
+};
+
 type TracedPromptResult = {
   rawText: string;
   sessionInfo: FlowSessionBinding;
@@ -116,6 +132,14 @@ type TracedPromptResult = {
     eventStartSeq: number;
     eventEndSeq: number;
   };
+};
+
+type PreparedAcpPrompt = {
+  agentInfo: ResolvedFlowAgent;
+  prompt: PromptInput;
+  promptText: string;
+  promptArtifact: FlowArtifactRef;
+  nodeTimeoutMs: number | undefined;
 };
 
 export class FlowRunner {
@@ -190,193 +214,9 @@ export class FlowRunner {
       inputArtifact,
     });
 
-    let current: string | null = flow.startAt;
-    const attemptCounts = new Map<string, number>();
-
     try {
       return await withInterrupt(
-        async () => {
-          try {
-            while (current) {
-              const node = flow.nodes[current];
-              if (!node) {
-                throw new Error(`Unknown flow node: ${current}`);
-              }
-
-              const attemptId = nextAttemptId(attemptCounts, current);
-              const startedAt = isoNow();
-              const context = makeFlowNodeContext(state, input, this.services);
-              let output: unknown;
-              let promptText: string | null = null;
-              let rawText: string | null = null;
-              let sessionInfo: FlowSessionBinding | null = null;
-              let agentInfo: ResolvedFlowAgent | null = null;
-              let trace: FlowStepTrace | null = null;
-              markNodeStarted(
-                state,
-                current,
-                attemptId,
-                node.nodeType,
-                startedAt,
-                node.statusDetail,
-              );
-              await this.store.writeSnapshot(runDir, state, {
-                scope: "node",
-                type: "node_started",
-                nodeId: current,
-                attemptId,
-                payload: {
-                  nodeType: node.nodeType,
-                  ...(node.timeoutMs !== undefined
-                    ? { timeoutMs: node.timeoutMs ?? this.defaultNodeTimeoutMs }
-                    : { timeoutMs: this.defaultNodeTimeoutMs }),
-                  ...(state.statusDetail ? { statusDetail: state.statusDetail } : {}),
-                },
-              });
-              let nodeResult: FlowNodeResult | undefined;
-              let executionError: unknown;
-              try {
-                ({ output, promptText, rawText, sessionInfo, agentInfo, trace } =
-                  await this.executeNode(runDir, state, flow, current, node, context));
-                trace = await finalizeStepTrace(
-                  this.store,
-                  runDir,
-                  state,
-                  current,
-                  attemptId,
-                  output,
-                  trace,
-                );
-                nodeResult = createNodeResult({
-                  attemptId,
-                  nodeId: current,
-                  nodeType: node.nodeType,
-                  outcome: "ok",
-                  startedAt,
-                  finishedAt: isoNow(),
-                  output,
-                });
-              } catch (error) {
-                executionError = error;
-                trace = extractAttachedStepTrace(error) ?? trace;
-                trace = await finalizeStepTrace(
-                  this.store,
-                  runDir,
-                  state,
-                  current,
-                  attemptId,
-                  undefined,
-                  trace,
-                );
-                nodeResult = createNodeResult({
-                  attemptId,
-                  nodeId: current,
-                  nodeType: node.nodeType,
-                  outcome: outcomeForError(error),
-                  startedAt,
-                  finishedAt: isoNow(),
-                  error: error instanceof Error ? error.message : String(error),
-                });
-              }
-
-              state.results[current] = nodeResult;
-
-              if (nodeResult.outcome === "ok" && node.nodeType === "checkpoint") {
-                state.outputs[current] = output;
-                state.waitingOn = current;
-                state.updatedAt = isoNow();
-                state.status = "waiting";
-                clearActiveNode(state, (output as { summary?: string } | null)?.summary ?? current);
-                state.steps.push({
-                  attemptId,
-                  nodeId: current,
-                  nodeType: node.nodeType,
-                  outcome: nodeResult.outcome,
-                  startedAt,
-                  finishedAt: nodeResult.finishedAt,
-                  promptText,
-                  rawText,
-                  output,
-                  session: null,
-                  agent: null,
-                  ...(trace ? { trace } : {}),
-                });
-                await this.store.writeSnapshot(runDir, state, {
-                  scope: "node",
-                  type: "node_outcome",
-                  nodeId: current,
-                  attemptId,
-                  payload: createNodeOutcomePayload(nodeResult, trace),
-                });
-                return {
-                  runDir,
-                  state,
-                };
-              }
-
-              if (nodeResult.outcome === "ok") {
-                state.outputs[current] = output;
-              }
-              state.updatedAt = isoNow();
-              clearActiveNode(state);
-              state.steps.push({
-                attemptId,
-                nodeId: current,
-                nodeType: node.nodeType,
-                outcome: nodeResult.outcome,
-                startedAt,
-                finishedAt: nodeResult.finishedAt,
-                promptText,
-                rawText,
-                output,
-                error: nodeResult.error,
-                session: sessionInfo,
-                agent: agentInfo,
-                ...(trace ? { trace } : {}),
-              });
-
-              await this.store.writeSnapshot(runDir, state, {
-                scope: "node",
-                type: "node_outcome",
-                nodeId: current,
-                attemptId,
-                payload: createNodeOutcomePayload(nodeResult, trace),
-              });
-
-              if (nodeResult.outcome === "ok") {
-                current = resolveNext(flow.edges, current, output, nodeResult);
-                continue;
-              }
-
-              const next = resolveNextForOutcome(flow.edges, current, nodeResult);
-              if (next) {
-                current = next;
-                continue;
-              }
-
-              throw executionError;
-            }
-
-            state.status = "completed";
-            state.finishedAt = isoNow();
-            state.updatedAt = state.finishedAt;
-            clearActiveNode(state);
-            await this.store.writeSnapshot(runDir, state, {
-              scope: "run",
-              type: "run_completed",
-              payload: {
-                status: state.status,
-              },
-            });
-            return {
-              runDir,
-              state,
-            };
-          } catch (error) {
-            await persistRunFailure(this.store, runDir, state, error);
-            throw error;
-          }
-        },
+        async () => await this.executeFlowRun(flow, input, runDir, state),
         async () => {
           await persistRunFailure(this.store, runDir, state, new InterruptedError());
         },
@@ -384,6 +224,282 @@ export class FlowRunner {
     } finally {
       await this.closePendingPersistentSessionClients();
     }
+  }
+
+  private async executeFlowRun(
+    flow: FlowDefinition,
+    input: unknown,
+    runDir: string,
+    state: FlowRunState,
+  ): Promise<FlowRunExecutionResult> {
+    let current: string | null = flow.startAt;
+    const attemptCounts = new Map<string, number>();
+    try {
+      while (current) {
+        const step = await this.executeFlowStep(flow, input, runDir, state, current, attemptCounts);
+        const waiting = await this.maybeCompleteCheckpointStep(runDir, state, step);
+        if (waiting) {
+          return waiting;
+        }
+        await this.recordFlowStepOutcome(runDir, state, step);
+        current = this.resolveNextNode(flow, step);
+      }
+      return await this.completeFlowRun(runDir, state);
+    } catch (error) {
+      await persistRunFailure(this.store, runDir, state, error);
+      throw error;
+    }
+  }
+
+  private async executeFlowStep(
+    flow: FlowDefinition,
+    input: unknown,
+    runDir: string,
+    state: FlowRunState,
+    nodeId: string,
+    attemptCounts: Map<string, number>,
+  ): Promise<FlowStepExecutionResult> {
+    const node = flow.nodes[nodeId];
+    if (!node) {
+      throw new Error(`Unknown flow node: ${nodeId}`);
+    }
+    const attemptId = nextAttemptId(attemptCounts, nodeId);
+    const startedAt = isoNow();
+    markNodeStarted(state, nodeId, attemptId, node.nodeType, startedAt, node.statusDetail);
+    await this.writeNodeStartedSnapshot(runDir, state, nodeId, attemptId, node);
+    return await this.executeStartedFlowStep({
+      flow,
+      input,
+      runDir,
+      state,
+      nodeId,
+      node,
+      attemptId,
+      startedAt,
+    });
+  }
+
+  private async writeNodeStartedSnapshot(
+    runDir: string,
+    state: FlowRunState,
+    nodeId: string,
+    attemptId: string,
+    node: FlowNodeDefinition,
+  ): Promise<void> {
+    await this.store.writeSnapshot(runDir, state, {
+      scope: "node",
+      type: "node_started",
+      nodeId,
+      attemptId,
+      payload: {
+        nodeType: node.nodeType,
+        ...(node.timeoutMs !== undefined
+          ? { timeoutMs: node.timeoutMs ?? this.defaultNodeTimeoutMs }
+          : { timeoutMs: this.defaultNodeTimeoutMs }),
+        ...(state.statusDetail ? { statusDetail: state.statusDetail } : {}),
+      },
+    });
+  }
+
+  private async executeStartedFlowStep(params: {
+    flow: FlowDefinition;
+    input: unknown;
+    runDir: string;
+    state: FlowRunState;
+    nodeId: string;
+    node: FlowNodeDefinition;
+    attemptId: string;
+    startedAt: string;
+  }): Promise<FlowStepExecutionResult> {
+    const context = makeFlowNodeContext(params.state, params.input, this.services);
+    try {
+      const executed = await this.executeNode(
+        params.runDir,
+        params.state,
+        params.flow,
+        params.nodeId,
+        params.node,
+        context,
+      );
+      return await this.createSuccessfulFlowStep(params, executed);
+    } catch (error) {
+      return await this.createFailedFlowStep(params, error);
+    }
+  }
+
+  private async createSuccessfulFlowStep(
+    params: {
+      runDir: string;
+      state: FlowRunState;
+      nodeId: string;
+      node: FlowNodeDefinition;
+      attemptId: string;
+      startedAt: string;
+    },
+    executed: FlowNodeExecutionResult,
+  ): Promise<FlowStepExecutionResult> {
+    const trace = await finalizeStepTrace(
+      this.store,
+      params.runDir,
+      params.state,
+      params.nodeId,
+      params.attemptId,
+      executed.output,
+      executed.trace,
+    );
+    const nodeResult = createNodeResult({
+      attemptId: params.attemptId,
+      nodeId: params.nodeId,
+      nodeType: params.node.nodeType,
+      outcome: "ok",
+      startedAt: params.startedAt,
+      finishedAt: isoNow(),
+      output: executed.output,
+    });
+    params.state.results[params.nodeId] = nodeResult;
+    return {
+      ...executed,
+      trace,
+      nodeResult,
+      attemptId: params.attemptId,
+      nodeId: params.nodeId,
+      node: params.node,
+      startedAt: params.startedAt,
+      state: params.state,
+    };
+  }
+
+  private async createFailedFlowStep(
+    params: {
+      runDir: string;
+      state: FlowRunState;
+      nodeId: string;
+      node: FlowNodeDefinition;
+      attemptId: string;
+      startedAt: string;
+    },
+    error: unknown,
+  ): Promise<FlowStepExecutionResult> {
+    const trace = await finalizeStepTrace(
+      this.store,
+      params.runDir,
+      params.state,
+      params.nodeId,
+      params.attemptId,
+      undefined,
+      extractAttachedStepTrace(error) ?? null,
+    );
+    const nodeResult = createNodeResult({
+      attemptId: params.attemptId,
+      nodeId: params.nodeId,
+      nodeType: params.node.nodeType,
+      outcome: outcomeForError(error),
+      startedAt: params.startedAt,
+      finishedAt: isoNow(),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    params.state.results[params.nodeId] = nodeResult;
+    return {
+      output: undefined,
+      promptText: null,
+      rawText: null,
+      sessionInfo: null,
+      agentInfo: null,
+      trace,
+      nodeResult,
+      executionError: error,
+      attemptId: params.attemptId,
+      nodeId: params.nodeId,
+      node: params.node,
+      startedAt: params.startedAt,
+      state: params.state,
+    };
+  }
+
+  private async maybeCompleteCheckpointStep(
+    runDir: string,
+    state: FlowRunState,
+    step: FlowStepExecutionResult,
+  ): Promise<FlowRunExecutionResult | undefined> {
+    if (step.nodeResult.outcome !== "ok" || step.node.nodeType !== "checkpoint") {
+      return undefined;
+    }
+    state.outputs[step.nodeId] = step.output;
+    state.waitingOn = step.nodeId;
+    state.updatedAt = isoNow();
+    state.status = "waiting";
+    await this.recordFlowStepOutcome(runDir, state, step, {
+      sessionInfo: null,
+      agentInfo: null,
+      statusDetail: (step.output as { summary?: string } | null)?.summary ?? step.nodeId,
+    });
+    return { runDir, state };
+  }
+
+  private resolveNextNode(flow: FlowDefinition, step: FlowStepExecutionResult): string | null {
+    if (step.nodeResult.outcome === "ok") {
+      step.state.outputs[step.nodeId] = step.output;
+      return resolveNext(flow.edges, step.nodeId, step.output, step.nodeResult);
+    }
+    const next = resolveNextForOutcome(flow.edges, step.nodeId, step.nodeResult);
+    if (next) {
+      return next;
+    }
+    throw step.executionError;
+  }
+
+  private async completeFlowRun(
+    runDir: string,
+    state: FlowRunState,
+  ): Promise<FlowRunExecutionResult> {
+    state.status = "completed";
+    state.finishedAt = isoNow();
+    state.updatedAt = state.finishedAt;
+    clearActiveNode(state);
+    await this.store.writeSnapshot(runDir, state, {
+      scope: "run",
+      type: "run_completed",
+      payload: {
+        status: state.status,
+      },
+    });
+    return { runDir, state };
+  }
+
+  private async recordFlowStepOutcome(
+    runDir: string,
+    state: FlowRunState,
+    step: FlowStepExecutionResult,
+    overrides: {
+      sessionInfo?: FlowSessionBinding | null;
+      agentInfo?: ResolvedFlowAgent | null;
+      statusDetail?: string;
+    } = {},
+  ): Promise<void> {
+    state.updatedAt = isoNow();
+    clearActiveNode(state, overrides.statusDetail);
+    state.steps.push({
+      attemptId: step.attemptId,
+      nodeId: step.nodeId,
+      nodeType: step.node.nodeType,
+      outcome: step.nodeResult.outcome,
+      startedAt: step.startedAt,
+      finishedAt: step.nodeResult.finishedAt,
+      promptText: step.promptText,
+      rawText: step.rawText,
+      output: step.output,
+      error: step.nodeResult.error,
+      session: overrides.sessionInfo ?? step.sessionInfo,
+      agent: overrides.agentInfo ?? step.agentInfo,
+      ...(step.trace ? { trace: step.trace } : {}),
+    });
+    await this.store.writeSnapshot(runDir, state, {
+      scope: "node",
+      type: "node_outcome",
+      nodeId: step.nodeId,
+      attemptId: step.attemptId,
+      payload: createNodeOutcomePayload(step.nodeResult, step.trace),
+    });
   }
 
   private async executeNode(
@@ -618,117 +734,9 @@ export class FlowRunner {
       node,
       nodeTimeoutMs,
       async () => {
-        const resolvedAgent = this.resolveAgent(node.profile);
-        const agentInfo = {
-          ...resolvedAgent,
-          cwd: await resolveNodeCwd(resolvedAgent.cwd, node.cwd, context),
-        };
-        const prompt = normalizePromptInput(await Promise.resolve(node.prompt(context)));
-        const promptText = promptToDisplayText(prompt);
-        updateStatusDetail(state, summarizePrompt(promptText, node.statusDetail));
-        await this.store.writeLive(runDir, state, {
-          scope: "node",
-          type: "node_heartbeat",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-          payload: {
-            statusDetail: state.statusDetail,
-          },
-        });
-        const promptArtifact = await this.store.writeArtifact(runDir, state, promptText, {
-          mediaType: "text/plain",
-          extension: "txt",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-        });
-
+        const prepared = await this.prepareAcpPrompt(runDir, state, node, context, nodeTimeoutMs);
         if (node.session?.isolated) {
-          const isolatedBinding = createIsolatedSessionBinding(
-            flow.name,
-            state.runId,
-            state.currentAttemptId ?? randomUUID(),
-            node.profile,
-            agentInfo,
-          );
-          const initialIsolatedRecord = createSyntheticSessionRecord({
-            binding: isolatedBinding,
-            createdAt: state.currentNodeStartedAt ?? isoNow(),
-            updatedAt: state.currentNodeStartedAt ?? isoNow(),
-            conversation: createSessionConversation(state.currentNodeStartedAt ?? isoNow()),
-            acpxState: undefined,
-            lastSeq: 0,
-          });
-          await this.store.ensureSessionBundle(
-            runDir,
-            state,
-            isolatedBinding,
-            initialIsolatedRecord,
-          );
-          await this.store.appendTrace(runDir, state, {
-            scope: "acp",
-            type: "acp_prompt_prepared",
-            nodeId: state.currentNode,
-            attemptId: state.currentAttemptId,
-            sessionId: isolatedBinding.bundleId,
-            payload: {
-              sessionId: isolatedBinding.bundleId,
-              promptArtifact,
-            },
-          });
-          const isolatedPrompt = await this.runIsolatedPrompt(
-            runDir,
-            state,
-            isolatedBinding,
-            agentInfo,
-            prompt,
-            nodeTimeoutMs,
-          );
-          const rawResponseArtifact = await this.store.writeArtifact(
-            runDir,
-            state,
-            isolatedPrompt.rawText,
-            {
-              mediaType: "text/plain",
-              extension: "txt",
-              nodeId: state.currentNode,
-              attemptId: state.currentAttemptId,
-              sessionId: isolatedBinding.bundleId,
-            },
-          );
-          await this.store.appendTrace(runDir, state, {
-            scope: "acp",
-            type: "acp_response_parsed",
-            nodeId: state.currentNode,
-            attemptId: state.currentAttemptId,
-            sessionId: isolatedBinding.bundleId,
-            payload: {
-              sessionId: isolatedBinding.bundleId,
-              conversation: isolatedPrompt.conversation,
-              rawResponseArtifact,
-            },
-          });
-          const trace: FlowStepTrace = {
-            sessionId: isolatedBinding.bundleId,
-            promptArtifact,
-            rawResponseArtifact,
-            conversation: isolatedPrompt.conversation,
-          };
-          let parsedOutput: unknown;
-          try {
-            parsedOutput = node.parse
-              ? await node.parse(isolatedPrompt.rawText, context)
-              : isolatedPrompt.rawText;
-          } catch (error) {
-            throw attachStepTrace(error, trace);
-          }
-          return {
-            output: parsedOutput,
-            promptText,
-            rawText: isolatedPrompt.rawText,
-            sessionInfo: isolatedBinding,
-            agentInfo,
-            trace,
-          };
+          return await this.executeIsolatedAcpPrompt(runDir, state, flow, node, context, prepared);
         }
 
         boundSession = await this.ensureSessionBinding(
@@ -736,73 +744,17 @@ export class FlowRunner {
           state,
           flow,
           node,
-          agentInfo,
+          prepared.agentInfo,
           nodeTimeoutMs,
         );
-        await this.store.appendTrace(runDir, state, {
-          scope: "acp",
-          type: "acp_prompt_prepared",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-          sessionId: boundSession.bundleId,
-          payload: {
-            sessionId: boundSession.bundleId,
-            promptArtifact,
-          },
-        });
-        const persistentPrompt = await this.runPersistentPrompt(
+        return await this.executePersistentAcpPrompt(
           runDir,
           state,
+          node,
+          context,
+          prepared,
           boundSession,
-          prompt,
-          nodeTimeoutMs,
         );
-        const rawResponseArtifact = await this.store.writeArtifact(
-          runDir,
-          state,
-          persistentPrompt.rawText,
-          {
-            mediaType: "text/plain",
-            extension: "txt",
-            nodeId: state.currentNode,
-            attemptId: state.currentAttemptId,
-            sessionId: persistentPrompt.sessionInfo.bundleId,
-          },
-        );
-        await this.store.appendTrace(runDir, state, {
-          scope: "acp",
-          type: "acp_response_parsed",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-          sessionId: persistentPrompt.sessionInfo.bundleId,
-          payload: {
-            sessionId: persistentPrompt.sessionInfo.bundleId,
-            conversation: persistentPrompt.conversation,
-            rawResponseArtifact,
-          },
-        });
-        const trace: FlowStepTrace = {
-          sessionId: persistentPrompt.sessionInfo.bundleId,
-          promptArtifact,
-          rawResponseArtifact,
-          conversation: persistentPrompt.conversation,
-        };
-        let parsedOutput: unknown;
-        try {
-          parsedOutput = node.parse
-            ? await node.parse(persistentPrompt.rawText, context)
-            : persistentPrompt.rawText;
-        } catch (error) {
-          throw attachStepTrace(error, trace);
-        }
-        return {
-          output: parsedOutput,
-          promptText,
-          rawText: persistentPrompt.rawText,
-          sessionInfo: persistentPrompt.sessionInfo,
-          agentInfo,
-          trace,
-        };
       },
       async () => {
         if (!boundSession) {
@@ -813,6 +765,222 @@ export class FlowRunner {
         });
       },
     );
+  }
+
+  private async prepareAcpPrompt(
+    runDir: string,
+    state: FlowRunState,
+    node: AcpNodeDefinition,
+    context: FlowNodeContext,
+    nodeTimeoutMs: number | undefined,
+  ): Promise<PreparedAcpPrompt> {
+    const resolvedAgent = this.resolveAgent(node.profile);
+    const agentInfo = {
+      ...resolvedAgent,
+      cwd: await resolveNodeCwd(resolvedAgent.cwd, node.cwd, context),
+    };
+    const prompt = normalizePromptInput(await Promise.resolve(node.prompt(context)));
+    const promptText = promptToDisplayText(prompt);
+    updateStatusDetail(state, summarizePrompt(promptText, node.statusDetail));
+    await this.writeAcpPromptHeartbeat(runDir, state);
+    const promptArtifact = await this.store.writeArtifact(runDir, state, promptText, {
+      mediaType: "text/plain",
+      extension: "txt",
+      nodeId: state.currentNode,
+      attemptId: state.currentAttemptId,
+    });
+    return { agentInfo, prompt, promptText, promptArtifact, nodeTimeoutMs };
+  }
+
+  private async writeAcpPromptHeartbeat(runDir: string, state: FlowRunState): Promise<void> {
+    await this.store.writeLive(runDir, state, {
+      scope: "node",
+      type: "node_heartbeat",
+      nodeId: state.currentNode,
+      attemptId: state.currentAttemptId,
+      payload: {
+        statusDetail: state.statusDetail,
+      },
+    });
+  }
+
+  private async executeIsolatedAcpPrompt(
+    runDir: string,
+    state: FlowRunState,
+    flow: FlowDefinition,
+    node: AcpNodeDefinition,
+    context: FlowNodeContext,
+    prepared: PreparedAcpPrompt,
+  ): Promise<FlowNodeExecutionResult> {
+    const binding = createIsolatedSessionBinding(
+      flow.name,
+      state.runId,
+      state.currentAttemptId ?? randomUUID(),
+      node.profile,
+      prepared.agentInfo,
+    );
+    await this.initializeIsolatedSessionBundle(runDir, state, binding);
+    await this.appendAcpPromptPreparedTrace(runDir, state, binding, prepared.promptArtifact);
+    const prompt = await this.runIsolatedPrompt(
+      runDir,
+      state,
+      binding,
+      prepared.agentInfo,
+      prepared.prompt,
+      prepared.nodeTimeoutMs,
+    );
+    return await this.finishAcpPrompt(runDir, state, node, context, prepared, prompt, binding);
+  }
+
+  private async initializeIsolatedSessionBundle(
+    runDir: string,
+    state: FlowRunState,
+    binding: FlowSessionBinding,
+  ): Promise<void> {
+    const timestamp = state.currentNodeStartedAt ?? isoNow();
+    const initialRecord = createSyntheticSessionRecord({
+      binding,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      conversation: createSessionConversation(timestamp),
+      acpxState: undefined,
+      lastSeq: 0,
+    });
+    await this.store.ensureSessionBundle(runDir, state, binding, initialRecord);
+  }
+
+  private async executePersistentAcpPrompt(
+    runDir: string,
+    state: FlowRunState,
+    node: AcpNodeDefinition,
+    context: FlowNodeContext,
+    prepared: PreparedAcpPrompt,
+    binding: FlowSessionBinding,
+  ): Promise<FlowNodeExecutionResult> {
+    await this.appendAcpPromptPreparedTrace(runDir, state, binding, prepared.promptArtifact);
+    const prompt = await this.runPersistentPrompt(
+      runDir,
+      state,
+      binding,
+      prepared.prompt,
+      prepared.nodeTimeoutMs,
+    );
+    return await this.finishAcpPrompt(
+      runDir,
+      state,
+      node,
+      context,
+      prepared,
+      prompt,
+      prompt.sessionInfo,
+    );
+  }
+
+  private async appendAcpPromptPreparedTrace(
+    runDir: string,
+    state: FlowRunState,
+    binding: FlowSessionBinding,
+    promptArtifact: FlowArtifactRef,
+  ): Promise<void> {
+    await this.store.appendTrace(runDir, state, {
+      scope: "acp",
+      type: "acp_prompt_prepared",
+      nodeId: state.currentNode,
+      attemptId: state.currentAttemptId,
+      sessionId: binding.bundleId,
+      payload: {
+        sessionId: binding.bundleId,
+        promptArtifact,
+      },
+    });
+  }
+
+  private async finishAcpPrompt(
+    runDir: string,
+    state: FlowRunState,
+    node: AcpNodeDefinition,
+    context: FlowNodeContext,
+    prepared: PreparedAcpPrompt,
+    prompt: TracedPromptResult,
+    sessionInfo: FlowSessionBinding,
+  ): Promise<FlowNodeExecutionResult> {
+    const rawResponseArtifact = await this.writeAcpRawResponseArtifact(
+      runDir,
+      state,
+      prompt,
+      sessionInfo,
+    );
+    await this.appendAcpResponseParsedTrace(
+      runDir,
+      state,
+      prompt,
+      sessionInfo,
+      rawResponseArtifact,
+    );
+    const trace: FlowStepTrace = {
+      sessionId: sessionInfo.bundleId,
+      promptArtifact: prepared.promptArtifact,
+      rawResponseArtifact,
+      conversation: prompt.conversation,
+    };
+    const output = await this.parseAcpOutput(node, context, prompt.rawText, trace);
+    return {
+      output,
+      promptText: prepared.promptText,
+      rawText: prompt.rawText,
+      sessionInfo,
+      agentInfo: prepared.agentInfo,
+      trace,
+    };
+  }
+
+  private async writeAcpRawResponseArtifact(
+    runDir: string,
+    state: FlowRunState,
+    prompt: TracedPromptResult,
+    sessionInfo: FlowSessionBinding,
+  ): Promise<FlowArtifactRef> {
+    return await this.store.writeArtifact(runDir, state, prompt.rawText, {
+      mediaType: "text/plain",
+      extension: "txt",
+      nodeId: state.currentNode,
+      attemptId: state.currentAttemptId,
+      sessionId: sessionInfo.bundleId,
+    });
+  }
+
+  private async appendAcpResponseParsedTrace(
+    runDir: string,
+    state: FlowRunState,
+    prompt: TracedPromptResult,
+    sessionInfo: FlowSessionBinding,
+    rawResponseArtifact: FlowArtifactRef,
+  ): Promise<void> {
+    await this.store.appendTrace(runDir, state, {
+      scope: "acp",
+      type: "acp_response_parsed",
+      nodeId: state.currentNode,
+      attemptId: state.currentAttemptId,
+      sessionId: sessionInfo.bundleId,
+      payload: {
+        sessionId: sessionInfo.bundleId,
+        conversation: prompt.conversation,
+        rawResponseArtifact,
+      },
+    });
+  }
+
+  private async parseAcpOutput(
+    node: AcpNodeDefinition,
+    context: FlowNodeContext,
+    rawText: string,
+    trace: FlowStepTrace,
+  ): Promise<unknown> {
+    try {
+      return node.parse ? await node.parse(rawText, context) : rawText;
+    } catch (error) {
+      throw attachStepTrace(error, trace);
+    }
   }
 
   private async runWithHeartbeat<T>(

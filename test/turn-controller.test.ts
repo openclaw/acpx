@@ -127,22 +127,36 @@ test("QueueOwnerTurnController routes setSessionModel through active controller"
     setSessionModelFallback: async (_modelId, timeoutMs) => {
       fallbackCalls += 1;
       fallbackTimeouts.push(timeoutMs);
+      return { configOptions: [] };
     },
   });
 
+  const reportedResponse: SetSessionConfigOptionResponse = {
+    configOptions: [
+      {
+        id: "model",
+        name: "Model",
+        type: "select",
+        options: [{ value: "fast-model", name: "Fast" }],
+        currentValue: "fast-model",
+      },
+    ],
+  };
   controller.setActiveController(
     makeActiveController({
       setSessionModel: async () => {
         activeCalls += 1;
+        return reportedResponse;
       },
     }),
   );
 
-  await controller.setSessionModel("gpt-5.4", 1500);
+  const response = await controller.setSessionModel("gpt-5.4", 1500);
   assert.equal(activeCalls, 1);
   assert.equal(fallbackCalls, 0);
   assert.deepEqual(observedTimeouts, [1500]);
   assert.deepEqual(fallbackTimeouts, []);
+  assert.equal(response, reportedResponse);
 });
 
 test("QueueOwnerTurnController routes setSessionConfigOption through fallback when inactive", async () => {
@@ -202,7 +216,10 @@ test("QueueOwnerTurnController rejects control requests while closing", async ()
 type QueueOwnerTurnControllerOverrides = Partial<{
   withTimeout: <T>(run: () => Promise<T>, timeoutMs?: number) => Promise<T>;
   setSessionModeFallback: (modeId: string, timeoutMs?: number) => Promise<void>;
-  setSessionModelFallback: (modelId: string, timeoutMs?: number) => Promise<void>;
+  setSessionModelFallback: (
+    modelId: string,
+    timeoutMs?: number,
+  ) => Promise<SetSessionConfigOptionResponse | undefined>;
   setSessionConfigOptionFallback: (
     configId: string,
     value: string,
@@ -222,9 +239,9 @@ function createQueueOwnerTurnController(
     });
   const setSessionModelFallback =
     overrides.setSessionModelFallback ??
-    (async (): Promise<void> => {
-      // no-op
-    });
+    (async () => ({
+      configOptions: [],
+    }));
   const setSessionConfigOptionFallback =
     overrides.setSessionConfigOptionFallback ??
     (async () => ({
@@ -254,9 +271,9 @@ function makeActiveController(
       }),
     setSessionModel:
       overrides.setSessionModel ??
-      (async () => {
-        // no-op
-      }),
+      (async () => ({
+        configOptions: [],
+      })),
     setSessionConfigOption:
       overrides.setSessionConfigOption ?? (async () => ({ configOptions: [] })),
   };

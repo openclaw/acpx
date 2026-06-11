@@ -141,6 +141,7 @@ function replayBundledSession(
       baseRecord.createdAt ??
       new Date().toISOString(),
     cumulative_token_usage: baseRecord.cumulative_token_usage ?? {},
+    cumulative_cost: baseRecord.cumulative_cost,
     request_token_usage: baseRecord.request_token_usage ?? {},
   });
   let acpxState = cloneSessionAcpxState(baseRecord.acpx as never);
@@ -205,6 +206,7 @@ function replayBundledSession(
       messages: conversation.messages,
       updated_at: conversation.updated_at,
       cumulative_token_usage: conversation.cumulative_token_usage,
+      cumulative_cost: conversation.cumulative_cost,
       request_token_usage: conversation.request_token_usage,
       acpx: acpxState,
     },
@@ -319,6 +321,10 @@ function promptTextFromUserMessage(message: unknown): string | null {
           : typeof mention.uri === "string"
             ? mention.uri
             : null;
+      }
+      if ("Audio" in part && part.Audio && typeof part.Audio === "object") {
+        const audio = part.Audio as { mime_type?: unknown };
+        return typeof audio.mime_type === "string" ? `[audio] ${audio.mime_type}` : "[audio]";
       }
       return null;
     })

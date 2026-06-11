@@ -267,21 +267,29 @@ export async function findSessionByDirectoryWalk(
       return await loadRecordFromIndexEntry(match);
     }
 
-    if (current === walkBoundary || current === walkRoot) {
+    const parent = nextWalkParent(current, walkBoundary, walkRoot);
+    if (!parent) {
       return undefined;
     }
-
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return undefined;
-    }
-
     current = parent;
-
-    if (!isWithinBoundary(walkBoundary, current)) {
-      return undefined;
-    }
   }
+}
+
+function nextWalkParent(
+  current: string,
+  walkBoundary: string,
+  walkRoot: string,
+): string | undefined {
+  if (current === walkBoundary || current === walkRoot) {
+    return undefined;
+  }
+
+  const parent = path.dirname(current);
+  if (parent === current || !isWithinBoundary(walkBoundary, parent)) {
+    return undefined;
+  }
+
+  return parent;
 }
 
 function killSignalCandidates(signal: NodeJS.Signals | undefined): NodeJS.Signals[] {
@@ -327,23 +335,13 @@ export async function pruneSessions(options: PruneOptions = {}): Promise<PruneRe
   await ensureSessionDir();
   const entries = await loadSessionIndexEntries();
 
-  let eligible = entries.filter((entry) => entry.closed);
-
-  if (options.agentCommand) {
-    eligible = eligible.filter((entry) => entry.agentCommand === options.agentCommand);
-  }
+  const eligible = filterPruneCandidates(entries, options.agentCommand);
 
   const cutoff =
     options.before ??
     (options.olderThanMs != null ? new Date(Date.now() - options.olderThanMs) : undefined);
 
-  const records: SessionRecord[] = [];
-  for (const entry of eligible) {
-    const record = await loadRecordFromIndexEntry(entry);
-    if (record && (!cutoff || closedAtOrLastUsedAt(record) < cutoff.toISOString())) {
-      records.push(record);
-    }
-  }
+  const records = await loadPrunableRecords(eligible, cutoff);
 
   if (options.dryRun) {
     return { pruned: records, bytesFreed: 0, dryRun: true };
@@ -364,32 +362,12 @@ export async function pruneSessions(options: PruneOptions = {}): Promise<PruneRe
   }
 
   for (const record of records) {
-    const safeId = encodeURIComponent(record.acpxRecordId);
-    const jsonFile = path.join(sessionDir, `${safeId}.json`);
-
-    try {
-      const stat = await fs.stat(jsonFile);
-      bytesFreed += stat.size;
-    } catch {
-      // file already gone
-    }
-    await fs.unlink(jsonFile).catch(() => undefined);
-
-    if (options.includeHistory) {
-      for (const name of dirEntries) {
-        if (!isSessionStreamFile(name, safeId)) {
-          continue;
-        }
-        const filePath = path.join(sessionDir, name);
-        try {
-          const stat = await fs.stat(filePath);
-          bytesFreed += stat.size;
-        } catch {
-          // ignore
-        }
-        await fs.unlink(filePath).catch(() => undefined);
-      }
-    }
+    bytesFreed += await pruneSessionFiles(
+      record,
+      sessionDir,
+      dirEntries,
+      options.includeHistory === true,
+    );
   }
 
   await rebuildSessionIndex(sessionDir).catch(() => {
@@ -397,6 +375,62 @@ export async function pruneSessions(options: PruneOptions = {}): Promise<PruneRe
   });
 
   return { pruned: records, bytesFreed, dryRun: false };
+}
+
+function filterPruneCandidates(
+  entries: SessionIndexEntry[],
+  agentCommand: string | undefined,
+): SessionIndexEntry[] {
+  return entries.filter(
+    (entry) => entry.closed && (!agentCommand || entry.agentCommand === agentCommand),
+  );
+}
+
+async function loadPrunableRecords(
+  entries: SessionIndexEntry[],
+  cutoff: Date | undefined,
+): Promise<SessionRecord[]> {
+  const records: SessionRecord[] = [];
+  const cutoffIso = cutoff?.toISOString();
+  for (const entry of entries) {
+    const record = await loadRecordFromIndexEntry(entry);
+    if (record && isBeforeCutoff(record, cutoffIso)) {
+      records.push(record);
+    }
+  }
+  return records;
+}
+
+function isBeforeCutoff(record: SessionRecord, cutoffIso: string | undefined): boolean {
+  return !cutoffIso || closedAtOrLastUsedAt(record) < cutoffIso;
+}
+
+async function pruneSessionFiles(
+  record: SessionRecord,
+  sessionDir: string,
+  dirEntries: string[],
+  includeHistory: boolean,
+): Promise<number> {
+  const safeId = encodeURIComponent(record.acpxRecordId);
+  let bytesFreed = await unlinkCountingBytes(path.join(sessionDir, `${safeId}.json`));
+  if (includeHistory) {
+    for (const name of dirEntries.filter((entry) => isSessionStreamFile(entry, safeId))) {
+      bytesFreed += await unlinkCountingBytes(path.join(sessionDir, name));
+    }
+  }
+  return bytesFreed;
+}
+
+async function unlinkCountingBytes(filePath: string): Promise<number> {
+  let bytes = 0;
+  try {
+    const stat = await fs.stat(filePath);
+    bytes = stat.size;
+  } catch {
+    // file already gone
+  }
+  await fs.unlink(filePath).catch(() => undefined);
+  return bytes;
 }
 
 export async function closeSession(id: string): Promise<SessionRecord> {
