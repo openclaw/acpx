@@ -8,7 +8,8 @@ acpx compare pi openclaw codex 'summarize this checkout'
 ```
 
 Each agent runs independently through the same temporary-session path as
-`acpx <agent> exec`.
+`acpx <agent> exec`. Runs execute serially in the requested workspace so
+write-capable prompts cannot mutate the same checkout concurrently.
 
 ## Usage
 

@@ -161,6 +161,7 @@ acpx --format json compare codex claude --file prompt.md
 Behavior:
 
 - Runs the same temporary-session prompt against each listed agent
+- Runs agents serially in the requested workspace
 - Reuses the global `exec` controls: cwd, timeout, permissions, `--policy`, auth, terminal, retries, model/system options, and output format
 - `--format text` prints one summary table row per agent
 - `--format json` or `--json` prints `CompareRow[]`

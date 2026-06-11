@@ -272,7 +272,7 @@ Behavior:
 - `--format text` prints one summary table row per agent.
 - `--format json` or command-local `--json` prints a `CompareRow[]` summary payload.
 - `--format quiet` prints `<agent>\t<status>` per row.
-- The command does not create saved sessions or separate compare transcript directories. Use `--format json` when you need a machine-readable artifact.
+- Agents run serially in the requested workspace. The command does not create saved sessions or separate compare transcript directories. Use `--format json` when you need a machine-readable artifact.
 
 `CompareRow.status` is `ok`, `cancelled`, `permission_denied`, or `error`.
 

@@ -58,6 +58,7 @@ async function writeCompareAgent(homeDir: string): Promise<string> {
     agentPath,
     `
 import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import { Readable, Writable } from "node:stream";
 
@@ -105,7 +106,48 @@ class CompareAgent {
 
   async prompt(params) {
     const text = promptText(params.prompt);
-    if (mode === "permission") {
+    if (mode === "lock-a" || mode === "lock-b") {
+      let status = "isolated";
+      try {
+        await fs.mkdir("compare-agent-lock");
+      } catch (error) {
+        if (error?.code === "EEXIST") {
+          status = "overlap";
+        } else {
+          throw error;
+        }
+      }
+      await sleep(100);
+      if (status === "isolated") {
+        await fs.rm("compare-agent-lock", { recursive: true, force: true });
+      }
+      await this.connection.sessionUpdate({
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: mode + ":" + status },
+        },
+      });
+      return { stopReason: "end_turn" };
+    }
+
+    if (mode === "permission" || mode === "permission-mixed") {
+      const outcomes = [];
+      if (mode === "permission-mixed") {
+        const readResponse = await this.connection.requestPermission({
+          sessionId: params.sessionId,
+          toolCall: {
+            toolCallId: randomUUID(),
+            title: "Read file",
+            kind: "read",
+          },
+          options: [
+            { optionId: "allow", name: "Allow", kind: "allow_once" },
+            { optionId: "reject", name: "Reject", kind: "reject_once" },
+          ],
+        });
+        outcomes.push(readResponse.outcome.optionId);
+      }
       const response = await this.connection.requestPermission({
         sessionId: params.sessionId,
         toolCall: {
@@ -118,11 +160,12 @@ class CompareAgent {
           { optionId: "reject", name: "Reject", kind: "reject_once" },
         ],
       });
+      outcomes.push(response.outcome.optionId);
       await this.connection.sessionUpdate({
         sessionId: params.sessionId,
         update: {
           sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: "permission selected:" + response.outcome.optionId },
+          content: { type: "text", text: "permission selected:" + outcomes.join(",") },
         },
       });
       return { stopReason: "end_turn" };
@@ -180,6 +223,9 @@ async function writeCompareConfig(homeDir: string, agentPath: string): Promise<v
           slow: { command: process.execPath, args: [agentPath, "slow"] },
           error: { command: process.execPath, args: [agentPath, "error"] },
           permission: { command: process.execPath, args: [agentPath, "permission"] },
+          "permission-mixed": { command: process.execPath, args: [agentPath, "permission-mixed"] },
+          "lock-a": { command: process.execPath, args: [agentPath, "lock-a"] },
+          "lock-b": { command: process.execPath, args: [agentPath, "lock-b"] },
         },
       },
       null,
@@ -199,7 +245,7 @@ async function setupCompareFixture(homeDir: string): Promise<string> {
 
 type CompareRow = {
   agent: string;
-  status: "ok" | "cancelled" | "error";
+  status: "ok" | "cancelled" | "error" | "permission_denied";
   stop_reason: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
@@ -326,5 +372,51 @@ test("compare applies global permission policy to every agent run", async () => 
     assert.equal(rows[0]?.permission_requests, 1);
     assert.equal(rows[0]?.permission_denied, 1);
     assert.match(rows[0]?.final_message ?? "", /permission selected:reject/);
+  });
+});
+
+test("compare reports partial permission denial as denied", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    const result = await runCli(
+      [
+        "--approve-all",
+        "--policy",
+        '{"autoApprove":["read"],"autoDeny":["execute"]}',
+        "--format",
+        "json",
+        "compare",
+        "permission-mixed",
+        "summarize",
+      ],
+      homeDir,
+      cwd,
+    );
+
+    assert.equal(result.code, 5, result.stderr);
+    const rows = JSON.parse(result.stdout) as CompareRow[];
+    assert.equal(rows[0]?.agent, "permission-mixed");
+    assert.equal(rows[0]?.status, "permission_denied");
+    assert.equal(rows[0]?.permission_requests, 2);
+    assert.equal(rows[0]?.permission_denied, 1);
+    assert.match(rows[0]?.final_message ?? "", /permission selected:allow,reject/);
+  });
+});
+
+test("compare runs agents serially in a shared workspace", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    const result = await runCli(
+      ["compare", "lock-a", "lock-b", "--json", "summarize"],
+      homeDir,
+      cwd,
+    );
+
+    assert.equal(result.code, 0, result.stderr);
+    const rows = JSON.parse(result.stdout) as CompareRow[];
+    assert.deepEqual(
+      rows.map((row) => row.final_message),
+      ["lock-a:isolated", "lock-b:isolated"],
+    );
   });
 });

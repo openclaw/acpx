@@ -271,9 +271,7 @@ function captureSessionUpdate(notification: SessionNotification, capture: RunCap
 
 function rowStatusFromPermissionStats(stats: PermissionStats): CompareRow["status"] {
   const deniedOrCancelled = stats.denied + stats.cancelled;
-  return stats.requested > 0 && stats.approved === 0 && deniedOrCancelled > 0
-    ? "permission_denied"
-    : "ok";
+  return deniedOrCancelled > 0 ? "permission_denied" : "ok";
 }
 
 function sessionOptionsFromGlobalFlags(globalFlags: ReturnType<typeof resolveGlobalFlags>) {
@@ -515,17 +513,18 @@ export function registerCompareCommand(program: Command, config: ResolvedAcpxCon
       const prompt = await readPromptInput(promptFile, promptText, globalFlags.cwd);
       const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
 
-      const rows = await Promise.all(
-        agents.map((agentName) =>
-          runAgentForCompare({
+      const rows: CompareRow[] = [];
+      for (const agentName of agents) {
+        rows.push(
+          await runAgentForCompare({
             agentName,
             prompt,
             config,
             globalFlags,
             permissionPolicy,
           }),
-        ),
-      );
+        );
+      }
 
       printRows(rows, outputPolicy.format);
       updateCompareExitCode(rows);
