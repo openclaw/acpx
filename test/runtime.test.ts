@@ -234,6 +234,34 @@ test("createFileSessionStore persists records inside the provided state director
   );
 });
 
+test("createFileSessionStore.load() returns undefined for a corrupt session file (#378)", async (t) => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-store-corrupt-"));
+  t.after(async () => {
+    await fs.rm(stateDir, { recursive: true, force: true });
+  });
+
+  const store = createFileSessionStore({ stateDir });
+  const sessionId = "agent:codex:acp:corrupt";
+  const record = createSessionRecord({ acpxRecordId: sessionId, acpSessionId: "sid-corrupt" });
+  await store.save(record);
+
+  const sessionFile = path.join(stateDir, "sessions", `${encodeURIComponent(sessionId)}.json`);
+
+  // Truncated JSON (e.g. a SIGKILL/power-loss mid-write before the atomic rename, or
+  // a half-flushed external write). Pre-fix, JSON.parse threw a SyntaxError straight
+  // out of the public load(); every internal reader already recovers from this.
+  await fs.writeFile(sessionFile, '{"schema":"acpx.session.v1","acpx', "utf8");
+  assert.equal(await store.load(sessionId), undefined);
+
+  // Structurally-valid JSON of the wrong shape is also "no usable record".
+  await fs.writeFile(sessionFile, '{"not":"a session record"}', "utf8");
+  assert.equal(await store.load(sessionId), undefined);
+
+  // A rewritten valid record still loads — recovery does not mask good data.
+  await store.save(record);
+  assert.equal((await store.load(sessionId))?.acpSessionId, "sid-corrupt");
+});
+
 test("doctor reports backend unavailable probe failures and agent registry honors overrides", async () => {
   const registry = createAgentRegistry({
     overrides: {

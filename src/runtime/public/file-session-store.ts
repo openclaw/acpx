@@ -26,14 +26,24 @@ class FileSessionStore implements AcpSessionStore {
 
   async load(sessionId: string): Promise<AcpSessionRecord | undefined> {
     await this.ensureDir();
+    let payload: string;
     try {
-      const payload = await fs.readFile(this.filePath(sessionId), "utf8");
-      return parseSessionRecord(JSON.parse(payload)) ?? undefined;
+      payload = await fs.readFile(this.filePath(sessionId), "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return undefined;
       }
       throw error;
+    }
+    // A present-but-corrupt session file is "no usable record" per the contract
+    // (load -> AcpSessionRecord | undefined). Treat unparseable/ill-shaped JSON as
+    // a recoverable miss, matching every internal reader (e.g.
+    // src/session/persistence/repository.ts), instead of throwing a raw SyntaxError
+    // out of the public store. Genuine I/O faults still surface from the read above.
+    try {
+      return parseSessionRecord(JSON.parse(payload)) ?? undefined;
+    } catch {
+      return undefined;
     }
   }
 
