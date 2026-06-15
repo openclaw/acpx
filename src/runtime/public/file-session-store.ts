@@ -35,16 +35,13 @@ class FileSessionStore implements AcpSessionStore {
       }
       throw error;
     }
-    // A present-but-corrupt session file is "no usable record" per the contract
-    // (load -> AcpSessionRecord | undefined). Treat unparseable/ill-shaped JSON as
-    // a recoverable miss, matching every internal reader (e.g.
-    // src/session/persistence/repository.ts), instead of throwing a raw SyntaxError
-    // out of the public store. Genuine I/O faults still surface from the read above.
+    let parsed: unknown;
     try {
-      return parseSessionRecord(JSON.parse(payload)) ?? undefined;
+      parsed = JSON.parse(payload);
     } catch {
       return undefined;
     }
+    return parseSessionRecord(parsed) ?? undefined;
   }
 
   async save(record: AcpSessionRecord): Promise<void> {

@@ -21,6 +21,7 @@ Repo: https://github.com/openclaw/acpx
 - ACP/models: support SDK 0.25 model config options while preserving `session/set_model` compatibility for adapters that explicitly advertise legacy model metadata.
 - CLI/Claude: let Claude Code adjudicate model selectors missing from a stale advertised model list on later persistent turns, and preserve the adapter-reported current model after model switches. Thanks @oakif.
 - Client/ACP: advertise scoped Devin/Windsurf-compatible client metadata and handle Devin extension requests/notifications without noisy method-not-found logs. Thanks @LivioGama.
+- Runtime/sessions: treat corrupt public file-session records as missing while preserving genuine filesystem errors. Thanks @KrasimirKralev.
 
 ## 2026.5.23 (v0.10.0)
 
