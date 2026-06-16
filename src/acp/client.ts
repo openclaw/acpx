@@ -78,6 +78,7 @@ import {
   resolveAgentCloseAfterStdinEndMs,
   resolveClaudeAcpSessionCreateTimeoutMs,
   resolveClaudeCodeExecutable,
+  resolveClaudeCodeSettingSources,
   resolveGeminiAcpStartupTimeoutMs,
   resolveGeminiCommandArgs,
   shouldIgnoreNonJsonAgentOutputLine,
@@ -116,6 +117,7 @@ export {
   buildAgentSpawnOptions,
   buildQoderAcpCommandArgs,
   resolveAgentCloseAfterStdinEndMs,
+  resolveClaudeCodeSettingSources,
   shouldIgnoreNonJsonAgentOutputLine,
 };
 
@@ -902,7 +904,7 @@ export class AcpClient {
         connection.newSession({
           cwd: sessionCwd,
           mcpServers: this.options.mcpServers ?? [],
-          _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions),
+          _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions, claudeAcp),
         }),
       );
       result = claudeAcp

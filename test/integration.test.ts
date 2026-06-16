@@ -1025,6 +1025,7 @@ test("integration: exec forwards model, allowed-tools, and max-turns in session/
             model: "sonnet",
             allowedTools: ["Read", "Grep"],
             maxTurns: 7,
+            settingSources: ["project", "local"],
           },
         },
       });

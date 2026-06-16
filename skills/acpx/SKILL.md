@@ -286,6 +286,16 @@ acpx --append-system-prompt "Always explain trade-offs before recommending a fix
 
 The override is forwarded via ACP `_meta.systemPrompt` (or `_meta.systemPrompt.append`) on `session/new` and stored in `session_options.system_prompt`. Subsequent `prompt`/`ensure` calls in the same scope keep the override unless you explicitly create a new session. Non-Claude adapters ignore the field, so the same flag is safe inside cross-agent scripts.
 
+## Claude settings isolation
+
+Built-in `acpx claude` sessions load Claude project and local settings, but not
+user settings. This prevents globally enabled channel and daemon plugins from
+claiming singleton external resources in an ACP-spawned session.
+
+Set `ACPX_CLAUDE_INCLUDE_USER_SETTINGS=1` only when the spawned session needs
+the user's global Claude settings and no such plugin conflict exists. Ambient
+credentials and other environment variables are still inherited normally.
+
 ## Sessions cleanup
 
 Closed session records accumulate on disk by default. Use `sessions prune` to enforce retention:

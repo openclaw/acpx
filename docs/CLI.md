@@ -607,7 +607,10 @@ Per-tool policy:
 
 ## Environment variables
 
-No `acpx`-specific environment variables are currently defined.
+`ACPX_CLAUDE_INCLUDE_USER_SETTINGS=1` makes built-in `claude` sessions include
+Claude Code user settings. By default, they load only project and local settings
+to avoid globally enabled channel or daemon plugins interfering with spawned ACP
+sessions.
 
 Related runtime behavior:
 

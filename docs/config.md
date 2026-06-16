@@ -124,7 +124,12 @@ finds a matching `ACPX_AUTH_*` environment variable or `auth` config value.
 
 ## Environment variables
 
-`acpx` does not define new env vars beyond `ACPX_AUTH_*`. Other ACP-relevant behavior:
+`ACPX_CLAUDE_INCLUDE_USER_SETTINGS=1` makes built-in `claude` sessions include
+Claude Code user settings. By default, they load only project and local settings
+to avoid globally enabled channel or daemon plugins interfering with spawned ACP
+sessions.
+
+Other ACP-relevant behavior:
 
 - Session storage path is derived from the OS home directory (`~/.acpx/sessions`).
 - Child adapter processes inherit the current environment by default.

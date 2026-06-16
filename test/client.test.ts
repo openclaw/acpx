@@ -7,6 +7,7 @@ import {
   AcpClient,
   buildAgentSpawnOptions,
   buildQoderAcpCommandArgs,
+  resolveClaudeCodeSettingSources,
   resolveAgentCloseAfterStdinEndMs,
   shouldIgnoreNonJsonAgentOutputLine,
 } from "../src/acp/client.js";
@@ -685,6 +686,47 @@ test("AcpClient createSession forwards claudeCode options in _meta", async () =>
       },
     },
   });
+});
+
+test("AcpClient creates built-in Claude sessions without user settings by default", async () => {
+  const cwd = path.resolve("/tmp/acpx-client-claude-settings");
+  const client = makeClient({
+    agentCommand: "npx -y @agentclientprotocol/claude-agent-acp",
+  });
+
+  let capturedParams: Record<string, unknown> | undefined;
+  asInternals(client).connection = {
+    newSession: async (params: Record<string, unknown>) => {
+      capturedParams = params;
+      return { sessionId: "session-claude-settings" };
+    },
+  };
+
+  await client.createSession("/tmp/acpx-client-claude-settings");
+  assert.deepEqual(capturedParams, {
+    cwd,
+    mcpServers: [],
+    _meta: {
+      claudeCode: {
+        options: {
+          settingSources: ["project", "local"],
+        },
+      },
+    },
+  });
+});
+
+test("resolveClaudeCodeSettingSources includes user settings only when explicitly enabled", () => {
+  assert.deepEqual(resolveClaudeCodeSettingSources({}), ["project", "local"]);
+  assert.deepEqual(resolveClaudeCodeSettingSources({ ACPX_CLAUDE_INCLUDE_USER_SETTINGS: "1" }), [
+    "user",
+    "project",
+    "local",
+  ]);
+  assert.deepEqual(resolveClaudeCodeSettingSources({ ACPX_CLAUDE_INCLUDE_USER_SETTINGS: "true" }), [
+    "project",
+    "local",
+  ]);
 });
 
 test("AcpClient createSession forwards systemPrompt string in _meta", async () => {

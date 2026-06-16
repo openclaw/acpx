@@ -16,6 +16,7 @@ const CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS = 60_000;
 const GEMINI_VERSION_TIMEOUT_MS = 2_000;
 const GEMINI_ACP_FLAG_VERSION = [0, 33, 0] as const;
 const COPILOT_HELP_TIMEOUT_MS = 2_000;
+const CLAUDE_CODE_DEFAULT_SETTING_SOURCES = ["project", "local"] as const;
 
 type GeminiVersion = {
   raw: string;
@@ -294,26 +295,35 @@ export async function ensureCopilotAcpSupport(command: string): Promise<void> {
 
 export function buildClaudeCodeOptionsMeta(
   options: AcpClientOptions["sessionOptions"],
+  isolateUserSettings = false,
 ): Record<string, unknown> | undefined {
-  if (!options) {
-    return undefined;
-  }
-
   const claudeCodeOptions: Record<string, unknown> = {};
-  assignClaudeCodeOptions(claudeCodeOptions, options);
+  if (isolateUserSettings) {
+    claudeCodeOptions.settingSources = resolveClaudeCodeSettingSources();
+  }
+  if (options) {
+    assignClaudeCodeOptions(claudeCodeOptions, options);
+  }
 
   const meta: Record<string, unknown> = {};
   if (Object.keys(claudeCodeOptions).length > 0) {
     meta.claudeCode = { options: claudeCodeOptions };
   }
 
-  assignClaudeCodeSystemPrompt(meta, options.systemPrompt);
+  assignClaudeCodeSystemPrompt(meta, options?.systemPrompt);
 
   if (Object.keys(meta).length === 0) {
     return undefined;
   }
 
   return meta;
+}
+
+export function resolveClaudeCodeSettingSources(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (env.ACPX_CLAUDE_INCLUDE_USER_SETTINGS?.trim() === "1") {
+    return ["user", ...CLAUDE_CODE_DEFAULT_SETTING_SOURCES];
+  }
+  return [...CLAUDE_CODE_DEFAULT_SETTING_SOURCES];
 }
 
 function assignClaudeCodeOptions(
@@ -333,7 +343,7 @@ function assignClaudeCodeOptions(
 
 function assignClaudeCodeSystemPrompt(
   target: Record<string, unknown>,
-  systemPrompt: NonNullable<AcpClientOptions["sessionOptions"]>["systemPrompt"],
+  systemPrompt: NonNullable<AcpClientOptions["sessionOptions"]>["systemPrompt"] | undefined,
 ): void {
   if (typeof systemPrompt === "string" && systemPrompt.length > 0) {
     target.systemPrompt = systemPrompt;
