@@ -59,15 +59,22 @@ function promotePrefixedAuthEnvironment(env: NodeJS.ProcessEnv): void {
 
 function buildAgentEnvironment(
   authCredentials: Record<string, string> | undefined,
+  sessionEnv: Record<string, string> | undefined,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   promotePrefixedAuthEnvironment(env);
-  if (!authCredentials) {
-    return env;
+  if (authCredentials) {
+    for (const [methodId, credential] of Object.entries(authCredentials)) {
+      assignAuthCredentialEnv(env, methodId, credential);
+    }
   }
 
-  for (const [methodId, credential] of Object.entries(authCredentials)) {
-    assignAuthCredentialEnv(env, methodId, credential);
+  if (sessionEnv) {
+    for (const [key, value] of Object.entries(sessionEnv)) {
+      if (typeof value === "string") {
+        env[key] = value;
+      }
+    }
   }
 
   return env;
@@ -110,6 +117,7 @@ export function resolveConfiguredAuthCredential(
 export function buildAgentSpawnOptions(
   cwd: string,
   authCredentials: Record<string, string> | undefined,
+  sessionEnv?: Record<string, string>,
 ): {
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -118,7 +126,7 @@ export function buildAgentSpawnOptions(
 } {
   return {
     cwd,
-    env: buildAgentEnvironment(authCredentials),
+    env: buildAgentEnvironment(authCredentials, sessionEnv),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   };

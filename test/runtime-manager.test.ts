@@ -4,7 +4,11 @@ import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import type { SessionModelState } from "../src/acp/model-support.js";
 import { AcpxOperationalError } from "../src/errors.js";
 import { AcpRuntimeManager } from "../src/runtime/engine/manager.js";
-import { persistSessionOptions } from "../src/runtime/engine/session-options.js";
+import {
+  mergeSessionOptions,
+  persistSessionOptions,
+  sessionOptionsFromRecord,
+} from "../src/runtime/engine/session-options.js";
 import type {
   AcpRuntimeEvent,
   AcpRuntimeHandle,
@@ -2793,6 +2797,7 @@ test("AcpRuntimeManager forwards sessionOptions to createClient on fresh session
     allowed_tools: undefined,
     max_turns: undefined,
     system_prompt: "Be terse.",
+    env: undefined,
   });
 });
 
@@ -2864,6 +2869,7 @@ test("AcpRuntimeManager persists sessionOptions { append } and model/allowedTool
     allowed_tools: ["read", "edit"],
     max_turns: 5,
     system_prompt: { append: "Also review tests." },
+    env: undefined,
   });
 });
 
@@ -2882,6 +2888,76 @@ test("persistSessionOptions preserves an explicit empty allowedTools list", () =
     allowed_tools: [],
     max_turns: undefined,
     system_prompt: undefined,
+    env: undefined,
+  });
+});
+
+test("persistSessionOptions preserves session env as a serialized record", () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "env-session",
+    acpSessionId: "env-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+
+  persistSessionOptions(record, {
+    env: {
+      GIT_AUTHOR_EMAIL: "agent-pm@example.local",
+      GIT_COMMITTER_NAME: "Agent PM",
+    },
+  });
+
+  assert.deepEqual(record.acpx?.session_options, {
+    model: undefined,
+    allowed_tools: undefined,
+    max_turns: undefined,
+    system_prompt: undefined,
+    env: {
+      GIT_AUTHOR_EMAIL: "agent-pm@example.local",
+      GIT_COMMITTER_NAME: "Agent PM",
+    },
+  });
+});
+
+test("sessionOptionsFromRecord restores session env from a persisted record", () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "env-restore-session",
+    acpSessionId: "env-restore-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+    acpx: {
+      session_options: {
+        env: {
+          GIT_AUTHOR_EMAIL: "restored-pm@example.local",
+        },
+      },
+    },
+  });
+
+  const restored = sessionOptionsFromRecord(record);
+  assert.deepEqual(restored?.env, { GIT_AUTHOR_EMAIL: "restored-pm@example.local" });
+});
+
+test("mergeSessionOptions merges session env per key with preferred overriding fallback", () => {
+  const merged = mergeSessionOptions(
+    {
+      env: {
+        GIT_AUTHOR_EMAIL: "preferred@example.local",
+        PREFERRED_ONLY: "preferred",
+      },
+    },
+    {
+      env: {
+        GIT_AUTHOR_EMAIL: "fallback@example.local",
+        FALLBACK_ONLY: "fallback",
+      },
+    },
+  );
+
+  assert.deepEqual(merged?.env, {
+    GIT_AUTHOR_EMAIL: "preferred@example.local",
+    PREFERRED_ONLY: "preferred",
+    FALLBACK_ONLY: "fallback",
   });
 });
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +13,84 @@ import {
   buildTerminalShellSpawnCommand,
   buildTerminalSpawnCommand,
 } from "../src/spawn-command-options.js";
+
+test("buildAgentSpawnOptions merges session env into the agent child environment", () => {
+  const previous = process.env.ACPX_TEST_SESSION_ENV_PARENT;
+  process.env.ACPX_TEST_SESSION_ENV_PARENT = "parent-value";
+  try {
+    const options = buildAgentSpawnOptions("/tmp/acpx-agent", undefined, {
+      ACPX_TEST_SESSION_ENV_INJECTED: "injected-value",
+      ACPX_TEST_SESSION_ENV_PARENT: "overridden-by-session",
+    });
+
+    assert.equal(options.env.ACPX_TEST_SESSION_ENV_INJECTED, "injected-value");
+    assert.equal(
+      options.env.ACPX_TEST_SESSION_ENV_PARENT,
+      "overridden-by-session",
+      "session env must override the parent process env for colliding keys",
+    );
+  } finally {
+    if (previous == null) {
+      delete process.env.ACPX_TEST_SESSION_ENV_PARENT;
+    } else {
+      process.env.ACPX_TEST_SESSION_ENV_PARENT = previous;
+    }
+  }
+});
+
+test("buildAgentSpawnOptions leaves the agent env untouched when no session env is configured", () => {
+  const options = buildAgentSpawnOptions("/tmp/acpx-agent", undefined, undefined);
+  assert.equal(options.env.ACPX_TEST_SESSION_ENV_INJECTED, undefined);
+});
+
+test("spawned agent child process receives session env with parent-override precedence", async () => {
+  const script =
+    "process.stdout.write(JSON.stringify({injected:process.env.ACPX_TEST_E2E_INJECTED,parent:process.env.ACPX_TEST_E2E_PARENT}))";
+  const options = buildAgentSpawnOptions(os.tmpdir(), undefined, {
+    ACPX_TEST_E2E_INJECTED: "e2e-injected",
+    ACPX_TEST_E2E_PARENT: "e2e-overridden",
+  });
+
+  const result = await new Promise<{ injected?: string; parent?: string }>((resolve, reject) => {
+    const child = spawn(process.execPath, ["-e", script], {
+      ...options,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`child exited with ${code}: ${stderr}`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch {
+        reject(new Error(`failed to parse child stdout: ${stdout} (${stderr})`));
+      }
+    });
+  });
+
+  assert.equal(
+    result.injected,
+    "e2e-injected",
+    "real child process must receive the injected session env var",
+  );
+  assert.equal(
+    result.parent,
+    "e2e-overridden",
+    "real child process must see session env override the parent value",
+  );
+});
 
 test("buildAgentSpawnOptions hides Windows console windows and preserves auth env", () => {
   const options = buildAgentSpawnOptions("/tmp/acpx-agent", {

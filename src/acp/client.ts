@@ -659,7 +659,11 @@ export class AcpClient {
       geminiAcp: isGeminiAcpCommand(spawnCommand, args),
       copilotAcp: isCopilotAcpCommand(spawnCommand, args),
       claudeAcp: isClaudeAcpCommand(spawnCommand, args),
-      spawnOptions: buildAgentSpawnOptions(this.options.cwd, this.options.authCredentials),
+      spawnOptions: buildAgentSpawnOptions(
+        this.options.cwd,
+        this.options.authCredentials,
+        this.options.sessionOptions?.env,
+      ),
     };
   }
 

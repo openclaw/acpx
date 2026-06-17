@@ -7,6 +7,14 @@ export type SessionAgentOptions = {
   allowedTools?: string[];
   maxTurns?: number;
   systemPrompt?: SystemPromptOption;
+  /**
+   * Per-agent environment variables injected into the spawned agent child
+   * process. Keys here override the parent process environment for the
+   * spawned child, so configured agents can shadow user-level values (for
+   * example `GIT_AUTHOR_EMAIL`). Callers are responsible for sanitizing
+   * dangerous keys (such as `PATH`) before passing them to acpx.
+   */
+  env?: Record<string, string>;
 };
 
 export function mergeSessionOptions(
@@ -18,7 +26,18 @@ export function mergeSessionOptions(
   assignDefinedOption(merged, "allowedTools", preferred?.allowedTools);
   assignDefinedOption(merged, "maxTurns", preferred?.maxTurns);
   assignDefinedOption(merged, "systemPrompt", preferred?.systemPrompt);
+  assignDefinedOption(merged, "env", mergeEnvRecords(fallback?.env, preferred?.env));
   return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function mergeEnvRecords(
+  fallback: Record<string, string> | undefined,
+  preferred: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!fallback && !preferred) {
+    return undefined;
+  }
+  return { ...fallback, ...preferred };
 }
 
 function assignDefinedOption<Key extends keyof SessionAgentOptions>(
@@ -66,6 +85,7 @@ export function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOpt
     "systemPrompt",
     storedSystemPromptOption(stored.system_prompt),
   );
+  assignStoredOption(sessionOptions, "env", storedEnvRecord(stored.env));
 
   return Object.keys(sessionOptions).length > 0 ? sessionOptions : undefined;
 }
@@ -80,6 +100,7 @@ function persistedSessionOptions(
     allowed_tools: Array.isArray(options.allowedTools) ? [...options.allowedTools] : undefined,
     max_turns: typeof options.maxTurns === "number" ? options.maxTurns : undefined,
     system_prompt: normalizeSystemPromptOption(options.systemPrompt),
+    env: storedEnvRecord(options.env),
   } satisfies PersistedSessionOptions;
   return hasPersistedSessionOptions(next) ? next : undefined;
 }
@@ -89,8 +110,24 @@ function hasPersistedSessionOptions(options: PersistedSessionOptions): boolean {
     options.model !== undefined ||
     options.allowed_tools !== undefined ||
     options.max_turns !== undefined ||
-    options.system_prompt !== undefined
+    options.system_prompt !== undefined ||
+    options.env !== undefined
   );
+}
+
+function storedEnvRecord(value: unknown): Record<string, string> | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  const result: Record<string, string> = {};
+  for (const [key, raw] of entries) {
+    if (typeof raw !== "string") {
+      continue;
+    }
+    result[key] = raw;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function normalizeSystemPromptOption(value: unknown): SystemPromptOption | undefined {
