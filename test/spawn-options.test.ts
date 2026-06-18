@@ -103,6 +103,22 @@ test("buildAgentSpawnOptions hides Windows console windows and preserves auth en
   assert.equal(options.env.ACPX_AUTH_TOKEN, "secret-token");
 });
 
+test("buildAgentSpawnOptions prevents session env from overriding injected auth env", () => {
+  const options = buildAgentSpawnOptions(
+    "/tmp/acpx-agent",
+    {
+      "api-token": "secret-token",
+    },
+    {
+      ACPX_AUTH_API_TOKEN: "session-prefixed",
+      API_TOKEN: "session-normalized",
+    },
+  );
+
+  assert.equal(options.env.ACPX_AUTH_API_TOKEN, "secret-token");
+  assert.equal(options.env.API_TOKEN, "secret-token");
+});
+
 test("buildAgentSpawnOptions promotes explicit ACPX auth env vars into agent auth env", () => {
   const previousPrefixed = process.env.ACPX_AUTH_OPENAI_API_KEY;
   const previousNormalized = process.env.OPENAI_API_KEY;

@@ -10,9 +10,9 @@ export type SessionAgentOptions = {
   /**
    * Per-agent environment variables injected into the spawned agent child
    * process. Keys here override the parent process environment for the
-   * spawned child, so configured agents can shadow user-level values (for
-   * example `GIT_AUTHOR_EMAIL`). Callers are responsible for sanitizing
-   * dangerous keys (such as `PATH`) before passing them to acpx.
+   * spawned child, except acpx-managed auth credential keys. Callers are
+   * responsible for sanitizing dangerous keys (such as `PATH`) before
+   * passing them to acpx.
    */
   env?: Record<string, string>;
 };

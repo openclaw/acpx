@@ -39,7 +39,8 @@ export function readEnvCredential(methodId: string): string | undefined {
   return undefined;
 }
 
-function promotePrefixedAuthEnvironment(env: NodeJS.ProcessEnv): void {
+function promotePrefixedAuthEnvironment(env: NodeJS.ProcessEnv): Set<string> {
+  const protectedKeys = new Set<string>();
   for (const [key, value] of Object.entries(env)) {
     if (!key.startsWith(AUTH_ENV_PREFIX)) {
       continue;
@@ -49,12 +50,17 @@ function promotePrefixedAuthEnvironment(env: NodeJS.ProcessEnv): void {
     }
 
     const normalized = key.slice(AUTH_ENV_PREFIX.length);
-    if (!normalized || env[normalized] != null) {
+    if (!normalized) {
       continue;
     }
 
-    env[normalized] = value;
+    protectedKeys.add(key);
+    protectedKeys.add(normalized);
+    if (env[normalized] == null) {
+      env[normalized] = value;
+    }
   }
+  return protectedKeys;
 }
 
 function buildAgentEnvironment(
@@ -62,22 +68,43 @@ function buildAgentEnvironment(
   sessionEnv: Record<string, string> | undefined,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
-  promotePrefixedAuthEnvironment(env);
+  const protectedAuthEnvKeys = promotePrefixedAuthEnvironment(env);
   if (authCredentials) {
     for (const [methodId, credential] of Object.entries(authCredentials)) {
+      addAuthCredentialEnvKeys(protectedAuthEnvKeys, methodId, credential);
       assignAuthCredentialEnv(env, methodId, credential);
     }
   }
 
   if (sessionEnv) {
     for (const [key, value] of Object.entries(sessionEnv)) {
-      if (typeof value === "string") {
+      if (typeof value === "string" && !protectedAuthEnvKeys.has(key)) {
         env[key] = value;
       }
     }
   }
 
   return env;
+}
+
+function addAuthCredentialEnvKeys(
+  protectedKeys: Set<string>,
+  methodId: string,
+  credential: string,
+): void {
+  if (typeof credential !== "string" || credential.trim().length === 0) {
+    return;
+  }
+
+  if (!methodId.includes("=") && !methodId.includes("\u0000")) {
+    protectedKeys.add(methodId);
+  }
+
+  const normalized = toEnvToken(methodId);
+  if (normalized) {
+    protectedKeys.add(`${AUTH_ENV_PREFIX}${normalized}`);
+    protectedKeys.add(normalized);
+  }
 }
 
 function assignAuthCredentialEnv(
