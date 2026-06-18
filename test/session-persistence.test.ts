@@ -29,6 +29,34 @@ test("SessionRecord allows optional closed and closedAt fields", () => {
   assert.equal(record.closedAt, undefined);
 });
 
+test("parseSessionRecord preserves persisted session env", () => {
+  const serialized = serializeSessionRecordForDisk(
+    makeSessionRecord({
+      acpxRecordId: "session-env-options",
+      acpSessionId: "session-env-options",
+      agentCommand: "agent",
+      cwd: "/tmp/session-env-options",
+      acpx: {
+        session_options: {
+          env: {
+            GIT_AUTHOR_EMAIL: "agent@example.local",
+          },
+        },
+      },
+    }),
+  );
+  const acpx = serialized.acpx as Record<string, unknown>;
+  const sessionOptions = acpx.session_options as { env: Record<string, unknown> };
+  sessionOptions.env.IGNORED_NON_STRING = 123;
+
+  const parsed = parseSessionRecord(serialized);
+
+  assert.ok(parsed);
+  assert.deepEqual(parsed.acpx?.session_options?.env, {
+    GIT_AUTHOR_EMAIL: "agent@example.local",
+  });
+});
+
 test("parseSessionRecord ignores malformed config options during model-control migration", () => {
   const serialized = serializeSessionRecordForDisk(
     makeSessionRecord({

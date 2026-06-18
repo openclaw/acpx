@@ -43,6 +43,14 @@ function protectedEnvKey(key: string): string {
   return process.platform === "win32" ? key.toUpperCase() : key;
 }
 
+function isAuthEnvKey(key: string): boolean {
+  return protectedEnvKey(key).startsWith(AUTH_ENV_PREFIX);
+}
+
+function authEnvSuffix(key: string): string {
+  return key.slice(AUTH_ENV_PREFIX.length);
+}
+
 function protectEnvKey(protectedKeys: Set<string>, key: string): void {
   protectedKeys.add(protectedEnvKey(key));
 }
@@ -50,14 +58,14 @@ function protectEnvKey(protectedKeys: Set<string>, key: string): void {
 function promotePrefixedAuthEnvironment(env: NodeJS.ProcessEnv): Set<string> {
   const protectedKeys = new Set<string>();
   for (const [key, value] of Object.entries(env)) {
-    if (!key.startsWith(AUTH_ENV_PREFIX)) {
+    if (!isAuthEnvKey(key)) {
       continue;
     }
     if (typeof value !== "string" || value.trim().length === 0) {
       continue;
     }
 
-    const normalized = key.slice(AUTH_ENV_PREFIX.length);
+    const normalized = toEnvToken(authEnvSuffix(key));
     if (!normalized) {
       continue;
     }

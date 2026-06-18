@@ -499,6 +499,7 @@ function assignParsedSessionOptions(state: SessionAcpxState, raw: unknown): void
   assignSessionOptionAllowedTools(parsedSessionOptions, sessionOptions.allowed_tools);
   assignSessionOptionMaxTurns(parsedSessionOptions, sessionOptions.max_turns);
   assignSessionOptionSystemPrompt(parsedSessionOptions, sessionOptions.system_prompt);
+  assignSessionOptionEnv(parsedSessionOptions, sessionOptions.env);
 
   if (Object.keys(parsedSessionOptions).length > 0) {
     state.session_options = parsedSessionOptions;
@@ -544,6 +545,26 @@ function assignSessionOptionSystemPrompt(
   const appendRecord = asRecord(value);
   if (appendRecord && typeof appendRecord.append === "string" && appendRecord.append.length > 0) {
     options.system_prompt = { append: appendRecord.append };
+  }
+}
+
+function assignSessionOptionEnv(
+  options: NonNullable<SessionAcpxState["session_options"]>,
+  value: unknown,
+): void {
+  const env = asRecord(value);
+  if (!env) {
+    return;
+  }
+
+  const parsed = Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => {
+      const [, raw] = entry;
+      return typeof raw === "string";
+    }),
+  );
+  if (Object.keys(parsed).length > 0) {
+    options.env = parsed;
   }
 }
 

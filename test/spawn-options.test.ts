@@ -151,6 +151,29 @@ test("buildAgentSpawnOptions protects auth env case-insensitively on Windows", (
   });
 });
 
+test("buildAgentSpawnOptions protects inherited auth env case-insensitively on Windows", () => {
+  return withPlatform("win32", () => {
+    const previous = process.env.acpx_auth_inherited_token;
+    process.env.acpx_auth_inherited_token = "inherited-secret";
+    try {
+      const options = buildAgentSpawnOptions("/tmp/acpx-agent", undefined, {
+        ACPX_AUTH_INHERITED_TOKEN: "session-prefixed",
+        INHERITED_TOKEN: "session-normalized",
+      });
+
+      assert.equal(options.env.acpx_auth_inherited_token, "inherited-secret");
+      assert.equal(options.env.INHERITED_TOKEN, "inherited-secret");
+      assert.equal(options.env.ACPX_AUTH_INHERITED_TOKEN, undefined);
+    } finally {
+      if (previous == null) {
+        delete process.env.acpx_auth_inherited_token;
+      } else {
+        process.env.acpx_auth_inherited_token = previous;
+      }
+    }
+  });
+});
+
 test("buildAgentSpawnOptions promotes explicit ACPX auth env vars into agent auth env", () => {
   const previousPrefixed = process.env.ACPX_AUTH_OPENAI_API_KEY;
   const previousNormalized = process.env.OPENAI_API_KEY;
