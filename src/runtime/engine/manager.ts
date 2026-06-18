@@ -65,7 +65,11 @@ import {
 import { runPromptTurn } from "./prompt-turn.js";
 import { connectAndLoadSession, type ConnectAndLoadSessionResult } from "./reconnect.js";
 import { shouldReuseExistingRecord } from "./reuse-policy.js";
-import { persistSessionOptions, type SessionAgentOptions } from "./session-options.js";
+import {
+  persistSessionOptions,
+  sessionOptionsFromRecord,
+  type SessionAgentOptions,
+} from "./session-options.js";
 
 export type AcpRuntimeManagerDeps = {
   clientFactory?: (options: ConstructorParameters<typeof AcpClient>[0]) => AcpClient;
@@ -964,6 +968,7 @@ export class AcpRuntimeManager {
       nonInteractivePermissions: this.options.nonInteractivePermissions,
       onPermissionRequest: this.options.onPermissionRequest,
       verbose: this.options.verbose,
+      sessionOptions: sessionOptionsFromRecord(record),
     });
   }
 

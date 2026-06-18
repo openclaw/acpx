@@ -395,6 +395,71 @@ test("AcpRuntimeManager streams runtime events and saves updated status", async 
   assert.equal(saved?.protocolVersion, 1);
 });
 
+test("AcpRuntimeManager restores persisted session env when reconnecting startTurn", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "turn-env-session",
+    acpSessionId: "turn-env-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+    acpx: {
+      session_options: {
+        env: {
+          GIT_AUTHOR_EMAIL: "turn-env@example.local",
+        },
+      },
+    },
+  });
+  const store = new InMemorySessionStore([record]);
+  const factoryCalls: unknown[] = [];
+  const client: FakeClient = {
+    initializeResult: { protocolVersion: 1, agentCapabilities: { prompt: true } },
+    start: async () => {},
+    close: async () => {},
+    createSession: async () => ({ sessionId: "unused" }),
+    loadSession: async () => ({ agentSessionId: "unused" }),
+    hasReusableSession: () => false,
+    supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
+    loadSessionWithOptions: async () => ({ agentSessionId: "turn-env-agent" }),
+    getAgentLifecycleSnapshot: () => ({ running: true }),
+    prompt: async (sessionId) => {
+      assert.equal(sessionId, "turn-env-sid");
+      return { stopReason: "end_turn" };
+    },
+    requestCancelActivePrompt: async () => false,
+    hasActivePrompt: () => false,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {},
+    setEventHandlers: () => {},
+  };
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: (options) => {
+        factoryCalls.push(options);
+        return client as never;
+      },
+    },
+  );
+
+  const turn = manager.startTurn({
+    handle: createHandle("turn-env-session"),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-env",
+  });
+  const { result } = await collectTurn(turn);
+
+  assert.deepEqual(result, { status: "completed", stopReason: "end_turn" });
+  assert.deepEqual((factoryCalls[0] as { sessionOptions?: unknown }).sessionOptions, {
+    env: {
+      GIT_AUTHOR_EMAIL: "turn-env@example.local",
+    },
+  });
+});
+
 test("AcpRuntimeManager keeps reusable persistent clients pooled across turns and closes them on runtime close", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "pooled-persistent-session",
