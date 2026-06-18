@@ -39,6 +39,14 @@ export function readEnvCredential(methodId: string): string | undefined {
   return undefined;
 }
 
+function protectedEnvKey(key: string): string {
+  return process.platform === "win32" ? key.toUpperCase() : key;
+}
+
+function protectEnvKey(protectedKeys: Set<string>, key: string): void {
+  protectedKeys.add(protectedEnvKey(key));
+}
+
 function promotePrefixedAuthEnvironment(env: NodeJS.ProcessEnv): Set<string> {
   const protectedKeys = new Set<string>();
   for (const [key, value] of Object.entries(env)) {
@@ -54,8 +62,8 @@ function promotePrefixedAuthEnvironment(env: NodeJS.ProcessEnv): Set<string> {
       continue;
     }
 
-    protectedKeys.add(key);
-    protectedKeys.add(normalized);
+    protectEnvKey(protectedKeys, key);
+    protectEnvKey(protectedKeys, normalized);
     if (env[normalized] == null) {
       env[normalized] = value;
     }
@@ -78,7 +86,7 @@ function buildAgentEnvironment(
 
   if (sessionEnv) {
     for (const [key, value] of Object.entries(sessionEnv)) {
-      if (typeof value === "string" && !protectedAuthEnvKeys.has(key)) {
+      if (typeof value === "string" && !protectedAuthEnvKeys.has(protectedEnvKey(key))) {
         env[key] = value;
       }
     }
@@ -97,13 +105,13 @@ function addAuthCredentialEnvKeys(
   }
 
   if (!methodId.includes("=") && !methodId.includes("\u0000")) {
-    protectedKeys.add(methodId);
+    protectEnvKey(protectedKeys, methodId);
   }
 
   const normalized = toEnvToken(methodId);
   if (normalized) {
-    protectedKeys.add(`${AUTH_ENV_PREFIX}${normalized}`);
-    protectedKeys.add(normalized);
+    protectEnvKey(protectedKeys, `${AUTH_ENV_PREFIX}${normalized}`);
+    protectEnvKey(protectedKeys, normalized);
   }
 }
 

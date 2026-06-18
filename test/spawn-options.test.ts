@@ -14,6 +14,18 @@ import {
   buildTerminalSpawnCommand,
 } from "../src/spawn-command-options.js";
 
+function withPlatform<T>(platform: NodeJS.Platform, callback: () => T): T {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { value: platform });
+  try {
+    return callback();
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(process, "platform", descriptor);
+    }
+  }
+}
+
 test("buildAgentSpawnOptions merges session env into the agent child environment", () => {
   const previous = process.env.ACPX_TEST_SESSION_ENV_PARENT;
   process.env.ACPX_TEST_SESSION_ENV_PARENT = "parent-value";
@@ -117,6 +129,26 @@ test("buildAgentSpawnOptions prevents session env from overriding injected auth 
 
   assert.equal(options.env.ACPX_AUTH_API_TOKEN, "secret-token");
   assert.equal(options.env.API_TOKEN, "secret-token");
+});
+
+test("buildAgentSpawnOptions protects auth env case-insensitively on Windows", () => {
+  return withPlatform("win32", () => {
+    const options = buildAgentSpawnOptions(
+      "/tmp/acpx-agent",
+      {
+        "case-token": "secret-token",
+      },
+      {
+        acpx_auth_case_token: "session-prefixed",
+        case_token: "session-normalized",
+      },
+    );
+
+    assert.equal(options.env.ACPX_AUTH_CASE_TOKEN, "secret-token");
+    assert.equal(options.env.CASE_TOKEN, "secret-token");
+    assert.equal(options.env.acpx_auth_case_token, undefined);
+    assert.equal(options.env.case_token, undefined);
+  });
 });
 
 test("buildAgentSpawnOptions promotes explicit ACPX auth env vars into agent auth env", () => {
