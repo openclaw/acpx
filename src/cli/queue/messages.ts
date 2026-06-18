@@ -282,6 +282,9 @@ function parseSessionOptions(value: unknown): QueueSessionOptions | null | undef
   if (!assignSessionSystemPrompt(sessionOptions, record.systemPrompt)) {
     return null;
   }
+  if (!assignSessionEnv(sessionOptions, record.env)) {
+    return null;
+  }
 
   return sessionOptions;
 }
@@ -332,6 +335,22 @@ function assignSessionSystemPrompt(options: QueueSessionOptions, value: unknown)
     return false;
   }
   options.systemPrompt = { append: systemPrompt.append };
+  return true;
+}
+
+function assignSessionEnv(options: QueueSessionOptions, value: unknown): boolean {
+  if (value == null) {
+    return true;
+  }
+  const env = asRecord(value);
+  if (!env) {
+    return false;
+  }
+  const entries = Object.entries(env);
+  if (entries.some(([, entryValue]) => typeof entryValue !== "string")) {
+    return false;
+  }
+  options.env = Object.fromEntries(entries) as Record<string, string>;
   return true;
 }
 

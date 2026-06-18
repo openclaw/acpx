@@ -66,6 +66,9 @@ test("parseQueueRequest accepts prompt session options", () => {
       allowedTools: ["Read", "Grep"],
       maxTurns: 4,
       systemPrompt: { append: "keep it brief" },
+      env: {
+        GIT_AUTHOR_EMAIL: "agent@example.local",
+      },
     },
     waitForCompletion: true,
   });
@@ -85,6 +88,9 @@ test("parseQueueRequest accepts prompt session options", () => {
       allowedTools: ["Read", "Grep"],
       maxTurns: 4,
       systemPrompt: { append: "keep it brief" },
+      env: {
+        GIT_AUTHOR_EMAIL: "agent@example.local",
+      },
     },
   });
 });

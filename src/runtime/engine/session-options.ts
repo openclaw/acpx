@@ -9,10 +9,12 @@ export type SessionAgentOptions = {
   systemPrompt?: SystemPromptOption;
   /**
    * Per-agent environment variables injected into the spawned agent child
-   * process. Keys here override the parent process environment for the
-   * spawned child, except acpx-managed auth credential keys. Callers are
-   * responsible for sanitizing dangerous keys such as `PATH`, `LD_PRELOAD`,
-   * and `NODE_OPTIONS` before passing them to acpx.
+   * process and persisted with the session record for reconnects. Keys here
+   * override the parent process environment for the spawned child, except
+   * acpx-managed auth credential keys. Do not put secrets here; use
+   * authCredentials for credentials. Callers are responsible for sanitizing
+   * dangerous keys such as `PATH`, `LD_PRELOAD`, and `NODE_OPTIONS` before
+   * passing them to acpx.
    */
   env?: Record<string, string>;
 };
