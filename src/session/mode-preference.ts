@@ -104,6 +104,18 @@ export function getDesiredModelId(state: SessionAcpxState | undefined): string |
   return normalizeModelId(state?.session_options?.model);
 }
 
+function hasStoredSessionOptions(
+  options: NonNullable<SessionAcpxState["session_options"]>,
+): boolean {
+  return (
+    typeof options.model === "string" ||
+    Array.isArray(options.allowed_tools) ||
+    typeof options.max_turns === "number" ||
+    options.system_prompt !== undefined ||
+    options.env !== undefined
+  );
+}
+
 export function setDesiredModelId(
   record: SessionRecord,
   modelId: string | undefined,
@@ -119,12 +131,7 @@ export function setDesiredModelId(
     delete sessionOptions.model;
   }
 
-  if (
-    typeof sessionOptions.model === "string" ||
-    Array.isArray(sessionOptions.allowed_tools) ||
-    typeof sessionOptions.max_turns === "number" ||
-    sessionOptions.system_prompt !== undefined
-  ) {
+  if (hasStoredSessionOptions(sessionOptions)) {
     acpx.session_options = sessionOptions;
   } else {
     delete acpx.session_options;

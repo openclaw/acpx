@@ -6,6 +6,7 @@ import {
   normalizeModeId,
   setDesiredConfigOption,
   setDesiredModeId,
+  setDesiredModelId,
 } from "../src/session/mode-preference.js";
 import type { SessionRecord } from "../src/types.js";
 
@@ -55,6 +56,28 @@ test("setDesiredConfigOption persists non-mode config option preferences", () =>
 
   setDesiredConfigOption(record, "reasoning_effort", undefined);
   assert.deepEqual(record.acpx, {});
+});
+
+test("setDesiredModelId preserves session env when clearing model", () => {
+  const record = makeSessionRecord();
+  record.acpx = {
+    session_options: {
+      model: "claude-sonnet-4-6",
+      env: {
+        GIT_AUTHOR_EMAIL: "agent@example.local",
+      },
+    },
+  };
+
+  setDesiredModelId(record, undefined);
+
+  assert.deepEqual(record.acpx, {
+    session_options: {
+      env: {
+        GIT_AUTHOR_EMAIL: "agent@example.local",
+      },
+    },
+  });
 });
 
 function makeSessionRecord(): SessionRecord {
