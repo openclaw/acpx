@@ -2208,7 +2208,7 @@ def self_test_opencode_isolation() -> None:
     _assert_opencode_permission(False)
     cmd = build_opencode_cmd(
         argparse.Namespace(
-            opencode_bin="opencode",
+            opencode_bin=sys.executable,
             stream_engine_output=False,
             model=None,
             thinking=None,
@@ -2500,6 +2500,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--opencode-bin", default=os.environ.get("OPENCODE_BIN", "opencode"))
     parser.add_argument("--pi-bin", default=os.environ.get("PI_BIN", "pi"))
     parser.add_argument("--no-tools", dest="tools", action="store_false", default=True, help="Disable tools for engines that support it. Codex, copilot, and opencode reject no-tools review.")
+    parser.add_argument("--self-test", action="store_true", help="Run deterministic local autoreview self-tests.")
     parser.add_argument("--self-test-opencode-jsonl-parser", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--self-test-opencode-isolation", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--self-test-opencode-real-project-isolation", action="store_true", help=argparse.SUPPRESS)
@@ -2930,8 +2931,20 @@ def self_test_fallback_scope() -> None:
     print("self-test fallback scope: ok")
 
 
+def self_test() -> int:
+    self_test_opencode_jsonl_parser()
+    self_test_opencode_isolation()
+    self_test_config_defaults()
+    self_test_fallback_scope()
+    self_test_heartbeat_metrics()
+    self_test_json_array_parser()
+    return self_test_engine_isolation()
+
+
 def main() -> int:
     args = parse_args()
+    if args.self_test:
+        return self_test()
     if args.self_test_opencode_jsonl_parser:
         self_test_opencode_jsonl_parser()
         return 0

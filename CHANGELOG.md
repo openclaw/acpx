@@ -8,6 +8,14 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+### Breaking
+
+### Fixes
+
+## 2026.6.17 (v0.11.0)
+
+### Changes
+
 - Agents/built-ins: bump the default Claude ACP adapter range to `@agentclientprotocol/claude-agent-acp@^0.37.0`. Thanks @trumpyla.
 - Runtime/embedding: surface cost, token usage breakdowns, and advertised command metadata on runtime status/events. Thanks @DaniAkash.
 - Agents/built-ins: add `fast-agent` as a built-in fast-agent ACP adapter via `uvx fast-agent-mcp acp`.
