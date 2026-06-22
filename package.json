@@ -80,9 +80,9 @@
     "viewer:typecheck": "tsgo -p examples/flows/replay-viewer/tsconfig.json --noEmit && tsgo -p examples/flows/replay-viewer/tsconfig.server.json --noEmit"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.25.0",
+    "@agentclientprotocol/sdk": "^0.28.1",
     "commander": "^15.0.0",
-    "skillflag": "^0.1.4",
+    "skillflag": "^0.2.0",
     "tsx": "^4.22.4",
     "zod": "^4.4.3"
   },
