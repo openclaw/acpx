@@ -5101,6 +5101,62 @@ test("runPromptTurn: post-success drain runs before closing the turn", async () 
   );
 });
 
+test("runPromptTurn: prompt response usage is recorded after usage update drain", async () => {
+  const conversation = createSessionConversation();
+  const promptMessageId = recordPromptSubmission(conversation, "hello");
+  assert.ok(promptMessageId);
+
+  const client = {
+    prompt: async () => ({
+      stopReason: "end_turn" as const,
+      usage: {
+        inputTokens: 8,
+        outputTokens: 1317,
+        cachedReadTokens: 68370,
+        cachedWriteTokens: 15156,
+        thoughtTokens: 42,
+        totalTokens: 84893,
+      },
+    }),
+    waitForSessionUpdatesIdle: async () => {
+      recordSessionUpdate(conversation, undefined, {
+        sessionId: "session-response-usage",
+        update: {
+          sessionUpdate: "usage_update",
+          used: 84,
+          size: 1000,
+        },
+      });
+    },
+  };
+
+  const result = await runPromptTurn({
+    client,
+    sessionId: "session-response-usage",
+    prompt: "hello",
+    conversation,
+    promptMessageId,
+  });
+
+  assert.equal(result.source, "rpc");
+  assert.deepEqual(conversation.cumulative_token_usage, {
+    input_tokens: 8,
+    output_tokens: 1317,
+    cache_read_input_tokens: 68370,
+    cache_creation_input_tokens: 15156,
+    thought_tokens: 42,
+    total_tokens: 84893,
+  });
+  assert.deepEqual(conversation.request_token_usage[promptMessageId], {
+    input_tokens: 8,
+    output_tokens: 1317,
+    cache_read_input_tokens: 68370,
+    cache_creation_input_tokens: 15156,
+    thought_tokens: 42,
+    total_tokens: 84893,
+  });
+});
+
 test("runPromptTurn: late session updates after successful prompt reach the drain", async () => {
   const observed: string[] = [];
   let lateUpdateEmitted = false;

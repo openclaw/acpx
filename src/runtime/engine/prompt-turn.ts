@@ -1,5 +1,8 @@
 import { TimeoutError, withTimeout } from "../../async-control.js";
-import { hasAgentReplyAfterPrompt } from "../../session/conversation-model.js";
+import {
+  hasAgentReplyAfterPrompt,
+  recordPromptResponseUsage,
+} from "../../session/conversation-model.js";
 import type { PromptInput, RunPromptResult, SessionConversation } from "../../types.js";
 
 const SESSION_REPLY_IDLE_MS = 1_000;
@@ -9,7 +12,7 @@ type PromptTurnClient = {
   prompt: (
     sessionId: string,
     prompt: PromptInput | string,
-  ) => Promise<{ stopReason: RunPromptResult["stopReason"] }>;
+  ) => Promise<{ stopReason: RunPromptResult["stopReason"]; usage?: unknown }>;
   waitForSessionUpdatesIdle?: (options?: { idleMs?: number; timeoutMs?: number }) => Promise<void>;
 };
 
@@ -35,6 +38,7 @@ export async function runPromptTurn(params: {
         // Best effort. The prompt already completed successfully, so keep the
         // original stop reason if late update draining itself times out.
       });
+    recordPromptResponseUsage(params.conversation, response.usage, params.promptMessageId);
     return {
       stopReason: response.stopReason,
       source: "rpc",

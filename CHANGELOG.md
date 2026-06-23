@@ -12,6 +12,10 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Runtime/sessions: persist prompt-result token usage breakdowns into session
+  state so `getStatus().usage` reflects adapters that report usage on the final
+  prompt response. Thanks @odrobnik.
+
 ## 2026.6.23 (v0.11.1)
 
 ### Changes

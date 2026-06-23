@@ -442,6 +442,36 @@ function numberField(source: Record<string, unknown>, keys: readonly string[]): 
   return undefined;
 }
 
+function sourceToTokenUsage(source: unknown): SessionTokenUsage | undefined {
+  const usageRecord = asRecord(source);
+  if (!usageRecord) {
+    return undefined;
+  }
+
+  const normalized: SessionTokenUsage = {
+    input_tokens: numberField(usageRecord, ["input_tokens", "inputTokens"]),
+    output_tokens: numberField(usageRecord, ["output_tokens", "outputTokens"]),
+    cache_creation_input_tokens: numberField(usageRecord, [
+      "cache_creation_input_tokens",
+      "cacheCreationInputTokens",
+      "cachedWriteTokens",
+    ]),
+    cache_read_input_tokens: numberField(usageRecord, [
+      "cache_read_input_tokens",
+      "cacheReadInputTokens",
+      "cachedReadTokens",
+    ]),
+    thought_tokens: numberField(usageRecord, ["thought_tokens", "thoughtTokens"]),
+    total_tokens: numberField(usageRecord, ["total_tokens", "totalTokens"]),
+  };
+
+  if (!hasTokenUsageValue(normalized)) {
+    return undefined;
+  }
+
+  return normalized;
+}
+
 function usageToTokenUsage(update: UsageUpdate): SessionTokenUsage | undefined {
   const updateRecord = asRecord(update);
   const usageMeta = asRecord(updateRecord?._meta)?.usage;
@@ -450,28 +480,7 @@ function usageToTokenUsage(update: UsageUpdate): SessionTokenUsage | undefined {
     return undefined;
   }
 
-  const normalized: SessionTokenUsage = {
-    input_tokens: numberField(source, ["input_tokens", "inputTokens"]),
-    output_tokens: numberField(source, ["output_tokens", "outputTokens"]),
-    cache_creation_input_tokens: numberField(source, [
-      "cache_creation_input_tokens",
-      "cacheCreationInputTokens",
-      "cachedWriteTokens",
-    ]),
-    cache_read_input_tokens: numberField(source, [
-      "cache_read_input_tokens",
-      "cacheReadInputTokens",
-      "cachedReadTokens",
-    ]),
-    thought_tokens: numberField(source, ["thought_tokens", "thoughtTokens"]),
-    total_tokens: numberField(source, ["total_tokens", "totalTokens"]),
-  };
-
-  if (!hasTokenUsageValue(normalized)) {
-    return undefined;
-  }
-
-  return normalized;
+  return sourceToTokenUsage(source);
 }
 
 function hasTokenUsageValue(usage: SessionTokenUsage): boolean {
@@ -698,6 +707,23 @@ export function recordSessionUpdate(
   return acpx;
 }
 
+export function recordPromptResponseUsage(
+  conversation: SessionConversation,
+  usage: unknown,
+  promptMessageId?: string,
+  timestamp = isoNow(),
+): boolean {
+  const tokenUsage = sourceToTokenUsage(usage);
+  if (!tokenUsage) {
+    return false;
+  }
+
+  applyTokenUsage(conversation, tokenUsage, promptMessageId);
+  updateConversationTimestamp(conversation, timestamp);
+  trimConversationForRuntime(conversation);
+  return true;
+}
+
 function applySessionUpdate(
   conversation: SessionConversation,
   acpx: SessionAcpxState,
@@ -800,14 +826,22 @@ function applyUsageUpdate(conversation: SessionConversation, update: UsageUpdate
     return;
   }
   if (usage) {
-    conversation.cumulative_token_usage = usage;
-    const userId = lastUserMessageId(conversation);
-    if (userId) {
-      conversation.request_token_usage[userId] = usage;
-    }
+    applyTokenUsage(conversation, usage);
   }
   if (cost) {
     conversation.cumulative_cost = cost;
+  }
+}
+
+function applyTokenUsage(
+  conversation: SessionConversation,
+  usage: SessionTokenUsage,
+  promptMessageId?: string,
+): void {
+  conversation.cumulative_token_usage = usage;
+  const userId = promptMessageId ?? lastUserMessageId(conversation);
+  if (userId) {
+    conversation.request_token_usage[userId] = usage;
   }
 }
 

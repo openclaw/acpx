@@ -80,6 +80,7 @@ type FakeClient = {
     input: unknown,
   ) => Promise<{
     stopReason: string;
+    usage?: Record<string, unknown>;
   }>;
   closeSession?: (sessionId: string) => Promise<void>;
   waitForSessionUpdatesIdle?: (options?: { idleMs?: number; timeoutMs?: number }) => Promise<void>;
@@ -393,6 +394,122 @@ test("AcpRuntimeManager streams runtime events and saves updated status", async 
   assert.equal(saved?.lastPromptAt != null, true);
   assert.equal(saved?.pid, 999);
   assert.equal(saved?.protocolVersion, 1);
+});
+
+test("AcpRuntimeManager persists prompt response usage and surfaces it in status", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "response-usage-session",
+    acpSessionId: "response-usage-sid",
+    agentCommand: "claude --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let handlers: FakeClientHandlers = {};
+  const client: FakeClient = {
+    initializeResult: {
+      protocolVersion: 1,
+      agentCapabilities: { prompt: true },
+    },
+    start: async () => {},
+    close: async () => {},
+    createSession: async () => ({ sessionId: "unused" }),
+    loadSession: async () => ({ agentSessionId: "unused" }),
+    hasReusableSession: (sessionId) => sessionId === "response-usage-sid",
+    supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
+    loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+    getAgentLifecycleSnapshot: () => ({ running: true }),
+    prompt: async (sessionId) => {
+      assert.equal(sessionId, "response-usage-sid");
+      return {
+        stopReason: "end_turn",
+        usage: {
+          inputTokens: 8,
+          outputTokens: 1317,
+          cachedReadTokens: 68370,
+          cachedWriteTokens: 15156,
+          thoughtTokens: 42,
+          totalTokens: 84893,
+        },
+      };
+    },
+    waitForSessionUpdatesIdle: async () => {
+      handlers.onSessionUpdate?.({
+        sessionId: "response-usage-sid",
+        update: {
+          sessionUpdate: "usage_update",
+          used: 84,
+          size: 1000,
+        },
+      });
+    },
+    requestCancelActivePrompt: async () => false,
+    hasActivePrompt: () => false,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {
+      handlers = {};
+    },
+    setEventHandlers: (nextHandlers) => {
+      handlers = nextHandlers;
+    },
+  };
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () => client as never,
+    },
+  );
+
+  const turn = manager.startTurn({
+    handle: createHandle("response-usage-session"),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-response-usage",
+  });
+  const { result } = await collectTurn(turn);
+
+  assert.deepEqual(result, { status: "completed", stopReason: "end_turn" });
+  const saved = await store.load("response-usage-session");
+  assert.ok(saved);
+  const userMessage = saved.messages.find(
+    (message) => typeof message === "object" && "User" in message,
+  );
+  assert.ok(typeof userMessage === "object" && userMessage !== null && "User" in userMessage);
+  const userId = userMessage.User.id;
+
+  assert.deepEqual(saved.cumulative_token_usage, {
+    input_tokens: 8,
+    output_tokens: 1317,
+    cache_read_input_tokens: 68370,
+    cache_creation_input_tokens: 15156,
+    thought_tokens: 42,
+    total_tokens: 84893,
+  });
+  assert.deepEqual(saved.request_token_usage[userId], saved.cumulative_token_usage);
+
+  const status = await manager.getStatus(createHandle("response-usage-session"));
+  assert.deepEqual(status.usage, {
+    cumulative: {
+      inputTokens: 8,
+      outputTokens: 1317,
+      cachedReadTokens: 68370,
+      cachedWriteTokens: 15156,
+      thoughtTokens: 42,
+      totalTokens: 84893,
+    },
+    perRequest: {
+      [userId]: {
+        inputTokens: 8,
+        outputTokens: 1317,
+        cachedReadTokens: 68370,
+        cachedWriteTokens: 15156,
+        thoughtTokens: 42,
+        totalTokens: 84893,
+      },
+    },
+  });
 });
 
 test("AcpRuntimeManager restores persisted session env when reconnecting startTurn", async () => {
