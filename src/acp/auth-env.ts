@@ -94,13 +94,24 @@ function buildAgentEnvironment(
 
   if (sessionEnv) {
     for (const [key, value] of Object.entries(sessionEnv)) {
-      if (typeof value === "string" && !protectedAuthEnvKeys.has(protectedEnvKey(key))) {
-        env[key] = value;
+      if (typeof value !== "string" || protectedAuthEnvKeys.has(protectedEnvKey(key))) {
+        continue;
       }
+      assignSessionEnv(env, key, value);
     }
   }
 
   return env;
+}
+
+function assignSessionEnv(env: NodeJS.ProcessEnv, key: string, value: string): void {
+  const normalizedKey = protectedEnvKey(key);
+  for (const existingKey of Object.keys(env)) {
+    if (protectedEnvKey(existingKey) === normalizedKey) {
+      delete env[existingKey];
+    }
+  }
+  env[key] = value;
 }
 
 function addAuthCredentialEnvKeys(

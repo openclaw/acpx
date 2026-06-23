@@ -8,6 +8,9 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Runtime/embedding: preserve per-agent environment variables across ACP session
+  creation, queue handoff, persistence, and reconnects. Thanks @zhangguiping-xydt.
+
 ### Breaking
 
 ### Fixes

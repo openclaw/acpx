@@ -174,6 +174,27 @@ test("buildAgentSpawnOptions protects inherited auth env case-insensitively on W
   });
 });
 
+test("buildAgentSpawnOptions replaces inherited env case collisions on Windows", () => {
+  return withPlatform("win32", () => {
+    const previous = process.env.ACPX_TEST_SESSION_ENV_CASE;
+    process.env.ACPX_TEST_SESSION_ENV_CASE = "inherited";
+    try {
+      const options = buildAgentSpawnOptions("/tmp/acpx-agent", undefined, {
+        acpx_test_session_env_case: "session",
+      });
+
+      assert.equal(options.env.ACPX_TEST_SESSION_ENV_CASE, undefined);
+      assert.equal(options.env.acpx_test_session_env_case, "session");
+    } finally {
+      if (previous == null) {
+        delete process.env.ACPX_TEST_SESSION_ENV_CASE;
+      } else {
+        process.env.ACPX_TEST_SESSION_ENV_CASE = previous;
+      }
+    }
+  });
+});
+
 test("buildAgentSpawnOptions promotes explicit ACPX auth env vars into agent auth env", () => {
   const previousPrefixed = process.env.ACPX_AUTH_OPENAI_API_KEY;
   const previousNormalized = process.env.OPENAI_API_KEY;
