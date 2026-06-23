@@ -12,6 +12,7 @@ import { buildQueueOwnerSpawnOptions } from "../src/cli/session/queue-owner-proc
 import {
   buildTerminalShellSpawnCommand,
   buildTerminalSpawnCommand,
+  resolveWindowsExecutablePath,
 } from "../src/spawn-command-options.js";
 
 function withPlatform<T>(platform: NodeJS.Platform, callback: () => T): T {
@@ -499,6 +500,59 @@ test("resolveClaudeCodeExecutable finds claude.exe on PATH on Windows", async ()
     const env = { PATH: tempDir, PATHEXT: ".COM;.EXE;.BAT;.CMD" } as NodeJS.ProcessEnv;
     const result = resolveClaudeCodeExecutable("win32", env);
     assert.equal(result, path.join(tempDir, "claude.exe"));
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveClaudeCodeExecutable ignores a Windows command shim without a native executable", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-claude-shim-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "claude.cmd"), '@echo off\r\nnode "%~dp0cli.js" %*\r\n');
+    const env = {
+      PATH: tempDir,
+      PATHEXT: ".CMD;.EXE;.BAT;.PS1",
+    } as NodeJS.ProcessEnv;
+
+    assert.equal(resolveClaudeCodeExecutable("win32", env), undefined);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveClaudeCodeExecutable prefers a native sibling when PATH ordering finds a shim first", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-claude-shim-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "claude.cmd"), "@echo off\r\n");
+    await fs.writeFile(path.join(tempDir, "claude.exe"), "");
+    const env = {
+      PATH: tempDir,
+      PATHEXT: ".CMD;.EXE;.BAT;.PS1",
+    } as NodeJS.ProcessEnv;
+
+    assert.equal(resolveClaudeCodeExecutable("win32", env), path.join(tempDir, "claude.exe"));
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveWindowsExecutablePath follows a wrapper to a native entrypoint", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-claude-shim-"));
+  try {
+    const binDir = path.join(tempDir, "bin");
+    await fs.mkdir(binDir);
+    const executable = path.join(binDir, "claude.exe");
+    await fs.writeFile(executable, "");
+    await fs.writeFile(
+      path.join(tempDir, "claude.cmd"),
+      `@echo off\r\n"%~dp0bin\\claude.exe" %*\r\n`,
+    );
+    const env = {
+      PATH: tempDir,
+      PATHEXT: ".CMD;.EXE;.BAT;.PS1",
+    } as NodeJS.ProcessEnv;
+
+    assert.equal(resolveWindowsExecutablePath("claude", env), executable);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

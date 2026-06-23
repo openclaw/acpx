@@ -17,6 +17,9 @@ Repo: https://github.com/openclaw/acpx
 
 - CLI/queue: harden command parsing, queue-owner startup, stale process cleanup,
   and release/CI checks found by `clawpatch`.
+- Windows/Claude: only export a native `.exe` as `CLAUDE_CODE_EXECUTABLE`;
+  unresolved `.cmd`, `.bat`, and `.ps1` shims now fall back to the Claude ACP
+  adapter's bundled native binary. Fixes openclaw/openclaw#93465.
 - ACP/models: call the current SDK `session/set_model` method for legacy model
   metadata instead of the generic extension fallback.
 - CLI/config: add `--mcp-config` for session-scoped MCP servers without writing

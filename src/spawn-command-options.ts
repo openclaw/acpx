@@ -57,6 +57,36 @@ function findExistingCommandInDirectory(
     .find((resolved) => fs.existsSync(resolved));
 }
 
+function resolveWindowsWrapperToken(token: string, wrapperPath: string): string | undefined {
+  const relative = token.match(/%~?dp0%?\s*[\\/]*(.*)$/i)?.[1]?.trim();
+  if (!relative) {
+    return undefined;
+  }
+  const candidate = path.resolve(
+    path.dirname(wrapperPath),
+    relative.replace(/[\\/]+/g, path.sep).replace(/^[\\/]+/, ""),
+  );
+  return path.extname(candidate).toLowerCase() === ".exe" && fs.existsSync(candidate)
+    ? candidate
+    : undefined;
+}
+
+function resolveWindowsWrapperExecutable(wrapperPath: string): string | undefined {
+  if (!fs.existsSync(wrapperPath)) {
+    return undefined;
+  }
+
+  try {
+    const content = fs.readFileSync(wrapperPath, "utf8");
+    return [...content.matchAll(/"([^"\r\n]*)"/g)]
+      .map((match) => resolveWindowsWrapperToken(match[1] ?? "", wrapperPath))
+      .find((candidate): candidate is string => candidate !== undefined);
+  } catch {
+    // Ignore unreadable wrapper scripts and let callers use their fallback.
+    return undefined;
+  }
+}
+
 export function resolveWindowsCommand(
   command: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -68,6 +98,37 @@ export function resolveWindowsCommand(
   }
 
   return resolveWindowsPathCommand(command, env);
+}
+
+/**
+ * Resolve a Windows command to a native executable suitable for direct spawn.
+ *
+ * Batch and PowerShell shims are intentionally rejected unless they point at a
+ * real `.exe` entrypoint. Callers that need shell execution should use the
+ * command-specific shell policy instead.
+ */
+export function resolveWindowsExecutablePath(
+  command: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const resolved = resolveWindowsCommand(command, env);
+  if (!resolved) {
+    return undefined;
+  }
+
+  const absolute = path.resolve(resolved);
+  const extension = path.extname(absolute).toLowerCase();
+  if (extension === ".exe") {
+    return absolute;
+  }
+  if (extension !== ".cmd" && extension !== ".bat" && extension !== ".ps1") {
+    return undefined;
+  }
+
+  const siblingExecutable = `${absolute.slice(0, -extension.length)}.exe`;
+  return fs.existsSync(siblingExecutable)
+    ? siblingExecutable
+    : resolveWindowsWrapperExecutable(absolute);
 }
 
 function shouldUseWindowsBatchShell(
