@@ -3,6 +3,9 @@ import path from "node:path";
 import test from "node:test";
 import {
   AcpRuntimeError,
+  isRequestedModelUnsupportedError,
+  REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE,
+  RequestedModelUnsupportedError,
   decodeAcpxRuntimeHandleState,
   isAcpRuntimeError,
 } from "../src/runtime.js";
@@ -85,6 +88,13 @@ test("runtime errors preserve codes and can be identified safely", () => {
   assert.equal(error.cause, cause);
   assert.equal(isAcpRuntimeError(error), true);
   assert.equal(isAcpRuntimeError(new Error("plain")), false);
+});
+
+test("runtime exports the model capability error signal", () => {
+  const error = new RequestedModelUnsupportedError("model unsupported", "missing-capability");
+  assert.equal(error.code, REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE);
+  assert.equal(error.reason, "missing-capability");
+  assert.equal(isRequestedModelUnsupportedError(error), true);
 });
 
 test("runtime lifecycle helpers update records from runtime snapshots and conversations", () => {

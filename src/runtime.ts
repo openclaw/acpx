@@ -23,6 +23,16 @@ export { DEFAULT_AGENT_NAME, createFileSessionStore };
 export { AcpRuntimeError, isAcpRuntimeError } from "./runtime/public/errors.js";
 export type { AcpRuntimeErrorCode } from "./runtime/public/errors.js";
 export {
+  REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE,
+  REQUESTED_MODEL_UNSUPPORTED_REASONS,
+  isRequestedModelUnsupportedError,
+  RequestedModelUnsupportedError,
+} from "./acp/model-support.js";
+export type {
+  RequestedModelUnsupportedErrorCode,
+  RequestedModelUnsupportedReason,
+} from "./acp/model-support.js";
+export {
   decodeAcpxRuntimeHandleState,
   encodeAcpxRuntimeHandleState,
 } from "./runtime/public/handle-state.js";

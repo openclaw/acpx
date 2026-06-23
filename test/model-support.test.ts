@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertRequestedModelSupported } from "../src/acp/model-support.js";
+import {
+  assertRequestedModelSupported,
+  isRequestedModelUnsupportedError,
+  REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE,
+  RequestedModelUnsupportedError,
+} from "../src/acp/model-support.js";
 
 test("Claude ACP model validation warns for unadvertised selectors", () => {
   const warning = assertRequestedModelSupported({
@@ -24,8 +29,8 @@ test("Claude ACP model validation warns for unadvertised selectors", () => {
 });
 
 test("non-Claude model validation rejects unadvertised selectors", () => {
-  assert.throws(
-    () =>
+  assert.throws(() => {
+    try {
       assertRequestedModelSupported({
         requestedModel: "missing-model",
         models: {
@@ -35,8 +40,60 @@ test("non-Claude model validation rejects unadvertised selectors", () => {
         },
         agentCommand: "mock-agent --advertise-models",
         context: "apply",
+      });
+    } catch (error) {
+      assert(error instanceof RequestedModelUnsupportedError);
+      assert.equal(error.code, REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE);
+      assert.equal(error.reason, "unadvertised-model");
+      assert.equal(isRequestedModelUnsupportedError(error), true);
+      assert.equal(
+        isRequestedModelUnsupportedError({
+          name: "RequestedModelUnsupportedError",
+          code: REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE,
+          reason: "unadvertised-model",
+        }),
+        true,
+      );
+      throw error;
+    }
+  }, /did not advertise that model/);
+});
+
+test("model validation distinguishes missing model capability", () => {
+  assert.throws(
+    () =>
+      assertRequestedModelSupported({
+        requestedModel: "missing-model",
+        models: undefined,
+        agentCommand: "mock-agent",
+        context: "apply",
       }),
-    /did not advertise that model/,
+    (error: unknown) => {
+      assert(error instanceof RequestedModelUnsupportedError);
+      assert.equal(error.reason, "missing-capability");
+      assert.equal(isRequestedModelUnsupportedError(error), true);
+      return error.message.includes("did not advertise model support");
+    },
+  );
+});
+
+test("model unsupported predicate rejects unrelated errors", () => {
+  assert.equal(isRequestedModelUnsupportedError(new Error("did not advertise that model")), false);
+  assert.equal(
+    isRequestedModelUnsupportedError({
+      name: "RequestedModelUnsupportedError",
+      code: "ACP_TURN_FAILED",
+      reason: "missing-capability",
+    }),
+    false,
+  );
+  assert.equal(
+    isRequestedModelUnsupportedError({
+      name: "RequestedModelUnsupportedError",
+      code: REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE,
+      reason: "unknown",
+    }),
+    false,
   );
 });
 

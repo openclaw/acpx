@@ -42,6 +42,10 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Runtime/embedding: export a stable typed error and predicate for requested model
+  selectors that an ACP agent does not support, including whether model
+  capability is missing or the requested id is unadvertised, so embedders do not
+  need to match error text.
 - CLI/Claude: isolate built-in Claude ACP sessions from user settings by default so globally enabled channel and daemon plugins cannot interfere with a spawned session. Set `ACPX_CLAUDE_INCLUDE_USER_SETTINGS=1` to restore user settings deliberately. Fixes #361.
 - ACP/models: support SDK 0.25 model config options while preserving `session/set_model` compatibility for adapters that explicitly advertise legacy model metadata.
 - CLI/Claude: let Claude Code adjudicate model selectors missing from a stale advertised model list on later persistent turns, and preserve the adapter-reported current model after model switches. Thanks @oakif.

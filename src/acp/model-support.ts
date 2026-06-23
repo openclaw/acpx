@@ -19,11 +19,52 @@ type LegacySessionModelResponse = {
   } | null;
 };
 
+export const REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE = "ACP_MODEL_UNSUPPORTED" as const;
+
+export type RequestedModelUnsupportedErrorCode = typeof REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE;
+
+export const REQUESTED_MODEL_UNSUPPORTED_REASONS = [
+  "missing-capability",
+  "unadvertised-model",
+] as const;
+
+export type RequestedModelUnsupportedReason = (typeof REQUESTED_MODEL_UNSUPPORTED_REASONS)[number];
+
 export class RequestedModelUnsupportedError extends Error {
-  constructor(message: string) {
+  readonly code = REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE;
+  readonly reason: RequestedModelUnsupportedReason;
+
+  constructor(message: string, reason: RequestedModelUnsupportedReason) {
     super(message);
     this.name = "RequestedModelUnsupportedError";
+    this.reason = reason;
   }
+}
+
+function isRequestedModelUnsupportedReason(
+  value: unknown,
+): value is RequestedModelUnsupportedReason {
+  return (
+    typeof value === "string" &&
+    REQUESTED_MODEL_UNSUPPORTED_REASONS.includes(value as RequestedModelUnsupportedReason)
+  );
+}
+
+export function isRequestedModelUnsupportedError(
+  value: unknown,
+): value is RequestedModelUnsupportedError {
+  if (value instanceof RequestedModelUnsupportedError) {
+    return true;
+  }
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as { code?: unknown; name?: unknown; reason?: unknown };
+  return (
+    candidate.name === "RequestedModelUnsupportedError" &&
+    candidate.code === REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE &&
+    isRequestedModelUnsupportedReason(candidate.reason)
+  );
 }
 
 export function supportsLegacyClaudeCodeModelMetadata(agentCommand: string | undefined): boolean {
@@ -203,6 +244,7 @@ export function assertRequestedModelSupported(params: {
     const action = params.context === "replay" ? "replay saved model" : "apply --model";
     throw new RequestedModelUnsupportedError(
       `Cannot ${action} "${params.requestedModel}": the ACP agent did not advertise model support through a session config option or legacy models metadata, and the adapter does not support a startup model flag.`,
+      "missing-capability",
     );
   }
 
@@ -218,6 +260,7 @@ export function assertRequestedModelSupported(params: {
     const action = params.context === "replay" ? "replay saved model" : "apply --model";
     throw new RequestedModelUnsupportedError(
       `Cannot ${action} "${params.requestedModel}": the ACP agent did not advertise that model. Available models: ${formatAvailableModelIds(params.models)}.`,
+      "unadvertised-model",
     );
   }
   return undefined;

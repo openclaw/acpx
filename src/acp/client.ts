@@ -1140,6 +1140,7 @@ export class AcpClient {
     if (!control) {
       throw new RequestedModelUnsupportedError(
         `Cannot set model "${modelId}": the ACP session did not advertise a model config option or legacy session/set_model support.`,
+        "missing-capability",
       );
     }
     const resolvedModelId = resolveRequestedModelId({
