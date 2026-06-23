@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { SessionAgentOptions } from "../../runtime/engine/session-options.js";
 import type {
   AuthPolicy,
@@ -7,6 +9,9 @@ import type {
   NonInteractivePermissionPolicy,
   PermissionMode,
 } from "../../types.js";
+
+const QUEUE_OWNER_PAYLOAD_FILE_ENV = "ACPX_QUEUE_OWNER_PAYLOAD_FILE";
+const QUEUE_OWNER_PAYLOAD_ENV = "ACPX_QUEUE_OWNER_PAYLOAD";
 
 export type QueueOwnerRuntimeOptions = {
   sessionId: string;
@@ -166,29 +171,43 @@ export function queueOwnerRuntimeOptionsFromSend(
   };
 }
 
-export function buildQueueOwnerSpawnOptions(payload: string): {
+export function writeQueueOwnerPayloadFile(payload: string): string {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "acpx-queue-owner-"));
+  const payloadPath = path.join(dir, "payload.json");
+  writeFileSync(payloadPath, payload, {
+    encoding: "utf8",
+    flag: "wx",
+    mode: 0o600,
+  });
+  return payloadPath;
+}
+
+export function buildQueueOwnerSpawnOptions(payloadFilePath: string): {
   detached: true;
   stdio: "ignore";
   env: NodeJS.ProcessEnv;
   windowsHide: true;
 } {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    [QUEUE_OWNER_PAYLOAD_FILE_ENV]: payloadFilePath,
+  };
+  delete env[QUEUE_OWNER_PAYLOAD_ENV];
   return {
     detached: true,
     stdio: "ignore",
-    env: {
-      ...process.env,
-      ACPX_QUEUE_OWNER_PAYLOAD: payload,
-    },
+    env,
     windowsHide: true,
   };
 }
 
 export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): void {
   const payload = JSON.stringify(options);
+  const payloadPath = writeQueueOwnerPayloadFile(payload);
   const child = spawn(
     process.execPath,
     resolveQueueOwnerSpawnArgs(),
-    buildQueueOwnerSpawnOptions(payload),
+    buildQueueOwnerSpawnOptions(payloadPath),
   );
   child.unref();
 }

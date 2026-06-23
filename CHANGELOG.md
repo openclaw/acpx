@@ -15,6 +15,11 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- CLI/queue: harden command parsing, queue-owner startup, stale process cleanup,
+  and release/CI checks found by `clawpatch`.
+- ACP/models: call the current SDK `session/set_model` method for legacy model
+  metadata instead of the generic extension fallback.
+
 ## 2026.6.17 (v0.11.0)
 
 ### Changes

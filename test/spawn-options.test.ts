@@ -234,13 +234,14 @@ test("buildTerminalSpawnOptions hides Windows console windows and maps env entri
   assert.equal(options.env?.TERM, "screen-256color");
 });
 
-test("buildQueueOwnerSpawnOptions hides Windows console windows and passes payload", () => {
-  const options = buildQueueOwnerSpawnOptions('{"sessionId":"queue-session"}');
+test("buildQueueOwnerSpawnOptions hides Windows console windows and passes payload path", () => {
+  const options = buildQueueOwnerSpawnOptions("/tmp/acpx-queue-owner/payload.json");
 
   assert.equal(options.detached, true);
   assert.equal(options.stdio, "ignore");
   assert.equal(options.windowsHide, true);
-  assert.equal(options.env.ACPX_QUEUE_OWNER_PAYLOAD, '{"sessionId":"queue-session"}');
+  assert.equal(options.env.ACPX_QUEUE_OWNER_PAYLOAD_FILE, "/tmp/acpx-queue-owner/payload.json");
+  assert.equal(options.env.ACPX_QUEUE_OWNER_PAYLOAD, undefined);
 });
 
 test("buildSpawnCommandOptions enables shell for .cmd/.bat on Windows", () => {

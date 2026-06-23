@@ -136,6 +136,15 @@ test("config commands accept command-local --format json", async () => {
   });
 });
 
+test("top-level output flag detection stops at the first command token", async () => {
+  await withTempHome(async (homeDir) => {
+    const result = await runCli(["codex", "--json-strict"], homeDir);
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout.trim(), "");
+    assert.match(result.stderr, /unknown option '--json-strict'/);
+  });
+});
+
 test(
   "CLI exits cleanly when stdout pipe closes early",
   { skip: process.platform === "win32" },

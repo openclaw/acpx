@@ -29,7 +29,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v6.0.8
+      - uses: pnpm/action-setup@v6.0.9
         with:
           version: ${{ env.PNPM_VERSION }}
 
@@ -137,10 +137,15 @@ jobs:
         run: |
           set -euo pipefail
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
-          PUBLISHED_VERSION=$(npm view acpx version 2>/dev/null || true)
+          error_log="$(mktemp)"
 
-          if [ "$PUBLISHED_VERSION" = "$PACKAGE_VERSION" ]; then
+          if npm view "acpx@${PACKAGE_VERSION}" version >/dev/null 2>"${error_log}"; then
             echo "acpx@$PACKAGE_VERSION is already published on npm."
+            exit 1
+          fi
+
+          if ! grep -Eq "E404|404 Not Found" "${error_log}"; then
+            cat "${error_log}" >&2
             exit 1
           fi
 

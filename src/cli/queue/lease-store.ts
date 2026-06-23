@@ -160,6 +160,17 @@ async function cleanupStaleQueueOwner(
   });
 }
 
+async function retireStaleQueueOwner(
+  sessionId: string,
+  owner: QueueOwnerRecord | undefined,
+): Promise<void> {
+  if (owner && isProcessAlive(owner.pid)) {
+    await terminateProcess(owner.pid);
+  }
+
+  await cleanupStaleQueueOwner(sessionId, owner);
+}
+
 export async function readQueueOwnerRecord(
   sessionId: string,
 ): Promise<QueueOwnerRecord | undefined> {
@@ -208,12 +219,7 @@ export async function ensureOwnerIsUsable(
     return true;
   }
 
-  if (alive) {
-    await terminateProcess(owner.pid).catch(() => {
-      // best effort stale owner termination
-    });
-  }
-  await cleanupStaleQueueOwner(sessionId, owner);
+  await retireStaleQueueOwner(sessionId, owner);
   return false;
 }
 
@@ -291,12 +297,7 @@ export async function tryAcquireQueueOwnerLease(
     }
 
     if (!isProcessAlive(owner.pid) || isQueueOwnerHeartbeatStale(owner)) {
-      if (isProcessAlive(owner.pid)) {
-        await terminateProcess(owner.pid).catch(() => {
-          // best effort stale owner termination
-        });
-      }
-      await cleanupStaleQueueOwner(sessionId, owner);
+      await retireStaleQueueOwner(sessionId, owner);
     }
     return undefined;
   }

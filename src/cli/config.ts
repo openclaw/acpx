@@ -585,7 +585,20 @@ export async function initGlobalConfigFile(): Promise<{
     auth: {},
   };
 
-  await fs.writeFile(configPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  try {
+    await fs.writeFile(configPath, `${JSON.stringify(payload, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      return {
+        path: configPath,
+        created: false,
+      };
+    }
+    throw error;
+  }
   return {
     path: configPath,
     created: true,

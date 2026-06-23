@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtemp, stat, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 import { parseQueueOwnerPayload, runQueueOwnerFromEnv } from "../src/cli/queue/owner-env.js";
+import { writeQueueOwnerPayloadFile } from "../src/cli/session/queue-owner-process.js";
 
 describe("parseQueueOwnerPayload", () => {
   it("parses valid payload", () => {
@@ -105,5 +109,34 @@ describe("runQueueOwnerFromEnv", () => {
     await assert.rejects(async () => await runQueueOwnerFromEnv({}), {
       message: "missing ACPX_QUEUE_OWNER_PAYLOAD",
     });
+  });
+
+  it("reads one-shot payload files and removes them before parsing", async () => {
+    const payloadPath = writeQueueOwnerPayloadFile("{}");
+    const payloadDir = path.dirname(payloadPath);
+
+    await assert.rejects(
+      async () => await runQueueOwnerFromEnv({ ACPX_QUEUE_OWNER_PAYLOAD_FILE: payloadPath }),
+      {
+        message: "queue owner payload missing sessionId",
+      },
+    );
+    await assert.rejects(async () => await stat(payloadDir), {
+      code: "ENOENT",
+    });
+  });
+
+  it("does not delete arbitrary payload-file parent directories", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "acpx-untrusted-owner-env-"));
+    const payloadPath = path.join(dir, "payload.json");
+    await writeFile(payloadPath, "{}", "utf8");
+
+    await assert.rejects(
+      async () => await runQueueOwnerFromEnv({ ACPX_QUEUE_OWNER_PAYLOAD_FILE: payloadPath }),
+      {
+        message: "queue owner payload missing sessionId",
+      },
+    );
+    assert.equal((await stat(dir)).isDirectory(), true);
   });
 });

@@ -189,6 +189,35 @@ test("ensureOwnerIsUsable cleans up stale live owners", async () => {
       assert(owner);
       assert.equal(await ensureOwnerIsUsable(sessionId, owner), false);
       assert.equal(await readQueueOwnerRecord(sessionId), undefined);
+      assert.equal(isProcessAlive(keeper.pid), false);
+    } finally {
+      stopProcess(keeper);
+    }
+  });
+});
+
+test("tryAcquireQueueOwnerLease terminates stale live owners before retry acquisition", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "stale-live-owner-acquire";
+    const keeper = await startKeeperProcess();
+    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
+
+    try {
+      await writeQueueOwnerLock({
+        lockPath,
+        pid: keeper.pid,
+        sessionId,
+        socketPath,
+        heartbeatAt: "2000-01-01T00:00:00.000Z",
+      });
+
+      assert.equal(await tryAcquireQueueOwnerLease(sessionId), undefined);
+      assert.equal(await readQueueOwnerRecord(sessionId), undefined);
+      assert.equal(isProcessAlive(keeper.pid), false);
+
+      const lease = await tryAcquireQueueOwnerLease(sessionId);
+      assert(lease);
+      await releaseQueueOwnerLease(lease);
     } finally {
       stopProcess(keeper);
     }

@@ -92,27 +92,33 @@ export function splitCommandLine(value: string): CommandParts {
   let current = "";
   let quote: "'" | '"' | null = null;
   let escaping = false;
+  let hasPart = false;
 
   for (const ch of value) {
-    const next = readCommandLineChar({ ch, current, quote, escaping, parts });
+    const next = readCommandLineChar({ ch, current, quote, escaping, parts, hasPart });
     current = next.current;
     quote = next.quote;
     escaping = next.escaping;
+    hasPart = next.hasPart;
   }
 
   if (escaping) {
     current += "\\";
+    hasPart = true;
   }
 
   if (quote) {
     throw new Error("Invalid --agent command: unterminated quote");
   }
 
-  if (current.length > 0) {
+  if (hasPart) {
     parts.push(current);
   }
 
   if (parts.length === 0) {
+    throw new Error("Invalid --agent command: empty command");
+  }
+  if (parts[0] === "") {
     throw new Error("Invalid --agent command: empty command");
   }
 
@@ -128,51 +134,85 @@ function readCommandLineChar(state: {
   quote: "'" | '"' | null;
   escaping: boolean;
   parts: string[];
-}): { current: string; quote: "'" | '"' | null; escaping: boolean } {
+  hasPart: boolean;
+}): { current: string; quote: "'" | '"' | null; escaping: boolean; hasPart: boolean } {
   if (state.escaping) {
-    return { current: state.current + state.ch, quote: state.quote, escaping: false };
+    return {
+      current: state.current + state.ch,
+      quote: state.quote,
+      escaping: false,
+      hasPart: true,
+    };
   }
   if (state.ch === "\\" && state.quote !== "'") {
-    return { current: state.current, quote: state.quote, escaping: true };
+    return {
+      current: state.current,
+      quote: state.quote,
+      escaping: true,
+      hasPart: state.hasPart,
+    };
   }
   if (state.quote) {
     return readQuotedCommandLineChar({
       ch: state.ch,
       current: state.current,
       quote: state.quote,
+      hasPart: state.hasPart,
     });
   }
   return readUnquotedCommandLineChar(state);
 }
 
-function readQuotedCommandLineChar(state: { ch: string; current: string; quote: "'" | '"' }): {
+function readQuotedCommandLineChar(state: {
+  ch: string;
+  current: string;
+  quote: "'" | '"';
+  hasPart: boolean;
+}): {
   current: string;
   quote: "'" | '"' | null;
   escaping: boolean;
+  hasPart: boolean;
 } {
   if (state.ch === state.quote) {
-    return { current: state.current, quote: null, escaping: false };
+    return { current: state.current, quote: null, escaping: false, hasPart: true };
   }
-  return { current: state.current + state.ch, quote: state.quote, escaping: false };
+  return {
+    current: state.current + state.ch,
+    quote: state.quote,
+    escaping: false,
+    hasPart: true,
+  };
 }
 
-function readUnquotedCommandLineChar(state: { ch: string; current: string; parts: string[] }): {
+function readUnquotedCommandLineChar(state: {
+  ch: string;
+  current: string;
+  parts: string[];
+  hasPart: boolean;
+}): {
   current: string;
   quote: "'" | '"' | null;
   escaping: boolean;
+  hasPart: boolean;
 } {
   if (state.ch === "'" || state.ch === '"') {
-    return { current: state.current, quote: state.ch, escaping: false };
+    return { current: state.current, quote: state.ch, escaping: false, hasPart: true };
   }
   if (/\s/.test(state.ch)) {
-    flushCommandLinePart(state.parts, state.current);
-    return { current: "", quote: null, escaping: false };
+    flushCommandLinePart(state.parts, state.current, state.hasPart);
+    return { current: "", quote: null, escaping: false, hasPart: false };
   }
-  return { current: state.current + state.ch, quote: null, escaping: false };
+  return {
+    current: state.current + state.ch,
+    quote: null,
+    escaping: false,
+    hasPart: true,
+  };
 }
 
-function flushCommandLinePart(parts: string[], current: string): void {
-  if (current.length > 0) {
+function flushCommandLinePart(parts: string[], current: string, hasPart: boolean): void {
+  if (hasPart) {
     parts.push(current);
   }
 }

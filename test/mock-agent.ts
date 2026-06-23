@@ -1061,6 +1061,13 @@ class MockAgent implements Agent {
     return {};
   }
 
+  async unstable_setSessionModel(params: {
+    sessionId: string;
+    modelId: string;
+  }): Promise<Record<string, unknown>> {
+    return this.extMethod("session/set_model", params);
+  }
+
   private async sendAssistantMessage(sessionId: SessionId, text: string): Promise<void> {
     await this.connection.sessionUpdate({
       sessionId,

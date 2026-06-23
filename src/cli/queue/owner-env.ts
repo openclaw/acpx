@@ -1,8 +1,14 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { parseOptionalMcpServers } from "../../mcp-servers.js";
 import {
   runSessionQueueOwner,
   type QueueOwnerRuntimeOptions,
 } from "../session/queue-owner-runtime.js";
+
+const QUEUE_OWNER_PAYLOAD_FILE_ENV = "ACPX_QUEUE_OWNER_PAYLOAD_FILE";
+const QUEUE_OWNER_PAYLOAD_ENV = "ACPX_QUEUE_OWNER_PAYLOAD";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -185,10 +191,46 @@ function assignSessionEnv(
 }
 
 export async function runQueueOwnerFromEnv(env: NodeJS.ProcessEnv): Promise<void> {
-  const payload = env.ACPX_QUEUE_OWNER_PAYLOAD;
-  if (!payload) {
-    throw new Error("missing ACPX_QUEUE_OWNER_PAYLOAD");
-  }
+  const payload = await readQueueOwnerPayloadFromEnv(env);
   const options = parseQueueOwnerPayload(payload);
   await runSessionQueueOwner(options);
+}
+
+async function readQueueOwnerPayloadFromEnv(env: NodeJS.ProcessEnv): Promise<string> {
+  const payloadFile = env[QUEUE_OWNER_PAYLOAD_FILE_ENV];
+  if (payloadFile) {
+    const payload = await fs.readFile(payloadFile, "utf8");
+    await cleanupQueueOwnerPayloadFile(payloadFile).catch(() => {
+      // The payload is one-shot; startup should not fail only because cleanup lost a race.
+    });
+    return payload;
+  }
+
+  const payload = env[QUEUE_OWNER_PAYLOAD_ENV];
+  if (!payload) {
+    throw new Error(`missing ${QUEUE_OWNER_PAYLOAD_ENV}`);
+  }
+  return payload;
+}
+
+async function cleanupQueueOwnerPayloadFile(payloadFile: string): Promise<void> {
+  if (!isQueueOwnerPayloadFile(payloadFile)) {
+    return;
+  }
+  await fs.unlink(payloadFile).catch(() => {
+    // Ignore a file already removed by a racing startup path.
+  });
+  await fs.rmdir(path.dirname(payloadFile)).catch(() => {
+    // The private temp dir should be empty after unlink; leave it alone if it is not.
+  });
+}
+
+function isQueueOwnerPayloadFile(payloadFile: string): boolean {
+  const resolved = path.resolve(payloadFile);
+  const payloadDir = path.dirname(resolved);
+  return (
+    path.dirname(payloadDir) === path.resolve(os.tmpdir()) &&
+    path.basename(payloadDir).startsWith("acpx-queue-owner-") &&
+    path.basename(resolved) === "payload.json"
+  );
 }

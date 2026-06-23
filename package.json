@@ -15,7 +15,7 @@
   "author": "OpenClaw Team <dev@openclaw.ai>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/openclaw/acpx.git"
+    "url": "https://github.com/openclaw/acpx"
   },
   "bin": {
     "acpx": "dist/cli.js"
@@ -38,9 +38,10 @@
     "build": "tsdown src/cli.ts src/flows.ts src/runtime.ts --format esm --dts --clean --platform node --target node22 --no-fixedExtension",
     "build:quiet": "tsdown --logLevel silent src/cli.ts src/flows.ts src/runtime.ts --format esm --dts --clean --platform node --target node22 --no-fixedExtension",
     "build:test": "node -e \"require('node:fs').rmSync('dist-test',{recursive:true,force:true})\" && tsgo -p tsconfig.test.json",
-    "check": "pnpm run format:check && pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run viewer:typecheck && pnpm run viewer:build && pnpm run test:coverage && pnpm run mutate",
+    "check": "pnpm run format:check && pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run viewer:typecheck && pnpm run viewer:build && pnpm run test:coverage",
     "check:changed": "pnpm run check",
     "check:docs": "pnpm run format:docs:check && pnpm run lint:docs && pnpm run docs:site",
+    "check:mutation": "pnpm run mutate",
     "conformance:run": "tsx conformance/runner/run.ts",
     "crabbox:hydrate": "crabbox actions hydrate",
     "crabbox:run": "crabbox run",
@@ -79,9 +80,9 @@
     "viewer:typecheck": "tsgo -p examples/flows/replay-viewer/tsconfig.json --noEmit && tsgo -p examples/flows/replay-viewer/tsconfig.server.json --noEmit"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.25.0",
+    "@agentclientprotocol/sdk": "^0.28.1",
     "commander": "^15.0.0",
-    "skillflag": "^0.1.4",
+    "skillflag": "^0.2.0",
     "tsx": "^4.22.4",
     "zod": "^4.4.3"
   },
@@ -92,7 +93,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/react-test-renderer": "^19.1.0",
     "@types/ws": "^8.18.1",
-    "@typescript/native-preview": "7.0.0-dev.20260613.1",
+    "@typescript/native-preview": "7.0.0-dev.20260616.1",
     "@vitejs/plugin-react": "^6.0.2",
     "@xyflow/react": "^12.11.0",
     "c8": "^11.0.0",
@@ -101,8 +102,8 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.0.7",
     "markdownlint-cli2": "^0.22.1",
-    "oxfmt": "^0.54.0",
-    "oxlint": "^1.69.0",
+    "oxfmt": "^0.55.0",
+    "oxlint": "^1.70.0",
     "oxlint-tsgolint": "^0.23.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

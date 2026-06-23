@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { realpathSync } from "node:fs";
+import * as fs from "node:fs/promises";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,7 +10,9 @@ import {
   queueOwnerRuntimeOptionsFromSend,
   resolveQueueOwnerSpawnArgs,
   sanitizeQueueOwnerExecArgv,
+  writeQueueOwnerPayloadFile,
 } from "../src/cli/session/queue-owner-process.js";
+import { sessionControlTestInternals } from "../src/cli/session/session-control.js";
 
 async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "acpx-queue-owner-path-"));
@@ -113,6 +116,22 @@ describe("buildQueueOwnerArgOverride", () => {
   });
 });
 
+describe("writeQueueOwnerPayloadFile", () => {
+  it("writes queue owner payloads to a private temp file", async () => {
+    const payloadPath = writeQueueOwnerPayloadFile('{"sessionId":"session-1"}');
+
+    try {
+      assert.equal(await fs.readFile(payloadPath, "utf8"), '{"sessionId":"session-1"}');
+      if (process.platform !== "win32") {
+        const mode = (await fs.stat(payloadPath)).mode & 0o777;
+        assert.equal(mode, 0o600);
+      }
+    } finally {
+      await fs.rm(path.dirname(payloadPath), { recursive: true, force: true });
+    }
+  });
+});
+
 describe("queueOwnerRuntimeOptionsFromSend", () => {
   it("preserves terminal capability preference", () => {
     const options = queueOwnerRuntimeOptionsFromSend({
@@ -122,5 +141,25 @@ describe("queueOwnerRuntimeOptionsFromSend", () => {
     });
 
     assert.equal(options.terminal, false);
+  });
+});
+
+describe("session process command parsing", () => {
+  it("reads quoted executable paths from saved agent commands", () => {
+    assert.equal(
+      sessionControlTestInternals.firstAgentCommandToken(
+        '"/Applications/My Agent.app/Contents/MacOS/agent" --profile x',
+      ),
+      "/Applications/My Agent.app/Contents/MacOS/agent",
+    );
+  });
+
+  it("preserves quoted executable paths in process-list fallbacks", () => {
+    assert.deepEqual(
+      sessionControlTestInternals.splitCommandLineLike(
+        '"/Applications/My Agent.app/Contents/MacOS/agent" --profile "with spaces"',
+      ),
+      ["/Applications/My Agent.app/Contents/MacOS/agent", "--profile", "with spaces"],
+    );
   });
 });

@@ -83,6 +83,11 @@ const AGENT_SCAN_BOOLEAN_FLAGS = new Set<string>(TOP_LEVEL_VERSION_BOOLEAN_FLAGS
 
 let skillflagModulePromise: Promise<SkillflagModule> | undefined;
 
+type TopLevelFlagStep = {
+  stop: boolean;
+  skipNext: boolean;
+};
+
 function loadSkillflagModule(): Promise<SkillflagModule> {
   skillflagModulePromise ??= import("skillflag");
   return skillflagModulePromise;
@@ -174,28 +179,38 @@ function detectInitialCwd(argv: string[]): string {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
 
-    if (token === "--cwd") {
-      const next = argv[index + 1];
-      if (next && next !== "--") {
-        return path.resolve(next);
-      }
+    const scan = classifyTopLevelFlagScan(token);
+    if (scan.stop) {
       break;
     }
 
-    if (token.startsWith("--cwd=")) {
-      const value = token.slice("--cwd=".length).trim();
-      if (value.length > 0) {
-        return path.resolve(value);
-      }
+    const cwd = readCwdFlagValue(token, argv[index + 1]);
+    if (cwd) {
+      return path.resolve(cwd);
+    }
+    if (isCwdFlagToken(token)) {
       break;
     }
 
-    if (token === "--") {
-      break;
+    if (scan.skipNext) {
+      index += 1;
     }
   }
 
   return process.cwd();
+}
+
+function isCwdFlagToken(token: string): boolean {
+  return token === "--cwd" || token.startsWith("--cwd=");
+}
+
+function readCwdFlagValue(token: string, nextToken: string | undefined): string | undefined {
+  const raw = token === "--cwd" ? nextToken : readInlineFlagValue(token, "--cwd");
+  const value = raw?.trim();
+  if (!value || value === "--") {
+    return undefined;
+  }
+  return value;
 }
 
 function detectRequestedOutputFormat(argv: string[], fallback: OutputFormat): OutputFormat {
@@ -204,7 +219,8 @@ function detectRequestedOutputFormat(argv: string[], fallback: OutputFormat): Ou
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
 
-    if (token === "--") {
+    const scan = classifyTopLevelFlagScan(token);
+    if (scan.stop) {
       break;
     }
 
@@ -216,9 +232,23 @@ function detectRequestedOutputFormat(argv: string[], fallback: OutputFormat): Ou
     if (format) {
       detectedFormat = format;
     }
+
+    if (scan.skipNext) {
+      index += 1;
+    }
   }
 
   return detectedFormat;
+}
+
+function classifyTopLevelFlagScan(token: string): TopLevelFlagStep {
+  if (token === "--" || !token.startsWith("-") || token === "-") {
+    return { stop: true, skipNext: false };
+  }
+  return {
+    stop: false,
+    skipNext: TOP_LEVEL_VERSION_VALUE_FLAGS.has(token),
+  };
 }
 
 function readFormatFlagValue(
@@ -248,12 +278,17 @@ function detectJsonStrict(argv: string[]): boolean {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
 
-    if (token === "--") {
+    const scan = classifyTopLevelFlagScan(token);
+    if (scan.stop) {
       break;
     }
 
     if (isJsonStrictToken(token)) {
       return true;
+    }
+
+    if (scan.skipNext) {
+      index += 1;
     }
   }
 

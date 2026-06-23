@@ -22,6 +22,7 @@ type JsonRpcResponseMessage = {
   jsonrpc?: unknown;
   id?: unknown;
   result?: unknown;
+  error?: unknown;
 };
 
 const DEFAULT_JSON_SESSION_ID = "unknown";
@@ -164,13 +165,19 @@ class JsonOutputFormatter implements OutputFormatter {
   private sanitizeReadResponse(message: unknown): unknown {
     const candidate = message as JsonRpcResponseMessage;
     const idKey = jsonRpcIdKey(candidate.id);
-    if (!idKey || !Object.hasOwn(candidate, "result")) {
+    if (!idKey) {
+      return message;
+    }
+
+    const hasResult = Object.hasOwn(candidate, "result");
+    const hasError = Object.hasOwn(candidate, "error");
+    if (!hasResult && !hasError) {
       return message;
     }
 
     const method = this.requestMethodById.get(idKey);
     this.requestMethodById.delete(idKey);
-    if (method !== "fs/read_text_file") {
+    if (method !== "fs/read_text_file" || !hasResult) {
       return message;
     }
 

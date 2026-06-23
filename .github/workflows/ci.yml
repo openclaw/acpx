@@ -72,6 +72,7 @@ jobs:
                 ;;
               .github/workflows/ci.yml)
                 docs_only=false
+                changelog_scope_only=false
                 ;;
               *)
                 docs_only=false
@@ -129,7 +130,7 @@ jobs:
           submodules: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6.0.8
+        uses: pnpm/action-setup@v6.0.9
         with:
           version: ${{ env.PNPM_VERSION }}
 
@@ -162,7 +163,7 @@ jobs:
           submodules: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6.0.8
+        uses: pnpm/action-setup@v6.0.9
         with:
           version: ${{ env.PNPM_VERSION }}
 

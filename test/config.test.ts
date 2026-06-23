@@ -159,6 +159,18 @@ test("initGlobalConfigFile creates the config once and then reports existing fil
   });
 });
 
+test("initGlobalConfigFile is atomic under concurrent initialization", async () => {
+  await withTempEnv(async () => {
+    const results = await Promise.all([initGlobalConfigFile(), initGlobalConfigFile()]);
+    assert.deepEqual(
+      results
+        .map((result) => result.created)
+        .toSorted((left, right) => Number(left) - Number(right)),
+      [false, true],
+    );
+  });
+});
+
 test("loadResolvedConfig defaults disableExec to false", async () => {
   await withTempEnv(async ({ homeDir }) => {
     const cwd = path.join(homeDir, "workspace");
@@ -258,6 +270,19 @@ test("loadResolvedConfig merges agent args into the command safely", async () =>
       command: "node",
       args: ["/usr/local/bin/my agent", "--profile", "with spaces", 'quote"me'],
     });
+  });
+});
+
+test("splitCommandLine preserves empty quoted arguments", () => {
+  assert.deepEqual(splitCommandLine('node cli.js "" \'\' "--flag="'), {
+    command: "node",
+    args: ["cli.js", "", "", "--flag="],
+  });
+});
+
+test("splitCommandLine rejects empty quoted commands", () => {
+  assert.throws(() => splitCommandLine('""'), {
+    message: "Invalid --agent command: empty command",
   });
 });
 

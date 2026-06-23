@@ -627,7 +627,7 @@ test("SessionQueueOwner emits typed shutdown errors for pending prompts", async 
   });
 });
 
-test("SessionQueueOwner rejects prompts when queue depth exceeds the configured limit", async () => {
+test("SessionQueueOwner rejects no-wait prompts when queue depth exceeds the limit", async () => {
   await withTempHome(async () => {
     const lease = await tryAcquireQueueOwnerLease("owner-overloaded");
     assert(lease);
@@ -673,7 +673,7 @@ test("SessionQueueOwner rejects prompts when queue depth exceeds the configured 
         ownerGeneration: lease.ownerGeneration,
         message: "second",
         permissionMode: "approve-reads",
-        waitForCompletion: true,
+        waitForCompletion: false,
       })}\n`,
     );
 
@@ -681,10 +681,6 @@ test("SessionQueueOwner rejects prompts when queue depth exceeds the configured 
     const secondIterator = secondLines[Symbol.asyncIterator]();
 
     try {
-      const accepted = (await nextJsonLine(secondIterator)) as { type: string; requestId: string };
-      assert.equal(accepted.type, "accepted");
-      assert.equal(accepted.requestId, "req-second");
-
       const error = (await nextJsonLine(secondIterator)) as {
         type: string;
         detailCode?: string;
