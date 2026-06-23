@@ -17,6 +17,7 @@ import type {
 import { probeQueueOwnerHealth, type QueueOwnerHealth } from "./ipc-health.js";
 import { connectToQueueOwner } from "./ipc-transport.js";
 import {
+  ensureOwnerIsUsable,
   type QueueOwnerRecord,
   readQueueOwnerRecord,
   terminateQueueOwnerForSession,
@@ -702,6 +703,9 @@ export async function trySubmitToRunningOwner(
 ): Promise<SessionSendOutcome | undefined> {
   const owner = await readQueueOwnerRecord(options.sessionId);
   if (!owner) {
+    return undefined;
+  }
+  if (!(await ensureOwnerIsUsable(options.sessionId, owner))) {
     return undefined;
   }
   assertQueueOwnerMcpConfigMatches(owner, options);
