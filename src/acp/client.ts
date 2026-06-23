@@ -731,7 +731,11 @@ export class AcpClient {
           if (launch.devinAcp && isDevinRequestDiagnosticsMethod(method)) {
             return {};
           }
-          throw RequestError.methodNotFound(method);
+          const error = RequestError.methodNotFound(method);
+          if (!this.options.suppressSdkConsoleErrors) {
+            console.error(error.message);
+          }
+          throw error;
         },
         readTextFile: async (params: ReadTextFileRequest): Promise<ReadTextFileResponse> => {
           return this.handleReadTextFile(params);
