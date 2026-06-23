@@ -66,6 +66,11 @@ export function isQoderAcpCommand(command: string, args: readonly string[]): boo
   return basenameToken(command) === "qodercli" && args.includes("--acp");
 }
 
+export function isCursorAcpCommand(command: string, args: readonly string[]): boolean {
+  const commandToken = basenameToken(command);
+  return commandToken === "cursor-agent" || (commandToken === "agent" && args.includes("acp"));
+}
+
 export function isDevinAcpCommand(command: string, args: readonly string[]): boolean {
   return (
     basenameToken(command) === "devin" &&

@@ -104,6 +104,7 @@ import {
   modelStateFromConfigOptions,
   modelStateFromSessionResponse,
   RequestedModelUnsupportedError,
+  resolveRequestedModelId,
   type SessionModelState,
 } from "./model-support.js";
 import {
@@ -262,7 +263,8 @@ type SessionUpdateSuppressionState = {
 };
 
 type ModelControl = { kind: "config_option"; configId: string } | { kind: "legacy_set_model" };
-type ModelControlOverride = Pick<SessionModelState, "configId">;
+type ModelControlOverride = Pick<SessionModelState, "configId"> &
+  Partial<Pick<SessionModelState, "availableModels">>;
 
 export type AgentExitInfo = {
   exitCode: number | null;
@@ -1125,9 +1127,16 @@ export class AcpClient {
         `Cannot set model "${modelId}": the ACP session did not advertise a model config option or legacy session/set_model support.`,
       );
     }
+    const resolvedModelId = resolveRequestedModelId({
+      requestedModel: modelId,
+      models: controlOverride?.availableModels
+        ? { availableModels: controlOverride.availableModels }
+        : undefined,
+      agentCommand: this.options.agentCommand,
+    });
     return control.kind === "config_option"
-      ? await this.setSessionModelThroughConfig(sessionId, modelId, control.configId)
-      : await this.setSessionModelThroughLegacyMethod(sessionId, modelId);
+      ? await this.setSessionModelThroughConfig(sessionId, resolvedModelId, control.configId)
+      : await this.setSessionModelThroughLegacyMethod(sessionId, resolvedModelId);
   }
 
   private async setSessionModelThroughConfig(

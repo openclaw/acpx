@@ -123,6 +123,10 @@ Behavior varies by adapter:
 - **Claude** consumes the value as session-creation metadata.
 - Other agents must advertise a model session config option or legacy `models` metadata. Config options use `session/set_config_option`; explicitly advertised legacy models use `session/set_model`.
 - Model ids must appear in the adapter's advertised values. Unknown ids are rejected.
+- Cursor may advertise model variants with bracketed settings such as
+  `composer-2.5[fast=false]`. When exactly one advertised Cursor id has the requested
+  bare model as its prefix, `acpx` forwards that advertised id automatically; ambiguous
+  variants remain rejected.
 
 For mid-session model switches, use `set model <id>` instead. See [Session control](session-control.md#set-key-value).
 

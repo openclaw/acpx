@@ -16,6 +16,8 @@ Repo: https://github.com/openclaw/acpx
   and release/CI checks found by `clawpatch`.
 - ACP/models: call the current SDK `session/set_model` method for legacy model
   metadata instead of the generic extension fallback.
+- ACP/Cursor: normalize a bare model name to a unique advertised bracketed
+  Cursor model id, while keeping ambiguous values rejected. Fixes #385.
 
 ## 2026.6.17 (v0.11.0)
 

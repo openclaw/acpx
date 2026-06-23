@@ -270,6 +270,9 @@ Behavior:
 - `--no-terminal`: do not advertise the ACP terminal capability — useful for review-only or sandboxed agent invocations
 - `--verbose`: verbose ACP/debug logs to stderr
 
+Cursor may advertise bracketed model ids such as `composer-2.5[fast=false]`. A bare Cursor
+model name is normalized only when exactly one advertised bracketed variant matches it.
+
 Permission flags are mutually exclusive.
 
 ## System prompt override (Claude)

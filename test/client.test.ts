@@ -869,6 +869,23 @@ test("AcpClient setSessionModel honors an advertised custom config id", async ()
   assert.equal(capturedConfigId, "llm");
 });
 
+test("AcpClient normalizes a Cursor model alias to its unique advertised id", async () => {
+  const client = makeClient({ agentCommand: "cursor-agent acp" });
+  let capturedValue: string | undefined;
+  asInternals(client).connection = {
+    setSessionConfigOption: async (params: { value: string }) => {
+      capturedValue = params.value;
+      return { configOptions: [] };
+    },
+  };
+
+  await client.setSessionModel("session-456", "composer-2.5", {
+    configId: "model",
+    availableModels: [{ modelId: "composer-2.5[fast=false]", name: "Composer 2.5" }],
+  });
+  assert.equal(capturedValue, "composer-2.5[fast=false]");
+});
+
 test("AcpClient setSessionModel rejects sessions without advertised model control", async () => {
   const client = makeClient();
   asInternals(client).connection = {};
