@@ -99,10 +99,9 @@ export type AcpRuntimeUsageCost = {
 };
 
 /**
- * Per-turn token breakdown. Sourced from `UsageUpdate._meta.usage` on
- * adapters that populate it (Claude Code today; Codex and others may
- * omit it). All fields optional — consumers should treat missing
- * fields as "unknown", not "zero".
+ * Per-turn token breakdown. Sourced from final prompt response usage or
+ * `UsageUpdate._meta.usage` on adapters that populate it. All fields optional —
+ * consumers should treat missing fields as "unknown", not "zero".
  */
 export type AcpRuntimeUsageBreakdown = {
   inputTokens?: number;
