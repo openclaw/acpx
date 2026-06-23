@@ -16,6 +16,8 @@ const QUEUE_OWNER_PAYLOAD_ENV = "ACPX_QUEUE_OWNER_PAYLOAD";
 export type QueueOwnerRuntimeOptions = {
   sessionId: string;
   mcpServers?: McpServer[];
+  mcpConfigPath?: string;
+  mcpConfigFingerprint?: string;
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -32,6 +34,8 @@ export type QueueOwnerRuntimeOptions = {
 type SessionSendLike = {
   sessionId: string;
   mcpServers?: McpServer[];
+  mcpConfigPath?: string;
+  mcpConfigFingerprint?: string;
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -157,6 +161,8 @@ export function queueOwnerRuntimeOptionsFromSend(
   return {
     sessionId: options.sessionId,
     mcpServers: options.mcpServers,
+    ...(options.mcpConfigPath ? { mcpConfigPath: options.mcpConfigPath } : {}),
+    ...(options.mcpConfigFingerprint ? { mcpConfigFingerprint: options.mcpConfigFingerprint } : {}),
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,

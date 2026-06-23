@@ -267,6 +267,9 @@ real GitHub PRs if you run it against a live repository.
 
 CLI flags always win over config values.
 
+Use `--mcp-config <path>` to load only the `mcpServers` array from an external JSON file without
+writing a project config file. Relative paths resolve from `--cwd`.
+
 Supported keys:
 
 ```json

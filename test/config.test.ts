@@ -134,6 +134,68 @@ test("loadResolvedConfig rejects invalid mcpServers config", async () => {
   });
 });
 
+test("loadResolvedConfig uses an explicit MCP config path without project config", async () => {
+  await withTempEnv(async ({ homeDir }) => {
+    const cwd = path.join(homeDir, "workspace");
+    const mcpConfigPath = path.join(homeDir, "job", "mcp.json");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.dirname(mcpConfigPath), { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          mcpServers: [{ name: "global", type: "http", url: "https://global.example/mcp" }],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await fs.writeFile(
+      mcpConfigPath,
+      `${JSON.stringify(
+        {
+          mcpServers: [{ name: "job", type: "stdio", command: "./bin/job-mcp" }],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const config = await loadResolvedConfig(cwd, {
+      mcpConfigPath: path.relative(cwd, mcpConfigPath),
+    });
+    assert.deepEqual(config.mcpServers, [
+      {
+        name: "job",
+        command: "./bin/job-mcp",
+        args: [],
+        env: [],
+        _meta: undefined,
+      },
+    ]);
+    assert.equal(config.mcpConfigPath, mcpConfigPath);
+  });
+});
+
+test("loadResolvedConfig rejects a missing explicit MCP config path", async () => {
+  await withTempEnv(async ({ homeDir }) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    await assert.rejects(
+      () =>
+        loadResolvedConfig(cwd, {
+          mcpConfigPath: "missing-mcp.json",
+        }),
+      /MCP config file not found: .*missing-mcp\.json/,
+    );
+  });
+});
+
 test("initGlobalConfigFile creates the config once and then reports existing file", async () => {
   await withTempEnv(async ({ homeDir }) => {
     const first = await initGlobalConfigFile();

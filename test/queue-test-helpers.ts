@@ -56,6 +56,8 @@ export async function writeQueueOwnerLock(options: {
   socketPath: string;
   ownerGeneration?: number;
   queueDepth?: number;
+  mcpConfigPath?: string;
+  mcpConfigFingerprint?: string;
   createdAt?: string;
   heartbeatAt?: string;
 }): Promise<void> {
@@ -74,6 +76,10 @@ export async function writeQueueOwnerLock(options: {
       ownerGeneration:
         options.ownerGeneration ?? Date.now() * 1_000 + Math.floor(Math.random() * 1_000),
       queueDepth: options.queueDepth ?? 0,
+      ...(options.mcpConfigPath ? { mcpConfigPath: options.mcpConfigPath } : {}),
+      ...(options.mcpConfigFingerprint
+        ? { mcpConfigFingerprint: options.mcpConfigFingerprint }
+        : {}),
     })}\n`,
     "utf8",
   );

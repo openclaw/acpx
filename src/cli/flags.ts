@@ -341,6 +341,10 @@ export function addGlobalFlags(command: Command): Command {
       "Queue owner idle TTL before shutdown (0 = keep alive forever) (default: 300)",
       parseTtlSeconds,
     )
+    .option(
+      "--mcp-config <path>",
+      "Load MCP servers from a JSON config file instead of project/global mcpServers",
+    )
     .option("--verbose", "Enable verbose debug logs");
 }
 

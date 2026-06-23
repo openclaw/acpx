@@ -46,13 +46,24 @@ export type ResolvedAcpxConfig = {
   mcpServers: McpServer[];
   globalPath: string;
   projectPath: string;
+  mcpConfigPath?: string;
+  mcpConfigFingerprint?: string;
   hasGlobalConfig: boolean;
   hasProjectConfig: boolean;
+};
+
+export type LoadResolvedConfigOptions = {
+  mcpConfigPath?: string;
 };
 
 type ConfigFileLoadResult = {
   config?: ConfigFileShape;
   exists: boolean;
+};
+
+type ExplicitMcpConfig = {
+  path?: string;
+  config?: ConfigFileShape;
 };
 
 const DEFAULT_TIMEOUT_MS = undefined;
@@ -287,6 +298,25 @@ async function readConfigFile(filePath: string): Promise<ConfigFileLoadResult> {
   }
 }
 
+async function loadExplicitMcpConfig(
+  cwd: string,
+  configuredPath: string | undefined,
+): Promise<ExplicitMcpConfig> {
+  if (!configuredPath) {
+    return {};
+  }
+
+  const resolvedPath = path.resolve(cwd, configuredPath);
+  const result = await readConfigFile(resolvedPath);
+  if (!result.exists) {
+    throw new Error(`MCP config file not found: ${resolvedPath}`);
+  }
+  return {
+    path: resolvedPath,
+    config: result.config,
+  };
+}
+
 function mergeAgents(
   globalAgents: Record<string, string> | undefined,
   projectAgents: Record<string, string> | undefined,
@@ -307,13 +337,17 @@ function mergeAuth(
   };
 }
 
-export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfig> {
+export async function loadResolvedConfig(
+  cwd: string,
+  options: LoadResolvedConfigOptions = {},
+): Promise<ResolvedAcpxConfig> {
   const globalPath = defaultGlobalConfigPath();
   const projectPath = projectConfigPath(cwd);
 
-  const [globalResult, projectResult] = await Promise.all([
+  const [globalResult, projectResult, explicitMcp] = await Promise.all([
     readConfigFile(globalPath),
     readConfigFile(projectPath),
+    loadExplicitMcpConfig(cwd, options.mcpConfigPath),
   ]);
 
   const globalConfig = globalResult.config;
@@ -330,7 +364,14 @@ export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfi
     parseAuth(projectConfig?.auth, projectPath),
   );
 
-  const mcpServers = resolveMcpServers(projectConfig, projectPath, globalConfig, globalPath);
+  const mcpServers = resolveMcpServers(
+    projectConfig,
+    projectPath,
+    globalConfig,
+    globalPath,
+    explicitMcp.config,
+    explicitMcp.path,
+  );
   const disableExec = resolveDisableExec(projectConfig, projectPath, globalConfig, globalPath);
 
   return {
@@ -341,6 +382,8 @@ export async function loadResolvedConfig(cwd: string): Promise<ResolvedAcpxConfi
     mcpServers,
     globalPath,
     projectPath,
+    mcpConfigPath: explicitMcp.path,
+    mcpConfigFingerprint: explicitMcp.path ? JSON.stringify(mcpServers) : undefined,
     hasGlobalConfig: globalResult.exists,
     hasProjectConfig: projectResult.exists,
   };
@@ -499,7 +542,12 @@ function resolveMcpServers(
   projectPath: string,
   globalConfig: ConfigFileShape | undefined,
   globalPath: string,
+  mcpConfig: ConfigFileShape | undefined,
+  mcpConfigPath: string | undefined,
 ): McpServer[] {
+  if (mcpConfigPath) {
+    return parseMcpServers(mcpConfig?.mcpServers, mcpConfigPath);
+  }
   if (hasConfigKey(projectConfig, "mcpServers")) {
     return parseMcpServers(projectConfig?.mcpServers, projectPath);
   }

@@ -336,6 +336,8 @@ export async function handlePrompt(
     sessionId: record.acpxRecordId,
     prompt,
     mcpServers: config.mcpServers,
+    mcpConfigPath: config.mcpConfigPath,
+    mcpConfigFingerprint: config.mcpConfigFingerprint,
     permissionMode,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     permissionPolicy,

@@ -301,6 +301,8 @@ export type SubmitToQueueOwnerOptions = {
   sessionId: string;
   message: string;
   prompt?: PromptInput;
+  mcpConfigPath?: string;
+  mcpConfigFingerprint?: string;
   permissionMode: PermissionMode;
   resumePolicy?: SessionResumePolicy;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
@@ -668,11 +670,25 @@ async function submitCloseSessionToQueueOwner(
   return response.closed;
 }
 
+function queueOwnerMcpConfigMatches(
+  owner: QueueOwnerRecord,
+  options: SubmitToQueueOwnerOptions,
+): boolean {
+  return (
+    owner.mcpConfigPath === options.mcpConfigPath &&
+    owner.mcpConfigFingerprint === options.mcpConfigFingerprint
+  );
+}
+
 export async function trySubmitToRunningOwner(
   options: SubmitToQueueOwnerOptions,
 ): Promise<SessionSendOutcome | undefined> {
   const owner = await readQueueOwnerRecord(options.sessionId);
   if (!owner) {
+    return undefined;
+  }
+  if (!queueOwnerMcpConfigMatches(owner, options)) {
+    await terminateQueueOwnerForSession(options.sessionId);
     return undefined;
   }
 

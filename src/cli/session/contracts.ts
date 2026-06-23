@@ -82,6 +82,8 @@ export type SessionSendOptions = {
   prompt: PromptInput;
   resumePolicy?: SessionResumePolicy;
   mcpServers?: McpServer[];
+  mcpConfigPath?: string;
+  mcpConfigFingerprint?: string;
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   permissionPolicy?: PermissionPolicy;

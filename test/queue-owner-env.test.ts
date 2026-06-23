@@ -12,6 +12,8 @@ describe("parseQueueOwnerPayload", () => {
       JSON.stringify({
         sessionId: "session-1",
         permissionMode: "approve-reads",
+        mcpConfigPath: "/tmp/job-mcp.json",
+        mcpConfigFingerprint: "fingerprint-v1",
         mcpServers: [
           {
             name: "linear-http",
@@ -38,6 +40,8 @@ describe("parseQueueOwnerPayload", () => {
     );
     assert.equal(parsed.sessionId, "session-1");
     assert.equal(parsed.permissionMode, "approve-reads");
+    assert.equal(parsed.mcpConfigPath, "/tmp/job-mcp.json");
+    assert.equal(parsed.mcpConfigFingerprint, "fingerprint-v1");
     assert.equal(parsed.ttlMs, 1234);
     assert.equal(parsed.maxQueueDepth, 7);
     assert.equal(parsed.terminal, false);

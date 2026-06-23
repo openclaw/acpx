@@ -61,6 +61,7 @@ const TOP_LEVEL_VERSION_VALUE_FLAG_VALUES = [
   "--prompt-retries",
   "--timeout",
   "--ttl",
+  "--mcp-config",
 ] as const;
 
 const TOP_LEVEL_VERSION_VALUE_FLAGS = new Set<string>(TOP_LEVEL_VERSION_VALUE_FLAG_VALUES);
@@ -198,6 +199,41 @@ function detectInitialCwd(argv: string[]): string {
   }
 
   return process.cwd();
+}
+
+function detectMcpConfigPath(argv: string[], cwd: string): string | undefined {
+  for (let index = 0; index < argv.length; index += 1) {
+    const scan = scanMcpConfigToken(argv[index], argv[index + 1], cwd);
+    if (scan.stop) {
+      return scan.path;
+    }
+    if (scan.skipNext) {
+      index += 1;
+    }
+  }
+  return undefined;
+}
+
+function scanMcpConfigToken(
+  token: string,
+  nextToken: string | undefined,
+  cwd: string,
+): { path?: string; skipNext?: boolean; stop?: boolean } {
+  if (token === "--" || !token.startsWith("-") || token === "-") {
+    return { stop: true };
+  }
+  if (token === "--mcp-config") {
+    return { path: resolveMcpConfigPath(nextToken, cwd), stop: true };
+  }
+  if (token.startsWith("--mcp-config=")) {
+    return { path: resolveMcpConfigPath(token.slice("--mcp-config=".length), cwd), stop: true };
+  }
+  return { skipNext: TOP_LEVEL_VERSION_VALUE_FLAGS.has(token) };
+}
+
+function resolveMcpConfigPath(value: string | undefined, cwd: string): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed !== "--" ? path.resolve(cwd, trimmed) : undefined;
 }
 
 function isCwdFlagToken(token: string): boolean {
@@ -489,7 +525,10 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
   await maybeHandleSkillflag(normalizedArgv);
 
-  const config = await loadResolvedConfig(detectInitialCwd(rawArgs));
+  const initialCwd = detectInitialCwd(rawArgs);
+  const config = await loadResolvedConfig(initialCwd, {
+    mcpConfigPath: detectMcpConfigPath(rawArgs, initialCwd),
+  });
   const requestedJsonStrict = detectJsonStrict(rawArgs);
   const requestedOutputFormat = detectRequestedOutputFormat(rawArgs, config.format);
   const requestedOutputPolicy = {

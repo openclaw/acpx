@@ -57,6 +57,12 @@ function assignQueueOwnerTransportOptions(
   if (parsedMcpServers) {
     options.mcpServers = parsedMcpServers;
   }
+  if (typeof record.mcpConfigPath === "string" && record.mcpConfigPath.length > 0) {
+    options.mcpConfigPath = record.mcpConfigPath;
+  }
+  if (typeof record.mcpConfigFingerprint === "string" && record.mcpConfigFingerprint.length > 0) {
+    options.mcpConfigFingerprint = record.mcpConfigFingerprint;
+  }
 
   if (record.authCredentials && typeof record.authCredentials === "object") {
     const entries = Object.entries(record.authCredentials as UnknownRecord).filter(

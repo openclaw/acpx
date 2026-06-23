@@ -52,6 +52,8 @@ async function submitToRunningOwner(
     sessionId: options.sessionId,
     message: promptToDisplayText(options.prompt),
     prompt: options.prompt,
+    mcpConfigPath: options.mcpConfigPath,
+    mcpConfigFingerprint: options.mcpConfigFingerprint,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     permissionPolicy: options.permissionPolicy,
@@ -197,7 +199,10 @@ async function writeQueueOwnerLifecycleSnapshot(
 }
 
 export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): Promise<void> {
-  const lease = await tryAcquireQueueOwnerLease(options.sessionId);
+  const lease = await tryAcquireQueueOwnerLease(options.sessionId, {
+    path: options.mcpConfigPath,
+    fingerprint: options.mcpConfigFingerprint,
+  });
   if (!lease) {
     return;
   }

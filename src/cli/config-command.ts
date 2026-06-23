@@ -9,6 +9,7 @@ async function handleConfigShow(command: Command, config: ResolvedAcpxConfig): P
     paths: {
       global: config.globalPath,
       project: config.projectPath,
+      ...(config.mcpConfigPath ? { mcp: config.mcpConfigPath } : {}),
     },
     loaded: {
       global: config.hasGlobalConfig,
