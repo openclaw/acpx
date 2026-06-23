@@ -1,12 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isAcpMessageObject,
   isAcpJsonRpcMessage,
   isJsonRpcNotification,
   isSessionUpdateNotification,
   parseJsonRpcErrorMessage,
   parsePromptStopReason,
 } from "../src/acp/jsonrpc.js";
+
+test("isAcpMessageObject rejects non-object JSON values", () => {
+  assert.equal(isAcpMessageObject(1), false);
+  assert.equal(isAcpMessageObject(null), false);
+  assert.equal(isAcpMessageObject("message"), false);
+  assert.equal(isAcpMessageObject([]), false);
+});
+
+test("isAcpMessageObject accepts object-shaped protocol values", () => {
+  assert.equal(isAcpMessageObject({}), true);
+  assert.equal(isAcpMessageObject({ jsonrpc: "2.0", method: "session/update" }), true);
+});
 
 test("isAcpJsonRpcMessage accepts JSON-RPC request", () => {
   assert.equal(

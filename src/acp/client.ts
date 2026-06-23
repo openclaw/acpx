@@ -99,7 +99,7 @@ import {
   waitForSpawn,
 } from "./client-process.js";
 import { extractAcpError } from "./error-shapes.js";
-import { isSessionUpdateNotification } from "./jsonrpc.js";
+import { isAcpMessageObject, isSessionUpdateNotification } from "./jsonrpc.js";
 import {
   modelStateFromConfigOptions,
   modelStateFromSessionResponse,
@@ -330,11 +330,18 @@ function enqueueNdJsonLine(
     return;
   }
   try {
-    const message = JSON.parse(trimmedLine) as AnyMessage;
-    controller.enqueue(message);
+    const message = parseAcpJsonMessageLine(trimmedLine);
+    if (message) {
+      controller.enqueue(message);
+    }
   } catch (err) {
     console.error("Failed to parse JSON message:", trimmedLine, err);
   }
+}
+
+export function parseAcpJsonMessageLine(line: string): AnyMessage | undefined {
+  const message: unknown = JSON.parse(line);
+  return isAcpMessageObject(message) ? message : undefined;
 }
 
 function enqueueNdJsonLines(

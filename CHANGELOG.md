@@ -20,6 +20,8 @@ Repo: https://github.com/openclaw/acpx
 - Windows/Claude: only export a native `.exe` as `CLAUDE_CODE_EXECUTABLE`;
   unresolved `.cmd`, `.bat`, and `.ps1` shims now fall back to the Claude ACP
   adapter's bundled native binary. Fixes openclaw/openclaw#93465.
+- Client/ACP: ignore non-object JSON lines from adapter stdout before ACP
+  dispatch, preventing primitive frames from crashing the SDK message path.
 - ACP/models: call the current SDK `session/set_model` method for legacy model
   metadata instead of the generic extension fallback.
 - CLI/config: add `--mcp-config` for session-scoped MCP servers without writing

@@ -7,6 +7,7 @@ import {
   AcpClient,
   buildAgentSpawnOptions,
   buildQoderAcpCommandArgs,
+  parseAcpJsonMessageLine,
   resolveClaudeCodeSettingSources,
   resolveAgentCloseAfterStdinEndMs,
   shouldIgnoreNonJsonAgentOutputLine,
@@ -19,6 +20,19 @@ import {
   PermissionPromptUnavailableError,
   UnsupportedPromptContentError,
 } from "../src/errors.js";
+
+test("parseAcpJsonMessageLine ignores non-object JSON values", () => {
+  for (const line of ["1", "null", '"diagnostic"', "[]", "[{}]"]) {
+    assert.equal(parseAcpJsonMessageLine(line), undefined);
+  }
+});
+
+test("parseAcpJsonMessageLine preserves object-shaped protocol values", () => {
+  assert.deepEqual(parseAcpJsonMessageLine('{"jsonrpc":"2.0","method":"session/update"}'), {
+    jsonrpc: "2.0",
+    method: "session/update",
+  });
+});
 
 type ClientInternals = {
   selectAuthMethod?: (methods: Array<{ id: string }>) =>
