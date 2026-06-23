@@ -178,6 +178,8 @@ test("loadResolvedConfig uses an explicit MCP config path without project config
       },
     ]);
     assert.equal(config.mcpConfigPath, mcpConfigPath);
+    assert.match(config.mcpConfigFingerprint ?? "", /^[a-f0-9]{64}$/);
+    assert(!/job-mcp/.test(config.mcpConfigFingerprint ?? ""));
   });
 });
 

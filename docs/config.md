@@ -77,6 +77,9 @@ the project/global `mcpServers` value for that invocation. Relative paths resolv
 acpx --cwd /workspace --mcp-config /run/job-mcp.json codex 'use the configured tools'
 ```
 
+An existing persistent session cannot switch MCP configurations while its queue owner is live.
+Close that session first, then retry with the new `--mcp-config` file.
+
 ## The `agents` map
 
 Custom agents and overrides live here:

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -383,7 +384,9 @@ export async function loadResolvedConfig(
     globalPath,
     projectPath,
     mcpConfigPath: explicitMcp.path,
-    mcpConfigFingerprint: explicitMcp.path ? JSON.stringify(mcpServers) : undefined,
+    mcpConfigFingerprint: explicitMcp.path
+      ? createHash("sha256").update(JSON.stringify(mcpServers)).digest("hex")
+      : undefined,
     hasGlobalConfig: globalResult.exists,
     hasProjectConfig: projectResult.exists,
   };

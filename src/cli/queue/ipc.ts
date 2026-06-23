@@ -680,6 +680,23 @@ function queueOwnerMcpConfigMatches(
   );
 }
 
+function assertQueueOwnerMcpConfigMatches(
+  owner: QueueOwnerRecord,
+  options: SubmitToQueueOwnerOptions,
+): void {
+  if (queueOwnerMcpConfigMatches(owner, options)) {
+    return;
+  }
+  throw new QueueConnectionError(
+    "Session queue owner uses a different MCP config; close the session before retrying",
+    {
+      detailCode: "QUEUE_MCP_CONFIG_CONFLICT",
+      origin: "queue",
+      retryable: false,
+    },
+  );
+}
+
 export async function trySubmitToRunningOwner(
   options: SubmitToQueueOwnerOptions,
 ): Promise<SessionSendOutcome | undefined> {
@@ -687,10 +704,7 @@ export async function trySubmitToRunningOwner(
   if (!owner) {
     return undefined;
   }
-  if (!queueOwnerMcpConfigMatches(owner, options)) {
-    await terminateQueueOwnerForSession(options.sessionId);
-    return undefined;
-  }
+  assertQueueOwnerMcpConfigMatches(owner, options);
 
   let submitted: SessionSendOutcome | undefined;
   try {

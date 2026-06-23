@@ -45,6 +45,7 @@ acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--n
 
 The global `--mcp-config <path>` option loads an external JSON file's `mcpServers` array for the
 invocation, replacing project/global MCP configuration. Relative paths resolve from `--cwd`.
+For a persistent session, close the existing session before switching its MCP config.
 
 `<agent>` can be:
 

@@ -17,7 +17,8 @@ Repo: https://github.com/openclaw/acpx
 - ACP/models: call the current SDK `session/set_model` method for legacy model
   metadata instead of the generic extension fallback.
 - CLI/config: add `--mcp-config` for session-scoped MCP servers without writing
-  a project config file. Fixes #387.
+  a project config file. Live persistent sessions reject MCP config changes until
+  closed. Fixes #387.
 
 ## 2026.6.17 (v0.11.0)
 
