@@ -1,8 +1,16 @@
 version: 2
 
+registries:
+  npmjs:
+    type: npm-registry
+    url: https://registry.npmjs.org
+    replaces-base: true
+
 updates:
   - package-ecosystem: npm
     directory: /
+    registries:
+      - npmjs
     schedule:
       interval: daily
     cooldown:
