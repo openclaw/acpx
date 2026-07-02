@@ -160,7 +160,13 @@ function emitQueueOwnerError(
     });
     formatter.flush();
   }
-  return queueConnectionErrorFromOwner(message, queueErrorAlreadyEmitted);
+  // If we just emitted via the formatter, mark the error as already-emitted so
+  // that the top-level emitRequestedError handler (cli-core.ts) does not emit
+  // the same error a second time on stderr.  Without this, quiet mode (where
+  // queueErrorAlreadyEmitted === false) results in two stderr lines: one
+  // structured "[acpx] error: …" from the formatter and one raw line from the
+  // catch handler.
+  return queueConnectionErrorFromOwner(message, queueErrorAlreadyEmitted || shouldEmitInFormatter);
 }
 
 function parseQueueOwnerResponseLine(
