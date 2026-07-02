@@ -625,3 +625,26 @@ test("quiet formatter onError line uses code when detailCode is absent", () => {
   assert.equal(stdout.toString(), "");
   assert.equal(stderr.toString(), "[acpx] error: NO_SESSION session not found\n");
 });
+
+test("quiet formatter onError collapses multi-line message to a single stderr line", () => {
+  // A message containing \n would break a line-by-line parser reading stderr.
+  // The formatter must squash all newlines before interpolation.
+  const stdout = new CaptureWriter();
+  const stderr = new CaptureWriter();
+  const formatter = createOutputFormatter("quiet", { stdout, stderr });
+
+  formatter.onError({
+    code: "RUNTIME",
+    message: "line one\nline two\nline three",
+  });
+
+  assert.equal(stdout.toString(), "");
+  const stderrStr = stderr.toString();
+  // Exactly one non-empty line in the output.
+  assert.equal(
+    stderrStr.split("\n").filter(Boolean).length,
+    1,
+    "stderr must be a single line when the message contains embedded newlines",
+  );
+  assert.equal(stderrStr, "[acpx] error: RUNTIME line one line two line three\n");
+});
