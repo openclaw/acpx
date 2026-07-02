@@ -1146,7 +1146,7 @@ class QuietOutputFormatter implements OutputFormatter {
     }
   }
 
-  onError(_params: {
+  onError(params: {
     code: OutputErrorCode;
     detailCode?: string;
     origin?: OutputErrorOrigin;
@@ -1155,7 +1155,8 @@ class QuietOutputFormatter implements OutputFormatter {
     acp?: OutputErrorAcpPayload;
     timestamp?: string;
   }): void {
-    // no-op in quiet mode
+    const qualifier = params.detailCode ? `${params.code} ${params.detailCode}` : params.code;
+    this.stderr.write(`[acpx] error: ${qualifier} ${params.message}\n`);
   }
 
   onPermissionEscalation(_event: PermissionEscalationEvent): void {
