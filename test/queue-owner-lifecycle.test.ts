@@ -11,9 +11,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
+import net from "node:net";
 import path from "node:path";
+import readline from "node:readline";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { isProcessAlive } from "../src/cli/queue/lease-store.js";
 import { queueLockFilePath, queueSocketPath } from "../src/cli/queue/paths.js";
 import { makeSessionRecord, withTempHome, writeSessionRecordFile } from "./runtime-test-helpers.js";
 
@@ -299,6 +302,146 @@ describe("queue owner lifecycle — graceful SIGTERM shutdown", () => {
           "lock file must be gone after graceful shutdown — shared shutdown promise was not awaited",
         );
       } finally {
+        if (child.exitCode == null && child.signalCode == null) {
+          child.kill("SIGKILL");
+        }
+      }
+    });
+  });
+});
+
+describe("queue owner lifecycle — bridge process death on SIGTERM", () => {
+  // Verifies that when the queue owner is SIGTERMed while a prompt is in
+  // flight, the agent bridge process (mock-agent) is also killed by the
+  // queue owner's graceful shutdown before it exits.
+  //
+  // This test catches the race that existed before the SIGTERM grace-period
+  // fix: terminateProcess() used a 1 500 ms SIGTERM grace, but AcpClient.close()
+  // can take up to ~2 600 ms.  With the old grace the queue owner could be
+  // SIGKILLed before it finished killing the bridge, leaving it orphaned.
+  it("kills the agent bridge when the queue owner receives SIGTERM mid-prompt", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    await withTempHome("acpx-lifecycle-bridge-", async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      await fs.mkdir(cwd, { recursive: true });
+
+      // PID file: mock-agent writes its PID here as soon as it starts, before
+      // the ACP handshake.  We poll for it to know the bridge is live.
+      const pidFilePath = path.join(homeDir, "mock-agent.pid");
+
+      const record = makeSessionRecord({
+        acpxRecordId: "lifecycle-bridge-test",
+        acpSessionId: "lifecycle-bridge-session",
+        // Pass --pid-file so the bridge records its PID at startup.
+        agentCommand: `node ${JSON.stringify(MOCK_AGENT_PATH)} --pid-file ${JSON.stringify(pidFilePath)}`,
+        cwd,
+      });
+      await writeSessionRecordFile(homeDir, record);
+
+      const socketPath = queueSocketPath(record.acpxRecordId, homeDir);
+
+      const payload = JSON.stringify({
+        sessionId: record.acpxRecordId,
+        permissionMode: "approve-reads",
+      });
+
+      const child = spawn(process.execPath, [CLI_PATH, "__queue-owner"], {
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          ACPX_QUEUE_OWNER_PAYLOAD: payload,
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+
+      const stderrChunks: Buffer[] = [];
+      child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+
+      let queueSocket: net.Socket | undefined;
+
+      try {
+        // Wait for the queue owner socket — signal handlers are live at this point.
+        await waitUntil(() => fileExists(socketPath));
+
+        // Connect to the queue-owner socket and submit a long-running prompt.
+        // "sleep 10000" keeps the bridge busy for 10 s so it is still alive
+        // when we send SIGTERM to the queue owner.
+        queueSocket = await new Promise<net.Socket>((resolve, reject) => {
+          const s = net.createConnection(socketPath);
+          s.setEncoding("utf8");
+          s.once("connect", () => resolve(s));
+          s.once("error", reject);
+        });
+
+        queueSocket.write(
+          `${JSON.stringify({
+            type: "submit_prompt",
+            requestId: "req-bridge-test",
+            message: "sleep 10000",
+            permissionMode: "approve-reads",
+            waitForCompletion: true,
+          })}\n`,
+        );
+
+        // Read the "accepted" acknowledgement.
+        const lines = readline.createInterface({ input: queueSocket });
+        const iter = lines[Symbol.asyncIterator]();
+        const acceptedRaw = await Promise.race([
+          iter.next(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("timeout waiting for accepted")), 5_000),
+          ),
+        ]);
+        const accepted = JSON.parse((acceptedRaw as IteratorYieldResult<string>).value) as {
+          type: string;
+        };
+        assert.equal(accepted.type, "accepted", "queue owner must acknowledge the prompt");
+
+        // Close the readline and socket BEFORE sending SIGTERM.
+        // SessionQueueOwner.close() calls net.Server.close() which waits for
+        // all existing connections to drain before resolving.  Leaving this
+        // socket open would stall the queue-owner's graceful shutdown forever.
+        lines.close();
+        queueSocket.destroy();
+        queueSocket = undefined;
+
+        // Wait for the bridge to write its PID — this confirms the bridge
+        // process has been spawned and the ACP handshake has started.
+        await waitUntil(() => fileExists(pidFilePath), 8_000);
+
+        const bridgePidRaw = (await fs.readFile(pidFilePath, "utf8")).trim();
+        const bridgePid = Number(bridgePidRaw);
+        assert(
+          Number.isInteger(bridgePid) && bridgePid > 0,
+          "bridge PID must be a positive integer",
+        );
+        assert.equal(isProcessAlive(bridgePid), true, "bridge must be alive before SIGTERM");
+
+        // Signal the queue owner to shut down gracefully.
+        child.kill("SIGTERM");
+
+        const { code, signal } = await waitForProcessExit(child, 10_000);
+        const stderr = Buffer.concat(stderrChunks).toString("utf8");
+
+        assert.equal(
+          signal,
+          null,
+          `queue owner should not have been killed by a signal; stderr=${stderr}`,
+        );
+        assert.equal(code, 0, `expected queue owner exit code 0 (graceful); stderr=${stderr}`);
+
+        // After the queue owner exits, the bridge must also be dead.
+        // AcpClient.close() kills the bridge before releasing the lease.
+        assert.equal(
+          isProcessAlive(bridgePid),
+          false,
+          "bridge process must be dead after queue owner graceful shutdown — was it orphaned?",
+        );
+      } finally {
+        queueSocket?.destroy();
         if (child.exitCode == null && child.signalCode == null) {
           child.kill("SIGKILL");
         }

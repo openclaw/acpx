@@ -67,6 +67,8 @@ type MockAgentOptions = {
   replayLoadSessionUpdates: boolean;
   loadReplayText: string;
   ignoreSigterm: boolean;
+  /** If set, the agent writes its PID to this path at startup (before ACP handshake). */
+  pidFile?: string;
 };
 
 type SessionState = {
@@ -375,6 +377,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let loadReplayText = "replayed load session update";
   let ignoreSigterm = false;
   let hangOnNewSession = false;
+  let pidFile: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -513,6 +516,12 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
       continue;
     }
 
+    if (token === "--pid-file") {
+      pidFile = parseOptionValue(argv, index + 1, token);
+      index += 1;
+      continue;
+    }
+
     if (token === "--claude-agent-acp") {
       continue;
     }
@@ -578,6 +587,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     replayLoadSessionUpdates,
     loadReplayText,
     ignoreSigterm,
+    pidFile,
   };
 }
 
@@ -1458,6 +1468,12 @@ const output = Writable.toWeb(process.stdout);
 const input = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>;
 const stream = ndJsonStream(output, input);
 const mockAgentOptions = parseMockAgentOptions(process.argv.slice(2));
+
+// Write PID to a file before doing anything else so that the parent can track
+// this bridge process and verify it is dead after queue-owner shutdown.
+if (mockAgentOptions.pidFile) {
+  writeFileSync(mockAgentOptions.pidFile, `${process.pid}\n`, "utf8");
+}
 
 if (mockAgentOptions.ignoreSigterm) {
   process.on("SIGTERM", () => {
