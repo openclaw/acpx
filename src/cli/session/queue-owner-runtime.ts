@@ -174,10 +174,21 @@ async function closeQueueOwnerRuntime(params: {
     clearInterval(params.heartbeatTimer);
   }
   params.turnController.beginClosing();
-  await params.owner?.close();
+  // Kill the bridge first — invariant: the bridge must never outlive the owner.
+  // The old order (owner.close() then sharedClient.close()) was wrong:
+  // owner.close() calls server.close() which waits for all active client
+  // sockets to drain.  A client in waitForCompletion that stayed connected
+  // would block the drain past the external 4 s SIGKILL grace period, so
+  // terminateProcess() would SIGKILL the owner before sharedClient.close()
+  // (which calls terminateAgentProcess) had a chance to run — orphaning the
+  // bridge.  By closing the bridge first we guarantee it is killed regardless
+  // of how long the IPC-server drain takes.
   await params.sharedClient.close().catch(() => {
     // best effort while queue owner is shutting down
   });
+  // SessionQueueOwner.close() now also destroys tracked client sockets so
+  // server.close() resolves promptly even when a client is still connected.
+  await params.owner?.close();
   await writeQueueOwnerLifecycleSnapshot(params.sessionId, params.sharedClient);
   await releaseQueueOwnerLease(params.lease);
   if (params.verbose) {

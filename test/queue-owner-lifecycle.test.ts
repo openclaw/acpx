@@ -400,10 +400,11 @@ describe("queue owner lifecycle — bridge process death on SIGTERM", () => {
         };
         assert.equal(accepted.type, "accepted", "queue owner must acknowledge the prompt");
 
-        // Close the readline and socket BEFORE sending SIGTERM.
-        // SessionQueueOwner.close() calls net.Server.close() which waits for
-        // all existing connections to drain before resolving.  Leaving this
-        // socket open would stall the queue-owner's graceful shutdown forever.
+        // Close the readline and socket before sending SIGTERM.
+        // (This was previously required to prevent a deadlock — server.close()
+        // waited for connected sockets to drain — but is now just one of two
+        // test scenarios; the companion test verifies the fix when the socket
+        // stays open.)
         lines.close();
         queueSocket.destroy();
         queueSocket = undefined;
@@ -440,6 +441,152 @@ describe("queue owner lifecycle — bridge process death on SIGTERM", () => {
           false,
           "bridge process must be dead after queue owner graceful shutdown — was it orphaned?",
         );
+      } finally {
+        queueSocket?.destroy();
+        if (child.exitCode == null && child.signalCode == null) {
+          child.kill("SIGKILL");
+        }
+      }
+    });
+  });
+
+  it("kills the bridge and exits gracefully when a client socket stays open during SIGTERM", async () => {
+    // Regression test for the connected-client deadlock.
+    //
+    // Before the fix:
+    //   closeQueueOwnerRuntime called owner.close() first, which called
+    //   server.close().  server.close() waits for all existing connections to
+    //   drain.  A client in waitForCompletion that never closed its socket
+    //   kept the drain blocked past the external 4 s SIGKILL grace period;
+    //   terminateProcess() then SIGKILLed the owner before sharedClient.close()
+    //   ran — leaving the bridge orphaned.
+    //
+    // After the fix:
+    //   sharedClient.close() (kills bridge) runs BEFORE owner.close() (drains
+    //   IPC server), and SessionQueueOwner.close() destroys tracked sockets so
+    //   server.close() does not block even if the client socket is still open.
+    if (process.platform === "win32") {
+      return;
+    }
+
+    await withTempHome("acpx-lifecycle-bridge-open-socket-", async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      await fs.mkdir(cwd, { recursive: true });
+
+      const pidFilePath = path.join(homeDir, "mock-agent-open.pid");
+
+      const record = makeSessionRecord({
+        acpxRecordId: "lifecycle-bridge-open-socket-test",
+        acpSessionId: "lifecycle-bridge-open-socket-session",
+        agentCommand: `node ${JSON.stringify(MOCK_AGENT_PATH)} --pid-file ${JSON.stringify(pidFilePath)}`,
+        cwd,
+      });
+      await writeSessionRecordFile(homeDir, record);
+
+      const socketPath = queueSocketPath(record.acpxRecordId, homeDir);
+      const lockPath = queueLockFilePath(record.acpxRecordId, homeDir);
+
+      const payload = JSON.stringify({
+        sessionId: record.acpxRecordId,
+        permissionMode: "approve-reads",
+      });
+
+      const child = spawn(process.execPath, [CLI_PATH, "__queue-owner"], {
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          ACPX_QUEUE_OWNER_PAYLOAD: payload,
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+
+      const stderrChunks: Buffer[] = [];
+      child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+
+      // This socket intentionally stays open (not destroyed before SIGTERM)
+      // to reproduce the deadlock that existed before the fix.
+      let queueSocket: net.Socket | undefined;
+
+      try {
+        await waitUntil(() => fileExists(socketPath));
+
+        queueSocket = await new Promise<net.Socket>((resolve, reject) => {
+          const s = net.createConnection(socketPath);
+          s.setEncoding("utf8");
+          s.once("connect", () => resolve(s));
+          s.once("error", reject);
+        });
+
+        queueSocket.write(
+          `${JSON.stringify({
+            type: "submit_prompt",
+            requestId: "req-open-socket-test",
+            message: "sleep 10000",
+            permissionMode: "approve-reads",
+            waitForCompletion: true,
+          })}\n`,
+        );
+
+        // Read the "accepted" acknowledgement.
+        const lines = readline.createInterface({ input: queueSocket });
+        const iter = lines[Symbol.asyncIterator]();
+        const acceptedRaw = await Promise.race([
+          iter.next(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("timeout waiting for accepted")), 5_000),
+          ),
+        ]);
+        const accepted = JSON.parse((acceptedRaw as IteratorYieldResult<string>).value) as {
+          type: string;
+        };
+        assert.equal(accepted.type, "accepted", "queue owner must acknowledge the prompt");
+
+        // Deliberately do NOT close the readline or socket here.
+        // The fix must handle this — the socket remaining open must not block
+        // the bridge kill or prevent the owner from exiting within the grace period.
+
+        // Wait until the bridge has written its PID — ACP handshake started.
+        await waitUntil(() => fileExists(pidFilePath), 8_000);
+
+        const bridgePidRaw = (await fs.readFile(pidFilePath, "utf8")).trim();
+        const bridgePid = Number(bridgePidRaw);
+        assert(
+          Number.isInteger(bridgePid) && bridgePid > 0,
+          "bridge PID must be a positive integer",
+        );
+        assert.equal(isProcessAlive(bridgePid), true, "bridge must be alive before SIGTERM");
+
+        // Send SIGTERM — the external grace is 4 s (lease-store terminateProcess).
+        // The owner must exit before that deadline even though the client socket
+        // is still open.
+        child.kill("SIGTERM");
+
+        // Tight budget: the owner must finish within the 4 s external grace.
+        const { code, signal } = await waitForProcessExit(child, 8_000);
+        const stderr = Buffer.concat(stderrChunks).toString("utf8");
+
+        assert.equal(
+          signal,
+          null,
+          `queue owner should not have been killed by a signal — it likely stalled past the grace period; stderr=${stderr}`,
+        );
+        assert.equal(code, 0, `expected queue owner exit code 0 (graceful); stderr=${stderr}`);
+
+        // Bridge must be dead — it must not have been orphaned.
+        assert.equal(
+          isProcessAlive(bridgePid),
+          false,
+          "bridge process must be dead after queue owner graceful shutdown — was it orphaned? (connected-client deadlock regression)",
+        );
+
+        // Lock file must be released.
+        assert.equal(
+          await fileExists(lockPath),
+          false,
+          "lock file must be gone after graceful shutdown",
+        );
+
+        lines.close();
       } finally {
         queueSocket?.destroy();
         if (child.exitCode == null && child.signalCode == null) {

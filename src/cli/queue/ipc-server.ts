@@ -122,6 +122,7 @@ export class SessionQueueOwner {
   private readonly onQueueDepthChanged?: (queueDepth: number) => void;
   private readonly pending: QueueTask[] = [];
   private readonly waiters: Array<(task: QueueTask | undefined) => void> = [];
+  private readonly activeSockets = new Set<net.Socket>();
   private closed = false;
 
   private constructor(
@@ -194,6 +195,18 @@ export class SessionQueueOwner {
       task.close();
     }
     this.emitQueueDepth();
+
+    // Destroy tracked sockets so server.close() can resolve promptly even
+    // when a client is still connected (e.g. in waitForCompletion).  Without
+    // this, server.close() waits for all existing connections to drain;
+    // a connected client would block the drain past the external SIGKILL grace,
+    // letting terminateProcess() kill the owner before the bridge was killed.
+    // Clients already handle unexpected disconnects gracefully (the error is
+    // caught on the client side and converted to a retryable error).
+    for (const socket of this.activeSockets) {
+      socket.destroy();
+    }
+    this.activeSockets.clear();
 
     await new Promise<void>((resolve) => {
       this.server.close(() => resolve());
@@ -508,6 +521,11 @@ export class SessionQueueOwner {
 
   private handleConnection(socket: net.Socket): void {
     socket.setEncoding("utf8");
+
+    this.activeSockets.add(socket);
+    socket.once("close", () => {
+      this.activeSockets.delete(socket);
+    });
 
     if (this.closed) {
       writeQueueMessage(
