@@ -1156,7 +1156,7 @@ class QuietOutputFormatter implements OutputFormatter {
     timestamp?: string;
   }): void {
     const qualifier = params.detailCode ? `${params.code} ${params.detailCode}` : params.code;
-    this.stderr.write(`[acpx] error: ${qualifier} ${params.message.replace(/\n/g, " ")}\n`);
+    this.stderr.write(`[acpx] error: ${qualifier} ${params.message.replace(/\r\n?|\n/g, " ")}\n`);
   }
 
   onPermissionEscalation(_event: PermissionEscalationEvent): void {

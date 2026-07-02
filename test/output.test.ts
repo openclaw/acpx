@@ -648,3 +648,25 @@ test("quiet formatter onError collapses multi-line message to a single stderr li
   );
   assert.equal(stderrStr, "[acpx] error: RUNTIME line one line two line three\n");
 });
+
+test("quiet formatter onError collapses CRLF line endings in message to a single stderr line", () => {
+  // Windows-style \r\n line endings must be collapsed the same way as \n.
+  // A lone \r (old Mac style) is also normalised.
+  const stdout = new CaptureWriter();
+  const stderr = new CaptureWriter();
+  const formatter = createOutputFormatter("quiet", { stdout, stderr });
+
+  formatter.onError({
+    code: "RUNTIME",
+    message: "line one\r\nline two\r\nline three",
+  });
+
+  assert.equal(stdout.toString(), "");
+  const stderrStr = stderr.toString();
+  assert.equal(
+    stderrStr.split("\n").filter(Boolean).length,
+    1,
+    "stderr must be a single line when the message contains embedded CRLF newlines",
+  );
+  assert.equal(stderrStr, "[acpx] error: RUNTIME line one line two line three\n");
+});
