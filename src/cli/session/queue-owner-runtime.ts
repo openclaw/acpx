@@ -255,23 +255,25 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     }
   };
 
-  // Idempotent shutdown: safe to invoke from both the signal handler (via
-  // withInterrupt's onInterrupt callback) and the finally block below.
-  let closeStarted = false;
-  const doShutdown = async (): Promise<void> => {
-    if (closeStarted) {
-      return;
+  // Shared-promise shutdown: both the signal handler (withInterrupt's
+  // onInterrupt callback) and the finally block below call doShutdown().
+  // Using a shared promise means the second caller awaits the SAME cleanup
+  // instead of returning immediately, so runSessionQueueOwner never returns
+  // before releaseQueueOwnerLease has executed.
+  let shutdownPromise: Promise<void> | null = null;
+  const doShutdown = (): Promise<void> => {
+    if (!shutdownPromise) {
+      shutdownPromise = closeQueueOwnerRuntime({
+        lease,
+        owner,
+        heartbeatTimer,
+        turnController,
+        sharedClient,
+        sessionId: options.sessionId,
+        verbose: options.verbose,
+      });
     }
-    closeStarted = true;
-    await closeQueueOwnerRuntime({
-      lease,
-      owner,
-      heartbeatTimer,
-      turnController,
-      sharedClient,
-      sessionId: options.sessionId,
-      verbose: options.verbose,
-    });
+    return shutdownPromise;
   };
 
   try {

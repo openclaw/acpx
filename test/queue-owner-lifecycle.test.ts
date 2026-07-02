@@ -36,7 +36,9 @@ async function waitUntil(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await condition()) {return;}
+    if (await condition()) {
+      return;
+    }
     await new Promise<void>((resolve) => setTimeout(resolve, pollMs));
   }
   throw new Error(`Condition not met within ${timeoutMs}ms`);
@@ -59,6 +61,15 @@ function waitForProcessExit(
 }
 
 describe("queue owner lifecycle — graceful SIGTERM shutdown", () => {
+  // Implementation note: doShutdown() uses a shared Promise (not a boolean
+  // flag) so that both the signal handler (withInterrupt's onInterrupt
+  // callback) and the finally block await the SAME cleanup.  With a boolean
+  // flag the finally block would return immediately while cleanup was still
+  // in progress, causing runSessionQueueOwner to return before
+  // releaseQueueOwnerLease executed (floating promise / orphaned lock file).
+  // The tests below verify the lock file is gone synchronously after process
+  // exit, which only holds if both callers fully awaited cleanup.
+
   it("exits with code 0 and releases its lease when it receives SIGTERM", async () => {
     if (process.platform === "win32") {
       // SIGTERM semantics differ on Windows; skip this test.
@@ -200,6 +211,92 @@ describe("queue owner lifecycle — graceful SIGTERM shutdown", () => {
           await fileExists(lockPath),
           false,
           "lock file must be gone after graceful shutdown — lease was not released",
+        );
+      } finally {
+        if (child.exitCode == null && child.signalCode == null) {
+          child.kill("SIGKILL");
+        }
+      }
+    });
+  });
+
+  it("releases lease even when doShutdown is invoked concurrently from signal and finally block", async () => {
+    // Regression test for the shared-promise fix.
+    //
+    // SIGTERM fires while the queue owner is in nextTask().  withInterrupt's
+    // onInterrupt callback calls doShutdown() (first invocation), which
+    // starts closeQueueOwnerRuntime().  The resulting InterruptedError is
+    // then caught, the finally block runs, and it calls doShutdown() again
+    // (second invocation).
+    //
+    // With the old boolean guard the second invocation returned immediately
+    // without awaiting the in-progress cleanup.  runSessionQueueOwner could
+    // therefore return before releaseQueueOwnerLease had run, leaving the
+    // lock file on disk.
+    //
+    // With the shared-promise fix both invocations await the same Promise,
+    // so the process only exits after cleanup is fully complete.
+    if (process.platform === "win32") {
+      return;
+    }
+
+    await withTempHome("acpx-lifecycle-concurrent-shutdown-", async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      await fs.mkdir(cwd, { recursive: true });
+
+      const record = makeSessionRecord({
+        acpxRecordId: "lifecycle-concurrent-shutdown-test",
+        acpSessionId: "lifecycle-concurrent-shutdown-session",
+        agentCommand: `node ${JSON.stringify(MOCK_AGENT_PATH)}`,
+        cwd,
+      });
+      await writeSessionRecordFile(homeDir, record);
+
+      const lockPath = queueLockFilePath(record.acpxRecordId, homeDir);
+      const socketPath = queueSocketPath(record.acpxRecordId, homeDir);
+
+      const payload = JSON.stringify({
+        sessionId: record.acpxRecordId,
+        permissionMode: "approve-reads",
+      });
+
+      const child = spawn(process.execPath, [CLI_PATH, "__queue-owner"], {
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          ACPX_QUEUE_OWNER_PAYLOAD: payload,
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+
+      const stderrChunks: Buffer[] = [];
+      child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+
+      try {
+        // Wait until the owner is inside nextTask() — signal handlers live.
+        await waitUntil(() => fileExists(socketPath));
+
+        assert.equal(await fileExists(lockPath), true, "lock file must exist before SIGTERM");
+
+        // Send SIGTERM — this triggers the concurrent doShutdown scenario.
+        child.kill("SIGTERM");
+
+        const { code, signal } = await waitForProcessExit(child);
+        const stderr = Buffer.concat(stderrChunks).toString("utf8");
+
+        assert.equal(
+          signal,
+          null,
+          `process should not have been killed by a signal; stderr=${stderr}`,
+        );
+        assert.equal(code, 0, `expected exit code 0 (graceful); stderr=${stderr}`);
+
+        // Lock file must be gone immediately after process exit — not
+        // eventually.  A floating cleanup promise would leave it on disk.
+        assert.equal(
+          await fileExists(lockPath),
+          false,
+          "lock file must be gone after graceful shutdown — shared shutdown promise was not awaited",
         );
       } finally {
         if (child.exitCode == null && child.signalCode == null) {
