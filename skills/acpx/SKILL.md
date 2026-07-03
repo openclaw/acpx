@@ -184,6 +184,7 @@ Behavior:
 - `set-mode` mode ids are adapter-defined; unsupported values are rejected by the adapter (often `Invalid params`).
 - `set`: calls ACP `session/set_config_option`.
 - For codex, reasoning effort is selected through advertised ACP model ids when the adapter reports model variants.
+- For OpenClaw, provider-backed model ids such as `xai/grok-build-0.1` are selectable only when the connected OpenClaw ACP bridge advertises them.
 - `--model <id>`: Claude-compatible adapters may consume session creation metadata; other agents must advertise a model config option or legacy `models` metadata.
 - `set model <id>`: uses `session/set_config_option` for advertised model config options and preserves `session/set_model` for explicitly advertised legacy models.
 - `set-mode`/`set` route through queue-owner IPC when active, otherwise reconnect directly.

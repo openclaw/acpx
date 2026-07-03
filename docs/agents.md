@@ -53,6 +53,32 @@ See [Prompting](prompting.md), [Sessions](sessions.md), and [Session control](se
 
 Notes that override or extend the cross-agent behavior live below.
 
+### Pi
+
+- Built-in name: `pi`
+- Default command: `npx pi-acp`
+- Upstream: [mariozechner/pi](https://github.com/mariozechner/pi)
+
+### OpenClaw
+
+- Built-in name: `openclaw`
+- Default command: `openclaw acp`
+- Upstream: [openclaw/openclaw](https://github.com/openclaw/openclaw)
+
+See [OpenClaw](https://github.com/openclaw/acpx/blob/main/agents/OpenClaw.md) for OpenClaw-specific model selection notes, including xAI model ids that OpenClaw advertises through ACP.
+
+For repo-local OpenClaw checkouts, override the built-in command in `~/.acpx/config.json` so `acpx openclaw …` spawns the ACP bridge directly without the `pnpm` wrapper:
+
+```json
+{
+  "agents": {
+    "openclaw": {
+      "command": "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 node scripts/run-node.mjs acp --url ws://127.0.0.1:18789 --token-file ~/.openclaw/gateway.token --session agent:main:main"
+    }
+  }
+}
+```
+
 ### Codex
 
 - Built-in name: `codex`
@@ -70,29 +96,11 @@ Notes that override or extend the cross-agent behavior live below.
 - On Windows, `acpx` resolves the `claude.exe` executable from `PATH` before spawning so launches do not depend on shell-specific command lookup.
 - `--system-prompt` and `--append-system-prompt` forward through ACP `_meta.systemPrompt` on `session/new`, letting you replace or append to the Claude Code system prompt without leaving a persistent session. The value persists in `session_options.system_prompt` so ensure/reuse keeps the override. Other agents ignore the field.
 
-### Pi
+### Gemini
 
-- Built-in name: `pi`
-- Default command: `npx pi-acp`
-- Upstream: [mariozechner/pi](https://github.com/mariozechner/pi)
-
-### OpenClaw
-
-- Built-in name: `openclaw`
-- Default command: `openclaw acp`
-- Upstream: [openclaw/openclaw](https://github.com/openclaw/openclaw)
-
-For repo-local OpenClaw checkouts, override the built-in command in `~/.acpx/config.json` so `acpx openclaw …` spawns the ACP bridge directly without the `pnpm` wrapper:
-
-```json
-{
-  "agents": {
-    "openclaw": {
-      "command": "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 node scripts/run-node.mjs acp --url ws://127.0.0.1:18789 --token-file ~/.openclaw/gateway.token --session agent:main:main"
-    }
-  }
-}
-```
+- Built-in name: `gemini`
+- Default command: `gemini --acp`
+- Upstream: [google/gemini-cli](https://github.com/google/gemini-cli)
 
 ### Cursor
 
@@ -105,12 +113,6 @@ If your Cursor install exposes ACP as `agent acp` instead of `cursor-agent acp`,
 ```json
 { "agents": { "cursor": { "command": "agent acp" } } }
 ```
-
-### Gemini
-
-- Built-in name: `gemini`
-- Default command: `gemini --acp`
-- Upstream: [google/gemini-cli](https://github.com/google/gemini-cli)
 
 ### Copilot
 
