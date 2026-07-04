@@ -25,6 +25,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- CLI/queue: drain active turns before releasing queue-owner leases and preserve typed retryable shutdown responses while terminating agent bridges. Thanks @superWorldSavior.
+
 ## 2026.6.23 (v0.11.1)
 
 ### Changes

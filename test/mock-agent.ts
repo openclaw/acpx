@@ -67,6 +67,9 @@ type MockAgentOptions = {
   replayLoadSessionUpdates: boolean;
   loadReplayText: string;
   ignoreSigterm: boolean;
+  cancelDelayMs: number;
+  /** If set, the agent writes its PID to this path at startup (before ACP handshake). */
+  pidFile?: string;
 };
 
 type SessionState = {
@@ -374,7 +377,9 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let replayLoadSessionUpdates = false;
   let loadReplayText = "replayed load session update";
   let ignoreSigterm = false;
+  let cancelDelayMs = 0;
   let hangOnNewSession = false;
+  let pidFile: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -508,8 +513,20 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
       continue;
     }
 
+    if (token === "--cancel-delay-ms") {
+      cancelDelayMs = parsePositiveIntegerOption(argv, index + 1, token);
+      index += 1;
+      continue;
+    }
+
     if (token === "--hang-on-new-session") {
       hangOnNewSession = true;
+      continue;
+    }
+
+    if (token === "--pid-file") {
+      pidFile = parseOptionValue(argv, index + 1, token);
+      index += 1;
       continue;
     }
 
@@ -578,6 +595,8 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     replayLoadSessionUpdates,
     loadReplayText,
     ignoreSigterm,
+    cancelDelayMs,
+    pidFile,
   };
 }
 
@@ -967,6 +986,9 @@ class MockAgent implements Agent {
   }
 
   async cancel(params: { sessionId: SessionId }): Promise<void> {
+    if (this.options.cancelDelayMs > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, this.options.cancelDelayMs));
+    }
     this.sessions.get(params.sessionId)?.pendingPrompt?.abort();
   }
 
@@ -1458,6 +1480,12 @@ const output = Writable.toWeb(process.stdout);
 const input = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>;
 const stream = ndJsonStream(output, input);
 const mockAgentOptions = parseMockAgentOptions(process.argv.slice(2));
+
+// Write PID to a file before doing anything else so that the parent can track
+// this bridge process and verify it is dead after queue-owner shutdown.
+if (mockAgentOptions.pidFile) {
+  writeFileSync(mockAgentOptions.pidFile, `${process.pid}\n`, "utf8");
+}
 
 if (mockAgentOptions.ignoreSigterm) {
   process.on("SIGTERM", () => {

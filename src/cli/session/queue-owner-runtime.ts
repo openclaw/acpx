@@ -43,6 +43,7 @@ import { runQueuedTask } from "./runtime.js";
 
 const QUEUE_OWNER_STARTUP_MAX_ATTEMPTS = 120;
 const QUEUE_OWNER_HEARTBEAT_INTERVAL_MS = 5_000;
+const QUEUE_OWNER_ACTIVE_TURN_CANCEL_GRACE_MS = 750;
 
 async function submitToRunningOwner(
   options: SessionSendOptions,
@@ -174,10 +175,11 @@ async function closeQueueOwnerRuntime(params: {
     clearInterval(params.heartbeatTimer);
   }
   params.turnController.beginClosing();
-  await params.owner?.close();
+  // Kill the bridge before draining IPC so it cannot outlive the owner.
   await params.sharedClient.close().catch(() => {
     // best effort while queue owner is shutting down
   });
+  await params.owner?.close();
   await writeQueueOwnerLifecycleSnapshot(params.sessionId, params.sharedClient);
   await releaseQueueOwnerLease(params.lease);
   if (params.verbose) {
@@ -196,6 +198,137 @@ async function writeQueueOwnerLifecycleSnapshot(
   } catch {
     // best effort - session may already be cleaned up
   }
+}
+
+async function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      promise.then(
+        () => true,
+        () => true,
+      ),
+      timeout,
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+type QueueOwnerShutdownController = {
+  readonly requested: boolean;
+  request: () => void;
+  setActiveTurn: (turn: Promise<void>) => void;
+  clearActiveTurn: (turn: Promise<void>) => void;
+  shutdown: () => Promise<void>;
+};
+
+function createQueueOwnerShutdownController(params: {
+  lease: QueueOwnerLease;
+  getOwner: () => SessionQueueOwner | undefined;
+  stopHeartbeat: () => void;
+  turnController: QueueOwnerTurnController;
+  sharedClient: AcpClient;
+  sessionId: string;
+  verbose?: boolean;
+}): QueueOwnerShutdownController {
+  let requested = false;
+  let activeTurn: Promise<void> | undefined;
+  let activeTurnShutdown: Promise<void> | undefined;
+  let shutdownPromise: Promise<void> | undefined;
+
+  const drainActiveTurn = async (): Promise<void> => {
+    const turn = activeTurn;
+    if (!turn) {
+      return;
+    }
+
+    void params.turnController.requestCancel().catch((error) => {
+      logDeferredCancelFailure(error, params.verbose);
+    });
+
+    if (!(await settlesWithin(turn, QUEUE_OWNER_ACTIVE_TURN_CANCEL_GRACE_MS))) {
+      // A bridge that ignores session/cancel must still be terminated before
+      // the external queue-owner SIGKILL deadline. Closing it forces the active
+      // turn to unwind; the lease remains held until that unwind completes.
+      await params.sharedClient.close().catch(() => {
+        // best effort while forcing active-turn cancellation
+      });
+    }
+    await turn.catch(() => {
+      // The main loop preserves the original turn result; shutdown only waits
+      // for its cleanup boundary before releasing the lease.
+    });
+  };
+
+  const request = (): void => {
+    requested = true;
+    params.stopHeartbeat();
+    params.getOwner()?.beginShutdown();
+    activeTurnShutdown ??= drainActiveTurn();
+  };
+
+  return {
+    get requested() {
+      return requested;
+    },
+    request,
+    setActiveTurn: (turn) => {
+      activeTurn = turn;
+    },
+    clearActiveTurn: (turn) => {
+      if (activeTurn === turn) {
+        activeTurn = undefined;
+      }
+    },
+    shutdown: () => {
+      request();
+      shutdownPromise ??= (async () => {
+        await activeTurnShutdown;
+        await closeQueueOwnerRuntime({
+          lease: params.lease,
+          owner: params.getOwner(),
+          heartbeatTimer: undefined,
+          turnController: params.turnController,
+          sharedClient: params.sharedClient,
+          sessionId: params.sessionId,
+          verbose: params.verbose,
+        });
+      })();
+      return shutdownPromise;
+    },
+  };
+}
+
+function applyRequestedShutdown(
+  owner: SessionQueueOwner,
+  shutdown: QueueOwnerShutdownController,
+): void {
+  if (shutdown.requested) {
+    owner.beginShutdown();
+  }
+}
+
+function startQueueOwnerHeartbeat(params: {
+  enabled: boolean;
+  lease: QueueOwnerLease;
+  owner: SessionQueueOwner;
+}): NodeJS.Timeout | undefined {
+  if (!params.enabled) {
+    return undefined;
+  }
+  return setInterval(() => {
+    void refreshQueueOwnerLease(params.lease, { queueDepth: params.owner.queueDepth() }).catch(
+      () => {
+        // best effort heartbeat refresh while owner is live
+      },
+    );
+  }, QUEUE_OWNER_HEARTBEAT_INTERVAL_MS);
 }
 
 export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): Promise<void> {
@@ -255,6 +388,29 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     }
   };
 
+  const shutdown = createQueueOwnerShutdownController({
+    lease,
+    getOwner: () => owner,
+    stopHeartbeat: () => {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = undefined;
+      }
+    },
+    turnController,
+    sharedClient,
+    sessionId: options.sessionId,
+    verbose: options.verbose,
+  });
+
+  const onSignal = (): void => {
+    shutdown.request();
+  };
+
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+  process.once("SIGHUP", onSignal);
+
   try {
     owner = await SessionQueueOwner.start(
       lease,
@@ -288,6 +444,8 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
       },
     );
 
+    applyRequestedShutdown(owner, shutdown);
+
     logQueueOwnerReady({
       sessionId: options.sessionId,
       ttlMs,
@@ -297,12 +455,11 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     await refreshQueueOwnerLease(lease, { queueDepth: owner.queueDepth() }).catch(() => {
       // best effort initial heartbeat
     });
-    heartbeatTimer = setInterval(() => {
-      void refreshQueueOwnerLease(lease, { queueDepth: owner?.queueDepth() ?? 0 }).catch(() => {
-        // best effort heartbeat
-      });
-    }, QUEUE_OWNER_HEARTBEAT_INTERVAL_MS);
-
+    heartbeatTimer = startQueueOwnerHeartbeat({
+      enabled: !shutdown.requested,
+      lease,
+      owner,
+    });
     let isFirstTask = true;
     while (true) {
       const pollTimeoutMs = isFirstTask ? initialTaskPollTimeoutMs : taskPollTimeoutMs;
@@ -312,7 +469,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
       }
       isFirstTask = false;
 
-      await runPromptTurn(async () => {
+      const turnPromise = runPromptTurn(async () => {
         try {
           await runQueuedTask(options.sessionId, task, {
             sharedClient,
@@ -330,22 +487,24 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
               turnController.markPromptActive();
               await applyPendingCancel();
             },
+            handleProcessInterrupts: false,
           });
         } finally {
           checkpointPerfMetricsCapture();
         }
       });
+      shutdown.setActiveTurn(turnPromise);
+      try {
+        await turnPromise;
+      } finally {
+        shutdown.clearActiveTurn(turnPromise);
+      }
     }
   } finally {
-    await closeQueueOwnerRuntime({
-      lease,
-      owner,
-      heartbeatTimer,
-      turnController,
-      sharedClient,
-      sessionId: options.sessionId,
-      verbose: options.verbose,
-    });
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+    process.off("SIGHUP", onSignal);
+    await shutdown.shutdown();
   }
 }
 

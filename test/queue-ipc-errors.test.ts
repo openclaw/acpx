@@ -624,6 +624,65 @@ test("SessionQueueOwner emits typed shutdown errors for pending prompts", async 
   });
 });
 
+test("SessionQueueOwner preserves request ids for clients arriving during shutdown", async () => {
+  await withTempHome(async () => {
+    const sessionId = "owner-shutdown-new-client";
+    const lease = await tryAcquireQueueOwnerLease(sessionId);
+    assert(lease);
+
+    const owner = await SessionQueueOwner.start(lease, {
+      cancelPrompt: async () => false,
+      closeSession: async () => false,
+      setSessionMode: async () => {
+        // no-op
+      },
+      setSessionModel: async () => {
+        // no-op
+      },
+      setSessionConfigOption: async () => ({
+        configOptions: [],
+      }),
+    });
+
+    try {
+      owner.beginShutdown();
+      const socket = await connectSocket(lease.socketPath);
+      const lines = readline.createInterface({ input: socket });
+      const iterator = lines[Symbol.asyncIterator]();
+      socket.write(
+        `${JSON.stringify({
+          type: "submit_prompt",
+          requestId: "req-during-shutdown",
+          ownerGeneration: lease.ownerGeneration,
+          message: "arrived during shutdown",
+          permissionMode: "approve-reads",
+          waitForCompletion: true,
+        })}\n`,
+      );
+
+      const payload = (await nextJsonLine(iterator)) as {
+        type: string;
+        requestId: string;
+        detailCode?: string;
+        origin?: string;
+        retryable?: boolean;
+        message: string;
+      };
+      assert.equal(payload.type, "error");
+      assert.equal(payload.requestId, "req-during-shutdown");
+      assert.equal(payload.detailCode, "QUEUE_OWNER_CLOSED");
+      assert.equal(payload.origin, "queue");
+      assert.equal(payload.retryable, true);
+      assert.match(payload.message, /shutting down/i);
+      lines.close();
+      socket.destroy();
+    } finally {
+      await owner.close();
+      await releaseQueueOwnerLease(lease);
+    }
+  });
+});
+
 test("SessionQueueOwner rejects no-wait prompts when queue depth exceeds the limit", async () => {
   await withTempHome(async () => {
     const lease = await tryAcquireQueueOwnerLease("owner-overloaded");

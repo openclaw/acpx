@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -286,4 +288,81 @@ test("terminateProcess and terminateQueueOwnerForSession handle live and missing
       stopProcess(keeper);
     }
   });
+});
+
+test("terminateProcess waits long enough for a process that delays 2s before exiting on SIGTERM", async () => {
+  // Regression test for the SIGTERM grace-period mismatch.
+  //
+  // A queue-owner's AcpClient.close() can take up to ~2 600 ms (stdin-close
+  // 100 ms + SIGTERM wait 1 500 ms + SIGKILL wait 1 000 ms).  The old
+  // PROCESS_EXIT_GRACE_MS of 1 500 ms would SIGKILL the owner before it
+  // finished closing its bridge.  PROCESS_SIGTERM_GRACE_MS = 4 000 ms gives
+  // sufficient headroom.
+  //
+  // This test spawns a Node.js process that defers its exit by 2 000 ms after
+  // receiving SIGTERM and verifies that terminateProcess() returns true without
+  // needing to escalate to SIGKILL (i.e. the process exits on its own within
+  // the 4 s window).
+  if (process.platform === "win32") {
+    // SIGTERM semantics differ on Windows.
+    return;
+  }
+
+  // The child writes "ready\n" to stderr once its SIGTERM handler is installed.
+  // We wait for that line before sending SIGTERM to avoid the race where the
+  // signal arrives before the handler is registered.
+  const script = `
+    process.on('SIGTERM', () => {
+      setTimeout(() => process.exit(0), 2_000);
+    });
+    process.stderr.write('ready\\n');
+    // Keep the event loop alive until SIGTERM arrives.
+    setInterval(() => {}, 60_000);
+  `;
+
+  const child = spawn(process.execPath, ["-e", script], {
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+
+  // Wait for the "ready" signal before sending SIGTERM.
+  await new Promise<void>((resolve, reject) => {
+    let buf = "";
+    const onData = (chunk: Buffer) => {
+      buf += chunk.toString();
+      if (buf.includes("ready")) {
+        child.stderr?.off("data", onData);
+        resolve();
+      }
+    };
+    child.stderr?.on("data", onData);
+    child.once("exit", () => reject(new Error("child exited before signalling ready")));
+  });
+
+  assert(child.pid, "child must have a pid");
+
+  try {
+    assert.equal(isProcessAlive(child.pid), true, "child must be alive before terminateProcess");
+    const result = await terminateProcess(child.pid);
+    assert.equal(result, true, "terminateProcess must return true");
+    assert.equal(isProcessAlive(child.pid), false, "process must be dead after terminateProcess");
+
+    // Wait for the ChildProcess object to pick up the close event so that
+    // exitCode / signalCode are populated.
+    if (child.exitCode == null && child.signalCode == null) {
+      await once(child, "close");
+    }
+
+    // The process should have exited with code 0 (clean exit via setTimeout),
+    // not killed by a signal, proving the 4 s SIGTERM grace was enough.
+    assert.equal(
+      child.signalCode,
+      null,
+      `process should have exited cleanly, not via signal ${child.signalCode}`,
+    );
+    assert.equal(child.exitCode, 0, "process must exit with code 0");
+  } finally {
+    if (child.exitCode == null && child.signalCode == null) {
+      child.kill("SIGKILL");
+    }
+  }
 });

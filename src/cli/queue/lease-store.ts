@@ -5,7 +5,14 @@ import { queueBaseDir, queueLockFilePath, queueSocketBaseDir, queueSocketPath } 
 
 export { isProcessAlive } from "../../process-liveness.js";
 
-const PROCESS_EXIT_GRACE_MS = 1_500;
+// Budget for graceful SIGTERM shutdown of a queue-owner process.
+// The owner runs AcpClient.close() during shutdown:
+//   stdin-close grace (100 ms) + SIGTERM wait (1 500 ms) + SIGKILL wait (1 000 ms) = 2 600 ms worst case.
+// We add ~1 400 ms of headroom for event-loop latency and process startup overhead → 4 000 ms.
+// If the owner does not exit within this window we escalate to SIGKILL.
+const PROCESS_SIGTERM_GRACE_MS = 4_000;
+// After SIGKILL the OS terminates the process almost immediately; 1 500 ms is generous.
+const PROCESS_SIGKILL_GRACE_MS = 1_500;
 const PROCESS_POLL_MS = 50;
 const QUEUE_OWNER_STALE_HEARTBEAT_MS = 15_000;
 
@@ -203,7 +210,7 @@ export async function terminateProcess(pid: number): Promise<boolean> {
     return false;
   }
 
-  if (await waitForProcessExit(pid, PROCESS_EXIT_GRACE_MS)) {
+  if (await waitForProcessExit(pid, PROCESS_SIGTERM_GRACE_MS)) {
     return true;
   }
 
@@ -213,7 +220,7 @@ export async function terminateProcess(pid: number): Promise<boolean> {
     return false;
   }
 
-  await waitForProcessExit(pid, PROCESS_EXIT_GRACE_MS);
+  await waitForProcessExit(pid, PROCESS_SIGKILL_GRACE_MS);
   return true;
 }
 

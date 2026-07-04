@@ -22,6 +22,8 @@ type QueueOwnerSocketLease = {
   ownerGeneration?: number;
 };
 
+const QUEUE_SOCKET_DRAIN_TIMEOUT_MS = 1_000;
+
 function makeQueueOwnerError(
   requestId: string,
   message: string,
@@ -122,6 +124,9 @@ export class SessionQueueOwner {
   private readonly onQueueDepthChanged?: (queueDepth: number) => void;
   private readonly pending: QueueTask[] = [];
   private readonly waiters: Array<(task: QueueTask | undefined) => void> = [];
+  private readonly sockets = new Set<net.Socket>();
+  private readonly taskSockets = new Set<net.Socket>();
+  private readonly drainingSockets = new Set<net.Socket>();
   private closed = false;
 
   private constructor(
@@ -168,7 +173,7 @@ export class SessionQueueOwner {
     return ownerRef.current;
   }
 
-  async close(): Promise<void> {
+  beginShutdown(): void {
     if (this.closed) {
       return;
     }
@@ -193,10 +198,28 @@ export class SessionQueueOwner {
       }
       task.close();
     }
+    for (const socket of this.sockets) {
+      if (!this.taskSockets.has(socket) && !this.drainingSockets.has(socket)) {
+        socket.destroy();
+      }
+    }
     this.emitQueueDepth();
+  }
+
+  async close(): Promise<void> {
+    this.beginShutdown();
 
     await new Promise<void>((resolve) => {
-      this.server.close(() => resolve());
+      const forceCloseTimer = setTimeout(() => {
+        for (const socket of this.sockets) {
+          socket.destroy();
+        }
+      }, QUEUE_SOCKET_DRAIN_TIMEOUT_MS);
+      forceCloseTimer.unref();
+      this.server.close(() => {
+        clearTimeout(forceCloseTimer);
+        resolve();
+      });
     });
   }
 
@@ -320,10 +343,20 @@ export class SessionQueueOwner {
         });
       })
       .finally(() => {
-        if (!options.socket.destroyed) {
-          options.socket.end();
-        }
+        this.endSocket(options.socket);
       });
+  }
+
+  private endSocket(socket: net.Socket): void {
+    if (socket.destroyed || this.drainingSockets.has(socket)) {
+      return;
+    }
+    this.taskSockets.delete(socket);
+    this.drainingSockets.add(socket);
+    socket.end(() => {
+      this.drainingSockets.delete(socket);
+      socket.destroy();
+    });
   }
 
   private failRequest(
@@ -338,7 +371,7 @@ export class SessionQueueOwner {
       }),
       ownerGeneration: this.ownerGeneration,
     });
-    socket.end();
+    this.endSocket(socket);
   }
 
   private parseRequestLine(socket: net.Socket, line: string): QueueRequest | undefined {
@@ -375,6 +408,25 @@ export class SessionQueueOwner {
       "Queue request targeted a stale queue owner generation",
       "QUEUE_OWNER_GENERATION_MISMATCH",
     );
+    return true;
+  }
+
+  private rejectClosedOwner(socket: net.Socket, request: QueueRequest): boolean {
+    if (!this.closed) {
+      return false;
+    }
+    writeQueueMessage(socket, {
+      ...makeQueueOwnerError(
+        request.requestId,
+        "Queue owner is shutting down",
+        "QUEUE_OWNER_CLOSED",
+        {
+          retryable: true,
+        },
+      ),
+      ownerGeneration: this.ownerGeneration,
+    });
+    this.endSocket(socket);
     return true;
   }
 
@@ -464,6 +516,7 @@ export class SessionQueueOwner {
     socket: net.Socket,
     request: Extract<QueueRequest, { type: "submit_prompt" }>,
   ): void {
+    this.taskSockets.add(socket);
     const task: QueueTask = {
       requestId: request.requestId,
       message: request.message,
@@ -485,9 +538,7 @@ export class SessionQueueOwner {
         });
       },
       close: () => {
-        if (!socket.destroyed) {
-          socket.end();
-        }
+        this.endSocket(socket);
       },
     };
 
@@ -507,18 +558,13 @@ export class SessionQueueOwner {
   }
 
   private handleConnection(socket: net.Socket): void {
+    this.sockets.add(socket);
     socket.setEncoding("utf8");
-
-    if (this.closed) {
-      writeQueueMessage(
-        socket,
-        makeQueueOwnerError("unknown", "Queue owner is closed", "QUEUE_OWNER_CLOSED", {
-          retryable: true,
-        }),
-      );
-      socket.end();
-      return;
-    }
+    socket.once("close", () => {
+      this.sockets.delete(socket);
+      this.taskSockets.delete(socket);
+      this.drainingSockets.delete(socket);
+    });
 
     let buffer = "";
     let handled = false;
@@ -530,7 +576,11 @@ export class SessionQueueOwner {
       handled = true;
 
       const request = this.parseRequestLine(socket, line);
-      if (!request || this.rejectStaleOwnerGeneration(socket, request)) {
+      if (
+        !request ||
+        this.rejectClosedOwner(socket, request) ||
+        this.rejectStaleOwnerGeneration(socket, request)
+      ) {
         return;
       }
       if (this.handleControlQueueRequest(socket, request)) {

@@ -80,6 +80,7 @@ type RunSessionPromptOptions = Omit<
   "errorEmissionPolicy" | "maxQueueDepth" | "sessionId" | "ttlMs" | "waitForCompletion"
 > & {
   sessionRecordId: string;
+  handleProcessInterrupts?: boolean;
   onClientAvailable?: (controller: ActiveSessionController) => void;
   onClientClosed?: () => void;
   onPromptActive?: () => Promise<void> | void;
@@ -490,6 +491,7 @@ function buildQueuedTaskRunOptions(
     onClientAvailable: options.onClientAvailable,
     onClientClosed: options.onClientClosed,
     onPromptActive: options.onPromptActive,
+    handleProcessInterrupts: options.handleProcessInterrupts,
     client: options.sharedClient,
   };
 }
@@ -545,6 +547,7 @@ export async function runQueuedTask(
     onClientAvailable?: (controller: ActiveSessionController) => void;
     onClientClosed?: () => void;
     onPromptActive?: () => Promise<void> | void;
+    handleProcessInterrupts?: boolean;
   },
 ): Promise<void> {
   const outputFormatter = task.waitForCompletion
@@ -907,50 +910,54 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     return response;
   };
 
+  const runPrompt = async (): Promise<SessionSendResult> => {
+    const { sessionId: activeSessionId, resumed, loadError } = await connectForPrompt();
+
+    await applyPromptModelIfAdvertised({
+      client,
+      sessionId: activeSessionId,
+      requestedModel: sessionOptions?.model,
+      record,
+      timeoutMs: options.timeoutMs,
+      suppressWarnings: options.suppressSdkConsoleErrors,
+    });
+    acpxState = cloneSessionAcpxState(record.acpx);
+
+    output.setContext({
+      sessionId: record.acpxRecordId,
+    });
+    await liveCheckpoint.checkpoint();
+
+    const response = await savePromptSuccess(await runPromptWithRetries(activeSessionId));
+    promptTurnActive = false;
+
+    return {
+      ...toPromptResult(response.stopReason, record.acpxRecordId, client),
+      record,
+      resumed,
+      loadError,
+    };
+  };
+
+  const handleInterrupt = async (): Promise<void> => {
+    await client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS);
+    applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
+    record.lastUsedAt = isoNow();
+    applyConversation(record, conversation);
+    record.acpx = acpxState;
+    await flushPendingMessages(false).catch(() => {
+      // best effort while process is being interrupted
+    });
+    if (ownClient) {
+      await client.close();
+    }
+  };
+
   try {
-    return await withInterrupt(
-      async () => {
-        const { sessionId: activeSessionId, resumed, loadError } = await connectForPrompt();
-
-        await applyPromptModelIfAdvertised({
-          client,
-          sessionId: activeSessionId,
-          requestedModel: sessionOptions?.model,
-          record,
-          timeoutMs: options.timeoutMs,
-          suppressWarnings: options.suppressSdkConsoleErrors,
-        });
-        acpxState = cloneSessionAcpxState(record.acpx);
-
-        output.setContext({
-          sessionId: record.acpxRecordId,
-        });
-        await liveCheckpoint.checkpoint();
-
-        const response = await savePromptSuccess(await runPromptWithRetries(activeSessionId));
-        promptTurnActive = false;
-
-        return {
-          ...toPromptResult(response.stopReason, record.acpxRecordId, client),
-          record,
-          resumed,
-          loadError,
-        };
-      },
-      async () => {
-        await client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS);
-        applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-        record.lastUsedAt = isoNow();
-        applyConversation(record, conversation);
-        record.acpx = acpxState;
-        await flushPendingMessages(false).catch(() => {
-          // best effort while process is being interrupted
-        });
-        if (ownClient) {
-          await client.close();
-        }
-      },
-    );
+    if (options.handleProcessInterrupts === false) {
+      return await runPrompt();
+    }
+    return await withInterrupt(runPrompt, handleInterrupt);
   } finally {
     if (options.verbose) {
       process.stderr.write(`[acpx] ${formatPerfMetric("prompt.total", stopTotalTimer())}\n`);
