@@ -1,5 +1,6 @@
 import { AcpClient } from "../../acp/client.js";
 import {
+  extractAcpError,
   formatErrorMessage,
   isRetryablePromptError,
   normalizeOutputError,
@@ -55,11 +56,13 @@ import {
 } from "../../session/persistence.js";
 import type {
   AcpJsonRpcMessage,
+  AcpMessageDirection,
   AuthPolicy,
   McpServer,
   NonInteractivePermissionPolicy,
   OutputErrorAcpPayload,
   OutputErrorCode,
+  OutputErrorEmissionPolicy,
   OutputErrorOrigin,
   OutputFormatter,
   PermissionEscalationEvent,
@@ -77,7 +80,7 @@ const INTERRUPT_CANCEL_WAIT_MS = 2_500;
 
 type RunSessionPromptOptions = Omit<
   SessionSendOptions,
-  "errorEmissionPolicy" | "maxQueueDepth" | "sessionId" | "ttlMs" | "waitForCompletion"
+  "maxQueueDepth" | "sessionId" | "ttlMs" | "waitForCompletion"
 > & {
   sessionRecordId: string;
   handleProcessInterrupts?: boolean;
@@ -87,6 +90,11 @@ type RunSessionPromptOptions = Omit<
 };
 
 type ActiveSessionController = QueueOwnerActiveSessionController;
+
+type BufferedAcpOutputMessage = {
+  direction: AcpMessageDirection;
+  message: AcpJsonRpcMessage;
+};
 
 class QueueTaskOutputFormatter implements OutputFormatter {
   private readonly requestId: string;
@@ -146,6 +154,81 @@ const DISCARD_OUTPUT_FORMATTER: OutputFormatter = {
   onPermissionEscalation() {},
   flush() {},
 };
+
+function markOutputAlreadyEmitted(error: unknown, outputAlreadyEmitted: boolean): void {
+  if (!outputAlreadyEmitted || !error || typeof error !== "object") {
+    return;
+  }
+  (error as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted = true;
+}
+
+async function runWithOptionalInterrupt<T>(options: {
+  handleProcessInterrupts?: boolean;
+  run: () => Promise<T>;
+  handleInterrupt: () => Promise<void>;
+}): Promise<T> {
+  if (options.handleProcessInterrupts === false) {
+    return await options.run();
+  }
+  return await withInterrupt(options.run, options.handleInterrupt);
+}
+
+function attachAcpErrorPayload(error: unknown, acp: OutputErrorAcpPayload | undefined): void {
+  if (!acp || !error || typeof error !== "object") {
+    return;
+  }
+  (error as { acp?: OutputErrorAcpPayload }).acp = acp;
+}
+
+function rendersAcpErrors(policy: OutputErrorEmissionPolicy | undefined): boolean {
+  return policy?.queueErrorAlreadyEmitted ?? true;
+}
+
+function normalizedErrorText(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function outboundAcpErrorMatches(error: unknown, acp: OutputErrorAcpPayload): boolean {
+  const errorText = normalizedErrorText(formatErrorMessage(error));
+  const details = (acp.data as { details?: unknown } | undefined)?.details;
+  const candidate =
+    typeof details === "string" && details.trim().length > 0 ? details : acp.message;
+  const candidateText = normalizedErrorText(candidate);
+  return errorText === candidateText || errorText.includes(candidateText);
+}
+
+class AcpErrorTracker {
+  private latestInbound: OutputErrorAcpPayload | undefined;
+  private readonly outbound: OutputErrorAcpPayload[] = [];
+
+  reset(): void {
+    this.latestInbound = undefined;
+    this.outbound.length = 0;
+  }
+
+  observe(
+    output: OutputFormatter,
+    direction: AcpMessageDirection,
+    message: AcpJsonRpcMessage,
+  ): void {
+    output.onAcpMessage(message);
+    const acp = extractAcpError(message);
+    if (!acp) {
+      return;
+    }
+    if (direction === "inbound") {
+      this.latestInbound = acp;
+      return;
+    }
+    this.outbound.push(acp);
+  }
+
+  match(error: unknown): OutputErrorAcpPayload | undefined {
+    return (
+      this.latestInbound ?? this.outbound.findLast((acp) => outboundAcpErrorMatches(error, acp))
+    );
+  }
+}
 
 function toPromptResult(
   stopReason: RunPromptResult["stopReason"],
@@ -366,6 +449,19 @@ function filterRecoverableLoadFallbackOutput(messages: AcpJsonRpcMessage[]): Acp
   });
 }
 
+function filterBufferedConnectOutput(
+  messages: BufferedAcpOutputMessage[],
+  loadError: string | undefined,
+): BufferedAcpOutputMessage[] {
+  if (loadError == null) {
+    return messages;
+  }
+  const filteredMessages = new Set(
+    filterRecoverableLoadFallbackOutput(messages.map(({ message }) => message)),
+  );
+  return messages.filter(({ message }) => filteredMessages.has(message));
+}
+
 function emitPromptRetryNotice(params: {
   error: unknown;
   delayMs: number;
@@ -483,6 +579,7 @@ function buildQueuedTaskRunOptions(
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     outputFormatter,
+    errorEmissionPolicy: { queueErrorAlreadyEmitted: true },
     timeoutMs: task.timeoutMs,
     suppressSdkConsoleErrors: task.suppressSdkConsoleErrors ?? options.suppressSdkConsoleErrors,
     verbose: options.verbose,
@@ -572,6 +669,7 @@ export async function runQueuedTask(
 async function runSessionPrompt(options: RunSessionPromptOptions): Promise<SessionSendResult> {
   const stopTotalTimer = startPerfTimer("runtime.prompt.total");
   const output = options.outputFormatter;
+  const shouldMarkAcpErrorsEmitted = rendersAcpErrors(options.errorEmissionPolicy);
   const record = await measurePerf("session.resolve_prompt_record", async () => {
     return await resolveSessionRecord(options.sessionRecordId);
   });
@@ -593,7 +691,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     return await SessionEventWriter.open(record);
   });
   const pendingMessages: AcpJsonRpcMessage[] = [];
-  const pendingConnectOutputMessages: AcpJsonRpcMessage[] = [];
+  const pendingConnectOutputMessages: BufferedAcpOutputMessage[] = [];
   const sessionOptions = mergeSessionOptions(
     options.sessionOptions,
     sessionOptionsFromRecord(record),
@@ -601,7 +699,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
   let bufferingConnectOutput = true;
   let promptTurnActive = false;
   let promptTurnHadSideEffects = false;
-  let sawAcpMessage = false;
+  const acpErrors = new AcpErrorTracker();
   let eventWriterClosed = false;
 
   const closeEventWriter = async (checkpoint: boolean): Promise<void> => {
@@ -683,16 +781,15 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
   });
   client.setEventHandlers({
     onAcpMessage: (direction, message) => {
-      sawAcpMessage = true;
       pendingMessages.push(message);
       options.onAcpMessage?.(direction, message);
     },
-    onAcpOutputMessage: (_direction, message) => {
+    onAcpOutputMessage: (direction, message) => {
       if (bufferingConnectOutput) {
-        pendingConnectOutputMessages.push(message);
+        pendingConnectOutputMessages.push({ direction, message });
         return;
       }
-      output.onAcpMessage(message);
+      acpErrors.observe(output, direction, message);
     },
     onSessionUpdate: (notification) => {
       if (promptTurnActive) {
@@ -764,12 +861,9 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
 
   const flushConnectOutput = (loadError?: string): void => {
     bufferingConnectOutput = false;
-    const messages =
-      loadError == null
-        ? pendingConnectOutputMessages
-        : filterRecoverableLoadFallbackOutput(pendingConnectOutputMessages);
-    for (const message of messages) {
-      output.onAcpMessage(message);
+    const outputMessages = filterBufferedConnectOutput(pendingConnectOutputMessages, loadError);
+    for (const { direction, message } of outputMessages) {
+      acpErrors.observe(output, direction, message);
     }
     pendingConnectOutputMessages.length = 0;
   };
@@ -822,6 +916,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
   };
 
   const runPromptAttempt = async (sessionId: string, attempt: number) => {
+    acpErrors.reset();
     const promptStartedAt = Date.now();
     const response = await measurePerf("runtime.prompt.agent_turn", async () => {
       return await runPromptTurn({
@@ -867,7 +962,11 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     promptTurnActive = false;
     applyLifecycleSnapshotToRecord(record, snapshot);
     emitPromptDisconnectNotice(snapshot, options.verbose);
-    const normalizedError = normalizeOutputError(error, { origin: "runtime" });
+    const matchedAcpError = acpErrors.match(error);
+    const normalizedError = normalizeOutputError(error, {
+      origin: "runtime",
+      acp: matchedAcpError,
+    });
     await flushPendingMessages(false).catch(() => {
       // best effort while bubbling prompt failure
     });
@@ -876,7 +975,9 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     applyConversation(record, conversation);
     record.acpx = acpxState;
     const propagated = error instanceof Error ? error : new Error(formatErrorMessage(error));
-    (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted = sawAcpMessage;
+    attachAcpErrorPayload(propagated, normalizedError.acp);
+    (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted =
+      matchedAcpError !== undefined && shouldMarkAcpErrorsEmitted;
     (propagated as { normalizedOutputError?: unknown }).normalizedOutputError = normalizedError;
     throw propagated;
   };
@@ -954,10 +1055,16 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
   };
 
   try {
-    if (options.handleProcessInterrupts === false) {
-      return await runPrompt();
-    }
-    return await withInterrupt(runPrompt, handleInterrupt);
+    return await runWithOptionalInterrupt({
+      handleProcessInterrupts: options.handleProcessInterrupts,
+      run: runPrompt,
+      handleInterrupt,
+    });
+  } catch (error) {
+    const matchedAcpError = acpErrors.match(error);
+    attachAcpErrorPayload(error, matchedAcpError);
+    markOutputAlreadyEmitted(error, matchedAcpError !== undefined && shouldMarkAcpErrorsEmitted);
+    throw error;
   } finally {
     if (options.verbose) {
       process.stderr.write(`[acpx] ${formatPerfMetric("prompt.total", stopTotalTimer())}\n`);
@@ -991,8 +1098,10 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
 
 export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult> {
   const output = options.outputFormatter;
+  const shouldMarkAcpErrorsEmitted = rendersAcpErrors(options.errorEmissionPolicy);
   let promptTurnActive = false;
   let promptTurnHadSideEffects = false;
+  const acpErrors = new AcpErrorTracker();
   const client = new AcpClient({
     agentCommand: options.agentCommand,
     cwd: absolutePath(options.cwd),
@@ -1006,7 +1115,9 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
     onAcpMessage: options.onAcpMessage,
-    onAcpOutputMessage: (_direction, message) => output.onAcpMessage(message),
+    onAcpOutputMessage: (direction, message) => {
+      acpErrors.observe(output, direction, message);
+    },
     onSessionUpdate: (notification) => {
       if (promptTurnActive) {
         promptTurnHadSideEffects = true;
@@ -1027,6 +1138,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
   });
 
   const runExecPromptAttempt = async (sessionId: string) => {
+    acpErrors.reset();
     return await measurePerf("runtime.exec.prompt", async () => {
       return await withTimeout(client.prompt(sessionId, options.prompt), options.timeoutMs);
     });
@@ -1090,6 +1202,11 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
         await client.close();
       },
     );
+  } catch (error) {
+    const matchedAcpError = acpErrors.match(error);
+    attachAcpErrorPayload(error, matchedAcpError);
+    markOutputAlreadyEmitted(error, matchedAcpError !== undefined && shouldMarkAcpErrorsEmitted);
+    throw error;
   } finally {
     await client.close();
   }
@@ -1108,6 +1225,7 @@ export async function sendSessionDirect(options: SessionSendOptions): Promise<Se
     authPolicy: options.authPolicy,
     terminal: options.terminal,
     outputFormatter: options.outputFormatter,
+    errorEmissionPolicy: options.errorEmissionPolicy,
     onAcpMessage: options.onAcpMessage,
     onSessionUpdate: options.onSessionUpdate,
     onClientOperation: options.onClientOperation,

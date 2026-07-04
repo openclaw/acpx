@@ -500,7 +500,7 @@ export function resolveOutputPolicy(format: OutputFormat, jsonStrict: boolean): 
     suppressReads: false,
     suppressNonJsonStderr: jsonStrict,
     queueErrorAlreadyEmitted: format !== "quiet",
-    suppressSdkConsoleErrors: jsonStrict,
+    suppressSdkConsoleErrors: jsonStrict || format === "quiet",
   };
 }
 

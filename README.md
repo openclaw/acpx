@@ -310,7 +310,7 @@ acpx --format json codex exec 'review this PR' \
 # json-strict: suppresses non-JSON stderr output (requires --format json)
 acpx --format json --json-strict codex exec 'review this PR'
 
-# quiet: final assistant text only
+# quiet: final assistant text on stdout; one structured stderr line on failure
 acpx --format quiet codex 'give me a 3-line summary'
 
 # suppress read payloads while keeping the selected output format
@@ -319,7 +319,7 @@ acpx --suppress-reads codex exec 'inspect the repo and report tool usage'
 
 - `text`: human-readable stream with assistant text and tool updates
 - `json`: raw ACP NDJSON stream for automation
-- `quiet`: final assistant text only
+- `quiet`: final assistant text on stdout; failed prompts emit one structured `[acpx] error:` line on stderr
 - `--suppress-reads`: replace raw read-file contents with `[read output suppressed]` in `text` and `json` output
 
 JSON events include a stable envelope for correlation:

@@ -20,6 +20,7 @@ import {
 import { EXIT_CODES } from "../types.js";
 import type {
   OutputFormat,
+  OutputFormatter,
   OutputPolicy,
   SessionAgentContent,
   SessionRecord,
@@ -137,19 +138,28 @@ async function readPromptFromFile(
   return prompt;
 }
 
-function applyPermissionExitCode(result: {
-  permissionStats: {
-    requested: number;
-    approved: number;
-    denied: number;
-    cancelled: number;
-  };
-}): void {
+function applyPermissionExitCode(
+  result: {
+    permissionStats: {
+      requested: number;
+      approved: number;
+      denied: number;
+      cancelled: number;
+    };
+  },
+  quietOutput?: OutputFormatter,
+): void {
   const stats = result.permissionStats;
   const deniedOrCancelled = stats.denied + stats.cancelled;
 
   if (stats.requested > 0 && stats.approved === 0 && deniedOrCancelled > 0) {
     process.exitCode = EXIT_CODES.PERMISSION_DENIED;
+    quietOutput?.onError({
+      code: "PERMISSION_DENIED",
+      origin: "runtime",
+      message: "Permission request denied or cancelled",
+    });
+    quietOutput?.flush();
   }
 }
 
@@ -368,7 +378,7 @@ export async function handlePrompt(
     return;
   }
 
-  applyPermissionExitCode(result);
+  applyPermissionExitCode(result, outputPolicy.format === "quiet" ? outputFormatter : undefined);
 
   if (globalFlags.verbose && result.loadError) {
     process.stderr.write(
@@ -433,6 +443,9 @@ export async function handleExec(
     authPolicy: globalFlags.authPolicy,
     terminal: globalFlags.terminal,
     outputFormatter,
+    errorEmissionPolicy: {
+      queueErrorAlreadyEmitted: outputPolicy.queueErrorAlreadyEmitted,
+    },
     suppressSdkConsoleErrors: outputPolicy.suppressSdkConsoleErrors,
     timeoutMs: globalFlags.timeout,
     verbose: globalFlags.verbose,
@@ -445,7 +458,7 @@ export async function handleExec(
     },
   });
 
-  applyPermissionExitCode(result);
+  applyPermissionExitCode(result, outputPolicy.format === "quiet" ? outputFormatter : undefined);
 }
 
 function printCancelResultByFormat(

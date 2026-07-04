@@ -409,6 +409,13 @@ async function emitRequestedError(
     return;
   }
 
+  if (outputPolicy.format === "quiet") {
+    const formatter = createOutputFormatter("quiet");
+    formatter.onError(normalized);
+    formatter.flush();
+    return;
+  }
+
   if (!outputPolicy.suppressNonJsonStderr) {
     process.stderr.write(`${normalized.message}\n`);
     if (outputPolicy.format === "text") {

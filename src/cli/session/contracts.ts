@@ -50,6 +50,7 @@ export type RunOnceOptions = {
   authPolicy?: AuthPolicy;
   terminal?: boolean;
   outputFormatter: OutputFormatter;
+  errorEmissionPolicy?: OutputErrorEmissionPolicy;
   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onSessionUpdate?: (notification: SessionNotification) => void;
   onClientOperation?: (operation: ClientOperation) => void;

@@ -517,14 +517,14 @@ When a prompt is already in flight for a session, `acpx` uses a per-session queu
 
 - `text` (default): human-readable stream
 - `json`: raw ACP NDJSON stream for automation
-- `quiet`: assistant text only
+- `quiet`: assistant text on stdout; failed prompts emit one structured `[acpx] error:` line on stderr
 - `--format json --json-strict`: same ACP NDJSON stream, with non-JSON stderr output suppressed
 
 ### Prompt/exec output behavior
 
 - `text`: assistant text, tool status blocks, client-operation logs, plan updates, and `[done] <reason>`
 - `json`: one raw ACP JSON-RPC message per line
-- `quiet`: concatenated assistant text only
+- `quiet`: concatenated assistant text on stdout; failed prompts emit one structured `[acpx] error:` line on stderr
 
 When `--suppress-reads` is enabled:
 

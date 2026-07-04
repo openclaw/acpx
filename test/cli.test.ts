@@ -1488,23 +1488,16 @@ test("queued prompt failures remain visible in quiet mode", async () => {
       });
 
       const writeResult = await runCli(
-        [
-          "--cwd",
-          cwd,
-          "--format",
-          "quiet",
-          "--non-interactive-permissions",
-          "fail",
-          "codex",
-          "prompt",
-          `write ${path.join(cwd, "x.txt")} hi`,
-        ],
+        ["--cwd", cwd, "--format", "quiet", "codex", "prompt", "retryable-error-once"],
         homeDir,
       );
 
-      assert.equal(writeResult.code, 5);
-      assert.match(writeResult.stdout, /error:\s*Internal error/i);
-      assert.match(writeResult.stderr, /Permission prompt unavailable in non-interactive mode/);
+      assert.equal(writeResult.code, 1);
+      assert.equal(writeResult.stdout, "");
+      assert.equal(
+        writeResult.stderr,
+        "[acpx] error: RUNTIME QUEUE_RUNTIME_PROMPT_FAILED Internal error\n",
+      );
     } finally {
       if (blocker.exitCode === null && blocker.signalCode == null) {
         blocker.kill("SIGKILL");
@@ -1513,6 +1506,156 @@ test("queued prompt failures remain visible in quiet mode", async () => {
         });
       }
     }
+  });
+});
+
+test("queued setup failures emit exactly one structured quiet diagnostic", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify(
+        {
+          agents: {
+            codex: {
+              command: `${MOCK_AGENT_COMMAND} --set-session-model-fails`,
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const session = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "sessions", "new"],
+      homeDir,
+    );
+    assert.equal(session.code, 0, session.stderr);
+
+    const blocker = spawn(
+      process.execPath,
+      [CLI_PATH, "--cwd", cwd, "codex", "prompt", "sleep 1500"],
+      {
+        env: { ...process.env, HOME: homeDir },
+        stdio: ["ignore", "ignore", "ignore"],
+      },
+    );
+
+    try {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 200);
+      });
+
+      const writeResult = await runCli(
+        [
+          "--cwd",
+          cwd,
+          "--format",
+          "quiet",
+          "--model",
+          "fast-model",
+          "codex",
+          "prompt",
+          "queued model failure",
+        ],
+        homeDir,
+      );
+
+      assert.equal(writeResult.code, 1);
+      assert.equal(writeResult.stdout, "");
+      assert.equal(
+        writeResult.stderr,
+        "[acpx] error: RUNTIME QUEUE_RUNTIME_PROMPT_FAILED setSessionModel failed\n",
+      );
+    } finally {
+      if (blocker.exitCode === null && blocker.signalCode == null) {
+        blocker.kill("SIGKILL");
+        await new Promise<void>((resolve) => {
+          blocker.once("close", () => resolve());
+        });
+      }
+    }
+  });
+});
+
+test("direct prompt failures emit exactly one structured quiet diagnostic", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const result = await runCli(
+      [
+        "--agent",
+        MOCK_AGENT_COMMAND,
+        "--cwd",
+        cwd,
+        "--format",
+        "quiet",
+        "exec",
+        "retryable-error-once",
+      ],
+      homeDir,
+    );
+
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "[acpx] error: RUNTIME Internal error\n");
+  });
+});
+
+test("quiet successful prompts do not report handled ACP client errors", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const result = await runCli(
+      [
+        "--agent",
+        MOCK_AGENT_COMMAND,
+        "--cwd",
+        cwd,
+        "--format",
+        "quiet",
+        "exec",
+        `read ${path.join(cwd, "missing.txt")}`,
+      ],
+      homeDir,
+    );
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /^error:/i);
+    assert.equal(result.stderr, "");
+  });
+});
+
+test("quiet successful retries do not report intermediate ACP errors", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const result = await runCli(
+      [
+        "--agent",
+        MOCK_AGENT_COMMAND,
+        "--cwd",
+        cwd,
+        "--format",
+        "quiet",
+        "--prompt-retries",
+        "1",
+        "exec",
+        "retryable-error-once",
+      ],
+      homeDir,
+    );
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, "recovered after retry\n");
+    assert.equal(result.stderr, "");
   });
 });
 
@@ -1559,6 +1702,10 @@ test("non-queued write permission denial exits with code 5", async () => {
 
     assert.equal(writeResult.code, 5);
     assert.match(writeResult.stdout, /error:\s*Internal error/i);
+    assert.equal(
+      writeResult.stderr,
+      "[acpx] error: PERMISSION_DENIED Permission request denied or cancelled\n",
+    );
   });
 });
 
@@ -1611,6 +1758,20 @@ test("prompt exits with NO_SESSION when no session exists (no auto-create)", asy
         `⚠ No acpx session found \\(searched up to ${escapedCwd}\\)\\.\\nCreate one: acpx codex sessions new\\n?`,
       ),
     );
+  });
+});
+
+test("quiet prompt emits a structured NO_SESSION diagnostic", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace", "packages", "app");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const result = await runCli(["--cwd", cwd, "--format", "quiet", "codex", "hello"], homeDir);
+
+    assert.equal(result.code, 4);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr.split("\n").filter(Boolean).length, 1);
+    assert.match(result.stderr, /^\[acpx\] error: NO_SESSION /);
   });
 });
 

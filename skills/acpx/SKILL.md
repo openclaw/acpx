@@ -411,7 +411,7 @@ Use `--format <fmt>`:
 
 - `text` (default): human-readable stream with updates/tool status and done line
 - `json`: NDJSON event stream (good for automation)
-- `quiet`: final assistant text only
+- `quiet`: final assistant text on stdout; failed prompts emit one structured `[acpx] error:` line on stderr
 - `--suppress-reads`: replace raw read-file contents with `[read output suppressed]` in `text` and `json` output
 - `--json-strict`: pair with `--format json` to suppress non-JSON stderr noise (logs, banners) for downstream consumers
 

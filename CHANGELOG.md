@@ -27,6 +27,8 @@ Repo: https://github.com/openclaw/acpx
 
 - CLI/queue: drain active turns before releasing queue-owner leases and preserve typed retryable shutdown responses while terminating agent bridges. Thanks @superWorldSavior.
 
+- CLI/quiet output: emit exactly one structured stderr diagnostic for direct and queued prompt failures without adding diagnostics to stdout. Thanks @superWorldSavior.
+
 ## 2026.6.23 (v0.11.1)
 
 ### Changes

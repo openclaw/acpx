@@ -113,6 +113,17 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function parseJsonRpcErrorSummary(message: AcpJsonRpcMessage): string | undefined {
+  const fallback = parseJsonRpcErrorMessage(message);
+  if (!fallback) {
+    return undefined;
+  }
+
+  const error = asRecord((message as { error?: unknown }).error);
+  const details = asRecord(error?.data)?.details;
+  return typeof details === "string" && details.trim().length > 0 ? details.trim() : fallback;
+}
+
 function extractJsonRpcMethod(message: AnyMessage): string | undefined {
   return Object.hasOwn(message, "method")
     ? (message as { method?: unknown }).method?.toString()
@@ -786,7 +797,7 @@ class TextOutputFormatter implements OutputFormatter {
       return;
     }
 
-    const errorMessage = parseJsonRpcErrorMessage(message);
+    const errorMessage = parseJsonRpcErrorSummary(message);
     if (errorMessage) {
       this.onError({
         code: "RUNTIME",
@@ -1146,7 +1157,7 @@ class QuietOutputFormatter implements OutputFormatter {
     }
   }
 
-  onError(_params: {
+  onError(params: {
     code: OutputErrorCode;
     detailCode?: string;
     origin?: OutputErrorOrigin;
@@ -1155,7 +1166,9 @@ class QuietOutputFormatter implements OutputFormatter {
     acp?: OutputErrorAcpPayload;
     timestamp?: string;
   }): void {
-    // no-op in quiet mode
+    const qualifier = params.detailCode ? `${params.code} ${params.detailCode}` : params.code;
+    const message = preferredAcpErrorDetails(params.acp) ?? params.message;
+    this.stderr.write(`[acpx] error: ${qualifier} ${message.replace(/\r\n?|\n/g, " ")}\n`);
   }
 
   onPermissionEscalation(_event: PermissionEscalationEvent): void {
@@ -1258,6 +1271,11 @@ class QuietOutputFormatter implements OutputFormatter {
 
     return undefined;
   }
+}
+
+function preferredAcpErrorDetails(acp: OutputErrorAcpPayload | undefined): string | undefined {
+  const details = asRecord(acp?.data)?.details;
+  return typeof details === "string" && details.trim().length > 0 ? details.trim() : undefined;
 }
 
 export function createOutputFormatter(

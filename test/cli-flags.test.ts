@@ -464,7 +464,7 @@ test("resolveOutputPolicy maps json-strict output behavior", () => {
     suppressReads: false,
     suppressNonJsonStderr: false,
     queueErrorAlreadyEmitted: false,
-    suppressSdkConsoleErrors: false,
+    suppressSdkConsoleErrors: true,
   });
 });
 

@@ -1170,7 +1170,8 @@ test("integration: non-Devin ACP launch rejects Devin diagnostics extension requ
         result.stdout,
         /extension request accepted: _cognition\.ai\/request_diagnostics/,
       );
-      assert.match(result.stderr, /"Method not found": _cognition\.ai\/request_diagnostics/);
+      assert.match(result.stdout, /^error:/i);
+      assert.equal(result.stderr, "");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
