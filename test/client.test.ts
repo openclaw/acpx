@@ -358,7 +358,6 @@ test("AcpClient selects Grok Build cached_token as agent-managed auth", async ()
       const selection = internals.selectAuthMethod?.([{ id: "cached_token" }]);
       assert.deepEqual(selection, {
         methodId: "cached_token",
-        credential: "agent-managed",
         source: "agent",
       });
 

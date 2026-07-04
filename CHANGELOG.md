@@ -19,6 +19,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Agents/built-ins: add Grok Build via `grok agent stdio`, including cached-login and `XAI_API_KEY` authentication selection. Thanks @TheAngryPit.
+
 ### Breaking
 
 ### Fixes

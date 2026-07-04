@@ -237,7 +237,7 @@ type PendingConnectionRequest = {
 
 type AuthSelection = {
   methodId: string;
-  credential: string;
+  credential?: string;
   source: "env" | "config" | "agent";
 };
 
@@ -1616,7 +1616,6 @@ export class AcpClient {
     }
     return {
       methodId,
-      credential: "agent-managed",
       source: "agent",
     };
   }
