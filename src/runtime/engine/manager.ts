@@ -387,7 +387,7 @@ function commandRecord(
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
-  return value as { name?: unknown; description?: unknown; has_input?: unknown };
+  return value;
 }
 
 function trimmedField(value: unknown): string | undefined {

@@ -33,7 +33,7 @@ function resolveStructuredPromptPayload(parsed: Record<string, unknown>): {
     const params = parsed.params;
     if (isRecord(params) && isRecord(params.update)) {
       const update = params.update;
-      const tag = asOptionalString(update.sessionUpdate) as AcpSessionUpdateTag | undefined;
+      const tag = asOptionalString(update.sessionUpdate);
       return {
         type: tag ?? "",
         payload: update,
@@ -42,7 +42,7 @@ function resolveStructuredPromptPayload(parsed: Record<string, unknown>): {
     }
   }
 
-  const sessionUpdate = asOptionalString(parsed.sessionUpdate) as AcpSessionUpdateTag | undefined;
+  const sessionUpdate = asOptionalString(parsed.sessionUpdate);
   if (sessionUpdate) {
     return {
       type: sessionUpdate,
@@ -52,7 +52,7 @@ function resolveStructuredPromptPayload(parsed: Record<string, unknown>): {
   }
 
   const type = asTrimmedString(parsed.type);
-  const tag = asOptionalString(parsed.tag) as AcpSessionUpdateTag | undefined;
+  const tag = asOptionalString(parsed.tag);
   return {
     type,
     payload: parsed,

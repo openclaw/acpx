@@ -56,7 +56,7 @@ export function action(
   const node: ActionNodeDefinition = {
     nodeType: "action",
     ...definition,
-  } as ActionNodeDefinition;
+  };
   assertValidActionNodeDefinition(node);
   return node;
 }

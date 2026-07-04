@@ -53,10 +53,10 @@ test("parseReplayViewerCliArgs rejects invalid flags", () => {
 test("replay viewer CLI prints help without starting a server", async () => {
   const lines: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = ((chunk: string | Uint8Array) => {
+  process.stdout.write = (chunk: string | Uint8Array) => {
     lines.push(String(chunk));
     return true;
-  }) as typeof process.stdout.write;
+  };
 
   try {
     await replayViewerMain(["--help"]);
@@ -104,10 +104,10 @@ test("replay viewer CLI status prints running details", async () => {
 
   const lines: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = ((chunk: string | Uint8Array) => {
+  process.stdout.write = (chunk: string | Uint8Array) => {
     lines.push(String(chunk));
     return true;
-  }) as typeof process.stdout.write;
+  };
 
   try {
     await replayViewerMain(["status", "--port", String(viewerServer.port)]);

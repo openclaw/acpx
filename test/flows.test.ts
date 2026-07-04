@@ -510,7 +510,7 @@ test("defineFlow validates flow definition shape before execution", () => {
             },
           },
         ],
-      } as unknown as FlowDefinition),
+      }),
     /Invalid flow definition: edges\.0: edge must define exactly one of to or switch/,
   );
 

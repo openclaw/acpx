@@ -288,7 +288,7 @@ async function readConfigFile(filePath: string): Promise<ConfigFileLoadResult> {
       throw new Error(`Invalid config in ${filePath}: expected top-level JSON object`);
     }
     return {
-      config: parsed as ConfigFileShape,
+      config: parsed,
       exists: true,
     };
   } catch (error) {

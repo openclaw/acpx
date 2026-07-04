@@ -65,12 +65,10 @@ export async function withCapturedStderrWrites<T>(
 ): Promise<T> {
   const originalWrite = process.stderr.write.bind(process.stderr);
   const writes: string[] = [];
-  (process.stderr as unknown as { write: typeof process.stderr.write }).write = ((
-    chunk: string,
-  ) => {
+  (process.stderr as unknown as { write: typeof process.stderr.write }).write = (chunk: string) => {
     writes.push(chunk);
     return true;
-  }) as typeof process.stderr.write;
+  };
 
   try {
     return await run(writes);

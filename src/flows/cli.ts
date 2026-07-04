@@ -248,10 +248,7 @@ async function loadFlowRuntimeModule(
     };
     const loader = register({ namespace: randomUUID() });
     try {
-      return (await loader.import(flowUrl, import.meta.url)) as {
-        default?: unknown;
-        "module.exports"?: unknown;
-      };
+      return await loader.import(flowUrl, import.meta.url);
     } finally {
       await loader.unregister();
     }

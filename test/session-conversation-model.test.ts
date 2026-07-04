@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { modelStateFromConfigOptions } from "../src/acp/model-support.js";
 import { mergeConnectedModelState } from "../src/cli/session/runtime.js";
 import { applyConfigOptionsToState } from "../src/session/config-options.js";
@@ -28,7 +27,7 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
         sessionUpdate: "agent_message_chunk",
         content: { type: "text", text: "hi " },
       },
-    } as SessionNotification,
+    },
     "2026-02-27T10:00:01.000Z",
   );
 
@@ -41,7 +40,7 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
         sessionUpdate: "agent_thought_chunk",
         content: { type: "text", text: "thinking" },
       },
-    } as SessionNotification,
+    },
     "2026-02-27T10:00:02.000Z",
   );
 
@@ -58,7 +57,7 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
         kind: "execute",
         rawInput: { command: "ls" },
       },
-    } as SessionNotification,
+    },
     "2026-02-27T10:00:03.000Z",
   );
 
@@ -73,7 +72,7 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
         status: "completed",
         rawOutput: { exitCode: 0 },
       },
-    } as SessionNotification,
+    },
     "2026-02-27T10:00:04.000Z",
   );
 
@@ -86,7 +85,7 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
         sessionUpdate: "available_commands_update",
         availableCommands: [{ name: "create_plan", description: "create plan" }],
       },
-    } as SessionNotification,
+    },
     "2026-02-27T10:00:05.000Z",
   );
 
@@ -99,7 +98,7 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
         sessionUpdate: "current_mode_update",
         currentModeId: "code",
       },
-    } as SessionNotification,
+    },
     "2026-02-27T10:00:06.000Z",
   );
 
@@ -113,7 +112,7 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
         title: "My Session",
         updatedAt: "2026-02-27T10:00:06.000Z",
       },
-    } as SessionNotification,
+    },
     "2026-02-27T10:00:06.000Z",
   );
 
@@ -138,7 +137,7 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
           },
         },
       },
-    } as SessionNotification,
+    },
     "2026-02-27T10:00:07.000Z",
   );
 
@@ -227,7 +226,7 @@ test("config option updates synchronize and clear advertised model state", () =>
         },
       ],
     },
-  } as SessionNotification);
+  });
 
   assert.equal(acpxState.current_model_id, "smart-model");
   assert.deepEqual(acpxState.available_models, ["fast-model", "smart-model"]);
@@ -238,7 +237,7 @@ test("config option updates synchronize and clear advertised model state", () =>
       sessionUpdate: "config_option_update",
       configOptions: [],
     },
-  } as SessionNotification);
+  });
 
   assert.equal(acpxState.current_model_id, undefined);
   assert.equal(acpxState.available_models, undefined);

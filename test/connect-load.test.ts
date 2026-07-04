@@ -77,10 +77,9 @@ const ACTIVE_CONTROLLER: ConnectedSessionController & {
   requestCancelActivePrompt: async () => false,
   setSessionMode: async () => {},
   setSessionModel: async () => {},
-  setSessionConfigOption: async () =>
-    ({
-      configOptions: [],
-    }) as SetSessionConfigOptionResponse,
+  setSessionConfigOption: async () => ({
+    configOptions: [],
+  }),
 };
 
 function buildModelsState(currentModelId: string): SessionModelState {

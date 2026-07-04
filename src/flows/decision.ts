@@ -67,7 +67,7 @@ export function decisionEdge<TChoice extends string>(args: {
     from: args.from,
     switch: {
       on: `$.${field}`,
-      cases: args.cases as Record<string, string>,
+      cases: args.cases,
     },
   };
 }

@@ -64,7 +64,7 @@ export function StepTimeline({
           onChange={(event) => onSeek(Number(event.target.value))}
           onPointerUp={(event) => onSeekCommit(Number((event.target as HTMLInputElement).value))}
           onKeyUp={(event) => onSeekCommit(Number((event.target as HTMLInputElement).value))}
-          onBlur={(event) => onSeekCommit(Number((event.target as HTMLInputElement).value))}
+          onBlur={(event) => onSeekCommit(Number(event.target.value))}
           aria-label={`Replay position step ${selectedIndex + 1} of ${steps.length}`}
         />
       </div>

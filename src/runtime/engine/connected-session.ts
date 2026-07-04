@@ -141,7 +141,7 @@ export async function withConnectedSession<T>(
           verbose: options.verbose,
           activeController,
           onClientAvailable: (controller) => {
-            options.onClientAvailable?.(controller as FullConnectedSessionController);
+            options.onClientAvailable?.(controller);
             notifiedClientAvailable = true;
           },
           onConnectedRecord: options.onConnectedRecord,

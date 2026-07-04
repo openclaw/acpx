@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import readline from "node:readline";
 import test from "node:test";
-import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import {
   SessionQueueOwner,
   releaseQueueOwnerLease,
@@ -38,7 +37,7 @@ test("SessionQueueOwner handles control requests and nextTask timeouts", async (
         configRequests.push({ id: configId, value });
         return {
           configOptions: [],
-        } as SetSessionConfigOptionResponse;
+        };
       },
     });
 
@@ -160,10 +159,9 @@ test("SessionQueueOwner enqueues fire-and-forget prompts and rejects invalid own
         setSessionModel: async () => {
           // no-op
         },
-        setSessionConfigOption: async () =>
-          ({
-            configOptions: [],
-          }) as SetSessionConfigOptionResponse,
+        setSessionConfigOption: async () => ({
+          configOptions: [],
+        }),
       },
       {
         maxQueueDepth: 4,

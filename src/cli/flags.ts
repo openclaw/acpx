@@ -385,7 +385,7 @@ export function resolveSessionNameFromFlags(
     return globalSession;
   }
 
-  const parentOpts = asRecord(command.parent?.opts?.() as unknown);
+  const parentOpts = asRecord(command.parent?.opts?.());
   return parseOptionalSessionName(parentOpts?.session);
 }
 
@@ -399,7 +399,7 @@ export function addPromptInputOption(command: Command): Command {
 }
 
 export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig): GlobalFlags {
-  const opts = asRecord(command.optsWithGlobals() as unknown) ?? {};
+  const opts = asRecord(command.optsWithGlobals()) ?? {};
   const format = parseOutputFormat(stringOption(opts.format) ?? config.format ?? "text");
   const jsonStrict = opts.jsonStrict === true;
   const verbose = opts.verbose === true;

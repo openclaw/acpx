@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import readline from "node:readline";
 import test from "node:test";
-import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import {
   MAX_MESSAGE_BUFFER_SIZE,
   SessionQueueOwner,
@@ -526,10 +525,9 @@ test("SessionQueueOwner emits typed invalid request payload errors", async () =>
       setSessionModel: async () => {
         // no-op
       },
-      setSessionConfigOption: async () =>
-        ({
-          configOptions: [],
-        }) as SetSessionConfigOptionResponse,
+      setSessionConfigOption: async () => ({
+        configOptions: [],
+      }),
     });
 
     const socket = await connectSocket(lease.socketPath);
@@ -574,10 +572,9 @@ test("SessionQueueOwner emits typed shutdown errors for pending prompts", async 
       setSessionModel: async () => {
         // no-op
       },
-      setSessionConfigOption: async () =>
-        ({
-          configOptions: [],
-        }) as SetSessionConfigOptionResponse,
+      setSessionConfigOption: async () => ({
+        configOptions: [],
+      }),
     });
 
     const socket = await connectSocket(lease.socketPath);
@@ -643,10 +640,9 @@ test("SessionQueueOwner rejects no-wait prompts when queue depth exceeds the lim
         setSessionModel: async () => {
           // no-op
         },
-        setSessionConfigOption: async () =>
-          ({
-            configOptions: [],
-          }) as SetSessionConfigOptionResponse,
+        setSessionConfigOption: async () => ({
+          configOptions: [],
+        }),
       },
       {
         maxQueueDepth: 1,

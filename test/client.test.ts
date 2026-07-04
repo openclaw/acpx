@@ -1042,8 +1042,8 @@ test("AcpClient session update handling drains queued callbacks and swallows han
   const internals = asInternals(client);
 
   await Promise.all([
-    internals.handleSessionUpdate?.({ sessionId: "good" } as never),
-    internals.handleSessionUpdate?.({ sessionId: "bad" } as never),
+    internals.handleSessionUpdate?.({ sessionId: "good" }),
+    internals.handleSessionUpdate?.({ sessionId: "bad" }),
   ]);
   await internals.waitForSessionUpdateDrain?.(0, 100);
 
@@ -1052,7 +1052,7 @@ test("AcpClient session update handling drains queued callbacks and swallows han
   assert.equal(internals.processedSessionUpdates, 2);
 
   internals.suppressSessionUpdates = true;
-  await internals.handleSessionUpdate?.({ sessionId: "suppressed" } as never);
+  await internals.handleSessionUpdate?.({ sessionId: "suppressed" });
   assert.deepEqual(notifications, ["good", "bad"]);
 });
 

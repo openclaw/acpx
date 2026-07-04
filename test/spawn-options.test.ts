@@ -591,7 +591,7 @@ test("resolveClaudeCodeExecutable respects case-insensitive env var on Windows",
 });
 
 test("resolveClaudeCodeExecutable returns undefined on non-Windows platforms", () => {
-  const result = resolveClaudeCodeExecutable("linux", { PATH: "/usr/bin" } as NodeJS.ProcessEnv);
+  const result = resolveClaudeCodeExecutable("linux", { PATH: "/usr/bin" });
   assert.equal(result, undefined);
 });
 

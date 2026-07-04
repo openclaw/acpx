@@ -163,62 +163,61 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
     startedAt: "2026-01-01T00:00:00.000Z",
     running: true,
   };
-  const createClient = (): FakeClient =>
-    ({
-      initializeResult: {
-        protocolVersion: 1,
-        agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } },
-      },
-      start: async () => {},
-      close: async () => {},
-      createSession: async (cwd) => {
-        assert.equal(cwd, "/workspace");
-        return {
-          sessionId: "new-session",
-          agentSessionId: "agent-session",
-          configOptions: [
-            {
-              id: "mode",
-              name: "Mode",
-              type: "select",
-              currentValue: "ask",
-              options: [{ value: "ask", name: "Ask" }],
-            },
-          ],
-        };
-      },
-      loadSession: async () => {
-        throw new Error("loadSession should not be called");
-      },
-      resumeSession: async (sessionId, cwd) => {
-        assert.equal(sessionId, "resume-session");
-        assert.equal(cwd, "/workspace");
-        return {
-          agentSessionId: "resumed-agent",
-          configOptions: [
-            {
-              id: "model",
-              name: "Model",
-              type: "select",
-              currentValue: "fast",
-              options: [{ value: "fast", name: "Fast" }],
-            },
-          ],
-        };
-      },
-      hasReusableSession: () => false,
-      supportsLoadSession: () => true,
-      supportsResumeSession: () => true,
-      loadSessionWithOptions: async () => ({ agentSessionId: "runtime-session" }),
-      getAgentLifecycleSnapshot: () => lifecycle,
-      prompt: async () => ({ stopReason: "end_turn" }),
-      requestCancelActivePrompt: async () => false,
-      hasActivePrompt: () => false,
-      setSessionMode: async () => {},
-      setSessionConfigOption: async () => {},
-      clearEventHandlers: () => {},
-      setEventHandlers: () => {},
-    }) as FakeClient;
+  const createClient = (): FakeClient => ({
+    initializeResult: {
+      protocolVersion: 1,
+      agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } },
+    },
+    start: async () => {},
+    close: async () => {},
+    createSession: async (cwd) => {
+      assert.equal(cwd, "/workspace");
+      return {
+        sessionId: "new-session",
+        agentSessionId: "agent-session",
+        configOptions: [
+          {
+            id: "mode",
+            name: "Mode",
+            type: "select",
+            currentValue: "ask",
+            options: [{ value: "ask", name: "Ask" }],
+          },
+        ],
+      };
+    },
+    loadSession: async () => {
+      throw new Error("loadSession should not be called");
+    },
+    resumeSession: async (sessionId, cwd) => {
+      assert.equal(sessionId, "resume-session");
+      assert.equal(cwd, "/workspace");
+      return {
+        agentSessionId: "resumed-agent",
+        configOptions: [
+          {
+            id: "model",
+            name: "Model",
+            type: "select",
+            currentValue: "fast",
+            options: [{ value: "fast", name: "Fast" }],
+          },
+        ],
+      };
+    },
+    hasReusableSession: () => false,
+    supportsLoadSession: () => true,
+    supportsResumeSession: () => true,
+    loadSessionWithOptions: async () => ({ agentSessionId: "runtime-session" }),
+    getAgentLifecycleSnapshot: () => lifecycle,
+    prompt: async () => ({ stopReason: "end_turn" }),
+    requestCancelActivePrompt: async () => false,
+    hasActivePrompt: () => false,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {},
+    setEventHandlers: () => {},
+  });
   let constructed = 0;
   const manager = new AcpRuntimeManager(
     createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
@@ -2816,33 +2815,32 @@ function createModelsClientFactory(options: {
   models?: SessionModelState;
   onSetSessionModel?: (sessionId: string, modelId: string) => void;
 }): () => FakeClient {
-  return (): FakeClient =>
-    ({
-      initializeResult: { protocolVersion: 1 },
-      start: async () => {},
-      close: async () => {},
-      createSession: async () => ({
-        sessionId: "models-session",
-        agentSessionId: "models-agent",
-        ...(options.models !== undefined ? { models: options.models } : {}),
-      }),
-      loadSession: async () => ({ agentSessionId: "models-agent" }),
-      hasReusableSession: () => false,
-      supportsLoadSession: () => true,
-      supportsResumeSession: () => false,
-      loadSessionWithOptions: async () => ({ agentSessionId: "models-agent" }),
-      getAgentLifecycleSnapshot: () => ({ pid: 1, startedAt: "now", running: true }),
-      prompt: async () => ({ stopReason: "end_turn" }),
-      requestCancelActivePrompt: async () => false,
-      hasActivePrompt: () => false,
-      setSessionMode: async () => {},
-      setSessionConfigOption: async () => {},
-      setSessionModel: async (sessionId: string, modelId: string) => {
-        options.onSetSessionModel?.(sessionId, modelId);
-      },
-      clearEventHandlers: () => {},
-      setEventHandlers: () => {},
-    }) as unknown as FakeClient;
+  return (): FakeClient => ({
+    initializeResult: { protocolVersion: 1 },
+    start: async () => {},
+    close: async () => {},
+    createSession: async () => ({
+      sessionId: "models-session",
+      agentSessionId: "models-agent",
+      ...(options.models !== undefined ? { models: options.models } : {}),
+    }),
+    loadSession: async () => ({ agentSessionId: "models-agent" }),
+    hasReusableSession: () => false,
+    supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
+    loadSessionWithOptions: async () => ({ agentSessionId: "models-agent" }),
+    getAgentLifecycleSnapshot: () => ({ pid: 1, startedAt: "now", running: true }),
+    prompt: async () => ({ stopReason: "end_turn" }),
+    requestCancelActivePrompt: async () => false,
+    hasActivePrompt: () => false,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    setSessionModel: async (sessionId: string, modelId: string) => {
+      options.onSetSessionModel?.(sessionId, modelId);
+    },
+    clearEventHandlers: () => {},
+    setEventHandlers: () => {},
+  });
 }
 
 test("AcpRuntimeManager getStatus surfaces models advertised by the agent", async () => {
@@ -2941,7 +2939,7 @@ test("AcpRuntimeManager forwards sessionOptions to createClient on fresh session
     createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
     {
       clientFactory: (options) => {
-        factoryCalls.push(options as Record<string, unknown>);
+        factoryCalls.push(options);
         return {
           initializeResult: { protocolVersion: 1, agentCapabilities: {} },
           start: async () => {},
@@ -2991,7 +2989,7 @@ test("AcpRuntimeManager persists sessionOptions { append } and model/allowedTool
     createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
     {
       clientFactory: (options) => {
-        factoryCalls.push(options as Record<string, unknown>);
+        factoryCalls.push(options);
         return {
           initializeResult: { protocolVersion: 1, agentCapabilities: {} },
           start: async () => {},
