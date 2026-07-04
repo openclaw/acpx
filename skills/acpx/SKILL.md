@@ -90,6 +90,7 @@ Friendly agent names resolve to commands:
 - `copilot` -> `copilot --acp --stdio`
 - `droid` -> `droid exec --output-format acp` (`factory-droid` and `factorydroid` also resolve to `droid`)
 - `fast-agent` -> `uvx fast-agent-mcp acp`
+- `grok-build` -> `grok agent stdio`
 - `iflow` -> `iflow --experimental-acp`
 - `kilocode` -> `npx -y @kilocode/cli acp`
 - `kimi` -> `kimi acp`

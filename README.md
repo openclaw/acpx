@@ -356,6 +356,7 @@ Built-ins:
 | `copilot`    | native (`copilot --acp --stdio`)                                            | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
 | `droid`      | native (`droid exec --output-format acp`)                                   | [Factory Droid](https://www.factory.ai)                                                                         |
 | `fast-agent` | `uvx fast-agent-mcp acp`                                                    | [fast-agent](https://fast-agent.ai)                                                                             |
+| `grok-build` | native (`grok agent stdio`)                                                 | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
 | `iflow`      | native (`iflow --experimental-acp`)                                         | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
 | `kilocode`   | `npx -y @kilocode/cli acp`                                                  | [Kilocode](https://kilocode.ai)                                                                                 |
 | `kimi`       | native (`kimi acp`)                                                         | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |

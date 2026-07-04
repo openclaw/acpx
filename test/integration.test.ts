@@ -848,6 +848,33 @@ test("integration: built-in fast-agent resolves to uvx fast-agent-mcp acp", asyn
   });
 });
 
+test("integration: built-in grok-build agent resolves to grok agent stdio", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-grok-build-"));
+
+    try {
+      await writeFakeGrokBuildAgent(fakeBinDir);
+
+      const result = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "quiet", "grok-build", "exec", "echo hello"],
+        homeDir,
+        {
+          env: {
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /hello/);
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: built-in iflow agent resolves to iflow --experimental-acp", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -4484,6 +4511,41 @@ async function writeFakeIflowAgent(binDir: string): Promise<void> {
       "#!/bin/sh",
       'if [ "$1" = "--experimental-acp" ]; then',
       "  shift",
+      "fi",
+      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
+      "",
+    ].join("\n"),
+    { encoding: "utf8", mode: 0o755 },
+  );
+}
+
+async function writeFakeGrokBuildAgent(binDir: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(binDir, "grok.cmd"),
+      [
+        "@echo off",
+        "setlocal",
+        'if not "%~1"=="agent" exit /b 2',
+        'if not "%~2"=="stdio" exit /b 2',
+        `"${process.execPath}" "${MOCK_AGENT_PATH}" %3 %4 %5 %6 %7 %8 %9`,
+        "",
+      ].join("\r\n"),
+      { encoding: "utf8" },
+    );
+    return;
+  }
+
+  await fs.writeFile(
+    path.join(binDir, "grok"),
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "agent" ] && [ "$2" = "stdio" ]; then',
+      "  shift",
+      "  shift",
+      "else",
+      '  echo "unexpected grok command: $*" 1>&2',
+      "  exit 2",
       "fi",
       `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
       "",

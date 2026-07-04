@@ -13,6 +13,7 @@ date: 2026-02-17
 - `openclaw -> openclaw acp`
 - `codex -> npx @zed-industries/codex-acp`
 - `claude -> npx -y @agentclientprotocol/claude-agent-acp`
+- `grok-build -> grok agent stdio`
 
 The built-in agents table lives in [../README.md](../README.md). Additional built-in agent docs live under [../agents/README.md](../agents/README.md).
 

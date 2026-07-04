@@ -20,6 +20,7 @@ The default agent for top-level commands like `acpx exec â€¦` and `acpx prompt â
 | `copilot`    | `copilot --acp --stdio`                        | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
 | `droid`      | `droid exec --output-format acp`               | [Factory Droid](https://www.factory.ai)                                                                         |
 | `fast-agent` | `uvx fast-agent-mcp acp`                       | [fast-agent](https://fast-agent.ai/)                                                                            |
+| `grok-build` | `grok agent stdio`                             | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
 | `iflow`      | `iflow --experimental-acp`                     | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
 | `kilocode`   | `npx -y @kilocode/cli acp`                     | [Kilocode](https://kilocode.ai)                                                                                 |
 | `kimi`       | `kimi acp`                                     | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
@@ -134,6 +135,14 @@ If your Cursor install exposes ACP as `agent acp` instead of `cursor-agent acp`,
 `acpx fast-agent` starts fast-agent through its ACP entrypoint. It requires `uvx` on `PATH`.
 
 Configure model/provider settings through fast-agent environment variables, fast-agent configuration, or an `acpx` agent override with additional `fast-agent-mcp acp` arguments.
+
+### Grok Build
+
+- Built-in name: `grok-build`
+- Default command: `grok agent stdio`
+- Upstream: [xAI Grok Build](https://docs.x.ai/build/overview)
+
+`acpx grok-build` uses the installed `grok` CLI ACP server. Install Grok Build and complete its normal authentication flow before using it through `acpx`. If the Grok ACP server advertises `cached_token`, `acpx` asks it to authenticate with its agent-managed cached login. If it advertises `xai.api_key`, `acpx` also accepts `XAI_API_KEY` for this built-in.
 
 ### Qoder
 

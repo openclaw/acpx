@@ -33,7 +33,7 @@ acpx flow run examples/flows/branch.flow.ts \
 
 ## What acpx does
 
-- **One CLI, every coding agent.** Built-in adapters for Codex, Claude, Pi, OpenClaw, Gemini, Cursor, Copilot, Droid, Qwen, Qoder, Trae, and more — plus `--agent` for any custom ACP server.
+- **One CLI, every coding agent.** Built-in adapters for Codex, Claude, Pi, OpenClaw, Gemini, Cursor, Copilot, Droid, Grok Build, Qwen, Qoder, Trae, and more — plus `--agent` for any custom ACP server.
 - **Persistent sessions.** Multi-turn conversations survive across invocations, scoped per repo. `-s <name>` runs parallel workstreams (`backend`, `docs`, `pr-842`).
 - **Queue-aware prompts.** Submit while a turn is running; new prompts queue and drain in order. `--no-wait` enqueues and returns. `cancel` aborts cooperatively without tearing the session down.
 - **Crash-resistant.** Dead agent processes are detected and reloaded automatically. `Ctrl+C` sends ACP `session/cancel` before any force-kill.

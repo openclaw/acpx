@@ -54,6 +54,11 @@ test("fast-agent built-in runs the ACP entrypoint through uvx", () => {
   assert.equal(resolveAgentCommand("fast-agent"), "uvx fast-agent-mcp acp");
 });
 
+test("grok-build built-in runs the Grok Build ACP entrypoint", () => {
+  assert.equal(AGENT_REGISTRY["grok-build"], "grok agent stdio");
+  assert.equal(resolveAgentCommand("grok-build"), "grok agent stdio");
+});
+
 test("mux built-in runs the coder/mux ACP stdio bridge through npx", () => {
   assert.equal(AGENT_REGISTRY.mux, "npx -y mux@^0.27.0 acp");
   assert.equal(resolveAgentCommand("mux"), "npx -y mux@^0.27.0 acp");
@@ -74,6 +79,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
   assert.deepEqual(agents.slice(7), [
     "droid",
     "fast-agent",
+    "grok-build",
     "iflow",
     "kilocode",
     "kimi",
