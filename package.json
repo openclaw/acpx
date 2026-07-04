@@ -83,7 +83,7 @@
     "@agentclientprotocol/sdk": "^1.1.0",
     "commander": "^15.0.0",
     "skillflag": "^0.2.0",
-    "tsx": "^4.22.4",
+    "tsx": "^4.23.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
