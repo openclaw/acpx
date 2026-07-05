@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -23,6 +25,7 @@ import {
   UnsupportedPromptContentError,
 } from "../src/errors.js";
 import { isProcessAlive } from "../src/process-liveness.js";
+import { LIFELINE_HELPER_ENV } from "./lifeline-test-helper.js";
 import { fileExists, withTempDir } from "./runtime-test-helpers.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
@@ -119,6 +122,10 @@ type ClientInternals = {
     kill: (signal?: NodeJS.Signals) => void;
     unref: () => void;
   };
+  agentGroupLeader: boolean;
+  lifelineWatchdog?: ChildProcess;
+  startLifelineWatchdog?: (child: ChildProcess) => Promise<void>;
+  stopLifelineWatchdog?: () => void;
   activePrompt?:
     | {
         sessionId: string;
@@ -1282,6 +1289,60 @@ test("AcpClient start fails fast when the agent exits during initialize", async 
   assert(Date.now() - startedAt < 2_000);
 });
 
+test("AcpClient start group-kills bridge descendants when initialize fails", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("lifeline watchdog is POSIX-only");
+    return;
+  }
+
+  await withTempDir("acpx-client-init-failure-grandchild-", async (tempDir) => {
+    const helper = await writeLifelineFixture(tempDir);
+    const grandchildPidFile = path.join(tempDir, "grandchild.pid");
+    const client = makeClient({
+      agentCommand: [
+        JSON.stringify(process.execPath),
+        JSON.stringify(MOCK_AGENT_PATH),
+        "--fail-initialize",
+        "--grandchild-pid-file",
+        JSON.stringify(grandchildPidFile),
+      ].join(" "),
+    });
+    let grandchildPid: number | undefined;
+
+    await withEnv({ [LIFELINE_HELPER_ENV]: helper }, async () => {
+      try {
+        const startResult = client.start().then(
+          () => ({ type: "resolved" as const }),
+          (error: unknown) => ({ type: "rejected" as const, error }),
+        );
+        const sawGrandchildPid = await waitUntil(() => fileExists(grandchildPidFile));
+        assert.equal(sawGrandchildPid, true, "grandchild PID file must be written");
+        grandchildPid = Number((await fs.readFile(grandchildPidFile, "utf8")).trim());
+        assert(
+          Number.isInteger(grandchildPid) && grandchildPid > 0,
+          "grandchild PID must be valid",
+        );
+
+        const result = await startResult;
+        assert.equal(result.type, "rejected");
+        assert.match(String(result.error), /initialize failed/);
+
+        const grandchildExited = await waitUntil(() =>
+          Promise.resolve(!isProcessAlive(grandchildPid)),
+        );
+        assert.equal(
+          grandchildExited,
+          true,
+          `grandchild process ${grandchildPid} must be dead after initialize failure`,
+        );
+      } finally {
+        await client.close();
+        killProcessIfAlive(grandchildPid);
+      }
+    });
+  });
+});
+
 test("AcpClient close terminates long-lived bridge grandchildren", async () => {
   if (process.platform === "win32") {
     return;
@@ -1326,6 +1387,229 @@ test("AcpClient close terminates long-lived bridge grandchildren", async () => {
       await client.close();
       killProcessIfAlive(grandchildPid);
     }
+  });
+});
+
+test("AcpClient close reaps bridge descendants after cooperative bridge exit", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("lifeline watchdog is POSIX-only");
+    return;
+  }
+
+  await withTempDir("acpx-client-cooperative-grandchild-", async (tempDir) => {
+    const helper = await writeLifelineFixture(tempDir);
+    const grandchildPidFile = path.join(tempDir, "grandchild.pid");
+    const client = makeClient({
+      agentCommand: [
+        JSON.stringify(process.execPath),
+        JSON.stringify(MOCK_AGENT_PATH),
+        "--grandchild-pid-file",
+        JSON.stringify(grandchildPidFile),
+        "--grandchild-ignore-sigterm",
+      ].join(" "),
+    });
+    let grandchildPid: number | undefined;
+
+    await withEnv({ [LIFELINE_HELPER_ENV]: helper }, async () => {
+      try {
+        await client.start();
+        await waitUntil(() => fileExists(grandchildPidFile));
+
+        grandchildPid = Number((await fs.readFile(grandchildPidFile, "utf8")).trim());
+        assert(
+          Number.isInteger(grandchildPid) && grandchildPid > 0,
+          "grandchild PID must be a positive integer",
+        );
+        assert.equal(isProcessAlive(grandchildPid), true, "grandchild must be alive before close");
+
+        await client.close();
+
+        const grandchildExited = await waitUntil(() =>
+          Promise.resolve(!isProcessAlive(grandchildPid)),
+        );
+        assert.equal(
+          grandchildExited,
+          true,
+          `grandchild process ${grandchildPid} must be dead after cooperative bridge exit`,
+        );
+      } finally {
+        await client.close();
+        killProcessIfAlive(grandchildPid);
+      }
+    });
+  });
+});
+
+test("AcpClient releases the lifeline watchdog on cooperative close", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("lifeline watchdog is POSIX-only");
+    return;
+  }
+
+  await withTempDir("acpx-client-lifeline-close-", async (tempDir) => {
+    const helper = await writeLifelineFixture(tempDir);
+    const client = makeClient({
+      agentCommand: [JSON.stringify(process.execPath), JSON.stringify(MOCK_AGENT_PATH)].join(" "),
+    });
+    let watchdog: ChildProcess | undefined;
+
+    await withEnv({ [LIFELINE_HELPER_ENV]: helper }, async () => {
+      try {
+        await client.start();
+        watchdog = asInternals(client).lifelineWatchdog;
+        assert(watchdog?.pid, "lifeline watchdog handle must be retained");
+
+        await client.close();
+        await waitForChildExit(watchdog, 2_000);
+
+        assert.equal(watchdog.exitCode, 0, "watchdog must exit cleanly after release");
+        assert.equal(watchdog.signalCode, null, "watchdog must not be killed by raw PID signal");
+        assert.equal(asInternals(client).lifelineWatchdog, undefined);
+      } finally {
+        await client.close();
+        killProcessIfAlive(watchdog?.pid);
+      }
+    });
+  });
+});
+
+test("AcpClient keeps the bridge attached when the lifeline helper is unavailable", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("lifeline watchdog is POSIX-only");
+    return;
+  }
+
+  await withTempDir("acpx-client-lifeline-unavailable-", async (tempDir) => {
+    const missingHelper = path.join(tempDir, "missing-lifeline-helper");
+    const bridgePidFile = path.join(tempDir, "bridge.pid");
+    const client = makeClient({
+      agentCommand: [
+        JSON.stringify(process.execPath),
+        JSON.stringify(MOCK_AGENT_PATH),
+        "--stay-alive-after-stdin-end",
+        "--pid-file",
+        JSON.stringify(bridgePidFile),
+      ].join(" "),
+    });
+    let bridgePid: number | undefined;
+
+    await withEnv({ [LIFELINE_HELPER_ENV]: missingHelper }, async () => {
+      try {
+        await client.start();
+        await waitUntil(() => fileExists(bridgePidFile));
+
+        bridgePid = Number((await fs.readFile(bridgePidFile, "utf8")).trim());
+        assert(Number.isInteger(bridgePid) && bridgePid > 0, "bridge PID must be valid");
+        assert.equal(asInternals(client).agentGroupLeader, false);
+        assert.equal(asInternals(client).lifelineWatchdog, undefined);
+
+        await client.close();
+
+        const bridgeExited = await waitUntil(() => Promise.resolve(!isProcessAlive(bridgePid)));
+        assert.equal(bridgeExited, true, `bridge process ${bridgePid} must be dead after close`);
+      } finally {
+        await client.close();
+        killProcessIfAlive(bridgePid);
+      }
+    });
+  });
+});
+
+test("AcpClient still group-kills bridge descendants at close when the lifeline watchdog fails to start", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("lifeline watchdog is POSIX-only");
+    return;
+  }
+
+  await withTempDir("acpx-client-lifeline-watchdog-fail-", async (tempDir) => {
+    const brokenHelper = path.join(tempDir, "broken-lifeline-helper");
+    // An invalid shebang makes the spawn fail with ENOENT on both macOS and Linux.
+    // A shebang-less file would instead hit the execvp -> /bin/sh fallback on Linux
+    // (spawn succeeds, then exits quickly), which would not exercise the watchdog-failure path.
+    await fs.writeFile(brokenHelper, "#!/nonexistent/acpx-lifeline-test-interpreter\n", "utf8");
+    await fs.chmod(brokenHelper, 0o755);
+    const grandchildPidFile = path.join(tempDir, "grandchild.pid");
+    const client = makeClient({
+      agentCommand: [
+        JSON.stringify(process.execPath),
+        JSON.stringify(MOCK_AGENT_PATH),
+        "--ignore-sigterm",
+        "--stay-alive-after-stdin-end",
+        "--grandchild-pid-file",
+        JSON.stringify(grandchildPidFile),
+      ].join(" "),
+    });
+    let grandchildPid: number | undefined;
+
+    await withEnv({ [LIFELINE_HELPER_ENV]: brokenHelper }, async () => {
+      try {
+        await client.start();
+        await waitUntil(() => fileExists(grandchildPidFile));
+
+        grandchildPid = Number((await fs.readFile(grandchildPidFile, "utf8")).trim());
+        assert(
+          Number.isInteger(grandchildPid) && grandchildPid > 0,
+          "grandchild PID must be valid",
+        );
+        assert.equal(asInternals(client).lifelineWatchdog, undefined);
+        assert.equal(asInternals(client).agentGroupLeader, true);
+
+        await client.close();
+
+        const grandchildExited = await waitUntil(() =>
+          Promise.resolve(!isProcessAlive(grandchildPid)),
+        );
+        assert.equal(
+          grandchildExited,
+          true,
+          `grandchild ${grandchildPid} must be group-killed at close`,
+        );
+      } finally {
+        await client.close();
+        killProcessIfAlive(grandchildPid);
+      }
+    });
+  });
+});
+
+test("AcpClient stops the previous lifeline watchdog before replacing it", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("lifeline watchdog is POSIX-only");
+    return;
+  }
+
+  await withTempDir("acpx-client-lifeline-replace-", async (tempDir) => {
+    const helper = await writeLifelineFixture(tempDir);
+    const client = makeClient();
+    const internals = asInternals(client);
+    const firstBridge = spawnDetachedIdleProcess();
+    const secondBridge = spawnDetachedIdleProcess();
+    let firstWatchdog: ChildProcess | undefined;
+    let secondWatchdog: ChildProcess | undefined;
+
+    await withEnv({ [LIFELINE_HELPER_ENV]: helper }, async () => {
+      try {
+        internals.agentGroupLeader = true;
+        await internals.startLifelineWatchdog?.(firstBridge);
+        firstWatchdog = internals.lifelineWatchdog;
+        assert(firstWatchdog?.pid, "first watchdog must be retained");
+
+        await internals.startLifelineWatchdog?.(secondBridge);
+        secondWatchdog = internals.lifelineWatchdog;
+        assert(secondWatchdog?.pid, "replacement watchdog must be retained");
+        assert.notEqual(secondWatchdog.pid, firstWatchdog.pid);
+
+        await waitForChildExit(firstWatchdog, 2_000);
+        assert.equal(firstWatchdog.exitCode, 0, "old watchdog must receive release");
+        assert.equal(firstWatchdog.signalCode, null, "old watchdog must not be killed by PID");
+      } finally {
+        internals.stopLifelineWatchdog?.();
+        killProcessIfAlive(firstWatchdog?.pid);
+        killProcessIfAlive(secondWatchdog?.pid);
+        killProcessGroupIfAlive(firstBridge.pid);
+        killProcessGroupIfAlive(secondBridge.pid);
+      }
+    });
   });
 });
 
@@ -1426,6 +1710,55 @@ async function waitUntil(
   return false;
 }
 
+async function waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      once(child, "exit"),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("child did not exit in time")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+async function writeLifelineFixture(tempDir: string): Promise<string> {
+  const helper = path.join(tempDir, "lifeline-helper");
+  await fs.writeFile(
+    helper,
+    `#!/usr/bin/env node
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  if (chunk.includes("R")) {
+    process.exit(0);
+  }
+});
+process.stdin.on("end", () => process.exit(4));
+setInterval(() => {}, 1000);
+`,
+    "utf8",
+  );
+  await fs.chmod(helper, 0o755);
+  return helper;
+}
+
+function spawnDetachedIdleProcess(): ChildProcess {
+  const child = spawn(process.execPath, ["--eval", "setInterval(() => {}, 1000);"], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  return child;
+}
+
 function killProcessIfAlive(pid: number | undefined): void {
   if (pid === undefined || !isProcessAlive(pid)) {
     return;
@@ -1434,6 +1767,17 @@ function killProcessIfAlive(pid: number | undefined): void {
     process.kill(pid, "SIGKILL");
   } catch {
     // best effort cleanup for the intentional RED leak
+  }
+}
+
+function killProcessGroupIfAlive(pid: number | undefined): void {
+  if (pid === undefined || !isProcessAlive(pid)) {
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    killProcessIfAlive(pid);
   }
 }
 

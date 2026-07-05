@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 type PackageJson = {
+  files?: string[];
   scripts?: Record<string, string>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
@@ -83,4 +84,13 @@ test("test scripts build packaged output before running package-bin smoke tests"
 
   assert.match(pkg.scripts?.test ?? "", /^pnpm run build && pnpm run build:test && /);
   assert.match(pkg.scripts?.["test:coverage"] ?? "", /^pnpm run build && pnpm run build:test && /);
+});
+
+test("package ships lifeline source but prepack does not ship host-native helper binaries", () => {
+  const pkg = readPackageJson();
+  const prepack = pkg.scripts?.prepack ?? "";
+
+  assert(pkg.files?.includes("native"), "native source directory must be included in package");
+  assert.doesNotMatch(prepack, /\bbuild:native\b/);
+  assert.match(prepack, /dist\/native/);
 });

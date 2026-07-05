@@ -70,10 +70,12 @@ type MockAgentOptions = {
   ignoreSigterm: boolean;
   cancelDelayMs: number;
   stayAliveAfterStdinEnd: boolean;
+  failInitialize: boolean;
   /** If set, the agent writes its PID to this path at startup (before ACP handshake). */
   pidFile?: string;
   /** If set, the agent spawns a long-lived child and writes its PID to this path. */
   grandchildPidFile?: string;
+  grandchildIgnoreSigterm: boolean;
 };
 
 type SessionState = {
@@ -384,8 +386,10 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let cancelDelayMs = 0;
   let hangOnNewSession = false;
   let stayAliveAfterStdinEnd = false;
+  let failInitialize = false;
   let pidFile: string | undefined;
   let grandchildPidFile: string | undefined;
+  let grandchildIgnoreSigterm = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -524,6 +528,11 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
       continue;
     }
 
+    if (token === "--fail-initialize") {
+      failInitialize = true;
+      continue;
+    }
+
     if (token === "--cancel-delay-ms") {
       cancelDelayMs = parsePositiveIntegerOption(argv, index + 1, token);
       index += 1;
@@ -544,6 +553,11 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     if (token === "--grandchild-pid-file") {
       grandchildPidFile = parseOptionValue(argv, index + 1, token);
       index += 1;
+      continue;
+    }
+
+    if (token === "--grandchild-ignore-sigterm") {
+      grandchildIgnoreSigterm = true;
       continue;
     }
 
@@ -614,8 +628,10 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     ignoreSigterm,
     cancelDelayMs,
     stayAliveAfterStdinEnd,
+    failInitialize,
     pidFile,
     grandchildPidFile,
+    grandchildIgnoreSigterm,
   };
 }
 
@@ -767,6 +783,10 @@ class MockAgent implements Agent {
   }
 
   async initialize(): Promise<InitializeResponse> {
+    if (this.options.failInitialize) {
+      throw RequestError.internalError({ reason: "requested failure" }, "initialize failed");
+    }
+
     const sessionCapabilities = {
       ...(this.options.supportsCloseSession ? { close: {} } : {}),
       ...(this.options.supportsListSessions ? { list: {} } : {}),
@@ -1500,10 +1520,11 @@ const input = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>;
 const stream = ndJsonStream(output, input);
 const mockAgentOptions = parseMockAgentOptions(process.argv.slice(2));
 
-function spawnLongLivedGrandchild(pidFile: string): void {
-  const grandchild = spawn(process.execPath, ["--eval", "setInterval(() => {}, 1000);"], {
-    stdio: "ignore",
-  });
+function spawnLongLivedGrandchild(pidFile: string, ignoreSigterm: boolean): void {
+  const script = ignoreSigterm
+    ? "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);"
+    : "setInterval(() => {}, 1000);";
+  const grandchild = spawn(process.execPath, ["--eval", script], { stdio: "ignore" });
   if (!grandchild.pid) {
     throw new Error("long-lived grandchild did not receive a PID");
   }
@@ -1518,7 +1539,10 @@ if (mockAgentOptions.pidFile) {
 }
 
 if (mockAgentOptions.grandchildPidFile) {
-  spawnLongLivedGrandchild(mockAgentOptions.grandchildPidFile);
+  spawnLongLivedGrandchild(
+    mockAgentOptions.grandchildPidFile,
+    mockAgentOptions.grandchildIgnoreSigterm,
+  );
 }
 
 if (mockAgentOptions.ignoreSigterm) {

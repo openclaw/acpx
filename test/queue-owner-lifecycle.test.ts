@@ -18,6 +18,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { isProcessAlive } from "../src/cli/queue/lease-store.js";
 import { queueLockFilePath, queueSocketPath } from "../src/cli/queue/paths.js";
+import { LIFELINE_HELPER_ENV, resolveTestLifelineHelper } from "./lifeline-test-helper.js";
 import { makeSessionRecord, withTempHome, writeSessionRecordFile } from "./runtime-test-helpers.js";
 
 const CLI_PATH = fileURLToPath(new URL("../src/cli.js", import.meta.url));
@@ -94,6 +95,38 @@ function waitForProcessExit(
       resolve({ code, signal });
     });
   });
+}
+
+async function readPidFile(pidFilePath: string, label: string): Promise<number> {
+  const raw = (await fs.readFile(pidFilePath, "utf8")).trim();
+  const pid = Number(raw);
+  assert(Number.isInteger(pid) && pid > 0, `${label} PID must be a positive integer`);
+  return pid;
+}
+
+async function waitForProcessesToExit(
+  pids: number[],
+  timeoutMs = 2_000,
+  pollMs = 50,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (pids.every((pid) => !isProcessAlive(pid))) {
+      return;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+function killProcessIfAlive(pid: number | undefined): void {
+  if (pid === undefined || !isProcessAlive(pid)) {
+    return;
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // best effort cleanup for intentionally orphaned RED processes
+  }
 }
 
 describe("queue owner lifecycle — graceful SIGTERM shutdown", () => {
@@ -298,6 +331,142 @@ describe("queue owner lifecycle — graceful SIGTERM shutdown", () => {
         if (child.exitCode == null && child.signalCode == null) {
           child.kill("SIGKILL");
         }
+      }
+    });
+  });
+});
+
+describe("queue owner lifecycle — bridge lifeline on abrupt owner death", () => {
+  it("kills the bridge process tree when the queue owner is SIGKILLed", async (t) => {
+    if (process.platform === "win32") {
+      t.skip("lifeline watchdog is POSIX-only");
+      return;
+    }
+
+    const helper = await resolveTestLifelineHelper();
+    if (!helper) {
+      t.skip("lifeline helper binary is unavailable");
+      return;
+    }
+
+    await withTempHome("acpx-lifecycle-lifeline-sigkill-", async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      await fs.mkdir(cwd, { recursive: true });
+
+      const bridgePidFilePath = path.join(homeDir, "mock-agent-lifeline.pid");
+      const grandchildPidFilePath = path.join(homeDir, "mock-agent-lifeline-grandchild.pid");
+
+      const record = makeSessionRecord({
+        acpxRecordId: "lifecycle-lifeline-sigkill-test",
+        acpSessionId: "lifecycle-lifeline-sigkill-session",
+        agentCommand: [
+          "node",
+          JSON.stringify(MOCK_AGENT_PATH),
+          "--pid-file",
+          JSON.stringify(bridgePidFilePath),
+          "--grandchild-pid-file",
+          JSON.stringify(grandchildPidFilePath),
+          "--grandchild-ignore-sigterm",
+          "--stay-alive-after-stdin-end",
+        ].join(" "),
+        cwd,
+      });
+      await writeSessionRecordFile(homeDir, record);
+
+      const socketPath = queueSocketPath(record.acpxRecordId, homeDir);
+      const payload = JSON.stringify({
+        sessionId: record.acpxRecordId,
+        permissionMode: "approve-reads",
+      });
+
+      const child = spawn(process.execPath, [CLI_PATH, "__queue-owner"], {
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          ACPX_QUEUE_OWNER_PAYLOAD: payload,
+          [LIFELINE_HELPER_ENV]: helper,
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+
+      const stderrChunks: Buffer[] = [];
+      child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+
+      let queueSocket: net.Socket | undefined;
+      let lines: readline.Interface | undefined;
+      let bridgePid: number | undefined;
+      let grandchildPid: number | undefined;
+
+      try {
+        await waitUntil(() => fileExists(socketPath));
+
+        queueSocket = await new Promise<net.Socket>((resolve, reject) => {
+          const socket = net.createConnection(socketPath);
+          socket.setEncoding("utf8");
+          socket.once("connect", () => resolve(socket));
+          socket.once("error", reject);
+        });
+
+        queueSocket.write(
+          `${JSON.stringify({
+            type: "submit_prompt",
+            requestId: "req-lifeline-sigkill-test",
+            message: "sleep 10000",
+            permissionMode: "approve-reads",
+            waitForCompletion: true,
+          })}\n`,
+        );
+
+        lines = readline.createInterface({ input: queueSocket });
+        const iter = lines[Symbol.asyncIterator]();
+        const acceptedRaw = await Promise.race([
+          iter.next(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("timeout waiting for accepted")), 5_000),
+          ),
+        ]);
+        const accepted = JSON.parse((acceptedRaw as IteratorYieldResult<string>).value) as {
+          type: string;
+        };
+        assert.equal(accepted.type, "accepted", "queue owner must acknowledge the prompt");
+
+        await waitUntil(() => fileExists(bridgePidFilePath), 8_000);
+        await waitUntil(() => fileExists(grandchildPidFilePath), 8_000);
+
+        bridgePid = await readPidFile(bridgePidFilePath, "bridge");
+        grandchildPid = await readPidFile(grandchildPidFilePath, "grandchild");
+        assert.equal(isProcessAlive(bridgePid), true, "bridge must be alive before SIGKILL");
+        assert.equal(
+          isProcessAlive(grandchildPid),
+          true,
+          "grandchild must be alive before SIGKILL",
+        );
+
+        child.kill("SIGKILL");
+        const { signal } = await waitForProcessExit(child, 5_000);
+        const stderr = Buffer.concat(stderrChunks).toString("utf8");
+        assert.equal(signal, "SIGKILL", `queue owner must be SIGKILLed; stderr=${stderr}`);
+
+        await waitForProcessesToExit([bridgePid, grandchildPid], 2_000);
+        assert.deepEqual(
+          {
+            bridgeAliveAfterOwnerSigkill: isProcessAlive(bridgePid),
+            grandchildAliveAfterOwnerSigkill: isProcessAlive(grandchildPid),
+          },
+          {
+            bridgeAliveAfterOwnerSigkill: false,
+            grandchildAliveAfterOwnerSigkill: false,
+          },
+          "bridge and grandchild must die after abrupt queue-owner death",
+        );
+      } finally {
+        lines?.close();
+        queueSocket?.destroy();
+        if (child.exitCode == null && child.signalCode == null) {
+          child.kill("SIGKILL");
+        }
+        killProcessIfAlive(bridgePid);
+        killProcessIfAlive(grandchildPid);
       }
     });
   });
