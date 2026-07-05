@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
@@ -68,8 +69,12 @@ type MockAgentOptions = {
   loadReplayText: string;
   ignoreSigterm: boolean;
   cancelDelayMs: number;
+  stayAliveAfterStdinEnd: boolean;
+  exitOnStdinEnd: boolean;
   /** If set, the agent writes its PID to this path at startup (before ACP handshake). */
   pidFile?: string;
+  /** If set, the agent spawns a long-lived child and writes its PID to this path. */
+  grandchildPidFile?: string;
 };
 
 type SessionState = {
@@ -379,7 +384,10 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let ignoreSigterm = false;
   let cancelDelayMs = 0;
   let hangOnNewSession = false;
+  let stayAliveAfterStdinEnd = false;
+  let exitOnStdinEnd = false;
   let pidFile: string | undefined;
+  let grandchildPidFile: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -513,6 +521,16 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
       continue;
     }
 
+    if (token === "--stay-alive-after-stdin-end") {
+      stayAliveAfterStdinEnd = true;
+      continue;
+    }
+
+    if (token === "--exit-on-stdin-end") {
+      exitOnStdinEnd = true;
+      continue;
+    }
+
     if (token === "--cancel-delay-ms") {
       cancelDelayMs = parsePositiveIntegerOption(argv, index + 1, token);
       index += 1;
@@ -526,6 +544,12 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
 
     if (token === "--pid-file") {
       pidFile = parseOptionValue(argv, index + 1, token);
+      index += 1;
+      continue;
+    }
+
+    if (token === "--grandchild-pid-file") {
+      grandchildPidFile = parseOptionValue(argv, index + 1, token);
       index += 1;
       continue;
     }
@@ -596,7 +620,10 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     loadReplayText,
     ignoreSigterm,
     cancelDelayMs,
+    stayAliveAfterStdinEnd,
+    exitOnStdinEnd,
     pidFile,
+    grandchildPidFile,
   };
 }
 
@@ -1481,16 +1508,43 @@ const input = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>;
 const stream = ndJsonStream(output, input);
 const mockAgentOptions = parseMockAgentOptions(process.argv.slice(2));
 
+function spawnLongLivedGrandchild(pidFile: string): void {
+  const grandchild = spawn(process.execPath, ["--eval", "setInterval(() => {}, 1000);"], {
+    stdio: "ignore",
+  });
+  if (!grandchild.pid) {
+    throw new Error("long-lived grandchild did not receive a PID");
+  }
+  grandchild.unref();
+  writeFileSync(pidFile, `${grandchild.pid}\n`, "utf8");
+}
+
 // Write PID to a file before doing anything else so that the parent can track
 // this bridge process and verify it is dead after queue-owner shutdown.
 if (mockAgentOptions.pidFile) {
   writeFileSync(mockAgentOptions.pidFile, `${process.pid}\n`, "utf8");
 }
 
+if (mockAgentOptions.grandchildPidFile) {
+  spawnLongLivedGrandchild(mockAgentOptions.grandchildPidFile);
+}
+
 if (mockAgentOptions.ignoreSigterm) {
   process.on("SIGTERM", () => {
     // Intentionally ignore to exercise ACP client SIGKILL fallback behavior.
   });
+}
+
+if (mockAgentOptions.stayAliveAfterStdinEnd) {
+  setInterval(() => undefined, 1_000);
+}
+
+if (mockAgentOptions.exitOnStdinEnd) {
+  // Deterministically exit when acpx closes our stdin, modelling a well-behaved
+  // bridge that shuts down on stdin EOF regardless of ACP SDK version. This makes
+  // the "reaps grandchildren when the bridge exits during stdin-close" test rely
+  // on the final group sweep rather than on incidental SDK teardown timing.
+  process.stdin.on("end", () => process.exit(0));
 }
 
 const connection = new AgentSideConnection(

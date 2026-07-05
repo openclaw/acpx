@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import type { RequestPermissionRequest, RequestPermissionResponse } from "@agentclientprotocol/sdk";
 import {
   AcpClient,
@@ -20,6 +22,10 @@ import {
   PermissionPromptUnavailableError,
   UnsupportedPromptContentError,
 } from "../src/errors.js";
+import { isProcessAlive } from "../src/process-liveness.js";
+import { fileExists, withTempDir } from "./runtime-test-helpers.js";
+
+const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
 
 test("parseAcpJsonMessageLine ignores non-object JSON values", () => {
   for (const line of ["1", "null", '"diagnostic"', "[]", "[{}]"]) {
@@ -1276,6 +1282,103 @@ test("AcpClient start fails fast when the agent exits during initialize", async 
   assert(Date.now() - startedAt < 2_000);
 });
 
+test("AcpClient close terminates long-lived bridge grandchildren", async () => {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  await withTempDir("acpx-client-grandchild-", async (tempDir) => {
+    const grandchildPidFile = path.join(tempDir, "grandchild.pid");
+    const client = makeClient({
+      agentCommand: [
+        JSON.stringify(process.execPath),
+        JSON.stringify(MOCK_AGENT_PATH),
+        "--ignore-sigterm",
+        "--stay-alive-after-stdin-end",
+        "--grandchild-pid-file",
+        JSON.stringify(grandchildPidFile),
+      ].join(" "),
+    });
+    let grandchildPid: number | undefined;
+
+    try {
+      await client.start();
+      await waitUntil(() => fileExists(grandchildPidFile));
+
+      grandchildPid = Number((await fs.readFile(grandchildPidFile, "utf8")).trim());
+      assert(
+        Number.isInteger(grandchildPid) && grandchildPid > 0,
+        "grandchild PID must be a positive integer",
+      );
+      assert.equal(isProcessAlive(grandchildPid), true, "grandchild must be alive before close");
+
+      await client.close();
+
+      const grandchildExited = await waitUntil(() =>
+        Promise.resolve(!isProcessAlive(grandchildPid)),
+      );
+      assert.equal(
+        grandchildExited,
+        true,
+        `grandchild process ${grandchildPid} must be dead after AcpClient.close()`,
+      );
+    } finally {
+      await client.close();
+      killProcessIfAlive(grandchildPid);
+    }
+  });
+});
+
+test("AcpClient close reaps grandchildren when the bridge exits during stdin-close", async () => {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  // A well-behaved bridge exits on stdin-close (no --ignore-sigterm /
+  // --stay-alive-after-stdin-end), but it spawned a grandchild that outlives it.
+  // The bridge PID is already gone before the SIGTERM path runs, so only the
+  // final group sweep can reap the grandchild.
+  await withTempDir("acpx-client-grandchild-cleanexit-", async (tempDir) => {
+    const grandchildPidFile = path.join(tempDir, "grandchild.pid");
+    const client = makeClient({
+      agentCommand: [
+        JSON.stringify(process.execPath),
+        JSON.stringify(MOCK_AGENT_PATH),
+        "--exit-on-stdin-end",
+        "--grandchild-pid-file",
+        JSON.stringify(grandchildPidFile),
+      ].join(" "),
+    });
+    let grandchildPid: number | undefined;
+
+    try {
+      await client.start();
+      await waitUntil(() => fileExists(grandchildPidFile));
+
+      grandchildPid = Number((await fs.readFile(grandchildPidFile, "utf8")).trim());
+      assert(
+        Number.isInteger(grandchildPid) && grandchildPid > 0,
+        "grandchild PID must be a positive integer",
+      );
+      assert.equal(isProcessAlive(grandchildPid), true, "grandchild must be alive before close");
+
+      await client.close();
+
+      const grandchildExited = await waitUntil(() =>
+        Promise.resolve(!isProcessAlive(grandchildPid)),
+      );
+      assert.equal(
+        grandchildExited,
+        true,
+        `grandchild ${grandchildPid} must be dead after close even when the bridge exited on its own`,
+      );
+    } finally {
+      await client.close();
+      killProcessIfAlive(grandchildPid);
+    }
+  });
+});
+
 test("AcpClient close resets in-memory state and shuts down terminal manager", async () => {
   const client = makeClient();
   const internals = asInternals(client);
@@ -1356,6 +1459,32 @@ function makeClient(
 
 function asInternals(client: AcpClient): ClientInternals {
   return client as unknown as ClientInternals;
+}
+
+async function waitUntil(
+  condition: () => Promise<boolean>,
+  timeoutMs = 2_000,
+  pollMs = 50,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await condition()) {
+      return true;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, pollMs));
+  }
+  return false;
+}
+
+function killProcessIfAlive(pid: number | undefined): void {
+  if (pid === undefined || !isProcessAlive(pid)) {
+    return;
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // best effort cleanup for the intentional RED leak
+  }
 }
 
 function makePermissionRequest(

@@ -442,6 +442,7 @@ export class AcpClient {
   private agentStartedAt?: string;
   private lastAgentExit?: AgentExitInfo;
   private lastKnownPid?: number;
+  private agentGroupLeader = false;
   private readonly promptPermissionFailures = new Map<string, PermissionPromptUnavailableError>();
   private readonly pendingConnectionRequests = new Set<PendingConnectionRequest>();
   private readonly modelConfigIds = new Map<string, string>();
@@ -710,11 +711,16 @@ export class AcpClient {
   private async spawnAgentProcess(
     plan: AgentLaunchPlan,
   ): Promise<ChildProcessByStdio<Writable, Readable, Readable>> {
+    const agentGroupLeader = process.platform !== "win32";
     const spawnedChild = spawn(
       plan.spawnCommand,
       plan.args,
-      buildSpawnCommandOptions(plan.spawnCommand, plan.spawnOptions),
+      buildSpawnCommandOptions(plan.spawnCommand, {
+        ...plan.spawnOptions,
+        detached: agentGroupLeader,
+      }),
     ) as ChildProcessByStdio<Writable, Readable, Readable>;
+    this.agentGroupLeader = agentGroupLeader;
     try {
       await waitForSpawn(spawnedChild);
     } catch (error) {
@@ -1369,6 +1375,7 @@ export class AcpClient {
     this.initResult = undefined;
     this.connection = undefined;
     this.agent = undefined;
+    this.agentGroupLeader = false;
   }
 
   private async terminateAgentProcess(
@@ -1381,6 +1388,14 @@ export class AcpClient {
     if (!exited) {
       this.log(`agent did not exit after ${AGENT_CLOSE_TERM_GRACE_MS}ms; forcing SIGKILL`);
       exited = await this.killAgentIfRunning(child, exited, "SIGKILL", AGENT_CLOSE_KILL_GRACE_MS);
+    }
+
+    // The bridge PID may have exited on its own during the stdin-close grace,
+    // which bypasses the group signal above. Sweep the process group once more
+    // (best-effort) so descendants that outlived the bridge — model process,
+    // MCP servers — are reaped instead of leaking.
+    if (this.agentGroupLeader && child.pid !== undefined) {
+      this.signalAgentProcess(child, "SIGKILL");
     }
 
     // Ensure stdio handles don't keep this process alive after close() returns.
@@ -1408,12 +1423,41 @@ export class AcpClient {
     if (alreadyExited || !isChildProcessRunning(child)) {
       return alreadyExited;
     }
-    try {
-      child.kill(signal);
-    } catch {
-      // best effort
-    }
+    this.signalAgentProcess(child, signal);
     return await waitForChildExit(child, waitMs);
+  }
+
+  private signalAgentProcess(
+    child: ChildProcessByStdio<Writable, Readable, Readable>,
+    signal: NodeJS.Signals,
+  ): void {
+    const pid = child.pid;
+    // Detached Unix bridges lead their own process group (pgid == pid), so a
+    // negative PID reaps that group and its descendants. agentGroupLeader gates
+    // it so acpx never signals its own group. A failed group signal — and every
+    // non-detached / Windows case — falls back to killing the bridge PID.
+    if (this.agentGroupLeader && pid !== undefined) {
+      if (this.tryKill(() => process.kill(-pid, signal), signal, `group -${pid}`)) {
+        return;
+      }
+    }
+    this.tryKill(() => child.kill(signal), signal, `pid ${pid ?? "unknown"}`);
+  }
+
+  private tryKill(kill: () => void, signal: NodeJS.Signals, target: string): boolean {
+    try {
+      kill();
+      return true;
+    } catch (error) {
+      // ESRCH just means the target is already gone (the common case); anything
+      // else (e.g. EPERM) gets a debug trace so a silent descendant leak stays
+      // diagnosable.
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (code !== "ESRCH") {
+        this.log(`agent ${signal} to ${target} failed: ${(error as Error | undefined)?.message ?? code}`);
+      }
+      return false;
+    }
   }
 
   private detachAgentHandles(agent: ChildProcess, unref: boolean): void {
