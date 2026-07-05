@@ -442,6 +442,7 @@ export class AcpClient {
   private agentStartedAt?: string;
   private lastAgentExit?: AgentExitInfo;
   private lastKnownPid?: number;
+  private agentGroupLeader = false;
   private readonly promptPermissionFailures = new Map<string, PermissionPromptUnavailableError>();
   private readonly pendingConnectionRequests = new Set<PendingConnectionRequest>();
   private readonly modelConfigIds = new Map<string, string>();
@@ -710,11 +711,16 @@ export class AcpClient {
   private async spawnAgentProcess(
     plan: AgentLaunchPlan,
   ): Promise<ChildProcessByStdio<Writable, Readable, Readable>> {
+    const agentGroupLeader = process.platform !== "win32";
     const spawnedChild = spawn(
       plan.spawnCommand,
       plan.args,
-      buildSpawnCommandOptions(plan.spawnCommand, plan.spawnOptions),
+      buildSpawnCommandOptions(plan.spawnCommand, {
+        ...plan.spawnOptions,
+        detached: agentGroupLeader,
+      }),
     ) as ChildProcessByStdio<Writable, Readable, Readable>;
+    this.agentGroupLeader = agentGroupLeader;
     try {
       await waitForSpawn(spawnedChild);
     } catch (error) {
@@ -1369,6 +1375,7 @@ export class AcpClient {
     this.initResult = undefined;
     this.connection = undefined;
     this.agent = undefined;
+    this.agentGroupLeader = false;
   }
 
   private async terminateAgentProcess(
@@ -1409,9 +1416,20 @@ export class AcpClient {
       return alreadyExited;
     }
     try {
-      child.kill(signal);
+      if (this.agentGroupLeader && child.pid !== undefined) {
+        // Detached Unix bridges lead their own process group (pgid == pid), so
+        // a negative PID targets only that group and its descendants. The
+        // agentGroupLeader gate prevents signaling acpx's own group.
+        process.kill(-child.pid, signal);
+      } else {
+        child.kill(signal);
+      }
     } catch {
-      // best effort
+      try {
+        child.kill(signal);
+      } catch {
+        // best effort
+      }
     }
     return await waitForChildExit(child, waitMs);
   }
