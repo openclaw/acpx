@@ -97,6 +97,7 @@ Friendly agent names resolve to commands:
 - `kiro` -> `kiro-cli-chat acp`
 - `mux` -> `mux acp` via an ACPX-owned npm range
 - `opencode` -> `npx -y opencode-ai acp`
+- `pool` -> `pool acp`
 - `qoder` -> `qodercli --acp`
   Forwards Qoder-native `--allowed-tools` and `--max-turns` startup flags from `acpx` session options.
 - `qwen` -> `qwen --acp`

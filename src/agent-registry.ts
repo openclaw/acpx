@@ -53,6 +53,7 @@ export const AGENT_REGISTRY: Record<string, string> = {
   kiro: "kiro-cli-chat acp",
   mux: `npx -y mux@${ACP_ADAPTER_PACKAGE_RANGES.mux} acp`,
   opencode: "npx -y opencode-ai acp",
+  pool: "pool acp",
   qoder: "qodercli --acp",
   qwen: "qwen --acp",
   trae: "traecli acp serve",

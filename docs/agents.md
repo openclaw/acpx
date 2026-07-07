@@ -27,6 +27,7 @@ The default agent for top-level commands like `acpx exec â€¦` and `acpx prompt â
 | `kiro`       | `kiro-cli-chat acp`                            | [Kiro CLI](https://kiro.dev)                                                                                    |
 | `mux`        | `mux acp` via an ACPX-owned npm range          | [Mux](https://mux.coder.com)                                                                                    |
 | `opencode`   | `npx -y opencode-ai acp`                       | [OpenCode](https://opencode.ai)                                                                                 |
+| `pool`       | `pool acp`                                     | [Poolside](https://poolside.ai)                                                                                 |
 | `qoder`      | `qodercli --acp`                               | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |
 | `qwen`       | `qwen --acp`                                   | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
 | `trae`       | `traecli acp serve`                            | [Trae CLI](https://docs.trae.cn/cli)                                                                            |
@@ -191,6 +192,14 @@ Configure at least one model provider before prompting (for example `ANTHROPIC_A
 - Built-in name: `opencode`
 - Default command: `npx -y opencode-ai acp`
 - Upstream: [opencode.ai](https://opencode.ai)
+
+### Pool
+
+- Built-in name: `pool`
+- Default command: `pool acp`
+- Upstream: [Poolside](https://poolside.ai)
+
+`acpx pool` uses the installed `pool` CLI ACP server (`pool acp`). Install `pool` and complete its authentication flow with `pool login` before using it through `acpx`; credentials are stored under `~/.config/poolside/`.
 
 ### Qwen
 

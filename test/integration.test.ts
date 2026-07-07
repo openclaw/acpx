@@ -934,6 +934,33 @@ test("integration: built-in grok-build agent resolves to grok agent stdio", asyn
   });
 });
 
+test("integration: built-in pool agent resolves to pool acp", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-pool-"));
+
+    try {
+      await writeFakePoolAgent(fakeBinDir);
+
+      const result = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "quiet", "pool", "exec", "echo hello"],
+        homeDir,
+        {
+          env: {
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /hello/);
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: built-in iflow agent resolves to iflow --experimental-acp", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -4637,6 +4664,39 @@ async function writeFakeGrokBuildAgent(binDir: string): Promise<void> {
       "  shift",
       "else",
       '  echo "unexpected grok command: $*" 1>&2',
+      "  exit 2",
+      "fi",
+      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
+      "",
+    ].join("\n"),
+    { encoding: "utf8", mode: 0o755 },
+  );
+}
+
+async function writeFakePoolAgent(binDir: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(binDir, "pool.cmd"),
+      [
+        "@echo off",
+        "setlocal",
+        'if not "%~1"=="acp" exit /b 2',
+        `"${process.execPath}" "${MOCK_AGENT_PATH}" %2 %3 %4 %5 %6 %7 %8 %9`,
+        "",
+      ].join("\r\n"),
+      { encoding: "utf8" },
+    );
+    return;
+  }
+
+  await fs.writeFile(
+    path.join(binDir, "pool"),
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "acp" ]; then',
+      "  shift",
+      "else",
+      '  echo "unexpected pool command: $*" 1>&2',
       "  exit 2",
       "fi",
       `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,

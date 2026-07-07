@@ -74,6 +74,11 @@ test("mux built-in runs the coder/mux ACP stdio bridge through npx", () => {
   assert.equal(resolveAgentCommand("mux"), "npx -y mux@^0.28.0 acp");
 });
 
+test("pool built-in runs the Poolside ACP entrypoint", () => {
+  assert.equal(AGENT_REGISTRY.pool, "pool acp");
+  assert.equal(resolveAgentCommand("pool"), "pool acp");
+});
+
 test("listBuiltInAgents preserves the required example prefix and alphabetical tail", () => {
   const agents = listBuiltInAgents();
   assert.deepEqual(agents, Object.keys(AGENT_REGISTRY));
@@ -96,6 +101,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "kiro",
     "mux",
     "opencode",
+    "pool",
     "qoder",
     "qwen",
     "trae",

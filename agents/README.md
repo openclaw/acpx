@@ -18,6 +18,7 @@ Built-in agents:
 - `kiro -> kiro-cli-chat acp`
 - `mux -> mux acp` via an ACPX-owned npm range
 - `opencode -> npx -y opencode-ai acp`
+- `pool -> pool acp`
 - `qoder -> qodercli --acp`
 - `qwen -> qwen --acp`
 - `trae -> traecli acp serve`
@@ -38,6 +39,7 @@ Harness-specific docs in this directory:
 - [Kiro](Kiro.md): built-in `kiro -> kiro-cli-chat acp`
 - [Mux](Mux.md): built-in `mux -> mux acp` via an ACPX-owned npm range
 - [OpenCode](OpenCode.md): built-in `opencode -> npx -y opencode-ai acp`
+- [Pool](Pool.md): built-in `pool -> pool acp`
 - [Qoder](Qoder.md): built-in `qoder -> qodercli --acp`
 - [Qwen](Qwen.md): built-in `qwen -> qwen --acp`
 - [Trae](Trae.md): built-in `trae -> traecli acp serve`

@@ -369,6 +369,7 @@ Built-ins:
 | `kiro`       | native (`kiro-cli-chat acp`)                                                | [Kiro CLI](https://kiro.dev)                                                                                    |
 | `mux`        | `mux acp` via an ACPX-owned npm range                                       | [Mux](https://mux.coder.com)                                                                                    |
 | `opencode`   | `npx -y opencode-ai acp`                                                    | [OpenCode](https://opencode.ai)                                                                                 |
+| `pool`       | native (`pool acp`)                                                         | [Poolside](https://poolside.ai)                                                                                 |
 | `qoder`      | native (`qodercli --acp`)                                                   | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |
 | `qwen`       | native (`qwen --acp`)                                                       | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
 | `trae`       | native (`traecli acp serve`)                                                | [Trae CLI](https://docs.trae.cn/cli)                                                                            |
