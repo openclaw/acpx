@@ -14,7 +14,13 @@ function installBrokenPipeHandler(stream: NodeJS.WritableStream): void {
       process.exit(0);
     }
 
-    throw error;
+    // Event-emitter throws become uncaughtException. Surface and exit instead.
+    try {
+      process.stderr.write(`[acpx] stream error: ${error.message}\n`);
+    } catch {
+      // ignore secondary write failures
+    }
+    process.exit(1);
   });
 }
 
@@ -43,5 +49,16 @@ if (isCliEntrypoint(process.argv)) {
     process.env.ACPX_QUEUE_OWNER_ARGS ??= queueOwnerArgOverride;
   }
 
-  void main(process.argv);
+  void main(process.argv).catch((error: unknown) => {
+    // Avoid unhandled promise rejections for top-level CLI failures.
+    // Commander parse errors are already handled inside main(); this
+    // catches unexpected throws and stream-handler rethrows.
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      process.stderr.write(`[acpx] ${message}\n`);
+    } catch {
+      // stderr may already be broken
+    }
+    process.exitCode = 1;
+  });
 }
