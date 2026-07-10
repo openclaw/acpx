@@ -1014,7 +1014,11 @@ export class FlowRunner {
 
     if (heartbeatMs > 0) {
       timer = setInterval(() => {
-        void heartbeat();
+        // Heartbeat writes are best-effort; never leave a rejected promise
+        // from setInterval (unhandledRejection noise / process flags).
+        void heartbeat().catch(() => {
+          // ignore
+        });
       }, heartbeatMs);
     }
 
