@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { SessionRecord } from "../../types.js";
+import { createAtomicWriteTempPath } from "./atomic-write.js";
 import { parseSessionRecord } from "./parse.js";
 
 const SESSION_INDEX_SCHEMA = "acpx.session-index.v1";
@@ -125,7 +126,7 @@ export async function writeSessionIndex(
   },
 ): Promise<void> {
   const filePath = sessionIndexPath(sessionDir);
-  const tempFile = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  const tempFile = createAtomicWriteTempPath(filePath);
   const payload = JSON.stringify(
     {
       schema: SESSION_INDEX_SCHEMA,

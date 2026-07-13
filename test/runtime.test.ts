@@ -234,6 +234,34 @@ test("createFileSessionStore persists records inside the provided state director
   );
 });
 
+test("createFileSessionStore supports concurrent saves in the same millisecond", async (t) => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-store-concurrent-"));
+  t.after(async () => {
+    await fs.rm(stateDir, { recursive: true, force: true });
+  });
+
+  const originalNow = Date.now;
+  Date.now = () => 1_750_000_000_000;
+  t.after(() => {
+    Date.now = originalNow;
+  });
+
+  const store = createFileSessionStore({ stateDir });
+  const record = createSessionRecord({
+    acpxRecordId: "agent:codex:acp:concurrent",
+    acpSessionId: "sid-concurrent",
+  });
+
+  await Promise.all(Array.from({ length: 8 }, () => store.save(record)));
+
+  const loaded = await store.load(record.acpxRecordId);
+  assert.equal(loaded?.acpSessionId, "sid-concurrent");
+  assert.deepEqual(
+    (await fs.readdir(path.join(stateDir, "sessions"))).filter((file) => file.endsWith(".tmp")),
+    [],
+  );
+});
+
 test("createFileSessionStore.load() returns undefined for a corrupt session file (#378)", async (t) => {
   const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-store-corrupt-"));
   t.after(async () => {

@@ -6,6 +6,7 @@ import { SessionNotFoundError, SessionResolutionError } from "../../errors.js";
 import { incrementPerfCounter, measurePerf } from "../../perf-metrics.js";
 import { assertPersistedKeyPolicy } from "../../persisted-key-policy.js";
 import type { SessionRecord } from "../../types.js";
+import { createAtomicWriteTempPath } from "./atomic-write.js";
 import {
   loadOrRebuildSessionIndex,
   rebuildSessionIndex,
@@ -90,7 +91,7 @@ export async function writeSessionRecord(record: SessionRecord): Promise<void> {
     assertPersistedKeyPolicy(persisted);
 
     const file = sessionFilePath(record.acpxRecordId);
-    const tempFile = `${file}.${process.pid}.${Date.now()}.tmp`;
+    const tempFile = createAtomicWriteTempPath(file);
     const payload = JSON.stringify(persisted, null, 2);
     await fs.writeFile(tempFile, `${payload}\n`, "utf8");
     await fs.rename(tempFile, file);

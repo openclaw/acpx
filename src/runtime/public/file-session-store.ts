@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { assertPersistedKeyPolicy } from "../../persisted-key-policy.js";
+import { createAtomicWriteTempPath } from "../../session/persistence/atomic-write.js";
 import { parseSessionRecord } from "../../session/persistence/parse.js";
 import { serializeSessionRecordForDisk } from "../../session/persistence/serialize.js";
 import type { AcpFileSessionStoreOptions, AcpSessionRecord, AcpSessionStore } from "./contract.js";
@@ -50,7 +51,7 @@ class FileSessionStore implements AcpSessionStore {
     assertPersistedKeyPolicy(persisted);
 
     const file = this.filePath(record.acpxRecordId);
-    const tempFile = `${file}.${process.pid}.${Date.now()}.tmp`;
+    const tempFile = createAtomicWriteTempPath(file);
     const payload = JSON.stringify(persisted, null, 2);
     await fs.writeFile(tempFile, `${payload}\n`, "utf8");
     await fs.rename(tempFile, file);
