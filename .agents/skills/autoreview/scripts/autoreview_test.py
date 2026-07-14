@@ -157,6 +157,32 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
             ("cursor", "auto", None),
         )
 
+    def test_claude_auth_env_does_not_block_explicit_non_claude_engine(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"AUTOREVIEW_CLAUDE_AUTH": "subscription"},
+            clear=False,
+        ):
+            with mock.patch.object(sys, "argv", ["autoreview", "--engine", "cursor"]):
+                reviewers = AUTOREVIEW.reviewer_args(AUTOREVIEW.parse_args())
+        self.assertEqual([reviewer.engine for reviewer in reviewers], ["cursor"])
+
+    def test_explicit_claude_auth_rejects_non_claude_engine(self) -> None:
+        with mock.patch.object(
+            sys,
+            "argv",
+            [
+                "autoreview",
+                "--engine",
+                "cursor",
+                "--claude-auth",
+                "subscription",
+            ],
+        ):
+            args = AUTOREVIEW.parse_args()
+        with self.assertRaisesRegex(SystemExit, "only supported for claude"):
+            AUTOREVIEW.reviewer_args(args)
+
     def test_cursor_agent_keyed_option_normalizes_to_cursor(self) -> None:
         self.assertEqual(
             AUTOREVIEW.parse_keyed_options(["cursor-agent=auto"], "model"),

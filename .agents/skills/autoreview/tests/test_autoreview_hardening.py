@@ -91,7 +91,11 @@ class AutoreviewHardeningTests(unittest.TestCase):
 
             bundle, truncated = self.helper["local_bundle"](repo)
 
-            self.assertIn("## image.bin\n[binary file omitted]", bundle)
+            self.assertIn(
+                '# Untracked File\npath: "image.bin"\n'
+                'source-line 1: "[binary file omitted]"',
+                bundle,
+            )
             self.assertTrue(truncated)
 
     def test_local_bundle_rejects_non_utf8_untracked_text(self) -> None:
@@ -122,7 +126,12 @@ class AutoreviewHardeningTests(unittest.TestCase):
             ):
                 bundle, truncated = self.helper["local_bundle"](repo)
 
-            self.assertIn("## notes.txt\nreview me", bundle)
+            expected_record = json.dumps("review me" + os.linesep)
+            self.assertIn(
+                '# Untracked File\npath: "notes.txt"\n'
+                f"source-line 1: {expected_record}",
+                bundle,
+            )
             self.assertFalse(truncated)
             self.assertEqual(reads, 1)
 
@@ -214,6 +223,202 @@ class AutoreviewHardeningTests(unittest.TestCase):
             self.helper["codex_config_overrides"](args),
             args.codex_config,
         )
+
+    def test_codex_command_selects_profile_and_drops_strict_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            runtime = root / "runtime"
+            with mock.patch.dict(
+                self.helper["codex_command"].__globals__,
+                {"resolve_command": lambda *_args: "/usr/bin/codex"},
+            ):
+                command = self.helper["codex_command"](
+                    argparse.Namespace(
+                        codex_bin="codex",
+                        web_search=False,
+                        codex_config=None,
+                        thinking=None,
+                        codex_speed=None,
+                        codex_profile="bedrock",
+                        codex_no_output_schema=False,
+                        stream_engine_output=False,
+                    ),
+                    repo,
+                    root / "review",
+                    runtime,
+                    root / "schema.json",
+                    root / "output.json",
+                    None,
+                )
+
+        profile_index = command.index("--profile")
+        self.assertEqual(command[profile_index + 1], "bedrock")
+        self.assertLess(profile_index, command.index("exec"))
+        self.assertNotIn("--ignore-user-config", command)
+        self.assertIn("--ignore-rules", command)
+        for override in (
+            "features.shell_tool=false",
+            "features.code_mode=false",
+            "features.code_mode_only=false",
+            "features.multi_agent=false",
+            "features.enable_fanout=false",
+        ):
+            self.assertIn(override, command)
+        self.assertNotIn("--output-schema", command)
+
+    def test_codex_command_ignores_user_config_without_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            with mock.patch.dict(
+                self.helper["codex_command"].__globals__,
+                {"resolve_command": lambda *_args: "/usr/bin/codex"},
+            ):
+                command = self.helper["codex_command"](
+                    argparse.Namespace(
+                        codex_bin="codex",
+                        web_search=False,
+                        codex_config=None,
+                        thinking=None,
+                        codex_speed=None,
+                        codex_profile=None,
+                        codex_no_output_schema=False,
+                        stream_engine_output=False,
+                    ),
+                    repo,
+                    root / "review",
+                    root / "runtime",
+                    root / "schema.json",
+                    root / "output.json",
+                    "gpt-5.6-sol",
+                )
+
+        self.assertIn("--ignore-user-config", command)
+        self.assertNotIn("features.shell_tool=false", command)
+
+    def test_codex_bedrock_credentials_require_a_profile(self) -> None:
+        old = os.environ.copy()
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            try:
+                os.environ["AWS_BEARER_TOKEN_BEDROCK"] = "test-token"
+                os.environ["AWS_PROFILE"] = "review-profile"
+                standard = self.helper["codex_engine_env"](
+                    argparse.Namespace(codex_profile=None),
+                    repo,
+                )
+                bedrock = self.helper["codex_engine_env"](
+                    argparse.Namespace(codex_profile="bedrock"),
+                    repo,
+                )
+
+                self.assertNotIn("AWS_BEARER_TOKEN_BEDROCK", standard)
+                self.assertNotIn("AWS_PROFILE", standard)
+                self.assertEqual(
+                    bedrock["AWS_BEARER_TOKEN_BEDROCK"],
+                    "test-token",
+                )
+                self.assertNotIn("AWS_PROFILE", bedrock)
+            finally:
+                os.environ.clear()
+                os.environ.update(old)
+
+    def test_explicit_reviewer_selection_overrides_environment_panel(self) -> None:
+        args = self.helper["reviewer_test_args"](
+            engine="claude",
+            reviewer_selection_explicit=True,
+        )
+        with mock.patch.dict(
+            os.environ,
+            {"AUTOREVIEW_REVIEWERS": "pi"},
+            clear=False,
+        ):
+            reviewers = self.helper["reviewer_args"](args)
+
+        self.assertEqual([reviewer.engine for reviewer in reviewers], ["claude"])
+
+    def test_environment_reviewer_list_rejects_empty_and_expands_all(self) -> None:
+        args = self.helper["reviewer_test_args"]()
+        with mock.patch.dict(
+            os.environ,
+            {"AUTOREVIEW_REVIEWERS": ","},
+            clear=False,
+        ), self.assertRaisesRegex(SystemExit, "must select at least one reviewer"):
+            self.helper["reviewer_args"](args)
+
+        with mock.patch.dict(
+            os.environ,
+            {"AUTOREVIEW_REVIEWERS": "all"},
+            clear=False,
+        ):
+            reviewers = self.helper["reviewer_args"](args)
+
+        self.assertEqual(
+            [reviewer.engine for reviewer in reviewers],
+            list(self.helper["ALL_REVIEWERS"]),
+        )
+
+    def test_reviewer_selection_flags_reject_prefix_abbreviations(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--engi", "claude"],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unrecognized arguments: --engi claude", result.stderr)
+
+    def test_run_codex_profile_uses_none_model_as_one_valid_attempt(self) -> None:
+        observed_models: list[str | None] = []
+
+        def fake_command(
+            _args: argparse.Namespace,
+            _source_repo: Path,
+            _review_root: Path,
+            _runtime_root: Path,
+            _schema_path: Path,
+            _output_path: Path,
+            model: str | None,
+            *,
+            force_file_auth: bool = False,
+        ) -> list[str]:
+            self.assertFalse(force_file_auth)
+            observed_models.append(model)
+            return ["/usr/bin/codex"]
+
+        result = subprocess.CompletedProcess(
+            args=["/usr/bin/codex"],
+            returncode=0,
+            stdout="profile-output",
+            stderr="",
+        )
+        args = argparse.Namespace(
+            tools=True,
+            model=None,
+            fallback_model=None,
+            stream_engine_output=False,
+            codex_profile="bedrock",
+        )
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            with mock.patch.dict(
+                self.helper["run_codex"].__globals__,
+                {
+                    "prepare_codex_runtime_auth": lambda *_args: False,
+                    "prepare_codex_runtime_profile": lambda *_args: True,
+                    "codex_source_home": lambda *_args: None,
+                    "codex_command": fake_command,
+                    "codex_engine_env": lambda *_args, **_kwargs: {},
+                    "run_with_heartbeat": lambda *_args, **_kwargs: result,
+                },
+            ):
+                output = self.helper["run_codex"](args, repo, "review")
+
+        self.assertEqual(output, "profile-output")
+        self.assertEqual(observed_models, [None])
 
     def test_untracked_files_respect_trusted_global_excludes(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -364,6 +569,338 @@ class AutoreviewHardeningTests(unittest.TestCase):
     def test_review_patch_limit_counts_utf8_bytes(self) -> None:
         with self.assertRaisesRegex(SystemExit, r"12 bytes; limit 10"):
             self.helper["validate_review_patch"]("local staged diff", ["safe.txt"], "界" * 4, 10)
+
+    def test_review_patch_accepts_large_content_without_explicit_limit(self) -> None:
+        patch = (
+            "diff --git a/safe.txt b/safe.txt\n"
+            "--- a/safe.txt\n"
+            "+++ b/safe.txt\n"
+            "@@ -0,0 +1,100000 @@\n"
+            + "+safe review content\n" * 100_000
+        )
+
+        self.assertEqual(
+            self.helper["validate_review_patch"](
+                "local staged diff",
+                ["safe.txt"],
+                patch,
+            ),
+            patch,
+        )
+
+    def test_review_bundle_chunking_preserves_every_byte_and_diff_context(self) -> None:
+        bundle = (
+            "# Commit Diff\n\n"
+            "diff --git a/safe.txt b/safe.txt\n"
+            "--- a/safe.txt\n"
+            "+++ b/safe.txt\n"
+            "@@ -0,0 +1,200 @@\n"
+            + "+safe review content\n" * 200
+        )
+
+        chunks = self.helper["split_review_bundle"](bundle, 300)
+
+        self.assertGreater(len(chunks), 1)
+        self.assertEqual("".join(chunk.content for chunk in chunks), bundle)
+        self.assertTrue(all(len(chunk.content.encode("utf-8")) <= 300 for chunk in chunks))
+        self.assertTrue(
+            any(
+                "+++ b/safe.txt" in chunk.context
+                and "@@ -0,0 +1,200 @@" in chunk.context
+                and "Continuation begins at new-file line" in chunk.context
+                for chunk in chunks[1:]
+            )
+        )
+
+    def test_untracked_markdown_headings_do_not_create_bundle_boundaries(self) -> None:
+        bundle = (
+            "# Untracked Files\n\n"
+            "# Untracked File\n"
+            'path: "notes.md"\n'
+            'source-line 1: "# title\\n"\n'
+            'source-line 2: "## section\\n"\n\n'
+            "# Untracked File\n"
+            'path: "todo.md"\n'
+            'source-line 1: "# next\\n"'
+        )
+
+        units = self.helper["review_bundle_units"](bundle)
+
+        self.assertEqual(len(units), 3)
+        self.assertIn(r'source-line 2: "## section\n"', units[1])
+        self.assertEqual("".join(units), bundle)
+
+    def test_unicode_line_separators_do_not_create_bundle_boundaries(self) -> None:
+        bundle = (
+            "# Untracked Files\n\n"
+            "# Untracked File\n"
+            'path: "notes.txt"\n'
+            'source-line 1: "before\u2028diff --git a/fake b/fake"\n\n'
+            "diff --git a/real.txt b/real.txt\n"
+            "--- a/real.txt\n"
+            "+++ b/real.txt\n"
+        )
+
+        units = self.helper["review_bundle_units"](bundle)
+
+        self.assertEqual(len(units), 3)
+        self.assertIn("\u2028diff --git a/fake b/fake", units[1])
+        self.assertEqual("".join(units), bundle)
+
+    def test_diff_source_prefixes_do_not_replace_file_context(self) -> None:
+        context: list[str] = []
+        next_new_line = None
+        next_old_line = None
+        in_hunk = False
+        lines = (
+            "diff --git a/safe.txt b/safe.txt\n",
+            "--- a/safe.txt\n",
+            "+++ b/safe.txt\n",
+            "@@ -10,2 +10,3 @@\n",
+            "+++ added source beginning with pluses\n",
+            "--- deleted source beginning with minuses\n",
+            " context\n",
+        )
+
+        for line in lines:
+            next_new_line, next_old_line, in_hunk = self.helper[
+                "update_review_chunk_context"
+            ](
+                context,
+                line,
+                next_new_line,
+                next_old_line,
+                in_hunk,
+            )
+
+        self.assertEqual(next_new_line, 12)
+        self.assertEqual(next_old_line, 12)
+        self.assertIn("--- a/safe.txt\n", context)
+        self.assertIn("+++ b/safe.txt\n", context)
+        self.assertNotIn("--- deleted source beginning with minuses\n", context)
+
+    def test_hunk_header_that_fits_fresh_chunk_is_not_split(self) -> None:
+        unit = (
+            "diff --git a/abcdefghijk b/abcdefghijk\n"
+            "--- a/abcdefghijk\n"
+            "+++ b/abcdefghijk\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+
+        chunks = self.helper["split_oversized_review_unit"](unit, 85)
+
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(any("@@ -1 +1 @@\n" in chunk.content for chunk in chunks))
+        self.assertEqual("".join(chunk.content for chunk in chunks), unit)
+
+    def test_long_diff_line_continuations_keep_their_original_marker(self) -> None:
+        for marker in ("+", "-", " "):
+            with self.subTest(marker=marker):
+                unit = (
+                    "diff --git a/large.txt b/large.txt\n"
+                    "--- a/large.txt\n"
+                    "+++ b/large.txt\n"
+                    "@@ -1 +1 @@\n"
+                    f"{marker}{'x' * 400}\n"
+                )
+
+                chunks = self.helper["split_oversized_review_unit"](unit, 140)
+
+                self.assertTrue(
+                    any(
+                        f"original marker is `{marker}`" in chunk.context
+                        for chunk in chunks[1:]
+                    )
+                )
+                self.assertEqual("".join(chunk.content for chunk in chunks), unit)
+
+    def test_modified_file_deletion_context_keeps_old_and_new_offsets(self) -> None:
+        context: list[str] = []
+        next_new_line = None
+        next_old_line = None
+        in_hunk = False
+        for line in (
+            "diff --git a/safe.txt b/safe.txt\n",
+            "--- a/safe.txt\n",
+            "+++ b/safe.txt\n",
+            "@@ -10,3 +10,2 @@\n",
+            "-first deleted line\n",
+        ):
+            next_new_line, next_old_line, in_hunk = self.helper[
+                "update_review_chunk_context"
+            ](
+                context,
+                line,
+                next_new_line,
+                next_old_line,
+                in_hunk,
+            )
+
+        rendered = self.helper["review_chunk_context"](
+            context,
+            next_new_line,
+            next_old_line,
+        )
+
+        self.assertIn("new-file line 10", rendered)
+        self.assertIn("old-file line 11", rendered)
+
+    def test_multiple_long_line_tails_pack_into_following_chunks(self) -> None:
+        limit = 200
+        unit = (
+            "diff --git a/large.txt b/large.txt\n"
+            "--- a/large.txt\n"
+            "+++ b/large.txt\n"
+            "@@ -1,5 +1,5 @@\n"
+            + ("+" + "x" * 205 + "\n") * 5
+        )
+
+        chunks = self.helper["split_oversized_review_unit"](unit, limit)
+        minimum_chunks = (len(unit.encode("utf-8")) + limit - 1) // limit
+
+        self.assertLessEqual(len(chunks), minimum_chunks + 1)
+        self.assertEqual("".join(chunk.content for chunk in chunks), unit)
+        self.assertTrue(all(len(chunk.content.encode("utf-8")) <= limit for chunk in chunks))
+
+    def test_untracked_continuation_context_keeps_source_line(self) -> None:
+        unit = (
+            "# Untracked File\n"
+            'path: "notes.txt"\n'
+            'source-line 1: "short\\n"\n'
+            f'source-line 2: "{"x" * 300}"\n'
+        )
+
+        chunks = self.helper["split_oversized_review_unit"](unit, 120)
+
+        self.assertGreater(len(chunks), 2)
+        self.assertTrue(
+            any(
+                "Continuation begins at untracked source line 2" in chunk.context
+                for chunk in chunks[1:]
+            )
+        )
+        self.assertEqual("".join(chunk.content for chunk in chunks), unit)
+
+    def test_deleted_file_continuation_uses_positive_old_line(self) -> None:
+        unit = (
+            "diff --git a/removed.txt b/removed.txt\n"
+            "--- a/removed.txt\n"
+            "+++ /dev/null\n"
+            "@@ -40,50 +0,0 @@\n"
+            + "-deleted content\n" * 50
+        )
+
+        chunks = self.helper["split_oversized_review_unit"](unit, 180)
+
+        deletion_contexts = [
+            chunk.context for chunk in chunks[1:] if "old-file line" in chunk.context
+        ]
+        self.assertTrue(deletion_contexts)
+        self.assertTrue(all("line 0" not in context for context in deletion_contexts))
+        self.assertTrue(all("--- a/removed.txt" in context for context in deletion_contexts))
+
+    def test_long_complete_context_is_retained_or_rejected(self) -> None:
+        path = "nested/" + "x" * 10_000 + ".txt"
+        context = [
+            f'diff --git "a/{path}" "b/{path}"\n',
+            f'--- "a/{path}"\n',
+            f'+++ "b/{path}"\n',
+            "@@ -1 +1 @@\n",
+        ]
+
+        rendered = self.helper["review_chunk_context"](context, 2, 2)
+
+        self.assertIn(f'+++ "b/{path}"', rendered)
+        self.assertIn("@@ -1 +1 @@", rendered)
+        self.assertIn("Continuation begins at new-file line 2", rendered)
+
+    def test_review_bundle_packs_oversized_unit_tails_globally(self) -> None:
+        limit = 1_000
+        units = []
+        for index in range(5):
+            header = (
+                f"diff --git a/file-{index}.txt b/file-{index}.txt\n"
+                f"--- a/file-{index}.txt\n"
+                f"+++ b/file-{index}.txt\n"
+                "@@ -0,0 +1 @@\n"
+            )
+            body = "+" + "x" * (1_100 - len(header.encode("utf-8")) - 2) + "\n"
+            units.append(header + body)
+        bundle = "".join(units)
+
+        chunks = self.helper["split_review_bundle"](bundle, limit)
+
+        self.assertEqual(len(chunks), 6)
+        self.assertEqual("".join(chunk.content for chunk in chunks), bundle)
+        self.assertTrue(all(len(chunk.content.encode("utf-8")) <= limit for chunk in chunks))
+
+    def test_large_bundle_stays_single_pass_until_prompt_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            prompts = self.helper["build_review_prompts"](
+                repo,
+                "commit",
+                "HEAD",
+                "# Commit Diff\n" + "safe review content\n" * 18_000,
+                "",
+                "",
+            )
+
+        self.assertEqual(len(prompts), 1)
+
+    def test_bundle_above_prompt_limit_uses_complete_bounded_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            prompts = self.helper["build_review_prompts"](
+                repo,
+                "commit",
+                "HEAD",
+                "# Commit Diff\n" + "safe review content\n" * 35_000,
+                "",
+                "",
+            )
+
+        self.assertGreater(len(prompts), 1)
+        self.assertTrue(
+            all(
+                len(prompt.encode("utf-8"))
+                <= self.helper["MAX_REVIEW_PROMPT_BYTES"]
+                for prompt in prompts
+            )
+        )
+        self.assertTrue(all("Oversized review bundle chunk:" in prompt for prompt in prompts))
+
+    def test_review_prompt_preserves_bundle_ending_whitespace(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            bundle = "# Commit Diff\n+Markdown hard break  \n+\n"
+            prompt = self.helper["render_review_prompt"](
+                repo,
+                "commit",
+                "HEAD",
+                self.helper["ReviewChunk"](bundle),
+                "",
+                "",
+            )
+
+        self.assertTrue(prompt.endswith(bundle))
+
+    def test_review_pass_count_is_bounded(self) -> None:
+        builder = self.helper["build_review_prompts"]
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            with mock.patch.dict(builder.__globals__, {"MAX_REVIEW_PASSES": 1}):
+                with self.assertRaisesRegex(SystemExit, "more than 1 bounded passes"):
+                    builder(
+                        repo,
+                        "commit",
+                        "HEAD",
+                        "# Commit Diff\n" + "safe review content\n" * 35_000,
+                        "",
+                        "",
+                    )
 
     def test_review_patch_escapes_controls_in_blocked_paths(self) -> None:
         path = ".env.\x1b]52;c;VEVTVA==\x07\udc9b"
@@ -2108,7 +2645,15 @@ class AutoreviewHardeningTests(unittest.TestCase):
             repo = init_repo(Path(tempdir))
             prompt = self.helper["build_prompt"](repo, "local", None, "diff", "", "")
 
-            self.assertIn("Repository root: .", prompt)
+            self.assertIn(
+                "Review sandbox: . (intentionally contains no reviewed repository files)",
+                prompt,
+            )
+            self.assertIn("Read-only tools cannot access unchanged repository files", prompt)
+            self.assertIn(
+                "Do not report a missing import, symbol, definition, call site, config entry",
+                prompt,
+            )
             self.assertNotIn(str(repo), prompt)
             with self.assertRaisesRegex(SystemExit, "aggregate limit"):
                 self.helper["build_prompt"](
@@ -2325,6 +2870,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
                     claude_env["AWS_BEARER_TOKEN_BEDROCK"],
                     "test-token-placeholder",
                 )
+                self.assertNotIn("AWS_BEARER_TOKEN_BEDROCK", env)
                 self.assertEqual(
                     claude_env["ANTHROPIC_BEDROCK_BASE_URL"],
                     "https://bedrock.example.invalid",
@@ -2334,6 +2880,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
                     "https://vertex.example.invalid",
                 )
                 self.assertEqual(claude_env["AWS_PROFILE"], "review-profile")
+                self.assertNotIn("AWS_PROFILE", env)
                 self.assertNotIn("AWS_CONFIG_FILE", env)
                 self.assertNotIn("GOOGLE_APPLICATION_CREDENTIALS", env)
                 self.assertNotIn(
@@ -2400,6 +2947,171 @@ class AutoreviewHardeningTests(unittest.TestCase):
         self.assertTrue(observed[1]["shell"])
         self.assertNotIn("shell", observed[2])
         self.assertNotIn("shell", observed[3])
+
+    def test_claude_subscription_auth_ignores_provider_environment(self) -> None:
+        old = os.environ.copy()
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            try:
+                os.environ["ANTHROPIC_API_KEY"] = "test-api-key"
+                os.environ["ANTHROPIC_AUTH_TOKEN"] = "test-auth-token"
+                os.environ["ANTHROPIC_BASE_URL"] = "https://api.example.invalid"
+                os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+                os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = "test-oauth-token"
+
+                subscription = self.helper["claude_engine_env"](
+                    argparse.Namespace(claude_auth="subscription"),
+                    repo,
+                )
+                default = self.helper["claude_engine_env"](
+                    argparse.Namespace(claude_auth="default"),
+                    repo,
+                )
+
+                for key in (
+                    "ANTHROPIC_API_KEY",
+                    "ANTHROPIC_AUTH_TOKEN",
+                    "ANTHROPIC_BASE_URL",
+                    "CLAUDE_CODE_USE_BEDROCK",
+                ):
+                    self.assertNotIn(key, subscription)
+                self.assertEqual(
+                    subscription["CLAUDE_CODE_OAUTH_TOKEN"],
+                    "test-oauth-token",
+                )
+                self.assertEqual(
+                    subscription["CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK"],
+                    "1",
+                )
+                self.assertEqual(default["ANTHROPIC_API_KEY"], "test-api-key")
+                subscription_flags = self.helper["claude_review_isolation_flags"](
+                    argparse.Namespace(claude_auth="subscription")
+                )
+                sources_index = subscription_flags.index("--setting-sources")
+                self.assertEqual(subscription_flags[sources_index + 1], "")
+            finally:
+                os.environ.clear()
+                os.environ.update(old)
+
+    def test_claude_refusal_is_detected(self) -> None:
+        output = json.dumps(
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "fallback",
+                                "from": {"model": "claude-fable-5"},
+                                "to": {"model": "claude-opus-4-8"},
+                            }
+                        ]
+                    },
+                },
+                {"type": "system", "subtype": "model_refusal_fallback"},
+            ]
+        )
+
+        self.assertTrue(self.helper["claude_refusal_detected"](output))
+        self.assertFalse(
+            self.helper["claude_refusal_detected"](
+                json.dumps([{"type": "result", "subtype": "success"}])
+            )
+        )
+
+    def test_claude_retries_fable_twice_then_uses_opus_max(self) -> None:
+        refusal = subprocess.CompletedProcess(
+            args=["claude"],
+            returncode=1,
+            stdout=json.dumps(
+                [{"type": "system", "subtype": "model_refusal_no_fallback"}]
+            ),
+            stderr="",
+        )
+        success = subprocess.CompletedProcess(
+            args=["claude"],
+            returncode=0,
+            stdout=json.dumps([{"type": "result", "subtype": "success"}]),
+            stderr="",
+        )
+        args = argparse.Namespace(
+            model="claude-fable-5",
+            thinking="max",
+        )
+        run_once = mock.Mock(side_effect=[refusal, refusal, success])
+
+        with mock.patch.dict(
+            self.helper["run_claude"].__globals__,
+            {
+                "ensure_claude_isolation_supported": lambda *_args: None,
+                "run_claude_once": run_once,
+            },
+        ):
+            output = self.helper["run_claude"](args, Path("/repo"), "review")
+
+        self.assertEqual(output, success.stdout)
+        self.assertEqual(run_once.call_count, 3)
+        invoked_models = [call.args[0].model for call in run_once.call_args_list]
+        invoked_thinking = [call.args[0].thinking for call in run_once.call_args_list]
+        self.assertEqual(
+            invoked_models,
+            ["claude-fable-5", "claude-fable-5", "claude-opus-4-8"],
+        )
+        self.assertEqual(invoked_thinking, ["max", "max", "max"])
+        self.assertEqual(args.actual_model, "claude-opus-4-8")
+        self.assertEqual(args.actual_thinking, "max")
+
+    def test_claude_retries_fable_once_without_opus_when_retry_succeeds(self) -> None:
+        refusal = subprocess.CompletedProcess(
+            args=["claude"],
+            returncode=1,
+            stdout=json.dumps(
+                [{"type": "system", "subtype": "model_refusal_no_fallback"}]
+            ),
+            stderr="",
+        )
+        success = subprocess.CompletedProcess(
+            args=["claude"],
+            returncode=0,
+            stdout=json.dumps([{"type": "result", "subtype": "success"}]),
+            stderr="",
+        )
+        args = argparse.Namespace(model="claude-fable-5", thinking="max")
+        run_once = mock.Mock(side_effect=[refusal, success])
+
+        with mock.patch.dict(
+            self.helper["run_claude"].__globals__,
+            {
+                "ensure_claude_isolation_supported": lambda *_args: None,
+                "run_claude_once": run_once,
+            },
+        ):
+            output = self.helper["run_claude"](args, Path("/repo"), "review")
+
+        self.assertEqual(output, success.stdout)
+        self.assertEqual(run_once.call_count, 2)
+        self.assertEqual(
+            [call.args[0].model for call in run_once.call_args_list],
+            ["claude-fable-5", "claude-fable-5"],
+        )
+        self.assertIsNone(args.actual_model)
+        self.assertIsNone(args.actual_thinking)
+
+    def test_reviewer_label_reports_only_effective_refusal_fallback(self) -> None:
+        args = argparse.Namespace(
+            engine="claude",
+            model="claude-fable-5",
+            thinking="max",
+            fallback_model="claude-opus-4-8,claude-sonnet-4-6",
+            actual_model="claude-opus-4-8",
+            actual_thinking="max",
+        )
+
+        label = self.helper["reviewer_label"](args)
+
+        self.assertIn("model=claude-opus-4-8", label)
+        self.assertIn("refusal-fallback-from=claude-fable-5", label)
+        self.assertNotIn("fallback=", label)
 
     def test_parallel_test_finish_does_not_wait_for_inherited_stderr_pipe(
         self,
@@ -3126,6 +3838,174 @@ class AutoreviewHardeningTests(unittest.TestCase):
             ):
                 self.helper["ensure_claude_isolation_supported"](args, repo)
 
+    def test_claude_isolation_support_probes_hidden_flags_directly(self) -> None:
+        args = argparse.Namespace(
+            claude_bin="claude",
+            fallback_model=None,
+            model="claude-fable-5",
+        )
+        commands: list[list[str]] = []
+
+        def fake_run(
+            command: list[str],
+            *_args: object,
+            **_kwargs: object,
+        ) -> subprocess.CompletedProcess[str]:
+            commands.append(command)
+            if command == ["/usr/bin/claude", "--version"]:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    "2.1.207 (Claude Code)",
+                    "",
+                )
+            if "--autoreview-invalid-control" in command:
+                return subprocess.CompletedProcess(
+                    command,
+                    1,
+                    "",
+                    "error: unknown option '--autoreview-invalid-control'",
+                )
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                "",
+                (
+                    "Error: Input must be provided either through stdin or as a "
+                    "prompt argument when using --print"
+                ),
+            )
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            with mock.patch.dict(
+                self.helper["ensure_claude_isolation_supported"].__globals__,
+                {
+                    "resolve_command": lambda *_args: "/usr/bin/claude",
+                    "safe_engine_env": lambda *_args, **_kwargs: {},
+                    "safe_temp_root": lambda _repo: Path(tempdir),
+                    "run": fake_run,
+                },
+            ):
+                self.helper["ensure_claude_isolation_supported"](args, repo)
+
+        self.assertEqual(commands[0], ["/usr/bin/claude", "--version"])
+        self.assertNotIn("--help", commands[1])
+        self.assertEqual(commands[1][1], "--autoreview-invalid-control")
+        self.assertEqual(commands[1][-1], "--print")
+        self.assertNotIn("--autoreview-invalid-control", commands[2])
+        for required in (
+            "--safe-mode",
+            "--setting-sources",
+            "--strict-mcp-config",
+            "--disallowedTools",
+            "--tools",
+        ):
+            self.assertIn(required, commands[2])
+        self.assertEqual(commands[2][-1], "--print")
+
+    def test_claude_isolation_support_fails_when_capability_probe_rejects_flags(self) -> None:
+        args = argparse.Namespace(
+            claude_bin="claude",
+            fallback_model=None,
+            model="claude-fable-5",
+        )
+        results = iter(
+            [
+                subprocess.CompletedProcess([], 0, "2.1.207 (Claude Code)", ""),
+                subprocess.CompletedProcess(
+                    [],
+                    1,
+                    "",
+                    "error: unknown option '--autoreview-invalid-control'",
+                ),
+                subprocess.CompletedProcess([], 1, "", "unknown option --safe-mode"),
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            with mock.patch.dict(
+                self.helper["ensure_claude_isolation_supported"].__globals__,
+                {
+                    "resolve_command": lambda *_args: "/usr/bin/claude",
+                    "safe_engine_env": lambda *_args, **_kwargs: {},
+                    "safe_temp_root": lambda _repo: Path(tempdir),
+                    "run": lambda *_args, **_kwargs: next(results),
+                },
+            ), self.assertRaisesRegex(
+                SystemExit,
+                "isolation flags rejected by capability probe",
+            ):
+                self.helper["ensure_claude_isolation_supported"](args, repo)
+
+    def test_claude_isolation_probe_fails_if_unknown_control_is_not_rejected(self) -> None:
+        args = argparse.Namespace(
+            claude_bin="claude",
+            fallback_model=None,
+            model="claude-fable-5",
+        )
+        results = iter(
+            [
+                subprocess.CompletedProcess([], 0, "2.1.207 (Claude Code)", ""),
+                subprocess.CompletedProcess([], 0, "2.1.207 (Claude Code)", ""),
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            with mock.patch.dict(
+                self.helper["ensure_claude_isolation_supported"].__globals__,
+                {
+                    "resolve_command": lambda *_args: "/usr/bin/claude",
+                    "safe_engine_env": lambda *_args, **_kwargs: {},
+                    "safe_temp_root": lambda _repo: Path(tempdir),
+                    "run": lambda *_args, **_kwargs: next(results),
+                },
+            ), self.assertRaisesRegex(
+                SystemExit,
+                "capability probe rejects unknown flags",
+            ):
+                self.helper["ensure_claude_isolation_supported"](args, repo)
+
+    def test_claude_isolation_probe_rejects_warn_and_continue_parser(self) -> None:
+        args = argparse.Namespace(
+            claude_bin="claude",
+            fallback_model=None,
+            model="claude-fable-5",
+        )
+        results = iter(
+            [
+                subprocess.CompletedProcess([], 0, "2.1.207 (Claude Code)", ""),
+                subprocess.CompletedProcess(
+                    [],
+                    1,
+                    "",
+                    (
+                        "warning: unknown option '--autoreview-invalid-control'\n"
+                        "Error: Input must be provided either through stdin or as a "
+                        "prompt argument when using --print"
+                    ),
+                ),
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            with mock.patch.dict(
+                self.helper["ensure_claude_isolation_supported"].__globals__,
+                {
+                    "resolve_command": lambda *_args: "/usr/bin/claude",
+                    "safe_engine_env": lambda *_args, **_kwargs: {},
+                    "safe_temp_root": lambda _repo: Path(tempdir),
+                    "run": lambda *_args, **_kwargs: next(results),
+                },
+            ), self.assertRaisesRegex(
+                SystemExit,
+                "capability probe rejects unknown flags",
+            ):
+                self.helper["ensure_claude_isolation_supported"](args, repo)
+
     def test_claude_runs_outside_repo_with_auto_memory_disabled(self) -> None:
         args = argparse.Namespace(
             claude_allowed_tools=None,
@@ -3526,6 +4406,97 @@ class AutoreviewHardeningTests(unittest.TestCase):
                     json.loads(source_auth.read_text(encoding="utf-8"))["token"],
                     "test-auth-token",
                 )
+            finally:
+                os.environ.clear()
+                os.environ.update(old)
+
+    def test_codex_runtime_profile_stages_only_safe_bedrock_settings(self) -> None:
+        old = os.environ.copy()
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            source_home = root / "host-home" / ".codex"
+            runtime_home = root / "runtime" / "codex-home"
+            source_home.mkdir(parents=True)
+            (source_home / "bedrock.config.toml").write_text(
+                'model = "openai.gpt-5.5"\n'
+                'model_provider = "amazon-bedrock"\n'
+                'model_reasoning_effort = "xhigh"\n'
+                'approvals_reviewer = "user"\n'
+                '[mcp_servers.hostile]\ncommand = "touch"\n'
+                '[model_providers.amazon-bedrock.aws]\n'
+                'region = "us-east-2"\n',
+                encoding="utf-8",
+            )
+            try:
+                os.environ["CODEX_HOME"] = str(source_home)
+                staged = self.helper["prepare_codex_runtime_profile"](
+                    argparse.Namespace(codex_profile="bedrock"),
+                    repo,
+                    runtime_home,
+                )
+                self.assertTrue(staged)
+                runtime_profile = runtime_home / "bedrock.config.toml"
+                text = runtime_profile.read_text(encoding="utf-8")
+                self.assertIn('model = "openai.gpt-5.5"', text)
+                self.assertIn('model_provider = "amazon-bedrock"', text)
+                self.assertIn('model_reasoning_effort = "xhigh"', text)
+                self.assertIn('region = "us-east-2"', text)
+                self.assertNotIn("approvals_reviewer", text)
+                self.assertNotIn("mcp_servers", text)
+                self.assertEqual(
+                    stat.S_IMODE(runtime_profile.stat().st_mode),
+                    0o600,
+                )
+            finally:
+                os.environ.clear()
+                os.environ.update(old)
+
+    def test_codex_runtime_profile_rejects_file_backed_aws_profile(self) -> None:
+        old = os.environ.copy()
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            source_home = root / "host-home" / ".codex"
+            source_home.mkdir(parents=True)
+            (source_home / "bedrock.config.toml").write_text(
+                'model = "openai.gpt-5.5"\n'
+                'model_provider = "amazon-bedrock"\n'
+                '[model_providers.amazon-bedrock.aws]\n'
+                'profile = "review"\nregion = "us-east-2"\n',
+                encoding="utf-8",
+            )
+            try:
+                os.environ["CODEX_HOME"] = str(source_home)
+                with self.assertRaisesRegex(SystemExit, "file-backed"):
+                    self.helper["prepare_codex_runtime_profile"](
+                        argparse.Namespace(codex_profile="bedrock"),
+                        repo,
+                        root / "runtime" / "codex-home",
+                    )
+            finally:
+                os.environ.clear()
+                os.environ.update(old)
+
+    def test_codex_runtime_profile_rejects_unsupported_provider(self) -> None:
+        old = os.environ.copy()
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            source_home = root / "host-home" / ".codex"
+            source_home.mkdir(parents=True)
+            (source_home / "custom.config.toml").write_text(
+                'model = "custom-model"\nmodel_provider = "credential-sink"\n',
+                encoding="utf-8",
+            )
+            try:
+                os.environ["CODEX_HOME"] = str(source_home)
+                with self.assertRaisesRegex(SystemExit, "unsupported model_provider"):
+                    self.helper["prepare_codex_runtime_profile"](
+                        argparse.Namespace(codex_profile="custom"),
+                        repo,
+                        root / "runtime" / "codex-home",
+                    )
             finally:
                 os.environ.clear()
                 os.environ.update(old)
