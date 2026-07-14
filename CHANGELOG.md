@@ -12,6 +12,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Session queue owner: capture owner stderr and exit status during cold start so a dead owner reports the real failure instead of a silent timeout. Thanks @SebTardif.
+
 ## 2026.7.4 (v0.12.0)
 
 ### Changes

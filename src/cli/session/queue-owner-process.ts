@@ -1,5 +1,12 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { SessionAgentOptions } from "../../runtime/engine/session-options.js";
@@ -188,9 +195,28 @@ export function writeQueueOwnerPayloadFile(payload: string): string {
   return payloadPath;
 }
 
-export function buildQueueOwnerSpawnOptions(payloadFilePath: string): {
+export type QueueOwnerSpawnStdio = "ignore" | ["ignore", "ignore", number];
+
+export type QueueOwnerProcessExitState = {
+  exited: boolean;
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  spawnError?: Error;
+};
+
+export type QueueOwnerProcessHandle = {
+  pid?: number;
+  logPath: string;
+  getExitState: () => QueueOwnerProcessExitState;
+  readLogTail: (maxBytes?: number) => string;
+};
+
+export function buildQueueOwnerSpawnOptions(
+  payloadFilePath: string,
+  stderrFd?: number,
+): {
   detached: true;
-  stdio: "ignore";
+  stdio: QueueOwnerSpawnStdio;
   env: NodeJS.ProcessEnv;
   windowsHide: true;
 } {
@@ -201,19 +227,93 @@ export function buildQueueOwnerSpawnOptions(payloadFilePath: string): {
   delete env[QUEUE_OWNER_PAYLOAD_ENV];
   return {
     detached: true,
-    stdio: "ignore",
+    stdio: typeof stderrFd === "number" ? ["ignore", "ignore", stderrFd] : "ignore",
     env,
     windowsHide: true,
   };
 }
 
-export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): void {
+export function formatQueueOwnerStartupFailure(params: {
+  sessionId: string;
+  exit: QueueOwnerProcessExitState;
+  logTail: string;
+}): string {
+  const parts = [`Session queue owner failed to start for session ${params.sessionId}`];
+  if (params.exit.spawnError) {
+    parts.push(`spawn error: ${params.exit.spawnError.message}`);
+  } else if (params.exit.exited) {
+    const codePart = params.exit.code === null ? "null" : String(params.exit.code);
+    const signalPart = params.exit.signal ? `, signal ${params.exit.signal}` : "";
+    parts.push(`exited with code ${codePart}${signalPart} before binding its socket`);
+  }
+  const tail = params.logTail.trim();
+  if (tail.length > 0) {
+    parts.push(`stderr:\n${tail}`);
+  }
+  return parts.join(": ");
+}
+
+export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): QueueOwnerProcessHandle {
   const payload = JSON.stringify(options);
   const payloadPath = writeQueueOwnerPayloadFile(payload);
+  const logPath = path.join(path.dirname(payloadPath), "owner.stderr.log");
+  const logFd = openSync(logPath, "w", 0o600);
+
+  let exited = false;
+  let code: number | null = null;
+  let signal: NodeJS.Signals | null = null;
+  let spawnError: Error | undefined;
+  let logFdClosed = false;
+
+  const closeLogFd = () => {
+    if (logFdClosed) {
+      return;
+    }
+    logFdClosed = true;
+    try {
+      closeSync(logFd);
+    } catch {
+      // best-effort
+    }
+  };
+
   const child = spawn(
     process.execPath,
     resolveQueueOwnerSpawnArgs(),
-    buildQueueOwnerSpawnOptions(payloadPath),
+    buildQueueOwnerSpawnOptions(payloadPath, logFd),
   );
+  child.on("error", (error) => {
+    spawnError = error;
+    exited = true;
+    closeLogFd();
+  });
+  child.on("exit", (exitCode, exitSignal) => {
+    exited = true;
+    code = exitCode;
+    signal = exitSignal;
+    closeLogFd();
+  });
   child.unref();
+
+  return {
+    pid: child.pid,
+    logPath,
+    getExitState: () => ({
+      exited,
+      code,
+      signal,
+      ...(spawnError ? { spawnError } : {}),
+    }),
+    readLogTail: (maxBytes = 4_000) => {
+      try {
+        const content = readFileSync(logPath, "utf8");
+        if (content.length <= maxBytes) {
+          return content;
+        }
+        return content.slice(content.length - maxBytes);
+      } catch {
+        return "";
+      }
+    },
+  };
 }

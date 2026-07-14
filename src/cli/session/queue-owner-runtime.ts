@@ -38,7 +38,11 @@ import {
   type ActiveSessionController,
 } from "./prompt-runner.js";
 import type { QueueOwnerRuntimeOptions } from "./queue-owner-process.js";
-import { queueOwnerRuntimeOptionsFromSend, spawnQueueOwnerProcess } from "./queue-owner-process.js";
+import {
+  formatQueueOwnerStartupFailure,
+  queueOwnerRuntimeOptionsFromSend,
+  spawnQueueOwnerProcess,
+} from "./queue-owner-process.js";
 import { runQueuedTask } from "./runtime.js";
 
 const QUEUE_OWNER_STARTUP_MAX_ATTEMPTS = 120;
@@ -516,9 +520,19 @@ export async function sendSession(options: SessionSendOptions): Promise<SessionS
     return queuedToOwner;
   }
 
-  spawnQueueOwnerProcess(queueOwnerRuntimeOptionsFromSend(options));
+  const owner = spawnQueueOwnerProcess(queueOwnerRuntimeOptionsFromSend(options));
 
   for (let attempt = 0; attempt < QUEUE_OWNER_STARTUP_MAX_ATTEMPTS; attempt += 1) {
+    const exit = owner.getExitState();
+    if (exit.exited) {
+      throw new Error(
+        formatQueueOwnerStartupFailure({
+          sessionId: options.sessionId,
+          exit,
+          logTail: owner.readLogTail(),
+        }),
+      );
+    }
     const queued = await submitToRunningOwner(options, waitForCompletion);
     if (queued) {
       return queued;
@@ -526,7 +540,14 @@ export async function sendSession(options: SessionSendOptions): Promise<SessionS
     await waitMs(QUEUE_CONNECT_RETRY_MS);
   }
 
-  throw new Error(`Session queue owner failed to start for session ${options.sessionId}`);
+  const finalExit = owner.getExitState();
+  throw new Error(
+    formatQueueOwnerStartupFailure({
+      sessionId: options.sessionId,
+      exit: finalExit.exited ? finalExit : { exited: false, code: null, signal: null },
+      logTail: owner.readLogTail(),
+    }),
+  );
 }
 
 export type { QueueOwnerRuntimeOptions };

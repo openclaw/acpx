@@ -163,3 +163,43 @@ describe("session process command parsing", () => {
     );
   });
 });
+
+describe("formatQueueOwnerStartupFailure", () => {
+  it("includes exit code when the owner dies before bind", async () => {
+    const { formatQueueOwnerStartupFailure } =
+      await import("../src/cli/session/queue-owner-process.js");
+    const message = formatQueueOwnerStartupFailure({
+      sessionId: "sess-1",
+      exit: { exited: true, code: 1, signal: null },
+      logTail: "Error: EPERM: operation not permitted, chmod",
+    });
+    assert.match(message, /exited with code 1/);
+    assert.match(message, /EPERM/);
+    assert.match(message, /sess-1/);
+  });
+
+  it("includes spawn error when the process cannot start", async () => {
+    const { formatQueueOwnerStartupFailure } =
+      await import("../src/cli/session/queue-owner-process.js");
+    const message = formatQueueOwnerStartupFailure({
+      sessionId: "sess-2",
+      exit: {
+        exited: true,
+        code: null,
+        signal: null,
+        spawnError: new Error("spawn ENOENT"),
+      },
+      logTail: "",
+    });
+    assert.match(message, /spawn error: spawn ENOENT/);
+  });
+});
+
+describe("buildQueueOwnerSpawnOptions stderr fd", () => {
+  it("pipes stderr to a file descriptor when provided", async () => {
+    const { buildQueueOwnerSpawnOptions } =
+      await import("../src/cli/session/queue-owner-process.js");
+    const options = buildQueueOwnerSpawnOptions("/tmp/acpx-queue-owner/payload.json", 3);
+    assert.deepEqual(options.stdio, ["ignore", "ignore", 3]);
+  });
+});

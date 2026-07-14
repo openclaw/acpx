@@ -122,12 +122,26 @@ function isQueueOwnerHeartbeatStale(owner: QueueOwnerRecord): boolean {
 
 async function ensureQueueDir(): Promise<void> {
   const baseDir = queueBaseDir();
-  await fs.mkdir(baseDir, { recursive: true, mode: 0o700 });
-  await fs.chmod(baseDir, 0o700);
+  try {
+    await fs.mkdir(baseDir, { recursive: true, mode: 0o700 });
+    await fs.chmod(baseDir, 0o700);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to prepare queue directory ${baseDir}: ${message}`, {
+      cause: error,
+    });
+  }
   const socketDir = queueSocketBaseDir();
   if (socketDir) {
-    await fs.mkdir(socketDir, { recursive: true, mode: 0o700 });
-    await fs.chmod(socketDir, 0o700);
+    try {
+      await fs.mkdir(socketDir, { recursive: true, mode: 0o700 });
+      await fs.chmod(socketDir, 0o700);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to prepare queue socket directory ${socketDir}: ${message}`, {
+        cause: error,
+      });
+    }
   }
 }
 
