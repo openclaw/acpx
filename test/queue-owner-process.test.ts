@@ -195,11 +195,81 @@ describe("formatQueueOwnerStartupFailure", () => {
   });
 });
 
-describe("buildQueueOwnerSpawnOptions stderr fd", () => {
-  it("pipes stderr to a file descriptor when provided", async () => {
+describe("buildQueueOwnerSpawnOptions stderr capture", () => {
+  it("ignores stderr by default", async () => {
     const { buildQueueOwnerSpawnOptions } =
       await import("../src/cli/session/queue-owner-process.js");
-    const options = buildQueueOwnerSpawnOptions("/tmp/acpx-queue-owner/payload.json", 3);
-    assert.deepEqual(options.stdio, ["ignore", "ignore", 3]);
+    const options = buildQueueOwnerSpawnOptions("/tmp/acpx-queue-owner/payload.json");
+    assert.equal(options.stdio, "ignore");
+  });
+
+  it("pipes stderr when captureStderr is enabled", async () => {
+    const { buildQueueOwnerSpawnOptions } =
+      await import("../src/cli/session/queue-owner-process.js");
+    const options = buildQueueOwnerSpawnOptions("/tmp/acpx-queue-owner/payload.json", {
+      captureStderr: true,
+    });
+    assert.deepEqual(options.stdio, ["ignore", "ignore", "pipe"]);
+  });
+});
+
+describe("spawnQueueOwnerProcess startup capture lifecycle", () => {
+  it("captures early stderr then stops after stopStartupCapture", async () => {
+    const { spawnQueueOwnerProcess } = await import("../src/cli/session/queue-owner-process.js");
+    const { setTimeout: sleep } = await import("node:timers/promises");
+
+    const previous = process.env.ACPX_QUEUE_OWNER_ARGS;
+    process.env.ACPX_QUEUE_OWNER_ARGS = JSON.stringify([
+      "-e",
+      "process.stderr.write('startup-noise\n'); setInterval(() => process.stderr.write('post-bind-noise\n'), 20); setTimeout(() => process.exit(0), 500);",
+    ]);
+    try {
+      const handle = spawnQueueOwnerProcess({
+        sessionId: "capture-lifecycle",
+        permissionMode: "approve-reads",
+      });
+      await sleep(80);
+      const duringStartup = handle.readLogTail();
+      assert.match(duringStartup, /startup-noise/);
+      handle.stopStartupCapture();
+      await sleep(120);
+      const afterStop = handle.readLogTail();
+      assert.equal(afterStop, duringStartup);
+      assert.doesNotMatch(afterStop, /post-bind-noise/);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ACPX_QUEUE_OWNER_ARGS;
+      } else {
+        process.env.ACPX_QUEUE_OWNER_ARGS = previous;
+      }
+    }
+  });
+
+  it("bounds captured stderr to QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES", async () => {
+    const { spawnQueueOwnerProcess, QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES } =
+      await import("../src/cli/session/queue-owner-process.js");
+    const { setTimeout: sleep } = await import("node:timers/promises");
+
+    const previous = process.env.ACPX_QUEUE_OWNER_ARGS;
+    process.env.ACPX_QUEUE_OWNER_ARGS = JSON.stringify([
+      "-e",
+      "process.stderr.write('x'.repeat(20000)); process.exit(1);",
+    ]);
+    try {
+      const handle = spawnQueueOwnerProcess({
+        sessionId: "capture-bound",
+        permissionMode: "approve-reads",
+      });
+      await sleep(150);
+      const tail = handle.readLogTail();
+      assert.ok(tail.length <= QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES);
+      handle.stopStartupCapture();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ACPX_QUEUE_OWNER_ARGS;
+      } else {
+        process.env.ACPX_QUEUE_OWNER_ARGS = previous;
+      }
+    }
   });
 });

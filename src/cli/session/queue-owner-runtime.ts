@@ -525,29 +525,31 @@ export async function sendSession(options: SessionSendOptions): Promise<SessionS
   for (let attempt = 0; attempt < QUEUE_OWNER_STARTUP_MAX_ATTEMPTS; attempt += 1) {
     const exit = owner.getExitState();
     if (exit.exited) {
-      throw new Error(
-        formatQueueOwnerStartupFailure({
-          sessionId: options.sessionId,
-          exit,
-          logTail: owner.readLogTail(),
-        }),
-      );
+      const message = formatQueueOwnerStartupFailure({
+        sessionId: options.sessionId,
+        exit,
+        logTail: owner.readLogTail(),
+      });
+      owner.stopStartupCapture();
+      throw new Error(message);
     }
     const queued = await submitToRunningOwner(options, waitForCompletion);
     if (queued) {
+      // Bound capture to cold start only: drop the pipe after the owner is reachable.
+      owner.stopStartupCapture();
       return queued;
     }
     await waitMs(QUEUE_CONNECT_RETRY_MS);
   }
 
   const finalExit = owner.getExitState();
-  throw new Error(
-    formatQueueOwnerStartupFailure({
-      sessionId: options.sessionId,
-      exit: finalExit.exited ? finalExit : { exited: false, code: null, signal: null },
-      logTail: owner.readLogTail(),
-    }),
-  );
+  const message = formatQueueOwnerStartupFailure({
+    sessionId: options.sessionId,
+    exit: finalExit.exited ? finalExit : { exited: false, code: null, signal: null },
+    logTail: owner.readLogTail(),
+  });
+  owner.stopStartupCapture();
+  throw new Error(message);
 }
 
 export type { QueueOwnerRuntimeOptions };

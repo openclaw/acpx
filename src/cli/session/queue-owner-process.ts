@@ -1,12 +1,5 @@
 import { spawn } from "node:child_process";
-import {
-  closeSync,
-  mkdtempSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { SessionAgentOptions } from "../../runtime/engine/session-options.js";
@@ -195,7 +188,10 @@ export function writeQueueOwnerPayloadFile(payload: string): string {
   return payloadPath;
 }
 
-export type QueueOwnerSpawnStdio = "ignore" | ["ignore", "ignore", number];
+export type QueueOwnerSpawnStdio = "ignore" | ["ignore", "ignore", "pipe"];
+
+/** Max stderr bytes retained for cold-start diagnostics. */
+export const QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES = 4_000;
 
 export type QueueOwnerProcessExitState = {
   exited: boolean;
@@ -206,14 +202,20 @@ export type QueueOwnerProcessExitState = {
 
 export type QueueOwnerProcessHandle = {
   pid?: number;
-  logPath: string;
   getExitState: () => QueueOwnerProcessExitState;
+  /** Stderr captured while startup capture is active (bounded). */
   readLogTail: (maxBytes?: number) => string;
+  /**
+   * Stop reading owner stderr and drop the pipe so a long-lived owner
+   * (including --ttl 0) cannot fill memory or retain diagnostics.
+   * Call after the owner socket is bound (successful submit).
+   */
+  stopStartupCapture: () => void;
 };
 
 export function buildQueueOwnerSpawnOptions(
   payloadFilePath: string,
-  stderrFd?: number,
+  opts?: { captureStderr?: boolean },
 ): {
   detached: true;
   stdio: QueueOwnerSpawnStdio;
@@ -225,9 +227,10 @@ export function buildQueueOwnerSpawnOptions(
     [QUEUE_OWNER_PAYLOAD_FILE_ENV]: payloadFilePath,
   };
   delete env[QUEUE_OWNER_PAYLOAD_ENV];
+  const captureStderr = opts?.captureStderr === true;
   return {
     detached: true,
-    stdio: typeof stderrFd === "number" ? ["ignore", "ignore", stderrFd] : "ignore",
+    stdio: captureStderr ? ["ignore", "ignore", "pipe"] : "ignore",
     env,
     windowsHide: true,
   };
@@ -256,64 +259,81 @@ export function formatQueueOwnerStartupFailure(params: {
 export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): QueueOwnerProcessHandle {
   const payload = JSON.stringify(options);
   const payloadPath = writeQueueOwnerPayloadFile(payload);
-  const logPath = path.join(path.dirname(payloadPath), "owner.stderr.log");
-  const logFd = openSync(logPath, "w", 0o600);
 
   let exited = false;
   let code: number | null = null;
   let signal: NodeJS.Signals | null = null;
   let spawnError: Error | undefined;
-  let logFdClosed = false;
-
-  const closeLogFd = () => {
-    if (logFdClosed) {
-      return;
-    }
-    logFdClosed = true;
-    try {
-      closeSync(logFd);
-    } catch {
-      // best-effort
-    }
-  };
+  let capturing = true;
+  const stderrChunks: Buffer[] = [];
+  let stderrBytes = 0;
 
   const child = spawn(
     process.execPath,
     resolveQueueOwnerSpawnArgs(),
-    buildQueueOwnerSpawnOptions(payloadPath, logFd),
+    buildQueueOwnerSpawnOptions(payloadPath, { captureStderr: true }),
   );
+
+  const stopStartupCapture = () => {
+    if (!capturing) {
+      return;
+    }
+    capturing = false;
+    const stderr = child.stderr;
+    if (!stderr) {
+      return;
+    }
+    stderr.removeAllListeners("data");
+    stderr.removeAllListeners("error");
+    // Drop the pipe so a long-lived owner cannot keep writing into the parent.
+    stderr.destroy();
+  };
+
+  child.stderr?.on("data", (chunk: Buffer | string) => {
+    if (!capturing) {
+      return;
+    }
+    const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+    if (stderrBytes >= QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES) {
+      return;
+    }
+    const remaining = QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES - stderrBytes;
+    const slice = buf.length > remaining ? buf.subarray(0, remaining) : buf;
+    stderrChunks.push(slice);
+    stderrBytes += slice.length;
+  });
+  child.stderr?.on("error", () => {
+    // Ignore pipe errors after destroy / early close.
+  });
+
   child.on("error", (error) => {
     spawnError = error;
     exited = true;
-    closeLogFd();
+    stopStartupCapture();
   });
   child.on("exit", (exitCode, exitSignal) => {
     exited = true;
     code = exitCode;
     signal = exitSignal;
-    closeLogFd();
+    stopStartupCapture();
   });
   child.unref();
 
   return {
     pid: child.pid,
-    logPath,
     getExitState: () => ({
       exited,
       code,
       signal,
       ...(spawnError ? { spawnError } : {}),
     }),
-    readLogTail: (maxBytes = 4_000) => {
-      try {
-        const content = readFileSync(logPath, "utf8");
-        if (content.length <= maxBytes) {
-          return content;
-        }
-        return content.slice(content.length - maxBytes);
-      } catch {
-        return "";
+    readLogTail: (maxBytes = QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES) => {
+      const content = Buffer.concat(stderrChunks).toString("utf8");
+      if (content.length <= maxBytes) {
+        return content;
       }
+      return content.slice(content.length - maxBytes);
     },
+    stopStartupCapture,
   };
 }
