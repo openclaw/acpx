@@ -52,6 +52,7 @@ const QUEUE_OWNER_ACTIVE_TURN_CANCEL_GRACE_MS = 750;
 async function submitToRunningOwner(
   options: SessionSendOptions,
   waitForCompletion: boolean,
+  extras?: { onQueueAccepted?: () => void },
 ): Promise<SessionSendOutcome | undefined> {
   return await trySubmitToRunningOwner({
     sessionId: options.sessionId,
@@ -70,6 +71,7 @@ async function submitToRunningOwner(
     waitForCompletion,
     verbose: options.verbose,
     sessionOptions: options.sessionOptions,
+    onQueueAccepted: extras?.onQueueAccepted,
   });
 }
 
@@ -521,6 +523,10 @@ export async function sendSession(options: SessionSendOptions): Promise<SessionS
   }
 
   const owner = spawnQueueOwnerProcess(queueOwnerRuntimeOptionsFromSend(options));
+  // Stop retaining diagnostics at first IPC accept (not after full turn completion).
+  const onQueueAccepted = () => {
+    owner.stopStartupCapture();
+  };
 
   for (let attempt = 0; attempt < QUEUE_OWNER_STARTUP_MAX_ATTEMPTS; attempt += 1) {
     const exit = owner.getExitState();
@@ -533,9 +539,9 @@ export async function sendSession(options: SessionSendOptions): Promise<SessionS
       owner.stopStartupCapture();
       throw new Error(message);
     }
-    const queued = await submitToRunningOwner(options, waitForCompletion);
+    const queued = await submitToRunningOwner(options, waitForCompletion, { onQueueAccepted });
     if (queued) {
-      // Bound capture to cold start only: drop the pipe after the owner is reachable.
+      // Accept already stopped capture via onQueueAccepted; call again is idempotent.
       owner.stopStartupCapture();
       return queued;
     }

@@ -206,9 +206,9 @@ export type QueueOwnerProcessHandle = {
   /** Stderr captured while startup capture is active (bounded). */
   readLogTail: (maxBytes?: number) => string;
   /**
-   * Stop reading owner stderr and drop the pipe so a long-lived owner
-   * (including --ttl 0) cannot fill memory or retain diagnostics.
-   * Call after the owner socket is bound (successful submit).
+   * Stop retaining owner stderr for diagnostics while keeping the pipe
+   * open and draining (so long-lived owners, including --ttl 0, do not
+   * get EPIPE). Call as soon as IPC accepts the first request.
    */
   stopStartupCapture: () => void;
 };
@@ -283,10 +283,13 @@ export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): Queue
     if (!stderr) {
       return;
     }
+    // Stop retaining bytes, but keep the pipe open and draining so a long-lived
+    // owner writing more stderr does not hit EPIPE and die.
     stderr.removeAllListeners("data");
-    stderr.removeAllListeners("error");
-    // Drop the pipe so a long-lived owner cannot keep writing into the parent.
-    stderr.destroy();
+    stderr.on("data", () => {
+      // discard
+    });
+    stderr.resume();
   };
 
   child.stderr?.on("data", (chunk: Buffer | string) => {

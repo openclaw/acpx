@@ -214,28 +214,34 @@ describe("buildQueueOwnerSpawnOptions stderr capture", () => {
 });
 
 describe("spawnQueueOwnerProcess startup capture lifecycle", () => {
-  it("captures early stderr then stops after stopStartupCapture", async () => {
+  it("captures early stderr then drains without killing owner after stop", async () => {
     const { spawnQueueOwnerProcess } = await import("../src/cli/session/queue-owner-process.js");
     const { setTimeout: sleep } = await import("node:timers/promises");
 
     const previous = process.env.ACPX_QUEUE_OWNER_ARGS;
+    // Write only startup line first; post-bind noise starts after 200ms so we can stop capture first.
     process.env.ACPX_QUEUE_OWNER_ARGS = JSON.stringify([
       "-e",
-      "process.stderr.write('startup-noise\n'); setInterval(() => process.stderr.write('post-bind-noise\n'), 20); setTimeout(() => process.exit(0), 500);",
+      "process.stderr.on('error',()=>{});process.stderr.write('startup-noise'+String.fromCharCode(10));setTimeout(()=>{const t=setInterval(()=>{try{process.stderr.write('post-bind-noise'+String.fromCharCode(10))}catch{}},20);setTimeout(()=>{clearInterval(t);process.exit(0);},300);},200);",
     ]);
     try {
       const handle = spawnQueueOwnerProcess({
         sessionId: "capture-lifecycle",
         permissionMode: "approve-reads",
       });
-      await sleep(80);
+      await sleep(50);
       const duringStartup = handle.readLogTail();
       assert.match(duringStartup, /startup-noise/);
+      assert.doesNotMatch(duringStartup, /post-bind-noise/);
       handle.stopStartupCapture();
-      await sleep(120);
+      // Wait through post-bind writes and clean exit.
+      await sleep(600);
       const afterStop = handle.readLogTail();
       assert.equal(afterStop, duringStartup);
       assert.doesNotMatch(afterStop, /post-bind-noise/);
+      const exit = handle.getExitState();
+      assert.equal(exit.exited, true);
+      assert.equal(exit.code, 0, `expected clean exit, got ${JSON.stringify(exit)}`);
     } finally {
       if (previous === undefined) {
         delete process.env.ACPX_QUEUE_OWNER_ARGS;
