@@ -875,6 +875,64 @@ export async function handleSessionsEnsure(
   printEnsuredSessionByFormat(result.record, result.created, globalFlags.format);
 }
 
+/**
+ * List the models an agent advertises. Ensures a session (which performs the ACP
+ * handshake and records the agent's advertised `available_models` + current
+ * model), then reports them. The list is whatever the agent supports right now —
+ * nothing is hardcoded, so new models appear automatically.
+ */
+export async function handleModels(
+  explicitAgentName: string | undefined,
+  flags: SessionsNewFlags,
+  command: Command,
+  config: ResolvedAcpxConfig,
+): Promise<void> {
+  const globalFlags = resolveGlobalFlags(command, config);
+  const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
+  const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
+  const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const { ensureSession } = await loadSessionModule();
+  const result = await ensureSession(
+    buildSessionStartOptions({
+      agent,
+      flags,
+      globalFlags,
+      config,
+      permissionMode,
+      permissionPolicy,
+    }),
+  );
+
+  renderModels(
+    globalFlags.format,
+    agent.agentName,
+    result.record.acpx?.current_model_id ?? null,
+    result.record.acpx?.available_models ?? [],
+  );
+}
+
+function renderModels(
+  format: OutputFormat,
+  agentName: string,
+  current: string | null,
+  available: string[],
+): void {
+  if (emitJsonResult(format, { agent: agentName, current, available })) {
+    return;
+  }
+  if (format === "quiet") {
+    process.stdout.write(available.length ? `${available.join("\n")}\n` : "");
+    return;
+  }
+  if (available.length === 0) {
+    process.stdout.write(`No models advertised by ${agentName}.\n`);
+    return;
+  }
+  for (const id of available) {
+    process.stdout.write(`${id === current ? "* " : "  "}${id}\n`);
+  }
+}
+
 function userContentToText(content: SessionUserContent): string {
   if ("Text" in content) {
     return content.Text;

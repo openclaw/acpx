@@ -2987,3 +2987,30 @@ async function fileExists(filePath: string): Promise<boolean> {
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+test("agents --format json lists the built-in registry", async () => {
+  await withTempHome(async (homeDir) => {
+    const result = await runCli(["--format", "json", "agents"], homeDir);
+    assert.equal(result.code, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim()) as {
+      agents: { id: string; launchCommand: string | null; source: string }[];
+    };
+    const ids = new Set(payload.agents.map((agent) => agent.id));
+    for (const id of Object.keys(AGENT_REGISTRY)) {
+      assert.ok(ids.has(id), `agents output missing built-in agent ${id}`);
+    }
+    const codex = payload.agents.find((agent) => agent.id === "codex");
+    assert.equal(codex?.launchCommand, AGENT_REGISTRY.codex);
+    assert.equal(codex?.source, "built-in");
+  });
+});
+
+test("agents quiet format prints one id per line", async () => {
+  await withTempHome(async (homeDir) => {
+    const result = await runCli(["--format", "quiet", "agents"], homeDir);
+    assert.equal(result.code, 0, result.stderr);
+    const lines = new Set(result.stdout.trim().split("\n"));
+    assert.ok(lines.has("codex"));
+    assert.ok(lines.has("claude"));
+  });
+});

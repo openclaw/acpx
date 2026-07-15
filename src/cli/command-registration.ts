@@ -3,6 +3,7 @@ import { DEFAULT_HISTORY_LIMIT } from "../session/persistence.js";
 import {
   handleCancel,
   handleExec,
+  handleModels,
   handlePrompt,
   handleSessionsClose,
   handleSessionsEnsure,
@@ -28,6 +29,7 @@ import {
   parseNonEmptyValue,
   parsePruneBeforeDate,
   parseSessionName,
+  resolveGlobalFlags,
   type PromptFlags,
   type SessionsExportFlags,
   type SessionsHistoryFlags,
@@ -52,6 +54,7 @@ type SharedSubcommandDescriptions = {
   setMode: string;
   setConfig: string;
   status: string;
+  models: string;
 };
 
 class LocalAttributeOption extends Option {
@@ -275,6 +278,12 @@ export function registerSharedAgentSubcommands(
     await handleSetConfigOption(explicitAgentName, key, value, flags, this, config);
   });
 
+  const modelsCommand = parent.command("models").description(descriptions.models);
+  addSessionNameOption(modelsCommand);
+  modelsCommand.action(async function (this: Command, flags: SessionsNewFlags) {
+    await handleModels(explicitAgentName, flags, this, config);
+  });
+
   registerStatusCommand(parent, explicitAgentName, config, descriptions.status);
 }
 
@@ -304,6 +313,7 @@ export function registerAgentCommand(
     setMode: "Set session mode",
     setConfig: "Set session config option",
     status: "Show local status of current session agent process",
+    models: "List models this agent advertises (live, no hardcoded list)",
   });
 
   registerSessionsCommand(agentCommand, agentName, config);
@@ -339,10 +349,50 @@ export function registerDefaultCommands(program: Command, config: ResolvedAcpxCo
     setMode: `Set session mode for ${config.defaultAgent} by default`,
     setConfig: `Set session config option for ${config.defaultAgent} by default`,
     status: `Show local status for ${config.defaultAgent} by default`,
+    models: `List models for ${config.defaultAgent} by default (live)`,
   });
 
   registerSessionsCommand(program, undefined, config);
   registerConfigCommand(program, config);
   registerCompareCommand(program, config);
   registerFlowCommand(program, config);
+  registerAgentsCommand(program, config);
+}
+
+/**
+ * `acpx agents` — list every agent acpx can drive, straight from the built-in
+ * registry (plus config overrides). The source of truth for providers, so callers
+ * never hardcode the list.
+ */
+export function registerAgentsCommand(program: Command, config: ResolvedAcpxConfig): void {
+  program
+    .command("agents")
+    .description("List agents acpx can drive (built-in registry + config)")
+    .action(async function (this: Command) {
+      const globalFlags = resolveGlobalFlags(this, config);
+      const [{ AGENT_REGISTRY }, { emitJsonResult }] = await Promise.all([
+        import("../agent-registry.js"),
+        import("./output/json-output.js"),
+      ]);
+      const overrides = (config as { agents?: Record<string, { command?: string }> }).agents ?? {};
+      const ids = Array.from(
+        new Set([...Object.keys(AGENT_REGISTRY), ...Object.keys(overrides)]),
+      ).toSorted();
+      const agents = ids.map((id) => ({
+        id,
+        launchCommand: overrides[id]?.command ?? AGENT_REGISTRY[id] ?? null,
+        source: overrides[id]?.command ? "config" : "built-in",
+      }));
+
+      if (emitJsonResult(globalFlags.format, { agents })) {
+        return;
+      }
+      if (globalFlags.format === "quiet") {
+        process.stdout.write(`${ids.join("\n")}${ids.length ? "\n" : ""}`);
+        return;
+      }
+      for (const a of agents) {
+        process.stdout.write(`${a.id}\t${a.launchCommand ?? "-"}\n`);
+      }
+    });
 }

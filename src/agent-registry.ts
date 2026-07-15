@@ -43,6 +43,7 @@ export const AGENT_REGISTRY: Record<string, string> = {
   claude: `npx -y @agentclientprotocol/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
   gemini: "gemini --acp",
   cursor: "cursor-agent acp",
+  devin: "devin acp",
   copilot: "copilot --acp --stdio",
   droid: "droid exec --output-format acp",
   "fast-agent": "uvx fast-agent-mcp acp",
