@@ -278,11 +278,15 @@ export function registerSharedAgentSubcommands(
     await handleSetConfigOption(explicitAgentName, key, value, flags, this, config);
   });
 
-  const modelsCommand = parent.command("models").description(descriptions.models);
-  addSessionNameOption(modelsCommand);
-  modelsCommand.action(async function (this: Command, flags: SessionsNewFlags) {
-    await handleModels(explicitAgentName, flags, this, config);
-  });
+  // `models` performs a fresh ephemeral handshake (no persisted session), so it
+  // takes no session-name option. Skip registering the bare default-agent `models`
+  // verb when a configured agent literally reuses that name — the agent wins.
+  if (explicitAgentName !== undefined || !configHasAgent(config, "models")) {
+    const modelsCommand = parent.command("models").description(descriptions.models);
+    modelsCommand.action(async function (this: Command, flags: SessionsNewFlags) {
+      await handleModels(explicitAgentName, flags, this, config);
+    });
+  }
 
   registerStatusCommand(parent, explicitAgentName, config, descriptions.status);
 }
@@ -356,13 +360,31 @@ export function registerDefaultCommands(program: Command, config: ResolvedAcpxCo
   registerConfigCommand(program, config);
   registerCompareCommand(program, config);
   registerFlowCommand(program, config);
-  registerAgentsCommand(program, config);
+  // Skip the discovery `agents` verb when a configured agent literally reuses that
+  // name — the configured agent (registered earlier) keeps its positional launch.
+  if (!configHasAgent(config, "agents")) {
+    registerAgentsCommand(program, config);
+  }
 }
 
 /**
- * `acpx agents` — list every agent acpx can drive, straight from the built-in
- * registry (plus config overrides). The source of truth for providers, so callers
+ * Whether a configured agent literally reuses a reserved discovery verb name.
+ * When true, that agent takes precedence and the discovery verb is not registered,
+ * so existing `acpx <name> …` invocations keep working.
+ */
+function configHasAgent(config: ResolvedAcpxConfig, name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(config.agents ?? {}, name);
+}
+
+/**
+ * `acpx agents` — list every agent acpx can drive: the built-in registry unioned
+ * with any config-defined agents. The source of truth for providers, so callers
  * never hardcode the list.
+ *
+ * Security: only built-in launch commands (fixed, public package specs) are ever
+ * emitted. Configured agent commands can embed tokens, credentials, or private
+ * paths, so they are redacted (`launchCommand: null`, shown as "(configured)") to
+ * keep them out of terminal output, shell history, and downstream automation logs.
  */
 export function registerAgentsCommand(program: Command, config: ResolvedAcpxConfig): void {
   program
@@ -370,18 +392,19 @@ export function registerAgentsCommand(program: Command, config: ResolvedAcpxConf
     .description("List agents acpx can drive (built-in registry + config)")
     .action(async function (this: Command) {
       const globalFlags = resolveGlobalFlags(this, config);
-      const [{ AGENT_REGISTRY }, { emitJsonResult }] = await Promise.all([
+      const [{ AGENT_REGISTRY, listBuiltInAgents }, { emitJsonResult }] = await Promise.all([
         import("../agent-registry.js"),
         import("./output/json-output.js"),
       ]);
-      const overrides = (config as { agents?: Record<string, { command?: string }> }).agents ?? {};
-      const ids = Array.from(
-        new Set([...Object.keys(AGENT_REGISTRY), ...Object.keys(overrides)]),
-      ).toSorted();
+      const configuredAgents = config.agents ?? {};
+      const isConfigured = (id: string): boolean =>
+        Object.prototype.hasOwnProperty.call(configuredAgents, id);
+      const ids = listBuiltInAgents(config.agents).toSorted();
       const agents = ids.map((id) => ({
         id,
-        launchCommand: overrides[id]?.command ?? AGENT_REGISTRY[id] ?? null,
-        source: overrides[id]?.command ? "config" : "built-in",
+        // Redact configured commands (possible secrets); only public built-in specs.
+        launchCommand: isConfigured(id) ? null : (AGENT_REGISTRY[id] ?? null),
+        source: isConfigured(id) ? "config" : "built-in",
       }));
 
       if (emitJsonResult(globalFlags.format, { agents })) {
@@ -392,7 +415,7 @@ export function registerAgentsCommand(program: Command, config: ResolvedAcpxConf
         return;
       }
       for (const a of agents) {
-        process.stdout.write(`${a.id}\t${a.launchCommand ?? "-"}\n`);
+        process.stdout.write(`${a.id}\t${a.launchCommand ?? "(configured)"}\n`);
       }
     });
 }

@@ -876,9 +876,12 @@ export async function handleSessionsEnsure(
 }
 
 /**
- * List the models an agent advertises. Ensures a session (which performs the ACP
- * handshake and records the agent's advertised `available_models` + current
- * model), then reports them. The list is whatever the agent supports right now —
+ * List the models an agent advertises. Performs a fresh, ephemeral ACP handshake
+ * every call — it spawns the agent, reads the `available_models` +
+ * `current_model_id` it advertises *right now*, then tears the client down
+ * WITHOUT persisting a session record. This deliberately avoids reusing an
+ * existing session (which could report stale, cached model metadata) and creates
+ * no persistent state. The list is whatever the agent supports right now —
  * nothing is hardcoded, so new models appear automatically.
  */
 export async function handleModels(
@@ -891,9 +894,9 @@ export async function handleModels(
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
-  const { ensureSession } = await loadSessionModule();
-  const result = await ensureSession(
-    buildSessionStartOptions({
+  const { discoverAgentModels } = await loadSessionModule();
+  const models = await discoverAgentModels({
+    ...buildSessionStartOptions({
       agent,
       flags,
       globalFlags,
@@ -901,14 +904,12 @@ export async function handleModels(
       permissionMode,
       permissionPolicy,
     }),
-  );
+    // Force a fresh, unnamed, non-resumed handshake so the model list is live.
+    name: undefined,
+    resumeSessionId: undefined,
+  });
 
-  renderModels(
-    globalFlags.format,
-    agent.agentName,
-    result.record.acpx?.current_model_id ?? null,
-    result.record.acpx?.available_models ?? [],
-  );
+  renderModels(globalFlags.format, agent.agentName, models.currentModelId, models.availableModels);
 }
 
 function renderModels(
@@ -970,7 +971,11 @@ function conversationHistoryEntries(record: SessionRecord): Array<{
   timestamp: string;
   textPreview: string;
 }> {
-  const entries: Array<{ role: "user" | "assistant"; timestamp: string; textPreview: string }> = [];
+  const entries: Array<{
+    role: "user" | "assistant";
+    timestamp: string;
+    textPreview: string;
+  }> = [];
 
   for (const message of record.messages) {
     if (message === "Resume") {
@@ -985,7 +990,11 @@ function conversationHistoryEntries(record: SessionRecord): Array<{
       if (!text) {
         continue;
       }
-      entries.push({ role: "user", timestamp: record.updated_at, textPreview: text });
+      entries.push({
+        role: "user",
+        timestamp: record.updated_at,
+        textPreview: text,
+      });
       continue;
     }
 
@@ -997,7 +1006,11 @@ function conversationHistoryEntries(record: SessionRecord): Array<{
       if (!text) {
         continue;
       }
-      entries.push({ role: "assistant", timestamp: record.updated_at, textPreview: text });
+      entries.push({
+        role: "assistant",
+        timestamp: record.updated_at,
+        textPreview: text,
+      });
     }
   }
 

@@ -41,17 +41,13 @@ type CreatedSessionState = {
   requestedModelResponse?: Awaited<ReturnType<AcpClient["setSessionModel"]>>;
 };
 
-async function createSessionRecordWithClient(
+function buildSessionRecordFromState(
   client: AcpClient,
+  createdState: CreatedSessionState,
   options: SessionCreateOptions,
-): Promise<SessionRecord> {
-  const cwd = absolutePath(options.cwd);
-  await withTimeout(client.start(), options.timeoutMs);
-  const createdState = options.resumeSessionId
-    ? await resumeSessionRecordWithClient(client, options, cwd)
-    : await createFreshSessionState(client, options, cwd);
+  cwd: string,
+): SessionRecord {
   const { sessionId, agentSessionId } = createdState;
-
   const lifecycle = client.getAgentLifecycleSnapshot();
   const now = isoNow();
   const record: SessionRecord = {
@@ -79,9 +75,68 @@ async function createSessionRecordWithClient(
 
   persistSessionOptions(record, options.sessionOptions);
   applyCreatedSessionModelState(record, createdState, options.sessionOptions?.model);
+  return record;
+}
+
+async function createSessionRecordWithClient(
+  client: AcpClient,
+  options: SessionCreateOptions,
+): Promise<SessionRecord> {
+  const cwd = absolutePath(options.cwd);
+  await withTimeout(client.start(), options.timeoutMs);
+  const createdState = options.resumeSessionId
+    ? await resumeSessionRecordWithClient(client, options, cwd)
+    : await createFreshSessionState(client, options, cwd);
+
+  const record = buildSessionRecordFromState(client, createdState, options, cwd);
 
   await writeSessionRecord(record);
   return record;
+}
+
+/**
+ * Read the models an agent advertises via a fresh, ephemeral ACP handshake.
+ * Spawns the agent, performs `initialize` + `session/new`, extracts the advertised
+ * model state, then tears the client down. It NEVER writes a session record — this
+ * is a read-only discovery path that leaves no persistent local state and never
+ * reuses (potentially stale) persisted session metadata.
+ */
+export async function discoverAgentModels(
+  options: SessionCreateOptions,
+): Promise<{ currentModelId: string | null; availableModels: string[] }> {
+  const client = new AcpClient({
+    agentCommand: options.agentCommand,
+    cwd: absolutePath(options.cwd),
+    mcpServers: options.mcpServers,
+    permissionMode: options.permissionMode,
+    nonInteractivePermissions: options.nonInteractivePermissions,
+    permissionPolicy: options.permissionPolicy,
+    authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
+    terminal: options.terminal,
+    verbose: options.verbose,
+    sessionOptions: options.sessionOptions,
+  });
+
+  try {
+    return await withInterrupt(
+      async () => {
+        const cwd = absolutePath(options.cwd);
+        await withTimeout(client.start(), options.timeoutMs);
+        const createdState = await createFreshSessionState(client, options, cwd);
+        const record = buildSessionRecordFromState(client, createdState, options, cwd);
+        return {
+          currentModelId: record.acpx?.current_model_id ?? null,
+          availableModels: record.acpx?.available_models ?? [],
+        };
+      },
+      async () => {
+        await client.close();
+      },
+    );
+  } finally {
+    await client.close();
+  }
 }
 
 function applyCreatedSessionModelState(

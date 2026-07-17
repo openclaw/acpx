@@ -32,6 +32,8 @@ acpx [global_options] set <key> <value> [-s <name>]
 acpx [global_options] status [-s <name>]
 acpx [global_options] sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | export [name] --output <path> | import <archive> [--name <name>] [--cwd <dir>]]
 acpx [global_options] config [show | init]
+acpx [global_options] agents
+acpx [global_options] models
 
 acpx [global_options] <agent> [prompt_options] [prompt_text...]
 acpx [global_options] <agent> prompt [prompt_options] [prompt_text...]
@@ -40,6 +42,7 @@ acpx [global_options] <agent> cancel [-s <name>]
 acpx [global_options] <agent> set-mode <mode> [-s <name>]
 acpx [global_options] <agent> set <key> <value> [-s <name>]
 acpx [global_options] <agent> status [-s <name>]
+acpx [global_options] <agent> models
 acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | export [name] --output <path> | import <archive> [--name <name>] [--cwd <dir>]]
 ```
 
@@ -443,6 +446,41 @@ For ACP `authenticate` handshakes, use either config `auth` entries or explicit
 `ACPX_AUTH_<METHOD_ID>` environment variables such as `ACPX_AUTH_OPENAI_API_KEY`.
 Ambient provider env vars such as `OPENAI_API_KEY` are still passed through to
 child agents, but they do not trigger ACP auth-method selection on their own.
+
+## `agents` and `models` discovery commands
+
+Read-only runtime discovery so tools built on `acpx` enumerate what is reachable
+instead of shipping a hardcoded catalog. Both honor `--format json|quiet|text`.
+
+```bash
+acpx agents                       # <id>\t<launch-command> per line
+acpx agents --format json         # { "agents": [{ "id", "launchCommand", "source" }] }
+acpx agents --format quiet         # one id per line (script-friendly)
+
+acpx <agent> models               # models the agent advertises now (* marks current)
+acpx models                       # models for the default agent
+acpx <agent> models --format json # { "agent", "current", "available": [...] }
+acpx <agent> models --format quiet # one model id per line
+```
+
+`agents`:
+
+- Lists the built-in registry unioned with config-defined agents (`source` is
+  `built-in` or `config`).
+- **Security:** only fixed, public built-in launch commands are printed.
+  Configured commands may embed tokens, credentials, or private paths, so they are
+  redacted — `launchCommand` is `null` in JSON and shown as `(configured)` in text.
+
+`models`:
+
+- Performs a fresh, ephemeral ACP handshake on every call and persists no session,
+  so the list always reflects what the agent advertises right now (never cached or
+  resumed session metadata).
+
+Reserved-name precedence: `agents` and `models` are reserved top-level verbs, but a
+configured agent whose name is literally `agents` or `models` takes precedence — the
+discovery verb is not registered in that case, so `acpx agents …` / `acpx models …`
+keep invoking the configured agent.
 
 ## `--agent` escape hatch
 

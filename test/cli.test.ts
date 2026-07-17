@@ -2339,7 +2339,10 @@ test("sessions import --cwd overrides the destination cwd without replacing glob
       homeDir,
     );
     assert.equal(imported.code, 0, imported.stderr);
-    const payload = JSON.parse(imported.stdout) as { record_id?: string; cwd?: string };
+    const payload = JSON.parse(imported.stdout) as {
+      record_id?: string;
+      cwd?: string;
+    };
     assert.equal(payload.cwd, destinationCwd);
     assert.equal(typeof payload.record_id, "string");
 
@@ -2803,7 +2806,12 @@ async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<vo
   try {
     await run(tempHome);
   } finally {
-    await fs.rm(tempHome, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    await fs.rm(tempHome, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 50,
+    });
   }
 }
 
@@ -3012,5 +3020,225 @@ test("agents quiet format prints one id per line", async () => {
     const lines = new Set(result.stdout.trim().split("\n"));
     assert.ok(lines.has("codex"));
     assert.ok(lines.has("claude"));
+  });
+});
+
+async function writeAcpxConfig(homeDir: string, config: unknown): Promise<void> {
+  await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+  await fs.writeFile(
+    path.join(homeDir, ".acpx", "config.json"),
+    `${JSON.stringify(config, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+test("agents redacts configured launch commands but keeps built-in specs", async () => {
+  await withTempHome(async (homeDir) => {
+    await writeAcpxConfig(homeDir, {
+      agents: {
+        // Overrides a built-in name AND embeds a secret that must never surface.
+        cursor: { command: "cursor-agent acp --token=SUPERSECRET" },
+        // Config-only agent.
+        myagent: {
+          command: "./bin/custom-acp",
+          args: ["--api-key=ALSOSECRET"],
+        },
+      },
+    });
+
+    const result = await runCli(["--format", "json", "agents"], homeDir);
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(
+      !result.stdout.includes("SUPERSECRET") && !result.stdout.includes("ALSOSECRET"),
+      "configured launch commands (possible secrets) must be redacted from `agents` output",
+    );
+
+    const payload = JSON.parse(result.stdout.trim()) as {
+      agents: { id: string; launchCommand: string | null; source: string }[];
+    };
+    const byId = new Map(payload.agents.map((agent) => [agent.id, agent]));
+
+    // Built-in, not overridden → public spec is surfaced.
+    assert.equal(byId.get("codex")?.source, "built-in");
+    assert.equal(byId.get("codex")?.launchCommand, AGENT_REGISTRY.codex);
+
+    // Overridden built-in → marked config, command redacted.
+    assert.equal(byId.get("cursor")?.source, "config");
+    assert.equal(byId.get("cursor")?.launchCommand, null);
+
+    // Config-only agent → listed, marked config, command redacted.
+    assert.equal(byId.get("myagent")?.source, "config");
+    assert.equal(byId.get("myagent")?.launchCommand, null);
+  });
+});
+
+test("agents text format shows (configured) for config agents", async () => {
+  await withTempHome(async (homeDir) => {
+    await writeAcpxConfig(homeDir, {
+      agents: { myagent: { command: "./bin/custom-acp --token=SECRET" } },
+    });
+    const result = await runCli(["agents"], homeDir);
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(!result.stdout.includes("SECRET"), "must not leak configured command");
+    assert.match(result.stdout, /^myagent\t\(configured\)$/m);
+  });
+});
+
+test("a configured agent named `agents` takes precedence over the discovery verb", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await writeAcpxConfig(homeDir, {
+      agents: { agents: { command: MOCK_AGENT_COMMAND } },
+    });
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: "agents-session",
+      acpSessionId: "agents-session",
+      agentCommand: MOCK_AGENT_COMMAND,
+      cwd,
+      closed: false,
+    });
+
+    // The agent subcommand path only exists if `agents` resolved to the configured
+    // agent, not the discovery verb (which has no `sessions` subcommand).
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "quiet", "agents", "sessions", "--local"],
+      homeDir,
+    );
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /agents-session/);
+  });
+});
+
+test("<agent> models reports the live advertised model list", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await writeAcpxConfig(homeDir, {
+      agents: {
+        codex: { command: `${MOCK_AGENT_COMMAND} --advertise-models` },
+      },
+    });
+
+    const result = await runCli(
+      ["--cwd", cwd, "--approve-all", "--format", "json", "codex", "models"],
+      homeDir,
+      { timeoutMs: 20000 },
+    );
+    assert.equal(result.code, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim()) as {
+      agent: string;
+      current: string | null;
+      available: string[];
+    };
+    assert.equal(payload.agent, "codex");
+    assert.equal(payload.current, "default-model");
+    assert.deepEqual(payload.available, [
+      "default-model",
+      "fast-model",
+      "smart-model",
+      "gpt-5.4",
+      "gpt-5.2",
+    ]);
+  });
+});
+
+test("<agent> models persists no session record (ephemeral handshake)", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await writeAcpxConfig(homeDir, {
+      agents: {
+        codex: { command: `${MOCK_AGENT_COMMAND} --advertise-models` },
+      },
+    });
+
+    const result = await runCli(
+      ["--cwd", cwd, "--approve-all", "--format", "quiet", "codex", "models"],
+      homeDir,
+      { timeoutMs: 20000 },
+    );
+    assert.equal(result.code, 0, result.stderr);
+
+    let recordCount = 0;
+    try {
+      const entries = await fs.readdir(path.join(homeDir, ".acpx", "sessions"));
+      recordCount = entries.filter((name) => name.endsWith(".json")).length;
+    } catch {
+      recordCount = 0;
+    }
+    assert.equal(recordCount, 0, "models discovery must not write a session record");
+  });
+});
+
+test("<agent> models ignores stale persisted models and uses a fresh handshake", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    const modelAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-models`;
+    await writeAcpxConfig(homeDir, {
+      agents: { codex: { command: modelAgentCommand } },
+    });
+    // A pre-existing session with stale, cached model metadata for this cwd/agent.
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: "codex-stale",
+      acpSessionId: "codex-stale",
+      agentCommand: modelAgentCommand,
+      cwd,
+      closed: false,
+      acpx: {
+        current_model_id: "stale-old-model",
+        available_models: ["stale-old-model"],
+      },
+    });
+
+    const result = await runCli(
+      ["--cwd", cwd, "--approve-all", "--format", "json", "codex", "models"],
+      homeDir,
+      { timeoutMs: 20000 },
+    );
+    assert.equal(result.code, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim()) as {
+      current: string | null;
+      available: string[];
+    };
+    assert.ok(
+      !payload.available.includes("stale-old-model"),
+      "models must reflect the live handshake, not stale persisted metadata",
+    );
+    assert.deepEqual(payload.available, [
+      "default-model",
+      "fast-model",
+      "smart-model",
+      "gpt-5.4",
+      "gpt-5.2",
+    ]);
+    assert.equal(payload.current, "default-model");
+  });
+});
+
+test("<agent> models quiet format prints one model id per line", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await writeAcpxConfig(homeDir, {
+      agents: {
+        codex: { command: `${MOCK_AGENT_COMMAND} --advertise-models` },
+      },
+    });
+
+    const result = await runCli(
+      ["--cwd", cwd, "--approve-all", "--format", "quiet", "codex", "models"],
+      homeDir,
+      { timeoutMs: 20000 },
+    );
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(result.stdout.trim().split("\n"), [
+      "default-model",
+      "fast-model",
+      "smart-model",
+      "gpt-5.4",
+      "gpt-5.2",
+    ]);
   });
 });

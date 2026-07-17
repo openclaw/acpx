@@ -1,8 +1,11 @@
 # Devin
 
-- Built-in name: none
-- Raw command: `devin acp`
+- Built-in name: `devin`
+- Launch command: `devin acp`
 - Upstream: https://www.devin.ai
+
+`devin` is a built-in agent, so `acpx devin …` works directly (equivalent to the
+raw `--agent 'devin acp'` form shown below).
 
 ## ACP compatibility contract
 

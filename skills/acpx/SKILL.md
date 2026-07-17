@@ -87,6 +87,7 @@ Friendly agent names resolve to commands:
 - `claude` -> `npx -y @agentclientprotocol/claude-agent-acp` (ACPX-owned package range)
 - `gemini` -> `gemini --acp`
 - `cursor` -> `cursor-agent acp`
+- `devin` -> `devin acp` (advertises a Windsurf-compatible client identity; see `agents/Devin.md`)
 - `copilot` -> `copilot --acp --stdio`
 - `droid` -> `droid exec --output-format acp` (`factory-droid` and `factorydroid` also resolve to `droid`)
 - `fast-agent` -> `uvx fast-agent-mcp acp`
@@ -108,6 +109,23 @@ Rules:
 - Unknown positional agent tokens are treated as raw agent commands.
 - `--agent <command>` explicitly sets a raw ACP adapter command.
 - Do not combine a positional agent and `--agent` in the same command.
+- `agents` and `models` are reserved top-level verbs (see Discovery below). A configured agent whose name is literally `agents` or `models` still takes precedence — the discovery verb is not registered in that case.
+
+## Discovery
+
+Read-only, no persistent state:
+
+```bash
+acpx agents                 # id<tab>launch-command (built-in specs only)
+acpx agents --format json   # { agents: [{ id, launchCommand, source }] }
+acpx agents --format quiet  # one id per line
+acpx codex models           # models codex advertises now (* marks current)
+acpx models                 # models for the default agent
+acpx codex models --format json   # { agent, current, available }
+```
+
+- `agents` unions the built-in registry with config-defined agents. Configured launch commands are **redacted** (`launchCommand: null`, shown as `(configured)`) because they may embed secrets; only fixed built-in specs are printed.
+- `models` performs a fresh, ephemeral ACP handshake each call and persists no session — the list always reflects what the agent advertises right now.
 
 ## Commands
 
