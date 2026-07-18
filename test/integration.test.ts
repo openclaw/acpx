@@ -4332,15 +4332,24 @@ test("integration: session remains resumable after queue owner exits and agent h
       const sessionId = createdPayload.acpxRecordId;
       assert.equal(typeof sessionId, "string");
 
-      // 2. Send a prompt with a very short TTL so the queue owner exits quickly
+      // 2. Use a positive sub-millisecond TTL. It must floor to 1 ms rather than
+      //    round to the zero sentinel, which would keep the owner alive forever.
       const prompt = await runCli(
-        [...baseAgentArgs(cwd), "--format", "quiet", "--ttl", "1", "prompt", "echo oneshot-done"],
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "quiet",
+          "--ttl",
+          "0.0001",
+          "prompt",
+          "echo oneshot-done",
+        ],
         homeDir,
       );
       assert.equal(prompt.code, 0, prompt.stderr);
       assert.match(prompt.stdout, /oneshot-done/);
 
-      // 3. Wait for the queue owner to exit (it should exit after 1s TTL)
+      // 3. Wait for the queue owner to exit after its 1 ms floored TTL.
       const { lockPath } = queuePaths(homeDir, sessionId as string);
       let ownerPid: number | undefined;
       try {

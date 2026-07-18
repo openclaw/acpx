@@ -121,12 +121,16 @@ test("flag parsers reject invalid enum values with actionable messages", () => {
 
 test("numeric flag parsers reject non-finite and out-of-range values", () => {
   assert.equal(parseTimeoutSeconds("1.5"), 1500);
+  assert.equal(parseTimeoutSeconds("0.0001"), 1);
   assert.throws(() => parseTimeoutSeconds("0"), /positive number/);
   assert.throws(() => parseTimeoutSeconds("abc"), /positive number/);
+  assert.throws(() => parseTimeoutSeconds("2147483.648"), /maximum supported timer delay/);
 
   assert.equal(parseTtlSeconds("0"), 0);
+  assert.equal(parseTtlSeconds("0.0001"), 1);
   assert.equal(parseTtlSeconds("2.25"), 2250);
   assert.throws(() => parseTtlSeconds("-1"), /non-negative/);
+  assert.throws(() => parseTtlSeconds("2147483.648"), /maximum supported timer delay/);
 
   assert.equal(parseMaxTurns("2"), 2);
   assert.throws(() => parseMaxTurns("0"), /positive integer/);
