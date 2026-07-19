@@ -265,8 +265,7 @@ export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): Queue
   let signal: NodeJS.Signals | null = null;
   let spawnError: Error | undefined;
   let capturing = true;
-  const stderrChunks: Buffer[] = [];
-  let stderrBytes = 0;
+  let stderrTail = Buffer.alloc(0);
 
   const child = spawn(
     process.execPath,
@@ -290,6 +289,10 @@ export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): Queue
       // discard
     });
     stderr.resume();
+    // A piped stdio stream has its own event-loop reference even after the
+    // ChildProcess is unrefed. Release that reference once startup completes
+    // so a detached --ttl 0 owner cannot keep the submitting CLI alive.
+    (stderr as typeof stderr & { unref: () => void }).unref();
   };
 
   child.stderr?.on("data", (chunk: Buffer | string) => {
@@ -297,13 +300,11 @@ export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): Queue
       return;
     }
     const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
-    if (stderrBytes >= QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES) {
-      return;
-    }
-    const remaining = QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES - stderrBytes;
-    const slice = buf.length > remaining ? buf.subarray(0, remaining) : buf;
-    stderrChunks.push(slice);
-    stderrBytes += slice.length;
+    const combined = Buffer.concat([stderrTail, buf]);
+    stderrTail =
+      combined.length > QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES
+        ? combined.subarray(combined.length - QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES)
+        : combined;
   });
   child.stderr?.on("error", () => {
     // Ignore pipe errors after destroy / early close.
@@ -311,10 +312,10 @@ export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): Queue
 
   child.on("error", (error) => {
     spawnError = error;
-    exited = true;
-    stopStartupCapture();
   });
-  child.on("exit", (exitCode, exitSignal) => {
+  // `close` follows `exit`/`error` after stdio is drained, so the diagnostic
+  // includes the owner's final stderr instead of racing buffered pipe data.
+  child.on("close", (exitCode, exitSignal) => {
     exited = true;
     code = exitCode;
     signal = exitSignal;
@@ -331,11 +332,8 @@ export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): Queue
       ...(spawnError ? { spawnError } : {}),
     }),
     readLogTail: (maxBytes = QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES) => {
-      const content = Buffer.concat(stderrChunks).toString("utf8");
-      if (content.length <= maxBytes) {
-        return content;
-      }
-      return content.slice(content.length - maxBytes);
+      const start = Math.max(0, stderrTail.length - maxBytes);
+      return stderrTail.subarray(start).toString("utf8");
     },
     stopStartupCapture,
   };

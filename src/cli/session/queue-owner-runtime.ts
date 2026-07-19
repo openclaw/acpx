@@ -37,7 +37,10 @@ import {
   runSessionSetModeDirect,
   type ActiveSessionController,
 } from "./prompt-runner.js";
-import type { QueueOwnerRuntimeOptions } from "./queue-owner-process.js";
+import type {
+  QueueOwnerProcessExitState,
+  QueueOwnerRuntimeOptions,
+} from "./queue-owner-process.js";
 import {
   formatQueueOwnerStartupFailure,
   queueOwnerRuntimeOptionsFromSend,
@@ -152,6 +155,10 @@ function logDeferredCancelFailure(error: unknown, verbose?: boolean): void {
     return;
   }
   process.stderr.write(`[acpx] failed to apply deferred cancel: ${formatErrorMessage(error)}\n`);
+}
+
+function queueOwnerExitIsFatal(exit: QueueOwnerProcessExitState): boolean {
+  return exit.exited && (exit.spawnError !== undefined || exit.code !== 0 || exit.signal !== null);
 }
 
 function logQueueOwnerReady(params: {
@@ -529,8 +536,14 @@ export async function sendSession(options: SessionSendOptions): Promise<SessionS
   };
 
   for (let attempt = 0; attempt < QUEUE_OWNER_STARTUP_MAX_ATTEMPTS; attempt += 1) {
+    const queued = await submitToRunningOwner(options, waitForCompletion, { onQueueAccepted });
+    if (queued) {
+      // Accept already stopped capture via onQueueAccepted; call again is idempotent.
+      owner.stopStartupCapture();
+      return queued;
+    }
     const exit = owner.getExitState();
-    if (exit.exited) {
+    if (queueOwnerExitIsFatal(exit)) {
       const message = formatQueueOwnerStartupFailure({
         sessionId: options.sessionId,
         exit,
@@ -538,12 +551,6 @@ export async function sendSession(options: SessionSendOptions): Promise<SessionS
       });
       owner.stopStartupCapture();
       throw new Error(message);
-    }
-    const queued = await submitToRunningOwner(options, waitForCompletion, { onQueueAccepted });
-    if (queued) {
-      // Accept already stopped capture via onQueueAccepted; call again is idempotent.
-      owner.stopStartupCapture();
-      return queued;
     }
     await waitMs(QUEUE_CONNECT_RETRY_MS);
   }
@@ -560,3 +567,4 @@ export async function sendSession(options: SessionSendOptions): Promise<SessionS
 
 export type { QueueOwnerRuntimeOptions };
 export { DEFAULT_QUEUE_OWNER_TTL_MS };
+export const queueOwnerRuntimeTestInternals = { queueOwnerExitIsFatal };
