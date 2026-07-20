@@ -3,20 +3,11 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { main } from "./cli-core.js";
+import { installBrokenPipeHandler } from "./cli/broken-pipe.js";
 import { buildQueueOwnerArgOverride } from "./cli/session/queue-owner-process.js";
 
 export { formatPromptSessionBannerLine } from "./cli-core.js";
 export { parseAllowedTools, parseMaxTurns, parseTtlSeconds } from "./cli/flags.js";
-
-function installBrokenPipeHandler(stream: NodeJS.WritableStream): void {
-  stream.on("error", (error: NodeJS.ErrnoException) => {
-    if (error.code === "EPIPE") {
-      process.exit(0);
-    }
-
-    throw error;
-  });
-}
 
 function isCliEntrypoint(argv: string[]): boolean {
   const entry = argv[1];
@@ -35,8 +26,11 @@ function isCliEntrypoint(argv: string[]): boolean {
 }
 
 if (isCliEntrypoint(process.argv)) {
-  installBrokenPipeHandler(process.stdout);
-  installBrokenPipeHandler(process.stderr);
+  const isQueueOwner = process.argv[2] === "__queue-owner";
+  installBrokenPipeHandler(process.stdout, "exit");
+  // After the submitting CLI exits, a detached owner loses its stderr reader.
+  // Ignore that expected EPIPE so later diagnostics cannot kill the owner.
+  installBrokenPipeHandler(process.stderr, isQueueOwner ? "ignore" : "exit");
 
   const queueOwnerArgOverride = buildQueueOwnerArgOverride(fileURLToPath(import.meta.url));
   if (queueOwnerArgOverride) {

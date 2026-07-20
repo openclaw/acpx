@@ -322,6 +322,8 @@ export type SubmitToQueueOwnerOptions = {
   waitForCompletion: boolean;
   verbose?: boolean;
   sessionOptions?: NonNullable<AcpClientOptions["sessionOptions"]>;
+  /** Fires when the queue owner acknowledges the request (IPC accept), before completion. */
+  onQueueAccepted?: () => void;
 };
 
 function missingQueueAckError(): QueueConnectionError {
@@ -414,6 +416,7 @@ async function submitToQueueOwner(
     owner,
     request,
     onAccepted: ({ resolve }) => {
+      options.onQueueAccepted?.();
       options.outputFormatter.setContext({
         sessionId: options.sessionId,
       });

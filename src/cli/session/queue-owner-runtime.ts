@@ -37,8 +37,15 @@ import {
   runSessionSetModeDirect,
   type ActiveSessionController,
 } from "./prompt-runner.js";
-import type { QueueOwnerRuntimeOptions } from "./queue-owner-process.js";
-import { queueOwnerRuntimeOptionsFromSend, spawnQueueOwnerProcess } from "./queue-owner-process.js";
+import type {
+  QueueOwnerProcessExitState,
+  QueueOwnerRuntimeOptions,
+} from "./queue-owner-process.js";
+import {
+  formatQueueOwnerStartupFailure,
+  queueOwnerRuntimeOptionsFromSend,
+  spawnQueueOwnerProcess,
+} from "./queue-owner-process.js";
 import { runQueuedTask } from "./runtime.js";
 
 const QUEUE_OWNER_STARTUP_MAX_ATTEMPTS = 120;
@@ -48,6 +55,7 @@ const QUEUE_OWNER_ACTIVE_TURN_CANCEL_GRACE_MS = 750;
 async function submitToRunningOwner(
   options: SessionSendOptions,
   waitForCompletion: boolean,
+  extras?: { onQueueAccepted?: () => void },
 ): Promise<SessionSendOutcome | undefined> {
   return await trySubmitToRunningOwner({
     sessionId: options.sessionId,
@@ -66,6 +74,7 @@ async function submitToRunningOwner(
     waitForCompletion,
     verbose: options.verbose,
     sessionOptions: options.sessionOptions,
+    onQueueAccepted: extras?.onQueueAccepted,
   });
 }
 
@@ -146,6 +155,10 @@ function logDeferredCancelFailure(error: unknown, verbose?: boolean): void {
     return;
   }
   process.stderr.write(`[acpx] failed to apply deferred cancel: ${formatErrorMessage(error)}\n`);
+}
+
+function queueOwnerExitIsFatal(exit: QueueOwnerProcessExitState): boolean {
+  return exit.exited && (exit.spawnError !== undefined || exit.code !== 0 || exit.signal !== null);
 }
 
 function logQueueOwnerReady(params: {
@@ -516,18 +529,42 @@ export async function sendSession(options: SessionSendOptions): Promise<SessionS
     return queuedToOwner;
   }
 
-  spawnQueueOwnerProcess(queueOwnerRuntimeOptionsFromSend(options));
+  const owner = spawnQueueOwnerProcess(queueOwnerRuntimeOptionsFromSend(options));
+  // Stop retaining diagnostics at first IPC accept (not after full turn completion).
+  const onQueueAccepted = () => {
+    owner.stopStartupCapture();
+  };
 
   for (let attempt = 0; attempt < QUEUE_OWNER_STARTUP_MAX_ATTEMPTS; attempt += 1) {
-    const queued = await submitToRunningOwner(options, waitForCompletion);
+    const queued = await submitToRunningOwner(options, waitForCompletion, { onQueueAccepted });
     if (queued) {
+      // Accept already stopped capture via onQueueAccepted; call again is idempotent.
+      owner.stopStartupCapture();
       return queued;
+    }
+    const exit = owner.getExitState();
+    if (queueOwnerExitIsFatal(exit)) {
+      const message = formatQueueOwnerStartupFailure({
+        sessionId: options.sessionId,
+        exit,
+        logTail: owner.readLogTail(),
+      });
+      owner.stopStartupCapture();
+      throw new Error(message);
     }
     await waitMs(QUEUE_CONNECT_RETRY_MS);
   }
 
-  throw new Error(`Session queue owner failed to start for session ${options.sessionId}`);
+  const finalExit = owner.getExitState();
+  const message = formatQueueOwnerStartupFailure({
+    sessionId: options.sessionId,
+    exit: finalExit.exited ? finalExit : { exited: false, code: null, signal: null },
+    logTail: owner.readLogTail(),
+  });
+  owner.stopStartupCapture();
+  throw new Error(message);
 }
 
 export type { QueueOwnerRuntimeOptions };
 export { DEFAULT_QUEUE_OWNER_TTL_MS };
+export const queueOwnerRuntimeTestInternals = { queueOwnerExitIsFatal };
