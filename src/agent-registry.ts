@@ -3,10 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ACP_ADAPTER_PACKAGE_RANGES = {
-  pi: "^0.0.26",
-  codex: "^1.1.4",
-  claude: "^0.37.0",
-  mux: "^0.27.0",
+  pi: "^0.0.31",
+  codex: "^1.1.5",
+  claude: "^0.60.0",
+  mux: "^0.28.0",
 } as const;
 
 type BuiltInAgentPackageSpec = {

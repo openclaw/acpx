@@ -18,7 +18,7 @@ test("Claude ACP model validation warns for unadvertised selectors", () => {
         { modelId: "sonnet", name: "Sonnet" },
       ],
     },
-    agentCommand: "npx -y @agentclientprotocol/claude-agent-acp@^0.37.0",
+    agentCommand: "npx -y @agentclientprotocol/claude-agent-acp@^0.60.0",
     context: "apply",
   });
 

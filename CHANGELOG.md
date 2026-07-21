@@ -8,7 +8,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
-- Agents/built-ins: bump the default `@agentclientprotocol/codex-acp` package range to `^1.1.4` so fresh built-in Codex launches use the current stable adapter line.
+- Agents/built-ins: refresh the default Pi, Codex, Claude, and Mux adapter ranges. Thanks @kelvinschen.
 
 ### Breaking
 
