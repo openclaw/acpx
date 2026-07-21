@@ -54,8 +54,11 @@ Calls ACP `session/set_config_option` with the literal `<key>` and `<value>`. No
 
 `set model <id>` is a special-case interception. `acpx` prefers an advertised model session config option and updates it through `session/set_config_option`. If an adapter explicitly advertises legacy `models` metadata instead, `acpx` preserves compatibility through `session/set_model`.
 
+Current codex-acp releases advertise the base model and reasoning effort as separate config options.
+
 ```bash
-acpx codex set model 'gpt-5.2[high]'
+acpx codex set model gpt-5.6-sol
+acpx codex set reasoning_effort max
 acpx claude set model claude-sonnet-4-6
 ```
 
