@@ -8,7 +8,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
-- Agents/built-ins: refresh the default Pi, Codex, Claude, and Mux adapter ranges. Thanks @kelvinschen.
+- Agents/built-ins: refresh the default Pi, Codex, Claude, and Mux adapter ranges. Thanks @kelvinschen and @TheAngryPit.
 
 ### Breaking
 
