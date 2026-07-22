@@ -61,7 +61,9 @@ test("spawned handleMainRejection writes [acpx] diagnostic and exits 1", async (
     handleMainRejection(new Error("spawned boom"));
   `);
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /\[acpx\] spawned boom/);
+  assert.match(result.stderr, /\[acpx\] Error: spawned boom/);
+  // Unexpected errors keep Node-style stack (file/line), not message-only.
+  assert.match(result.stderr, /at /);
   assert.equal(result.stdout, "");
 });
 
@@ -114,7 +116,8 @@ void main().catch(handleMainRejection);
   try {
     const result = await spawnNode(["--import", "tsx", harness]);
     assert.equal(result.code, 1);
-    assert.match(result.stderr, /\[acpx\] proof main rejection via acpx fatal path/);
+    assert.match(result.stderr, /\[acpx\] Error: proof main rejection via acpx fatal path/);
+    assert.match(result.stderr, /at /);
   } finally {
     fs.rmSync(harness, { force: true });
   }

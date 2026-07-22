@@ -23,7 +23,10 @@ export function handleStreamError(error: NodeJS.ErrnoException): void {
 }
 
 export function handleMainRejection(error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
+  // Unexpected top-level failures should keep stack/file/line diagnostics.
+  // Expected command errors are handled inside main() before reject.
+  const message =
+    error instanceof Error ? (error.stack ?? error.message) : String(error);
   writeFatalLine(`[acpx] ${message}`);
   process.exitCode = 1;
 }
