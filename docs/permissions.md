@@ -41,6 +41,12 @@ Policy keys:
 
 Rule precedence is `autoDeny`, then `autoApprove`, then `escalate`, then `defaultAction`, then the normal permission mode. Matches are case-insensitive. In non-interactive output, an escalated request is denied for the current turn. Text mode prints a `[permission]` notice; JSON mode keeps the raw ACP stream and includes structured escalation details, including tool input when supplied by the agent, in the `session/request_permission` response `_meta.acpx.permissionEscalation` object so an orchestrator can resume with a broader policy.
 
+Embedding clients that use `acpx/runtime` can apply the same policy through
+`AcpRuntimeOptions.permissionPolicy`. A host `onPermissionRequest` callback gets
+the first chance to decide; returning no decision falls back to the configured
+policy and permission mode. The embedded runtime does not currently expose
+structured permission-escalation notifications to the host.
+
 ## What counts as a "read"
 
 Read/search requests in `--approve-reads`:

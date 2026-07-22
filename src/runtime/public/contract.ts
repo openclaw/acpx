@@ -5,13 +5,14 @@ import type {
   McpServer,
   NonInteractivePermissionPolicy,
   PermissionMode,
+  PermissionPolicy,
   SessionRecord,
 } from "../../types.js";
 import type { SessionAgentOptions } from "../engine/session-options.js";
 
 export type { SessionAgentOptions, SystemPromptOption } from "../engine/session-options.js";
 
-export type { AcpPermissionDecision, AcpPermissionRequest } from "../../types.js";
+export type { AcpPermissionDecision, AcpPermissionRequest, PermissionPolicy } from "../../types.js";
 
 export type AcpRuntimePromptMode = "prompt" | "steer";
 
@@ -298,6 +299,7 @@ export type AcpRuntimeOptions = {
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
+  permissionPolicy?: PermissionPolicy;
   timeoutMs?: number;
   probeAgent?: string;
   verbose?: boolean;

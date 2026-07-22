@@ -71,6 +71,7 @@ export type {
   AcpSessionRecord,
   AcpSessionStore,
   AcpSessionUpdateTag,
+  PermissionPolicy,
   SessionAgentOptions,
   SystemPromptOption,
 } from "./runtime/public/contract.js";

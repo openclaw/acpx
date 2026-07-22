@@ -10,6 +10,10 @@ Repo: https://github.com/openclaw/acpx
 
 - Docs/readme: rewrite the project front door to the house standard and route detailed CLI guidance to the existing documentation.
 
+- Runtime/embedding: expose the existing per-tool permission policy through
+  `AcpRuntimeOptions` so embedded clients can reuse its rule matching and
+  decisions. Thanks @xenaocx-dev.
+
 ### Breaking
 
 ### Fixes

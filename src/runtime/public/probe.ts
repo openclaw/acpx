@@ -120,6 +120,7 @@ function createProbeClient(
     mcpServers: [...(options.mcpServers ?? [])],
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
+    permissionPolicy: options.permissionPolicy,
     verbose: options.verbose,
   };
   return deps.clientFactory?.(clientOptions) ?? new AcpClient(clientOptions);
