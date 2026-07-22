@@ -53,6 +53,7 @@ export async function handleFlowRun(
     permissionPolicy,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
+    fs: globalFlags.fs,
     timeoutMs: globalFlags.timeout,
     ttlMs: globalFlags.ttl,
     verbose: globalFlags.verbose,

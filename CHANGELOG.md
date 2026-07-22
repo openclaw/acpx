@@ -25,6 +25,7 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - Agents/built-ins: refresh the default Pi, Codex, Claude, and Mux adapter ranges. Thanks @kelvinschen and @TheAngryPit.
+- CLI/ACP: add `--no-fs` to disable advertised ACP file read/write capabilities so compatible agents can use their native filesystem implementation. Thanks @zgxkbtl.
 
 ### Breaking
 

@@ -367,6 +367,7 @@ async function runAgentForCompare(params: {
       permissionPolicy: params.permissionPolicy,
       authCredentials: params.config.auth,
       authPolicy: params.globalFlags.authPolicy,
+      fs: params.globalFlags.fs,
       terminal: params.globalFlags.terminal,
       outputFormatter: formatter,
       suppressSdkConsoleErrors: true,

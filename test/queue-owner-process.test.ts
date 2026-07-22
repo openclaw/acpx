@@ -148,13 +148,15 @@ describe("writeQueueOwnerPayloadFile", () => {
 });
 
 describe("queueOwnerRuntimeOptionsFromSend", () => {
-  it("preserves terminal capability preference", () => {
+  it("preserves client capability preferences", () => {
     const options = queueOwnerRuntimeOptionsFromSend({
       sessionId: "session-1",
       permissionMode: "approve-reads",
+      fs: false,
       terminal: false,
     });
 
+    assert.equal(options.fs, false);
     assert.equal(options.terminal, false);
   });
 });

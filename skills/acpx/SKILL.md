@@ -35,7 +35,7 @@ Core capabilities:
 - Structured streaming output (`text`, `json`, `quiet`) with optional `--suppress-reads`
 - Built-in agent registry plus raw `--agent` escape hatch
 - Claude system prompt override via `--system-prompt` / `--append-system-prompt`
-- Optional terminal capability disable via `--no-terminal` for review-only flows
+- Optional ACP filesystem and terminal capability opt-outs via `--no-fs` and `--no-terminal`
 - Tool whitelist (`--allowed-tools`), turn cap (`--max-turns`), retry on transient failures (`--prompt-retries`)
 - Multi-agent flows via `acpx flow run` and the `acpx/flows` authoring API (`defineFlow`, `decision`, `decisionEdge`, `acp`, `action`, `compute`, `checkpoint`)
 
@@ -268,6 +268,7 @@ Behavior:
 - `--allowed-tools <list>`: comma-separated tool whitelist (use `""` for no tools)
 - `--max-turns <count>`: cap session turn count
 - `--prompt-retries <count>`: retry failed prompt turns on transient errors (default `0`)
+- `--no-fs`: advertise both ACP filesystem capabilities as disabled so compatible agents use their native file operations
 - `--no-terminal`: do not advertise the ACP terminal capability — useful for review-only or sandboxed agent invocations
 - `--verbose`: verbose ACP/debug logs to stderr
 

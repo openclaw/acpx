@@ -103,6 +103,65 @@ test("integration: built-in cursor agent resolves to cursor-agent acp", async ()
   });
 });
 
+test("integration: flow run --no-fs disables advertised filesystem capabilities", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [
+          ...baseLoadCapableAgentArgs(cwd),
+          "--format",
+          "json",
+          "--no-fs",
+          "flow",
+          "run",
+          FLOW_FIXTURE_PATH,
+          "--input-json",
+          JSON.stringify({ next: "yes_path" }),
+        ],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      const payload = JSON.parse(result.stdout.trim()) as { runDir?: string };
+      assert.equal(typeof payload.runDir, "string", result.stdout);
+
+      const manifest = JSON.parse(
+        await fs.readFile(path.join(payload.runDir ?? "", "manifest.json"), "utf8"),
+      ) as { sessions?: Array<{ eventsPath?: string }> };
+      const eventsPath = manifest.sessions?.[0]?.eventsPath;
+      assert.equal(typeof eventsPath, "string");
+
+      const events = (await fs.readFile(path.join(payload.runDir ?? "", eventsPath ?? ""), "utf8"))
+        .trim()
+        .split("\n")
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              message?: {
+                method?: string;
+                params?: {
+                  clientCapabilities?: {
+                    fs?: { readTextFile?: unknown; writeTextFile?: unknown };
+                  };
+                };
+              };
+            },
+        );
+      const initializeRequest = events.find((event) => event.message?.method === "initialize");
+
+      assert(initializeRequest, JSON.stringify(events, null, 2));
+      assert.deepEqual(initializeRequest.message?.params?.clientCapabilities?.fs, {
+        readTextFile: false,
+        writeTextFile: false,
+      });
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: flow run executes multiple ACP steps in one session and branches", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -1079,6 +1138,38 @@ test("integration: exec --no-terminal disables advertised terminal capability", 
         | undefined;
       assert(initializeRequest, result.stdout);
       assert.equal(initializeRequest.params?.clientCapabilities?.terminal, false);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: exec --no-fs disables advertised filesystem capabilities", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const result = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "--no-fs", "exec", "echo hello"],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const initializeRequest = payloads.find((payload) => payload.method === "initialize") as
+        | {
+            params?: {
+              clientCapabilities?: {
+                fs?: { readTextFile?: unknown; writeTextFile?: unknown };
+              };
+            };
+          }
+        | undefined;
+      assert(initializeRequest, result.stdout);
+      assert.deepEqual(initializeRequest.params?.clientCapabilities?.fs, {
+        readTextFile: false,
+        writeTextFile: false,
+      });
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }

@@ -39,6 +39,7 @@ export type GlobalFlags = PermissionFlags & {
   nonInteractivePermissions: NonInteractivePermissionPolicy;
   jsonStrict?: boolean;
   suppressReads?: boolean;
+  fs?: boolean;
   terminal?: boolean;
   timeout?: number;
   ttl: number;
@@ -337,6 +338,7 @@ export function addGlobalFlags(command: Command): Command {
       "--json-strict",
       "Strict JSON mode: requires --format json and suppresses non-JSON stderr output",
     )
+    .option("--no-fs", "Do not advertise ACP filesystem capabilities")
     .option("--no-terminal", "Do not advertise ACP terminal capability")
     .option("--timeout <seconds>", "Maximum time to wait for agent response", parseTimeoutSeconds)
     .option(
@@ -419,6 +421,7 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
     permissionPolicy: resolvePermissionPolicyOption(opts),
     jsonStrict,
     suppressReads: opts.suppressReads === true,
+    fs: resolveCapabilityOption(opts.fs),
     terminal: resolveTerminalOption(opts.terminal),
     timeout: resolveTimeoutOption(opts.timeout, config),
     ttl: resolveTtlOption(opts.ttl, config),
@@ -465,8 +468,12 @@ function resolvePermissionPolicyOption(opts: Record<string, unknown>): string | 
   return primary ?? alias;
 }
 
-function resolveTerminalOption(value: unknown): boolean | undefined {
+function resolveCapabilityOption(value: unknown): boolean | undefined {
   return value === false ? false : undefined;
+}
+
+function resolveTerminalOption(value: unknown): boolean | undefined {
+  return resolveCapabilityOption(value);
 }
 
 function resolveTimeoutOption(value: unknown, config: ResolvedAcpxConfig): number | undefined {

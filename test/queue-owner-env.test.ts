@@ -29,6 +29,7 @@ describe("parseQueueOwnerPayload", () => {
         ],
         ttlMs: 1234,
         maxQueueDepth: 7,
+        fs: false,
         terminal: false,
         sessionOptions: {
           model: "fast-model",
@@ -47,6 +48,7 @@ describe("parseQueueOwnerPayload", () => {
     assert.equal(parsed.mcpConfigFingerprint, "fingerprint-v1");
     assert.equal(parsed.ttlMs, 1234);
     assert.equal(parsed.maxQueueDepth, 7);
+    assert.equal(parsed.fs, false);
     assert.equal(parsed.terminal, false);
     assert.deepEqual(parsed.mcpServers, [
       {

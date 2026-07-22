@@ -210,6 +210,7 @@ export type AcpClientOptions = {
   permissionPolicy?: PermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  fs?: boolean;
   terminal?: boolean;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;

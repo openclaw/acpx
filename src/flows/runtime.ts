@@ -151,6 +151,7 @@ export class FlowRunner {
   private readonly permissionPolicy?: PermissionPolicy;
   private readonly authCredentials?;
   private readonly authPolicy?;
+  private readonly fs?;
   private readonly timeoutMs?;
   private readonly defaultNodeTimeoutMs;
   private readonly verbose?;
@@ -169,6 +170,7 @@ export class FlowRunner {
     this.permissionPolicy = options.permissionPolicy;
     this.authCredentials = options.authCredentials;
     this.authPolicy = options.authPolicy;
+    this.fs = options.fs;
     this.timeoutMs = options.timeoutMs;
     this.defaultNodeTimeoutMs =
       options.defaultNodeTimeoutMs ?? options.timeoutMs ?? DEFAULT_FLOW_STEP_TIMEOUT_MS;
@@ -1067,6 +1069,7 @@ export class FlowRunner {
       permissionPolicy: this.permissionPolicy,
       authCredentials: this.authCredentials,
       authPolicy: this.authPolicy,
+      fs: this.fs,
       timeoutMs,
       verbose: this.verbose,
       sessionOptions: this.sessionOptions,
@@ -1129,6 +1132,7 @@ export class FlowRunner {
         permissionPolicy: this.permissionPolicy,
         authCredentials: this.authCredentials,
         authPolicy: this.authPolicy,
+        fs: this.fs,
         outputFormatter: capture.formatter,
         onAcpMessage: (direction, message) => {
           const pending = this.store
@@ -1221,6 +1225,7 @@ export class FlowRunner {
       permissionPolicy: this.permissionPolicy,
       authCredentials: this.authCredentials,
       authPolicy: this.authPolicy,
+      fs: this.fs,
       outputFormatter: capture.formatter,
       onAcpMessage: (direction, message) => {
         const pending = this.store

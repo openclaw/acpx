@@ -151,12 +151,13 @@ function resolveClientInfo(devinAcp: boolean): { name: string; version: string }
 
 function resolveClientCapabilities(params: {
   devinAcp: boolean;
+  fs: boolean;
   terminal: boolean;
 }): ClientCapabilities {
   const baseCapabilities: ClientCapabilities = {
     fs: {
-      readTextFile: true,
-      writeTextFile: true,
+      readTextFile: params.fs,
+      writeTextFile: params.fs,
     },
     terminal: params.terminal,
   };
@@ -539,6 +540,7 @@ export class AcpClient {
     permissionMode?: PermissionMode;
     nonInteractivePermissions?: NonInteractivePermissionPolicy;
     permissionPolicy?: AcpClientOptions["permissionPolicy"];
+    fs?: boolean;
     terminal?: boolean;
     suppressSdkConsoleErrors?: boolean;
     verbose?: boolean;
@@ -554,15 +556,22 @@ export class AcpClient {
     if (Object.prototype.hasOwnProperty.call(options, "permissionPolicy")) {
       this.options.permissionPolicy = options.permissionPolicy;
     }
-    if (options.terminal !== undefined) {
-      this.options.terminal = options.terminal;
-    }
+    this.updateClientCapabilityPreferences(options);
     this.refreshRuntimePermissionPolicy(shouldRefreshPermissionPolicy);
     if (options.suppressSdkConsoleErrors !== undefined) {
       this.options.suppressSdkConsoleErrors = options.suppressSdkConsoleErrors;
     }
     if (options.verbose !== undefined) {
       this.options.verbose = options.verbose;
+    }
+  }
+
+  private updateClientCapabilityPreferences(options: { fs?: boolean; terminal?: boolean }): void {
+    if (options.fs !== undefined) {
+      this.options.fs = options.fs;
+    }
+    if (options.terminal !== undefined) {
+      this.options.terminal = options.terminal;
     }
   }
 
@@ -819,6 +828,7 @@ export class AcpClient {
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: resolveClientCapabilities({
         devinAcp: launch.devinAcp,
+        fs: this.options.fs !== false,
         terminal: this.options.terminal !== false,
       }),
       clientInfo: resolveClientInfo(launch.devinAcp),

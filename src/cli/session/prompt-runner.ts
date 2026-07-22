@@ -34,6 +34,7 @@ export type RunSessionSetModeDirectOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  fs?: boolean;
   terminal?: boolean;
   timeoutMs?: number;
   verbose?: boolean;
@@ -49,6 +50,7 @@ export type RunSessionSetConfigOptionDirectOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  fs?: boolean;
   terminal?: boolean;
   timeoutMs?: number;
   verbose?: boolean;
@@ -63,6 +65,7 @@ export type RunSessionSetModelDirectOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  fs?: boolean;
   terminal?: boolean;
   timeoutMs?: number;
   verbose?: boolean;
@@ -76,6 +79,7 @@ type DirectConnectedSessionOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  fs?: boolean;
   terminal?: boolean;
   timeoutMs?: number;
   verbose?: boolean;
@@ -95,6 +99,7 @@ function buildDirectConnectedSessionOptions<T>(
     nonInteractivePermissions: options.nonInteractivePermissions,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
+    fs: options.fs,
     terminal: options.terminal,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,

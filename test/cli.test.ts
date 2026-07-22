@@ -306,6 +306,7 @@ test("CLI resolves unknown raw agent commands after newer global flags", async (
       ["--system-prompt", "be precise"],
       ["--append-system-prompt", "be concise"],
       ["--prompt-retries", "1"],
+      ["--no-fs"],
       ["--no-terminal"],
     ];
 
@@ -330,6 +331,7 @@ test("global passthrough flags are present in help output", async () => {
     assert.match(result.stdout, /--max-turns <count>/);
     assert.match(result.stdout, /text, json, quiet/);
     assert.match(result.stdout, /--suppress-reads/);
+    assert.match(result.stdout, /--no-fs/);
     assert.match(result.stdout, /--no-terminal/);
   });
 });

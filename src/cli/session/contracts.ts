@@ -49,6 +49,7 @@ export type RunOnceOptions = {
   permissionPolicy?: PermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  fs?: boolean;
   terminal?: boolean;
   outputFormatter: OutputFormatter;
   errorEmissionPolicy?: OutputErrorEmissionPolicy;
@@ -74,6 +75,7 @@ export type SessionCreateOptions = {
   permissionPolicy?: PermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  fs?: boolean;
   terminal?: boolean;
   verbose?: boolean;
   sessionOptions?: SessionAgentOptions;
@@ -92,6 +94,7 @@ export type SessionSendOptions = {
   permissionPolicy?: PermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  fs?: boolean;
   terminal?: boolean;
   outputFormatter: OutputFormatter;
   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
@@ -121,6 +124,7 @@ export type SessionEnsureOptions = {
   permissionPolicy?: PermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  fs?: boolean;
   terminal?: boolean;
   verbose?: boolean;
   walkBoundary?: string;
@@ -140,6 +144,7 @@ export type SessionListOptions = {
   permissionPolicy?: PermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  fs?: boolean;
   terminal?: boolean;
   verbose?: boolean;
 } & TimedRunOptions;
@@ -163,6 +168,7 @@ export type SessionSetModeOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  fs?: boolean;
   terminal?: boolean;
   verbose?: boolean;
 } & TimedRunOptions;
@@ -174,6 +180,7 @@ export type SessionSetModelOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  fs?: boolean;
   terminal?: boolean;
   verbose?: boolean;
 } & TimedRunOptions;
@@ -186,6 +193,7 @@ export type SessionSetConfigOptionOptions = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
+  fs?: boolean;
   terminal?: boolean;
   verbose?: boolean;
 } & TimedRunOptions;

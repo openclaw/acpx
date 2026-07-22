@@ -72,6 +72,7 @@ const TOP_LEVEL_VERSION_BOOLEAN_FLAGS = new Set([
   "--deny-all",
   "--suppress-reads",
   "--json-strict",
+  "--no-fs",
   "--no-terminal",
   "--verbose",
 ]);

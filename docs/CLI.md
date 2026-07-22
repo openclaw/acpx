@@ -118,6 +118,7 @@ All global options:
 | `--format <fmt>`                         | Output format                                  | `text` (default), `json`, `quiet`.                                                                                                                    |
 | `--suppress-reads`                       | Suppress read file contents                    | Replaces raw read payloads with `[read output suppressed]`.                                                                                           |
 | `--json-strict`                          | Strict JSON mode                               | Requires `--format json`; suppresses non-JSON stderr output.                                                                                          |
+| `--no-fs`                                | Disable ACP filesystem capabilities            | Advertises `clientCapabilities.fs.readTextFile` and `writeTextFile` as `false` during ACP initialize for new agent clients.                           |
 | `--no-terminal`                          | Disable ACP terminal capability                | Advertises `clientCapabilities.terminal: false` during ACP initialize for new agent clients.                                                          |
 | `--non-interactive-permissions <policy>` | Non-TTY prompt policy                          | `deny` (default) or `fail` when approval prompt cannot be shown.                                                                                      |
 | `--permission-policy <json-or-file>`     | Per-tool permission policy                     | JSON object or file path with `autoApprove`, `autoDeny`, `escalate`, and optional `defaultAction` (`approve`, `deny`, `escalate`). Alias: `--policy`. |
@@ -140,6 +141,7 @@ acpx --policy '{"escalate":["execute"],"defaultAction":"deny"}' --format json co
 acpx --cwd ~/repos/api codex 'review auth middleware'
 acpx --format json codex exec 'summarize open TODO items'
 acpx --format json --json-strict codex exec 'machine-safe JSON output'
+acpx --no-fs codex exec 'use agent-native file operations'
 acpx --no-terminal codex exec 'summarize without terminal capability'
 acpx --timeout 120 codex 'investigate flaky test failures'
 acpx --ttl 30 codex 'keep queue owner warm for quick follow-up'

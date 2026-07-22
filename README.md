@@ -36,6 +36,7 @@ One command surface for Pi, OpenClaw ACP, Codex, Claude, and other ACP-compatibl
 - **Session export/import**: move portable session archives between machines
 - **Local status checks**: `status` reports running/idle/dead/no-session, pid, uptime, last prompt
 - **Client methods**: stable `fs/*` and `terminal/*` handlers with permission controls and cwd sandboxing
+- **Capability opt-outs**: let adapters use their native filesystem or terminal tools with `--no-fs` and `--no-terminal`
 - **Auth handshake**: stable `authenticate` support via env/config credentials
 - **Structured output**: typed ACP messages (thinking, tool calls, diffs) instead of ANSI scraping
 - **Any ACP agent**: built-in registry + `--agent` escape hatch for custom servers
@@ -219,6 +220,7 @@ acpx flow run ./my-flow.ts --input-file ./flow-input.json
 acpx --timeout 1800 flow run ./my-flow.ts
 acpx --format quiet codex 'final recommendation only'
 acpx --suppress-reads codex exec 'show tool activity without dumping file bodies'
+acpx --no-fs codex exec 'read files without ACP client filesystem delegation'
 
 acpx --timeout 90 codex 'investigate intermittent test timeout'
 acpx --ttl 30 codex 'keep queue owner alive for quick follow-ups'
