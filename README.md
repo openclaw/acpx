@@ -359,6 +359,7 @@ Built-ins:
 | `fast-agent` | `uvx fast-agent-mcp acp`                                                    | [fast-agent](https://fast-agent.ai)                                                                             |
 | `grok-build` | native (`grok agent stdio`)                                                 | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
 | `iflow`      | native (`iflow --experimental-acp`)                                         | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
+| `junie`      | native (`junie --acp true`)                                                 | [JetBrains Junie CLI](https://www.jetbrains.com/junie/)                                                         |
 | `kilocode`   | `npx -y @kilocode/cli acp`                                                  | [Kilocode](https://kilocode.ai)                                                                                 |
 | `kimi`       | native (`kimi acp`)                                                         | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
 | `kiro`       | native (`kiro-cli-chat acp`)                                                | [Kiro CLI](https://kiro.dev)                                                                                    |

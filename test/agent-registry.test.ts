@@ -7,6 +7,7 @@ import {
   AGENT_REGISTRY,
   BUILT_IN_AGENT_PACKAGES,
   DEFAULT_AGENT_NAME,
+  findBuiltInAgentPackage,
   listBuiltInAgents,
   resolveBuiltInAgentLaunch,
   resolveInstalledBuiltInAgentLaunch,
@@ -64,6 +65,22 @@ test("mux built-in runs the coder/mux ACP stdio bridge through npx", () => {
   assert.equal(resolveAgentCommand("mux"), "npx -y mux@^0.28.0 acp");
 });
 
+test("junie built-in launches the native ACP stdio server", () => {
+  assert.equal(AGENT_REGISTRY.junie, "junie --acp true");
+  assert.equal(resolveAgentCommand("junie"), "junie --acp true");
+});
+
+test("junie is a native agent and is not routed through an npm adapter package", () => {
+  assert.equal(findBuiltInAgentPackage(AGENT_REGISTRY.junie), undefined);
+  assert.equal(resolveInstalledBuiltInAgentLaunch(AGENT_REGISTRY.junie), undefined);
+  assert.equal(resolveBuiltInAgentLaunch(AGENT_REGISTRY.junie), undefined);
+});
+
+test("junie resolves case-insensitively and ignores surrounding whitespace", () => {
+  assert.equal(resolveAgentCommand("JUNIE"), "junie --acp true");
+  assert.equal(resolveAgentCommand("  Junie  "), "junie --acp true");
+});
+
 test("listBuiltInAgents preserves the required example prefix and alphabetical tail", () => {
   const agents = listBuiltInAgents();
   assert.deepEqual(agents, Object.keys(AGENT_REGISTRY));
@@ -81,6 +98,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "fast-agent",
     "grok-build",
     "iflow",
+    "junie",
     "kilocode",
     "kimi",
     "kiro",

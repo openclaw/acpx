@@ -929,6 +929,33 @@ test("integration: built-in qoder agent resolves to qodercli --acp", async () =>
   });
 });
 
+test("integration: built-in junie agent resolves to junie --acp true", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-junie-"));
+
+    try {
+      await writeFakeJunieAgent(fakeBinDir);
+
+      const result = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "quiet", "junie", "exec", "echo hello"],
+        homeDir,
+        {
+          env: {
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /hello/);
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: qoder session reuse preserves persisted startup flags", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -4512,6 +4539,40 @@ async function writeFakeIflowAgent(binDir: string): Promise<void> {
       "#!/bin/sh",
       'if [ "$1" = "--experimental-acp" ]; then',
       "  shift",
+      "fi",
+      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
+      "",
+    ].join("\n"),
+    { encoding: "utf8", mode: 0o755 },
+  );
+}
+
+async function writeFakeJunieAgent(binDir: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(binDir, "junie.cmd"),
+      [
+        "@echo off",
+        "setlocal",
+        'if "%~1"=="--acp" shift',
+        'if "%~1"=="true" shift',
+        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
+        "",
+      ].join("\r\n"),
+      { encoding: "utf8" },
+    );
+    return;
+  }
+
+  await fs.writeFile(
+    path.join(binDir, "junie"),
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "--acp" ]; then',
+      "  shift",
+      '  if [ "$1" = "true" ]; then',
+      "    shift",
+      "  fi",
       "fi",
       `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
       "",

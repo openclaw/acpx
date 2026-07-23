@@ -22,6 +22,7 @@ The default agent for top-level commands like `acpx exec â€¦` and `acpx prompt â
 | `fast-agent` | `uvx fast-agent-mcp acp`                       | [fast-agent](https://fast-agent.ai/)                                                                            |
 | `grok-build` | `grok agent stdio`                             | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
 | `iflow`      | `iflow --experimental-acp`                     | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
+| `junie`      | `junie --acp true`                             | [JetBrains Junie CLI](https://www.jetbrains.com/junie/)                                                         |
 | `kilocode`   | `npx -y @kilocode/cli acp`                     | [Kilocode](https://kilocode.ai)                                                                                 |
 | `kimi`       | `kimi acp`                                     | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
 | `kiro`       | `kiro-cli-chat acp`                            | [Kiro CLI](https://kiro.dev)                                                                                    |
@@ -157,6 +158,14 @@ Configure model/provider settings through fast-agent environment variables, fast
 - Built-in name: `iflow`
 - Default command: `iflow --experimental-acp`
 - Upstream: [iflow-ai/iflow-cli](https://github.com/iflow-ai/iflow-cli)
+
+### Junie
+
+- Built-in name: `junie`
+- Default command: `junie --acp true`
+- Upstream: [JetBrains Junie CLI](https://www.jetbrains.com/junie/)
+
+`acpx junie` launches the locally installed JetBrains Junie CLI in ACP stdio mode. Junie must already be installed and authenticated; `acpx` never installs it for you.
 
 ### Kilocode
 

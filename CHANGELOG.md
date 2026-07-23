@@ -9,6 +9,7 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - Agents/built-ins: refresh the default Pi, Codex, Claude, and Mux adapter ranges. Thanks @kelvinschen and @TheAngryPit.
+- Agents/built-ins: add JetBrains Junie as a built-in agent via `junie --acp true`.
 
 ### Breaking
 

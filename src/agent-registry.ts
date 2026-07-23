@@ -48,6 +48,7 @@ export const AGENT_REGISTRY: Record<string, string> = {
   "fast-agent": "uvx fast-agent-mcp acp",
   "grok-build": "grok agent stdio",
   iflow: "iflow --experimental-acp",
+  junie: "junie --acp true",
   kilocode: "npx -y @kilocode/cli acp",
   kimi: "kimi acp",
   kiro: "kiro-cli-chat acp",
