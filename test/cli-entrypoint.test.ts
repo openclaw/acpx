@@ -6,9 +6,15 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { handleMainRejection } from "../src/cli-fatal.js";
 
-const ROOT = fileURLToPath(new URL("..", import.meta.url));
+// Package root: source tests live in test/, compiled tests under dist-test/test/.
+const ROOT = fileURLToPath(
+  new URL(
+    fileURLToPath(import.meta.url).includes(`${path.sep}dist-test${path.sep}`) ? "../.." : "..",
+    import.meta.url,
+  ),
+);
 const DIST_CLI = path.join(ROOT, "dist", "cli.js");
-const CLI_FATAL_TS = fileURLToPath(new URL("../src/cli-fatal.ts", import.meta.url));
+const CLI_FATAL_TS = path.join(ROOT, "src", "cli-fatal.ts");
 
 test("importing the CLI module does not install entrypoint-only process state", async () => {
   const stdoutErrorListeners = process.stdout.listeners("error");
