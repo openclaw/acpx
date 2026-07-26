@@ -25,7 +25,7 @@ The default agent for top-level commands like `acpx exec â€¦` and `acpx prompt â
 | `kilocode`   | `npx -y @kilocode/cli acp`                     | [Kilocode](https://kilocode.ai)                                                                                 |
 | `kimi`       | `kimi acp`                                     | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
 | `kiro`       | `kiro-cli-chat acp`                            | [Kiro CLI](https://kiro.dev)                                                                                    |
-| `mux`        | `npx -y mux@^0.27.0 acp`                       | [Mux](https://mux.coder.com)                                                                                    |
+| `mux`        | `mux acp` via an ACPX-owned npm range          | [Mux](https://mux.coder.com)                                                                                    |
 | `opencode`   | `npx -y opencode-ai acp`                       | [OpenCode](https://opencode.ai)                                                                                 |
 | `qoder`      | `qodercli --acp`                               | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |
 | `qwen`       | `qwen --acp`                                   | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
@@ -179,7 +179,7 @@ Configure model/provider settings through fast-agent environment variables, fast
 ### Mux
 
 - Built-in name: `mux`
-- Default command: `npx -y mux@^0.27.0 acp`
+- Default entrypoint: `mux acp` via an ACPX-owned npm range
 - Upstream: https://mux.coder.com/integrations/acp
 
 `acpx mux` starts coder/mux through its ACP stdio bridge (`mux acp`). `mux acp` auto-starts an in-process mux server, so a separate `mux server` is not required.

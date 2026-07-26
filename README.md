@@ -148,7 +148,8 @@ acpx codex --file - "extra context"            # explicit stdin + appended args
 acpx codex --no-wait 'draft test migration plan' # enqueue without waiting if session is busy
 acpx codex cancel                               # cooperative cancel of in-flight prompt
 acpx codex set-mode auto                        # session/set_mode (adapter-defined mode id)
-acpx codex set model 'gpt-5.2[high]'            # adapter-advertised model control
+acpx codex set model gpt-5.6-sol                # select the advertised base model
+acpx codex set reasoning_effort max             # set the advertised reasoning effort
 acpx exec 'summarize this repo'                # default agent shortcut (codex)
 acpx codex exec 'what does this repo do?'      # one-shot, no saved session
 
@@ -361,7 +362,7 @@ Built-ins:
 | `kilocode`   | `npx -y @kilocode/cli acp`                                                  | [Kilocode](https://kilocode.ai)                                                                                 |
 | `kimi`       | native (`kimi acp`)                                                         | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
 | `kiro`       | native (`kiro-cli-chat acp`)                                                | [Kiro CLI](https://kiro.dev)                                                                                    |
-| `mux`        | `npx -y mux@^0.27.0 acp`                                                    | [Mux](https://mux.coder.com)                                                                                    |
+| `mux`        | `mux acp` via an ACPX-owned npm range                                       | [Mux](https://mux.coder.com)                                                                                    |
 | `opencode`   | `npx -y opencode-ai acp`                                                    | [OpenCode](https://opencode.ai)                                                                                 |
 | `qoder`      | native (`qodercli --acp`)                                                   | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |
 | `qwen`       | native (`qwen --acp`)                                                       | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |

@@ -1,7 +1,7 @@
 # Mux
 
 - Built-in name: `mux`
-- Default command: `npx -y mux@^0.27.0 acp`
+- Default entrypoint: `mux acp` via an ACPX-owned npm range
 - Upstream: https://mux.coder.com/integrations/acp
 
 `acpx mux` starts coder/mux through its ACP stdio bridge (`mux acp`). `mux acp` auto-starts an in-process mux server, so a separate `mux server` is not required.

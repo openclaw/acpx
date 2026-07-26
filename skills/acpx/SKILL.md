@@ -83,7 +83,7 @@ Friendly agent names resolve to commands:
 
 - `pi` -> `npx pi-acp`
 - `openclaw` -> `openclaw acp`
-- `codex` -> `npx -y @agentclientprotocol/codex-acp`
+- `codex` -> `npx -y @agentclientprotocol/codex-acp` (ACPX-owned package range)
 - `claude` -> `npx -y @agentclientprotocol/claude-agent-acp` (ACPX-owned package range)
 - `gemini` -> `gemini --acp`
 - `cursor` -> `cursor-agent acp`
@@ -96,7 +96,7 @@ Friendly agent names resolve to commands:
 - `kilocode` -> `npx -y @kilocode/cli acp`
 - `kimi` -> `kimi acp`
 - `kiro` -> `kiro-cli-chat acp`
-- `mux` -> `npx -y mux@^0.27.0 acp`
+- `mux` -> `mux acp` via an ACPX-owned npm range
 - `opencode` -> `npx -y opencode-ai acp`
 - `qoder` -> `qodercli --acp`
   Forwards Qoder-native `--allowed-tools` and `--max-turns` startup flags from `acpx` session options.
@@ -192,8 +192,8 @@ Behavior:
 ```bash
 acpx codex cancel
 acpx codex set-mode auto
-acpx codex set model gpt-5.2[high]
-acpx codex set model gpt-5.4
+acpx codex set model gpt-5.6-sol
+acpx codex set reasoning_effort max
 ```
 
 Behavior:
@@ -202,7 +202,7 @@ Behavior:
 - `set-mode`: calls ACP `session/set_mode`.
 - `set-mode` mode ids are adapter-defined; unsupported values are rejected by the adapter (often `Invalid params`).
 - `set`: calls ACP `session/set_config_option`.
-- For codex, reasoning effort is selected through advertised ACP model ids when the adapter reports model variants.
+- Current codex-acp releases expose `model` and `reasoning_effort` as separate config options.
 - `--model <id>`: Claude-compatible adapters may consume session creation metadata; other agents must advertise a model config option or legacy `models` metadata.
 - `set model <id>`: uses `session/set_config_option` for advertised model config options and preserves `session/set_model` for explicitly advertised legacy models.
 - `set-mode`/`set` route through queue-owner IPC when active, otherwise reconnect directly.

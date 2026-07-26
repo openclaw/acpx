@@ -12,6 +12,16 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+## 2026.7.23 (v0.12.1)
+
+### Changes
+
+- Agents/built-ins: refresh the default Pi, Codex, Claude, and Mux adapter ranges. Thanks @kelvinschen and @TheAngryPit.
+
+### Breaking
+
+### Fixes
+
 - Session queue owner: capture a bounded owner stderr tail and exit status during cold start only (stop retaining at first IPC accept; keep draining the pipe so long-lived owners are not killed by EPIPE) so a dead owner reports the real failure instead of a silent timeout. Thanks @SebTardif.
 
 ## 2026.7.4 (v0.12.0)
