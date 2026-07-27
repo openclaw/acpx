@@ -102,6 +102,7 @@ Friendly agent names resolve to commands:
   Forwards Qoder-native `--allowed-tools` and `--max-turns` startup flags from `acpx` session options.
 - `qwen` -> `qwen --acp`
 - `trae` -> `traecli acp serve`
+- `zeroclaw` -> `zeroclaw acp`
 
 Rules:
 

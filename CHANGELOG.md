@@ -14,6 +14,8 @@ Repo: https://github.com/openclaw/acpx
 
 - CLI/timers: preserve tiny positive timeout and TTL values from flags or config as 1 ms instead of disabling timers, and reject delays beyond Node's supported timer range. Thanks @realmehmetali.
 
+- Agents/built-ins: add ZeroClaw via `zeroclaw acp`, ZeroClaw's native ACP v1 stdio server. Thanks @JordanTheJet.
+
 ### Breaking
 
 - Windows agent launches now require structured `agents.<name>.argv`; unambiguous legacy `command` plus `args` entries migrate automatically, while raw, ambiguous, or directly executable `.sh` commands fail with explicit migration guidance instead of lossy parsing or CreateProcess ENOENT. Existing custom-agent sessions without saved argv must be recreated. Fixes #466. Thanks @MarcelCFritsche.

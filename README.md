@@ -373,6 +373,7 @@ Built-ins:
 | `qoder`      | native (`qodercli --acp`)                                                   | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |
 | `qwen`       | native (`qwen --acp`)                                                       | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
 | `trae`       | native (`traecli acp serve`)                                                | [Trae CLI](https://docs.trae.cn/cli)                                                                            |
+| `zeroclaw`   | native (`zeroclaw acp`)                                                     | [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw)                                                           |
 
 `factory-droid` and `factorydroid` also resolve to the built-in `droid` adapter.
 

@@ -22,6 +22,7 @@ Built-in agents:
 - `qoder -> qodercli --acp`
 - `qwen -> qwen --acp`
 - `trae -> traecli acp serve`
+- `zeroclaw -> zeroclaw acp`
 
 Harness-specific docs in this directory:
 
@@ -43,3 +44,4 @@ Harness-specific docs in this directory:
 - [Qoder](Qoder.md): built-in `qoder -> qodercli --acp`
 - [Qwen](Qwen.md): built-in `qwen -> qwen --acp`
 - [Trae](Trae.md): built-in `trae -> traecli acp serve`
+- [ZeroClaw](ZeroClaw.md): built-in `zeroclaw -> zeroclaw acp`

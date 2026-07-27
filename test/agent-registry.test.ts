@@ -80,6 +80,11 @@ test("pool built-in runs the Poolside ACP entrypoint", () => {
   assert.equal(resolveAgentCommand("pool"), "pool acp");
 });
 
+test("zeroclaw built-in launches the native ZeroClaw ACP server", () => {
+  assert.equal(AGENT_REGISTRY.zeroclaw, "zeroclaw acp");
+  assert.equal(resolveAgentCommand("zeroclaw"), "zeroclaw acp");
+});
+
 test("listBuiltInAgents preserves the required example prefix and alphabetical tail", () => {
   const agents = listBuiltInAgents();
   assert.deepEqual(agents, Object.keys(AGENT_REGISTRY));
@@ -106,6 +111,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "qoder",
     "qwen",
     "trae",
+    "zeroclaw",
   ]);
 });
 
