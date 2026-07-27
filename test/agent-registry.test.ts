@@ -82,6 +82,7 @@ test("pool built-in runs the Poolside ACP entrypoint", () => {
 
 test("zeroclaw built-in launches the native ZeroClaw ACP server", () => {
   assert.equal(AGENT_REGISTRY.zeroclaw, "zeroclaw acp");
+  assert.deepEqual(AGENT_ARGV_REGISTRY.zeroclaw, ["zeroclaw", "acp"]);
   assert.equal(resolveAgentCommand("zeroclaw"), "zeroclaw acp");
 });
 
