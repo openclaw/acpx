@@ -36,6 +36,7 @@ prompt.
 | `--timeout <sec>`                                              | Per-agent timeout in seconds.                                   |
 | `--non-interactive-permissions <policy>`                       | Non-TTY prompt behavior.                                        |
 | `--auth-policy <policy>`                                       | ACP authentication behavior.                                    |
+| `--no-fs`                                                      | Do not advertise filesystem support to agents.                  |
 | `--no-terminal`                                                | Do not advertise terminal support to agents.                    |
 | `--prompt-retries <count>`                                     | Retry failed prompt turns before any side effects are observed. |
 | `--model`, `--allowed-tools`, `--max-turns`, `--system-prompt` | Session creation options forwarded to compatible agents.        |
