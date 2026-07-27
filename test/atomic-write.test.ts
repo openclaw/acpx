@@ -21,3 +21,14 @@ test("atomic write temp paths stay distinct within the same millisecond", () => 
     Date.now = originalNow;
   }
 });
+
+test("atomic write temp paths preserve valid long destination basenames", () => {
+  const destination = path.join("/tmp", `${"x".repeat(220)}.json`);
+  const tempPath = createAtomicWriteTempPath(
+    destination,
+    () => "12345678-1234-1234-1234-123456789abc",
+  );
+
+  assert.equal(path.dirname(tempPath), path.dirname(destination));
+  assert.ok(Buffer.byteLength(path.basename(tempPath)) <= 255);
+});
