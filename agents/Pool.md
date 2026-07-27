@@ -2,9 +2,9 @@
 
 - Built-in name: `pool`
 - Default command: `pool acp`
-- Upstream: [Poolside](https://poolside.ai)
+- Upstream: [Poolside pool](https://github.com/poolsideai/pool)
 
-`acpx pool` launches the installed `pool` CLI through its ACP stdio entrypoint (`pool acp` starts the ACP server for Poolside's coding agent). Install `pool` and complete its normal authentication flow with `pool login` before using it through `acpx`; credentials are stored under `~/.config/poolside/`.
+`acpx pool` launches the installed `pool` CLI through its ACP stdio entrypoint. Install `pool` using the [official instructions](https://github.com/poolsideai/pool#install), then run `pool login` before using it through `acpx`. Poolside stores its configuration and credentials under `~/.config/poolside/`.
 
 Examples:
 
@@ -20,7 +20,7 @@ If your Poolside install exposes ACP through a different command, override the b
 {
   "agents": {
     "pool": {
-      "command": "pool acp"
+      "argv": ["pool", "acp"]
     }
   }
 }

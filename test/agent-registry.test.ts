@@ -76,6 +76,7 @@ test("mux built-in runs the coder/mux ACP stdio bridge through npx", () => {
 
 test("pool built-in runs the Poolside ACP entrypoint", () => {
   assert.equal(AGENT_REGISTRY.pool, "pool acp");
+  assert.deepEqual(AGENT_ARGV_REGISTRY.pool, ["pool", "acp"]);
   assert.equal(resolveAgentCommand("pool"), "pool acp");
 });
 
