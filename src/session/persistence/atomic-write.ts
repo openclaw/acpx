@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
 
-export function createAtomicWriteTempPath(filePath: string): string {
-  return `${filePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+export function createAtomicWriteTempPath(
+  filePath: string,
+  createUniqueId: () => string = randomUUID,
+): string {
+  return `${filePath}.${process.pid}.${Date.now()}.${createUniqueId()}.tmp`;
 }
