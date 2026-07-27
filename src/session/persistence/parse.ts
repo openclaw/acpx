@@ -1,3 +1,4 @@
+import { resolveAgentArgvForCommand } from "../../agent-registry.js";
 import type {
   SessionAcpxState,
   SessionEventLog,
@@ -21,6 +22,19 @@ function hasOwn(source: object, key: string): boolean {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+function parseOptionalAgentArgv(value: unknown): string[] | undefined {
+  return isStringArray(value) && value.length > 0 && value[0]?.length > 0 ? value : undefined;
+}
+
+function parsePersistedAgentArgv(record: Record<string, unknown>): string[] | undefined {
+  return (
+    parseOptionalAgentArgv(record.agent_argv) ??
+    (typeof record.agent_command === "string"
+      ? resolveAgentArgvForCommand(record.agent_command)
+      : undefined)
+  );
 }
 
 function hasModelConfigOption(options: unknown): boolean {
@@ -768,6 +782,7 @@ export function parseSessionRecord(raw: unknown): SessionRecord | null {
     acpSessionId: record.acp_session_id,
     agentSessionId: normalizeRuntimeSessionId(record.agent_session_id),
     agentCommand: record.agent_command,
+    agentArgv: parsePersistedAgentArgv(record),
     cwd: record.cwd,
     name: optionals.name,
     createdAt: record.created_at,

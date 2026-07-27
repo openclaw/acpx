@@ -60,6 +60,7 @@ async function createSessionRecordWithClient(
     acpSessionId: sessionId,
     agentSessionId,
     agentCommand: options.agentCommand,
+    agentArgv: options.agentArgv,
     cwd,
     name: normalizeName(options.name),
     createdAt: now,
@@ -189,6 +190,7 @@ export async function createSessionWithClient(
 ): Promise<SessionCreateWithClientResult> {
   const client = new AcpClient({
     agentCommand: options.agentCommand,
+    agentArgv: options.agentArgv,
     cwd: absolutePath(options.cwd),
     mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,
@@ -233,6 +235,7 @@ export async function createSession(options: SessionCreateOptions): Promise<Sess
 export async function listAgentSessions(options: SessionListOptions): Promise<SessionListResult> {
   const client = new AcpClient({
     agentCommand: options.agentCommand,
+    agentArgv: options.agentArgv,
     cwd: absolutePath(options.cwd),
     mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,
@@ -313,6 +316,7 @@ export async function ensureSession(options: SessionEnsureOptions): Promise<Sess
 
   const record = await createSession({
     agentCommand: options.agentCommand,
+    agentArgv: options.agentArgv,
     cwd,
     name: options.name,
     resumeSessionId: options.resumeSessionId,

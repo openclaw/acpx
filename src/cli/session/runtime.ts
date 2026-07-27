@@ -759,6 +759,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     options.client ??
     new AcpClient({
       agentCommand: record.agentCommand,
+      agentArgv: record.agentArgv,
       cwd: absolutePath(record.cwd),
       mcpServers: options.mcpServers,
       permissionMode: options.permissionMode,
@@ -1104,6 +1105,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
   const acpErrors = new AcpErrorTracker();
   const client = new AcpClient({
     agentCommand: options.agentCommand,
+    agentArgv: options.agentArgv,
     cwd: absolutePath(options.cwd),
     mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,

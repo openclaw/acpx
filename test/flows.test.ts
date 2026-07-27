@@ -609,7 +609,8 @@ test("FlowRunner executes isolated ACP nodes and branches deterministically", as
       const runner = new FlowRunner({
         resolveAgent: () => ({
           agentName: "mock",
-          agentCommand: MOCK_AGENT_COMMAND,
+          agentCommand: "display-only-invalid-command",
+          agentArgv: ["node", MOCK_AGENT_PATH],
           cwd,
         }),
         permissionMode: "approve-all",
@@ -671,6 +672,11 @@ test("FlowRunner executes isolated ACP nodes and branches deterministically", as
       assert.equal(result.state.status, "completed");
       assert.deepEqual(result.state.outputs.yes, { ok: true });
       assert.equal(result.state.outputs.no, undefined);
+      assert.ok(
+        Object.values(result.state.sessionBindings).every(
+          (binding) => binding.agentArgv?.[1] === MOCK_AGENT_PATH,
+        ),
+      );
       assert.match(result.runDir, new RegExp(escapeRegExp(flowRunsBaseDir(homeDir))));
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
@@ -745,6 +751,7 @@ test("FlowRunner writes isolated ACP bundle traces and artifacts", async () => {
         resolveAgent: () => ({
           agentName: "mock",
           agentCommand: `${MOCK_AGENT_COMMAND} --supports-load-session`,
+          agentArgv: ["node", MOCK_AGENT_PATH, "--supports-load-session"],
           cwd,
         }),
         permissionMode: "approve-all",
@@ -838,7 +845,8 @@ test("FlowRunner writes persistent ACP bundle traces and session bindings", asyn
       const runner = new FlowRunner({
         resolveAgent: () => ({
           agentName: "mock",
-          agentCommand: `${MOCK_AGENT_COMMAND} --supports-load-session`,
+          agentCommand: "display-only-invalid-command --supports-load-session",
+          agentArgv: ["node", MOCK_AGENT_PATH, "--supports-load-session"],
           cwd,
         }),
         permissionMode: "approve-all",
@@ -885,6 +893,11 @@ test("FlowRunner writes persistent ACP bundle traces and session bindings", asyn
       assert.equal(result.state.status, "completed");
       assert.equal(manifest.sessions.length, 1);
       assert.equal(Object.values(result.state.sessionBindings).length, 1);
+      assert.deepEqual(Object.values(result.state.sessionBindings)[0]?.agentArgv, [
+        "node",
+        MOCK_AGENT_PATH,
+        "--supports-load-session",
+      ]);
       assert.equal(steps[0]?.session?.bundleId, manifest.sessions[0]?.id);
       assert.equal(steps[0]?.trace?.sessionId, manifest.sessions[0]?.id);
       assert.ok(steps[0]?.trace?.conversation?.eventEndSeq);
@@ -893,7 +906,7 @@ test("FlowRunner writes persistent ACP bundle traces and session bindings", asyn
 
       const record = JSON.parse(
         await fs.readFile(path.join(result.runDir, manifest.sessions[0].recordPath), "utf8"),
-      ) as { messages: unknown[]; lastSeq: number };
+      ) as { messages: unknown[]; lastSeq: number; agentArgv?: string[] };
       const bundledEvents = (
         await fs.readFile(path.join(result.runDir, manifest.sessions[0].eventsPath), "utf8")
       )
@@ -902,6 +915,7 @@ test("FlowRunner writes persistent ACP bundle traces and session bindings", asyn
         .map((line) => JSON.parse(line) as { seq?: number });
 
       assert.ok(record.messages.length >= 2);
+      assert.deepEqual(record.agentArgv, ["node", MOCK_AGENT_PATH, "--supports-load-session"]);
       assert.equal(record.lastSeq, bundledEvents.length);
       assert.equal(bundledEvents[0]?.seq, 1);
     } finally {

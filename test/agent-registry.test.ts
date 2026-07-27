@@ -3,7 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { normalizeAgentCommandInput } from "../src/acp/client-process.js";
 import {
+  AGENT_ARGV_REGISTRY,
   AGENT_REGISTRY,
   BUILT_IN_AGENT_PACKAGES,
   DEFAULT_AGENT_NAME,
@@ -13,6 +15,14 @@ import {
   resolvePackageExecBuiltInAgentLaunch,
   resolveAgentCommand,
 } from "../src/agent-registry.js";
+
+test("built-in command displays stay synchronized with structured argv", () => {
+  assert.deepEqual(Object.keys(AGENT_ARGV_REGISTRY), Object.keys(AGENT_REGISTRY));
+  for (const [name, argv] of Object.entries(AGENT_ARGV_REGISTRY)) {
+    assert.equal(argv.join(" "), AGENT_REGISTRY[name]);
+    assert.equal(normalizeAgentCommandInput(argv).agentCommand, AGENT_REGISTRY[name]);
+  }
+});
 
 test("resolveAgentCommand maps known agents to commands", () => {
   for (const [name, command] of Object.entries(AGENT_REGISTRY)) {

@@ -10,6 +10,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Breaking
 
+- Windows agent launches now require structured `agents.<name>.argv`; unambiguous legacy `command` plus `args` entries migrate automatically, while raw, ambiguous, or directly executable `.sh` commands fail with explicit migration guidance instead of lossy parsing or CreateProcess ENOENT. Existing custom-agent sessions without saved argv must be recreated. Fixes #466. Thanks @MarcelCFritsche.
+
 ### Fixes
 
 ## 2026.7.23 (v0.12.1)

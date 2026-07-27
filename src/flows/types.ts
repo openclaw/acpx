@@ -240,6 +240,7 @@ export type FlowSessionBinding = {
   profile?: string;
   agentName: string;
   agentCommand: string;
+  agentArgv?: string[];
   cwd: string;
   acpxRecordId: string;
   acpSessionId: string;
@@ -335,6 +336,7 @@ export type FlowSessionBundleSnapshot = {
 export type ResolvedFlowAgent = {
   agentName: string;
   agentCommand: string;
+  agentArgv?: string[];
   cwd: string;
 };
 

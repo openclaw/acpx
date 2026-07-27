@@ -144,6 +144,51 @@ function shouldUseWindowsBatchShell(
   return ext === ".cmd" || ext === ".bat";
 }
 
+export type AgentSpawnCommand = {
+  command: string;
+  args: string[];
+  windowsVerbatimArguments?: boolean;
+};
+
+const CMD_META_CHAR_RE = /([()\][%!^"`<>&|;, *?])/gu;
+const CMD_BACKSLASH_QUOTE_RE = /(?=(\\+?)?)\1"/gu;
+const CMD_TRAILING_BACKSLASH_RE = /(?=(\\+?)?)\1$/gu;
+const CMD_SHIM_RE = /node_modules[\\/].bin[\\/][^\\/]+\.cmd$/iu;
+
+function escapeCmdCommand(value: string): string {
+  return value.replace(CMD_META_CHAR_RE, "^$1");
+}
+
+function escapeCmdArgument(value: string, doubleEscapeMeta: boolean): string {
+  const quoted = `"${value
+    .replace(CMD_BACKSLASH_QUOTE_RE, '$1$1\\"')
+    .replace(CMD_TRAILING_BACKSLASH_RE, "$1$1")}"`;
+  const escaped = quoted.replace(CMD_META_CHAR_RE, "^$1");
+  return doubleEscapeMeta ? escaped.replace(CMD_META_CHAR_RE, "^$1") : escaped;
+}
+
+export function buildAgentSpawnCommand(
+  command: string,
+  args: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): AgentSpawnCommand {
+  if (!shouldUseWindowsBatchShell(command, platform, env)) {
+    return { command, args: [...args] };
+  }
+  const resolvedCommand = path.win32.normalize(resolveWindowsCommand(command, env) ?? command);
+  const doubleEscapeMeta = CMD_SHIM_RE.test(resolvedCommand);
+  const shellCommand = [
+    escapeCmdCommand(resolvedCommand),
+    ...args.map((arg) => escapeCmdArgument(arg, doubleEscapeMeta)),
+  ].join(" ");
+  return {
+    command: readWindowsEnvValue(env, "COMSPEC") ?? "cmd.exe",
+    args: ["/d", "/s", "/c", `"${shellCommand}"`],
+    windowsVerbatimArguments: true,
+  };
+}
+
 export function buildSpawnCommandOptions(
   command: string,
   options: Parameters<typeof spawn>[2],

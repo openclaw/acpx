@@ -287,7 +287,7 @@ export interface AcpSessionStore {
 }
 
 export interface AcpAgentRegistry {
-  resolve(agentName: string): string;
+  resolve(agentName: string): string | string[];
   list(): string[];
 }
 

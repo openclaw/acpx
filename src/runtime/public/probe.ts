@@ -1,3 +1,4 @@
+import { normalizeAgentCommandInput } from "../../acp/client-process.js";
 import { AcpClient } from "../../acp/client.js";
 import { DEFAULT_AGENT_NAME } from "../../agent-registry.js";
 import type { AcpRuntimeOptions } from "./contract.js";
@@ -75,7 +76,7 @@ export async function probeRuntime(
   deps: ProbeRuntimeDeps = {},
 ): Promise<RuntimeHealthReport> {
   const agentName = options.probeAgent?.trim() || DEFAULT_AGENT_NAME;
-  const agentCommand = options.agentRegistry.resolve(agentName);
+  const agentCommand = normalizeAgentCommandInput(options.agentRegistry.resolve(agentName));
   const client = createProbeClient(options, agentCommand, deps);
 
   try {
@@ -85,7 +86,7 @@ export async function probeRuntime(
       message: "embedded ACP runtime ready",
       details: [
         `agent=${agentName}`,
-        `command=${agentCommand}`,
+        `command=${agentCommand.agentCommand}`,
         `cwd=${options.cwd}`,
         ...(client.initializeResult?.protocolVersion
           ? [`protocolVersion=${client.initializeResult.protocolVersion}`]
@@ -98,7 +99,7 @@ export async function probeRuntime(
       message: "embedded ACP runtime probe failed",
       details: [
         `agent=${agentName}`,
-        `command=${agentCommand}`,
+        `command=${agentCommand.agentCommand}`,
         `cwd=${options.cwd}`,
         formatRuntimeDetail(error),
       ],
@@ -110,11 +111,11 @@ export async function probeRuntime(
 
 function createProbeClient(
   options: AcpRuntimeOptions,
-  agentCommand: string,
+  agentCommand: ReturnType<typeof normalizeAgentCommandInput>,
   deps: ProbeRuntimeDeps,
 ): AcpClient {
   const clientOptions = {
-    agentCommand,
+    ...agentCommand,
     cwd: options.cwd,
     mcpServers: [...(options.mcpServers ?? [])],
     permissionMode: options.permissionMode,

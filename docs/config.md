@@ -46,7 +46,7 @@ acpx config init
     }
   ],
   "agents": {
-    "my-custom": { "command": "./bin/my-acp-server", "args": ["acp"] }
+    "my-custom": { "argv": ["./bin/my-acp-server", "acp"] }
   },
   "auth": {
     "openai_api_key": "sk-…"
@@ -88,12 +88,10 @@ Custom agents and overrides live here:
 {
   "agents": {
     "my-agent": {
-      "command": "./bin/my-acp-server",
-      "args": ["acp", "--profile", "ci"]
+      "argv": ["./bin/my-acp-server", "acp", "--profile", "ci"]
     },
     "codex": {
-      "command": "/usr/local/bin/codex-acp",
-      "args": ["--mode", "stable"]
+      "argv": ["/usr/local/bin/codex-acp", "--mode", "stable"]
     }
   }
 }
@@ -102,15 +100,18 @@ Custom agents and overrides live here:
 Rules:
 
 - Keys are friendly names you would type at `acpx <name> …`.
-- `command` is required; it can be a single executable or include in-string args (`"node ./bin/x.mjs"`).
-- `args` is optional. If present, it is appended after the parsed `command` tokens.
-- Custom agent `args` arrays are honored — required adapter sub-commands are no longer dropped silently.
+- `argv` is the preferred form and is required for custom agent launches on Windows. Its first item is the executable and every remaining item is passed literally as one argument.
+- Legacy `{ "command": "…", "args": […] }` entries migrate when `command` is an unquoted executable with no whitespace. Quoted executables and inline arguments are rejected as ambiguous; move the complete launch to `argv`.
+- A legacy `command` without `args` remains a raw command string for Unix compatibility. Windows rejects it with migration guidance because inferring argv would corrupt paths and quoting.
+- The raw `--agent <command>` escape hatch is likewise Unix-only.
+- Windows cannot execute `.sh` files directly. Name the interpreter explicitly, for example `"argv": ["bash", "C:\\tools\\bin\\agent.sh"]`; acpx does not discover or infer an interpreter.
+- On Windows, close and recreate custom-agent sessions created by an older acpx release so their records persist structured argv. Known built-in commands migrate automatically.
 - An entry that shares a name with a built-in **replaces** the built-in for that name.
 
 Project config can shadow global config by re-declaring the same key:
 
 ```json
-{ "agents": { "codex": { "command": "/usr/local/bin/codex-acp" } } }
+{ "agents": { "codex": { "argv": ["/usr/local/bin/codex-acp"] } } }
 ```
 
 Use this to point a particular repo at a vendored or pinned adapter.

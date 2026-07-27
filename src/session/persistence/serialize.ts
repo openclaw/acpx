@@ -14,6 +14,7 @@ export function serializeSessionRecordForDisk(record: SessionRecord): Record<str
     acp_session_id: canonical.acpSessionId,
     agent_session_id: normalizeRuntimeSessionId(canonical.agentSessionId),
     agent_command: canonical.agentCommand,
+    agent_argv: canonical.agentArgv,
     cwd: canonical.cwd,
     name: canonical.name,
     created_at: canonical.createdAt,

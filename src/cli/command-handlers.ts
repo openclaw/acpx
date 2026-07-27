@@ -215,6 +215,7 @@ function buildSessionStartOptions(params: {
 }): Parameters<SessionModule["createSession"]>[0] {
   return {
     agentCommand: params.agent.agentCommand,
+    agentArgv: params.agent.agentArgv,
     cwd: params.agent.cwd,
     name: params.flags.name,
     resumeSessionId: params.flags.resumeSession,
@@ -433,6 +434,7 @@ export async function handleExec(
 
   const result = await runOnce({
     agentCommand: agent.agentCommand,
+    agentArgv: agent.agentArgv,
     cwd: agent.cwd,
     prompt,
     mcpServers: config.mcpServers,
@@ -709,6 +711,7 @@ async function tryListAgentSessions(
   try {
     return await listAgentSessions({
       agentCommand: agent.agentCommand,
+      agentArgv: agent.agentArgv,
       cwd: agent.cwd,
       cursor: flags.cursor,
       filterCwd: resolveSessionListFilterCwd(flags, agent.cwd),

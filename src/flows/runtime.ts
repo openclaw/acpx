@@ -1054,6 +1054,7 @@ export class FlowRunner {
     const name = createSessionName(flow.name, handle, agent.cwd, state.runId);
     const created = await createSessionWithClient({
       agentCommand: agent.agentCommand,
+      agentArgv: agent.agentArgv,
       cwd: agent.cwd,
       name,
       mcpServers: this.mcpServers,
@@ -1075,6 +1076,7 @@ export class FlowRunner {
       profile: node.profile,
       agentName: agent.agentName,
       agentCommand: agent.agentCommand,
+      agentArgv: agent.agentArgv,
       cwd: agent.cwd,
       acpxRecordId: created.record.acpxRecordId,
       acpSessionId: created.record.acpSessionId,
@@ -1206,6 +1208,7 @@ export class FlowRunner {
     const pendingEventWrites: Promise<void>[] = [];
     const result = await runOnce({
       agentCommand: agent.agentCommand,
+      agentArgv: agent.agentArgv,
       cwd: agent.cwd,
       prompt,
       mcpServers: this.mcpServers,

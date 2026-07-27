@@ -283,7 +283,7 @@ Supported keys:
   "timeout": null,
   "format": "text",
   "agents": {
-    "my-custom": { "command": "./bin/my-acp-server", "args": ["acp"] }
+    "my-custom": { "argv": ["./bin/my-acp-server", "acp"] }
   },
   "auth": {
     "my_auth_method_id": "credential-value"
@@ -292,6 +292,9 @@ Supported keys:
 ```
 
 Use `acpx config show` to inspect the resolved result and `acpx config init` to create the global template.
+Use structured `agents.<name>.argv` for custom launches; it is required on Windows. Legacy
+`command` plus `args` entries migrate when `command` is an unquoted executable with no whitespace,
+while raw command strings remain Unix-only.
 
 For ACP `authenticate` handshakes, use either config `auth` entries or explicit
 `ACPX_AUTH_<METHOD_ID>` environment variables such as `ACPX_AUTH_OPENAI_API_KEY`.

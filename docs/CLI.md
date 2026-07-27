@@ -429,7 +429,7 @@ Supported keys:
   "timeout": null,
   "format": "text",
   "agents": {
-    "my-custom": { "command": "./bin/my-acp-server", "args": ["acp"] }
+    "my-custom": { "argv": ["./bin/my-acp-server", "acp"] }
   },
   "auth": {
     "my_auth_method_id": "credential-value"
@@ -439,6 +439,10 @@ Supported keys:
 
 CLI flags always override config values.
 
+Custom agents should use structured `agents.<name>.argv`, which is required on Windows. Legacy
+`command` plus `args` entries migrate when `command` is an unquoted executable with no whitespace.
+Raw command strings, including `--agent`, are supported only on Unix.
+
 For ACP `authenticate` handshakes, use either config `auth` entries or explicit
 `ACPX_AUTH_<METHOD_ID>` environment variables such as `ACPX_AUTH_OPENAI_API_KEY`.
 Ambient provider env vars such as `OPENAI_API_KEY` are still passed through to
@@ -446,7 +450,8 @@ child agents, but they do not trigger ACP auth-method selection on their own.
 
 ## `--agent` escape hatch
 
-`--agent <command>` sets a raw adapter command explicitly.
+`--agent <command>` sets a raw adapter command explicitly on Unix. On Windows, define a named
+agent with `agents.<name>.argv` so executable and argument boundaries remain unambiguous.
 
 Examples:
 

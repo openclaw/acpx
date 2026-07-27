@@ -518,3 +518,31 @@ test("resolveAgentInvocation rejects conflicting positional and override agents"
     /Do not combine positional agent with --agent override/,
   );
 });
+
+test("resolveAgentInvocation applies canonical config overrides through aliases", () => {
+  assert.deepEqual(
+    resolveAgentInvocation(
+      "factory-droid",
+      {
+        cwd: "/repo",
+        nonInteractivePermissions: "deny",
+        ttl: 300_000,
+        format: "text",
+      },
+      config({
+        agents: {
+          droid: {
+            command: '"C:\\\\tools\\\\droid.exe" "--acp"',
+            argv: ["C:\\tools\\droid.exe", "--acp"],
+          },
+        },
+      }),
+    ),
+    {
+      agentName: "factory-droid",
+      agentCommand: '"C:\\\\tools\\\\droid.exe" "--acp"',
+      agentArgv: ["C:\\tools\\droid.exe", "--acp"],
+      cwd: "/repo",
+    },
+  );
+});

@@ -4,6 +4,7 @@ import { once } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { AGENT_ARGV_REGISTRY, AGENT_REGISTRY } from "../src/agent-registry.js";
 import { parseSessionRecord, serializeSessionRecordForDisk } from "../src/session/persistence.js";
 import {
   fileExists,
@@ -27,6 +28,70 @@ test("SessionRecord allows optional closed and closedAt fields", () => {
 
   assert.equal(record.closed, false);
   assert.equal(record.closedAt, undefined);
+});
+
+test("parseSessionRecord preserves structured agent argv", () => {
+  const serialized = serializeSessionRecordForDisk(
+    makeSessionRecord({
+      acpxRecordId: "structured-agent-argv",
+      acpSessionId: "structured-agent-argv",
+      agentCommand: '"C:\\\\tools\\\\bin\\\\agent.sh"',
+      agentArgv: ["C:\\tools\\bin\\agent.sh", "--pipe", "\\\\.\\pipe\\acpx-agent"],
+      cwd: "/tmp/structured-agent-argv",
+    }),
+  );
+
+  const parsed = parseSessionRecord(serialized);
+
+  assert.ok(parsed);
+  assert.deepEqual(parsed.agentArgv, [
+    "C:\\tools\\bin\\agent.sh",
+    "--pipe",
+    "\\\\.\\pipe\\acpx-agent",
+  ]);
+});
+
+test("parseSessionRecord backfills argv for legacy built-in records", () => {
+  const serialized = serializeSessionRecordForDisk(
+    makeSessionRecord({
+      acpxRecordId: "legacy-built-in-argv",
+      acpSessionId: "legacy-built-in-argv",
+      agentCommand: AGENT_REGISTRY.codex,
+      cwd: "/tmp/legacy-built-in-argv",
+    }),
+  );
+  delete serialized.agent_argv;
+
+  const parsed = parseSessionRecord(serialized);
+
+  assert.ok(parsed);
+  assert.deepEqual(parsed.agentArgv, AGENT_ARGV_REGISTRY.codex);
+});
+
+test("parseSessionRecord backfills argv for historical built-in commands", () => {
+  for (const [agentCommand, expectedArgv] of [
+    ["npx @zed-industries/codex-acp@^0.12.0", AGENT_ARGV_REGISTRY.codex],
+    ["npm exec @agentclientprotocol/claude-agent-acp@^0.37.0", AGENT_ARGV_REGISTRY.claude],
+    ["npx -y mux@^0.27.0 acp", AGENT_ARGV_REGISTRY.mux],
+    ["gemini --experimental-acp", AGENT_ARGV_REGISTRY.gemini],
+    ["kiro-cli acp", AGENT_ARGV_REGISTRY.kiro],
+    ["npx opencode-ai", AGENT_ARGV_REGISTRY.opencode],
+  ] as const) {
+    const serialized = serializeSessionRecordForDisk(
+      makeSessionRecord({
+        acpxRecordId: agentCommand,
+        acpSessionId: agentCommand,
+        agentCommand,
+        cwd: "/tmp/historical-built-in-argv",
+      }),
+    );
+    delete serialized.agent_argv;
+
+    const parsed = parseSessionRecord(serialized);
+
+    assert.ok(parsed);
+    assert.deepEqual(parsed.agentArgv, expectedArgv);
+  }
 });
 
 test("parseSessionRecord preserves persisted session env", () => {

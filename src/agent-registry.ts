@@ -58,6 +58,32 @@ export const AGENT_REGISTRY: Record<string, string> = {
   trae: "traecli acp serve",
 };
 
+export const AGENT_ARGV_REGISTRY: Record<string, string[]> = {
+  pi: ["npx", `pi-acp@${ACP_ADAPTER_PACKAGE_RANGES.pi}`],
+  openclaw: ["openclaw", "acp"],
+  codex: ["npx", "-y", `@agentclientprotocol/codex-acp@${ACP_ADAPTER_PACKAGE_RANGES.codex}`],
+  claude: [
+    "npx",
+    "-y",
+    `@agentclientprotocol/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
+  ],
+  gemini: ["gemini", "--acp"],
+  cursor: ["cursor-agent", "acp"],
+  copilot: ["copilot", "--acp", "--stdio"],
+  droid: ["droid", "exec", "--output-format", "acp"],
+  "fast-agent": ["uvx", "fast-agent-mcp", "acp"],
+  "grok-build": ["grok", "agent", "stdio"],
+  iflow: ["iflow", "--experimental-acp"],
+  kilocode: ["npx", "-y", "@kilocode/cli", "acp"],
+  kimi: ["kimi", "acp"],
+  kiro: ["kiro-cli-chat", "acp"],
+  mux: ["npx", "-y", `mux@${ACP_ADAPTER_PACKAGE_RANGES.mux}`, "acp"],
+  opencode: ["npx", "-y", "opencode-ai", "acp"],
+  qoder: ["qodercli", "--acp"],
+  qwen: ["qwen", "--acp"],
+  trae: ["traecli", "acp", "serve"],
+};
+
 export const BUILT_IN_AGENT_PACKAGES = {
   codex: {
     packageName: "@agentclientprotocol/codex-acp",
@@ -82,10 +108,46 @@ const AGENT_ALIASES: Record<string, string> = {
   factorydroid: "droid",
 };
 
+const LEGACY_AGENT_COMMANDS: Record<string, string[]> = {
+  pi: ["npx pi-acp", "npx pi-acp@^0.0.22", "npx pi-acp@^0.0.26"],
+  codex: [
+    "npx @zed-industries/codex-acp",
+    "npx @zed-industries/codex-acp@^0.9.5",
+    "npx @zed-industries/codex-acp@^0.10.0",
+    "npx @zed-industries/codex-acp@^0.11.1",
+    "npx @zed-industries/codex-acp@^0.12.0",
+    "npx -y @agentclientprotocol/codex-acp@^0.0.44",
+    "npx -y @agentclientprotocol/codex-acp@^1.1.4",
+  ],
+  claude: [
+    "npx @zed-industries/claude-agent-acp",
+    "npx -y @zed-industries/claude-agent-acp",
+    "npx -y @zed-industries/claude-agent-acp@^0.21.0",
+    "npx -y @zed-industries/claude-agent-acp@^0.23.1",
+    "npx -y @zed-industries/claude-agent-acp@^0.24.2",
+    "npx -y @zed-industries/claude-agent-acp@^0.25.0",
+    "npx -y @zed-industries/claude-agent-acp@^0.31.0",
+    "npx -y @agentclientprotocol/claude-agent-acp@^0.36.1",
+    "npx -y @agentclientprotocol/claude-agent-acp@^0.37.0",
+    "npm exec @agentclientprotocol/claude-agent-acp@^0.36.1",
+    "npm exec @agentclientprotocol/claude-agent-acp@^0.37.0",
+    `npm exec @agentclientprotocol/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
+  ],
+  gemini: ["gemini", "gemini --experimental-acp"],
+  kiro: ["kiro-cli acp"],
+  mux: ["npx -y mux@^0.27.0 acp"],
+  opencode: ["npx opencode-ai"],
+};
+
 export const DEFAULT_AGENT_NAME = "codex";
 
 export function normalizeAgentName(value: string): string {
   return value.trim().toLowerCase();
+}
+
+export function resolveCanonicalAgentName(value: string): string {
+  const normalized = normalizeAgentName(value);
+  return AGENT_ALIASES[normalized] ?? normalized;
 }
 
 export function mergeAgentRegistry(overrides?: Record<string, string>): Record<string, string> {
@@ -108,6 +170,27 @@ export function resolveAgentCommand(agentName: string, overrides?: Record<string
   const normalized = normalizeAgentName(agentName);
   const registry = mergeAgentRegistry(overrides);
   return registry[normalized] ?? registry[AGENT_ALIASES[normalized] ?? normalized] ?? agentName;
+}
+
+export function resolveAgentArgv(agentName: string): string[] | undefined {
+  const normalized = normalizeAgentName(agentName);
+  const argv =
+    AGENT_ARGV_REGISTRY[normalized] ?? AGENT_ARGV_REGISTRY[resolveCanonicalAgentName(agentName)];
+  return argv ? [...argv] : undefined;
+}
+
+export function resolveAgentArgvForCommand(agentCommand: string): string[] | undefined {
+  for (const [name, command] of Object.entries(AGENT_REGISTRY)) {
+    if (command === agentCommand) {
+      return resolveAgentArgv(name);
+    }
+  }
+  for (const [name, commands] of Object.entries(LEGACY_AGENT_COMMANDS)) {
+    if (commands.includes(agentCommand)) {
+      return resolveAgentArgv(name);
+    }
+  }
+  return undefined;
 }
 
 export function findBuiltInAgentPackage(agentCommand: string): BuiltInAgentPackageSpec | undefined {
@@ -294,6 +377,6 @@ export function resolveBuiltInAgentLaunch(
   );
 }
 
-export function listBuiltInAgents(overrides?: Record<string, string>): string[] {
-  return Object.keys(mergeAgentRegistry(overrides));
+export function listBuiltInAgents(overrides?: Record<string, unknown>): string[] {
+  return [...new Set([...Object.keys(AGENT_REGISTRY), ...Object.keys(overrides ?? {})])];
 }

@@ -98,6 +98,7 @@ export async function withConnectedSession<T>(
   const client =
     options.createClient?.({
       agentCommand: record.agentCommand,
+      agentArgv: record.agentArgv,
       cwd: absolutePath(record.cwd),
       mcpServers: options.mcpServers,
       permissionMode: options.permissionMode ?? "approve-reads",
@@ -111,6 +112,7 @@ export async function withConnectedSession<T>(
     }) ??
     new AcpClient({
       agentCommand: record.agentCommand,
+      agentArgv: record.agentArgv,
       cwd: absolutePath(record.cwd),
       mcpServers: options.mcpServers,
       permissionMode: options.permissionMode ?? "approve-reads",

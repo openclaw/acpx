@@ -10,6 +10,7 @@ import { buildAgentSpawnOptions, buildSpawnCommandOptions } from "../src/acp/cli
 import { buildTerminalSpawnOptions } from "../src/acp/terminal-manager.js";
 import { buildQueueOwnerSpawnOptions } from "../src/cli/session/queue-owner-process.js";
 import {
+  buildAgentSpawnCommand,
   buildTerminalShellSpawnCommand,
   buildTerminalSpawnCommand,
   resolveWindowsExecutablePath,
@@ -258,6 +259,41 @@ test("buildSpawnCommandOptions enables shell for .cmd/.bat on Windows", () => {
   assert.equal(batOptions.shell, true);
   assert.deepEqual(cmdOptions.stdio, base.stdio);
   assert.equal(cmdOptions.windowsHide, true);
+});
+
+test("buildAgentSpawnCommand preserves argv boundaries through cmd.exe", () => {
+  const command = buildAgentSpawnCommand(
+    "C:\\Program Files\\agent.cmd",
+    ["with spaces", "a&b", "C:\\trailing\\"],
+    "win32",
+    { COMSPEC: "C:\\Windows\\System32\\cmd.exe" },
+  );
+
+  assert.deepEqual(command, {
+    command: "C:\\Windows\\System32\\cmd.exe",
+    args: [
+      "/d",
+      "/s",
+      "/c",
+      '"C:\\Program^ Files\\agent.cmd ^"with^ spaces^" ^"a^&b^" ^"C:\\trailing\\\\^""',
+    ],
+    windowsVerbatimArguments: true,
+  });
+});
+
+test("buildAgentSpawnCommand normalizes forward-slash batch paths for cmd.exe", () => {
+  const command = buildAgentSpawnCommand(
+    "C:/tools/agent.cmd",
+    ["--profile", "with spaces"],
+    "win32",
+    {},
+  );
+
+  assert.deepEqual(command, {
+    command: "cmd.exe",
+    args: ["/d", "/s", "/c", '"C:\\tools\\agent.cmd ^"--profile^" ^"with^ spaces^""'],
+    windowsVerbatimArguments: true,
+  });
 });
 
 test("buildSpawnCommandOptions enables shell for PATH-resolved .cmd wrappers on Windows", async () => {

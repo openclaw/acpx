@@ -3,6 +3,9 @@ import { InvalidArgumentError } from "commander";
 import type { Command } from "commander";
 import {
   DEFAULT_AGENT_NAME,
+  normalizeAgentName,
+  resolveCanonicalAgentName,
+  resolveAgentArgv,
   resolveAgentCommand as resolveAgentCommandFromRegistry,
 } from "../agent-registry.js";
 import type { SystemPromptOption } from "../runtime/engine/session-options.js";
@@ -511,6 +514,7 @@ export function resolveAgentInvocation(
 ): {
   agentName: string;
   agentCommand: string;
+  agentArgv?: string[];
   cwd: string;
 } {
   const override = globalFlags.agent?.trim();
@@ -519,14 +523,35 @@ export function resolveAgentInvocation(
   }
 
   const agentName = explicitAgentName ?? config.defaultAgent ?? DEFAULT_AGENT_NAME;
-  const agentCommand =
-    override && override.length > 0
-      ? override
-      : resolveAgentCommandFromRegistry(agentName, config.agents);
+  const command = resolveInvocationCommand(agentName, override, config);
 
   return {
     agentName,
-    agentCommand,
+    ...command,
     cwd: path.resolve(globalFlags.cwd),
+  };
+}
+
+function resolveInvocationCommand(
+  agentName: string,
+  override: string | undefined,
+  config: ResolvedAcpxConfig,
+): { agentCommand: string; agentArgv?: string[] } {
+  if (override) {
+    return { agentCommand: override };
+  }
+  const normalizedAgentName = normalizeAgentName(agentName);
+  const configuredAgent =
+    config.agents[normalizedAgentName] ?? config.agents[resolveCanonicalAgentName(agentName)];
+  if (configuredAgent) {
+    return {
+      agentCommand: configuredAgent.command,
+      ...(configuredAgent.argv ? { agentArgv: [...configuredAgent.argv] } : {}),
+    };
+  }
+  const agentArgv = resolveAgentArgv(agentName);
+  return {
+    agentCommand: resolveAgentCommandFromRegistry(agentName),
+    ...(agentArgv ? { agentArgv } : {}),
   };
 }

@@ -55,7 +55,7 @@ import {
 } from "../permissions.js";
 import { getUnsupportedPromptContentMessage, textPrompt } from "../prompt-content.js";
 import { extractRuntimeSessionId } from "../session/runtime-session-id.js";
-import { buildSpawnCommandOptions } from "../spawn-command-options.js";
+import { buildAgentSpawnCommand, buildSpawnCommandOptions } from "../spawn-command-options.js";
 import type {
   AcpClientOptions,
   NonInteractivePermissionPolicy,
@@ -93,8 +93,8 @@ import {
   isoNow,
   isChildProcessRunning,
   requireAgentStdio,
+  resolveAgentCommandParts,
   resolveAgentSessionCwd,
-  splitCommandLine,
   waitForChildExit,
   waitForSpawn,
 } from "./client-process.js";
@@ -652,7 +652,10 @@ export class AcpClient {
   }
 
   private async resolveAgentLaunchPlan(): Promise<AgentLaunchPlan> {
-    const configuredCommand = splitCommandLine(this.options.agentCommand);
+    const configuredCommand = resolveAgentCommandParts(
+      this.options.agentCommand,
+      this.options.agentArgv,
+    );
     const resolvedBuiltInLaunch = resolveBuiltInAgentLaunch(this.options.agentCommand);
     const spawnCommand = resolvedBuiltInLaunch?.command ?? configuredCommand.command;
     let args = resolvedBuiltInLaunch?.args ?? configuredCommand.args;
@@ -710,11 +713,16 @@ export class AcpClient {
   private async spawnAgentProcess(
     plan: AgentLaunchPlan,
   ): Promise<ChildProcessByStdio<Writable, Readable, Readable>> {
-    const spawnedChild = spawn(
+    const spawnCommand = buildAgentSpawnCommand(
       plan.spawnCommand,
       plan.args,
-      buildSpawnCommandOptions(plan.spawnCommand, plan.spawnOptions),
-    ) as ChildProcessByStdio<Writable, Readable, Readable>;
+      process.platform,
+      plan.spawnOptions.env,
+    );
+    const spawnedChild = spawn(spawnCommand.command, spawnCommand.args, {
+      ...plan.spawnOptions,
+      windowsVerbatimArguments: spawnCommand.windowsVerbatimArguments,
+    }) as ChildProcessByStdio<Writable, Readable, Readable>;
     try {
       await waitForSpawn(spawnedChild);
     } catch (error) {
@@ -911,7 +919,10 @@ export class AcpClient {
 
   async createSession(cwd = this.options.cwd): Promise<SessionCreateResult> {
     const connection = this.getConnection();
-    const { command, args } = splitCommandLine(this.options.agentCommand);
+    const { command, args } = resolveAgentCommandParts(
+      this.options.agentCommand,
+      this.options.agentArgv,
+    );
     const claudeAcp = isClaudeAcpCommand(command, args);
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
 
@@ -1621,7 +1632,10 @@ export class AcpClient {
   }
 
   private isGrokBuildAcpCommand(): boolean {
-    const { command, args } = splitCommandLine(this.options.agentCommand);
+    const { command, args } = resolveAgentCommandParts(
+      this.options.agentCommand,
+      this.options.agentArgv,
+    );
     const executable = command
       .replace(/\\/g, "/")
       .split("/")

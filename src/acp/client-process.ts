@@ -11,6 +11,27 @@ export type CommandParts = {
   args: string[];
 };
 
+export function normalizeAgentCommandInput(value: string | readonly string[]): {
+  agentCommand: string;
+  agentArgv?: string[];
+} {
+  if (typeof value === "string") {
+    return { agentCommand: value };
+  }
+  const parts = toCommandParts([...value]);
+  const argv = [parts.command, ...parts.args];
+  return {
+    agentCommand: renderArgvIdentity(argv),
+    agentArgv: argv,
+  };
+}
+
+const IDENTITY_SAFE_ARG_RE = /^[A-Za-z0-9_@%+=:,./^~-]+$/u;
+
+export function renderArgvIdentity(argv: readonly string[]): string {
+  return argv.map((arg) => (IDENTITY_SAFE_ARG_RE.test(arg) ? arg : JSON.stringify(arg))).join(" ");
+}
+
 type ResolveSessionCwdOptions = {
   platform?: NodeJS.Platform;
   existsSync?: (filePath: string) => boolean;
@@ -87,6 +108,32 @@ export function waitForChildExit(
   });
 }
 
+export function resolveAgentCommandParts(
+  value: string,
+  argv: readonly string[] | undefined,
+  platform: NodeJS.Platform = process.platform,
+): CommandParts {
+  if (argv) {
+    const parts = toCommandParts([...argv]);
+    assertWindowsLaunchableCommand(parts.command, platform);
+    return parts;
+  }
+  if (platform === "win32") {
+    throw new Error(
+      'Raw agent command strings are not supported on Windows. Configure the agent with an argv array, for example: "argv": ["agent.exe", "--acp"]. Legacy agents.<name>.args arrays are migrated automatically. Existing sessions without saved argv must be closed and recreated.',
+    );
+  }
+  return splitCommandLine(value);
+}
+
+function assertWindowsLaunchableCommand(command: string, platform: NodeJS.Platform): void {
+  if (platform === "win32" && path.extname(command).toLowerCase() === ".sh") {
+    throw new Error(
+      `Windows cannot launch shell script executable "${command}" directly. Configure an explicit interpreter argv, for example: "argv": ["bash", "${command}"]. acpx does not infer interpreters.`,
+    );
+  }
+}
+
 export function splitCommandLine(value: string): CommandParts {
   const parts: string[] = [];
   let current = "";
@@ -115,13 +162,13 @@ export function splitCommandLine(value: string): CommandParts {
     parts.push(current);
   }
 
-  if (parts.length === 0) {
-    throw new Error("Invalid --agent command: empty command");
-  }
-  if (parts[0] === "") {
-    throw new Error("Invalid --agent command: empty command");
-  }
+  return toCommandParts(parts);
+}
 
+function toCommandParts(parts: string[]): CommandParts {
+  if (parts.length === 0 || parts[0] === "") {
+    throw new Error("Invalid --agent command: empty command");
+  }
   return {
     command: parts[0],
     args: parts.slice(1),

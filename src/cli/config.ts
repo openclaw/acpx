@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { renderArgvIdentity } from "../acp/client-process.js";
 import { DEFAULT_AGENT_NAME, normalizeAgentName } from "../agent-registry.js";
 import { parseMcpServers } from "../mcp-servers.js";
 import type {
@@ -12,10 +13,12 @@ import type {
   PermissionMode,
 } from "../types.js";
 
-type ConfigAgentEntry = {
+export type ResolvedAgentConfig = {
   command: string;
-  args?: string[];
+  argv?: string[];
 };
+
+type ConfigAgentEntry = { command: string } | { argv: string[] };
 
 type ConfigFileShape = {
   defaultAgent?: unknown;
@@ -41,7 +44,7 @@ export type ResolvedAcpxConfig = {
   timeoutMs?: number;
   queueMaxDepth: number;
   format: OutputFormat;
-  agents: Record<string, string>;
+  agents: Record<string, ResolvedAgentConfig>;
   auth: Record<string, string>;
   disableExec: boolean;
   mcpServers: McpServer[];
@@ -189,7 +192,10 @@ function parseDefaultAgent(value: unknown, sourcePath: string): string | undefin
   return normalizeAgentName(value);
 }
 
-function parseAgents(value: unknown, sourcePath: string): Record<string, string> | undefined {
+function parseAgents(
+  value: unknown,
+  sourcePath: string,
+): Record<string, ResolvedAgentConfig> | undefined {
   if (value == null) {
     return undefined;
   }
@@ -197,25 +203,88 @@ function parseAgents(value: unknown, sourcePath: string): Record<string, string>
     throw new Error(`Invalid config agents in ${sourcePath}: expected object`);
   }
 
-  const parsed: Record<string, string> = {};
+  const parsed: Record<string, ResolvedAgentConfig> = {};
   for (const [name, raw] of Object.entries(value)) {
-    if (!isObject(raw)) {
-      throw new Error(
-        `Invalid config agents.${name} in ${sourcePath}: expected object with command`,
-      );
-    }
-    const command = raw.command;
-    if (typeof command !== "string" || command.trim().length === 0) {
-      throw new Error(
-        `Invalid config agents.${name}.command in ${sourcePath}: expected non-empty string`,
-      );
-    }
-    const args = parseAgentArgs(raw.args, name, sourcePath);
-    parsed[normalizeAgentName(name)] =
-      args.length > 0 ? `${command.trim()} ${args.map(quoteCommandArg).join(" ")}` : command.trim();
+    parsed[normalizeAgentName(name)] = parseAgentEntry(raw, name, sourcePath);
   }
 
   return parsed;
+}
+
+function parseAgentEntry(raw: unknown, name: string, sourcePath: string): ResolvedAgentConfig {
+  if (!isObject(raw)) {
+    throw new Error(`Invalid config agents.${name} in ${sourcePath}: expected object with command`);
+  }
+  return Object.prototype.hasOwnProperty.call(raw, "argv")
+    ? parseArgvAgentEntry(raw, name, sourcePath)
+    : parseLegacyAgentEntry(raw, name, sourcePath);
+}
+
+function parseArgvAgentEntry(
+  raw: Record<string, unknown>,
+  name: string,
+  sourcePath: string,
+): ResolvedAgentConfig {
+  if (
+    Object.prototype.hasOwnProperty.call(raw, "command") ||
+    Object.prototype.hasOwnProperty.call(raw, "args")
+  ) {
+    throw new Error(
+      `Invalid config agents.${name} in ${sourcePath}: use argv alone, not command or args`,
+    );
+  }
+  const argv = parseAgentArgv(raw.argv, name, sourcePath);
+  return { command: renderArgv(argv), argv };
+}
+
+function parseLegacyAgentEntry(
+  raw: Record<string, unknown>,
+  name: string,
+  sourcePath: string,
+): ResolvedAgentConfig {
+  const command = raw.command;
+  if (typeof command !== "string" || command.trim().length === 0) {
+    throw new Error(
+      `Invalid config agents.${name}.command in ${sourcePath}: expected non-empty string`,
+    );
+  }
+  const trimmedCommand = command.trim();
+  if (!Object.prototype.hasOwnProperty.call(raw, "args")) {
+    return { command: trimmedCommand };
+  }
+  if (/[\s'"]/u.test(trimmedCommand)) {
+    throw new Error(
+      `Invalid config agents.${name}.command in ${sourcePath}: command must be an unquoted executable with no whitespace when args is present; migrate the complete launch to argv`,
+    );
+  }
+  const args = parseAgentArgs(raw.args, name, sourcePath);
+  return {
+    command:
+      args.length > 0 ? `${trimmedCommand} ${args.map(quoteCommandArg).join(" ")}` : trimmedCommand,
+    argv: [trimmedCommand, ...args],
+  };
+}
+
+function parseAgentArgv(value: unknown, agentName: string, sourcePath: string): string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(
+      `Invalid config agents.${agentName}.argv in ${sourcePath}: expected non-empty array of strings`,
+    );
+  }
+  const argv = value.map((arg, index) => {
+    if (typeof arg !== "string") {
+      throw new Error(
+        `Invalid config agents.${agentName}.argv[${index}] in ${sourcePath}: expected string`,
+      );
+    }
+    return arg;
+  });
+  if (argv[0]?.length === 0) {
+    throw new Error(
+      `Invalid config agents.${agentName}.argv[0] in ${sourcePath}: expected non-empty executable`,
+    );
+  }
+  return argv;
 }
 
 function parseAgentArgs(value: unknown, agentName: string, sourcePath: string): string[] {
@@ -239,6 +308,10 @@ function parseAgentArgs(value: unknown, agentName: string, sourcePath: string): 
 
 function quoteCommandArg(value: string): string {
   return JSON.stringify(value);
+}
+
+function renderArgv(argv: readonly string[]): string {
+  return renderArgvIdentity(argv);
 }
 
 function parseAuth(value: unknown, sourcePath: string): Record<string, string> | undefined {
@@ -319,9 +392,9 @@ async function loadExplicitMcpConfig(
 }
 
 function mergeAgents(
-  globalAgents: Record<string, string> | undefined,
-  projectAgents: Record<string, string> | undefined,
-): Record<string, string> {
+  globalAgents: Record<string, ResolvedAgentConfig> | undefined,
+  projectAgents: Record<string, ResolvedAgentConfig> | undefined,
+): Record<string, ResolvedAgentConfig> {
   return {
     ...globalAgents,
     ...projectAgents,
@@ -587,8 +660,8 @@ export function toConfigDisplay(config: ResolvedAcpxConfig): {
   disableExec: boolean;
 } {
   const agents: Record<string, ConfigAgentEntry> = {};
-  for (const [name, command] of Object.entries(config.agents)) {
-    agents[name] = { command };
+  for (const [name, agent] of Object.entries(config.agents)) {
+    agents[name] = agent.argv ? { argv: [...agent.argv] } : { command: agent.command };
   }
 
   return {

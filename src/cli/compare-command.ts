@@ -358,6 +358,7 @@ async function runAgentForCompare(params: {
     const agent = resolveAgentInvocation(params.agentName, params.globalFlags, params.config);
     const result = await runOnce({
       agentCommand: agent.agentCommand,
+      agentArgv: agent.agentArgv,
       cwd: agent.cwd,
       prompt: params.prompt,
       mcpServers: params.config.mcpServers,

@@ -40,6 +40,7 @@ export function normalizeQueueOwnerTtlMs(ttlMs: number | undefined): number {
 
 export type RunOnceOptions = {
   agentCommand: string;
+  agentArgv?: string[];
   cwd: string;
   prompt: PromptInput;
   mcpServers?: McpServer[];
@@ -63,6 +64,7 @@ export type RunOnceOptions = {
 
 export type SessionCreateOptions = {
   agentCommand: string;
+  agentArgv?: string[];
   cwd: string;
   name?: string;
   resumeSessionId?: string;
@@ -109,6 +111,7 @@ export type SessionSendOptions = {
 
 export type SessionEnsureOptions = {
   agentCommand: string;
+  agentArgv?: string[];
   cwd: string;
   name?: string;
   resumeSessionId?: string;
@@ -127,6 +130,7 @@ export type SessionEnsureOptions = {
 
 export type SessionListOptions = {
   agentCommand: string;
+  agentArgv?: string[];
   cwd: string;
   cursor?: string;
   filterCwd?: string;

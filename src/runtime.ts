@@ -1,4 +1,11 @@
-import { DEFAULT_AGENT_NAME, listBuiltInAgents, resolveAgentCommand } from "./agent-registry.js";
+import {
+  DEFAULT_AGENT_NAME,
+  listBuiltInAgents,
+  normalizeAgentName,
+  resolveCanonicalAgentName,
+  resolveAgentArgv,
+  resolveAgentCommand,
+} from "./agent-registry.js";
 import { AcpRuntimeManager } from "./runtime/engine/manager.js";
 import type {
   AcpAgentRegistry,
@@ -81,16 +88,44 @@ type AcpxRuntimeLike = AcpRuntime & {
 };
 
 export function createAgentRegistry(params?: {
-  overrides?: Record<string, string>;
+  overrides?: Record<string, string | string[]>;
 }): AcpAgentRegistry {
+  const overrides = normalizeRegistryOverrides(params?.overrides);
   return {
     resolve(agentName: string) {
-      return resolveAgentCommand(agentName, params?.overrides);
+      const normalizedAgentName = normalizeAgentName(agentName);
+      const override =
+        overrides[normalizedAgentName] ?? overrides[resolveCanonicalAgentName(agentName)];
+      return override ?? resolveAgentArgv(agentName) ?? resolveAgentCommand(agentName);
     },
     list() {
-      return listBuiltInAgents(params?.overrides);
+      return listBuiltInAgents(overrides);
     },
   };
+}
+
+function normalizeRegistryOverrides(
+  values: Record<string, string | string[]> | undefined,
+): Record<string, string | string[]> {
+  const normalized: Record<string, string | string[]> = {};
+  for (const [name, value] of Object.entries(values ?? {})) {
+    const normalizedName = normalizeAgentName(name);
+    if (!normalizedName) {
+      continue;
+    }
+    const normalizedValue = normalizeRegistryOverride(value);
+    if (normalizedValue) {
+      normalized[normalizedName] = normalizedValue;
+    }
+  }
+  return normalized;
+}
+
+function normalizeRegistryOverride(value: string | string[]): string | string[] | undefined {
+  if (typeof value === "string") {
+    return value.trim() || undefined;
+  }
+  return value.length > 0 && value[0]?.length ? [...value] : undefined;
 }
 
 export class AcpxRuntime implements AcpxRuntimeLike {

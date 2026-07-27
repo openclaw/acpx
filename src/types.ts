@@ -202,6 +202,7 @@ export interface OutputFormatter {
 
 export type AcpClientOptions = {
   agentCommand: string;
+  agentArgv?: string[];
   cwd: string;
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;
@@ -384,6 +385,7 @@ export type SessionRecord = {
   acpSessionId: string;
   agentSessionId?: string;
   agentCommand: string;
+  agentArgv?: string[];
   cwd: string;
   name?: string;
   createdAt: string;

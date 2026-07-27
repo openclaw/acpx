@@ -293,6 +293,26 @@ test("doctor reports backend unavailable probe failures and agent registry honor
   assert.deepEqual(report.details, ["agent=codex", "command=codex-override --acp"]);
 });
 
+test("agent registry preserves structured argv overrides", () => {
+  const registry = createAgentRegistry({
+    overrides: {
+      Custom: ["C:\\tools\\bin\\agent.sh", "--pipe", "\\\\.\\pipe\\acpx-agent"],
+      droid: ["C:\\tools\\droid.exe", "--acp"],
+      blank: "   ",
+    },
+  });
+
+  assert.deepEqual(registry.resolve("custom"), [
+    "C:\\tools\\bin\\agent.sh",
+    "--pipe",
+    "\\\\.\\pipe\\acpx-agent",
+  ]);
+  assert.equal(registry.resolve("blank"), "blank");
+  assert.deepEqual(registry.resolve("factorydroid"), ["C:\\tools\\droid.exe", "--acp"]);
+  assert.equal(registry.list().includes("Custom"), false);
+  assert.equal(registry.list().includes("custom"), true);
+});
+
 test("doctor coerces probe detail values to strings", async () => {
   const circular: Record<string, unknown> = { code: "BROKEN" };
   circular.self = circular;

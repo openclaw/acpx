@@ -332,7 +332,7 @@ Supported keys:
 - `ttl` (seconds)
 - `timeout` (seconds or `null`)
 - `format` (`text`, `json`, `quiet`)
-- `agents` map (`name -> { command, args? }`)
+- `agents` map (`name -> { argv: [executable, ...args] }`); structured argv is required on Windows, and legacy `{ command, args }` entries migrate automatically
 - `auth` map (`authMethodId -> credential`)
 
 Use `acpx config show` to inspect the resolved config and `acpx config init` to create the global template.
