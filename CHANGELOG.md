@@ -16,6 +16,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Flows: swallow best-effort heartbeat write failures at the timer boundary so storage errors do not become unhandled promise rejections. Thanks @SebTardif.
+
 ## 2026.7.23 (v0.12.1)
 
 ### Changes

@@ -92,11 +92,7 @@ test("FlowRunner heartbeat writeLive rejections do not become unhandledRejection
       rejectedIntervalHeartbeats >= 1,
       `expected at least one rejected interval heartbeat, got attempts=${heartbeatAttempts} rejected=${rejectedIntervalHeartbeats}`,
     );
-    assert.equal(
-      rejections.length,
-      0,
-      `unexpected unhandledRejection: ${String(rejections[0] ?? "")}`,
-    );
+    assert.deepEqual(rejections, []);
   } finally {
     process.off("unhandledRejection", onUnhandled);
     if (previousHome === undefined) {
