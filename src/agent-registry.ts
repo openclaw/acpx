@@ -108,37 +108,6 @@ const AGENT_ALIASES: Record<string, string> = {
   factorydroid: "droid",
 };
 
-const LEGACY_AGENT_COMMANDS: Record<string, string[]> = {
-  pi: ["npx pi-acp", "npx pi-acp@^0.0.22", "npx pi-acp@^0.0.26"],
-  codex: [
-    "npx @zed-industries/codex-acp",
-    "npx @zed-industries/codex-acp@^0.9.5",
-    "npx @zed-industries/codex-acp@^0.10.0",
-    "npx @zed-industries/codex-acp@^0.11.1",
-    "npx @zed-industries/codex-acp@^0.12.0",
-    "npx -y @agentclientprotocol/codex-acp@^0.0.44",
-    "npx -y @agentclientprotocol/codex-acp@^1.1.4",
-  ],
-  claude: [
-    "npx @zed-industries/claude-agent-acp",
-    "npx -y @zed-industries/claude-agent-acp",
-    "npx -y @zed-industries/claude-agent-acp@^0.21.0",
-    "npx -y @zed-industries/claude-agent-acp@^0.23.1",
-    "npx -y @zed-industries/claude-agent-acp@^0.24.2",
-    "npx -y @zed-industries/claude-agent-acp@^0.25.0",
-    "npx -y @zed-industries/claude-agent-acp@^0.31.0",
-    "npx -y @agentclientprotocol/claude-agent-acp@^0.36.1",
-    "npx -y @agentclientprotocol/claude-agent-acp@^0.37.0",
-    "npm exec @agentclientprotocol/claude-agent-acp@^0.36.1",
-    "npm exec @agentclientprotocol/claude-agent-acp@^0.37.0",
-    `npm exec @agentclientprotocol/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
-  ],
-  gemini: ["gemini", "gemini --experimental-acp"],
-  kiro: ["kiro-cli acp"],
-  mux: ["npx -y mux@^0.27.0 acp"],
-  opencode: ["npx opencode-ai"],
-};
-
 export const DEFAULT_AGENT_NAME = "codex";
 
 export function normalizeAgentName(value: string): string {
@@ -177,20 +146,6 @@ export function resolveAgentArgv(agentName: string): string[] | undefined {
   const argv =
     AGENT_ARGV_REGISTRY[normalized] ?? AGENT_ARGV_REGISTRY[resolveCanonicalAgentName(agentName)];
   return argv ? [...argv] : undefined;
-}
-
-export function resolveAgentArgvForCommand(agentCommand: string): string[] | undefined {
-  for (const [name, command] of Object.entries(AGENT_REGISTRY)) {
-    if (command === agentCommand) {
-      return resolveAgentArgv(name);
-    }
-  }
-  for (const [name, commands] of Object.entries(LEGACY_AGENT_COMMANDS)) {
-    if (commands.includes(agentCommand)) {
-      return resolveAgentArgv(name);
-    }
-  }
-  return undefined;
 }
 
 export function findBuiltInAgentPackage(agentCommand: string): BuiltInAgentPackageSpec | undefined {

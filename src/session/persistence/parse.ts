@@ -1,4 +1,4 @@
-import { resolveAgentArgvForCommand } from "../../agent-registry.js";
+import { resolveAgentArgvForCommand } from "../../acp/builtin-command-migration.js";
 import type {
   SessionAcpxState,
   SessionEventLog,
