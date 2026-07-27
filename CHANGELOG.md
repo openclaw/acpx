@@ -12,6 +12,8 @@ Repo: https://github.com/openclaw/acpx
 
 - CLI/ACP: add `--no-fs` to disable advertised ACP file read/write capabilities so compatible agents can use their native filesystem implementation. Thanks @zgxkbtl.
 
+- CLI/timers: preserve tiny positive timeout and TTL values from flags or config as 1 ms instead of disabling timers, and reject delays beyond Node's supported timer range. Thanks @realmehmetali.
+
 ### Breaking
 
 - Windows agent launches now require structured `agents.<name>.argv`; unambiguous legacy `command` plus `args` entries migrate automatically, while raw, ambiguous, or directly executable `.sh` commands fail with explicit migration guidance instead of lossy parsing or CreateProcess ENOENT. Existing custom-agent sessions without saved argv must be recreated. Fixes #466. Thanks @MarcelCFritsche.
@@ -33,8 +35,6 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Session queue owner: capture a bounded owner stderr tail and exit status during cold start only (stop retaining at first IPC accept; keep draining the pipe so long-lived owners are not killed by EPIPE) so a dead owner reports the real failure instead of a silent timeout. Thanks @SebTardif.
-
-- CLI/timers: preserve tiny positive `--timeout` and `--ttl` values as 1 ms instead of disabling timers, and reject delays beyond Node's supported timer range. Thanks @realmehmetali.
 
 ## 2026.7.4 (v0.12.0)
 

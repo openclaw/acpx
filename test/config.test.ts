@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { resolveAgentCommandParts, splitCommandLine } from "../src/acp/client-process.js";
-import { initGlobalConfigFile, loadResolvedConfig } from "../src/cli/config.js";
+import { initGlobalConfigFile, loadResolvedConfig, toConfigDisplay } from "../src/cli/config.js";
 
 test("loadResolvedConfig merges global and project config with project priority", async () => {
   await withTempEnv(async ({ homeDir }) => {
@@ -107,6 +107,28 @@ test("loadResolvedConfig merges global and project config with project priority"
     ]);
     assert.equal(config.hasGlobalConfig, true);
     assert.equal(config.hasProjectConfig, true);
+  });
+});
+
+test("loadResolvedConfig normalizes timer values through the CLI timer boundary", async () => {
+  await withTempEnv(async ({ homeDir }) => {
+    const cwd = path.join(homeDir, "workspace");
+    const configPath = path.join(homeDir, ".acpx", "config.json");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+
+    await fs.writeFile(configPath, `${JSON.stringify({ ttl: 0.0001, timeout: 0.0001 })}\n`);
+    const config = await loadResolvedConfig(cwd);
+    assert.equal(config.ttlMs, 1);
+    assert.equal(config.timeoutMs, 1);
+    assert.equal(toConfigDisplay(config).ttl, 0.001);
+    assert.equal(toConfigDisplay(config).timeout, 0.001);
+
+    await fs.writeFile(configPath, `${JSON.stringify({ ttl: 2_147_483.648 })}\n`);
+    await assert.rejects(loadResolvedConfig(cwd), /ttl.*maximum supported timer delay/u);
+
+    await fs.writeFile(configPath, `${JSON.stringify({ timeout: 2_147_483.648 })}\n`);
+    await assert.rejects(loadResolvedConfig(cwd), /timeout.*maximum supported timer delay/u);
   });
 });
 

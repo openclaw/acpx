@@ -12,6 +12,7 @@ import type {
   OutputFormat,
   PermissionMode,
 } from "../types.js";
+import { toTimerMilliseconds } from "./timer-duration.js";
 
 export type ResolvedAgentConfig = {
   command: string;
@@ -109,7 +110,11 @@ function parseTtlMs(value: unknown, sourcePath: string): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     throw new Error(`Invalid config ttl in ${sourcePath}: expected non-negative seconds`);
   }
-  return Math.round(value * 1_000);
+  const milliseconds = toTimerMilliseconds(value, true);
+  if (milliseconds === undefined) {
+    throw new Error(`Invalid config ttl in ${sourcePath}: exceeds maximum supported timer delay`);
+  }
+  return milliseconds;
 }
 
 function parseTimeoutMs(value: unknown, sourcePath: string): number | undefined {
@@ -119,7 +124,13 @@ function parseTimeoutMs(value: unknown, sourcePath: string): number | undefined 
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     throw new Error(`Invalid config timeout in ${sourcePath}: expected positive seconds or null`);
   }
-  return Math.round(value * 1_000);
+  const milliseconds = toTimerMilliseconds(value, false);
+  if (milliseconds === undefined) {
+    throw new Error(
+      `Invalid config timeout in ${sourcePath}: exceeds maximum supported timer delay`,
+    );
+  }
+  return milliseconds;
 }
 
 function parseQueueMaxDepth(value: unknown, sourcePath: string): number | undefined {
@@ -669,7 +680,7 @@ export function toConfigDisplay(config: ResolvedAcpxConfig): {
     defaultPermissions: config.defaultPermissions,
     nonInteractivePermissions: config.nonInteractivePermissions,
     authPolicy: config.authPolicy,
-    ttl: Math.round(config.ttlMs / 1_000),
+    ttl: config.ttlMs / 1_000,
     timeout: config.timeoutMs == null ? null : config.timeoutMs / 1_000,
     queueMaxDepth: config.queueMaxDepth,
     format: config.format,
