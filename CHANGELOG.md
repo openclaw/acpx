@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Dependencies/tooling: refresh the ACP SDK, runtime and development toolchain, update pnpm to 10.34.5, and resolve the PostCSS, fast-uri, js-yaml, and brace-expansion advisories.
+
 ### Breaking
 
 - Windows agent launches now require structured `agents.<name>.argv`; unambiguous legacy `command` plus `args` entries migrate automatically, while raw, ambiguous, or directly executable `.sh` commands fail with explicit migration guidance instead of lossy parsing or CreateProcess ENOENT. Existing custom-agent sessions without saved argv must be recreated. Fixes #466. Thanks @MarcelCFritsche.

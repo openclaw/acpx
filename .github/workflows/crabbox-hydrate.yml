@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 env:
-  PNPM_VERSION: 10.33.2
+  PNPM_VERSION: 10.34.5
 
 jobs:
   hydrate:

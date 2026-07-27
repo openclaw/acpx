@@ -8,13 +8,13 @@ description: Install acpx globally with npm, run it ad-hoc with npx, or build fr
 ## Requirements
 
 - Node.js **22.13 or newer** (see `engines.node` in `package.json`)
-- pnpm **10.33.2** for source builds
+- pnpm **10.34.5** for source builds
 - The underlying coding agent CLI you plan to talk to (Codex, Claude, etc.)
 
 If pnpm is not installed yet, use npm:
 
 ```bash
-npm install -g pnpm@10.33.2
+npm install -g pnpm@10.34.5
 ```
 
 Some older Corepack builds bundled with supported Node.js versions have stale
@@ -74,7 +74,7 @@ For development or to test an unreleased branch:
 ```bash
 git clone https://github.com/openclaw/acpx.git
 cd acpx
-npm install -g pnpm@10.33.2 # if pnpm is not already installed
+npm install -g pnpm@10.34.5 # if pnpm is not already installed
 pnpm install
 pnpm run build
 node dist/cli.js --help
