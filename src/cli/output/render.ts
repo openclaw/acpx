@@ -16,17 +16,23 @@ function formatRoutedFrom(sessionCwd: string, currentCwd: string): string | unde
   return relative.startsWith(".") ? relative : `.${path.sep}${relative}`;
 }
 
-// A session with no healthy queue owner is not broken: the owner is started on
-// demand by the very prompt this banner introduces. Cold-start every run (a
-// fresh container, a CI job) lands here, so the status has to read as the
-// normal path, not as a defect the operator must act on.
-type SessionConnectionStatus = "connected" | "starting";
+type SessionConnectionStatus = "connected" | "starting" | "needs reconnect";
+
+export function classifySessionConnectionStatus(health: {
+  healthy: boolean;
+  hasLease: boolean;
+}): SessionConnectionStatus {
+  if (health.healthy) {
+    return "connected";
+  }
+  return health.hasLease ? "needs reconnect" : "starting";
+}
 
 async function resolveSessionConnectionStatus(
   record: SessionRecord,
 ): Promise<SessionConnectionStatus> {
   const health = await probeQueueOwnerHealth(record.acpxRecordId);
-  return health.healthy ? "connected" : "starting";
+  return classifySessionConnectionStatus(health);
 }
 
 export function printSessionsByFormat(sessions: SessionRecord[], format: OutputFormat): void {

@@ -24,6 +24,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Runtime/sessions: use collision-resistant temporary paths for concurrent atomic session and index writes. Thanks @henkterharmsel.
 
+- CLI/status: report a normal cold-start session as `agent starting` while preserving `needs reconnect` for an unreachable live owner. Thanks @guettli.
+
 ## 2026.7.23 (v0.12.1)
 
 ### Changes

@@ -15,6 +15,7 @@ import {
   parseMaxTurns,
   parseTtlSeconds,
 } from "../src/cli.js";
+import { classifySessionConnectionStatus } from "../src/cli/output/render.js";
 import { serializeSessionRecordForDisk } from "../src/session/persistence.js";
 import type { SessionRecord } from "../src/types.js";
 import {
@@ -252,6 +253,15 @@ test("formatPromptSessionBannerLine reports a live queue owner as connected", ()
 
   const line = formatPromptSessionBannerLine(record, "/home/user/project", "connected");
   assert.equal(line, "[acpx] session calm-forest (abc123) · /home/user/project · agent connected");
+});
+
+test("session banner status distinguishes cold start from an unreachable owner", () => {
+  assert.equal(classifySessionConnectionStatus({ healthy: true, hasLease: true }), "connected");
+  assert.equal(classifySessionConnectionStatus({ healthy: false, hasLease: false }), "starting");
+  assert.equal(
+    classifySessionConnectionStatus({ healthy: false, hasLease: true }),
+    "needs reconnect",
+  );
 });
 
 test("formatPromptSessionBannerLine includes routed-from path when cwd differs", () => {
