@@ -15,6 +15,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Runtime/embedding: settle turn results only after lifecycle persistence and client cleanup attempts finish, including unexpected finalization failures.
+- Runtime: preserve non-empty `messageId` and a safe subset of ACP update `_meta` on `text_delta` events so consumers can distinguish model prose from adapter diagnostics that still use `agent_message_chunk`. Thanks @SebTardif.
 
 ## 2026.7.27 (v0.13.0)
 

@@ -116,11 +116,70 @@ function planStatusText(payload: Record<string, unknown>): string | null {
   return content ? `plan: ${content}` : null;
 }
 
+const ORIGIN_META_MAX_DEPTH = 2;
+const ORIGIN_META_MAX_KEYS = 32;
+
+/**
+ * Preserve a fail-closed subset of ACP update origin fields for text_delta
+ * consumers. Empty or unusable values are omitted rather than inferred.
+ */
+function extractTextDeltaOrigin(payload: Record<string, unknown>): {
+  messageId?: string;
+  meta?: Record<string, unknown>;
+} {
+  const messageId = asOptionalString(payload.messageId) ?? asOptionalString(payload.message_id);
+  const meta = sanitizeOriginMeta(payload._meta ?? payload.meta);
+  return {
+    ...(messageId ? { messageId } : {}),
+    ...(meta ? { meta } : {}),
+  };
+}
+
+function isOriginMetaLeaf(value: unknown): value is string | number | boolean | null {
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
+}
+
+function trySanitizeOriginMetaEntry(
+  entry: unknown,
+  depth: number,
+): string | number | boolean | null | Record<string, unknown> | undefined {
+  if (isOriginMetaLeaf(entry)) {
+    return entry;
+  }
+  if (!isRecord(entry) || depth >= ORIGIN_META_MAX_DEPTH) {
+    return undefined;
+  }
+  return sanitizeOriginMeta(entry, depth + 1);
+}
+
+function sanitizeOriginMeta(value: unknown, depth = 0): Record<string, unknown> | undefined {
+  if (!isRecord(value) || depth > ORIGIN_META_MAX_DEPTH) {
+    return undefined;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (Object.keys(out).length >= ORIGIN_META_MAX_KEYS) {
+      break;
+    }
+    const sanitized = trySanitizeOriginMetaEntry(entry, depth);
+    if (sanitized !== undefined) {
+      out[key] = sanitized;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function resolveTextChunk(params: {
   payload: Record<string, unknown>;
   stream: "output" | "thought";
   tag: AcpSessionUpdateTag;
 }): AcpRuntimeEvent | null {
+  const origin = extractTextDeltaOrigin(params.payload);
   const contentRaw = params.payload.content;
   if (isRecord(contentRaw)) {
     const contentType = asTrimmedString(contentRaw.type);
@@ -134,6 +193,7 @@ function resolveTextChunk(params: {
         text,
         stream: params.stream,
         tag: params.tag,
+        ...origin,
       };
     }
   }
@@ -146,6 +206,7 @@ function resolveTextChunk(params: {
     text,
     stream: params.stream,
     tag: params.tag,
+    ...origin,
   };
 }
 

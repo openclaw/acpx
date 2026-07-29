@@ -170,6 +170,20 @@ export type AcpRuntimeEvent =
       text: string;
       stream?: "output" | "thought";
       tag?: AcpSessionUpdateTag;
+      /**
+       * Present when the originating ACP session update carried a non-empty
+       * `messageId` (or `message_id`). Absent when the wire payload had no id.
+       * Consumers can use this together with `meta` to distinguish model prose
+       * from adapter diagnostics that still use `agent_message_chunk`.
+       */
+      messageId?: string;
+      /**
+       * Safe subset of the originating ACP update `_meta` (or `meta`) object.
+       * Only JSON-serializable leaf values and shallow nested plain objects
+       * are preserved; functions, arrays, and unknown shapes are dropped
+       * (fail closed). Omitted when no usable metadata is present.
+       */
+      meta?: Record<string, unknown>;
     }
   | {
       type: "status";
