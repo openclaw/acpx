@@ -116,8 +116,12 @@ function planStatusText(payload: Record<string, unknown>): string | null {
   return content ? `plan: ${content}` : null;
 }
 
-const ORIGIN_META_MAX_DEPTH = 2;
-const ORIGIN_META_MAX_KEYS = 32;
+/**
+ * Documented allowlist for text_delta.meta origin fields.
+ * Only these keys may be copied from ACP update `_meta`/`meta`.
+ * Unknown keys (including secret-like producer-controlled names) are dropped.
+ */
+const ORIGIN_META_ALLOWLIST = new Set(["origin", "kind", "source"]);
 
 /**
  * Preserve a fail-closed subset of ACP update origin fields for text_delta
@@ -135,40 +139,22 @@ function extractTextDeltaOrigin(payload: Record<string, unknown>): {
   };
 }
 
-function isOriginMetaLeaf(value: unknown): value is string | number | boolean | null {
-  return (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  );
-}
-
-function trySanitizeOriginMetaEntry(
-  entry: unknown,
-  depth: number,
-): string | number | boolean | null | Record<string, unknown> | undefined {
-  if (isOriginMetaLeaf(entry)) {
-    return entry;
-  }
-  if (!isRecord(entry) || depth >= ORIGIN_META_MAX_DEPTH) {
-    return undefined;
-  }
-  return sanitizeOriginMeta(entry, depth + 1);
-}
-
-function sanitizeOriginMeta(value: unknown, depth = 0): Record<string, unknown> | undefined {
-  if (!isRecord(value) || depth > ORIGIN_META_MAX_DEPTH) {
+/**
+ * Copy only allowlisted string origin keys from wire `_meta`/`meta`.
+ * Nested objects, arrays, non-strings, and unknown keys are dropped.
+ */
+function sanitizeOriginMeta(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) {
     return undefined;
   }
   const out: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (Object.keys(out).length >= ORIGIN_META_MAX_KEYS) {
-      break;
-    }
-    const sanitized = trySanitizeOriginMetaEntry(entry, depth);
-    if (sanitized !== undefined) {
-      out[key] = sanitized;
+  for (const key of ORIGIN_META_ALLOWLIST) {
+    const entry = value[key];
+    if (typeof entry === "string") {
+      const trimmed = entry.trim();
+      if (trimmed.length > 0) {
+        out[key] = trimmed;
+      }
     }
   }
   return Object.keys(out).length > 0 ? out : undefined;

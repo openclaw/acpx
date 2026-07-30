@@ -178,10 +178,10 @@ export type AcpRuntimeEvent =
        */
       messageId?: string;
       /**
-       * Safe subset of the originating ACP update `_meta` (or `meta`) object.
-       * Only JSON-serializable leaf values and shallow nested plain objects
-       * are preserved; functions, arrays, and unknown shapes are dropped
-       * (fail closed). Omitted when no usable metadata is present.
+       * Allowlisted origin fields from the ACP update `_meta` (or `meta`).
+       * Only the documented string keys `origin`, `kind`, and `source` are
+       * preserved. All other keys (including nested objects and secret-like
+       * producer-controlled names) are dropped. Omitted when none remain.
        */
       meta?: Record<string, unknown>;
     }

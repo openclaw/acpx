@@ -722,7 +722,7 @@ test("parsePromptEventLine surfaces full availableCommands list with hasInput fl
   );
 });
 
-test("parsePromptEventLine preserves messageId and safe _meta on agent_message_chunk text_delta", () => {
+test("parsePromptEventLine preserves messageId and allowlisted _meta on agent_message_chunk text_delta", () => {
   assert.deepEqual(
     parsePromptEventLine(
       JSON.stringify({
@@ -731,8 +731,9 @@ test("parsePromptEventLine preserves messageId and safe _meta on agent_message_c
         _meta: {
           origin: "assistant",
           kind: "model",
+          source: "codex-acp",
+          // nested objects and unknown keys are dropped
           nested: { source: "codex-acp" },
-          // arrays and non-objects are dropped by sanitizeOriginMeta
           dropList: ["nope"],
         },
         content: { type: "text", text: "hello from model" },
@@ -747,7 +748,7 @@ test("parsePromptEventLine preserves messageId and safe _meta on agent_message_c
       meta: {
         origin: "assistant",
         kind: "model",
-        nested: { source: "codex-acp" },
+        source: "codex-acp",
       },
     },
   );
@@ -769,6 +770,35 @@ test("parsePromptEventLine preserves messageId and safe _meta on agent_message_c
       tag: "agent_message_chunk",
       messageId: "msg_diag_1",
       meta: { origin: "adapter", kind: "diagnostic" },
+    },
+  );
+});
+
+test("parsePromptEventLine drops unknown and secret-like _meta keys from text_delta", () => {
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        sessionUpdate: "agent_message_chunk",
+        messageId: "msg_sec_1",
+        _meta: {
+          origin: "assistant",
+          kind: "model",
+          apiKey: "sk-secret-should-not-leak",
+          authorization: "Bearer leak",
+          token: "t-123",
+          internalUrl: "https://internal.example/diagnostics",
+          nested: { apiKey: "nested-secret" },
+        },
+        content: { type: "text", text: "safe body" },
+      }),
+    ),
+    {
+      type: "text_delta",
+      text: "safe body",
+      stream: "output",
+      tag: "agent_message_chunk",
+      messageId: "msg_sec_1",
+      meta: { origin: "assistant", kind: "model" },
     },
   );
 });
