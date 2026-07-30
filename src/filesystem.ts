@@ -85,7 +85,7 @@ export class FileSystemHandlers {
   }
 
   async readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
-    const filePath = this.resolvePathWithinRoot(params.path);
+    const filePath = await this.resolvePathWithinRoot(params.path);
     const summary = `read_text_file: ${filePath}`;
     this.emitOperation({
       method: "fs/read_text_file",
@@ -125,7 +125,7 @@ export class FileSystemHandlers {
   }
 
   async writeTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
-    const filePath = this.resolvePathWithinRoot(params.path);
+    const filePath = await this.resolvePathWithinRoot(params.path);
     const preview = toWritePreview(params.content);
     const summary = `write_text_file: ${filePath}`;
 
@@ -183,15 +183,17 @@ export class FileSystemHandlers {
     return await this.confirmWrite(filePath, preview);
   }
 
-  private resolvePathWithinRoot(rawPath: string): string {
+  private async resolvePathWithinRoot(rawPath: string): Promise<string> {
     if (!path.isAbsolute(rawPath)) {
       throw new Error(`Path must be absolute: ${rawPath}`);
     }
     const resolved = path.resolve(rawPath);
-    if (!isWithinRoot(this.rootDir, resolved)) {
-      throw new Error(`Path is outside allowed cwd subtree: ${resolved}`);
+    // Resolve symlinks to prevent sandbox escape via symlinks within the cwd
+    const realPath = await fs.realpath(resolved).catch(() => resolved);
+    if (!isWithinRoot(this.rootDir, realPath)) {
+      throw new Error(`Path is outside allowed cwd subtree: ${realPath}`);
     }
-    return resolved;
+    return realPath;
   }
 
   private sliceContent(
