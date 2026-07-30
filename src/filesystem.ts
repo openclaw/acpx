@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import type {
   ReadTextFileRequest,
@@ -68,7 +69,7 @@ export class FileSystemHandlers {
   private readonly confirmWrite: (filePath: string, preview: string) => Promise<boolean>;
 
   constructor(options: FileSystemHandlersOptions) {
-    this.rootDir = path.resolve(options.cwd);
+    this.rootDir = realpathSync(path.resolve(options.cwd));
     this.permissionMode = options.permissionMode;
     this.nonInteractivePermissions = options.nonInteractivePermissions ?? "deny";
     this.onOperation = options.onOperation;
