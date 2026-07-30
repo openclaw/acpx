@@ -188,8 +188,28 @@ export class FileSystemHandlers {
       throw new Error(`Path must be absolute: ${rawPath}`);
     }
     const resolved = path.resolve(rawPath);
-    // Resolve symlinks to prevent sandbox escape via symlinks within the cwd
-    const realPath = await fs.realpath(resolved).catch(() => resolved);
+    // Resolve symlinks to prevent sandbox escape via symlinks within the cwd.
+    // If the full path does not exist (e.g. a write to a new file), walk up
+    // to the deepest existing parent and resolve that, then rebuild the path.
+    let realPath = resolved;
+    try {
+      realPath = await fs.realpath(resolved);
+    } catch {
+      // Walk up to deepest existing parent
+      let ancestor = path.dirname(resolved);
+      while (ancestor.length >= this.rootDir.length) {
+        try {
+          const realAncestor = await fs.realpath(ancestor);
+          const relative = path.relative(ancestor, resolved);
+          realPath = path.join(realAncestor, relative);
+          break;
+        } catch {
+          const parent = path.dirname(ancestor);
+          if (parent === ancestor) break; // reached root
+          ancestor = parent;
+        }
+      }
+    }
     if (!isWithinRoot(this.rootDir, realPath)) {
       throw new Error(`Path is outside allowed cwd subtree: ${realPath}`);
     }
