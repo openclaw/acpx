@@ -1,5 +1,5 @@
-import fs from "node:fs/promises";
 import { realpathSync } from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import type {
   ReadTextFileRequest,
@@ -196,9 +196,14 @@ export class FileSystemHandlers {
     try {
       realPath = await fs.realpath(resolved);
     } catch {
-      // Walk up to deepest existing parent
+      // Walk up to deepest existing parent. The walk is bounded only by the
+      // filesystem root: `ancestor` is derived from the lexical path while
+      // `rootDir` is canonical, so the two are not comparable, and any
+      // length-based bound here would skip the walk whenever the lexical cwd
+      // is shorter than its canonical target (a symlinked cwd). Containment is
+      // enforced by isWithinRoot below, once both sides are canonical.
       let ancestor = path.dirname(resolved);
-      while (ancestor.length >= this.rootDir.length) {
+      for (;;) {
         try {
           const realAncestor = await fs.realpath(ancestor);
           const relative = path.relative(ancestor, resolved);
@@ -206,7 +211,9 @@ export class FileSystemHandlers {
           break;
         } catch {
           const parent = path.dirname(ancestor);
-          if (parent === ancestor) break; // reached root
+          if (parent === ancestor) {
+            break; // reached the filesystem root
+          }
           ancestor = parent;
         }
       }

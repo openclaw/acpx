@@ -133,6 +133,116 @@ test("writeTextFile blocks paths outside cwd subtree", async () => {
   }
 });
 
+test("readTextFile blocks reads through a symlink pointing outside cwd", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-test-"));
+  try {
+    const sandbox = path.join(tmp, "sandbox");
+    const outside = path.join(tmp, "outside");
+    await fs.mkdir(sandbox);
+    await fs.mkdir(outside);
+    await fs.writeFile(path.join(outside, "secret.txt"), "secret", "utf8");
+    await fs.symlink(path.join(outside, "secret.txt"), path.join(sandbox, "link.txt"));
+
+    const handlers = new FileSystemHandlers({
+      cwd: sandbox,
+      permissionMode: "approve-all",
+    });
+
+    await assert.rejects(
+      handlers.readTextFile({
+        sessionId: "session-1",
+        path: path.join(sandbox, "link.txt"),
+      }),
+      /outside allowed cwd subtree/,
+    );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("writeTextFile blocks new files under a symlinked directory pointing outside cwd", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-test-"));
+  try {
+    const sandbox = path.join(tmp, "sandbox");
+    const outside = path.join(tmp, "outside");
+    await fs.mkdir(sandbox);
+    await fs.mkdir(outside);
+    await fs.symlink(outside, path.join(sandbox, "escape"));
+
+    const handlers = new FileSystemHandlers({
+      cwd: sandbox,
+      permissionMode: "approve-all",
+    });
+
+    await assert.rejects(
+      handlers.writeTextFile({
+        sessionId: "session-1",
+        // The leaf does not exist, so containment must be decided from the
+        // resolved parent rather than the lexical path.
+        path: path.join(sandbox, "escape", "pwned.txt"),
+        content: "nope",
+      }),
+      /outside allowed cwd subtree/,
+    );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("readTextFile allows existing files when cwd is itself a symlink", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-test-"));
+  try {
+    // The link path is deliberately shorter than its canonical target, which is
+    // the shape a symlinked cwd takes in practice (macOS /tmp -> /private/tmp).
+    const realRoot = path.join(tmp, "a", "b", "c", "d", "project");
+    const linkedRoot = path.join(tmp, "w");
+    await fs.mkdir(realRoot, { recursive: true });
+    await fs.symlink(realRoot, linkedRoot);
+    await fs.writeFile(path.join(realRoot, "notes.txt"), "hello", "utf8");
+
+    const handlers = new FileSystemHandlers({
+      cwd: linkedRoot,
+      permissionMode: "approve-all",
+    });
+
+    const response = await handlers.readTextFile({
+      sessionId: "session-1",
+      path: path.join(linkedRoot, "notes.txt"),
+    });
+
+    assert.equal(response.content, "hello");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("writeTextFile allows new files when cwd is itself a symlink", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-test-"));
+  try {
+    const realRoot = path.join(tmp, "a", "b", "c", "d", "project");
+    const linkedRoot = path.join(tmp, "w");
+    await fs.mkdir(realRoot, { recursive: true });
+    await fs.symlink(realRoot, linkedRoot);
+
+    const handlers = new FileSystemHandlers({
+      cwd: linkedRoot,
+      permissionMode: "approve-all",
+    });
+
+    // Non-existent leaf under a symlinked cwd: the ancestor walk has to run
+    // even though the lexical cwd is shorter than its canonical target.
+    await handlers.writeTextFile({
+      sessionId: "session-1",
+      path: path.join(linkedRoot, "new.txt"),
+      content: "written",
+    });
+
+    assert.equal(await fs.readFile(path.join(realRoot, "new.txt"), "utf8"), "written");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("readTextFile requires absolute paths", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-test-"));
   try {
