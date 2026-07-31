@@ -31,6 +31,69 @@ function isWithinRoot(rootDir: string, targetPath: string): boolean {
   return relative.length === 0 || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+function canonicalizeRootDir(resolved: string): string {
+  // The cwd may not exist yet (it is created on first write), so fall back
+  // to canonicalizing the deepest existing ancestor rather than throwing.
+  // A dangling-symlink cwd resolves to its lexical form here and is then
+  // rejected per-operation by resolvePathWithinRoot.
+  let ancestor = resolved;
+  for (;;) {
+    try {
+      return path.join(realpathSync(ancestor), path.relative(ancestor, resolved));
+    } catch {
+      const parent = path.dirname(ancestor);
+      if (parent === ancestor) {
+        return resolved;
+      }
+      ancestor = parent;
+    }
+  }
+}
+
+async function existsAsEntry(target: string): Promise<boolean> {
+  try {
+    await fs.lstat(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Canonicalize `resolved` so symlinks cannot escape the sandbox. If the path
+// itself does not exist (e.g. a write to a new file), walk up to the deepest
+// existing parent, canonicalize that, and rebuild the leaf onto it. A path
+// component that exists per lstat but fails realpath (a dangling symlink or a
+// symlink loop) is rejected: falling back to its lexical form would let a
+// subsequent write follow the link to an external target.
+async function canonicalizeForContainment(resolved: string): Promise<string> {
+  try {
+    return await fs.realpath(resolved);
+  } catch {
+    if (await existsAsEntry(resolved)) {
+      throw new Error(`Path contains an unresolvable symlink: ${resolved}`);
+    }
+  }
+  // The walk is bounded only by the filesystem root: `ancestor` is derived
+  // from the lexical path while the caller's rootDir is canonical, so the two
+  // are not comparable and any length-based bound here would skip the walk
+  // whenever the lexical cwd is shorter than its canonical target.
+  let ancestor = path.dirname(resolved);
+  for (;;) {
+    try {
+      return path.join(await fs.realpath(ancestor), path.relative(ancestor, resolved));
+    } catch {
+      if (await existsAsEntry(ancestor)) {
+        throw new Error(`Path contains an unresolvable symlink: ${resolved}`);
+      }
+      const parent = path.dirname(ancestor);
+      if (parent === ancestor) {
+        return resolved; // reached the filesystem root
+      }
+      ancestor = parent;
+    }
+  }
+}
+
 function toWritePreview(content: string): string {
   const normalized = content.replace(/\r\n/g, "\n");
   const lines = normalized.split("\n");
@@ -69,7 +132,7 @@ export class FileSystemHandlers {
   private readonly confirmWrite: (filePath: string, preview: string) => Promise<boolean>;
 
   constructor(options: FileSystemHandlersOptions) {
-    this.rootDir = realpathSync(path.resolve(options.cwd));
+    this.rootDir = canonicalizeRootDir(path.resolve(options.cwd));
     this.permissionMode = options.permissionMode;
     this.nonInteractivePermissions = options.nonInteractivePermissions ?? "deny";
     this.onOperation = options.onOperation;
@@ -188,36 +251,7 @@ export class FileSystemHandlers {
     if (!path.isAbsolute(rawPath)) {
       throw new Error(`Path must be absolute: ${rawPath}`);
     }
-    const resolved = path.resolve(rawPath);
-    // Resolve symlinks to prevent sandbox escape via symlinks within the cwd.
-    // If the full path does not exist (e.g. a write to a new file), walk up
-    // to the deepest existing parent and resolve that, then rebuild the path.
-    let realPath = resolved;
-    try {
-      realPath = await fs.realpath(resolved);
-    } catch {
-      // Walk up to deepest existing parent. The walk is bounded only by the
-      // filesystem root: `ancestor` is derived from the lexical path while
-      // `rootDir` is canonical, so the two are not comparable, and any
-      // length-based bound here would skip the walk whenever the lexical cwd
-      // is shorter than its canonical target (a symlinked cwd). Containment is
-      // enforced by isWithinRoot below, once both sides are canonical.
-      let ancestor = path.dirname(resolved);
-      for (;;) {
-        try {
-          const realAncestor = await fs.realpath(ancestor);
-          const relative = path.relative(ancestor, resolved);
-          realPath = path.join(realAncestor, relative);
-          break;
-        } catch {
-          const parent = path.dirname(ancestor);
-          if (parent === ancestor) {
-            break; // reached the filesystem root
-          }
-          ancestor = parent;
-        }
-      }
-    }
+    const realPath = await canonicalizeForContainment(path.resolve(rawPath));
     if (!isWithinRoot(this.rootDir, realPath)) {
       throw new Error(`Path is outside allowed cwd subtree: ${realPath}`);
     }

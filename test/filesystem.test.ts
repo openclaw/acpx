@@ -189,6 +189,63 @@ test("writeTextFile blocks new files under a symlinked directory pointing outsid
   }
 });
 
+test("writeTextFile blocks writes through a dangling symlink pointing outside cwd", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-test-"));
+  try {
+    const sandbox = path.join(tmp, "sandbox");
+    const outside = path.join(tmp, "outside");
+    await fs.mkdir(sandbox);
+    await fs.mkdir(outside);
+    // The link itself exists but its target does not, so realpath() fails
+    // even though the leaf is present. Without an lstat guard the ancestor
+    // walk would treat this as a missing file and let the write follow the
+    // link to its external target.
+    await fs.symlink(path.join(outside, "secret.txt"), path.join(sandbox, "link.txt"));
+
+    const handlers = new FileSystemHandlers({
+      cwd: sandbox,
+      permissionMode: "approve-all",
+    });
+
+    await assert.rejects(
+      handlers.writeTextFile({
+        sessionId: "session-1",
+        path: path.join(sandbox, "link.txt"),
+        content: "pwned",
+      }),
+      /unresolvable symlink/,
+    );
+    // The external target must not have been created through the link.
+    await assert.rejects(fs.access(path.join(outside, "secret.txt")));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("constructor tolerates a cwd that does not exist yet", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-test-"));
+  try {
+    // The configured cwd is created lazily on first write; canonicalizing it
+    // in the constructor must not throw when it is still absent.
+    const missing = path.join(tmp, "not-created-yet");
+
+    const handlers = new FileSystemHandlers({
+      cwd: missing,
+      permissionMode: "approve-all",
+    });
+
+    await handlers.writeTextFile({
+      sessionId: "session-1",
+      path: path.join(missing, "new.txt"),
+      content: "written",
+    });
+
+    assert.equal(await fs.readFile(path.join(missing, "new.txt"), "utf8"), "written");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("readTextFile allows existing files when cwd is itself a symlink", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-test-"));
   try {
