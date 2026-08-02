@@ -151,9 +151,13 @@ function sanitizeOriginMeta(value: unknown): AcpTextDeltaOriginMeta | undefined 
   const out: Partial<Record<"origin" | "kind" | "source", string>> = {};
   for (const key of ORIGIN_META_ALLOWLIST) {
     const entry = value[key];
-    if (typeof entry !== "string") {continue;}
+    if (typeof entry !== "string") {
+      continue;
+    }
     const trimmed = entry.trim();
-    if (!trimmed) {continue;}
+    if (!trimmed) {
+      continue;
+    }
     out[key as "origin" | "kind" | "source"] = trimmed;
   }
   return Object.keys(out).length > 0 ? out : undefined;
