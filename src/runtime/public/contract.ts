@@ -164,6 +164,16 @@ export type AcpRuntimeDoctorReport = {
   details?: string[];
 };
 
+/**
+ * Fail-closed origin metadata on `text_delta` events.
+ * Only these optional string fields are preserved from ACP wire `_meta`/`meta`.
+ */
+export type AcpTextDeltaOriginMeta = {
+  origin?: string;
+  kind?: string;
+  source?: string;
+};
+
 export type AcpRuntimeEvent =
   | {
       type: "text_delta";
@@ -183,7 +193,7 @@ export type AcpRuntimeEvent =
        * preserved. All other keys (including nested objects and secret-like
        * producer-controlled names) are dropped. Omitted when none remain.
        */
-      meta?: Record<string, unknown>;
+      meta?: AcpTextDeltaOriginMeta;
     }
   | {
       type: "status";

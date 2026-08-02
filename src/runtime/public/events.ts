@@ -5,6 +5,7 @@ import type {
   AcpRuntimeUsageBreakdown,
   AcpRuntimeUsageCost,
   AcpSessionUpdateTag,
+  AcpTextDeltaOriginMeta,
 } from "./contract.js";
 import { asOptionalString, asString, asTrimmedString, isRecord } from "./shared.js";
 
@@ -129,7 +130,7 @@ const ORIGIN_META_ALLOWLIST = new Set(["origin", "kind", "source"]);
  */
 function extractTextDeltaOrigin(payload: Record<string, unknown>): {
   messageId?: string;
-  meta?: Record<string, unknown>;
+  meta?: AcpTextDeltaOriginMeta;
 } {
   const messageId = asOptionalString(payload.messageId) ?? asOptionalString(payload.message_id);
   const meta = sanitizeOriginMeta(payload._meta ?? payload.meta);
@@ -143,19 +144,17 @@ function extractTextDeltaOrigin(payload: Record<string, unknown>): {
  * Copy only allowlisted string origin keys from wire `_meta`/`meta`.
  * Nested objects, arrays, non-strings, and unknown keys are dropped.
  */
-function sanitizeOriginMeta(value: unknown): Record<string, unknown> | undefined {
+function sanitizeOriginMeta(value: unknown): AcpTextDeltaOriginMeta | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
-  const out: Record<string, unknown> = {};
+  const out: Partial<Record<"origin" | "kind" | "source", string>> = {};
   for (const key of ORIGIN_META_ALLOWLIST) {
     const entry = value[key];
-    if (typeof entry === "string") {
-      const trimmed = entry.trim();
-      if (trimmed.length > 0) {
-        out[key] = trimmed;
-      }
-    }
+    if (typeof entry !== "string") {continue;}
+    const trimmed = entry.trim();
+    if (!trimmed) {continue;}
+    out[key as "origin" | "kind" | "source"] = trimmed;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
