@@ -1,432 +1,114 @@
+# acpx 🤝 — Agents talking to agents, minus the terminal séance
+
 <p align="center">
   <img src="acpx_banner.svg" alt="acpx banner" width="100%" />
 </p>
 
-# acpx
+[![CI](https://img.shields.io/github/actions/workflow/status/openclaw/acpx/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/openclaw/acpx/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/acpx?style=flat-square)](https://www.npmjs.com/package/acpx)
+[![Node.js](https://img.shields.io/node/v/acpx?style=flat-square)](https://nodejs.org/)
+[![License](https://img.shields.io/github/license/openclaw/acpx?style=flat-square)](LICENSE)
+[![npm downloads](https://img.shields.io/npm/dm/acpx?style=flat-square)](https://www.npmjs.com/package/acpx)
 
-[![npm version](https://img.shields.io/npm/v/acpx.svg)](https://www.npmjs.com/package/acpx)
-[![npm downloads](https://img.shields.io/npm/dm/acpx.svg)](https://www.npmjs.com/package/acpx)
-[![CI](https://github.com/openclaw/acpx/actions/workflows/ci.yml/badge.svg)](https://github.com/openclaw/acpx/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/node/v/acpx.svg)](https://nodejs.org)
+`acpx` is a headless command-line client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com). It gives agents, orchestrators, and developers one structured interface for persistent sessions, one-shot runs, permissions, and machine-readable output across ACP-compatible coding agents.
 
-> ⚠️ `acpx` is in alpha and the CLI/runtime interfaces are likely to change. Anything you build downstream of this might break until it stabilizes.
-
-> ACP coverage status: see [ACP Spec Coverage Roadmap](docs/2026-02-19-acp-coverage-roadmap.md).
-
-Your agents love acpx! 🤖❤️ They hate having to scrape characters from a PTY session 😤
-
-`acpx` is a headless CLI client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com), so AI agents and orchestrators can talk to coding agents over a structured protocol instead of PTY scraping.
-
-One command surface for Pi, OpenClaw ACP, Codex, Claude, and other ACP-compatible agents. Built for agent-to-agent communication over the command line.
-
-- **Persistent sessions**: multi-turn conversations that survive across invocations, scoped per repo
-- **Named sessions**: run parallel workstreams in the same repo (`-s backend`, `-s frontend`)
-- **Prompt queueing**: submit prompts while one is already running, they execute in order
-- **Cooperative cancel command**: `cancel` sends ACP `session/cancel` via queue IPC without tearing down session state
-- **Soft-close lifecycle**: close sessions without deleting history from disk
-- **Queue owner TTL**: keep queue owners alive briefly for follow-up prompts (`--ttl`)
-- **Fire-and-forget**: `--no-wait` queues a prompt and returns immediately
-- **Graceful cancel**: `Ctrl+C` sends ACP `session/cancel` before force-kill fallback
-- **Session controls**: `set-mode` and `set <key> <value>` for `session/set_mode` and `session/set_config_option`
-- **Crash reconnect**: dead agent processes are detected and sessions are resumed or reloaded automatically
-- **Prompt from file/stdin**: `--file <path>` or piped stdin for prompt content
-- **Config files**: global + project JSON config with `acpx config show|init`
-- **Session inspect/history**: `sessions show` and `sessions history --limit <n>`
-- **Session export/import**: move portable session archives between machines
-- **Local status checks**: `status` reports running/idle/dead/no-session, pid, uptime, last prompt
-- **Client methods**: stable `fs/*` and `terminal/*` handlers with permission controls and cwd sandboxing
-- **Capability opt-outs**: let adapters use their native filesystem or terminal tools with `--no-fs` and `--no-terminal`
-- **Auth handshake**: stable `authenticate` support via env/config credentials
-- **Structured output**: typed ACP messages (thinking, tool calls, diffs) instead of ANSI scraping
-- **Any ACP agent**: built-in registry + `--agent` escape hatch for custom servers
-- **One-shot mode**: `exec` for stateless fire-and-forget tasks
-- **Compare across agents**: `acpx compare pi openclaw codex 'fix the bug'` runs the same one-shot prompt against multiple ACP-compatible agents and summarizes timing, token usage, permissions, and final output side by side
-- **Experimental flows**: `flow run <file>` for TypeScript workflow modules over multiple prompts
-- **Runtime-owned flow actions**: shell-backed action steps can prepare workspaces and other deterministic mechanics outside the agent turn
-- **Flow workspace isolation**: `acp` nodes can target an explicit per-step cwd, so flows can keep agent work inside disposable worktrees
-
-```bash
+```console
 $ acpx codex sessions new
-$ acpx codex "find the flaky test and fix it"
-
-[thinking] Investigating test suite for flaky failures
-
-[tool] Run npm test -- --reporter=verbose (running)
-[tool] Run npm test -- --reporter=verbose (completed)
-  output:
-    ✓ auth.login (0.8s)
-    ✗ checkout.submit (timed out after 5000ms)
-    ✓ cart.add (0.3s)
-
-[thinking] Found it — checkout.submit has a race condition in the async setup
-
-[tool] Edit src/checkout.test.ts (completed)
-  output:
-    Success. Updated 1 file.
-
-[tool] Run npm test -- checkout.submit (completed)
-  output:
-    ✓ checkout.submit (0.4s)
-
-Fixed: added `await` to the setup hook in checkout.submit. The test was
-reading stale state from the previous run.
-
+<session-id>
+$ acpx codex "summarize this repository"
+[tool] Read README.md (completed)
+This repository contains ...
 [done] end_turn
 ```
 
-## Quick setup — tell your agent about acpx
-
-Copy the block below and paste it into your Pi, OpenClaw, Claude Code, or similar agent harness. It will install acpx, read the skill reference, and know how to use ACP for all future coding agent tasks.
-
-```text
-I want you to use acpx to run coding agents over the Agent Client Protocol
-(ACP) instead of scraping PTY sessions. Please do the following:
-
-1. Install acpx globally (recommended) or use npx:
-   npm install -g acpx@latest
-
-   Or without installing:
-   npx acpx@latest
-
-2. For Pi or OpenClaw, use the reference URL below. For Codex-style skill
-   installation, install the acpx skill so you have the full reference
-   available:
-   npx acpx@latest --skill install acpx --agent codex --scope user
-   Use --agent claude for Claude Code. For another harness not listed by
-   --skill install --help, use the reference URL below instead.
-
-3. Read the acpx skill reference so you know every command, flag, and
-   workflow pattern:
-   https://raw.githubusercontent.com/openclaw/acpx/main/skills/acpx/SKILL.md
-
-4. If you need the full CLI reference with all options and examples:
-   https://raw.githubusercontent.com/openclaw/acpx/main/docs/CLI.md
-
-From now on, when you need to delegate work to a coding agent, use acpx
-instead of spawning raw terminal sessions. For example:
-  npx acpx@latest codex "fix the failing tests"
-  npx acpx@latest claude "refactor the auth module"
-  npx acpx@latest codex exec "one-shot: summarize this repo"
-```
+> [!NOTE]
+> `acpx` is pre-1.0. Treat its CLI and runtime interfaces as evolving.
 
 ## Install
+
+Install the published npm package globally:
 
 ```bash
 npm install -g acpx@latest
 ```
 
-Or run without installing:
+`acpx` requires Node.js 22.13 or newer. To try it without a global install, prefix a command with `npx acpx@latest` instead. See the [install guide](docs/install.md) for adapter prerequisites, updates, and source builds.
+
+## Quick start
+
+Install and authenticate the coding agent you want to use, then create a session in your project and send it a prompt:
 
 ```bash
-npx acpx@latest codex "fix the tests"
+acpx codex sessions new
+acpx codex "find the slowest test and explain why"
 ```
 
-Session state lives in `~/.acpx/` either way. Global install is a little faster, but `npx acpx@latest` works fine.
+The session is scoped to the current repository and persists across invocations. Creating sessions explicitly prevents automation from starting an unexpected conversation. The [quickstart](docs/quickstart.md) continues with named sessions, one-shot runs, history, and JSON output.
 
-## Agent prerequisites
+## Choose an agent
 
-`acpx` auto-downloads ACP adapters with `npx` on first use. You do not need to install adapter packages manually.
+Use the same command shape with the built-in launch profiles:
 
-The only prerequisite is the underlying coding agent you want to use:
+| Agent             | Command                      |
+| ----------------- | ---------------------------- |
+| Codex             | `acpx codex …`               |
+| Claude Code       | `acpx claude …`              |
+| Gemini CLI        | `acpx gemini …`              |
+| OpenClaw          | `acpx openclaw …`            |
+| Custom ACP server | `acpx --agent '<command>' …` |
 
-- `acpx pi` -> Pi Coding Agent: https://github.com/mariozechner/pi
-- `acpx openclaw` -> OpenClaw ACP bridge: https://github.com/openclaw/openclaw
-- `acpx codex` -> Codex CLI: https://codex.openai.com
-- `acpx claude` -> Claude Code: https://claude.ai/code
+The upstream agent must be installed and authenticated when its adapter does not provide that itself. See [built-in agents](docs/agents.md) for every supported profile and [custom agents](docs/custom-agents.md) for registry configuration.
 
-Additional built-in agent docs live in [agents/README.md](agents/README.md).
+## Sessions and one-shot runs
 
-## Usage examples
+Persistent sessions keep context between prompts, support parallel named workstreams, and queue follow-up prompts when a turn is already running. Use `exec` when you want a stateless run with no saved session.
 
 ```bash
-acpx codex sessions new                        # create a session (explicit) for this project dir
-acpx codex 'fix the tests'                     # implicit prompt (routes via directory-walk)
-acpx codex prompt 'fix the tests'              # explicit prompt subcommand
-echo 'fix flaky tests' | acpx codex            # prompt from stdin
-acpx codex --file prompt.md                    # prompt from file
-acpx codex --file - "extra context"            # explicit stdin + appended args
-acpx codex --no-wait 'draft test migration plan' # enqueue without waiting if session is busy
-acpx codex cancel                               # cooperative cancel of in-flight prompt
-acpx codex set-mode auto                        # session/set_mode (adapter-defined mode id)
-acpx codex set model gpt-5.6-sol                # select the advertised base model
-acpx codex set reasoning_effort max             # set the advertised reasoning effort
-acpx exec 'summarize this repo'                # default agent shortcut (codex)
-acpx codex exec 'what does this repo do?'      # one-shot, no saved session
-
-acpx codex sessions new --name api              # create named session
-acpx codex -s api 'implement token pagination'  # prompt in named session
-acpx codex sessions new --name docs             # create another named session
-acpx codex -s docs 'rewrite API docs'           # parallel work in another named session
-
-acpx codex sessions              # list sessions for codex command
-acpx codex sessions list         # explicit list
-acpx codex sessions show         # inspect cwd session metadata
-acpx codex sessions history      # show recent turn history
-acpx codex sessions new          # create fresh cwd-scoped default session
-acpx codex sessions new --name api # create fresh named session
-acpx codex sessions ensure       # return existing scoped session or create one
-acpx codex sessions ensure --name api # ensure named scoped session
-acpx codex sessions close        # close cwd-scoped default session
-acpx codex sessions close api    # close cwd-scoped named session
-acpx codex status                # local process status for current session
-
-acpx config show                 # show resolved config (global + project)
-acpx config init                 # create ~/.acpx/config.json template
+acpx codex sessions new --name backend
+acpx codex -s backend "trace the checkout timeout"
+acpx codex exec "summarize this repository"
 ```
 
-Main landing harness examples:
+Session state lives under `~/.acpx/`. The [sessions guide](docs/sessions.md) covers scope, queue ownership, reconnects, export/import, cancellation, and cleanup.
+
+## Automation and permissions
+
+Text output is the default. `--format json` emits NDJSON ACP events for automation, while `--format quiet` prints only the final assistant text. Output events retain structured thinking, tool calls, diffs, and completion state instead of terminal escape sequences.
+
+Permission modes range from read approval to explicit deny or approve-all policies. Use `--cwd` to set the session scope and filesystem boundary. Global and project JSON configuration can provide defaults; command-line flags take precedence.
+
+- [Output formats](docs/output-formats.md)
+- [Permissions](docs/permissions.md)
+- [Configuration](docs/config.md)
+- [Exit codes](docs/exit-codes.md)
+
+## Flows and embedding
+
+For multi-step work, `acpx flow run` executes TypeScript workflows that combine ACP turns with deterministic actions, decisions, computation, and checkpoints. The package also exports `acpx/runtime` and `acpx/flows` for applications that need session and workflow primitives without shelling out.
+
+Start with the [flows guide](docs/flows.md), then use the [examples](examples/flows/README.md) and [architecture notes](docs/2026-03-25-acpx-flows-architecture.md) for deeper integrations.
+
+## Documentation
+
+- [CLI reference](docs/CLI.md) — commands, flags, and behavior
+- [Prompting](docs/prompting.md) — arguments, stdin, files, and queueing
+- [Session controls](docs/session-control.md) — cancel, modes, options, and status
+- [Compare agents](docs/compare.md) — run one prompt across multiple agents
+- [ACP coverage](docs/2026-02-19-acp-coverage-roadmap.md) — implemented protocol methods
+- [Vision](VISION.md) — project scope and design principles
+
+The full documentation is also available at [acpx.sh](https://acpx.sh/).
+
+## Development
 
 ```bash
-acpx pi 'review recent changes'
-acpx openclaw exec 'summarize active session state' # built-in OpenClaw ACP bridge
-acpx codex 'fix the failing typecheck'
-acpx claude 'refactor auth middleware' # built-in claude agent
+pnpm install --frozen-lockfile
+pnpm run check
+pnpm run check:docs
 ```
 
-Additional supported harnesses and their specific notes are documented in [agents/README.md](agents/README.md).
-
-```bash
-acpx my-agent 'review this patch'                      # unknown name -> raw command
-acpx --agent './bin/dev-acp --profile ci' 'run checks' # --agent escape hatch
-```
-
-## Practical scenarios
-
-```bash
-# Review a PR in a dedicated session and auto-approve permissions
-acpx --cwd ~/repos/shop --approve-all codex -s pr-842 \
-  'Review PR #842 for regressions and propose a minimal fix'
-
-# Keep parallel streams for the same repo
-acpx codex -s bugfix 'isolate flaky checkout test'
-acpx codex -s release 'draft release notes from recent commits'
-```
-
-## Global options in practice
-
-```bash
-acpx --approve-all codex 'apply the patch and run tests'
-acpx --approve-reads codex 'inspect repo structure and suggest plan' # default mode
-acpx --deny-all codex 'explain what you can do without tool access'
-acpx --non-interactive-permissions fail codex 'fail instead of deny in non-TTY'
-acpx --policy '{"escalate":["execute"],"defaultAction":"deny"}' --format json codex exec 'ask before shell'
-
-acpx --cwd ~/repos/backend codex 'review recent auth changes'
-acpx --format text codex 'summarize your findings'
-acpx --format json codex exec 'review changed files'
-acpx --format json --json-strict codex exec 'machine-safe JSON only'
-acpx flow run ./my-flow.ts --input-file ./flow-input.json
-acpx --timeout 1800 flow run ./my-flow.ts
-acpx --format quiet codex 'final recommendation only'
-acpx --suppress-reads codex exec 'show tool activity without dumping file bodies'
-acpx --no-fs codex exec 'read files without ACP client filesystem delegation'
-
-acpx --timeout 90 codex 'investigate intermittent test timeout'
-acpx --ttl 30 codex 'keep queue owner alive for quick follow-ups'
-acpx --verbose codex 'debug why adapter startup is failing'
-```
-
-## Flows
-
-`acpx flow run <file>` executes a TypeScript flow module through the `acpx/flows`
-runtime and persists run state under `~/.acpx/flows/runs/`.
-
-Flows are for multi-step ACP work where one prompt is not enough:
-
-- `acp` steps keep model-shaped work in ACP
-- `decision()` and `decisionEdge()` wrap constrained-choice ACP branching without adding a new node type
-- `action` steps handle deterministic mechanics like shell commands or GitHub calls
-- `compute` steps do local routing or shaping
-- `checkpoint` steps pause for something outside the runtime
-
-The source tree includes flow examples under [examples/flows/README.md](examples/flows/README.md):
-
-- small examples such as `echo`, `branch`, `shell`, `workdir`, and `two-turn`
-- a larger PR-triage example under [examples/flows/pr-triage/README.md](examples/flows/pr-triage/README.md)
-- a replay viewer under [examples/flows/replay-viewer/README.md](examples/flows/replay-viewer/README.md) for inspecting saved run bundles in the browser
-
-Example runs:
-
-```bash
-acpx flow run ./my-flow.ts --input-file ./flow-input.json
-
-acpx flow run examples/flows/branch.flow.ts \
-  --input-json '{"task":"FIX: add a regression test for the reconnect bug"}'
-
-acpx flow run examples/flows/pr-triage/pr-triage.flow.ts \
-  --input-json '{"repo":"openclaw/acpx","prNumber":150}'
-```
-
-The PR-triage example is only an example workflow. It can comment on or close
-real GitHub PRs if you run it against a live repository.
-
-## Configuration files
-
-`acpx` reads config in this order (later wins):
-
-1. global: `~/.acpx/config.json`
-2. project: `<cwd>/.acpxrc.json`
-
-CLI flags always win over config values.
-
-Use `--mcp-config <path>` to load only the `mcpServers` array from an external JSON file without
-writing a project config file. Relative paths resolve from `--cwd`.
-
-Supported keys:
-
-```json
-{
-  "defaultAgent": "codex",
-  "defaultPermissions": "approve-all",
-  "nonInteractivePermissions": "deny",
-  "authPolicy": "skip",
-  "ttl": 300,
-  "timeout": null,
-  "format": "text",
-  "agents": {
-    "my-custom": { "argv": ["./bin/my-acp-server", "acp"] }
-  },
-  "auth": {
-    "my_auth_method_id": "credential-value"
-  }
-}
-```
-
-Use `acpx config show` to inspect the resolved result and `acpx config init` to create the global template.
-Use structured `agents.<name>.argv` for custom launches; it is required on Windows. Legacy
-`command` plus `args` entries migrate when `command` is an unquoted executable with no whitespace,
-while raw command strings remain Unix-only.
-
-For ACP `authenticate` handshakes, use either config `auth` entries or explicit
-`ACPX_AUTH_<METHOD_ID>` environment variables such as `ACPX_AUTH_OPENAI_API_KEY`.
-Ambient provider env vars such as `OPENAI_API_KEY` are still passed through to
-child agents, but they do not trigger ACP auth-method selection on their own.
-
-## Output formats
-
-```bash
-# text (default): human-readable stream with tool updates
-acpx codex 'review this PR'
-
-# json: NDJSON events, useful for automation
-acpx --format json codex exec 'review this PR' \
-  | jq -r 'select(.type=="tool_call") | [.status, .title] | @tsv'
-
-# json-strict: suppresses non-JSON stderr output (requires --format json)
-acpx --format json --json-strict codex exec 'review this PR'
-
-# quiet: final assistant text on stdout; one structured stderr line on failure
-acpx --format quiet codex 'give me a 3-line summary'
-
-# suppress read payloads while keeping the selected output format
-acpx --suppress-reads codex exec 'inspect the repo and report tool usage'
-```
-
-- `text`: human-readable stream with assistant text and tool updates
-- `json`: raw ACP NDJSON stream for automation
-- `quiet`: final assistant text on stdout; failed prompts emit one structured `[acpx] error:` line on stderr
-- `--suppress-reads`: replace raw read-file contents with `[read output suppressed]` in `text` and `json` output
-
-JSON events include a stable envelope for correlation:
-
-```json
-{
-  "eventVersion": 1,
-  "sessionId": "abc123",
-  "requestId": "req-42",
-  "seq": 7,
-  "stream": "prompt",
-  "type": "tool_call"
-}
-```
-
-Session-control JSON payloads (`sessions new|ensure`, `status`) always include
-`acpxRecordId` and `acpxSessionId`. They include `agentSessionId` only when the
-adapter exposes a provider-native session ID. The text/quiet session id is the
-local acpx record id; do not assume it can be passed to the native provider CLI
-unless `agentSessionId` is present.
-
-## Built-in agents and custom servers
-
-Built-ins:
-
-| Agent        | Adapter                                                                     | Wraps                                                                                                           |
-| ------------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `pi`         | [pi-acp](https://github.com/svkozak/pi-acp)                                 | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
-| `openclaw`   | native (`openclaw acp`)                                                     | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
-| `codex`      | [codex-acp](https://github.com/agentclientprotocol/codex-acp)               | [Codex CLI](https://codex.openai.com)                                                                           |
-| `claude`     | [claude-agent-acp](https://github.com/agentclientprotocol/claude-agent-acp) | [Claude Code](https://claude.ai/code)                                                                           |
-| `gemini`     | native (`gemini --acp`)                                                     | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
-| `cursor`     | native (`cursor-agent acp`)                                                 | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
-| `copilot`    | native (`copilot --acp --stdio`)                                            | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
-| `droid`      | native (`droid exec --output-format acp`)                                   | [Factory Droid](https://www.factory.ai)                                                                         |
-| `fast-agent` | `uvx fast-agent-mcp acp`                                                    | [fast-agent](https://fast-agent.ai)                                                                             |
-| `grok-build` | native (`grok agent stdio`)                                                 | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
-| `iflow`      | native (`iflow --experimental-acp`)                                         | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
-| `kilocode`   | `npx -y @kilocode/cli acp`                                                  | [Kilocode](https://kilocode.ai)                                                                                 |
-| `kimi`       | native (`kimi acp`)                                                         | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
-| `kiro`       | native (`kiro-cli-chat acp`)                                                | [Kiro CLI](https://kiro.dev)                                                                                    |
-| `mux`        | `mux acp` via an ACPX-owned npm range                                       | [Mux](https://mux.coder.com)                                                                                    |
-| `opencode`   | `npx -y opencode-ai acp`                                                    | [OpenCode](https://opencode.ai)                                                                                 |
-| `pool`       | native (`pool acp`)                                                         | [Poolside](https://poolside.ai)                                                                                 |
-| `qoder`      | native (`qodercli --acp`)                                                   | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |
-| `qwen`       | native (`qwen --acp`)                                                       | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
-| `trae`       | native (`traecli acp serve`)                                                | [Trae CLI](https://docs.trae.cn/cli)                                                                            |
-| `zeroclaw`   | native (`zeroclaw acp`)                                                     | [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw)                                                           |
-
-`factory-droid` and `factorydroid` also resolve to the built-in `droid` adapter.
-
-Additional built-in agent docs live in [agents/README.md](agents/README.md).
-
-Use `--agent` as an escape hatch for custom ACP servers:
-
-```bash
-acpx --agent ./my-custom-acp-server 'do something'
-```
-
-For repo-local OpenClaw checkouts, override the built-in command in config so `acpx openclaw ...`
-spawns the ACP bridge directly without `pnpm` wrapper noise:
-
-```json
-{
-  "agents": {
-    "openclaw": {
-      "command": "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 node scripts/run-node.mjs acp --url ws://127.0.0.1:18789 --token-file ~/.openclaw/gateway.token --session agent:main:main"
-    }
-  }
-}
-```
-
-## Session behavior
-
-- Prompt commands require an existing saved session record (created via `sessions new` or `sessions ensure`).
-- Prompts route by walking up from `cwd` (or `--cwd`) to the nearest git root (inclusive) and selecting the nearest active session matching `(agent command, dir, optional name)`.
-- If no git root is found, prompts only match an exact `cwd` session (no parent-directory walk).
-- `-s <name>` selects a parallel named session during that directory walk.
-- `sessions new [--name <name>]` creates a fresh session for that scope and soft-closes the prior one.
-- `sessions ensure [--name <name>]` is idempotent: it returns an existing scoped session or creates one when missing.
-- `sessions close [name]` soft-closes the session: queue owner/processes are terminated, record is kept with `closed: true`.
-- `sessions list` uses agent-side ACP `session/list` when available; use
-  `--cursor`, `--filter-cwd`, or `--local` for pagination, cwd filtering, or
-  saved-record inspection.
-- Auto-resume for cwd scope skips sessions marked closed.
-- Prompt submissions are queue-aware per session. If a prompt is already running, new prompts are queued and drained by the running `acpx` process.
-- Queue owners use an idle TTL (default 300s). `--ttl <seconds>` overrides it; `--ttl 0` keeps owners alive indefinitely.
-- `--no-wait` submits to that queue and returns immediately.
-- `cancel` sends cooperative `session/cancel` to the running queue owner process and returns success when no prompt is running (`nothing to cancel`).
-- `set-mode` and `set` route through queue-owner IPC when active, otherwise they reconnect directly to apply `session/set_mode` and `session/set_config_option`.
-- `<mode>` values for `set-mode` are adapter-defined; unsupported values are rejected by the adapter (commonly `Invalid params`).
-- `exec` is always one-shot and does not reuse saved sessions.
-- Session metadata is stored under `~/.acpx/sessions/`.
-- Each successful prompt appends lightweight turn history previews (`role`, `timestamp`, `textPreview`) to session metadata.
-- `Ctrl+C` during a running turn sends ACP `session/cancel` and waits briefly for `stopReason=cancelled` before force-killing if needed.
-- If a saved session pid is dead on the next prompt, `acpx` respawns the agent, attempts `session/resume` when advertised or `session/load` otherwise, and transparently falls back to `session/new` if reconnecting fails.
-
-## Full CLI reference
-
-See [docs/CLI.md](docs/CLI.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and review guidance.
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
