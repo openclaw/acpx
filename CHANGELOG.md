@@ -15,6 +15,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Runtime/embedding: settle turn results only after lifecycle persistence and client cleanup attempts finish, including unexpected finalization failures.
+- CLI/session: re-apply a session-pinned model before set_mode/set_model/set_config_option after reconnect, matching the prompt path so model-dependent options work. Fixes #489.
 
 ## 2026.7.27 (v0.13.0)
 
