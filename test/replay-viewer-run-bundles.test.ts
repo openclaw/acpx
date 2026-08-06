@@ -67,6 +67,48 @@ test("listRunBundles prefers live status over stale run projections", async () =
   }
 });
 
+test("listRunBundles ignores bundles whose manifest paths escape the bundle", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-list-escape-"));
+  const secretDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-secret-"));
+
+  try {
+    const secretFile = path.join(secretDir, "secret.json");
+    await fs.writeFile(secretFile, JSON.stringify({ runTitle: "leaked", status: "completed" }));
+
+    const runId = "2026-03-27T090000000Z-malicious";
+    const runDir = path.join(runsDir, runId);
+    await fs.mkdir(runDir, { recursive: true });
+    await fs.writeFile(
+      path.join(runDir, "manifest.json"),
+      JSON.stringify({
+        schema: "acpx.flow-run-bundle.v1",
+        runId,
+        flowName: "flow-malicious",
+        startedAt: "2026-03-27T09:00:00.000Z",
+        status: "completed",
+        traceSchema: "acpx.flow-trace-event.v1",
+        paths: {
+          flow: "flow.json",
+          trace: "trace.ndjson",
+          runProjection: path.relative(runDir, secretFile),
+          liveProjection: "projections/live.json",
+          stepsProjection: "projections/steps.json",
+          sessionsDir: "sessions",
+          artifactsDir: "artifacts",
+        },
+        sessions: [],
+      }),
+    );
+
+    const runs = await listRunBundles(runsDir);
+
+    assert.deepEqual(runs, []);
+  } finally {
+    await fs.rm(runsDir, { recursive: true, force: true });
+    await fs.rm(secretDir, { recursive: true, force: true });
+  }
+});
+
 test("resolveRunBundleFilePath rejects traversal outside a run bundle", () => {
   const runsDir = path.join(os.tmpdir(), "acpx-run-list");
 

@@ -70,11 +70,18 @@ async function readRunBundleSummary(runsDir: string, runId: string): Promise<Run
   const manifest = JSON.parse(
     await fs.readFile(path.join(runDir, "manifest.json"), "utf8"),
   ) as FlowRunManifest;
+  // The manifest is bundle-controlled data, so its projection paths are
+  // constrained to the run bundle before being read. Otherwise a crafted
+  // manifest could point runProjection/liveProjection at an arbitrary file
+  // outside the bundle (e.g. "../../../etc/passwd") during listRunBundles.
   const run = JSON.parse(
-    await fs.readFile(path.join(runDir, manifest.paths.runProjection), "utf8"),
+    await fs.readFile(
+      resolveRunBundleFilePath(runsDir, runId, manifest.paths.runProjection),
+      "utf8",
+    ),
   ) as FlowRunState;
   const live = await fs
-    .readFile(path.join(runDir, manifest.paths.liveProjection), "utf8")
+    .readFile(resolveRunBundleFilePath(runsDir, runId, manifest.paths.liveProjection), "utf8")
     .then((text) => JSON.parse(text) as Partial<FlowRunState>)
     .catch(() => null);
   const mergedRun = mergeLiveRunState(run, live);
