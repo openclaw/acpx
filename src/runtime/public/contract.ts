@@ -249,6 +249,8 @@ export type AcpRuntimeTurnResult =
 
 export interface AcpRuntimeTurn {
   readonly requestId: string;
+  /** Resolves after `connection.prompt()` returns its request promise. */
+  readonly promptStarted: Promise<void>;
   readonly events: AsyncIterable<AcpRuntimeEvent>;
   readonly result: Promise<AcpRuntimeTurnResult>;
   cancel(input?: { reason?: string }): Promise<void>;

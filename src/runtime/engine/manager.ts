@@ -463,6 +463,7 @@ type RuntimeTurnTask = {
   };
   promptInput: PromptInput | string;
   queue: AsyncEventQueue;
+  promptStarted: Deferred<void>;
   sessionReady: Deferred<void>;
   state: RuntimeTurnTaskState;
   settleResult: (next: AcpRuntimeTurnResult) => void;
@@ -823,6 +824,8 @@ export class AcpRuntimeManager {
     const promptInput = toPromptInput(input.text, input.attachments);
     const queue = new AsyncEventQueue();
     const result = createDeferred<AcpRuntimeTurnResult>();
+    const promptStarted = createDeferred<void>();
+    void promptStarted.promise.catch(() => {});
     const sessionReady = createDeferred<void>();
     void sessionReady.promise.catch(() => {});
     let resultSettled = false;
@@ -866,6 +869,7 @@ export class AcpRuntimeManager {
     };
     if (input.signal) {
       if (input.signal.aborted) {
+        promptStarted.reject(new Error("ACP turn cancelled before prompt submission."));
         closeStream();
         settleResult({
           status: "cancelled",
@@ -873,6 +877,7 @@ export class AcpRuntimeManager {
         });
         return {
           requestId: input.requestId,
+          promptStarted: promptStarted.promise,
           events: queue.iterate(),
           result: result.promise,
           cancel: async () => {},
@@ -886,6 +891,7 @@ export class AcpRuntimeManager {
       input,
       promptInput,
       queue,
+      promptStarted,
       sessionReady,
       state,
       settleResult,
@@ -894,6 +900,7 @@ export class AcpRuntimeManager {
 
     return {
       requestId: input.requestId,
+      promptStarted: promptStarted.promise,
       events: queue.iterate(),
       result: result.promise,
       cancel: async () => {
@@ -922,6 +929,7 @@ export class AcpRuntimeManager {
         timeoutMs: task.input.timeoutMs ?? this.options.timeoutMs,
         conversation: turn.conversation,
         promptMessageId: turn.promptMessageId,
+        onPromptRequestStarted: () => task.promptStarted.resolve(),
       });
       await this.saveCompletedRuntimeTurn(turn, response.stopReason);
       task.settleResult({
@@ -1201,6 +1209,7 @@ export class AcpRuntimeManager {
       return false;
     }
     task.state.pendingCancel = false;
+    task.promptStarted.reject(new Error("ACP turn cancelled before prompt submission."));
     task.settleResult({
       status: "cancelled",
       stopReason: "cancelled",
@@ -1237,6 +1246,7 @@ export class AcpRuntimeManager {
   }
 
   private failRuntimeTurn(task: RuntimeTurnTask, error: unknown): void {
+    task.promptStarted.reject(error);
     task.sessionReady.reject(error);
     const normalized = normalizeOutputError(error, { origin: "runtime" });
     task.settleResult({

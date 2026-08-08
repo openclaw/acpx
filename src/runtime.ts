@@ -223,6 +223,9 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     );
     return {
       requestId: input.requestId,
+      get promptStarted() {
+        return turnPromise.then((turn) => turn.promptStarted);
+      },
       events: {
         async *[Symbol.asyncIterator]() {
           const turn = await turnPromise;

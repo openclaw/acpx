@@ -88,6 +88,7 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   let cancelCalls = 0;
   let managerCancelCalls = 0;
   let closeDiscardPersistentState: boolean | undefined;
+  let promptStarted = Promise.resolve();
   const manager = {
     ensureSession: async (input: { mode: string }) => {
       ensuredMode = input.mode;
@@ -99,6 +100,7 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
       turnTimeoutMs = input.timeoutMs;
       return {
         requestId: input.requestId,
+        promptStarted,
         events: (async function* () {
           yield { type: "text_delta" as const, text: "hello", stream: "output" as const };
         })(),
@@ -170,6 +172,7 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
     requestId: "req-1",
     timeoutMs: 42,
   });
+  await turn.promptStarted;
   const events = [];
   for await (const event of turn.events) {
     events.push(event);
@@ -181,6 +184,16 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   assert.equal(turnTimeoutMs, 42);
   assert.deepEqual(events, [{ type: "text_delta", text: "hello", stream: "output" }]);
   assert.deepEqual(result, { status: "completed", stopReason: "end_turn" });
+
+  promptStarted = Promise.reject(new Error("prompt failed before request creation"));
+  void promptStarted.catch(() => {});
+  const failedReadinessTurn = runtime.startTurn({
+    handle,
+    text: "fail before request",
+    mode: "prompt",
+    requestId: "req-readiness-failure",
+  });
+  await assert.rejects(failedReadinessTurn.promptStarted, /failed before request creation/);
 
   const legacyEvents: AcpRuntimeEvent[] = [];
   for await (const event of runtime.runTurn({
