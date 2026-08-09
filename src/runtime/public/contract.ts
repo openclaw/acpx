@@ -250,6 +250,11 @@ export type AcpRuntimeTurnResult =
 export interface AcpRuntimeTurn {
   readonly requestId: string;
   readonly events: AsyncIterable<AcpRuntimeEvent>;
+  /**
+   * Canonical completion signal for the turn. Resolves only after final record
+   * checkpoint/persistence and runtime client pooling or close cleanup attempts
+   * have settled.
+   */
   readonly result: Promise<AcpRuntimeTurnResult>;
   cancel(input?: { reason?: string }): Promise<void>;
   closeStream(input?: { reason?: string }): Promise<void>;
