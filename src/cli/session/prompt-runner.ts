@@ -198,14 +198,8 @@ export async function runSessionSetModelDirect(
 ): Promise<SessionSetModelResult> {
   const result = await withConnectedSession(
     buildDirectConnectedSessionOptions(options, async ({ client, sessionId, record }) => {
-      // set-model is an explicit model change; still re-apply pin first so the
-      // agent advertises the pinned option set before we switch.
-      await reapplyPinnedModelAfterConnect({
-        client,
-        sessionId,
-        record,
-        timeoutMs: options.timeoutMs,
-      });
+      // Explicit model switch replaces the saved pin. Do not re-apply the old
+      // pin first: an unadvertised saved model would reject and block the switch.
       const models = advertisedModelState(record.acpx);
       const response = await withTimeout(
         client.setSessionModel(sessionId, options.modelId, models),
@@ -226,13 +220,18 @@ export async function runSessionSetConfigOptionDirect(
 ): Promise<SessionSetConfigOptionResult> {
   const result = await withConnectedSession(
     buildDirectConnectedSessionOptions(options, async ({ client, sessionId, record }) => {
-      await reapplyPinnedModelAfterConnect({
-        client,
-        sessionId,
-        record,
-        timeoutMs: options.timeoutMs,
-      });
       const modelConfigId = advertisedModelState(record.acpx)?.configId;
+      // Model-valued config updates replace the pin; skip pin replay so an
+      // obsolete saved model cannot block the replacement. Other config keys
+      // still re-apply the pin so model-dependent options see the right set.
+      if (options.configId !== modelConfigId) {
+        await reapplyPinnedModelAfterConnect({
+          client,
+          sessionId,
+          record,
+          timeoutMs: options.timeoutMs,
+        });
+      }
       const response = await withTimeout(
         client.setSessionConfigOption(sessionId, options.configId, options.value),
         options.timeoutMs,
