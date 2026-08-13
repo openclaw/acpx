@@ -100,6 +100,9 @@ type Deferred<T> = {
   reject: (error: unknown) => void;
 };
 
+type SettledAttempt<T> = { ok: true; value: T } | { ok: false; error: unknown };
+type FailedAttempt = Extract<SettledAttempt<unknown>, { ok: false }>;
+
 function createDeferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -108,6 +111,20 @@ function createDeferred<T>(): Deferred<T> {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+async function settleAttempt<T>(run: () => T | Promise<T>): Promise<SettledAttempt<T>> {
+  try {
+    return { ok: true, value: await run() };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+function firstFailedAttempt(
+  attempts: readonly SettledAttempt<unknown>[],
+): FailedAttempt | undefined {
+  return attempts.find((attempt): attempt is FailedAttempt => !attempt.ok);
 }
 
 class AsyncEventQueue {
@@ -914,33 +931,42 @@ export class AcpRuntimeManager {
 
   private async runRuntimeTurnTask(task: RuntimeTurnTask): Promise<void> {
     let turn: RunningRuntimeTurn | undefined;
+    let terminalResult: AcpRuntimeTurnResult;
     try {
       turn = await this.prepareRuntimeTurn(task);
       const { sessionId, resumed, loadError } = await this.connectRuntimeTurn(task, turn);
       await this.resolveRuntimeTurnReady(task, turn, resumed, loadError);
       if (this.cancelRuntimeTurnBeforePrompt(task)) {
-        return;
+        terminalResult = {
+          status: "cancelled",
+          stopReason: "cancelled",
+        };
+      } else {
+        await this.applyPendingRuntimeTurnCancel(task, turn);
+        const response = await runPromptTurn({
+          client: turn.client,
+          sessionId,
+          prompt: task.promptInput,
+          timeoutMs: task.input.timeoutMs ?? this.options.timeoutMs,
+          conversation: turn.conversation,
+          promptMessageId: turn.promptMessageId,
+          onPromptRequestStarted: () => task.promptStarted.resolve(),
+        });
+        await this.saveCompletedRuntimeTurn(turn, response.stopReason);
+        terminalResult = {
+          status: response.stopReason === "cancelled" ? "cancelled" : "completed",
+          ...(response.stopReason ? { stopReason: response.stopReason } : {}),
+        };
       }
-      await this.applyPendingRuntimeTurnCancel(task, turn);
-      const response = await runPromptTurn({
-        client: turn.client,
-        sessionId,
-        prompt: task.promptInput,
-        timeoutMs: task.input.timeoutMs ?? this.options.timeoutMs,
-        conversation: turn.conversation,
-        promptMessageId: turn.promptMessageId,
-        onPromptRequestStarted: () => task.promptStarted.resolve(),
-      });
-      await this.saveCompletedRuntimeTurn(turn, response.stopReason);
-      task.settleResult({
-        status: response.stopReason === "cancelled" ? "cancelled" : "completed",
-        ...(response.stopReason ? { stopReason: response.stopReason } : {}),
-      });
     } catch (error) {
-      this.failRuntimeTurn(task, error);
-    } finally {
-      await this.finalizeRuntimeTurn(task, turn);
+      terminalResult = this.failRuntimeTurn(task, error);
     }
+    try {
+      await this.finalizeRuntimeTurn(task, turn);
+    } catch (error) {
+      terminalResult = this.failRuntimeTurn(task, error);
+    }
+    task.settleResult(terminalResult);
   }
 
   private async prepareRuntimeTurn(task: RuntimeTurnTask): Promise<RunningRuntimeTurn> {
@@ -1210,10 +1236,6 @@ export class AcpRuntimeManager {
     }
     task.state.pendingCancel = false;
     task.promptStarted.reject(new Error("ACP turn cancelled before prompt submission."));
-    task.settleResult({
-      status: "cancelled",
-      stopReason: "cancelled",
-    });
     return true;
   }
 
@@ -1245,11 +1267,11 @@ export class AcpRuntimeManager {
     await this.options.sessionStore.save(turn.record);
   }
 
-  private failRuntimeTurn(task: RuntimeTurnTask, error: unknown): void {
+  private failRuntimeTurn(task: RuntimeTurnTask, error: unknown): AcpRuntimeTurnResult {
     task.promptStarted.reject(error);
     task.sessionReady.reject(error);
     const normalized = normalizeOutputError(error, { origin: "runtime" });
-    task.settleResult({
+    return {
       status: "failed",
       error: {
         message: normalized.message,
@@ -1257,7 +1279,7 @@ export class AcpRuntimeManager {
         ...(normalized.detailCode ? { detailCode: normalized.detailCode } : {}),
         ...(normalized.retryable !== undefined ? { retryable: normalized.retryable } : {}),
       },
-    });
+    };
   }
 
   private async finalizeRuntimeTurn(
@@ -1265,12 +1287,46 @@ export class AcpRuntimeManager {
     turn: RunningRuntimeTurn | undefined,
   ): Promise<void> {
     task.state.turnActive = false;
-    task.input.signal?.removeEventListener("abort", task.abortHandler);
-    turn?.client.clearEventHandlers();
-    const pooled = turn ? await this.finalizeRuntimeTurnRecord(turn) : false;
-    if (!pooled) {
-      await turn?.client.close().catch(() => {});
+    const abortHandlerAttempt = await settleAttempt(() =>
+      task.input.signal?.removeEventListener("abort", task.abortHandler),
+    );
+    const clearHandlersAttempt = await settleAttempt(() => turn?.client.clearEventHandlers());
+    const recordAttempt = await settleAttempt(async () =>
+      turn ? await this.finalizeRuntimeTurnRecord(turn) : false,
+    );
+    const failure = firstFailedAttempt([abortHandlerAttempt, clearHandlersAttempt, recordAttempt]);
+    let pooled = recordAttempt.ok ? recordAttempt.value : false;
+    if (failure) {
+      this.discardRetainedRuntimeTurnClient(turn);
+      pooled = false;
     }
+    await this.closeRuntimeTurnClient(turn, pooled);
+    this.cleanupRuntimeTurn(task, turn);
+    if (failure) {
+      throw failure.error;
+    }
+  }
+
+  private discardRetainedRuntimeTurnClient(turn: RunningRuntimeTurn | undefined): void {
+    if (!turn || this.pendingPersistentClients.get(turn.record.acpxRecordId) !== turn.client) {
+      return;
+    }
+    this.pendingPersistentClients.delete(turn.record.acpxRecordId);
+  }
+
+  private async closeRuntimeTurnClient(
+    turn: RunningRuntimeTurn | undefined,
+    pooled: boolean,
+  ): Promise<void> {
+    if (!turn || pooled) {
+      return;
+    }
+    try {
+      await turn.client.close();
+    } catch {}
+  }
+
+  private cleanupRuntimeTurn(task: RuntimeTurnTask, turn: RunningRuntimeTurn | undefined): void {
     if (turn) {
       this.activeControllers.delete(turn.record.acpxRecordId);
       this.closingActiveRecords.delete(turn.record.acpxRecordId);

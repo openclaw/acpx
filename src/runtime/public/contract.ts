@@ -252,6 +252,11 @@ export interface AcpRuntimeTurn {
   /** Resolves after `connection.prompt()` returns its request promise. */
   readonly promptStarted: Promise<void>;
   readonly events: AsyncIterable<AcpRuntimeEvent>;
+  /**
+   * Canonical completion signal for the turn. Resolves only after final record
+   * checkpoint/persistence and runtime client pooling or close cleanup attempts
+   * have settled.
+   */
   readonly result: Promise<AcpRuntimeTurnResult>;
   cancel(input?: { reason?: string }): Promise<void>;
   closeStream(input?: { reason?: string }): Promise<void>;

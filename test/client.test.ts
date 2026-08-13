@@ -1298,6 +1298,29 @@ test("AcpClient does not report prompt start when the connection is already clos
   assert.equal(reported, false);
 });
 
+test("AcpClient does not submit a prompt after agent exit settles the queued request", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  let promptCalls = 0;
+  let reported = false;
+  internals.connection = {
+    prompt: async () => {
+      promptCalls += 1;
+      return { stopReason: "end_turn" as const };
+    },
+  };
+
+  const pending = client.prompt("session-exited-before-start", "hello", () => {
+    reported = true;
+  });
+  internals.recordAgentExit?.("connection_close", null, null);
+
+  await assert.rejects(pending, AgentDisconnectedError);
+  await Promise.resolve();
+  assert.equal(promptCalls, 0);
+  assert.equal(reported, false);
+});
+
 test("AcpClient reports prompt start when the connection closes while creating the request", async () => {
   const client = makeClient();
   const internals = asInternals(client);

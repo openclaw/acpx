@@ -1888,6 +1888,9 @@ export class AcpClient {
       this.pendingConnectionRequests.add(pending);
       void Promise.resolve()
         .then(async () => {
+          if (pending.settled) {
+            return { started: false as const };
+          }
           const requestCanStart = canStartRequest();
           const request = run();
           if (requestCanStart) {
@@ -1897,10 +1900,14 @@ export class AcpClient {
               // Readiness observation must not own a request that was already submitted.
             }
           }
-          return await request;
+          return { started: true as const, value: await request };
         })
         .then(
-          (value) => finish(() => resolve(value)),
+          (outcome) => {
+            if (outcome.started) {
+              finish(() => resolve(outcome.value));
+            }
+          },
           (error) => finish(() => reject(error)),
         );
     });
