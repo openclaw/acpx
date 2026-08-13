@@ -1227,6 +1227,137 @@ test("AcpClient sends audio prompts when the agent advertises audio support", as
   assert.deepEqual(capturedPrompt, [{ type: "audio", mimeType: "audio/wav", data: "UklGRg==" }]);
 });
 
+test("AcpClient reports prompt start only after the connection request exists", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  const calls: string[] = [];
+  let resolvePrompt!: (value: { stopReason: "end_turn" }) => void;
+  const promptResponse = new Promise<{ stopReason: "end_turn" }>((resolve) => {
+    resolvePrompt = resolve;
+  });
+  let reportStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    reportStarted = resolve;
+  });
+  internals.connection = {
+    prompt: () => {
+      calls.push("prompt");
+      return promptResponse;
+    },
+  };
+
+  const pending = client.prompt("session-start", "hello", () => {
+    calls.push("started");
+    reportStarted();
+  });
+  await started;
+
+  assert.deepEqual(calls, ["prompt", "started"]);
+  assert.equal(client.hasActivePrompt(), true);
+  resolvePrompt({ stopReason: "end_turn" });
+  assert.deepEqual(await pending, { stopReason: "end_turn" });
+});
+
+test("AcpClient does not report prompt start when request creation throws", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  let reported = false;
+  internals.connection = {
+    prompt: () => {
+      throw new Error("request creation failed");
+    },
+  };
+
+  await assert.rejects(
+    client.prompt("session-start-failure", "hello", () => {
+      reported = true;
+    }),
+    /request creation failed/,
+  );
+
+  assert.equal(reported, false);
+});
+
+test("AcpClient does not report prompt start when the connection is already closed", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  let reported = false;
+  const failure = new Error("ACP connection closed");
+  internals.connection = {
+    signal: AbortSignal.abort(failure),
+    prompt: () => Promise.reject(failure),
+  };
+
+  await assert.rejects(
+    client.prompt("session-closed-before-start", "hello", () => {
+      reported = true;
+    }),
+    failure,
+  );
+
+  assert.equal(reported, false);
+});
+
+test("AcpClient does not submit a prompt after agent exit settles the queued request", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  let promptCalls = 0;
+  let reported = false;
+  internals.connection = {
+    prompt: async () => {
+      promptCalls += 1;
+      return { stopReason: "end_turn" as const };
+    },
+  };
+
+  const pending = client.prompt("session-exited-before-start", "hello", () => {
+    reported = true;
+  });
+  internals.recordAgentExit?.("connection_close", null, null);
+
+  await assert.rejects(pending, AgentDisconnectedError);
+  await Promise.resolve();
+  assert.equal(promptCalls, 0);
+  assert.equal(reported, false);
+});
+
+test("AcpClient reports prompt start when the connection closes while creating the request", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  const connection = new AbortController();
+  let reported = false;
+  internals.connection = {
+    signal: connection.signal,
+    prompt: () => {
+      connection.abort(new Error("closed after request creation began"));
+      return Promise.resolve({ stopReason: "end_turn" });
+    },
+  };
+
+  await client.prompt("session-close-during-start", "hello", () => {
+    reported = true;
+  });
+
+  assert.equal(reported, true);
+});
+
+test("AcpClient prompt completion does not depend on prompt start observers", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  internals.connection = {
+    prompt: async () => ({ stopReason: "end_turn" }),
+  };
+
+  await assert.doesNotReject(
+    client.prompt("session-start-observer-failure", "hello", async () => {
+      throw new Error("observer failed");
+    }),
+  );
+  await assert.doesNotReject(
+    client.prompt("session-start-observer-pending", "hello", () => new Promise<void>(() => {})),
+  );
+});
+
 test("AcpClient prompt rejects when the agent disconnects mid-prompt", async () => {
   const client = makeClient();
   const internals = asInternals(client);

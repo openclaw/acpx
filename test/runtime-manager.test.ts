@@ -79,6 +79,7 @@ type FakeClient = {
   prompt: (
     sessionId: string,
     input: unknown,
+    onRequestStarted?: () => Promise<void> | void,
   ) => Promise<{
     stopReason: string;
     usage?: Record<string, unknown>;
@@ -394,6 +395,186 @@ test("AcpRuntimeManager streams runtime events and saves updated status", async 
   assert.equal(saved?.lastPromptAt != null, true);
   assert.equal(saved?.pid, 999);
   assert.equal(saved?.protocolVersion, 1);
+});
+
+test("AcpRuntimeManager resolves promptStarted while the submitted prompt is pending", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "prompt-started-session",
+    acpSessionId: "prompt-started-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let resolvePrompt!: (value: { stopReason: string }) => void;
+  const promptResponse = new Promise<{ stopReason: string }>((resolve) => {
+    resolvePrompt = resolve;
+  });
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => true,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async (
+            _sessionId: string,
+            _input: unknown,
+            onRequestStarted?: () => Promise<void> | void,
+          ) => {
+            await onRequestStarted?.();
+            return await promptResponse;
+          },
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  const turn = manager.startTurn({
+    handle: createHandle("prompt-started-session"),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-prompt-started",
+  });
+
+  await turn.promptStarted;
+  resolvePrompt({ stopReason: "end_turn" });
+  assert.deepEqual(await turn.result, { status: "completed", stopReason: "end_turn" });
+});
+
+test("AcpRuntimeManager rejects promptStarted when the turn fails before submission", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "prompt-not-started-session",
+    acpSessionId: "prompt-not-started-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {
+            throw new Error("connect failed");
+          },
+          close: async () => {},
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: false }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  const turn = manager.startTurn({
+    handle: createHandle("prompt-not-started-session"),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-prompt-not-started",
+  });
+
+  await assert.rejects(turn.promptStarted, /connect failed/);
+  assert.equal((await turn.result).status, "failed");
+});
+
+test("AcpRuntimeManager rejects promptStarted when cancelled before submission", async () => {
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: new InMemorySessionStore() }),
+  );
+  const controller = new AbortController();
+  controller.abort();
+
+  const turn = manager.startTurn({
+    handle: createHandle("prompt-cancelled-session"),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-prompt-cancelled",
+    signal: controller.signal,
+  });
+
+  await assert.rejects(turn.promptStarted, /cancelled before prompt submission/);
+  assert.deepEqual(await turn.result, { status: "cancelled", stopReason: "cancelled" });
+});
+
+test("AcpRuntimeManager keeps promptStarted resolved when submission later fails", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "prompt-failed-session",
+    acpSessionId: "prompt-failed-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => true,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async (
+            _sessionId: string,
+            _input: unknown,
+            onRequestStarted?: () => Promise<void> | void,
+          ) => {
+            await onRequestStarted?.();
+            throw new Error("prompt failed after submission");
+          },
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  const turn = manager.startTurn({
+    handle: createHandle("prompt-failed-session"),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-prompt-failed",
+  });
+
+  await turn.promptStarted;
+  const result = await turn.result;
+  assert.equal(result.status, "failed");
+  if (result.status === "failed") {
+    assert.match(result.error.message, /prompt failed after submission/);
+  }
 });
 
 test("AcpRuntimeManager persists prompt response usage and surfaces it in status", async () => {
@@ -1953,6 +2134,7 @@ test("AcpRuntimeManager honors aborts requested before prompt starts after onesh
   await new Promise((resolve) => setTimeout(resolve, 0));
   controller.abort();
   resolveLoadFailure();
+  await assert.rejects(turn.promptStarted, /cancelled before prompt submission/);
   const events = await eventsPromise;
   const result = await turn.result;
 

@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import type { PromptInput } from "../src/prompt-content.js";
 import { runPromptTurn } from "../src/runtime/engine/prompt-turn.js";
 import {
   createSessionConversation,
@@ -5382,6 +5383,48 @@ test("runPromptTurn: post-success drain runs before closing the turn", async () 
     ["prompt", "drain(1000/5000)"],
     "post-success drain must run before runPromptTurn returns",
   );
+});
+
+test("runPromptTurn: request readiness does not replace the awaited prompt lifecycle barrier", async () => {
+  const calls: string[] = [];
+  let releaseLifecycleBarrier: () => void = () => {};
+  const lifecycleBarrier = new Promise<void>((resolve) => {
+    releaseLifecycleBarrier = resolve;
+  });
+  const client = {
+    prompt: async (
+      _sessionId: string,
+      _prompt: PromptInput | string,
+      onRequestStarted?: () => Promise<void> | void,
+    ) => {
+      calls.push("prompt");
+      await onRequestStarted?.();
+      return { stopReason: "end_turn" as const };
+    },
+  };
+
+  const conversation = createSessionConversation();
+  const pending = runPromptTurn({
+    client,
+    sessionId: "session-prompt-barrier",
+    prompt: "hello",
+    conversation,
+    onPromptRequestStarted: () => {
+      calls.push("request-started");
+    },
+    onPromptStarted: async () => {
+      calls.push("lifecycle-started");
+      await lifecycleBarrier;
+      calls.push("lifecycle-released");
+    },
+  });
+
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls, ["prompt", "request-started", "lifecycle-started"]);
+
+  releaseLifecycleBarrier();
+  await pending;
+  assert.deepEqual(calls, ["prompt", "request-started", "lifecycle-started", "lifecycle-released"]);
 });
 
 test("runPromptTurn: prompt response usage is recorded after usage update drain", async () => {

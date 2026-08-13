@@ -42,7 +42,7 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
 
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.0.10
         with:
           version: ${{ env.PNPM_VERSION }}
 

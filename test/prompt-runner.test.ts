@@ -228,6 +228,54 @@ test("runSessionSetConfigOptionDirect promotes a custom model config preference"
   });
 });
 
+test("runSessionSetConfigOptionDirect re-applies pinned model after reconnect", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    // Simulate a prior session pinned to smart-model. On reconnect the mock
+    // agent creates a fresh in-process session at default-model (new process).
+    const record = makeSessionRecord({
+      acpxRecordId: "prompt-runner-pinned-model-set",
+      acpSessionId: "prompt-runner-pinned-model-set-session",
+      agentCommand: `node ${JSON.stringify(MOCK_AGENT_PATH)} --supports-load-session --advertise-models --model-config-id model`,
+      cwd,
+      closed: true,
+      closedAt: "2026-01-01T00:05:00.000Z",
+      acpx: {
+        current_model_id: "smart-model",
+        session_options: {
+          model: "smart-model",
+        },
+      },
+    });
+    await writeSessionRecord(homeDir, record);
+
+    const result = await runSessionSetConfigOptionDirect({
+      sessionRecordId: record.acpxRecordId,
+      configId: "reasoning_effort",
+      value: "high",
+      timeoutMs: 5_000,
+    });
+
+    assert.equal(result.resumed, true);
+    assert.equal(result.record.acpx?.current_model_id, "smart-model");
+    assert.equal(result.record.acpx?.session_options?.model, "smart-model");
+    assert.equal(
+      result.record.acpx?.config_options?.find((option) => option.id === "model")?.currentValue,
+      "smart-model",
+    );
+    assert.equal(
+      result.record.acpx?.config_options?.find((option) => option.id === "reasoning_effort")
+        ?.currentValue,
+      "high",
+    );
+    assert.deepEqual(result.record.acpx?.desired_config_options, {
+      reasoning_effort: "high",
+    });
+  });
+});
+
 test("runSessionSetModelDirect updates current and desired model", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");

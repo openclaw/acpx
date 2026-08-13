@@ -1047,7 +1047,11 @@ export class AcpClient {
     this.suppressReplaySessionUpdateMessages = previous.suppressReplaySessionUpdateMessages;
   }
 
-  async prompt(sessionId: string, prompt: PromptInput | string): Promise<PromptResponse> {
+  async prompt(
+    sessionId: string,
+    prompt: PromptInput | string,
+    onRequestStarted?: () => Promise<void> | void,
+  ): Promise<PromptResponse> {
     const connection = this.getConnection();
     const normalizedPrompt = this.normalizePromptForAgent(prompt);
     const restoreConsoleError = this.options.suppressSdkConsoleErrors
@@ -1056,11 +1060,14 @@ export class AcpClient {
 
     let promptPromise: Promise<PromptResponse>;
     try {
-      promptPromise = this.runConnectionRequest(() =>
-        connection.prompt({
-          sessionId,
-          prompt: normalizedPrompt,
-        }),
+      promptPromise = this.runConnectionRequest(
+        () =>
+          connection.prompt({
+            sessionId,
+            prompt: normalizedPrompt,
+          }),
+        onRequestStarted,
+        () => !connection.signal?.aborted,
       );
     } catch (error) {
       restoreConsoleError?.();
@@ -1858,7 +1865,11 @@ export class AcpClient {
     return error;
   }
 
-  private async runConnectionRequest<T>(run: () => Promise<T>): Promise<T> {
+  private async runConnectionRequest<T>(
+    run: () => Promise<T>,
+    onRequestStarted?: () => Promise<void> | void,
+    canStartRequest: () => boolean = () => true,
+  ): Promise<T> {
     return await new Promise<T>((resolve, reject) => {
       const pending: PendingConnectionRequest = {
         settled: false,
@@ -1876,9 +1887,27 @@ export class AcpClient {
 
       this.pendingConnectionRequests.add(pending);
       void Promise.resolve()
-        .then(run)
+        .then(async () => {
+          if (pending.settled) {
+            return { started: false as const };
+          }
+          const requestCanStart = canStartRequest();
+          const request = run();
+          if (requestCanStart) {
+            try {
+              void Promise.resolve(onRequestStarted?.()).catch(() => {});
+            } catch {
+              // Readiness observation must not own a request that was already submitted.
+            }
+          }
+          return { started: true as const, value: await request };
+        })
         .then(
-          (value) => finish(() => resolve(value)),
+          (outcome) => {
+            if (outcome.started) {
+              finish(() => resolve(outcome.value));
+            }
+          },
           (error) => finish(() => reject(error)),
         );
     });
