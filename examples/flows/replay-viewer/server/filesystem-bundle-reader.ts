@@ -1,15 +1,16 @@
-import fs from "node:fs/promises";
 import type { BundleReader } from "../src/lib/bundle-reader.js";
 import type { RunBundleSummary } from "../src/types.js";
-import { resolveRunBundleFilePath } from "./run-bundles.js";
+import {
+  readRunBundleFile as readContainedRunBundleFile,
+  readRunBundleTextFile,
+} from "./run-bundles.js";
 
 export function createFilesystemBundleReader(
   runsDir: string,
   run: Pick<RunBundleSummary, "runId">,
 ): BundleReader {
   async function readText(relativePath: string): Promise<string> {
-    const filePath = await resolveRunBundleFilePath(runsDir, run.runId, relativePath);
-    return fs.readFile(filePath, "utf8");
+    return await readRunBundleTextFile(runsDir, run.runId, relativePath);
   }
 
   return {
@@ -28,6 +29,5 @@ export async function readBundleFile(
   runId: string,
   relativePath: string,
 ): Promise<Buffer> {
-  const filePath = await resolveRunBundleFilePath(runsDir, runId, relativePath);
-  return fs.readFile(filePath);
+  return await readContainedRunBundleFile(runsDir, runId, relativePath);
 }

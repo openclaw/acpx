@@ -1,4 +1,5 @@
-import fs from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import fs, { type FileHandle } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { mergeLiveRunState } from "../src/lib/run-state.js";
@@ -77,23 +78,73 @@ export async function resolveRunBundleFilePath(
   return realPath;
 }
 
+export async function readRunBundleTextFile(
+  runsDir: string,
+  runId: string,
+  relativePath: string,
+): Promise<string> {
+  const file = await openContainedRunBundleFile(runsDir, runId, relativePath);
+  try {
+    return await file.readFile("utf8");
+  } finally {
+    await file.close();
+  }
+}
+
+export async function readRunBundleFile(
+  runsDir: string,
+  runId: string,
+  relativePath: string,
+): Promise<Buffer> {
+  const file = await openContainedRunBundleFile(runsDir, runId, relativePath);
+  try {
+    return await file.readFile();
+  } finally {
+    await file.close();
+  }
+}
+
+async function openContainedRunBundleFile(
+  runsDir: string,
+  runId: string,
+  relativePath: string,
+): Promise<FileHandle> {
+  const checkedPath = await resolveRunBundleFilePath(runsDir, runId, relativePath);
+  const realRunDir = await fs.realpath(path.resolve(runsDir, runId));
+  const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+  const file = await fs.open(checkedPath, fsConstants.O_RDONLY | noFollow);
+  try {
+    const [openedStat, currentPath] = await Promise.all([
+      file.stat(),
+      fs.realpath(path.resolve(runsDir, runId, normalizeRelativePath(relativePath))),
+    ]);
+    if (!isPathInsideDirectory(realRunDir, currentPath)) {
+      throw new Error(`Refusing to read outside run bundle: ${relativePath}`);
+    }
+    const currentStat = await fs.stat(currentPath);
+    if (openedStat.dev !== currentStat.dev || openedStat.ino !== currentStat.ino) {
+      throw new Error(`Refusing changed run bundle path: ${relativePath}`);
+    }
+    return file;
+  } catch (error) {
+    await file.close();
+    throw error;
+  }
+}
+
 async function readRunBundleSummary(runsDir: string, runId: string): Promise<RunBundleSummary> {
   const runDir = path.join(runsDir, runId);
   const manifest = JSON.parse(
-    await fs.readFile(await resolveRunBundleFilePath(runsDir, runId, "manifest.json"), "utf8"),
+    await readRunBundleTextFile(runsDir, runId, "manifest.json"),
   ) as FlowRunManifest;
   // The manifest is bundle-controlled data, so its projection paths are
   // constrained to the run bundle before being read. Otherwise a crafted
   // manifest could point runProjection/liveProjection at an arbitrary file
   // outside the bundle (e.g. "../../../etc/passwd") during listRunBundles.
   const run = JSON.parse(
-    await fs.readFile(
-      await resolveRunBundleFilePath(runsDir, runId, manifest.paths.runProjection),
-      "utf8",
-    ),
+    await readRunBundleTextFile(runsDir, runId, manifest.paths.runProjection),
   ) as FlowRunState;
-  const live = await resolveRunBundleFilePath(runsDir, runId, manifest.paths.liveProjection)
-    .then(async (filePath) => await fs.readFile(filePath, "utf8"))
+  const live = await readRunBundleTextFile(runsDir, runId, manifest.paths.liveProjection)
     .then((text) => JSON.parse(text) as Partial<FlowRunState>)
     .catch(() => null);
   const mergedRun = mergeLiveRunState(run, live);
