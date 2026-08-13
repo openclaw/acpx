@@ -721,3 +721,143 @@ test("parsePromptEventLine surfaces full availableCommands list with hasInput fl
     },
   );
 });
+
+test("parsePromptEventLine preserves messageId and allowlisted _meta on agent_message_chunk text_delta", () => {
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        sessionUpdate: "agent_message_chunk",
+        messageId: "msg_assistant_1",
+        _meta: {
+          origin: "assistant",
+          kind: "model",
+          source: "codex-acp",
+          // nested objects and unknown keys are dropped
+          nested: { source: "codex-acp" },
+          dropList: ["nope"],
+        },
+        content: { type: "text", text: "hello from model" },
+      }),
+    ),
+    {
+      type: "text_delta",
+      text: "hello from model",
+      stream: "output",
+      tag: "agent_message_chunk",
+      messageId: "msg_assistant_1",
+      meta: {
+        origin: "assistant",
+        kind: "model",
+        source: "codex-acp",
+      },
+    },
+  );
+
+  // Diagnostic-shaped chunk: same tag, different origin metadata
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        sessionUpdate: "agent_message_chunk",
+        messageId: "msg_diag_1",
+        _meta: { origin: "adapter", kind: "diagnostic" },
+        content: { type: "text", text: "warning: tool timeout" },
+      }),
+    ),
+    {
+      type: "text_delta",
+      text: "warning: tool timeout",
+      stream: "output",
+      tag: "agent_message_chunk",
+      messageId: "msg_diag_1",
+      meta: { origin: "adapter", kind: "diagnostic" },
+    },
+  );
+});
+
+test("parsePromptEventLine drops unknown and secret-like _meta keys from text_delta", () => {
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        sessionUpdate: "agent_message_chunk",
+        messageId: "msg_sec_1",
+        _meta: {
+          origin: "assistant",
+          kind: "model",
+          apiKey: "redacted",
+          authorization: "redacted",
+          token: "redacted",
+          internalUrl: "https://internal.example/diagnostics",
+          nested: { apiKey: "redacted" },
+        },
+        content: { type: "text", text: "safe body" },
+      }),
+    ),
+    {
+      type: "text_delta",
+      text: "safe body",
+      stream: "output",
+      tag: "agent_message_chunk",
+      messageId: "msg_sec_1",
+      meta: { origin: "assistant", kind: "model" },
+    },
+  );
+});
+
+test("parsePromptEventLine omits origin fields when messageId/_meta are absent or empty", () => {
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        sessionUpdate: "agent_message_chunk",
+        messageId: "   ",
+        _meta: {},
+        content: { type: "text", text: "plain" },
+      }),
+    ),
+    {
+      type: "text_delta",
+      text: "plain",
+      stream: "output",
+      tag: "agent_message_chunk",
+    },
+  );
+});
+
+test("parsePromptEventLine ignores non-ACP message_id and meta aliases", () => {
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        sessionUpdate: "agent_message_chunk",
+        message_id: "msg_snake",
+        meta: { origin: "assistant" },
+        content: { type: "text", text: "aliased" },
+      }),
+    ),
+    {
+      type: "text_delta",
+      text: "aliased",
+      stream: "output",
+      tag: "agent_message_chunk",
+    },
+  );
+});
+
+test("parsePromptEventLine preserves origin on agent_thought_chunk", () => {
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        sessionUpdate: "agent_thought_chunk",
+        messageId: "thought_1",
+        _meta: { origin: "assistant" },
+        content: { type: "text", text: "reasoning" },
+      }),
+    ),
+    {
+      type: "text_delta",
+      text: "reasoning",
+      stream: "thought",
+      tag: "agent_thought_chunk",
+      messageId: "thought_1",
+      meta: { origin: "assistant" },
+    },
+  );
+});
