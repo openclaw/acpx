@@ -1342,9 +1342,9 @@ export class AcpRuntimeManager {
     turn.record.acpx = turn.acpxState;
     applyConversation(turn.record, turn.conversation);
     turn.record.lastUsedAt = isoNow();
-    await turn.liveCheckpoint.flush().catch(() => {});
+    await turn.liveCheckpoint.flush();
     const closed = await this.refreshClosedState(turn.record);
-    await this.options.sessionStore.save(turn.record).catch(() => {});
+    await this.options.sessionStore.save(turn.record);
     if (closed) {
       return false;
     }
