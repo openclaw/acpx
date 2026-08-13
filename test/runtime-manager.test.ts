@@ -12,6 +12,7 @@ import {
 import type {
   AcpRuntimeEvent,
   AcpRuntimeHandle,
+  AcpSessionRecord,
   AcpRuntimeTurn,
   AcpRuntimeTurnResult,
 } from "../src/runtime/public/contract.js";
@@ -2473,6 +2474,190 @@ test("AcpRuntimeManager maps audio attachments into ACP prompt blocks", async ()
     { type: "text", text: "transcribe" },
     { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
   ]);
+});
+
+test("AcpRuntimeManager keeps failed reconnect results pending until PID persistence and client cleanup complete", async () => {
+  const runtimePid = 424_242;
+  let releaseFinalSave!: () => void;
+  const finalSaveGate = new Promise<void>((resolve) => {
+    releaseFinalSave = resolve;
+  });
+  let signalFinalSaveStarted!: () => void;
+  const finalSaveStarted = new Promise<void>((resolve) => {
+    signalFinalSaveStarted = resolve;
+  });
+  let finalSaveBlocked = false;
+  class LeaseRaceSessionStore extends InMemorySessionStore {
+    override async save(record: AcpSessionRecord): Promise<void> {
+      if (record.pid === runtimePid && !finalSaveBlocked) {
+        finalSaveBlocked = true;
+        signalFinalSaveStarted();
+        await finalSaveGate;
+      }
+      await super.save(record);
+    }
+  }
+
+  const record = makeSessionRecord({
+    acpxRecordId: "failed-reconnect-lease-session",
+    acpSessionId: "stale-backend-session",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+    pid: 2_147_483_647,
+  });
+  const store = new LeaseRaceSessionStore([record]);
+  let clientCloseCompleted = false;
+  let promptCalled = false;
+  const client: FakeClient = {
+    start: async () => {},
+    close: async () => {
+      clientCloseCompleted = true;
+    },
+    createSession: async () => ({ sessionId: "unused" }),
+    loadSession: async () => ({ agentSessionId: "unused" }),
+    hasReusableSession: () => false,
+    supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
+    loadSessionWithOptions: async () => {
+      throw new Error("saved session cannot be loaded");
+    },
+    getAgentLifecycleSnapshot: () => ({
+      pid: runtimePid,
+      startedAt: "2026-01-01T00:01:00.000Z",
+      running: true,
+    }),
+    prompt: async () => {
+      promptCalled = true;
+      return { stopReason: "end_turn" };
+    },
+    requestCancelActivePrompt: async () => false,
+    hasActivePrompt: () => false,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {},
+    setEventHandlers: () => {},
+  };
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    { clientFactory: () => client as never },
+  );
+
+  const turn = manager.startTurn({
+    handle: createHandle("failed-reconnect-lease-session"),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-failed-reconnect-lease",
+  });
+  const eventsPromise = collectEvents(turn.events);
+  let resultSettled = false;
+  let persistedPidAtResult: number | undefined;
+  let clientClosedAtResult = false;
+  const resultPromise = turn.result.then((result) => {
+    resultSettled = true;
+    persistedPidAtResult = store.records.get(record.acpxRecordId)?.pid;
+    clientClosedAtResult = clientCloseCompleted;
+    return result;
+  });
+
+  await finalSaveStarted;
+  await Promise.resolve();
+  assert.equal(resultSettled, false);
+  releaseFinalSave();
+
+  const result = await resultPromise;
+  assert.deepEqual(result, {
+    status: "failed",
+    error: {
+      code: "RUNTIME",
+      detailCode: "SESSION_RESUME_REQUIRED",
+      message:
+        "Persistent ACP session stale-backend-session could not be resumed: saved session cannot be loaded",
+      retryable: true,
+    },
+  });
+  assert.deepEqual(await eventsPromise, []);
+  assert.equal(promptCalled, false);
+  assert.equal(persistedPidAtResult, runtimePid);
+  assert.equal(clientClosedAtResult, true);
+});
+
+test("AcpRuntimeManager closes the stream and client before reporting an unexpected finalization failure", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "finalization-failure-session:oneshot:1",
+    acpSessionId: "finalization-failure-backend-session",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let signalFinalizationHookReached!: () => void;
+  const finalizationHookReached = new Promise<void>((resolve) => {
+    signalFinalizationHookReached = resolve;
+  });
+  let closeCalls = 0;
+  const client: FakeClient = {
+    start: async () => {},
+    close: async () => {
+      closeCalls += 1;
+    },
+    createSession: async () => ({ sessionId: "unused" }),
+    loadSession: async () => ({ agentSessionId: "unused" }),
+    hasReusableSession: () => false,
+    supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
+    loadSessionWithOptions: async () => ({ agentSessionId: "finalization-failure-agent" }),
+    getAgentLifecycleSnapshot: () => ({ running: true }),
+    prompt: async () => ({ stopReason: "end_turn" }),
+    requestCancelActivePrompt: async () => false,
+    hasActivePrompt: () => false,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {
+      signalFinalizationHookReached();
+      throw new Error("finalization hook exploded");
+    },
+    setEventHandlers: () => {},
+  };
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    { clientFactory: () => client as never },
+  );
+
+  const turn = manager.startTurn({
+    handle: createHandle(record.acpxRecordId),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "oneshot",
+    requestId: "req-finalization-failure",
+  });
+  let eventStreamClosed = false;
+  const eventsPromise = collectEvents(turn.events).then((events) => {
+    eventStreamClosed = true;
+    return events;
+  });
+  let resultSettled = false;
+  let clientClosedAtResult = false;
+  const resultPromise = turn.result.then((result) => {
+    resultSettled = true;
+    clientClosedAtResult = closeCalls === 1;
+    return result;
+  });
+
+  await finalizationHookReached;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(eventStreamClosed, true);
+  assert.equal(resultSettled, true);
+
+  assert.deepEqual(await eventsPromise, []);
+  assert.deepEqual(await resultPromise, {
+    status: "failed",
+    error: {
+      code: "RUNTIME",
+      message: "finalization hook exploded",
+    },
+  });
+  assert.equal(closeCalls, 1);
+  assert.equal(clientClosedAtResult, true);
 });
 
 test("AcpRuntimeManager fails persistent turns clearly when session reuse is unavailable", async () => {
