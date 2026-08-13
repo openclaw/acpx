@@ -15,6 +15,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Runtime/embedding: settle turn results only after lifecycle persistence and client cleanup attempts finish, including unexpected finalization failures.
+- Replay viewer: contain manifest-selected projection reads within their run bundle, including symlink targets. Thanks @bunlongheng.
 
 ## 2026.7.27 (v0.13.0)
 

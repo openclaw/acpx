@@ -45,11 +45,11 @@ export async function listRunBundles(
     });
 }
 
-export function resolveRunBundleFilePath(
+export async function resolveRunBundleFilePath(
   runsDir: string,
   runId: string,
   relativePath: string,
-): string {
+): Promise<string> {
   const normalizedRelativePath = normalizeRelativePath(relativePath);
   const resolvedRunsDir = path.resolve(runsDir);
   const runDir = path.resolve(resolvedRunsDir, runId);
@@ -62,13 +62,25 @@ export function resolveRunBundleFilePath(
     throw new Error(`Refusing to read outside run bundle: ${relativePath}`);
   }
 
-  return resolvedPath;
+  const [realRunsDir, realRunDir, realPath] = await Promise.all([
+    fs.realpath(resolvedRunsDir),
+    fs.realpath(runDir),
+    fs.realpath(resolvedPath),
+  ]);
+  if (!isPathInsideDirectory(realRunsDir, realRunDir, { allowSamePath: false })) {
+    throw new Error(`Refusing to read run bundle outside runs directory: ${runId}`);
+  }
+  if (!isPathInsideDirectory(realRunDir, realPath)) {
+    throw new Error(`Refusing to read outside run bundle: ${relativePath}`);
+  }
+
+  return realPath;
 }
 
 async function readRunBundleSummary(runsDir: string, runId: string): Promise<RunBundleSummary> {
   const runDir = path.join(runsDir, runId);
   const manifest = JSON.parse(
-    await fs.readFile(path.join(runDir, "manifest.json"), "utf8"),
+    await fs.readFile(await resolveRunBundleFilePath(runsDir, runId, "manifest.json"), "utf8"),
   ) as FlowRunManifest;
   // The manifest is bundle-controlled data, so its projection paths are
   // constrained to the run bundle before being read. Otherwise a crafted
@@ -76,12 +88,12 @@ async function readRunBundleSummary(runsDir: string, runId: string): Promise<Run
   // outside the bundle (e.g. "../../../etc/passwd") during listRunBundles.
   const run = JSON.parse(
     await fs.readFile(
-      resolveRunBundleFilePath(runsDir, runId, manifest.paths.runProjection),
+      await resolveRunBundleFilePath(runsDir, runId, manifest.paths.runProjection),
       "utf8",
     ),
   ) as FlowRunState;
-  const live = await fs
-    .readFile(resolveRunBundleFilePath(runsDir, runId, manifest.paths.liveProjection), "utf8")
+  const live = await resolveRunBundleFilePath(runsDir, runId, manifest.paths.liveProjection)
+    .then(async (filePath) => await fs.readFile(filePath, "utf8"))
     .then((text) => JSON.parse(text) as Partial<FlowRunState>)
     .catch(() => null);
   const mergedRun = mergeLiveRunState(run, live);

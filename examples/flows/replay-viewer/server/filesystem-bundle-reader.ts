@@ -8,7 +8,7 @@ export function createFilesystemBundleReader(
   run: Pick<RunBundleSummary, "runId">,
 ): BundleReader {
   async function readText(relativePath: string): Promise<string> {
-    const filePath = resolveRunBundleFilePath(runsDir, run.runId, relativePath);
+    const filePath = await resolveRunBundleFilePath(runsDir, run.runId, relativePath);
     return fs.readFile(filePath, "utf8");
   }
 
@@ -28,6 +28,6 @@ export async function readBundleFile(
   runId: string,
   relativePath: string,
 ): Promise<Buffer> {
-  const filePath = resolveRunBundleFilePath(runsDir, runId, relativePath);
+  const filePath = await resolveRunBundleFilePath(runsDir, runId, relativePath);
   return fs.readFile(filePath);
 }

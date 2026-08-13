@@ -109,19 +109,98 @@ test("listRunBundles ignores bundles whose manifest paths escape the bundle", as
   }
 });
 
-test("resolveRunBundleFilePath rejects traversal outside a run bundle", () => {
+test("listRunBundles ignores bundles whose projection symlink escapes the bundle", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-list-symlink-"));
+  const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-outside-"));
+
+  try {
+    const runId = "2026-03-27T100000000Z-symlink";
+    const runDir = path.join(runsDir, runId);
+    const outsideFile = path.join(outsideDir, "outside.json");
+    await fs.mkdir(path.join(runDir, "projections"), { recursive: true });
+    await fs.writeFile(outsideFile, JSON.stringify({ runTitle: "leaked", status: "completed" }));
+    await fs.symlink(outsideFile, path.join(runDir, "projections", "run.json"));
+    await fs.writeFile(
+      path.join(runDir, "manifest.json"),
+      JSON.stringify({
+        schema: "acpx.flow-run-bundle.v1",
+        runId,
+        flowName: "flow-symlink",
+        startedAt: "2026-03-27T10:00:00.000Z",
+        status: "completed",
+        traceSchema: "acpx.flow-trace-event.v1",
+        paths: {
+          flow: "flow.json",
+          trace: "trace.ndjson",
+          runProjection: "projections/run.json",
+          liveProjection: "projections/live.json",
+          stepsProjection: "projections/steps.json",
+          sessionsDir: "sessions",
+          artifactsDir: "artifacts",
+        },
+        sessions: [],
+      }),
+    );
+
+    assert.deepEqual(await listRunBundles(runsDir), []);
+  } finally {
+    await fs.rm(runsDir, { recursive: true, force: true });
+    await fs.rm(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test("listRunBundles ignores bundles whose manifest symlink escapes the bundle", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-manifest-symlink-"));
+  const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-manifest-outside-"));
+
+  try {
+    const runId = "2026-03-27T110000000Z-manifest-symlink";
+    const runDir = path.join(runsDir, runId);
+    const outsideManifest = path.join(outsideDir, "manifest.json");
+    await fs.mkdir(runDir, { recursive: true });
+    await fs.writeFile(
+      outsideManifest,
+      JSON.stringify({
+        schema: "acpx.flow-run-bundle.v1",
+        runId,
+        flowName: "flow-manifest-symlink",
+        startedAt: "2026-03-27T11:00:00.000Z",
+        status: "completed",
+        traceSchema: "acpx.flow-trace-event.v1",
+        paths: {
+          flow: "flow.json",
+          trace: "trace.ndjson",
+          runProjection: "projections/run.json",
+          liveProjection: "projections/live.json",
+          stepsProjection: "projections/steps.json",
+          sessionsDir: "sessions",
+          artifactsDir: "artifacts",
+        },
+        sessions: [],
+      }),
+    );
+    await fs.symlink(outsideManifest, path.join(runDir, "manifest.json"));
+
+    assert.deepEqual(await listRunBundles(runsDir), []);
+  } finally {
+    await fs.rm(runsDir, { recursive: true, force: true });
+    await fs.rm(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveRunBundleFilePath rejects traversal outside a run bundle", async () => {
   const runsDir = path.join(os.tmpdir(), "acpx-run-list");
 
-  assert.throws(
-    () => resolveRunBundleFilePath(runsDir, "run-id", "../manifest.json"),
+  await assert.rejects(
+    resolveRunBundleFilePath(runsDir, "run-id", "../manifest.json"),
     /not allowed/,
   );
-  assert.throws(
-    () => resolveRunBundleFilePath(runsDir, "run-id", "/tmp/manifest.json"),
+  await assert.rejects(
+    resolveRunBundleFilePath(runsDir, "run-id", "/tmp/manifest.json"),
     /not allowed/,
   );
-  assert.throws(
-    () => resolveRunBundleFilePath(runsDir, "../sessions", "session.json"),
+  await assert.rejects(
+    resolveRunBundleFilePath(runsDir, "../sessions", "session.json"),
     /outside runs directory/,
   );
 });
