@@ -162,11 +162,51 @@ test("replay viewer blocks file reads that escape the runs directory via runId",
     const response = await fetch(
       `${viewerServer.baseUrl}/api/runs/..%2F..%2Fsessions/files/session-secret.json`,
     );
-    assert.equal(response.status, 400);
-    assert.deepEqual(await response.json(), { error: "Invalid run bundle file request" });
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), { error: "Run bundle file not found" });
   } finally {
     await viewerServer.close().catch(() => {});
     await fs.rm(fakeHome, { recursive: true, force: true });
+  }
+});
+
+test("replay viewer does not reveal whether a denied symlink target exists", async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-symlink-oracle-"));
+  const runsDir = path.join(rootDir, "runs");
+  const outsideDir = path.join(rootDir, "outside");
+  const runDir = path.join(runsDir, "hostile");
+  await fs.mkdir(runDir, { recursive: true });
+  await fs.mkdir(outsideDir, { recursive: true });
+  await fs.writeFile(path.join(outsideDir, "exists.txt"), "secret");
+  await fs.symlink(path.join(outsideDir, "exists.txt"), path.join(runDir, "existing-link"));
+  await fs.symlink(path.join(outsideDir, "missing.txt"), path.join(runDir, "missing-link"));
+
+  const viewerServer = await createReplayViewerServer({
+    host: "127.0.0.1",
+    port: 0,
+    runsDir,
+    disableDependencyOptimization: true,
+  });
+
+  try {
+    const responses = await Promise.all(
+      ["existing-link", "missing-link", "ordinary-missing"].map(async (name) => {
+        const response = await fetch(`${viewerServer.baseUrl}/api/runs/hostile/files/${name}`);
+        return {
+          status: response.status,
+          body: await response.json(),
+        };
+      }),
+    );
+
+    assert.deepEqual(responses, [
+      { status: 404, body: { error: "Run bundle file not found" } },
+      { status: 404, body: { error: "Run bundle file not found" } },
+      { status: 404, body: { error: "Run bundle file not found" } },
+    ]);
+  } finally {
+    await viewerServer.close().catch(() => {});
+    await fs.rm(rootDir, { recursive: true, force: true });
   }
 });
 

@@ -493,6 +493,38 @@ test("AcpClient partial runtime option updates preserve permission policy", asyn
   });
 });
 
+test("AcpClient snapshots permission policies at configuration boundaries", async () => {
+  const initialPolicy = {
+    autoDeny: ["execute"],
+  };
+  const client = makeClient({
+    permissionMode: "approve-all",
+    permissionPolicy: initialPolicy,
+  });
+
+  initialPolicy.autoDeny.splice(0, 1);
+  const deniedFromInitialSnapshot = await asInternals(client).handlePermissionRequest?.(
+    makePermissionRequest("session-policy-snapshot-1", "execute"),
+  );
+  assert.equal(deniedFromInitialSnapshot?.outcome.outcome, "selected");
+  if (deniedFromInitialSnapshot?.outcome.outcome === "selected") {
+    assert.equal(deniedFromInitialSnapshot.outcome.optionId, "reject");
+  }
+
+  const updatedPolicy = {
+    autoDeny: ["execute"],
+  };
+  client.updateRuntimeOptions({ permissionPolicy: updatedPolicy });
+  updatedPolicy.autoDeny.splice(0, 1);
+  const deniedFromUpdatedSnapshot = await asInternals(client).handlePermissionRequest?.(
+    makePermissionRequest("session-policy-snapshot-2", "execute"),
+  );
+  assert.equal(deniedFromUpdatedSnapshot?.outcome.outcome, "selected");
+  if (deniedFromUpdatedSnapshot?.outcome.outcome === "selected") {
+    assert.equal(deniedFromUpdatedSnapshot.outcome.optionId, "reject");
+  }
+});
+
 test("AcpClient onPermissionRequest decision short-circuits the mode-based resolver", async () => {
   let callbackInvocations = 0;
   const client = makeClient({

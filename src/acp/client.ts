@@ -236,6 +236,20 @@ type PendingConnectionRequest = {
   reject: (error: unknown) => void;
 };
 
+function snapshotPermissionPolicy(
+  policy: AcpClientOptions["permissionPolicy"],
+): AcpClientOptions["permissionPolicy"] {
+  if (!policy) {
+    return undefined;
+  }
+  return {
+    ...(policy.autoApprove ? { autoApprove: [...policy.autoApprove] } : {}),
+    ...(policy.autoDeny ? { autoDeny: [...policy.autoDeny] } : {}),
+    ...(policy.escalate ? { escalate: [...policy.escalate] } : {}),
+    ...(policy.defaultAction ? { defaultAction: policy.defaultAction } : {}),
+  };
+}
+
 type AuthSelection = {
   methodId: string;
   credential?: string;
@@ -453,6 +467,7 @@ export class AcpClient {
       ...options,
       cwd: asAbsoluteCwd(options.cwd),
       authPolicy: options.authPolicy ?? "skip",
+      permissionPolicy: snapshotPermissionPolicy(options.permissionPolicy),
     };
     this.eventHandlers = {
       onAcpMessage: this.options.onAcpMessage,
@@ -554,7 +569,7 @@ export class AcpClient {
       this.options.nonInteractivePermissions = options.nonInteractivePermissions;
     }
     if (Object.prototype.hasOwnProperty.call(options, "permissionPolicy")) {
-      this.options.permissionPolicy = options.permissionPolicy;
+      this.options.permissionPolicy = snapshotPermissionPolicy(options.permissionPolicy);
     }
     this.updateClientCapabilityPreferences(options);
     this.refreshRuntimePermissionPolicy(shouldRefreshPermissionPolicy);

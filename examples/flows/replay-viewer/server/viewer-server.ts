@@ -188,14 +188,9 @@ export async function handleApiRequest(
       response.statusCode = 200;
       response.setHeader("content-type", contentTypeFor(relativePath ?? ""));
       response.end(payload);
-    } catch (error) {
-      const code =
-        error instanceof Error &&
-        /outside run bundle|outside runs directory|not allowed|required/.test(error.message)
-          ? 400
-          : 404;
-      writeJson(response, code, {
-        error: code === 400 ? "Invalid run bundle file request" : "Run bundle file not found",
+    } catch {
+      writeJson(response, 404, {
+        error: "Run bundle file not found",
       });
     }
     return true;
