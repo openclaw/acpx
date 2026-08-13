@@ -119,7 +119,7 @@ function planStatusText(payload: Record<string, unknown>): string | null {
 
 /**
  * Documented allowlist for text_delta.meta origin fields.
- * Only these keys may be copied from ACP update `_meta`/`meta`.
+ * Only these keys may be copied from ACP update `_meta`.
  * Unknown keys (including secret-like producer-controlled names) are dropped.
  */
 const ORIGIN_META_ALLOWLIST = new Set(["origin", "kind", "source"]);
@@ -132,8 +132,8 @@ function extractTextDeltaOrigin(payload: Record<string, unknown>): {
   messageId?: string;
   meta?: AcpTextDeltaOriginMeta;
 } {
-  const messageId = asOptionalString(payload.messageId) ?? asOptionalString(payload.message_id);
-  const meta = sanitizeOriginMeta(payload._meta ?? payload.meta);
+  const messageId = asOptionalString(payload.messageId);
+  const meta = sanitizeOriginMeta(payload._meta);
   return {
     ...(messageId ? { messageId } : {}),
     ...(meta ? { meta } : {}),
@@ -141,7 +141,7 @@ function extractTextDeltaOrigin(payload: Record<string, unknown>): {
 }
 
 /**
- * Copy only allowlisted string origin keys from wire `_meta`/`meta`.
+ * Copy only allowlisted string origin keys from wire `_meta`.
  * Nested objects, arrays, non-strings, and unknown keys are dropped.
  */
 function sanitizeOriginMeta(value: unknown): AcpTextDeltaOriginMeta | undefined {

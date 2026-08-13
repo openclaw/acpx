@@ -166,7 +166,7 @@ export type AcpRuntimeDoctorReport = {
 
 /**
  * Fail-closed origin metadata on `text_delta` events.
- * Only these optional string fields are preserved from ACP wire `_meta`/`meta`.
+ * Only these optional string fields are preserved from ACP wire `_meta`.
  */
 export type AcpTextDeltaOriginMeta = {
   origin?: string;
@@ -182,7 +182,7 @@ export type AcpRuntimeEvent =
       tag?: AcpSessionUpdateTag;
       /**
        * Present when the originating ACP session update carried a non-empty
-       * `messageId` (or `message_id`). Absent when the wire payload had no id.
+       * `messageId`. Absent when the wire payload had no id.
        * Opaque producer-supplied routing hint only: ACPX does not authenticate
        * this value. Do not treat it as proof of authorship or as an
        * authorization boundary. Useful for correlating chunks from the same
@@ -190,7 +190,7 @@ export type AcpRuntimeEvent =
        */
       messageId?: string;
       /**
-       * Allowlisted origin fields from the ACP update `_meta` (or `meta`).
+       * Allowlisted origin fields from the ACP update `_meta`.
        * Only the documented string keys `origin`, `kind`, and `source` are
        * preserved. All other keys (including nested objects and secret-like
        * producer-controlled names) are dropped. Omitted when none remain.

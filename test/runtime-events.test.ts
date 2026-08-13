@@ -822,7 +822,7 @@ test("parsePromptEventLine omits origin fields when messageId/_meta are absent o
   );
 });
 
-test("parsePromptEventLine accepts message_id and meta aliases", () => {
+test("parsePromptEventLine ignores non-ACP message_id and meta aliases", () => {
   assert.deepEqual(
     parsePromptEventLine(
       JSON.stringify({
@@ -837,8 +837,6 @@ test("parsePromptEventLine accepts message_id and meta aliases", () => {
       text: "aliased",
       stream: "output",
       tag: "agent_message_chunk",
-      messageId: "msg_snake",
-      meta: { origin: "assistant" },
     },
   );
 });
