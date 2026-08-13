@@ -51,6 +51,14 @@ export async function resolveRunBundleFilePath(
   runId: string,
   relativePath: string,
 ): Promise<string> {
+  return (await resolveRunBundleFileTarget(runsDir, runId, relativePath)).realPath;
+}
+
+async function resolveRunBundleFileTarget(
+  runsDir: string,
+  runId: string,
+  relativePath: string,
+): Promise<{ realPath: string; realRunDir: string }> {
   const normalizedRelativePath = normalizeRelativePath(relativePath);
   const resolvedRunsDir = path.resolve(runsDir);
   const runDir = path.resolve(resolvedRunsDir, runId);
@@ -75,7 +83,7 @@ export async function resolveRunBundleFilePath(
     throw new Error(`Refusing to read outside run bundle: ${relativePath}`);
   }
 
-  return realPath;
+  return { realPath, realRunDir };
 }
 
 export async function readRunBundleTextFile(
@@ -109,8 +117,11 @@ async function openContainedRunBundleFile(
   runId: string,
   relativePath: string,
 ): Promise<FileHandle> {
-  const checkedPath = await resolveRunBundleFilePath(runsDir, runId, relativePath);
-  const realRunDir = await fs.realpath(path.resolve(runsDir, runId));
+  const { realPath: checkedPath, realRunDir } = await resolveRunBundleFileTarget(
+    runsDir,
+    runId,
+    relativePath,
+  );
   const noFollow = fsConstants.O_NOFOLLOW ?? 0;
   const file = await fs.open(checkedPath, fsConstants.O_RDONLY | noFollow);
   try {
