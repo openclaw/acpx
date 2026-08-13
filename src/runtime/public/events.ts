@@ -122,7 +122,11 @@ function planStatusText(payload: Record<string, unknown>): string | null {
  * Only these keys may be copied from ACP update `_meta`.
  * Unknown keys (including secret-like producer-controlled names) are dropped.
  */
-const ORIGIN_META_ALLOWLIST = new Set(["origin", "kind", "source"]);
+const ORIGIN_META_KEYS = [
+  "origin",
+  "kind",
+  "source",
+] as const satisfies readonly (keyof AcpTextDeltaOriginMeta)[];
 
 /**
  * Preserve a fail-closed subset of ACP update origin fields for text_delta
@@ -148,8 +152,8 @@ function sanitizeOriginMeta(value: unknown): AcpTextDeltaOriginMeta | undefined 
   if (!isRecord(value)) {
     return undefined;
   }
-  const out: Partial<Record<"origin" | "kind" | "source", string>> = {};
-  for (const key of ORIGIN_META_ALLOWLIST) {
+  const out: AcpTextDeltaOriginMeta = {};
+  for (const key of ORIGIN_META_KEYS) {
     const entry = value[key];
     if (typeof entry !== "string") {
       continue;
@@ -158,7 +162,7 @@ function sanitizeOriginMeta(value: unknown): AcpTextDeltaOriginMeta | undefined 
     if (!trimmed) {
       continue;
     }
-    out[key as "origin" | "kind" | "source"] = trimmed;
+    out[key] = trimmed;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
