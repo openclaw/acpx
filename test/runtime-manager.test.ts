@@ -2878,96 +2878,102 @@ test("AcpRuntimeManager closes the stream and client before reporting an unexpec
   assert.equal(clientClosedAtResult, true);
 });
 
-test("AcpRuntimeManager fails the turn when final session persist throws", async () => {
-  const record = makeSessionRecord({
-    acpxRecordId: "finalize-persist-session",
-    acpSessionId: "finalize-persist-sid",
-    agentCommand: "codex --acp",
-    cwd: "/workspace",
-  });
-  let promptFinished = false;
-  let savesAfterPrompt = 0;
-  class FinalizePersistFailStore extends InMemorySessionStore {
-    override async save(next: AcpSessionRecord): Promise<void> {
-      if (promptFinished) {
-        savesAfterPrompt += 1;
-        if (savesAfterPrompt >= 2) {
-          throw new Error("ENOSPC: no space left on device");
+for (const { stage, failAtSave } of [
+  { stage: "checkpoint flush", failAtSave: 2 },
+  { stage: "final session persist", failAtSave: 3 },
+]) {
+  test(`AcpRuntimeManager fails the turn when ${stage} throws`, async () => {
+    const record = makeSessionRecord({
+      acpxRecordId: "finalize-persist-session",
+      acpSessionId: "finalize-persist-sid",
+      agentCommand: "codex --acp",
+      cwd: "/workspace",
+    });
+    let promptFinished = false;
+    let savesAfterPrompt = 0;
+    class FinalizePersistFailStore extends InMemorySessionStore {
+      override async save(next: AcpSessionRecord): Promise<void> {
+        if (promptFinished) {
+          savesAfterPrompt += 1;
+          if (savesAfterPrompt >= failAtSave) {
+            throw new Error("ENOSPC: no space left on device");
+          }
         }
+        await super.save(next);
       }
-      await super.save(next);
     }
-  }
-  const store = new FinalizePersistFailStore([record]);
-  let closeCalls = 0;
-  let handlers: FakeClientHandlers = {};
-  const client: FakeClient = {
-    initializeResult: {
-      protocolVersion: 1,
-      agentCapabilities: { prompt: true },
-    },
-    start: async () => {},
-    close: async () => {
-      closeCalls += 1;
-    },
-    createSession: async () => ({ sessionId: "unused" }),
-    loadSession: async () => ({ agentSessionId: "unused" }),
-    hasReusableSession: (sessionId) => sessionId === "finalize-persist-sid",
-    supportsLoadSession: () => true,
-    supportsResumeSession: () => false,
-    loadSessionWithOptions: async () => ({ agentSessionId: "finalize-persist-agent" }),
-    getAgentLifecycleSnapshot: () => ({
-      pid: 77_001,
-      startedAt: "2026-01-01T00:00:00.000Z",
-      running: true,
-    }),
-    prompt: async () => {
-      handlers.onSessionUpdate?.({
-        sessionId: "finalize-persist-sid",
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: "done" },
-        },
-      });
-      promptFinished = true;
-      return { stopReason: "end_turn" };
-    },
-    waitForSessionUpdatesIdle: async () => {},
-    requestCancelActivePrompt: async () => false,
-    hasActivePrompt: () => false,
-    setSessionMode: async () => {},
-    setSessionConfigOption: async () => {},
-    clearEventHandlers: () => {
-      handlers = {};
-    },
-    setEventHandlers: (nextHandlers) => {
-      handlers = nextHandlers;
-    },
-  };
-  const manager = new AcpRuntimeManager(
-    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
-    { clientFactory: () => client as never },
-  );
+    const store = new FinalizePersistFailStore([record]);
+    let closeCalls = 0;
+    let handlers: FakeClientHandlers = {};
+    const client: FakeClient = {
+      initializeResult: {
+        protocolVersion: 1,
+        agentCapabilities: { prompt: true },
+      },
+      start: async () => {},
+      close: async () => {
+        closeCalls += 1;
+      },
+      createSession: async () => ({ sessionId: "unused" }),
+      loadSession: async () => ({ agentSessionId: "unused" }),
+      hasReusableSession: (sessionId) => sessionId === "finalize-persist-sid",
+      supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
+      loadSessionWithOptions: async () => ({ agentSessionId: "finalize-persist-agent" }),
+      getAgentLifecycleSnapshot: () => ({
+        pid: 77_001,
+        startedAt: "2026-01-01T00:00:00.000Z",
+        running: true,
+      }),
+      prompt: async () => {
+        handlers.onSessionUpdate?.({
+          sessionId: "finalize-persist-sid",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "done" },
+          },
+        });
+        promptFinished = true;
+        return { stopReason: "end_turn" };
+      },
+      waitForSessionUpdatesIdle: async () => {},
+      requestCancelActivePrompt: async () => false,
+      hasActivePrompt: () => false,
+      setSessionMode: async () => {},
+      setSessionConfigOption: async () => {},
+      clearEventHandlers: () => {
+        handlers = {};
+      },
+      setEventHandlers: (nextHandlers) => {
+        handlers = nextHandlers;
+      },
+    };
+    const manager = new AcpRuntimeManager(
+      createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+      { clientFactory: () => client as never },
+    );
 
-  const turn = manager.startTurn({
-    handle: createHandle("finalize-persist-session"),
-    text: "hello",
-    mode: "prompt",
-    sessionMode: "persistent",
-    requestId: "req-finalize-persist",
-  });
-  const { events, result } = await collectTurn(turn);
+    const turn = manager.startTurn({
+      handle: createHandle("finalize-persist-session"),
+      text: "hello",
+      mode: "prompt",
+      sessionMode: "persistent",
+      requestId: "req-finalize-persist",
+    });
+    const { events, result } = await collectTurn(turn);
 
-  assert.deepEqual(result, {
-    status: "failed",
-    error: {
-      code: "RUNTIME",
-      message: "ENOSPC: no space left on device",
-    },
+    assert.deepEqual(result, {
+      status: "failed",
+      error: {
+        code: "RUNTIME",
+        message: "ENOSPC: no space left on device",
+      },
+    });
+    assert.equal(closeCalls, 1);
+    assert.equal(savesAfterPrompt, failAtSave);
+    assert.ok(events.some((event) => event.type === "text_delta"));
   });
-  assert.equal(closeCalls, 1);
-  assert.ok(events.some((event) => event.type === "text_delta"));
-});
+}
 
 test("AcpRuntimeManager fails persistent turns clearly when session reuse is unavailable", async () => {
   const record = makeSessionRecord({

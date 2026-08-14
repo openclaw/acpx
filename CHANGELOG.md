@@ -21,13 +21,13 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Runtime/embedding: settle turn results only after lifecycle persistence and client cleanup attempts finish, including unexpected finalization failures.
-- Runtime/sessions: surface checkpoint flush and session-store save failures during turn finalization instead of dropping them. Thanks @SebTardif.
 - Replay viewer: contain manifest-selected projection reads within their run bundle, including symlink targets. Thanks @bunlongheng.
 - CLI/session: re-apply a session-pinned model before set_mode/set_model/set_config_option after reconnect, matching the prompt path so model-dependent options work. Fixes #489. Thanks @SebTardif.
 - Runtime: preserve non-empty `messageId` and a safe subset of ACP update `_meta` on `text_delta` events so consumers can distinguish model prose from adapter diagnostics that still use `agent_message_chunk`. Thanks @SebTardif.
 - Runtime/sessions: keep atomic-write temporary filenames within filesystem component limits when valid session IDs have long basenames. Thanks @henkterharmsel.
 - Runtime/embedding: snapshot permission policies at client configuration boundaries so caller-side mutation cannot change an in-flight turn after prompt readiness.
 - Replay viewer: return the same not-found response for missing files and containment-denied paths, preventing outside-target existence probes.
+- Runtime/sessions: surface checkpoint flush and session-store save failures during turn finalization instead of dropping them. Thanks @SebTardif.
 
 ## 2026.7.27 (v0.13.0)
 
