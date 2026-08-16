@@ -500,25 +500,35 @@ test("runTimedExecFile keeps stdout beyond execFile default maxBuffer", async ()
 
 test("runTimedExecFile kills a hung helper instead of waiting forever", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-timed-exec-"));
-  const pidPath = path.join(tmp, "child.pid");
+  const helperPidPath = path.join(tmp, "helper.pid");
+  const descendantPidPath = path.join(tmp, "descendant.pid");
   try {
     await assert.rejects(
       runTimedExecFile(
         process.execPath,
         [
           "-e",
-          `require('node:fs').writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); setInterval(() => {}, 1000)`,
+          [
+            `const fs = require("node:fs")`,
+            `const { spawn } = require("node:child_process")`,
+            `fs.writeFileSync(${JSON.stringify(helperPidPath)}, String(process.pid))`,
+            `const descendant = spawn(process.execPath, ["-e", "setTimeout(() => process.exit(0), 5000)"], { stdio: "inherit" })`,
+            `fs.writeFileSync(${JSON.stringify(descendantPidPath)}, String(descendant.pid))`,
+            `setInterval(() => {}, 1000)`,
+          ].join(";"),
         ],
         { timeoutMs: 200 },
       ),
+      (error: unknown) =>
+        error instanceof Error && (error as NodeJS.ErrnoException).code === "ETIMEDOUT",
     );
 
-    const pid = Number(await fs.readFile(pidPath, "utf8"));
-    assert.ok(Number.isInteger(pid) && pid > 0);
+    const helperPid = Number(await fs.readFile(helperPidPath, "utf8"));
+    assert.ok(Number.isInteger(helperPid) && helperPid > 0);
     const deadline = Date.now() + 2_000;
     while (Date.now() < deadline) {
       try {
-        process.kill(pid, 0);
+        process.kill(helperPid, 0);
       } catch {
         return;
       }
@@ -527,12 +537,20 @@ test("runTimedExecFile kills a hung helper instead of waiting forever", async ()
       });
     }
     try {
-      process.kill(pid, "SIGKILL");
+      process.kill(helperPid, "SIGKILL");
     } catch {
       // best-effort cleanup
     }
-    assert.fail(`hung helper process still alive: ${pid}`);
+    assert.fail(`hung helper process still alive: ${helperPid}`);
   } finally {
+    try {
+      const descendantPid = Number(await fs.readFile(descendantPidPath, "utf8"));
+      if (Number.isInteger(descendantPid) && descendantPid > 0) {
+        process.kill(descendantPid, "SIGKILL");
+      }
+    } catch {
+      // best-effort cleanup of the helper's pipe-inheriting descendant
+    }
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
