@@ -489,6 +489,15 @@ test("runTimedExecFile returns helper stdout", async () => {
   assert.equal(stdout, "helper-ok");
 });
 
+test("runTimedExecFile keeps stdout beyond execFile default maxBuffer", async () => {
+  const size = 1024 * 1024 + 64 * 1024;
+  const stdout = await runTimedExecFile(process.execPath, [
+    "-e",
+    `process.stdout.write("x".repeat(${size}))`,
+  ]);
+  assert.equal(stdout.length, size);
+});
+
 test("runTimedExecFile kills a hung helper instead of waiting forever", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-timed-exec-"));
   const pidPath = path.join(tmp, "child.pid");

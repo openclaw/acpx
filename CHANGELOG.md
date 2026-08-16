@@ -29,6 +29,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: return the same not-found response for missing files and containment-denied paths, preventing outside-target existence probes.
 - Runtime/sessions: surface checkpoint flush and session-store save failures during turn finalization instead of dropping them. Thanks @SebTardif.
 - ACP/terminal: time out hung `ps` / PowerShell process-list helpers after a shell-backed terminal exits so wait_for_exit, kill, and release can finish. Thanks @SebTardif.
+- ACP/terminal: raise the process-list helper stdout cap above execFile's 1 MiB default so large `ps` listings are not dropped as empty. Thanks @SebTardif.
 
 ## 2026.7.27 (v0.13.0)
 

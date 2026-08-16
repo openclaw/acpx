@@ -7,18 +7,21 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 export const PROCESS_HELPER_TIMEOUT_MS = 8_000;
+export const PROCESS_HELPER_MAX_BUFFER_BYTES = 32 * 1024 * 1024;
 
 export async function runTimedExecFile(
   command: string,
   args: readonly string[],
   options: {
     timeoutMs?: number;
+    maxBufferBytes?: number;
     windowsHide?: boolean;
   } = {},
 ): Promise<string> {
   const { stdout } = await execFileAsync(command, [...args], {
     encoding: "utf8",
     timeout: options.timeoutMs ?? PROCESS_HELPER_TIMEOUT_MS,
+    maxBuffer: options.maxBufferBytes ?? PROCESS_HELPER_MAX_BUFFER_BYTES,
     killSignal: "SIGKILL",
     windowsHide: options.windowsHide,
   });
