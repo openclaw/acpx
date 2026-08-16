@@ -190,10 +190,11 @@ Install MiniMax Code with `npm install -g @minimax-ai/code`, then authenticate w
 ACP v1 server over stdio; permission requests are handled by acpx's normal permission
 policy.
 
-MCode currently supports new in-process ACP sessions but does not advertise
-`session/load`. Prefer `acpx mcode exec …` for one-shot work; after the agent process
-exits, start a new persistent session instead of expecting a saved provider session to
-resume.
+MCode currently does not advertise provider-session reload. Although
+`acpx mcode sessions new` can create a local record, it closes the ACP client before a
+later CLI invocation; that later prompt starts with fresh MCode context. Prefer
+`acpx mcode exec …` and do not rely on sequential CLI invocations for a persistent
+conversation.
 
 ### Mux
 

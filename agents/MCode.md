@@ -12,12 +12,10 @@ npm install -g @minimax-ai/code
 mcode login
 ```
 
-Then run a one-shot prompt or create an in-process session:
+Then run a one-shot prompt:
 
 ```bash
 acpx mcode exec 'summarize this repository'
-acpx mcode sessions new
-acpx mcode 'review the current branch'
 ```
 
 MCode emits normal ACP agent messages, tool-call updates, and permission requests.
@@ -27,10 +25,10 @@ Choose the acpx permission policy that matches the task, for example
 ## Session lifecycle
 
 MCode currently implements `session/new` and `session/prompt`, but does not advertise
-`session/load`. A live acpx process can keep using its in-process session; after the
-MCode process exits, start a new session rather than expecting a saved provider session
-to resume. `acpx mcode exec …` avoids persisted-session expectations and is the most
-predictable choice for automation.
+provider-session reload. `acpx mcode sessions new` closes the ACP client after saving
+the local record, so a later CLI prompt starts with fresh MCode context instead of
+continuing that provider conversation. Do not treat sequential CLI invocations as a
+multi-turn session. Use `acpx mcode exec …` for predictable automation.
 
 If `mcode` is installed outside `PATH`, override the built-in argv in
 `~/.acpx/config.json`:
