@@ -6,6 +6,25 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+export const PROCESS_HELPER_TIMEOUT_MS = 8_000;
+
+export async function runTimedExecFile(
+  command: string,
+  args: readonly string[],
+  options: {
+    timeoutMs?: number;
+    windowsHide?: boolean;
+  } = {},
+): Promise<string> {
+  const { stdout } = await execFileAsync(command, [...args], {
+    encoding: "utf8",
+    timeout: options.timeoutMs ?? PROCESS_HELPER_TIMEOUT_MS,
+    killSignal: "SIGKILL",
+    windowsHide: options.windowsHide,
+  });
+  return stdout;
+}
+
 export type CommandParts = {
   command: string;
   args: string[];
@@ -319,10 +338,7 @@ function isWindowsExecutableCommand(command: string): boolean {
 }
 
 async function runWslpath(cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync("wslpath", ["-w", cwd], {
-    encoding: "utf8",
-  });
-  return stdout;
+  return await runTimedExecFile("wslpath", ["-w", cwd]);
 }
 
 export function basenameToken(value: string): string {

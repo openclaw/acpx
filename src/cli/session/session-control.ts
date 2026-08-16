@@ -1,8 +1,6 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
-import { splitCommandLine } from "../../acp/client-process.js";
+import { runTimedExecFile, splitCommandLine } from "../../acp/client-process.js";
 import { applyConfigOptionsToRecord } from "../../session/config-options.js";
 import {
   setCurrentModelId,
@@ -41,8 +39,6 @@ import {
   runSessionSetModelDirect,
   runSessionSetModeDirect,
 } from "./prompt-runner.js";
-
-const execFileAsync = promisify(execFile);
 
 export async function cancelSessionPrompt(
   options: SessionCancelOptions,
@@ -225,7 +221,7 @@ async function readProcCmdline(pid: number): Promise<string[] | undefined> {
 
 async function readPosixCommandLine(pid: number): Promise<string | undefined> {
   try {
-    const { stdout } = await execFileAsync("ps", ["-p", String(pid), "-o", "command="]);
+    const stdout = await runTimedExecFile("ps", ["-p", String(pid), "-o", "command="]);
     return stdout.trim() || undefined;
   } catch {
     return undefined;
@@ -234,7 +230,7 @@ async function readPosixCommandLine(pid: number): Promise<string | undefined> {
 
 async function readWindowsCommandLine(pid: number): Promise<string | undefined> {
   try {
-    const { stdout } = await execFileAsync(
+    const stdout = await runTimedExecFile(
       "powershell.exe",
       [
         "-NoProfile",

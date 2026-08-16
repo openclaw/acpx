@@ -24,6 +24,7 @@ import {
   type TerminalSpawnCommand,
 } from "../spawn-command-options.js";
 import type { ClientOperation, NonInteractivePermissionPolicy, PermissionMode } from "../types.js";
+import { PROCESS_HELPER_TIMEOUT_MS, runTimedExecFile } from "./client-process.js";
 
 const DEFAULT_TERMINAL_OUTPUT_LIMIT_BYTES = 64 * 1024;
 const DEFAULT_KILL_GRACE_MS = 1_500;
@@ -33,6 +34,7 @@ type ManagedTerminal = {
   killProcessGroup: boolean;
   descendantPids: Set<number>;
   processGroupSnapshotPromise?: Promise<void>;
+  processHelperTimeoutMs: number;
   output: Buffer;
   truncated: boolean;
   outputByteLimit: number;
@@ -49,6 +51,7 @@ export type TerminalManagerOptions = {
   onOperation?: (operation: ClientOperation) => void;
   confirmExecute?: (commandLine: string) => Promise<boolean>;
   killGraceMs?: number;
+  processHelperTimeoutMs?: number;
 };
 
 type TerminalSpawnOptions = {
@@ -161,6 +164,7 @@ export class TerminalManager {
   private readonly usesDefaultConfirmExecute: boolean;
   private readonly confirmExecute: (commandLine: string) => Promise<boolean>;
   private readonly killGraceMs: number;
+  private readonly processHelperTimeoutMs: number;
   private readonly terminals = new Map<string, ManagedTerminal>();
 
   constructor(options: TerminalManagerOptions) {
@@ -171,6 +175,10 @@ export class TerminalManager {
     this.usesDefaultConfirmExecute = options.confirmExecute == null;
     this.confirmExecute = options.confirmExecute ?? defaultConfirmExecute;
     this.killGraceMs = Math.max(0, Math.round(options.killGraceMs ?? DEFAULT_KILL_GRACE_MS));
+    this.processHelperTimeoutMs = Math.max(
+      1,
+      Math.round(options.processHelperTimeoutMs ?? PROCESS_HELPER_TIMEOUT_MS),
+    );
   }
 
   updatePermissionPolicy(
@@ -212,6 +220,7 @@ export class TerminalManager {
         process: proc,
         killProcessGroup: spawnCommand.killProcessGroup,
         descendantPids: new Set(),
+        processHelperTimeoutMs: this.processHelperTimeoutMs,
         output: Buffer.alloc(0),
         truncated: false,
         outputByteLimit,
@@ -513,7 +522,7 @@ export class TerminalManager {
         // ignore best-effort process group snapshot failures
       });
     }
-    for (const descendantPid of await listDescendantPids(pid)) {
+    for (const descendantPid of await listDescendantPids(pid, terminal.processHelperTimeoutMs)) {
       terminal.descendantPids.add(descendantPid);
     }
   }
@@ -628,10 +637,10 @@ function commandPathExists(command: string, cwd: string): boolean {
   return fs.existsSync(resolvedPath);
 }
 
-async function listDescendantPids(rootPid: number): Promise<number[]> {
+async function listDescendantPids(rootPid: number, timeoutMs: number): Promise<number[]> {
   let output: string;
   try {
-    output = await runProcessListCommand();
+    output = await runProcessListCommand(timeoutMs);
   } catch {
     return [];
   }
@@ -679,40 +688,12 @@ function parseProcessListLine(line: string): { pid: number; parentPid: number } 
   return { pid, parentPid };
 }
 
-async function runProcessListCommand(): Promise<string> {
+async function runProcessListCommand(timeoutMs: number): Promise<string> {
   if (process.platform === "win32") {
-    return await runWindowsProcessListCommand();
+    return await runWindowsProcessListCommand(timeoutMs);
   }
 
-  return await new Promise<string>((resolve, reject) => {
-    const child = spawn("ps", ["-eo", "pid=,ppid="], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-
-    child.once("error", reject);
-    child.once("close", (code, signal) => {
-      if (code === 0) {
-        resolve(stdout);
-        return;
-      }
-      reject(
-        new Error(`ps exited with code ${code ?? "null"} signal ${signal ?? "null"}: ${stderr}`),
-      );
-    });
-  });
+  return await runTimedExecFile("ps", ["-eo", "pid=,ppid="], { timeoutMs });
 }
 
 async function rememberProcessGroupPids(terminal: ManagedTerminal): Promise<void> {
@@ -722,23 +703,23 @@ async function rememberProcessGroupPids(terminal: ManagedTerminal): Promise<void
   }
 
   if (process.platform === "win32") {
-    for (const pid of await listDescendantPids(processGroupId)) {
+    for (const pid of await listDescendantPids(processGroupId, terminal.processHelperTimeoutMs)) {
       terminal.descendantPids.add(pid);
     }
     return;
   }
 
-  for (const pid of await listProcessGroupPids(processGroupId)) {
+  for (const pid of await listProcessGroupPids(processGroupId, terminal.processHelperTimeoutMs)) {
     if (pid !== processGroupId) {
       terminal.descendantPids.add(pid);
     }
   }
 }
 
-async function listProcessGroupPids(processGroupId: number): Promise<number[]> {
+async function listProcessGroupPids(processGroupId: number, timeoutMs: number): Promise<number[]> {
   let output: string;
   try {
-    output = await runProcessGroupListCommand();
+    output = await runProcessGroupListCommand(timeoutMs);
   } catch {
     return [];
   }
@@ -759,77 +740,20 @@ async function listProcessGroupPids(processGroupId: number): Promise<number[]> {
   return pids;
 }
 
-async function runProcessGroupListCommand(): Promise<string> {
-  return await new Promise<string>((resolve, reject) => {
-    const child = spawn("ps", ["-eo", "pid=,pgid="], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-
-    child.once("error", reject);
-    child.once("close", (code, signal) => {
-      if (code === 0) {
-        resolve(stdout);
-        return;
-      }
-      reject(
-        new Error(`ps exited with code ${code ?? "null"} signal ${signal ?? "null"}: ${stderr}`),
-      );
-    });
-  });
+async function runProcessGroupListCommand(timeoutMs: number): Promise<string> {
+  return await runTimedExecFile("ps", ["-eo", "pid=,pgid="], { timeoutMs });
 }
 
-async function runWindowsProcessListCommand(): Promise<string> {
-  return await new Promise<string>((resolve, reject) => {
-    const command = [
-      "Get-CimInstance Win32_Process |",
-      'ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }',
-    ].join(" ");
-    const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-
-    child.once("error", reject);
-    child.once("close", (code, signal) => {
-      if (code === 0) {
-        resolve(stdout);
-        return;
-      }
-      reject(
-        new Error(
-          `powershell process list exited with code ${code ?? "null"} signal ${
-            signal ?? "null"
-          }: ${stderr}`,
-        ),
-      );
-    });
-  });
+async function runWindowsProcessListCommand(timeoutMs: number): Promise<string> {
+  const command = [
+    "Get-CimInstance Win32_Process |",
+    'ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }',
+  ].join(" ");
+  return await runTimedExecFile(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", command],
+    { timeoutMs, windowsHide: true },
+  );
 }
 
 async function killWindowsProcessTree(pid: number, signal: NodeJS.Signals): Promise<void> {

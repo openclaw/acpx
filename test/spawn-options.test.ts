@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { resolveClaudeCodeExecutable } from "../src/acp/agent-command.js";
-import { resolveAgentSessionCwd } from "../src/acp/client-process.js";
+import { resolveAgentSessionCwd, runTimedExecFile } from "../src/acp/client-process.js";
 import { buildAgentSpawnOptions, buildSpawnCommandOptions } from "../src/acp/client.js";
 import { buildTerminalSpawnOptions } from "../src/acp/terminal-manager.js";
 import { buildQueueOwnerSpawnOptions } from "../src/cli/session/queue-owner-process.js";
@@ -479,6 +479,53 @@ test("resolveAgentSessionCwd rejects empty wslpath output", async () => {
     }),
     /wslpath returned an empty Windows path/,
   );
+});
+
+test("runTimedExecFile returns helper stdout", async () => {
+  const stdout = await runTimedExecFile(process.execPath, [
+    "-e",
+    "process.stdout.write('helper-ok')",
+  ]);
+  assert.equal(stdout, "helper-ok");
+});
+
+test("runTimedExecFile kills a hung helper instead of waiting forever", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-timed-exec-"));
+  const pidPath = path.join(tmp, "child.pid");
+  try {
+    await assert.rejects(
+      runTimedExecFile(
+        process.execPath,
+        [
+          "-e",
+          `require('node:fs').writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); setInterval(() => {}, 1000)`,
+        ],
+        { timeoutMs: 200 },
+      ),
+    );
+
+    const pid = Number(await fs.readFile(pidPath, "utf8"));
+    assert.ok(Number.isInteger(pid) && pid > 0);
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    }
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // best-effort cleanup
+    }
+    assert.fail(`hung helper process still alive: ${pid}`);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
 });
 
 test("buildTerminalSpawnOptions enables shell for PATH-resolved .cmd wrappers on Windows", async () => {

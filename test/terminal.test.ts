@@ -691,6 +691,61 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
+async function rejectIfHung<T>(
+  operation: Promise<T>,
+  message: string,
+  timeoutMs = 1_500,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(message));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+async function withHangingProcessListCommand<T>(run: () => Promise<T>): Promise<T> {
+  const bin = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-hanging-ps-"));
+  const pidPath = path.join(bin, "ps.pids");
+  const previousPath = process.env.PATH ?? "";
+  await fs.writeFile(
+    path.join(bin, "ps"),
+    `#!/bin/sh\nprintf '%s\\n' "$$" >> ${JSON.stringify(pidPath)}\nexec sleep 3600\n`,
+    { mode: 0o755 },
+  );
+  process.env.PATH = `${bin}${path.delimiter}${previousPath}`;
+  try {
+    return await run();
+  } finally {
+    process.env.PATH = previousPath;
+    try {
+      const pids = (await fs.readFile(pidPath, "utf8"))
+        .split("\n")
+        .map((line) => Number(line))
+        .filter((pid) => Number.isInteger(pid) && pid > 0);
+      for (const pid of pids) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // best-effort cleanup of the hung helper
+        }
+      }
+    } catch {
+      // no helper pids recorded
+    }
+    await fs.rm(bin, { recursive: true, force: true });
+  }
+}
+
 test("terminal manager prompts in approve-reads mode and can deny", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
   try {
@@ -735,6 +790,89 @@ test("terminal manager fails when prompt is unavailable and policy is fail", asy
       }),
       PermissionPromptUnavailableError,
     );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("terminal manager wait_for_exit and release finish when process listing hangs", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX process list hang assertion");
+    return;
+  }
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
+  try {
+    const manager = new TerminalManager({
+      cwd: tmp,
+      permissionMode: "approve-all",
+      processHelperTimeoutMs: 200,
+    });
+    const created = await manager.createTerminal({
+      sessionId: "session-1",
+      command: "echo done",
+    });
+
+    await withHangingProcessListCommand(async () => {
+      const waitResult = await rejectIfHung(
+        manager.waitForTerminalExit({
+          sessionId: "session-1",
+          terminalId: created.terminalId,
+        }),
+        "terminal/wait_for_exit hung on process listing",
+      );
+      assert.equal(waitResult.exitCode, 0);
+
+      await rejectIfHung(
+        manager.releaseTerminal({
+          sessionId: "session-1",
+          terminalId: created.terminalId,
+        }),
+        "terminal/release hung on process listing",
+      );
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("terminal manager kill finishes when process listing hangs", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX process list hang assertion");
+    return;
+  }
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
+  try {
+    const manager = new TerminalManager({
+      cwd: tmp,
+      permissionMode: "approve-all",
+      killGraceMs: 200,
+      processHelperTimeoutMs: 200,
+    });
+    const created = await manager.createTerminal({
+      sessionId: "session-1",
+      command: "sleep 30",
+    });
+
+    await withHangingProcessListCommand(async () => {
+      await rejectIfHung(
+        manager.killTerminal({
+          sessionId: "session-1",
+          terminalId: created.terminalId,
+        }),
+        "terminal/kill hung on process listing",
+      );
+
+      const waitResult = await rejectIfHung(
+        manager.waitForTerminalExit({
+          sessionId: "session-1",
+          terminalId: created.terminalId,
+        }),
+        "terminal/wait_for_exit hung after kill while process listing hangs",
+      );
+      assert.ok(waitResult.exitCode !== null || waitResult.signal !== null);
+    });
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

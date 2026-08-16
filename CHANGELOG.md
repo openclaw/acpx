@@ -28,6 +28,7 @@ Repo: https://github.com/openclaw/acpx
 - Runtime/embedding: snapshot permission policies at client configuration boundaries so caller-side mutation cannot change an in-flight turn after prompt readiness.
 - Replay viewer: return the same not-found response for missing files and containment-denied paths, preventing outside-target existence probes.
 - Runtime/sessions: surface checkpoint flush and session-store save failures during turn finalization instead of dropping them. Thanks @SebTardif.
+- ACP/terminal: time out hung `ps` / PowerShell process-list helpers after a shell-backed terminal exits so wait_for_exit, kill, and release can finish. Thanks @SebTardif.
 
 ## 2026.7.27 (v0.13.0)
 
