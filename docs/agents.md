@@ -25,6 +25,7 @@ The default agent for top-level commands like `acpx exec …` and `acpx prompt �
 | `kilocode`   | `npx -y @kilocode/cli acp`                     | [Kilocode](https://kilocode.ai)                                                                                 |
 | `kimi`       | `kimi acp`                                     | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
 | `kiro`       | `kiro-cli-chat acp`                            | [Kiro CLI](https://kiro.dev)                                                                                    |
+| `mcode`      | `mcode acp`                                    | [MiniMax Code](https://www.npmjs.com/package/@minimax-ai/code)                                                  |
 | `mux`        | `mux acp` via an ACPX-owned npm range          | [Mux](https://mux.coder.com)                                                                                    |
 | `opencode`   | `npx -y opencode-ai acp`                       | [OpenCode](https://opencode.ai)                                                                                 |
 | `pool`       | `pool acp`                                     | [Poolside](https://poolside.ai)                                                                                 |
@@ -177,6 +178,22 @@ Configure model/provider settings through fast-agent environment variables, fast
 - Built-in name: `kiro`
 - Default command: `kiro-cli-chat acp`
 - Upstream: [kiro.dev](https://kiro.dev)
+
+### MCode
+
+- Built-in name: `mcode`
+- Default command: `mcode acp`
+- Upstream: [MiniMax Code](https://www.npmjs.com/package/@minimax-ai/code)
+
+Install MiniMax Code with `npm install -g @minimax-ai/code`, then authenticate with
+`mcode login` before launching it through acpx. The native `mcode acp` command runs an
+ACP v1 server over stdio; permission requests are handled by acpx's normal permission
+policy.
+
+MCode currently supports new in-process ACP sessions but does not advertise
+`session/load`. Prefer `acpx mcode exec …` for one-shot work; after the agent process
+exits, start a new persistent session instead of expecting a saved provider session to
+resume.
 
 ### Mux
 
