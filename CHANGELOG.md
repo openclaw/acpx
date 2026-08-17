@@ -30,6 +30,8 @@ Repo: https://github.com/openclaw/acpx
 - Runtime/sessions: surface checkpoint flush and session-store save failures during turn finalization instead of dropping them. Thanks @SebTardif.
 - ACP/terminal: time out hung `ps` / PowerShell process-list helpers after a shell-backed terminal exits so wait_for_exit, kill, and release can finish. Thanks @SebTardif.
 - ACP/terminal: raise the process-list helper stdout cap above execFile's 1 MiB default so large `ps` listings are not dropped as empty. Thanks @SebTardif.
+- Runtime/embedding: retain one-shot session ownership from initialization through its turn so repeated pre-turn `ensureSession` calls reuse one backend session, then clean it up after completion. Fixes #504. Thanks @jhgaylor.
+- Runtime/embedding: project and persist `session/update` notifications for the full lifetime of retained sessions, including idle periods before and between turns. Fixes #477. Thanks @nyl199310.
 
 ## 2026.7.27 (v0.13.0)
 

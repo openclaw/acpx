@@ -60,6 +60,7 @@ type MockAgentOptions = {
   advertiseConfigOptions: boolean;
   advertiseModels: boolean;
   advertiseLegacyModels: boolean;
+  advertiseCommandsAfterNew: boolean;
   modelConfigId: string;
   omitReconnectConfigOptions: boolean;
   omitReconnectModelId?: string;
@@ -370,6 +371,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let advertiseConfigOptions = false;
   let advertiseModels = false;
   let advertiseLegacyModels = false;
+  let advertiseCommandsAfterNew = false;
   let modelConfigId = "model";
   let omitReconnectConfigOptions = false;
   let omitReconnectModelId: string | undefined;
@@ -446,6 +448,11 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
 
     if (token === "--advertise-legacy-models") {
       advertiseLegacyModels = true;
+      continue;
+    }
+
+    if (token === "--advertise-commands-after-new") {
+      advertiseCommandsAfterNew = true;
       continue;
     }
 
@@ -588,6 +595,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     advertiseConfigOptions,
     advertiseModels,
     advertiseLegacyModels,
+    advertiseCommandsAfterNew,
     modelConfigId,
     omitReconnectConfigOptions,
     omitReconnectModelId,
@@ -794,11 +802,17 @@ class MockAgent implements Agent {
       );
     }
 
-    return attachLegacyModels(
+    const result = attachLegacyModels(
       response,
       this.ensureSession(sessionId),
       this.options.advertiseLegacyModels,
     );
+    if (this.options.advertiseCommandsAfterNew) {
+      setImmediate(() => {
+        void this.sendAvailableCommands(sessionId);
+      });
+    }
+    return result;
   }
 
   async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
@@ -1099,6 +1113,21 @@ class MockAgent implements Agent {
           type: "text",
           text,
         },
+      },
+    });
+  }
+
+  private async sendAvailableCommands(sessionId: SessionId): Promise<void> {
+    await this.connection.sessionUpdate({
+      sessionId,
+      update: {
+        sessionUpdate: "available_commands_update",
+        availableCommands: [
+          {
+            name: "fixture-command",
+            description: "Advertised after session creation",
+          },
+        ],
       },
     });
   }

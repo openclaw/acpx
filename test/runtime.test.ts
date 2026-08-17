@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   AcpRuntimeError,
   AcpxRuntime,
@@ -15,6 +16,8 @@ import {
   type AcpRuntimeEvent,
   type AcpSessionRecord,
 } from "../src/runtime.js";
+
+const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
 
 function createSessionRecord(overrides: Partial<AcpSessionRecord> = {}): AcpSessionRecord {
   return {
@@ -221,6 +224,106 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   assert.equal(managerCancelCalls, 1);
   assert.equal(closeDiscardPersistentState, true);
 });
+
+test("AcpxRuntime keeps session ownership from initialization through idle updates and oneshot cleanup", async (t) => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-owner-"));
+  const stateDir = path.join(rootDir, "state");
+  const persistentPidFile = path.join(rootDir, "persistent.pid");
+  const oneshotPidFile = path.join(rootDir, "oneshot.pid");
+  t.after(async () => {
+    await fs.rm(rootDir, { recursive: true, force: true });
+  });
+
+  const runtime = createAcpRuntime({
+    cwd: rootDir,
+    sessionStore: createFileSessionStore({ stateDir }),
+    agentRegistry: createAgentRegistry({
+      overrides: {
+        fixture: [
+          process.execPath,
+          MOCK_AGENT_PATH,
+          "--advertise-commands-after-new",
+          "--pid-file",
+          persistentPidFile,
+        ],
+        "fixture-oneshot": [process.execPath, MOCK_AGENT_PATH, "--pid-file", oneshotPidFile],
+      },
+    }),
+    permissionMode: "approve-reads",
+  });
+
+  const persistentHandle = await runtime.ensureSession({
+    sessionKey: "owned-persistent",
+    agent: "fixture",
+    mode: "persistent",
+  });
+  const status = await waitForRuntimeStatus(
+    async () => await runtime.getStatus({ handle: persistentHandle }),
+    (value) => value.availableCommands?.[0]?.name === "fixture-command",
+  );
+  assert.deepEqual(status.availableCommands, [
+    {
+      name: "fixture-command",
+      description: "Advertised after session creation",
+      hasInput: false,
+    },
+  ]);
+  await runtime.close({ handle: persistentHandle, reason: "test complete" });
+
+  const firstHandle = await runtime.ensureSession({
+    sessionKey: "owned-oneshot",
+    agent: "fixture-oneshot",
+    mode: "oneshot",
+  });
+  const secondHandle = await runtime.ensureSession({
+    sessionKey: "owned-oneshot",
+    agent: "fixture-oneshot",
+    mode: "oneshot",
+  });
+  assert.equal(firstHandle.acpxRecordId, secondHandle.acpxRecordId);
+  assert.equal(firstHandle.backendSessionId, secondHandle.backendSessionId);
+
+  const turn = runtime.startTurn({
+    handle: secondHandle,
+    text: "echo owner cleanup",
+    mode: "prompt",
+    requestId: "req-owner-cleanup",
+  });
+  for await (const event of turn.events) {
+    // Drain the public event stream before observing terminal cleanup.
+    void event;
+  }
+  assert.deepEqual(await turn.result, { status: "completed", stopReason: "end_turn" });
+
+  const oneshotPid = Number((await fs.readFile(oneshotPidFile, "utf8")).trim());
+  await waitForRuntimeStatus(
+    () => isProcessRunning(oneshotPid),
+    (running) => !running,
+  );
+});
+
+async function waitForRuntimeStatus<T>(
+  read: () => Promise<T> | T,
+  matches: (value: T) => boolean,
+): Promise<T> {
+  const deadline = Date.now() + 5_000;
+  let value = await read();
+  while (!matches(value) && Date.now() < deadline) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    value = await read();
+  }
+  assert.equal(matches(value), true);
+  return value;
+}
+
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 test("createFileSessionStore persists records inside the provided state directory", async (t) => {
   const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-store-"));
