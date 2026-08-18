@@ -90,14 +90,8 @@ test("terminal manager ignores child stdout and stderr pipe-death errors", async
     });
 
     const stdio = getManagedStdio(manager, created.terminalId);
-    stdio.stdout.emit(
-      "error",
-      Object.assign(new Error("broken pipe"), { code: "EPIPE" }) as NodeJS.ErrnoException,
-    );
-    stdio.stderr.emit(
-      "error",
-      Object.assign(new Error("input/output error"), { code: "EIO" }) as NodeJS.ErrnoException,
-    );
+    stdio.stdout.emit("error", Object.assign(new Error("broken pipe"), { code: "EPIPE" }));
+    stdio.stderr.emit("error", Object.assign(new Error("input/output error"), { code: "EIO" }));
 
     await manager.killTerminal({
       sessionId: "session-1",
