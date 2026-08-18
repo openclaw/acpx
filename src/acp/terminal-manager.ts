@@ -156,6 +156,14 @@ function waitMs(ms: number): Promise<void> {
   });
 }
 
+const TERMINAL_PIPE_DEATH_CODES = new Set(["EPIPE", "EIO", "ECONNRESET", "ERR_STREAM_DESTROYED"]);
+
+function onStreamError(error: NodeJS.ErrnoException): void {
+  if (error.code && TERMINAL_PIPE_DEATH_CODES.has(error.code)) {
+    return;
+  }
+}
+
 export class TerminalManager {
   private readonly cwd: string;
   private permissionMode: PermissionMode;
@@ -245,6 +253,8 @@ export class TerminalManager {
 
       proc.stdout.on("data", appendOutput);
       proc.stderr.on("data", appendOutput);
+      proc.stdout.on("error", onStreamError);
+      proc.stderr.on("error", onStreamError);
       proc.once("exit", (exitCode, signal) => {
         terminal.exitCode = exitCode;
         terminal.signal = signal;
