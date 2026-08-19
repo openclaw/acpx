@@ -100,41 +100,24 @@ export async function withConnectedSession<T>(
   options: WithConnectedSessionOptions<T>,
 ): Promise<WithConnectedSessionResult<T>> {
   const record = await options.loadRecord(options.sessionRecordId);
-  const client =
-    options.createClient?.({
-      agentCommand: record.agentCommand,
-      agentArgv: record.agentArgv,
-      cwd: absolutePath(record.cwd),
-      mcpServers: options.mcpServers,
-      permissionMode: options.permissionMode ?? "approve-reads",
-      nonInteractivePermissions: options.nonInteractivePermissions,
-      permissionPolicy: options.permissionPolicy,
-      onPermissionRequest: options.onPermissionRequest,
-      authCredentials: options.authCredentials,
-      authPolicy: options.authPolicy,
-      fs: options.fs,
-      terminal: options.terminal,
-      elicitationModes: options.elicitationModes,
-      verbose: options.verbose,
-      sessionOptions: sessionOptionsFromRecord(record),
-    }) ??
-    new AcpClient({
-      agentCommand: record.agentCommand,
-      agentArgv: record.agentArgv,
-      cwd: absolutePath(record.cwd),
-      mcpServers: options.mcpServers,
-      permissionMode: options.permissionMode ?? "approve-reads",
-      nonInteractivePermissions: options.nonInteractivePermissions,
-      permissionPolicy: options.permissionPolicy,
-      onPermissionRequest: options.onPermissionRequest,
-      authCredentials: options.authCredentials,
-      authPolicy: options.authPolicy,
-      fs: options.fs,
-      terminal: options.terminal,
-      elicitationModes: options.elicitationModes,
-      verbose: options.verbose,
-      sessionOptions: sessionOptionsFromRecord(record),
-    });
+  const clientOptions: ConstructorParameters<typeof AcpClient>[0] = {
+    agentCommand: record.agentCommand,
+    agentArgv: record.agentArgv,
+    cwd: absolutePath(record.cwd),
+    mcpServers: options.mcpServers,
+    permissionMode: options.permissionMode ?? "approve-reads",
+    nonInteractivePermissions: options.nonInteractivePermissions,
+    permissionPolicy: options.permissionPolicy,
+    onPermissionRequest: options.onPermissionRequest,
+    authCredentials: options.authCredentials,
+    authPolicy: options.authPolicy,
+    fs: options.fs,
+    terminal: options.terminal,
+    elicitationModes: options.elicitationModes,
+    verbose: options.verbose,
+    sessionOptions: sessionOptionsFromRecord(record),
+  };
+  const client = options.createClient?.(clientOptions) ?? new AcpClient(clientOptions);
   let activeSessionIdForControl = record.acpSessionId;
   let notifiedClientAvailable = false;
   const activeController = createActiveSessionController({
