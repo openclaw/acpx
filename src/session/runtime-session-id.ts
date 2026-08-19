@@ -1,10 +1,4 @@
-import {
-  AGENT_SESSION_ID_META_KEYS,
-  extractAgentSessionId,
-  normalizeAgentSessionId,
-} from "../acp/agent-session-id.js";
-
-export const RUNTIME_SESSION_ID_META_KEYS = AGENT_SESSION_ID_META_KEYS;
+import { extractAgentSessionId, normalizeAgentSessionId } from "../acp/agent-session-id.js";
 
 export function normalizeRuntimeSessionId(value: unknown): string | undefined {
   return normalizeAgentSessionId(value);
