@@ -44,6 +44,7 @@ import type {
   SessionTokenUsage,
 } from "../../types.js";
 import type {
+  AcpElicitationHandler,
   AcpRuntimeAvailableCommand,
   AcpRuntimeEvent,
   AcpRuntimeHandle,
@@ -499,6 +500,7 @@ type RuntimeTurnTask = {
     requestId: string;
     timeoutMs?: number;
     signal?: AbortSignal;
+    onElicitation?: AcpElicitationHandler;
   };
   promptInput: PromptInput | string;
   queue: AsyncEventQueue;
@@ -841,11 +843,7 @@ export class AcpRuntimeManager {
     acpxState: ReturnType<typeof cloneSessionAcpxState>;
   }): Promise<boolean> {
     const { record, owner, conversation, acpxState } = input;
-    if (
-      owner.mode !== "persistent" ||
-      record.closed ||
-      !owner.client.hasReusableSession(record.acpSessionId)
-    ) {
+    if (!this.canRetainPersistentSessionOwner(owner, record)) {
       owner.activeTurn = undefined;
       return false;
     }
@@ -857,6 +855,18 @@ export class AcpRuntimeManager {
       await this.stopSessionOwner(previousOwner);
     }
     return true;
+  }
+
+  private canRetainPersistentSessionOwner(
+    owner: RuntimeSessionOwner,
+    record: SessionRecord,
+  ): boolean {
+    return (
+      owner.mode === "persistent" &&
+      !record.closed &&
+      !(owner.client.hasUnresolvedPrompt?.() ?? false) &&
+      owner.client.hasReusableSession(record.acpSessionId)
+    );
   }
 
   private async withRuntimeControlSession<T>(
@@ -891,6 +901,7 @@ export class AcpRuntimeManager {
       nonInteractivePermissions: this.options.nonInteractivePermissions,
       permissionPolicy: this.options.permissionPolicy,
       onPermissionRequest: this.options.onPermissionRequest,
+      elicitationModes: this.options.elicitationModes,
       verbose: this.options.verbose,
       timeoutMs: this.options.timeoutMs,
       resumePolicy: resumePolicyForSessionMode(sessionMode),
@@ -1058,6 +1069,7 @@ export class AcpRuntimeManager {
       nonInteractivePermissions: this.options.nonInteractivePermissions,
       permissionPolicy: this.options.permissionPolicy,
       onPermissionRequest: this.options.onPermissionRequest,
+      elicitationModes: this.options.elicitationModes,
       verbose: this.options.verbose,
       sessionOptions: input.sessionOptions,
     });
@@ -1169,6 +1181,7 @@ export class AcpRuntimeManager {
     requestId: string;
     timeoutMs?: number;
     signal?: AbortSignal;
+    onElicitation?: AcpElicitationHandler;
   }): AcpRuntimeTurn {
     let promptInput: PromptInput | string;
     try {
@@ -1293,15 +1306,7 @@ export class AcpRuntimeManager {
         };
       } else {
         await this.applyPendingRuntimeTurnCancel(task, turn);
-        const response = await runPromptTurn({
-          client: turn.client,
-          sessionId,
-          prompt: task.promptInput,
-          timeoutMs: task.input.timeoutMs ?? this.options.timeoutMs,
-          conversation: turn.conversation,
-          promptMessageId: turn.promptMessageId,
-          onPromptRequestStarted: () => task.promptStarted.resolve(),
-        });
+        const response = await this.runRuntimePrompt(task, turn, sessionId);
         await this.saveCompletedRuntimeTurn(turn, response.stopReason);
         terminalResult = {
           status: response.stopReason === "cancelled" ? "cancelled" : "completed",
@@ -1317,6 +1322,27 @@ export class AcpRuntimeManager {
       terminalResult = this.failRuntimeTurn(task, error);
     }
     task.settleResult(terminalResult);
+  }
+
+  private async runRuntimePrompt(
+    task: RuntimeTurnTask,
+    turn: RunningRuntimeTurn,
+    sessionId: string,
+  ): ReturnType<typeof runPromptTurn> {
+    try {
+      return await runPromptTurn({
+        client: turn.client,
+        sessionId,
+        prompt: task.promptInput,
+        timeoutMs: task.input.timeoutMs ?? this.options.timeoutMs,
+        conversation: turn.conversation,
+        promptMessageId: turn.promptMessageId,
+        onPromptRequestStarted: () => task.promptStarted.resolve(),
+        onElicitation: task.input.onElicitation,
+      });
+    } finally {
+      turn.client.endPromptElicitation?.(sessionId);
+    }
   }
 
   private async prepareRuntimeTurn(task: RuntimeTurnTask): Promise<RunningRuntimeTurn> {
@@ -1466,6 +1492,7 @@ export class AcpRuntimeManager {
       nonInteractivePermissions: this.options.nonInteractivePermissions,
       permissionPolicy: this.options.permissionPolicy,
       onPermissionRequest: this.options.onPermissionRequest,
+      elicitationModes: this.options.elicitationModes,
       verbose: this.options.verbose,
       sessionOptions: sessionOptionsFromRecord(record),
     });
@@ -1811,6 +1838,7 @@ export class AcpRuntimeManager {
     requestId: string;
     timeoutMs?: number;
     signal?: AbortSignal;
+    onElicitation?: AcpElicitationHandler;
   }): AsyncIterable<AcpRuntimeEvent> {
     const turn = this.startTurn(input);
     yield* turn.events;
@@ -2014,6 +2042,7 @@ export class AcpRuntimeManager {
         nonInteractivePermissions: this.options.nonInteractivePermissions,
         permissionPolicy: this.options.permissionPolicy,
         onPermissionRequest: this.options.onPermissionRequest,
+        elicitationModes: this.options.elicitationModes,
         verbose: this.options.verbose,
       }),
     };

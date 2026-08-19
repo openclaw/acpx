@@ -6,6 +6,7 @@ import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
   AgentSideConnection,
+  type AnyMessage,
   type CloseSessionRequest,
   type CloseSessionResponse,
   PROTOCOL_VERSION,
@@ -14,7 +15,11 @@ import {
   type Agent,
   type AgentSideConnection as AgentConnection,
   type ContentBlock,
+  type CreateElicitationRequest,
+  type CreateElicitationResponse,
+  type InitializeRequest,
   type InitializeResponse,
+  type JsonRpcId,
   type ListSessionsRequest,
   type ListSessionsResponse,
   type LoadSessionRequest,
@@ -31,12 +36,15 @@ import {
   type SetSessionModeRequest,
   type SetSessionModeResponse,
   type SessionInfo,
+  methods,
 } from "@agentclientprotocol/sdk";
 
 type ParsedCommand = {
   command: string;
   args: string[];
 };
+
+let activePromptRequestId: JsonRpcId | undefined;
 
 type MockAgentOptions = {
   hangOnNewSession: boolean;
@@ -69,6 +77,7 @@ type MockAgentOptions = {
   loadReplayText: string;
   ignoreSigterm: boolean;
   cancelDelayMs: number;
+  elicitOnNewSession: boolean;
   /** If set, the agent writes its PID to this path at startup (before ACP handshake). */
   pidFile?: string;
 };
@@ -80,6 +89,7 @@ type SessionState = {
   configValues: Record<string, string | boolean>;
   transientPromptAttempts: Record<string, number>;
   modelId: string;
+  lastElicitationResponse?: CreateElicitationResponse;
 };
 
 class CancelledError extends Error {
@@ -129,6 +139,16 @@ function getPromptText(prompt: ContentBlock[]): string {
   }
 
   return parts.join("").trim();
+}
+
+function formSchema() {
+  return {
+    type: "object" as const,
+    properties: {
+      answer: { type: "string" as const },
+    },
+    required: ["answer"],
+  };
 }
 
 function describePromptBlocks(prompt: ContentBlock[]): string {
@@ -381,6 +401,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let ignoreSigterm = false;
   let cancelDelayMs = 0;
   let hangOnNewSession = false;
+  let elicitOnNewSession = false;
   let pidFile: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -531,6 +552,11 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
       continue;
     }
 
+    if (token === "--elicit-on-new-session") {
+      elicitOnNewSession = true;
+      continue;
+    }
+
     if (token === "--pid-file") {
       pidFile = parseOptionValue(argv, index + 1, token);
       index += 1;
@@ -604,6 +630,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     loadReplayText,
     ignoreSigterm,
     cancelDelayMs,
+    elicitOnNewSession,
     pidFile,
   };
 }
@@ -749,13 +776,15 @@ class MockAgent implements Agent {
   private readonly connection: AgentConnection;
   private readonly sessions = new Map<SessionId, SessionState>();
   private readonly options: MockAgentOptions;
+  private clientCapabilities?: InitializeRequest["clientCapabilities"];
 
   constructor(connection: AgentConnection, options: MockAgentOptions) {
     this.connection = connection;
     this.options = options;
   }
 
-  async initialize(): Promise<InitializeResponse> {
+  async initialize(params: InitializeRequest): Promise<InitializeResponse> {
+    this.clientCapabilities = structuredClone(params.clientCapabilities);
     const sessionCapabilities = {
       ...(this.options.supportsCloseSession ? { close: {} } : {}),
       ...(this.options.supportsListSessions ? { list: {} } : {}),
@@ -787,6 +816,16 @@ class MockAgent implements Agent {
 
     const sessionId = randomUUID();
     this.sessions.set(sessionId, createSessionState(false));
+
+    if (this.options.elicitOnNewSession) {
+      const response = await this.connection.request(methods.client.elicitation.create, {
+        mode: "form",
+        requestId: "session-new",
+        message: "Configure the session",
+        requestedSchema: formSchema(),
+      });
+      this.ensureSession(sessionId).lastElicitationResponse = response;
+    }
 
     const response: NewSessionResponse = { sessionId };
 
@@ -1204,6 +1243,14 @@ class MockAgent implements Agent {
       return "recovered after retry";
     }
 
+    if (text === "client-capabilities") {
+      return JSON.stringify(this.clientCapabilities);
+    }
+
+    if (text.startsWith("elicitation ")) {
+      return await this.handleElicitation(sessionId, text.slice("elicitation ".length), signal);
+    }
+
     if (text.startsWith("extension-notification ")) {
       const rest = text.slice("extension-notification ".length).trim();
       const firstSpace = rest.search(/\s/);
@@ -1436,6 +1483,94 @@ class MockAgent implements Agent {
     return `unrecognized prompt: ${text}`;
   }
 
+  private async handleElicitation(
+    sessionId: SessionId,
+    command: string,
+    signal: AbortSignal,
+  ): Promise<string> {
+    if (command === "complete") {
+      await this.connection.unstable_completeElicitation({
+        elicitationId: "elicitation-123",
+      });
+      return "elicitation complete accepted";
+    }
+
+    if (command === "last-response") {
+      return JSON.stringify(this.ensureSession(sessionId).lastElicitationResponse ?? null);
+    }
+
+    const request: CreateElicitationRequest =
+      command === "request-scoped"
+        ? {
+            mode: "form",
+            requestId: activePromptRequestId ?? "missing-prompt-request",
+            message: "Choose a value",
+            requestedSchema: formSchema(),
+          }
+        : command === "mismatched-session"
+          ? {
+              mode: "form",
+              sessionId: "wrong-session",
+              toolCallId: "tool-123",
+              message: "Choose a value",
+              requestedSchema: formSchema(),
+            }
+          : command === "custom-mode"
+            ? {
+                mode: "future-mode",
+                sessionId,
+                message: "Choose a value",
+              }
+            : {
+                mode: command === "url" ? "url" : "form",
+                sessionId,
+                toolCallId: "tool-123",
+                message: "Choose a value",
+                ...(command === "url"
+                  ? { elicitationId: "elicitation-123", url: "https://example.invalid/input" }
+                  : { requestedSchema: formSchema() }),
+              };
+
+    if (command === "late") {
+      void this.connection.request(methods.client.elicitation.create, request).then((response) => {
+        this.ensureSession(sessionId).lastElicitationResponse = response;
+      });
+      return "elicitation dispatched";
+    }
+
+    if (command === "timeout-late") {
+      void this.connection.request(methods.client.elicitation.create, request).then((response) => {
+        this.ensureSession(sessionId).lastElicitationResponse = response;
+      });
+      await sleepWithCancel(5_000, signal);
+      return "elicitation timeout completed";
+    }
+
+    if (command === "request-cancel") {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30);
+      try {
+        const response = await this.connection.request(methods.client.elicitation.create, request, {
+          cancellationSignal: controller.signal,
+        });
+        return `elicitation request completed:${JSON.stringify(response)}:aborted:${controller.signal.aborted}`;
+      } catch {
+        return `elicitation request cancelled:${controller.signal.aborted}`;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    const response = await this.connection.request(methods.client.elicitation.create, request, {
+      cancellationSignal: signal,
+    });
+    this.ensureSession(sessionId).lastElicitationResponse = response;
+    if (command === "form-no-echo") {
+      return `elicitation ${response.action}`;
+    }
+    return JSON.stringify(response);
+  }
+
   private async runTerminalCommand(
     sessionId: SessionId,
     rawCommand: string,
@@ -1507,7 +1642,30 @@ class MockAgent implements Agent {
 
 const output = Writable.toWeb(process.stdout);
 const input = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>;
-const stream = ndJsonStream(output, input);
+const baseStream = ndJsonStream(output, input);
+const stream = {
+  readable: new ReadableStream<AnyMessage>({
+    async start(controller) {
+      const reader = baseStream.readable.getReader();
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) {
+            break;
+          }
+          if ("method" in value && value.method === methods.agent.session.prompt && "id" in value) {
+            activePromptRequestId = value.id;
+          }
+          controller.enqueue(value);
+        }
+      } finally {
+        reader.releaseLock();
+        controller.close();
+      }
+    },
+  }),
+  writable: baseStream.writable,
+};
 const mockAgentOptions = parseMockAgentOptions(process.argv.slice(2));
 
 // Write PID to a file before doing anything else so that the parent can track

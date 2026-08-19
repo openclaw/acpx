@@ -45,6 +45,11 @@ export {
 } from "./runtime/public/handle-state.js";
 export type {
   AcpAgentRegistry,
+  AcpElicitationContext,
+  AcpElicitationHandler,
+  AcpElicitationMode,
+  AcpElicitationRequest,
+  AcpElicitationResponse,
   AcpFileSessionStoreOptions,
   AcpPermissionDecision,
   AcpPermissionRequest,
@@ -221,6 +226,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
         requestId: input.requestId,
         timeoutMs: input.timeoutMs,
         signal: input.signal,
+        onElicitation: input.onElicitation,
       }),
     );
     return {
@@ -258,6 +264,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       requestId: input.requestId,
       timeoutMs: input.timeoutMs,
       signal: input.signal,
+      onElicitation: input.onElicitation,
     });
   }
 

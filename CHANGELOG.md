@@ -14,6 +14,8 @@ Repo: https://github.com/openclaw/acpx
   `AcpRuntimeOptions` so embedded clients can reuse its rule matching and
   decisions. Thanks @xenaocx-dev.
 
+- Runtime/embedding: add turn-scoped ACP form and URL elicitation handlers with capability and cancellation fencing.
+
 ### Breaking
 
 - Runtime API: require `AcpRuntimeTurn.promptStarted`, which settles after `connection.prompt()` returns its request promise or fails beforehand.
