@@ -103,6 +103,8 @@ export const BUILT_IN_AGENT_PACKAGES = {
     fallbackCommand: AGENT_REGISTRY.claude,
     legacyFallbackCommands: [
       `npm exec @agentclientprotocol/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
+      "npx -y @agentclientprotocol/claude-agent-acp@^0.60.0",
+      "npm exec @agentclientprotocol/claude-agent-acp@^0.60.0",
     ],
   },
 } as const satisfies Record<string, BuiltInAgentPackageSpec>;

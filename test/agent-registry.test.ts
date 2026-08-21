@@ -177,6 +177,24 @@ test("resolveInstalledBuiltInAgentLaunch ignores non-built-in commands", () => {
   assert.equal(resolveInstalledBuiltInAgentLaunch("custom-acp-server --stdio"), undefined);
 });
 
+test("package-exec resolution recognizes the retired Claude built-in commands", () => {
+  const npmCliPath = path.join(os.tmpdir(), "acpx-test-npm-cli.js");
+  for (const retiredCommand of [
+    "npx -y @agentclientprotocol/claude-agent-acp@^0.60.0",
+    "npm exec @agentclientprotocol/claude-agent-acp@^0.60.0",
+  ]) {
+    const launch = resolvePackageExecBuiltInAgentLaunch(retiredCommand, {
+      execPath: "/tmp/node",
+      existsSync: (candidate) => candidate === npmCliPath,
+      resolveNpmCliPath: () => npmCliPath,
+    });
+
+    assert.equal(launch?.source, "package-exec");
+    assert.equal(launch?.packageName, BUILT_IN_AGENT_PACKAGES.claude.packageName);
+    assert.equal(launch?.packageRange, BUILT_IN_AGENT_PACKAGES.claude.packageRange);
+  }
+});
+
 test("resolvePackageExecBuiltInAgentLaunch bridges built-ins through the current Node npm CLI", () => {
   const npmCliPath = path.join(os.tmpdir(), "acpx-test-npm-cli.js");
   const launch = resolvePackageExecBuiltInAgentLaunch(AGENT_REGISTRY.codex, {
