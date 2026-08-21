@@ -78,6 +78,13 @@ Auth-required policy:
 - use `detailCode=AUTH_REQUIRED` for deterministic machine handling
 - include raw ACP payload in `acp` when available (for example `acp.code=-32000`)
 
+Agent-spawn policy:
+
+- keep top-level `code` as `RUNTIME` for compatibility
+- use `detailCode=AGENT_SPAWN_ENOENT` when process creation fails with `ENOENT`
+- describe the missing launch path without assuming it is always the command binary; the executable, interpreter, or working directory may be absent
+- leave non-`ENOENT` spawn failures on the generic runtime path
+
 ## Queue detail codes (initial set)
 
 - `QUEUE_OWNER_CLOSED`

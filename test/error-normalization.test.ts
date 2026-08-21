@@ -7,10 +7,41 @@ import {
   isAcpResourceNotFoundError,
 } from "../src/acp/error-normalization.js";
 import {
+  AgentSpawnError,
   PermissionPromptUnavailableError,
   QueueConnectionError,
   AuthPolicyError,
 } from "../src/errors.js";
+
+test("normalizeOutputError preserves spawn ENOENT as an additive detail", () => {
+  const cause = Object.assign(new Error("spawn custom-agent ENOENT"), {
+    code: "ENOENT",
+  });
+  const normalized = normalizeOutputError(new AgentSpawnError("custom-agent", cause), {
+    origin: "cli",
+  });
+
+  assert.equal(normalized.code, "RUNTIME");
+  assert.equal(normalized.detailCode, "AGENT_SPAWN_ENOENT");
+  assert.equal(normalized.origin, "cli");
+  assert.match(normalized.message, /^Failed to spawn agent command: custom-agent\./);
+  assert.match(normalized.message, /required executable, interpreter, working directory/i);
+  assert.match(normalized.message, /effective PATH/i);
+  assert.match(normalized.message, /configured argv/i);
+});
+
+test("normalizeOutputError keeps non-ENOENT spawn failures generic", () => {
+  const cause = Object.assign(new Error("spawn custom-agent EACCES"), {
+    code: "EACCES",
+  });
+  const normalized = normalizeOutputError(new AgentSpawnError("custom-agent", cause), {
+    origin: "cli",
+  });
+
+  assert.equal(normalized.code, "RUNTIME");
+  assert.equal(normalized.detailCode, undefined);
+  assert.equal(normalized.message, "Failed to spawn agent command: custom-agent");
+});
 
 test("normalizeOutputError maps permission prompt unavailable errors", () => {
   const normalized = normalizeOutputError(new PermissionPromptUnavailableError(), {

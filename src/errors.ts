@@ -44,8 +44,18 @@ export class AgentSpawnError extends AcpxOperationalError {
   readonly agentCommand: string;
 
   constructor(agentCommand: string, cause?: unknown) {
-    super(`Failed to spawn agent command: ${agentCommand}`, {
+    const spawnCode = cause instanceof Error ? (cause as NodeJS.ErrnoException).code : undefined;
+    const spawnEnoent = spawnCode === "ENOENT";
+    const message = spawnEnoent
+      ? `Failed to spawn agent command: ${agentCommand}. The agent process could not start because a required executable, interpreter, working directory, or other launch path was not found. Check the command, effective PATH, and working directory, or verify the custom agent's configured argv.`
+      : `Failed to spawn agent command: ${agentCommand}`;
+    super(message, {
       cause: cause instanceof Error ? cause : undefined,
+      ...(spawnEnoent
+        ? {
+            detailCode: "AGENT_SPAWN_ENOENT",
+          }
+        : {}),
     });
     this.agentCommand = agentCommand;
   }

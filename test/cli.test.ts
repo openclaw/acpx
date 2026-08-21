@@ -345,6 +345,53 @@ test("CLI resolves unknown raw agent commands after newer global flags", async (
   });
 });
 
+test(
+  "CLI reports actionable text and JSON detail for a missing raw agent command",
+  { skip: process.platform === "win32" },
+  async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      await fs.mkdir(cwd, { recursive: true });
+      const missingAgent = path.join(homeDir, "missing-raw-agent");
+
+      const text = await runCli(["--cwd", cwd, missingAgent, "exec", "ping"], homeDir);
+      assert.equal(text.code, 1);
+      assert.match(text.stderr, /required executable, interpreter, working directory/i);
+      assert.match(text.stderr, /effective PATH/i);
+      assert.match(text.stderr, /configured argv/i);
+
+      const json = await runCli(
+        ["--cwd", cwd, "--format", "json", missingAgent, "exec", "ping"],
+        homeDir,
+      );
+      assert.equal(json.code, 1);
+      const error = parseSingleAcpErrorLine(json.stdout);
+      assert.equal(error.data?.acpxCode, "RUNTIME");
+      assert.equal(error.data?.detailCode, "AGENT_SPAWN_ENOENT");
+      assert.equal(error.data?.origin, "cli");
+
+      const missingCwd = await runCli(
+        [
+          "--cwd",
+          path.join(homeDir, "missing-workspace"),
+          "--format",
+          "json",
+          "--agent",
+          process.execPath,
+          "exec",
+          "ping",
+        ],
+        homeDir,
+      );
+      assert.equal(missingCwd.code, 1);
+      const missingCwdError = parseSingleAcpErrorLine(missingCwd.stdout);
+      assert.equal(missingCwdError.data?.acpxCode, "RUNTIME");
+      assert.equal(missingCwdError.data?.detailCode, "AGENT_SPAWN_ENOENT");
+      assert.match(missingCwdError.message ?? "", /working directory/i);
+    });
+  },
+);
+
 test("global passthrough flags are present in help output", async () => {
   await withTempHome(async (homeDir) => {
     const result = await runCli(["--help"], homeDir);
