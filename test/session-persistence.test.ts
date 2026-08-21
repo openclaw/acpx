@@ -97,6 +97,25 @@ test("parseSessionRecord backfills argv for historical built-in commands", () =>
   }
 });
 
+test("parseSessionRecord keeps usable stored argv over historical command migration", () => {
+  const storedArgv = ["npx", "-y", "@agentclientprotocol/claude-agent-acp@^0.60.0"];
+  const serialized = serializeSessionRecordForDisk(
+    makeSessionRecord({
+      acpxRecordId: "stored-argv-wins",
+      acpSessionId: "stored-argv-wins",
+      agentCommand: "npx -y @agentclientprotocol/claude-agent-acp@^0.60.0",
+      cwd: "/tmp/stored-argv-wins",
+    }),
+  );
+  serialized.agent_argv = storedArgv;
+
+  const parsed = parseSessionRecord(serialized);
+
+  assert.ok(parsed);
+  assert.deepEqual(parsed.agentArgv, storedArgv);
+  assert.notDeepEqual(parsed.agentArgv, AGENT_ARGV_REGISTRY.claude);
+});
+
 test("parseSessionRecord preserves persisted session env", () => {
   const serialized = serializeSessionRecordForDisk(
     makeSessionRecord({
