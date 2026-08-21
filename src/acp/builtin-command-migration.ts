@@ -1,7 +1,7 @@
 import { AGENT_ARGV_REGISTRY, AGENT_REGISTRY, BUILT_IN_AGENT_PACKAGES } from "../agent-registry.js";
 
 const LEGACY_AGENT_COMMANDS: Record<string, string[]> = {
-  pi: ["npx pi-acp", "npx pi-acp@^0.0.22", "npx pi-acp@^0.0.26"],
+  pi: ["npx pi-acp", "npx pi-acp@^0.0.22", "npx pi-acp@^0.0.26", "npx pi-acp@^0.0.31"],
   codex: [
     "npx @zed-industries/codex-acp",
     "npx @zed-industries/codex-acp@^0.9.5",
@@ -21,8 +21,10 @@ const LEGACY_AGENT_COMMANDS: Record<string, string[]> = {
     "npx -y @zed-industries/claude-agent-acp@^0.31.0",
     "npx -y @agentclientprotocol/claude-agent-acp@^0.36.1",
     "npx -y @agentclientprotocol/claude-agent-acp@^0.37.0",
+    "npx -y @agentclientprotocol/claude-agent-acp@^0.60.0",
     "npm exec @agentclientprotocol/claude-agent-acp@^0.36.1",
     "npm exec @agentclientprotocol/claude-agent-acp@^0.37.0",
+    "npm exec @agentclientprotocol/claude-agent-acp@^0.60.0",
   ],
   gemini: ["gemini", "gemini --experimental-acp"],
   kiro: ["kiro-cli acp"],

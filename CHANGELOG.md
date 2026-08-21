@@ -17,7 +17,7 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - Dependencies: update the ACP SDK, TypeScript runner, replay-viewer dependencies, and validation tooling, and refresh transitive dependency overrides.
-- Agents/built-ins: bump the default Claude ACP adapter range to `@agentclientprotocol/claude-agent-acp@^0.70.0` and the Pi adapter range to `pi-acp@^0.0.33`, so fresh built-in launches pick up the latest adapter releases.
+- Agents/built-ins: refresh the default Claude and Pi adapter ranges so fresh built-in launches pick up the current adapter releases, and keep sessions persisted under the superseded launch commands on the current built-in launch path.
 
 ### Breaking
 

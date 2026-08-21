@@ -72,6 +72,9 @@ test("parseSessionRecord backfills argv for historical built-in commands", () =>
   for (const [agentCommand, expectedArgv] of [
     ["npx @zed-industries/codex-acp@^0.12.0", AGENT_ARGV_REGISTRY.codex],
     ["npm exec @agentclientprotocol/claude-agent-acp@^0.37.0", AGENT_ARGV_REGISTRY.claude],
+    ["npx -y @agentclientprotocol/claude-agent-acp@^0.60.0", AGENT_ARGV_REGISTRY.claude],
+    ["npm exec @agentclientprotocol/claude-agent-acp@^0.60.0", AGENT_ARGV_REGISTRY.claude],
+    ["npx pi-acp@^0.0.31", AGENT_ARGV_REGISTRY.pi],
     ["npx -y mux@^0.27.0 acp", AGENT_ARGV_REGISTRY.mux],
     ["gemini --experimental-acp", AGENT_ARGV_REGISTRY.gemini],
     ["kiro-cli acp", AGENT_ARGV_REGISTRY.kiro],

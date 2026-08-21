@@ -81,7 +81,7 @@ If prompt text is omitted and stdin is piped, `acpx` reads prompt text from stdi
 
 Friendly agent names resolve to commands:
 
-- `pi` -> `npx pi-acp`
+- `pi` -> `npx pi-acp` (ACPX-owned package range)
 - `openclaw` -> `openclaw acp`
 - `codex` -> `npx -y @agentclientprotocol/codex-acp` (ACPX-owned package range)
 - `claude` -> `npx -y @agentclientprotocol/claude-agent-acp` (ACPX-owned package range)
@@ -110,6 +110,8 @@ Rules:
 - Unknown positional agent tokens are treated as raw agent commands.
 - `--agent <command>` explicitly sets a raw ACP adapter command.
 - Do not combine a positional agent and `--agent` in the same command.
+- When ACPX advances an ACPX-owned package range, sessions persisted under the superseded
+  built-in command are mapped back to the current built-in launch argv on reuse.
 
 ## Commands
 
