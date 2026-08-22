@@ -959,7 +959,7 @@ export class AcpClient {
       await waitForSpawn(spawnedChild);
     } catch (error) {
       const spawnError = new AgentSpawnError(this.options.agentCommand, error);
-      await this.notifyProcessSpawnFailure(launch, spawnError);
+      this.notifyProcessSpawnFailure(launch, spawnError);
       throw spawnError;
     }
 
@@ -970,7 +970,7 @@ export class AcpClient {
         this.options.agentCommand,
         new Error("spawned agent process did not expose a PID"),
       );
-      await this.notifyProcessSpawnFailure(launch, spawnError);
+      this.notifyProcessSpawnFailure(launch, spawnError);
       await this.terminateAgentProcess(child);
       throw spawnError;
     }
@@ -2255,19 +2255,20 @@ export class AcpClient {
     });
   }
 
-  private async notifyProcessSpawnFailure(launch: AcpProcessLaunch, error: unknown): Promise<void> {
+  private notifyProcessSpawnFailure(launch: AcpProcessLaunch, error: unknown): void {
     const handler = this.options.processLifecycle?.onSpawnFailed;
     if (!handler) {
       return;
     }
+    const event = Object.freeze({
+      ...launch,
+      error,
+      failedAt: isoNow(),
+    });
     try {
-      await handler(
-        Object.freeze({
-          ...launch,
-          error,
-          failedAt: isoNow(),
-        }),
-      );
+      void Promise.resolve(handler(event)).catch((observerError: unknown) => {
+        this.logProcessLifecycleError("onSpawnFailed", observerError);
+      });
     } catch (observerError) {
       this.logProcessLifecycleError("onSpawnFailed", observerError);
     }

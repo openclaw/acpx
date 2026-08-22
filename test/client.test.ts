@@ -1532,6 +1532,34 @@ test("AcpClient correlates spawn failures with the prepared launch", async () =>
   assert.equal(exited, false);
 });
 
+test("AcpClient does not await non-settling spawn failure observers", async () => {
+  let observerCalled = false;
+  const client = makeClient({
+    agentCommand: "acpx-test-missing-agent",
+    agentArgv: ["acpx-test-missing-agent"],
+    processLifecycle: {
+      onSpawnFailed: () => {
+        observerCalled = true;
+        return new Promise<void>(() => {});
+      },
+    },
+  });
+
+  const result = await Promise.race([
+    client.start().then(
+      () => ({ type: "resolved" as const }),
+      (error: unknown) => ({ type: "rejected" as const, error }),
+    ),
+    new Promise<{ type: "timeout" }>((resolve) => {
+      setTimeout(() => resolve({ type: "timeout" }), 100);
+    }),
+  ]);
+
+  assert.equal(observerCalled, true);
+  assert.equal(result.type, "rejected");
+  assert(result.error instanceof AgentSpawnError);
+});
+
 test("AcpClient terminates a spawned process when spawned admission fails", async () => {
   const admissionError = new Error("spawned lease persistence failed");
   let spawnedPid: number | undefined;
