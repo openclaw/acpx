@@ -77,7 +77,7 @@ export async function probeRuntime(
 ): Promise<RuntimeHealthReport> {
   const agentName = options.probeAgent?.trim() || DEFAULT_AGENT_NAME;
   const agentCommand = normalizeAgentCommandInput(options.agentRegistry.resolve(agentName));
-  const client = createProbeClient(options, agentCommand, deps);
+  const client = createProbeClient(options, agentName, agentCommand, deps);
 
   try {
     await client.start();
@@ -111,6 +111,7 @@ export async function probeRuntime(
 
 function createProbeClient(
   options: AcpRuntimeOptions,
+  agentName: string,
   agentCommand: ReturnType<typeof normalizeAgentCommandInput>,
   deps: ProbeRuntimeDeps,
 ): AcpClient {
@@ -121,6 +122,8 @@ function createProbeClient(
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     permissionPolicy: options.permissionPolicy,
+    processLifecycle: options.processLifecycle,
+    processLaunchScope: { kind: "runtime-probe" as const, agent: agentName },
     verbose: options.verbose,
   };
   return deps.clientFactory?.(clientOptions) ?? new AcpClient(clientOptions);

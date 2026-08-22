@@ -14,6 +14,7 @@ import {
 } from "../src/acp/client.js";
 import {
   AgentDisconnectedError,
+  AgentSpawnError,
   AgentStartupError,
   AuthPolicyError,
   PermissionDeniedError,
@@ -1415,6 +1416,192 @@ test("AcpClient prompt rejects when the agent disconnects mid-prompt", async () 
   assert(result.error instanceof AgentDisconnectedError);
   assert.match(result.error.message, /disconnected during request/i);
   assert.equal(client.hasActivePrompt(), false);
+});
+
+test("AcpClient reports ordered process lifecycle events to embedding hosts", async () => {
+  const observed: string[] = [];
+  let launchId: string | undefined;
+  let pid: number | undefined;
+  let resolveExit: (() => void) | undefined;
+  const exited = new Promise<void>((resolve) => {
+    resolveExit = resolve;
+  });
+  const client = makeClient({
+    agentCommand: process.execPath,
+    agentArgv: [process.execPath, path.join(process.cwd(), "dist-test", "test", "mock-agent.js")],
+    processLaunchScope: { kind: "runtime-session", sessionKey: "lease-session" },
+    processLifecycle: {
+      onBeforeSpawn: (launch) => {
+        observed.push("before");
+        launchId = launch.launchId;
+        assert.equal(Object.isFrozen(launch), true);
+        assert.equal(Object.isFrozen(launch.args), true);
+        assert.deepEqual(launch.scope, {
+          kind: "runtime-session",
+          sessionKey: "lease-session",
+        });
+        assert.equal(launch.cwd, process.cwd());
+        assert(launch.command.length > 0);
+      },
+      onSpawned: (started) => {
+        observed.push("spawned");
+        assert.equal(started.launchId, launchId);
+        assert.equal(Object.isFrozen(started), true);
+        assert(Number.isInteger(started.pid));
+        assert(started.startedAt.length > 0);
+        pid = started.pid;
+      },
+      onSpawnFailed: () => {
+        assert.fail("spawn should succeed");
+      },
+      onExit: (exit) => {
+        observed.push("exit");
+        assert.equal(exit.launchId, launchId);
+        assert.equal(exit.pid, pid);
+        assert(exit.exitedAt.length > 0);
+        resolveExit?.();
+      },
+    },
+  });
+
+  await client.start();
+  await client.close();
+  await exited;
+
+  assert.deepEqual(observed, ["before", "spawned", "exit"]);
+});
+
+test("AcpClient aborts before spawn when lifecycle admission fails", async () => {
+  const admissionError = new Error("lease persistence failed");
+  let spawned = false;
+  const client = makeClient({
+    agentCommand: process.execPath,
+    agentArgv: [process.execPath, path.join(process.cwd(), "dist-test", "test", "mock-agent.js")],
+    processLifecycle: {
+      onBeforeSpawn: async () => {
+        throw admissionError;
+      },
+      onSpawned: () => {
+        spawned = true;
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => client.start(),
+    (error: unknown) => {
+      assert.equal(error, admissionError);
+      return true;
+    },
+  );
+  assert.equal(spawned, false);
+});
+
+test("AcpClient correlates spawn failures with the prepared launch", async () => {
+  let launchId: string | undefined;
+  let failureLaunchId: string | undefined;
+  let observedFailure: unknown;
+  let exited = false;
+  const client = makeClient({
+    agentCommand: "acpx-test-missing-agent",
+    agentArgv: ["acpx-test-missing-agent"],
+    processLifecycle: {
+      onBeforeSpawn: (launch) => {
+        launchId = launch.launchId;
+      },
+      onSpawnFailed: (failure) => {
+        failureLaunchId = failure.launchId;
+        observedFailure = failure.error;
+        assert(failure.failedAt.length > 0);
+      },
+      onExit: () => {
+        exited = true;
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => client.start(),
+    (error: unknown) => {
+      assert(error instanceof AgentSpawnError);
+      assert.equal(error, observedFailure);
+      return true;
+    },
+  );
+  assert.equal(failureLaunchId, launchId);
+  assert.equal(exited, false);
+});
+
+test("AcpClient terminates a spawned process when spawned admission fails", async () => {
+  const admissionError = new Error("spawned lease persistence failed");
+  let spawnedPid: number | undefined;
+  let exitedPid: number | undefined;
+  let resolveExit: (() => void) | undefined;
+  const exited = new Promise<void>((resolve) => {
+    resolveExit = resolve;
+  });
+  const client = makeClient({
+    agentCommand: process.execPath,
+    agentArgv: [process.execPath, path.join(process.cwd(), "dist-test", "test", "mock-agent.js")],
+    processLifecycle: {
+      onSpawned: (started) => {
+        spawnedPid = started.pid;
+        throw admissionError;
+      },
+      onExit: (exit) => {
+        exitedPid = exit.pid;
+        resolveExit?.();
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => client.start(),
+    (error: unknown) => {
+      assert.equal(error, admissionError);
+      return true;
+    },
+  );
+  await exited;
+
+  assert.equal(exitedPid, spawnedPid);
+});
+
+test("AcpClient reports an early exit after spawned admission settles", async () => {
+  const admissionError = new Error("spawned lease persistence failed");
+  const observed: string[] = [];
+  let resolveExit: (() => void) | undefined;
+  const exited = new Promise<void>((resolve) => {
+    resolveExit = resolve;
+  });
+  const client = makeClient({
+    agentCommand: process.execPath,
+    agentArgv: [process.execPath, path.join(process.cwd(), "dist-test", "test", "mock-agent.js")],
+    processLifecycle: {
+      onSpawned: async (started) => {
+        observed.push("spawned:start");
+        process.kill(started.pid);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        observed.push("spawned:end");
+        throw admissionError;
+      },
+      onExit: () => {
+        observed.push("exit");
+        resolveExit?.();
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => client.start(),
+    (error: unknown) => {
+      assert.equal(error, admissionError);
+      return true;
+    },
+  );
+  await exited;
+
+  assert.deepEqual(observed, ["spawned:start", "spawned:end", "exit"]);
 });
 
 test("AcpClient start fails fast when the agent exits during initialize", async () => {

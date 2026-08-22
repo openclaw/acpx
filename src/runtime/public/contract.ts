@@ -9,6 +9,7 @@ import type {
   AcpElicitationMode,
   AcpPermissionDecision,
   AcpPermissionRequest,
+  AcpProcessLifecycle,
   McpServer,
   NonInteractivePermissionPolicy,
   PermissionMode,
@@ -27,6 +28,12 @@ export type {
   AcpElicitationResponse,
   AcpPermissionDecision,
   AcpPermissionRequest,
+  AcpProcessExit,
+  AcpProcessLaunch,
+  AcpProcessLaunchScope,
+  AcpProcessLifecycle,
+  AcpProcessSpawnFailure,
+  AcpProcessStarted,
   PermissionPolicy,
 } from "../../types.js";
 
@@ -363,6 +370,8 @@ export type AcpRuntimeOptions = {
   verbose?: boolean;
   /** ACP elicitation modes the embedding host can render for prompt turns. */
   elicitationModes?: readonly AcpElicitationMode[];
+  /** Optional lifecycle observer for ACP agent processes owned by this runtime. */
+  processLifecycle?: AcpProcessLifecycle;
   onPermissionRequest?: (
     req: AcpPermissionRequest,
     ctx: { signal: AbortSignal },

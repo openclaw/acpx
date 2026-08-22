@@ -231,6 +231,52 @@ export interface OutputFormatter {
   flush(): void;
 }
 
+export type AcpProcessLaunchScope =
+  | Readonly<{ kind: "client" }>
+  | Readonly<{ kind: "runtime-session"; sessionKey: string }>
+  | Readonly<{ kind: "runtime-probe"; agent: string }>;
+
+export type AcpProcessLaunch = Readonly<{
+  launchId: string;
+  scope: AcpProcessLaunchScope;
+  command: string;
+  args: readonly string[];
+  cwd: string;
+}>;
+
+export type AcpProcessStarted = AcpProcessLaunch &
+  Readonly<{
+    pid: number;
+    startedAt: string;
+  }>;
+
+export type AcpProcessSpawnFailure = AcpProcessLaunch &
+  Readonly<{
+    error: unknown;
+    failedAt: string;
+  }>;
+
+export type AcpProcessExit = AcpProcessStarted &
+  Readonly<{
+    exitCode: number | null;
+    signal: NodeJS.Signals | null;
+    exitedAt: string;
+  }>;
+
+/**
+ * Optional process lifecycle seam for embedding hosts that persist their own
+ * launch ownership. Pre-spawn and spawned hooks are admission boundaries:
+ * rejecting either aborts startup, and a process rejected after spawn is
+ * terminated before the error is returned. Failure and exit hooks are
+ * best-effort observations and cannot replace the launch or exit outcome.
+ */
+export type AcpProcessLifecycle = {
+  onBeforeSpawn?: (launch: AcpProcessLaunch) => Promise<void> | void;
+  onSpawned?: (process: AcpProcessStarted) => Promise<void> | void;
+  onSpawnFailed?: (failure: AcpProcessSpawnFailure) => Promise<void> | void;
+  onExit?: (exit: AcpProcessExit) => Promise<void> | void;
+};
+
 export type AcpClientOptions = {
   agentCommand: string;
   agentArgv?: string[];
@@ -244,6 +290,8 @@ export type AcpClientOptions = {
   fs?: boolean;
   terminal?: boolean;
   elicitationModes?: readonly AcpElicitationMode[];
+  processLifecycle?: AcpProcessLifecycle;
+  processLaunchScope?: AcpProcessLaunchScope;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   sessionOptions?: {
