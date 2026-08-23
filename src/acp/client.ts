@@ -455,6 +455,7 @@ type AgentLaunchPlan = {
 type StartupFailureWatcher = {
   promise: Promise<never>;
   dispose: () => void;
+  getError: () => AgentStartupError | undefined;
 };
 
 type SessionUpdateSuppressionState = {
@@ -836,7 +837,6 @@ export class AcpClient {
     this.agentStartedAt = startedProcess.startedAt;
     this.lastAgentExit = undefined;
     this.lastKnownPid = startedProcess.pid;
-    await this.admitAndObserveSpawnedProcess(child, startedProcess);
     const startupStderr: string[] = [];
 
     child.stderr.on("data", (chunk: Buffer | string) => {
@@ -846,6 +846,17 @@ export class AcpClient {
       }
       process.stderr.write(chunk);
     });
+    const startupFailure = this.createStartupFailureWatcher(child, startupStderr);
+    try {
+      await this.admitAndObserveSpawnedProcess(child, startedProcess);
+      const admissionExit = startupFailure.getError();
+      if (admissionExit) {
+        throw admissionExit;
+      }
+    } catch (error) {
+      startupFailure.dispose();
+      throw error;
+    }
 
     const input = Writable.toWeb(child.stdin);
     const output = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
@@ -861,8 +872,6 @@ export class AcpClient {
       },
       { once: true },
     );
-    const startupFailure = this.createStartupFailureWatcher(child, startupStderr);
-
     await this.initializeAgentConnection({
       child,
       connection,
@@ -1850,6 +1859,7 @@ export class AcpClient {
     startupStderr: string[],
   ): StartupFailureWatcher {
     let settled = false;
+    let failure: AgentStartupError | undefined;
     let rejectPromise: (error: unknown) => void;
 
     const cleanup = () => {
@@ -1858,13 +1868,14 @@ export class AcpClient {
       child.off("close", onClose);
     };
 
-    const finish = (error?: unknown) => {
+    const finish = (error?: AgentStartupError) => {
       if (settled) {
         return;
       }
       settled = true;
       cleanup();
       if (error) {
+        failure = error;
         rejectPromise(error);
       }
     };
@@ -1899,11 +1910,16 @@ export class AcpClient {
       child.once("error", onError);
       child.once("exit", onExit);
       child.once("close", onClose);
+      if (child.exitCode !== null || child.signalCode !== null) {
+        onExit(child.exitCode, child.signalCode);
+      }
     });
+    void promise.catch(() => {});
 
     return {
       promise,
       dispose: () => finish(),
+      getError: () => failure,
     };
   }
 

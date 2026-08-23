@@ -1632,6 +1632,55 @@ test("AcpClient reports an early exit after spawned admission settles", async ()
   assert.deepEqual(observed, ["spawned:start", "spawned:end", "exit"]);
 });
 
+test("AcpClient rejects when the agent exits during successful spawned admission", async () => {
+  const stderrLine = "exited during spawned admission";
+  const observed: string[] = [];
+  let resolveExit: (() => void) | undefined;
+  const exited = new Promise<void>((resolve) => {
+    resolveExit = resolve;
+  });
+  const client = makeClient({
+    agentCommand: process.execPath,
+    agentArgv: [
+      process.execPath,
+      "--eval",
+      `setTimeout(() => {
+        process.stderr.write(${JSON.stringify(`${stderrLine}\n`)});
+        process.exit(17);
+      }, 20);`,
+    ],
+    processLifecycle: {
+      onSpawned: async () => {
+        observed.push("spawned:start");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        observed.push("spawned:end");
+      },
+      onExit: () => {
+        observed.push("exit");
+        resolveExit?.();
+      },
+    },
+  });
+
+  const result = await Promise.race([
+    client.start().then(
+      () => ({ type: "resolved" as const }),
+      (error: unknown) => ({ type: "rejected" as const, error }),
+    ),
+    new Promise<{ type: "timeout" }>((resolve) => {
+      setTimeout(() => resolve({ type: "timeout" }), 2_000);
+    }),
+  ]);
+
+  assert.equal(result.type, "rejected");
+  assert(result.error instanceof AgentStartupError);
+  assert.equal(result.error.exitCode, 17);
+  assert.equal(result.error.signal, null);
+  assert.match(result.error.message, /exited during spawned admission/);
+  await exited;
+  assert.deepEqual(observed, ["spawned:start", "spawned:end", "exit"]);
+});
+
 test("AcpClient start fails fast when the agent exits during initialize", async () => {
   const stderrLine = "startup boom";
   const client = makeClient({
