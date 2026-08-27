@@ -12,6 +12,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Runtime/embedding: let hosts durably retire an exact persistent or one-shot ACPX record without requiring backend `session/close`, so the next ensure starts fresh across process restarts.
+
 ## 2026.8.18 (v0.13.1)
 
 ### Changes

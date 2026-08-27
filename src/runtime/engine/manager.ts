@@ -82,6 +82,7 @@ export type AcpRuntimeManagerDeps = {
 type ActiveSessionController = {
   hasActivePrompt: () => boolean;
   requestCancelActivePrompt: () => Promise<boolean>;
+  completion: Promise<void>;
   setSessionMode: (modeId: string) => Promise<void>;
   setSessionModel: (modelId: string) => ReturnType<AcpClient["setSessionModel"]>;
   setSessionConfigOption: (
@@ -488,6 +489,7 @@ type RuntimeTurnTaskState = {
   pendingCancel: boolean;
   turnActive: boolean;
   activeController: ActiveSessionController | null;
+  completion: Deferred<void>;
 };
 
 type RuntimeTurnTask = {
@@ -809,6 +811,15 @@ export class AcpRuntimeManager {
     }
     this.removeRetainedSessionOwner(owner);
     await this.stopSessionOwner(owner);
+  }
+
+  private async releaseRetainedSessionOwner(recordId: string): Promise<void> {
+    const owner = this.retainedSessionOwners.get(recordId);
+    if (!owner) {
+      return;
+    }
+    await this.finalizeSessionConnection({ client: owner.client, owner });
+    this.removeRetainedSessionOwner(owner);
   }
 
   private async stopSessionOwner(owner: RuntimeSessionOwner): Promise<void> {
@@ -1201,7 +1212,9 @@ export class AcpRuntimeManager {
       pendingCancel: false,
       turnActive: true,
       activeController: null,
+      completion: createDeferred<void>(),
     };
+    void state.completion.promise.catch(() => {});
     let streamClosed = false;
 
     const settleResult = (next: AcpRuntimeTurnResult): void => {
@@ -1318,7 +1331,9 @@ export class AcpRuntimeManager {
     }
     try {
       await this.finalizeRuntimeTurn(task, turn);
+      task.state.completion.resolve();
     } catch (error) {
+      task.state.completion.reject(error);
       terminalResult = this.failRuntimeTurn(task, error);
     }
     task.settleResult(terminalResult);
@@ -1521,6 +1536,7 @@ export class AcpRuntimeManager {
     return {
       hasActivePrompt: () => turn.client.hasActivePrompt(),
       requestCancelActivePrompt: async () => await this.requestRuntimeTurnCancel(task, turn),
+      completion: task.state.completion.promise,
       setSessionMode: async (modeId: string) => {
         await this.waitForRuntimeControlSession(task, turn);
         await turn.client.setSessionMode(turn.activeSessionId, modeId);
@@ -1952,6 +1968,22 @@ export class AcpRuntimeManager {
     await controller?.requestCancelActivePrompt();
   }
 
+  async prepareFreshSession(handle: AcpRuntimeHandle): Promise<void> {
+    const recordId = handle.acpxRecordId ?? handle.sessionKey;
+    await this.withManagerLock(this.runtimeOperationLocks, recordId, async () => {
+      let record = await this.resolveRuntimeRecordForClose(recordId);
+      this.markActiveRuntimeRecordClosing(record);
+      const controller = this.activeControllers.get(record.acpxRecordId);
+      await controller?.requestCancelActivePrompt();
+      await controller?.completion;
+      if (controller) {
+        record = await this.resolveRuntimeRecordForClose(recordId);
+      }
+      await this.releaseRetainedSessionOwner(record.acpxRecordId);
+      await this.persistClosedRuntimeRecord(record, true);
+    });
+  }
+
   async close(
     handle: AcpRuntimeHandle,
     options: { discardPersistentState?: boolean } = {},
@@ -1961,6 +1993,19 @@ export class AcpRuntimeManager {
     this.markActiveRuntimeRecordClosing(record);
     await this.cancel(handle);
     await this.closeRuntimeRecordOwnership(record, options.discardPersistentState === true);
+    await this.persistClosedRuntimeRecord(record, options.discardPersistentState === true);
+  }
+
+  private async persistClosedRuntimeRecord(
+    record: SessionRecord,
+    resetOnNextEnsure: boolean,
+  ): Promise<void> {
+    if (resetOnNextEnsure) {
+      record.acpx = {
+        ...record.acpx,
+        reset_on_next_ensure: true,
+      };
+    }
     record.closed = true;
     record.closedAt = isoNow();
     await this.options.sessionStore.save(record);
@@ -1986,10 +2031,6 @@ export class AcpRuntimeManager {
   ): Promise<void> {
     if (discardPersistentState) {
       await this.closeBackendSession(record);
-      record.acpx = {
-        ...record.acpx,
-        reset_on_next_ensure: true,
-      };
     } else {
       await this.closeRetainedSessionOwner(record.acpxRecordId);
     }
@@ -2003,11 +2044,11 @@ export class AcpRuntimeManager {
     } catch (error) {
       this.handleBackendSessionCloseError(record, error);
     } finally {
-      await this.finalizeBackendCloseConnection(connection);
+      await this.finalizeSessionConnection(connection);
     }
   }
 
-  private async finalizeBackendCloseConnection(connection: {
+  private async finalizeSessionConnection(connection: {
     client: AcpClient;
     owner?: RuntimeSessionOwner;
   }): Promise<void> {

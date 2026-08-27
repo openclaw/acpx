@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   AcpRuntimeError,
   AcpxRuntime,
@@ -18,6 +20,10 @@ import {
 } from "../src/runtime.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
+const RETIREMENT_PROCESS_PATH = fileURLToPath(
+  new URL("./runtime-retirement-process.js", import.meta.url),
+);
+const execFileAsync = promisify(execFile);
 
 function createSessionRecord(overrides: Partial<AcpSessionRecord> = {}): AcpSessionRecord {
   return {
@@ -90,6 +96,7 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   let closedStreamRequestId: string | undefined;
   let cancelCalls = 0;
   let managerCancelCalls = 0;
+  let preparedFreshHandle: unknown;
   let closeDiscardPersistentState: boolean | undefined;
   let promptStarted = Promise.resolve();
   const manager = {
@@ -139,6 +146,9 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
     setConfigOption: async () => {},
     cancel: async () => {
       managerCancelCalls += 1;
+    },
+    prepareFreshSession: async (handle: unknown) => {
+      preparedFreshHandle = handle;
     },
     close: async (_handle: unknown, options?: { discardPersistentState?: boolean }) => {
       closeDiscardPersistentState = options?.discardPersistentState;
@@ -216,12 +226,14 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   await runtime.setMode({ handle, mode: "architect" });
   await runtime.setConfigOption({ handle, key: "approval", value: "manual" });
   await runtime.cancel({ handle, reason: "legacy cancel" });
+  await runtime.prepareFreshSession(handle);
   await turn.closeStream({ reason: "observer closed stream" });
   await turn.cancel();
   await runtime.close({ handle, reason: "test", discardPersistentState: true });
   assert.equal(closedStreamRequestId, "req-1");
   assert.equal(cancelCalls, 1);
   assert.equal(managerCancelCalls, 1);
+  assert.deepEqual(preparedFreshHandle, handle);
   assert.equal(closeDiscardPersistentState, true);
 });
 
@@ -377,6 +389,78 @@ test("createFileSessionStore supports concurrent saves in the same millisecond",
     [],
   );
 });
+
+test(
+  "prepareFreshSession propagates FileSessionStore write failure without false retirement",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-retirement-failure-"));
+    const sessionDir = path.join(stateDir, "sessions");
+    t.after(async () => {
+      await fs.chmod(sessionDir, 0o700).catch(() => {});
+      await fs.rm(stateDir, { recursive: true, force: true });
+    });
+    const store = createFileSessionStore({ stateDir });
+    const record = createSessionRecord({
+      acpxRecordId: "write-failure-retirement",
+      acpSessionId: "stale-backend",
+      cwd: stateDir,
+    });
+    await store.save(record);
+    await fs.chmod(sessionDir, 0o500);
+    const runtime = createAcpRuntime({
+      cwd: stateDir,
+      sessionStore: store,
+      agentRegistry: createAgentRegistry(),
+      permissionMode: "approve-reads",
+    });
+
+    await assert.rejects(
+      runtime.prepareFreshSession({
+        sessionKey: record.acpxRecordId,
+        backend: "acpx",
+        runtimeSessionName: record.acpxRecordId,
+        acpxRecordId: record.acpxRecordId,
+      }),
+      (error: NodeJS.ErrnoException) => error.code === "EACCES" || error.code === "EPERM",
+    );
+
+    await fs.chmod(sessionDir, 0o700);
+    const unchanged = await store.load(record.acpxRecordId);
+    assert.equal(unchanged?.closed, false);
+    assert.equal(unchanged?.acpx?.reset_on_next_ensure, undefined);
+  },
+);
+
+test("prepareFreshSession survives seed, retire, and ensure across OS processes", async (t) => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-retirement-process-"));
+  t.after(async () => {
+    await fs.rm(stateDir, { recursive: true, force: true });
+  });
+
+  const seed = await runRetirementProcess("seed", stateDir);
+  const retire = await runRetirementProcess("retire", stateDir);
+  const ensure = await runRetirementProcess("ensure", stateDir);
+
+  assert.deepEqual(seed, { phase: "seed", backendSessionId: "stale-backend-session" });
+  assert.deepEqual(retire, { phase: "retire" });
+  assert.equal(ensure.phase, "ensure");
+  assert.equal(ensure.acpxRecordId, "process-retirement");
+  assert.notEqual(ensure.backendSessionId, "stale-backend-session");
+});
+
+async function runRetirementProcess(
+  mode: "seed" | "retire" | "ensure",
+  stateDir: string,
+): Promise<Record<string, string>> {
+  const { stdout } = await execFileAsync(process.execPath, [
+    RETIREMENT_PROCESS_PATH,
+    mode,
+    stateDir,
+    MOCK_AGENT_PATH,
+  ]);
+  return JSON.parse(stdout.trim()) as Record<string, string>;
+}
 
 test("createFileSessionStore.load() returns undefined for a corrupt session file (#378)", async (t) => {
   const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-store-corrupt-"));

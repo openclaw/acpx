@@ -322,6 +322,7 @@ export interface AcpRuntime {
   setConfigOption?(input: { handle: AcpRuntimeHandle; key: string; value: string }): Promise<void>;
   doctor?(): Promise<AcpRuntimeDoctorReport>;
   cancel(input: { handle: AcpRuntimeHandle; reason?: string }): Promise<void>;
+  prepareFreshSession?(handle: AcpRuntimeHandle): Promise<void>;
   close(input: {
     handle: AcpRuntimeHandle;
     reason: string;
