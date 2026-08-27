@@ -108,6 +108,30 @@ function createHandle(sessionKey: string, acpxRecordId = sessionKey): AcpRuntime
   };
 }
 
+function createFakeClient(overrides: Partial<FakeClient> = {}): FakeClient {
+  return {
+    start: async () => {},
+    close: async () => {},
+    createSession: async () => ({ sessionId: "fresh-session" }),
+    loadSession: async () => ({ agentSessionId: "loaded-agent" }),
+    hasReusableSession: () => true,
+    supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
+    supportsCloseSession: () => true,
+    closeSession: async () => {},
+    loadSessionWithOptions: async () => ({ agentSessionId: "loaded-agent" }),
+    getAgentLifecycleSnapshot: () => ({ running: true }),
+    prompt: async () => ({ stopReason: "end_turn" }),
+    requestCancelActivePrompt: async () => false,
+    hasActivePrompt: () => false,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {},
+    setEventHandlers: () => {},
+    ...overrides,
+  };
+}
+
 async function collectEvents(iterable: AsyncIterable<AcpRuntimeEvent>): Promise<AcpRuntimeEvent[]> {
   const events: AcpRuntimeEvent[] = [];
   for await (const event of iterable) {
@@ -2563,6 +2587,196 @@ test("AcpRuntimeManager handles offline oneshot controls, status, close, and mis
   await assert.rejects(
     async () => await manager.getStatus(createHandle("missing-session")),
     /ACP session not found/,
+  );
+});
+
+test("AcpRuntimeManager prepares the exact generated oneshot record for a fresh session", async () => {
+  const decoy = makeSessionRecord({
+    acpxRecordId: "shared-session",
+    acpSessionId: "persistent-backend",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  class OrderingStore extends InMemorySessionStore {
+    override async save(next: AcpSessionRecord): Promise<void> {
+      if (next.acpx?.reset_on_next_ensure) {
+        events.push("retired");
+      } else if (next.acpx?.available_commands) {
+        events.push("flushed");
+      }
+      await super.save(next);
+    }
+  }
+  const store = new OrderingStore([decoy]);
+  const events: string[] = [];
+  let backendCloseCalls = 0;
+  let handlers: FakeClientHandlers = {};
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        createFakeClient({
+          close: async () => {
+            events.push("owner-closed");
+          },
+          closeSession: async () => {
+            backendCloseCalls += 1;
+          },
+          setEventHandlers: (nextHandlers) => {
+            handlers = nextHandlers;
+          },
+        }) as never,
+    },
+  );
+  const record = await manager.ensureSession({
+    sessionKey: "shared-session",
+    agent: "codex",
+    mode: "oneshot",
+  });
+  assert.match(record.acpxRecordId, /^shared-session:oneshot:/u);
+  events.length = 0;
+  handlers.onSessionUpdate?.({
+    sessionId: record.acpSessionId,
+    update: {
+      sessionUpdate: "available_commands_update",
+      availableCommands: [{ name: "pending-command" }],
+    },
+  });
+
+  await manager.prepareFreshSession(createHandle("shared-session", record.acpxRecordId));
+
+  const retired = await store.load(record.acpxRecordId);
+  const unchangedDecoy = await store.load("shared-session");
+  assert.deepEqual(events, ["flushed", "owner-closed", "retired"]);
+  assert.equal(backendCloseCalls, 0);
+  assert.equal(retired?.acpx?.available_commands?.[0]?.name, "pending-command");
+  assert.equal(retired?.closed, true);
+  assert.equal(typeof retired?.closedAt, "string");
+  assert.equal(retired?.acpx?.reset_on_next_ensure, true);
+  assert.equal(unchangedDecoy?.closed, false);
+  assert.equal(unchangedDecoy?.acpx?.reset_on_next_ensure, undefined);
+});
+
+test("AcpRuntimeManager finalizes an active owner before durable local retirement", async (t) => {
+  const record = makeSessionRecord({
+    acpxRecordId: "active-retirement",
+    acpSessionId: "active-backend",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const events: string[] = [];
+  let resolvePrompt!: (value: { stopReason: string }) => void;
+  const promptResult = new Promise<{ stopReason: string }>((resolve) => {
+    resolvePrompt = resolve;
+  });
+  t.after(() => resolvePrompt({ stopReason: "cancelled" }));
+  let promptActive = false;
+  class OrderingStore extends InMemorySessionStore {
+    override async save(next: AcpSessionRecord): Promise<void> {
+      if (next.acpx?.reset_on_next_ensure) {
+        events.push("retired");
+      }
+      await super.save(next);
+    }
+  }
+  const store = new OrderingStore([record]);
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        createFakeClient({
+          hasReusableSession: () => false,
+          prompt: async (_sessionId, _input, onRequestStarted) => {
+            promptActive = true;
+            await onRequestStarted?.();
+            return await promptResult;
+          },
+          hasActivePrompt: () => promptActive,
+          requestCancelActivePrompt: async () => {
+            events.push("cancelled");
+            promptActive = false;
+            return true;
+          },
+          close: async () => {
+            events.push("owner-closed");
+          },
+        }) as never,
+    },
+  );
+  const handle = createHandle("persistent-session-key", record.acpxRecordId);
+  const turn = manager.startTurn({
+    handle,
+    text: "stay active",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-active-retirement",
+  });
+  await turn.promptStarted;
+
+  let retirementSettled = false;
+  const retirement = manager.prepareFreshSession(handle);
+  void retirement.then(
+    () => {
+      retirementSettled = true;
+    },
+    () => {
+      retirementSettled = true;
+    },
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ["cancelled"]);
+  assert.equal(retirementSettled, false);
+  resolvePrompt({ stopReason: "cancelled" });
+  await retirement;
+  await turn.result;
+  assert.deepEqual(events, ["cancelled", "owner-closed", "retired"]);
+
+  const fresh = await manager.ensureSession({
+    sessionKey: record.acpxRecordId,
+    agent: "codex",
+    mode: "persistent",
+  });
+  assert.equal(fresh.acpSessionId, "fresh-session");
+  assert.equal((await store.load(record.acpxRecordId))?.acpSessionId, "fresh-session");
+});
+
+test("AcpRuntimeManager preserves retryable state when owner finalization fails", async () => {
+  const store = new InMemorySessionStore();
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        createFakeClient({
+          close: async () => {
+            throw new Error("owner finalization failed");
+          },
+        }) as never,
+    },
+  );
+  const record = await manager.ensureSession({
+    sessionKey: "finalization-failure",
+    agent: "codex",
+    mode: "persistent",
+  });
+
+  await assert.rejects(
+    manager.prepareFreshSession(createHandle(record.acpxRecordId)),
+    /owner finalization failed/,
+  );
+
+  const unchanged = await store.load(record.acpxRecordId);
+  assert.equal(unchanged?.closed, false);
+  assert.equal(unchanged?.acpx?.reset_on_next_ensure, undefined);
+});
+
+test("AcpRuntimeManager rejects local retirement when the exact record is missing", async () => {
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: new InMemorySessionStore() }),
+  );
+
+  await assert.rejects(
+    manager.prepareFreshSession(createHandle("missing-retirement")),
+    /ACP session not found: missing-retirement/,
   );
 });
 

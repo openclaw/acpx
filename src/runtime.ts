@@ -324,6 +324,12 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     await manager.cancel(handle);
   }
 
+  async prepareFreshSession(inputHandle: AcpRuntimeHandle): Promise<void> {
+    const { handle } = this.resolveManagerHandle(inputHandle);
+    const manager = await this.getManager();
+    await manager.prepareFreshSession(handle);
+  }
+
   async close(input: {
     handle: AcpRuntimeHandle;
     reason: string;
