@@ -15,14 +15,15 @@ acpx codex 'find the flaky test and fix it'
 
 # Switch agents, same surface.
 acpx claude 'refactor the auth middleware'
-acpx gemini 'review this branch'
 
 # One-shot, no saved context.
 acpx codex exec 'summarize this repo in 5 bullets'
 
 # Pipe structured ACP events into your own automation.
 acpx --format json codex exec 'review changed files' \
-  | jq -r 'select(.type=="tool_call") | [.status,.title] | @tsv'
+  | jq -r 'select(.method=="session/update") | .params.update
+           | select(.sessionUpdate=="tool_call" or .sessionUpdate=="tool_call_update")
+           | [(.status // "-"), (.title // "-")] | @tsv'
 
 # Run a TypeScript multi-step flow against a real agent.
 acpx flow run examples/flows/branch.flow.ts \
@@ -33,7 +34,7 @@ acpx flow run examples/flows/branch.flow.ts \
 
 ## What acpx does
 
-- **One CLI, every coding agent.** Built-in adapters for Codex, Claude, Pi, OpenClaw, Gemini, Cursor, Copilot, Droid, Qwen, Qoder, Trae, and more — plus `--agent` for any custom ACP server.
+- **One CLI, every coding agent.** Built-in adapters for Pi, OpenClaw, Codex, Claude, and more — plus `--agent` for any custom ACP server.
 - **Persistent sessions.** Multi-turn conversations survive across invocations, scoped per repo. `-s <name>` runs parallel workstreams (`backend`, `docs`, `pr-842`).
 - **Queue-aware prompts.** Submit while a turn is running; new prompts queue and drain in order. `--no-wait` enqueues and returns. `cancel` aborts cooperatively without tearing the session down.
 - **Crash-resistant.** Dead agent processes are detected and reloaded automatically. `Ctrl+C` sends ACP `session/cancel` before any force-kill.

@@ -14,6 +14,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Docs/JSON: fix raw ACP tool-call pipelines and message examples so automation reads nested session updates and handles partial tool updates. Fixes #520. Thanks @prateek.
+
 ## 2026.8.18 (v0.13.1)
 
 ### Changes

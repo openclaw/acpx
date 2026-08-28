@@ -422,7 +422,9 @@ Example automation:
 
 ```bash
 acpx --format json codex exec 'review changed files' \
-  | jq -r 'select(.type=="tool_call") | [.status, .title] | @tsv'
+  | jq -r 'select(.method=="session/update") | .params.update
+           | select(.sessionUpdate=="tool_call" or .sessionUpdate=="tool_call_update")
+           | [(.status // "-"), (.title // "-")] | @tsv'
 ```
 
 ## Permission modes
