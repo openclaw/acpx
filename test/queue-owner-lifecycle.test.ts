@@ -47,6 +47,45 @@ async function waitUntil(
   throw new Error(`Condition not met within ${timeoutMs}ms`);
 }
 
+async function connectQueueSocket(socketPath: string): Promise<net.Socket> {
+  let connectedSocket: net.Socket | undefined;
+  // A Unix socket file can exist before the server starts accepting connections.
+  await waitUntil(
+    () =>
+      new Promise<boolean>((resolve, reject) => {
+        const socket = net.createConnection(socketPath);
+        socket.setEncoding("utf8");
+        socket.once("connect", () => {
+          connectedSocket = socket;
+          resolve(true);
+        });
+        socket.once("error", (error: NodeJS.ErrnoException) => {
+          socket.destroy();
+          if (error.code === "ENOENT" || error.code === "ECONNREFUSED") {
+            resolve(false);
+          } else {
+            reject(error);
+          }
+        });
+      }),
+  );
+  assert(connectedSocket, "queue socket must be connected");
+  return connectedSocket;
+}
+
+async function waitForBridgePid(pidFilePath: string): Promise<number> {
+  let bridgePid = 0;
+  // File creation precedes the PID write, so existence alone is not readiness.
+  await waitUntil(async () => {
+    if (!(await fileExists(pidFilePath))) {
+      return false;
+    }
+    bridgePid = Number((await fs.readFile(pidFilePath, "utf8")).trim());
+    return Number.isInteger(bridgePid) && bridgePid > 0;
+  }, 8_000);
+  return bridgePid;
+}
+
 async function waitForTerminalQueueMessage(
   iterator: AsyncIterator<string>,
   timeoutMs = 5_000,
@@ -280,11 +319,7 @@ describe("queue owner lifecycle — graceful SIGTERM shutdown", () => {
 
       try {
         await waitUntil(() => fileExists(socketPath));
-        idleSocket = await new Promise<net.Socket>((resolve, reject) => {
-          const socket = net.createConnection(socketPath);
-          socket.once("connect", () => resolve(socket));
-          socket.once("error", reject);
-        });
+        idleSocket = await connectQueueSocket(socketPath);
 
         child.kill("SIGTERM");
         const { code, signal } = await waitForProcessExit(child, 5_000);
@@ -362,12 +397,7 @@ describe("queue owner lifecycle — bridge process death on SIGTERM", () => {
         // Connect to the queue-owner socket and submit a long-running prompt.
         // "sleep 10000" keeps the bridge busy for 10 s so it is still alive
         // when we send SIGTERM to the queue owner.
-        queueSocket = await new Promise<net.Socket>((resolve, reject) => {
-          const s = net.createConnection(socketPath);
-          s.setEncoding("utf8");
-          s.once("connect", () => resolve(s));
-          s.once("error", reject);
-        });
+        queueSocket = await connectQueueSocket(socketPath);
 
         queueSocket.write(
           `${JSON.stringify({
@@ -404,10 +434,7 @@ describe("queue owner lifecycle — bridge process death on SIGTERM", () => {
 
         // Wait for the bridge to write its PID — this confirms the bridge
         // process has been spawned and the ACP handshake has started.
-        await waitUntil(() => fileExists(pidFilePath), 8_000);
-
-        const bridgePidRaw = (await fs.readFile(pidFilePath, "utf8")).trim();
-        const bridgePid = Number(bridgePidRaw);
+        const bridgePid = await waitForBridgePid(pidFilePath);
         assert(
           Number.isInteger(bridgePid) && bridgePid > 0,
           "bridge PID must be a positive integer",
@@ -501,12 +528,7 @@ describe("queue owner lifecycle — bridge process death on SIGTERM", () => {
       try {
         await waitUntil(() => fileExists(socketPath));
 
-        queueSocket = await new Promise<net.Socket>((resolve, reject) => {
-          const s = net.createConnection(socketPath);
-          s.setEncoding("utf8");
-          s.once("connect", () => resolve(s));
-          s.once("error", reject);
-        });
+        queueSocket = await connectQueueSocket(socketPath);
 
         queueSocket.write(
           `${JSON.stringify({
@@ -537,10 +559,7 @@ describe("queue owner lifecycle — bridge process death on SIGTERM", () => {
         // the bridge kill or prevent the owner from exiting within the grace period.
 
         // Wait until the bridge has written its PID — ACP handshake started.
-        await waitUntil(() => fileExists(pidFilePath), 8_000);
-
-        const bridgePidRaw = (await fs.readFile(pidFilePath, "utf8")).trim();
-        const bridgePid = Number(bridgePidRaw);
+        const bridgePid = await waitForBridgePid(pidFilePath);
         assert(
           Number.isInteger(bridgePid) && bridgePid > 0,
           "bridge PID must be a positive integer",
