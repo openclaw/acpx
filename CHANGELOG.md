@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Dependencies: update the ACP SDK, TypeScript runner, replay-viewer dependencies, and validation tooling, and refresh transitive dependency overrides.
+
 ### Breaking
 
 ### Fixes
