@@ -55,34 +55,6 @@ export function setDesiredModeId(record: SessionRecord, modeId: string | undefin
   record.acpx = acpx;
 }
 
-export function setDesiredConfigOption(
-  record: SessionRecord,
-  configId: string,
-  value: string | undefined,
-): void {
-  const normalizedConfigId = normalizeModeId(configId);
-  if (!normalizedConfigId || normalizedConfigId === "mode" || normalizedConfigId === "model") {
-    return;
-  }
-
-  const acpx = ensureAcpxState(record.acpx);
-  const desired = { ...acpx.desired_config_options };
-
-  if (typeof value === "string") {
-    desired[normalizedConfigId] = value;
-  } else {
-    delete desired[normalizedConfigId];
-  }
-
-  if (Object.keys(desired).length > 0) {
-    acpx.desired_config_options = desired;
-  } else {
-    delete acpx.desired_config_options;
-  }
-
-  record.acpx = acpx;
-}
-
 export function clearDesiredConfigOption(
   state: SessionAcpxState,
   configId: string | undefined,

@@ -15,6 +15,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Docs/JSON: fix raw ACP tool-call pipelines and message examples so automation reads nested session updates and handles partial tool updates. Fixes #520. Thanks @prateek.
+- Session controls: restore saved model/config selections after reconnect, keep reasoning effort aligned with accepted model changes, and return accepted configuration to embedded clients without pinning unselected defaults. Thanks @programmerlapar.
 
 ## 2026.8.18 (v0.13.1)
 

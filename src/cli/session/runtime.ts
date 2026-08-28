@@ -5,10 +5,6 @@ import {
   isRetryablePromptError,
   normalizeOutputError,
 } from "../../acp/error-normalization.js";
-import {
-  assertRequestedModelSupported,
-  modelStateFromConfigOptions,
-} from "../../acp/model-support.js";
 import { InterruptedError, withInterrupt, withTimeout } from "../../async-control.js";
 export { InterruptedError, TimeoutError } from "../../async-control.js";
 import { formatPerfMetric, measurePerf, startPerfTimer } from "../../perf-metrics.js";
@@ -24,10 +20,7 @@ import {
   sessionOptionsFromRecord,
   type SessionAgentOptions,
 } from "../../runtime/engine/session-options.js";
-import {
-  applyConfigOptionsToRecord,
-  applyConfigOptionsToState,
-} from "../../session/config-options.js";
+import { applyConfigOptionSelection, applyModelSelection } from "../../session/config-options.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,
@@ -38,15 +31,7 @@ import {
 } from "../../session/conversation-model.js";
 import { SessionEventWriter } from "../../session/events.js";
 import { LiveSessionCheckpoint } from "../../session/live-checkpoint.js";
-import {
-  clearDesiredConfigOption,
-  setCurrentModelId,
-  setDesiredModelId,
-} from "../../session/mode-preference.js";
-import {
-  applyRequestedModelIfAdvertised,
-  currentModelIdFromSetModelResponse,
-} from "../../session/model-application.js";
+import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
 import { advertisedModelState } from "../../session/model-state.js";
 import {
   absolutePath,
@@ -246,18 +231,6 @@ function requestedModelId(value: string | undefined): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function applyConfigOptionResponseToState(
-  state: SessionAcpxState | undefined,
-  response:
-    | Awaited<ReturnType<AcpClient["setSessionConfigOption"]>>
-    | Awaited<ReturnType<AcpClient["setSessionModel"]>>,
-): SessionAcpxState | undefined {
-  if (!response?.configOptions) {
-    return state;
-  }
-  return applyConfigOptionsToState(state, response.configOptions);
-}
-
 export function mergeConnectedModelState(
   state: SessionAcpxState | undefined,
   connectedState: SessionAcpxState | undefined,
@@ -309,6 +282,8 @@ function mergeConnectedModelPreferences(
   }
   if (connectedState.desired_config_options) {
     nextState.desired_config_options = { ...connectedState.desired_config_options };
+  } else {
+    delete nextState.desired_config_options;
   }
 }
 
@@ -325,34 +300,19 @@ async function applyPromptModelIfAdvertised(params: {
     return;
   }
 
-  const models = advertisedModelState(params.record.acpx);
-  const warning = assertRequestedModelSupported({
+  const result = await applyRequestedModelIfAdvertised({
+    client: params.client,
+    sessionId: params.sessionId,
     requestedModel,
-    models,
+    models: advertisedModelState(params.record.acpx),
     agentCommand: params.record.agentCommand,
-    context: "apply",
+    timeoutMs: params.timeoutMs,
+    onWarning: params.suppressWarnings
+      ? undefined
+      : (message) => process.stderr.write(`[acpx] warning: ${message}\n`),
   });
-  emitModelSupportWarning(warning, params.suppressWarnings);
-  if (!models) {
-    return;
-  }
-  if (params.record.acpx?.current_model_id === requestedModel) {
-    setDesiredModelId(params.record, requestedModel, models.configId);
-    return;
-  }
-
-  const response = await withTimeout(
-    params.client.setSessionModel(params.sessionId, requestedModel, models),
-    params.timeoutMs,
-  );
-  applyConfigOptionsToRecord(params.record, response);
-  setDesiredModelId(params.record, requestedModel, models.configId);
-  setCurrentModelId(params.record, currentModelIdFromSetModelResponse(response, requestedModel));
-}
-
-function emitModelSupportWarning(warning: string | undefined, suppressWarnings?: boolean): void {
-  if (warning && !suppressWarnings) {
-    process.stderr.write(`[acpx] warning: ${warning}\n`);
+  if (result.applied) {
+    params.record.acpx = applyModelSelection(params.record.acpx, requestedModel, result.response);
   }
 }
 
@@ -754,7 +714,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     },
   });
 
-  const ownClient = options.client == null;
+  let closeClientOnExit = options.client == null;
   const client =
     options.client ??
     new AcpClient({
@@ -828,36 +788,18 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     setSessionModel: async (modelId: string) => {
       const models = advertisedModelState(acpxState);
       const response = await client.setSessionModel(activeSessionIdForControl, modelId, models);
-      acpxState = applyConfigOptionResponseToState(acpxState, response);
-      const nextState = cloneSessionAcpxState(acpxState) ?? {};
-      nextState.session_options = { ...nextState.session_options, model: modelId };
-      nextState.current_model_id = currentModelIdFromSetModelResponse(response, modelId);
-      clearDesiredConfigOption(nextState, models?.configId);
-      acpxState = nextState;
+      acpxState = applyModelSelection(acpxState, modelId, response);
       return response;
     },
     setSessionConfigOption: async (configId: string, value: string) => {
+      // Preserve the selected control's identity across pre-ack notifications.
+      const modelConfigId = advertisedModelState(acpxState)?.configId;
       const response = await client.setSessionConfigOption(
         activeSessionIdForControl,
         configId,
         value,
       );
-      acpxState = applyConfigOptionResponseToState(acpxState, response);
-      const nextState = cloneSessionAcpxState(acpxState) ?? {};
-      const modelConfigId = modelStateFromConfigOptions(nextState.config_options)?.configId;
-      if (configId === modelConfigId) {
-        nextState.session_options = { ...nextState.session_options, model: value };
-        nextState.current_model_id = currentModelIdFromSetModelResponse(response, value);
-        clearDesiredConfigOption(nextState, configId);
-      } else if (configId === "mode") {
-        nextState.desired_mode_id = value;
-      } else {
-        nextState.desired_config_options = {
-          ...nextState.desired_config_options,
-          [configId]: value,
-        };
-      }
-      acpxState = nextState;
+      acpxState = applyConfigOptionSelection(acpxState, configId, value, response, modelConfigId);
       return response;
     },
   };
@@ -879,6 +821,9 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
           client,
           record,
           resumePolicy: options.resumePolicy,
+          replacingConfigOption: requestedModelId(options.sessionOptions?.model)
+            ? { key: "model" }
+            : undefined,
           timeoutMs: options.timeoutMs,
           verbose: options.verbose,
           suppressWarnings: options.suppressSdkConsoleErrors,
@@ -900,6 +845,8 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       emitConnectPerfMetric(connectStartedAt, options.verbose);
       return connected;
     } catch (error) {
+      // A shared queue client must reconnect after an incomplete preference replay.
+      closeClientOnExit = true;
       flushConnectOutput();
       throw error;
     }
@@ -1020,7 +967,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     await applyPromptModelIfAdvertised({
       client,
       sessionId: activeSessionId,
-      requestedModel: sessionOptions?.model,
+      requestedModel: options.sessionOptions?.model,
       record,
       timeoutMs: options.timeoutMs,
       suppressWarnings: options.suppressSdkConsoleErrors,
@@ -1052,7 +999,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     await flushPendingMessages(false).catch(() => {
       // best effort while process is being interrupted
     });
-    if (ownClient) {
+    if (closeClientOnExit) {
       await client.close();
     }
   };
@@ -1078,7 +1025,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       options.onClientClosed?.();
     }
     client.clearEventHandlers();
-    if (ownClient) {
+    if (closeClientOnExit) {
       await client.close();
     }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());

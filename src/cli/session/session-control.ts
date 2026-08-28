@@ -1,15 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { runTimedExecFile, splitCommandLine } from "../../acp/client-process.js";
-import { applyConfigOptionsToRecord } from "../../session/config-options.js";
-import {
-  setCurrentModelId,
-  setDesiredConfigOption,
-  setDesiredModeId,
-  setDesiredModelId,
-} from "../../session/mode-preference.js";
-import { currentModelIdFromSetModelResponse } from "../../session/model-application.js";
-import { advertisedModelState } from "../../session/model-state.js";
+import { applyConfigOptionSelection, applyModelSelection } from "../../session/config-options.js";
+import { setDesiredModeId } from "../../session/mode-preference.js";
 import { resolveSessionRecord, writeSessionRecord, isoNow } from "../../session/persistence.js";
 import type {
   SessionRecord,
@@ -94,12 +87,7 @@ export async function setSessionModel(
   );
   if (submittedToOwner) {
     const record = await resolveSessionRecord(options.sessionId);
-    applyConfigOptionsToRecord(record, submittedToOwner.response);
-    setDesiredModelId(record, options.modelId, advertisedModelState(record.acpx)?.configId);
-    setCurrentModelId(
-      record,
-      currentModelIdFromSetModelResponse(submittedToOwner.response, options.modelId),
-    );
+    record.acpx = applyModelSelection(record.acpx, options.modelId, submittedToOwner.response);
     await writeSessionRecord(record);
     return {
       record,
@@ -134,16 +122,12 @@ export async function setSessionConfigOption(
   );
   if (ownerResponse) {
     const record = await resolveSessionRecord(options.sessionId);
-    const modelConfigId = advertisedModelState(record.acpx)?.configId;
-    applyConfigOptionsToRecord(record, ownerResponse);
-    if (options.configId === modelConfigId) {
-      setDesiredModelId(record, options.value, options.configId);
-      setCurrentModelId(record, currentModelIdFromSetModelResponse(ownerResponse, options.value));
-    } else if (options.configId === "mode") {
-      setDesiredModeId(record, options.value);
-    } else {
-      setDesiredConfigOption(record, options.configId, options.value);
-    }
+    record.acpx = applyConfigOptionSelection(
+      record.acpx,
+      options.configId,
+      options.value,
+      ownerResponse,
+    );
     await writeSessionRecord(record);
     return {
       record,

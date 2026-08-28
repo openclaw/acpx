@@ -322,6 +322,8 @@ Behavior:
 - Routes through queue-owner IPC when an owner is active.
 - Falls back to a direct client reconnect when no owner is running.
 - **`set model <id>`**: Uses the advertised model config option through `session/set_config_option`; adapters that explicitly advertise legacy `models` metadata use `session/set_model`.
+- Saves accepted values for existing non-mode selections, including reasoning effort adjusted or removed by a model switch; does not pin unselected defaults.
+- Restores saved model and config selections after reconnect, before the next prompt; already loaded sessions are reused without replay.
 
 ## `sessions` subcommand
 

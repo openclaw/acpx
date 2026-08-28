@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import type { SessionNotification } from "@agentclientprotocol/sdk";
+import type { SessionNotification, SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { normalizeAgentCommandInput } from "../../acp/client-process.js";
 import { AcpClient } from "../../acp/client.js";
 import { normalizeOutputError } from "../../acp/error-normalization.js";
@@ -11,7 +11,8 @@ import { withTimeout } from "../../async-control.js";
 import { textPrompt, type PromptInput } from "../../prompt-content.js";
 import {
   applyConfigOptionsToRecord,
-  applyConfigOptionsToState,
+  applyConfigOptionSelection,
+  applyModelSelection,
 } from "../../session/config-options.js";
 import {
   cloneSessionAcpxState,
@@ -25,10 +26,7 @@ import {
 import { defaultSessionEventLog } from "../../session/event-log.js";
 import { LiveSessionCheckpoint } from "../../session/live-checkpoint.js";
 import {
-  clearDesiredConfigOption,
   setCurrentModelId,
-  setDesiredConfigOption,
-  setDesiredModelId,
   setDesiredModeId,
   syncAdvertisedModelState,
 } from "../../session/mode-preference.js";
@@ -67,7 +65,11 @@ import {
   reconcileAgentSessionId,
 } from "./lifecycle.js";
 import { runPromptTurn } from "./prompt-turn.js";
-import { connectAndLoadSession, type ConnectAndLoadSessionResult } from "./reconnect.js";
+import {
+  connectAndLoadSession,
+  type ConnectAndLoadSessionOptions,
+  type ConnectAndLoadSessionResult,
+} from "./reconnect.js";
 import { shouldReuseExistingRecord } from "./reuse-policy.js";
 import {
   persistSessionOptions,
@@ -518,8 +520,7 @@ type RunningRuntimeTurn = {
   liveCheckpoint: LiveSessionCheckpoint;
   client: AcpClient;
   owner: RuntimeSessionOwner;
-  pendingClient: AcpClient | undefined;
-  connectionUpdates: SessionNotification[] | undefined;
+  connected: boolean;
   promptMessageId: string | undefined;
   activeSessionId: string;
 };
@@ -527,7 +528,6 @@ type RunningRuntimeTurn = {
 type RuntimeSessionProjection = {
   record: SessionRecord;
   conversation: ReturnType<typeof cloneSessionConversation>;
-  acpxState: ReturnType<typeof cloneSessionAcpxState>;
   checkpoint: LiveSessionCheckpoint;
 };
 
@@ -552,54 +552,6 @@ type PreparedRuntimeTurnState = {
   acpxState: ReturnType<typeof cloneSessionAcpxState>;
   promptMessageId: string | undefined;
 };
-
-function applyConfigOptionResponseToTurn(
-  turn: RunningRuntimeTurn,
-  response:
-    | Awaited<ReturnType<AcpClient["setSessionConfigOption"]>>
-    | Awaited<ReturnType<AcpClient["setSessionModel"]>>,
-): void {
-  if (!response?.configOptions) {
-    return;
-  }
-  turn.acpxState = applyConfigOptionsToState(turn.acpxState, response.configOptions);
-}
-
-function applyDesiredConfigOptionToTurn(
-  turn: RunningRuntimeTurn,
-  configId: string,
-  value: string,
-): void {
-  const nextState = cloneSessionAcpxState(turn.acpxState) ?? {};
-  const modelConfigId = modelStateFromConfigOptions(nextState.config_options)?.configId;
-  if (configId === modelConfigId) {
-    nextState.session_options = { ...nextState.session_options, model: value };
-    clearDesiredConfigOption(nextState, configId);
-  } else if (configId === "mode") {
-    nextState.desired_mode_id = value;
-  } else {
-    nextState.desired_config_options = {
-      ...nextState.desired_config_options,
-      [configId]: value,
-    };
-  }
-  turn.acpxState = nextState;
-}
-
-function applyDesiredConfigOptionToRecord(
-  record: SessionRecord,
-  configId: string,
-  value: string,
-): void {
-  const modelConfigId = modelStateFromConfigOptions(record.acpx?.config_options)?.configId;
-  if (configId === modelConfigId) {
-    setDesiredModelId(record, value, configId);
-  } else if (configId === "mode") {
-    setDesiredModeId(record, value);
-  } else {
-    setDesiredConfigOption(record, configId, value);
-  }
-}
 
 async function createOrLoadRuntimeSession(
   client: AcpClient,
@@ -677,18 +629,15 @@ export class AcpRuntimeManager {
     const active = owner.activeTurn;
     if (active) {
       const { task, turn } = active;
-      if (turn.connectionUpdates) {
-        turn.connectionUpdates.push(notification);
-        this.emitRuntimeTurnEvent(task, {
-          jsonrpc: "2.0",
-          method: "session/update",
-          params: notification,
-        });
-        return;
+      if (turn.connected) {
+        turn.acpxState = recordSessionUpdate(turn.conversation, turn.acpxState, notification);
+        turn.liveCheckpoint.request();
+      } else {
+        // Reconnect setters and their notifications share the record so an older
+        // notification cannot overwrite a later acknowledgement after replay.
+        turn.record.acpx = recordSessionUpdate(turn.conversation, turn.record.acpx, notification);
       }
-      turn.acpxState = recordSessionUpdate(turn.conversation, turn.acpxState, notification);
       trimConversationForRuntime(turn.conversation);
-      turn.liveCheckpoint.request();
       this.emitRuntimeTurnEvent(task, {
         jsonrpc: "2.0",
         method: "session/update",
@@ -707,9 +656,9 @@ export class AcpRuntimeManager {
       owner.pendingSessionUpdates.push(notification);
       return;
     }
-    projection.acpxState = recordSessionUpdate(
+    projection.record.acpx = recordSessionUpdate(
       projection.conversation,
-      projection.acpxState,
+      projection.record.acpx,
       notification,
     );
     trimConversationForRuntime(projection.conversation);
@@ -722,9 +671,13 @@ export class AcpRuntimeManager {
       return;
     }
     const { task, turn } = active;
-    turn.acpxState = recordClientOperation(turn.conversation, turn.acpxState, operation);
+    if (turn.connected) {
+      turn.acpxState = recordClientOperation(turn.conversation, turn.acpxState, operation);
+      turn.liveCheckpoint.request();
+    } else {
+      turn.record.acpx = recordClientOperation(turn.conversation, turn.record.acpx, operation);
+    }
     trimConversationForRuntime(turn.conversation);
-    turn.liveCheckpoint.request();
     this.emitRuntimeTurnEvent(task, {
       type: "client_operation",
       ...operation,
@@ -735,21 +688,24 @@ export class AcpRuntimeManager {
     owner: RuntimeSessionOwner,
     record: SessionRecord,
     conversation = cloneSessionConversation(record),
-    acpxState = cloneSessionAcpxState(record.acpx),
+    acpxState = record.acpx,
   ): void {
-    let projection: RuntimeSessionProjection;
+    record.acpx = acpxState;
     const checkpoint = new LiveSessionCheckpoint({
       save: async () => {
+        // Initialization owns publication; notifications before its model
+        // selection succeeds must not create an incomplete session record.
+        if (!owner.recordId) {
+          return;
+        }
         record.lastUsedAt = isoNow();
-        record.acpx = projection.acpxState;
-        applyConversation(record, projection.conversation);
+        applyConversation(record, conversation);
         applyLifecycleSnapshotToRecord(record, owner.client.getAgentLifecycleSnapshot());
         await this.refreshClosedState(record);
         await this.options.sessionStore.save(record);
       },
     });
-    projection = { record, conversation, acpxState, checkpoint };
-    owner.projection = projection;
+    owner.projection = { record, conversation, checkpoint };
     owner.activeTurn = undefined;
     this.drainPendingSessionUpdates(owner);
   }
@@ -873,11 +829,11 @@ export class AcpRuntimeManager {
     record: SessionRecord,
     sessionMode: "persistent" | "oneshot",
     run: (context: { client: AcpClient; sessionId: string; record: SessionRecord }) => Promise<T>,
+    replacingConfigOption?: ConnectAndLoadSessionOptions["replacingConfigOption"],
   ): Promise<{ value: T; record: SessionRecord }> {
     const owner = await this.readRetainedSessionOwner(record, { consume: false });
     if (owner) {
       const ownedRecord = owner.projection?.record ?? record;
-      owner.bufferSessionUpdates = true;
       try {
         const value = await run({
           client: owner.client,
@@ -887,7 +843,7 @@ export class AcpRuntimeManager {
         this.refreshOwnedRecordLifecycle(owner, ownedRecord);
         return { value, record: ownedRecord };
       } finally {
-        await this.finishBufferedOwnerControl(owner, ownedRecord);
+        await this.flushSessionOwner(owner);
       }
     }
 
@@ -905,6 +861,7 @@ export class AcpRuntimeManager {
       verbose: this.options.verbose,
       timeoutMs: this.options.timeoutMs,
       resumePolicy: resumePolicyForSessionMode(sessionMode),
+      replacingConfigOption,
       run,
     });
     return {
@@ -922,22 +879,6 @@ export class AcpRuntimeManager {
     applyLifecycleSnapshotToRecord(record, owner.client.getAgentLifecycleSnapshot());
   }
 
-  private async finishBufferedOwnerControl(
-    owner: RuntimeSessionOwner,
-    record: SessionRecord,
-  ): Promise<void> {
-    const projection = owner.projection;
-    if (projection) {
-      projection.acpxState = cloneSessionAcpxState(record.acpx);
-    }
-    owner.bufferSessionUpdates = false;
-    this.drainPendingSessionUpdates(owner);
-    if (projection) {
-      record.acpx = projection.acpxState;
-      applyConversation(record, projection.conversation);
-      await projection.checkpoint.flush();
-    }
-  }
   async ensureSession(input: RuntimeEnsureInput): Promise<SessionRecord> {
     return await this.withEnsureSessionLock(input, async () =>
       this.ensureSessionWithOwnership(input),
@@ -1083,39 +1024,41 @@ export class AcpRuntimeManager {
     try {
       await client.start();
       const session = await createOrLoadRuntimeSession(client, input.resumeSessionId, cwd);
-      const record = await this.createAndSaveRuntimeRecord({
+      const record = await this.prepareInitialRuntimeRecord({
         input,
         client,
+        owner,
         agentCommand,
         agentArgv,
         cwd,
         session,
       });
-      this.attachIdleProjection(owner, record);
       await this.retainInitializedSessionOwner(owner, record);
       retained = true;
       return record;
     } finally {
       if (!retained) {
+        owner.recordId = undefined;
         client.clearEventHandlers();
         await client.close();
       }
     }
   }
 
-  private async createAndSaveRuntimeRecord(params: {
+  private async prepareInitialRuntimeRecord(params: {
     input: {
       sessionKey: string;
       mode: "persistent" | "oneshot";
       sessionOptions?: SessionAgentOptions;
     };
     client: AcpClient;
+    owner: RuntimeSessionOwner;
     agentCommand: string;
     agentArgv?: string[];
     cwd: string;
     session: CreatedRuntimeSession;
   }): Promise<SessionRecord> {
-    const { input, client, agentCommand, agentArgv, cwd, session } = params;
+    const { input, client, owner, agentCommand, agentArgv, cwd, session } = params;
     const record = createInitialRecord({
       recordId: createRecordId(input.sessionKey, input.mode),
       sessionName: input.sessionKey,
@@ -1128,6 +1071,9 @@ export class AcpRuntimeManager {
     this.closingActiveRecords.delete(record.acpxRecordId);
     record.protocolVersion = client.initializeResult?.protocolVersion;
     record.agentCapabilities = client.initializeResult?.agentCapabilities;
+    // Fold pre-response notifications first; later controls and their updates
+    // then share this record and retain wire order through acknowledgement.
+    this.attachIdleProjection(owner, record);
     applyConfigOptionsToRecord(record, session.sessionResult);
     const modelApplication = await applyRequestedModelIfAdvertised({
       client,
@@ -1152,7 +1098,6 @@ export class AcpRuntimeManager {
     }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     persistSessionOptions(record, input.sessionOptions);
-    await this.options.sessionStore.save(record);
     return record;
   }
 
@@ -1161,6 +1106,9 @@ export class AcpRuntimeManager {
     record: SessionRecord,
   ): Promise<void> {
     owner.recordId = record.acpxRecordId;
+    // The checkpoint loop also persists notifications arriving during the
+    // initial async save before this owner becomes available for reuse.
+    await owner.projection?.checkpoint.checkpoint();
     const previousOwner = this.retainedSessionOwners.get(record.acpxRecordId);
     this.retainedSessionOwners.set(record.acpxRecordId, owner);
     if (owner.mode === "oneshot") {
@@ -1366,7 +1314,7 @@ export class AcpRuntimeManager {
         acpxState,
         client,
         owner,
-        pendingClient: retainedOwner?.client,
+        connected: retainedOwner !== undefined,
         promptMessageId,
       });
       this.activateRuntimeTurn(task, turn);
@@ -1450,11 +1398,10 @@ export class AcpRuntimeManager {
     acpxState: ReturnType<typeof cloneSessionAcpxState>;
     client: AcpClient;
     owner: RuntimeSessionOwner;
-    pendingClient: AcpClient | undefined;
+    connected: boolean;
     promptMessageId: string | undefined;
   }): RunningRuntimeTurn {
-    const { record, conversation, acpxState, client, owner, pendingClient, promptMessageId } =
-      input;
+    const { record, conversation, acpxState, client, owner, connected, promptMessageId } = input;
     const turn: RunningRuntimeTurn = {
       record,
       conversation,
@@ -1462,8 +1409,7 @@ export class AcpRuntimeManager {
       liveCheckpoint: this.createRuntimeTurnCheckpoint(record, conversation, () => turn.acpxState),
       client,
       owner,
-      pendingClient,
-      connectionUpdates: pendingClient ? undefined : [],
+      connected,
       promptMessageId,
       activeSessionId: record.acpSessionId,
     };
@@ -1532,12 +1478,7 @@ export class AcpRuntimeManager {
         await this.waitForRuntimeControlSession(task, turn);
         const models = advertisedModelState(turn.acpxState);
         const response = await turn.client.setSessionModel(turn.activeSessionId, modelId, models);
-        applyConfigOptionResponseToTurn(turn, response);
-        const nextState = cloneSessionAcpxState(turn.acpxState) ?? {};
-        nextState.session_options = { ...nextState.session_options, model: modelId };
-        nextState.current_model_id = currentModelIdFromSetModelResponse(response, modelId);
-        clearDesiredConfigOption(nextState, models?.configId);
-        turn.acpxState = nextState;
+        turn.acpxState = applyModelSelection(turn.acpxState, modelId, response);
         return response;
       },
       setSessionConfigOption: async (configId: string, value: string) => {
@@ -1593,23 +1534,21 @@ export class AcpRuntimeManager {
       },
       configId,
     );
+    // Notifications can remove the model control before the setter resolves.
+    const modelConfigId = advertisedModelState(turn.acpxState)?.configId;
     const response = await turn.client.setSessionConfigOption(
       turn.activeSessionId,
       resolvedConfigId,
       value,
     );
-    this.applyRuntimeConfigOptionState(turn, resolvedConfigId, value, response);
+    turn.acpxState = applyConfigOptionSelection(
+      turn.acpxState,
+      resolvedConfigId,
+      value,
+      response,
+      modelConfigId,
+    );
     return { configId: resolvedConfigId, response };
-  }
-
-  private applyRuntimeConfigOptionState(
-    turn: RunningRuntimeTurn,
-    configId: string,
-    value: string,
-    response: Awaited<ReturnType<AcpClient["setSessionConfigOption"]>>,
-  ): void {
-    applyConfigOptionResponseToTurn(turn, response);
-    applyDesiredConfigOptionToTurn(turn, configId, value);
   }
 
   private emitRuntimeTurnEvent(task: RuntimeTurnTask, payload: Record<string, unknown>): void {
@@ -1624,24 +1563,13 @@ export class AcpRuntimeManager {
     task: RuntimeTurnTask,
     turn: RunningRuntimeTurn,
   ): Promise<ConnectAndLoadSessionResult> {
-    const loaded = turn.pendingClient
-      ? { sessionId: turn.record.acpSessionId, resumed: false, loadError: undefined }
-      : await this.connectRuntimeTurnClient(task, turn);
-    this.drainRuntimeConnectionUpdates(turn);
-    return loaded;
-  }
-
-  private drainRuntimeConnectionUpdates(turn: RunningRuntimeTurn): void {
-    if (!turn.connectionUpdates) {
-      return;
+    if (turn.connected) {
+      return { sessionId: turn.record.acpSessionId, resumed: false, loadError: undefined };
     }
+    const loaded = await this.connectRuntimeTurnClient(task, turn);
     turn.acpxState = cloneSessionAcpxState(turn.record.acpx);
-    for (const notification of turn.connectionUpdates) {
-      turn.acpxState = recordSessionUpdate(turn.conversation, turn.acpxState, notification);
-    }
-    turn.connectionUpdates = undefined;
-    trimConversationForRuntime(turn.conversation);
-    turn.liveCheckpoint.request();
+    turn.connected = true;
+    return loaded;
   }
 
   private async connectRuntimeTurnClient(
@@ -1810,7 +1738,9 @@ export class AcpRuntimeManager {
   }
 
   private async finalizeRuntimeTurnRecord(turn: RunningRuntimeTurn): Promise<boolean> {
-    this.drainRuntimeConnectionUpdates(turn);
+    if (!turn.connected) {
+      turn.acpxState = cloneSessionAcpxState(turn.record.acpx);
+    }
     applyLifecycleSnapshotToRecord(turn.record, turn.client.getAgentLifecycleSnapshot());
     turn.record.acpx = turn.acpxState;
     applyConversation(turn.record, turn.conversation);
@@ -1818,7 +1748,8 @@ export class AcpRuntimeManager {
     await turn.liveCheckpoint.flush();
     const closed = await this.refreshClosedState(turn.record);
     await this.options.sessionStore.save(turn.record);
-    if (closed) {
+    // A loaded transport is not reusable until preference reconciliation succeeds.
+    if (closed || !turn.connected) {
       return false;
     }
     return await this.retainPersistentSessionOwnerAfterTurn({
@@ -1911,9 +1842,9 @@ export class AcpRuntimeManager {
     key: string,
     value: string,
     sessionMode: "persistent" | "oneshot" = "persistent",
-  ): Promise<void> {
+  ): Promise<SetSessionConfigOptionResponse> {
     const recordId = handle.acpxRecordId ?? handle.sessionKey;
-    await this.withManagerLock(this.runtimeOperationLocks, recordId, async () =>
+    return await this.withManagerLock(this.runtimeOperationLocks, recordId, async () =>
       this.setConfigOptionWithOwnership(handle, key, value, sessionMode),
     );
   }
@@ -1923,15 +1854,14 @@ export class AcpRuntimeManager {
     key: string,
     value: string,
     sessionMode: "persistent" | "oneshot",
-  ): Promise<void> {
+  ): Promise<SetSessionConfigOptionResponse> {
     const record = await this.requireRecord(handle.acpxRecordId ?? handle.sessionKey);
     const controller = this.activeControllers.get(record.acpxRecordId);
     if (controller) {
       const { configId, response } = await controller.setResolvedSessionConfigOption(key, value);
-      applyConfigOptionsToRecord(record, response);
-      applyDesiredConfigOptionToRecord(record, configId, value);
+      record.acpx = applyConfigOptionSelection(record.acpx, configId, value, response);
       await this.options.sessionStore.save(record);
-      return;
+      return response;
     }
 
     const result = await this.withRuntimeControlSession(
@@ -1939,12 +1869,21 @@ export class AcpRuntimeManager {
       sessionMode,
       async ({ client, sessionId, record: connectedRecord }) => {
         const configId = resolveSupportedConfigOptionId(connectedRecord, key);
+        const modelConfigId = advertisedModelState(connectedRecord.acpx)?.configId;
         const response = await client.setSessionConfigOption(sessionId, configId, value);
-        applyConfigOptionsToRecord(connectedRecord, response);
-        applyDesiredConfigOptionToRecord(connectedRecord, configId, value);
+        connectedRecord.acpx = applyConfigOptionSelection(
+          connectedRecord.acpx,
+          configId,
+          value,
+          response,
+          modelConfigId,
+        );
+        return response;
       },
+      { key, resolve: (connectedRecord) => resolveSupportedConfigOptionId(connectedRecord, key) },
     );
     await this.options.sessionStore.save(result.record);
+    return result.value;
   }
 
   async cancel(handle: AcpRuntimeHandle): Promise<void> {

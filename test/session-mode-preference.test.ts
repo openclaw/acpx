@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  getDesiredConfigOptions,
   getDesiredModeId,
   normalizeModeId,
-  setDesiredConfigOption,
   setDesiredModeId,
   setDesiredModelId,
 } from "../src/session/mode-preference.js";
@@ -35,26 +33,6 @@ test("setDesiredModeId creates and clears acpx mode preference state", () => {
   assert.deepEqual(record.acpx, {});
 
   setDesiredModeId(record, undefined);
-  assert.deepEqual(record.acpx, {});
-});
-
-test("setDesiredConfigOption persists non-mode config option preferences", () => {
-  const record = makeSessionRecord();
-
-  setDesiredConfigOption(record, " reasoning_effort ", "high");
-  setDesiredConfigOption(record, "mode", "plan");
-  setDesiredConfigOption(record, "model", "gpt-5.4");
-
-  assert.deepEqual(record.acpx, {
-    desired_config_options: {
-      reasoning_effort: "high",
-    },
-  });
-  assert.deepEqual(getDesiredConfigOptions(record.acpx), {
-    reasoning_effort: "high",
-  });
-
-  setDesiredConfigOption(record, "reasoning_effort", undefined);
   assert.deepEqual(record.acpx, {});
 });
 

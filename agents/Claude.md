@@ -4,6 +4,8 @@
 - Default command: `npx -y @agentclientprotocol/claude-agent-acp`
 - Upstream: https://github.com/agentclientprotocol/claude-agent-acp
 - ACPX pins the built-in package range so fresh installs pick up Claude model and ACP adapter fixes without depending on a global adapter binary.
+- Model switches can change the available effort controls. ACPX updates existing saved effort selections from the accepted response and removes selections whose controls disappear.
+- Saved model and config selections are restored after reconnect, without replacing the conversation.
 
 ## Settings isolation
 
