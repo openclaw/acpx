@@ -67,6 +67,7 @@ import type {
   FlowNodeResult,
   ResolvedFlowAgent,
   ShellActionExecution,
+  ShellActionNodeDefinition,
 } from "./types.js";
 
 export { acp, action, checkpoint, compute, defineFlow, shell };
@@ -160,6 +161,7 @@ export class FlowRunner {
   private readonly services;
   private readonly store;
   private readonly pendingPersistentSessionClients = new Map<string, AcpClient>();
+  private activeRunAbort: AbortController | null = null;
 
   constructor(options: FlowRunnerOptions) {
     this.resolveAgent = options.resolveAgent;
@@ -216,14 +218,20 @@ export class FlowRunner {
       inputArtifact,
     });
 
+    const runAbort = new AbortController();
+    this.activeRunAbort = runAbort;
     try {
       return await withInterrupt(
         async () => await this.executeFlowRun(flow, input, runDir, state),
         async () => {
+          runAbort.abort();
           await persistRunFailure(this.store, runDir, state, new InterruptedError());
         },
       );
     } finally {
+      if (this.activeRunAbort === runAbort) {
+        this.activeRunAbort = null;
+      }
       await this.closePendingPersistentSessionClients();
     }
   }
@@ -583,108 +591,159 @@ export class FlowRunner {
       };
     }
 
-    const { output, rawText, trace } = await this.runWithHeartbeat(
-      runDir,
-      state,
-      state.currentNode ?? "",
-      node,
-      nodeTimeoutMs,
-      async () => {
-        const execution = await Promise.resolve(node.exec(context));
-        const effectiveExecution: ShellActionExecution = {
-          ...execution,
-          cwd: resolveShellActionCwd(this.defaultCwd, execution.cwd),
-          timeoutMs: execution.timeoutMs ?? nodeTimeoutMs,
-        };
-        updateStatusDetail(state, formatShellActionSummary(effectiveExecution));
-        await this.store.writeLive(runDir, state, {
-          scope: "node",
-          type: "node_heartbeat",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-          payload: {
-            statusDetail: state.statusDetail,
-          },
-        });
-        await this.store.appendTrace(runDir, state, {
-          scope: "action",
-          type: "action_prepared",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-          payload: {
-            action: {
-              actionType: "shell",
-              command: effectiveExecution.command,
-              args: effectiveExecution.args ?? [],
-              cwd: effectiveExecution.cwd,
-            },
-          },
-        });
-        const result = await runShellAction(effectiveExecution);
-        const stdoutArtifact = await this.store.writeArtifact(runDir, state, result.stdout, {
-          mediaType: "text/plain",
-          extension: "txt",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-        });
-        const stderrArtifact = await this.store.writeArtifact(runDir, state, result.stderr, {
-          mediaType: "text/plain",
-          extension: "txt",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-        });
-        await this.store.appendTrace(runDir, state, {
-          scope: "action",
-          type: "action_completed",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-          payload: {
-            action: {
-              actionType: "shell",
-              command: result.command,
-              args: result.args,
-              cwd: result.cwd,
-              exitCode: result.exitCode,
-              signal: result.signal,
-              durationMs: result.durationMs,
-            },
-            stdoutArtifact,
-            stderrArtifact,
-          },
-        });
-        const trace: FlowStepTrace = {
-          action: {
-            actionType: "shell",
-            command: result.command,
-            args: result.args,
-            cwd: result.cwd,
-            exitCode: result.exitCode,
-            signal: result.signal,
-            durationMs: result.durationMs,
-          },
-          stdoutArtifact,
-          stderrArtifact,
-        };
-        let parsedOutput: unknown;
-        try {
-          parsedOutput = node.parse ? await node.parse(result, context) : result;
-        } catch (error) {
-          throw attachStepTrace(error, trace);
-        }
-        return {
-          output: parsedOutput,
-          rawText: result.combinedOutput,
-          trace,
-        };
+    const shellAbort = this.createShellActionAbort();
+    try {
+      const { output, rawText, trace } = await this.runWithHeartbeat(
+        runDir,
+        state,
+        state.currentNode ?? "",
+        node,
+        nodeTimeoutMs,
+        async () =>
+          await this.executeShellAction(
+            runDir,
+            state,
+            node,
+            context,
+            nodeTimeoutMs,
+            shellAbort.signal,
+          ),
+        async () => {
+          shellAbort.abort();
+        },
+      );
+      return {
+        output,
+        promptText: null,
+        rawText,
+        sessionInfo: null,
+        agentInfo: null,
+        trace,
+      };
+    } finally {
+      shellAbort.dispose();
+    }
+  }
+
+  private async executeShellAction(
+    runDir: string,
+    state: FlowRunState,
+    node: ShellActionNodeDefinition,
+    context: FlowNodeContext,
+    nodeTimeoutMs: number | undefined,
+    signal: AbortSignal,
+  ): Promise<{ output: unknown; rawText: string; trace: FlowStepTrace }> {
+    const execution = await Promise.resolve(node.exec(context));
+    const effectiveExecution: ShellActionExecution = {
+      ...execution,
+      cwd: resolveShellActionCwd(this.defaultCwd, execution.cwd),
+      timeoutMs: execution.timeoutMs ?? nodeTimeoutMs,
+    };
+    updateStatusDetail(state, formatShellActionSummary(effectiveExecution));
+    await this.store.writeLive(runDir, state, {
+      scope: "node",
+      type: "node_heartbeat",
+      nodeId: state.currentNode,
+      attemptId: state.currentAttemptId,
+      payload: {
+        statusDetail: state.statusDetail,
       },
-    );
+    });
+    await this.store.appendTrace(runDir, state, {
+      scope: "action",
+      type: "action_prepared",
+      nodeId: state.currentNode,
+      attemptId: state.currentAttemptId,
+      payload: {
+        action: {
+          actionType: "shell",
+          command: effectiveExecution.command,
+          args: effectiveExecution.args ?? [],
+          cwd: effectiveExecution.cwd,
+        },
+      },
+    });
+    const result = await runShellAction(effectiveExecution, { signal });
+    const stdoutArtifact = await this.store.writeArtifact(runDir, state, result.stdout, {
+      mediaType: "text/plain",
+      extension: "txt",
+      nodeId: state.currentNode,
+      attemptId: state.currentAttemptId,
+    });
+    const stderrArtifact = await this.store.writeArtifact(runDir, state, result.stderr, {
+      mediaType: "text/plain",
+      extension: "txt",
+      nodeId: state.currentNode,
+      attemptId: state.currentAttemptId,
+    });
+    await this.store.appendTrace(runDir, state, {
+      scope: "action",
+      type: "action_completed",
+      nodeId: state.currentNode,
+      attemptId: state.currentAttemptId,
+      payload: {
+        action: {
+          actionType: "shell",
+          command: result.command,
+          args: result.args,
+          cwd: result.cwd,
+          exitCode: result.exitCode,
+          signal: result.signal,
+          durationMs: result.durationMs,
+        },
+        stdoutArtifact,
+        stderrArtifact,
+      },
+    });
+    const trace: FlowStepTrace = {
+      action: {
+        actionType: "shell",
+        command: result.command,
+        args: result.args,
+        cwd: result.cwd,
+        exitCode: result.exitCode,
+        signal: result.signal,
+        durationMs: result.durationMs,
+      },
+      stdoutArtifact,
+      stderrArtifact,
+    };
+    let parsedOutput: unknown;
+    try {
+      parsedOutput = node.parse ? await node.parse(result, context) : result;
+    } catch (error) {
+      throw attachStepTrace(error, trace);
+    }
     return {
-      output,
-      promptText: null,
-      rawText,
-      sessionInfo: null,
-      agentInfo: null,
+      output: parsedOutput,
+      rawText: result.combinedOutput,
       trace,
+    };
+  }
+
+  private createShellActionAbort(): {
+    signal: AbortSignal;
+    abort: () => void;
+    dispose: () => void;
+  } {
+    const controller = new AbortController();
+    const parent = this.activeRunAbort?.signal;
+    const onParentAbort = () => {
+      controller.abort();
+    };
+    if (parent?.aborted) {
+      controller.abort();
+    } else {
+      parent?.addEventListener("abort", onParentAbort, { once: true });
+    }
+    return {
+      signal: controller.signal,
+      abort: () => {
+        controller.abort();
+      },
+      dispose: () => {
+        parent?.removeEventListener("abort", onParentAbort);
+      },
     };
   }
 
@@ -1024,9 +1083,13 @@ export class FlowRunner {
       }, heartbeatMs);
     }
 
+    const runPromise = run();
     try {
-      return await withTimeout(run(), timeoutMs);
+      return await withTimeout(runPromise, timeoutMs);
     } catch (error) {
+      void runPromise.catch(() => {
+        // ignore
+      });
       if (error instanceof TimeoutError && onTimeout) {
         await onTimeout().catch(() => {
           // best effort cancellation only

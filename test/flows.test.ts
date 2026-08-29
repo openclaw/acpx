@@ -25,6 +25,7 @@ import type {
   ShellActionNodeDefinition,
 } from "../src/flows/runtime.js";
 import { flowRunsBaseDir } from "../src/flows/store.js";
+import { isProcessAlive } from "../src/process-liveness.js";
 import type { PromptInput } from "../src/types.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
@@ -1407,6 +1408,72 @@ test("FlowRunner keeps same session handles isolated by working directory", asyn
       await fs.rm(baseCwd, { recursive: true, force: true });
       await fs.rm(worktreeA, { recursive: true, force: true });
       await fs.rm(worktreeB, { recursive: true, force: true });
+    }
+  });
+});
+
+test("FlowRunner kills shell child when outer node timeout fires", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+    const pidDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-shell-pid-"));
+    const pidPath = path.join(pidDir, "pid");
+    let pid: number | undefined;
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "unused",
+        agentCommand: "unused",
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+
+    const flow = defineFlow({
+      name: "outer-timeout-kills-shell",
+      startAt: "slow",
+      nodes: {
+        slow: shell({
+          timeoutMs: 200,
+          exec: () => ({
+            command: process.execPath,
+            args: [
+              "-e",
+              `require("node:fs").writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); setInterval(() => {}, 60_000);`,
+            ],
+            timeoutMs: 0,
+          }),
+        }),
+      },
+      edges: [],
+    });
+
+    const runPromise = runner.run(flow, {});
+    try {
+      pid = await waitFor(async () => {
+        try {
+          const value = Number(await fs.readFile(pidPath, "utf8"));
+          return Number.isInteger(value) && value > 0 ? value : null;
+        } catch {
+          return null;
+        }
+      }, 2_000);
+      assert.equal(isProcessAlive(pid), true);
+      await assert.rejects(async () => await runPromise, TimeoutError);
+      const deadline = Date.now() + 1_500;
+      while (isProcessAlive(pid) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(isProcessAlive(pid), false);
+    } finally {
+      if (pid && isProcessAlive(pid)) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // already gone
+        }
+      }
+      await runPromise.catch(() => undefined);
+      await fs.rm(pidDir, { recursive: true, force: true });
     }
   });
 });
