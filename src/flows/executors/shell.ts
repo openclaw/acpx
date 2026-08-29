@@ -1,6 +1,33 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { TimeoutError } from "../../async-control.js";
 import type { ShellActionExecution, ShellActionResult } from "../runtime.js";
+
+const SHELL_STDIN_PIPE_DEATH_CODES = new Set([
+  "EPIPE",
+  "EIO",
+  "ECONNRESET",
+  "ERR_STREAM_DESTROYED",
+]);
+
+function ignoreShellStdinPipeDeath(error: NodeJS.ErrnoException): void {
+  if (error.code && SHELL_STDIN_PIPE_DEATH_CODES.has(error.code)) {
+    return;
+  }
+}
+
+function writeShellStdin(child: ChildProcess, stdin: string | undefined): void {
+  const stream = child.stdin;
+  if (!stream) {
+    return;
+  }
+  stream.on("error", ignoreShellStdinPipeDeath);
+  if (stdin != null && stream.writable && !stream.writableEnded) {
+    stream.write(stdin);
+  }
+  if (stream.writable && !stream.writableEnded) {
+    stream.end();
+  }
+}
 
 export function formatShellActionSummary(spec: ShellActionExecution): string {
   return `shell: ${renderShellCommand(spec.command, spec.args ?? [])}`;
@@ -94,10 +121,7 @@ export async function runShellAction(spec: ShellActionExecution): Promise<ShellA
     });
   });
 
-  if (spec.stdin != null) {
-    child.stdin.write(spec.stdin);
-  }
-  child.stdin.end();
+  writeShellStdin(child, spec.stdin);
 
   if (spec.timeoutMs != null && spec.timeoutMs > 0) {
     timeout = setTimeout(() => {
