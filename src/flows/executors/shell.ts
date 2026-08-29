@@ -1,6 +1,44 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { TimeoutError } from "../../async-control.js";
 import type { ShellActionExecution, ShellActionResult } from "../runtime.js";
+
+export const DEFAULT_SHELL_ACTION_MAX_BUFFER_BYTES = 1024 * 1024;
+
+function createMaxBufferError(stream: "stdout" | "stderr", maxBufferBytes: number): Error {
+  return new Error(
+    `Shell action exceeded maxBuffer (${String(maxBufferBytes)} bytes) on ${stream}`,
+  );
+}
+
+function appendCappedShellOutput(
+  current: string,
+  chunk: string,
+  maxBufferBytes: number,
+): { value: string; overflowed: boolean } {
+  const currentBytes = Buffer.byteLength(current, "utf8");
+  if (currentBytes >= maxBufferBytes) {
+    return { value: current, overflowed: true };
+  }
+  const chunkBytes = Buffer.byteLength(chunk, "utf8");
+  if (currentBytes + chunkBytes <= maxBufferBytes) {
+    return { value: `${current}${chunk}`, overflowed: false };
+  }
+  const remaining = maxBufferBytes - currentBytes;
+  const sliced = Buffer.from(chunk, "utf8").subarray(0, remaining).toString("utf8");
+  return { value: `${current}${sliced}`, overflowed: true };
+}
+
+function stopReadingShellOutput(child: ChildProcess): void {
+  child.stdout?.pause();
+  child.stderr?.pause();
+}
+
+function killShellChild(child: ChildProcess): void {
+  child.kill("SIGTERM");
+  setTimeout(() => {
+    child.kill("SIGKILL");
+  }, 1_000).unref();
+}
 
 export function formatShellActionSummary(spec: ShellActionExecution): string {
   return `shell: ${renderShellCommand(spec.command, spec.args ?? [])}`;
@@ -30,7 +68,12 @@ function rejectIfShellFailed(
   args: string[],
   result: ShellActionResult,
   timedOut: boolean,
+  overflowedStream: "stdout" | "stderr" | undefined,
+  maxBufferBytes: number,
 ): Error | undefined {
+  if (overflowedStream) {
+    return createMaxBufferError(overflowedStream, maxBufferBytes);
+  }
   if (timedOut) {
     return new TimeoutError(spec.timeoutMs ?? 0);
   }
@@ -58,16 +101,38 @@ export async function runShellAction(spec: ShellActionExecution): Promise<ShellA
   let stdout = "";
   let stderr = "";
   let timedOut = false;
+  let overflowedStream: "stdout" | "stderr" | undefined;
   let timeout: NodeJS.Timeout | undefined;
+  const maxBufferBytes = spec.maxBufferBytes ?? DEFAULT_SHELL_ACTION_MAX_BUFFER_BYTES;
 
   const finish = new Promise<ShellActionResult>((resolve, reject) => {
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
+    const takeChunk = (stream: "stdout" | "stderr", chunk: string): void => {
+      if (overflowedStream) {
+        return;
+      }
+      const next = appendCappedShellOutput(
+        stream === "stdout" ? stdout : stderr,
+        chunk,
+        maxBufferBytes,
+      );
+      if (stream === "stdout") {
+        stdout = next.value;
+      } else {
+        stderr = next.value;
+      }
+      if (next.overflowed) {
+        overflowedStream = stream;
+        stopReadingShellOutput(child);
+        killShellChild(child);
+      }
+    };
     child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
+      takeChunk("stdout", chunk);
     });
     child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
+      takeChunk("stderr", chunk);
     });
 
     child.once("error", reject);
@@ -84,7 +149,14 @@ export async function runShellAction(spec: ShellActionExecution): Promise<ShellA
         durationMs: Date.now() - startMs,
       };
 
-      const error = rejectIfShellFailed(spec, args, result, timedOut);
+      const error = rejectIfShellFailed(
+        spec,
+        args,
+        result,
+        timedOut,
+        overflowedStream,
+        maxBufferBytes,
+      );
       if (error) {
         reject(error);
         return;
@@ -102,10 +174,7 @@ export async function runShellAction(spec: ShellActionExecution): Promise<ShellA
   if (spec.timeoutMs != null && spec.timeoutMs > 0) {
     timeout = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        child.kill("SIGKILL");
-      }, 1_000).unref();
+      killShellChild(child);
     }, spec.timeoutMs);
   }
 

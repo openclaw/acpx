@@ -81,6 +81,7 @@ export type ShellActionExecution = {
   shell?: boolean | string;
   allowNonZeroExit?: boolean;
   timeoutMs?: number;
+  maxBufferBytes?: number;
 };
 
 export type ShellActionResult = {
