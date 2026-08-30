@@ -36,6 +36,7 @@ import {
   finalizeStepTrace,
   findConversationDeltaStart,
   isoNow,
+  isRunFailureFinalized,
   makeFlowNodeContext,
   markNodeStarted,
   nextAttemptId,
@@ -224,8 +225,11 @@ export class FlowRunner {
       return await withInterrupt(
         async () => await this.executeFlowRun(flow, input, runDir, state),
         async () => {
-          runAbort.abort();
-          await persistRunFailure(this.store, runDir, state, new InterruptedError());
+          try {
+            await persistRunFailure(this.store, runDir, state, new InterruptedError());
+          } finally {
+            runAbort.abort();
+          }
         },
       );
     } finally {
@@ -331,8 +335,14 @@ export class FlowRunner {
         params.node,
         context,
       );
+      if (isRunFailureFinalized(params.state)) {
+        throw new InterruptedError();
+      }
       return await this.createSuccessfulFlowStep(params, executed);
     } catch (error) {
+      if (isRunFailureFinalized(params.state)) {
+        throw error;
+      }
       return await this.createFailedFlowStep(params, error);
     }
   }
@@ -486,6 +496,9 @@ export class FlowRunner {
       statusDetail?: string;
     } = {},
   ): Promise<void> {
+    if (isRunFailureFinalized(state)) {
+      return;
+    }
     state.updatedAt = isoNow();
     clearActiveNode(state, overrides.statusDetail);
     state.steps.push({

@@ -28,16 +28,19 @@ export function isoNow(): string {
   return new Date().toISOString();
 }
 
+export function isRunFailureFinalized(state: FlowRunState): boolean {
+  return (
+    state.finishedAt !== undefined && (state.status === "failed" || state.status === "timed_out")
+  );
+}
+
 export function persistRunFailure(
   store: FlowRunStore,
   runDir: string,
   state: FlowRunState,
   error: unknown,
 ): Promise<void> {
-  if (
-    state.finishedAt !== undefined &&
-    (state.status === "failed" || state.status === "timed_out")
-  ) {
+  if (isRunFailureFinalized(state)) {
     return Promise.resolve();
   }
 
