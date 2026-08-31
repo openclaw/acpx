@@ -77,3 +77,39 @@ test("runShellAction rejects commands terminated by signal", async () => {
     /signal SIGTERM/,
   );
 });
+
+test("runShellAction caps captured stdout from a flooding command", async () => {
+  const chunkSize = 256 * 1024;
+  const repeats = 8;
+  await assert.rejects(
+    async () =>
+      await runShellAction({
+        command: process.execPath,
+        args: [
+          "-e",
+          `for (let i = 0; i < ${String(repeats)}; i += 1) process.stdout.write("x".repeat(${String(chunkSize)}));`,
+        ],
+        timeoutMs: 5_000,
+      }),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message.includes("maxBuffer") &&
+      error.message.includes("stdout"),
+  );
+});
+
+test("runShellAction caps captured stderr from a flooding command", async () => {
+  await assert.rejects(
+    async () =>
+      await runShellAction({
+        command: process.execPath,
+        args: ["-e", 'process.stderr.write("y".repeat(64 * 1024))'],
+        maxBufferBytes: 4_096,
+        timeoutMs: 5_000,
+      }),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message.includes("maxBuffer") &&
+      error.message.includes("stderr"),
+  );
+});
