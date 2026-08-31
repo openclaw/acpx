@@ -1489,7 +1489,7 @@ class MockAgent implements Agent {
     signal: AbortSignal,
   ): Promise<string> {
     if (command === "complete") {
-      await this.connection.unstable_completeElicitation({
+      await this.connection.completeElicitation({
         elicitationId: "elicitation-123",
       });
       return "elicitation complete accepted";

@@ -3,11 +3,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { AcpClient } from "../src/acp/client.js";
+import { createOutputFormatter } from "../src/cli/output/output.js";
 import {
   runSessionSetConfigOptionDirect,
   runSessionSetModelDirect,
   runSessionSetModeDirect,
 } from "../src/cli/session/prompt-runner.js";
+import { sendSessionDirect } from "../src/cli/session/runtime.js";
 import { resolveSessionRecord } from "../src/session/persistence/repository.js";
 import {
   makeSessionRecord as makeSessionRecordFixture,
@@ -16,6 +19,42 @@ import {
 } from "./runtime-test-helpers.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
+
+test("sendSessionDirect closes a shared client after reconnect preference failure", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    const record = makeSessionRecord({
+      acpxRecordId: "failed-shared-reconnect",
+      acpSessionId: "failed-shared-reconnect-backend",
+      agentCommand: `node ${JSON.stringify(MOCK_AGENT_PATH)} --supports-load-session --advertise-models`,
+      cwd,
+      acpx: { session_options: { model: "unavailable-saved-model" } },
+    });
+    await writeSessionRecord(homeDir, record);
+    const client = new AcpClient({
+      agentCommand: record.agentCommand,
+      cwd,
+      permissionMode: "approve-all",
+    });
+    try {
+      await assert.rejects(
+        sendSessionDirect({
+          sessionId: record.acpxRecordId,
+          prompt: [{ type: "text", text: "hello" }],
+          permissionMode: "approve-all",
+          outputFormatter: createOutputFormatter("quiet"),
+          client,
+          timeoutMs: 5_000,
+        }),
+        /Failed to replay saved session model unavailable-saved-model/,
+      );
+      assert.equal(client.hasReusableSession(record.acpSessionId), false);
+    } finally {
+      await client.close();
+    }
+  });
+});
 
 test("runSessionSetModeDirect resumes a load-capable session and closes the client once", async () => {
   await withTempHome(async (homeDir) => {
@@ -190,7 +229,7 @@ test("runSessionSetConfigOptionDirect falls back to createSession and returns up
   });
 });
 
-test("runSessionSetConfigOptionDirect promotes a custom model config preference", async () => {
+test("runSessionSetConfigOptionDirect replaces an unavailable pinned model through its custom config key", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
@@ -201,6 +240,7 @@ test("runSessionSetConfigOptionDirect promotes a custom model config preference"
       agentCommand: `node ${JSON.stringify(MOCK_AGENT_PATH)} --supports-load-session --advertise-models --model-config-id llm`,
       cwd,
       acpx: {
+        session_options: { model: "unavailable-saved-model" },
         desired_config_options: {
           llm: "stale-model",
           reasoning_effort: "high",
@@ -219,7 +259,7 @@ test("runSessionSetConfigOptionDirect promotes a custom model config preference"
     assert.equal(result.record.acpx?.current_model_id, "smart-model");
     assert.equal(result.record.acpx?.session_options?.model, "smart-model");
     assert.deepEqual(result.record.acpx?.desired_config_options, {
-      reasoning_effort: "high",
+      reasoning_effort: "medium",
     });
     assert.equal(
       result.record.acpx?.config_options?.find((option) => option.id === "llm")?.currentValue,
@@ -276,7 +316,7 @@ test("runSessionSetConfigOptionDirect re-applies pinned model after reconnect", 
   });
 });
 
-test("runSessionSetModelDirect updates current and desired model", async () => {
+test("runSessionSetModelDirect replaces an unavailable pinned model", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
@@ -289,6 +329,7 @@ test("runSessionSetModelDirect updates current and desired model", async () => {
       closed: true,
       closedAt: "2026-01-01T00:05:00.000Z",
       acpx: {
+        session_options: { model: "unavailable-saved-model" },
         desired_config_options: {
           llm: "stale-model",
           reasoning_effort: "high",
@@ -307,7 +348,7 @@ test("runSessionSetModelDirect updates current and desired model", async () => {
     assert.equal(result.record.acpx?.current_model_id, "gpt-5.4");
     assert.equal(result.record.acpx?.session_options?.model, "gpt-5.4");
     assert.deepEqual(result.record.acpx?.desired_config_options, {
-      reasoning_effort: "high",
+      reasoning_effort: "medium",
     });
     assert.equal(
       result.record.acpx?.config_options?.find((option) => option.category === "model")
@@ -319,7 +360,7 @@ test("runSessionSetModelDirect updates current and desired model", async () => {
     assert.equal(persisted.acpx?.current_model_id, "gpt-5.4");
     assert.equal(persisted.acpx?.session_options?.model, "gpt-5.4");
     assert.deepEqual(persisted.acpx?.desired_config_options, {
-      reasoning_effort: "high",
+      reasoning_effort: "medium",
     });
     assert.equal(
       persisted.acpx?.config_options?.find((option) => option.category === "model")?.currentValue,

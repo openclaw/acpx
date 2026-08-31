@@ -17,7 +17,11 @@ import type {
   SessionResumePolicy,
 } from "../../types.js";
 import { applyLifecycleSnapshotToRecord } from "./lifecycle.js";
-import { connectAndLoadSession, type ConnectedSessionController } from "./reconnect.js";
+import {
+  connectAndLoadSession,
+  type ConnectAndLoadSessionOptions,
+  type ConnectedSessionController,
+} from "./reconnect.js";
 import { sessionOptionsFromRecord } from "./session-options.js";
 
 export type FullConnectedSessionController = ConnectedSessionController & {
@@ -56,6 +60,7 @@ export type WithConnectedSessionOptions<T> = {
   terminal?: boolean;
   elicitationModes?: readonly AcpElicitationMode[];
   resumePolicy?: SessionResumePolicy;
+  replacingConfigOption?: ConnectAndLoadSessionOptions["replacingConfigOption"];
   timeoutMs?: number;
   verbose?: boolean;
   onClientAvailable?: (controller: FullConnectedSessionController) => void;
@@ -133,6 +138,7 @@ export async function withConnectedSession<T>(
           client,
           record,
           resumePolicy: options.resumePolicy,
+          replacingConfigOption: options.replacingConfigOption,
           timeoutMs: options.timeoutMs,
           verbose: options.verbose,
           activeController,

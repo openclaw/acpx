@@ -136,7 +136,7 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
       acpxRecordId: record.acpxRecordId,
     }),
     setMode: async () => {},
-    setConfigOption: async () => {},
+    setConfigOption: async () => ({ configOptions: [] }),
     cancel: async () => {
       managerCancelCalls += 1;
     },
@@ -214,7 +214,9 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
 
   await runtime.getStatus({ handle });
   await runtime.setMode({ handle, mode: "architect" });
-  await runtime.setConfigOption({ handle, key: "approval", value: "manual" });
+  assert.deepEqual(await runtime.setConfigOption({ handle, key: "approval", value: "manual" }), {
+    configOptions: [],
+  });
   await runtime.cancel({ handle, reason: "legacy cancel" });
   await turn.closeStream({ reason: "observer closed stream" });
   await turn.cancel();

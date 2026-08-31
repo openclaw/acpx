@@ -40,8 +40,8 @@ acpx --format json codex exec 'review changed files' \
 ```
 
 ```json
-{"jsonrpc":"2.0","id":"req-1","method":"session/prompt","params":{"sessionId":"019c…","prompt":"hi"}}
-{"jsonrpc":"2.0","method":"session/update","params":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hello"}}}
+{"jsonrpc":"2.0","id":"req-1","method":"session/prompt","params":{"sessionId":"019c…","prompt":[{"type":"text","text":"hi"}]}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"019c…","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hello"}}}}
 {"jsonrpc":"2.0","id":"req-1","result":{"stopReason":"end_turn"}}
 ```
 

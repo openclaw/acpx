@@ -12,7 +12,20 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
-- ACP/launch: preserve process-spawn `ENOENT` as additive `AGENT_SPAWN_ENOENT` detail and include qualified remediation while keeping the broad runtime code and other spawn failures unchanged. Fixes #510.
+- ACP/launch: preserve process-spawn `ENOENT` as additive `AGENT_SPAWN_ENOENT` detail and include qualified remediation while keeping the broad runtime code and other spawn failures unchanged. Fixes #510. Thanks @anyech.
+
+## 2026.8.28 (v0.13.2)
+
+### Changes
+
+- Dependencies: update the ACP SDK, TypeScript runner, replay-viewer dependencies, and validation tooling, and refresh transitive dependency overrides.
+
+### Breaking
+
+### Fixes
+
+- Docs/JSON: fix raw ACP tool-call pipelines and message examples so automation reads nested session updates and handles partial tool updates. Fixes #520. Thanks @prateek.
+- Session controls: restore saved model/config selections after reconnect, keep reasoning effort aligned with accepted model changes, and return accepted configuration to embedded clients without pinning unselected defaults. Thanks @programmerlapar.
 
 ## 2026.8.18 (v0.13.1)
 
