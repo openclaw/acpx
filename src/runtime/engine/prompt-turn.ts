@@ -3,7 +3,12 @@ import {
   hasAgentReplyAfterPrompt,
   recordPromptResponseUsage,
 } from "../../session/conversation-model.js";
-import type { PromptInput, RunPromptResult, SessionConversation } from "../../types.js";
+import type {
+  AcpElicitationHandler,
+  PromptInput,
+  RunPromptResult,
+  SessionConversation,
+} from "../../types.js";
 
 const SESSION_REPLY_IDLE_MS = 1_000;
 const SESSION_REPLY_DRAIN_TIMEOUT_MS = 5_000;
@@ -13,6 +18,7 @@ type PromptTurnClient = {
     sessionId: string,
     prompt: PromptInput | string,
     onRequestStarted?: () => Promise<void> | void,
+    onElicitation?: AcpElicitationHandler,
   ) => Promise<{ stopReason: RunPromptResult["stopReason"]; usage?: unknown }>;
   waitForSessionUpdatesIdle?: (options?: { idleMs?: number; timeoutMs?: number }) => Promise<void>;
 };
@@ -26,12 +32,14 @@ export async function runPromptTurn(params: {
   promptMessageId?: string;
   onPromptRequestStarted?: () => Promise<void> | void;
   onPromptStarted?: () => Promise<void> | void;
+  onElicitation?: AcpElicitationHandler;
 }): Promise<{ stopReason: RunPromptResult["stopReason"]; source: "rpc" | "session" }> {
   try {
     const promptPromise = params.client.prompt(
       params.sessionId,
       params.prompt,
       params.onPromptRequestStarted,
+      params.onElicitation,
     );
     await params.onPromptStarted?.();
     const response = await withTimeout(promptPromise, params.timeoutMs);

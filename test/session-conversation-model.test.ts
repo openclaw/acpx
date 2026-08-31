@@ -337,6 +337,7 @@ test("model config parsing ignores malformed raw and persisted snapshots", () =>
 test("connected model state propagates authoritative removals", () => {
   const merged = mergeConnectedModelState(
     {
+      desired_config_options: { reasoning_effort: "high" },
       current_model_id: "stale-model",
       available_models: ["stale-model"],
       model_control: "config_option",
@@ -357,6 +358,7 @@ test("connected model state propagates authoritative removals", () => {
   assert.equal(merged?.available_models, undefined);
   assert.equal(merged?.model_control, undefined);
   assert.equal(merged?.config_options, undefined);
+  assert.equal(merged?.desired_config_options, undefined);
 });
 
 test("recordPromptSubmission preserves audio prompt content", () => {

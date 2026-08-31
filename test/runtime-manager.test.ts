@@ -1266,6 +1266,288 @@ test("AcpRuntimeManager retains a reusable persistent client across turns", asyn
   assert.equal(closeCalls, 1);
 });
 
+test("AcpRuntimeManager retries failed reconnect preferences with a new client", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "replay-failure-session",
+    acpSessionId: "replay-failure-backend",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+    acpx: { desired_config_options: { reasoning_effort: "high" } },
+  });
+  const store = new InMemorySessionStore([record]);
+  let clients = 0;
+  let closes = 0;
+  let replayCalls = 0;
+  const promptEfforts: string[] = [];
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () => {
+        clients += 1;
+        let loaded = false;
+        let effort = "low";
+        return {
+          start: async () => {},
+          close: async () => {
+            closes += 1;
+            loaded = false;
+          },
+          hasReusableSession: () => loaded,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => {
+            loaded = true;
+            return {};
+          },
+          getAgentLifecycleSnapshot: () => ({ running: loaded }),
+          prompt: async () => {
+            promptEfforts.push(effort);
+            return { stopReason: "end_turn" };
+          },
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionConfigOption: async (_sessionId: string, _key: string, value: string) => {
+            replayCalls += 1;
+            if (replayCalls === 1) {
+              throw new Error("temporary preference rejection");
+            }
+            effort = value;
+            return {
+              configOptions: [
+                {
+                  id: "reasoning_effort",
+                  name: "Effort",
+                  type: "select",
+                  currentValue: effort,
+                  options: [{ value: "high", name: "High" }],
+                },
+              ],
+            };
+          },
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        } as never;
+      },
+    },
+  );
+  const handle = createHandle(record.acpxRecordId);
+  for (const [requestId, expectedStatus] of [
+    ["first", "failed"],
+    ["retry", "completed"],
+  ] as const) {
+    const { result } = await collectTurn(
+      manager.startTurn({
+        handle,
+        text: "hello",
+        mode: "prompt",
+        sessionMode: "persistent",
+        requestId,
+      }),
+    );
+    assert.equal(result.status, expectedStatus);
+  }
+  assert.deepEqual(promptEfforts, ["high"]);
+  assert.equal(replayCalls, 2);
+  assert.equal(clients, 2);
+  assert.equal(closes, 1);
+  await manager.close(handle);
+});
+
+for (const phase of [
+  "reconnect",
+  "idle",
+  "initialize",
+  "initialize-save",
+  "initialize-failure",
+] as const) {
+  test(`AcpRuntimeManager keeps config acknowledgements after earlier ${phase} notifications`, async () => {
+    const record = makeSessionRecord({
+      acpxRecordId: "ordered-config-session",
+      acpSessionId: "ordered-config-backend",
+      agentCommand: "codex --acp",
+      cwd: "/workspace",
+      acpx: {
+        session_options: { model: "target-model" },
+        desired_config_options: { reasoning_effort: "high" },
+      },
+    });
+    let afterSave: (() => void) | undefined;
+    class NotificationDuringSaveStore extends InMemorySessionStore {
+      override async save(nextRecord: AcpSessionRecord): Promise<void> {
+        await super.save(nextRecord);
+        const notify = afterSave;
+        afterSave = undefined;
+        notify?.();
+      }
+    }
+    const store = new NotificationDuringSaveStore(phase === "reconnect" ? [record] : []);
+    const initializing = phase.startsWith("initialize");
+    let handlers: FakeClientHandlers = {};
+    let loaded = false;
+    const configOptions = (
+      model: string,
+      effort: string,
+    ): SetSessionConfigOptionResponse["configOptions"] => [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: model,
+        options: [
+          { value: "default-model", name: "Default" },
+          { value: "target-model", name: "Target" },
+        ],
+      },
+      {
+        id: "reasoning_effort",
+        name: "Effort",
+        type: "select",
+        currentValue: effort,
+        options: [
+          { value: "low", name: "Low" },
+          { value: "high", name: "High" },
+        ],
+      },
+    ];
+    const emitEarlierUpdates = () => {
+      handlers.onSessionUpdate?.({
+        sessionId: record.acpSessionId,
+        update: {
+          sessionUpdate: "config_option_update",
+          configOptions: configOptions("target-model", "low"),
+        },
+      });
+      handlers.onSessionUpdate?.({
+        sessionId: record.acpSessionId,
+        update: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [{ name: "reconnected", description: "Restored command" }],
+        },
+      });
+    };
+    if (phase === "initialize-save") {
+      afterSave = emitEarlierUpdates;
+    }
+    const manager = new AcpRuntimeManager(
+      createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+      {
+        clientFactory: () =>
+          ({
+            start: async () => {},
+            close: async () => {
+              loaded = false;
+            },
+            createSession: async () => {
+              loaded = true;
+              return {
+                sessionId: record.acpSessionId,
+                configOptions: configOptions("default-model", "low"),
+                models: {
+                  configId: "model",
+                  currentModelId: "default-model",
+                  availableModels: [{ modelId: "target-model", name: "Target" }],
+                },
+              };
+            },
+            hasReusableSession: () => loaded,
+            supportsLoadSession: () => true,
+            supportsResumeSession: () => false,
+            loadSessionWithOptions: async () => {
+              loaded = true;
+              return {
+                configOptions: configOptions("default-model", "low"),
+                models: {
+                  configId: "model",
+                  currentModelId: "default-model",
+                  availableModels: [
+                    { modelId: "default-model", name: "Default" },
+                    { modelId: "target-model", name: "Target" },
+                  ],
+                },
+              };
+            },
+            getAgentLifecycleSnapshot: () => ({ running: loaded }),
+            prompt: async () => ({ stopReason: "end_turn" }),
+            requestCancelActivePrompt: async () => false,
+            hasActivePrompt: () => false,
+            setSessionModel: async () => {
+              emitEarlierUpdates();
+              if (phase === "initialize-failure") {
+                // Cross the live checkpoint interval while initialization is
+                // unresolved: no partial session may become externally visible.
+                await new Promise((resolve) => setTimeout(resolve, 650));
+                assert.equal(store.records.has(record.acpxRecordId), false);
+                throw new Error("initial model selection rejected");
+              }
+              return {
+                configOptions: configOptions("target-model", initializing ? "high" : "low"),
+              };
+            },
+            setSessionConfigOption: async () => {
+              if (phase === "idle") {
+                emitEarlierUpdates();
+              }
+              return { configOptions: configOptions("target-model", "high") };
+            },
+            clearEventHandlers: () => {
+              handlers = {};
+            },
+            setEventHandlers: (next: FakeClientHandlers) => {
+              handlers = next;
+            },
+          }) as never,
+      },
+    );
+    const handle = createHandle(record.acpxRecordId);
+    if (phase !== "reconnect") {
+      const initialized = manager.ensureSession({
+        sessionKey: record.acpxRecordId,
+        agent: "codex",
+        mode: "persistent",
+        sessionOptions: initializing ? { model: "target-model" } : undefined,
+      });
+      if (phase === "initialize-failure") {
+        await assert.rejects(initialized, /initial model selection rejected/);
+        assert.equal(store.records.has(record.acpxRecordId), false);
+        assert.equal(loaded, false);
+        return;
+      }
+      await initialized;
+      if (phase === "idle") {
+        await manager.setConfigOption(handle, "reasoning_effort", "high");
+      }
+    } else {
+      const { result } = await collectTurn(
+        manager.startTurn({
+          handle,
+          text: "hello",
+          mode: "prompt",
+          sessionMode: "persistent",
+          requestId: "ordered-reconnect",
+        }),
+      );
+      assert.equal(result.status, "completed");
+    }
+    const reloadedManager = new AcpRuntimeManager(
+      createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    );
+    const status = await reloadedManager.getStatus(handle);
+    assert.deepEqual(
+      status.details?.configOptions,
+      configOptions("target-model", phase === "initialize-save" ? "low" : "high"),
+    );
+    assert.deepEqual(status.availableCommands, [
+      { name: "reconnected", description: "Restored command", hasInput: false },
+    ]);
+    assert.deepEqual(
+      store.records.get(record.acpxRecordId)?.acpx?.desired_config_options,
+      initializing ? undefined : { reasoning_effort: "high" },
+    );
+    await manager.close(handle);
+  });
+}
+
 test("AcpRuntimeManager projects session updates before, during, and after turns", async () => {
   const store = new InMemorySessionStore();
   let handlers: FakeClientHandlers = {};
@@ -2052,73 +2334,130 @@ test("AcpRuntimeManager maps generic thinking config to refreshed advertised eff
   assert.deepEqual(stored?.acpx?.desired_config_options, { effort: "high" });
 });
 
-test("AcpRuntimeManager persists advertised model config as desired model", async () => {
-  const record = makeSessionRecord({
-    acpxRecordId: "model-config-session",
-    acpSessionId: "model-config-backend-session",
-    agentCommand: "agent",
-    cwd: "/workspace",
-    acpx: {
-      desired_config_options: {
-        effort: "high",
-        llm: "stale-model",
-      },
-      config_options: [
-        {
-          id: "llm",
-          name: "Model",
-          category: "model",
-          type: "select",
-          currentValue: "default-model",
-          options: [{ value: "smart-model", name: "Smart Model" }],
+for (const scenario of [
+  {
+    name: "normalizes saved effort",
+    desiredEffort: "high",
+    acceptedEffort: "medium",
+    advertiseModel: true,
+  },
+  {
+    name: "removes unavailable effort",
+    desiredEffort: "high",
+    acceptedEffort: undefined,
+    advertiseModel: true,
+  },
+  {
+    name: "does not pin default effort",
+    desiredEffort: undefined,
+    acceptedEffort: "medium",
+    advertiseModel: true,
+  },
+  {
+    name: "learns the model control from the response",
+    desiredEffort: "high",
+    acceptedEffort: "medium",
+    advertiseModel: false,
+  },
+]) {
+  test(`AcpRuntimeManager persists accepted model preferences: ${scenario.name}`, async () => {
+    const record = makeSessionRecord({
+      acpxRecordId: "model-config-session",
+      acpSessionId: "model-config-backend-session",
+      agentCommand: "agent",
+      cwd: "/workspace",
+      acpx: {
+        desired_config_options: {
+          ...(scenario.desiredEffort ? { effort: scenario.desiredEffort } : {}),
+          llm: "stale-model",
         },
-      ],
-    },
-  });
-  const store = new InMemorySessionStore([record]);
-  const manager = new AcpRuntimeManager(
-    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
-    {
-      clientFactory: () =>
-        ({
-          start: async () => {},
-          close: async () => {},
-          hasReusableSession: () => false,
-          supportsLoadSession: () => true,
-          supportsResumeSession: () => false,
-          loadSessionWithOptions: async () => ({
-            configOptions: record.acpx?.config_options,
-          }),
-          getAgentLifecycleSnapshot: () => ({ running: true }),
-          requestCancelActivePrompt: async () => false,
-          hasActivePrompt: () => false,
-          setSessionMode: async () => {},
-          setSessionConfigOption: async () => ({
-            configOptions: [
+        config_options: scenario.advertiseModel
+          ? [
               {
                 id: "llm",
                 name: "Model",
                 category: "model",
                 type: "select",
-                currentValue: "smart-model",
+                currentValue: "default-model",
                 options: [{ value: "smart-model", name: "Smart Model" }],
               },
-            ],
-          }),
-          clearEventHandlers: () => {},
-          setEventHandlers: () => {},
-        }) as never,
-    },
-  );
+            ]
+          : undefined,
+      },
+    });
+    const store = new InMemorySessionStore([record]);
+    const manager = new AcpRuntimeManager(
+      createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+      {
+        clientFactory: () =>
+          ({
+            start: async () => {},
+            close: async () => {},
+            hasReusableSession: () => false,
+            supportsLoadSession: () => true,
+            supportsResumeSession: () => false,
+            loadSessionWithOptions: async () => ({
+              configOptions: record.acpx?.config_options,
+            }),
+            getAgentLifecycleSnapshot: () => ({ running: true }),
+            requestCancelActivePrompt: async () => false,
+            hasActivePrompt: () => false,
+            setSessionMode: async () => {},
+            setSessionConfigOption: async () => ({
+              configOptions: [
+                {
+                  id: "llm",
+                  name: "Model",
+                  category: "model",
+                  type: "select",
+                  currentValue: "smart-model",
+                  options: [{ value: "smart-model", name: "Smart Model" }],
+                },
+                ...(scenario.acceptedEffort
+                  ? [
+                      {
+                        id: "effort",
+                        name: "Effort",
+                        type: "select",
+                        currentValue: scenario.acceptedEffort,
+                        options: [{ value: scenario.acceptedEffort, name: "Medium" }],
+                      },
+                    ]
+                  : []),
+              ],
+            }),
+            clearEventHandlers: () => {},
+            setEventHandlers: () => {},
+          }) as never,
+      },
+    );
 
-  await manager.setConfigOption(createHandle("model-config-session"), "llm", "smart-model");
+    const response = await manager.setConfigOption(
+      createHandle("model-config-session"),
+      "llm",
+      "smart-model",
+    );
+    assert.equal(
+      response.configOptions.find((option) => option.id === "llm")?.currentValue,
+      "smart-model",
+    );
+    assert.equal(
+      response.configOptions.find((option) => option.id === "effort")?.currentValue,
+      scenario.acceptedEffort,
+    );
 
-  const stored = await store.load("model-config-session");
-  assert.equal(stored?.acpx?.session_options?.model, "smart-model");
-  assert.deepEqual(stored?.acpx?.desired_config_options, { effort: "high" });
-});
+    const stored = await store.load("model-config-session");
+    assert.equal(stored?.acpx?.session_options?.model, "smart-model");
+    assert.deepEqual(
+      stored?.acpx?.desired_config_options,
+      scenario.desiredEffort && scenario.acceptedEffort
+        ? { effort: scenario.acceptedEffort }
+        : undefined,
+    );
+  });
+}
 
-test("AcpRuntimeManager maps active generic thinking config against live advertised effort key", async () => {
+test("AcpRuntimeManager maps active thinking controls and persists the accepted value", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "active-thinking-alias-session",
     acpSessionId: "active-thinking-alias-backend-session",
@@ -2186,8 +2525,8 @@ test("AcpRuntimeManager maps active generic thinking config against live adverti
                   id: "effort",
                   name: "Effort",
                   type: "select",
-                  currentValue: value,
-                  options: [{ value, name: "High" }],
+                  currentValue: "medium",
+                  options: [{ value: "medium", name: "Medium" }],
                 },
               ],
             };
@@ -2222,6 +2561,95 @@ test("AcpRuntimeManager maps active generic thinking config against live adverti
   ]);
   assert.deepEqual(result, { status: "completed", stopReason: "end_turn" });
   assert.deepEqual(events, []);
+  assert.deepEqual((await store.load(record.acpxRecordId))?.acpx?.desired_config_options, {
+    effort: "medium",
+  });
+});
+
+test("AcpRuntimeManager retains a model selection when its control disappears before acknowledgement", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "active-model-removal",
+    acpSessionId: "active-model-session",
+    agentCommand: "agent",
+    cwd: "/workspace",
+    acpx: {
+      session_options: { model: "old-model" },
+      desired_config_options: { effort: "high" },
+      config_options: [
+        {
+          id: "llm",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "old-model",
+          options: [{ value: "next-model", name: "Next Model" }],
+        },
+      ],
+    },
+  });
+  const store = new InMemorySessionStore([record]);
+  let resolveStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    resolveStarted = resolve;
+  });
+  let resolvePrompt!: (value: { stopReason: string }) => void;
+  const prompt = new Promise<{ stopReason: string }>((resolve) => {
+    resolvePrompt = resolve;
+  });
+  let handlers: FakeClientHandlers = {};
+  const client = createModelsClientFactory({})();
+  client.hasActivePrompt = () => true;
+  client.setEventHandlers = (next) => {
+    handlers = next;
+  };
+  client.prompt = async () => {
+    resolveStarted();
+    return await prompt;
+  };
+  client.setSessionConfigOption = async (_sessionId, key, value) => {
+    if (key !== "llm") {
+      return {
+        configOptions: [
+          ...record.acpx!.config_options!,
+          {
+            id: key,
+            name: key,
+            type: "select",
+            currentValue: value,
+            options: [{ value, name: value }],
+          },
+        ],
+      };
+    }
+    handlers.onSessionUpdate?.({
+      sessionId: record.acpSessionId,
+      update: { sessionUpdate: "config_option_update", configOptions: [] },
+    });
+    return { configOptions: [] };
+  };
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    { clientFactory: () => client as never },
+  );
+  const handle = createHandle(record.acpxRecordId);
+  const turn = manager.startTurn({
+    handle,
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "active-model-removal-turn",
+  });
+  const events = collectEvents(turn.events);
+  await started;
+  try {
+    await manager.setConfigOption(handle, "llm", "next-model");
+  } finally {
+    resolvePrompt({ stopReason: "end_turn" });
+  }
+  await Promise.all([turn.result, events]);
+  const stored = await store.load(record.acpxRecordId);
+  assert.equal(stored?.acpx?.session_options?.model, "next-model");
+  assert.equal(stored?.acpx?.desired_config_options, undefined);
 });
 
 test("AcpRuntimeManager waits for active load refresh before resolving generic config keys", async () => {
@@ -2531,6 +2959,7 @@ test("AcpRuntimeManager handles offline oneshot controls, status, close, and mis
           },
           setSessionConfigOption: async (sessionId: string) => {
             setConfigSessions.push(sessionId);
+            return { configOptions: [] };
           },
           clearEventHandlers: () => {},
           setEventHandlers: () => {},

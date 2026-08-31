@@ -189,6 +189,8 @@ Behavior:
 - Current codex-acp releases expose `model` and `reasoning_effort` as separate config options.
 - `--model <id>`: Claude-compatible adapters may consume session creation metadata; other agents must advertise a model config option or legacy `models` metadata.
 - `set model <id>`: uses `session/set_config_option` for advertised model config options and preserves `session/set_model` for explicitly advertised legacy models.
+- Model switches can change or remove reasoning-effort controls. ACPX reconciles saved non-mode selections with the accepted response; select a supported effort again if needed.
+- After reconnect, ACPX restores the saved model when advertised and replays saved config selections before prompting. A replay failure is reported instead of silently using defaults.
 - `set-mode`/`set` route through queue-owner IPC when active, otherwise reconnect directly.
 
 ### Sessions
@@ -422,7 +424,9 @@ Example automation:
 
 ```bash
 acpx --format json codex exec 'review changed files' \
-  | jq -r 'select(.type=="tool_call") | [.status, .title] | @tsv'
+  | jq -r 'select(.method=="session/update") | .params.update
+           | select(.sessionUpdate=="tool_call" or .sessionUpdate=="tool_call_update")
+           | [(.status // "-"), (.title // "-")] | @tsv'
 ```
 
 ## Permission modes

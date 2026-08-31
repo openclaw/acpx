@@ -1,30 +1,44 @@
 import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import {
-  ClientSideConnection,
   PROTOCOL_VERSION,
-  RequestError,
+  client,
+  methods,
   type AnyMessage,
   type AuthMethod,
+  type AuthenticateRequest,
   type ClientCapabilities,
+  type ClientConnection,
+  type CreateElicitationRequest,
+  type CreateElicitationResponse,
   type CreateTerminalRequest,
   type CreateTerminalResponse,
+  type InitializeRequest,
   type InitializeResponse,
+  type JsonRpcId,
+  type LoadSessionRequest,
   type ListSessionsRequest,
   type ListSessionsResponse,
   type KillTerminalRequest,
   type KillTerminalResponse,
   type LoadSessionResponse,
+  type NewSessionRequest,
+  type NewSessionResponse,
   type PromptResponse,
+  type PromptRequest,
   type ReadTextFileRequest,
   type ReadTextFileResponse,
   type ReleaseTerminalRequest,
   type ReleaseTerminalResponse,
   type ResumeSessionResponse,
+  type ResumeSessionRequest,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionNotification,
   type SetSessionConfigOptionResponse,
+  type SetSessionConfigOptionRequest,
+  type SetSessionModeRequest,
+  type SetSessionModeResponse,
   type TerminalOutputRequest,
   type TerminalOutputResponse,
   type WaitForTerminalExitRequest,
@@ -58,6 +72,8 @@ import { extractRuntimeSessionId } from "../session/runtime-session-id.js";
 import { buildAgentSpawnCommand, buildSpawnCommandOptions } from "../spawn-command-options.js";
 import type {
   AcpClientOptions,
+  AcpElicitationHandler,
+  AcpElicitationMode,
   NonInteractivePermissionPolicy,
   PermissionMode,
   PermissionStats,
@@ -134,6 +150,14 @@ const DEVIN_COMPATIBILITY_CLIENT_CAPABILITIES_META = Object.freeze({
 const DEVIN_COMPATIBILITY_CLIENT_NAME = "windsurf";
 // This is the embedded Windsurf IDE version bundled with Devin Desktop 3.1.7, the first locally verified version that passes Devin's server-side ACP precondition.
 const DEFAULT_DEVIN_COMPATIBILITY_CLIENT_VERSION = "1.110.1";
+const ELICITATION_CANCEL_MESSAGES = {
+  inactive: "elicitation owner is no longer active",
+  unavailable: "elicitation handler is unavailable",
+  unsupported: "elicitation mode is not supported",
+  mismatchedSession: "elicitation session is not active",
+  cancelled: "elicitation request was cancelled",
+  requestScoped: "request-scoped elicitation has no owner",
+} as const;
 
 function resolveClientInfo(devinAcp: boolean): { name: string; version: string } {
   if (!devinAcp) {
@@ -149,10 +173,119 @@ function resolveClientInfo(devinAcp: boolean): { name: string; version: string }
   };
 }
 
+function normalizeElicitationModes(
+  modes: readonly AcpElicitationMode[] | undefined,
+): AcpElicitationMode[] {
+  return [...new Set((modes ?? []).filter((mode) => mode === "form" || mode === "url"))];
+}
+
+function cancelledElicitationResponse(message: string): CreateElicitationResponse {
+  return { action: "cancel", _meta: { message } };
+}
+
+function isKnownElicitationResponse(response: unknown): response is CreateElicitationResponse {
+  if (!response || typeof response !== "object") {
+    return false;
+  }
+  const action = (response as { action?: unknown }).action;
+  return action === "accept" || action === "decline" || action === "cancel";
+}
+
+function elicitationSessionId(request: CreateElicitationRequest): string | undefined {
+  const value = (request as { sessionId?: unknown }).sessionId;
+  return typeof value === "string" ? value : undefined;
+}
+
+function elicitationRequestScopeId(request: CreateElicitationRequest): JsonRpcId | undefined {
+  const value = (request as { requestId?: unknown }).requestId;
+  return value === null || typeof value === "string" || typeof value === "number"
+    ? value
+    : undefined;
+}
+
+function waitForAbort(signal: AbortSignal): Promise<{ kind: "aborted" }> {
+  if (signal.aborted) {
+    return Promise.resolve({ kind: "aborted" });
+  }
+  return new Promise((resolve) => {
+    signal.addEventListener("abort", () => resolve({ kind: "aborted" }), { once: true });
+  });
+}
+
+function isExtensionNotification(message: AnyMessage): boolean {
+  if (!("method" in message) || "id" in message || typeof message.method !== "string") {
+    return false;
+  }
+  return (
+    message.method !== methods.client.session.update &&
+    message.method !== methods.client.elicitation.complete &&
+    message.method !== methods.protocol.cancelRequest
+  );
+}
+
+function elicitationRequestId(message: AnyMessage): JsonRpcId | undefined {
+  if (
+    !("method" in message) ||
+    message.method !== methods.client.elicitation.create ||
+    !("id" in message)
+  ) {
+    return undefined;
+  }
+  return message.id;
+}
+
+function responseId(message: AnyMessage): JsonRpcId | undefined {
+  if (!("id" in message) || "method" in message) {
+    return undefined;
+  }
+  return message.id;
+}
+
+function promptRequestOwner(
+  message: AnyMessage,
+): { requestId: JsonRpcId; sessionId: string } | undefined {
+  if (
+    !("method" in message) ||
+    message.method !== methods.agent.session.prompt ||
+    !("id" in message)
+  ) {
+    return undefined;
+  }
+  const sessionId = (message.params as { sessionId?: unknown } | undefined)?.sessionId;
+  return typeof sessionId === "string" ? { requestId: message.id, sessionId } : undefined;
+}
+
+function createAgentConnectionFacade(connection: ClientConnection): AcpAgentConnection {
+  const agent = connection.agent;
+  return {
+    signal: connection.signal,
+    close: (error) => connection.close(error),
+    initialize: async (params) => await agent.request(methods.agent.initialize, params),
+    authenticate: async (params) => {
+      await agent.request(methods.agent.authenticate, params);
+    },
+    newSession: async (params) => await agent.request(methods.agent.session.new, params),
+    loadSession: async (params) => await agent.request(methods.agent.session.load, params),
+    resumeSession: async (params) => await agent.request(methods.agent.session.resume, params),
+    prompt: async (params) => await agent.request(methods.agent.session.prompt, params),
+    setSessionMode: async (params) => await agent.request(methods.agent.session.setMode, params),
+    setSessionConfigOption: async (params) =>
+      await agent.request(methods.agent.session.setConfigOption, params),
+    extMethod: async (method, params) =>
+      await agent.request<Record<string, unknown>, Record<string, unknown>>(method, params),
+    cancel: async (params) => await agent.notify(methods.agent.session.cancel, params),
+    closeSession: async (params) => {
+      await agent.request(methods.agent.session.close, params);
+    },
+    listSessions: async (params) => await agent.request(methods.agent.session.list, params),
+  };
+}
+
 function resolveClientCapabilities(params: {
   devinAcp: boolean;
   fs: boolean;
   terminal: boolean;
+  elicitationModes: readonly AcpElicitationMode[];
 }): ClientCapabilities {
   const baseCapabilities: ClientCapabilities = {
     fs: {
@@ -160,6 +293,14 @@ function resolveClientCapabilities(params: {
       writeTextFile: params.fs,
     },
     terminal: params.terminal,
+    ...(params.elicitationModes.length > 0
+      ? {
+          elicitation: {
+            ...(params.elicitationModes.includes("form") ? { form: {} } : {}),
+            ...(params.elicitationModes.includes("url") ? { url: {} } : {}),
+          },
+        }
+      : {}),
   };
 
   if (!params.devinAcp) {
@@ -170,10 +311,6 @@ function resolveClientCapabilities(params: {
     ...baseCapabilities,
     _meta: DEVIN_COMPATIBILITY_CLIENT_CAPABILITIES_META,
   };
-}
-
-function isDevinRequestDiagnosticsMethod(method: string): boolean {
-  return method === "_cognition.ai/request_diagnostics";
 }
 
 type LoadSessionOptions = {
@@ -234,6 +371,38 @@ type AgentDisconnectReason = "process_exit" | "process_close" | "pipe_close" | "
 type PendingConnectionRequest = {
   settled: boolean;
   reject: (error: unknown) => void;
+};
+
+type AcpAgentConnection = {
+  signal: AbortSignal;
+  close?: (error?: unknown) => void;
+  initialize: (params: InitializeRequest) => Promise<InitializeResponse>;
+  authenticate: (params: AuthenticateRequest) => Promise<void>;
+  newSession: (params: NewSessionRequest) => Promise<NewSessionResponse>;
+  loadSession: (params: LoadSessionRequest) => Promise<LoadSessionResponse>;
+  resumeSession: (params: ResumeSessionRequest) => Promise<ResumeSessionResponse>;
+  prompt: (params: PromptRequest) => Promise<PromptResponse>;
+  setSessionMode: (params: SetSessionModeRequest) => Promise<SetSessionModeResponse>;
+  setSessionConfigOption: (
+    params: SetSessionConfigOptionRequest,
+  ) => Promise<SetSessionConfigOptionResponse>;
+  extMethod: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  cancel: (params: { sessionId: string }) => Promise<void>;
+  closeSession: (params: { sessionId: string }) => Promise<void>;
+  listSessions: (params: ListSessionsRequest) => Promise<ListSessionsResponse>;
+};
+
+type ActivePromptState = {
+  sessionId: string;
+  requestId?: JsonRpcId;
+  promise?: Promise<PromptResponse>;
+  elicitationHandler?: AcpElicitationHandler;
+  elicitationController: AbortController;
+};
+
+type ElicitationOwner = {
+  active: ActivePromptState;
+  handler: AcpElicitationHandler;
 };
 
 function snapshotPermissionPolicy(
@@ -422,7 +591,7 @@ function createNdJsonMessageStream(
 
 export class AcpClient {
   private options: AcpClientOptions;
-  private connection?: ClientSideConnection;
+  private connection?: AcpAgentConnection;
   private agent?: ChildProcessByStdio<Writable, Readable, Readable>;
   private initResult?: InitializeResponse;
   private loadedSessionId?: string;
@@ -447,10 +616,8 @@ export class AcpClient {
   private processedSessionUpdates = 0;
   private suppressSessionUpdates = false;
   private suppressReplaySessionUpdateMessages = false;
-  private activePrompt?: {
-    sessionId: string;
-    promise: Promise<PromptResponse>;
-  };
+  private activePrompt?: ActivePromptState;
+  private readonly pendingPromptOwners: ActivePromptState[] = [];
   private readonly cancellingSessionIds = new Set<string>();
   private readonly permissionAbortControllers = new Map<string, AbortController>();
   private closing = false;
@@ -468,6 +635,7 @@ export class AcpClient {
       cwd: asAbsoluteCwd(options.cwd),
       authPolicy: options.authPolicy ?? "skip",
       permissionPolicy: snapshotPermissionPolicy(options.permissionPolicy),
+      elicitationModes: normalizeElicitationModes(options.elicitationModes),
     };
     this.eventHandlers = {
       onAcpMessage: this.options.onAcpMessage,
@@ -623,6 +791,19 @@ export class AcpClient {
     return this.activePrompt.sessionId === sessionId;
   }
 
+  hasUnresolvedPrompt(): boolean {
+    return this.activePrompt !== undefined;
+  }
+
+  endPromptElicitation(sessionId: string): void {
+    const active = this.activePrompt;
+    if (!active || active.sessionId !== sessionId) {
+      return;
+    }
+    active.elicitationHandler = undefined;
+    active.elicitationController.abort();
+  }
+
   async start(): Promise<void> {
     if (this.connection && this.agent && isChildProcessRunning(this.agent)) {
       return;
@@ -761,61 +942,58 @@ export class AcpClient {
       writable: WritableStream<AnyMessage>;
     },
     launch: Pick<AgentLaunchPlan, "devinAcp">,
-  ): ClientSideConnection {
-    return new ClientSideConnection(
-      () => ({
-        sessionUpdate: async (params: SessionNotification) => {
-          await this.handleSessionUpdate(params);
+  ): AcpAgentConnection {
+    const app = client({ name: "acpx" })
+      .onNotification(methods.client.session.update, async ({ params }) => {
+        await this.handleSessionUpdate(params);
+      })
+      .onNotification(methods.client.elicitation.complete, async () => {})
+      .onRequest(methods.client.session.requestPermission, async ({ params }) => {
+        return await this.handlePermissionRequest(params);
+      })
+      .onRequest(methods.client.elicitation.create, async ({ params, requestId, signal }) => {
+        return await this.handleElicitationRequest(params, requestId, signal);
+      })
+      .onRequest(methods.client.fs.readTextFile, async ({ params }) => {
+        return await this.handleReadTextFile(params);
+      })
+      .onRequest(methods.client.fs.writeTextFile, async ({ params }) => {
+        return await this.handleWriteTextFile(params);
+      })
+      .onRequest(methods.client.terminal.create, async ({ params }) => {
+        return await this.handleCreateTerminal(params);
+      })
+      .onRequest(methods.client.terminal.output, async ({ params }) => {
+        return await this.handleTerminalOutput(params);
+      })
+      .onRequest(methods.client.terminal.waitForExit, async ({ params }) => {
+        return await this.handleWaitForTerminalExit(params);
+      })
+      .onRequest(methods.client.terminal.kill, async ({ params }) => {
+        return await this.handleKillTerminal(params);
+      })
+      .onRequest(methods.client.terminal.release, async ({ params }) => {
+        return await this.handleReleaseTerminal(params);
+      });
+
+    if (launch.devinAcp) {
+      app.onRequest(
+        "_cognition.ai/request_diagnostics",
+        (params): Record<string, unknown> => {
+          return params && typeof params === "object" && !Array.isArray(params)
+            ? (params as Record<string, unknown>)
+            : {};
         },
-        requestPermission: async (
-          params: RequestPermissionRequest,
-        ): Promise<RequestPermissionResponse> => {
-          return this.handlePermissionRequest(params);
-        },
-        extMethod: async (method: string): Promise<Record<string, unknown>> => {
-          if (launch.devinAcp && isDevinRequestDiagnosticsMethod(method)) {
-            return {};
-          }
-          const error = RequestError.methodNotFound(method);
-          if (!this.options.suppressSdkConsoleErrors) {
-            console.error(error.message);
-          }
-          throw error;
-        },
-        readTextFile: async (params: ReadTextFileRequest): Promise<ReadTextFileResponse> => {
-          return this.handleReadTextFile(params);
-        },
-        writeTextFile: async (params: WriteTextFileRequest): Promise<WriteTextFileResponse> => {
-          return this.handleWriteTextFile(params);
-        },
-        createTerminal: async (params: CreateTerminalRequest): Promise<CreateTerminalResponse> => {
-          return this.handleCreateTerminal(params);
-        },
-        terminalOutput: async (params: TerminalOutputRequest): Promise<TerminalOutputResponse> => {
-          return this.handleTerminalOutput(params);
-        },
-        waitForTerminalExit: async (
-          params: WaitForTerminalExitRequest,
-        ): Promise<WaitForTerminalExitResponse> => {
-          return this.handleWaitForTerminalExit(params);
-        },
-        killTerminal: async (params: KillTerminalRequest): Promise<KillTerminalResponse> => {
-          return this.handleKillTerminal(params);
-        },
-        releaseTerminal: async (
-          params: ReleaseTerminalRequest,
-        ): Promise<ReleaseTerminalResponse> => {
-          return this.handleReleaseTerminal(params);
-        },
-        extNotification: async (): Promise<void> => {},
-      }),
-      stream,
-    );
+        async () => ({}),
+      );
+    }
+
+    return createAgentConnectionFacade(app.connect(stream));
   }
 
   private async initializeAgentConnection(params: {
     child: ChildProcessByStdio<Writable, Readable, Readable>;
-    connection: ClientSideConnection;
+    connection: AcpAgentConnection;
     startupFailure: StartupFailureWatcher;
     startupStderr: string[];
     launch: AgentLaunchPlan;
@@ -831,12 +1009,13 @@ export class AcpClient {
       this.initResult = initResult;
       this.log(`initialized protocol version ${initResult.protocolVersion}`);
     } catch (error) {
+      params.connection.close?.(error);
       await this.handleInitializeFailure(params, error);
     }
   }
 
   private async initializeProtocolConnection(
-    connection: ClientSideConnection,
+    connection: AcpAgentConnection,
     launch: Pick<AgentLaunchPlan, "devinAcp" | "geminiAcp">,
   ): Promise<InitializeResponse> {
     const initializePromise = connection.initialize({
@@ -845,6 +1024,7 @@ export class AcpClient {
         devinAcp: launch.devinAcp,
         fs: this.options.fs !== false,
         terminal: this.options.terminal !== false,
+        elicitationModes: this.options.elicitationModes ?? [],
       }),
       clientInfo: resolveClientInfo(launch.devinAcp),
     });
@@ -896,9 +1076,24 @@ export class AcpClient {
   } {
     const onAcpMessage = () => this.eventHandlers.onAcpMessage;
     const onAcpOutputMessage = () => this.eventHandlers.onAcpOutputMessage;
+    const elicitationRequestIds = new Set<JsonRpcId>();
+    const bindPromptOwner = (owner: { requestId: JsonRpcId; sessionId: string }): void => {
+      this.bindPromptOwner(owner);
+    };
 
     const shouldSuppressInboundReplaySessionUpdate = (message: AnyMessage): boolean => {
       return this.suppressReplaySessionUpdateMessages && isSessionUpdateNotification(message);
+    };
+    const observeInbound = (message: AnyMessage): void => {
+      const requestId = elicitationRequestId(message);
+      if (requestId !== undefined) {
+        elicitationRequestIds.add(requestId);
+        return;
+      }
+      if (!shouldSuppressInboundReplaySessionUpdate(message)) {
+        onAcpOutputMessage()?.("inbound", message);
+        onAcpMessage()?.("inbound", message);
+      }
     };
 
     const readable = new ReadableStream<AnyMessage>({
@@ -913,9 +1108,9 @@ export class AcpClient {
             if (!value) {
               continue;
             }
-            if (!shouldSuppressInboundReplaySessionUpdate(value)) {
-              onAcpOutputMessage()?.("inbound", value);
-              onAcpMessage()?.("inbound", value);
+            observeInbound(value);
+            if (isExtensionNotification(value)) {
+              continue;
             }
             controller.enqueue(value);
           }
@@ -928,8 +1123,16 @@ export class AcpClient {
 
     const writable = new WritableStream<AnyMessage>({
       async write(message) {
-        onAcpOutputMessage()?.("outbound", message);
-        onAcpMessage()?.("outbound", message);
+        const promptOwner = promptRequestOwner(message);
+        if (promptOwner) {
+          bindPromptOwner(promptOwner);
+        }
+        const id = responseId(message);
+        const sensitive = id !== undefined && elicitationRequestIds.delete(id);
+        if (!sensitive) {
+          onAcpOutputMessage()?.("outbound", message);
+          onAcpMessage()?.("outbound", message);
+        }
         const writer = base.writable.getWriter();
         try {
           await writer.write(message);
@@ -951,7 +1154,7 @@ export class AcpClient {
     const claudeAcp = isClaudeAcpCommand(command, args);
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
 
-    let result: Awaited<ReturnType<typeof connection.newSession>>;
+    let result: NewSessionResponse;
     try {
       const createPromise = this.runConnectionRequest(() =>
         connection.newSession({
@@ -1066,12 +1269,15 @@ export class AcpClient {
     sessionId: string,
     prompt: PromptInput | string,
     onRequestStarted?: () => Promise<void> | void,
+    onElicitation?: AcpElicitationHandler,
   ): Promise<PromptResponse> {
     const connection = this.getConnection();
     const normalizedPrompt = this.normalizePromptForAgent(prompt);
     const restoreConsoleError = this.options.suppressSdkConsoleErrors
       ? installSdkConsoleErrorSuppression()
       : undefined;
+
+    const activePrompt = this.beginActivePrompt(sessionId, onElicitation);
 
     let promptPromise: Promise<PromptResponse>;
     try {
@@ -1085,14 +1291,12 @@ export class AcpClient {
         () => !connection.signal?.aborted,
       );
     } catch (error) {
+      this.clearActivePrompt(activePrompt);
       restoreConsoleError?.();
       throw error;
     }
 
-    this.activePrompt = {
-      sessionId,
-      promise: promptPromise,
-    };
+    activePrompt.promise = promptPromise;
 
     try {
       return this.returnPromptResponseOrPermissionFailure(sessionId, await promptPromise);
@@ -1101,13 +1305,48 @@ export class AcpClient {
       throw error;
     } finally {
       restoreConsoleError?.();
-      if (this.activePrompt?.promise === promptPromise) {
-        this.activePrompt = undefined;
-      }
+      this.clearActivePrompt(activePrompt);
       this.cancellingSessionIds.delete(sessionId);
       this.abortAndDropPermissionSignal(sessionId);
       this.promptPermissionFailures.delete(sessionId);
     }
+  }
+
+  private beginActivePrompt(
+    sessionId: string,
+    elicitationHandler: AcpElicitationHandler | undefined,
+  ): ActivePromptState {
+    const previous = this.activePrompt;
+    this.cancellingSessionIds.delete(sessionId);
+    const active: ActivePromptState = {
+      sessionId,
+      elicitationHandler,
+      elicitationController: new AbortController(),
+    };
+    this.activePrompt = active;
+    this.pendingPromptOwners.push(active);
+    previous?.elicitationController?.abort();
+    return active;
+  }
+
+  private bindPromptOwner(owner: { requestId: JsonRpcId; sessionId: string }): void {
+    const active = this.pendingPromptOwners.find((candidate) => {
+      return candidate.requestId === undefined && candidate.sessionId === owner.sessionId;
+    });
+    if (active) {
+      active.requestId = owner.requestId;
+    }
+  }
+
+  private clearActivePrompt(active: ActivePromptState): void {
+    if (this.activePrompt === active) {
+      this.activePrompt = undefined;
+    }
+    const pendingIndex = this.pendingPromptOwners.indexOf(active);
+    if (pendingIndex >= 0) {
+      this.pendingPromptOwners.splice(pendingIndex, 1);
+    }
+    active.elicitationController.abort();
   }
 
   private normalizePromptForAgent(prompt: PromptInput | string): PromptInput {
@@ -1294,7 +1533,13 @@ export class AcpClient {
 
   async cancel(sessionId: string): Promise<void> {
     const connection = this.getConnection();
-    this.cancellingSessionIds.add(sessionId);
+    const active = this.activePrompt;
+    if (active?.sessionId === sessionId) {
+      this.cancellingSessionIds.add(sessionId);
+      active.elicitationController?.abort();
+    } else {
+      this.cancellingSessionIds.delete(sessionId);
+    }
     this.abortAndDropPermissionSignal(sessionId);
     await this.runConnectionRequest(() =>
       connection.cancel({
@@ -1305,6 +1550,10 @@ export class AcpClient {
 
   async closeSession(sessionId: string): Promise<void> {
     const connection = this.getConnection();
+    this.cancellingSessionIds.add(sessionId);
+    if (this.activePrompt?.sessionId === sessionId) {
+      this.activePrompt.elicitationController?.abort();
+    }
     await this.runConnectionRequest(() =>
       connection.closeSession({
         sessionId,
@@ -1347,6 +1596,10 @@ export class AcpClient {
     if (waitMs <= 0) {
       return undefined;
     }
+    const activePromise = active.promise;
+    if (!activePromise) {
+      return undefined;
+    }
 
     let timer: NodeJS.Timeout | number | undefined;
     const timeoutPromise = new Promise<undefined>((resolve) => {
@@ -1355,7 +1608,7 @@ export class AcpClient {
 
     try {
       return await Promise.race([
-        active.promise.then(
+        activePromise.then(
           (response) => response,
           () => undefined,
         ),
@@ -1370,6 +1623,7 @@ export class AcpClient {
 
   async close(): Promise<void> {
     this.closing = true;
+    this.abortActiveElicitation();
 
     await this.terminalManager.shutdown();
 
@@ -1377,6 +1631,7 @@ export class AcpClient {
     if (agent) {
       await this.terminateAgentProcess(agent);
     }
+    this.closeConnection();
     if (this.pendingConnectionRequests.size > 0) {
       this.rejectPendingConnectionRequests(
         this.lastAgentExit
@@ -1400,6 +1655,7 @@ export class AcpClient {
     this.suppressSessionUpdates = false;
     this.suppressReplaySessionUpdateMessages = false;
     this.activePrompt = undefined;
+    this.pendingPromptOwners.length = 0;
     this.cancellingSessionIds.clear();
     for (const controller of this.permissionAbortControllers.values()) {
       controller.abort();
@@ -1412,6 +1668,14 @@ export class AcpClient {
     this.initResult = undefined;
     this.connection = undefined;
     this.agent = undefined;
+  }
+
+  private abortActiveElicitation(): void {
+    this.activePrompt?.elicitationController?.abort();
+  }
+
+  private closeConnection(): void {
+    this.connection?.close?.();
   }
 
   private async terminateAgentProcess(
@@ -1477,7 +1741,7 @@ export class AcpClient {
     }
   }
 
-  private getConnection(): ClientSideConnection {
+  private getConnection(): AcpAgentConnection {
     if (!this.connection) {
       throw new Error("ACP client not started");
     }
@@ -1678,23 +1942,23 @@ export class AcpClient {
   }
 
   private async authenticateIfRequired(
-    connection: ClientSideConnection,
-    methods: AuthMethod[],
+    connection: AcpAgentConnection,
+    authMethods: AuthMethod[],
   ): Promise<void> {
-    if (methods.length === 0) {
+    if (authMethods.length === 0) {
       return;
     }
 
-    const selected = this.selectAuthMethod(methods);
+    const selected = this.selectAuthMethod(authMethods);
     if (!selected) {
       if (this.options.authPolicy === "fail") {
         throw new AuthPolicyError(
-          `agent advertised auth methods [${methods.map((m) => m.id).join(", ")}] but no matching credentials found`,
+          `agent advertised auth methods [${authMethods.map((m) => m.id).join(", ")}] but no matching credentials found`,
         );
       }
 
       this.log(
-        `agent advertised auth methods [${methods.map((m) => m.id).join(", ")}] but no matching credentials found — skipping (agent may handle auth internally)`,
+        `agent advertised auth methods [${authMethods.map((m) => m.id).join(", ")}] but no matching credentials found — skipping (agent may handle auth internally)`,
       );
       return;
     }
@@ -1725,6 +1989,86 @@ export class AcpClient {
     }
 
     return response;
+  }
+
+  private async handleElicitationRequest(
+    request: CreateElicitationRequest,
+    requestId: JsonRpcId,
+    requestSignal: AbortSignal,
+  ): Promise<CreateElicitationResponse> {
+    const resolved = this.resolveElicitationOwner(request);
+    if ("response" in resolved) {
+      return resolved.response;
+    }
+    const { active, handler } = resolved.owner;
+
+    const signal = AbortSignal.any([requestSignal, active.elicitationController.signal]);
+    const handlerAttempt = Promise.resolve()
+      .then(async () => await handler(request, { requestId, signal }))
+      .then(
+        (response) => ({ kind: "response" as const, response }),
+        (error: unknown) => ({ kind: "error" as const, error }),
+      );
+    const outcome = await Promise.race([handlerAttempt, waitForAbort(signal)]);
+
+    if (this.activePrompt !== active) {
+      return cancelledElicitationResponse(ELICITATION_CANCEL_MESSAGES.inactive);
+    }
+    if (outcome.kind === "aborted" || signal.aborted) {
+      return cancelledElicitationResponse(ELICITATION_CANCEL_MESSAGES.cancelled);
+    }
+    if (outcome.kind === "error" || !isKnownElicitationResponse(outcome.response)) {
+      return cancelledElicitationResponse(ELICITATION_CANCEL_MESSAGES.unavailable);
+    }
+    return outcome.response;
+  }
+
+  private resolveElicitationOwner(
+    request: CreateElicitationRequest,
+  ): { owner: ElicitationOwner } | { response: CreateElicitationResponse } {
+    if (!this.options.elicitationModes?.includes(request.mode as AcpElicitationMode)) {
+      return { response: cancelledElicitationResponse(ELICITATION_CANCEL_MESSAGES.unsupported) };
+    }
+    const active = this.activePrompt;
+    if (!active) {
+      return { response: cancelledElicitationResponse(ELICITATION_CANCEL_MESSAGES.inactive) };
+    }
+    const scope = this.resolveElicitationScope(request, active);
+    if ("response" in scope) {
+      return scope;
+    }
+    if (this.isElicitationSessionCancelling(scope.sessionId)) {
+      return { response: cancelledElicitationResponse(ELICITATION_CANCEL_MESSAGES.cancelled) };
+    }
+    if (!active.elicitationHandler) {
+      return { response: cancelledElicitationResponse(ELICITATION_CANCEL_MESSAGES.unavailable) };
+    }
+    return { owner: { active, handler: active.elicitationHandler } };
+  }
+
+  private resolveElicitationScope(
+    request: CreateElicitationRequest,
+    active: ActivePromptState,
+  ): { sessionId: string } | { response: CreateElicitationResponse } {
+    const sessionId = elicitationSessionId(request);
+    if (sessionId) {
+      return sessionId === active.sessionId
+        ? { sessionId }
+        : {
+            response: cancelledElicitationResponse(ELICITATION_CANCEL_MESSAGES.mismatchedSession),
+          };
+    }
+    const requestScopeId = elicitationRequestScopeId(request);
+    if (requestScopeId === undefined || requestScopeId !== active.requestId) {
+      return {
+        response: cancelledElicitationResponse(ELICITATION_CANCEL_MESSAGES.requestScoped),
+      };
+    }
+    return { sessionId: active.sessionId };
+  }
+
+  private isElicitationSessionCancelling(sessionId: string): boolean {
+    return this.closing || this.cancellingSessionIds.has(sessionId);
   }
 
   private async tryHandlePermissionRequestWithHost(

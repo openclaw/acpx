@@ -1083,93 +1083,226 @@ test("connectAndLoadSession restores the original session when desired model rep
   });
 });
 
-test("connectAndLoadSession replays desired config options on a fresh session", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = path.join(homeDir, "workspace");
-    await fs.mkdir(cwd, { recursive: true });
+for (const [connection, modelMetadata, replacingConfig, savedEffort, siblingChange] of [
+  ["fresh", "different"],
+  ["load", "different"],
+  ["resume", "different"],
+  ["load", "same"],
+  ["resume", "same"],
+  ["load", "omitted"],
+  ["resume", "omitted"],
+  ["load", "removes-option"],
+  ["resume", "removes-option"],
+  ["load", "different", "thinking"],
+  ["resume", "different", "thinking"],
+  ["load", "different", undefined, "ultra"],
+  ["resume", "same", undefined, "ultra"],
+  ["load", "different", undefined, "low"],
+  ["fresh", "different", undefined, undefined, "removed"],
+  ["load", "omitted", undefined, undefined, "removed"],
+  ["resume", "omitted", undefined, undefined, "adjusted"],
+  ["resume", "same", undefined, undefined, "adjusted"],
+] as const) {
+  test(`connectAndLoadSession replays saved selections after ${connection} with ${modelMetadata} model metadata${replacingConfig ? " while replacing effort" : ""}${savedEffort ? ` with ${savedEffort === "ultra" ? "stale" : "unlisted current"} saved effort` : ""}${siblingChange ? ` with later ${siblingChange} control` : ""}`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      await fs.mkdir(cwd, { recursive: true });
 
-    const record = makeSessionRecord({
-      acpxRecordId: "config-replay-record",
-      acpSessionId: "stale-session",
-      agentCommand: "agent",
-      cwd,
-      acpx: {
-        desired_config_options: {
-          reasoning_effort: "high",
-        },
-      },
-    });
-
-    const configCalls: Array<{ sessionId: string; configId: string; value: string }> = [];
-    const client: FakeClient = {
-      hasReusableSession: () => false,
-      start: async () => {},
-      getAgentLifecycleSnapshot: () => ({
-        running: true,
-      }),
-      supportsLoadSession: () => true,
-      supportsResumeSession: () => false,
-      loadSessionWithOptions: async () => {
-        throw {
-          error: {
-            code: -32002,
-            message: "session not found",
+      const record = makeSessionRecord({
+        acpxRecordId: "config-replay-record",
+        acpSessionId: "stale-session",
+        agentCommand: "agent",
+        cwd,
+        acpx: {
+          desired_mode_id: "plan",
+          session_options: { model: "gpt-5.4" },
+          desired_config_options: {
+            reasoning_effort: savedEffort ?? "high",
+            approval: "manual",
           },
-        };
-      },
-      createSession: async () => ({
-        sessionId: "fresh-session",
-        agentSessionId: "fresh-runtime",
-      }),
-      setSessionMode: async () => {},
-      setSessionModel: async () => {},
-      setSessionConfigOption: async (sessionId, configId, value) => {
-        configCalls.push({ sessionId, configId, value });
-        return {
-          configOptions: [
+        },
+      });
+
+      const configCalls: Array<{ sessionId: string; configId: string; value: string }> = [];
+      const expectedSessionId = connection === "fresh" ? "fresh-session" : "stale-session";
+      const shouldSetModel = modelMetadata !== "omitted";
+      const removesApproval = modelMetadata === "removes-option";
+      const configOptions = (
+        effort: string,
+        approval: string,
+        modelId = "gpt-5.4",
+      ): SetSessionConfigOptionResponse["configOptions"] => [
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: modelId,
+          options: buildModelsState(modelId).availableModels.map((model) => ({
+            value: model.modelId,
+            name: model.name,
+          })),
+        },
+        {
+          id: "reasoning_effort",
+          name: "Effort",
+          type: "select",
+          currentValue: effort,
+          options: [
             {
-              id: "llm",
-              name: "Model",
-              category: "model",
-              type: "select",
-              currentValue: "replayed-model",
-              options: [{ value: "replayed-model", name: "Replayed Model" }],
-            },
-            {
-              id: "reasoning_effort",
-              name: "Reasoning Effort",
-              type: "select",
-              currentValue: "high",
-              options: [{ value: "high", name: "High" }],
+              group: "supported",
+              name: "Supported",
+              options: (savedEffort === "low" ? ["high"] : ["low", "medium", "high"]).map(
+                (value) => ({ value, name: value }),
+              ),
             },
           ],
-        };
-      },
-    };
+        },
+        {
+          id: "approval",
+          name: "Approval",
+          type: "select",
+          currentValue: approval,
+          options: ["ask", "manual"].map((value) => ({ value, name: value })),
+        },
+      ];
+      const restoredOptions =
+        modelMetadata === "omitted"
+          ? {}
+          : {
+              configOptions: configOptions(
+                "low",
+                "ask",
+                modelMetadata === "same" ? "gpt-5.4" : "default-model",
+              ),
+              models: buildModelsState(modelMetadata === "same" ? "gpt-5.4" : "default-model"),
+            };
+      const acceptedOptions = (effort: string, approval: string) =>
+        configOptions(effort, approval).filter(
+          (option) => !removesApproval || option.id !== "approval",
+        );
+      const client: FakeClient = {
+        hasReusableSession: () => false,
+        start: async () => {},
+        getAgentLifecycleSnapshot: () => ({
+          running: true,
+        }),
+        supportsLoadSession: () => true,
+        supportsResumeSession: () => connection === "resume",
+        resumeSession: async () => ({
+          agentSessionId: "restored-runtime",
+          ...restoredOptions,
+        }),
+        loadSessionWithOptions: async () => {
+          if (connection === "load") {
+            return {
+              agentSessionId: "restored-runtime",
+              ...restoredOptions,
+            };
+          }
+          throw {
+            error: {
+              code: -32002,
+              message: "session not found",
+            },
+          };
+        },
+        createSession: async () => ({
+          sessionId: "fresh-session",
+          agentSessionId: "fresh-runtime",
+          configOptions: configOptions("low", "ask", "default-model"),
+          models: buildModelsState("default-model"),
+        }),
+        setSessionMode: async (sessionId, value) => {
+          assert.equal(connection, "fresh", "legacy mode must remain fresh-only");
+          configCalls.push({ sessionId, configId: "mode", value });
+        },
+        setSessionModel: async (sessionId, value) => {
+          configCalls.push({ sessionId, configId: "model", value });
+          return { configOptions: acceptedOptions("low", "ask") };
+        },
+        setSessionConfigOption: async (sessionId, configId, value) => {
+          configCalls.push({ sessionId, configId, value });
+          if (configId === "approval") {
+            assert.equal(
+              siblingChange,
+              undefined,
+              "the previous acknowledgement retired manual approval",
+            );
+          }
+          assert.notEqual(
+            value,
+            "ultra",
+            "a model acknowledgement must retire the old unsupported effort",
+          );
+          return {
+            configOptions: acceptedOptions("medium", configId === "approval" ? value : "ask")
+              .filter((option) => siblingChange !== "removed" || option.id !== "approval")
+              .map((option) =>
+                siblingChange === "adjusted" && option.id === "approval" && "options" in option
+                  ? Object.assign(option, { options: [{ value: "ask", name: "Ask" }] })
+                  : option,
+              ),
+          };
+        },
+      };
 
-    const result = await connectAndLoadSession({
-      client: client as never,
-      record,
-      activeController: ACTIVE_CONTROLLER,
+      const result = await connectAndLoadSession({
+        client: client as never,
+        record,
+        activeController: ACTIVE_CONTROLLER,
+        replacingConfigOption: replacingConfig
+          ? {
+              key: replacingConfig,
+              resolve: (connectedRecord) => {
+                assert.equal(connectedRecord.acpx?.current_model_id, "gpt-5.4");
+                return "reasoning_effort";
+              },
+            }
+          : undefined,
+      });
+
+      assert.equal(result.sessionId, expectedSessionId);
+      assert.equal(result.resumed, connection !== "fresh");
+      assert.deepEqual(configCalls, [
+        ...(connection === "fresh"
+          ? [{ sessionId: expectedSessionId, configId: "mode", value: "plan" }]
+          : []),
+        ...(shouldSetModel
+          ? [{ sessionId: expectedSessionId, configId: "model", value: "gpt-5.4" }]
+          : []),
+        ...(replacingConfig || savedEffort === "ultra"
+          ? []
+          : [
+              {
+                sessionId: expectedSessionId,
+                configId: "reasoning_effort",
+                value: savedEffort ?? "high",
+              },
+            ]),
+        ...(removesApproval || siblingChange
+          ? []
+          : [{ sessionId: expectedSessionId, configId: "approval", value: "manual" }]),
+      ]);
+      assert.deepEqual(record.acpx?.desired_config_options, {
+        reasoning_effort: "medium",
+        ...(removesApproval || siblingChange === "removed"
+          ? {}
+          : { approval: siblingChange === "adjusted" ? "ask" : "manual" }),
+      });
+      assert.equal(record.acpx?.current_model_id, "gpt-5.4");
+      assert.equal(record.acpx?.model_control, "config_option");
+      assert.deepEqual(
+        record.acpx?.config_options?.map((option) => option.id),
+        [
+          "model",
+          "reasoning_effort",
+          ...(removesApproval || siblingChange === "removed" ? [] : ["approval"]),
+        ],
+      );
     });
-
-    assert.equal(result.sessionId, "fresh-session");
-    assert.equal(result.resumed, false);
-    assert.deepEqual(configCalls, [
-      {
-        sessionId: "fresh-session",
-        configId: "reasoning_effort",
-        value: "high",
-      },
-    ]);
-    assert.equal(record.acpx?.current_model_id, "replayed-model");
-    assert.equal(record.acpx?.model_control, "config_option");
-    assert.deepEqual(
-      record.acpx?.config_options?.map((option) => option.id),
-      ["llm", "reasoning_effort"],
-    );
   });
-});
+}
 
 test("connectAndLoadSession preserves legacy models after config option replay", async () => {
   await withTempHome(async (homeDir) => {
@@ -1245,77 +1378,84 @@ test("connectAndLoadSession preserves legacy models after config option replay",
   });
 });
 
-test("connectAndLoadSession restores the original session when desired config replay fails", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = path.join(homeDir, "workspace");
-    await fs.mkdir(cwd, { recursive: true });
+for (const connection of ["fresh", "load", "resume"] as const) {
+  test(`connectAndLoadSession restores the original session when desired config replay fails after ${connection}`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      await fs.mkdir(cwd, { recursive: true });
 
-    const record = makeSessionRecord({
-      acpxRecordId: "config-replay-failure-record",
-      acpSessionId: "stale-session",
-      agentSessionId: "stale-runtime",
-      agentCommand: "agent",
-      cwd,
-      acpx: {
-        desired_config_options: {
-          reasoning_effort: "xhigh",
-        },
-      },
-    });
-
-    const client: FakeClient = {
-      hasReusableSession: () => false,
-      start: async () => {},
-      getAgentLifecycleSnapshot: () => ({
-        running: true,
-      }),
-      supportsLoadSession: () => true,
-      supportsResumeSession: () => false,
-      loadSessionWithOptions: async () => {
-        throw {
-          error: {
-            code: -32002,
-            message: "session not found",
+      const record = makeSessionRecord({
+        acpxRecordId: "config-replay-failure-record",
+        acpSessionId: "stale-session",
+        agentSessionId: "stale-runtime",
+        agentCommand: "agent",
+        cwd,
+        acpx: {
+          desired_config_options: {
+            reasoning_effort: "xhigh",
           },
-        };
-      },
-      createSession: async () => ({
-        sessionId: "fresh-session",
-        agentSessionId: "fresh-runtime",
-      }),
-      setSessionMode: async () => {},
-      setSessionModel: async () => {},
-      setSessionConfigOption: async (sessionId, configId, value) => {
-        assert.equal(sessionId, "fresh-session");
-        assert.equal(configId, "reasoning_effort");
-        assert.equal(value, "xhigh");
-        throw new Error("config restore rejected");
-      },
-    };
+        },
+      });
 
-    await assert.rejects(
-      async () =>
-        await connectAndLoadSession({
-          client: client as never,
-          record,
-          activeController: ACTIVE_CONTROLLER,
+      const client: FakeClient = {
+        hasReusableSession: () => false,
+        start: async () => {},
+        getAgentLifecycleSnapshot: () => ({
+          running: true,
         }),
-      (error: unknown) => {
-        assert(error instanceof Error);
-        assert.equal(error.name, "SessionConfigOptionReplayError");
-        assert.equal((error as Error & { retryable?: boolean }).retryable, true);
-        assert.match(
-          error.message,
-          /Failed to replay saved session config option reasoning_effort/,
-        );
-        return true;
-      },
-    );
+        supportsLoadSession: () => true,
+        supportsResumeSession: () => connection === "resume",
+        resumeSession: async () => ({ agentSessionId: "resumed-runtime" }),
+        loadSessionWithOptions: async () => {
+          if (connection === "load") {
+            return { agentSessionId: "resumed-runtime" };
+          }
+          throw {
+            error: {
+              code: -32002,
+              message: "session not found",
+            },
+          };
+        },
+        createSession: async () => ({
+          sessionId: "fresh-session",
+          agentSessionId: "fresh-runtime",
+        }),
+        setSessionMode: async () => {},
+        setSessionModel: async () => {},
+        setSessionConfigOption: async (sessionId, configId, value) => {
+          assert.equal(sessionId, connection === "fresh" ? "fresh-session" : "stale-session");
+          assert.equal(configId, "reasoning_effort");
+          assert.equal(value, "xhigh");
+          throw new Error("config restore rejected");
+        },
+      };
 
-    assert.equal(record.acpSessionId, "stale-session");
-    assert.equal(record.agentSessionId, "stale-runtime");
+      await assert.rejects(
+        async () =>
+          await connectAndLoadSession({
+            client: client as never,
+            record,
+            activeController: ACTIVE_CONTROLLER,
+          }),
+        (error: unknown) => {
+          assert(error instanceof Error);
+          assert.equal(error.name, "SessionConfigOptionReplayError");
+          assert.equal((error as Error & { retryable?: boolean }).retryable, true);
+          assert.match(
+            error.message,
+            /Failed to replay saved session config option reasoning_effort/,
+          );
+          return true;
+        },
+      );
+
+      assert.equal(record.acpSessionId, "stale-session");
+      assert.equal(record.agentSessionId, "stale-runtime");
+      assert.deepEqual(record.acpx?.desired_config_options, { reasoning_effort: "xhigh" });
+    });
   });
-});
+}
 
 test("connectAndLoadSession reuses an already loaded client session", async () => {
   await withTempHome(async (homeDir) => {
@@ -1327,6 +1467,11 @@ test("connectAndLoadSession reuses an already loaded client session", async () =
       acpSessionId: "reused-session",
       agentCommand: "agent",
       cwd,
+      acpx: {
+        session_options: { model: "gpt-5.4" },
+        desired_mode_id: "plan",
+        desired_config_options: { reasoning_effort: "high" },
+      },
     });
 
     let started = false;
@@ -1350,8 +1495,15 @@ test("connectAndLoadSession reuses an already loaded client session", async () =
       createSession: async () => {
         throw new Error("createSession should not be called");
       },
-      setSessionMode: async () => {},
-      setSessionModel: async () => {},
+      setSessionMode: async () => {
+        throw new Error("a reused session must not replay mode");
+      },
+      setSessionModel: async () => {
+        throw new Error("a reused session must not replay model");
+      },
+      setSessionConfigOption: async () => {
+        throw new Error("a reused session must not replay config");
+      },
     };
 
     const result = await connectAndLoadSession({

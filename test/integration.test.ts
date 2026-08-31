@@ -1608,10 +1608,35 @@ test("integration: prompt --model updates existing session model before prompt",
 
     try {
       const created = await runCli(
-        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "sessions", "new"],
+        [
+          "--agent",
+          modelAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "sessions",
+          "new",
+        ],
         homeDir,
       );
       assert.equal(created.code, 0, created.stderr);
+      const { acpxRecordId } = JSON.parse(created.stdout.trim()) as { acpxRecordId: string };
+      const effort = await runCli(
+        [
+          "--agent",
+          modelAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "set",
+          "reasoning_effort",
+          "high",
+        ],
+        homeDir,
+      );
+      assert.equal(effort.code, 0, effort.stderr);
 
       const result = await runCli(
         [
@@ -1647,6 +1672,15 @@ test("integration: prompt --model updates existing session model before prompt",
       );
       assert.equal(status.code, 0, status.stderr);
       assert.equal((JSON.parse(status.stdout.trim()) as { model?: string }).model, "fast-model");
+      const stored = JSON.parse(
+        await fs.readFile(
+          path.join(homeDir, ".acpx", "sessions", `${encodeURIComponent(acpxRecordId)}.json`),
+          "utf8",
+        ),
+      ) as {
+        acpx?: { desired_config_options?: Record<string, string> };
+      };
+      assert.equal(stored.acpx?.desired_config_options?.reasoning_effort, "medium");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }

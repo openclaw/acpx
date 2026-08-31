@@ -1,6 +1,9 @@
 import type {
   AgentCapabilities,
   AnyMessage,
+  CreateElicitationRequest,
+  ElicitationContentValue,
+  JsonRpcId,
   McpServer,
   RequestPermissionRequest,
   SessionNotification,
@@ -25,6 +28,34 @@ export type AcpPermissionDecision =
   | { outcome: "reject_once" }
   | { outcome: "reject_always" }
   | { outcome: "cancel" };
+
+export const ACP_ELICITATION_MODES = ["form", "url"] as const;
+export type AcpElicitationMode = (typeof ACP_ELICITATION_MODES)[number];
+export type AcpElicitationRequest = CreateElicitationRequest;
+
+export type AcpElicitationContext = {
+  /** Exact JSON-RPC id of the outer `elicitation/create` request. */
+  requestId: JsonRpcId;
+  /** Aborts with the request itself or its owning prompt turn/session. */
+  signal: AbortSignal;
+};
+
+type AcpElicitationResponseMeta = {
+  _meta?: Record<string, unknown> | null;
+};
+
+export type AcpElicitationResponse =
+  | ({
+      action: "accept";
+      content?: Record<string, ElicitationContentValue> | null;
+    } & AcpElicitationResponseMeta)
+  | ({ action: "decline" } & AcpElicitationResponseMeta)
+  | ({ action: "cancel" } & AcpElicitationResponseMeta);
+
+export type AcpElicitationHandler = (
+  request: AcpElicitationRequest,
+  context: AcpElicitationContext,
+) => Promise<AcpElicitationResponse>;
 
 export const EXIT_CODES = {
   SUCCESS: 0,
@@ -212,6 +243,7 @@ export type AcpClientOptions = {
   authPolicy?: AuthPolicy;
   fs?: boolean;
   terminal?: boolean;
+  elicitationModes?: readonly AcpElicitationMode[];
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   sessionOptions?: {

@@ -1,5 +1,12 @@
-import type { ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
 import type {
+  SetSessionConfigOptionResponse,
+  ToolCallContent,
+  ToolCallLocation,
+  ToolKind,
+} from "@agentclientprotocol/sdk";
+import type {
+  AcpElicitationHandler,
+  AcpElicitationMode,
   AcpPermissionDecision,
   AcpPermissionRequest,
   McpServer,
@@ -12,7 +19,16 @@ import type { SessionAgentOptions } from "../engine/session-options.js";
 
 export type { SessionAgentOptions, SystemPromptOption } from "../engine/session-options.js";
 
-export type { AcpPermissionDecision, AcpPermissionRequest, PermissionPolicy } from "../../types.js";
+export type {
+  AcpElicitationHandler,
+  AcpElicitationMode,
+  AcpElicitationContext,
+  AcpElicitationRequest,
+  AcpElicitationResponse,
+  AcpPermissionDecision,
+  AcpPermissionRequest,
+  PermissionPolicy,
+} from "../../types.js";
 
 export type AcpRuntimePromptMode = "prompt" | "steer";
 
@@ -77,6 +93,8 @@ export type AcpRuntimeTurnInput = {
   requestId: string;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Handles ACP elicitation requests owned by this prompt turn. */
+  onElicitation?: AcpElicitationHandler;
 };
 
 export type AcpRuntimeCapabilities = {
@@ -306,7 +324,11 @@ export interface AcpRuntime {
   }): Promise<AcpRuntimeCapabilities> | AcpRuntimeCapabilities;
   getStatus?(input: { handle: AcpRuntimeHandle; signal?: AbortSignal }): Promise<AcpRuntimeStatus>;
   setMode?(input: { handle: AcpRuntimeHandle; mode: string }): Promise<void>;
-  setConfigOption?(input: { handle: AcpRuntimeHandle; key: string; value: string }): Promise<void>;
+  setConfigOption?(input: {
+    handle: AcpRuntimeHandle;
+    key: string;
+    value: string;
+  }): Promise<SetSessionConfigOptionResponse | void>;
   doctor?(): Promise<AcpRuntimeDoctorReport>;
   cancel(input: { handle: AcpRuntimeHandle; reason?: string }): Promise<void>;
   close(input: {
@@ -339,6 +361,8 @@ export type AcpRuntimeOptions = {
   timeoutMs?: number;
   probeAgent?: string;
   verbose?: boolean;
+  /** ACP elicitation modes the embedding host can render for prompt turns. */
+  elicitationModes?: readonly AcpElicitationMode[];
   onPermissionRequest?: (
     req: AcpPermissionRequest,
     ctx: { signal: AbortSignal },

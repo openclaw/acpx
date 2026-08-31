@@ -322,6 +322,8 @@ Behavior:
 - Routes through queue-owner IPC when an owner is active.
 - Falls back to a direct client reconnect when no owner is running.
 - **`set model <id>`**: Uses the advertised model config option through `session/set_config_option`; adapters that explicitly advertise legacy `models` metadata use `session/set_model`.
+- Saves accepted values for existing non-mode selections, including reasoning effort adjusted or removed by a model switch; does not pin unselected defaults.
+- Restores saved model and config selections after reconnect, before the next prompt; already loaded sessions are reused without replay.
 
 ## `sessions` subcommand
 
@@ -542,8 +544,8 @@ When `--suppress-reads` is enabled:
 ACP message examples:
 
 ```json
-{"jsonrpc":"2.0","id":"req-1","method":"session/prompt","params":{"sessionId":"019c...","prompt":"hi"}}
-{"jsonrpc":"2.0","method":"session/update","params":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hello"}}}
+{"jsonrpc":"2.0","id":"req-1","method":"session/prompt","params":{"sessionId":"019c...","prompt":[{"type":"text","text":"hi"}]}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"019c...","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hello"}}}}
 {"jsonrpc":"2.0","id":"req-1","result":{"stopReason":"end_turn"}}
 ```
 
@@ -668,5 +670,7 @@ acpx config init
 
 # JSON automation pipeline
 acpx --format json codex exec 'review latest diff for security issues' \
-  | jq -r 'select(.type=="tool_call") | [.status, .title] | @tsv'
+  | jq -r 'select(.method=="session/update") | .params.update
+           | select(.sessionUpdate=="tool_call" or .sessionUpdate=="tool_call_update")
+           | [(.status // "-"), (.title // "-")] | @tsv'
 ```

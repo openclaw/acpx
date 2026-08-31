@@ -8,11 +8,36 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+### Breaking
+
+### Fixes
+
+- ACP/terminal: handle child stdout and stderr errors without terminating the host, so wait and release can finish. Thanks @SebTardif.
+
+## 2026.8.28 (v0.13.2)
+
+### Changes
+
+- Dependencies: update the ACP SDK, TypeScript runner, replay-viewer dependencies, and validation tooling, and refresh transitive dependency overrides.
+
+### Breaking
+
+### Fixes
+
+- Docs/JSON: fix raw ACP tool-call pipelines and message examples so automation reads nested session updates and handles partial tool updates. Fixes #520. Thanks @prateek.
+- Session controls: restore saved model/config selections after reconnect, keep reasoning effort aligned with accepted model changes, and return accepted configuration to embedded clients without pinning unselected defaults. Thanks @programmerlapar.
+
+## 2026.8.18 (v0.13.1)
+
+### Changes
+
 - Docs/readme: rewrite the project front door to the house standard and route detailed CLI guidance to the existing documentation.
 
 - Runtime/embedding: expose the existing per-tool permission policy through
   `AcpRuntimeOptions` so embedded clients can reuse its rule matching and
   decisions. Thanks @xenaocx-dev.
+
+- Runtime/embedding: add turn-scoped ACP form and URL elicitation handlers with capability and cancellation fencing.
 
 ### Breaking
 

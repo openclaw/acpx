@@ -156,12 +156,8 @@ function waitMs(ms: number): Promise<void> {
   });
 }
 
-const TERMINAL_PIPE_DEATH_CODES = new Set(["EPIPE", "EIO", "ECONNRESET", "ERR_STREAM_DESTROYED"]);
-
-function onStreamError(error: NodeJS.ErrnoException): void {
-  if (error.code && TERMINAL_PIPE_DEATH_CODES.has(error.code)) {
-    return;
-  }
+function onStreamError(): void {
+  // Child pipe failures must not terminate the ACP host; process exit owns status.
 }
 
 export class TerminalManager {
