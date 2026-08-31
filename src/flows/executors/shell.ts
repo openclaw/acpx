@@ -2,25 +2,14 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { TimeoutError } from "../../async-control.js";
 import type { ShellActionExecution, ShellActionResult } from "../runtime.js";
 
-const SHELL_STDIN_PIPE_DEATH_CODES = new Set([
-  "EPIPE",
-  "EIO",
-  "ECONNRESET",
-  "ERR_STREAM_DESTROYED",
-]);
-
-function ignoreShellStdinPipeDeath(error: NodeJS.ErrnoException): void {
-  if (error.code && SHELL_STDIN_PIPE_DEATH_CODES.has(error.code)) {
-    return;
-  }
-}
-
 function writeShellStdin(child: ChildProcess, stdin: string | undefined): void {
   const stream = child.stdin;
   if (!stream) {
     return;
   }
-  stream.on("error", ignoreShellStdinPipeDeath);
+  stream.on("error", () => {
+    // A child may close its input early; its exit status remains authoritative.
+  });
   if (stdin != null && stream.writable && !stream.writableEnded) {
     stream.write(stdin);
   }

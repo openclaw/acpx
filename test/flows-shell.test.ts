@@ -28,7 +28,7 @@ function runHostScript(script: string): Promise<{
       stderr += chunk;
     });
     child.once("error", reject);
-    child.once("exit", (exitCode) => {
+    child.once("close", (exitCode) => {
       resolve({ exitCode, stdout, stderr });
     });
   });
