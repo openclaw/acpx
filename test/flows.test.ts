@@ -24,7 +24,7 @@ import type {
   ShellActionExecution,
   ShellActionNodeDefinition,
 } from "../src/flows/runtime.js";
-import { flowRunsBaseDir } from "../src/flows/store.js";
+import { type FlowRunStore, flowRunsBaseDir } from "../src/flows/store.js";
 import type { PromptInput } from "../src/types.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
@@ -1302,6 +1302,77 @@ test("FlowRunner persists active node state while a shell step is running", asyn
     assert.equal(result.state.currentNode, undefined);
   });
 });
+
+for (const rejectWrite of [false, true]) {
+  test(`FlowRunner bounds pending heartbeat writes and resumes after ${rejectWrite ? "failure" : "success"}`, async (t) => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-heartbeat-"));
+    let startStep = () => {};
+    let finishStep = () => {};
+    let finishWrite = () => {};
+    const started = new Promise<void>((resolve) => {
+      startStep = resolve;
+    });
+    const step = new Promise<void>((resolve) => {
+      finishStep = resolve;
+    });
+    const write = new Promise<void>((resolve) => {
+      finishWrite = resolve;
+    });
+    const runner = new FlowRunner({
+      resolveAgent: () => ({ agentName: "unused", agentCommand: "unused", cwd: process.cwd() }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+    const store = (runner as unknown as { store: FlowRunStore }).store;
+    let writes = 0;
+    t.mock.method(store, "writeLive", async () => {
+      writes += 1;
+      await write;
+      if (rejectWrite) {
+        throw new Error("slow heartbeat storage failed");
+      }
+    });
+    t.mock.timers.enable({ apis: ["setInterval"] });
+
+    const running = runner.run(
+      defineFlow({
+        name: "slow-heartbeat-storage",
+        startAt: "wait",
+        nodes: {
+          wait: compute({
+            heartbeatMs: 25,
+            run: async () => {
+              startStep();
+              await step;
+              return { ok: true };
+            },
+          }),
+        },
+        edges: [],
+      }),
+      {},
+    );
+
+    try {
+      await started;
+      t.mock.timers.tick(25);
+      assert.equal(writes, 1);
+      t.mock.timers.tick(100);
+      assert.equal(writes, 1, "slow storage must not accumulate concurrent heartbeat writes");
+      finishWrite();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      t.mock.timers.tick(25);
+      assert.equal(writes, 2, "heartbeats must resume after the pending write settles");
+      finishStep();
+      assert.equal((await running).state.status, "completed");
+    } finally {
+      finishWrite();
+      finishStep();
+      await running;
+      await fs.rm(outputRoot, { recursive: true, force: true });
+    }
+  });
+}
 
 test("FlowRunner lets ACP nodes run in a dynamic working directory", async () => {
   await withTempHome(async () => {

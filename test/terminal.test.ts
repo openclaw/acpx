@@ -6,6 +6,31 @@ import test from "node:test";
 import { TerminalManager } from "../src/acp/terminal-manager.js";
 import { PermissionPromptUnavailableError } from "../src/errors.js";
 
+function getManagedStdio(
+  manager: TerminalManager,
+  terminalId: string,
+): {
+  stdout: NodeJS.EventEmitter;
+  stderr: NodeJS.EventEmitter;
+} {
+  const terminals = (
+    manager as unknown as {
+      terminals: Map<
+        string,
+        {
+          process: {
+            stdout: NodeJS.EventEmitter;
+            stderr: NodeJS.EventEmitter;
+          };
+        }
+      >;
+    }
+  ).terminals;
+  const terminal = terminals.get(terminalId);
+  assert.ok(terminal, `expected managed terminal ${terminalId}`);
+  return terminal.process;
+}
+
 test("terminal manager create/output/wait/release lifecycle", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
   try {
@@ -45,6 +70,43 @@ test("terminal manager create/output/wait/release lifecycle", async () => {
       }),
       /Unknown terminal/,
     );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("terminal manager ignores child stdout and stderr pipe-death errors", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
+  try {
+    const manager = new TerminalManager({
+      cwd: tmp,
+      permissionMode: "approve-all",
+    });
+
+    const created = await manager.createTerminal({
+      sessionId: "session-1",
+      command: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000)"],
+    });
+
+    const stdio = getManagedStdio(manager, created.terminalId);
+    stdio.stdout.emit("error", Object.assign(new Error("broken pipe"), { code: "EPIPE" }));
+    stdio.stderr.emit("error", Object.assign(new Error("input/output error"), { code: "EIO" }));
+
+    await manager.killTerminal({
+      sessionId: "session-1",
+      terminalId: created.terminalId,
+    });
+    const waitResult = await manager.waitForTerminalExit({
+      sessionId: "session-1",
+      terminalId: created.terminalId,
+    });
+    assert.ok(waitResult.exitCode !== null || waitResult.signal !== null);
+
+    await manager.releaseTerminal({
+      sessionId: "session-1",
+      terminalId: created.terminalId,
+    });
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

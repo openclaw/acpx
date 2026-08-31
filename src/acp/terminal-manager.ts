@@ -156,6 +156,10 @@ function waitMs(ms: number): Promise<void> {
   });
 }
 
+function onStreamError(): void {
+  // Child pipe failures must not terminate the ACP host; process exit owns status.
+}
+
 export class TerminalManager {
   private readonly cwd: string;
   private permissionMode: PermissionMode;
@@ -245,6 +249,8 @@ export class TerminalManager {
 
       proc.stdout.on("data", appendOutput);
       proc.stderr.on("data", appendOutput);
+      proc.stdout.on("error", onStreamError);
+      proc.stderr.on("error", onStreamError);
       proc.once("exit", (exitCode, signal) => {
         terminal.exitCode = exitCode;
         terminal.signal = signal;
