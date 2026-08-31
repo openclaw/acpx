@@ -997,21 +997,28 @@ export class FlowRunner {
     const heartbeatMs = Math.max(0, Math.round(node.heartbeatMs ?? DEFAULT_FLOW_HEARTBEAT_MS));
     let timer: NodeJS.Timeout | undefined;
     let active = true;
+    let heartbeatPending = false;
     const heartbeat = async (): Promise<void> => {
-      if (!active) {
+      if (!active || heartbeatPending) {
         return;
       }
-      state.lastHeartbeatAt = isoNow();
-      state.updatedAt = state.lastHeartbeatAt;
-      await this.store.writeLive(runDir, state, {
-        scope: "node",
-        type: "node_heartbeat",
-        nodeId,
-        attemptId: state.currentAttemptId,
-        payload: {
-          statusDetail: state.statusDetail,
-        },
-      });
+      // Slow storage must not accumulate a new write on every timer tick.
+      heartbeatPending = true;
+      try {
+        state.lastHeartbeatAt = isoNow();
+        state.updatedAt = state.lastHeartbeatAt;
+        await this.store.writeLive(runDir, state, {
+          scope: "node",
+          type: "node_heartbeat",
+          nodeId,
+          attemptId: state.currentAttemptId,
+          payload: {
+            statusDetail: state.statusDetail,
+          },
+        });
+      } finally {
+        heartbeatPending = false;
+      }
     };
 
     if (heartbeatMs > 0) {

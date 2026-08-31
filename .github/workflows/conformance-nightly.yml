@@ -22,7 +22,7 @@ concurrency:
 
 env:
   NODE_VERSION: 24
-  PNPM_VERSION: 10.34.5
+  PNPM_VERSION: 11.24.0
 
 jobs:
   conformance-mock:
