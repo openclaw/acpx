@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import test from "node:test";
 import { TimeoutError } from "../src/async-control.js";
 import {
@@ -6,6 +7,32 @@ import {
   renderShellCommand,
   runShellAction,
 } from "../src/flows/executors/shell.js";
+
+function runHostScript(script: string): Promise<{
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+}> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once("error", reject);
+    child.once("close", (exitCode) => {
+      resolve({ exitCode, stdout, stderr });
+    });
+  });
+}
 
 test("renderShellCommand quotes arguments consistently", () => {
   assert.equal(renderShellCommand("echo", ["hello", "two words"]), 'echo "hello" "two words"');
@@ -76,4 +103,27 @@ test("runShellAction rejects commands terminated by signal", async () => {
       }),
     /signal SIGTERM/,
   );
+});
+
+test("runShellAction does not crash the host when the child exits before reading stdin", async () => {
+  const moduleUrl = new URL("../src/flows/executors/shell.js", import.meta.url).href;
+  const host = await runHostScript(`
+    import { runShellAction } from ${JSON.stringify(moduleUrl)};
+    const result = await runShellAction({
+      command: process.execPath,
+      args: ["-e", "setImmediate(() => process.exit(0))"],
+      stdin: "x".repeat(1024 * 1024),
+      allowNonZeroExit: true,
+    });
+    process.stdout.write(JSON.stringify({
+      exitCode: result.exitCode,
+      signal: result.signal,
+    }));
+  `);
+
+  assert.equal(host.exitCode, 0, host.stderr);
+  assert.doesNotMatch(host.stderr, /EPIPE|uncaughtException|Unhandled/);
+  const payload = JSON.parse(host.stdout) as { exitCode: number | null; signal: string | null };
+  assert.equal(payload.exitCode, 0);
+  assert.equal(payload.signal, null);
 });

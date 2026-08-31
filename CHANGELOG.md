@@ -8,10 +8,14 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Dependencies: update runtime schema validation and development tooling, and move source builds to pnpm 11.24.0.
+
 ### Breaking
 
 ### Fixes
 
+- Flows: coalesce heartbeat writes while storage is busy so slow filesystems do not accumulate overlapping writes and stall running steps.
+- Flows: keep the host alive when a shell action closes stdin before consuming its input. Thanks @SebTardif.
 - ACP/terminal: handle child stdout and stderr errors without terminating the host, so wait and release can finish. Thanks @SebTardif.
 
 ## 2026.8.28 (v0.13.2)
