@@ -24,7 +24,7 @@ import type {
   ShellActionExecution,
   ShellActionNodeDefinition,
 } from "../src/flows/runtime.js";
-import { FlowRunStore, flowRunsBaseDir } from "../src/flows/store.js";
+import { type FlowRunStore, flowRunsBaseDir } from "../src/flows/store.js";
 import type { PromptInput } from "../src/types.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
@@ -1318,8 +1318,14 @@ for (const rejectWrite of [false, true]) {
     const write = new Promise<void>((resolve) => {
       finishWrite = resolve;
     });
+    const runner = new FlowRunner({
+      resolveAgent: () => ({ agentName: "unused", agentCommand: "unused", cwd: process.cwd() }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+    const store = (runner as unknown as { store: FlowRunStore }).store;
     let writes = 0;
-    t.mock.method(FlowRunStore.prototype, "writeLive", async () => {
+    t.mock.method(store, "writeLive", async () => {
       writes += 1;
       await write;
       if (rejectWrite) {
@@ -1328,11 +1334,6 @@ for (const rejectWrite of [false, true]) {
     });
     t.mock.timers.enable({ apis: ["setInterval"] });
 
-    const runner = new FlowRunner({
-      resolveAgent: () => ({ agentName: "unused", agentCommand: "unused", cwd: process.cwd() }),
-      permissionMode: "approve-all",
-      outputRoot,
-    });
     const running = runner.run(
       defineFlow({
         name: "slow-heartbeat-storage",
