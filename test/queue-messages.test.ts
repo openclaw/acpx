@@ -510,65 +510,67 @@ test("parseQueueOwnerMessage accepts result payloads and optional emitted-error 
 });
 
 test("parseQueueOwnerMessage preserves null result metadata", () => {
-  assert.deepEqual(
-    parseQueueOwnerMessage({
-      type: "result",
-      requestId: "req-null-meta",
-      result: {
-        stopReason: "end_turn",
-        sessionId: "session-1",
-        resumed: true,
-        permissionStats: {
-          requested: 0,
-          approved: 0,
-          denied: 0,
-          cancelled: 0,
-        },
-        _meta: null,
-        record: {
-          acpxRecordId: "record-1",
-          acpSessionId: "session-1",
-          agentCommand: "codex",
-          cwd: "/tmp/work",
-          createdAt: "2026-03-26T00:00:00.000Z",
-          lastUsedAt: "2026-03-26T00:00:00.000Z",
-          messages: [],
-          updated_at: "2026-03-26T00:00:00.000Z",
-          lastSeq: 0,
-          eventLog: { stream_count: 0, segment_count: 0 },
-        },
+  const message = {
+    type: "result",
+    requestId: "req-null-meta",
+    result: {
+      stopReason: "end_turn",
+      sessionId: "session-1",
+      resumed: true,
+      permissionStats: {
+        requested: 0,
+        approved: 0,
+        denied: 0,
+        cancelled: 0,
       },
-    }),
-    {
-      type: "result",
-      requestId: "req-null-meta",
-      ownerGeneration: undefined,
-      result: {
-        stopReason: "end_turn",
-        sessionId: "session-1",
-        resumed: true,
-        permissionStats: {
-          requested: 0,
-          approved: 0,
-          denied: 0,
-          cancelled: 0,
-        },
-        _meta: null,
-        record: {
-          acpxRecordId: "record-1",
-          acpSessionId: "session-1",
-          agentCommand: "codex",
-          cwd: "/tmp/work",
-          createdAt: "2026-03-26T00:00:00.000Z",
-          lastUsedAt: "2026-03-26T00:00:00.000Z",
-          messages: [],
-          updated_at: "2026-03-26T00:00:00.000Z",
-          lastSeq: 0,
-          eventLog: { stream_count: 0, segment_count: 0 },
-        },
+      _meta: null,
+      record: {
+        acpxRecordId: "record-1",
+        acpSessionId: "session-1",
+        agentCommand: "codex",
+        cwd: "/tmp/work",
+        createdAt: "2026-03-26T00:00:00.000Z",
+        lastUsedAt: "2026-03-26T00:00:00.000Z",
+        messages: [],
+        updated_at: "2026-03-26T00:00:00.000Z",
+        lastSeq: 0,
+        eventLog: { stream_count: 0, segment_count: 0 },
       },
     },
-  );
+  };
+  assert.deepEqual(parseQueueOwnerMessage(message), {
+    type: "result",
+    requestId: "req-null-meta",
+    ownerGeneration: undefined,
+    result: {
+      stopReason: "end_turn",
+      sessionId: "session-1",
+      resumed: true,
+      permissionStats: {
+        requested: 0,
+        approved: 0,
+        denied: 0,
+        cancelled: 0,
+      },
+      _meta: null,
+      record: {
+        acpxRecordId: "record-1",
+        acpSessionId: "session-1",
+        agentCommand: "codex",
+        cwd: "/tmp/work",
+        createdAt: "2026-03-26T00:00:00.000Z",
+        lastUsedAt: "2026-03-26T00:00:00.000Z",
+        messages: [],
+        updated_at: "2026-03-26T00:00:00.000Z",
+        lastSeq: 0,
+        eventLog: { stream_count: 0, segment_count: 0 },
+      },
+    },
+  });
+
+  const withoutMetadata = structuredClone(message);
+  Reflect.deleteProperty(withoutMetadata.result, "_meta");
+  assert.notEqual(parseQueueOwnerMessage(withoutMetadata), null);
 });
 
 test("parseQueueOwnerMessage rejects invalid structured owner message payloads", () => {

@@ -5550,6 +5550,23 @@ test("runPromptTurn: prompt response metadata is preserved", async () => {
   });
 });
 
+test("runPromptTurn: absent prompt response metadata stays absent", async () => {
+  const result = await runPromptTurn({
+    client: {
+      prompt: async () => ({ stopReason: "end_turn" as const }),
+    },
+    sessionId: "session-response-no-meta",
+    prompt: "hello",
+    conversation: createSessionConversation(),
+  });
+
+  assert.deepEqual(result, {
+    stopReason: "end_turn",
+    source: "rpc",
+  });
+  assert.equal(Object.hasOwn(result, "_meta"), false);
+});
+
 test("runPromptTurn: null prompt response metadata is preserved", async () => {
   const result = await runPromptTurn({
     client: {
