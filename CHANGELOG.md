@@ -18,6 +18,7 @@ Repo: https://github.com/openclaw/acpx
 - Flows: keep the host alive when a shell action closes stdin before consuming its input. Thanks @SebTardif.
 - ACP/terminal: handle child stdout and stderr errors without terminating the host, so wait and release can finish. Thanks @SebTardif.
 - ACP/launch: preserve process-spawn `ENOENT` as additive `AGENT_SPAWN_ENOENT` detail and include qualified remediation while keeping the broad runtime code and other spawn failures unchanged. Fixes #510. Thanks @anyech.
+- ACP/results: preserve optional prompt-response `_meta` through direct, queued, compare, and embedded-runtime result surfaces.
 
 ## 2026.8.28 (v0.13.2)
 

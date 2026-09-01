@@ -9,3 +9,4 @@
 - Switching models can adjust reasoning effort. ACPX saves the accepted effort for an existing selection, or removes that selection if the new model has no effort control.
 - Reconnecting restores the saved model and effort before prompting, even when the adapter resumes the conversation with different defaults.
 - Legacy `models` metadata may encode both values in a combined id such as `gpt-5.6-sol[max]`; ACPX uses that form only when the adapter does not advertise the newer model config option.
+- When the adapter returns `_meta.codex.turnConfiguration`, ACPX preserves the receipt in direct, queued, compare, and embedded-runtime results. Structured CLI output also retains the raw ACP prompt response.

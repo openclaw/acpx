@@ -261,6 +261,7 @@ export type AcpRuntimeEvent =
   | {
       type: "done";
       stopReason?: string;
+      _meta?: Record<string, unknown> | null;
     }
   /**
    * Compatibility failure event emitted by runTurn(...). startTurn(...).events
@@ -285,10 +286,12 @@ export type AcpRuntimeTurnResult =
   | {
       status: "completed";
       stopReason?: string;
+      _meta?: Record<string, unknown> | null;
     }
   | {
       status: "cancelled";
       stopReason?: string;
+      _meta?: Record<string, unknown> | null;
     }
   | {
       status: "failed";

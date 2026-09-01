@@ -295,6 +295,7 @@ function legacyTerminalEventFromTurnResult(result: AcpRuntimeTurnResult): AcpRun
   return {
     type: "done",
     ...(result.stopReason ? { stopReason: result.stopReason } : {}),
+    ...(result._meta === undefined ? {} : { _meta: result._meta }),
   };
 }
 
@@ -1259,6 +1260,7 @@ export class AcpRuntimeManager {
         terminalResult = {
           status: response.stopReason === "cancelled" ? "cancelled" : "completed",
           ...(response.stopReason ? { stopReason: response.stopReason } : {}),
+          ...(response._meta === undefined ? {} : { _meta: response._meta }),
         };
       }
     } catch (error) {
