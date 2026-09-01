@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
-import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
@@ -12,7 +11,6 @@ import {
   type AcpRuntimeHandle,
 } from "../../src/runtime.js";
 
-const require = createRequire(import.meta.url);
 const ProbeEventSchema = z.object({ event: z.enum(["start", "call", "exit"]), pid: z.number() });
 const WireEventSchema = z.object({
   method: z.literal("session/resume"),
@@ -78,15 +76,11 @@ function commandOutput(command: string, args: string[]): string {
 }
 
 async function writeProbeServer(serverPath: string): Promise<void> {
-  const mcpPath = require.resolve("@modelcontextprotocol/sdk/server/mcp.js");
-  const stdioPath = require.resolve("@modelcontextprotocol/sdk/server/stdio.js");
   await fs.writeFile(
     serverPath,
     `#!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { appendFileSync, chmodSync, writeFileSync } from "node:fs";
-import { McpServer } from ${JSON.stringify(mcpPath)};
-import { StdioServerTransport } from ${JSON.stringify(stdioPath)};
 
 const valueFile = process.env.PROBE_VALUE_FILE;
 const eventFile = process.env.PROBE_EVENT_FILE;
@@ -103,12 +97,61 @@ record("start");
 process.once("exit", () => record("exit"));
 process.stdin.once("end", () => process.exit(0));
 for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => process.exit(0));
-const server = new McpServer({ name: "muse-revocation-proof", version: "1.0.0" });
-server.tool("revocation_probe", "Return a verifier-only random value.", async () => {
-  record("call");
-  return { content: [{ type: "text", text: value }] };
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  input += chunk;
+  for (;;) {
+    const end = input.indexOf("\\n");
+    if (end < 0) break;
+    const line = input.slice(0, end);
+    input = input.slice(end + 1);
+    if (!line.trim()) continue;
+    const request = JSON.parse(line);
+    if (request.id === undefined) continue;
+    if (request.method === "initialize") {
+      send({
+        jsonrpc: "2.0",
+        id: request.id,
+        result: {
+          protocolVersion: request.params?.protocolVersion ?? "2025-06-18",
+          capabilities: { tools: {} },
+          serverInfo: { name: "muse-revocation-proof", version: "1.0.0" },
+        },
+      });
+      continue;
+    }
+    if (request.method === "tools/list") {
+      send({
+        jsonrpc: "2.0",
+        id: request.id,
+        result: {
+          tools: [{
+            name: "revocation_probe",
+            description: "Return a verifier-only random value.",
+            inputSchema: { type: "object", properties: {}, additionalProperties: false },
+          }],
+        },
+      });
+      continue;
+    }
+    if (request.method === "tools/call" && request.params?.name === "revocation_probe") {
+      record("call");
+      send({
+        jsonrpc: "2.0",
+        id: request.id,
+        result: { content: [{ type: "text", text: value }] },
+      });
+      continue;
+    }
+    send({
+      jsonrpc: "2.0",
+      id: request.id,
+      error: { code: -32601, message: "Method not found" },
+    });
+  }
 });
-await server.connect(new StdioServerTransport());
 `,
     { encoding: "utf8", mode: 0o700 },
   );
