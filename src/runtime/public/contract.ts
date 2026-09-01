@@ -89,6 +89,8 @@ export type AcpRuntimeTurnInput = {
   handle: AcpRuntimeHandle;
   text: string;
   attachments?: AcpRuntimeTurnAttachment[];
+  /** Optional complete MCP server snapshot applied through session/resume before this prompt. */
+  mcpServers?: McpServer[];
   mode: AcpRuntimePromptMode;
   requestId: string;
   timeoutMs?: number;

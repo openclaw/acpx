@@ -37,6 +37,7 @@ import {
 import { advertisedModelState } from "../../session/model-state.js";
 import type {
   ClientOperation,
+  McpServer,
   SessionRecord,
   SessionResumePolicy,
   SessionTokenUsage,
@@ -497,6 +498,7 @@ type RuntimeTurnTask = {
     handle: AcpRuntimeHandle;
     text: string;
     attachments?: AcpRuntimeTurnAttachment[];
+    mcpServers?: McpServer[];
     mode: AcpRuntimePromptMode;
     sessionMode: "persistent" | "oneshot";
     requestId: string;
@@ -1124,6 +1126,7 @@ export class AcpRuntimeManager {
     handle: AcpRuntimeHandle;
     text: string;
     attachments?: AcpRuntimeTurnAttachment[];
+    mcpServers?: McpServer[];
     mode: AcpRuntimePromptMode;
     sessionMode: "persistent" | "oneshot";
     requestId: string;
@@ -1131,9 +1134,13 @@ export class AcpRuntimeManager {
     signal?: AbortSignal;
     onElicitation?: AcpElicitationHandler;
   }): AcpRuntimeTurn {
+    const turnInput =
+      input.mcpServers === undefined
+        ? input
+        : { ...input, mcpServers: structuredClone(input.mcpServers) };
     let promptInput: PromptInput | string;
     try {
-      promptInput = toPromptInput(input.text, input.attachments);
+      promptInput = toPromptInput(turnInput.text, turnInput.attachments);
     } catch (error) {
       void this.closeRetainedOneShotHandle(input.handle).catch(() => {});
       throw error;
@@ -1183,8 +1190,8 @@ export class AcpRuntimeManager {
     const abortHandler = () => {
       void requestCancel();
     };
-    if (input.signal) {
-      if (input.signal.aborted) {
+    if (turnInput.signal) {
+      if (turnInput.signal.aborted) {
         promptStarted.reject(new Error("ACP turn cancelled before prompt submission."));
         closeStream();
         void this.closeRetainedOneShotHandle(input.handle)
@@ -1204,11 +1211,11 @@ export class AcpRuntimeManager {
           closeStream: async () => {},
         };
       }
-      input.signal.addEventListener("abort", abortHandler, { once: true });
+      turnInput.signal.addEventListener("abort", abortHandler, { once: true });
     }
 
     void this.runRuntimeTurnTask({
-      input,
+      input: turnInput,
       promptInput,
       queue,
       promptStarted,
@@ -1564,8 +1571,20 @@ export class AcpRuntimeManager {
     turn: RunningRuntimeTurn,
   ): Promise<ConnectAndLoadSessionResult> {
     if (turn.connected) {
-      return { sessionId: turn.record.acpSessionId, resumed: false, loadError: undefined };
+      if (task.input.mcpServers === undefined) {
+        return { sessionId: turn.record.acpSessionId, resumed: false, loadError: undefined };
+      }
+      if (!turn.client.supportsResumeSession()) {
+        throw new AcpRuntimeError(
+          "ACP_BACKEND_UNSUPPORTED_CONTROL",
+          "Agent does not support session/resume; cannot apply per-turn MCP servers",
+        );
+      }
+      // Buffered updates were projected while this retained owner was connected.
+      // Carry them into the reconnect record before routing switches to that record.
+      turn.record.acpx = turn.acpxState;
     }
+    turn.connected = false;
     const loaded = await this.connectRuntimeTurnClient(task, turn);
     turn.acpxState = cloneSessionAcpxState(turn.record.acpx);
     turn.connected = true;
@@ -1579,6 +1598,7 @@ export class AcpRuntimeManager {
     return await connectAndLoadSession({
       client: turn.client,
       record: turn.record,
+      mcpServers: task.input.mcpServers,
       resumePolicy: resumePolicyForSessionMode(task.input.sessionMode),
       timeoutMs: this.options.timeoutMs,
       activeController: task.state.activeController!,
@@ -1764,6 +1784,7 @@ export class AcpRuntimeManager {
     handle: AcpRuntimeHandle;
     text: string;
     attachments?: AcpRuntimeTurnAttachment[];
+    mcpServers?: McpServer[];
     mode: AcpRuntimePromptMode;
     sessionMode: "persistent" | "oneshot";
     requestId: string;

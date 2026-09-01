@@ -36,7 +36,8 @@ import {
   clearAdvertisedModelState,
   removeModelConfigOptions,
 } from "../../session/model-state.js";
-import type { SessionRecord, SessionResumePolicy } from "../../types.js";
+import type { McpServer, SessionRecord, SessionResumePolicy } from "../../types.js";
+import { AcpRuntimeError } from "../public/errors.js";
 import {
   applyLifecycleSnapshotToRecord,
   reconcileAgentSessionId,
@@ -70,6 +71,7 @@ function isProcessAlive(pid: number | undefined): boolean {
 export type ConnectAndLoadSessionOptions = {
   client: AcpClient;
   record: SessionRecord;
+  mcpServers?: McpServer[];
   resumePolicy?: SessionResumePolicy;
   replacingConfigOption?: {
     key: string;
@@ -124,6 +126,54 @@ function requiresSameSession(resumePolicy: SessionResumePolicy | undefined): boo
   return resumePolicy === "same-session-only";
 }
 
+function shouldRestorePreferences(
+  createdFreshSession: boolean,
+  mcpServers: McpServer[] | undefined,
+): boolean {
+  return createdFreshSession || mcpServers !== undefined;
+}
+
+function modeToRestore(
+  createdFreshSession: boolean,
+  mcpServers: McpServer[] | undefined,
+  desiredModeId: string | undefined,
+): string | undefined {
+  return shouldRestorePreferences(createdFreshSession, mcpServers) ? desiredModeId : undefined;
+}
+
+function refreshRequiresModelRestore(
+  mcpServers: McpServer[] | undefined,
+  loadState: RuntimeSessionLoadState,
+): boolean {
+  return (
+    mcpServers !== undefined &&
+    !loadState.configOptionsPresent &&
+    !loadState.legacyModelMetadataPresent
+  );
+}
+
+function shouldRestoreModel(
+  createdFreshSession: boolean,
+  refreshRequiresRestore: boolean,
+): boolean {
+  return createdFreshSession || refreshRequiresRestore;
+}
+
+function sessionModelsForReplay(
+  loadState: RuntimeSessionLoadState,
+  acpx: SessionRecord["acpx"],
+  refreshRequiresRestore: boolean,
+): SessionModelState | undefined {
+  if (loadState.sessionModels) {
+    return loadState.sessionModels;
+  }
+  // Omission keeps the prior advertisement; an explicit response snapshot wins.
+  if (!refreshRequiresRestore) {
+    return undefined;
+  }
+  return advertisedModelState(acpx);
+}
+
 function makeSessionResumeRequiredError(params: {
   record: SessionRecord;
   reason: string;
@@ -173,10 +223,10 @@ async function replayDesiredMode(params: {
 function canReplayModel(
   desiredModelId: string | undefined,
   models: SessionModelState | undefined,
-  createdFreshSession: boolean,
+  restorePreferences: boolean,
 ): desiredModelId is string {
   // Resume metadata is optional; omission alone does not revoke saved model support.
-  return Boolean(desiredModelId) && (createdFreshSession || models !== undefined);
+  return Boolean(desiredModelId) && (restorePreferences || models !== undefined);
 }
 
 async function replayDesiredModel(params: {
@@ -186,12 +236,12 @@ async function replayDesiredModel(params: {
   previousSessionId: string;
   record: SessionRecord;
   models: import("../../acp/client.js").SessionLoadResult["models"] | undefined;
-  createdFreshSession: boolean;
+  restorePreferences: boolean;
   timeoutMs?: number;
   verbose?: boolean;
   suppressWarnings?: boolean;
 }): Promise<ModelReplayResult> {
-  if (!canReplayModel(params.desiredModelId, params.models, params.createdFreshSession)) {
+  if (!canReplayModel(params.desiredModelId, params.models, params.restorePreferences)) {
     return { replayed: false };
   }
 
@@ -203,6 +253,9 @@ async function replayDesiredModel(params: {
       context: "replay",
     });
     emitModelSupportWarning(warning, params.suppressWarnings);
+    // Startup-model agents bind the model at session/new and expose no session
+    // setter. Resuming the same session keeps that creation model; ordinary
+    // agents without a control already failed the support assertion above.
     if (!params.models) {
       return { replayed: false };
     }
@@ -374,6 +427,7 @@ export async function connectAndLoadSession(
     record,
     reusingLoadedSession,
     sameSessionOnly,
+    mcpServers: options.mcpServers,
     timeoutMs: options.timeoutMs,
   });
   resumed = loadState.resumed;
@@ -381,20 +435,21 @@ export async function connectAndLoadSession(
   sessionId = loadState.sessionId;
   createdFreshSession = loadState.createdFreshSession;
   pendingAgentSessionId = loadState.pendingAgentSessionId;
-  sessionModels = loadState.sessionModels;
+  const refreshRestoresModel = refreshRequiresModelRestore(options.mcpServers, loadState);
+  sessionModels = sessionModelsForReplay(loadState, record.acpx, refreshRestoresModel);
 
   const preferenceReplay = await replaySessionPreferences({
     client,
     record,
-    createdFreshSession,
-    reusingLoadedSession,
+    reusingLoadedSession: reusingLoadedSession && options.mcpServers === undefined,
+    restoreModel: shouldRestoreModel(createdFreshSession, refreshRestoresModel),
+    modeToRestore: modeToRestore(createdFreshSession, options.mcpServers, desiredModeId),
     replacingConfigOption: options.replacingConfigOption,
     sessionId,
     pendingAgentSessionId,
     originalSessionId,
     originalAgentSessionId,
     originalAcpx,
-    desiredModeId,
     desiredModelId,
     desiredConfigOptions,
     sessionModels,
@@ -547,15 +602,15 @@ function resolveReplacingConfigOptionId(
 async function replaySessionPreferences(params: {
   client: AcpClient;
   record: SessionRecord;
-  createdFreshSession: boolean;
   reusingLoadedSession: boolean;
+  restoreModel: boolean;
+  modeToRestore: string | undefined;
   replacingConfigOption?: ConnectAndLoadSessionOptions["replacingConfigOption"];
   sessionId: string;
   pendingAgentSessionId: string | undefined;
   originalSessionId: string;
   originalAgentSessionId: string | undefined;
   originalAcpx: SessionRecord["acpx"];
-  desiredModeId: string | undefined;
   desiredModelId: string | undefined;
   desiredConfigOptions: Record<string, string>;
   sessionModels: import("../../acp/client.js").SessionLoadResult["models"];
@@ -581,7 +636,7 @@ async function replaySessionPreferences(params: {
     await replayDesiredMode({
       client: params.client,
       sessionId: params.sessionId,
-      desiredModeId: params.createdFreshSession ? params.desiredModeId : undefined,
+      desiredModeId: params.modeToRestore,
       previousSessionId: params.originalSessionId,
       timeoutMs: params.timeoutMs,
       verbose: params.verbose,
@@ -593,7 +648,7 @@ async function replaySessionPreferences(params: {
       previousSessionId: params.originalSessionId,
       record: params.record,
       models: params.sessionModels,
-      createdFreshSession: params.createdFreshSession,
+      restorePreferences: params.restoreModel,
       timeoutMs: params.timeoutMs,
       verbose: params.verbose,
       suppressWarnings: params.suppressWarnings,
@@ -643,8 +698,18 @@ async function loadOrCreateRuntimeSession(params: {
   record: SessionRecord;
   reusingLoadedSession: boolean;
   sameSessionOnly: boolean;
+  mcpServers?: McpServer[];
   timeoutMs?: number;
 }): Promise<RuntimeSessionLoadState> {
+  if (params.mcpServers !== undefined) {
+    if (!params.client.supportsResumeSession()) {
+      throw new AcpRuntimeError(
+        "ACP_BACKEND_UNSUPPORTED_CONTROL",
+        "Agent does not support session/resume; cannot apply per-turn MCP servers",
+      );
+    }
+    return await resumeRuntimeSession(params);
+  }
   if (params.reusingLoadedSession) {
     return {
       sessionId: params.record.acpSessionId,
@@ -679,11 +744,12 @@ async function resumeRuntimeSession(params: {
   client: AcpClient;
   record: SessionRecord;
   sameSessionOnly: boolean;
+  mcpServers?: McpServer[];
   timeoutMs?: number;
 }): Promise<RuntimeSessionLoadState> {
   try {
     const resumeResult = await withTimeout(
-      params.client.resumeSession(params.record.acpSessionId, params.record.cwd),
+      params.client.resumeSession(params.record.acpSessionId, params.record.cwd, params.mcpServers),
       params.timeoutMs,
     );
     reconcileAgentSessionId(params.record, resumeResult.agentSessionId);
@@ -736,6 +802,7 @@ async function recoverRuntimeSessionLoadFailure(
     client: AcpClient;
     record: SessionRecord;
     sameSessionOnly: boolean;
+    mcpServers?: McpServer[];
     timeoutMs?: number;
   },
   error: unknown,
@@ -748,7 +815,7 @@ async function recoverRuntimeSessionLoadFailure(
       cause: error,
     });
   }
-  if (!shouldFallbackToNewSession(error, params.record)) {
+  if (params.mcpServers !== undefined || !shouldFallbackToNewSession(error, params.record)) {
     throw error;
   }
   return {

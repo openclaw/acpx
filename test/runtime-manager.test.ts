@@ -54,6 +54,7 @@ type FakeClient = {
   resumeSession?: (
     sessionId: string,
     cwd: string,
+    mcpServers?: import("../src/types.js").McpServer[],
   ) => Promise<{
     agentSessionId?: string;
     configOptions?: SetSessionConfigOptionResponse["configOptions"];
@@ -327,6 +328,274 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
     constructedOptions.map((options) => options.permissionPolicy),
     [permissionPolicy, permissionPolicy],
   );
+});
+
+test("AcpRuntimeManager refreshes per-turn MCP servers before prompting", async () => {
+  const store = new InMemorySessionStore();
+  const operations: string[] = [];
+  let handlers: FakeClientHandlers = {};
+  const expectedMcpServers = [
+    {
+      name: "turn-tools",
+      command: "/usr/bin/turn-tools",
+      args: ["--stdio"],
+      env: [{ name: "TURN_CLAIM", value: "claim-1" }],
+    },
+  ];
+  const expectedSnapshot = structuredClone(expectedMcpServers);
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          initializeResult: {
+            protocolVersion: 1,
+            agentCapabilities: { sessionCapabilities: { resume: {} } },
+          },
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "mcp-refresh-session" }),
+          loadSession: async () => ({}),
+          hasReusableSession: () => true,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => true,
+          resumeSession: async (sessionId: string, cwd: string, mcpServers: unknown) => {
+            operations.push("resume");
+            assert.equal(sessionId, "mcp-refresh-session");
+            assert.equal(cwd, "/workspace");
+            assert.deepEqual(mcpServers, expectedSnapshot);
+            handlers.onSessionUpdate?.({
+              sessionId,
+              update: {
+                sessionUpdate: "available_commands_update",
+                availableCommands: [{ name: "refreshed-command", description: "From resume" }],
+              },
+            });
+            return {
+              configOptions: [
+                {
+                  id: "model",
+                  name: "Model",
+                  type: "select",
+                  currentValue: "refreshed-model",
+                  options: [{ value: "refreshed-model", name: "Refreshed" }],
+                },
+              ],
+            };
+          },
+          loadSessionWithOptions: async () => ({}),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async (_sessionId: string, _input: unknown, onRequestStarted?: () => void) => {
+            operations.push("prompt");
+            onRequestStarted?.();
+            return { stopReason: "end_turn" };
+          },
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async (_sessionId: string, modeId: string) => {
+            assert.equal(modeId, "plan");
+            operations.push("set_mode");
+          },
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {
+            handlers = {};
+          },
+          setEventHandlers: (nextHandlers: FakeClientHandlers) => {
+            handlers = nextHandlers;
+          },
+        }) as never,
+    },
+  );
+  const record = await manager.ensureSession({
+    sessionKey: "mcp-refresh",
+    agent: "muse",
+    mode: "persistent",
+  });
+  const handle = createHandle("mcp-refresh", record.acpxRecordId);
+  await manager.setMode(handle, "plan");
+  operations.length = 0;
+
+  const turn = manager.startTurn({
+    handle,
+    text: "use the refreshed tools",
+    mcpServers: expectedMcpServers,
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-mcp-refresh",
+  });
+  expectedMcpServers.push({
+    name: "late-mutation",
+    command: "/usr/bin/late-mutation",
+    args: [],
+    env: [],
+  });
+  expectedMcpServers[0].args[0] = "--mutated";
+  expectedMcpServers[0].env[0].value = "mutated-claim";
+
+  assert.deepEqual((await collectTurn(turn)).result, {
+    status: "completed",
+    stopReason: "end_turn",
+  });
+  assert.deepEqual(operations, ["resume", "set_mode", "prompt"]);
+  const saved = store.records.get(record.acpxRecordId);
+  assert.equal(saved?.acpx?.current_model_id, "refreshed-model");
+  assert.deepEqual(saved?.acpx?.available_commands, [
+    { name: "refreshed-command", description: "From resume", has_input: false },
+  ]);
+  assert.equal(JSON.stringify(saved).includes("claim-1"), false);
+});
+
+test("AcpRuntimeManager rejects per-turn MCP servers when resume is unavailable", async () => {
+  const store = new InMemorySessionStore();
+  let promptCalled = false;
+  let closeCalls = 0;
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          initializeResult: { protocolVersion: 1, agentCapabilities: {} },
+          start: async () => {},
+          close: async () => {
+            closeCalls += 1;
+          },
+          createSession: async () => ({ sessionId: "no-resume-session" }),
+          loadSession: async () => ({}),
+          hasReusableSession: () => true,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => ({}),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => {
+            promptCalled = true;
+            return { stopReason: "end_turn" };
+          },
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+  const record = await manager.ensureSession({
+    sessionKey: "no-resume",
+    agent: "legacy-agent",
+    mode: "persistent",
+  });
+
+  const turn = manager.startTurn({
+    handle: createHandle("no-resume", record.acpxRecordId),
+    text: "do not prompt",
+    mcpServers: [],
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-no-resume",
+  });
+  const result = (await collectTurn(turn)).result;
+
+  assert.equal(result.status, "failed");
+  assert.match(result.status === "failed" ? result.error.message : "", /session\/resume/);
+  assert.equal(
+    result.status === "failed" ? result.error.detailCode : undefined,
+    "ACP_BACKEND_UNSUPPORTED_CONTROL",
+  );
+  assert.equal(promptCalled, false);
+  assert.equal(closeCalls, 0);
+});
+
+test("AcpRuntimeManager discards a retained owner after MCP refresh times out", async () => {
+  const store = new InMemorySessionStore();
+  let clients = 0;
+  let closeCalls = 0;
+  let promptCalls = 0;
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store, timeoutMs: 5 }),
+    {
+      clientFactory: () => {
+        clients += 1;
+        const clientNumber = clients;
+        let reusable = false;
+        return {
+          initializeResult: {
+            protocolVersion: 1,
+            agentCapabilities: { sessionCapabilities: { resume: {} } },
+          },
+          start: async () => {},
+          close: async () => {
+            closeCalls += 1;
+            reusable = false;
+          },
+          createSession: async () => {
+            reusable = true;
+            return { sessionId: "refresh-timeout-session" };
+          },
+          loadSession: async () => ({}),
+          hasReusableSession: () => reusable,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => true,
+          resumeSession: async () => {
+            if (clientNumber === 1) {
+              return await new Promise<never>(() => {});
+            }
+            reusable = true;
+            return {};
+          },
+          loadSessionWithOptions: async () => ({}),
+          getAgentLifecycleSnapshot: () => ({ running: reusable }),
+          prompt: async () => {
+            promptCalls += 1;
+            return { stopReason: "end_turn" };
+          },
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        } as never;
+      },
+    },
+  );
+  const record = await manager.ensureSession({
+    sessionKey: "refresh-timeout",
+    agent: "muse",
+    mode: "persistent",
+  });
+  const handle = createHandle("refresh-timeout", record.acpxRecordId);
+
+  const failed = await collectTurn(
+    manager.startTurn({
+      handle,
+      text: "time out",
+      mcpServers: [],
+      mode: "prompt",
+      sessionMode: "persistent",
+      requestId: "req-refresh-timeout",
+    }),
+  );
+  assert.equal(failed.result.status, "failed");
+  assert.equal(
+    failed.result.status === "failed" ? failed.result.error.detailCode : undefined,
+    "SESSION_RESUME_REQUIRED",
+  );
+  assert.equal(failed.result.status === "failed" ? failed.result.error.retryable : undefined, true);
+  assert.equal(clients, 1);
+  assert.equal(closeCalls, 1);
+
+  const retry = await collectTurn(
+    manager.startTurn({
+      handle,
+      text: "retry without refresh",
+      mode: "prompt",
+      sessionMode: "persistent",
+      requestId: "req-refresh-retry",
+    }),
+  );
+  assert.equal(retry.result.status, "completed");
+  assert.equal(clients, 2);
+  assert.equal(promptCalls, 1);
 });
 
 test("AcpRuntimeManager reuses pending oneshot initialization and closes it after the turn", async () => {

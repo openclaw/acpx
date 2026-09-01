@@ -85,6 +85,7 @@ test("runtime errors preserve codes and can be identified safely", () => {
   const error = new AcpRuntimeError("ACP_TURN_FAILED", "turn failed", { cause });
   assert.equal(error.name, "AcpRuntimeError");
   assert.equal(error.code, "ACP_TURN_FAILED");
+  assert.equal(error.detailCode, "ACP_TURN_FAILED");
   assert.equal(error.cause, cause);
   assert.equal(isAcpRuntimeError(error), true);
   assert.equal(isAcpRuntimeError(new Error("plain")), false);

@@ -8,6 +8,7 @@ import {
   connectAndLoadSession,
   type ConnectedSessionController,
 } from "../src/runtime/engine/reconnect.js";
+import type { McpServer } from "../src/types.js";
 import {
   makeSessionRecord as makeSessionRecordFixture,
   withTempHome as withTempHomeFixture,
@@ -32,6 +33,7 @@ type FakeClient = {
   resumeSession?: (
     sessionId: string,
     cwd: string,
+    mcpServers?: McpServer[],
   ) => Promise<{
     agentSessionId?: string;
     configOptions?: SetSessionConfigOptionResponse["configOptions"];
@@ -62,6 +64,7 @@ type FakeClient = {
   setSessionModel: (
     sessionId: string,
     modelId: string,
+    models?: SessionModelState,
   ) => Promise<void | SetSessionConfigOptionResponse>;
   setSessionConfigOption?: (
     sessionId: string,
@@ -105,6 +108,10 @@ test("connectAndLoadSession prefers session/resume for resume-capable sessions",
       cwd,
     });
 
+    const mcpServers: McpServer[] = [
+      { name: "turn-tools", command: "/usr/bin/turn-tools", args: [], env: [] },
+    ];
+    let resumeCalls = 0;
     const client: FakeClient = {
       hasReusableSession: () => false,
       start: async () => {},
@@ -113,9 +120,11 @@ test("connectAndLoadSession prefers session/resume for resume-capable sessions",
       }),
       supportsLoadSession: () => false,
       supportsResumeSession: () => true,
-      resumeSession: async (sessionId, resumeCwd) => {
+      resumeSession: async (sessionId, resumeCwd, receivedMcpServers) => {
+        resumeCalls += 1;
         assert.equal(sessionId, "resume-session");
         assert.equal(resumeCwd, cwd);
+        assert.deepEqual(receivedMcpServers, mcpServers);
         return { agentSessionId: "runtime-session" };
       },
       loadSessionWithOptions: async () => {
@@ -131,6 +140,7 @@ test("connectAndLoadSession prefers session/resume for resume-capable sessions",
     const result = await connectAndLoadSession({
       client: client as never,
       record,
+      mcpServers,
       timeoutMs: 1_000,
       activeController: ACTIVE_CONTROLLER,
     });
@@ -142,6 +152,74 @@ test("connectAndLoadSession prefers session/resume for resume-capable sessions",
       loadError: undefined,
     });
     assert.equal(record.agentSessionId, "runtime-session");
+    assert.equal(resumeCalls, 1);
+  });
+});
+
+test("connectAndLoadSession never drops an MCP snapshot through fresh-session fallback", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    const record = makeSessionRecord({
+      acpxRecordId: "snapshot-failure-record",
+      acpSessionId: "snapshot-failure-session",
+      agentCommand: "agent",
+      cwd,
+    });
+    let createSessionCalls = 0;
+    const resumeFailure = { error: { code: -32602, message: "Invalid params" } };
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({ running: true }),
+      supportsLoadSession: () => true,
+      supportsResumeSession: () => true,
+      resumeSession: async () => {
+        throw resumeFailure;
+      },
+      loadSessionWithOptions: async () => {
+        throw new Error("loadSessionWithOptions should not be called");
+      },
+      createSession: async () => {
+        createSessionCalls += 1;
+        return { sessionId: "wrong-fallback-session" };
+      },
+      setSessionMode: async () => {},
+      setSessionModel: async () => {},
+    };
+
+    await assert.rejects(
+      connectAndLoadSession({
+        client: client as never,
+        record,
+        mcpServers: [],
+        activeController: ACTIVE_CONTROLLER,
+      }),
+      (error: unknown) => error === resumeFailure,
+    );
+    assert.equal(createSessionCalls, 0);
+    assert.equal(record.acpSessionId, "snapshot-failure-session");
+
+    await assert.rejects(
+      connectAndLoadSession({
+        client: client as never,
+        record,
+        mcpServers: [],
+        resumePolicy: "same-session-only",
+        activeController: ACTIVE_CONTROLLER,
+      }),
+      (error: unknown) => {
+        assert(error instanceof Error);
+        assert.equal(error.name, "SessionResumeRequiredError");
+        assert.equal(
+          (error as Error & { detailCode?: string }).detailCode,
+          "SESSION_RESUME_REQUIRED",
+        );
+        assert.equal((error as Error & { retryable?: boolean }).retryable, true);
+        return true;
+      },
+    );
+    assert.equal(createSessionCalls, 0);
   });
 });
 
@@ -1097,6 +1175,8 @@ for (const [connection, modelMetadata, replacingConfig, savedEffort, siblingChan
   ["resume", "different", "thinking"],
   ["load", "different", undefined, "ultra"],
   ["resume", "same", undefined, "ultra"],
+  ["refresh", "different"],
+  ["refresh", "omitted"],
   ["load", "different", undefined, "low"],
   ["fresh", "different", undefined, undefined, "removed"],
   ["load", "omitted", undefined, undefined, "removed"],
@@ -1108,24 +1188,9 @@ for (const [connection, modelMetadata, replacingConfig, savedEffort, siblingChan
       const cwd = path.join(homeDir, "workspace");
       await fs.mkdir(cwd, { recursive: true });
 
-      const record = makeSessionRecord({
-        acpxRecordId: "config-replay-record",
-        acpSessionId: "stale-session",
-        agentCommand: "agent",
-        cwd,
-        acpx: {
-          desired_mode_id: "plan",
-          session_options: { model: "gpt-5.4" },
-          desired_config_options: {
-            reasoning_effort: savedEffort ?? "high",
-            approval: "manual",
-          },
-        },
-      });
-
       const configCalls: Array<{ sessionId: string; configId: string; value: string }> = [];
       const expectedSessionId = connection === "fresh" ? "fresh-session" : "stale-session";
-      const shouldSetModel = modelMetadata !== "omitted";
+      const shouldSetModel = modelMetadata !== "omitted" || connection === "refresh";
       const removesApproval = modelMetadata === "removes-option";
       const configOptions = (
         effort: string,
@@ -1166,6 +1231,28 @@ for (const [connection, modelMetadata, replacingConfig, savedEffort, siblingChan
           options: ["ask", "manual"].map((value) => ({ value, name: value })),
         },
       ];
+      const record = makeSessionRecord({
+        acpxRecordId: "config-replay-record",
+        acpSessionId: "stale-session",
+        agentCommand: "agent",
+        cwd,
+        acpx: {
+          desired_mode_id: "plan",
+          session_options: { model: "gpt-5.4" },
+          desired_config_options: {
+            reasoning_effort: savedEffort ?? "high",
+            approval: "manual",
+          },
+          ...(connection === "refresh"
+            ? {
+                config_options: configOptions("high", "manual"),
+                current_model_id: "gpt-5.4",
+                available_models: ["default-model", "gpt-5.4"],
+                model_control: "config_option" as const,
+              }
+            : {}),
+        },
+      });
       const restoredOptions =
         modelMetadata === "omitted"
           ? {}
@@ -1182,17 +1269,25 @@ for (const [connection, modelMetadata, replacingConfig, savedEffort, siblingChan
           (option) => !removesApproval || option.id !== "approval",
         );
       const client: FakeClient = {
-        hasReusableSession: () => false,
+        hasReusableSession: () => connection === "refresh",
         start: async () => {},
         getAgentLifecycleSnapshot: () => ({
           running: true,
         }),
         supportsLoadSession: () => true,
-        supportsResumeSession: () => connection === "resume",
-        resumeSession: async () => ({
-          agentSessionId: "restored-runtime",
-          ...restoredOptions,
-        }),
+        supportsResumeSession: () => connection === "resume" || connection === "refresh",
+        resumeSession: async (_sessionId, _cwd, mcpServers) => {
+          assert.deepEqual(
+            mcpServers,
+            connection === "refresh"
+              ? [{ name: "turn-tools", command: "/usr/bin/turn-tools", args: [], env: [] }]
+              : undefined,
+          );
+          return {
+            agentSessionId: "restored-runtime",
+            ...restoredOptions,
+          };
+        },
         loadSessionWithOptions: async () => {
           if (connection === "load") {
             return {
@@ -1214,10 +1309,17 @@ for (const [connection, modelMetadata, replacingConfig, savedEffort, siblingChan
           models: buildModelsState("default-model"),
         }),
         setSessionMode: async (sessionId, value) => {
-          assert.equal(connection, "fresh", "legacy mode must remain fresh-only");
+          assert.equal(
+            connection === "fresh" || connection === "refresh",
+            true,
+            "mode replay is limited to fresh sessions and explicit refreshes",
+          );
           configCalls.push({ sessionId, configId: "mode", value });
         },
-        setSessionModel: async (sessionId, value) => {
+        setSessionModel: async (sessionId, value, models) => {
+          if (connection === "refresh" && modelMetadata === "omitted") {
+            assert.equal(models?.configId, "model");
+          }
           configCalls.push({ sessionId, configId: "model", value });
           return { configOptions: acceptedOptions("low", "ask") };
         },
@@ -1250,6 +1352,10 @@ for (const [connection, modelMetadata, replacingConfig, savedEffort, siblingChan
       const result = await connectAndLoadSession({
         client: client as never,
         record,
+        mcpServers:
+          connection === "refresh"
+            ? [{ name: "turn-tools", command: "/usr/bin/turn-tools", args: [], env: [] }]
+            : undefined,
         activeController: ACTIVE_CONTROLLER,
         replacingConfigOption: replacingConfig
           ? {
@@ -1265,7 +1371,7 @@ for (const [connection, modelMetadata, replacingConfig, savedEffort, siblingChan
       assert.equal(result.sessionId, expectedSessionId);
       assert.equal(result.resumed, connection !== "fresh");
       assert.deepEqual(configCalls, [
-        ...(connection === "fresh"
+        ...(connection === "fresh" || connection === "refresh"
           ? [{ sessionId: expectedSessionId, configId: "mode", value: "plan" }]
           : []),
         ...(shouldSetModel
@@ -1303,6 +1409,126 @@ for (const [connection, modelMetadata, replacingConfig, savedEffort, siblingChan
     });
   });
 }
+
+for (const [agentCommand, outcome] of [
+  ["agent", "fails visibly"],
+  ["npx -y @agentclientprotocol/claude-agent-acp@^0.60.0", "keeps startup model"],
+] as const) {
+  test(`connectAndLoadSession ${outcome} when MCP refresh has no model control`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      await fs.mkdir(cwd, { recursive: true });
+      const record = makeSessionRecord({
+        acpxRecordId: "refresh-no-model-control-record",
+        acpSessionId: "refresh-no-model-control-session",
+        agentCommand,
+        cwd,
+        acpx: { session_options: { model: "gpt-5.4" } },
+      });
+      let modelCalls = 0;
+      const client: FakeClient = {
+        hasReusableSession: () => true,
+        start: async () => {},
+        getAgentLifecycleSnapshot: () => ({ running: true }),
+        supportsLoadSession: () => true,
+        supportsResumeSession: () => true,
+        resumeSession: async () => ({}),
+        loadSessionWithOptions: async () => {
+          throw new Error("loadSessionWithOptions should not be called");
+        },
+        createSession: async () => {
+          throw new Error("createSession should not be called");
+        },
+        setSessionMode: async () => {},
+        setSessionModel: async () => {
+          modelCalls += 1;
+        },
+      };
+      const connect = () =>
+        connectAndLoadSession({
+          client: client as never,
+          record,
+          mcpServers: [],
+          activeController: ACTIVE_CONTROLLER,
+        });
+
+      if (outcome === "fails visibly") {
+        await assert.rejects(connect(), (error: unknown) => {
+          assert(error instanceof Error);
+          assert.equal(error.name, "SessionModelReplayError");
+          assert.match(error.message, /did not advertise model support/);
+          return true;
+        });
+      } else {
+        await connect();
+      }
+      assert.equal(modelCalls, 0);
+    });
+  });
+}
+
+test("connectAndLoadSession honors explicit model-control removal during MCP refresh", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    const record = makeSessionRecord({
+      acpxRecordId: "refresh-model-removal-record",
+      acpSessionId: "refresh-model-removal-session",
+      agentCommand: "agent",
+      cwd,
+      acpx: {
+        session_options: { model: "gpt-5.4" },
+        current_model_id: "gpt-5.4",
+        available_models: ["default-model", "gpt-5.4"],
+        model_control: "config_option",
+        config_options: [
+          {
+            id: "model",
+            name: "Model",
+            category: "model",
+            type: "select",
+            currentValue: "gpt-5.4",
+            options: [{ value: "gpt-5.4", name: "gpt-5.4" }],
+          },
+        ],
+      },
+    });
+    let modelCalls = 0;
+    const client: FakeClient = {
+      hasReusableSession: () => true,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({ running: true }),
+      supportsLoadSession: () => true,
+      supportsResumeSession: () => true,
+      resumeSession: async () => ({
+        configOptions: [],
+        configOptionsPresent: true,
+        legacyModelMetadataPresent: false,
+      }),
+      loadSessionWithOptions: async () => {
+        throw new Error("loadSessionWithOptions should not be called");
+      },
+      createSession: async () => {
+        throw new Error("createSession should not be called");
+      },
+      setSessionMode: async () => {},
+      setSessionModel: async () => {
+        modelCalls += 1;
+      },
+    };
+
+    await connectAndLoadSession({
+      client: client as never,
+      record,
+      mcpServers: [],
+      activeController: ACTIVE_CONTROLLER,
+    });
+
+    assert.equal(modelCalls, 0);
+    assert.equal(record.acpx?.current_model_id, undefined);
+    assert.deepEqual(record.acpx?.config_options, []);
+  });
+});
 
 test("connectAndLoadSession preserves legacy models after config option replay", async () => {
   await withTempHome(async (homeDir) => {

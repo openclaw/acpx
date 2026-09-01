@@ -87,6 +87,7 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   let turnMode: string | undefined;
   let turnSessionMode: string | undefined;
   let turnTimeoutMs: number | undefined;
+  let turnMcpServers: unknown;
   let closedStreamRequestId: string | undefined;
   let cancelCalls = 0;
   let managerCancelCalls = 0;
@@ -97,10 +98,17 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
       ensuredMode = input.mode;
       return record;
     },
-    startTurn(input: { mode: string; sessionMode: string; timeoutMs?: number; requestId: string }) {
+    startTurn(input: {
+      mode: string;
+      sessionMode: string;
+      timeoutMs?: number;
+      requestId: string;
+      mcpServers?: unknown;
+    }) {
       turnMode = input.mode;
       turnSessionMode = input.sessionMode;
       turnTimeoutMs = input.timeoutMs;
+      turnMcpServers = input.mcpServers;
       return {
         requestId: input.requestId,
         promptStarted,
@@ -124,10 +132,12 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
       sessionMode: string;
       timeoutMs?: number;
       requestId: string;
+      mcpServers?: unknown;
     }) {
       turnMode = input.mode;
       turnSessionMode = input.sessionMode;
       turnTimeoutMs = input.timeoutMs;
+      turnMcpServers = input.mcpServers;
       yield { type: "text_delta" as const, text: "hello", stream: "output" as const };
       yield { type: "done" as const, stopReason: "end_turn" };
     },
@@ -171,6 +181,7 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   const turn = runtime.startTurn({
     handle,
     text: "hello",
+    mcpServers: [{ name: "turn-tools", command: "/usr/bin/turn-tools", args: [], env: [] }],
     mode: "steer",
     requestId: "req-1",
     timeoutMs: 42,
@@ -185,6 +196,9 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   assert.equal(turnMode, "steer");
   assert.equal(turnSessionMode, "oneshot");
   assert.equal(turnTimeoutMs, 42);
+  assert.deepEqual(turnMcpServers, [
+    { name: "turn-tools", command: "/usr/bin/turn-tools", args: [], env: [] },
+  ]);
   assert.deepEqual(events, [{ type: "text_delta", text: "hello", stream: "output" }]);
   assert.deepEqual(result, { status: "completed", stopReason: "end_turn" });
 
@@ -202,6 +216,7 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   for await (const event of runtime.runTurn({
     handle,
     text: "legacy",
+    mcpServers: [{ name: "legacy-tools", command: "/usr/bin/legacy-tools", args: [], env: [] }],
     mode: "prompt",
     requestId: "req-legacy",
   })) {
@@ -210,6 +225,9 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   assert.deepEqual(legacyEvents, [
     { type: "text_delta", text: "hello", stream: "output" },
     { type: "done", stopReason: "end_turn" },
+  ]);
+  assert.deepEqual(turnMcpServers, [
+    { name: "legacy-tools", command: "/usr/bin/legacy-tools", args: [], env: [] },
   ]);
 
   await runtime.getStatus({ handle });

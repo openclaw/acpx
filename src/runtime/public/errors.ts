@@ -12,12 +12,15 @@ export type AcpRuntimeErrorCode = (typeof ACP_ERROR_CODES)[number];
 
 export class AcpRuntimeError extends Error {
   readonly code: AcpRuntimeErrorCode;
+  /** Keeps the domain code visible when the shared output normalizer handles this error. */
+  readonly detailCode: AcpRuntimeErrorCode;
   override readonly cause?: unknown;
 
   constructor(code: AcpRuntimeErrorCode, message: string, options?: { cause?: unknown }) {
     super(message);
     this.name = "AcpRuntimeError";
     this.code = code;
+    this.detailCode = code;
     this.cause = options?.cause;
   }
 }

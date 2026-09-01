@@ -78,6 +78,7 @@ import type {
   PermissionMode,
   PermissionStats,
   PromptInput,
+  McpServer,
 } from "../types.js";
 import { getAcpxVersion } from "../version.js";
 import {
@@ -1232,14 +1233,18 @@ export class AcpClient {
     return result;
   }
 
-  async resumeSession(sessionId: string, cwd = this.options.cwd): Promise<SessionResumeResult> {
+  async resumeSession(
+    sessionId: string,
+    cwd = this.options.cwd,
+    mcpServers: McpServer[] = this.options.mcpServers ?? [],
+  ): Promise<SessionResumeResult> {
     const connection = this.getConnection();
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
     const response = await this.runConnectionRequest(() =>
       connection.resumeSession({
         sessionId,
         cwd: sessionCwd,
-        mcpServers: this.options.mcpServers ?? [],
+        mcpServers,
       }),
     );
 
