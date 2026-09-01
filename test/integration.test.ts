@@ -1490,6 +1490,8 @@ test("integration: exec applies config options after the model and before the pr
           "fast-model",
           "exec",
           "--config-option",
+          "reasoning_effort=high",
+          "--config-option",
           "reasoning_effort=xhigh",
           "echo hello",
         ],
@@ -1503,7 +1505,14 @@ test("integration: exec applies config options after the model and before the pr
           payload.method === "session/set_config_option" &&
           (payload.params as { configId?: unknown } | undefined)?.configId === "model",
       );
-      const effortIndex = payloads.findIndex(
+      const highEffortIndex = payloads.findIndex(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown; value?: unknown } | undefined)?.configId ===
+            "reasoning_effort" &&
+          (payload.params as { value?: unknown } | undefined)?.value === "high",
+      );
+      const xhighEffortIndex = payloads.findIndex(
         (payload) =>
           payload.method === "session/set_config_option" &&
           (payload.params as { configId?: unknown; value?: unknown } | undefined)?.configId ===
@@ -1512,8 +1521,12 @@ test("integration: exec applies config options after the model and before the pr
       );
       const promptIndex = payloads.findIndex((payload) => payload.method === "session/prompt");
       assert(modelIndex >= 0, "expected model config request");
-      assert(effortIndex > modelIndex, "expected reasoning effort after model selection");
-      assert(promptIndex > effortIndex, "expected prompt after config option selection");
+      assert(highEffortIndex > modelIndex, "expected first config option after model selection");
+      assert(
+        xhighEffortIndex > highEffortIndex,
+        "expected repeated config options in command-line order",
+      );
+      assert(promptIndex > xhighEffortIndex, "expected prompt after all config option selections");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -1543,9 +1556,24 @@ test("integration: exec stops before prompting when a config option is rejected"
         homeDir,
       );
       assert.notEqual(result.code, 0, "expected non-zero exit");
-      assert.match(`${result.stderr}\n${result.stdout}`, /session\/set_config_option/i);
 
       const payloads = parseJsonRpcOutputLines(result.stdout);
+      const rejectedRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "reasoning_effort",
+      ) as { id?: unknown } | undefined;
+      assert(rejectedRequest, "expected rejected config option request");
+      const rejection = payloads.find(
+        (payload) => payload.id === rejectedRequest.id && "error" in payload,
+      ) as
+        | {
+            error?: { code?: unknown; message?: unknown; data?: { details?: unknown } };
+          }
+        | undefined;
+      assert.equal(rejection?.error?.code, -32603);
+      assert.equal(rejection?.error?.message, "Internal error");
+      assert.equal(rejection?.error?.data?.details, "Invalid params");
       assert.equal(
         payloads.some((payload) => payload.method === "session/prompt"),
         false,

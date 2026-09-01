@@ -169,6 +169,8 @@ test("session config option assignments preserve values and reject incomplete pa
   assert.throws(() => parseSessionConfigOptionAssignment("reasoning_effort"), /<key>=<value>/);
   assert.throws(() => parseSessionConfigOptionAssignment("=xhigh"), /<key>=<value>/);
   assert.throws(() => parseSessionConfigOptionAssignment("reasoning_effort="), /<key>=<value>/);
+  assert.throws(() => parseSessionConfigOptionAssignment("  =xhigh"), /<key>=<value>/);
+  assert.throws(() => parseSessionConfigOptionAssignment("reasoning_effort=   "), /<key>=<value>/);
 });
 
 test("history and prune parsers validate positive numbers and dates", () => {
