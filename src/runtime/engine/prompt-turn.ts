@@ -35,6 +35,23 @@ type PromptTurnClient = {
 
 type PromptResponse = Awaited<ReturnType<PromptTurnClient["prompt"]>>;
 
+function recoveredSessionResult(
+  response: PromptResponse | undefined,
+  conversation: SessionConversation,
+  promptMessageId: string,
+): {
+  stopReason: "end_turn";
+  source: "session";
+  _meta?: Record<string, unknown> | null;
+} {
+  recordPromptResponseUsage(conversation, response?.usage, promptMessageId);
+  return {
+    stopReason: "end_turn",
+    source: "session",
+    ...responseMetaField(response?._meta),
+  };
+}
+
 export async function runPromptTurn(params: {
   client: PromptTurnClient;
   sessionId: string;
@@ -96,16 +113,7 @@ export async function runPromptTurn(params: {
       });
 
     if (hasAgentReplyAfterPrompt(params.conversation, params.promptMessageId)) {
-      recordPromptResponseUsage(
-        params.conversation,
-        settledResponse?.usage,
-        params.promptMessageId,
-      );
-      return {
-        stopReason: "end_turn",
-        source: "session",
-        ...responseMetaField(settledResponse?._meta),
-      };
+      return recoveredSessionResult(settledResponse, params.conversation, params.promptMessageId);
     }
 
     throw error;
