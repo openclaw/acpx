@@ -9,6 +9,7 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - Dependencies: update runtime schema validation and development tooling, and move source builds to pnpm 11.24.0.
+- CLI/exec: apply repeatable ACP `--config-option <key=value>` selections after the requested model and before a one-shot prompt.
 
 ### Breaking
 

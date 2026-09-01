@@ -60,6 +60,7 @@ export type RunOnceOptions = {
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   sessionOptions?: SessionAgentOptions;
+  configOptions?: Array<{ configId: string; value: string }>;
   promptRetries?: number;
 } & TimedRunOptions;
 

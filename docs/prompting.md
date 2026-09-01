@@ -130,6 +130,21 @@ Behavior varies by adapter:
 
 For mid-session model switches, use `set model <id>` instead. See [Session control](session-control.md#set-key-value).
 
+## One-shot session configuration
+
+`exec` accepts repeatable `--config-option <key=value>` flags for adapter-advertised ACP
+session controls. ACPX applies the requested model first, then the config options in command
+order, and only then sends the prompt:
+
+```bash
+acpx --model gpt-5.4 codex exec \
+  --config-option reasoning_effort=high \
+  'one-shot review'
+```
+
+The temporary selection is not saved. If any `session/set_config_option` request fails, `exec`
+reports the adapter error and does not start the prompt.
+
 ## Permissions inside a prompt
 
 Prompts can trigger permission requests for tool calls. The default policy auto-approves reads and prompts for writes; non-interactive runs default to deny. See [Permissions](permissions.md).
