@@ -9,7 +9,7 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - Dependencies: update runtime schema validation and development tooling, and move source builds to pnpm 11.24.0.
-- Runtime/embedding: apply a complete turn-scoped MCP server snapshot before each prompt, so embedding hosts can refresh tools without recreating the ACP session, and preserve stable detail codes for runtime errors.
+- Runtime/embedding: copy and apply a complete turn-scoped MCP server snapshot before each prompt, so embedding hosts can refresh tools without recreating the ACP session, and preserve stable detail codes for runtime errors.
 
 ### Breaking
 

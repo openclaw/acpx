@@ -216,13 +216,15 @@ export class AcpxRuntime implements AcpxRuntimeLike {
 
   startTurn(input: AcpRuntimeTurnInput) {
     const { handle, state } = this.resolveManagerHandle(input.handle);
+    const mcpServers =
+      input.mcpServers === undefined ? undefined : structuredClone(input.mcpServers);
     const managerPromise = this.getManager();
     const turnPromise = managerPromise.then((manager) =>
       manager.startTurn({
         handle,
         text: input.text,
         attachments: input.attachments,
-        mcpServers: input.mcpServers,
+        mcpServers,
         mode: input.mode,
         sessionMode: state.mode,
         requestId: input.requestId,
@@ -254,21 +256,26 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     };
   }
 
-  async *runTurn(input: AcpRuntimeTurnInput): AsyncIterable<AcpRuntimeEvent> {
-    const { handle, state } = this.resolveManagerHandle(input.handle);
-    const manager = await this.getManager();
-    yield* manager.runTurn({
-      handle,
-      text: input.text,
-      attachments: input.attachments,
-      mcpServers: input.mcpServers,
-      mode: input.mode,
-      sessionMode: state.mode,
-      requestId: input.requestId,
-      timeoutMs: input.timeoutMs,
-      signal: input.signal,
-      onElicitation: input.onElicitation,
-    });
+  runTurn(input: AcpRuntimeTurnInput): AsyncIterable<AcpRuntimeEvent> {
+    const mcpServers =
+      input.mcpServers === undefined ? undefined : structuredClone(input.mcpServers);
+    const run = async function* (runtime: AcpxRuntime): AsyncIterable<AcpRuntimeEvent> {
+      const { handle, state } = runtime.resolveManagerHandle(input.handle);
+      const manager = await runtime.getManager();
+      yield* manager.runTurn({
+        handle,
+        text: input.text,
+        attachments: input.attachments,
+        mcpServers,
+        mode: input.mode,
+        sessionMode: state.mode,
+        requestId: input.requestId,
+        timeoutMs: input.timeoutMs,
+        signal: input.signal,
+        onElicitation: input.onElicitation,
+      });
+    };
+    return run(this);
   }
 
   async getCapabilities(input?: { handle?: AcpRuntimeHandle }): Promise<AcpRuntimeCapabilities> {

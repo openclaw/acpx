@@ -178,14 +178,24 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   assert.equal(handle.backendSessionId, "sid-1");
   assert.equal(handle.agentSessionId, "inner-1");
 
+  const startMcpServers = [
+    {
+      name: "turn-tools",
+      command: "/usr/bin/turn-tools",
+      args: ["--stdio"],
+      env: [{ name: "TURN_CLAIM", value: "claim-1" }],
+    },
+  ];
   const turn = runtime.startTurn({
     handle,
     text: "hello",
-    mcpServers: [{ name: "turn-tools", command: "/usr/bin/turn-tools", args: [], env: [] }],
+    mcpServers: startMcpServers,
     mode: "steer",
     requestId: "req-1",
     timeoutMs: 42,
   });
+  startMcpServers[0].args[0] = "--mutated";
+  startMcpServers[0].env[0].value = "mutated-claim";
   await turn.promptStarted;
   const events = [];
   for await (const event of turn.events) {
@@ -197,7 +207,12 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   assert.equal(turnSessionMode, "oneshot");
   assert.equal(turnTimeoutMs, 42);
   assert.deepEqual(turnMcpServers, [
-    { name: "turn-tools", command: "/usr/bin/turn-tools", args: [], env: [] },
+    {
+      name: "turn-tools",
+      command: "/usr/bin/turn-tools",
+      args: ["--stdio"],
+      env: [{ name: "TURN_CLAIM", value: "claim-1" }],
+    },
   ]);
   assert.deepEqual(events, [{ type: "text_delta", text: "hello", stream: "output" }]);
   assert.deepEqual(result, { status: "completed", stopReason: "end_turn" });
@@ -212,14 +227,25 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   });
   await assert.rejects(failedReadinessTurn.promptStarted, /failed before request creation/);
 
-  const legacyEvents: AcpRuntimeEvent[] = [];
-  for await (const event of runtime.runTurn({
+  const legacyMcpServers = [
+    {
+      name: "legacy-tools",
+      command: "/usr/bin/legacy-tools",
+      args: ["--stdio"],
+      env: [{ name: "TURN_CLAIM", value: "legacy-claim" }],
+    },
+  ];
+  const legacyTurn = runtime.runTurn({
     handle,
     text: "legacy",
-    mcpServers: [{ name: "legacy-tools", command: "/usr/bin/legacy-tools", args: [], env: [] }],
+    mcpServers: legacyMcpServers,
     mode: "prompt",
     requestId: "req-legacy",
-  })) {
+  });
+  legacyMcpServers[0].args[0] = "--mutated";
+  legacyMcpServers[0].env[0].value = "mutated-claim";
+  const legacyEvents: AcpRuntimeEvent[] = [];
+  for await (const event of legacyTurn) {
     legacyEvents.push(event);
   }
   assert.deepEqual(legacyEvents, [
@@ -227,8 +253,18 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
     { type: "done", stopReason: "end_turn" },
   ]);
   assert.deepEqual(turnMcpServers, [
-    { name: "legacy-tools", command: "/usr/bin/legacy-tools", args: [], env: [] },
+    {
+      name: "legacy-tools",
+      command: "/usr/bin/legacy-tools",
+      args: ["--stdio"],
+      env: [{ name: "TURN_CLAIM", value: "legacy-claim" }],
+    },
   ]);
+  const repeatedLegacyEvents: AcpRuntimeEvent[] = [];
+  for await (const event of legacyTurn) {
+    repeatedLegacyEvents.push(event);
+  }
+  assert.deepEqual(repeatedLegacyEvents, []);
 
   await runtime.getStatus({ handle });
   await runtime.setMode({ handle, mode: "architect" });
@@ -548,6 +584,22 @@ test("AcpxRuntime validates required ensureSession inputs and runtime handles", 
       }),
     /runtimeSessionName is missing/,
   );
+
+  const invalidLegacyTurn = runtime.runTurn({
+    handle: {
+      sessionKey: "agent:codex:acp:test",
+      backend: "acpx",
+      runtimeSessionName: "   ",
+    },
+    text: "never submitted",
+    mode: "prompt",
+    requestId: "invalid-legacy-turn",
+  });
+  await assert.rejects(async () => {
+    for await (const event of invalidLegacyTurn) {
+      void event;
+    }
+  }, /runtimeSessionName is missing/);
 });
 
 test("AcpxRuntime falls back to plain runtimeSessionName handles and reuses a single manager instance", async () => {
