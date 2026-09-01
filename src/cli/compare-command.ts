@@ -52,6 +52,7 @@ export type CompareRow = {
   error: string | null;
   permission_requests: number;
   permission_denied: number;
+  _meta?: Record<string, unknown> | null;
 };
 
 type CompareFlags = {
@@ -316,6 +317,7 @@ function buildSuccessRow(
     error: null,
     permission_requests: permissionStats.requested,
     permission_denied: permissionStats.denied + permissionStats.cancelled,
+    ...(result._meta === undefined ? {} : { _meta: result._meta }),
   };
 }
 

@@ -590,7 +590,8 @@ function hasValidSessionSendResultCore(result: Record<string, unknown>): boolean
   return (
     typeof result.stopReason === "string" &&
     typeof result.sessionId === "string" &&
-    typeof result.resumed === "boolean"
+    typeof result.resumed === "boolean" &&
+    (result._meta === undefined || result._meta === null || asRecord(result._meta) !== undefined)
   );
 }
 

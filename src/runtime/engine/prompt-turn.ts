@@ -13,13 +13,23 @@ import type {
 const SESSION_REPLY_IDLE_MS = 1_000;
 const SESSION_REPLY_DRAIN_TIMEOUT_MS = 5_000;
 
+function responseMetaField(meta: Record<string, unknown> | null | undefined): {
+  _meta?: Record<string, unknown> | null;
+} {
+  return meta === undefined ? {} : { _meta: meta };
+}
+
 type PromptTurnClient = {
   prompt: (
     sessionId: string,
     prompt: PromptInput | string,
     onRequestStarted?: () => Promise<void> | void,
     onElicitation?: AcpElicitationHandler,
-  ) => Promise<{ stopReason: RunPromptResult["stopReason"]; usage?: unknown }>;
+  ) => Promise<{
+    stopReason: RunPromptResult["stopReason"];
+    usage?: unknown;
+    _meta?: Record<string, unknown> | null;
+  }>;
   waitForSessionUpdatesIdle?: (options?: { idleMs?: number; timeoutMs?: number }) => Promise<void>;
 };
 
@@ -33,7 +43,11 @@ export async function runPromptTurn(params: {
   onPromptRequestStarted?: () => Promise<void> | void;
   onPromptStarted?: () => Promise<void> | void;
   onElicitation?: AcpElicitationHandler;
-}): Promise<{ stopReason: RunPromptResult["stopReason"]; source: "rpc" | "session" }> {
+}): Promise<{
+  stopReason: RunPromptResult["stopReason"];
+  source: "rpc" | "session";
+  _meta?: Record<string, unknown> | null;
+}> {
   try {
     const promptPromise = params.client.prompt(
       params.sessionId,
@@ -56,6 +70,7 @@ export async function runPromptTurn(params: {
     return {
       stopReason: response.stopReason,
       source: "rpc",
+      ...responseMetaField(response._meta),
     };
   } catch (error) {
     if (!(error instanceof TimeoutError) || !params.promptMessageId) {

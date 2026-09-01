@@ -5517,6 +5517,39 @@ test("runPromptTurn: prompt response usage is recorded after usage update drain"
   });
 });
 
+test("runPromptTurn: prompt response metadata is preserved", async () => {
+  const responseMeta = {
+    codex: {
+      turnConfiguration: {
+        version: 1,
+        turns: [
+          {
+            turnId: "turn-1",
+            requested: { model: "gpt-5.6-sol", effort: "xhigh" },
+          },
+        ],
+      },
+    },
+  };
+  const result = await runPromptTurn({
+    client: {
+      prompt: async () => ({
+        stopReason: "end_turn" as const,
+        _meta: responseMeta,
+      }),
+    },
+    sessionId: "session-response-meta",
+    prompt: "hello",
+    conversation: createSessionConversation(),
+  });
+
+  assert.deepEqual(result, {
+    stopReason: "end_turn",
+    source: "rpc",
+    _meta: responseMeta,
+  });
+});
+
 test("runPromptTurn: late session updates after successful prompt reach the drain", async () => {
   const observed: string[] = [];
   let lateUpdateEmitted = false;

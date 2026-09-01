@@ -83,6 +83,7 @@ type FakeClient = {
   ) => Promise<{
     stopReason: string;
     usage?: Record<string, unknown>;
+    _meta?: Record<string, unknown> | null;
   }>;
   closeSession?: (sessionId: string) => Promise<void>;
   waitForSessionUpdatesIdle?: (options?: { idleMs?: number; timeoutMs?: number }) => Promise<void>;
@@ -534,7 +535,10 @@ test("AcpRuntimeManager streams runtime events and saves updated status", async 
         status: "ok",
         summary: "saved notes.md",
       });
-      return { stopReason: "end_turn" };
+      return {
+        stopReason: "end_turn",
+        _meta: { transport: { model: "gpt-5.6-sol", effort: "xhigh" } },
+      };
     },
     requestCancelActivePrompt: async () => false,
     hasActivePrompt: () => false,
@@ -567,7 +571,11 @@ test("AcpRuntimeManager streams runtime events and saves updated status", async 
     { type: "text_delta", text: "hello", stream: "output", tag: "agent_message_chunk" },
     { type: "status", text: "write_file ok saved notes.md" },
   ]);
-  assert.deepEqual(result, { status: "completed", stopReason: "end_turn" });
+  assert.deepEqual(result, {
+    status: "completed",
+    stopReason: "end_turn",
+    _meta: { transport: { model: "gpt-5.6-sol", effort: "xhigh" } },
+  });
 
   const saved = await store.load("turn-session");
   assert.equal(saved?.lastRequestId, "req-1");

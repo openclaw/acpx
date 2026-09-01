@@ -33,6 +33,7 @@ Core capabilities:
 - Stable ACP client methods for filesystem and terminal requests
 - Stable ACP `authenticate` handshake via env/config credentials
 - Structured streaming output (`text`, `json`, `quiet`) with optional `--suppress-reads`
+- Prompt-response `_meta` preservation across direct, queued, compare, and embedded-runtime results
 - Built-in agent registry plus raw `--agent` escape hatch
 - Claude system prompt override via `--system-prompt` / `--append-system-prompt`
 - Optional ACP filesystem and terminal capability opt-outs via `--no-fs` and `--no-terminal`

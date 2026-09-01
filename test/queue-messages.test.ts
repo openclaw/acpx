@@ -429,6 +429,9 @@ test("parseQueueOwnerMessage accepts result payloads and optional emitted-error 
           denied: 0,
           cancelled: 0,
         },
+        _meta: {
+          transport: { model: "gpt-5.6-sol", effort: "xhigh" },
+        },
         record: {
           acpxRecordId: "record-1",
           acpSessionId: "session-1",
@@ -459,6 +462,9 @@ test("parseQueueOwnerMessage accepts result payloads and optional emitted-error 
           approved: 1,
           denied: 0,
           cancelled: 0,
+        },
+        _meta: {
+          transport: { model: "gpt-5.6-sol", effort: "xhigh" },
         },
         record: {
           acpxRecordId: "record-1",
@@ -535,6 +541,37 @@ test("parseQueueOwnerMessage rejects invalid structured owner message payloads",
       requestId: "req-result",
       result: {
         stopReason: "end_turn",
+      },
+    }),
+    null,
+  );
+  assert.equal(
+    parseQueueOwnerMessage({
+      type: "result",
+      requestId: "req-result",
+      result: {
+        stopReason: "end_turn",
+        sessionId: "session-1",
+        resumed: true,
+        permissionStats: {
+          requested: 0,
+          approved: 0,
+          denied: 0,
+          cancelled: 0,
+        },
+        _meta: "invalid",
+        record: {
+          acpxRecordId: "record-1",
+          acpSessionId: "session-1",
+          agentCommand: "codex",
+          cwd: "/tmp/work",
+          createdAt: "2026-03-26T00:00:00.000Z",
+          lastUsedAt: "2026-03-26T00:00:00.000Z",
+          messages: [],
+          updated_at: "2026-03-26T00:00:00.000Z",
+          lastSeq: 0,
+          eventLog: { stream_count: 0, segment_count: 0 },
+        },
       },
     }),
     null,

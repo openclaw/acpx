@@ -219,11 +219,13 @@ function toPromptResult(
   stopReason: RunPromptResult["stopReason"],
   sessionId: string,
   client: AcpClient,
+  meta?: Record<string, unknown> | null,
 ): RunPromptResult {
   return {
     stopReason,
     sessionId,
     permissionStats: client.getPermissionStats(),
+    ...(meta === undefined ? {} : { _meta: meta }),
   };
 }
 
@@ -983,7 +985,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
     promptTurnActive = false;
 
     return {
-      ...toPromptResult(response.stopReason, record.acpxRecordId, client),
+      ...toPromptResult(response.stopReason, record.acpxRecordId, client, response._meta),
       record,
       resumed,
       loadError,
@@ -1147,7 +1149,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
         const response = await runExecPromptWithRetries(sessionId);
         promptTurnActive = false;
         output.flush();
-        return toPromptResult(response.stopReason, sessionId, client);
+        return toPromptResult(response.stopReason, sessionId, client, response._meta);
       },
       async () => {
         await client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS);

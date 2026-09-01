@@ -451,6 +451,7 @@ export type RunPromptResult = {
   stopReason: StopReason;
   permissionStats: PermissionStats;
   sessionId: string;
+  _meta?: Record<string, unknown> | null;
 };
 
 export type SessionSendResult = RunPromptResult & {
