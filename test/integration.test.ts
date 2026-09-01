@@ -5550,6 +5550,64 @@ test("runPromptTurn: prompt response metadata is preserved", async () => {
   });
 });
 
+test("runPromptTurn: timeout recovery preserves a response that settles during draining", async () => {
+  const responseMeta = {
+    codex: {
+      turnConfiguration: {
+        version: 1,
+        turns: [{ turnId: "turn-timeout", requested: { effort: "xhigh" } }],
+      },
+    },
+  };
+  const conversation = createSessionConversation();
+  const promptMessageId = recordPromptSubmission(conversation, "hello");
+  assert.ok(promptMessageId);
+  let resolvePrompt: (value: {
+    stopReason: "end_turn";
+    usage: { inputTokens: number };
+    _meta: typeof responseMeta;
+  }) => void = () => {};
+  const promptResponse = new Promise<{
+    stopReason: "end_turn";
+    usage: { inputTokens: number };
+    _meta: typeof responseMeta;
+  }>((resolve) => {
+    resolvePrompt = resolve;
+  });
+
+  const result = await runPromptTurn({
+    client: {
+      prompt: async () => await promptResponse,
+      waitForSessionUpdatesIdle: async () => {
+        recordSessionUpdate(conversation, undefined, {
+          sessionId: "session-timeout-meta",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "completed during drain" },
+          },
+        });
+        resolvePrompt({
+          stopReason: "end_turn",
+          usage: { inputTokens: 17 },
+          _meta: responseMeta,
+        });
+      },
+    },
+    sessionId: "session-timeout-meta",
+    prompt: "hello",
+    timeoutMs: 1,
+    conversation,
+    promptMessageId,
+  });
+
+  assert.deepEqual(result, {
+    stopReason: "end_turn",
+    source: "session",
+    _meta: responseMeta,
+  });
+  assert.equal(conversation.request_token_usage[promptMessageId]?.input_tokens, 17);
+});
+
 test("runPromptTurn: late session updates after successful prompt reach the drain", async () => {
   const observed: string[] = [];
   let lateUpdateEmitted = false;

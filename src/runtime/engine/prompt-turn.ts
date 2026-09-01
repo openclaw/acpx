@@ -33,6 +33,8 @@ type PromptTurnClient = {
   waitForSessionUpdatesIdle?: (options?: { idleMs?: number; timeoutMs?: number }) => Promise<void>;
 };
 
+type PromptResponse = Awaited<ReturnType<PromptTurnClient["prompt"]>>;
+
 export async function runPromptTurn(params: {
   client: PromptTurnClient;
   sessionId: string;
@@ -48,12 +50,19 @@ export async function runPromptTurn(params: {
   source: "rpc" | "session";
   _meta?: Record<string, unknown> | null;
 }> {
+  let settledResponse: PromptResponse | undefined;
   try {
     const promptPromise = params.client.prompt(
       params.sessionId,
       params.prompt,
       params.onPromptRequestStarted,
       params.onElicitation,
+    );
+    void promptPromise.then(
+      (response) => {
+        settledResponse = response;
+      },
+      () => {},
     );
     await params.onPromptStarted?.();
     const response = await withTimeout(promptPromise, params.timeoutMs);
@@ -87,9 +96,15 @@ export async function runPromptTurn(params: {
       });
 
     if (hasAgentReplyAfterPrompt(params.conversation, params.promptMessageId)) {
+      recordPromptResponseUsage(
+        params.conversation,
+        settledResponse?.usage,
+        params.promptMessageId,
+      );
       return {
         stopReason: "end_turn",
         source: "session",
+        ...responseMetaField(settledResponse?._meta),
       };
     }
 
