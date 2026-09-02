@@ -17,7 +17,7 @@ type PromptTurnClient = {
   prompt: (
     sessionId: string,
     prompt: PromptInput | string,
-    onRequestStarted?: () => Promise<void> | void,
+    onRequestWritten?: () => Promise<void> | void,
     onElicitation?: AcpElicitationHandler,
   ) => Promise<{ stopReason: RunPromptResult["stopReason"]; usage?: unknown }>;
   waitForSessionUpdatesIdle?: (options?: { idleMs?: number; timeoutMs?: number }) => Promise<void>;
@@ -30,7 +30,7 @@ export async function runPromptTurn(params: {
   timeoutMs?: number;
   conversation: SessionConversation;
   promptMessageId?: string;
-  onPromptRequestStarted?: () => Promise<void> | void;
+  onPromptRequestWritten?: () => Promise<void> | void;
   onPromptStarted?: () => Promise<void> | void;
   onElicitation?: AcpElicitationHandler;
 }): Promise<{ stopReason: RunPromptResult["stopReason"]; source: "rpc" | "session" }> {
@@ -38,7 +38,7 @@ export async function runPromptTurn(params: {
     const promptPromise = params.client.prompt(
       params.sessionId,
       params.prompt,
-      params.onPromptRequestStarted,
+      params.onPromptRequestWritten,
       params.onElicitation,
     );
     await params.onPromptStarted?.();
