@@ -94,6 +94,20 @@ test("runShellAction times out long-running commands", async () => {
   );
 });
 
+for (const timeoutMs of [0, -1]) {
+  test(`runShellAction still kills a non-exiting child when timeoutMs is ${String(timeoutMs)}`, async () => {
+    await assert.rejects(
+      async () =>
+        await runShellAction({
+          command: process.execPath,
+          args: ["-e", "setTimeout(() => {}, 10_000)"],
+          timeoutMs,
+        }),
+      (error: unknown) => error instanceof TimeoutError,
+    );
+  });
+}
+
 test("runShellAction rejects commands terminated by signal", async () => {
   await assert.rejects(
     async () =>

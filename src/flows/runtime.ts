@@ -18,7 +18,11 @@ import {
 } from "../session/session.js";
 import type { PermissionPolicy, PromptInput, SessionRecord } from "../types.js";
 import { acp, action, checkpoint, compute, defineFlow, shell } from "./definition.js";
-import { formatShellActionSummary, runShellAction } from "./executors/shell.js";
+import {
+  formatShellActionSummary,
+  resolveShellActionTimeoutMs,
+  runShellAction,
+} from "./executors/shell.js";
 import { resolveNext, resolveNextForOutcome, validateFlowDefinition } from "./graph.js";
 import {
   attachStepTrace,
@@ -594,7 +598,7 @@ export class FlowRunner {
         const effectiveExecution: ShellActionExecution = {
           ...execution,
           cwd: resolveShellActionCwd(this.defaultCwd, execution.cwd),
-          timeoutMs: execution.timeoutMs ?? nodeTimeoutMs,
+          timeoutMs: resolveShellActionTimeoutMs(execution.timeoutMs ?? nodeTimeoutMs),
         };
         updateStatusDetail(state, formatShellActionSummary(effectiveExecution));
         await this.store.writeLive(runDir, state, {

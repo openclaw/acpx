@@ -41,14 +41,22 @@ function createShellFailureError(
   );
 }
 
+export function resolveShellActionTimeoutMs(timeoutMs: number | undefined): number | undefined {
+  if (timeoutMs == null) {
+    return undefined;
+  }
+  return Math.max(1, Math.round(timeoutMs));
+}
+
 function rejectIfShellFailed(
   spec: ShellActionExecution,
   args: string[],
   result: ShellActionResult,
   timedOut: boolean,
+  timeoutMs: number | undefined,
 ): Error | undefined {
   if (timedOut) {
-    return new TimeoutError(spec.timeoutMs ?? 0);
+    return new TimeoutError(timeoutMs ?? spec.timeoutMs ?? 0);
   }
   if (((result.exitCode ?? 0) !== 0 || result.signal != null) && spec.allowNonZeroExit !== true) {
     return createShellFailureError(spec, args, result.exitCode, result.signal, result.stderr);
@@ -60,6 +68,7 @@ export async function runShellAction(spec: ShellActionExecution): Promise<ShellA
   const cwd = spec.cwd ?? process.cwd();
   const args = spec.args ?? [];
   const startMs = Date.now();
+  const timeoutMs = resolveShellActionTimeoutMs(spec.timeoutMs);
   const child = spawn(spec.command, args, {
     cwd,
     env: {
@@ -100,7 +109,7 @@ export async function runShellAction(spec: ShellActionExecution): Promise<ShellA
         durationMs: Date.now() - startMs,
       };
 
-      const error = rejectIfShellFailed(spec, args, result, timedOut);
+      const error = rejectIfShellFailed(spec, args, result, timedOut, timeoutMs);
       if (error) {
         reject(error);
         return;
@@ -112,14 +121,14 @@ export async function runShellAction(spec: ShellActionExecution): Promise<ShellA
 
   writeShellStdin(child, spec.stdin);
 
-  if (spec.timeoutMs != null && spec.timeoutMs > 0) {
+  if (timeoutMs != null) {
     timeout = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
       setTimeout(() => {
         child.kill("SIGKILL");
       }, 1_000).unref();
-    }, spec.timeoutMs);
+    }, timeoutMs);
   }
 
   try {

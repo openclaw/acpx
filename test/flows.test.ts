@@ -1526,6 +1526,46 @@ test("FlowRunner marks timed out shell steps explicitly", async () => {
   });
 });
 
+for (const timeoutMs of [0, -1]) {
+  const label = timeoutMs < 0 ? "negative" : "zero";
+  test(`FlowRunner still times out a non-exiting shell when timeoutMs is ${label}`, async () => {
+    await withTempHome(async () => {
+      const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "unused",
+          agentCommand: "unused",
+          cwd: process.cwd(),
+        }),
+        permissionMode: "approve-all",
+        outputRoot,
+      });
+
+      const flow = defineFlow({
+        name: `timeout-${label}-test`,
+        startAt: "slow",
+        nodes: {
+          slow: shell({
+            exec: () => ({
+              command: process.execPath,
+              args: ["-e", "setTimeout(() => {}, 2000)"],
+              timeoutMs,
+            }),
+          }),
+        },
+        edges: [],
+      });
+
+      await assert.rejects(async () => await runner.run(flow, {}), TimeoutError);
+      const runDir = await waitForRunDir(outputRoot, `timeout-${label}-test`);
+      const state = await readRunJson(runDir);
+      assert.equal(state.status, "timed_out");
+      const slowResult = (state.results as Record<string, Record<string, unknown>>).slow;
+      assert.equal(slowResult.outcome, "timed_out");
+    });
+  });
+}
+
 test("FlowRunner can route timed out nodes by outcome", async () => {
   await withTempHome(async () => {
     const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
