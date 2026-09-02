@@ -115,7 +115,7 @@ import {
   waitForSpawn,
 } from "./client-process.js";
 import { extractAcpError } from "./error-shapes.js";
-import { isAcpMessageObject, isSessionUpdateNotification } from "./jsonrpc.js";
+import { isSessionUpdateNotification } from "./jsonrpc.js";
 import {
   modelStateFromConfigOptions,
   modelStateFromSessionResponse,
@@ -123,6 +123,7 @@ import {
   resolveRequestedModelId,
   type SessionModelState,
 } from "./model-support.js";
+import { createNdJsonMessageStream } from "./ndjson-stream.js";
 import {
   formatSessionControlAcpSummary,
   maybeWrapSessionControlError,
@@ -137,6 +138,12 @@ export {
   resolveClaudeCodeSettingSources,
   shouldIgnoreNonJsonAgentOutputLine,
 };
+export {
+  MAX_NDJSON_INCOMPLETE_LINE_BYTES,
+  assertNdJsonIncompleteLineWithinLimit,
+  createNdJsonMessageStream,
+  parseAcpJsonMessageLine,
+} from "./ndjson-stream.js";
 
 const REPLAY_IDLE_MS = 80;
 const REPLAY_DRAIN_TIMEOUT_MS = 5_000;
@@ -502,91 +509,6 @@ function installSdkConsoleErrorSuppression(): () => void {
   return () => {
     console.error = originalConsoleError;
   };
-}
-
-function enqueueNdJsonLine(
-  agentCommand: string,
-  line: string,
-  controller: ReadableStreamDefaultController<AnyMessage>,
-): void {
-  const trimmedLine = line.trim();
-  if (!trimmedLine || shouldIgnoreNonJsonAgentOutputLine(agentCommand, trimmedLine)) {
-    return;
-  }
-  try {
-    const message = parseAcpJsonMessageLine(trimmedLine);
-    if (message) {
-      controller.enqueue(message);
-    }
-  } catch (err) {
-    console.error("Failed to parse JSON message:", trimmedLine, err);
-  }
-}
-
-export function parseAcpJsonMessageLine(line: string): AnyMessage | undefined {
-  const message: unknown = JSON.parse(line);
-  return isAcpMessageObject(message) ? message : undefined;
-}
-
-function enqueueNdJsonLines(
-  agentCommand: string,
-  lines: string[],
-  controller: ReadableStreamDefaultController<AnyMessage>,
-): void {
-  for (const line of lines) {
-    enqueueNdJsonLine(agentCommand, line, controller);
-  }
-}
-
-function createNdJsonMessageStream(
-  agentCommand: string,
-  output: WritableStream<Uint8Array>,
-  input: ReadableStream<Uint8Array>,
-): {
-  readable: ReadableStream<AnyMessage>;
-  writable: WritableStream<AnyMessage>;
-} {
-  const textEncoder = new TextEncoder();
-  const textDecoder = new TextDecoder();
-
-  const readable = new ReadableStream<AnyMessage>({
-    async start(controller) {
-      let content = "";
-      const reader = input.getReader();
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) {
-            break;
-          }
-          if (!value) {
-            continue;
-          }
-          content += textDecoder.decode(value, { stream: true });
-          const lines = content.split("\n");
-          content = lines.pop() || "";
-          enqueueNdJsonLines(agentCommand, lines, controller);
-        }
-      } finally {
-        reader.releaseLock();
-        controller.close();
-      }
-    },
-  });
-
-  const writable = new WritableStream<AnyMessage>({
-    async write(message) {
-      const content = JSON.stringify(message) + "\n";
-      const writer = output.getWriter();
-      try {
-        await writer.write(textEncoder.encode(content));
-      } finally {
-        writer.releaseLock();
-      }
-    },
-  });
-
-  return { readable, writable };
 }
 
 export class AcpClient {
