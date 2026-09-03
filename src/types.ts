@@ -231,6 +231,26 @@ export interface OutputFormatter {
   flush(): void;
 }
 
+export type AcpAgentProcessLaunch = {
+  /** Logical ACP agent command, before any host-specific process transport replacement. */
+  agentCommand: string;
+  command: string;
+  args: string[];
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  windowsVerbatimArguments?: boolean;
+};
+
+export type AcpAgentProcess = import("node:child_process").ChildProcessByStdio<
+  import("node:stream").Writable,
+  import("node:stream").Readable,
+  import("node:stream").Readable
+>;
+
+export type AcpAgentProcessLauncher = (
+  launch: AcpAgentProcessLaunch,
+) => Promise<AcpAgentProcess | undefined>;
+
 export type AcpClientOptions = {
   agentCommand: string;
   agentArgv?: string[];
@@ -243,6 +263,8 @@ export type AcpClientOptions = {
   authPolicy?: AuthPolicy;
   fs?: boolean;
   terminal?: boolean;
+  /** Replaces only the physical process transport; ACP command identity stays unchanged. */
+  processLauncher?: AcpAgentProcessLauncher;
   elicitationModes?: readonly AcpElicitationMode[];
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;

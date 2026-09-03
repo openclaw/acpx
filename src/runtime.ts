@@ -82,6 +82,7 @@ export type {
   SessionAgentOptions,
   SystemPromptOption,
 } from "./runtime/public/contract.js";
+export type { AcpAgentProcess, AcpAgentProcessLaunch, AcpAgentProcessLauncher } from "./types.js";
 
 export const ACPX_BACKEND_ID = "acpx";
 
