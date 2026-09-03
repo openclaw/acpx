@@ -41,12 +41,22 @@ function createShellFailureError(
   );
 }
 
+/**
+ * Resolve a shell-action timeout.
+ * Non-positive values match withTimeout: no deadline (undefined).
+ * Positive finite values arm SIGTERM/SIGKILL after that many ms.
+ */
 export function resolveShellActionTimeoutMs(timeoutMs: number | undefined): number | undefined {
-  if (timeoutMs == null) {
+  if (timeoutMs == null || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     return undefined;
   }
-  return Math.max(1, Math.round(timeoutMs));
+  return timeoutMs;
 }
+
+export type RunShellActionOptions = {
+  /** When aborted, reap the child (SIGTERM then SIGKILL). Used for outer node deadlines. */
+  signal?: AbortSignal;
+};
 
 function rejectIfShellFailed(
   spec: ShellActionExecution,
@@ -64,34 +74,93 @@ function rejectIfShellFailed(
   return undefined;
 }
 
-export async function runShellAction(spec: ShellActionExecution): Promise<ShellActionResult> {
-  const cwd = spec.cwd ?? process.cwd();
-  const args = spec.args ?? [];
-  const startMs = Date.now();
-  const timeoutMs = resolveShellActionTimeoutMs(spec.timeoutMs);
-  const child = spawn(spec.command, args, {
-    cwd,
-    env: {
-      ...process.env,
-      ...spec.env,
-    },
-    shell: spec.shell,
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-  });
+type ShellTermination = {
+  timedOut: () => boolean;
+  terminate: () => void;
+  armTimeout: (timeoutMs: number | undefined) => void;
+  armAbort: (signal: AbortSignal | undefined) => void;
+  dispose: () => void;
+};
 
+function createShellTermination(child: ChildProcess): ShellTermination {
+  let timedOut = false;
+  let terminated = false;
+  let timeout: NodeJS.Timeout | undefined;
+  let killFollowUp: NodeJS.Timeout | undefined;
+
+  const terminate = (): void => {
+    if (terminated) {
+      return;
+    }
+    terminated = true;
+    timedOut = true;
+    child.kill("SIGTERM");
+    killFollowUp = setTimeout(() => {
+      child.kill("SIGKILL");
+    }, 1_000);
+    killFollowUp.unref();
+  };
+
+  let abortSignal: AbortSignal | undefined;
+
+  return {
+    timedOut: () => timedOut,
+    terminate,
+    armTimeout(timeoutMs) {
+      // Positive timeout only. Zero/negative/undefined = no shell-action deadline.
+      if (timeoutMs == null) {
+        return;
+      }
+      timeout = setTimeout(terminate, timeoutMs);
+    },
+    armAbort(signal) {
+      abortSignal = signal;
+      if (!signal) {
+        return;
+      }
+      if (signal.aborted) {
+        terminate();
+        return;
+      }
+      signal.addEventListener("abort", terminate, { once: true });
+    },
+    dispose() {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      if (killFollowUp) {
+        clearTimeout(killFollowUp);
+      }
+      abortSignal?.removeEventListener("abort", terminate);
+    },
+  };
+}
+
+function waitForShellExit(
+  child: ChildProcess,
+  spec: ShellActionExecution,
+  args: string[],
+  cwd: string,
+  startMs: number,
+  timeoutMs: number | undefined,
+  timedOut: () => boolean,
+): Promise<ShellActionResult> {
   let stdout = "";
   let stderr = "";
-  let timedOut = false;
-  let timeout: NodeJS.Timeout | undefined;
 
-  const finish = new Promise<ShellActionResult>((resolve, reject) => {
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
+  const stdoutStream = child.stdout;
+  const stderrStream = child.stderr;
+  if (!stdoutStream || !stderrStream) {
+    throw new Error("Shell action child is missing stdio pipes");
+  }
+
+  return new Promise<ShellActionResult>((resolve, reject) => {
+    stdoutStream.setEncoding("utf8");
+    stderrStream.setEncoding("utf8");
+    stdoutStream.on("data", (chunk: string) => {
       stdout += chunk;
     });
-    child.stderr.on("data", (chunk: string) => {
+    stderrStream.on("data", (chunk: string) => {
       stderr += chunk;
     });
 
@@ -109,7 +178,7 @@ export async function runShellAction(spec: ShellActionExecution): Promise<ShellA
         durationMs: Date.now() - startMs,
       };
 
-      const error = rejectIfShellFailed(spec, args, result, timedOut, timeoutMs);
+      const error = rejectIfShellFailed(spec, args, result, timedOut(), timeoutMs);
       if (error) {
         reject(error);
         return;
@@ -118,24 +187,37 @@ export async function runShellAction(spec: ShellActionExecution): Promise<ShellA
       resolve(result);
     });
   });
+}
+
+export async function runShellAction(
+  spec: ShellActionExecution,
+  options?: RunShellActionOptions,
+): Promise<ShellActionResult> {
+  const cwd = spec.cwd ?? process.cwd();
+  const args = spec.args ?? [];
+  const startMs = Date.now();
+  const timeoutMs = resolveShellActionTimeoutMs(spec.timeoutMs);
+  const child = spawn(spec.command, args, {
+    cwd,
+    env: {
+      ...process.env,
+      ...spec.env,
+    },
+    shell: spec.shell,
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+
+  const termination = createShellTermination(child);
+  const finish = waitForShellExit(child, spec, args, cwd, startMs, timeoutMs, termination.timedOut);
 
   writeShellStdin(child, spec.stdin);
-
-  if (timeoutMs != null) {
-    timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        child.kill("SIGKILL");
-      }, 1_000).unref();
-    }, timeoutMs);
-  }
+  termination.armTimeout(timeoutMs);
+  termination.armAbort(options?.signal);
 
   try {
     return await finish;
   } finally {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
+    termination.dispose();
   }
 }

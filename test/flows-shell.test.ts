@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { TimeoutError } from "../src/async-control.js";
 import {
   formatShellActionSummary,
   renderShellCommand,
+  resolveShellActionTimeoutMs,
   runShellAction,
 } from "../src/flows/executors/shell.js";
 
@@ -94,19 +98,70 @@ test("runShellAction times out long-running commands", async () => {
   );
 });
 
-for (const timeoutMs of [0, -1]) {
-  test(`runShellAction still kills a non-exiting child when timeoutMs is ${String(timeoutMs)}`, async () => {
-    await assert.rejects(
-      async () =>
-        await runShellAction({
-          command: process.execPath,
-          args: ["-e", "setTimeout(() => {}, 10_000)"],
-          timeoutMs,
-        }),
-      (error: unknown) => error instanceof TimeoutError,
-    );
+test("resolveShellActionTimeoutMs treats non-positive as no deadline", () => {
+  assert.equal(resolveShellActionTimeoutMs(undefined), undefined);
+  assert.equal(resolveShellActionTimeoutMs(0), undefined);
+  assert.equal(resolveShellActionTimeoutMs(-1), undefined);
+  assert.equal(resolveShellActionTimeoutMs(50), 50);
+});
+
+test("runShellAction treats timeoutMs 0 as no deadline", async () => {
+  const started = Date.now();
+  const result = await runShellAction({
+    command: process.execPath,
+    args: ["-e", "setTimeout(() => {}, 80)"],
+    timeoutMs: 0,
   });
-}
+  assert.equal(result.exitCode, 0);
+  assert.ok(Date.now() - started >= 70, "command should run to completion without a 1ms kill");
+});
+
+test("runShellAction reaps child when abort signal fires", async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-shell-abort-"));
+  const pidFile = path.join(tmpDir, "pid");
+  const ac = new AbortController();
+  const pending = runShellAction(
+    {
+      command: process.execPath,
+      args: [
+        "-e",
+        `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 30_000)`,
+      ],
+    },
+    { signal: ac.signal },
+  );
+
+  let pid: number | undefined;
+  for (let i = 0; i < 50; i += 1) {
+    try {
+      pid = Number(await fs.readFile(pidFile, "utf8"));
+      if (Number.isFinite(pid) && pid > 0) {
+        break;
+      }
+    } catch {
+      // not written yet
+    }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.ok(pid && pid > 0, "child should write pid");
+
+  ac.abort();
+  await assert.rejects(
+    async () => await pending,
+    (error: unknown) => error instanceof TimeoutError,
+  );
+
+  // Child must be reaped (process gone).
+  await new Promise((r) => setTimeout(r, 50));
+  let alive = true;
+  try {
+    process.kill(pid!, 0);
+  } catch {
+    alive = false;
+  }
+  assert.equal(alive, false, "aborted shell child should be reaped");
+  await fs.rm(tmpDir, { recursive: true, force: true });
+});
 
 test("runShellAction rejects commands terminated by signal", async () => {
   await assert.rejects(

@@ -587,6 +587,7 @@ export class FlowRunner {
       };
     }
 
+    const shellAbort = new AbortController();
     const { output, rawText, trace } = await this.runWithHeartbeat(
       runDir,
       state,
@@ -598,6 +599,7 @@ export class FlowRunner {
         const effectiveExecution: ShellActionExecution = {
           ...execution,
           cwd: resolveShellActionCwd(this.defaultCwd, execution.cwd),
+          // Non-positive stays no-deadline; positive arms the shell kill timer.
           timeoutMs: resolveShellActionTimeoutMs(execution.timeoutMs ?? nodeTimeoutMs),
         };
         updateStatusDetail(state, formatShellActionSummary(effectiveExecution));
@@ -624,7 +626,7 @@ export class FlowRunner {
             },
           },
         });
-        const result = await runShellAction(effectiveExecution);
+        const result = await runShellAction(effectiveExecution, { signal: shellAbort.signal });
         const stdoutArtifact = await this.store.writeArtifact(runDir, state, result.stdout, {
           mediaType: "text/plain",
           extension: "txt",
@@ -680,6 +682,10 @@ export class FlowRunner {
           rawText: result.combinedOutput,
           trace,
         };
+      },
+      async () => {
+        // Outer node deadline expired: reap the shell child even when action timeout is 0.
+        shellAbort.abort();
       },
     );
     return {
