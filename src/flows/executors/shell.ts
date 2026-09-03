@@ -10,6 +10,23 @@ function createMaxBufferError(stream: "stdout" | "stderr", maxBufferBytes: numbe
   );
 }
 
+export function resolveShellActionMaxBufferBytes(maxBufferBytes: number | undefined): number {
+  if (maxBufferBytes == null) {
+    return DEFAULT_SHELL_ACTION_MAX_BUFFER_BYTES;
+  }
+  if (
+    typeof maxBufferBytes !== "number" ||
+    !Number.isFinite(maxBufferBytes) ||
+    !Number.isInteger(maxBufferBytes) ||
+    maxBufferBytes < 0
+  ) {
+    throw new Error(
+      `Shell action maxBufferBytes must be a finite non-negative integer (got ${String(maxBufferBytes)})`,
+    );
+  }
+  return maxBufferBytes;
+}
+
 function appendCappedShellOutput(
   current: string,
   chunk: string,
@@ -33,7 +50,42 @@ function stopReadingShellOutput(child: ChildProcess): void {
   child.stderr?.pause();
 }
 
+function signalShellTree(pid: number, signal: NodeJS.Signals): void {
+  if (process.platform === "win32") {
+    const args = ["/pid", String(pid), "/t"];
+    if (signal === "SIGKILL") {
+      args.push("/f");
+    }
+    const killer = spawn("taskkill", args, {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    killer.unref();
+    return;
+  }
+
+  try {
+    // Child is spawned detached so it is the process-group leader; -pid reaps
+    // shell wrappers plus pipeline/background descendants in that group.
+    process.kill(-pid, signal);
+  } catch {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // Already exited between overflow detection and signal delivery.
+    }
+  }
+}
+
 function killShellChild(child: ChildProcess): void {
+  const pid = child.pid;
+  if (pid) {
+    signalShellTree(pid, "SIGTERM");
+    setTimeout(() => {
+      signalShellTree(pid, "SIGKILL");
+    }, 1_000).unref();
+    return;
+  }
   child.kill("SIGTERM");
   setTimeout(() => {
     child.kill("SIGKILL");
@@ -86,7 +138,10 @@ function rejectIfShellFailed(
 export async function runShellAction(spec: ShellActionExecution): Promise<ShellActionResult> {
   const cwd = spec.cwd ?? process.cwd();
   const args = spec.args ?? [];
+  const maxBufferBytes = resolveShellActionMaxBufferBytes(spec.maxBufferBytes);
   const startMs = Date.now();
+  // Detached on POSIX so the child leads a new process group and overflow/timeout
+  // cleanup can signal -pid (shell pipelines and background jobs included).
   const child = spawn(spec.command, args, {
     cwd,
     env: {
@@ -96,6 +151,7 @@ export async function runShellAction(spec: ShellActionExecution): Promise<ShellA
     shell: spec.shell,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
+    detached: process.platform !== "win32",
   });
 
   let stdout = "";
@@ -103,7 +159,6 @@ export async function runShellAction(spec: ShellActionExecution): Promise<ShellA
   let timedOut = false;
   let overflowedStream: "stdout" | "stderr" | undefined;
   let timeout: NodeJS.Timeout | undefined;
-  const maxBufferBytes = spec.maxBufferBytes ?? DEFAULT_SHELL_ACTION_MAX_BUFFER_BYTES;
 
   const finish = new Promise<ShellActionResult>((resolve, reject) => {
     child.stdout.setEncoding("utf8");

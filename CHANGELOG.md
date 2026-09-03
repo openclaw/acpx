@@ -12,6 +12,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Flows/shell: cap captured stdout and stderr at 1 MiB by default (override with `maxBufferBytes`), reject non-finite or fractional limits, and terminate the full shell command tree on overflow. Thanks @SebTardif.
+
 ## 2026.8.28 (v0.13.2)
 
 ### Changes
