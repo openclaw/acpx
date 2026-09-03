@@ -144,6 +144,7 @@ test("runShellAction reaps child when abort signal fires", async () => {
     await new Promise((r) => setTimeout(r, 20));
   }
   assert.ok(pid && pid > 0, "child should write pid");
+  const childPid = pid;
 
   ac.abort();
   await assert.rejects(
@@ -155,7 +156,7 @@ test("runShellAction reaps child when abort signal fires", async () => {
   await new Promise((r) => setTimeout(r, 50));
   let alive = true;
   try {
-    process.kill(pid!, 0);
+    process.kill(childPid, 0);
   } catch {
     alive = false;
   }
