@@ -9,6 +9,8 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - Dependencies: update runtime schema validation and development tooling, and move source builds to pnpm 11.24.0.
+- Dependencies: refresh tsx and zod patch versions for bounded transform caching and schema traversal fixes. Thanks @dependabot.
+- Dependencies: update the qs override for parser limit and cycle-detection fixes, refresh replay-viewer and validation tooling, and align source builds with pnpm 11.25.0. Thanks @dependabot.
 
 ### Breaking
 
