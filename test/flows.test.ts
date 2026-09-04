@@ -1582,7 +1582,7 @@ test("FlowRunner reaps shell child when outer node deadline expires", async () =
       nodes: {
         slow: shell({
           // Enabled outer deadline; action timeout stays zero (no shell-level deadline).
-          timeoutMs: 80,
+          timeoutMs: 500,
           exec: () => ({
             command: process.execPath,
             args: [
@@ -1605,8 +1605,6 @@ test("FlowRunner reaps shell child when outer node deadline expires", async () =
 
     const pid = Number(await fs.readFile(pidFile, "utf8"));
     assert.ok(pid > 0);
-    // Allow SIGTERM/SIGKILL follow-up to finish.
-    await new Promise((r) => setTimeout(r, 100));
     let alive = true;
     try {
       process.kill(pid, 0);
@@ -1985,3 +1983,49 @@ async function waitFor<T>(fn: () => Promise<T | null>, timeoutMs: number): Promi
 
   throw lastError instanceof Error ? lastError : new Error("Timed out waiting for condition");
 }
+
+test("FlowRunner does not launch a shell action when its executor resolves after timeout", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-late-"));
+    const marker = path.join(outputRoot, "must-not-exist");
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runner = new FlowRunner({
+      resolveAgent: () => ({ agentName: "unused", agentCommand: "unused", cwd: outputRoot }),
+      permissionMode: "deny-all",
+      outputRoot,
+    });
+    const flow = defineFlow({
+      name: "late-executor",
+      startAt: "late",
+      nodes: {
+        late: shell({
+          timeoutMs: 20,
+          exec: async () => {
+            await gate;
+            return {
+              command: process.execPath,
+              args: [
+                "-e",
+                `require('node:fs').writeFileSync(${JSON.stringify(marker)},'launched')`,
+              ],
+              timeoutMs: 0,
+            };
+          },
+        }),
+      },
+      edges: [],
+    });
+    try {
+      await assert.rejects(runner.run(flow, {}), TimeoutError);
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await assert.rejects(fs.access(marker), { code: "ENOENT" });
+    } finally {
+      release();
+      await fs.rm(outputRoot, { recursive: true, force: true });
+    }
+  });
+});

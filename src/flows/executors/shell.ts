@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { TimeoutError } from "../../async-control.js";
 import type { ShellActionExecution, ShellActionResult } from "../runtime.js";
+import { hasShellProcesses, stopShellProcess } from "./shell-process.js";
 
 function writeShellStdin(child: ChildProcess, stdin: string | undefined): void {
   const stream = child.stdin;
@@ -44,19 +45,41 @@ function createShellFailureError(
 /**
  * Resolve a shell-action timeout.
  * Non-positive values match withTimeout: no deadline (undefined).
- * Positive finite values arm SIGTERM/SIGKILL after that many ms.
+ * Positive values arm SIGTERM/SIGKILL after that many ms.
  */
 export function resolveShellActionTimeoutMs(timeoutMs: number | undefined): number | undefined {
-  if (timeoutMs == null || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+  if (timeoutMs == null || !(timeoutMs > 0)) {
     return undefined;
   }
   return timeoutMs;
 }
 
-export type RunShellActionOptions = {
-  /** When aborted, reap the child (SIGTERM then SIGKILL). Used for outer node deadlines. */
-  signal?: AbortSignal;
+export type ShellProcessOwner = {
+  cancel: (signal: NodeJS.Signals) => Promise<void>;
+  release: () => void;
 };
+
+export type RunShellActionOptions = {
+  /** Cancellation waits for the owned process tree to terminate. */
+  signal?: AbortSignal;
+  terminationSignal?: NodeJS.Signals;
+  registerOwner?: (owner: ShellProcessOwner) => () => void;
+};
+
+export async function withShellAbort<T>(run: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  let rejectAbort: (reason: unknown) => void = () => {};
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = () => rejectAbort(signal.reason);
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    return await Promise.race([run(), aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
 
 function rejectIfShellFailed(
   spec: ShellActionExecution,
@@ -72,68 +95,6 @@ function rejectIfShellFailed(
     return createShellFailureError(spec, args, result.exitCode, result.signal, result.stderr);
   }
   return undefined;
-}
-
-type ShellTermination = {
-  timedOut: () => boolean;
-  terminate: () => void;
-  armTimeout: (timeoutMs: number | undefined) => void;
-  armAbort: (signal: AbortSignal | undefined) => void;
-  dispose: () => void;
-};
-
-function createShellTermination(child: ChildProcess): ShellTermination {
-  let timedOut = false;
-  let terminated = false;
-  let timeout: NodeJS.Timeout | undefined;
-  let killFollowUp: NodeJS.Timeout | undefined;
-
-  const terminate = (): void => {
-    if (terminated) {
-      return;
-    }
-    terminated = true;
-    timedOut = true;
-    child.kill("SIGTERM");
-    killFollowUp = setTimeout(() => {
-      child.kill("SIGKILL");
-    }, 1_000);
-    killFollowUp.unref();
-  };
-
-  let abortSignal: AbortSignal | undefined;
-
-  return {
-    timedOut: () => timedOut,
-    terminate,
-    armTimeout(timeoutMs) {
-      // Positive timeout only. Zero/negative/undefined = no shell-action deadline.
-      if (timeoutMs == null) {
-        return;
-      }
-      timeout = setTimeout(terminate, timeoutMs);
-    },
-    armAbort(signal) {
-      abortSignal = signal;
-      if (!signal) {
-        return;
-      }
-      if (signal.aborted) {
-        terminate();
-        return;
-      }
-      signal.addEventListener("abort", terminate, { once: true });
-    },
-    dispose() {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
-      if (killFollowUp) {
-        clearTimeout(killFollowUp);
-      }
-      abortSignal?.removeEventListener("abort", terminate);
-    },
-  };
 }
 
 function waitForShellExit(
@@ -189,10 +150,99 @@ function waitForShellExit(
   });
 }
 
+function createShellTermination(
+  child: ChildProcess,
+  timeoutMs: number | undefined,
+  options: RunShellActionOptions,
+) {
+  const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
+  let rejectCleanup: (error: unknown) => void = () => {};
+  const cleanupFailure = new Promise<never>((_resolve, reject) => {
+    rejectCleanup = reject;
+  });
+  let termination: Promise<void> | undefined;
+  let timedOut = false;
+  let released = false;
+  let deadline: NodeJS.Timeout | undefined;
+  let monitor: NodeJS.Timeout | undefined;
+  let unregister: (() => void) | undefined;
+  const clearDeadline = () => {
+    if (deadline) {
+      clearTimeout(deadline);
+    }
+  };
+  const release = () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    clearDeadline();
+    if (monitor) {
+      clearInterval(monitor);
+    }
+    options.signal?.removeEventListener("abort", onAbort);
+    unregister?.();
+  };
+  const cancel = (signal: NodeJS.Signals): Promise<void> => {
+    if (termination) {
+      return termination;
+    }
+    if (released) {
+      return Promise.resolve();
+    }
+    timedOut = true;
+    termination = stopShellProcess(child, closed, signal).finally(release);
+    void termination.catch(rejectCleanup);
+    return termination;
+  };
+  const onAbort = () => {
+    void cancel(options.terminationSignal ?? "SIGTERM");
+  };
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+  if (timeoutMs != null) {
+    deadline = setTimeout(() => {
+      void cancel("SIGTERM");
+    }, timeoutMs);
+  }
+  unregister = options.registerOwner?.({ cancel, release });
+  if (unregister) {
+    child.once("close", () => {
+      if (released || termination) {
+        return;
+      }
+      const prune = () => {
+        if (!termination && !hasShellProcesses(child)) {
+          release();
+        }
+      };
+      monitor = setInterval(prune, 100);
+      monitor.unref();
+      prune();
+    });
+  }
+  return {
+    timedOut: () => timedOut,
+    cleanupFailure,
+    async dispose() {
+      clearDeadline();
+      try {
+        await termination;
+      } finally {
+        if (!unregister) {
+          release();
+        }
+      }
+    },
+  };
+}
+
 export async function runShellAction(
   spec: ShellActionExecution,
-  options?: RunShellActionOptions,
+  options: RunShellActionOptions = {},
 ): Promise<ShellActionResult> {
+  if (options?.signal?.aborted) {
+    throw options.signal.reason;
+  }
   const cwd = spec.cwd ?? process.cwd();
   const args = spec.args ?? [];
   const startMs = Date.now();
@@ -206,18 +256,15 @@ export async function runShellAction(
     shell: spec.shell,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
+    detached: process.platform !== "win32",
   });
 
-  const termination = createShellTermination(child);
+  const termination = createShellTermination(child, timeoutMs, options);
   const finish = waitForShellExit(child, spec, args, cwd, startMs, timeoutMs, termination.timedOut);
-
   writeShellStdin(child, spec.stdin);
-  termination.armTimeout(timeoutMs);
-  termination.armAbort(options?.signal);
-
   try {
-    return await finish;
+    return await Promise.race([finish, termination.cleanupFailure]);
   } finally {
-    termination.dispose();
+    await termination.dispose();
   }
 }
