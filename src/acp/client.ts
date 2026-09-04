@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import {
   PROTOCOL_VERSION,
@@ -74,6 +75,9 @@ import type {
   AcpClientOptions,
   AcpElicitationHandler,
   AcpElicitationMode,
+  AcpProcessLaunch,
+  AcpProcessLaunchScope,
+  AcpProcessStarted,
   NonInteractivePermissionPolicy,
   PermissionMode,
   PermissionStats,
@@ -419,6 +423,18 @@ function snapshotPermissionPolicy(
   };
 }
 
+function snapshotProcessLaunchScope(
+  scope: AcpProcessLaunchScope | undefined,
+): AcpProcessLaunchScope {
+  if (!scope || scope.kind === "client") {
+    return Object.freeze({ kind: "client" });
+  }
+  if (scope.kind === "runtime-session") {
+    return Object.freeze({ kind: "runtime-session", sessionKey: scope.sessionKey });
+  }
+  return Object.freeze({ kind: "runtime-probe", agent: scope.agent });
+}
+
 type AuthSelection = {
   methodId: string;
   credential?: string;
@@ -439,6 +455,7 @@ type AgentLaunchPlan = {
 type StartupFailureWatcher = {
   promise: Promise<never>;
   dispose: () => void;
+  getError: () => AgentStartupError | undefined;
 };
 
 type SessionUpdateSuppressionState = {
@@ -815,12 +832,11 @@ export class AcpClient {
     const launch = await this.resolveAgentLaunchPlan();
     this.logAgentLaunch(launch);
     await this.ensureLaunchSupport(launch);
-    const child = await this.spawnAgentProcess(launch);
+    const { child, process: startedProcess } = await this.spawnAgentProcess(launch);
     this.closing = false;
-    this.agentStartedAt = isoNow();
+    this.agentStartedAt = startedProcess.startedAt;
     this.lastAgentExit = undefined;
-    this.lastKnownPid = child.pid ?? undefined;
-    this.attachAgentLifecycleObservers(child);
+    this.lastKnownPid = startedProcess.pid;
     const startupStderr: string[] = [];
 
     child.stderr.on("data", (chunk: Buffer | string) => {
@@ -830,6 +846,17 @@ export class AcpClient {
       }
       process.stderr.write(chunk);
     });
+    const startupFailure = this.createStartupFailureWatcher(child, startupStderr);
+    try {
+      await this.admitAndObserveSpawnedProcess(child, startedProcess);
+      const admissionExit = startupFailure.getError();
+      if (admissionExit) {
+        throw admissionExit;
+      }
+    } catch (error) {
+      startupFailure.dispose();
+      throw error;
+    }
 
     const input = Writable.toWeb(child.stdin);
     const output = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
@@ -845,8 +872,6 @@ export class AcpClient {
       },
       { once: true },
     );
-    const startupFailure = this.createStartupFailureWatcher(child, startupStderr);
-
     await this.initializeAgentConnection({
       child,
       connection,
@@ -915,25 +940,76 @@ export class AcpClient {
     }
   }
 
-  private async spawnAgentProcess(
-    plan: AgentLaunchPlan,
-  ): Promise<ChildProcessByStdio<Writable, Readable, Readable>> {
+  private async spawnAgentProcess(plan: AgentLaunchPlan): Promise<{
+    child: ChildProcessByStdio<Writable, Readable, Readable>;
+    process: AcpProcessStarted;
+  }> {
     const spawnCommand = buildAgentSpawnCommand(
       plan.spawnCommand,
       plan.args,
       process.platform,
       plan.spawnOptions.env,
     );
-    const spawnedChild = spawn(spawnCommand.command, spawnCommand.args, {
-      ...plan.spawnOptions,
-      windowsVerbatimArguments: spawnCommand.windowsVerbatimArguments,
-    }) as ChildProcessByStdio<Writable, Readable, Readable>;
+    const launch: AcpProcessLaunch = Object.freeze({
+      launchId: randomUUID(),
+      scope: snapshotProcessLaunchScope(this.options.processLaunchScope),
+      command: spawnCommand.command,
+      args: Object.freeze([...spawnCommand.args]),
+      cwd: this.options.cwd,
+    });
+    await this.options.processLifecycle?.onBeforeSpawn?.(launch);
+
+    let spawnedChild: ChildProcessByStdio<Writable, Readable, Readable>;
     try {
+      spawnedChild = spawn(spawnCommand.command, spawnCommand.args, {
+        ...plan.spawnOptions,
+        windowsVerbatimArguments: spawnCommand.windowsVerbatimArguments,
+      });
       await waitForSpawn(spawnedChild);
     } catch (error) {
-      throw new AgentSpawnError(this.options.agentCommand, error);
+      const spawnError = new AgentSpawnError(this.options.agentCommand, error);
+      this.notifyProcessSpawnFailure(launch, spawnError);
+      throw spawnError;
     }
-    return requireAgentStdio(spawnedChild);
+
+    const child = requireAgentStdio(spawnedChild);
+    const pid = child.pid;
+    if (pid === undefined) {
+      const spawnError = new AgentSpawnError(
+        this.options.agentCommand,
+        new Error("spawned agent process did not expose a PID"),
+      );
+      this.notifyProcessSpawnFailure(launch, spawnError);
+      await this.terminateAgentProcess(child);
+      throw spawnError;
+    }
+    return {
+      child,
+      process: Object.freeze({
+        ...launch,
+        pid,
+        startedAt: isoNow(),
+      }),
+    };
+  }
+
+  private async admitAndObserveSpawnedProcess(
+    child: ChildProcessByStdio<Writable, Readable, Readable>,
+    process: AcpProcessStarted,
+  ): Promise<void> {
+    let releaseExitNotification = () => {};
+    const exitNotificationBarrier = new Promise<void>((resolve) => {
+      releaseExitNotification = resolve;
+    });
+    this.attachAgentLifecycleObservers(child, process, exitNotificationBarrier);
+    try {
+      await this.options.processLifecycle?.onSpawned?.(process);
+    } catch (error) {
+      await this.terminateAgentProcess(child);
+      throw error;
+    } finally {
+      releaseExitNotification();
+    }
   }
 
   private createConnection(
@@ -1783,6 +1859,7 @@ export class AcpClient {
     startupStderr: string[],
   ): StartupFailureWatcher {
     let settled = false;
+    let failure: AgentStartupError | undefined;
     let rejectPromise: (error: unknown) => void;
 
     const cleanup = () => {
@@ -1791,13 +1868,14 @@ export class AcpClient {
       child.off("close", onClose);
     };
 
-    const finish = (error?: unknown) => {
+    const finish = (error?: AgentStartupError) => {
       if (settled) {
         return;
       }
       settled = true;
       cleanup();
       if (error) {
+        failure = error;
         rejectPromise(error);
       }
     };
@@ -1832,11 +1910,16 @@ export class AcpClient {
       child.once("error", onError);
       child.once("exit", onExit);
       child.once("close", onClose);
+      if (child.exitCode !== null || child.signalCode !== null) {
+        onExit(child.exitCode, child.signalCode);
+      }
     });
+    void promise.catch(() => {});
 
     return {
       promise,
       dispose: () => finish(),
+      getError: () => failure,
     };
   }
 
@@ -2168,10 +2251,24 @@ export class AcpClient {
 
   private attachAgentLifecycleObservers(
     child: ChildProcessByStdio<Writable, Readable, Readable>,
+    startedProcess: AcpProcessStarted,
+    exitNotificationBarrier: Promise<void>,
   ): void {
-    child.once("exit", (exitCode, signal) => {
+    const onExit = (exitCode: number | null, signal: NodeJS.Signals | null) => {
+      const exitedAt = isoNow();
       this.recordAgentExit("process_exit", exitCode, signal);
-    });
+      void exitNotificationBarrier.then(() => {
+        this.notifyProcessExit(startedProcess, exitCode, signal, exitedAt);
+      });
+    };
+    child.once("exit", onExit);
+
+    // A child can exit between spawn completion and observer attachment.
+    // Replay Node's recorded state so host process ownership cannot remain stale.
+    if (child.exitCode !== null || child.signalCode !== null) {
+      child.off("exit", onExit);
+      onExit(child.exitCode, child.signalCode);
+    }
 
     child.once("close", (exitCode, signal) => {
       this.recordAgentExit("process_close", exitCode, signal);
@@ -2180,6 +2277,55 @@ export class AcpClient {
     child.stdout.once("close", () => {
       this.recordAgentExit("pipe_close", child.exitCode ?? null, child.signalCode ?? null);
     });
+  }
+
+  private notifyProcessSpawnFailure(launch: AcpProcessLaunch, error: unknown): void {
+    const handler = this.options.processLifecycle?.onSpawnFailed;
+    if (!handler) {
+      return;
+    }
+    const event = Object.freeze({
+      ...launch,
+      error,
+      failedAt: isoNow(),
+    });
+    try {
+      void Promise.resolve(handler(event)).catch((observerError: unknown) => {
+        this.logProcessLifecycleError("onSpawnFailed", observerError);
+      });
+    } catch (observerError) {
+      this.logProcessLifecycleError("onSpawnFailed", observerError);
+    }
+  }
+
+  private notifyProcessExit(
+    startedProcess: AcpProcessStarted,
+    exitCode: number | null,
+    signal: NodeJS.Signals | null,
+    exitedAt: string,
+  ): void {
+    const handler = this.options.processLifecycle?.onExit;
+    if (!handler) {
+      return;
+    }
+    const event = Object.freeze({
+      ...startedProcess,
+      exitCode,
+      signal,
+      exitedAt,
+    });
+    try {
+      void Promise.resolve(handler(event)).catch((error: unknown) => {
+        this.logProcessLifecycleError("onExit", error);
+      });
+    } catch (error) {
+      this.logProcessLifecycleError("onExit", error);
+    }
+  }
+
+  private logProcessLifecycleError(hook: string, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.log(`process lifecycle ${hook} hook failed: ${message}`);
   }
 
   private recordAgentExit(

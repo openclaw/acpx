@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import type { SessionModelState } from "../src/acp/model-support.js";
@@ -224,6 +225,7 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
     escalate: ["execute"],
     defaultAction: "deny" as const,
   };
+  const processLifecycle = {};
   const lifecycle = {
     pid: 456,
     startedAt: "2026-01-01T00:00:00.000Z",
@@ -237,7 +239,7 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
     start: async () => {},
     close: async () => {},
     createSession: async (cwd) => {
-      assert.equal(cwd, "/workspace");
+      assert.equal(cwd, path.resolve("/workspace"));
       return {
         sessionId: "new-session",
         agentSessionId: "agent-session",
@@ -257,7 +259,7 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
     },
     resumeSession: async (sessionId, cwd) => {
       assert.equal(sessionId, "resume-session");
-      assert.equal(cwd, "/workspace");
+      assert.equal(cwd, path.resolve("/workspace"));
       return {
         agentSessionId: "resumed-agent",
         configOptions: [
@@ -286,7 +288,12 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
   });
   const constructedOptions: Array<Record<string, unknown>> = [];
   const manager = new AcpRuntimeManager(
-    createRuntimeOptions({ cwd: "/workspace", sessionStore: store, permissionPolicy }),
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: store,
+      permissionPolicy,
+      processLifecycle,
+    }),
     {
       clientFactory: (options) => {
         constructedOptions.push(options);
@@ -326,6 +333,17 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
   assert.deepEqual(
     constructedOptions.map((options) => options.permissionPolicy),
     [permissionPolicy, permissionPolicy],
+  );
+  assert.deepEqual(
+    constructedOptions.map((options) => options.processLifecycle),
+    [processLifecycle, processLifecycle],
+  );
+  assert.deepEqual(
+    constructedOptions.map((options) => options.processLaunchScope),
+    [
+      { kind: "runtime-session", sessionKey: "created-session" },
+      { kind: "runtime-session", sessionKey: "resumed-session" },
+    ],
   );
 });
 
