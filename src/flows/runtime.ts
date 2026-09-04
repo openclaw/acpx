@@ -18,7 +18,14 @@ import {
 } from "../session/session.js";
 import type { PermissionPolicy, PromptInput, SessionRecord } from "../types.js";
 import { acp, action, checkpoint, compute, defineFlow, shell } from "./definition.js";
-import { formatShellActionSummary, runShellAction } from "./executors/shell.js";
+import {
+  formatShellActionSummary,
+  resolveShellActionTimeoutMs,
+  runShellAction,
+  withShellAbort,
+  type RunShellActionOptions,
+  type ShellProcessOwner,
+} from "./executors/shell.js";
 import { resolveNext, resolveNextForOutcome, validateFlowDefinition } from "./graph.js";
 import {
   attachStepTrace,
@@ -67,6 +74,7 @@ import type {
   FlowNodeResult,
   ResolvedFlowAgent,
   ShellActionExecution,
+  ShellActionResult,
 } from "./types.js";
 
 export { acp, action, checkpoint, compute, defineFlow, shell };
@@ -160,6 +168,12 @@ export class FlowRunner {
   private readonly services;
   private readonly store;
   private readonly pendingPersistentSessionClients = new Map<string, AcpClient>();
+  private readonly shellInterrupts = new Map<
+    string,
+    (reason: InterruptedError, signal: NodeJS.Signals) => void
+  >();
+  private readonly runInterruptions = new Map<string, InterruptedError>();
+  private readonly shellOwners = new Map<string, Set<ShellProcessOwner>>();
 
   constructor(options: FlowRunnerOptions) {
     this.resolveAgent = options.resolveAgent;
@@ -217,15 +231,105 @@ export class FlowRunner {
     });
 
     try {
-      return await withInterrupt(
-        async () => await this.executeFlowRun(flow, input, runDir, state),
-        async () => {
-          await persistRunFailure(this.store, runDir, state, new InterruptedError());
-        },
-      );
+      return await this.runWithShellOwnership(flow, input, runDir, state);
     } finally {
       await this.closePendingPersistentSessionClients();
     }
+  }
+
+  private async runWithShellOwnership(
+    flow: FlowDefinition,
+    input: unknown,
+    runDir: string,
+    state: FlowRunState,
+  ): Promise<FlowRunResult> {
+    let execution: Promise<FlowRunExecutionResult> | undefined;
+    let cancellation: Promise<void> | undefined;
+    let interruption: InterruptedError | undefined;
+    const result = await withInterrupt(
+      () => {
+        execution = this.executeFlowRun(flow, input, runDir, state);
+        return execution;
+      },
+      async (signal) => {
+        const reason = interruption ?? new InterruptedError();
+        interruption = reason;
+        this.runInterruptions.set(runDir, reason);
+        cancellation ??= this.cancelShellOwners(runDir, signal);
+        void cancellation.catch(() => {});
+        const interruptShell = this.shellInterrupts.get(runDir);
+        if (interruptShell) {
+          interruptShell(reason, signal);
+          await execution?.catch(() => {});
+        }
+      },
+    ).then(
+      (value) => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    try {
+      try {
+        await cancellation;
+      } catch (cleanupError) {
+        const failure =
+          result.ok || result.error === cleanupError
+            ? cleanupError
+            : new AggregateError(
+                [result.error, cleanupError],
+                "Shell cleanup failed during interruption",
+                { cause: cleanupError },
+              );
+        await persistRunFailure(this.store, runDir, state, failure);
+        throw failure;
+      }
+      if (result.ok && !interruption) {
+        return result.value;
+      }
+      const failure = result.ok ? interruption : result.error;
+      if (interruption) {
+        await persistRunFailure(this.store, runDir, state, failure);
+      }
+      throw failure;
+    } finally {
+      this.releaseShellOwners(runDir);
+    }
+  }
+
+  private registerShellOwner(runDir: string, owner: ShellProcessOwner): () => void {
+    let owners = this.shellOwners.get(runDir);
+    if (!owners) {
+      owners = new Set();
+      this.shellOwners.set(runDir, owners);
+    }
+    owners.add(owner);
+    const registered = owners;
+    return () => {
+      registered.delete(owner);
+      if (registered.size === 0) {
+        this.shellOwners.delete(runDir);
+      }
+    };
+  }
+
+  private async cancelShellOwners(runDir: string, signal: NodeJS.Signals): Promise<void> {
+    const owners = [...(this.shellOwners.get(runDir) ?? [])];
+    const results = await Promise.allSettled(owners.map((owner) => owner.cancel(signal)));
+    const errors: unknown[] = [];
+    for (const result of results) {
+      if (result.status === "rejected") {
+        errors.push(result.reason);
+      }
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(errors, "Shell process cleanup failed", { cause: errors[0] });
+    }
+  }
+
+  private releaseShellOwners(runDir: string): void {
+    for (const owner of this.shellOwners.get(runDir) ?? []) {
+      owner.release();
+    }
+    this.shellOwners.delete(runDir);
   }
 
   private async executeFlowRun(
@@ -238,7 +342,9 @@ export class FlowRunner {
     const attemptCounts = new Map<string, number>();
     try {
       while (current) {
+        this.throwIfRunInterrupted(runDir);
         const step = await this.executeFlowStep(flow, input, runDir, state, current, attemptCounts);
+        this.throwIfRunInterrupted(runDir, step.executionError);
         const waiting = await this.maybeCompleteCheckpointStep(runDir, state, step);
         if (waiting) {
           return waiting;
@@ -248,8 +354,19 @@ export class FlowRunner {
       }
       return await this.completeFlowRun(runDir, state);
     } catch (error) {
-      await persistRunFailure(this.store, runDir, state, error);
+      if (!this.runInterruptions.has(runDir)) {
+        await persistRunFailure(this.store, runDir, state, error);
+      }
       throw error;
+    } finally {
+      this.runInterruptions.delete(runDir);
+    }
+  }
+
+  private throwIfRunInterrupted(runDir: string, error?: unknown): void {
+    const interrupted = this.runInterruptions.get(runDir);
+    if (interrupted) {
+      throw error ?? interrupted;
     }
   }
 
@@ -315,6 +432,7 @@ export class FlowRunner {
   }): Promise<FlowStepExecutionResult> {
     const context = makeFlowNodeContext(params.state, params.input, this.services);
     try {
+      this.throwIfRunInterrupted(params.runDir);
       const executed = await this.executeNode(
         params.runDir,
         params.state,
@@ -323,6 +441,7 @@ export class FlowRunner {
         params.node,
         context,
       );
+      this.throwIfRunInterrupted(params.runDir);
       return await this.createSuccessfulFlowStep(params, executed);
     } catch (error) {
       return await this.createFailedFlowStep(params, error);
@@ -583,62 +702,97 @@ export class FlowRunner {
       };
     }
 
+    const shellAbort = new AbortController();
+    let runningOwner: ShellProcessOwner | undefined;
+    const shellControl: RunShellActionOptions = {
+      signal: shellAbort.signal,
+      registerOwner: (owner) => {
+        runningOwner = owner;
+        return this.registerShellOwner(runDir, owner);
+      },
+    };
+    this.shellInterrupts.set(runDir, (reason, signal) => {
+      shellControl.terminationSignal = signal;
+      shellAbort.abort(reason);
+    });
+    let runningShell: Promise<ShellActionResult> | undefined;
     const { output, rawText, trace } = await this.runWithHeartbeat(
       runDir,
       state,
       state.currentNode ?? "",
       node,
       nodeTimeoutMs,
-      async () => {
-        const execution = await Promise.resolve(node.exec(context));
-        const effectiveExecution: ShellActionExecution = {
-          ...execution,
-          cwd: resolveShellActionCwd(this.defaultCwd, execution.cwd),
-          timeoutMs: execution.timeoutMs ?? nodeTimeoutMs,
-        };
-        updateStatusDetail(state, formatShellActionSummary(effectiveExecution));
-        await this.store.writeLive(runDir, state, {
-          scope: "node",
-          type: "node_heartbeat",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-          payload: {
-            statusDetail: state.statusDetail,
-          },
-        });
-        await this.store.appendTrace(runDir, state, {
-          scope: "action",
-          type: "action_prepared",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-          payload: {
-            action: {
-              actionType: "shell",
-              command: effectiveExecution.command,
-              args: effectiveExecution.args ?? [],
-              cwd: effectiveExecution.cwd,
+      () =>
+        withShellAbort(async () => {
+          const execution = await Promise.resolve(node.exec(context));
+          shellAbort.signal.throwIfAborted();
+          const effectiveExecution: ShellActionExecution = {
+            ...execution,
+            cwd: resolveShellActionCwd(this.defaultCwd, execution.cwd),
+            // Non-positive stays no-deadline; positive arms the shell kill timer.
+            timeoutMs: resolveShellActionTimeoutMs(execution.timeoutMs ?? nodeTimeoutMs),
+          };
+          updateStatusDetail(state, formatShellActionSummary(effectiveExecution));
+          await this.store.writeLive(runDir, state, {
+            scope: "node",
+            type: "node_heartbeat",
+            nodeId: state.currentNode,
+            attemptId: state.currentAttemptId,
+            payload: {
+              statusDetail: state.statusDetail,
             },
-          },
-        });
-        const result = await runShellAction(effectiveExecution);
-        const stdoutArtifact = await this.store.writeArtifact(runDir, state, result.stdout, {
-          mediaType: "text/plain",
-          extension: "txt",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-        });
-        const stderrArtifact = await this.store.writeArtifact(runDir, state, result.stderr, {
-          mediaType: "text/plain",
-          extension: "txt",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-        });
-        await this.store.appendTrace(runDir, state, {
-          scope: "action",
-          type: "action_completed",
-          nodeId: state.currentNode,
-          attemptId: state.currentAttemptId,
-          payload: {
+          });
+          shellAbort.signal.throwIfAborted();
+          await this.store.appendTrace(runDir, state, {
+            scope: "action",
+            type: "action_prepared",
+            nodeId: state.currentNode,
+            attemptId: state.currentAttemptId,
+            payload: {
+              action: {
+                actionType: "shell",
+                command: effectiveExecution.command,
+                args: effectiveExecution.args ?? [],
+                cwd: effectiveExecution.cwd,
+              },
+            },
+          });
+          runningShell = runShellAction(effectiveExecution, shellControl);
+          const result = await runningShell;
+          shellAbort.signal.throwIfAborted();
+          const stdoutArtifact = await this.store.writeArtifact(runDir, state, result.stdout, {
+            mediaType: "text/plain",
+            extension: "txt",
+            nodeId: state.currentNode,
+            attemptId: state.currentAttemptId,
+          });
+          const stderrArtifact = await this.store.writeArtifact(runDir, state, result.stderr, {
+            mediaType: "text/plain",
+            extension: "txt",
+            nodeId: state.currentNode,
+            attemptId: state.currentAttemptId,
+          });
+          shellAbort.signal.throwIfAborted();
+          await this.store.appendTrace(runDir, state, {
+            scope: "action",
+            type: "action_completed",
+            nodeId: state.currentNode,
+            attemptId: state.currentAttemptId,
+            payload: {
+              action: {
+                actionType: "shell",
+                command: result.command,
+                args: result.args,
+                cwd: result.cwd,
+                exitCode: result.exitCode,
+                signal: result.signal,
+                durationMs: result.durationMs,
+              },
+              stdoutArtifact,
+              stderrArtifact,
+            },
+          });
+          const trace: FlowStepTrace = {
             action: {
               actionType: "shell",
               command: result.command,
@@ -650,34 +804,39 @@ export class FlowRunner {
             },
             stdoutArtifact,
             stderrArtifact,
-          },
-        });
-        const trace: FlowStepTrace = {
-          action: {
-            actionType: "shell",
-            command: result.command,
-            args: result.args,
-            cwd: result.cwd,
-            exitCode: result.exitCode,
-            signal: result.signal,
-            durationMs: result.durationMs,
-          },
-          stdoutArtifact,
-          stderrArtifact,
-        };
-        let parsedOutput: unknown;
+          };
+          shellAbort.signal.throwIfAborted();
+          let parsedOutput: unknown;
+          try {
+            parsedOutput = node.parse ? await node.parse(result, context) : result;
+            shellAbort.signal.throwIfAborted();
+          } catch (error) {
+            throw attachStepTrace(error, trace);
+          }
+          return {
+            output: parsedOutput,
+            rawText: result.combinedOutput,
+            trace,
+          };
+        }, shellAbort.signal),
+    )
+      .catch(async (error: unknown) => {
+        shellAbort.abort(error);
         try {
-          parsedOutput = node.parse ? await node.parse(result, context) : result;
-        } catch (error) {
-          throw attachStepTrace(error, trace);
+          await runningOwner?.cancel(shellControl.terminationSignal ?? "SIGTERM");
+          await runningShell;
+        } catch (cleanupError) {
+          if (!(cleanupError instanceof TimeoutError) && cleanupError !== error) {
+            throw new AggregateError([error, cleanupError], "Shell action cleanup failed", {
+              cause: cleanupError,
+            });
+          }
         }
-        return {
-          output: parsedOutput,
-          rawText: result.combinedOutput,
-          trace,
-        };
-      },
-    );
+        throw error;
+      })
+      .finally(() => {
+        this.shellInterrupts.delete(runDir);
+      });
     return {
       output,
       promptText: null,
