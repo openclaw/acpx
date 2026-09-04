@@ -2254,13 +2254,21 @@ export class AcpClient {
     startedProcess: AcpProcessStarted,
     exitNotificationBarrier: Promise<void>,
   ): void {
-    child.once("exit", (exitCode, signal) => {
+    const onExit = (exitCode: number | null, signal: NodeJS.Signals | null) => {
       const exitedAt = isoNow();
       this.recordAgentExit("process_exit", exitCode, signal);
       void exitNotificationBarrier.then(() => {
         this.notifyProcessExit(startedProcess, exitCode, signal, exitedAt);
       });
-    });
+    };
+    child.once("exit", onExit);
+
+    // A child can exit between spawn completion and observer attachment.
+    // Replay Node's recorded state so host process ownership cannot remain stale.
+    if (child.exitCode !== null || child.signalCode !== null) {
+      child.off("exit", onExit);
+      onExit(child.exitCode, child.signalCode);
+    }
 
     child.once("close", (exitCode, signal) => {
       this.recordAgentExit("process_close", exitCode, signal);

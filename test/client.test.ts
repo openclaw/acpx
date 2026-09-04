@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import path from "node:path";
-import { PassThrough } from "node:stream";
+import { PassThrough, type Readable, type Writable } from "node:stream";
 import test from "node:test";
 import type { RequestPermissionRequest, RequestPermissionResponse } from "@agentclientprotocol/sdk";
 import {
@@ -21,6 +22,7 @@ import {
   PermissionPromptUnavailableError,
   UnsupportedPromptContentError,
 } from "../src/errors.js";
+import type { AcpProcessStarted } from "../src/types.js";
 
 test("parseAcpJsonMessageLine ignores non-object JSON values", () => {
   for (const line of ["1", "null", '"diagnostic"', "[]", "[{}]"]) {
@@ -79,6 +81,11 @@ type ClientInternals = {
     reason: "process_exit" | "process_close" | "pipe_close" | "connection_close",
     exitCode: number | null,
     signal: NodeJS.Signals | null,
+  ) => void;
+  attachAgentLifecycleObservers?: (
+    child: ChildProcessByStdio<Writable, Readable, Readable>,
+    startedProcess: AcpProcessStarted,
+    exitNotificationBarrier: Promise<void>,
   ) => void;
   filesystem?: {
     readTextFile: (params: {
@@ -1679,6 +1686,40 @@ test("AcpClient rejects when the agent exits during successful spawned admission
   assert.match(result.error.message, /exited during spawned admission/);
   await exited;
   assert.deepEqual(observed, ["spawned:start", "spawned:end", "exit"]);
+});
+
+test("AcpClient reports an exit recorded before lifecycle observers attach", async () => {
+  const observed: Array<{ exitCode: number | null; signal: NodeJS.Signals | null }> = [];
+  const client = makeClient({
+    processLifecycle: {
+      onExit: ({ exitCode, signal }) => {
+        observed.push({ exitCode, signal });
+      },
+    },
+  });
+  const child = spawn(process.execPath, ["--eval", "process.exit(17)"], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", () => resolve());
+  });
+  assert.equal(child.exitCode, 17);
+
+  const startedProcess: AcpProcessStarted = Object.freeze({
+    launchId: "already-exited-launch",
+    scope: Object.freeze({ kind: "client" }),
+    command: process.execPath,
+    args: Object.freeze(["--eval", "process.exit(17)"]),
+    cwd: process.cwd(),
+    pid: child.pid!,
+    startedAt: new Date().toISOString(),
+  });
+  const internals = asInternals(client);
+  internals.attachAgentLifecycleObservers?.(child, startedProcess, Promise.resolve());
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(observed, [{ exitCode: 17, signal: null }]);
 });
 
 test("AcpClient start fails fast when the agent exits during initialize", async () => {
