@@ -9,7 +9,9 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - Dependencies: update runtime schema validation and development tooling, and move source builds to pnpm 11.24.0.
-- CLI/exec: apply repeatable ACP `--config-option <key=value>` selections after the requested model and before a one-shot prompt.
+- Dependencies: refresh tsx and zod patch versions for bounded transform caching and schema traversal fixes. Thanks @dependabot.
+- Dependencies: update the qs override for parser limit and cycle-detection fixes, refresh replay-viewer and validation tooling, and align source builds with pnpm 11.25.0. Thanks @dependabot.
+- CLI/exec: apply repeatable ACP `--config-option <key=value>` selections after the requested model and before a one-shot prompt. Thanks @superbiche.
 
 ### Breaking
 
@@ -19,6 +21,7 @@ Repo: https://github.com/openclaw/acpx
 - Flows: keep the host alive when a shell action closes stdin before consuming its input. Thanks @SebTardif.
 - ACP/terminal: handle child stdout and stderr errors without terminating the host, so wait and release can finish. Thanks @SebTardif.
 - ACP/launch: preserve process-spawn `ENOENT` as additive `AGENT_SPAWN_ENOENT` detail and include qualified remediation while keeping the broad runtime code and other spawn failures unchanged. Fixes #510. Thanks @anyech.
+- Flows: preserve unlimited shell timeouts while enclosing deadlines and interrupts cancel active shell commands and attributable descendants before completing, and prevent late executors from launching after cancellation. Thanks @SebTardif.
 
 ## 2026.8.28 (v0.13.2)
 

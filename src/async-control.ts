@@ -35,7 +35,7 @@ export async function withTimeout<T>(promise: Promise<T>, timeoutMs?: number): P
 
 export async function withInterrupt<T>(
   run: () => Promise<T>,
-  onInterrupt: () => Promise<void>,
+  onInterrupt: (signal: NodeJS.Signals) => Promise<void>,
 ): Promise<T> {
   return await new Promise<T>((resolve, reject) => {
     let settled = false;
@@ -51,22 +51,23 @@ export async function withInterrupt<T>(
       cb();
     };
 
-    const rejectInterrupted = () => {
-      void onInterrupt().finally(() => {
-        finish(() => reject(new InterruptedError()));
-      });
+    const rejectInterrupted = (signal: NodeJS.Signals) => {
+      void onInterrupt(signal).then(
+        () => finish(() => reject(new InterruptedError())),
+        (error: unknown) => finish(() => reject(error)),
+      );
     };
 
     const onSigint = () => {
-      rejectInterrupted();
+      rejectInterrupted("SIGINT");
     };
 
     const onSigterm = () => {
-      rejectInterrupted();
+      rejectInterrupted("SIGTERM");
     };
 
     const onSighup = () => {
-      rejectInterrupted();
+      rejectInterrupted("SIGHUP");
     };
 
     process.once("SIGINT", onSigint);
