@@ -6,23 +6,19 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
-### Changes
+**Highlights:** One-shot runs can apply ACP configuration options before prompting, and embedded clients can wait for the actual prompt transport write.
 
-- Dependencies: update runtime schema validation and development tooling, and move source builds to pnpm 11.24.0.
-- Dependencies: refresh tsx and zod patch versions for bounded transform caching and schema traversal fixes. Thanks @dependabot.
-- Dependencies: update the qs override for parser limit and cycle-detection fixes, refresh replay-viewer and validation tooling, and align source builds with pnpm 11.25.0. Thanks @dependabot.
 - CLI/exec: apply repeatable ACP `--config-option <key=value>` selections after the requested model and before a one-shot prompt. Thanks @superbiche.
-
-### Breaking
-
-### Fixes
-
-- Flows: coalesce heartbeat writes while storage is busy so slow filesystems do not accumulate overlapping writes and stall running steps.
+- Runtime/embedding: settle `promptStarted` only after the exact prompt request is accepted by the writable ACP transport, and reject it when that write fails. Thanks @vincentkoc.
+- Flows: preserve unlimited shell timeouts while enclosing deadlines and interrupts cancel active shell commands and attributable descendants before completing, and prevent late executors from launching after cancellation. Thanks @SebTardif.
+- ACP/terminal: time out hung Windows `taskkill` and report incomplete cleanup instead of hanging release or reporting a successful kill, retaining terminal state for a cleanup retry. Thanks @SebTardif.
+- Runtime/sessions: preserve uppercase and mixed-case environment variable names when saving and reloading session options. Thanks @coding-ax.
 - Flows: keep the host alive when a shell action closes stdin before consuming its input. Thanks @SebTardif.
 - ACP/terminal: handle child stdout and stderr errors without terminating the host, so wait and release can finish. Thanks @SebTardif.
 - ACP/launch: preserve process-spawn `ENOENT` as additive `AGENT_SPAWN_ENOENT` detail and include qualified remediation while keeping the broad runtime code and other spawn failures unchanged. Fixes #510. Thanks @anyech.
-- Flows: preserve unlimited shell timeouts while enclosing deadlines and interrupts cancel active shell commands and attributable descendants before completing, and prevent late executors from launching after cancellation. Thanks @SebTardif.
-- Runtime/sessions: preserve uppercase and mixed-case environment variable names when saving and reloading session options. Thanks @coding-ax.
+- Flows: coalesce heartbeat writes while storage is busy so slow filesystems do not accumulate overlapping writes and stall running steps.
+- Dependencies: refresh tsx, zod, qs, replay-viewer packages, React DOM types, and source tooling; align source builds with pnpm 11.25.0 and tsdown 0.23.0. Thanks @dependabot.
+- Source builds: document supported Node versions separately from the published CLI runtime minimum; tsdown no longer supports Node 25.
 
 ## 2026.8.28 (v0.13.2)
 
