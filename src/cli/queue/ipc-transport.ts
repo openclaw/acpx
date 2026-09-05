@@ -5,6 +5,7 @@ import { type QueueOwnerRecord, waitMs } from "./lease-store.js";
 const QUEUE_CONNECT_ATTEMPTS = 40;
 export const QUEUE_CONNECT_RETRY_MS = 50;
 export const SOCKET_CONNECTION_TIMEOUT_MS = 5000;
+export const MAX_MESSAGE_BUFFER_SIZE = 10 * 1024 * 1024;
 
 function shouldRetryQueueConnect(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code;

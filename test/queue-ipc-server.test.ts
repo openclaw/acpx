@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import readline from "node:readline";
 import test from "node:test";
 import {
+  MAX_MESSAGE_BUFFER_SIZE,
   SessionQueueOwner,
   releaseQueueOwnerLease,
   tryAcquireQueueOwnerLease,
@@ -245,6 +247,54 @@ test("SessionQueueOwner enqueues fire-and-forget prompts and rejects invalid own
       assert.equal(invalid.detailCode, "QUEUE_REQUEST_INVALID");
       invalidLines.close();
       invalidSocket.destroy();
+    } finally {
+      await owner.close();
+      await releaseQueueOwnerLease(lease);
+    }
+  });
+});
+
+test("SessionQueueOwner destroys sockets that exceed the incomplete-line buffer cap", async () => {
+  await withTempHome(async () => {
+    const lease = await tryAcquireQueueOwnerLease("owner-incomplete-line-cap");
+    assert(lease);
+
+    const owner = await SessionQueueOwner.start(lease, {
+      cancelPrompt: async () => true,
+      closeSession: async () => true,
+      setSessionMode: async () => {
+        // no-op
+      },
+      setSessionModel: async () => {
+        // no-op
+      },
+      setSessionConfigOption: async () => ({
+        configOptions: [],
+      }),
+    });
+
+    try {
+      const socket = await connectSocket(lease.socketPath);
+      socket.on("error", () => {
+        // destroy during a large write can emit ECONNRESET
+      });
+
+      const closed = once(socket, "close");
+      const overflow = Buffer.alloc(MAX_MESSAGE_BUFFER_SIZE + 1, 0x78);
+      const wrote = socket.write(overflow);
+      if (!wrote) {
+        await Promise.race([once(socket, "drain"), closed]);
+      }
+
+      await Promise.race([
+        closed,
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(() => {
+            reject(new Error("owner did not destroy oversized incomplete-line socket"));
+          }, 2_000);
+        }),
+      ]);
+      assert.equal(socket.destroyed, true);
     } finally {
       await owner.close();
       await releaseQueueOwnerLease(lease);
