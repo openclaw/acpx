@@ -72,6 +72,7 @@ import { extractRuntimeSessionId } from "../session/runtime-session-id.js";
 import { buildAgentSpawnCommand, buildSpawnCommandOptions } from "../spawn-command-options.js";
 import type {
   AcpClientOptions,
+  AcpAgentProcessLaunch,
   AcpElicitationHandler,
   AcpElicitationMode,
   NonInteractivePermissionPolicy,
@@ -814,7 +815,6 @@ export class AcpClient {
 
     const launch = await this.resolveAgentLaunchPlan();
     this.logAgentLaunch(launch);
-    await this.ensureLaunchSupport(launch);
     const child = await this.spawnAgentProcess(launch);
     this.closing = false;
     this.agentStartedAt = isoNow();
@@ -924,9 +924,34 @@ export class AcpClient {
       process.platform,
       plan.spawnOptions.env,
     );
-    const spawnedChild = spawn(spawnCommand.command, spawnCommand.args, {
+    if (this.options.processLauncher) {
+      const launch: AcpAgentProcessLaunch = {
+        agentCommand: this.options.agentCommand,
+        command: spawnCommand.command,
+        args: [...spawnCommand.args],
+        cwd: plan.spawnOptions.cwd,
+        env: { ...plan.spawnOptions.env },
+        windowsVerbatimArguments: spawnCommand.windowsVerbatimArguments,
+      };
+      try {
+        const launched = await this.options.processLauncher(launch);
+        if (launched) {
+          return requireAgentStdio(launched);
+        }
+      } catch (error) {
+        throw new AgentSpawnError(this.options.agentCommand, error);
+      }
+    }
+    await this.ensureLaunchSupport(plan);
+    const localSpawnCommand = buildAgentSpawnCommand(
+      plan.spawnCommand,
+      plan.args,
+      process.platform,
+      plan.spawnOptions.env,
+    );
+    const spawnedChild = spawn(localSpawnCommand.command, localSpawnCommand.args, {
       ...plan.spawnOptions,
-      windowsVerbatimArguments: spawnCommand.windowsVerbatimArguments,
+      windowsVerbatimArguments: localSpawnCommand.windowsVerbatimArguments,
     }) as ChildProcessByStdio<Writable, Readable, Readable>;
     try {
       await waitForSpawn(spawnedChild);

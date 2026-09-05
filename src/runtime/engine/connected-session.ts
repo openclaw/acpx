@@ -7,6 +7,7 @@ import { absolutePath, isoNow } from "../../session/persistence.js";
 import type {
   AcpPermissionDecision,
   AcpPermissionRequest,
+  AcpClientOptions,
   AcpElicitationMode,
   AuthPolicy,
   McpServer,
@@ -58,6 +59,7 @@ export type WithConnectedSessionOptions<T> = {
   authPolicy?: AuthPolicy;
   fs?: boolean;
   terminal?: boolean;
+  processLauncher?: AcpClientOptions["processLauncher"];
   elicitationModes?: readonly AcpElicitationMode[];
   resumePolicy?: SessionResumePolicy;
   replacingConfigOption?: ConnectAndLoadSessionOptions["replacingConfigOption"];
@@ -118,6 +120,7 @@ export async function withConnectedSession<T>(
     authPolicy: options.authPolicy,
     fs: options.fs,
     terminal: options.terminal,
+    processLauncher: options.processLauncher,
     elicitationModes: options.elicitationModes,
     verbose: options.verbose,
     sessionOptions: sessionOptionsFromRecord(record),

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
@@ -228,6 +229,35 @@ test("buildQoderAcpCommandArgs preserves explicit qoder startup flags", () => {
     ),
     ["--acp", "--max-turns=3", "--allowed-tools=READ", "--disallowed-tools=BASH"],
   );
+});
+
+test("AcpClient processLauncher replaces physical spawn and preserves logical launch metadata", async () => {
+  let observed:
+    | Parameters<NonNullable<ConstructorParameters<typeof AcpClient>[0]["processLauncher"]>>[0]
+    | undefined;
+  const client = makeClient({
+    agentCommand: process.execPath,
+    agentArgv: ["./test/mock-agent.js"],
+    sessionOptions: { env: { REMOTE_ONLY: "present" } },
+    processLauncher: async (launch) => {
+      observed = launch;
+      return spawn(process.execPath, ["./dist-test/test/mock-agent.js"], {
+        cwd: process.cwd(),
+        env: process.env,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    },
+  });
+
+  await client.start();
+  try {
+    assert.equal(observed?.agentCommand, process.execPath);
+    assert.equal(observed?.cwd, process.cwd());
+    assert.equal(observed?.env.REMOTE_ONLY, "present");
+    assert(observed?.command.length);
+  } finally {
+    await client.close();
+  }
 });
 
 test("AcpClient prefers env auth credentials over config credentials", async () => {
