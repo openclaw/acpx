@@ -79,7 +79,7 @@ type FakeClient = {
   prompt: (
     sessionId: string,
     input: unknown,
-    onRequestStarted?: () => Promise<void> | void,
+    onRequestWritten?: () => Promise<void> | void,
   ) => Promise<{
     stopReason: string;
     usage?: Record<string, unknown>;
@@ -605,9 +605,9 @@ test("AcpRuntimeManager resolves promptStarted while the submitted prompt is pen
           prompt: async (
             _sessionId: string,
             _input: unknown,
-            onRequestStarted?: () => Promise<void> | void,
+            onRequestWritten?: () => Promise<void> | void,
           ) => {
-            await onRequestStarted?.();
+            await onRequestWritten?.();
             return await promptResponse;
           },
           requestCancelActivePrompt: async () => false,
@@ -677,6 +677,53 @@ test("AcpRuntimeManager rejects promptStarted when the turn fails before submiss
   });
 
   await assert.rejects(turn.promptStarted, /connect failed/);
+  assert.equal((await turn.result).status, "failed");
+});
+
+test("AcpRuntimeManager rejects promptStarted when the prompt transport write fails", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "prompt-write-failed-session",
+    acpSessionId: "prompt-write-failed-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => true,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => {
+            throw new Error("transport write failed");
+          },
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  const turn = manager.startTurn({
+    handle: createHandle("prompt-write-failed-session"),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-prompt-write-failed",
+  });
+
+  await assert.rejects(turn.promptStarted, /transport write failed/);
   assert.equal((await turn.result).status, "failed");
 });
 
@@ -790,9 +837,9 @@ test("AcpRuntimeManager keeps promptStarted resolved when submission later fails
           prompt: async (
             _sessionId: string,
             _input: unknown,
-            onRequestStarted?: () => Promise<void> | void,
+            onRequestWritten?: () => Promise<void> | void,
           ) => {
-            await onRequestStarted?.();
+            await onRequestWritten?.();
             throw new Error("prompt failed after submission");
           },
           requestCancelActivePrompt: async () => false,
