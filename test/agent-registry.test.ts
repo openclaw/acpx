@@ -59,6 +59,12 @@ test("kiro built-in uses kiro-cli-chat directly", () => {
   assert.equal(resolveAgentCommand("kiro"), "kiro-cli-chat acp");
 });
 
+test("mcode built-in launches the native MCode ACP server", () => {
+  assert.equal(AGENT_REGISTRY.mcode, "mcode acp");
+  assert.deepEqual(AGENT_ARGV_REGISTRY.mcode, ["mcode", "acp"]);
+  assert.equal(resolveAgentCommand("mcode"), "mcode acp");
+});
+
 test("fast-agent built-in runs the ACP entrypoint through uvx", () => {
   assert.equal(AGENT_REGISTRY["fast-agent"], "uvx fast-agent-mcp acp");
   assert.equal(resolveAgentCommand("fast-agent"), "uvx fast-agent-mcp acp");
@@ -106,6 +112,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "kilocode",
     "kimi",
     "kiro",
+    "mcode",
     "mux",
     "opencode",
     "pool",
