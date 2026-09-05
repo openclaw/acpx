@@ -15,7 +15,7 @@ import type {
   SessionSendOutcome,
 } from "../../types.js";
 import { probeQueueOwnerHealth, type QueueOwnerHealth } from "./ipc-health.js";
-import { connectToQueueOwner } from "./ipc-transport.js";
+import { connectToQueueOwner, MAX_MESSAGE_BUFFER_SIZE } from "./ipc-transport.js";
 import {
   ensureOwnerIsUsable,
   type QueueOwnerRecord,
@@ -39,8 +39,7 @@ import {
   type QueueSubmitRequest,
 } from "./messages.js";
 
-export { QUEUE_CONNECT_RETRY_MS } from "./ipc-transport.js";
-export const MAX_MESSAGE_BUFFER_SIZE = 10 * 1024 * 1024;
+export { QUEUE_CONNECT_RETRY_MS, MAX_MESSAGE_BUFFER_SIZE } from "./ipc-transport.js";
 export {
   isProcessAlive,
   releaseQueueOwnerLease,

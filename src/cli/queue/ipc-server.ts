@@ -10,6 +10,7 @@ import type {
   PromptInput,
   SessionResumePolicy,
 } from "../../types.js";
+import { MAX_MESSAGE_BUFFER_SIZE } from "./ipc-transport.js";
 import {
   parseQueueRequest,
   type QueueOwnerErrorMessage,
@@ -600,6 +601,11 @@ export class SessionQueueOwner {
 
     socket.on("data", (chunk: string) => {
       buffer += chunk;
+
+      if (buffer.length > MAX_MESSAGE_BUFFER_SIZE) {
+        socket.destroy();
+        return;
+      }
 
       let index = buffer.indexOf("\n");
       while (index >= 0) {
