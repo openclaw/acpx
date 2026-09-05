@@ -1471,6 +1471,120 @@ test("integration: exec --model sets the advertised model config option", async 
   });
 });
 
+test("integration: exec applies config options after the model and before the prompt", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const configAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-config-options`;
+
+    try {
+      const result = await runCli(
+        [
+          "--agent",
+          configAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "--model",
+          "fast-model",
+          "exec",
+          "--config-option",
+          "reasoning_effort=high",
+          "--config-option",
+          "reasoning_effort=xhigh",
+          "echo hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const modelIndex = payloads.findIndex(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "model",
+      );
+      const highEffortIndex = payloads.findIndex(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown; value?: unknown } | undefined)?.configId ===
+            "reasoning_effort" &&
+          (payload.params as { value?: unknown } | undefined)?.value === "high",
+      );
+      const xhighEffortIndex = payloads.findIndex(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown; value?: unknown } | undefined)?.configId ===
+            "reasoning_effort" &&
+          (payload.params as { value?: unknown } | undefined)?.value === "xhigh",
+      );
+      const promptIndex = payloads.findIndex((payload) => payload.method === "session/prompt");
+      assert(modelIndex >= 0, "expected model config request");
+      assert(highEffortIndex > modelIndex, "expected first config option after model selection");
+      assert(
+        xhighEffortIndex > highEffortIndex,
+        "expected repeated config options in command-line order",
+      );
+      assert(promptIndex > xhighEffortIndex, "expected prompt after all config option selections");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: exec stops before prompting when a config option is rejected", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const rejectingAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-config-options --set-session-config-invalid-params`;
+
+    try {
+      const result = await runCli(
+        [
+          "--agent",
+          rejectingAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "exec",
+          "--config-option",
+          "reasoning_effort=xhigh",
+          "echo hello",
+        ],
+        homeDir,
+      );
+      assert.notEqual(result.code, 0, "expected non-zero exit");
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const rejectedRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "reasoning_effort",
+      ) as { id?: unknown } | undefined;
+      assert(rejectedRequest, "expected rejected config option request");
+      const rejection = payloads.find(
+        (payload) => payload.id === rejectedRequest.id && "error" in payload,
+      ) as
+        | {
+            error?: { code?: unknown; message?: unknown; data?: { details?: unknown } };
+          }
+        | undefined;
+      assert.equal(rejection?.error?.code, -32603);
+      assert.equal(rejection?.error?.message, "Internal error");
+      assert.equal(rejection?.error?.data?.details, "Invalid params");
+      assert.equal(
+        payloads.some((payload) => payload.method === "session/prompt"),
+        false,
+        "prompt must not start after a rejected config option",
+      );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: exec --model fails when agent does not advertise models", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

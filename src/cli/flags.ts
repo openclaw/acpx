@@ -62,6 +62,12 @@ export type PromptFlags = {
 
 export type ExecFlags = {
   file?: string;
+  configOption?: SessionConfigOptionAssignment[];
+};
+
+export type SessionConfigOptionAssignment = {
+  configId: string;
+  value: string;
 };
 
 export type SessionsNewFlags = {
@@ -193,6 +199,31 @@ export function parseNonEmptyValue(label: string, value: string): string {
     throw new InvalidArgumentError(`${label} must not be empty`);
   }
   return trimmed;
+}
+
+export function parseSessionConfigOptionAssignment(value: string): SessionConfigOptionAssignment {
+  const separator = value.indexOf("=");
+  if (separator <= 0 || separator === value.length - 1) {
+    throw new InvalidArgumentError(
+      'Session config option must use "<key>=<value>" with non-empty parts',
+    );
+  }
+
+  const configId = value.slice(0, separator).trim();
+  const configValue = value.slice(separator + 1).trim();
+  if (configId.length === 0 || configValue.length === 0) {
+    throw new InvalidArgumentError(
+      'Session config option must use "<key>=<value>" with non-empty parts',
+    );
+  }
+  return { configId, value: configValue };
+}
+
+function collectSessionConfigOptionAssignment(
+  value: string,
+  previous: SessionConfigOptionAssignment[] = [],
+): SessionConfigOptionAssignment[] {
+  return [...previous, parseSessionConfigOptionAssignment(value)];
 }
 
 export function parseHistoryLimit(value: string): number {
@@ -410,6 +441,14 @@ function parseOptionalSessionName(value: unknown): string | undefined {
 
 export function addPromptInputOption(command: Command): Command {
   return command.option("-f, --file <path>", "Read prompt text from file path (use - for stdin)");
+}
+
+export function addExecConfigOption(command: Command): Command {
+  return command.option(
+    "--config-option <key=value>",
+    "Set an ACP session config option before the one-shot prompt (repeatable)",
+    collectSessionConfigOptionAssignment,
+  );
 }
 
 export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig): GlobalFlags {
