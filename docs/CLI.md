@@ -637,6 +637,7 @@ Related runtime behavior:
 
 - session storage path is derived from OS home directory (`~/.acpx/sessions`)
 - child processes inherit the current environment by default
+- Windows terminal kill and release requests fail if process cleanup cannot finish after escalation. The terminal remains available for a cleanup retry; restore a working `taskkill` command before retrying.
 
 ## Practical examples
 

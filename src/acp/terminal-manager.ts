@@ -476,7 +476,7 @@ export class TerminalManager {
       return;
     }
 
-    await this.waitForCleanupAfterSignal(terminal);
+    await this.waitForFinalCleanup(terminal);
   }
 
   private async signalProcess(terminal: ManagedTerminal, signal: NodeJS.Signals): Promise<void> {
@@ -530,6 +530,13 @@ export class TerminalManager {
     }
     for (const descendantPid of await listDescendantPids(pid, terminal.processHelperTimeoutMs)) {
       terminal.descendantPids.add(descendantPid);
+    }
+  }
+
+  private async waitForFinalCleanup(terminal: ManagedTerminal): Promise<void> {
+    const cleaned = await this.waitForCleanupAfterSignal(terminal);
+    if (!cleaned && process.platform === "win32") {
+      throw new Error("Terminal process cleanup did not finish after SIGKILL");
     }
   }
 

@@ -1,4 +1,6 @@
-import { execFileSync } from "node:child_process";
+import assert from "node:assert/strict";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -108,15 +110,15 @@ async function withHangingTaskkillCommand<T>(run: () => Promise<T>): Promise<T> 
   try {
     if (process.platform === "win32") {
       await installWindowsHangingTaskkill(bin);
-      process.chdir(bin);
     } else {
       await fs.writeFile(
         path.join(bin, "taskkill"),
-        `#!/bin/sh\nprintf '%s\\n' "$$" >> ${JSON.stringify(pidPath)}\nexec sleep 3600\n`,
+        `#!/bin/sh\nprintf '%s\\n' "$$" >> taskkill.pid\nexec sleep 3600\n`,
         { mode: 0o755 },
       );
       process.env.PATH = `${bin}${path.delimiter}${previousPath}`;
     }
+    process.chdir(bin);
     return await run();
   } finally {
     process.chdir(previousCwd);
@@ -137,59 +139,85 @@ async function withHangingTaskkillCommand<T>(run: () => Promise<T>): Promise<T> 
 
 describe("hung Windows taskkill", { concurrency: false }, () => {
   test("killWindowsProcessTree returns after hung taskkill times out", async () => {
-    await withHangingTaskkillCommand(async () => {
-      await rejectIfHung(
-        killWindowsProcessTree(1, "SIGKILL", 200),
-        "killWindowsProcessTree hung on taskkill",
-      );
+    const target = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore",
     });
-  });
-
-  test("terminal manager kill finishes when taskkill hangs", async (t) => {
-    if (process.platform !== "win32") {
-      t.skip("Windows taskkill hang assertion");
-      return;
-    }
-
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
-    const manager = new TerminalManager({
-      cwd: tmp,
-      permissionMode: "approve-all",
-      killGraceMs: 200,
-      processHelperTimeoutMs: 200,
-    });
-    let createdTerminalId: string | undefined;
+    await once(target, "spawn");
+    const targetPid = target.pid;
+    assert.ok(targetPid);
     try {
-      const created = await manager.createTerminal({
-        sessionId: "session-1",
-        command: "ping -t 127.0.0.1",
-      });
-      createdTerminalId = created.terminalId;
-
       await withHangingTaskkillCommand(async () => {
         await rejectIfHung(
-          manager.killTerminal({
-            sessionId: "session-1",
-            terminalId: created.terminalId,
-          }),
-          "terminal/kill hung on taskkill",
-          3_000,
+          killWindowsProcessTree(targetPid, "SIGKILL", 200),
+          "killWindowsProcessTree hung on taskkill",
         );
       });
     } finally {
-      const pid = createdTerminalId ? getManagedPid(manager, createdTerminalId) : undefined;
-      if (pid) {
-        try {
-          execFileSync("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore" });
-        } catch {
-          // best-effort cleanup after a stubbed taskkill
-        }
-      }
-      try {
-        await fs.rm(tmp, { recursive: true, force: true });
-      } catch {
-        // The shell child can outlive a hung taskkill and keep the temp dir locked.
+      if (target.exitCode === null && target.signalCode === null) {
+        const closed = once(target, "close");
+        target.kill("SIGKILL");
+        await closed;
       }
     }
   });
+
+  for (const operation of ["killTerminal", "releaseTerminal"] as const) {
+    test(`terminal manager ${operation} rejects and retains cleanup state when taskkill hangs`, async (t) => {
+      if (process.platform !== "win32") {
+        t.skip("Windows taskkill hang assertion");
+        return;
+      }
+
+      const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
+      const manager = new TerminalManager({
+        cwd: tmp,
+        permissionMode: "approve-all",
+        killGraceMs: 200,
+        processHelperTimeoutMs: 200,
+      });
+      let createdTerminalId: string | undefined;
+      try {
+        const created = await manager.createTerminal({
+          sessionId: "session-1",
+          command: "ping -t 127.0.0.1",
+        });
+        createdTerminalId = created.terminalId;
+        const pid = getManagedPid(manager, created.terminalId);
+        assert.ok(pid);
+
+        await withHangingTaskkillCommand(async () => {
+          await assert.rejects(
+            rejectIfHung(
+              manager[operation]({
+                sessionId: "session-1",
+                terminalId: created.terminalId,
+              }),
+              `${operation} hung on taskkill`,
+              3_000,
+            ),
+            /Terminal process cleanup did not finish after SIGKILL/,
+          );
+          assert.equal(getManagedPid(manager, created.terminalId), pid);
+          assert.doesNotThrow(() => process.kill(pid, 0));
+        });
+        await manager.releaseTerminal({ sessionId: "session-1", terminalId: created.terminalId });
+        assert.equal(getManagedPid(manager, created.terminalId), undefined);
+        assert.throws(() => process.kill(pid, 0));
+      } finally {
+        const pid = createdTerminalId ? getManagedPid(manager, createdTerminalId) : undefined;
+        if (pid) {
+          try {
+            execFileSync("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore" });
+          } catch {
+            // best-effort cleanup after a stubbed taskkill
+          }
+        }
+        try {
+          await fs.rm(tmp, { recursive: true, force: true });
+        } catch {
+          // The shell child can outlive a hung taskkill and keep the temp dir locked.
+        }
+      }
+    });
+  }
 });
