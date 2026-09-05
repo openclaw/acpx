@@ -94,6 +94,12 @@ acpx codex --no-wait 'and propose 1 minimal fix'
 
 `Ctrl+C` while waiting on a queued or running prompt sends ACP `session/cancel` first, waits briefly for the cancelled completion, and falls back to a force-kill only if the agent does not respond. See [Session control](session-control.md) for the explicit `cancel` command.
 
+## Embedded runtime readiness
+
+For applications using `acpx/runtime`, `AcpRuntimeTurn.promptStarted` resolves only after the writable ACP transport accepts that turn's prompt request. It remains pending under transport backpressure and rejects if submission or the write fails.
+
+Readiness does not mean the agent has finished processing the prompt. Await `turn.result` for the turn outcome after persistence and cleanup have settled.
+
 ## Timeouts
 
 `--timeout <seconds>` caps how long `acpx` will wait for an agent response. It applies to:
@@ -114,8 +120,8 @@ If the timeout fires, `acpx` exits with code `3` and the agent process is cancel
 `--model <id>` requests a specific model:
 
 ```bash
-acpx --model claude-sonnet-4-6 claude 'do the thing'
 acpx --model gpt-5.4 codex exec 'one-shot summary'
+acpx --model claude-sonnet-4-6 claude 'do the thing'
 ```
 
 Behavior varies by adapter:
