@@ -5543,10 +5543,10 @@ test("runPromptTurn: request readiness does not replace the awaited prompt lifec
     prompt: async (
       _sessionId: string,
       _prompt: PromptInput | string,
-      onRequestStarted?: () => Promise<void> | void,
+      onRequestWritten?: () => Promise<void> | void,
     ) => {
       calls.push("prompt");
-      await onRequestStarted?.();
+      await onRequestWritten?.();
       return { stopReason: "end_turn" as const };
     },
   };
@@ -5557,8 +5557,8 @@ test("runPromptTurn: request readiness does not replace the awaited prompt lifec
     sessionId: "session-prompt-barrier",
     prompt: "hello",
     conversation,
-    onPromptRequestStarted: () => {
-      calls.push("request-started");
+    onPromptRequestWritten: () => {
+      calls.push("request-written");
     },
     onPromptStarted: async () => {
       calls.push("lifecycle-started");
@@ -5568,11 +5568,11 @@ test("runPromptTurn: request readiness does not replace the awaited prompt lifec
   });
 
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(calls, ["prompt", "request-started", "lifecycle-started"]);
+  assert.deepEqual(calls, ["prompt", "request-written", "lifecycle-started"]);
 
   releaseLifecycleBarrier();
   await pending;
-  assert.deepEqual(calls, ["prompt", "request-started", "lifecycle-started", "lifecycle-released"]);
+  assert.deepEqual(calls, ["prompt", "request-written", "lifecycle-started", "lifecycle-released"]);
 });
 
 test("runPromptTurn: prompt response usage is recorded after usage update drain", async () => {

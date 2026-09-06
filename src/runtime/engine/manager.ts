@@ -1285,7 +1285,7 @@ export class AcpRuntimeManager {
         timeoutMs: task.input.timeoutMs ?? this.options.timeoutMs,
         conversation: turn.conversation,
         promptMessageId: turn.promptMessageId,
-        onPromptRequestStarted: () => task.promptStarted.resolve(),
+        onPromptRequestWritten: () => task.promptStarted.resolve(),
         onElicitation: task.input.onElicitation,
       });
     } finally {
