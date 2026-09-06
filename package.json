@@ -90,7 +90,7 @@
     "@stryker-mutator/core": "^10.0.0",
     "@types/node": "^26.4.1",
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.5",
+    "@types/react-dom": "^19.2.7",
     "@types/react-test-renderer": "^19.1.0",
     "@types/ws": "^8.18.1",
     "@typescript/native": "npm:typescript@^7.0.2",
@@ -108,7 +108,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-test-renderer": "^19.2.8",
-    "tsdown": "^0.22.14",
+    "tsdown": "^0.23.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vite": "^8.2.2",
     "ws": "^8.21.3"
