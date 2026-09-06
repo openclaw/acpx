@@ -4,7 +4,7 @@
 
 Repo: https://github.com/openclaw/acpx
 
-## Unreleased
+## 0.14.0 - 2026-09-05
 
 **Highlights:** One-shot runs can apply ACP configuration options before prompting, and embedded clients can wait for the actual prompt transport write.
 
