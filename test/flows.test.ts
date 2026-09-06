@@ -1526,6 +1526,96 @@ test("FlowRunner marks timed out shell steps explicitly", async () => {
   });
 });
 
+test("FlowRunner preserves shell timeoutMs 0 as no action deadline", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "unused",
+        agentCommand: "unused",
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot,
+      defaultNodeTimeoutMs: 5_000,
+    });
+
+    const flow = defineFlow({
+      name: "timeout-zero-ok",
+      startAt: "ok",
+      nodes: {
+        ok: shell({
+          exec: () => ({
+            command: process.execPath,
+            args: ["-e", "setTimeout(() => {}, 80)"],
+            // Explicit zero: no shell-action deadline (must not become 1ms SIGTERM).
+            timeoutMs: 0,
+          }),
+        }),
+      },
+      edges: [],
+    });
+
+    const result = await runner.run(flow, {});
+    assert.equal(result.state.status, "completed");
+  });
+});
+
+test("FlowRunner reaps shell child when outer node deadline expires", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
+    const pidDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-shell-pid-"));
+    const pidFile = path.join(pidDir, "pid");
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "unused",
+        agentCommand: "unused",
+        cwd: process.cwd(),
+      }),
+      permissionMode: "approve-all",
+      outputRoot,
+    });
+
+    const flow = defineFlow({
+      name: "timeout-outer-reap",
+      startAt: "slow",
+      nodes: {
+        slow: shell({
+          // Enabled outer deadline; action timeout stays zero (no shell-level deadline).
+          timeoutMs: 500,
+          exec: () => ({
+            command: process.execPath,
+            args: [
+              "-e",
+              `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 30_000)`,
+            ],
+            timeoutMs: 0,
+          }),
+        }),
+      },
+      edges: [],
+    });
+
+    await assert.rejects(async () => await runner.run(flow, {}), TimeoutError);
+    const runDir = await waitForRunDir(outputRoot, "timeout-outer-reap");
+    const state = await readRunJson(runDir);
+    assert.equal(state.status, "timed_out");
+    const slowResult = (state.results as Record<string, Record<string, unknown>>).slow;
+    assert.equal(slowResult.outcome, "timed_out");
+
+    const pid = Number(await fs.readFile(pidFile, "utf8"));
+    assert.ok(pid > 0);
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch {
+      alive = false;
+    }
+    assert.equal(alive, false, "outer deadline must reap the shell child");
+    await fs.rm(pidDir, { recursive: true, force: true });
+  });
+});
+
 test("FlowRunner can route timed out nodes by outcome", async () => {
   await withTempHome(async () => {
     const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
@@ -1893,3 +1983,49 @@ async function waitFor<T>(fn: () => Promise<T | null>, timeoutMs: number): Promi
 
   throw lastError instanceof Error ? lastError : new Error("Timed out waiting for condition");
 }
+
+test("FlowRunner does not launch a shell action when its executor resolves after timeout", async () => {
+  await withTempHome(async () => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-late-"));
+    const marker = path.join(outputRoot, "must-not-exist");
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runner = new FlowRunner({
+      resolveAgent: () => ({ agentName: "unused", agentCommand: "unused", cwd: outputRoot }),
+      permissionMode: "deny-all",
+      outputRoot,
+    });
+    const flow = defineFlow({
+      name: "late-executor",
+      startAt: "late",
+      nodes: {
+        late: shell({
+          timeoutMs: 20,
+          exec: async () => {
+            await gate;
+            return {
+              command: process.execPath,
+              args: [
+                "-e",
+                `require('node:fs').writeFileSync(${JSON.stringify(marker)},'launched')`,
+              ],
+              timeoutMs: 0,
+            };
+          },
+        }),
+      },
+      edges: [],
+    });
+    try {
+      await assert.rejects(runner.run(flow, {}), TimeoutError);
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await assert.rejects(fs.access(marker), { code: "ENOENT" });
+    } finally {
+      release();
+      await fs.rm(outputRoot, { recursive: true, force: true });
+    }
+  });
+});

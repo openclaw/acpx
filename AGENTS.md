@@ -22,9 +22,10 @@ instead of expanding this file into a full technical spec.
 - npm: `https://www.npmjs.com/package/acpx`
 - Default branch: `main`
 - Runtime: Node.js `>=22.13.0`
-- Package manager: `pnpm@11.24.0`
-- Clean Node 22.13 setups can have stale Corepack signing keys; install pnpm
-  with `npm install -g pnpm@11.24.0` if `corepack prepare` fails.
+- Source builds: Node.js `^22.18.0 || ^24.11.0 || >=26.0.0` (tsdown excludes Node 25).
+- Package manager: `pnpm@11.25.0`
+- Clean Node 22 setups can have stale Corepack signing keys; install pnpm
+  with `npm install -g pnpm@11.25.0` if `corepack prepare` fails.
 
 ## Product Direction
 

@@ -257,9 +257,17 @@ acpx [global_options] exec [prompt_options] [prompt_text...]   # defaults to cod
 Behavior:
 
 - Creates temporary ACP session
+- Applies `--model`, then each repeatable `--config-option <key=value>`, before prompting
 - Sends prompt once
 - Does not write/use a saved session record
 - Supports prompt text from args, stdin, `--file <path>`, and `--file -`
+- Stops without prompting if the adapter rejects a requested config option
+
+```bash
+acpx --model gpt-5.4 codex exec \
+  --config-option reasoning_effort=high \
+  'review this checkout'
+```
 
 ## `compare` subcommand
 
@@ -629,6 +637,7 @@ Related runtime behavior:
 
 - session storage path is derived from OS home directory (`~/.acpx/sessions`)
 - child processes inherit the current environment by default
+- Windows terminal kill and release requests fail if process cleanup cannot finish after escalation. The terminal remains available for a cleanup retry; restore a working `taskkill` command before retrying.
 
 ## Practical examples
 

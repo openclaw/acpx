@@ -21,6 +21,7 @@ import { registerCompareCommand } from "./compare-command.js";
 import { registerConfigCommand } from "./config-command.js";
 import type { ResolvedAcpxConfig } from "./config.js";
 import {
+  addExecConfigOption,
   addPromptInputOption,
   addSessionNameOption,
   addSessionOption,
@@ -237,6 +238,7 @@ export function registerSharedAgentSubcommands(
     .argument("[prompt...]", "Prompt text")
     .showHelpAfterError();
   addPromptInputOption(execCommand);
+  addExecConfigOption(execCommand);
   execCommand.action(async function (this: Command, promptParts: string[], flags) {
     await handleExec(explicitAgentName, promptParts, flags, this, config);
   });

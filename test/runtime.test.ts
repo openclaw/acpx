@@ -352,6 +352,20 @@ test("createFileSessionStore persists records inside the provided state director
   );
 });
 
+test("createFileSessionStore preserves environment name casing across reloads", async (t) => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-env-store-"));
+  t.after(async () => {
+    await fs.rm(stateDir, { recursive: true, force: true });
+  });
+  const env = { INITIAL_AGENT_MODE: "read-only", CustomMixedCase: "synthetic" };
+  const record = createSessionRecord({ acpx: { session_options: { env } } });
+
+  await createFileSessionStore({ stateDir }).save(record);
+
+  const restored = await createFileSessionStore({ stateDir }).load(record.acpxRecordId);
+  assert.deepEqual(restored?.acpx?.session_options?.env, env);
+});
+
 test("createFileSessionStore supports concurrent saves in the same millisecond", async (t) => {
   const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-store-concurrent-"));
   t.after(async () => {

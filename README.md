@@ -67,6 +67,7 @@ Persistent sessions keep context between prompts, support parallel named workstr
 acpx codex sessions new --name backend
 acpx codex -s backend "trace the checkout timeout"
 acpx codex exec "summarize this repository"
+acpx --model gpt-5.4 codex exec --config-option reasoning_effort=high "review this repository"
 ```
 
 Session state lives under `~/.acpx/`. The [sessions guide](docs/sessions.md) covers scope, queue ownership, reconnects, export/import, cancellation, and cleanup.

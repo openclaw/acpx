@@ -1,6 +1,6 @@
 {
   "name": "acpx",
-  "version": "0.13.2",
+  "version": "0.14.0",
   "description": "Headless CLI client for the Agent Client Protocol (ACP) — talk to coding agents from the command line",
   "keywords": [
     "acp",
@@ -88,9 +88,9 @@
   },
   "devDependencies": {
     "@stryker-mutator/core": "^10.0.0",
-    "@types/node": "^26.4.0",
+    "@types/node": "^26.4.1",
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.5",
+    "@types/react-dom": "^19.2.7",
     "@types/react-test-renderer": "^19.1.0",
     "@types/ws": "^8.18.1",
     "@typescript/native": "npm:typescript@^7.0.2",
@@ -102,13 +102,13 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.4.1",
     "markdownlint-cli2": "^0.23.2",
-    "oxfmt": "^0.65.0",
-    "oxlint": "^1.80.0",
+    "oxfmt": "^0.66.0",
+    "oxlint": "^1.81.0",
     "oxlint-tsgolint": "^7.0.2001",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-test-renderer": "^19.2.8",
-    "tsdown": "^0.22.14",
+    "tsdown": "^0.23.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vite": "^8.2.2",
     "ws": "^8.21.3"
@@ -125,5 +125,5 @@
   "engines": {
     "node": ">=22.13.0"
   },
-  "packageManager": "pnpm@11.24.0"
+  "packageManager": "pnpm@11.25.0"
 }

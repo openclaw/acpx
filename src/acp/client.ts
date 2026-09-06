@@ -396,6 +396,7 @@ type ActivePromptState = {
   sessionId: string;
   requestId?: JsonRpcId;
   promise?: Promise<PromptResponse>;
+  onRequestWritten?: () => Promise<void> | void;
   elicitationHandler?: AcpElicitationHandler;
   elicitationController: AbortController;
 };
@@ -1077,9 +1078,12 @@ export class AcpClient {
     const onAcpMessage = () => this.eventHandlers.onAcpMessage;
     const onAcpOutputMessage = () => this.eventHandlers.onAcpOutputMessage;
     const elicitationRequestIds = new Set<JsonRpcId>();
-    const bindPromptOwner = (owner: { requestId: JsonRpcId; sessionId: string }): void => {
+    const bindPromptOwner = (owner: { requestId: JsonRpcId; sessionId: string }) =>
       this.bindPromptOwner(owner);
-    };
+    const onPromptRequestWritten = (
+      active: ActivePromptState,
+      owner: { requestId: JsonRpcId; sessionId: string },
+    ) => this.onPromptRequestWritten(active, owner);
 
     const shouldSuppressInboundReplaySessionUpdate = (message: AnyMessage): boolean => {
       return this.suppressReplaySessionUpdateMessages && isSessionUpdateNotification(message);
@@ -1124,9 +1128,7 @@ export class AcpClient {
     const writable = new WritableStream<AnyMessage>({
       async write(message) {
         const promptOwner = promptRequestOwner(message);
-        if (promptOwner) {
-          bindPromptOwner(promptOwner);
-        }
+        const activePrompt = promptOwner ? bindPromptOwner(promptOwner) : undefined;
         const id = responseId(message);
         const sensitive = id !== undefined && elicitationRequestIds.delete(id);
         if (!sensitive) {
@@ -1138,6 +1140,9 @@ export class AcpClient {
           await writer.write(message);
         } finally {
           writer.releaseLock();
+        }
+        if (activePrompt && promptOwner) {
+          onPromptRequestWritten(activePrompt, promptOwner);
         }
       },
     });
@@ -1268,7 +1273,7 @@ export class AcpClient {
   async prompt(
     sessionId: string,
     prompt: PromptInput | string,
-    onRequestStarted?: () => Promise<void> | void,
+    onRequestWritten?: () => Promise<void> | void,
     onElicitation?: AcpElicitationHandler,
   ): Promise<PromptResponse> {
     const connection = this.getConnection();
@@ -1277,18 +1282,15 @@ export class AcpClient {
       ? installSdkConsoleErrorSuppression()
       : undefined;
 
-    const activePrompt = this.beginActivePrompt(sessionId, onElicitation);
+    const activePrompt = this.beginActivePrompt(sessionId, onRequestWritten, onElicitation);
 
     let promptPromise: Promise<PromptResponse>;
     try {
-      promptPromise = this.runConnectionRequest(
-        () =>
-          connection.prompt({
-            sessionId,
-            prompt: normalizedPrompt,
-          }),
-        onRequestStarted,
-        () => !connection.signal?.aborted,
+      promptPromise = this.runConnectionRequest(() =>
+        connection.prompt({
+          sessionId,
+          prompt: normalizedPrompt,
+        }),
       );
     } catch (error) {
       this.clearActivePrompt(activePrompt);
@@ -1314,12 +1316,14 @@ export class AcpClient {
 
   private beginActivePrompt(
     sessionId: string,
+    onRequestWritten: (() => Promise<void> | void) | undefined,
     elicitationHandler: AcpElicitationHandler | undefined,
   ): ActivePromptState {
     const previous = this.activePrompt;
     this.cancellingSessionIds.delete(sessionId);
     const active: ActivePromptState = {
       sessionId,
+      onRequestWritten,
       elicitationHandler,
       elicitationController: new AbortController(),
     };
@@ -1329,12 +1333,30 @@ export class AcpClient {
     return active;
   }
 
-  private bindPromptOwner(owner: { requestId: JsonRpcId; sessionId: string }): void {
+  private bindPromptOwner(owner: {
+    requestId: JsonRpcId;
+    sessionId: string;
+  }): ActivePromptState | undefined {
     const active = this.pendingPromptOwners.find((candidate) => {
       return candidate.requestId === undefined && candidate.sessionId === owner.sessionId;
     });
     if (active) {
       active.requestId = owner.requestId;
+    }
+    return active;
+  }
+
+  private onPromptRequestWritten(
+    active: ActivePromptState,
+    owner: { requestId: JsonRpcId; sessionId: string },
+  ): void {
+    if (active.requestId !== owner.requestId || active.sessionId !== owner.sessionId) {
+      return;
+    }
+    try {
+      void Promise.resolve(active.onRequestWritten?.()).catch(() => {});
+    } catch {
+      // Readiness observation must not own a request accepted by the transport.
     }
   }
 
@@ -2224,11 +2246,7 @@ export class AcpClient {
     return error;
   }
 
-  private async runConnectionRequest<T>(
-    run: () => Promise<T>,
-    onRequestStarted?: () => Promise<void> | void,
-    canStartRequest: () => boolean = () => true,
-  ): Promise<T> {
+  private async runConnectionRequest<T>(run: () => Promise<T>): Promise<T> {
     return await new Promise<T>((resolve, reject) => {
       const pending: PendingConnectionRequest = {
         settled: false,
@@ -2250,16 +2268,7 @@ export class AcpClient {
           if (pending.settled) {
             return { started: false as const };
           }
-          const requestCanStart = canStartRequest();
-          const request = run();
-          if (requestCanStart) {
-            try {
-              void Promise.resolve(onRequestStarted?.()).catch(() => {});
-            } catch {
-              // Readiness observation must not own a request that was already submitted.
-            }
-          }
-          return { started: true as const, value: await request };
+          return { started: true as const, value: await run() };
         })
         .then(
           (outcome) => {

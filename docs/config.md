@@ -153,6 +153,7 @@ Other ACP-relevant behavior:
 
 - Session storage path is derived from the OS home directory (`~/.acpx/sessions`).
 - Child adapter processes inherit the current environment by default.
+- Embedded clients can persist per-session overrides through `SessionAgentOptions.env`; environment variable names retain their exact casing when saved and reloaded.
 - Some adapters look at their own env vars (e.g., `QODER_PERSONAL_ACCESS_TOKEN`) — see [Agents](agents.md) for per-adapter notes.
 
 ## Practical config recipes

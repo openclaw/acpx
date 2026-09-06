@@ -1141,6 +1141,12 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
             ? undefined
             : (message) => process.stderr.write(`[acpx] warning: ${message}\n`),
         });
+        for (const configOption of options.configOptions ?? []) {
+          await withTimeout(
+            client.setSessionConfigOption(sessionId, configOption.configId, configOption.value),
+            options.timeoutMs,
+          );
+        }
 
         output.setContext({
           sessionId,
