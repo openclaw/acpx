@@ -52,11 +52,61 @@ function assignDefinedOption<Key extends keyof SessionAgentOptions>(
   }
 }
 
+/**
+ * Environment keys whose values must never reach the session record on disk.
+ *
+ * Hosts are told to route credentials through `authCredentials` (see the `env`
+ * doc comment above), which is never persisted. That guidance is unenforceable
+ * for embedders of the runtime API, which exposes `sessionOptions.env` but no
+ * `authCredentials`, so a host with per-agent credentials has no compliant
+ * channel and its secrets land in `acpx.session_options.env` in cleartext.
+ * `secretEnvKeys` gives those hosts a way to name the keys to withhold.
+ */
+export type SecretEnvKeys = ReadonlySet<string> | readonly string[];
+
+function isSecretEnvKey(key: string, secretEnvKeys: SecretEnvKeys | undefined): boolean {
+  if (secretEnvKeys === undefined) {
+    return false;
+  }
+  return Array.isArray(secretEnvKeys)
+    ? secretEnvKeys.includes(key)
+    : (secretEnvKeys as ReadonlySet<string>).has(key);
+}
+
+/**
+ * Drop the named credential values before the record is serialized.
+ *
+ * The entry is omitted rather than replaced with a placeholder: on resume the
+ * record is the *sole* source of session env (`sessionOptionsFromRecord` in
+ * `manager.ts`/`connected-session.ts` builds client options with no live
+ * fallback), and `buildAgentEnvironment` layers session env over
+ * `process.env`. A placeholder would therefore be assigned to the child as a
+ * literal value, breaking the launch it was meant to protect. Omission lets
+ * the host's freshly-supplied value stand. Non-secret env is untouched.
+ */
+function withoutSecretEnv(
+  env: Record<string, string> | undefined,
+  secretEnvKeys: SecretEnvKeys | undefined,
+): Record<string, string> | undefined {
+  if (env === undefined || secretEnvKeys === undefined) {
+    return env;
+  }
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (isSecretEnvKey(key, secretEnvKeys)) {
+      continue;
+    }
+    result[key] = value;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 export function persistSessionOptions(
   record: SessionRecord,
   options: SessionAgentOptions | undefined,
+  secretEnvKeys?: SecretEnvKeys,
 ): void {
-  const next = options === undefined ? undefined : persistedSessionOptions(options);
+  const next = options === undefined ? undefined : persistedSessionOptions(options, secretEnvKeys);
   if (next !== undefined) {
     record.acpx = {
       ...record.acpx,
@@ -70,6 +120,34 @@ export function persistSessionOptions(
   }
 
   delete record.acpx.session_options;
+}
+
+/**
+ * The view of `options` that survives a round trip through the record, for
+ * callers that compare stored options against live ones (session reuse).
+ *
+ * Without this, withholding a secret env key would make every comparison fail
+ * and silently disable one-shot session reuse.
+ */
+export function persistableSessionOptions(
+  options: SessionAgentOptions | undefined,
+  secretEnvKeys: SecretEnvKeys | undefined,
+): SessionAgentOptions | undefined {
+  if (options === undefined || secretEnvKeys === undefined) {
+    return options;
+  }
+  const env = withoutSecretEnv(options.env, secretEnvKeys);
+  const next: SessionAgentOptions = { ...options };
+  if (env === undefined) {
+    delete next.env;
+  } else {
+    next.env = env;
+  }
+  // Nothing left to persist means the record carries no session_options block at
+  // all, so the round-trip view is `undefined`, not `{}`. Returning `{}` here
+  // would never compare equal to the record and would reinstate the very reuse
+  // regression this function exists to prevent.
+  return Object.keys(next).length > 0 ? next : undefined;
 }
 
 export function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOptions | undefined {
@@ -96,13 +174,14 @@ type PersistedSessionOptions = NonNullable<NonNullable<SessionRecord["acpx"]>["s
 
 function persistedSessionOptions(
   options: SessionAgentOptions,
+  secretEnvKeys: SecretEnvKeys | undefined,
 ): PersistedSessionOptions | undefined {
   const next = {
     model: nonEmptyString(options.model),
     allowed_tools: Array.isArray(options.allowedTools) ? [...options.allowedTools] : undefined,
     max_turns: typeof options.maxTurns === "number" ? options.maxTurns : undefined,
     system_prompt: normalizeSystemPromptOption(options.systemPrompt),
-    env: storedEnvRecord(options.env),
+    env: withoutSecretEnv(storedEnvRecord(options.env), secretEnvKeys),
   } satisfies PersistedSessionOptions;
   return hasPersistedSessionOptions(next) ? next : undefined;
 }

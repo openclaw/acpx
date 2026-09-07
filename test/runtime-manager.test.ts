@@ -4487,6 +4487,133 @@ test("persistSessionOptions preserves session env as a serialized record", () =>
   });
 });
 
+test("persistSessionOptions omits secretEnvKeys values and keeps the rest", () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "secret-env-session",
+    acpSessionId: "secret-env-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+
+  persistSessionOptions(
+    record,
+    {
+      env: {
+        API_TOKEN: "live-secret-value",
+        GIT_AUTHOR_EMAIL: "agent-pm@example.local",
+      },
+    },
+    ["API_TOKEN"],
+  );
+
+  const persisted = record.acpx?.session_options?.env;
+  assert.deepEqual(persisted, { GIT_AUTHOR_EMAIL: "agent-pm@example.local" });
+  // The value must be absent entirely, not replaced by a placeholder: the
+  // record is the sole source of session env on resume.
+  assert.ok(!JSON.stringify(record).includes("live-secret-value"));
+});
+
+test("persistSessionOptions drops the env block when every key is secret", () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "all-secret-env-session",
+    acpSessionId: "all-secret-env-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+
+  persistSessionOptions(record, { env: { API_TOKEN: "live-secret-value" } }, ["API_TOKEN"]);
+
+  assert.equal(record.acpx?.session_options?.env, undefined);
+  assert.ok(!JSON.stringify(record).includes("live-secret-value"));
+});
+
+test("persistSessionOptions leaves env untouched when secretEnvKeys is omitted", () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "no-secret-keys-session",
+    acpSessionId: "no-secret-keys-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+
+  persistSessionOptions(record, { env: { API_TOKEN: "kept-by-default" } });
+
+  assert.deepEqual(record.acpx?.session_options?.env, { API_TOKEN: "kept-by-default" });
+});
+
+async function countSessionsCreatedForRepeatedOneshot(
+  env: Record<string, string>,
+): Promise<number> {
+  const store = new InMemorySessionStore();
+  let created = 0;
+  const makeClient = () =>
+    ({
+      initializeResult: { protocolVersion: 1, agentCapabilities: {} },
+      start: async () => {},
+      close: async () => {},
+      createSession: async () => {
+        created += 1;
+        return { sessionId: `sid-${created}`, agentSessionId: `agent-sid-${created}` };
+      },
+      loadSession: async () => ({ agentSessionId: "unused" }),
+      hasReusableSession: () => false,
+      supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
+      loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+      getAgentLifecycleSnapshot: () => ({ running: true }),
+      prompt: async () => ({ stopReason: "end_turn" }),
+      requestCancelActivePrompt: async () => false,
+      hasActivePrompt: () => false,
+      setSessionMode: async () => {},
+      setSessionConfigOption: async () => {},
+      clearEventHandlers: () => {},
+      setEventHandlers: () => {},
+    }) as never;
+
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: store,
+      secretEnvKeys: ["API_TOKEN"],
+    }),
+    { clientFactory: () => makeClient() },
+  );
+
+  const input = {
+    sessionKey: "reuse-session",
+    agent: "codex",
+    mode: "oneshot",
+    sessionOptions: { env },
+  } as const;
+
+  await manager.ensureSession({ ...input });
+  await manager.ensureSession({ ...input });
+
+  return created;
+}
+
+test("secretEnvKeys does not disable one-shot session reuse", async () => {
+  // Without filtering the comparison side, the withheld key would make the
+  // stored options differ from the live ones on every call.
+  const created = await countSessionsCreatedForRepeatedOneshot({
+    API_TOKEN: "live-secret-value",
+    LANG: "C",
+  });
+
+  assert.equal(created, 1);
+});
+
+test("secretEnvKeys does not disable one-shot reuse when every env key is secret", async () => {
+  // Narrower than the mixed case above: with nothing left to persist the record
+  // carries no session_options block, so the comparison view must be `undefined`
+  // rather than `{}` — otherwise reuse stays silently disabled for exactly the
+  // hosts this option targets, whose session env is credentials only.
+  const created = await countSessionsCreatedForRepeatedOneshot({
+    API_TOKEN: "live-secret-value",
+  });
+
+  assert.equal(created, 1);
+});
+
 test("sessionOptionsFromRecord restores session env from a persisted record", () => {
   const record = makeSessionRecord({
     acpxRecordId: "env-restore-session",

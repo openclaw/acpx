@@ -72,6 +72,7 @@ import {
 } from "./reconnect.js";
 import { shouldReuseExistingRecord } from "./reuse-policy.js";
 import {
+  persistableSessionOptions,
   persistSessionOptions,
   sessionOptionsFromRecord,
   type SessionAgentOptions,
@@ -970,9 +971,16 @@ export class AcpRuntimeManager {
     if (input.mode === "persistent") {
       return true;
     }
+    // Compare against what *would* be persisted for these options, not the raw
+    // input: withheld secret env keys are absent from the record by design, so
+    // comparing the record to the unfiltered input would never match and would
+    // silently disable one-shot session reuse.
     return Boolean(
       existing.owner &&
-      isDeepStrictEqual(sessionOptionsFromRecord(existing.record), input.sessionOptions),
+      isDeepStrictEqual(
+        sessionOptionsFromRecord(existing.record),
+        persistableSessionOptions(input.sessionOptions, this.options.secretEnvKeys),
+      ),
     );
   }
 
@@ -1097,7 +1105,7 @@ export class AcpRuntimeManager {
       );
     }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-    persistSessionOptions(record, input.sessionOptions);
+    persistSessionOptions(record, input.sessionOptions, this.options.secretEnvKeys);
     return record;
   }
 

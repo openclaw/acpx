@@ -148,11 +148,13 @@ export function createRuntimeOptions(params: {
   agentRegistry?: AcpAgentRegistry;
   permissionPolicy?: AcpRuntimeOptions["permissionPolicy"];
   timeoutMs?: number;
+  secretEnvKeys?: AcpRuntimeOptions["secretEnvKeys"];
 }): AcpRuntimeOptions {
   return {
     cwd: params.cwd,
     sessionStore: params.sessionStore,
     timeoutMs: params.timeoutMs,
+    secretEnvKeys: params.secretEnvKeys,
     agentRegistry: params.agentRegistry ?? {
       resolve(agentName: string) {
         return `${agentName} --acp`;
