@@ -206,7 +206,9 @@ test("runShellAction does not crash the host when the child exits before reading
 
 for (const detached of [false, true]) {
   test(`shell abort stops descendants after wrapper exit (detached=${detached})`, async (t) => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-shell-tree-"));
+    const dir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "acpx-shell-tree space & $dollar 'quote'-"),
+    );
     const pidFile = path.join(dir, "descendant.pid");
     const controller = new AbortController();
     const descendant = `process.on('SIGTERM',()=>{});require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setInterval(()=>{},1000)`;
@@ -214,7 +216,15 @@ for (const detached of [false, true]) {
     const wrapperFile = path.join(dir, "wrapper.cjs");
     await fs.writeFile(wrapperFile, wrapper);
     const pending = runShellAction(
-      { command: process.execPath, args: [wrapperFile], shell: true, timeoutMs: 0 },
+      {
+        command:
+          process.platform === "win32"
+            ? '"%ACPX_TEST_NODE%" "%ACPX_TEST_WRAPPER%"'
+            : '"$ACPX_TEST_NODE" "$ACPX_TEST_WRAPPER"',
+        env: { ACPX_TEST_NODE: process.execPath, ACPX_TEST_WRAPPER: wrapperFile },
+        shell: true,
+        timeoutMs: 0,
+      },
       { signal: controller.signal },
     );
     const rejected = assert.rejects(pending, TimeoutError);
