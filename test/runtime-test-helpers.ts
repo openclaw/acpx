@@ -148,6 +148,7 @@ export function createRuntimeOptions(params: {
   agentRegistry?: AcpAgentRegistry;
   permissionPolicy?: AcpRuntimeOptions["permissionPolicy"];
   agentProcessEnv?: AcpRuntimeOptions["agentProcessEnv"];
+  processLifecycle?: AcpRuntimeOptions["processLifecycle"];
   timeoutMs?: number;
 }): AcpRuntimeOptions {
   return {
@@ -165,5 +166,6 @@ export function createRuntimeOptions(params: {
     permissionMode: "approve-reads",
     permissionPolicy: params.permissionPolicy,
     agentProcessEnv: params.agentProcessEnv,
+    processLifecycle: params.processLifecycle,
   };
 }

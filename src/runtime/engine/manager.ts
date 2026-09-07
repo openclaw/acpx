@@ -853,7 +853,15 @@ export class AcpRuntimeManager {
       sessionRecordId: record.acpxRecordId,
       loadRecord: async (sessionRecordId) => await this.requireRecord(sessionRecordId),
       saveRecord: async (connectedRecord) => await this.options.sessionStore.save(connectedRecord),
-      createClient: (options) => this.createClient(options),
+      createClient: (options) =>
+        this.createClient({
+          ...options,
+          processLifecycle: this.options.processLifecycle,
+          processLaunchScope: {
+            kind: "runtime-session",
+            sessionKey: record.name ?? record.acpxRecordId,
+          },
+        }),
       mcpServers: [...(this.options.mcpServers ?? [])],
       permissionMode: this.options.permissionMode,
       nonInteractivePermissions: this.options.nonInteractivePermissions,
@@ -1013,6 +1021,8 @@ export class AcpRuntimeManager {
       permissionPolicy: this.options.permissionPolicy,
       onPermissionRequest: this.options.onPermissionRequest,
       elicitationModes: this.options.elicitationModes,
+      processLifecycle: this.options.processLifecycle,
+      processLaunchScope: { kind: "runtime-session", sessionKey: input.sessionKey },
       verbose: this.options.verbose,
       sessionOptions: input.sessionOptions,
     });
@@ -1442,6 +1452,11 @@ export class AcpRuntimeManager {
       permissionPolicy: this.options.permissionPolicy,
       onPermissionRequest: this.options.onPermissionRequest,
       elicitationModes: this.options.elicitationModes,
+      processLifecycle: this.options.processLifecycle,
+      processLaunchScope: {
+        kind: "runtime-session",
+        sessionKey: record.name ?? record.acpxRecordId,
+      },
       verbose: this.options.verbose,
       sessionOptions: sessionOptionsFromRecord(record),
     });
@@ -1985,6 +2000,11 @@ export class AcpRuntimeManager {
         permissionPolicy: this.options.permissionPolicy,
         onPermissionRequest: this.options.onPermissionRequest,
         elicitationModes: this.options.elicitationModes,
+        processLifecycle: this.options.processLifecycle,
+        processLaunchScope: {
+          kind: "runtime-session",
+          sessionKey: record.name ?? record.acpxRecordId,
+        },
         verbose: this.options.verbose,
       }),
     };

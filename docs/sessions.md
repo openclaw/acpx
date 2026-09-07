@@ -240,3 +240,6 @@ Do not pass an `acpx` session id to a native provider CLI unless `agentSessionId
 - [Session control](session-control.md) — `cancel`, `set-mode`, `set <key>`, `set model`.
 - [Output formats](output-formats.md) — JSON envelope for sessions/status payloads.
 - [CLI reference](CLI.md#sessions-subcommand) — long-form spec and exit codes.
+
+Embedding hosts can use optional [process lifecycle callbacks](runtime-process-lifecycle.md)
+for launch admission and host-owned process tracking.

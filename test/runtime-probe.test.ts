@@ -17,12 +17,14 @@ test("probeRuntime uses the default agent override and reports protocol details"
     escalate: ["execute"],
     defaultAction: "deny" as const,
   };
+  const processLifecycle = {};
   const report = await probeRuntime(
     createRuntimeOptions({
       cwd: "/workspace",
       sessionStore: store,
       permissionPolicy,
       agentProcessEnv,
+      processLifecycle,
       agentRegistry: createAgentRegistry({
         overrides: {
           claude: "broken-claude-acp",
@@ -46,6 +48,11 @@ test("probeRuntime uses the default agent override and reports protocol details"
   assert.equal(constructed[0]?.agentCommand, "codex-override --acp");
   assert.deepEqual(constructed[0]?.permissionPolicy, permissionPolicy);
   assert.deepEqual(constructed[0]?.agentProcessEnv, agentProcessEnv);
+  assert.equal(constructed[0]?.processLifecycle, processLifecycle);
+  assert.deepEqual(constructed[0]?.processLaunchScope, {
+    kind: "runtime-probe",
+    agent: "codex",
+  });
   assert.deepEqual(report.details, [
     "agent=codex",
     "command=codex-override --acp",
