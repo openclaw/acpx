@@ -6,13 +6,15 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
-### Changes
+**Highlights:** Embedding hosts gain process lifecycle admission and transient child environments; optional limits bound shell output and ACP/queue input.
 
+- Runtime/embedding: expose optional correlated process lifecycle hooks with awaited launch admission and best-effort failure and exit observers. Thanks @MertBasar0.
+- Runtime/embedding: add a snapshotted child-only environment overlay for probes and session reconnects without persisting host settings or overriding protected authentication. Thanks @taras and @coding-ax.
+- ACP/results: preserve optional opaque prompt-response metadata in direct, queued, compare, and embedded-runtime results. Thanks @superbiche.
 - Agents/built-ins: add MiniMax Code through its native `mcode acp` server, with structured launch arguments and setup/lifecycle guidance. Thanks @hetaoBackend.
-
-### Breaking
-
-### Fixes
+- Flows: add optional per-stream shell capture limits with UTF-8 byte accounting and complete process-tree cleanup, retaining unlimited capture by default. Thanks @SebTardif.
+- ACP/transport: add an optional raw-byte message limit with clear overflow errors, preserving unlimited input by default and consistent handling across chunk boundaries. Thanks @SebTardif.
+- Queue: add an optional incoming request limit with client-side size diagnostics and raw-peer rejection, preserving large requests by default. Thanks @SebTardif.
 
 ## 0.14.0 - 2026-09-05
 
