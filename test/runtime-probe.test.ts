@@ -11,6 +11,7 @@ import { createRuntimeOptions, InMemorySessionStore } from "./runtime-test-helpe
 test("probeRuntime uses the default agent override and reports protocol details", async () => {
   const store = new InMemorySessionStore();
   const constructed: Array<Record<string, unknown>> = [];
+  const agentProcessEnv = { ACPX_TEST_RUNTIME_OVERLAY: "probe-only" };
   const permissionPolicy = {
     autoApprove: ["read", "search"],
     escalate: ["execute"],
@@ -21,6 +22,7 @@ test("probeRuntime uses the default agent override and reports protocol details"
       cwd: "/workspace",
       sessionStore: store,
       permissionPolicy,
+      agentProcessEnv,
       agentRegistry: createAgentRegistry({
         overrides: {
           claude: "broken-claude-acp",
@@ -43,6 +45,7 @@ test("probeRuntime uses the default agent override and reports protocol details"
   assert.equal(report.ok, true);
   assert.equal(constructed[0]?.agentCommand, "codex-override --acp");
   assert.deepEqual(constructed[0]?.permissionPolicy, permissionPolicy);
+  assert.deepEqual(constructed[0]?.agentProcessEnv, agentProcessEnv);
   assert.deepEqual(report.details, [
     "agent=codex",
     "command=codex-override --acp",

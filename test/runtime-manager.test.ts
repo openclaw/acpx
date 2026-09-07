@@ -219,6 +219,7 @@ test("AcpRuntimeManager closes an incompatible persistent owner before replacing
 
 test("AcpRuntimeManager creates and resumes sessions through the client", async () => {
   const store = new InMemorySessionStore();
+  const agentProcessEnv = { ACPX_TEST_RUNTIME_OVERLAY: "runtime-only" };
   const permissionPolicy = {
     autoApprove: ["read"],
     escalate: ["execute"],
@@ -286,7 +287,12 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
   });
   const constructedOptions: Array<Record<string, unknown>> = [];
   const manager = new AcpRuntimeManager(
-    createRuntimeOptions({ cwd: "/workspace", sessionStore: store, permissionPolicy }),
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: store,
+      permissionPolicy,
+      agentProcessEnv,
+    }),
     {
       clientFactory: (options) => {
         constructedOptions.push(options);
@@ -323,6 +329,12 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
     ["model"],
   );
   assert.equal(constructedOptions.length, 2);
+  assert.deepEqual(
+    constructedOptions.map((options) => options.agentProcessEnv),
+    [agentProcessEnv, agentProcessEnv],
+  );
+  assert.equal(JSON.stringify(created).includes("runtime-only"), false);
+  assert.equal(JSON.stringify(resumed).includes("runtime-only"), false);
   assert.deepEqual(
     constructedOptions.map((options) => options.permissionPolicy),
     [permissionPolicy, permissionPolicy],

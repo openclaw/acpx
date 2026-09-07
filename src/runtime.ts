@@ -151,7 +151,11 @@ export class AcpxRuntime implements AcpxRuntimeLike {
         details?: unknown[];
       }>;
     },
-  ) {}
+  ) {
+    if (options.agentProcessEnv) {
+      this.options = { ...options, agentProcessEnv: { ...options.agentProcessEnv } };
+    }
+  }
 
   isHealthy(): boolean {
     return this.healthy;

@@ -711,3 +711,29 @@ test("createRuntimeStore is an alias for the file-backed session store", async (
 
   assert.equal(loaded?.acpSessionId, "alias-sid");
 });
+
+test("AcpxRuntime snapshots transient child environment for manager and probes", async () => {
+  const agentProcessEnv = { ACPX_TEST_RUNTIME_OVERLAY: "construction-value" };
+  const observed: unknown[] = [];
+  const runtime = new AcpxRuntime(
+    {
+      cwd: process.cwd(),
+      sessionStore: createFileSessionStore({
+        stateDir: path.join(os.tmpdir(), "unused-env-store"),
+      }),
+      agentRegistry: createAgentRegistry(),
+      permissionMode: "deny-all",
+      agentProcessEnv,
+    },
+    {
+      probeRunner: async (options) => {
+        observed.push(options.agentProcessEnv);
+        return { ok: true, message: "synthetic probe" };
+      },
+    },
+  );
+  agentProcessEnv.ACPX_TEST_RUNTIME_OVERLAY = "mutated-value";
+  await runtime.doctor();
+  assert.deepEqual(observed, [{ ACPX_TEST_RUNTIME_OVERLAY: "construction-value" }]);
+  assert.equal(process.env.ACPX_TEST_RUNTIME_OVERLAY, undefined);
+});

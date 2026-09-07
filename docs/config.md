@@ -213,3 +213,6 @@ Then `acpx ci-bot 'run sanity checks'` resolves through the registry without any
 - [Custom agents](custom-agents.md) — `--agent` escape hatch and unknown positional names.
 - [Permissions](permissions.md) — `defaultPermissions` and non-interactive policy.
 - [Output formats](output-formats.md) — `format` default and `--json-strict`.
+
+Embedded hosts can also supply a [transient runtime environment](runtime-environment.md)
+without persisting child-process settings in a session.

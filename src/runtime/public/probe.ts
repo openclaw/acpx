@@ -117,6 +117,7 @@ function createProbeClient(
   const clientOptions = {
     ...agentCommand,
     cwd: options.cwd,
+    agentProcessEnv: options.agentProcessEnv,
     mcpServers: [...(options.mcpServers ?? [])],
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,

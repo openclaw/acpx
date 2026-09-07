@@ -602,7 +602,8 @@ export class AcpRuntimeManager {
   ) {}
 
   private createClient(options: ConstructorParameters<typeof AcpClient>[0]): AcpClient {
-    return this.deps.clientFactory?.(options) ?? new AcpClient(options);
+    const clientOptions = { ...options, agentProcessEnv: this.options.agentProcessEnv };
+    return this.deps.clientFactory?.(clientOptions) ?? new AcpClient(clientOptions);
   }
 
   private createSessionOwner(input: {

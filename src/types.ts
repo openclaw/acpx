@@ -234,6 +234,8 @@ export interface OutputFormatter {
 export type AcpClientOptions = {
   agentCommand: string;
   agentArgv?: string[];
+  /** Trusted child-only environment overlay; never persisted as session options. */
+  agentProcessEnv?: Record<string, string>;
   cwd: string;
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;

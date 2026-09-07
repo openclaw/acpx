@@ -352,6 +352,8 @@ export interface AcpAgentRegistry {
 
 export type AcpRuntimeOptions = {
   cwd: string;
+  /** Trusted child-only environment, snapshotted at construction and never persisted. */
+  agentProcessEnv?: Record<string, string>;
   sessionStore: AcpSessionStore;
   agentRegistry: AcpAgentRegistry;
   mcpServers?: McpServer[];

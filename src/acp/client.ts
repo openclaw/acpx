@@ -634,6 +634,7 @@ export class AcpClient {
     this.options = {
       ...options,
       cwd: asAbsoluteCwd(options.cwd),
+      agentProcessEnv: options.agentProcessEnv ? { ...options.agentProcessEnv } : undefined,
       authPolicy: options.authPolicy ?? "skip",
       permissionPolicy: snapshotPermissionPolicy(options.permissionPolicy),
       elicitationModes: normalizeElicitationModes(options.elicitationModes),
@@ -881,6 +882,7 @@ export class AcpClient {
         this.options.cwd,
         this.options.authCredentials,
         this.options.sessionOptions?.env,
+        this.options.agentProcessEnv,
       ),
     };
   }

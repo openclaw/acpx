@@ -79,10 +79,27 @@ function promotePrefixedAuthEnvironment(env: NodeJS.ProcessEnv): Set<string> {
   return protectedKeys;
 }
 
+function validateAgentProcessEnv(agentProcessEnv: Record<string, string> | undefined): void {
+  for (const [key, value] of Object.entries(agentProcessEnv ?? {})) {
+    if (
+      typeof value !== "string" ||
+      key.includes("=") ||
+      key.includes("\u0000") ||
+      value.includes("\u0000")
+    ) {
+      throw new Error(
+        "Invalid agentProcessEnv: environment entries cannot contain NUL or names with '='",
+      );
+    }
+  }
+}
+
 function buildAgentEnvironment(
   authCredentials: Record<string, string> | undefined,
   sessionEnv: Record<string, string> | undefined,
+  agentProcessEnv: Record<string, string> | undefined,
 ): NodeJS.ProcessEnv {
+  validateAgentProcessEnv(agentProcessEnv);
   const env: NodeJS.ProcessEnv = { ...process.env };
   const protectedAuthEnvKeys = promotePrefixedAuthEnvironment(env);
   if (authCredentials) {
@@ -92,8 +109,8 @@ function buildAgentEnvironment(
     }
   }
 
-  if (sessionEnv) {
-    for (const [key, value] of Object.entries(sessionEnv)) {
+  for (const overlay of [sessionEnv, agentProcessEnv]) {
+    for (const [key, value] of Object.entries(overlay ?? {})) {
       if (typeof value !== "string" || protectedAuthEnvKeys.has(protectedEnvKey(key))) {
         continue;
       }
@@ -172,6 +189,7 @@ export function buildAgentSpawnOptions(
   cwd: string,
   authCredentials: Record<string, string> | undefined,
   sessionEnv?: Record<string, string>,
+  agentProcessEnv?: Record<string, string>,
 ): {
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -180,7 +198,7 @@ export function buildAgentSpawnOptions(
 } {
   return {
     cwd,
-    env: buildAgentEnvironment(authCredentials, sessionEnv),
+    env: buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   };

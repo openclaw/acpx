@@ -57,6 +57,53 @@ test("buildAgentSpawnOptions leaves the agent env untouched when no session env 
   assert.equal(options.env.ACPX_TEST_SESSION_ENV_INJECTED, undefined);
 });
 
+test("runtime environment overrides session values without changing protected credentials or parent", () => {
+  const options = buildAgentSpawnOptions(
+    os.tmpdir(),
+    { "runtime-token": "synthetic-credential" },
+    { ACPX_TEST_RUNTIME_OVERLAY: "session", RUNTIME_TOKEN: "session-credential" },
+    {
+      ACPX_TEST_RUNTIME_OVERLAY: "runtime",
+      RUNTIME_TOKEN: "runtime-credential",
+      ACPX_AUTH_RUNTIME_TOKEN: "runtime-prefixed",
+    },
+  );
+  assert.equal(options.env.ACPX_TEST_RUNTIME_OVERLAY, "runtime");
+  assert.equal(options.env.RUNTIME_TOKEN, "synthetic-credential");
+  assert.equal(options.env.ACPX_AUTH_RUNTIME_TOKEN, "synthetic-credential");
+  assert.equal(process.env.ACPX_TEST_RUNTIME_OVERLAY, undefined);
+});
+
+test("runtime environment uses Windows case collision and credential protection rules", () => {
+  withPlatform("win32", () => {
+    const options = buildAgentSpawnOptions(
+      os.tmpdir(),
+      { "runtime-token": "synthetic-credential" },
+      { ACPX_TEST_RUNTIME_OVERLAY: "session" },
+      { acpx_test_runtime_overlay: "runtime", runtime_token: "override" },
+    );
+    assert.equal(options.env.ACPX_TEST_RUNTIME_OVERLAY, undefined);
+    assert.equal(options.env.acpx_test_runtime_overlay, "runtime");
+    assert.equal(options.env.RUNTIME_TOKEN, "synthetic-credential");
+    assert.equal(options.env.runtime_token, undefined);
+  });
+});
+
+test("invalid runtime environment fails without echoing the supplied value", () => {
+  assert.throws(
+    () =>
+      buildAgentSpawnOptions(os.tmpdir(), undefined, undefined, {
+        VALID_NAME: "private-marker\u0000",
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /Invalid agentProcessEnv/);
+      assert.equal(error.message.includes("private-marker"), false);
+      return true;
+    },
+  );
+});
+
 test("spawned agent child process receives session env with parent-override precedence", async () => {
   const script =
     "process.stdout.write(JSON.stringify({injected:process.env.ACPX_TEST_E2E_INJECTED,parent:process.env.ACPX_TEST_E2E_PARENT}))";
