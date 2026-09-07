@@ -10,6 +10,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Breaking
 
+- ACP/transport: default incoming messages to a 64 MiB raw-byte limit instead of unlimited input; use `ACPX_MAX_ACP_MESSAGE_BYTES` to raise the limit or `0` to disable it. Overflow errors explain the override, and existing warm owners retain their startup setting.
+
 ### Fixes
 
 ## 0.15.0 - 2026-09-07

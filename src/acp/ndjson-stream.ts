@@ -3,14 +3,19 @@ import { AcpxOperationalError } from "../errors.js";
 import { shouldIgnoreNonJsonAgentOutputLine } from "./agent-command.js";
 import { isAcpMessageObject } from "./jsonrpc.js";
 
+export const DEFAULT_MAX_ACP_MESSAGE_BYTES = 64 * 1024 * 1024;
+
 export class AcpMessageLimitError extends AcpxOperationalError {
   constructor(limit: number) {
-    super(`ACP message exceeded ACPX_MAX_ACP_MESSAGE_BYTES (${limit} bytes)`, {
-      outputCode: "RUNTIME",
-      detailCode: "ACP_MESSAGE_TOO_LARGE",
-      origin: "acp",
-      retryable: false,
-    });
+    super(
+      `ACP message exceeded ACPX_MAX_ACP_MESSAGE_BYTES (${limit} bytes). Increase the limit or set it to 0 for unlimited input.`,
+      {
+        outputCode: "RUNTIME",
+        detailCode: "ACP_MESSAGE_TOO_LARGE",
+        origin: "acp",
+        retryable: false,
+      },
+    );
   }
 }
 
@@ -19,7 +24,7 @@ export function readMaxAcpMessageBytes(
 ): number | undefined {
   const value = raw?.trim();
   if (!value) {
-    return undefined;
+    return DEFAULT_MAX_ACP_MESSAGE_BYTES;
   }
   const bytes = Number(value);
   if (!/^\d+$/.test(value) || !Number.isSafeInteger(bytes)) {

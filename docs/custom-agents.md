@@ -141,13 +141,25 @@ OpenClaw repo-local checkout (the canonical "override a built-in" example):
 
 ## Incoming message limits
 
-`ACPX_MAX_ACP_MESSAGE_BYTES` optionally limits each incoming ACP transport line
-to a non-negative safe integer number of bytes, excluding its final newline.
-Unset, empty, or zero preserves unlimited input. For example, set it to
-`8388608` to enforce an 8 MiB limit when starting a client or queue owner.
+Each incoming ACP transport line is limited to **64 MiB (67,108,864 bytes)** by
+default. `ACPX_MAX_ACP_MESSAGE_BYTES` overrides that limit with a non-negative
+safe integer number of bytes:
 
-The limit applies to complete messages and unfinished lines alike, regardless of
-how stdout chunks are split. This is an explicit maximum message size: choose a
-limit large enough for image and other structured responses. Overflow fails the
-connection with `ACP_MESSAGE_TOO_LARGE`, while invalid settings fail before an agent process is spawned.
-A warm owner keeps the setting with which its ACP connection was started.
+- Unset, empty, or whitespace-only: use the 64 MiB default.
+- Positive value: use that limit; for example, `134217728` allows 128 MiB.
+- `0`: explicitly disable the limit and allow unlimited input.
+
+The limit counts raw UTF-8 bytes before decoding, excluding the terminating LF
+but including a preceding CR and other whitespace. It applies to complete messages
+and unfinished lines alike, regardless of how stdout chunks are split. Multiple
+individually valid messages can arrive in a combined read larger than the limit.
+
+Choose a limit large enough for image and other structured responses. Overflow
+fails the connection with `ACP_MESSAGE_TOO_LARGE` and explains how to raise or
+disable the limit; invalid settings fail before an agent process is spawned.
+A warm owner keeps the setting with which its ACP connection was started, so
+restart it to pick up a new value or default.
+
+This is a per-message limit, not a process-memory or model-token budget; decoding
+and JSON parsing may use more memory than the serialized message size. It does
+not limit outgoing ACP prompts, queue requests, or shell output capture.

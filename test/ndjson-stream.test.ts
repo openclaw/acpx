@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readMaxAcpMessageBytes, createNdJsonMessageStream } from "../src/acp/ndjson-stream.js";
+import {
+  DEFAULT_MAX_ACP_MESSAGE_BYTES,
+  AcpMessageLimitError,
+  readMaxAcpMessageBytes,
+  createNdJsonMessageStream,
+} from "../src/acp/ndjson-stream.js";
 
 function sinkWritable(): WritableStream<Uint8Array> {
   return new WritableStream<Uint8Array>({
@@ -32,13 +37,43 @@ async function readAll(readable: ReadableStream<unknown>): Promise<unknown[]> {
   return values;
 }
 
-test("ACP message limits are opt-in and validate configuration", () => {
-  assert.equal(readMaxAcpMessageBytes(""), undefined);
+test("ACP message limits default to 64 MiB and preserve explicit overrides", () => {
+  assert.equal(DEFAULT_MAX_ACP_MESSAGE_BYTES, 64 * 1024 * 1024);
+  assert.equal(readMaxAcpMessageBytes(""), DEFAULT_MAX_ACP_MESSAGE_BYTES);
+  assert.equal(readMaxAcpMessageBytes(" \t "), DEFAULT_MAX_ACP_MESSAGE_BYTES);
   assert.equal(readMaxAcpMessageBytes("0"), undefined);
+  assert.equal(readMaxAcpMessageBytes(" 0 "), undefined);
   assert.equal(readMaxAcpMessageBytes("1024"), 1024);
+  assert.equal(readMaxAcpMessageBytes("134217728"), 128 * 1024 * 1024);
   for (const raw of ["-1", "1.5", "NaN", "Infinity", "9007199254740992"]) {
     assert.throws(() => readMaxAcpMessageBytes(raw), /ACPX_MAX_ACP_MESSAGE_BYTES/);
   }
+});
+
+test("ACP message limit reads unset and configured environment values", () => {
+  const previous = process.env.ACPX_MAX_ACP_MESSAGE_BYTES;
+  try {
+    delete process.env.ACPX_MAX_ACP_MESSAGE_BYTES;
+    assert.equal(readMaxAcpMessageBytes(), DEFAULT_MAX_ACP_MESSAGE_BYTES);
+    process.env.ACPX_MAX_ACP_MESSAGE_BYTES = "0";
+    assert.equal(readMaxAcpMessageBytes(), undefined);
+    process.env.ACPX_MAX_ACP_MESSAGE_BYTES = "4096";
+    assert.equal(readMaxAcpMessageBytes(), 4096);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.ACPX_MAX_ACP_MESSAGE_BYTES;
+    } else {
+      process.env.ACPX_MAX_ACP_MESSAGE_BYTES = previous;
+    }
+  }
+});
+
+test("ACP message limit errors explain how to raise or disable the limit", () => {
+  const error = new AcpMessageLimitError(DEFAULT_MAX_ACP_MESSAGE_BYTES);
+  assert.match(error.message, /67108864 bytes/);
+  assert.match(error.message, /Increase the limit or set it to 0/);
+  assert.equal(error.detailCode, "ACP_MESSAGE_TOO_LARGE");
+  assert.equal(error.retryable, false);
 });
 
 test("ACP limits reject complete and incomplete lines independently of chunk boundaries", async () => {
@@ -89,6 +124,7 @@ test("ACP default accepts complete frames above the former proposed 8 MiB ceilin
     "fixture",
     sinkWritable(),
     bytesFrom([bytes.subarray(0, 1024), bytes.subarray(1024)]),
+    readMaxAcpMessageBytes(""),
   );
   assert.deepEqual(await readAll(stream.readable), [{ id: 1, result: value }]);
 });
