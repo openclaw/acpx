@@ -39,7 +39,7 @@ jobs:
           submodules: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6.0.10
+        uses: pnpm/action-setup@v6.1.0
         with:
           version: ${{ env.PNPM_VERSION }}
 
@@ -114,7 +114,7 @@ jobs:
           submodules: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6.0.10
+        uses: pnpm/action-setup@v6.1.0
         with:
           version: ${{ env.PNPM_VERSION }}
 
@@ -145,14 +145,14 @@ jobs:
           REPORT="conformance-artifacts/${{ matrix.id }}-report.json"
           if [ ! -f "$REPORT" ]; then
             node - <<'NODE'
-            const fs = require("node:fs");
-            const lines = [
-              "### Adapter Smoke: ${{ matrix.id }}",
-              "",
-              "- Result: report not produced (adapter failed before report write)",
-            ];
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`);
-            NODE
+          const fs = require("node:fs");
+          const lines = [
+            "### Adapter Smoke: ${{ matrix.id }}",
+            "",
+            "- Result: report not produced (adapter failed before report write)",
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`);
+          NODE
             exit 0
           fi
           node - <<'NODE'
