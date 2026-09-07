@@ -121,6 +121,9 @@ function createProbeClient(
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     permissionPolicy: options.permissionPolicy,
+    fs: options.fs,
+    terminal: options.terminal,
+    processLauncher: options.processLauncher,
     verbose: options.verbose,
   };
   return deps.clientFactory?.(clientOptions) ?? new AcpClient(clientOptions);

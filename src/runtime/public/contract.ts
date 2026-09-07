@@ -367,6 +367,12 @@ export type AcpRuntimeOptions = {
     req: AcpPermissionRequest,
     ctx: { signal: AbortSignal },
   ) => Promise<AcpPermissionDecision | undefined>;
+  /** ACP client filesystem capability. Disable when the agent runs on another host. */
+  fs?: boolean;
+  /** ACP client terminal capability. Disable when the agent runs on another host. */
+  terminal?: boolean;
+  /** Replaces the local child-process spawn while preserving logical agent behavior. */
+  processLauncher?: import("../../types.js").AcpAgentProcessLauncher;
 };
 
 export type AcpFileSessionStoreOptions = {
