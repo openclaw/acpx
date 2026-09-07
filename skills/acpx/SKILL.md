@@ -96,6 +96,7 @@ Friendly agent names resolve to commands:
 - `kilocode` -> `npx -y @kilocode/cli acp`
 - `kimi` -> `kimi acp`
 - `kiro` -> `kiro-cli-chat acp`
+- `mcode` -> `mcode acp` (install/authenticate MCode first; prefer `exec` for one-shot work, and require advertised ACP reload support for cross-invocation continuity)
 - `mux` -> `mux acp` via an ACPX-owned npm range
 - `opencode` -> `npx -y opencode-ai acp`
 - `pool` -> `pool acp`

@@ -16,6 +16,7 @@ Built-in agents:
 - `kilocode -> npx -y @kilocode/cli acp`
 - `kimi -> kimi acp`
 - `kiro -> kiro-cli-chat acp`
+- `mcode -> mcode acp`
 - `mux -> mux acp` via an ACPX-owned npm range
 - `opencode -> npx -y opencode-ai acp`
 - `pool -> pool acp`
@@ -38,6 +39,7 @@ Harness-specific docs in this directory:
 - [Kilocode](Kilocode.md): built-in `kilocode -> npx -y @kilocode/cli acp`
 - [Kimi](Kimi.md): built-in `kimi -> kimi acp`
 - [Kiro](Kiro.md): built-in `kiro -> kiro-cli-chat acp`
+- [MCode](MCode.md): built-in `mcode -> mcode acp`
 - [Mux](Mux.md): built-in `mux -> mux acp` via an ACPX-owned npm range
 - [OpenCode](OpenCode.md): built-in `opencode -> npx -y opencode-ai acp`
 - [Pool](Pool.md): built-in `pool -> pool acp`

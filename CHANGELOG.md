@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Agents/built-ins: add MiniMax Code through its native `mcode acp` server, with structured launch arguments and setup/lifecycle guidance. Thanks @hetaoBackend.
+
 ### Breaking
 
 ### Fixes
@@ -24,7 +26,6 @@ Repo: https://github.com/openclaw/acpx
 - Flows: keep the host alive when a shell action closes stdin before consuming its input. Thanks @SebTardif.
 - ACP/terminal: handle child stdout and stderr errors without terminating the host, so wait and release can finish. Thanks @SebTardif.
 - ACP/launch: preserve process-spawn `ENOENT` as additive `AGENT_SPAWN_ENOENT` detail and include qualified remediation while keeping the broad runtime code and other spawn failures unchanged. Fixes #510. Thanks @anyech.
-- ACP/results: preserve optional prompt-response `_meta` through direct, queued, compare, and embedded-runtime result surfaces.
 - Flows: coalesce heartbeat writes while storage is busy so slow filesystems do not accumulate overlapping writes and stall running steps.
 - Dependencies: refresh tsx, zod, qs, replay-viewer packages, React DOM types, and source tooling; align source builds with pnpm 11.25.0 and tsdown 0.23.0. Thanks @dependabot.
 - Source builds: document supported Node versions separately from the published CLI runtime minimum; tsdown no longer supports Node 25.
