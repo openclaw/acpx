@@ -6,7 +6,12 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+**Highlights:** Hosts can bound terminal output retention without changing existing defaults; incoming ACP messages now default to a 64 MiB limit with an explicit override.
+
 ### Changes
+
+- ACP/terminal: add an opt-in `ACPX_TERMINAL_MAX_OUTPUT_BYTES` ceiling for combined stdout and stderr retention, preserving agent-requested limits and the 64 KiB default unless configured. Zero disables only the host ceiling; truncated output retains the newest UTF-8 suffix. Thanks @SebTardif.
+- Source builds: update pnpm to 12.3.4 across local setup and CI while preserving the 48-hour dependency release-age policy and the existing Node.js minimum.
 
 ### Breaking
 
