@@ -772,6 +772,7 @@ export class AcpRuntimeManager {
     }
     this.removeRetainedSessionOwner(owner);
     await this.stopSessionOwner(owner);
+    this.clearTransientOneShotOptions(owner);
   }
 
   private clearTransientOneShotOptions(owner: RuntimeSessionOwner): void {
@@ -905,9 +906,18 @@ export class AcpRuntimeManager {
   }
 
   async ensureSession(input: RuntimeEnsureInput): Promise<SessionRecord> {
-    return await this.withEnsureSessionLock(input, async () =>
-      this.ensureSessionWithOwnership(input),
-    );
+    return await this.withEnsureSessionLock(input, async () => {
+      const recordId =
+        input.mode === "persistent"
+          ? input.sessionKey
+          : this.pendingOneShotRecordIds.get(input.sessionKey);
+      if (!recordId) {
+        return await this.ensureSessionWithOwnership(input);
+      }
+      return await this.withManagerLock(this.runtimeOperationLocks, recordId, async () =>
+        this.ensureSessionWithOwnership(input),
+      );
+    });
   }
 
   private async withEnsureSessionLock<T>(
@@ -1803,6 +1813,7 @@ export class AcpRuntimeManager {
       return;
     }
     turn.owner.activeTurn = undefined;
+    this.clearTransientOneShotOptions(turn.owner);
     const clearAttempt = await settleAttempt(() => turn.client.clearEventHandlers());
     const closeAttempt = await settleAttempt(async () => turn.client.close());
     const failure = firstFailedAttempt([clearAttempt, closeAttempt]);

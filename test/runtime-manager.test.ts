@@ -15,6 +15,7 @@ import type {
   AcpRuntimeHandle,
   AcpSessionRecord,
   AcpRuntimeTurn,
+  SessionAgentOptions,
   AcpRuntimeTurnResult,
 } from "../src/runtime/public/contract.js";
 import {
@@ -4983,6 +4984,173 @@ test("AcpRuntimeManager rejects secret rotation during an active turn", async ()
   resolvePrompt({ stopReason: "end_turn" });
   assert.deepEqual(await turn.result, { status: "completed", stopReason: "end_turn" });
   await manager.close(createHandle(record.acpxRecordId));
+});
+
+test("AcpRuntimeManager serializes secret rotation with reconnecting controls", async () => {
+  const existing = makeSessionRecord({
+    acpxRecordId: "control-rotation-session",
+    acpSessionId: "control-rotation-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+    closed: true,
+  });
+  const store = new InMemorySessionStore([existing]);
+  let signalLoadStarted!: () => void;
+  const loadStarted = new Promise<void>((resolve) => {
+    signalLoadStarted = resolve;
+  });
+  let releaseLoad!: () => void;
+  const loadGate = new Promise<void>((resolve) => {
+    releaseLoad = resolve;
+  });
+  let rotationResolved = false;
+  const constructedOptions: Array<{ sessionOptions?: SessionAgentOptions }> = [];
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: store,
+      secretEnvKeys: ["API_TOKEN"],
+    }),
+    {
+      clientFactory: (options) => {
+        constructedOptions.push(options);
+        const sessionOptions = options.sessionOptions;
+        return {
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => {
+            signalLoadStarted();
+            await loadGate;
+            return { agentSessionId: "control-agent" };
+          },
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {
+            assert.deepEqual(sessionOptions?.env, {
+              API_TOKEN: rotationResolved ? "fixture-value-new" : "fixture-value-old",
+            });
+          },
+          setSessionConfigOption: async () => ({ configOptions: [] }),
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        } as never;
+      },
+    },
+  );
+
+  const record = await manager.ensureSession({
+    sessionKey: existing.acpxRecordId,
+    agent: "codex",
+    mode: "persistent",
+    sessionOptions: { env: { API_TOKEN: "fixture-value-old" } },
+  });
+  const control = manager.setMode(createHandle(record.acpxRecordId), "ask");
+  await loadStarted;
+  const rotation = manager
+    .ensureSession({
+      sessionKey: existing.acpxRecordId,
+      agent: "codex",
+      mode: "persistent",
+      sessionOptions: { env: { API_TOKEN: "fixture-value-new" } },
+    })
+    .then((value) => {
+      rotationResolved = true;
+      return value;
+    });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(rotationResolved, false);
+
+  releaseLoad();
+  await control;
+  await rotation;
+  assert.equal(rotationResolved, true);
+  await manager.setMode(createHandle(record.acpxRecordId), "plan");
+  assert.deepEqual(constructedOptions.at(-1)?.sessionOptions, {
+    env: { API_TOKEN: "fixture-value-new" },
+  });
+});
+
+test("AcpRuntimeManager releases one-shot transient secrets after every teardown", async () => {
+  const store = new InMemorySessionStore();
+  let created = 0;
+  const observedSessionOptions: Array<SessionAgentOptions | undefined> = [];
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: store,
+      secretEnvKeys: ["API_TOKEN"],
+    }),
+    {
+      clientFactory: (options) => {
+        observedSessionOptions.push(options.sessionOptions);
+        return {
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: `oneshot-secret-${++created}` }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => true,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => ({ agentSessionId: "reconnected" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => ({ configOptions: [] }),
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        } as never;
+      },
+    },
+  );
+
+  const completed = await manager.ensureSession({
+    sessionKey: "completed-oneshot-secret",
+    agent: "codex",
+    mode: "oneshot",
+    sessionOptions: { env: { API_TOKEN: "fixture-value-completed" } },
+  });
+  const turn = manager.startTurn({
+    handle: createHandle(completed.name ?? completed.acpxRecordId, completed.acpxRecordId),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "oneshot",
+    requestId: "completed-oneshot-secret",
+  });
+  assert.deepEqual((await collectTurn(turn)).result, {
+    status: "completed",
+    stopReason: "end_turn",
+  });
+  await manager.setMode(createHandle(completed.acpxRecordId), "ask", "oneshot");
+  assert.equal(observedSessionOptions.at(-1), undefined);
+
+  const aborted = await manager.ensureSession({
+    sessionKey: "aborted-oneshot-secret",
+    agent: "codex",
+    mode: "oneshot",
+    sessionOptions: { env: { API_TOKEN: "fixture-value-aborted" } },
+  });
+  const controller = new AbortController();
+  controller.abort();
+  const cancelled = manager.startTurn({
+    handle: createHandle(aborted.name ?? aborted.acpxRecordId, aborted.acpxRecordId),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "oneshot",
+    requestId: "aborted-oneshot-secret",
+    signal: controller.signal,
+  });
+  assert.deepEqual(await cancelled.result, { status: "cancelled", stopReason: "cancelled" });
+  await manager.setMode(createHandle(aborted.acpxRecordId), "ask", "oneshot");
+  assert.equal(observedSessionOptions.at(-1), undefined);
 });
 
 test("sessionOptionsFromRecord restores session env from a persisted record", () => {
