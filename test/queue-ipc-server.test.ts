@@ -251,3 +251,52 @@ test("SessionQueueOwner enqueues fire-and-forget prompts and rejects invalid own
     }
   });
 });
+
+test("queue request limits retain unlimited input and reject oversized socket fragments", async () => {
+  await withTempHome(async () => {
+    for (const limit of [0, 1024]) {
+      const lease = await tryAcquireQueueOwnerLease(`request-limit-${limit}`);
+      assert(lease);
+      const owner = await SessionQueueOwner.start(
+        lease,
+        {
+          cancelPrompt: async () => false,
+          closeSession: async () => false,
+          setSessionMode: async () => {},
+          setSessionModel: async () => undefined,
+          setSessionConfigOption: async () => ({ configOptions: [] }),
+        },
+        { maxQueueDepth: 16, maxRequestBytes: limit },
+      );
+      const socket = await connectSocket(lease.socketPath);
+      try {
+        if (limit) {
+          const closed = new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error("oversized socket stayed open")), 2000);
+            socket.once("close", () => {
+              clearTimeout(timer);
+              resolve();
+            });
+            socket.on("error", () => {});
+          });
+          socket.write("é".repeat(513));
+          await closed;
+          assert.equal(await owner.nextTask(10), undefined);
+        } else {
+          const lines = readline.createInterface({ input: socket });
+          const iterator = lines[Symbol.asyncIterator]();
+          socket.write(
+            `${JSON.stringify({ type: "submit_prompt", requestId: "large", message: "x".repeat(10 * 1024 * 1024 + 1), prompt: [{ type: "text", text: "small" }], permissionMode: "deny-all", waitForCompletion: false })}\n`,
+          );
+          assert.equal(((await nextJsonLine(iterator)) as { type: string }).type, "accepted");
+          assert.equal((await owner.nextTask(1000))?.requestId, "large");
+          lines.close();
+        }
+      } finally {
+        socket.destroy();
+        await owner.close();
+        await releaseQueueOwnerLease(lease);
+      }
+    }
+  });
+});

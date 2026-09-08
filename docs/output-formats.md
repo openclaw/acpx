@@ -152,3 +152,11 @@ Do not assume the `acpxRecordId` can be passed to a native provider CLI. Use `ag
 - [Sessions](sessions.md) — what session-control commands return.
 - [Permissions](permissions.md) — how denials surface in each format.
 - [CLI reference](CLI.md#output-formats) — full per-mode behavior table.
+
+## Prompt response metadata
+
+ACP prompt response `_meta` is passed through to compare summaries and embedded
+runtime completion results, including queued prompts. An absent field stays
+absent, and an explicit `null` stays `null`. Nested values are opaque,
+adapter-defined data; ACPX does not authenticate them or treat them as proof of
+model identity or configuration. Raw JSON output retains the original ACP response.

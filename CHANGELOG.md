@@ -8,19 +8,44 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
-- Dependencies: update runtime schema validation and development tooling, and move source builds to pnpm 11.24.0.
-- Dependencies: refresh tsx and zod patch versions for bounded transform caching and schema traversal fixes. Thanks @dependabot.
-- Dependencies: update the qs override for parser limit and cycle-detection fixes, refresh replay-viewer and validation tooling, and align source builds with pnpm 11.25.0. Thanks @dependabot.
-
 ### Breaking
 
 ### Fixes
 
-- Flows: coalesce heartbeat writes while storage is busy so slow filesystems do not accumulate overlapping writes and stall running steps.
+## 0.15.1 - 2026-09-07
+
+**Highlights:** Hosts can bound terminal output retention without changing existing defaults; incoming ACP messages now default to a 64 MiB limit with an explicit override.
+
+- ACP/terminal: add an opt-in `ACPX_TERMINAL_MAX_OUTPUT_BYTES` ceiling for combined stdout and stderr retention, preserving agent-requested limits and the 64 KiB default unless configured. Zero disables only the host ceiling; truncated output retains the newest UTF-8 suffix. Thanks @SebTardif.
+- ACP/transport (**compatibility change**): default incoming messages to a 64 MiB raw-byte limit instead of unlimited input; use `ACPX_MAX_ACP_MESSAGE_BYTES` to raise the limit or `0` to disable it. Overflow errors explain the override, and existing warm owners retain their startup setting.
+
+## 0.15.0 - 2026-09-07
+
+**Highlights:** Embedding hosts gain process lifecycle admission and transient child environments; optional limits bound shell output and ACP/queue input.
+
+- Runtime/embedding: expose optional correlated process lifecycle hooks with awaited launch admission and best-effort failure and exit observers. Thanks @MertBasar0.
+- Runtime/embedding: add a snapshotted child-only environment overlay for probes and session reconnects without persisting host settings or overriding protected authentication. Thanks @taras and @coding-ax.
+- ACP/results: preserve optional opaque prompt-response metadata in direct, queued, compare, and embedded-runtime results. Thanks @superbiche.
+- Agents/built-ins: add MiniMax Code through its native `mcode acp` server, with structured launch arguments and setup/lifecycle guidance. Thanks @hetaoBackend.
+- Flows: add optional per-stream shell capture limits with UTF-8 byte accounting and complete process-tree cleanup, retaining unlimited capture by default. Thanks @SebTardif.
+- ACP/transport: add an optional raw-byte message limit with clear overflow errors, preserving unlimited input by default and consistent handling across chunk boundaries. Thanks @SebTardif.
+- Queue: add an optional incoming request limit with client-side size diagnostics and raw-peer rejection, preserving large requests by default. Thanks @SebTardif.
+
+## 0.14.0 - 2026-09-05
+
+**Highlights:** One-shot runs can apply ACP configuration options before prompting, and embedded clients can wait for the actual prompt transport write.
+
+- CLI/exec: apply repeatable ACP `--config-option <key=value>` selections after the requested model and before a one-shot prompt. Thanks @superbiche.
+- Runtime/embedding: settle `promptStarted` only after the exact prompt request is accepted by the writable ACP transport, and reject it when that write fails. Thanks @vincentkoc.
+- Flows: preserve unlimited shell timeouts while enclosing deadlines and interrupts cancel active shell commands and attributable descendants before completing, and prevent late executors from launching after cancellation. Thanks @SebTardif.
+- ACP/terminal: time out hung Windows `taskkill` and report incomplete cleanup instead of hanging release or reporting a successful kill, retaining terminal state for a cleanup retry. Thanks @SebTardif.
+- Runtime/sessions: preserve uppercase and mixed-case environment variable names when saving and reloading session options. Thanks @coding-ax.
 - Flows: keep the host alive when a shell action closes stdin before consuming its input. Thanks @SebTardif.
 - ACP/terminal: handle child stdout and stderr errors without terminating the host, so wait and release can finish. Thanks @SebTardif.
 - ACP/launch: preserve process-spawn `ENOENT` as additive `AGENT_SPAWN_ENOENT` detail and include qualified remediation while keeping the broad runtime code and other spawn failures unchanged. Fixes #510. Thanks @anyech.
-- Flows: preserve unlimited shell timeouts while enclosing deadlines and interrupts cancel active shell commands and attributable descendants before completing, and prevent late executors from launching after cancellation. Thanks @SebTardif.
+- Flows: coalesce heartbeat writes while storage is busy so slow filesystems do not accumulate overlapping writes and stall running steps.
+- Dependencies: refresh tsx, zod, qs, replay-viewer packages, React DOM types, and source tooling; align source builds with pnpm 11.25.0 and tsdown 0.23.0. Thanks @dependabot.
+- Source builds: document supported Node versions separately from the published CLI runtime minimum; tsdown no longer supports Node 25.
 
 ## 2026.8.28 (v0.13.2)
 

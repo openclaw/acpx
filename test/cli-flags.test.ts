@@ -3,6 +3,7 @@ import test from "node:test";
 import { Command } from "commander";
 import type { ResolvedAcpxConfig } from "../src/cli/config.js";
 import {
+  addExecConfigOption,
   addGlobalFlags,
   addPromptInputOption,
   addSessionNameOption,
@@ -17,6 +18,7 @@ import {
   parseOutputFormat,
   parsePruneBeforeDate,
   parsePromptRetries,
+  parseSessionConfigOptionAssignment,
   parseSessionName,
   parseTimeoutSeconds,
   parseTtlSeconds,
@@ -153,6 +155,22 @@ test("string list flag parsers normalize valid values and reject empty entries",
   assert.deepEqual(parseAllowedTools("   "), []);
   assert.deepEqual(parseAllowedTools("Read, Edit , Bash"), ["Read", "Edit", "Bash"]);
   assert.throws(() => parseAllowedTools("Read,,Edit"), /without empty entries/);
+});
+
+test("session config option assignments preserve values and reject incomplete pairs", () => {
+  assert.deepEqual(parseSessionConfigOptionAssignment(" reasoning_effort = xhigh "), {
+    configId: "reasoning_effort",
+    value: "xhigh",
+  });
+  assert.deepEqual(parseSessionConfigOptionAssignment("endpoint=https://example.com?a=b"), {
+    configId: "endpoint",
+    value: "https://example.com?a=b",
+  });
+  assert.throws(() => parseSessionConfigOptionAssignment("reasoning_effort"), /<key>=<value>/);
+  assert.throws(() => parseSessionConfigOptionAssignment("=xhigh"), /<key>=<value>/);
+  assert.throws(() => parseSessionConfigOptionAssignment("reasoning_effort="), /<key>=<value>/);
+  assert.throws(() => parseSessionConfigOptionAssignment("  =xhigh"), /<key>=<value>/);
+  assert.throws(() => parseSessionConfigOptionAssignment("reasoning_effort=   "), /<key>=<value>/);
 });
 
 test("history and prune parsers validate positive numbers and dates", () => {
@@ -431,6 +449,19 @@ test("session and prompt option registration parse command-local flags", () => {
 
   const promptCommand = parseCommand(addPromptInputOption(new Command()), ["--file", "-"]);
   assert.deepEqual(promptCommand.opts(), { file: "-" });
+
+  const execCommand = parseCommand(addExecConfigOption(new Command()), [
+    "--config-option",
+    "reasoning_effort=high",
+    "--config-option",
+    "verbosity=terse",
+  ]);
+  assert.deepEqual(execCommand.opts(), {
+    configOption: [
+      { configId: "reasoning_effort", value: "high" },
+      { configId: "verbosity", value: "terse" },
+    ],
+  });
 });
 
 test("resolveSessionNameFromFlags falls back through global and parent command options", () => {

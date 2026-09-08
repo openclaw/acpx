@@ -3,3 +3,4 @@ self-hosted-runner:
     - crabbox
     - openclaw
     - acpx
+    - blacksmith-16vcpu-ubuntu-2404

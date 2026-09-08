@@ -461,6 +461,7 @@ export async function handleExec(
       maxTurns: globalFlags.maxTurns,
       systemPrompt: globalFlags.systemPrompt,
     },
+    configOptions: flags.configOption,
   });
 
   applyPermissionExitCode(result, outputPolicy.format === "quiet" ? outputFormatter : undefined);

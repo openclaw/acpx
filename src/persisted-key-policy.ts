@@ -13,7 +13,11 @@ const ZED_TAG_KEYS = new Set([
   "ToolUse",
 ]);
 
-const MAP_OBJECT_PATHS = new Set(["request_token_usage", "messages.Agent.tool_results"]);
+const MAP_OBJECT_PATHS = new Set([
+  "request_token_usage",
+  "messages.Agent.tool_results",
+  "acpx.session_options.env",
+]);
 
 const OPAQUE_VALUE_PATHS = new Set([
   "agent_capabilities",

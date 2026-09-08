@@ -54,6 +54,12 @@ export type {
   AcpFileSessionStoreOptions,
   AcpPermissionDecision,
   AcpPermissionRequest,
+  AcpProcessExit,
+  AcpProcessLaunch,
+  AcpProcessLaunchScope,
+  AcpProcessLifecycle,
+  AcpProcessSpawnFailure,
+  AcpProcessStarted,
   AcpRuntime,
   AcpRuntimeAvailableCommand,
   AcpRuntimeCapabilities,
@@ -151,7 +157,11 @@ export class AcpxRuntime implements AcpxRuntimeLike {
         details?: unknown[];
       }>;
     },
-  ) {}
+  ) {
+    if (options.agentProcessEnv) {
+      this.options = { ...options, agentProcessEnv: { ...options.agentProcessEnv } };
+    }
+  }
 
   isHealthy(): boolean {
     return this.healthy;

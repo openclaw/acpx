@@ -81,6 +81,8 @@ export type ShellActionExecution = {
   shell?: boolean | string;
   allowNonZeroExit?: boolean;
   timeoutMs?: number;
+  /** Per-stream UTF-8 capture limit. Omitted is unlimited; zero permits empty output only. */
+  maxBufferBytes?: number;
 };
 
 export type ShellActionResult = {

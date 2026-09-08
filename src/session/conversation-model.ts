@@ -26,12 +26,6 @@ import type {
 } from "../types.js";
 import { applyConfigOptionsModelState } from "./model-state.js";
 
-export type LegacyHistoryEntry = {
-  role: "user" | "assistant";
-  timestamp: string;
-  textPreview: string;
-};
-
 const MAX_RUNTIME_MESSAGES = 200;
 const MAX_RUNTIME_AGENT_TEXT_CHARS = 8_000;
 const MAX_RUNTIME_THINKING_CHARS = 4_000;
@@ -601,36 +595,6 @@ function cloneSystemPromptOption(
   option: NonNullable<NonNullable<SessionAcpxState["session_options"]>["system_prompt"]>,
 ): NonNullable<NonNullable<SessionAcpxState["session_options"]>["system_prompt"]> {
   return typeof option === "string" ? option : { append: option.append };
-}
-
-export function appendLegacyHistory(
-  conversation: SessionConversation,
-  entries: LegacyHistoryEntry[],
-): void {
-  for (const entry of entries) {
-    const text = entry.textPreview?.trim();
-    if (!text) {
-      continue;
-    }
-
-    if (entry.role === "user") {
-      conversation.messages.push({
-        User: {
-          id: nextUserMessageId(),
-          content: [{ Text: text }],
-        },
-      });
-    } else {
-      conversation.messages.push({
-        Agent: {
-          content: [{ Text: text }],
-          tool_results: {},
-        },
-      });
-    }
-
-    updateConversationTimestamp(conversation, entry.timestamp || conversation.updated_at);
-  }
 }
 
 export function recordPromptSubmission(

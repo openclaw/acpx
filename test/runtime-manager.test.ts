@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import type { SessionModelState } from "../src/acp/model-support.js";
@@ -79,10 +80,11 @@ type FakeClient = {
   prompt: (
     sessionId: string,
     input: unknown,
-    onRequestStarted?: () => Promise<void> | void,
+    onRequestWritten?: () => Promise<void> | void,
   ) => Promise<{
     stopReason: string;
     usage?: Record<string, unknown>;
+    _meta?: Record<string, unknown> | null;
   }>;
   closeSession?: (sessionId: string) => Promise<void>;
   waitForSessionUpdatesIdle?: (options?: { idleMs?: number; timeoutMs?: number }) => Promise<void>;
@@ -219,11 +221,13 @@ test("AcpRuntimeManager closes an incompatible persistent owner before replacing
 
 test("AcpRuntimeManager creates and resumes sessions through the client", async () => {
   const store = new InMemorySessionStore();
+  const agentProcessEnv = { ACPX_TEST_RUNTIME_OVERLAY: "runtime-only" };
   const permissionPolicy = {
     autoApprove: ["read"],
     escalate: ["execute"],
     defaultAction: "deny" as const,
   };
+  const processLifecycle = {};
   const lifecycle = {
     pid: 456,
     startedAt: "2026-01-01T00:00:00.000Z",
@@ -237,7 +241,7 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
     start: async () => {},
     close: async () => {},
     createSession: async (cwd) => {
-      assert.equal(cwd, "/workspace");
+      assert.equal(cwd, path.resolve("/workspace"));
       return {
         sessionId: "new-session",
         agentSessionId: "agent-session",
@@ -257,7 +261,7 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
     },
     resumeSession: async (sessionId, cwd) => {
       assert.equal(sessionId, "resume-session");
-      assert.equal(cwd, "/workspace");
+      assert.equal(cwd, path.resolve("/workspace"));
       return {
         agentSessionId: "resumed-agent",
         configOptions: [
@@ -286,7 +290,13 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
   });
   const constructedOptions: Array<Record<string, unknown>> = [];
   const manager = new AcpRuntimeManager(
-    createRuntimeOptions({ cwd: "/workspace", sessionStore: store, permissionPolicy }),
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: store,
+      permissionPolicy,
+      agentProcessEnv,
+      processLifecycle,
+    }),
     {
       clientFactory: (options) => {
         constructedOptions.push(options);
@@ -324,8 +334,25 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
   );
   assert.equal(constructedOptions.length, 2);
   assert.deepEqual(
+    constructedOptions.map((options) => options.agentProcessEnv),
+    [agentProcessEnv, agentProcessEnv],
+  );
+  assert.equal(JSON.stringify(created).includes("runtime-only"), false);
+  assert.equal(JSON.stringify(resumed).includes("runtime-only"), false);
+  assert.deepEqual(
     constructedOptions.map((options) => options.permissionPolicy),
     [permissionPolicy, permissionPolicy],
+  );
+  assert.deepEqual(
+    constructedOptions.map((options) => options.processLifecycle),
+    [processLifecycle, processLifecycle],
+  );
+  assert.deepEqual(
+    constructedOptions.map((options) => options.processLaunchScope),
+    [
+      { kind: "runtime-session", sessionKey: "created-session" },
+      { kind: "runtime-session", sessionKey: "resumed-session" },
+    ],
   );
 });
 
@@ -534,7 +561,10 @@ test("AcpRuntimeManager streams runtime events and saves updated status", async 
         status: "ok",
         summary: "saved notes.md",
       });
-      return { stopReason: "end_turn" };
+      return {
+        stopReason: "end_turn",
+        _meta: { transport: { model: "gpt-5.6-sol", effort: "xhigh" } },
+      };
     },
     requestCancelActivePrompt: async () => false,
     hasActivePrompt: () => false,
@@ -567,7 +597,11 @@ test("AcpRuntimeManager streams runtime events and saves updated status", async 
     { type: "text_delta", text: "hello", stream: "output", tag: "agent_message_chunk" },
     { type: "status", text: "write_file ok saved notes.md" },
   ]);
-  assert.deepEqual(result, { status: "completed", stopReason: "end_turn" });
+  assert.deepEqual(result, {
+    status: "completed",
+    stopReason: "end_turn",
+    _meta: { transport: { model: "gpt-5.6-sol", effort: "xhigh" } },
+  });
 
   const saved = await store.load("turn-session");
   assert.equal(saved?.lastRequestId, "req-1");
@@ -605,9 +639,9 @@ test("AcpRuntimeManager resolves promptStarted while the submitted prompt is pen
           prompt: async (
             _sessionId: string,
             _input: unknown,
-            onRequestStarted?: () => Promise<void> | void,
+            onRequestWritten?: () => Promise<void> | void,
           ) => {
-            await onRequestStarted?.();
+            await onRequestWritten?.();
             return await promptResponse;
           },
           requestCancelActivePrompt: async () => false,
@@ -677,6 +711,53 @@ test("AcpRuntimeManager rejects promptStarted when the turn fails before submiss
   });
 
   await assert.rejects(turn.promptStarted, /connect failed/);
+  assert.equal((await turn.result).status, "failed");
+});
+
+test("AcpRuntimeManager rejects promptStarted when the prompt transport write fails", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "prompt-write-failed-session",
+    acpSessionId: "prompt-write-failed-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => true,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => {
+            throw new Error("transport write failed");
+          },
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+
+  const turn = manager.startTurn({
+    handle: createHandle("prompt-write-failed-session"),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-prompt-write-failed",
+  });
+
+  await assert.rejects(turn.promptStarted, /transport write failed/);
   assert.equal((await turn.result).status, "failed");
 });
 
@@ -790,9 +871,9 @@ test("AcpRuntimeManager keeps promptStarted resolved when submission later fails
           prompt: async (
             _sessionId: string,
             _input: unknown,
-            onRequestStarted?: () => Promise<void> | void,
+            onRequestWritten?: () => Promise<void> | void,
           ) => {
-            await onRequestStarted?.();
+            await onRequestWritten?.();
             throw new Error("prompt failed after submission");
           },
           requestCancelActivePrompt: async () => false,

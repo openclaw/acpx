@@ -206,7 +206,9 @@ test("runShellAction does not crash the host when the child exits before reading
 
 for (const detached of [false, true]) {
   test(`shell abort stops descendants after wrapper exit (detached=${detached})`, async (t) => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-shell-tree-"));
+    const dir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "acpx-shell-tree space & $dollar 'quote'-"),
+    );
     const pidFile = path.join(dir, "descendant.pid");
     const controller = new AbortController();
     const descendant = `process.on('SIGTERM',()=>{});require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setInterval(()=>{},1000)`;
@@ -214,7 +216,15 @@ for (const detached of [false, true]) {
     const wrapperFile = path.join(dir, "wrapper.cjs");
     await fs.writeFile(wrapperFile, wrapper);
     const pending = runShellAction(
-      { command: process.execPath, args: [wrapperFile], shell: true, timeoutMs: 0 },
+      {
+        command:
+          process.platform === "win32"
+            ? '"%ACPX_TEST_NODE%" "%ACPX_TEST_WRAPPER%"'
+            : '"$ACPX_TEST_NODE" "$ACPX_TEST_WRAPPER"',
+        env: { ACPX_TEST_NODE: process.execPath, ACPX_TEST_WRAPPER: wrapperFile },
+        shell: true,
+        timeoutMs: 0,
+      },
       { signal: controller.signal },
     );
     const rejected = assert.rejects(pending, TimeoutError);
@@ -552,5 +562,113 @@ test(
     );
     assert.equal(host.exitCode, 0, host.stderr);
     assert.deepEqual(JSON.parse(host.stdout), { error: "InterruptedError", count: "1" });
+  },
+);
+
+test("shell capture stays unlimited by default and limits streams independently", async () => {
+  const unlimited = await runShellAction({
+    command: process.execPath,
+    args: ["-e", 'process.stdout.write("x".repeat(2*1024*1024))'],
+  });
+  assert.equal(Buffer.byteLength(unlimited.stdout), 2 * 1024 * 1024);
+  const bounded = await runShellAction({
+    command: process.execPath,
+    args: ["-e", 'process.stdout.write("aaaa");process.stderr.write("bbbb")'],
+    maxBufferBytes: 4,
+  });
+  assert.equal(bounded.combinedOutput, "aaaabbbb");
+  const empty = await runShellAction({
+    command: process.execPath,
+    args: ["-e", ""],
+    maxBufferBytes: 0,
+  });
+  assert.equal(empty.combinedOutput, "");
+});
+
+test("shell capture rejects excess stdout and stderr even when nonzero exits are allowed", async () => {
+  for (const stream of ["stdout", "stderr"]) {
+    await assert.rejects(
+      runShellAction({
+        command: process.execPath,
+        args: ["-e", `process.${stream}.write("12345")`],
+        maxBufferBytes: 4,
+        allowNonZeroExit: true,
+      }),
+      new RegExp(`maxBuffer.*${stream}`),
+    );
+  }
+  await assert.rejects(
+    runShellAction({
+      command: process.execPath,
+      args: ["-e", 'process.stdout.write("x")'],
+      maxBufferBytes: 0,
+    }),
+    /maxBuffer/,
+  );
+});
+
+test("shell capture counts split UTF-8 characters without retaining partial prefixes", async () => {
+  const args = [
+    "-e",
+    "process.stdout.write(Buffer.from([0xc3]));setTimeout(()=>process.stdout.write(Buffer.from([0xa9])),20)",
+  ];
+  const result = await runShellAction({ command: process.execPath, args, maxBufferBytes: 2 });
+  assert.equal(result.stdout, "é");
+  await assert.rejects(
+    runShellAction({ command: process.execPath, args, maxBufferBytes: 1 }),
+    /maxBuffer/,
+  );
+});
+
+test("shell capture rejects invalid limits before spawning", async () => {
+  for (const maxBufferBytes of [-1, 0.5, Number.NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    await assert.rejects(
+      runShellAction({ command: "acpx-invalid-limit-must-not-spawn", maxBufferBytes }),
+      /maxBufferBytes must be a non-negative safe integer/,
+    );
+  }
+});
+
+test(
+  "shell capture preserves cancellation when a signal handler emits excess output",
+  { skip: process.platform === "win32" },
+  async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-cancel-output-"));
+    const ready = path.join(dir, "ready");
+    let owner: { cancel(signal: NodeJS.Signals): Promise<void> } | undefined;
+    const script = `process.on('SIGTERM',()=>{process.stdout.write('x'.repeat(65536),()=>process.exit(0))});require('node:fs').writeFileSync(${JSON.stringify(ready)},'ready');setInterval(()=>{},1000)`;
+    const pending = runShellAction(
+      { command: process.execPath, args: ["-e", script], maxBufferBytes: 1 },
+      {
+        registerOwner: (value) => {
+          owner = value;
+          return () => {};
+        },
+      },
+    );
+    const rejected = assert.rejects(pending, TimeoutError);
+    try {
+      let started = false;
+      for (let i = 0; i < 250; i += 1) {
+        if (
+          await fs.stat(ready).then(
+            () => true,
+            () => false,
+          )
+        ) {
+          started = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.ok(started, "child must install its signal handler");
+      assert.ok(owner);
+      await owner.cancel("SIGTERM");
+      await rejected;
+    } finally {
+      await owner?.cancel("SIGKILL");
+      await rejected;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   },
 );

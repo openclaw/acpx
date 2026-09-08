@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import path from "node:path";
-import { PassThrough } from "node:stream";
+import { PassThrough, type Readable, type Writable } from "node:stream";
 import test from "node:test";
-import type { RequestPermissionRequest, RequestPermissionResponse } from "@agentclientprotocol/sdk";
+import type {
+  AnyMessage,
+  RequestPermissionRequest,
+  RequestPermissionResponse,
+} from "@agentclientprotocol/sdk";
 import {
   AcpClient,
   buildAgentSpawnOptions,
@@ -14,12 +19,14 @@ import {
 } from "../src/acp/client.js";
 import {
   AgentDisconnectedError,
+  AgentSpawnError,
   AgentStartupError,
   AuthPolicyError,
   PermissionDeniedError,
   PermissionPromptUnavailableError,
   UnsupportedPromptContentError,
 } from "../src/errors.js";
+import type { AcpProcessStarted } from "../src/types.js";
 
 test("parseAcpJsonMessageLine ignores non-object JSON values", () => {
   for (const line of ["1", "null", '"diagnostic"', "[]", "[{}]"]) {
@@ -35,6 +42,20 @@ test("parseAcpJsonMessageLine preserves object-shaped protocol values", () => {
 });
 
 type ClientInternals = {
+  createTappedStream?: (base: {
+    readable: ReadableStream<AnyMessage>;
+    writable: WritableStream<AnyMessage>;
+  }) => {
+    readable: ReadableStream<AnyMessage>;
+    writable: WritableStream<AnyMessage>;
+  };
+  createConnection?: (
+    stream: {
+      readable: ReadableStream<AnyMessage>;
+      writable: WritableStream<AnyMessage>;
+    },
+    launch: { devinAcp: boolean },
+  ) => unknown;
   selectAuthMethod?: (methods: Array<{ id: string }>) =>
     | {
         methodId: string;
@@ -78,6 +99,11 @@ type ClientInternals = {
     reason: "process_exit" | "process_close" | "pipe_close" | "connection_close",
     exitCode: number | null,
     signal: NodeJS.Signals | null,
+  ) => void;
+  attachAgentLifecycleObservers?: (
+    child: ChildProcessByStdio<Writable, Readable, Readable>,
+    startedProcess: AcpProcessStarted,
+    exitNotificationBarrier: Promise<void>,
   ) => void;
   filesystem?: {
     readTextFile: (params: {
@@ -1204,6 +1230,140 @@ test("AcpClient lifecycle snapshot and cancel helpers reflect active prompt stat
   assert.deepEqual(cancelled, { stopReason: "cancelled" });
 });
 
+test("AcpClient reports prompt readiness only after the transport accepts the request", async () => {
+  const writeEntered = createDeferred<AnyMessage>();
+  const releaseWrite = createDeferred<void>();
+  const requestWritten = createDeferred<void>();
+  const agentToClient = new TransformStream<AnyMessage>();
+  const client = makeClient();
+  connectClientToStream(client, {
+    readable: agentToClient.readable,
+    writable: new WritableStream<AnyMessage>({
+      async write(message) {
+        writeEntered.resolve(message);
+        await releaseWrite.promise;
+      },
+    }),
+  });
+
+  let readinessCalls = 0;
+  const prompt = client.prompt("session-write-ready", "hello", () => {
+    readinessCalls += 1;
+    requestWritten.resolve();
+  });
+  const request = await writeEntered.promise;
+
+  assert.equal(readinessCalls, 0);
+  releaseWrite.resolve();
+  await requestWritten.promise;
+  assert.equal(readinessCalls, 1);
+
+  await writeAgentMessage(agentToClient.writable, promptResponseFor(request));
+  assert.deepEqual(await prompt, { stopReason: "end_turn" });
+});
+
+test("AcpClient rejects a failed prompt write without reporting readiness", async () => {
+  const writeEntered = createDeferred<void>();
+  const failWrite = createDeferred<void>();
+  const agentToClient = new TransformStream<AnyMessage>();
+  const client = makeClient();
+  connectClientToStream(client, {
+    readable: agentToClient.readable,
+    writable: new WritableStream<AnyMessage>({
+      async write() {
+        writeEntered.resolve();
+        await failWrite.promise;
+      },
+    }),
+  });
+
+  let readinessCalls = 0;
+  const prompt = client.prompt("session-write-failed", "hello", () => {
+    readinessCalls += 1;
+  });
+
+  await writeEntered.promise;
+  failWrite.reject(new Error("transport write failed"));
+  await assert.rejects(prompt, /transport write failed/);
+  assert.equal(readinessCalls, 0);
+});
+
+test("AcpClient keeps accepted prompts alive when the readiness observer throws", async () => {
+  const writeEntered = createDeferred<AnyMessage>();
+  const agentToClient = new TransformStream<AnyMessage>();
+  const client = makeClient();
+  connectClientToStream(client, {
+    readable: agentToClient.readable,
+    writable: new WritableStream<AnyMessage>({
+      write(message) {
+        writeEntered.resolve(message);
+      },
+    }),
+  });
+
+  const prompt = client.prompt("session-observer-failed", "hello", () => {
+    throw new Error("observer failed");
+  });
+  const request = await writeEntered.promise;
+  await writeAgentMessage(agentToClient.writable, promptResponseFor(request));
+
+  assert.deepEqual(await prompt, { stopReason: "end_turn" });
+});
+
+test("AcpClient keeps a queued prompt unready until its own transport write succeeds", async () => {
+  const firstWriteEntered = createDeferred<AnyMessage>();
+  const secondWriteEntered = createDeferred<AnyMessage>();
+  const releaseFirstWrite = createDeferred<void>();
+  const releaseSecondWrite = createDeferred<void>();
+  const firstRequestWritten = createDeferred<void>();
+  const secondRequestWritten = createDeferred<void>();
+  const agentToClient = new TransformStream<AnyMessage>();
+  const client = makeClient();
+  let writeCount = 0;
+  connectClientToStream(client, {
+    readable: agentToClient.readable,
+    writable: new WritableStream<AnyMessage>({
+      async write(message) {
+        writeCount += 1;
+        if (writeCount === 1) {
+          firstWriteEntered.resolve(message);
+          await releaseFirstWrite.promise;
+          return;
+        }
+        secondWriteEntered.resolve(message);
+        await releaseSecondWrite.promise;
+      },
+    }),
+  });
+
+  let secondReadinessCalls = 0;
+  const firstPrompt = client.prompt("session-queued", "first", () => {
+    firstRequestWritten.resolve();
+  });
+  const secondPrompt = client.prompt("session-queued", "second", () => {
+    secondReadinessCalls += 1;
+    secondRequestWritten.resolve();
+  });
+
+  const firstRequest = await firstWriteEntered.promise;
+  assert.equal(writeCount, 1);
+  assert.equal(secondReadinessCalls, 0);
+
+  releaseFirstWrite.resolve();
+  await firstRequestWritten.promise;
+  const secondRequest = await secondWriteEntered.promise;
+  assert.equal(secondReadinessCalls, 0);
+
+  await writeAgentMessage(agentToClient.writable, promptResponseFor(firstRequest));
+  releaseSecondWrite.resolve();
+  await secondRequestWritten.promise;
+  assert.equal(secondReadinessCalls, 1);
+  await writeAgentMessage(agentToClient.writable, promptResponseFor(secondRequest));
+
+  assert.deepEqual(await firstPrompt, { stopReason: "end_turn" });
+  assert.deepEqual(await secondPrompt, { stopReason: "end_turn" });
+});
+
 test("AcpClient rejects rich prompt content not advertised by promptCapabilities", async () => {
   const client = makeClient();
   const internals = asInternals(client);
@@ -1259,38 +1419,31 @@ test("AcpClient sends audio prompts when the agent advertises audio support", as
   assert.deepEqual(capturedPrompt, [{ type: "audio", mimeType: "audio/wav", data: "UklGRg==" }]);
 });
 
-test("AcpClient reports prompt start only after the connection request exists", async () => {
+test("AcpClient does not infer prompt readiness from connection promise creation", async () => {
   const client = makeClient();
   const internals = asInternals(client);
-  const calls: string[] = [];
   let resolvePrompt!: (value: { stopReason: "end_turn" }) => void;
   const promptResponse = new Promise<{ stopReason: "end_turn" }>((resolve) => {
     resolvePrompt = resolve;
   });
-  let reportStarted!: () => void;
-  const started = new Promise<void>((resolve) => {
-    reportStarted = resolve;
-  });
+  let reported = false;
   internals.connection = {
-    prompt: () => {
-      calls.push("prompt");
-      return promptResponse;
-    },
+    prompt: () => promptResponse,
   };
 
   const pending = client.prompt("session-start", "hello", () => {
-    calls.push("started");
-    reportStarted();
+    reported = true;
   });
-  await started;
+  await Promise.resolve();
 
-  assert.deepEqual(calls, ["prompt", "started"]);
+  assert.equal(reported, false);
   assert.equal(client.hasActivePrompt(), true);
   resolvePrompt({ stopReason: "end_turn" });
   assert.deepEqual(await pending, { stopReason: "end_turn" });
+  assert.equal(reported, false);
 });
 
-test("AcpClient does not report prompt start when request creation throws", async () => {
+test("AcpClient does not report prompt readiness when request creation throws", async () => {
   const client = makeClient();
   const internals = asInternals(client);
   let reported = false;
@@ -1310,7 +1463,7 @@ test("AcpClient does not report prompt start when request creation throws", asyn
   assert.equal(reported, false);
 });
 
-test("AcpClient does not report prompt start when the connection is already closed", async () => {
+test("AcpClient does not report prompt readiness when the connection is already closed", async () => {
   const client = makeClient();
   const internals = asInternals(client);
   let reported = false;
@@ -1353,7 +1506,7 @@ test("AcpClient does not submit a prompt after agent exit settles the queued req
   assert.equal(reported, false);
 });
 
-test("AcpClient reports prompt start when the connection closes while creating the request", async () => {
+test("AcpClient does not report prompt readiness when the connection closes during request creation", async () => {
   const client = makeClient();
   const internals = asInternals(client);
   const connection = new AbortController();
@@ -1370,24 +1523,7 @@ test("AcpClient reports prompt start when the connection closes while creating t
     reported = true;
   });
 
-  assert.equal(reported, true);
-});
-
-test("AcpClient prompt completion does not depend on prompt start observers", async () => {
-  const client = makeClient();
-  const internals = asInternals(client);
-  internals.connection = {
-    prompt: async () => ({ stopReason: "end_turn" }),
-  };
-
-  await assert.doesNotReject(
-    client.prompt("session-start-observer-failure", "hello", async () => {
-      throw new Error("observer failed");
-    }),
-  );
-  await assert.doesNotReject(
-    client.prompt("session-start-observer-pending", "hello", () => new Promise<void>(() => {})),
-  );
+  assert.equal(reported, false);
 });
 
 test("AcpClient prompt rejects when the agent disconnects mid-prompt", async () => {
@@ -1415,6 +1551,303 @@ test("AcpClient prompt rejects when the agent disconnects mid-prompt", async () 
   assert(result.error instanceof AgentDisconnectedError);
   assert.match(result.error.message, /disconnected during request/i);
   assert.equal(client.hasActivePrompt(), false);
+});
+
+test("AcpClient reports ordered process lifecycle events to embedding hosts", async () => {
+  const observed: string[] = [];
+  let launchId: string | undefined;
+  let pid: number | undefined;
+  let resolveExit: (() => void) | undefined;
+  const exited = new Promise<void>((resolve) => {
+    resolveExit = resolve;
+  });
+  const client = makeClient({
+    agentCommand: process.execPath,
+    agentArgv: [process.execPath, path.join(process.cwd(), "dist-test", "test", "mock-agent.js")],
+    processLaunchScope: { kind: "runtime-session", sessionKey: "lease-session" },
+    processLifecycle: {
+      onBeforeSpawn: (launch) => {
+        observed.push("before");
+        launchId = launch.launchId;
+        assert.equal(Object.isFrozen(launch), true);
+        assert.equal(Object.isFrozen(launch.args), true);
+        assert.deepEqual(launch.scope, {
+          kind: "runtime-session",
+          sessionKey: "lease-session",
+        });
+        assert.equal(launch.cwd, process.cwd());
+        assert(launch.command.length > 0);
+      },
+      onSpawned: (started) => {
+        observed.push("spawned");
+        assert.equal(started.launchId, launchId);
+        assert.equal(Object.isFrozen(started), true);
+        assert(Number.isInteger(started.pid));
+        assert(started.startedAt.length > 0);
+        pid = started.pid;
+      },
+      onSpawnFailed: () => {
+        assert.fail("spawn should succeed");
+      },
+      onExit: (exit) => {
+        observed.push("exit");
+        assert.equal(exit.launchId, launchId);
+        assert.equal(exit.pid, pid);
+        assert(exit.exitedAt.length > 0);
+        resolveExit?.();
+      },
+    },
+  });
+
+  await client.start();
+  await client.close();
+  await exited;
+
+  assert.deepEqual(observed, ["before", "spawned", "exit"]);
+});
+
+test("AcpClient aborts before spawn when lifecycle admission fails", async () => {
+  const admissionError = new Error("lease persistence failed");
+  let spawned = false;
+  const client = makeClient({
+    agentCommand: process.execPath,
+    agentArgv: [process.execPath, path.join(process.cwd(), "dist-test", "test", "mock-agent.js")],
+    processLifecycle: {
+      onBeforeSpawn: async () => {
+        throw admissionError;
+      },
+      onSpawned: () => {
+        spawned = true;
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => client.start(),
+    (error: unknown) => {
+      assert.equal(error, admissionError);
+      return true;
+    },
+  );
+  assert.equal(spawned, false);
+});
+
+test("AcpClient correlates spawn failures with the prepared launch", async () => {
+  let launchId: string | undefined;
+  let failureLaunchId: string | undefined;
+  let observedFailure: unknown;
+  let exited = false;
+  const client = makeClient({
+    agentCommand: "acpx-test-missing-agent",
+    agentArgv: ["acpx-test-missing-agent"],
+    processLifecycle: {
+      onBeforeSpawn: (launch) => {
+        launchId = launch.launchId;
+      },
+      onSpawnFailed: (failure) => {
+        failureLaunchId = failure.launchId;
+        observedFailure = failure.error;
+        assert(failure.failedAt.length > 0);
+      },
+      onExit: () => {
+        exited = true;
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => client.start(),
+    (error: unknown) => {
+      assert(error instanceof AgentSpawnError);
+      assert.equal(error, observedFailure);
+      return true;
+    },
+  );
+  assert.equal(failureLaunchId, launchId);
+  assert.equal(exited, false);
+});
+
+test("AcpClient does not await non-settling spawn failure observers", async () => {
+  let observerCalled = false;
+  const client = makeClient({
+    agentCommand: "acpx-test-missing-agent",
+    agentArgv: ["acpx-test-missing-agent"],
+    processLifecycle: {
+      onSpawnFailed: () => {
+        observerCalled = true;
+        return new Promise<void>(() => {});
+      },
+    },
+  });
+
+  const result = await Promise.race([
+    client.start().then(
+      () => ({ type: "resolved" as const }),
+      (error: unknown) => ({ type: "rejected" as const, error }),
+    ),
+    new Promise<{ type: "timeout" }>((resolve) => {
+      setTimeout(() => resolve({ type: "timeout" }), 100);
+    }),
+  ]);
+
+  assert.equal(observerCalled, true);
+  assert.equal(result.type, "rejected");
+  assert(result.error instanceof AgentSpawnError);
+});
+
+test("AcpClient terminates a spawned process when spawned admission fails", async () => {
+  const admissionError = new Error("spawned lease persistence failed");
+  let spawnedPid: number | undefined;
+  let exitedPid: number | undefined;
+  let resolveExit: (() => void) | undefined;
+  const exited = new Promise<void>((resolve) => {
+    resolveExit = resolve;
+  });
+  const client = makeClient({
+    agentCommand: process.execPath,
+    agentArgv: [process.execPath, path.join(process.cwd(), "dist-test", "test", "mock-agent.js")],
+    processLifecycle: {
+      onSpawned: (started) => {
+        spawnedPid = started.pid;
+        throw admissionError;
+      },
+      onExit: (exit) => {
+        exitedPid = exit.pid;
+        resolveExit?.();
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => client.start(),
+    (error: unknown) => {
+      assert.equal(error, admissionError);
+      return true;
+    },
+  );
+  await exited;
+
+  assert.equal(exitedPid, spawnedPid);
+});
+
+test("AcpClient reports an early exit after spawned admission settles", async () => {
+  const admissionError = new Error("spawned lease persistence failed");
+  const observed: string[] = [];
+  let resolveExit: (() => void) | undefined;
+  const exited = new Promise<void>((resolve) => {
+    resolveExit = resolve;
+  });
+  const client = makeClient({
+    agentCommand: process.execPath,
+    agentArgv: [process.execPath, path.join(process.cwd(), "dist-test", "test", "mock-agent.js")],
+    processLifecycle: {
+      onSpawned: async (started) => {
+        observed.push("spawned:start");
+        process.kill(started.pid);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        observed.push("spawned:end");
+        throw admissionError;
+      },
+      onExit: () => {
+        observed.push("exit");
+        resolveExit?.();
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => client.start(),
+    (error: unknown) => {
+      assert.equal(error, admissionError);
+      return true;
+    },
+  );
+  await exited;
+
+  assert.deepEqual(observed, ["spawned:start", "spawned:end", "exit"]);
+});
+
+test("AcpClient rejects when the agent exits during successful spawned admission", async () => {
+  const stderrLine = "exited during spawned admission";
+  const observed: string[] = [];
+  let resolveExit: (() => void) | undefined;
+  const exited = new Promise<void>((resolve) => {
+    resolveExit = resolve;
+  });
+  const client = makeClient({
+    agentCommand: process.execPath,
+    agentArgv: [
+      process.execPath,
+      "--eval",
+      `setTimeout(() => {
+        process.stderr.write(${JSON.stringify(`${stderrLine}\n`)});
+        process.exit(17);
+      }, 20);`,
+    ],
+    processLifecycle: {
+      onSpawned: async () => {
+        observed.push("spawned:start");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        observed.push("spawned:end");
+      },
+      onExit: () => {
+        observed.push("exit");
+        resolveExit?.();
+      },
+    },
+  });
+
+  const result = await Promise.race([
+    client.start().then(
+      () => ({ type: "resolved" as const }),
+      (error: unknown) => ({ type: "rejected" as const, error }),
+    ),
+    new Promise<{ type: "timeout" }>((resolve) => {
+      setTimeout(() => resolve({ type: "timeout" }), 2_000);
+    }),
+  ]);
+
+  assert.equal(result.type, "rejected");
+  assert(result.error instanceof AgentStartupError);
+  assert.equal(result.error.exitCode, 17);
+  assert.equal(result.error.signal, null);
+  assert.match(result.error.message, /exited during spawned admission/);
+  await exited;
+  assert.deepEqual(observed, ["spawned:start", "spawned:end", "exit"]);
+});
+
+test("AcpClient reports an exit recorded before lifecycle observers attach", async () => {
+  const observed: Array<{ exitCode: number | null; signal: NodeJS.Signals | null }> = [];
+  const client = makeClient({
+    processLifecycle: {
+      onExit: ({ exitCode, signal }) => {
+        observed.push({ exitCode, signal });
+      },
+    },
+  });
+  const child = spawn(process.execPath, ["--eval", "process.exit(17)"], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", () => resolve());
+  });
+  assert.equal(child.exitCode, 17);
+
+  const startedProcess: AcpProcessStarted = Object.freeze({
+    launchId: "already-exited-launch",
+    scope: Object.freeze({ kind: "client" }),
+    command: process.execPath,
+    args: Object.freeze(["--eval", "process.exit(17)"]),
+    cwd: process.cwd(),
+    pid: child.pid!,
+    startedAt: new Date().toISOString(),
+  });
+  const internals = asInternals(client);
+  internals.attachAgentLifecycleObservers?.(child, startedProcess, Promise.resolve());
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(observed, [{ exitCode: 17, signal: null }]);
 });
 
 test("AcpClient start fails fast when the agent exits during initialize", async () => {
@@ -1519,6 +1952,58 @@ function makeClient(
 
 function asInternals(client: AcpClient): ClientInternals {
   return client as unknown as ClientInternals;
+}
+
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+};
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function connectClientToStream(
+  client: AcpClient,
+  base: {
+    readable: ReadableStream<AnyMessage>;
+    writable: WritableStream<AnyMessage>;
+  },
+): void {
+  const internals = asInternals(client);
+  const tapped = internals.createTappedStream?.(base);
+  assert(tapped);
+  const connection = internals.createConnection?.(tapped, { devinAcp: false });
+  assert(connection);
+  internals.connection = connection;
+}
+
+function promptResponseFor(request: AnyMessage): AnyMessage {
+  assert("id" in request);
+  return {
+    jsonrpc: "2.0",
+    id: request.id,
+    result: { stopReason: "end_turn" },
+  };
+}
+
+async function writeAgentMessage(
+  writable: WritableStream<AnyMessage>,
+  message: AnyMessage,
+): Promise<void> {
+  const writer = writable.getWriter();
+  try {
+    await writer.write(message);
+  } finally {
+    writer.releaseLock();
+  }
 }
 
 function makePermissionRequest(

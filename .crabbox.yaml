@@ -24,7 +24,8 @@ actions:
   ephemeral: true
 aws:
   region: eu-west-1
-  rootGB: 160
+  # The promoted AWS runner image requires at least a 400 GiB root volume.
+  rootGB: 400
 sync:
   delete: true
   checksum: false

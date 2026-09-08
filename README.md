@@ -47,14 +47,14 @@ The session is scoped to the current repository and persists across invocations.
 
 ## Choose an agent
 
-Use the same command shape with the built-in launch profiles:
+Common launch examples use the same command shape:
 
 | Agent             | Command                      |
 | ----------------- | ---------------------------- |
+| Pi                | `acpx pi …`                  |
+| OpenClaw          | `acpx openclaw …`            |
 | Codex             | `acpx codex …`               |
 | Claude Code       | `acpx claude …`              |
-| Gemini CLI        | `acpx gemini …`              |
-| OpenClaw          | `acpx openclaw …`            |
 | Custom ACP server | `acpx --agent '<command>' …` |
 
 The upstream agent must be installed and authenticated when its adapter does not provide that itself. See [built-in agents](docs/agents.md) for every supported profile and [custom agents](docs/custom-agents.md) for registry configuration.
@@ -67,6 +67,7 @@ Persistent sessions keep context between prompts, support parallel named workstr
 acpx codex sessions new --name backend
 acpx codex -s backend "trace the checkout timeout"
 acpx codex exec "summarize this repository"
+acpx --model gpt-5.4 codex exec --config-option reasoning_effort=high "review this repository"
 ```
 
 Session state lives under `~/.acpx/`. The [sessions guide](docs/sessions.md) covers scope, queue ownership, reconnects, export/import, cancellation, and cleanup.

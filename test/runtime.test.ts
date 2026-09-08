@@ -453,6 +453,20 @@ test("createFileSessionStore persists records inside the provided state director
   );
 });
 
+test("createFileSessionStore preserves environment name casing across reloads", async (t) => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-env-store-"));
+  t.after(async () => {
+    await fs.rm(stateDir, { recursive: true, force: true });
+  });
+  const env = { INITIAL_AGENT_MODE: "read-only", CustomMixedCase: "synthetic" };
+  const record = createSessionRecord({ acpx: { session_options: { env } } });
+
+  await createFileSessionStore({ stateDir }).save(record);
+
+  const restored = await createFileSessionStore({ stateDir }).load(record.acpxRecordId);
+  assert.deepEqual(restored?.acpx?.session_options?.env, env);
+});
+
 test("createFileSessionStore supports concurrent saves in the same millisecond", async (t) => {
   const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-store-concurrent-"));
   t.after(async () => {
@@ -797,4 +811,30 @@ test("createRuntimeStore is an alias for the file-backed session store", async (
   const loaded = await store.load("alias-record");
 
   assert.equal(loaded?.acpSessionId, "alias-sid");
+});
+
+test("AcpxRuntime snapshots transient child environment for manager and probes", async () => {
+  const agentProcessEnv = { ACPX_TEST_RUNTIME_OVERLAY: "construction-value" };
+  const observed: unknown[] = [];
+  const runtime = new AcpxRuntime(
+    {
+      cwd: process.cwd(),
+      sessionStore: createFileSessionStore({
+        stateDir: path.join(os.tmpdir(), "unused-env-store"),
+      }),
+      agentRegistry: createAgentRegistry(),
+      permissionMode: "deny-all",
+      agentProcessEnv,
+    },
+    {
+      probeRunner: async (options) => {
+        observed.push(options.agentProcessEnv);
+        return { ok: true, message: "synthetic probe" };
+      },
+    },
+  );
+  agentProcessEnv.ACPX_TEST_RUNTIME_OVERLAY = "mutated-value";
+  await runtime.doctor();
+  assert.deepEqual(observed, [{ ACPX_TEST_RUNTIME_OVERLAY: "construction-value" }]);
+  assert.equal(process.env.ACPX_TEST_RUNTIME_OVERLAY, undefined);
 });

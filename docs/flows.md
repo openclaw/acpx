@@ -138,6 +138,8 @@ Bundles are immutable once a run terminates. They are the input for the [replay 
 
 A shell action's `timeoutMs: 0` disables its own deadline; an enclosing node deadline still applies. On expiry or interruption, acpx cancels active shell commands and waits for termination and output-stream cleanup before reporting cancellation. Cleanup failures are reported instead of silently claiming cleanup succeeded. An executor that resolves after its node has timed out or been interrupted cannot launch a new shell process.
 
+Set `maxBufferBytes` on the object returned by `shell().exec` to limit captured stdout and stderr independently. The value is a non-negative safe integer counting UTF-8 bytes; omission preserves unlimited capture, and zero permits empty output only. Overflow fails the action even with `allowNonZeroExit`, stops retaining output, and waits for the existing process-tree cleanup before returning the error. A timeout or cancellation already in progress keeps its original result.
+
 On POSIX, cleanup covers the owned process group and descendants discoverable before it is signalled, including descendants that move to another process group while their wrapper is active. Successful command completion still follows the wrapper's exit. A child that deliberately starts a separate session with independent stdio and is reparented before cancellation can outlive the flow, as before; acpx does not provide persistent supervision of escaped daemons.
 
 ## Replay viewer

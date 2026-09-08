@@ -100,3 +100,18 @@ test("persisted key policy rejects camelCase acpx-owned keys", () => {
     assertPersistedKeyPolicy(persisted);
   }, /snake_case/);
 });
+
+test("session environment names are map keys while session option names remain validated", () => {
+  const record = makeRecord();
+  record.acpx = {
+    session_options: { env: { INITIAL_AGENT_MODE: "read-only", MixedCase: "value" } },
+  };
+  const persisted = serializeSessionRecordForDisk(record);
+  assertPersistedKeyPolicy(persisted);
+  assert.deepEqual(
+    findPersistedKeyPolicyViolations({
+      acpx: { session_options: { unexpectedOption: true, env: { UPPER_CASE: "value" } } },
+    }),
+    ["acpx.session_options.unexpectedOption"],
+  );
+});

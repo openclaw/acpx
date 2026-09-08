@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { TimeoutError } from "../../async-control.js";
 import type { ShellActionExecution, ShellActionResult } from "../runtime.js";
+import { createShellOutputCapture, validateShellActionMaxBufferBytes } from "./shell-output.js";
 import { hasShellProcesses, stopShellProcess } from "./shell-process.js";
 
 function writeShellStdin(child: ChildProcess, stdin: string | undefined): void {
@@ -104,11 +105,8 @@ function waitForShellExit(
   cwd: string,
   startMs: number,
   timeoutMs: number | undefined,
-  timedOut: () => boolean,
+  termination: { timedOut: () => boolean; cancel: ShellProcessOwner["cancel"] },
 ): Promise<ShellActionResult> {
-  let stdout = "";
-  let stderr = "";
-
   const stdoutStream = child.stdout;
   const stderrStream = child.stderr;
   if (!stdoutStream || !stderrStream) {
@@ -116,17 +114,32 @@ function waitForShellExit(
   }
 
   return new Promise<ShellActionResult>((resolve, reject) => {
+    let settled = false;
+    const fail = (error: unknown) => {
+      settled = true;
+      reject(error);
+    };
+    const capture = createShellOutputCapture(
+      spec.maxBufferBytes,
+      () => settled || termination.timedOut(),
+      (error) => {
+        fail(error);
+        void termination.cancel("SIGTERM").catch(fail);
+      },
+    );
     stdoutStream.setEncoding("utf8");
     stderrStream.setEncoding("utf8");
     stdoutStream.on("data", (chunk: string) => {
-      stdout += chunk;
+      capture.append("stdout", chunk);
     });
     stderrStream.on("data", (chunk: string) => {
-      stderr += chunk;
+      capture.append("stderr", chunk);
     });
 
-    child.once("error", reject);
+    child.once("error", fail);
     child.once("exit", (exitCode, signal) => {
+      settled = true;
+      const { stdout, stderr } = capture.output;
       const result: ShellActionResult = {
         command: spec.command,
         args,
@@ -139,7 +152,7 @@ function waitForShellExit(
         durationMs: Date.now() - startMs,
       };
 
-      const error = rejectIfShellFailed(spec, args, result, timedOut(), timeoutMs);
+      const error = rejectIfShellFailed(spec, args, result, termination.timedOut(), timeoutMs);
       if (error) {
         reject(error);
         return;
@@ -221,6 +234,7 @@ function createShellTermination(
     });
   }
   return {
+    cancel,
     timedOut: () => timedOut,
     cleanupFailure,
     async dispose() {
@@ -247,6 +261,7 @@ export async function runShellAction(
   const args = spec.args ?? [];
   const startMs = Date.now();
   const timeoutMs = resolveShellActionTimeoutMs(spec.timeoutMs);
+  validateShellActionMaxBufferBytes(spec.maxBufferBytes);
   const child = spawn(spec.command, args, {
     cwd,
     env: {
@@ -260,7 +275,7 @@ export async function runShellAction(
   });
 
   const termination = createShellTermination(child, timeoutMs, options);
-  const finish = waitForShellExit(child, spec, args, cwd, startMs, timeoutMs, termination.timedOut);
+  const finish = waitForShellExit(child, spec, args, cwd, startMs, timeoutMs, termination);
   writeShellStdin(child, spec.stdin);
   try {
     return await Promise.race([finish, termination.cleanupFailure]);

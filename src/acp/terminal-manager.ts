@@ -105,6 +105,20 @@ export function buildTerminalSpawnOptions(
   ) as TerminalSpawnOptions;
 }
 
+function readTerminalOutputCeiling(): number | undefined {
+  const raw = process.env.ACPX_TERMINAL_MAX_OUTPUT_BYTES?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  const bytes = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(bytes)) {
+    throw new Error(
+      "ACPX_TERMINAL_MAX_OUTPUT_BYTES must be a non-negative safe integer; zero disables the host ceiling",
+    );
+  }
+  return bytes === 0 ? undefined : bytes;
+}
+
 function trimToUtf8Boundary(buffer: Buffer, limit: number): Buffer {
   if (limit <= 0) {
     return Buffer.alloc(0);
@@ -169,9 +183,11 @@ export class TerminalManager {
   private readonly confirmExecute: (commandLine: string) => Promise<boolean>;
   private readonly killGraceMs: number;
   private readonly processHelperTimeoutMs: number;
+  private readonly outputCeilingBytes: number | undefined;
   private readonly terminals = new Map<string, ManagedTerminal>();
 
   constructor(options: TerminalManagerOptions) {
+    this.outputCeilingBytes = readTerminalOutputCeiling();
     this.cwd = options.cwd;
     this.permissionMode = options.permissionMode;
     this.nonInteractivePermissions = options.nonInteractivePermissions ?? "deny";
@@ -209,9 +225,13 @@ export class TerminalManager {
         throw new PermissionDeniedError("Permission denied for terminal/create");
       }
 
-      const outputByteLimit = Math.max(
+      const requestedLimit = Math.max(
         0,
         Math.round(params.outputByteLimit ?? DEFAULT_TERMINAL_OUTPUT_LIMIT_BYTES),
+      );
+      const outputByteLimit = Math.min(
+        requestedLimit,
+        this.outputCeilingBytes ?? Number.POSITIVE_INFINITY,
       );
       const { proc, spawnCommand } = await spawnTerminalProcess(params, this.cwd);
 
@@ -476,7 +496,7 @@ export class TerminalManager {
       return;
     }
 
-    await this.waitForCleanupAfterSignal(terminal);
+    await this.waitForFinalCleanup(terminal);
   }
 
   private async signalProcess(terminal: ManagedTerminal, signal: NodeJS.Signals): Promise<void> {
@@ -499,11 +519,11 @@ export class TerminalManager {
   ): Promise<void> {
     await this.captureDescendantPids(terminal, pid);
     if (this.isRunning(terminal)) {
-      await killWindowsProcessTree(pid, signal);
+      await killWindowsProcessTree(pid, signal, terminal.processHelperTimeoutMs);
       return;
     }
     for (const descendantPid of terminal.descendantPids) {
-      await killWindowsProcessTree(descendantPid, signal);
+      await killWindowsProcessTree(descendantPid, signal, terminal.processHelperTimeoutMs);
     }
   }
 
@@ -530,6 +550,13 @@ export class TerminalManager {
     }
     for (const descendantPid of await listDescendantPids(pid, terminal.processHelperTimeoutMs)) {
       terminal.descendantPids.add(descendantPid);
+    }
+  }
+
+  private async waitForFinalCleanup(terminal: ManagedTerminal): Promise<void> {
+    const cleaned = await this.waitForCleanupAfterSignal(terminal);
+    if (!cleaned && process.platform === "win32") {
+      throw new Error("Terminal process cleanup did not finish after SIGKILL");
     }
   }
 
@@ -762,19 +789,20 @@ async function runWindowsProcessListCommand(timeoutMs: number): Promise<string> 
   );
 }
 
-async function killWindowsProcessTree(pid: number, signal: NodeJS.Signals): Promise<void> {
+export async function killWindowsProcessTree(
+  pid: number,
+  signal: NodeJS.Signals,
+  timeoutMs: number = PROCESS_HELPER_TIMEOUT_MS,
+): Promise<void> {
   const args = ["/pid", String(pid), "/t"];
   if (signal === "SIGKILL") {
     args.push("/f");
   }
-  await new Promise<void>((resolve) => {
-    const child = spawn("taskkill", args, {
-      stdio: ["ignore", "ignore", "ignore"],
-      windowsHide: true,
-    });
-    child.once("error", () => resolve());
-    child.once("close", () => resolve());
-  });
+  try {
+    await runTimedExecFile("taskkill", args, { timeoutMs, windowsHide: true });
+  } catch {
+    // Hung or missing taskkill must not block terminal/kill or terminal/release.
+  }
 }
 
 function sendSignal(pid: number, signal: NodeJS.Signals): void {

@@ -9,6 +9,7 @@ import type {
   AcpElicitationMode,
   AcpPermissionDecision,
   AcpPermissionRequest,
+  AcpProcessLifecycle,
   McpServer,
   NonInteractivePermissionPolicy,
   PermissionMode,
@@ -27,6 +28,12 @@ export type {
   AcpElicitationResponse,
   AcpPermissionDecision,
   AcpPermissionRequest,
+  AcpProcessExit,
+  AcpProcessLaunch,
+  AcpProcessLaunchScope,
+  AcpProcessLifecycle,
+  AcpProcessSpawnFailure,
+  AcpProcessStarted,
   PermissionPolicy,
 } from "../../types.js";
 
@@ -261,6 +268,7 @@ export type AcpRuntimeEvent =
   | {
       type: "done";
       stopReason?: string;
+      _meta?: Record<string, unknown> | null;
     }
   /**
    * Compatibility failure event emitted by runTurn(...). startTurn(...).events
@@ -285,10 +293,12 @@ export type AcpRuntimeTurnResult =
   | {
       status: "completed";
       stopReason?: string;
+      _meta?: Record<string, unknown> | null;
     }
   | {
       status: "cancelled";
       stopReason?: string;
+      _meta?: Record<string, unknown> | null;
     }
   | {
       status: "failed";
@@ -297,7 +307,7 @@ export type AcpRuntimeTurnResult =
 
 export interface AcpRuntimeTurn {
   readonly requestId: string;
-  /** Resolves after `connection.prompt()` returns its request promise. */
+  /** Resolves after the underlying writable transport accepts the prompt request. */
   readonly promptStarted: Promise<void>;
   readonly events: AsyncIterable<AcpRuntimeEvent>;
   /**
@@ -352,6 +362,8 @@ export interface AcpAgentRegistry {
 
 export type AcpRuntimeOptions = {
   cwd: string;
+  /** Trusted child-only environment, snapshotted at construction and never persisted. */
+  agentProcessEnv?: Record<string, string>;
   sessionStore: AcpSessionStore;
   agentRegistry: AcpAgentRegistry;
   mcpServers?: McpServer[];
@@ -381,6 +393,8 @@ export type AcpRuntimeOptions = {
   secretEnvKeys?: ReadonlySet<string> | readonly string[];
   /** ACP elicitation modes the embedding host can render for prompt turns. */
   elicitationModes?: readonly AcpElicitationMode[];
+  /** Optional lifecycle observer for ACP agent processes owned by this runtime. */
+  processLifecycle?: AcpProcessLifecycle;
   onPermissionRequest?: (
     req: AcpPermissionRequest,
     ctx: { signal: AbortSignal },

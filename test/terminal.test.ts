@@ -75,6 +75,119 @@ test("terminal manager create/output/wait/release lifecycle", async () => {
   }
 });
 
+function createManagerWithOutputCeiling(raw: string | undefined): TerminalManager {
+  const previous = process.env.ACPX_TERMINAL_MAX_OUTPUT_BYTES;
+  try {
+    if (raw === undefined) {
+      delete process.env.ACPX_TERMINAL_MAX_OUTPUT_BYTES;
+    } else {
+      process.env.ACPX_TERMINAL_MAX_OUTPUT_BYTES = raw;
+    }
+    return new TerminalManager({ cwd: os.tmpdir(), permissionMode: "approve-all" });
+  } finally {
+    if (previous === undefined) {
+      delete process.env.ACPX_TERMINAL_MAX_OUTPUT_BYTES;
+    } else {
+      process.env.ACPX_TERMINAL_MAX_OUTPUT_BYTES = previous;
+    }
+  }
+}
+
+test("terminal manager rejects invalid host ceilings before launching commands", () => {
+  for (const raw of ["-1", "1.5", "Infinity", "NaN", "1e3", "0x10", "9007199254740992"]) {
+    assert.throws(() => createManagerWithOutputCeiling(raw), /ACPX_TERMINAL_MAX_OUTPUT_BYTES/);
+  }
+});
+
+for (const scenario of [
+  {
+    name: "unset host ceiling preserves large requests",
+    host: undefined,
+    requested: Number.MAX_SAFE_INTEGER,
+    bytes: 16 * 1024 * 1024 + 1,
+    retained: 16 * 1024 * 1024 + 1,
+  },
+  {
+    name: "zero host ceiling preserves requests",
+    host: "0",
+    requested: 100_000,
+    bytes: 90_000,
+    retained: 90_000,
+  },
+  {
+    name: "empty host ceiling preserves requests",
+    host: " ",
+    requested: 100_000,
+    bytes: 90_000,
+    retained: 90_000,
+  },
+  {
+    name: "host ceiling clamps huge requests",
+    host: " 128 ",
+    requested: Number.MAX_SAFE_INTEGER,
+    bytes: 192,
+    retained: 128,
+  },
+  { name: "agent zero stores nothing", host: "128", requested: 0, bytes: 32, retained: 0 },
+  { name: "smaller agent limit wins", host: "128", requested: 64, bytes: 192, retained: 64 },
+  {
+    name: "omitted agent limit remains 64 KiB",
+    host: "100000",
+    requested: undefined,
+    bytes: 70_000,
+    retained: 64 * 1024,
+  },
+  {
+    name: "smaller host ceiling clamps the default",
+    host: "128",
+    requested: undefined,
+    bytes: 192,
+    retained: 128,
+  },
+]) {
+  test(`terminal manager ${scenario.name}`, async () => {
+    // Restoring the environment before create also proves client-lifetime snapshotting.
+    const manager = createManagerWithOutputCeiling(scenario.host);
+    try {
+      const { terminalId } = await manager.createTerminal({
+        sessionId: "session-1",
+        command: process.execPath,
+        args: ["-e", "setInterval(() => {}, 1000)"],
+        outputByteLimit: scenario.requested,
+      });
+      const stdio = getManagedStdio(manager, terminalId);
+      stdio.stdout.emit("data", Buffer.alloc(scenario.bytes - 1, 0x61));
+      stdio.stderr.emit("data", Buffer.from("z"));
+      const output = await manager.terminalOutput({ sessionId: "session-1", terminalId });
+      assert.equal(Buffer.byteLength(output.output), scenario.retained);
+      assert.equal(output.truncated, scenario.bytes > scenario.retained);
+      assert.equal(output.output, scenario.retained ? "a".repeat(scenario.retained - 1) + "z" : "");
+    } finally {
+      await manager.shutdown();
+    }
+  });
+}
+
+test("terminal host ceiling preserves the UTF-8 suffix across stdout and stderr", async () => {
+  const manager = createManagerWithOutputCeiling("5");
+  try {
+    const { terminalId } = await manager.createTerminal({
+      sessionId: "session-1",
+      command: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000)"],
+      outputByteLimit: 1000,
+    });
+    const stdio = getManagedStdio(manager, terminalId);
+    stdio.stdout.emit("data", Buffer.from("aé"));
+    stdio.stderr.emit("data", Buffer.from("🙂"));
+    const output = await manager.terminalOutput({ sessionId: "session-1", terminalId });
+    assert.equal(output.output, "🙂");
+    assert.equal(output.truncated, true);
+  } finally {
+    await manager.shutdown();
+  }
+});
+
 test("terminal manager ignores child stdout and stderr pipe-death errors", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
   try {

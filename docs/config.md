@@ -153,6 +153,7 @@ Other ACP-relevant behavior:
 
 - Session storage path is derived from the OS home directory (`~/.acpx/sessions`).
 - Child adapter processes inherit the current environment by default.
+- Embedded clients can persist per-session overrides through `SessionAgentOptions.env`; environment variable names retain their exact casing when saved and reloaded.
 - Some adapters look at their own env vars (e.g., `QODER_PERSONAL_ACCESS_TOKEN`) — see [Agents](agents.md) for per-adapter notes.
 
 ## Practical config recipes
@@ -212,3 +213,6 @@ Then `acpx ci-bot 'run sanity checks'` resolves through the registry without any
 - [Custom agents](custom-agents.md) — `--agent` escape hatch and unknown positional names.
 - [Permissions](permissions.md) — `defaultPermissions` and non-interactive policy.
 - [Output formats](output-formats.md) — `format` default and `--json-strict`.
+
+Embedded hosts can also supply a [transient runtime environment](runtime-environment.md)
+without persisting child-process settings in a session.

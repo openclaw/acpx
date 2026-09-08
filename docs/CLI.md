@@ -257,9 +257,17 @@ acpx [global_options] exec [prompt_options] [prompt_text...]   # defaults to cod
 Behavior:
 
 - Creates temporary ACP session
+- Applies `--model`, then each repeatable `--config-option <key=value>`, before prompting
 - Sends prompt once
 - Does not write/use a saved session record
 - Supports prompt text from args, stdin, `--file <path>`, and `--file -`
+- Stops without prompting if the adapter rejects a requested config option
+
+```bash
+acpx --model gpt-5.4 codex exec \
+  --config-option reasoning_effort=high \
+  'review this checkout'
+```
 
 ## `compare` subcommand
 
@@ -629,6 +637,8 @@ Related runtime behavior:
 
 - session storage path is derived from OS home directory (`~/.acpx/sessions`)
 - child processes inherit the current environment by default
+- Windows terminal kill and release requests fail if process cleanup cannot finish after escalation. The terminal remains available for a cleanup retry; restore a working `taskkill` command before retrying.
+- ACP `terminal/create` honors agent `outputByteLimit`; `0` stores nothing and the default when omitted is 64 KiB. Hosts can opt into an additional per-terminal retention ceiling with `ACPX_TERMINAL_MAX_OUTPUT_BYTES` (for example, `16777216` for 16 MiB). Unset, empty, or zero disables only the host ceiling, preserving the agent limit and default. Positive values must be safe integers. The smaller limit applies to combined stdout and stderr, retaining the newest UTF-8 output and reporting `truncated: true` when exceeded. This bounds retained output per terminal, not total process memory. Each ACP client snapshots the setting at construction; restart warm queue owners to change it.
 
 ## Practical examples
 
@@ -674,3 +684,17 @@ acpx --format json codex exec 'review latest diff for security issues' \
            | select(.sessionUpdate=="tool_call" or .sessionUpdate=="tool_call_update")
            | [(.status // "-"), (.title // "-")] | @tsv'
 ```
+
+### Queue request size
+
+`ACPX_QUEUE_MAX_REQUEST_BYTES` optionally bounds a queue owner's incoming request
+lines in UTF-8 bytes, excluding the newline. Unset, empty, or zero keeps the
+existing unlimited request size. Positive values must be safe integers.
+Clients with the same setting reject oversized submissions with
+`QUEUE_REQUEST_TOO_LARGE` before opening a socket. Owners disconnect a raw peer
+that exceeds the cap, including incomplete lines, while continuing to serve
+other clients. The existing owner-response limit is unchanged.
+
+An owner keeps the setting with which it starts; setting the variable does not
+reconfigure an already-running owner. Request JSON can be larger than the prompt
+file because it carries both structured content and display text.

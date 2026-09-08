@@ -298,6 +298,7 @@ function legacyTerminalEventFromTurnResult(result: AcpRuntimeTurnResult): AcpRun
   return {
     type: "done",
     ...(result.stopReason ? { stopReason: result.stopReason } : {}),
+    ...(result._meta === undefined ? {} : { _meta: result._meta }),
   };
 }
 
@@ -606,7 +607,8 @@ export class AcpRuntimeManager {
   ) {}
 
   private createClient(options: ConstructorParameters<typeof AcpClient>[0]): AcpClient {
-    return this.deps.clientFactory?.(options) ?? new AcpClient(options);
+    const clientOptions = { ...options, agentProcessEnv: this.options.agentProcessEnv };
+    return this.deps.clientFactory?.(clientOptions) ?? new AcpClient(clientOptions);
   }
 
   private createSessionOwner(input: {
@@ -862,7 +864,15 @@ export class AcpRuntimeManager {
       sessionRecordId: record.acpxRecordId,
       loadRecord: async (sessionRecordId) => await this.requireRecord(sessionRecordId),
       saveRecord: async (connectedRecord) => await this.saveRecord(connectedRecord),
-      createClient: (options) => this.createClient(options),
+      createClient: (options) =>
+        this.createClient({
+          ...options,
+          processLifecycle: this.options.processLifecycle,
+          processLaunchScope: {
+            kind: "runtime-session",
+            sessionKey: record.name ?? record.acpxRecordId,
+          },
+        }),
       mcpServers: [...(this.options.mcpServers ?? [])],
       permissionMode: this.options.permissionMode,
       nonInteractivePermissions: this.options.nonInteractivePermissions,
@@ -1051,6 +1061,8 @@ export class AcpRuntimeManager {
       permissionPolicy: this.options.permissionPolicy,
       onPermissionRequest: this.options.onPermissionRequest,
       elicitationModes: this.options.elicitationModes,
+      processLifecycle: this.options.processLifecycle,
+      processLaunchScope: { kind: "runtime-session", sessionKey: input.sessionKey },
       verbose: this.options.verbose,
       sessionOptions: input.sessionOptions,
     });
@@ -1303,6 +1315,7 @@ export class AcpRuntimeManager {
         terminalResult = {
           status: response.stopReason === "cancelled" ? "cancelled" : "completed",
           ...(response.stopReason ? { stopReason: response.stopReason } : {}),
+          ...(response._meta === undefined ? {} : { _meta: response._meta }),
         };
       }
     } catch (error) {
@@ -1329,7 +1342,7 @@ export class AcpRuntimeManager {
         timeoutMs: task.input.timeoutMs ?? this.options.timeoutMs,
         conversation: turn.conversation,
         promptMessageId: turn.promptMessageId,
-        onPromptRequestStarted: () => task.promptStarted.resolve(),
+        onPromptRequestWritten: () => task.promptStarted.resolve(),
         onElicitation: task.input.onElicitation,
       });
     } finally {
@@ -1483,6 +1496,11 @@ export class AcpRuntimeManager {
       permissionPolicy: this.options.permissionPolicy,
       onPermissionRequest: this.options.onPermissionRequest,
       elicitationModes: this.options.elicitationModes,
+      processLifecycle: this.options.processLifecycle,
+      processLaunchScope: {
+        kind: "runtime-session",
+        sessionKey: record.name ?? record.acpxRecordId,
+      },
       verbose: this.options.verbose,
       sessionOptions: mergeSessionOptions(
         this.transientSessionOptions.get(record.acpxRecordId),
@@ -2030,6 +2048,11 @@ export class AcpRuntimeManager {
         permissionPolicy: this.options.permissionPolicy,
         onPermissionRequest: this.options.onPermissionRequest,
         elicitationModes: this.options.elicitationModes,
+        processLifecycle: this.options.processLifecycle,
+        processLaunchScope: {
+          kind: "runtime-session",
+          sessionKey: record.name ?? record.acpxRecordId,
+        },
         verbose: this.options.verbose,
       }),
     };
