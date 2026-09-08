@@ -8,16 +8,9 @@ Repo: https://github.com/openclaw/acpx
 
 **Highlights:** Hosts can bound terminal output retention without changing existing defaults; incoming ACP messages now default to a 64 MiB limit with an explicit override.
 
-### Changes
-
 - ACP/terminal: add an opt-in `ACPX_TERMINAL_MAX_OUTPUT_BYTES` ceiling for combined stdout and stderr retention, preserving agent-requested limits and the 64 KiB default unless configured. Zero disables only the host ceiling; truncated output retains the newest UTF-8 suffix. Thanks @SebTardif.
+- ACP/transport (**compatibility change**): default incoming messages to a 64 MiB raw-byte limit instead of unlimited input; use `ACPX_MAX_ACP_MESSAGE_BYTES` to raise the limit or `0` to disable it. Overflow errors explain the override, and existing warm owners retain their startup setting.
 - Source builds: update pnpm to 12.3.4 across local setup and CI while preserving the 48-hour dependency release-age policy and the existing Node.js minimum.
-
-### Breaking
-
-- ACP/transport: default incoming messages to a 64 MiB raw-byte limit instead of unlimited input; use `ACPX_MAX_ACP_MESSAGE_BYTES` to raise the limit or `0` to disable it. Overflow errors explain the override, and existing warm owners retain their startup setting.
-
-### Fixes
 
 ## 0.15.0 - 2026-09-07
 
