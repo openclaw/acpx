@@ -872,6 +872,10 @@ export class AcpRuntimeManager {
             kind: "runtime-session",
             sessionKey: record.name ?? record.acpxRecordId,
           },
+          sessionOptions: mergeSessionOptions(
+            this.transientSessionOptions.get(record.acpxRecordId),
+            options.sessionOptions,
+          ),
         }),
       mcpServers: [...(this.options.mcpServers ?? [])],
       permissionMode: this.options.permissionMode,
@@ -944,12 +948,13 @@ export class AcpRuntimeManager {
     );
     const agent = { cwd, agentCommand, agentArgv };
     const existing = await this.loadExistingRuntimeSession(input);
+    const nextTransient = secretSessionOptions(input.sessionOptions, this.options.secretEnvKeys);
     if (existing && this.canReuseRuntimeSession(input, agent, existing)) {
-      await this.closeOwnerWithStaleTransientOptions(input, existing);
+      await this.closeOwnerWithStaleTransientOptions(existing, nextTransient);
       return await this.reuseRuntimeSession(existing.record, input.sessionOptions);
     }
     await this.closeConflictingSession(existing?.owner);
-    return await this.createOwnedRuntimeSession(input, agent);
+    return await this.createOwnedRuntimeSession(input, agent, nextTransient);
   }
 
   private async loadExistingRuntimeSession(
@@ -1026,17 +1031,23 @@ export class AcpRuntimeManager {
   }
 
   private async closeOwnerWithStaleTransientOptions(
-    input: RuntimeEnsureInput,
     existing: ExistingRuntimeSession,
+    nextTransient: SessionAgentOptions | undefined,
   ): Promise<void> {
-    const owner = existing.owner;
-    if (!owner?.recordId) {
+    const current = this.transientSessionOptions.get(existing.record.acpxRecordId);
+    if (isDeepStrictEqual(current, nextTransient)) {
       return;
     }
-    const current = this.transientSessionOptions.get(existing.record.acpxRecordId);
-    const next = secretSessionOptions(input.sessionOptions, this.options.secretEnvKeys);
-    if (!isDeepStrictEqual(current, next)) {
+    const owner = existing.owner;
+    if (owner?.recordId) {
       await this.closeRetainedSessionOwner(owner.recordId);
+      return;
+    }
+    if (this.activeControllers.has(existing.record.acpxRecordId)) {
+      throw new AcpRuntimeError(
+        "ACP_TURN_FAILED",
+        `Cannot change secret environment while ACP session ${existing.record.acpxRecordId} has an active turn.`,
+      );
     }
   }
 
@@ -1049,6 +1060,7 @@ export class AcpRuntimeManager {
   private async createOwnedRuntimeSession(
     input: RuntimeEnsureInput,
     agent: ResolvedRuntimeAgent,
+    transient: SessionAgentOptions | undefined,
   ): Promise<SessionRecord> {
     const { cwd, agentCommand, agentArgv } = agent;
     const client = this.createClient({
@@ -1071,6 +1083,12 @@ export class AcpRuntimeManager {
       sessionKey: input.sessionKey,
       mode: input.mode,
     });
+    const recordId = createRecordId(input.sessionKey, input.mode);
+    if (transient) {
+      this.transientSessionOptions.set(recordId, transient);
+    } else {
+      this.transientSessionOptions.delete(recordId);
+    }
     let retained = false;
 
     try {
@@ -1080,6 +1098,7 @@ export class AcpRuntimeManager {
         input,
         client,
         owner,
+        recordId,
         agentCommand,
         agentArgv,
         cwd,
@@ -1090,6 +1109,7 @@ export class AcpRuntimeManager {
       return record;
     } finally {
       if (!retained) {
+        this.transientSessionOptions.delete(recordId);
         owner.recordId = undefined;
         client.clearEventHandlers();
         await client.close();
@@ -1105,14 +1125,15 @@ export class AcpRuntimeManager {
     };
     client: AcpClient;
     owner: RuntimeSessionOwner;
+    recordId: string;
     agentCommand: string;
     agentArgv?: string[];
     cwd: string;
     session: CreatedRuntimeSession;
   }): Promise<SessionRecord> {
-    const { input, client, owner, agentCommand, agentArgv, cwd, session } = params;
+    const { input, client, owner, recordId, agentCommand, agentArgv, cwd, session } = params;
     const record = createInitialRecord({
-      recordId: createRecordId(input.sessionKey, input.mode),
+      recordId,
       sessionName: input.sessionKey,
       sessionId: session.sessionId,
       agentCommand,
@@ -1150,10 +1171,6 @@ export class AcpRuntimeManager {
     }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     persistSessionOptions(record, input.sessionOptions, this.options.secretEnvKeys);
-    const transient = secretSessionOptions(input.sessionOptions, this.options.secretEnvKeys);
-    if (transient) {
-      this.transientSessionOptions.set(record.acpxRecordId, transient);
-    }
     return record;
   }
 

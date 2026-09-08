@@ -4799,6 +4799,192 @@ test("secretEnvKeys replaces a retained one-shot child when a credential is remo
   assert.deepEqual(result, { created: 2, closed: 1 });
 });
 
+test("AcpRuntimeManager restores transient secret env for control reconnects", async () => {
+  const existing = makeSessionRecord({
+    acpxRecordId: "control-secret-session",
+    acpSessionId: "control-secret-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+    closed: true,
+    acpx: { session_options: { env: { API_TOKEN: "fixture-value-old", LANG: "C" } } },
+  });
+  const store = new InMemorySessionStore([existing]);
+  const factoryCalls: unknown[] = [];
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: store,
+      secretEnvKeys: ["API_TOKEN"],
+    }),
+    {
+      clientFactory: (options) => {
+        factoryCalls.push(options);
+        return {
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "unused" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => ({ agentSessionId: "control-agent" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        } as never;
+      },
+    },
+  );
+
+  const record = await manager.ensureSession({
+    sessionKey: existing.acpxRecordId,
+    agent: "codex",
+    mode: "persistent",
+    sessionOptions: { env: { API_TOKEN: "fixture-value-new" } },
+  });
+  await manager.setMode(createHandle(record.acpxRecordId), "ask");
+
+  assert.deepEqual((factoryCalls[0] as { sessionOptions?: unknown }).sessionOptions, {
+    env: { API_TOKEN: "fixture-value-new", LANG: "C" },
+  });
+  assert.ok(!JSON.stringify(await store.load(record.acpxRecordId)).includes("fixture-value"));
+});
+
+test("AcpRuntimeManager clears obsolete transient secrets when replacing a persistent record", async () => {
+  const store = new InMemorySessionStore();
+  const factoryCalls: unknown[] = [];
+  let created = 0;
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: store,
+      secretEnvKeys: ["API_TOKEN"],
+    }),
+    {
+      clientFactory: (options) => {
+        factoryCalls.push(options);
+        const sessionId = `replacement-${++created}`;
+        return {
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => false,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => ({ agentSessionId: "replacement-agent" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        } as never;
+      },
+    },
+  );
+
+  await manager.ensureSession({
+    sessionKey: "replacement-secret-session",
+    agent: "codex",
+    mode: "persistent",
+    cwd: "/workspace",
+    sessionOptions: { env: { API_TOKEN: "fixture-value-old" } },
+  });
+  const replacement = await manager.ensureSession({
+    sessionKey: "replacement-secret-session",
+    agent: "codex",
+    mode: "persistent",
+    cwd: "/other-workspace",
+  });
+  await manager.setMode(createHandle(replacement.acpxRecordId), "ask");
+
+  assert.equal(factoryCalls.length, 3);
+  assert.equal((factoryCalls[2] as { sessionOptions?: unknown }).sessionOptions, undefined);
+});
+
+test("AcpRuntimeManager rejects secret rotation during an active turn", async () => {
+  const store = new InMemorySessionStore();
+  let promptActive = false;
+  let resolvePromptStart!: () => void;
+  let resolvePrompt!: (value: { stopReason: string }) => void;
+  const promptStarted = new Promise<void>((resolve) => {
+    resolvePromptStart = resolve;
+  });
+  const promptResult = new Promise<{ stopReason: string }>((resolve) => {
+    resolvePrompt = resolve;
+  });
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: store,
+      secretEnvKeys: ["API_TOKEN"],
+    }),
+    {
+      clientFactory: () =>
+        ({
+          start: async () => {},
+          close: async () => {
+            promptActive = false;
+          },
+          createSession: async () => ({ sessionId: "active-secret-sid" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => true,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => {
+            promptActive = true;
+            resolvePromptStart();
+            return await promptResult;
+          },
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => promptActive,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        }) as never,
+    },
+  );
+  const record = await manager.ensureSession({
+    sessionKey: "active-secret-session",
+    agent: "codex",
+    mode: "persistent",
+    sessionOptions: { env: { API_TOKEN: "fixture-value-old" } },
+  });
+  const turn = manager.startTurn({
+    handle: createHandle(record.acpxRecordId),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "active-secret-turn",
+  });
+  await promptStarted;
+
+  await assert.rejects(
+    manager.ensureSession({
+      sessionKey: "active-secret-session",
+      agent: "codex",
+      mode: "persistent",
+      sessionOptions: { env: { API_TOKEN: "fixture-value-new" } },
+    }),
+    /Cannot change secret environment.*active turn/,
+  );
+
+  resolvePrompt({ stopReason: "end_turn" });
+  assert.deepEqual(await turn.result, { status: "completed", stopReason: "end_turn" });
+  await manager.close(createHandle(record.acpxRecordId));
+});
+
 test("sessionOptionsFromRecord restores session env from a persisted record", () => {
   const record = makeSessionRecord({
     acpxRecordId: "env-restore-session",
