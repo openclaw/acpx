@@ -1239,6 +1239,10 @@ class MockAgent implements Agent {
     if (text === "echo") {
       return "";
     }
+    if (text.startsWith("env-present ")) {
+      const key = text.slice("env-present ".length).trim();
+      return key && process.env[key] ? "present" : "missing";
+    }
     if (text === "retryable-error-once") {
       return "recovered after retry";
     }

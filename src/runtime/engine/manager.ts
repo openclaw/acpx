@@ -72,8 +72,10 @@ import {
 } from "./reconnect.js";
 import { shouldReuseExistingRecord } from "./reuse-policy.js";
 import {
+  mergeSessionOptions,
   persistableSessionOptions,
   persistSessionOptions,
+  secretSessionOptions,
   sessionOptionsFromRecord,
   type SessionAgentOptions,
 } from "./session-options.js";
@@ -592,6 +594,7 @@ async function createOrLoadRuntimeSession(
 export class AcpRuntimeManager {
   private readonly activeControllers = new Map<string, ActiveSessionController>();
   private readonly retainedSessionOwners = new Map<string, RuntimeSessionOwner>();
+  private readonly transientSessionOptions = new Map<string, SessionAgentOptions>();
   private readonly pendingOneShotRecordIds = new Map<string, string>();
   private readonly ensureSessionLocks = new Map<string, Promise<void>>();
   private readonly runtimeOperationLocks = new Map<string, Promise<void>>();
@@ -703,7 +706,7 @@ export class AcpRuntimeManager {
         applyConversation(record, conversation);
         applyLifecycleSnapshotToRecord(record, owner.client.getAgentLifecycleSnapshot());
         await this.refreshClosedState(record);
-        await this.options.sessionStore.save(record);
+        await this.saveRecord(record);
       },
     });
     owner.projection = { record, conversation, checkpoint };
@@ -751,6 +754,7 @@ export class AcpRuntimeManager {
     if (!owner.client.hasReusableSession(record.acpSessionId)) {
       this.removeRetainedSessionOwner(owner);
       await this.stopSessionOwner(owner);
+      this.clearTransientOneShotOptions(owner);
       return undefined;
     }
     if (options.consume) {
@@ -766,6 +770,12 @@ export class AcpRuntimeManager {
     }
     this.removeRetainedSessionOwner(owner);
     await this.stopSessionOwner(owner);
+  }
+
+  private clearTransientOneShotOptions(owner: RuntimeSessionOwner): void {
+    if (owner.mode === "oneshot" && owner.recordId) {
+      this.transientSessionOptions.delete(owner.recordId);
+    }
   }
 
   private async stopSessionOwner(owner: RuntimeSessionOwner): Promise<void> {
@@ -851,7 +861,7 @@ export class AcpRuntimeManager {
     const result = await withConnectedSession({
       sessionRecordId: record.acpxRecordId,
       loadRecord: async (sessionRecordId) => await this.requireRecord(sessionRecordId),
-      saveRecord: async (connectedRecord) => await this.options.sessionStore.save(connectedRecord),
+      saveRecord: async (connectedRecord) => await this.saveRecord(connectedRecord),
       createClient: (options) => this.createClient(options),
       mcpServers: [...(this.options.mcpServers ?? [])],
       permissionMode: this.options.permissionMode,
@@ -925,9 +935,10 @@ export class AcpRuntimeManager {
     const agent = { cwd, agentCommand, agentArgv };
     const existing = await this.loadExistingRuntimeSession(input);
     if (existing && this.canReuseRuntimeSession(input, agent, existing)) {
-      return await this.reuseRuntimeSession(existing.record);
+      await this.closeOwnerWithStaleTransientOptions(input, existing);
+      return await this.reuseRuntimeSession(existing.record, input.sessionOptions);
     }
-    await this.closeConflictingPersistentSession(input, existing?.owner);
+    await this.closeConflictingSession(existing?.owner);
     return await this.createOwnedRuntimeSession(input, agent);
   }
 
@@ -971,35 +982,56 @@ export class AcpRuntimeManager {
     if (input.mode === "persistent") {
       return true;
     }
-    // Compare against what *would* be persisted for these options, not the raw
-    // input: withheld secret env keys are absent from the record by design, so
-    // comparing the record to the unfiltered input would never match and would
-    // silently disable one-shot session reuse.
     return Boolean(
       existing.owner &&
       isDeepStrictEqual(
         sessionOptionsFromRecord(existing.record),
         persistableSessionOptions(input.sessionOptions, this.options.secretEnvKeys),
+      ) &&
+      isDeepStrictEqual(
+        this.transientSessionOptions.get(existing.record.acpxRecordId),
+        secretSessionOptions(input.sessionOptions, this.options.secretEnvKeys),
       ),
     );
   }
 
-  private async reuseRuntimeSession(record: SessionRecord): Promise<SessionRecord> {
-    // sessionOptions on a reused persistent record are intentionally ignored:
-    // system prompts are fixed at newSession time. Pending one-shot records are
-    // reused only when their options still match.
+  private async reuseRuntimeSession(
+    record: SessionRecord,
+    sessionOptions: SessionAgentOptions | undefined,
+  ): Promise<SessionRecord> {
+    // Persistent options other than transient env remain fixed at newSession
+    // time. Pending one-shot records are reused only when all options match.
+    const transient = secretSessionOptions(sessionOptions, this.options.secretEnvKeys);
+    if (transient) {
+      this.transientSessionOptions.set(record.acpxRecordId, transient);
+    } else {
+      this.transientSessionOptions.delete(record.acpxRecordId);
+    }
+    persistSessionOptions(record, sessionOptionsFromRecord(record), this.options.secretEnvKeys);
     record.closed = false;
     record.closedAt = undefined;
     this.closingActiveRecords.delete(record.acpxRecordId);
-    await this.options.sessionStore.save(record);
+    await this.saveRecord(record);
     return record;
   }
 
-  private async closeConflictingPersistentSession(
+  private async closeOwnerWithStaleTransientOptions(
     input: RuntimeEnsureInput,
-    owner: RuntimeSessionOwner | undefined,
+    existing: ExistingRuntimeSession,
   ): Promise<void> {
-    if (input.mode === "persistent" && owner?.recordId) {
+    const owner = existing.owner;
+    if (!owner?.recordId) {
+      return;
+    }
+    const current = this.transientSessionOptions.get(existing.record.acpxRecordId);
+    const next = secretSessionOptions(input.sessionOptions, this.options.secretEnvKeys);
+    if (!isDeepStrictEqual(current, next)) {
+      await this.closeRetainedSessionOwner(owner.recordId);
+    }
+  }
+
+  private async closeConflictingSession(owner: RuntimeSessionOwner | undefined): Promise<void> {
+    if (owner?.recordId) {
       await this.closeRetainedSessionOwner(owner.recordId);
     }
   }
@@ -1106,6 +1138,10 @@ export class AcpRuntimeManager {
     }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     persistSessionOptions(record, input.sessionOptions, this.options.secretEnvKeys);
+    const transient = secretSessionOptions(input.sessionOptions, this.options.secretEnvKeys);
+    if (transient) {
+      this.transientSessionOptions.set(record.acpxRecordId, transient);
+    }
     return record;
   }
 
@@ -1350,7 +1386,7 @@ export class AcpRuntimeManager {
       record.lastUsedAt = promptStartedAt;
       record.acpx = acpxState;
       applyConversation(record, conversation);
-      await this.options.sessionStore.save(record);
+      await this.saveRecord(record);
       return { record, retainedOwner, conversation, acpxState, promptMessageId };
     } catch (error) {
       this.restoreBufferedSessionOwner(retainedOwner);
@@ -1448,7 +1484,10 @@ export class AcpRuntimeManager {
       onPermissionRequest: this.options.onPermissionRequest,
       elicitationModes: this.options.elicitationModes,
       verbose: this.options.verbose,
-      sessionOptions: sessionOptionsFromRecord(record),
+      sessionOptions: mergeSessionOptions(
+        this.transientSessionOptions.get(record.acpxRecordId),
+        sessionOptionsFromRecord(record),
+      ),
     });
   }
 
@@ -1463,7 +1502,7 @@ export class AcpRuntimeManager {
         record.acpx = readAcpxState();
         applyConversation(record, conversation);
         await this.refreshClosedState(record);
-        await this.options.sessionStore.save(record);
+        await this.saveRecord(record);
       },
     });
   }
@@ -1671,7 +1710,7 @@ export class AcpRuntimeManager {
     turn.record.acpx = turn.acpxState;
     applyConversation(turn.record, turn.conversation);
     applyLifecycleSnapshotToRecord(turn.record, turn.client.getAgentLifecycleSnapshot());
-    await this.options.sessionStore.save(turn.record);
+    await this.saveRecord(turn.record);
   }
 
   private failRuntimeTurn(task: RuntimeTurnTask, error: unknown): AcpRuntimeTurnResult {
@@ -1755,7 +1794,7 @@ export class AcpRuntimeManager {
     turn.record.lastUsedAt = isoNow();
     await turn.liveCheckpoint.flush();
     const closed = await this.refreshClosedState(turn.record);
-    await this.options.sessionStore.save(turn.record);
+    await this.saveRecord(turn.record);
     // A loaded transport is not reusable until preference reconciliation succeeds.
     if (closed || !turn.connected) {
       return false;
@@ -1842,7 +1881,7 @@ export class AcpRuntimeManager {
       targetRecord = result.record;
     }
     setDesiredModeId(targetRecord, mode);
-    await this.options.sessionStore.save(targetRecord);
+    await this.saveRecord(targetRecord);
   }
 
   async setConfigOption(
@@ -1868,7 +1907,7 @@ export class AcpRuntimeManager {
     if (controller) {
       const { configId, response } = await controller.setResolvedSessionConfigOption(key, value);
       record.acpx = applyConfigOptionSelection(record.acpx, configId, value, response);
-      await this.options.sessionStore.save(record);
+      await this.saveRecord(record);
       return response;
     }
 
@@ -1890,7 +1929,7 @@ export class AcpRuntimeManager {
       },
       { key, resolve: (connectedRecord) => resolveSupportedConfigOptionId(connectedRecord, key) },
     );
-    await this.options.sessionStore.save(result.record);
+    await this.saveRecord(result.record);
     return result.value;
   }
 
@@ -1908,9 +1947,10 @@ export class AcpRuntimeManager {
     this.markActiveRuntimeRecordClosing(record);
     await this.cancel(handle);
     await this.closeRuntimeRecordOwnership(record, options.discardPersistentState === true);
+    this.transientSessionOptions.delete(record.acpxRecordId);
     record.closed = true;
     record.closedAt = isoNow();
-    await this.options.sessionStore.save(record);
+    await this.saveRecord(record);
   }
 
   private async resolveRuntimeRecordForClose(recordId: string): Promise<SessionRecord> {
@@ -2023,6 +2063,11 @@ export class AcpRuntimeManager {
       );
     }
     throw error;
+  }
+
+  private async saveRecord(record: SessionRecord): Promise<void> {
+    persistSessionOptions(record, sessionOptionsFromRecord(record), this.options.secretEnvKeys);
+    await this.options.sessionStore.save(record);
   }
 
   private async requireRecord(sessionId: string): Promise<SessionRecord> {

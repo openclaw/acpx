@@ -363,10 +363,10 @@ export type AcpRuntimeOptions = {
   verbose?: boolean;
   /**
    * Names of `sessionOptions.env` keys whose values must never be written to
-   * the session record. The keys are still passed to the spawned agent; only
-   * the persisted copy is withheld, and the entry is omitted rather than
-   * replaced with a placeholder so the host's freshly-supplied value stands on
-   * resume.
+   * the session record. The keys are still passed to the spawned agent and are
+   * retained only in memory for reconnects during this runtime instance. After
+   * a runtime restart the host must call `ensureSession` again with fresh values
+   * before the next turn.
    *
    * Hosts that can route credentials through `authCredentials` should keep
    * doing so — it is never persisted. This option exists because the runtime
@@ -374,10 +374,9 @@ export type AcpRuntimeOptions = {
    * (it is reachable only from the CLI and the `flows` API), so embedders with
    * per-agent credentials otherwise have no compliant channel.
    *
-   * Withheld keys do not participate in the one-shot session reuse comparison,
-   * which compares the live options against what the record can hold. Changing
-   * only a withheld value therefore no longer forces a fresh session; rotate by
-   * using a new session key if a rotated credential must reach a new child.
+   * Withheld keys still participate in one-shot reuse while their transient
+   * values are available in memory. Changing or removing one closes the retained
+   * child and starts a new session so stale credential authority is not reused.
    */
   secretEnvKeys?: ReadonlySet<string> | readonly string[];
   /** ACP elicitation modes the embedding host can render for prompt turns. */

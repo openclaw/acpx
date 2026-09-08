@@ -937,6 +937,95 @@ test("AcpRuntimeManager persists prompt response usage and surfaces it in status
   });
 });
 
+test("AcpRuntimeManager restores transient secret env when reconnecting after ensureSession", async () => {
+  const existing = makeSessionRecord({
+    acpxRecordId: "transient-env-session",
+    acpSessionId: "transient-env-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+    closed: true,
+    acpx: {
+      session_options: {
+        env: {
+          API_TOKEN: "fixture-value-a",
+          LANG: "C",
+        },
+      },
+    },
+  });
+  const store = new InMemorySessionStore([existing]);
+  const factoryCalls: unknown[] = [];
+  const createClient = (): FakeClient => ({
+    initializeResult: { protocolVersion: 1, agentCapabilities: { loadSession: true } },
+    start: async () => {},
+    close: async () => {},
+    createSession: async () => ({ sessionId: "unused" }),
+    loadSession: async () => ({ agentSessionId: "unused" }),
+    hasReusableSession: () => false,
+    supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
+    loadSessionWithOptions: async () => ({ agentSessionId: "transient-env-agent" }),
+    getAgentLifecycleSnapshot: () => ({ running: true }),
+    prompt: async () => ({ stopReason: "end_turn" }),
+    requestCancelActivePrompt: async () => false,
+    hasActivePrompt: () => false,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {},
+    setEventHandlers: () => {},
+  });
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: store,
+      secretEnvKeys: ["API_TOKEN"],
+    }),
+    {
+      clientFactory: (options) => {
+        factoryCalls.push(options);
+        return createClient() as never;
+      },
+    },
+  );
+
+  const record = await manager.ensureSession({
+    sessionKey: "transient-env-session",
+    agent: "codex",
+    mode: "persistent",
+    sessionOptions: {
+      env: {
+        API_TOKEN: "fixture-value-b",
+        LANG: "ignored-live-value",
+      },
+    },
+  });
+  const savedAfterEnsure = await store.load(record.acpxRecordId);
+  assert.deepEqual(savedAfterEnsure?.acpx?.session_options?.env, { LANG: "C" });
+  assert.ok(!JSON.stringify(savedAfterEnsure).includes("fixture-value-a"));
+  assert.ok(!JSON.stringify(savedAfterEnsure).includes("fixture-value-b"));
+
+  const turn = manager.startTurn({
+    handle: createHandle("transient-env-session"),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-transient-env",
+  });
+  assert.deepEqual((await collectTurn(turn)).result, {
+    status: "completed",
+    stopReason: "end_turn",
+  });
+  assert.deepEqual((factoryCalls[0] as { sessionOptions?: unknown }).sessionOptions, {
+    env: {
+      API_TOKEN: "fixture-value-b",
+      LANG: "C",
+    },
+  });
+  const savedAfterTurn = await store.load(record.acpxRecordId);
+  assert.ok(!JSON.stringify(savedAfterTurn).includes("fixture-value-a"));
+  assert.ok(!JSON.stringify(savedAfterTurn).includes("fixture-value-b"));
+});
+
 test("AcpRuntimeManager restores persisted session env when reconnecting startTurn", async () => {
   const permissionPolicy = {
     autoDeny: ["execute"],
@@ -4499,7 +4588,7 @@ test("persistSessionOptions omits secretEnvKeys values and keeps the rest", () =
     record,
     {
       env: {
-        API_TOKEN: "live-secret-value",
+        API_TOKEN: "fixture-value-c",
         GIT_AUTHOR_EMAIL: "agent-pm@example.local",
       },
     },
@@ -4510,7 +4599,7 @@ test("persistSessionOptions omits secretEnvKeys values and keeps the rest", () =
   assert.deepEqual(persisted, { GIT_AUTHOR_EMAIL: "agent-pm@example.local" });
   // The value must be absent entirely, not replaced by a placeholder: the
   // record is the sole source of session env on resume.
-  assert.ok(!JSON.stringify(record).includes("live-secret-value"));
+  assert.ok(!JSON.stringify(record).includes("fixture-value-c"));
 });
 
 test("persistSessionOptions drops the env block when every key is secret", () => {
@@ -4521,10 +4610,10 @@ test("persistSessionOptions drops the env block when every key is secret", () =>
     cwd: "/workspace",
   });
 
-  persistSessionOptions(record, { env: { API_TOKEN: "live-secret-value" } }, ["API_TOKEN"]);
+  persistSessionOptions(record, { env: { API_TOKEN: "fixture-value-c" } }, ["API_TOKEN"]);
 
   assert.equal(record.acpx?.session_options?.env, undefined);
-  assert.ok(!JSON.stringify(record).includes("live-secret-value"));
+  assert.ok(!JSON.stringify(record).includes("fixture-value-c"));
 });
 
 test("persistSessionOptions leaves env untouched when secretEnvKeys is omitted", () => {
@@ -4535,21 +4624,25 @@ test("persistSessionOptions leaves env untouched when secretEnvKeys is omitted",
     cwd: "/workspace",
   });
 
-  persistSessionOptions(record, { env: { API_TOKEN: "kept-by-default" } });
+  persistSessionOptions(record, { env: { API_TOKEN: "fixture-value-d" } });
 
-  assert.deepEqual(record.acpx?.session_options?.env, { API_TOKEN: "kept-by-default" });
+  assert.deepEqual(record.acpx?.session_options?.env, { API_TOKEN: "fixture-value-d" });
 });
 
 async function countSessionsCreatedForRepeatedOneshot(
-  env: Record<string, string>,
-): Promise<number> {
+  firstEnv: Record<string, string>,
+  secondEnv: Record<string, string> = firstEnv,
+): Promise<{ created: number; closed: number }> {
   const store = new InMemorySessionStore();
   let created = 0;
+  let closed = 0;
   const makeClient = () =>
     ({
       initializeResult: { protocolVersion: 1, agentCapabilities: {} },
       start: async () => {},
-      close: async () => {},
+      close: async () => {
+        closed += 1;
+      },
       createSession: async () => {
         created += 1;
         return { sessionId: `sid-${created}`, agentSessionId: `agent-sid-${created}` };
@@ -4582,36 +4675,47 @@ async function countSessionsCreatedForRepeatedOneshot(
     sessionKey: "reuse-session",
     agent: "codex",
     mode: "oneshot",
-    sessionOptions: { env },
   } as const;
 
-  await manager.ensureSession({ ...input });
-  await manager.ensureSession({ ...input });
+  await manager.ensureSession({ ...input, sessionOptions: { env: firstEnv } });
+  await manager.ensureSession({ ...input, sessionOptions: { env: secondEnv } });
 
-  return created;
+  return { created, closed };
 }
 
-test("secretEnvKeys does not disable one-shot session reuse", async () => {
-  // Without filtering the comparison side, the withheld key would make the
-  // stored options differ from the live ones on every call.
-  const created = await countSessionsCreatedForRepeatedOneshot({
-    API_TOKEN: "live-secret-value",
+test("secretEnvKeys permits one-shot reuse when transient values still match", async () => {
+  const result = await countSessionsCreatedForRepeatedOneshot({
+    API_TOKEN: "fixture-value-c",
     LANG: "C",
   });
 
-  assert.equal(created, 1);
+  assert.deepEqual(result, { created: 1, closed: 0 });
 });
 
-test("secretEnvKeys does not disable one-shot reuse when every env key is secret", async () => {
-  // Narrower than the mixed case above: with nothing left to persist the record
-  // carries no session_options block, so the comparison view must be `undefined`
-  // rather than `{}` — otherwise reuse stays silently disabled for exactly the
-  // hosts this option targets, whose session env is credentials only.
-  const created = await countSessionsCreatedForRepeatedOneshot({
-    API_TOKEN: "live-secret-value",
+test("secretEnvKeys permits one-shot reuse when every transient value still matches", async () => {
+  const result = await countSessionsCreatedForRepeatedOneshot({
+    API_TOKEN: "fixture-value-c",
   });
 
-  assert.equal(created, 1);
+  assert.deepEqual(result, { created: 1, closed: 0 });
+});
+
+test("secretEnvKeys replaces a retained one-shot child when a credential rotates", async () => {
+  const result = await countSessionsCreatedForRepeatedOneshot(
+    { API_TOKEN: "fixture-value-old" },
+    { API_TOKEN: "fixture-value-new" },
+  );
+
+  assert.deepEqual(result, { created: 2, closed: 1 });
+});
+
+test("secretEnvKeys replaces a retained one-shot child when a credential is removed", async () => {
+  const result = await countSessionsCreatedForRepeatedOneshot(
+    { API_TOKEN: "fixture-value-old" },
+    { LANG: "C" },
+  );
+
+  assert.deepEqual(result, { created: 2, closed: 1 });
 });
 
 test("sessionOptionsFromRecord restores session env from a persisted record", () => {

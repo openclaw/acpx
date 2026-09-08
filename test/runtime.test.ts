@@ -227,6 +227,107 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   assert.equal(closeDiscardPersistentState, true);
 });
 
+test("AcpxRuntime keeps transient secret env off disk and restores it to a replacement child", async (t) => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-secret-env-"));
+  const stateDir = path.join(rootDir, "state");
+  const store = createFileSessionStore({ stateDir });
+  t.after(async () => {
+    await fs.rm(rootDir, { recursive: true, force: true });
+  });
+
+  const options = {
+    cwd: rootDir,
+    sessionStore: store,
+    agentRegistry: createAgentRegistry({
+      overrides: {
+        fixture: [process.execPath, MOCK_AGENT_PATH, "--supports-load-session"],
+      },
+    }),
+    permissionMode: "approve-reads" as const,
+    secretEnvKeys: ["runtime_test_marker"],
+  };
+  const runtime = createAcpRuntime(options);
+  const handle = await runtime.ensureSession({
+    sessionKey: "secret-env-reconnect",
+    agent: "fixture",
+    mode: "persistent",
+    sessionOptions: {
+      env: {
+        runtime_test_marker: "fixture-runtime-marker",
+        lang: "C",
+      },
+    },
+  });
+  const rotatedHandle = await runtime.ensureSession({
+    sessionKey: "secret-env-reconnect",
+    agent: "fixture",
+    mode: "persistent",
+    sessionOptions: {
+      env: {
+        runtime_test_marker: "fixture-runtime-marker-rotated",
+      },
+    },
+  });
+  const rotationEvents: AcpRuntimeEvent[] = [];
+  for await (const event of runtime.runTurn({
+    handle: rotatedHandle,
+    text: "env-present runtime_test_marker",
+    mode: "prompt",
+    requestId: "req-secret-env-rotated",
+  })) {
+    rotationEvents.push(event);
+  }
+  assert.equal(
+    rotationEvents.some((event) => event.type === "text_delta" && event.text.includes("present")),
+    true,
+  );
+
+  const sessionPath = path.join(
+    stateDir,
+    "sessions",
+    `${encodeURIComponent(handle.acpxRecordId ?? handle.sessionKey)}.json`,
+  );
+  const afterEnsure = await fs.readFile(sessionPath, "utf8");
+  assert.doesNotMatch(afterEnsure, /fixture-runtime-marker/);
+  assert.match(afterEnsure, /"lang": "C"/);
+
+  await runtime.close({ handle: rotatedHandle, reason: "force replacement child" });
+  const restarted = createAcpRuntime(options);
+  const resumedHandle = await restarted.ensureSession({
+    sessionKey: "secret-env-reconnect",
+    agent: "fixture",
+    mode: "persistent",
+    sessionOptions: {
+      env: {
+        runtime_test_marker: "fixture-runtime-marker",
+      },
+    },
+  });
+  const events: AcpRuntimeEvent[] = [];
+  try {
+    for await (const event of restarted.runTurn({
+      handle: resumedHandle,
+      text: "env-present runtime_test_marker",
+      mode: "prompt",
+      requestId: "req-secret-env-reconnect",
+    })) {
+      events.push(event);
+    }
+    const text = events
+      .filter(
+        (event): event is Extract<AcpRuntimeEvent, { type: "text_delta" }> =>
+          event.type === "text_delta",
+      )
+      .map((event) => event.text)
+      .join("");
+    assert.match(text, /present/);
+  } finally {
+    await restarted.close({ handle: resumedHandle, reason: "test complete" });
+  }
+  assert.doesNotMatch(await fs.readFile(sessionPath, "utf8"), /fixture-runtime-marker/);
+  await restarted.close({ handle: resumedHandle, reason: "test complete" });
+});
+
 test("AcpxRuntime keeps session ownership from initialization through idle updates and oneshot cleanup", async (t) => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-owner-"));
   const stateDir = path.join(rootDir, "state");

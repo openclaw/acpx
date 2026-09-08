@@ -150,6 +150,22 @@ export function persistableSessionOptions(
   return Object.keys(next).length > 0 ? next : undefined;
 }
 
+export function secretSessionOptions(
+  options: SessionAgentOptions | undefined,
+  secretEnvKeys: SecretEnvKeys | undefined,
+): SessionAgentOptions | undefined {
+  if (options?.env === undefined || secretEnvKeys === undefined) {
+    return undefined;
+  }
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(options.env)) {
+    if (isSecretEnvKey(key, secretEnvKeys)) {
+      env[key] = value;
+    }
+  }
+  return Object.keys(env).length > 0 ? { env } : undefined;
+}
+
 export function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOptions | undefined {
   const stored = record.acpx?.session_options;
   if (!stored) {
