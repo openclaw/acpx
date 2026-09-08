@@ -4,6 +4,14 @@
 
 Repo: https://github.com/openclaw/acpx
 
+## Unreleased
+
+### Changes
+
+### Breaking
+
+### Fixes
+
 ## 0.15.1 - 2026-09-07
 
 **Highlights:** Hosts can bound terminal output retention without changing existing defaults; incoming ACP messages now default to a 64 MiB limit with an explicit override.
