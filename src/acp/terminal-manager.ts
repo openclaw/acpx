@@ -105,6 +105,20 @@ export function buildTerminalSpawnOptions(
   ) as TerminalSpawnOptions;
 }
 
+function readTerminalOutputCeiling(): number | undefined {
+  const raw = process.env.ACPX_TERMINAL_MAX_OUTPUT_BYTES?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  const bytes = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(bytes)) {
+    throw new Error(
+      "ACPX_TERMINAL_MAX_OUTPUT_BYTES must be a non-negative safe integer; zero disables the host ceiling",
+    );
+  }
+  return bytes === 0 ? undefined : bytes;
+}
+
 function trimToUtf8Boundary(buffer: Buffer, limit: number): Buffer {
   if (limit <= 0) {
     return Buffer.alloc(0);
@@ -169,9 +183,11 @@ export class TerminalManager {
   private readonly confirmExecute: (commandLine: string) => Promise<boolean>;
   private readonly killGraceMs: number;
   private readonly processHelperTimeoutMs: number;
+  private readonly outputCeilingBytes: number | undefined;
   private readonly terminals = new Map<string, ManagedTerminal>();
 
   constructor(options: TerminalManagerOptions) {
+    this.outputCeilingBytes = readTerminalOutputCeiling();
     this.cwd = options.cwd;
     this.permissionMode = options.permissionMode;
     this.nonInteractivePermissions = options.nonInteractivePermissions ?? "deny";
@@ -209,9 +225,13 @@ export class TerminalManager {
         throw new PermissionDeniedError("Permission denied for terminal/create");
       }
 
-      const outputByteLimit = Math.max(
+      const requestedLimit = Math.max(
         0,
         Math.round(params.outputByteLimit ?? DEFAULT_TERMINAL_OUTPUT_LIMIT_BYTES),
+      );
+      const outputByteLimit = Math.min(
+        requestedLimit,
+        this.outputCeilingBytes ?? Number.POSITIVE_INFINITY,
       );
       const { proc, spawnCommand } = await spawnTerminalProcess(params, this.cwd);
 
