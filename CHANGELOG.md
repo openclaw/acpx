@@ -6,13 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
-### Changes
+**Highlights:** Hosts can bound terminal output retention without changing existing defaults; incoming ACP messages now default to a 64 MiB limit with an explicit override.
 
-### Breaking
-
-- ACP/transport: default incoming messages to a 64 MiB raw-byte limit instead of unlimited input; use `ACPX_MAX_ACP_MESSAGE_BYTES` to raise the limit or `0` to disable it. Overflow errors explain the override, and existing warm owners retain their startup setting.
-
-### Fixes
+- ACP/terminal: add an opt-in `ACPX_TERMINAL_MAX_OUTPUT_BYTES` ceiling for combined stdout and stderr retention, preserving agent-requested limits and the 64 KiB default unless configured. Zero disables only the host ceiling; truncated output retains the newest UTF-8 suffix. Thanks @SebTardif.
+- ACP/transport (**compatibility change**): default incoming messages to a 64 MiB raw-byte limit instead of unlimited input; use `ACPX_MAX_ACP_MESSAGE_BYTES` to raise the limit or `0` to disable it. Overflow errors explain the override, and existing warm owners retain their startup setting.
 
 ## 0.15.0 - 2026-09-07
 
