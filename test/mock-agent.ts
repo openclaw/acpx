@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -1242,6 +1242,11 @@ class MockAgent implements Agent {
     if (text.startsWith("env-present ")) {
       const key = text.slice("env-present ".length).trim();
       return key && process.env[key] ? "present" : "missing";
+    }
+    if (text.startsWith("env-sha256 ")) {
+      const key = text.slice("env-sha256 ".length).trim();
+      const value = key ? process.env[key] : undefined;
+      return value ? createHash("sha256").update(value).digest("hex") : "missing";
     }
     if (text === "retryable-error-once") {
       return "recovered after retry";

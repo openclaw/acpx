@@ -756,7 +756,6 @@ export class AcpRuntimeManager {
     if (!owner.client.hasReusableSession(record.acpSessionId)) {
       this.removeRetainedSessionOwner(owner);
       await this.stopSessionOwner(owner);
-      this.clearTransientOneShotOptions(owner);
       return undefined;
     }
     if (options.consume) {
@@ -2082,6 +2081,10 @@ export class AcpRuntimeManager {
           sessionKey: record.name ?? record.acpxRecordId,
         },
         verbose: this.options.verbose,
+        sessionOptions: mergeSessionOptions(
+          this.transientSessionOptions.get(record.acpxRecordId),
+          sessionOptionsFromRecord(record),
+        ),
       }),
     };
   }

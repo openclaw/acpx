@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +15,7 @@ import {
   decodeAcpxRuntimeHandleState,
   encodeAcpxRuntimeHandleState,
   type AcpRuntimeEvent,
+  type AcpRuntimeHandle,
   type AcpSessionRecord,
 } from "../src/runtime.js";
 
@@ -326,6 +328,101 @@ test("AcpxRuntime keeps transient secret env off disk and restores it to a repla
   }
   assert.doesNotMatch(await fs.readFile(sessionPath, "utf8"), /fixture-runtime-marker/);
   await restarted.close({ handle: resumedHandle, reason: "test complete" });
+});
+
+test("AcpxRuntime uses the intended credential at final child I/O", async (t) => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-credential-io-"));
+  const stateDir = path.join(rootDir, "state");
+  const envKey = "runtime_test_credential";
+  const inherited = process.env[envKey];
+  process.env[envKey] = "fixture-inherited-credential";
+  t.after(async () => {
+    if (inherited === undefined) {
+      delete process.env[envKey];
+    } else {
+      process.env[envKey] = inherited;
+    }
+    await fs.rm(rootDir, { recursive: true, force: true });
+  });
+
+  const options = {
+    cwd: rootDir,
+    sessionStore: createFileSessionStore({ stateDir }),
+    agentRegistry: createAgentRegistry({
+      overrides: {
+        fixture: [process.execPath, MOCK_AGENT_PATH, "--supports-load-session"],
+      },
+    }),
+    permissionMode: "approve-reads" as const,
+    secretEnvKeys: [envKey],
+  };
+  const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+  const runCredentialProbe = async (
+    runtime: ReturnType<typeof createAcpRuntime>,
+    handle: AcpRuntimeHandle,
+    requestId: string,
+  ): Promise<string> => {
+    const output: string[] = [];
+    for await (const event of runtime.runTurn({
+      handle,
+      text: `env-sha256 ${envKey}`,
+      mode: "prompt",
+      requestId,
+    })) {
+      if (event.type === "text_delta") {
+        output.push(event.text);
+      }
+    }
+    return output.join("");
+  };
+
+  const runtime = createAcpRuntime(options);
+  const initial = await runtime.ensureSession({
+    sessionKey: "credential-final-io",
+    agent: "fixture",
+    mode: "persistent",
+    sessionOptions: { env: { [envKey]: "fixture-current-credential" } },
+  });
+  const rotated = await runtime.ensureSession({
+    sessionKey: "credential-final-io",
+    agent: "fixture",
+    mode: "persistent",
+    sessionOptions: { env: { [envKey]: "fixture-rotated-credential" } },
+  });
+  assert.equal(
+    await runCredentialProbe(runtime, rotated, "credential-final-io-rotated"),
+    digest("fixture-rotated-credential"),
+  );
+  assert.notEqual(
+    await runCredentialProbe(runtime, rotated, "credential-final-io-not-inherited"),
+    digest("fixture-inherited-credential"),
+  );
+  await runtime.close({ handle: rotated, reason: "restart credential proof" });
+
+  const restarted = createAcpRuntime(options);
+  const resumed = await restarted.ensureSession({
+    sessionKey: "credential-final-io",
+    agent: "fixture",
+    mode: "persistent",
+    sessionOptions: { env: { [envKey]: "fixture-restarted-credential" } },
+  });
+  assert.equal(
+    await runCredentialProbe(restarted, resumed, "credential-final-io-restarted"),
+    digest("fixture-restarted-credential"),
+  );
+  assert.notEqual(
+    await runCredentialProbe(restarted, resumed, "credential-final-io-obsolete"),
+    digest("fixture-rotated-credential"),
+  );
+  await restarted.close({ handle: resumed, reason: "test complete" });
+
+  const sessionPath = path.join(
+    stateDir,
+    "sessions",
+    `${encodeURIComponent(initial.acpxRecordId ?? initial.sessionKey)}.json`,
+  );
+  const saved = await fs.readFile(sessionPath, "utf8");
+  assert.doesNotMatch(saved, /fixture-(?:inherited|current|rotated|restarted)-credential/);
 });
 
 test("AcpxRuntime keeps session ownership from initialization through idle updates and oneshot cleanup", async (t) => {

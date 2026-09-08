@@ -447,6 +447,70 @@ test("AcpRuntimeManager reuses pending oneshot initialization and closes it afte
   assert.equal(closeCalls, 2);
 });
 
+test("AcpRuntimeManager preserves a pending one-shot credential through child recovery", async () => {
+  const store = new InMemorySessionStore();
+  const constructedOptions: Array<{ sessionOptions?: SessionAgentOptions }> = [];
+  let constructed = 0;
+  let firstReusable = true;
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: store,
+      secretEnvKeys: ["API_TOKEN"],
+    }),
+    {
+      clientFactory: (options) => {
+        constructed += 1;
+        constructedOptions.push(options);
+        return {
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({
+            sessionId: constructed === 1 ? "pending-secret-sid" : "replacement-secret-sid",
+          }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => (constructed === 1 ? firstReusable : true),
+          supportsLoadSession: () => false,
+          supportsResumeSession: () => false,
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        } as never;
+      },
+    },
+  );
+  const record = await manager.ensureSession({
+    sessionKey: "pending-secret-recovery",
+    agent: "codex",
+    mode: "oneshot",
+    sessionOptions: { env: { API_TOKEN: "fixture-value-current" } },
+  });
+  firstReusable = false;
+
+  const turn = manager.startTurn({
+    handle: createHandle("pending-secret-recovery", record.acpxRecordId),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "oneshot",
+    requestId: "pending-secret-recovery",
+  });
+
+  assert.deepEqual((await collectTurn(turn)).result, {
+    status: "completed",
+    stopReason: "end_turn",
+  });
+  assert.deepEqual(constructedOptions[1]?.sessionOptions, {
+    env: { API_TOKEN: "fixture-value-current" },
+  });
+  assert.ok(!JSON.stringify(await store.load(record.acpxRecordId)).includes("fixture-value"));
+});
+
 test("AcpRuntimeManager closes retained oneshot owners on pre-turn exits", async () => {
   const store = new InMemorySessionStore();
   let createdSessions = 0;
@@ -3273,6 +3337,72 @@ test("AcpRuntimeManager closes the backend session when discarding persistent st
   assert.equal(recreated.agentSessionId, "fresh-agent");
   assert.equal(recreated.messages.length, 0);
   assert.equal(recreated.acpx?.reset_on_next_ensure, undefined);
+});
+
+test("AcpRuntimeManager forwards rotated credentials to backend-close reconnects", async () => {
+  const store = new InMemorySessionStore();
+  const closedWithOptions: Array<SessionAgentOptions | undefined> = [];
+  let constructed = 0;
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({
+      cwd: "/workspace",
+      sessionStore: store,
+      secretEnvKeys: ["API_TOKEN"],
+    }),
+    {
+      clientFactory: (options) => {
+        constructed += 1;
+        const sessionOptions = options.sessionOptions;
+        return {
+          initializeResult: {
+            protocolVersion: 1,
+            agentCapabilities: { sessionCapabilities: { close: {} } },
+          },
+          start: async () => {},
+          close: async () => {},
+          createSession: async () => ({ sessionId: "backend-close-secret-sid" }),
+          loadSession: async () => ({ agentSessionId: "unused" }),
+          hasReusableSession: () => true,
+          supportsLoadSession: () => true,
+          supportsResumeSession: () => false,
+          supportsCloseSession: () => true,
+          closeSession: async () => {
+            closedWithOptions.push(sessionOptions);
+          },
+          loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+          getAgentLifecycleSnapshot: () => ({ running: true }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          requestCancelActivePrompt: async () => false,
+          hasActivePrompt: () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async () => {},
+          clearEventHandlers: () => {},
+          setEventHandlers: () => {},
+        } as never;
+      },
+    },
+  );
+  const initial = await manager.ensureSession({
+    sessionKey: "backend-close-secret",
+    agent: "codex",
+    mode: "persistent",
+    sessionOptions: { env: { API_TOKEN: "fixture-value-old" } },
+  });
+  const rotated = await manager.ensureSession({
+    sessionKey: "backend-close-secret",
+    agent: "codex",
+    mode: "persistent",
+    sessionOptions: { env: { API_TOKEN: "fixture-value-new" } },
+  });
+  assert.equal(rotated.acpxRecordId, initial.acpxRecordId);
+
+  await manager.close(createHandle(rotated.acpxRecordId), {
+    discardPersistentState: true,
+  });
+
+  assert.equal(constructed, 2);
+  assert.deepEqual(closedWithOptions, [{ env: { API_TOKEN: "fixture-value-new" } }]);
+  assert.ok(!JSON.stringify(await store.load(rotated.acpxRecordId)).includes("fixture-value"));
 });
 
 test("AcpRuntimeManager closes a retained client when the final backend-close flush fails", async () => {
