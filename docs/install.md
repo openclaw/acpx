@@ -9,13 +9,13 @@ description: Install acpx globally with npm, run it ad-hoc with npx, or build fr
 
 - To run the published CLI: Node.js **22.13 or newer** (see `engines.node` in `package.json`).
 - To build from source: Node.js **22.x starting at 22.18**, **24.x starting at 24.11**, or **26 or newer**. The tsdown build tool does not support Node 25.
-- pnpm **12.3.4** for source builds
+- pnpm **11.25.0** for source builds
 - The underlying coding agent CLI you plan to talk to (Codex, Claude, etc.)
 
 If pnpm is not installed yet, use npm:
 
 ```bash
-npm install -g pnpm@12.3.4
+npm install -g pnpm@11.25.0
 ```
 
 Some older Corepack builds bundled with supported Node.js versions have stale
@@ -75,7 +75,7 @@ For development or to test an unreleased branch:
 ```bash
 git clone https://github.com/openclaw/acpx.git
 cd acpx
-npm install -g pnpm@12.3.4 # if pnpm is not already installed
+npm install -g pnpm@11.25.0 # if pnpm is not already installed
 pnpm install
 pnpm run build
 node dist/cli.js --help

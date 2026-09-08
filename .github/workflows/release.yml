@@ -11,7 +11,7 @@ concurrency:
 
 env:
   NODE_VERSION: 24
-  PNPM_VERSION: 12.3.4
+  PNPM_VERSION: 11.25.0
 
 jobs:
   release:

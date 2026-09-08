@@ -23,9 +23,9 @@ instead of expanding this file into a full technical spec.
 - Default branch: `main`
 - Runtime: Node.js `>=22.13.0`
 - Source builds: Node.js `^22.18.0 || ^24.11.0 || >=26.0.0` (tsdown excludes Node 25).
-- Package manager: `pnpm@12.3.4`
+- Package manager: `pnpm@11.25.0`
 - Clean Node 22 setups can have stale Corepack signing keys; install pnpm
-  with `npm install -g pnpm@12.3.4` if `corepack prepare` fails.
+  with `npm install -g pnpm@11.25.0` if `corepack prepare` fails.
 
 ## Product Direction
 
