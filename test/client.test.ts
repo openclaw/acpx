@@ -94,7 +94,7 @@ type ClientInternals = {
   consumePromptPermissionFailure?: (
     sessionId: string,
   ) => PermissionPromptUnavailableError | undefined;
-  handleSessionUpdate?: (notification: { sessionId: string }) => Promise<void>;
+  handleSessionUpdate?: (notification: { sessionId: string; update?: unknown }) => Promise<void>;
   waitForSessionUpdateDrain?: (idleMs: number, timeoutMs: number) => Promise<void>;
   recordAgentExit?: (
     reason: "process_exit" | "process_close" | "pipe_close" | "connection_close",
@@ -165,6 +165,7 @@ type ClientInternals = {
   lastKnownPid?: number;
   agentStartedAt?: string;
   closing: boolean;
+  appliedModel?: string;
   observedSessionUpdates: number;
   processedSessionUpdates: number;
   suppressSessionUpdates: boolean;
@@ -1961,6 +1962,56 @@ test("AcpClient close resets in-memory state and shuts down terminal manager", a
   assert.equal(internals.suppressSessionUpdates, false);
   assert.equal(internals.suppressReplaySessionUpdateMessages, false);
   assert.equal(internals.closing, true);
+});
+
+test("config_option_update notifications refresh the tracked applied model", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  internals.appliedModel = "swe-2-high";
+
+  await internals.handleSessionUpdate?.({
+    sessionId: "session-1",
+    update: {
+      sessionUpdate: "config_option_update",
+      configOptions: [
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "swe-2-max",
+          options: [{ value: "swe-2-max", name: "SWE-2 Max" }],
+        },
+      ],
+    },
+  });
+
+  assert.equal(client.getAppliedModel(), "swe-2-max");
+});
+
+test("non-model session updates leave the tracked applied model untouched", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  internals.appliedModel = "swe-2-high";
+
+  await internals.handleSessionUpdate?.({
+    sessionId: "session-1",
+    update: {
+      sessionUpdate: "config_option_update",
+      configOptions: [
+        {
+          id: "mode",
+          name: "Mode",
+          category: "mode",
+          type: "select",
+          currentValue: "plan",
+          options: [{ value: "plan", name: "Plan" }],
+        },
+      ],
+    },
+  });
+
+  assert.equal(client.getAppliedModel(), "swe-2-high");
 });
 
 function makeClient(
