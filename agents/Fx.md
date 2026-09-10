@@ -20,6 +20,8 @@ acpx --model grok-4.5 fx exec 'summarize this repo'
 
 The flag is persisted in `session_options.model`, so persistent-session reuse and reconnects keep the selection. An explicit `--model` on a raw `--agent` command wins over the forwarded flag.
 
+fx advertises three selectors: `provider` (gateway/codex/grok), `model` (the provider's model ids), and `mode` (code/ask). `--model` targets the `model` selector; use `--config-option provider=<name>` to switch providers in-session.
+
 ## ACP surface
 
 fx supports `session/new`, `session/load`, `session/resume`, `session/list`, `session/close`, `session/prompt`, `session/cancel`, `session/set_mode`, and `session/set_config_option` for model and mode changes. The client process working directory becomes the fx primary workspace; launch a separate server process per workspace.
