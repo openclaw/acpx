@@ -262,7 +262,7 @@ test("buildDevinAcpCommandArgs forwards the requested model as a startup flag", 
     buildDevinAcpCommandArgs(["acp"], {
       sessionOptions: { model: "swe-2-high" },
     }),
-    ["acp", "--model=swe-2-high"],
+    ["acp", "--model", "swe-2-high"],
   );
 });
 

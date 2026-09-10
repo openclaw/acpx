@@ -84,8 +84,11 @@ export function buildDevinAcpCommandArgs(
   const args = [...initialArgs];
   const model = options.sessionOptions?.model;
 
+  // Emit the space-separated form: other startup-model adapters (fx acp) only
+  // accept `--model <id>`, and devin acp accepts it too, so it is the lowest
+  // common denominator.
   if (typeof model === "string" && model.trim() && !hasCommandFlag(args, "--model")) {
-    args.push(`--model=${model.trim()}`);
+    args.push("--model", model.trim());
   }
 
   return args;

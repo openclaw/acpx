@@ -1504,7 +1504,7 @@ test("integration: built-in devin agent resolves to devin acp and forwards --mod
 
       const argLines = (await fs.readFile(argLogPath, "utf8")).trim().split(/\r?\n/);
       assert(
-        argLines.some((line) => line.includes("--model=swe-2-high")),
+        argLines.some((line) => line.includes("--model swe-2-high")),
         `expected forwarded --model flag in logged invocations:\n${argLines.join("\n")}`,
       );
     } finally {
