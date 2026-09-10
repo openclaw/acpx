@@ -307,6 +307,53 @@ test("config responses clear stale config models without erasing legacy model co
   assert.equal(migratedConfig.model_control, undefined);
 });
 
+test("model config parsing prefers an explicit model id over other model-category selects", () => {
+  // fx advertises `provider` and `model` selects, both categorized as model.
+  const state = modelStateFromConfigOptions([
+    {
+      id: "provider",
+      name: "Provider",
+      category: "model",
+      type: "select",
+      currentValue: "grok",
+      options: [
+        { value: "gateway", name: "Vercel AI Gateway" },
+        { value: "codex", name: "Codex" },
+        { value: "grok", name: "Grok" },
+      ],
+    },
+    {
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: "grok-4.5",
+      options: [
+        { value: "grok-4.6", name: "Grok 4.6" },
+        { value: "grok-4.5", name: "Grok 4.5" },
+      ],
+    },
+  ]);
+
+  assert.equal(state?.configId, "model");
+  assert.equal(state?.currentModelId, "grok-4.5");
+});
+
+test("model config parsing falls back to the first model-category select", () => {
+  const state = modelStateFromConfigOptions([
+    {
+      id: "provider",
+      name: "Provider",
+      category: "model",
+      type: "select",
+      currentValue: "grok",
+      options: [{ value: "grok", name: "Grok" }],
+    },
+  ]);
+
+  assert.equal(state?.configId, "provider");
+});
+
 test("model config parsing ignores malformed raw and persisted snapshots", () => {
   assert.equal(
     modelStateFromConfigOptions([

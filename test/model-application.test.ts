@@ -20,14 +20,16 @@ function stubClient(startupModel: string | undefined): {
   client: AcpClient;
   setSessionModelCalls: string[];
 } {
+  let appliedModel = startupModel;
   const setSessionModelCalls: string[] = [];
   const client = {
-    getStartupModel: () => startupModel,
+    getAppliedModel: () => appliedModel,
     setSessionModel: async (
       _sessionId: string,
       modelId: string,
     ): Promise<SetSessionConfigOptionResponse> => {
       setSessionModelCalls.push(modelId);
+      appliedModel = modelId;
       return {
         configOptions: [
           {
@@ -58,6 +60,28 @@ test("applyRequestedModelIfAdvertised routes a changed model through ACP on a re
 
   assert.equal(result.applied, true);
   assert.deepEqual(setSessionModelCalls, ["grok-4.5"]);
+});
+
+test("applyRequestedModelIfAdvertised reapplies the startup model after an in-session change", async () => {
+  const { client, setSessionModelCalls } = stubClient("grok-4.6");
+
+  await applyRequestedModelIfAdvertised({
+    client,
+    sessionId: "session-1",
+    requestedModel: "grok-4.5",
+    models: buildFxModels("grok-4.6"),
+    agentCommand: "fx acp",
+  });
+  const result = await applyRequestedModelIfAdvertised({
+    client,
+    sessionId: "session-1",
+    requestedModel: "grok-4.6",
+    models: buildFxModels("grok-4.5"),
+    agentCommand: "fx acp",
+  });
+
+  assert.equal(result.applied, true);
+  assert.deepEqual(setSessionModelCalls, ["grok-4.5", "grok-4.6"]);
 });
 
 test("applyRequestedModelIfAdvertised skips the ACP update when the launch flag applied the model", async () => {

@@ -7,12 +7,12 @@ import {
 } from "../acp/model-support.js";
 import { withTimeout } from "../async-control.js";
 
-function modelAppliedAtLaunch(
+function modelAlreadyApplied(
   client: AcpClient,
   agentCommand: string | undefined,
   requestedModel: string,
 ): boolean {
-  return supportsStartupModelFlag(agentCommand) && client.getStartupModel() === requestedModel;
+  return supportsStartupModelFlag(agentCommand) && client.getAppliedModel() === requestedModel;
 }
 
 function emitStartupFlagUnavailableWarning(params: {
@@ -53,7 +53,7 @@ export async function applyRequestedModelIfAdvertised(params: {
   if (!requestedModel) {
     return { applied: false };
   }
-  const appliedViaStartupFlag = modelAppliedAtLaunch(
+  const appliedViaStartupFlag = modelAlreadyApplied(
     params.client,
     params.agentCommand,
     requestedModel,
@@ -68,9 +68,10 @@ export async function applyRequestedModelIfAdvertised(params: {
   if (warning) {
     params.onWarning?.(warning);
   }
-  // A model delivered through a startup flag counts as applied when this client
-  // process was actually launched with it. A reused queue client keeps ACP
-  // model controls so later --model requests still reach the running adapter.
+  // A model this client already applied (startup flag or a prior in-session
+  // change) needs no second ACP update. A reused queue client whose session
+  // moved to another model keeps ACP model controls so later --model requests
+  // still reach the running adapter.
   if (!params.models) {
     emitStartupFlagUnavailableWarning({
       requestedModel,
