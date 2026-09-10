@@ -149,7 +149,7 @@ test("Devin model validation defers to the startup model flag", () => {
 });
 
 test("Devin model validation warns instead of rejecting unadvertised fuzzy names", () => {
-  const warning = assertRequestedModelSupported({
+  const launched = assertRequestedModelSupported({
     requestedModel: "SWE-2 High",
     models: {
       configId: "model",
@@ -158,9 +158,22 @@ test("Devin model validation warns instead of rejecting unadvertised fuzzy names
     },
     agentCommand: "devin acp",
     context: "apply",
+    appliedViaStartupFlag: true,
   });
+  assert.match(launched ?? "", /passed to the agent as a startup flag/);
 
-  assert.match(warning ?? "", /passed to the agent as a startup flag/);
+  const forwarded = assertRequestedModelSupported({
+    requestedModel: "SWE-2 High",
+    models: {
+      configId: "model",
+      currentModelId: "swe-2-high",
+      availableModels: [{ modelId: "swe-2-high", name: "SWE-2 High" }],
+    },
+    agentCommand: "devin acp",
+    context: "apply",
+    appliedViaStartupFlag: false,
+  });
+  assert.match(forwarded ?? "", /forwarding it to the adapter/);
 });
 
 test("model unsupported predicate rejects unrelated errors", () => {
