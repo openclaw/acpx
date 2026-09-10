@@ -90,6 +90,7 @@ import {
   resolveClaudeCodeSettingSources,
   resolveGeminiAcpStartupTimeoutMs,
   resolveGeminiCommandArgs,
+  resolveStartupModelFlagValue,
   shouldIgnoreNonJsonAgentOutputLine,
   supportsStartupModelFlagCommand,
 } from "./agent-command.js";
@@ -313,6 +314,7 @@ type AgentLaunchPlan = {
   geminiAcp: boolean;
   copilotAcp: boolean;
   claudeAcp: boolean;
+  startupModel: string | undefined;
   spawnOptions: ReturnType<typeof buildAgentSpawnOptions>;
 };
 
@@ -420,6 +422,7 @@ export class AcpClient {
   private agentStartedAt?: string;
   private lastAgentExit?: AgentExitInfo;
   private lastKnownPid?: number;
+  private startupModel?: string;
   private readonly promptPermissionFailures = new Map<string, PermissionPromptUnavailableError>();
   private readonly pendingConnectionRequests = new Set<PendingConnectionRequest>();
   private readonly modelConfigIds = new Map<string, string>();
@@ -466,6 +469,13 @@ export class AcpClient {
 
   getAgentPid(): number | undefined {
     return this.agent?.pid ?? this.lastKnownPid;
+  }
+
+  // The model this client process was actually launched with through a
+  // startup flag, when the adapter supports one. Undefined means no model
+  // flag was injected for the current spawn.
+  getStartupModel(): string | undefined {
+    return this.startupModel;
   }
 
   getPermissionStats(): PermissionStats {
@@ -611,6 +621,7 @@ export class AcpClient {
 
     const maxMessageBytes = readMaxAcpMessageBytes();
     const launch = await this.resolveAgentLaunchPlan();
+    this.startupModel = launch.startupModel;
     this.logAgentLaunch(launch);
     await this.ensureLaunchSupport(launch);
     const { child, process: startedProcess } = await this.spawnAgentProcess(launch);
@@ -684,13 +695,16 @@ export class AcpClient {
     if (isQoderAcpCommand(spawnCommand, args)) {
       args = buildQoderAcpCommandArgs(args, this.options);
     }
+    let startupModel: string | undefined;
     if (supportsStartupModelFlagCommand(spawnCommand, args)) {
+      startupModel = resolveStartupModelFlagValue(args, this.options);
       args = buildStartupModelFlagArgs(args, this.options);
     }
     return {
       spawnCommand,
       args,
       resolvedBuiltInLaunch,
+      startupModel,
       devinAcp: isDevinAcpCommand(spawnCommand, args),
       geminiAcp: isGeminiAcpCommand(spawnCommand, args),
       copilotAcp: isCopilotAcpCommand(spawnCommand, args),

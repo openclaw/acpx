@@ -7,6 +7,28 @@ import {
 } from "../acp/model-support.js";
 import { withTimeout } from "../async-control.js";
 
+function modelAppliedAtLaunch(
+  client: AcpClient,
+  agentCommand: string | undefined,
+  requestedModel: string,
+): boolean {
+  return supportsStartupModelFlag(agentCommand) && client.getStartupModel() === requestedModel;
+}
+
+function emitStartupFlagUnavailableWarning(params: {
+  requestedModel: string;
+  appliedViaStartupFlag: boolean;
+  agentCommand?: string;
+  onWarning?: (message: string) => void;
+}): void {
+  if (params.appliedViaStartupFlag || !supportsStartupModelFlag(params.agentCommand)) {
+    return;
+  }
+  params.onWarning?.(
+    `requested model "${params.requestedModel}" was not applied to this running session; the adapter applies model selection at process startup, so a new session is required to change it.`,
+  );
+}
+
 export function currentModelIdFromSetModelResponse(
   response: SetSessionConfigOptionResponse | undefined,
   fallbackModelId: string | undefined,
@@ -31,22 +53,34 @@ export async function applyRequestedModelIfAdvertised(params: {
   if (!requestedModel) {
     return { applied: false };
   }
+  const appliedViaStartupFlag = modelAppliedAtLaunch(
+    params.client,
+    params.agentCommand,
+    requestedModel,
+  );
   const warning = assertRequestedModelSupported({
     requestedModel,
     models: params.models,
     agentCommand: params.agentCommand,
     context: "apply",
+    appliedViaStartupFlag,
   });
   if (warning) {
     params.onWarning?.(warning);
   }
-  // Startup-flag adapters (Devin, fx) already received the model at process
-  // launch; re-asserting through session/set_config_option can reject
-  // adapter-resolved fuzzy names the flag already applied.
-  if (!params.models || supportsStartupModelFlag(params.agentCommand)) {
-    return { applied: false };
+  // A model delivered through a startup flag counts as applied when this client
+  // process was actually launched with it. A reused queue client keeps ACP
+  // model controls so later --model requests still reach the running adapter.
+  if (!params.models) {
+    emitStartupFlagUnavailableWarning({
+      requestedModel,
+      appliedViaStartupFlag,
+      agentCommand: params.agentCommand,
+      onWarning: params.onWarning,
+    });
+    return { applied: appliedViaStartupFlag };
   }
-  if (params.models.currentModelId === requestedModel) {
+  if (appliedViaStartupFlag || params.models.currentModelId === requestedModel) {
     return { applied: true };
   }
 

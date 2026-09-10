@@ -85,20 +85,25 @@ export function supportsStartupModelFlagCommand(command: string, args: readonly 
   return isDevinAcpCommand(command, args) || isFxAcpCommand(command, args);
 }
 
+export function resolveStartupModelFlagValue(
+  initialArgs: readonly string[],
+  options: Pick<AcpClientOptions, "sessionOptions">,
+): string | undefined {
+  const model = options.sessionOptions?.model;
+  if (typeof model === "string" && model.trim() && !hasCommandFlag(initialArgs, "--model")) {
+    return model.trim();
+  }
+  return undefined;
+}
+
 export function buildStartupModelFlagArgs(
   initialArgs: readonly string[],
   options: Pick<AcpClientOptions, "sessionOptions">,
 ): string[] {
-  const args = [...initialArgs];
-  const model = options.sessionOptions?.model;
-
+  const model = resolveStartupModelFlagValue(initialArgs, options);
   // Emit the space-separated form: fx acp only accepts `--model <id>`, and
   // devin acp accepts it too, so it is the lowest common denominator.
-  if (typeof model === "string" && model.trim() && !hasCommandFlag(args, "--model")) {
-    args.push("--model", model.trim());
-  }
-
-  return args;
+  return model === undefined ? [...initialArgs] : [...initialArgs, "--model", model];
 }
 
 function hasCommandFlag(args: readonly string[], flagName: string): boolean {

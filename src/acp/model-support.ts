@@ -282,6 +282,7 @@ export function assertRequestedModelSupported(params: {
   models: SessionModelState | undefined;
   agentCommand?: string;
   context: "apply" | "replay";
+  appliedViaStartupFlag?: boolean;
 }): string | undefined {
   if (!params.models) {
     assertModelCapableWithoutAdvertisedModels(params);
@@ -298,7 +299,10 @@ export function assertRequestedModelSupported(params: {
       return `requested model "${params.requestedModel}" was not in the Claude ACP advertised model list (${formatAvailableModelIds(params.models)}); forwarding it to Claude Code so the adapter can accept or reject it.`;
     }
     if (supportsStartupModelFlag(params.agentCommand)) {
-      return `requested model "${params.requestedModel}" was not in the advertised model list (${formatAvailableModelIds(params.models)}); it was passed to the agent as a startup flag for the adapter to accept or reject.`;
+      if (params.appliedViaStartupFlag) {
+        return `requested model "${params.requestedModel}" was not in the advertised model list (${formatAvailableModelIds(params.models)}); it was passed to the agent as a startup flag for the adapter to accept or reject.`;
+      }
+      return `requested model "${params.requestedModel}" was not in the advertised model list (${formatAvailableModelIds(params.models)}); forwarding it to the adapter so it can accept or reject it.`;
     }
     const action = params.context === "replay" ? "replay saved model" : "apply --model";
     throw new RequestedModelUnsupportedError(

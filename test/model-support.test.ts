@@ -151,18 +151,29 @@ test("startup-flag adapters defer model validation to the launch flag", () => {
 });
 
 test("startup-flag adapters warn instead of rejecting unadvertised fuzzy names", () => {
-  const warning = assertRequestedModelSupported({
+  const models = {
+    configId: "model",
+    currentModelId: "grok-4.5",
+    availableModels: [{ modelId: "grok-4.5", name: "Grok 4.5" }],
+  };
+
+  const launched = assertRequestedModelSupported({
     requestedModel: "Grok 4.5",
-    models: {
-      configId: "model",
-      currentModelId: "grok-4.5",
-      availableModels: [{ modelId: "grok-4.5", name: "Grok 4.5" }],
-    },
+    models,
     agentCommand: "fx acp",
     context: "apply",
+    appliedViaStartupFlag: true,
   });
+  assert.match(launched ?? "", /passed to the agent as a startup flag/);
 
-  assert.match(warning ?? "", /passed to the agent as a startup flag/);
+  const forwarded = assertRequestedModelSupported({
+    requestedModel: "Grok 4.5",
+    models,
+    agentCommand: "fx acp",
+    context: "apply",
+    appliedViaStartupFlag: false,
+  });
+  assert.match(forwarded ?? "", /forwarding it to the adapter/);
 });
 
 test("model unsupported predicate rejects unrelated errors", () => {
