@@ -421,7 +421,7 @@ export class AcpClient {
   private agentStartedAt?: string;
   private lastAgentExit?: AgentExitInfo;
   private lastKnownPid?: number;
-  private startupModel?: string;
+  private appliedModel?: string;
   private readonly promptPermissionFailures = new Map<string, PermissionPromptUnavailableError>();
   private readonly pendingConnectionRequests = new Set<PendingConnectionRequest>();
   private readonly modelConfigIds = new Map<string, string>();
@@ -470,11 +470,11 @@ export class AcpClient {
     return this.agent?.pid ?? this.lastKnownPid;
   }
 
-  // The model this client process was actually launched with through a
-  // startup flag, when the adapter supports one. Undefined means no model
-  // flag was injected for the current spawn.
-  getStartupModel(): string | undefined {
-    return this.startupModel;
+  // The model selection acpx last applied to this client's session: injected
+  // at launch through a startup flag, then updated whenever an in-session model
+  // change succeeds. Undefined means acpx has applied no model this spawn.
+  getAppliedModel(): string | undefined {
+    return this.appliedModel;
   }
 
   getPermissionStats(): PermissionStats {
@@ -620,7 +620,7 @@ export class AcpClient {
 
     const maxMessageBytes = readMaxAcpMessageBytes();
     const launch = await this.resolveAgentLaunchPlan();
-    this.startupModel = launch.startupModel;
+    this.appliedModel = launch.startupModel;
     this.logAgentLaunch(launch);
     await this.ensureLaunchSupport(launch);
     const { child, process: startedProcess } = await this.spawnAgentProcess(launch);
@@ -1234,13 +1234,15 @@ export class AcpClient {
   ): Promise<SetSessionConfigOptionResponse> {
     const connection = this.getConnection();
     try {
-      return await this.runConnectionRequest(() =>
+      const response = await this.runConnectionRequest(() =>
         connection.setSessionConfigOption({
           sessionId,
           configId,
           value,
         }),
       );
+      this.trackAppliedModel(modelStateFromConfigOptions(response.configOptions));
+      return response;
     } catch (error) {
       throw maybeWrapSessionControlError(
         "session/set_config_option",
@@ -1288,7 +1290,9 @@ export class AcpClient {
           value: modelId,
         }),
       );
-      this.rememberSessionModels(sessionId, modelStateFromConfigOptions(response.configOptions));
+      const models = modelStateFromConfigOptions(response.configOptions);
+      this.rememberSessionModels(sessionId, models);
+      this.appliedModel = models?.currentModelId ?? modelId;
       return response;
     } catch (error) {
       return this.throwSessionModelError("session/set_config_option", modelId, error);
@@ -1304,6 +1308,7 @@ export class AcpClient {
       await this.runConnectionRequest(() =>
         connection.extMethod("session/set_model", { sessionId, modelId }),
       );
+      this.appliedModel = modelId;
       return undefined;
     } catch (error) {
       return this.throwSessionModelError("session/set_model", modelId, error);
@@ -1344,6 +1349,12 @@ export class AcpClient {
       return { kind: "config_option", configId };
     }
     return this.legacyModelSessionIds.has(sessionId) ? { kind: "legacy_set_model" } : undefined;
+  }
+
+  private trackAppliedModel(models: SessionModelState | undefined): void {
+    if (models?.currentModelId) {
+      this.appliedModel = models.currentModelId;
+    }
   }
 
   private rememberSessionModels(sessionId: string, models: SessionModelState | undefined): void {

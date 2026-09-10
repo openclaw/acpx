@@ -20,14 +20,16 @@ function stubClient(startupModel: string | undefined): {
   client: AcpClient;
   setSessionModelCalls: string[];
 } {
+  let appliedModel = startupModel;
   const setSessionModelCalls: string[] = [];
   const client = {
-    getStartupModel: () => startupModel,
+    getAppliedModel: () => appliedModel,
     setSessionModel: async (
       _sessionId: string,
       modelId: string,
     ): Promise<SetSessionConfigOptionResponse> => {
       setSessionModelCalls.push(modelId);
+      appliedModel = modelId;
       return {
         configOptions: [
           {
@@ -58,6 +60,28 @@ test("applyRequestedModelIfAdvertised routes a changed model through ACP on a re
 
   assert.equal(result.applied, true);
   assert.deepEqual(setSessionModelCalls, ["swe-2-max"]);
+});
+
+test("applyRequestedModelIfAdvertised reapplies the startup model after an in-session change", async () => {
+  const { client, setSessionModelCalls } = stubClient("swe-2-high");
+
+  await applyRequestedModelIfAdvertised({
+    client,
+    sessionId: "session-1",
+    requestedModel: "swe-2-max",
+    models: buildDevinModels("swe-2-high"),
+    agentCommand: "devin acp",
+  });
+  const result = await applyRequestedModelIfAdvertised({
+    client,
+    sessionId: "session-1",
+    requestedModel: "swe-2-high",
+    models: buildDevinModels("swe-2-max"),
+    agentCommand: "devin acp",
+  });
+
+  assert.equal(result.applied, true);
+  assert.deepEqual(setSessionModelCalls, ["swe-2-max", "swe-2-high"]);
 });
 
 test("applyRequestedModelIfAdvertised skips the ACP update when the launch flag applied the model", async () => {
