@@ -9,6 +9,7 @@ import {
 import {
   assertRequestedModelSupported,
   modelStateFromConfigOptions,
+  supportsStartupModelFlag,
   type SessionModelState,
 } from "../../acp/model-support.js";
 import { InterruptedError, TimeoutError, withTimeout } from "../../async-control.js";
@@ -174,9 +175,16 @@ function canReplayModel(
   desiredModelId: string | undefined,
   models: SessionModelState | undefined,
   createdFreshSession: boolean,
+  agentCommand: string | undefined,
 ): desiredModelId is string {
   // Resume metadata is optional; omission alone does not revoke saved model support.
-  return Boolean(desiredModelId) && (createdFreshSession || models !== undefined);
+  // Startup-flag adapters (Devin) re-receive the saved model on every spawn, so
+  // there is nothing to re-assert over ACP.
+  return (
+    Boolean(desiredModelId) &&
+    (createdFreshSession || models !== undefined) &&
+    !supportsStartupModelFlag(agentCommand)
+  );
 }
 
 async function replayDesiredModel(params: {
@@ -191,7 +199,14 @@ async function replayDesiredModel(params: {
   verbose?: boolean;
   suppressWarnings?: boolean;
 }): Promise<ModelReplayResult> {
-  if (!canReplayModel(params.desiredModelId, params.models, params.createdFreshSession)) {
+  if (
+    !canReplayModel(
+      params.desiredModelId,
+      params.models,
+      params.createdFreshSession,
+      params.record.agentCommand,
+    )
+  ) {
     return { replayed: false };
   }
 

@@ -18,6 +18,7 @@ The default agent for top-level commands like `acpx exec â€¦` and `acpx prompt â
 | `gemini`     | `gemini --acp`                                 | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
 | `cursor`     | `cursor-agent acp`                             | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
 | `copilot`    | `copilot --acp --stdio`                        | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
+| `devin`      | `devin acp`                                    | [Devin CLI](https://www.devin.ai)                                                                               |
 | `droid`      | `droid exec --output-format acp`               | [Factory Droid](https://www.factory.ai)                                                                         |
 | `fast-agent` | `uvx fast-agent-mcp acp`                       | [fast-agent](https://fast-agent.ai/)                                                                            |
 | `grok-build` | `grok agent stdio`                             | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
@@ -122,6 +123,16 @@ If your Cursor install exposes ACP as `agent acp` instead of `cursor-agent acp`,
 - Default command: `copilot --acp --stdio`
 - Upstream: [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line)
 - Requires a Copilot CLI release that supports ACP stdio mode. Older `copilot` binaries fail before ACP startup.
+
+### Devin
+
+- Built-in name: `devin`
+- Default command: `devin acp`
+- Upstream: [Devin CLI](https://www.devin.ai)
+
+`acpx devin` runs the installed Devin CLI ACP server. Install Devin and authenticate (`devin auth login`) first; the server also advertises a `devin-browser` auth method for in-session login.
+
+Devin launches receive a scoped compatibility shim: `clientInfo.name` is advertised as `windsurf` (version via `ACPX_DEVIN_WINDSURF_VERSION`, default `1.110.1`), `cognition.ai/requestDiagnostics` is advertised and answered, and Devin `_cognition.ai/*` extension traffic is absorbed. `acpx --model <id>` forwards to the `devin acp` startup `--model` flag and is persisted across session reuse and reconnects. See the [Devin compatibility contract](https://github.com/openclaw/acpx/blob/main/agents/Devin.md) for the full shim scope.
 
 ### Droid (Factory)
 

@@ -75,6 +75,7 @@ import type {
 import {
   buildClaudeAcpSessionCreateTimeoutMessage,
   buildClaudeCodeOptionsMeta,
+  buildDevinAcpCommandArgs,
   buildGeminiAcpStartupTimeoutMessage,
   buildQoderAcpCommandArgs,
   ensureCopilotAcpSupport,
@@ -135,6 +136,7 @@ import { TerminalManager } from "./terminal-manager.js";
 export { buildSpawnCommandOptions };
 export {
   buildAgentSpawnOptions,
+  buildDevinAcpCommandArgs,
   buildQoderAcpCommandArgs,
   resolveAgentCloseAfterStdinEndMs,
   resolveClaudeCodeSettingSources,
@@ -680,6 +682,9 @@ export class AcpClient {
     args = await resolveGeminiCommandArgs(spawnCommand, args);
     if (isQoderAcpCommand(spawnCommand, args)) {
       args = buildQoderAcpCommandArgs(args, this.options);
+    }
+    if (isDevinAcpCommand(spawnCommand, args)) {
+      args = buildDevinAcpCommandArgs(args, this.options);
     }
     return {
       spawnCommand,

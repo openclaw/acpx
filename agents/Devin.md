@@ -1,7 +1,7 @@
 # Devin
 
-- Built-in name: none
-- Raw command: `devin acp`
+- Built-in name: `devin`
+- Default command: `devin acp`
 - Upstream: https://www.devin.ai
 
 ## ACP compatibility contract
@@ -10,17 +10,22 @@ Devin requires Windsurf-compatible client metadata during ACP initialization. `a
 
 ### Detection
 
-`acpx` detects Devin ACP launches when the raw command starts with `devin` and includes `acp`, `--acp`, or `--experimental-acp`.
+`acpx` detects Devin ACP launches when the command starts with `devin` and includes `acp`, `--acp`, or `--experimental-acp`. This covers both the built-in `devin` name and raw `--agent` commands.
 
 ```bash
+acpx devin exec 'summarize this repo'
 acpx --agent 'devin acp' exec 'summarize this repo'
 ```
 
-Pass Devin global flags such as `--model <model>` before `acp` when needed:
+### Model selection
+
+`acpx --model <id>` forwards to the `devin acp` startup `--model` flag, which accepts the same fuzzy names as `/model` (family slug, alias, or partial name):
 
 ```bash
-acpx --agent 'devin --model swe-1-6 acp' exec 'summarize this repo'
+acpx --model swe-2-high devin exec 'summarize this repo'
 ```
+
+The flag is persisted in `session_options.model`, so persistent-session reuse and reconnects keep the selection. An explicit `--model` on a raw `--agent` command wins over the forwarded flag. `DEVIN_MODEL` is also inherited by the spawned process as usual.
 
 ### Client identity
 

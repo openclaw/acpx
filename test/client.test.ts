@@ -11,6 +11,7 @@ import type {
 import {
   AcpClient,
   buildAgentSpawnOptions,
+  buildDevinAcpCommandArgs,
   buildQoderAcpCommandArgs,
   parseAcpJsonMessageLine,
   resolveClaudeCodeSettingSources,
@@ -254,6 +255,29 @@ test("buildQoderAcpCommandArgs preserves explicit qoder startup flags", () => {
     ),
     ["--acp", "--max-turns=3", "--allowed-tools=READ", "--disallowed-tools=BASH"],
   );
+});
+
+test("buildDevinAcpCommandArgs forwards the requested model as a startup flag", () => {
+  assert.deepEqual(
+    buildDevinAcpCommandArgs(["acp"], {
+      sessionOptions: { model: "swe-2-high" },
+    }),
+    ["acp", "--model=swe-2-high"],
+  );
+});
+
+test("buildDevinAcpCommandArgs preserves an explicit devin --model flag", () => {
+  assert.deepEqual(
+    buildDevinAcpCommandArgs(["acp", "--model=swe-1-6"], {
+      sessionOptions: { model: "swe-2-high" },
+    }),
+    ["acp", "--model=swe-1-6"],
+  );
+});
+
+test("buildDevinAcpCommandArgs leaves args unchanged without a requested model", () => {
+  assert.deepEqual(buildDevinAcpCommandArgs(["acp"], {}), ["acp"]);
+  assert.deepEqual(buildDevinAcpCommandArgs(["acp"], { sessionOptions: { model: "  " } }), ["acp"]);
 });
 
 test("AcpClient prefers env auth credentials over config credentials", async () => {

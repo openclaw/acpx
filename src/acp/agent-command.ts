@@ -77,6 +77,20 @@ export function isDevinAcpCommand(command: string, args: readonly string[]): boo
   );
 }
 
+export function buildDevinAcpCommandArgs(
+  initialArgs: readonly string[],
+  options: Pick<AcpClientOptions, "sessionOptions">,
+): string[] {
+  const args = [...initialArgs];
+  const model = options.sessionOptions?.model;
+
+  if (typeof model === "string" && model.trim() && !hasCommandFlag(args, "--model")) {
+    args.push(`--model=${model.trim()}`);
+  }
+
+  return args;
+}
+
 function hasCommandFlag(args: readonly string[], flagName: string): boolean {
   return args.some((arg) => arg === flagName || arg.startsWith(`${flagName}=`));
 }
