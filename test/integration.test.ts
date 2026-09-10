@@ -1460,6 +1460,60 @@ test("integration: Devin ACP launch advertises scoped Windsurf client info", asy
   });
 });
 
+test("integration: built-in fx agent resolves to fx acp and forwards --model", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-fx-"));
+    const argLogPath = path.join(fakeBinDir, "fx-args.log");
+
+    try {
+      await writeFakeFxAgent(fakeBinDir, argLogPath);
+
+      const result = await runCli(
+        [
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "--model",
+          "grok-4.5",
+          "fx",
+          "exec",
+          "echo hello",
+        ],
+        homeDir,
+        {
+          env: {
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const initializeRequest = payloads.find((payload) => payload.method === "initialize") as
+        | {
+            params?: {
+              clientInfo?: { name?: unknown };
+            };
+          }
+        | undefined;
+      assert(initializeRequest, result.stdout);
+      assert.equal(initializeRequest.params?.clientInfo?.name, "acpx");
+
+      const argLines = (await fs.readFile(argLogPath, "utf8")).trim().split(/\r?\n/);
+      assert(
+        argLines.some((line) => line.includes("--model grok-4.5")),
+        `expected forwarded --model flag in logged invocations:\n${argLines.join("\n")}`,
+      );
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: exec --model sets the advertised model config option", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -4803,6 +4857,55 @@ async function writeFakeDevinAgent(binDir: string): Promise<void> {
       '      [ "$#" -gt 0 ] && shift',
       "      ;;",
       "    acp|--acp|--experimental-acp)",
+      "      shift",
+      "      ;;",
+      "    *)",
+      "      break",
+      "      ;;",
+      "  esac",
+      "done",
+      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
+      "",
+    ].join("\n"),
+    { encoding: "utf8", mode: 0o755 },
+  );
+}
+
+async function writeFakeFxAgent(binDir: string, argLogPath?: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(binDir, "fx.cmd"),
+      [
+        "@echo off",
+        "setlocal",
+        ...(argLogPath ? [`echo %*>> "${argLogPath}"`] : []),
+        ":shift_known",
+        'if "%~1"=="--model" shift & shift & goto shift_known',
+        'echo %~1 | findstr /B /C:"--model=" >nul && shift & goto shift_known',
+        'if "%~1"=="acp" shift & goto shift_known',
+        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
+        "",
+      ].join("\r\n"),
+      { encoding: "utf8" },
+    );
+    return;
+  }
+
+  await fs.writeFile(
+    path.join(binDir, "fx"),
+    [
+      "#!/bin/sh",
+      ...(argLogPath ? [`printf '%s\\n' "$*" >> ${JSON.stringify(argLogPath)}`] : []),
+      'while [ "$#" -gt 0 ]; do',
+      '  case "$1" in',
+      "    --model)",
+      "      shift",
+      '      [ "$#" -gt 0 ] && shift',
+      "      ;;",
+      "    --model=*)",
+      "      shift",
+      "      ;;",
+      "    acp)",
       "      shift",
       "      ;;",
       "    *)",

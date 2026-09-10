@@ -77,6 +77,7 @@ import {
   buildClaudeCodeOptionsMeta,
   buildGeminiAcpStartupTimeoutMessage,
   buildQoderAcpCommandArgs,
+  buildStartupModelFlagArgs,
   ensureCopilotAcpSupport,
   isClaudeAcpCommand,
   isCopilotAcpCommand,
@@ -90,6 +91,7 @@ import {
   resolveGeminiAcpStartupTimeoutMs,
   resolveGeminiCommandArgs,
   shouldIgnoreNonJsonAgentOutputLine,
+  supportsStartupModelFlagCommand,
 } from "./agent-command.js";
 import {
   buildAgentSpawnOptions,
@@ -136,6 +138,7 @@ export { buildSpawnCommandOptions };
 export {
   buildAgentSpawnOptions,
   buildQoderAcpCommandArgs,
+  buildStartupModelFlagArgs,
   resolveAgentCloseAfterStdinEndMs,
   resolveClaudeCodeSettingSources,
   shouldIgnoreNonJsonAgentOutputLine,
@@ -680,6 +683,9 @@ export class AcpClient {
     args = await resolveGeminiCommandArgs(spawnCommand, args);
     if (isQoderAcpCommand(spawnCommand, args)) {
       args = buildQoderAcpCommandArgs(args, this.options);
+    }
+    if (supportsStartupModelFlagCommand(spawnCommand, args)) {
+      args = buildStartupModelFlagArgs(args, this.options);
     }
     return {
       spawnCommand,

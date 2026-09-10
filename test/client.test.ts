@@ -12,6 +12,7 @@ import {
   AcpClient,
   buildAgentSpawnOptions,
   buildQoderAcpCommandArgs,
+  buildStartupModelFlagArgs,
   parseAcpJsonMessageLine,
   resolveClaudeCodeSettingSources,
   resolveAgentCloseAfterStdinEndMs,
@@ -254,6 +255,31 @@ test("buildQoderAcpCommandArgs preserves explicit qoder startup flags", () => {
     ),
     ["--acp", "--max-turns=3", "--allowed-tools=READ", "--disallowed-tools=BASH"],
   );
+});
+
+test("buildStartupModelFlagArgs forwards the requested model as a startup flag", () => {
+  assert.deepEqual(
+    buildStartupModelFlagArgs(["acp"], {
+      sessionOptions: { model: "grok-4.5" },
+    }),
+    ["acp", "--model", "grok-4.5"],
+  );
+});
+
+test("buildStartupModelFlagArgs preserves an explicit --model flag", () => {
+  assert.deepEqual(
+    buildStartupModelFlagArgs(["acp", "--model=grok-4.6"], {
+      sessionOptions: { model: "grok-4.5" },
+    }),
+    ["acp", "--model=grok-4.6"],
+  );
+});
+
+test("buildStartupModelFlagArgs leaves args unchanged without a requested model", () => {
+  assert.deepEqual(buildStartupModelFlagArgs(["acp"], {}), ["acp"]);
+  assert.deepEqual(buildStartupModelFlagArgs(["acp"], { sessionOptions: { model: "  " } }), [
+    "acp",
+  ]);
 });
 
 test("AcpClient prefers env auth credentials over config credentials", async () => {

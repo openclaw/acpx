@@ -136,6 +136,35 @@ test("model validation distinguishes missing model capability", () => {
   );
 });
 
+test("startup-flag adapters defer model validation to the launch flag", () => {
+  for (const agentCommand of ["devin acp", "fx acp"]) {
+    for (const context of ["apply", "replay"] as const) {
+      const warning = assertRequestedModelSupported({
+        requestedModel: "grok-4.5",
+        models: undefined,
+        agentCommand,
+        context,
+      });
+      assert.equal(warning, undefined);
+    }
+  }
+});
+
+test("startup-flag adapters warn instead of rejecting unadvertised fuzzy names", () => {
+  const warning = assertRequestedModelSupported({
+    requestedModel: "Grok 4.5",
+    models: {
+      configId: "model",
+      currentModelId: "grok-4.5",
+      availableModels: [{ modelId: "grok-4.5", name: "Grok 4.5" }],
+    },
+    agentCommand: "fx acp",
+    context: "apply",
+  });
+
+  assert.match(warning ?? "", /passed to the agent as a startup flag/);
+});
+
 test("model unsupported predicate rejects unrelated errors", () => {
   assert.equal(isRequestedModelUnsupportedError(new Error("did not advertise that model")), false);
   assert.equal(

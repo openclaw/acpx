@@ -3,6 +3,7 @@ import type { AcpClient, SessionCreateResult } from "../acp/client.js";
 import {
   assertRequestedModelSupported,
   modelStateFromConfigOptions,
+  supportsStartupModelFlag,
 } from "../acp/model-support.js";
 import { withTimeout } from "../async-control.js";
 
@@ -39,7 +40,10 @@ export async function applyRequestedModelIfAdvertised(params: {
   if (warning) {
     params.onWarning?.(warning);
   }
-  if (!params.models) {
+  // Startup-flag adapters (Devin, fx) already received the model at process
+  // launch; re-asserting through session/set_config_option can reject
+  // adapter-resolved fuzzy names the flag already applied.
+  if (!params.models || supportsStartupModelFlag(params.agentCommand)) {
     return { applied: false };
   }
   if (params.models.currentModelId === requestedModel) {
