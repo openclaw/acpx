@@ -2285,6 +2285,10 @@ export class AcpClient {
   private async handleSessionUpdate(notification: SessionNotification): Promise<void> {
     const sequence = ++this.observedSessionUpdates;
     this.sessionUpdateChain = this.sessionUpdateChain.then(async () => {
+      const update = notification.update;
+      if (update?.sessionUpdate === "config_option_update") {
+        this.trackAppliedModel(modelStateFromConfigOptions(update.configOptions));
+      }
       try {
         if (!this.suppressSessionUpdates) {
           this.eventHandlers.onSessionUpdate?.(notification);
