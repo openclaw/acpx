@@ -8,9 +8,13 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Dependencies: refresh Node types, Oxfmt, and Oxlint; align source builds and CI with pnpm 11.26.0. Thanks @dependabot.
+
 ### Breaking
 
 ### Fixes
+
+- Tooling: prevent malformed TOML configuration from hanging documentation lint by overriding the vulnerable `smol-toml` pin with 1.7.2 (GHSA-7w5x-hrqm-74c2).
 
 ## 0.15.1 - 2026-09-07
 
