@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -83,4 +86,27 @@ test("test scripts build packaged output before running package-bin smoke tests"
 
   assert.match(pkg.scripts?.test ?? "", /^pnpm run build && pnpm run build:test && /);
   assert.match(pkg.scripts?.["test:coverage"] ?? "", /^pnpm run build && pnpm run build:test && /);
+});
+
+test("documentation lint rejects unterminated TOML configuration without hanging", (t) => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "acpx-doclint-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const config = path.join(directory, "invalid.toml");
+  writeFileSync(config, "a=[1 #");
+  writeFileSync(path.join(directory, "README.md"), "# Fixture\n");
+  const require = createRequire(import.meta.url);
+  const cli = path.join(
+    path.dirname(require.resolve("markdownlint-cli2")),
+    "markdownlint-cli2-bin.mjs",
+  );
+
+  const result = spawnSync(process.execPath, [cli, "--config", config, "README.md"], {
+    cwd: directory,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+
+  assert.equal(result.error, undefined, "documentation lint must exit before the timeout");
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /Invalid TOML document: cannot find end of structure/);
 });

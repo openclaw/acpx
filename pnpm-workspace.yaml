@@ -9,3 +9,4 @@ overrides:
   js-yaml: 5.4.1
   markdown-it: 15.0.1
   qs: 6.16.0
+  smol-toml: 1.7.2
