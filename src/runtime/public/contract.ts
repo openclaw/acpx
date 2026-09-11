@@ -152,6 +152,18 @@ export type AcpRuntimeAvailableCommand = {
 };
 
 /**
+ * One entry of the agent's ACP `plan` (its live todo list). The agent
+ * re-sends the WHOLE list on each update, so consumers REPLACE rather
+ * than append. `priority` is omitted when the agent did not advertise a
+ * valid one — never fabricated.
+ */
+export type AcpRuntimePlanEntry = {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  priority?: "high" | "medium" | "low";
+};
+
+/**
  * Session-level usage roll-up surfaced through `getStatus()`. The
  * reducer persists the breakdowns onto the session record; this type
  * exposes them on the runtime contract.
@@ -247,6 +259,12 @@ export type AcpRuntimeEvent =
        * non-null `input` schema.
        */
       availableCommands?: AcpRuntimeAvailableCommand[];
+      /**
+       * Populated on `plan` events. Normalized view of the ACP `entries`
+       * payload — content plus execution status per entry, priority only
+       * when valid. Malformed entries are skipped, never fabricated.
+       */
+      entries?: AcpRuntimePlanEntry[];
     }
   | {
       type: "tool_call";

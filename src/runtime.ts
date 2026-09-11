@@ -69,6 +69,7 @@ export type {
   AcpTextDeltaOriginMeta,
   AcpRuntimeHandle,
   AcpRuntimeOptions,
+  AcpRuntimePlanEntry,
   AcpRuntimePromptMode,
   AcpRuntimeSessionMode,
   AcpRuntimeSessionModels,

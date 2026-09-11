@@ -2,6 +2,7 @@ import type { ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientpr
 import type {
   AcpRuntimeAvailableCommand,
   AcpRuntimeEvent,
+  AcpRuntimePlanEntry,
   AcpRuntimeUsageBreakdown,
   AcpRuntimeUsageCost,
   AcpSessionUpdateTag,
@@ -115,6 +116,57 @@ function planStatusText(payload: Record<string, unknown>): string | null {
   const first = entries.find((entry) => isRecord(entry));
   const content = asTrimmedString(first?.content);
   return content ? `plan: ${content}` : null;
+}
+
+const PLAN_ENTRY_STATUSES = new Set(["pending", "in_progress", "completed"]);
+
+const PLAN_ENTRY_PRIORITIES = new Set(["high", "medium", "low"]);
+
+function planUpdateEvent(payload: Record<string, unknown>): AcpRuntimeEvent | null {
+  const text = planStatusText(payload);
+  if (!text) {
+    return null;
+  }
+  const entries = normalizePlanEntries(payload.entries);
+  return {
+    type: "status",
+    text,
+    tag: "plan",
+    ...(entries.length > 0 ? { entries } : {}),
+  };
+}
+
+function normalizePlanEntries(value: unknown): AcpRuntimePlanEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const entries: AcpRuntimePlanEntry[] = [];
+  for (const entry of value) {
+    const normalized = normalizePlanEntry(entry);
+    if (normalized) {
+      entries.push(normalized);
+    }
+  }
+  return entries;
+}
+
+function normalizePlanEntry(value: unknown): AcpRuntimePlanEntry | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const content = asTrimmedString(value.content);
+  const status = asTrimmedString(value.status);
+  if (!content || !PLAN_ENTRY_STATUSES.has(status)) {
+    return undefined;
+  }
+  const priority = asTrimmedString(value.priority);
+  return {
+    content,
+    status: status as AcpRuntimePlanEntry["status"],
+    ...(PLAN_ENTRY_PRIORITIES.has(priority)
+      ? { priority: priority as AcpRuntimePlanEntry["priority"] }
+      : {}),
+  };
 }
 
 /**
@@ -493,7 +545,7 @@ const PROMPT_EVENT_PARSERS: Record<string, PromptEventParser> = {
   current_mode_update: (payload) => statusUpdateEvent("current_mode_update", payload),
   config_option_update: (payload) => statusUpdateEvent("config_option_update", payload),
   session_info_update: (payload) => statusUpdateEvent("session_info_update", payload),
-  plan: (payload) => statusUpdateEvent("plan", payload),
+  plan: planUpdateEvent,
   client_operation: clientOperationEvent,
   update: updateStatusEvent,
   done: () => null,

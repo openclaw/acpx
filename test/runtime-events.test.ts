@@ -861,3 +861,87 @@ test("parsePromptEventLine preserves origin on agent_thought_chunk", () => {
     },
   );
 });
+
+test("parsePromptEventLine surfaces structured plan entries", () => {
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        sessionUpdate: "plan",
+        entries: [
+          { content: "first step", status: "in_progress", priority: "high" },
+          { content: "second step", status: "pending" },
+        ],
+      }),
+    ),
+    {
+      type: "status",
+      text: "plan: first step",
+      tag: "plan",
+      entries: [
+        { content: "first step", status: "in_progress", priority: "high" },
+        { content: "second step", status: "pending" },
+      ],
+    },
+  );
+
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "s1",
+          update: {
+            sessionUpdate: "plan",
+            entries: [{ content: "enveloped", status: "completed", priority: "low" }],
+          },
+        },
+      }),
+    ),
+    {
+      type: "status",
+      text: "plan: enveloped",
+      tag: "plan",
+      entries: [{ content: "enveloped", status: "completed", priority: "low" }],
+    },
+  );
+
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        sessionUpdate: "plan",
+        entries: [
+          { content: "kept", status: "completed", priority: "urgent" },
+          null,
+          "skip",
+          { content: "  ", status: "pending" },
+          { content: "dropped", status: "bogus" },
+          { content: "also kept", status: "pending", priority: "low" },
+        ],
+      }),
+    ),
+    {
+      type: "status",
+      text: "plan: kept",
+      tag: "plan",
+      entries: [
+        { content: "kept", status: "completed" },
+        { content: "also kept", status: "pending", priority: "low" },
+      ],
+    },
+  );
+
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        sessionUpdate: "plan",
+        entries: [{ content: "status-less still narrates" }],
+      }),
+    ),
+    {
+      type: "status",
+      text: "plan: status-less still narrates",
+      tag: "plan",
+    },
+  );
+});

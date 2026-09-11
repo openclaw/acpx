@@ -8,6 +8,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Runtime/embedding: surface normalized ACP plan entries on status events and explicit empty snapshots that clear stale plans. Thanks @gadzan.
 - Dependencies: update Zod, React and its types, Vite, and lint-staged; retain the 48-hour release-age policy.
 - Dependencies: refresh Node types, Oxfmt, and Oxlint; align source builds and CI with pnpm 11.26.0. Thanks @dependabot.
 - Source builds: document Node 22.22.1 as the minimum Node 22 development version required by lint-staged; published CLI installs still support Node 22.13 and newer.
