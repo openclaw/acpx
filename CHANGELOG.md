@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Dependencies: refresh Node types, Oxfmt, and Oxlint; align source builds and CI with pnpm 11.26.0. Thanks @dependabot.
+
 ### Breaking
 
 ### Fixes
