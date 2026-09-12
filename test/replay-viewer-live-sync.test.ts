@@ -292,22 +292,28 @@ test("replay viewer streams selected-run ACP text as JSON Patch+ append updates"
 
     await appendLiveSessionChunk(runsDir, runId, sessionId, 3, "lo");
 
-    const runPatch = await inbox.next(
-      (message): message is Extract<ReplayServerMessage, { type: "run_patch" }> =>
-        message.type === "run_patch" && message.runId === runId,
-    );
+    let nextRunState = runSnapshot.state;
+    let runPatch: Extract<ReplayServerMessage, { type: "run_patch" }>;
+    const textPath = "/sessions/main-bundle/record/messages/1/Agent/content/0/Text";
+    const patchDeadline = Date.now() + 5_000;
+    do {
+      const remainingMs = patchDeadline - Date.now();
+      assert.ok(remainingMs > 0, "Timed out waiting for the streamed text patch");
+      runPatch = await inbox.next(
+        (message): message is Extract<ReplayServerMessage, { type: "run_patch" }> =>
+          message.type === "run_patch" && message.runId === runId,
+        remainingMs,
+      );
+      nextRunState = applyReplayPatch<ViewerRunLiveState>(nextRunState, runPatch.ops);
+    } while (!runPatch.ops.some((op) => op.path.endsWith(textPath)));
 
     assert.equal(
       runPatch.ops.some(
-        (op) =>
-          op.op === "append" &&
-          op.path.endsWith("/sessions/main-bundle/record/messages/1/Agent/content/0/Text") &&
-          op.value === "lo",
+        (op) => op.op === "append" && op.path.endsWith(textPath) && op.value === "lo",
       ),
       true,
     );
 
-    const nextRunState = applyReplayPatch<ViewerRunLiveState>(runSnapshot.state, runPatch.ops);
     const nextSession = nextRunState.sessions[sessionId];
     assert.ok(nextSession);
     assert.ok(Array.isArray(nextSession?.record.messages));
