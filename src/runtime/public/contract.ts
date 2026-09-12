@@ -152,6 +152,16 @@ export type AcpRuntimeAvailableCommand = {
 };
 
 /**
+ * An entry in an ACP plan snapshot. Each update replaces the previous list.
+ * Priority is omitted unless the agent advertises a valid value.
+ */
+export type AcpRuntimePlanEntry = {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  priority?: "high" | "medium" | "low";
+};
+
+/**
  * Session-level usage roll-up surfaced through `getStatus()`. The
  * reducer persists the breakdowns onto the session record; this type
  * exposes them on the runtime contract.
@@ -247,6 +257,11 @@ export type AcpRuntimeEvent =
        * non-null `input` schema.
        */
       availableCommands?: AcpRuntimeAvailableCommand[];
+      /**
+       * Normalized entries on `plan` events; malformed entries are skipped.
+       * Replace the displayed plan when present, including clearing it for [].
+       */
+      entries?: AcpRuntimePlanEntry[];
     }
   | {
       type: "tool_call";

@@ -610,6 +610,83 @@ test("AcpRuntimeManager streams runtime events and saves updated status", async 
   assert.equal(saved?.protocolVersion, 1);
 });
 
+test("AcpRuntimeManager surfaces structured plan snapshots through turn events", async () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "plan-session",
+    acpSessionId: "plan-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+  const store = new InMemorySessionStore([record]);
+  let handlers: FakeClientHandlers = {};
+  const client: FakeClient = {
+    start: async () => {},
+    close: async () => {},
+    createSession: async () => ({ sessionId: "unused" }),
+    loadSession: async () => ({ agentSessionId: "unused" }),
+    hasReusableSession: (sessionId) => sessionId === "plan-sid",
+    supportsLoadSession: () => true,
+    supportsResumeSession: () => false,
+    loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+    getAgentLifecycleSnapshot: () => ({ running: true }),
+    prompt: async () => {
+      handlers.onSessionUpdate?.({
+        sessionId: "plan-sid",
+        update: {
+          sessionUpdate: "plan",
+          entries: [
+            { content: "first step", status: "in_progress", priority: "high" },
+            { content: "second step", status: "pending", priority: "low" },
+          ],
+        },
+      });
+      handlers.onSessionUpdate?.({
+        sessionId: "plan-sid",
+        update: { sessionUpdate: "plan", entries: [] },
+      });
+      return { stopReason: "end_turn" };
+    },
+    requestCancelActivePrompt: async () => false,
+    hasActivePrompt: () => false,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    clearEventHandlers: () => {
+      handlers = {};
+    },
+    setEventHandlers: (nextHandlers) => {
+      handlers = nextHandlers;
+    },
+  };
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+    {
+      clientFactory: () => client as never,
+    },
+  );
+
+  const turn = manager.startTurn({
+    handle: createHandle("plan-session"),
+    text: "hello",
+    mode: "prompt",
+    sessionMode: "persistent",
+    requestId: "req-plan",
+  });
+  const { events } = await collectTurn(turn);
+
+  assert.deepEqual(events, [
+    {
+      type: "status",
+      text: "plan: first step",
+      tag: "plan",
+      entries: [
+        { content: "first step", status: "in_progress", priority: "high" },
+        { content: "second step", status: "pending", priority: "low" },
+      ],
+    },
+    { type: "status", text: "plan updated", tag: "plan", entries: [] },
+  ]);
+});
+
 test("AcpRuntimeManager resolves promptStarted while the submitted prompt is pending", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "prompt-started-session",
