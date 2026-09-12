@@ -160,7 +160,6 @@ export class FlowRunner {
   private readonly authCredentials?;
   private readonly authPolicy?;
   private readonly fs?;
-  private readonly timeoutMs?;
   private readonly defaultNodeTimeoutMs;
   private readonly verbose?;
   private readonly suppressSdkConsoleErrors?;
@@ -185,7 +184,6 @@ export class FlowRunner {
     this.authCredentials = options.authCredentials;
     this.authPolicy = options.authPolicy;
     this.fs = options.fs;
-    this.timeoutMs = options.timeoutMs;
     this.defaultNodeTimeoutMs =
       options.defaultNodeTimeoutMs ?? options.timeoutMs ?? DEFAULT_FLOW_STEP_TIMEOUT_MS;
     this.verbose = options.verbose;

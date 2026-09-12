@@ -51,8 +51,6 @@ type OutputFormatterOptions = {
 
 type NormalizedToolStatus = ToolCallStatus | "unknown";
 
-type FormatterSection = "assistant" | "thought" | "tool" | "plan" | "client" | "done";
-
 type ToolRenderState = {
   id: string;
   title?: string;
@@ -761,7 +759,6 @@ class TextOutputFormatter implements OutputFormatter {
   private thoughtBuffer = "";
   private wroteAny = false;
   private atLineStart = true;
-  private section: FormatterSection | null = null;
 
   constructor(stdout: WritableLike, suppressReads: boolean) {
     this.stdout = stdout;
@@ -849,7 +846,7 @@ class TextOutputFormatter implements OutputFormatter {
   private renderPlanUpdate(
     entries: Extract<SessionNotification["update"], { sessionUpdate: "plan" }>["entries"],
   ): void {
-    this.beginSection("plan");
+    this.beginSection();
     this.writeLine(this.bold("[plan]"));
     for (const entry of entries) {
       this.writeLine(`  - [${entry.status}] ${entry.content}`);
@@ -858,13 +855,13 @@ class TextOutputFormatter implements OutputFormatter {
 
   private renderDone(stopReason: string): void {
     this.flushThoughtBuffer();
-    this.beginSection("done");
+    this.beginSection();
     this.writeLine(this.dim(`[done] ${stopReason}`));
   }
 
   onError(params: RenderableOutputError): void {
     this.flushThoughtBuffer();
-    this.beginSection("done");
+    this.beginSection();
     this.writeLine(this.formatAnsi(`[error] ${params.code}: ${params.message}`, "31"));
     for (const hint of getTextErrorRemediationHints(params)) {
       this.writeLine(this.dim(hint));
@@ -873,7 +870,7 @@ class TextOutputFormatter implements OutputFormatter {
 
   onClientOperation(operation: ClientOperation): void {
     this.flushThoughtBuffer();
-    this.beginSection("client");
+    this.beginSection();
 
     const normalizedStatus: NormalizedToolStatus =
       operation.status === "completed"
@@ -891,7 +888,7 @@ class TextOutputFormatter implements OutputFormatter {
 
   onPermissionEscalation(event: PermissionEscalationEvent): void {
     this.flushThoughtBuffer();
-    this.beginSection("client");
+    this.beginSection();
     this.writeLine(`${this.bold("[permission]")} ${event.message}`);
     const details = [
       `sessionId: ${event.sessionId}`,
@@ -927,21 +924,19 @@ class TextOutputFormatter implements OutputFormatter {
     this.write(`${line}\n`);
   }
 
-  private beginSection(next: Exclude<FormatterSection, "assistant">): void {
+  private beginSection(): void {
     if (!this.atLineStart) {
       this.write("\n");
     }
     if (this.wroteAny) {
       this.write("\n");
     }
-    this.section = next;
   }
 
   private writeAssistantChunk(text: string): void {
     if (!text) {
       return;
     }
-    this.section = "assistant";
     this.write(text);
   }
 
@@ -952,7 +947,7 @@ class TextOutputFormatter implements OutputFormatter {
       return;
     }
 
-    this.beginSection("thought");
+    this.beginSection();
     const [firstLine, ...restLines] = thought.split("\n");
     this.writeLine(this.dim(`[thinking] ${firstLine}`));
     for (const line of restLines) {
@@ -1045,7 +1040,7 @@ class TextOutputFormatter implements OutputFormatter {
     state: ToolRenderState,
     status: Exclude<NormalizedToolStatus, "completed" | "failed">,
   ): void {
-    this.beginSection("tool");
+    this.beginSection();
 
     const title = state.title ?? state.id;
     const label = status === "pending" ? "pending" : "running";
@@ -1064,7 +1059,7 @@ class TextOutputFormatter implements OutputFormatter {
   }
 
   private renderFinalToolState(state: ToolRenderState, status: "completed" | "failed"): void {
-    this.beginSection("tool");
+    this.beginSection();
 
     const title = state.title ?? state.id;
     const statusText = this.colorStatus(toStatusLabel(status), status);

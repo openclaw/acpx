@@ -162,8 +162,9 @@ export async function nextJsonLine(
   iterator: AsyncIterator<string>,
   timeoutMs = 2_000,
 ): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_resolve, reject) => {
-    setTimeout(() => reject(new Error("Timed out waiting for queue line")), timeoutMs);
+    timer = setTimeout(() => reject(new Error("Timed out waiting for queue line")), timeoutMs);
   });
 
   const next = (async () => {
@@ -174,5 +175,9 @@ export async function nextJsonLine(
     return JSON.parse(result.value);
   })();
 
-  return await Promise.race([next, timeout]);
+  try {
+    return await Promise.race([next, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
 }

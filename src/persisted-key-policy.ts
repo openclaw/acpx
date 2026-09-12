@@ -34,14 +34,6 @@ function joinPath(path: string[]): string {
   return path.join(".");
 }
 
-function isAllowedKey(path: string[], key: string): boolean {
-  if (ZED_TAG_KEYS.has(key)) {
-    return true;
-  }
-
-  return false;
-}
-
 function shouldSkipKeyRule(path: string[]): boolean {
   return MAP_OBJECT_PATHS.has(joinPath(path));
 }
@@ -93,7 +85,7 @@ function collectKeyViolation(
   skipKeyRule: boolean,
   violations: string[],
 ): void {
-  if (!skipKeyRule && !SNAKE_CASE_KEY.test(key) && !isAllowedKey(path, key)) {
+  if (!skipKeyRule && !SNAKE_CASE_KEY.test(key) && !ZED_TAG_KEYS.has(key)) {
     violations.push(`${joinPath(path)}.${key}`.replace(/^\./, ""));
   }
 
