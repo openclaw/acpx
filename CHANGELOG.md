@@ -16,6 +16,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Replay viewer: preserve user-message identities across repeated transcript projection so idle polling does not emit spurious patches.
 - Tooling: prevent malformed TOML configuration from hanging documentation lint by overriding the vulnerable `smol-toml` pin with 1.7.2 (GHSA-7w5x-hrqm-74c2).
 
 ## 0.15.1 - 2026-09-07

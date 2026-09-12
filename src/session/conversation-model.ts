@@ -601,6 +601,7 @@ export function recordPromptSubmission(
   conversation: SessionConversation,
   prompt: PromptInput | string,
   timestamp = isoNow(),
+  messageId?: string,
 ): string | undefined {
   const normalizedPrompt = typeof prompt === "string" ? textPrompt(prompt) : prompt;
   const userContent = normalizedPrompt
@@ -610,7 +611,7 @@ export function recordPromptSubmission(
     return undefined;
   }
 
-  const promptMessageId = nextUserMessageId();
+  const promptMessageId = messageId ?? nextUserMessageId();
   conversation.messages.push({
     User: {
       id: promptMessageId,
@@ -660,11 +661,12 @@ export function recordSessionUpdate(
   state: SessionAcpxState | undefined,
   notification: SessionNotification,
   timestamp = isoNow(),
+  userMessageId?: string,
 ): SessionAcpxState {
   const acpx = ensureAcpxState(state);
 
   const update: SessionUpdate = notification.update;
-  applySessionUpdate(conversation, acpx, update);
+  applySessionUpdate(conversation, acpx, update, userMessageId);
 
   updateConversationTimestamp(conversation, timestamp);
   trimConversationForRuntime(conversation);
@@ -692,21 +694,23 @@ function applySessionUpdate(
   conversation: SessionConversation,
   acpx: SessionAcpxState,
   update: SessionUpdate,
+  userMessageId?: string,
 ): void {
   const handler = SESSION_UPDATE_HANDLERS[update.sessionUpdate];
-  handler?.(conversation, acpx, update);
+  handler?.(conversation, acpx, update, userMessageId);
 }
 
 type SessionUpdateHandler = (
   conversation: SessionConversation,
   acpx: SessionAcpxState,
   update: SessionUpdate,
+  userMessageId?: string,
 ) => void;
 
 const SESSION_UPDATE_HANDLERS: Record<string, SessionUpdateHandler> = {
-  user_message_chunk: (conversation, _acpx, update) => {
+  user_message_chunk: (conversation, _acpx, update, userMessageId) => {
     if (update.sessionUpdate === "user_message_chunk") {
-      appendUserMessageChunk(conversation, update.content);
+      appendUserMessageChunk(conversation, update.content, userMessageId);
     }
   },
   agent_message_chunk: (conversation, _acpx, update) => {
@@ -759,14 +763,18 @@ const SESSION_UPDATE_HANDLERS: Record<string, SessionUpdateHandler> = {
   },
 };
 
-function appendUserMessageChunk(conversation: SessionConversation, content: ContentBlock): void {
+function appendUserMessageChunk(
+  conversation: SessionConversation,
+  content: ContentBlock,
+  messageId?: string,
+): void {
   const userContent = contentToUserContent(content);
   if (!userContent) {
     return;
   }
   conversation.messages.push({
     User: {
-      id: nextUserMessageId(),
+      id: messageId ?? nextUserMessageId(),
       content: [userContent],
     },
   });

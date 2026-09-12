@@ -329,6 +329,62 @@ test("replay viewer streams selected-run ACP text as JSON Patch+ append updates"
   }
 });
 
+for (const sourceType of ["prompt", "user_message_chunk"] as const) {
+  test(`replay projection keeps ${sourceType} identities stable across reads and checkpoints`, async (t) => {
+    const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-identities-"));
+    t.after(() => fs.rm(runsDir, { recursive: true, force: true }));
+    const runId = "stable-identities";
+    const sessionId = "main-bundle";
+    await writeLiveSessionRunBundle(runsDir, {
+      runId,
+      sessionId,
+      promptText: "hello",
+      initialAgentText: "hel",
+    });
+    const sessionDir = path.join(runsDir, runId, "sessions", sessionId);
+    if (sourceType === "user_message_chunk") {
+      const eventsFile = path.join(sessionDir, "events.ndjson");
+      const events = (await fs.readFile(eventsFile, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as FlowBundledSessionEvent);
+      events[0].message = {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "agent-session",
+          update: {
+            sessionUpdate: "user_message_chunk",
+            content: { type: "text", text: "hello" },
+          },
+        },
+      };
+      await fs.writeFile(
+        eventsFile,
+        `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+      );
+    }
+
+    const source = createFilesystemRunSource(runsDir);
+    const first = await source.getRunState(runId);
+    assert.deepEqual(await source.getRunState(runId), first);
+
+    await appendLiveSessionChunk(runsDir, runId, sessionId, 3, "lo");
+    const grown = await source.getRunState(runId);
+    assert.deepEqual(await source.getRunState(runId), grown);
+    const firstUser = first.sessions[sessionId].record.messages?.[0];
+    assert.deepEqual(grown.sessions[sessionId].record.messages?.[0], firstUser);
+
+    const checkpoint = structuredClone(grown.sessions[sessionId].record);
+    const checkpointUser = checkpoint.messages?.[0] as { User: { id: string } };
+    checkpointUser.User.id = "persisted-user-id";
+    await fs.writeFile(path.join(sessionDir, "record.json"), JSON.stringify(checkpoint));
+    const restored = await source.getRunState(runId);
+    assert.deepEqual(restored.sessions[sessionId].record.messages?.[0], checkpointUser);
+    assert.deepEqual(await source.getRunState(runId), restored);
+  });
+}
+
 function createMessageInbox(socket: WebSocket) {
   const backlog: ReplayServerMessage[] = [];
   const waiters: Array<{

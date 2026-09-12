@@ -162,10 +162,13 @@ function replayBundledSession(
       continue;
     }
 
+    // Replaying unchanged events must not create fresh identities on every poll.
+    const messageId = `replay:${sessionId}:${event.seq}`;
+
     const prompt = extractPromptFromMessage(event.message as AcpJsonRpcMessage);
     if (prompt) {
       const messageStart = conversation.messages.length;
-      recordPromptSubmission(conversation, prompt, event.at);
+      recordPromptSubmission(conversation, prompt, event.at, messageId);
       promptText = promptToDisplayText(prompt);
       liveTurn = {
         sessionId,
@@ -192,7 +195,7 @@ function replayBundledSession(
       };
     }
 
-    acpxState = recordSessionUpdate(conversation, acpxState, notification, event.at);
+    acpxState = recordSessionUpdate(conversation, acpxState, notification, event.at, messageId);
     liveTurn.eventEndSeq = event.seq;
     liveTurn.messageEnd = Math.max(liveTurn.messageStart, conversation.messages.length - 1);
   }
