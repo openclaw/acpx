@@ -64,6 +64,9 @@ re-decided during coding:
 - The server computes patches from **semantic viewer state**, not by patching
   storage files directly.
 - The on-disk bundle format stays unchanged in this work.
+- Replaying an unchanged bundle preserves message identities. Projected user
+  messages derive their identity from the session bundle and event sequence;
+  message identities already present in a persisted checkpoint stay unchanged.
 
 ## Goals
 
