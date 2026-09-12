@@ -3,7 +3,7 @@
   "packageManager": "pnpm",
   "testRunner": "command",
   "commandRunner": {
-    "command": "pnpm run build:test && node --test dist-test/test/cli-flags.test.js"
+    "command": "node --import tsx --test test/cli-flags.test.ts"
   },
   "concurrency": 1,
   "mutate": ["src/cli/flags.ts"],

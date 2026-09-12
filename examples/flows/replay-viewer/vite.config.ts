@@ -4,8 +4,8 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react()],
-  root: path.resolve(__dirname),
-  publicDir: path.resolve(__dirname, "public"),
+  root: import.meta.dirname,
+  publicDir: path.resolve(import.meta.dirname, "public"),
   server: {
     host: "127.0.0.1",
     port: 4173,
@@ -17,7 +17,7 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
-    outDir: path.resolve(__dirname, "dist"),
+    outDir: path.resolve(import.meta.dirname, "dist"),
     emptyOutDir: true,
     chunkSizeWarningLimit: 1_500,
   },
