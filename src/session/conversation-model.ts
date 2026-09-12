@@ -824,7 +824,7 @@ function applySessionInfoUpdate(
 export function recordClientOperation(
   conversation: SessionConversation,
   state: SessionAcpxState | undefined,
-  operation: ClientOperation,
+  _operation: ClientOperation,
   timestamp = isoNow(),
 ): SessionAcpxState {
   const acpx = ensureAcpxState(state);

@@ -1267,7 +1267,7 @@ export class AcpRuntimeManager {
       } else {
         await this.applyPendingRuntimeTurnCancel(task, turn);
         const response = await this.runRuntimePrompt(task, turn, sessionId);
-        await this.saveCompletedRuntimeTurn(turn, response.stopReason);
+        await this.saveCompletedRuntimeTurn(turn);
         terminalResult = {
           status: response.stopReason === "cancelled" ? "cancelled" : "completed",
           ...(response.stopReason ? { stopReason: response.stopReason } : {}),
@@ -1670,10 +1670,7 @@ export class AcpRuntimeManager {
     return cancelled;
   }
 
-  private async saveCompletedRuntimeTurn(
-    turn: RunningRuntimeTurn,
-    _stopReason: string | undefined,
-  ): Promise<void> {
+  private async saveCompletedRuntimeTurn(turn: RunningRuntimeTurn): Promise<void> {
     turn.record.acpSessionId = turn.activeSessionId;
     reconcileAgentSessionId(turn.record, turn.record.agentSessionId);
     turn.record.protocolVersion = turn.client.initializeResult?.protocolVersion;

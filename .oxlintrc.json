@@ -28,7 +28,6 @@
     "eslint/no-self-compare": "error",
     "eslint/no-sequences": "error",
     "eslint/no-shadow": "off",
-    "eslint/no-underscore-dangle": ["error", { "allow": ["_meta"] }],
     "eslint/no-unmodified-loop-condition": "error",
     "eslint/no-useless-call": "error",
     "eslint/no-useless-computed-key": "error",
