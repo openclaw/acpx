@@ -123,11 +123,22 @@ const PLAN_ENTRY_STATUSES = new Set(["pending", "in_progress", "completed"]);
 const PLAN_ENTRY_PRIORITIES = new Set(["high", "medium", "low"]);
 
 function planUpdateEvent(payload: Record<string, unknown>): AcpRuntimeEvent | null {
-  const text = planStatusText(payload);
+  const raw = payload.entries;
+  const entries = normalizePlanEntries(raw);
+  if (Array.isArray(raw) && raw.length === 0) {
+    // Explicit empty replacement: the agent cleared its plan. Publish the
+    // snapshot so hosts drop a previously displayed list (ACP replacement
+    // semantics) instead of leaving it stale.
+    return { type: "status", text: "plan updated", tag: "plan", entries: [] };
+  }
+  // The snapshot is independent of the legacy summary: when leading entries
+  // are malformed, fall back to the first usable entry instead of dropping
+  // the whole update.
+  const text =
+    planStatusText(payload) ?? (entries.length > 0 ? `plan: ${entries[0]?.content}` : null);
   if (!text) {
     return null;
   }
-  const entries = normalizePlanEntries(payload.entries);
   return {
     type: "status",
     text,

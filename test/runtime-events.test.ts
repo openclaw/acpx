@@ -357,7 +357,12 @@ test("parsePromptEventLine ignores unsupported structured payloads and treats ra
     type: "status",
     text: "operation",
   });
-  assert.equal(parsePromptEventLine(JSON.stringify({ type: "plan", entries: [] })), null);
+  assert.deepEqual(parsePromptEventLine(JSON.stringify({ type: "plan", entries: [] })), {
+    type: "status",
+    text: "plan updated",
+    tag: "plan",
+    entries: [],
+  });
   assert.deepEqual(parsePromptEventLine(JSON.stringify(["not", "an", "object"])), {
     type: "status",
     text: '["not","an","object"]',
@@ -942,6 +947,35 @@ test("parsePromptEventLine surfaces structured plan entries", () => {
       type: "status",
       text: "plan: status-less still narrates",
       tag: "plan",
+    },
+  );
+});
+
+test("parsePromptEventLine preserves explicit empty plan replacements", () => {
+  assert.deepEqual(parsePromptEventLine(JSON.stringify({ sessionUpdate: "plan", entries: [] })), {
+    type: "status",
+    text: "plan updated",
+    tag: "plan",
+    entries: [],
+  });
+});
+
+test("parsePromptEventLine recovers plan snapshots with malformed leading entries", () => {
+  assert.deepEqual(
+    parsePromptEventLine(
+      JSON.stringify({
+        sessionUpdate: "plan",
+        entries: [
+          { content: "  ", status: "pending" },
+          { content: "usable step", status: "in_progress", priority: "high" },
+        ],
+      }),
+    ),
+    {
+      type: "status",
+      text: "plan: usable step",
+      tag: "plan",
+      entries: [{ content: "usable step", status: "in_progress", priority: "high" }],
     },
   );
 });

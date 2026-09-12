@@ -262,7 +262,9 @@ export type AcpRuntimeEvent =
       /**
        * Populated on `plan` events. Normalized view of the ACP `entries`
        * payload — content plus execution status per entry, priority only
-       * when valid. Malformed entries are skipped, never fabricated.
+       * when valid. Malformed entries are skipped, never fabricated. An
+       * empty array is an explicit replacement: the agent cleared its
+       * plan and hosts should drop any previously displayed list.
        */
       entries?: AcpRuntimePlanEntry[];
     }
