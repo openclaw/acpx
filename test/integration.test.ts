@@ -1917,6 +1917,37 @@ test("integration: sessions new --model fails when the model config update fails
   });
 });
 
+test("integration: model selection targets the model control when provider shares its category", async () => {
+  await withTempHome(async (homeDir) => {
+    const result = await runCli(
+      [
+        "--agent",
+        `${MOCK_AGENT_COMMAND} --advertise-model-provider`,
+        "--cwd",
+        homeDir,
+        "--format",
+        "json",
+        "--model",
+        "smart-model",
+        "exec",
+        "echo selected-model",
+      ],
+      homeDir,
+    );
+    assert.equal(result.code, 0, result.stderr);
+    const messages = parseJsonRpcOutputLines(result.stdout);
+    const modelRequests = messages.filter(
+      (message) => message.method === "session/set_config_option",
+    );
+    assert.equal(modelRequests.length, 1);
+    assert.partialDeepStrictEqual(modelRequests[0].params, {
+      configId: "model",
+      value: "smart-model",
+    });
+    assert.match(result.stdout, /selected-model/);
+  });
+});
+
 test("integration: set model routes through the advertised config option and succeeds", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

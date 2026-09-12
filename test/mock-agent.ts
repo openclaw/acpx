@@ -31,6 +31,7 @@ import {
   type ResumeSessionRequest,
   type ResumeSessionResponse,
   type SessionId,
+  type SessionConfigOption,
   type SetSessionConfigOptionRequest,
   type SetSessionConfigOptionResponse,
   type SetSessionModeRequest,
@@ -67,6 +68,7 @@ type MockAgentOptions = {
   setSessionModelInvalidParams: boolean;
   advertiseConfigOptions: boolean;
   advertiseModels: boolean;
+  advertiseModelProvider: boolean;
   advertiseLegacyModels: boolean;
   advertiseCommandsAfterNew: boolean;
   modelConfigId: string;
@@ -390,6 +392,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let setSessionModelInvalidParams = false;
   let advertiseConfigOptions = false;
   let advertiseModels = false;
+  let advertiseModelProvider = false;
   let advertiseLegacyModels = false;
   let advertiseCommandsAfterNew = false;
   let modelConfigId = "model";
@@ -464,6 +467,12 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
 
     if (token === "--advertise-models") {
       advertiseModels = true;
+      continue;
+    }
+
+    if (token === "--advertise-model-provider") {
+      advertiseModels = true;
+      advertiseModelProvider = true;
       continue;
     }
 
@@ -620,6 +629,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     setSessionModelInvalidParams,
     advertiseConfigOptions,
     advertiseModels,
+    advertiseModelProvider,
     advertiseLegacyModels,
     advertiseCommandsAfterNew,
     modelConfigId,
@@ -719,6 +729,7 @@ function buildConfigOptions(
   modelConfigId: string,
   omitModelId?: string,
   currentModelId = state.modelId,
+  includeProvider = false,
 ): SetSessionConfigOptionResponse["configOptions"] {
   const reasoningEffort =
     typeof state.configValues.reasoning_effort === "string"
@@ -734,6 +745,18 @@ function buildConfigOptions(
   ].filter((option) => option.value !== omitModelId);
 
   return [
+    ...(includeProvider
+      ? [
+          {
+            id: "provider",
+            name: "Provider",
+            type: "select",
+            category: "model",
+            currentValue: "fixture-provider",
+            options: [{ value: "fixture-provider", name: "Fixture Provider" }],
+          } satisfies SessionConfigOption,
+        ]
+      : []),
     {
       id: "mode",
       name: "Session Mode",
@@ -838,6 +861,8 @@ class MockAgent implements Agent {
         this.sessions.get(sessionId) ?? createSessionState(false),
         this.options.modelConfigId,
         this.options.omitReconnectModelId,
+        undefined,
+        this.options.advertiseModelProvider,
       );
     }
 
@@ -919,6 +944,9 @@ class MockAgent implements Agent {
       response.configOptions = buildConfigOptions(
         this.sessions.get(sessionId) ?? createSessionState(false),
         this.options.modelConfigId,
+        undefined,
+        undefined,
+        this.options.advertiseModelProvider,
       );
     }
 
@@ -1110,6 +1138,7 @@ class MockAgent implements Agent {
         this.options.modelConfigId,
         this.options.omitReconnectModelId,
         this.options.reportModelAs,
+        this.options.advertiseModelProvider,
       ),
     };
   }

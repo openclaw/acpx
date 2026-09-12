@@ -129,6 +129,12 @@ All global options:
 
 Permission flags are mutually exclusive. Using more than one of `--approve-all`, `--approve-reads`, `--deny-all` is a usage error.
 
+For model configuration, acpx prefers a valid select control with both
+`category: "model"` and `id: "model"`. Otherwise it uses the first valid
+model-category control, including custom IDs, then the legacy `id: "model"`
+fallback. This keeps provider selectors in the same category from taking over
+the actual model control.
+
 ### Global option examples
 
 ```bash

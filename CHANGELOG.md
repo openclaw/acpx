@@ -16,6 +16,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Model selection: prefer the actual model control when an adapter also groups provider controls under the model category, while retaining custom model controls and legacy fallback. Thanks @wtfsayo.
 - Replay viewer: preserve user-message identities across repeated transcript projection so idle polling does not emit spurious patches.
 - Tooling: prevent malformed TOML configuration from hanging documentation lint by overriding the vulnerable `smol-toml` pin with 1.7.2 (GHSA-7w5x-hrqm-74c2).
 

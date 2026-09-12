@@ -124,10 +124,8 @@ function isModelSelectOption(option: Record<string, unknown>): boolean {
   return option.type === "select" && (option.category === "model" || option.id === "model");
 }
 
-function parseModelConfigOption(value: unknown): SessionModelState | undefined {
-  const option = asRecord(value);
+function parseModelConfigOption(option: Record<string, unknown>): SessionModelState | undefined {
   if (
-    !option ||
     !isModelSelectOption(option) ||
     typeof option.id !== "string" ||
     typeof option.currentValue !== "string"
@@ -144,18 +142,36 @@ function parseModelConfigOption(value: unknown): SessionModelState | undefined {
     : undefined;
 }
 
+function modelConfigPriority(option: Record<string, unknown>): number {
+  if (option.category !== "model") {
+    return 0;
+  }
+  return option.id === "model" ? 2 : 1;
+}
+
 export function modelStateFromConfigOptions(configOptions: unknown): SessionModelState | undefined {
   if (!Array.isArray(configOptions)) {
     return undefined;
   }
 
+  let selected: SessionModelState | undefined;
+  let selectedPriority = -1;
   for (const value of configOptions) {
-    const models = parseModelConfigOption(value);
-    if (models) {
-      return models;
+    const option = asRecord(value);
+    if (!option) {
+      continue;
+    }
+    const models = parseModelConfigOption(option);
+    if (!models) {
+      continue;
+    }
+    const priority = modelConfigPriority(option);
+    if (priority > selectedPriority) {
+      selected = models;
+      selectedPriority = priority;
     }
   }
-  return undefined;
+  return selected;
 }
 
 export function modelStateFromLegacyResponse(response: unknown): SessionModelState | undefined {

@@ -3,9 +3,68 @@ import test from "node:test";
 import {
   assertRequestedModelSupported,
   isRequestedModelUnsupportedError,
+  modelStateFromConfigOptions,
   REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE,
   RequestedModelUnsupportedError,
 } from "../src/acp/model-support.js";
+
+function modelSelect(id: string, category?: string) {
+  return {
+    id,
+    name: id,
+    type: "select",
+    category,
+    currentValue: `${id}-first`,
+    options: [{ value: `${id}-first`, name: `${id} first` }],
+  };
+}
+
+test("model config selection distinguishes a categorized model from provider controls", () => {
+  const provider = modelSelect("provider", "model");
+  const model = modelSelect("model", "model");
+  for (const options of [
+    [provider, model],
+    [model, provider],
+  ]) {
+    assert.deepEqual(modelStateFromConfigOptions(options), {
+      configId: "model",
+      currentModelId: "model-first",
+      availableModels: [{ modelId: "model-first", name: "model first" }],
+    });
+  }
+});
+
+test("model config selection preserves categorized custom controls ahead of legacy ids", () => {
+  const custom = modelSelect("llm", "model");
+  for (const category of [undefined, "mode"]) {
+    const legacy = modelSelect("model", category);
+    for (const options of [
+      [legacy, custom],
+      [custom, legacy],
+    ]) {
+      assert.equal(modelStateFromConfigOptions(options)?.configId, "llm");
+    }
+  }
+  assert.equal(modelStateFromConfigOptions([modelSelect("model")])?.configId, "model");
+  assert.equal(
+    modelStateFromConfigOptions([custom, modelSelect("other", "model")])?.configId,
+    "llm",
+  );
+});
+
+test("model config selection skips malformed preferred controls and retains grouped models", () => {
+  const custom = modelSelect("llm", "model");
+  const malformed = { ...modelSelect("model", "model"), options: null };
+  assert.equal(modelStateFromConfigOptions([malformed, custom])?.configId, "llm");
+  const grouped = {
+    ...modelSelect("model", "model"),
+    options: [{ group: "group", name: "Group", options: modelSelect("model").options }],
+  };
+  assert.equal(modelStateFromConfigOptions([custom, grouped])?.configId, "model");
+  assert.deepEqual(modelStateFromConfigOptions([custom, grouped])?.availableModels, [
+    { modelId: "model-first", name: "model first" },
+  ]);
+});
 
 test("Claude ACP model validation warns for unadvertised selectors", () => {
   const warning = assertRequestedModelSupported({
