@@ -152,10 +152,8 @@ export type AcpRuntimeAvailableCommand = {
 };
 
 /**
- * One entry of the agent's ACP `plan` (its live todo list). The agent
- * re-sends the WHOLE list on each update, so consumers REPLACE rather
- * than append. `priority` is omitted when the agent did not advertise a
- * valid one — never fabricated.
+ * An entry in an ACP plan snapshot. Each update replaces the previous list.
+ * Priority is omitted unless the agent advertises a valid value.
  */
 export type AcpRuntimePlanEntry = {
   content: string;
@@ -260,11 +258,8 @@ export type AcpRuntimeEvent =
        */
       availableCommands?: AcpRuntimeAvailableCommand[];
       /**
-       * Populated on `plan` events. Normalized view of the ACP `entries`
-       * payload — content plus execution status per entry, priority only
-       * when valid. Malformed entries are skipped, never fabricated. An
-       * empty array is an explicit replacement: the agent cleared its
-       * plan and hosts should drop any previously displayed list.
+       * Normalized entries on `plan` events; malformed entries are skipped.
+       * Replace the displayed plan when present, including clearing it for [].
        */
       entries?: AcpRuntimePlanEntry[];
     }

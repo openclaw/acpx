@@ -160,3 +160,17 @@ runtime completion results, including queued prompts. An absent field stays
 absent, and an explicit `null` stays `null`. Nested values are opaque,
 adapter-defined data; ACPX does not authenticate them or treat them as proof of
 model identity or configuration. Raw JSON output retains the original ACP response.
+
+## Embedded runtime plans
+
+The `acpx/runtime` turn stream exposes ACP plan notifications as `status` events
+with `tag: "plan"`. The existing text summary remains available. The optional
+`entries` field contains normalized `AcpRuntimePlanEntry` objects with `content`,
+`status` (`pending`, `in_progress`, or `completed`), and a valid advertised
+`priority` (`high`, `medium`, or `low`) when present.
+
+Each `entries` array replaces the previous plan; `entries: []` clears it. An
+omitted field supplies no structured snapshot. Entries with blank content or
+invalid status are skipped, and invalid priorities are omitted. Legacy updates
+without valid statuses can still produce a text summary. CLI JSON output
+continues to expose the original ACP payload.

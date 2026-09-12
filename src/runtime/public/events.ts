@@ -77,7 +77,6 @@ const STATUS_TEXT_RESOLVERS: Partial<Record<AcpSessionUpdateTag, StatusTextResol
   current_mode_update: currentModeStatusText,
   config_option_update: configOptionStatusText,
   session_info_update: sessionInfoStatusText,
-  plan: planStatusText,
 };
 
 function availableCommandsStatusText(payload: Record<string, unknown>): string {
@@ -118,22 +117,22 @@ function planStatusText(payload: Record<string, unknown>): string | null {
   return content ? `plan: ${content}` : null;
 }
 
-const PLAN_ENTRY_STATUSES = new Set(["pending", "in_progress", "completed"]);
+function isPlanEntryStatus(value: string): value is AcpRuntimePlanEntry["status"] {
+  return value === "pending" || value === "in_progress" || value === "completed";
+}
 
-const PLAN_ENTRY_PRIORITIES = new Set(["high", "medium", "low"]);
+function isPlanEntryPriority(value: string): value is NonNullable<AcpRuntimePlanEntry["priority"]> {
+  return value === "high" || value === "medium" || value === "low";
+}
 
 function planUpdateEvent(payload: Record<string, unknown>): AcpRuntimeEvent | null {
   const raw = payload.entries;
   const entries = normalizePlanEntries(raw);
   if (Array.isArray(raw) && raw.length === 0) {
-    // Explicit empty replacement: the agent cleared its plan. Publish the
-    // snapshot so hosts drop a previously displayed list (ACP replacement
-    // semantics) instead of leaving it stale.
+    // An explicit empty snapshot clears the host's previous plan.
     return { type: "status", text: "plan updated", tag: "plan", entries: [] };
   }
-  // The snapshot is independent of the legacy summary: when leading entries
-  // are malformed, fall back to the first usable entry instead of dropping
-  // the whole update.
+  // Preserve legacy summaries, including entries without a valid status.
   const text =
     planStatusText(payload) ?? (entries.length > 0 ? `plan: ${entries[0]?.content}` : null);
   if (!text) {
@@ -167,16 +166,14 @@ function normalizePlanEntry(value: unknown): AcpRuntimePlanEntry | undefined {
   }
   const content = asTrimmedString(value.content);
   const status = asTrimmedString(value.status);
-  if (!content || !PLAN_ENTRY_STATUSES.has(status)) {
+  if (!content || !isPlanEntryStatus(status)) {
     return undefined;
   }
   const priority = asTrimmedString(value.priority);
   return {
     content,
-    status: status as AcpRuntimePlanEntry["status"],
-    ...(PLAN_ENTRY_PRIORITIES.has(priority)
-      ? { priority: priority as AcpRuntimePlanEntry["priority"] }
-      : {}),
+    status,
+    ...(isPlanEntryPriority(priority) ? { priority } : {}),
   };
 }
 
