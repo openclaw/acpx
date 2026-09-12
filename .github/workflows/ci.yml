@@ -12,11 +12,11 @@ concurrency:
 
 env:
   NODE_VERSION: 24
-  PNPM_VERSION: 11.26.0
 
 jobs:
   scope:
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
@@ -25,7 +25,7 @@ jobs:
       docs_changed: ${{ steps.scope.outputs.docs_changed }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: false
@@ -93,6 +93,7 @@ jobs:
     needs: scope
     if: needs.scope.outputs.docs_only != 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: read
     strategy:
@@ -106,12 +107,18 @@ jobs:
           - name: Lint
             command: pnpm run lint
           - name: Build
-            command: pnpm run build
+            command: pnpm run build && pnpm run viewer:typecheck && pnpm run viewer:build
           - name: Conformance Smoke
             command: pnpm run conformance:run -- --case acp.v1.initialize.handshake
           - name: Test
             node_version: 22
             command: pnpm run test:coverage
+          - name: Test (Node 24)
+            node_version: 24
+            command: pnpm run test
+          - name: Test (Node 26)
+            node_version: 26
+            command: pnpm run test
           - name: Mutation
             node_version: 22
             command: pnpm run mutate
@@ -123,19 +130,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           fetch-tags: false
           submodules: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6.1.0
-        with:
-          version: ${{ env.PNPM_VERSION }}
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node_version || env.NODE_VERSION }}
           check-latest: true
@@ -152,23 +157,22 @@ jobs:
     needs: scope
     if: needs.scope.outputs.docs_changed == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           fetch-tags: false
           submodules: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6.1.0
-        with:
-          version: ${{ env.PNPM_VERSION }}
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           check-latest: true

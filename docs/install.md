@@ -8,7 +8,7 @@ description: Install acpx globally with npm, run it ad-hoc with npx, or build fr
 ## Requirements
 
 - To run the published CLI: Node.js **22.13 or newer** (see `engines.node` in `package.json`).
-- To build from source: Node.js **22.x starting at 22.18**, **24.x starting at 24.11**, or **26 or newer**. The tsdown build tool does not support Node 25.
+- To build from source: Node.js **22.x starting at 22.22.1**, **24.x starting at 24.11**, or **26 or newer**. lint-staged sets the Node 22 minimum; the tsdown build tool does not support Node 25. Published CLI installs still support Node 22.13 and newer.
 - pnpm **11.26.0** for source builds
 - The underlying coding agent CLI you plan to talk to (Codex, Claude, etc.)
 

@@ -25,7 +25,7 @@ session lifecycle flows.
 ## Directory layout
 
 - `spec/v1.md`: normative contract for the v1 conformance profile
-- `cases/*.json`: data-driven case definitions consumed by a future runner
+- `cases/*.json`: data-driven case definitions consumed by the runner
 - `profiles/*.json`: profile files that declare required case ids
 - `runner/run.ts`: minimal executable draft runner
 
@@ -37,7 +37,7 @@ Case files are prefixed numerically to preserve stable execution ordering.
 
 Draft contract and seed case corpus.
 
-Current profile (`acp-core-v1`) includes 20 required cases.
+Current profile (`acp-core-v1`) includes 21 required cases.
 
 ## Run
 

@@ -22,8 +22,8 @@ instead of expanding this file into a full technical spec.
 - npm: `https://www.npmjs.com/package/acpx`
 - Default branch: `main`
 - Runtime: Node.js `>=22.13.0`
-- Source builds: Node.js `^22.18.0 || ^24.11.0 || >=26.0.0` (tsdown excludes Node 25).
-- Package manager: `pnpm@11.26.0`
+- Source builds: Node.js `^22.22.1 || ^24.11.0 || >=26.0.0` (lint-staged sets the Node 22 minimum; tsdown excludes Node 25).
+- Package manager: `pnpm@11.26.0` (CI reads the pin from `package.json`).
 - Clean Node 22 setups can have stale Corepack signing keys; install pnpm
   with `npm install -g pnpm@11.26.0` if `corepack prepare` fails.
 
@@ -290,7 +290,9 @@ CI lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
   - `pnpm run mutate`
   - `pnpm run test:coverage`
 - CI installs dependencies with `pnpm install --frozen-lockfile`
-- CI uses Node 24 by default; the `Test` job runs on Node 22
+- CI uses Node 24 by default; tests run on Node 22, 24, and 26, with coverage on Node 22.
+- The build job also typechecks and builds the replay viewer.
+- Mutation tests run the existing CLI flag suite directly through `tsx`, without rebuilding the test tree for each mutant.
 
 ## Release / CD
 
