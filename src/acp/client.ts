@@ -7,39 +7,28 @@ import {
   methods,
   type AnyMessage,
   type AuthMethod,
-  type AuthenticateRequest,
-  type ClientCapabilities,
-  type ClientConnection,
   type CreateElicitationRequest,
   type CreateElicitationResponse,
   type CreateTerminalRequest,
   type CreateTerminalResponse,
-  type InitializeRequest,
   type InitializeResponse,
   type JsonRpcId,
-  type LoadSessionRequest,
   type ListSessionsRequest,
   type ListSessionsResponse,
   type KillTerminalRequest,
   type KillTerminalResponse,
   type LoadSessionResponse,
-  type NewSessionRequest,
   type NewSessionResponse,
   type PromptResponse,
-  type PromptRequest,
   type ReadTextFileRequest,
   type ReadTextFileResponse,
   type ReleaseTerminalRequest,
   type ReleaseTerminalResponse,
   type ResumeSessionResponse,
-  type ResumeSessionRequest,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionNotification,
   type SetSessionConfigOptionResponse,
-  type SetSessionConfigOptionRequest,
-  type SetSessionModeRequest,
-  type SetSessionModeResponse,
   type TerminalOutputRequest,
   type TerminalOutputResponse,
   type WaitForTerminalExitRequest,
@@ -83,7 +72,6 @@ import type {
   PermissionStats,
   PromptInput,
 } from "../types.js";
-import { getAcpxVersion } from "../version.js";
 import {
   buildClaudeAcpSessionCreateTimeoutMessage,
   buildClaudeCodeOptionsMeta,
@@ -118,8 +106,13 @@ import {
   waitForChildExit,
   waitForSpawn,
 } from "./client-process.js";
+import {
+  createAgentConnectionFacade,
+  resolveClientCapabilities,
+  resolveClientInfo,
+  type AcpAgentConnection,
+} from "./client-protocol.js";
 import { extractAcpError } from "./error-shapes.js";
-import { isSessionUpdateNotification } from "./jsonrpc.js";
 import {
   modelStateFromConfigOptions,
   modelStateFromSessionResponse,
@@ -132,6 +125,7 @@ import {
   createNdJsonMessageStream,
   readMaxAcpMessageBytes,
 } from "./ndjson-stream.js";
+import { observeAcpStream } from "./observed-stream.js";
 import {
   formatSessionControlAcpSummary,
   maybeWrapSessionControlError,
@@ -154,12 +148,6 @@ const DRAIN_POLL_INTERVAL_MS = 20;
 const AGENT_CLOSE_TERM_GRACE_MS = 1_500;
 const AGENT_CLOSE_KILL_GRACE_MS = 1_000;
 const STARTUP_STDERR_MAX_CHARS = 8_192;
-const DEVIN_COMPATIBILITY_CLIENT_CAPABILITIES_META = Object.freeze({
-  "cognition.ai/requestDiagnostics": true,
-});
-const DEVIN_COMPATIBILITY_CLIENT_NAME = "windsurf";
-// This is the embedded Windsurf IDE version bundled with Devin Desktop 3.1.7, the first locally verified version that passes Devin's server-side ACP precondition.
-const DEFAULT_DEVIN_COMPATIBILITY_CLIENT_VERSION = "1.110.1";
 const ELICITATION_CANCEL_MESSAGES = {
   inactive: "elicitation owner is no longer active",
   unavailable: "elicitation handler is unavailable",
@@ -168,20 +156,6 @@ const ELICITATION_CANCEL_MESSAGES = {
   cancelled: "elicitation request was cancelled",
   requestScoped: "request-scoped elicitation has no owner",
 } as const;
-
-function resolveClientInfo(devinAcp: boolean): { name: string; version: string } {
-  if (!devinAcp) {
-    return {
-      name: "acpx",
-      version: getAcpxVersion(),
-    };
-  }
-
-  return {
-    name: DEVIN_COMPATIBILITY_CLIENT_NAME,
-    version: process.env.ACPX_DEVIN_WINDSURF_VERSION ?? DEFAULT_DEVIN_COMPATIBILITY_CLIENT_VERSION,
-  };
-}
 
 function normalizeElicitationModes(
   modes: readonly AcpElicitationMode[] | undefined,
@@ -220,107 +194,6 @@ function waitForAbort(signal: AbortSignal): Promise<{ kind: "aborted" }> {
   return new Promise((resolve) => {
     signal.addEventListener("abort", () => resolve({ kind: "aborted" }), { once: true });
   });
-}
-
-function isExtensionNotification(message: AnyMessage): boolean {
-  if (!("method" in message) || "id" in message || typeof message.method !== "string") {
-    return false;
-  }
-  return (
-    message.method !== methods.client.session.update &&
-    message.method !== methods.client.elicitation.complete &&
-    message.method !== methods.protocol.cancelRequest
-  );
-}
-
-function elicitationRequestId(message: AnyMessage): JsonRpcId | undefined {
-  if (
-    !("method" in message) ||
-    message.method !== methods.client.elicitation.create ||
-    !("id" in message)
-  ) {
-    return undefined;
-  }
-  return message.id;
-}
-
-function responseId(message: AnyMessage): JsonRpcId | undefined {
-  if (!("id" in message) || "method" in message) {
-    return undefined;
-  }
-  return message.id;
-}
-
-function promptRequestOwner(
-  message: AnyMessage,
-): { requestId: JsonRpcId; sessionId: string } | undefined {
-  if (
-    !("method" in message) ||
-    message.method !== methods.agent.session.prompt ||
-    !("id" in message)
-  ) {
-    return undefined;
-  }
-  const sessionId = (message.params as { sessionId?: unknown } | undefined)?.sessionId;
-  return typeof sessionId === "string" ? { requestId: message.id, sessionId } : undefined;
-}
-
-function createAgentConnectionFacade(connection: ClientConnection): AcpAgentConnection {
-  const agent = connection.agent;
-  return {
-    signal: connection.signal,
-    close: (error) => connection.close(error),
-    initialize: async (params) => await agent.request(methods.agent.initialize, params),
-    authenticate: async (params) => {
-      await agent.request(methods.agent.authenticate, params);
-    },
-    newSession: async (params) => await agent.request(methods.agent.session.new, params),
-    loadSession: async (params) => await agent.request(methods.agent.session.load, params),
-    resumeSession: async (params) => await agent.request(methods.agent.session.resume, params),
-    prompt: async (params) => await agent.request(methods.agent.session.prompt, params),
-    setSessionMode: async (params) => await agent.request(methods.agent.session.setMode, params),
-    setSessionConfigOption: async (params) =>
-      await agent.request(methods.agent.session.setConfigOption, params),
-    extMethod: async (method, params) =>
-      await agent.request<Record<string, unknown>, Record<string, unknown>>(method, params),
-    cancel: async (params) => await agent.notify(methods.agent.session.cancel, params),
-    closeSession: async (params) => {
-      await agent.request(methods.agent.session.close, params);
-    },
-    listSessions: async (params) => await agent.request(methods.agent.session.list, params),
-  };
-}
-
-function resolveClientCapabilities(params: {
-  devinAcp: boolean;
-  fs: boolean;
-  terminal: boolean;
-  elicitationModes: readonly AcpElicitationMode[];
-}): ClientCapabilities {
-  const baseCapabilities: ClientCapabilities = {
-    fs: {
-      readTextFile: params.fs,
-      writeTextFile: params.fs,
-    },
-    terminal: params.terminal,
-    ...(params.elicitationModes.length > 0
-      ? {
-          elicitation: {
-            ...(params.elicitationModes.includes("form") ? { form: {} } : {}),
-            ...(params.elicitationModes.includes("url") ? { url: {} } : {}),
-          },
-        }
-      : {}),
-  };
-
-  if (!params.devinAcp) {
-    return baseCapabilities;
-  }
-
-  return {
-    ...baseCapabilities,
-    _meta: DEVIN_COMPATIBILITY_CLIENT_CAPABILITIES_META,
-  };
 }
 
 type LoadSessionOptions = {
@@ -381,25 +254,6 @@ type AgentDisconnectReason = "process_exit" | "process_close" | "pipe_close" | "
 type PendingConnectionRequest = {
   settled: boolean;
   reject: (error: unknown) => void;
-};
-
-type AcpAgentConnection = {
-  signal: AbortSignal;
-  close?: (error?: unknown) => void;
-  initialize: (params: InitializeRequest) => Promise<InitializeResponse>;
-  authenticate: (params: AuthenticateRequest) => Promise<void>;
-  newSession: (params: NewSessionRequest) => Promise<NewSessionResponse>;
-  loadSession: (params: LoadSessionRequest) => Promise<LoadSessionResponse>;
-  resumeSession: (params: ResumeSessionRequest) => Promise<ResumeSessionResponse>;
-  prompt: (params: PromptRequest) => Promise<PromptResponse>;
-  setSessionMode: (params: SetSessionModeRequest) => Promise<SetSessionModeResponse>;
-  setSessionConfigOption: (
-    params: SetSessionConfigOptionRequest,
-  ) => Promise<SetSessionConfigOptionResponse>;
-  extMethod: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  cancel: (params: { sessionId: string }) => Promise<void>;
-  closeSession: (params: { sessionId: string }) => Promise<void>;
-  listSessions: (params: ListSessionsRequest) => Promise<ListSessionsResponse>;
 };
 
 type ActivePromptState = {
@@ -1080,83 +934,16 @@ export class AcpClient {
   private createTappedStream(base: {
     readable: ReadableStream<AnyMessage>;
     writable: WritableStream<AnyMessage>;
-  }): {
-    readable: ReadableStream<AnyMessage>;
-    writable: WritableStream<AnyMessage>;
-  } {
-    const onAcpMessage = () => this.eventHandlers.onAcpMessage;
-    const onAcpOutputMessage = () => this.eventHandlers.onAcpOutputMessage;
-    const elicitationRequestIds = new Set<JsonRpcId>();
-    const bindPromptOwner = (owner: { requestId: JsonRpcId; sessionId: string }) =>
-      this.bindPromptOwner(owner);
-    const onPromptRequestWritten = (
-      active: ActivePromptState,
-      owner: { requestId: JsonRpcId; sessionId: string },
-    ) => this.onPromptRequestWritten(active, owner);
-
-    const shouldSuppressInboundReplaySessionUpdate = (message: AnyMessage): boolean => {
-      return this.suppressReplaySessionUpdateMessages && isSessionUpdateNotification(message);
-    };
-    const observeInbound = (message: AnyMessage): void => {
-      const requestId = elicitationRequestId(message);
-      if (requestId !== undefined) {
-        elicitationRequestIds.add(requestId);
-        return;
-      }
-      if (!shouldSuppressInboundReplaySessionUpdate(message)) {
-        onAcpOutputMessage()?.("inbound", message);
-        onAcpMessage()?.("inbound", message);
-      }
-    };
-
-    const readable = new ReadableStream<AnyMessage>({
-      async start(controller) {
-        const reader = base.readable.getReader();
-        try {
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) {
-              break;
-            }
-            if (!value) {
-              continue;
-            }
-            observeInbound(value);
-            if (isExtensionNotification(value)) {
-              continue;
-            }
-            controller.enqueue(value);
-          }
-        } finally {
-          reader.releaseLock();
-          controller.close();
-        }
+  }): ReturnType<typeof observeAcpStream> {
+    return observeAcpStream(base, {
+      onMessage: (direction, message) => {
+        this.eventHandlers.onAcpOutputMessage?.(direction, message);
+        this.eventHandlers.onAcpMessage?.(direction, message);
       },
+      suppressReplaySessionUpdates: () => this.suppressReplaySessionUpdateMessages,
+      bindPromptOwner: (owner) => this.bindPromptOwner(owner),
+      onPromptRequestWritten: (active, owner) => this.onPromptRequestWritten(active, owner),
     });
-
-    const writable = new WritableStream<AnyMessage>({
-      async write(message) {
-        const promptOwner = promptRequestOwner(message);
-        const activePrompt = promptOwner ? bindPromptOwner(promptOwner) : undefined;
-        const id = responseId(message);
-        const sensitive = id !== undefined && elicitationRequestIds.delete(id);
-        if (!sensitive) {
-          onAcpOutputMessage()?.("outbound", message);
-          onAcpMessage()?.("outbound", message);
-        }
-        const writer = base.writable.getWriter();
-        try {
-          await writer.write(message);
-        } finally {
-          writer.releaseLock();
-        }
-        if (activePrompt && promptOwner) {
-          onPromptRequestWritten(activePrompt, promptOwner);
-        }
-      },
-    });
-
-    return { readable, writable };
   }
 
   async createSession(cwd = this.options.cwd): Promise<SessionCreateResult> {
