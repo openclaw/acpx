@@ -82,10 +82,10 @@ If prompt text is omitted and stdin is piped, `acpx` reads prompt text from stdi
 
 Friendly agent names resolve to commands:
 
-- `pi` -> `npx pi-acp`
+- `pi` -> `npx pi-acp` (ACPX-owned package range; see `agents/Pi.md`)
 - `openclaw` -> `openclaw acp`
 - `codex` -> `npx -y @agentclientprotocol/codex-acp` (ACPX-owned package range)
-- `claude` -> `npx -y @agentclientprotocol/claude-agent-acp` (ACPX-owned package range)
+- `claude` -> `npx -y @agentclientprotocol/claude-agent-acp` (ACPX-owned package range; see `agents/Claude.md`)
 - `gemini` -> `gemini --acp`
 - `cursor` -> `cursor-agent acp`
 - `copilot` -> `copilot --acp --stdio`

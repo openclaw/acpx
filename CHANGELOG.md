@@ -13,6 +13,8 @@ Repo: https://github.com/openclaw/acpx
 - Dependencies: refresh Node types, Oxfmt, and Oxlint; align source builds and CI with pnpm 11.26.0. Thanks @dependabot.
 - Source builds: document Node 22.22.1 as the minimum Node 22 development version required by lint-staged; published CLI installs still support Node 22.13 and newer.
 
+- Dependencies: refresh Zod, tsx, React Flow, Oxlint, the Pi and Claude adapters, and transitive tooling dependencies while retaining the 48-hour release-age policy.
+
 ### Breaking
 
 ### Fixes
