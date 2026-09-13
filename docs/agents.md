@@ -20,6 +20,7 @@ The default agent for top-level commands like `acpx exec …` and `acpx prompt �
 | `copilot`    | `copilot --acp --stdio`                        | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
 | `droid`      | `droid exec --output-format acp`               | [Factory Droid](https://www.factory.ai)                                                                         |
 | `fast-agent` | `uvx fast-agent-mcp acp`                       | [fast-agent](https://fast-agent.ai/)                                                                            |
+| `fx`         | `fx acp`                                       | [fx](https://fx.sh)                                                                                             |
 | `grok-build` | `grok agent stdio`                             | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
 | `iflow`      | `iflow --experimental-acp`                     | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
 | `kilocode`   | `npx -y @kilocode/cli acp`                     | [Kilocode](https://kilocode.ai)                                                                                 |
@@ -138,6 +139,14 @@ If your Cursor install exposes ACP as `agent acp` instead of `cursor-agent acp`,
 `acpx fast-agent` starts fast-agent through its ACP entrypoint. It requires `uvx` on `PATH`.
 
 Configure model/provider settings through fast-agent environment variables, fast-agent configuration, or an `acpx` agent override with additional `fast-agent-mcp acp` arguments.
+
+### fx
+
+- Built-in name: `fx`
+- Default command: `fx acp`
+- Upstream: [vercel-labs/fx](https://github.com/vercel-labs/fx)
+
+`acpx fx` runs the installed fx CLI ACP server (`fx acp`). Install fx and authenticate a model provider first (`fx login vercel`, `fx login codex`, or `fx login grok`; `fx provider` selects the active one) — ACP initialization fails without a usable credential. `acpx --model <id>` forwards to the `fx acp` startup `--model` flag and persists across session reuse and reconnects. The client working directory becomes the fx primary workspace. See the [fx ACP docs](https://fx.sh/docs/using-fx/acp) and [agents/Fx.md](https://github.com/openclaw/acpx/blob/main/agents/Fx.md) for details.
 
 ### Grok Build
 

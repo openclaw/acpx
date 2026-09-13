@@ -12,6 +12,7 @@ import {
   AcpClient,
   buildAgentSpawnOptions,
   buildQoderAcpCommandArgs,
+  buildStartupModelFlagArgs,
   parseAcpJsonMessageLine,
   resolveClaudeCodeSettingSources,
   resolveAgentCloseAfterStdinEndMs,
@@ -93,7 +94,7 @@ type ClientInternals = {
   consumePromptPermissionFailure?: (
     sessionId: string,
   ) => PermissionPromptUnavailableError | undefined;
-  handleSessionUpdate?: (notification: { sessionId: string }) => Promise<void>;
+  handleSessionUpdate?: (notification: { sessionId: string; update?: unknown }) => Promise<void>;
   waitForSessionUpdateDrain?: (idleMs: number, timeoutMs: number) => Promise<void>;
   recordAgentExit?: (
     reason: "process_exit" | "process_close" | "pipe_close" | "connection_close",
@@ -164,6 +165,7 @@ type ClientInternals = {
   lastKnownPid?: number;
   agentStartedAt?: string;
   closing: boolean;
+  appliedModel?: string;
   observedSessionUpdates: number;
   processedSessionUpdates: number;
   suppressSessionUpdates: boolean;
@@ -254,6 +256,31 @@ test("buildQoderAcpCommandArgs preserves explicit qoder startup flags", () => {
     ),
     ["--acp", "--max-turns=3", "--allowed-tools=READ", "--disallowed-tools=BASH"],
   );
+});
+
+test("buildStartupModelFlagArgs forwards the requested model as a startup flag", () => {
+  assert.deepEqual(
+    buildStartupModelFlagArgs(["acp"], {
+      sessionOptions: { model: "grok-4.5" },
+    }),
+    ["acp", "--model", "grok-4.5"],
+  );
+});
+
+test("buildStartupModelFlagArgs preserves an explicit --model flag", () => {
+  assert.deepEqual(
+    buildStartupModelFlagArgs(["acp", "--model=grok-4.6"], {
+      sessionOptions: { model: "grok-4.5" },
+    }),
+    ["acp", "--model=grok-4.6"],
+  );
+});
+
+test("buildStartupModelFlagArgs leaves args unchanged without a requested model", () => {
+  assert.deepEqual(buildStartupModelFlagArgs(["acp"], {}), ["acp"]);
+  assert.deepEqual(buildStartupModelFlagArgs(["acp"], { sessionOptions: { model: "  " } }), [
+    "acp",
+  ]);
 });
 
 test("AcpClient prefers env auth credentials over config credentials", async () => {
@@ -1937,6 +1964,56 @@ test("AcpClient close resets in-memory state and shuts down terminal manager", a
   assert.equal(internals.suppressSessionUpdates, false);
   assert.equal(internals.suppressReplaySessionUpdateMessages, false);
   assert.equal(internals.closing, true);
+});
+
+test("config_option_update notifications refresh the tracked applied model", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  internals.appliedModel = "grok-4.5";
+
+  await internals.handleSessionUpdate?.({
+    sessionId: "session-1",
+    update: {
+      sessionUpdate: "config_option_update",
+      configOptions: [
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "grok-4.6",
+          options: [{ value: "grok-4.6", name: "Grok 4.6" }],
+        },
+      ],
+    },
+  });
+
+  assert.equal(client.getAppliedModel(), "grok-4.6");
+});
+
+test("non-model session updates leave the tracked applied model untouched", async () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  internals.appliedModel = "grok-4.5";
+
+  await internals.handleSessionUpdate?.({
+    sessionId: "session-1",
+    update: {
+      sessionUpdate: "config_option_update",
+      configOptions: [
+        {
+          id: "mode",
+          name: "Mode",
+          category: "mode",
+          type: "select",
+          currentValue: "ask",
+          options: [{ value: "ask", name: "Ask" }],
+        },
+      ],
+    },
+  });
+
+  assert.equal(client.getAppliedModel(), "grok-4.5");
 });
 
 function makeClient(

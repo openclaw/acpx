@@ -91,6 +91,7 @@ Friendly agent names resolve to commands:
 - `copilot` -> `copilot --acp --stdio`
 - `droid` -> `droid exec --output-format acp` (`factory-droid` and `factorydroid` also resolve to `droid`)
 - `fast-agent` -> `uvx fast-agent-mcp acp`
+- `fx` -> `fx acp` (`acpx --model <id>` forwards to the `fx acp` startup `--model` flag)
 - `grok-build` -> `grok agent stdio`
 - `iflow` -> `iflow --experimental-acp`
 - `kilocode` -> `npx -y @kilocode/cli acp`
@@ -358,9 +359,10 @@ Devin is not a built-in agent shortcut. Use the raw command escape hatch:
 
 ```bash
 acpx --agent 'devin acp' exec 'summarize this repo'
+acpx --model swe-2-high --agent 'devin acp' exec 'summarize this repo'
 ```
 
-Pass Devin global flags such as `--model <model>` before `acp` when needed.
+`acpx --model <id>` forwards to the `devin acp` startup `--model` flag and persists across session reuse and reconnects.
 
 When `acpx` detects a Devin ACP launch (`devin ... acp`, `devin ... --acp`, or `devin ... --experimental-acp`), it advertises the minimum Windsurf-compatible metadata needed for Devin's ACP gate:
 
