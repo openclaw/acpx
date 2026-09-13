@@ -3,8 +3,31 @@ import type { AcpClient, SessionCreateResult } from "../acp/client.js";
 import {
   assertRequestedModelSupported,
   modelStateFromConfigOptions,
+  supportsStartupModelFlag,
 } from "../acp/model-support.js";
 import { withTimeout } from "../async-control.js";
+
+function modelAlreadyApplied(
+  client: AcpClient,
+  agentCommand: string | undefined,
+  requestedModel: string,
+): boolean {
+  return supportsStartupModelFlag(agentCommand) && client.getAppliedModel() === requestedModel;
+}
+
+function emitStartupFlagUnavailableWarning(params: {
+  requestedModel: string;
+  appliedViaStartupFlag: boolean;
+  agentCommand?: string;
+  onWarning?: (message: string) => void;
+}): void {
+  if (params.appliedViaStartupFlag || !supportsStartupModelFlag(params.agentCommand)) {
+    return;
+  }
+  params.onWarning?.(
+    `requested model "${params.requestedModel}" was not applied to this running session; the adapter applies model selection at process startup, so a new session is required to change it.`,
+  );
+}
 
 export function currentModelIdFromSetModelResponse(
   response: SetSessionConfigOptionResponse | undefined,
@@ -30,19 +53,35 @@ export async function applyRequestedModelIfAdvertised(params: {
   if (!requestedModel) {
     return { applied: false };
   }
+  const appliedViaStartupFlag = modelAlreadyApplied(
+    params.client,
+    params.agentCommand,
+    requestedModel,
+  );
   const warning = assertRequestedModelSupported({
     requestedModel,
     models: params.models,
     agentCommand: params.agentCommand,
     context: "apply",
+    appliedViaStartupFlag,
   });
   if (warning) {
     params.onWarning?.(warning);
   }
+  // A model this client already applied (startup flag or a prior in-session
+  // change) needs no second ACP update. A reused queue client whose session
+  // moved to another model keeps ACP model controls so later --model requests
+  // still reach the running adapter.
   if (!params.models) {
-    return { applied: false };
+    emitStartupFlagUnavailableWarning({
+      requestedModel,
+      appliedViaStartupFlag,
+      agentCommand: params.agentCommand,
+      onWarning: params.onWarning,
+    });
+    return { applied: appliedViaStartupFlag };
   }
-  if (params.models.currentModelId === requestedModel) {
+  if (appliedViaStartupFlag || params.models.currentModelId === requestedModel) {
     return { applied: true };
   }
 

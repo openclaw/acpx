@@ -16,11 +16,15 @@ Devin requires Windsurf-compatible client metadata during ACP initialization. `a
 acpx --agent 'devin acp' exec 'summarize this repo'
 ```
 
-Pass Devin global flags such as `--model <model>` before `acp` when needed:
+### Model selection
+
+`acpx --model <id>` forwards to the `devin acp` startup `--model` flag:
 
 ```bash
-acpx --agent 'devin --model swe-1-6 acp' exec 'summarize this repo'
+acpx --model swe-2-high --agent 'devin acp' exec 'summarize this repo'
 ```
+
+The flag is persisted in `session_options.model`, so persistent-session reuse and reconnects keep the selection. An explicit `--model` on the raw command wins over the forwarded flag; `DEVIN_MODEL` is inherited as usual.
 
 ### Client identity
 

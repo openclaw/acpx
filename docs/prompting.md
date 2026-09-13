@@ -127,8 +127,9 @@ acpx --model claude-sonnet-4-6 claude 'do the thing'
 Behavior varies by adapter:
 
 - **Claude** consumes the value as session-creation metadata.
+- Startup-flag adapters (such as `devin acp` and `fx acp`) receive the value as a launch `--model` flag. A running session cannot switch models in place, so changing the model requires a new session.
 - Other agents must advertise a model session config option or legacy `models` metadata. Config options use `session/set_config_option`; explicitly advertised legacy models use `session/set_model`.
-- Model ids must appear in the adapter's advertised values. Unknown ids are rejected.
+- Model ids must appear in the adapter's advertised values. Unknown ids are rejected; startup-flag adapters instead pass the value through for the adapter to accept or reject.
 - Cursor may advertise model variants with bracketed settings such as
   `composer-2.5[fast=false]`. When exactly one advertised Cursor id has the requested
   bare model as its prefix, `acpx` forwards that advertised id automatically; ambiguous
