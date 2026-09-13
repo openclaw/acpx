@@ -89,6 +89,7 @@ Friendly agent names resolve to commands:
 - `gemini` -> `gemini --acp`
 - `cursor` -> `cursor-agent acp`
 - `copilot` -> `copilot --acp --stdio`
+- `devin` -> `devin acp` (scoped Windsurf-compatible client identity shim; `acpx --model <id>` forwards to the `devin acp` startup `--model` flag)
 - `droid` -> `droid exec --output-format acp` (`factory-droid` and `factorydroid` also resolve to `droid`)
 - `fast-agent` -> `uvx fast-agent-mcp acp`
 - `grok-build` -> `grok agent stdio`
@@ -354,13 +355,15 @@ child agents, but they do not trigger ACP auth-method selection on their own.
 
 ## Devin ACP compatibility
 
-Devin is not a built-in agent shortcut. Use the raw command escape hatch:
+Devin is a built-in agent shortcut (`acpx devin ...`). The raw command escape hatch works too:
 
 ```bash
+acpx devin exec 'summarize this repo'
+acpx --model swe-2-high devin exec 'summarize this repo'
 acpx --agent 'devin acp' exec 'summarize this repo'
 ```
 
-Pass Devin global flags such as `--model <model>` before `acp` when needed.
+`acpx --model <id>` forwards to the `devin acp` startup `--model` flag and persists across session reuse and reconnects.
 
 When `acpx` detects a Devin ACP launch (`devin ... acp`, `devin ... --acp`, or `devin ... --experimental-acp`), it advertises the minimum Windsurf-compatible metadata needed for Devin's ACP gate:
 

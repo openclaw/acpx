@@ -49,6 +49,12 @@ test("resolveAgentCommand prefers explicit alias overrides over built-in alias m
   );
 });
 
+test("devin built-in runs the Devin CLI ACP server", () => {
+  assert.equal(AGENT_REGISTRY.devin, "devin acp");
+  assert.deepEqual(AGENT_ARGV_REGISTRY.devin, ["devin", "acp"]);
+  assert.equal(resolveAgentCommand("devin"), "devin acp");
+});
+
 test("trae built-in uses the standard traecli executable", () => {
   assert.equal(AGENT_REGISTRY.trae, "traecli acp serve");
   assert.equal(resolveAgentCommand("trae"), "traecli acp serve");
@@ -105,6 +111,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "copilot",
   ]);
   assert.deepEqual(agents.slice(7), [
+    "devin",
     "droid",
     "fast-agent",
     "grok-build",

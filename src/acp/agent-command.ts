@@ -77,6 +77,28 @@ export function isDevinAcpCommand(command: string, args: readonly string[]): boo
   );
 }
 
+export function resolveDevinAcpStartupModel(
+  initialArgs: readonly string[],
+  options: Pick<AcpClientOptions, "sessionOptions">,
+): string | undefined {
+  const model = options.sessionOptions?.model;
+  if (typeof model === "string" && model.trim() && !hasCommandFlag(initialArgs, "--model")) {
+    return model.trim();
+  }
+  return undefined;
+}
+
+export function buildDevinAcpCommandArgs(
+  initialArgs: readonly string[],
+  options: Pick<AcpClientOptions, "sessionOptions">,
+): string[] {
+  const model = resolveDevinAcpStartupModel(initialArgs, options);
+  // Emit the space-separated form: other startup-model adapters (fx acp) only
+  // accept `--model <id>`, and devin acp accepts it too, so it is the lowest
+  // common denominator.
+  return model === undefined ? [...initialArgs] : [...initialArgs, "--model", model];
+}
+
 function hasCommandFlag(args: readonly string[], flagName: string): boolean {
   return args.some((arg) => arg === flagName || arg.startsWith(`${flagName}=`));
 }

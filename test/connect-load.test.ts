@@ -59,6 +59,7 @@ type FakeClient = {
     legacyModelMetadataPresent?: boolean;
   }>;
   setSessionMode: (sessionId: string, modeId: string) => Promise<void>;
+  getAppliedModel?: () => string | undefined;
   setSessionModel: (
     sessionId: string,
     modelId: string,
@@ -1080,6 +1081,128 @@ test("connectAndLoadSession restores the original session when desired model rep
     assert.equal(record.acpSessionId, "stale-session");
     assert.equal(record.agentSessionId, "stale-runtime");
     assert.equal(record.acpx?.current_model_id, undefined);
+  });
+});
+
+test("connectAndLoadSession replays a saved model a pinned startup flag did not apply", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    // Raw command pins its own --model, so acpx injected nothing at spawn and
+    // the saved swe-2-max selection still needs an ACP replay.
+    const record = makeSessionRecord({
+      acpxRecordId: "pinned-model-replay-record",
+      acpSessionId: "stale-session",
+      agentCommand: "devin acp --model swe-2-high",
+      cwd,
+      acpx: {
+        session_options: {
+          model: "swe-2-max",
+        },
+      },
+    });
+
+    let setModelCalls = 0;
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({ running: true }),
+      getAppliedModel: () => undefined,
+      supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
+      loadSessionWithOptions: async () => ({
+        agentSessionId: "runtime-session",
+        models: {
+          configId: "model",
+          currentModelId: "swe-2-high",
+          availableModels: [
+            { modelId: "swe-2-high", name: "SWE-2 High" },
+            { modelId: "swe-2-max", name: "SWE-2 Max" },
+          ],
+        },
+      }),
+      createSession: async () => {
+        throw new Error("createSession should not be called");
+      },
+      setSessionMode: async () => {},
+      setSessionModel: async (sessionId, modelId) => {
+        setModelCalls += 1;
+        assert.equal(modelId, "swe-2-max");
+        return {
+          configOptions: [
+            {
+              id: "model",
+              name: "Model",
+              category: "model",
+              type: "select",
+              currentValue: modelId,
+              options: [],
+            },
+          ],
+        };
+      },
+    };
+
+    const result = await connectAndLoadSession({
+      client: client as never,
+      record,
+      activeController: ACTIVE_CONTROLLER,
+    });
+
+    assert.equal(result.sessionId, "stale-session");
+    assert.equal(setModelCalls, 1);
+  });
+});
+
+test("connectAndLoadSession skips replay when the launch flag applied the saved model", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "launch-applied-model-record",
+      acpSessionId: "stale-session",
+      agentCommand: "devin acp",
+      cwd,
+      acpx: {
+        session_options: {
+          model: "swe-2-high",
+        },
+      },
+    });
+
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({ running: true }),
+      getAppliedModel: () => "swe-2-high",
+      supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
+      loadSessionWithOptions: async () => ({
+        agentSessionId: "runtime-session",
+        models: {
+          configId: "model",
+          currentModelId: "swe-2-high",
+          availableModels: [{ modelId: "swe-2-high", name: "SWE-2 High" }],
+        },
+      }),
+      createSession: async () => {
+        throw new Error("createSession should not be called");
+      },
+      setSessionMode: async () => {},
+      setSessionModel: async () => {
+        throw new Error("setSessionModel should not be called");
+      },
+    };
+
+    const result = await connectAndLoadSession({
+      client: client as never,
+      record,
+      activeController: ACTIVE_CONTROLLER,
+    });
+
+    assert.equal(result.sessionId, "stale-session");
   });
 });
 

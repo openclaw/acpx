@@ -136,6 +136,46 @@ test("model validation distinguishes missing model capability", () => {
   );
 });
 
+test("Devin model validation defers to the startup model flag", () => {
+  for (const context of ["apply", "replay"] as const) {
+    const warning = assertRequestedModelSupported({
+      requestedModel: "swe-2-high",
+      models: undefined,
+      agentCommand: "devin acp",
+      context,
+    });
+    assert.equal(warning, undefined);
+  }
+});
+
+test("Devin model validation warns instead of rejecting unadvertised fuzzy names", () => {
+  const launched = assertRequestedModelSupported({
+    requestedModel: "SWE-2 High",
+    models: {
+      configId: "model",
+      currentModelId: "swe-2-high",
+      availableModels: [{ modelId: "swe-2-high", name: "SWE-2 High" }],
+    },
+    agentCommand: "devin acp",
+    context: "apply",
+    appliedViaStartupFlag: true,
+  });
+  assert.match(launched ?? "", /passed to the agent as a startup flag/);
+
+  const forwarded = assertRequestedModelSupported({
+    requestedModel: "SWE-2 High",
+    models: {
+      configId: "model",
+      currentModelId: "swe-2-high",
+      availableModels: [{ modelId: "swe-2-high", name: "SWE-2 High" }],
+    },
+    agentCommand: "devin acp",
+    context: "apply",
+    appliedViaStartupFlag: false,
+  });
+  assert.match(forwarded ?? "", /forwarding it to the adapter/);
+});
+
 test("model unsupported predicate rejects unrelated errors", () => {
   assert.equal(isRequestedModelUnsupportedError(new Error("did not advertise that model")), false);
   assert.equal(

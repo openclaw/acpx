@@ -1,4 +1,4 @@
-import { isClaudeAcpCommand, isCursorAcpCommand } from "./agent-command.js";
+import { isClaudeAcpCommand, isCursorAcpCommand, isDevinAcpCommand } from "./agent-command.js";
 import { splitCommandLine } from "./client-process.js";
 
 export type SessionModelState = {
@@ -73,6 +73,14 @@ export function supportsLegacyClaudeCodeModelMetadata(agentCommand: string | und
   }
   const { command, args } = splitCommandLine(agentCommand);
   return isClaudeAcpCommand(command, args);
+}
+
+export function supportsStartupModelFlag(agentCommand: string | undefined): boolean {
+  if (!agentCommand) {
+    return false;
+  }
+  const { command, args } = splitCommandLine(agentCommand);
+  return isDevinAcpCommand(command, args);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -247,21 +255,34 @@ function isCursorAcpCommandForModelAlias(agentCommand: string | undefined): bool
   return isCursorAcpCommand(command, args);
 }
 
+function assertModelCapableWithoutAdvertisedModels(params: {
+  requestedModel: string;
+  agentCommand?: string;
+  context: "apply" | "replay";
+}): void {
+  if (
+    supportsLegacyClaudeCodeModelMetadata(params.agentCommand) ||
+    supportsStartupModelFlag(params.agentCommand)
+  ) {
+    return;
+  }
+  const action = params.context === "replay" ? "replay saved model" : "apply --model";
+  throw new RequestedModelUnsupportedError(
+    `Cannot ${action} "${params.requestedModel}": the ACP agent did not advertise model support through a session config option or legacy models metadata, and the adapter does not support a startup model flag.`,
+    "missing-capability",
+  );
+}
+
 export function assertRequestedModelSupported(params: {
   requestedModel: string;
   models: SessionModelState | undefined;
   agentCommand?: string;
   context: "apply" | "replay";
+  appliedViaStartupFlag?: boolean;
 }): string | undefined {
   if (!params.models) {
-    if (supportsLegacyClaudeCodeModelMetadata(params.agentCommand)) {
-      return undefined;
-    }
-    const action = params.context === "replay" ? "replay saved model" : "apply --model";
-    throw new RequestedModelUnsupportedError(
-      `Cannot ${action} "${params.requestedModel}": the ACP agent did not advertise model support through a session config option or legacy models metadata, and the adapter does not support a startup model flag.`,
-      "missing-capability",
-    );
+    assertModelCapableWithoutAdvertisedModels(params);
+    return undefined;
   }
 
   const advertised = new Set(params.models.availableModels.map((model) => model.modelId));
@@ -272,6 +293,12 @@ export function assertRequestedModelSupported(params: {
     }
     if (supportsLegacyClaudeCodeModelMetadata(params.agentCommand)) {
       return `requested model "${params.requestedModel}" was not in the Claude ACP advertised model list (${formatAvailableModelIds(params.models)}); forwarding it to Claude Code so the adapter can accept or reject it.`;
+    }
+    if (supportsStartupModelFlag(params.agentCommand)) {
+      if (params.appliedViaStartupFlag) {
+        return `requested model "${params.requestedModel}" was not in the advertised model list (${formatAvailableModelIds(params.models)}); it was passed to the agent as a startup flag for the adapter to accept or reject.`;
+      }
+      return `requested model "${params.requestedModel}" was not in the advertised model list (${formatAvailableModelIds(params.models)}); forwarding it to the adapter so it can accept or reject it.`;
     }
     const action = params.context === "replay" ? "replay saved model" : "apply --model";
     throw new RequestedModelUnsupportedError(
