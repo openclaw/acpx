@@ -122,6 +122,9 @@ jobs:
           - name: Mutation
             node_version: 22
             command: pnpm run mutate
+          - name: Release boundary
+            node_version: 22
+            command: pnpm run test:release-boundary
           - name: Slophammer
             command: |
               pnpm dlx slophammer-ts@latest rules --format text
