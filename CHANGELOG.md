@@ -12,6 +12,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Sessions/hardening: keep session records and indexes private across atomic rewrites, including embedded file stores.
+
 ## 0.16.0 - 2026-09-15
 
 **Highlights:** Embedding hosts can share session-specific tools and turn-owned approvals, recover stored handles, and shut down connections while preserving existing sessions.
@@ -35,7 +37,6 @@ Repo: https://github.com/openclaw/acpx
 - Tooling: prevent malformed TOML configuration from hanging documentation lint by overriding the vulnerable `smol-toml` pin with 1.7.2 (GHSA-7w5x-hrqm-74c2).
 - ACP/cancellation: coalesce repeated prompt cancellation, allow explicit retries after failed sends, and preserve successor prompt ownership when abort callbacks reenter the client.
 - Sessions/export: preserve large event segments without exceeding the JavaScript argument limit.
-- Sessions/hardening: keep session records and indexes private across atomic rewrites, including embedded file stores.
 
 ## 0.15.1 - 2026-09-07
 
