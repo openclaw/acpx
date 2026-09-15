@@ -113,25 +113,9 @@ export type SessionSendOptions = {
   sessionOptions?: SessionAgentOptions;
 } & TimedRunOptions;
 
-export type SessionEnsureOptions = {
-  agentCommand: string;
-  agentArgv?: string[];
-  cwd: string;
-  name?: string;
-  resumeSessionId?: string;
-  mcpServers?: McpServer[];
-  permissionMode: PermissionMode;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  permissionPolicy?: PermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  fs?: boolean;
-  terminal?: boolean;
-  verbose?: boolean;
+export type SessionEnsureOptions = SessionCreateOptions & {
   walkBoundary?: string;
-  sessionOptions?: SessionAgentOptions;
-  onModelWarning?: (message: string) => void;
-} & TimedRunOptions;
+};
 
 export type SessionListOptions = {
   agentCommand: string;

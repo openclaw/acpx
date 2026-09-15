@@ -1,3 +1,4 @@
+import { normalizeAgentSessionId } from "../../acp/agent-session-id.js";
 import { AcpClient, type SessionCreateResult } from "../../acp/client.js";
 import { formatErrorMessage } from "../../acp/error-normalization.js";
 import { modelStateFromConfigOptions } from "../../acp/model-support.js";
@@ -20,7 +21,6 @@ import {
   normalizeName,
   writeSessionRecord,
 } from "../../session/persistence.js";
-import { normalizeRuntimeSessionId } from "../../session/runtime-session-id.js";
 import type { SessionEnsureResult, SessionRecord } from "../../types.js";
 import { DEFAULT_QUEUE_OWNER_TTL_MS } from "./contracts.js";
 import type {
@@ -123,7 +123,7 @@ async function createFreshSessionState(
   });
   return {
     sessionId: createdSession.sessionId,
-    agentSessionId: normalizeRuntimeSessionId(createdSession.agentSessionId),
+    agentSessionId: normalizeAgentSessionId(createdSession.agentSessionId),
     sessionResult: createdSession,
     sessionModels: createdSession.models,
     requestedModelApplied: modelApplication.applied,
@@ -169,7 +169,7 @@ async function resumeSessionRecordWithClient(
     });
     return {
       sessionId: options.resumeSessionId,
-      agentSessionId: normalizeRuntimeSessionId(resumedSession.agentSessionId),
+      agentSessionId: normalizeAgentSessionId(resumedSession.agentSessionId),
       sessionResult: resumedSession,
       sessionModels,
       requestedModelApplied: modelApplication.applied,

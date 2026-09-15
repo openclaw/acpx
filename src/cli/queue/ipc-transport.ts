@@ -56,8 +56,6 @@ export async function connectToQueueOwner(
   owner: QueueOwnerRecord,
   maxAttempts = QUEUE_CONNECT_ATTEMPTS,
 ): Promise<net.Socket | undefined> {
-  let lastError: unknown;
-
   const attempts = Math.max(1, Math.trunc(maxAttempts));
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
@@ -66,16 +64,11 @@ export async function connectToQueueOwner(
         async () => await connectToSocket(owner.socketPath),
       );
     } catch (error) {
-      lastError = error;
       if (!shouldRetryQueueConnect(error)) {
         throw error;
       }
       await waitMs(QUEUE_CONNECT_RETRY_MS);
     }
-  }
-
-  if (lastError && !shouldRetryQueueConnect(lastError)) {
-    throw lastError;
   }
 
   return undefined;

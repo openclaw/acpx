@@ -1,5 +1,5 @@
 import path from "node:path";
-import { normalizeRuntimeSessionId } from "../../session/runtime-session-id.js";
+import { normalizeAgentSessionId } from "../../acp/agent-session-id.js";
 import type { AgentSessionListResult, OutputFormat, SessionRecord } from "../../types.js";
 import { probeQueueOwnerHealth } from "../queue/ipc.js";
 import { emitJsonResult } from "./json-output.js";
@@ -339,7 +339,7 @@ function formatPruneSummaryLine(
 export function agentSessionIdPayload(agentSessionId: string | undefined): {
   agentSessionId?: string;
 } {
-  const normalized = normalizeRuntimeSessionId(agentSessionId);
+  const normalized = normalizeAgentSessionId(agentSessionId);
   if (!normalized) {
     return {};
   }

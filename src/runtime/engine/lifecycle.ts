@@ -1,5 +1,5 @@
+import { normalizeAgentSessionId } from "../../acp/agent-session-id.js";
 import type { AgentLifecycleSnapshot } from "../../acp/client.js";
-import { normalizeRuntimeSessionId } from "../../session/runtime-session-id.js";
 import type { SessionConversation, SessionRecord } from "../../types.js";
 
 export function applyLifecycleSnapshotToRecord(
@@ -31,7 +31,7 @@ export function reconcileAgentSessionId(
   record: SessionRecord,
   agentSessionId: string | undefined,
 ): void {
-  const normalized = normalizeRuntimeSessionId(agentSessionId);
+  const normalized = normalizeAgentSessionId(agentSessionId);
   if (!normalized) {
     return;
   }

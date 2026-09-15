@@ -32,7 +32,6 @@ typescript:
         - src/permission-prompt
         - src/permissions
         - src/prompt-content
-        - src/session/runtime-session-id
         - src/spawn-command-options
         - src/types
         - src/version
@@ -72,6 +71,7 @@ typescript:
         - src/errors
         - src/perf-metrics
         - src/persisted-key-policy
+        - src/process-liveness
         - src/prompt-content
         - src/session
         - src/state-files

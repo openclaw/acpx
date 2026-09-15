@@ -250,14 +250,9 @@ export function isRetryablePromptError(error: unknown): boolean {
     return false;
   }
 
-  // Extract ACP payload once and reuse for all subsequent checks.
   const acp = extractAcpError(error);
   if (!acp) {
     // Non-ACP errors (e.g. process crash) are not retried at the prompt level.
-    return false;
-  }
-
-  if (isPermanentPromptAcpError(acp)) {
     return false;
   }
 
@@ -273,16 +268,6 @@ function isNonRetryablePromptError(error: unknown): boolean {
     isTimeoutLike(error) ||
     isNoSessionLike(error) ||
     isUsageLike(error)
-  );
-}
-
-function isPermanentPromptAcpError(acp: OutputErrorAcpPayload): boolean {
-  return (
-    acp.code === -32001 ||
-    acp.code === -32002 ||
-    acp.code === -32601 ||
-    acp.code === -32602 ||
-    isAcpAuthRequiredPayload(acp)
   );
 }
 

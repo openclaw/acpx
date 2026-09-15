@@ -161,12 +161,8 @@ function emitQueueOwnerError(
     });
     formatter.flush();
   }
-  // If we just emitted via the formatter, mark the error as already-emitted so
-  // that the top-level emitRequestedError handler (cli-core.ts) does not emit
-  // the same error a second time on stderr.  Without this, quiet mode (where
-  // queueErrorAlreadyEmitted === false) results in two stderr lines: one
-  // structured "[acpx] error: …" from the formatter and one raw line from the
-  // catch handler.
+  // Mark formatter output as emitted even in quiet mode, so the CLI error
+  // handler does not print the same failure again.
   return queueConnectionErrorFromOwner(message, queueErrorAlreadyEmitted || shouldEmitInFormatter);
 }
 
@@ -478,37 +474,17 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
     request,
     onMessage: (message, { state, resolve, reject }) => {
       if (message.type === "error") {
-        reject(
-          new QueueConnectionError(message.message, {
-            outputCode: message.code,
-            detailCode: message.detailCode,
-            origin: message.origin ?? "queue",
-            retryable: message.retryable,
-            acp: message.acp,
-          }),
-        );
+        reject(queueConnectionErrorFromOwner(message, false));
         return;
       }
 
       if (!state.acknowledged) {
-        reject(
-          new QueueConnectionError("Queue owner did not acknowledge request", {
-            detailCode: "QUEUE_ACK_MISSING",
-            origin: "queue",
-            retryable: true,
-          }),
-        );
+        reject(missingQueueAckError());
         return;
       }
 
       if (!isExpectedResponse(message)) {
-        reject(
-          new QueueProtocolError("Queue owner returned unexpected response", {
-            detailCode: "QUEUE_PROTOCOL_UNEXPECTED_RESPONSE",
-            origin: "queue",
-            retryable: true,
-          }),
-        );
+        reject(unexpectedQueueResponseError());
         return;
       }
 
@@ -548,17 +524,7 @@ async function submitCancelToQueueOwner(owner: QueueOwnerRecord): Promise<boolea
     request,
     (message): message is QueueOwnerCancelResultMessage => message.type === "cancel_result",
   );
-  if (!response) {
-    return undefined;
-  }
-  if (response.requestId !== request.requestId) {
-    throw new QueueProtocolError("Queue owner returned mismatched cancel response", {
-      detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
-      origin: "queue",
-      retryable: true,
-    });
-  }
-  return response.cancelled;
+  return response?.cancelled;
 }
 
 async function submitSetModeToQueueOwner(
@@ -578,17 +544,7 @@ async function submitSetModeToQueueOwner(
     request,
     (message): message is QueueOwnerSetModeResultMessage => message.type === "set_mode_result",
   );
-  if (!response) {
-    return undefined;
-  }
-  if (response.requestId !== request.requestId) {
-    throw new QueueProtocolError("Queue owner returned mismatched set_mode response", {
-      detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
-      origin: "queue",
-      retryable: true,
-    });
-  }
-  return true;
+  return response ? true : undefined;
 }
 
 async function submitSetModelToQueueOwner(
@@ -603,22 +559,11 @@ async function submitSetModelToQueueOwner(
     modelId,
     timeoutMs,
   };
-  const response = await submitControlToQueueOwner(
+  return await submitControlToQueueOwner(
     owner,
     request,
     (message): message is QueueOwnerSetModelResultMessage => message.type === "set_model_result",
   );
-  if (!response) {
-    return undefined;
-  }
-  if (response.requestId !== request.requestId) {
-    throw new QueueProtocolError("Queue owner returned mismatched set_model response", {
-      detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
-      origin: "queue",
-      retryable: true,
-    });
-  }
-  return response;
 }
 
 async function submitSetConfigOptionToQueueOwner(
@@ -641,17 +586,7 @@ async function submitSetConfigOptionToQueueOwner(
     (message): message is QueueOwnerSetConfigOptionResultMessage =>
       message.type === "set_config_option_result",
   );
-  if (!response) {
-    return undefined;
-  }
-  if (response.requestId !== request.requestId) {
-    throw new QueueProtocolError("Queue owner returned mismatched set_config_option response", {
-      detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
-      origin: "queue",
-      retryable: true,
-    });
-  }
-  return response.response;
+  return response?.response;
 }
 
 async function submitCloseSessionToQueueOwner(
@@ -670,17 +605,7 @@ async function submitCloseSessionToQueueOwner(
     (message): message is QueueOwnerCloseSessionResultMessage =>
       message.type === "close_session_result",
   );
-  if (!response) {
-    return undefined;
-  }
-  if (response.requestId !== request.requestId) {
-    throw new QueueProtocolError("Queue owner returned mismatched close_session response", {
-      detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
-      origin: "queue",
-      retryable: true,
-    });
-  }
-  return response.closed;
+  return response?.closed;
 }
 
 function queueOwnerMcpConfigMatches(
@@ -762,73 +687,59 @@ export async function trySubmitToRunningOwner(
   );
 }
 
+async function tryControlOnRunningOwner<T>(options: {
+  sessionId: string;
+  verbose?: boolean;
+  requestName: string;
+  logPrefix: string;
+  submit: (owner: QueueOwnerRecord) => Promise<T | undefined>;
+}): Promise<T | undefined> {
+  const owner = await readQueueOwnerRecord(options.sessionId);
+  if (!owner) {
+    return undefined;
+  }
+  const response = await options.submit(owner);
+  if (response !== undefined) {
+    if (options.verbose) {
+      process.stderr.write(`${options.logPrefix} ${owner.pid} for session ${options.sessionId}\n`);
+    }
+    return response;
+  }
+  const health = await probeQueueOwnerHealth(options.sessionId);
+  if (!health.hasLease) {
+    return undefined;
+  }
+  throw new QueueConnectionError(
+    `Session queue owner is running but not accepting ${options.requestName} requests`,
+    { detailCode: "QUEUE_NOT_ACCEPTING_REQUESTS", origin: "queue", retryable: true },
+  );
+}
+
 export async function tryCloseSessionOnRunningOwner(options: {
   sessionId: string;
   timeoutMs?: number;
   verbose?: boolean;
 }): Promise<boolean | undefined> {
-  const owner = await readQueueOwnerRecord(options.sessionId);
-  if (!owner) {
-    return undefined;
-  }
-
-  const closed = await submitCloseSessionToQueueOwner(owner, options.timeoutMs);
-  if (closed !== undefined) {
-    if (options.verbose) {
-      process.stderr.write(
-        `[acpx] requested session/close on active owner pid ${owner.pid} for session ${options.sessionId}\n`,
-      );
-    }
-    return closed;
-  }
-
-  const health = await probeQueueOwnerHealth(options.sessionId);
-  if (!health.hasLease) {
-    return undefined;
-  }
-
-  throw new QueueConnectionError(
-    "Session queue owner is running but not accepting close_session requests",
-    {
-      detailCode: "QUEUE_NOT_ACCEPTING_REQUESTS",
-      origin: "queue",
-      retryable: true,
-    },
-  );
+  return await tryControlOnRunningOwner({
+    sessionId: options.sessionId,
+    verbose: options.verbose,
+    requestName: "close_session",
+    logPrefix: "[acpx] requested session/close on active owner pid",
+    submit: (owner) => submitCloseSessionToQueueOwner(owner, options.timeoutMs),
+  });
 }
 
 export async function tryCancelOnRunningOwner(options: {
   sessionId: string;
   verbose?: boolean;
 }): Promise<boolean | undefined> {
-  const owner = await readQueueOwnerRecord(options.sessionId);
-  if (!owner) {
-    return undefined;
-  }
-
-  const cancelled = await submitCancelToQueueOwner(owner);
-  if (cancelled !== undefined) {
-    if (options.verbose) {
-      process.stderr.write(
-        `[acpx] requested cancel on active owner pid ${owner.pid} for session ${options.sessionId}\n`,
-      );
-    }
-    return cancelled;
-  }
-
-  const health = await probeQueueOwnerHealth(options.sessionId);
-  if (!health.hasLease) {
-    return undefined;
-  }
-
-  throw new QueueConnectionError(
-    "Session queue owner is running but not accepting cancel requests",
-    {
-      detailCode: "QUEUE_NOT_ACCEPTING_REQUESTS",
-      origin: "queue",
-      retryable: true,
-    },
-  );
+  return await tryControlOnRunningOwner({
+    sessionId: options.sessionId,
+    verbose: options.verbose,
+    requestName: "cancel",
+    logPrefix: "[acpx] requested cancel on active owner pid",
+    submit: submitCancelToQueueOwner,
+  });
 }
 
 export async function trySetModeOnRunningOwner(
@@ -837,34 +748,13 @@ export async function trySetModeOnRunningOwner(
   timeoutMs: number | undefined,
   verbose: boolean | undefined,
 ): Promise<boolean | undefined> {
-  const owner = await readQueueOwnerRecord(sessionId);
-  if (!owner) {
-    return undefined;
-  }
-
-  const submitted = await submitSetModeToQueueOwner(owner, modeId, timeoutMs);
-  if (submitted) {
-    if (verbose) {
-      process.stderr.write(
-        `[acpx] requested session/set_mode on owner pid ${owner.pid} for session ${sessionId}\n`,
-      );
-    }
-    return true;
-  }
-
-  const health = await probeQueueOwnerHealth(sessionId);
-  if (!health.hasLease) {
-    return undefined;
-  }
-
-  throw new QueueConnectionError(
-    "Session queue owner is running but not accepting set_mode requests",
-    {
-      detailCode: "QUEUE_NOT_ACCEPTING_REQUESTS",
-      origin: "queue",
-      retryable: true,
-    },
-  );
+  return await tryControlOnRunningOwner({
+    sessionId,
+    verbose,
+    requestName: "set_mode",
+    logPrefix: "[acpx] requested session/set_mode on owner pid",
+    submit: (owner) => submitSetModeToQueueOwner(owner, modeId, timeoutMs),
+  });
 }
 
 export async function trySetModelOnRunningOwner(
@@ -873,34 +763,13 @@ export async function trySetModelOnRunningOwner(
   timeoutMs: number | undefined,
   verbose: boolean | undefined,
 ): Promise<QueueOwnerSetModelResultMessage | undefined> {
-  const owner = await readQueueOwnerRecord(sessionId);
-  if (!owner) {
-    return undefined;
-  }
-
-  const submitted = await submitSetModelToQueueOwner(owner, modelId, timeoutMs);
-  if (submitted) {
-    if (verbose) {
-      process.stderr.write(
-        `[acpx] requested a model config update on owner pid ${owner.pid} for session ${sessionId}\n`,
-      );
-    }
-    return submitted;
-  }
-
-  const health = await probeQueueOwnerHealth(sessionId);
-  if (!health.hasLease) {
-    return undefined;
-  }
-
-  throw new QueueConnectionError(
-    "Session queue owner is running but not accepting set_model requests",
-    {
-      detailCode: "QUEUE_NOT_ACCEPTING_REQUESTS",
-      origin: "queue",
-      retryable: true,
-    },
-  );
+  return await tryControlOnRunningOwner({
+    sessionId,
+    verbose,
+    requestName: "set_model",
+    logPrefix: "[acpx] requested a model config update on owner pid",
+    submit: (owner) => submitSetModelToQueueOwner(owner, modelId, timeoutMs),
+  });
 }
 
 export async function trySetConfigOptionOnRunningOwner(
@@ -910,32 +779,11 @@ export async function trySetConfigOptionOnRunningOwner(
   timeoutMs: number | undefined,
   verbose: boolean | undefined,
 ): Promise<SetSessionConfigOptionResponse | undefined> {
-  const owner = await readQueueOwnerRecord(sessionId);
-  if (!owner) {
-    return undefined;
-  }
-
-  const response = await submitSetConfigOptionToQueueOwner(owner, configId, value, timeoutMs);
-  if (response) {
-    if (verbose) {
-      process.stderr.write(
-        `[acpx] requested session/set_config_option on owner pid ${owner.pid} for session ${sessionId}\n`,
-      );
-    }
-    return response;
-  }
-
-  const health = await probeQueueOwnerHealth(sessionId);
-  if (!health.hasLease) {
-    return undefined;
-  }
-
-  throw new QueueConnectionError(
-    "Session queue owner is running but not accepting set_config_option requests",
-    {
-      detailCode: "QUEUE_NOT_ACCEPTING_REQUESTS",
-      origin: "queue",
-      retryable: true,
-    },
-  );
+  return await tryControlOnRunningOwner({
+    sessionId,
+    verbose,
+    requestName: "set_config_option",
+    logPrefix: "[acpx] requested session/set_config_option on owner pid",
+    submit: (owner) => submitSetConfigOptionToQueueOwner(owner, configId, value, timeoutMs),
+  });
 }

@@ -1,6 +1,6 @@
+import { normalizeAgentSessionId } from "../../acp/agent-session-id.js";
 import type { SessionRecord } from "../../types.js";
 import { SESSION_RECORD_SCHEMA } from "../../types.js";
-import { normalizeRuntimeSessionId } from "../runtime-session-id.js";
 
 export function serializeSessionRecordForDisk(record: SessionRecord): Record<string, unknown> {
   const canonical: SessionRecord = {
@@ -12,7 +12,7 @@ export function serializeSessionRecordForDisk(record: SessionRecord): Record<str
     schema: canonical.schema,
     acpx_record_id: canonical.acpxRecordId,
     acp_session_id: canonical.acpSessionId,
-    agent_session_id: normalizeRuntimeSessionId(canonical.agentSessionId),
+    agent_session_id: normalizeAgentSessionId(canonical.agentSessionId),
     agent_command: canonical.agentCommand,
     agent_argv: canonical.agentArgv,
     cwd: canonical.cwd,

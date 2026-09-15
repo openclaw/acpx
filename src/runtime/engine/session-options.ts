@@ -79,15 +79,15 @@ export function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOpt
   }
 
   const sessionOptions: SessionAgentOptions = {};
-  assignStoredOption(sessionOptions, "model", nonEmptyString(stored.model));
-  assignStoredOption(sessionOptions, "allowedTools", storedAllowedTools(stored.allowed_tools));
-  assignStoredOption(sessionOptions, "maxTurns", storedMaxTurns(stored.max_turns));
-  assignStoredOption(
+  assignDefinedOption(sessionOptions, "model", nonEmptyString(stored.model));
+  assignDefinedOption(sessionOptions, "allowedTools", storedAllowedTools(stored.allowed_tools));
+  assignDefinedOption(sessionOptions, "maxTurns", storedMaxTurns(stored.max_turns));
+  assignDefinedOption(
     sessionOptions,
     "systemPrompt",
-    storedSystemPromptOption(stored.system_prompt),
+    normalizeSystemPromptOption(stored.system_prompt),
   );
-  assignStoredOption(sessionOptions, "env", storedEnvRecord(stored.env));
+  assignDefinedOption(sessionOptions, "env", storedEnvRecord(stored.env));
 
   return Object.keys(sessionOptions).length > 0 ? sessionOptions : undefined;
 }
@@ -148,14 +148,6 @@ function appendedSystemPrompt(value: unknown): string | undefined {
   return nonEmptyString((value as { append?: unknown }).append);
 }
 
-function assignStoredOption<Key extends keyof SessionAgentOptions>(
-  target: SessionAgentOptions,
-  key: Key,
-  value: SessionAgentOptions[Key] | undefined,
-): void {
-  assignDefinedOption(target, key, value);
-}
-
 function storedAllowedTools(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === "string")
     ? [...value]
@@ -164,10 +156,6 @@ function storedAllowedTools(value: unknown): string[] | undefined {
 
 function storedMaxTurns(value: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
-}
-
-function storedSystemPromptOption(value: unknown): SystemPromptOption | undefined {
-  return normalizeSystemPromptOption(value);
 }
 
 function nonEmptyString(value: unknown): string | undefined {

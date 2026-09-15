@@ -1,4 +1,4 @@
-import type { EnvVariable, HttpHeader, McpServer } from "@agentclientprotocol/sdk";
+import type { McpServer } from "@agentclientprotocol/sdk";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -16,7 +16,7 @@ function parseNonEmptyString(value: unknown, path: string): string {
   return value.trim();
 }
 
-function parseHeaders(value: unknown, path: string): HttpHeader[] {
+function parseNameValuePairs(value: unknown, path: string): Array<{ name: string; value: string }> {
   if (value == null) {
     return [];
   }
@@ -24,20 +24,18 @@ function parseHeaders(value: unknown, path: string): HttpHeader[] {
     throw new Error(`Invalid ${path}: expected array`);
   }
 
-  const headers: HttpHeader[] = [];
-  for (const [index, rawHeader] of value.entries()) {
-    const headerRecord = asRecord(rawHeader);
-    if (!headerRecord) {
+  const entries: Array<{ name: string; value: string }> = [];
+  for (const [index, rawEntry] of value.entries()) {
+    const entry = asRecord(rawEntry);
+    if (!entry) {
       throw new Error(`Invalid ${path}[${index}]: expected object`);
     }
-    const name = parseNonEmptyString(headerRecord.name, `${path}[${index}].name`);
-    const headerValue = parseNonEmptyString(headerRecord.value, `${path}[${index}].value`);
-    headers.push({
-      name,
-      value: headerValue,
+    entries.push({
+      name: parseNonEmptyString(entry.name, `${path}[${index}].name`),
+      value: parseNonEmptyString(entry.value, `${path}[${index}].value`),
     });
   }
-  return headers;
+  return entries;
 }
 
 function parseArgs(value: unknown, path: string): string[] {
@@ -56,32 +54,6 @@ function parseArgs(value: unknown, path: string): string[] {
     args.push(rawArg);
   }
   return args;
-}
-
-function parseEnv(value: unknown, path: string): EnvVariable[] {
-  if (value == null) {
-    return [];
-  }
-  if (!Array.isArray(value)) {
-    throw new Error(`Invalid ${path}: expected array`);
-  }
-
-  const env: EnvVariable[] = [];
-  for (const [index, rawEntry] of value.entries()) {
-    const entry = asRecord(rawEntry);
-    if (!entry) {
-      throw new Error(`Invalid ${path}[${index}]: expected object`);
-    }
-
-    const name = parseNonEmptyString(entry.name, `${path}[${index}].name`);
-    const envValue = parseNonEmptyString(entry.value, `${path}[${index}].value`);
-    env.push({
-      name,
-      value: envValue,
-    });
-  }
-
-  return env;
 }
 
 function parseMeta(value: unknown, path: string): Record<string, unknown> | null | undefined {
@@ -121,7 +93,7 @@ function parseHttpServer(
     type,
     name,
     url: parseNonEmptyString(serverRecord.url, `${path}.url`),
-    headers: parseHeaders(serverRecord.headers, `${path}.headers`),
+    headers: parseNameValuePairs(serverRecord.headers, `${path}.headers`),
     _meta,
   } satisfies McpServer;
 }
@@ -136,7 +108,7 @@ function parseStdioServer(
     name,
     command: parseNonEmptyString(serverRecord.command, `${path}.command`),
     args: parseArgs(serverRecord.args, `${path}.args`),
-    env: parseEnv(serverRecord.env, `${path}.env`),
+    env: parseNameValuePairs(serverRecord.env, `${path}.env`),
     _meta,
   } satisfies McpServer;
 }

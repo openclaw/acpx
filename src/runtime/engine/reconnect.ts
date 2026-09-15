@@ -19,6 +19,7 @@ import {
   SessionResumeRequiredError,
 } from "../../errors.js";
 import { incrementPerfCounter } from "../../perf-metrics.js";
+import { isProcessAlive } from "../../process-liveness.js";
 import {
   applyConfigOptionsToRecord,
   applyConfigOptionSelection,
@@ -53,19 +54,6 @@ export type ConnectedSessionController = {
     value: string,
   ) => ReturnType<AcpClient["setSessionConfigOption"]>;
 };
-
-function isProcessAlive(pid: number | undefined): boolean {
-  if (!pid || !Number.isInteger(pid) || pid <= 0 || pid === process.pid) {
-    return false;
-  }
-
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export type ConnectAndLoadSessionOptions = {
   client: AcpClient;
@@ -362,13 +350,6 @@ export async function connectAndLoadSession(
   record.closedAt = undefined;
   options.onConnectedRecord?.(record);
 
-  let resumed = false;
-  let loadError: string | undefined;
-  let sessionId = record.acpSessionId;
-  let createdFreshSession = false;
-  let pendingAgentSessionId = record.agentSessionId;
-  let sessionModels: import("../../acp/client.js").SessionLoadResult["models"];
-
   const loadState = await loadOrCreateRuntimeSession({
     client,
     record,
@@ -376,12 +357,14 @@ export async function connectAndLoadSession(
     sameSessionOnly,
     timeoutMs: options.timeoutMs,
   });
-  resumed = loadState.resumed;
-  loadError = loadState.loadError;
-  sessionId = loadState.sessionId;
-  createdFreshSession = loadState.createdFreshSession;
-  pendingAgentSessionId = loadState.pendingAgentSessionId;
-  sessionModels = loadState.sessionModels;
+  const {
+    resumed,
+    loadError,
+    sessionId,
+    createdFreshSession,
+    pendingAgentSessionId,
+    sessionModels,
+  } = loadState;
 
   const preferenceReplay = await replaySessionPreferences({
     client,
@@ -658,11 +641,11 @@ async function loadOrCreateRuntimeSession(params: {
   }
 
   if (params.client.supportsResumeSession()) {
-    return await resumeRuntimeSession(params);
+    return await loadRuntimeSession(params, true);
   }
 
   if (params.client.supportsLoadSession()) {
-    return await loadRuntimeSession(params);
+    return await loadRuntimeSession(params, false);
   }
 
   if (params.sameSessionOnly) {
@@ -675,44 +658,22 @@ async function loadOrCreateRuntimeSession(params: {
   return await createFreshRuntimeSession(params.client, params.record, params.timeoutMs);
 }
 
-async function resumeRuntimeSession(params: {
-  client: AcpClient;
-  record: SessionRecord;
-  sameSessionOnly: boolean;
-  timeoutMs?: number;
-}): Promise<RuntimeSessionLoadState> {
-  try {
-    const resumeResult = await withTimeout(
-      params.client.resumeSession(params.record.acpSessionId, params.record.cwd),
-      params.timeoutMs,
-    );
-    reconcileAgentSessionId(params.record, resumeResult.agentSessionId);
-    applyConfigOptionsToRecord(params.record, resumeResult);
-    return {
-      sessionId: params.record.acpSessionId,
-      pendingAgentSessionId: params.record.agentSessionId,
-      sessionModels: resumeResult.models,
-      configOptionsPresent: resumeResult.configOptionsPresent,
-      legacyModelMetadataPresent: resumeResult.legacyModelMetadataPresent,
-      resumed: true,
-      createdFreshSession: false,
-    };
-  } catch (error) {
-    return await recoverRuntimeSessionLoadFailure(params, error);
-  }
-}
-
-async function loadRuntimeSession(params: {
-  client: AcpClient;
-  record: SessionRecord;
-  sameSessionOnly: boolean;
-  timeoutMs?: number;
-}): Promise<RuntimeSessionLoadState> {
+async function loadRuntimeSession(
+  params: {
+    client: AcpClient;
+    record: SessionRecord;
+    sameSessionOnly: boolean;
+    timeoutMs?: number;
+  },
+  resume: boolean,
+): Promise<RuntimeSessionLoadState> {
   try {
     const loadResult = await withTimeout(
-      params.client.loadSessionWithOptions(params.record.acpSessionId, params.record.cwd, {
-        suppressReplayUpdates: true,
-      }),
+      resume
+        ? params.client.resumeSession(params.record.acpSessionId, params.record.cwd)
+        : params.client.loadSessionWithOptions(params.record.acpSessionId, params.record.cwd, {
+            suppressReplayUpdates: true,
+          }),
       params.timeoutMs,
     );
     reconcileAgentSessionId(params.record, loadResult.agentSessionId);

@@ -1,3 +1,4 @@
+import { normalizeAgentSessionId } from "../../acp/agent-session-id.js";
 import { resolveAgentArgvForCommand } from "../../acp/builtin-command-migration.js";
 import type {
   SessionAcpxState,
@@ -7,7 +8,6 @@ import type {
 } from "../../types.js";
 import { SESSION_RECORD_SCHEMA } from "../../types.js";
 import { defaultSessionEventLog } from "../event-log.js";
-import { normalizeRuntimeSessionId } from "../runtime-session-id.js";
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -780,7 +780,7 @@ export function parseSessionRecord(raw: unknown): SessionRecord | null {
     schema: SESSION_RECORD_SCHEMA,
     acpxRecordId: record.acpx_record_id,
     acpSessionId: record.acp_session_id,
-    agentSessionId: normalizeRuntimeSessionId(record.agent_session_id),
+    agentSessionId: normalizeAgentSessionId(record.agent_session_id),
     agentCommand: record.agent_command,
     agentArgv: parsePersistedAgentArgv(record),
     cwd: record.cwd,

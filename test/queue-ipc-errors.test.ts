@@ -7,7 +7,10 @@ import {
   SessionQueueOwner,
   releaseQueueOwnerLease,
   tryAcquireQueueOwnerLease,
+  tryCancelOnRunningOwner,
+  tryCloseSessionOnRunningOwner,
   trySetConfigOptionOnRunningOwner,
+  trySetModelOnRunningOwner,
   trySetModeOnRunningOwner,
   trySubmitToRunningOwner,
 } from "../src/cli/queue/ipc.js";
@@ -45,6 +48,80 @@ const NOOP_OUTPUT_FORMATTER: OutputFormatter = {
     // no-op
   },
 };
+
+test("queue controls reject invalid responses and preserve false results", async () => {
+  const controls = [
+    { type: "cancel_prompt", send: (sessionId: string) => tryCancelOnRunningOwner({ sessionId }) },
+    {
+      type: "close_session",
+      send: (sessionId: string) => tryCloseSessionOnRunningOwner({ sessionId }),
+    },
+    {
+      type: "set_mode",
+      send: (sessionId: string) => trySetModeOnRunningOwner(sessionId, "plan", 1000, false),
+    },
+    {
+      type: "set_model",
+      send: (sessionId: string) => trySetModelOnRunningOwner(sessionId, "model", 1000, false),
+    },
+    {
+      type: "set_config_option",
+      send: (sessionId: string) =>
+        trySetConfigOptionOnRunningOwner(sessionId, "verbosity", "terse", 1000, false),
+    },
+  ];
+  await withTempHome(async (homeDir) => {
+    const sessionId = "control-admission";
+    const keeper = await startKeeperProcess();
+    const paths = queuePaths(homeDir, sessionId);
+    await writeQueueOwnerLock({ ...paths, sessionId, pid: keeper.pid });
+    try {
+      for (const control of controls) {
+        for (const [scenario, detailCode] of [
+          ["wrong-id", "QUEUE_PROTOCOL_MALFORMED_MESSAGE"],
+          ["missing-ack", "QUEUE_ACK_MISSING"],
+          ["unexpected", "QUEUE_PROTOCOL_UNEXPECTED_RESPONSE"],
+          ...(control.type === "cancel_prompt" || control.type === "close_session"
+            ? [["false-result", undefined]]
+            : []),
+        ]) {
+          const server = createSingleRequestServer((socket, request) => {
+            assert.equal(request.type, control.type);
+            if (scenario !== "missing-ack") {
+              socket.write(
+                `${JSON.stringify({ type: "accepted", requestId: scenario === "wrong-id" ? "wrong" : request.requestId })}\n`,
+              );
+            }
+            const response =
+              scenario === "false-result"
+                ? control.type === "cancel_prompt"
+                  ? { type: "cancel_result", cancelled: false }
+                  : { type: "close_session_result", closed: false }
+                : { type: "event", message: { jsonrpc: "2.0", method: "synthetic" } };
+            socket.end(`${JSON.stringify({ ...response, requestId: request.requestId })}\n`);
+          });
+          await listenServer(server, paths.socketPath);
+          try {
+            if (detailCode) {
+              await assert.rejects(
+                control.send(sessionId),
+                { detailCode, origin: "queue", retryable: true },
+                `${control.type}: ${scenario}`,
+              );
+            } else {
+              assert.equal(await control.send(sessionId), false, control.type);
+            }
+          } finally {
+            await closeServer(server);
+          }
+        }
+      }
+    } finally {
+      await cleanupOwnerArtifacts(paths);
+      stopProcess(keeper);
+    }
+  });
+});
 
 test("trySubmitToRunningOwner propagates typed queue prompt errors", async () => {
   await withTempHome(async (homeDir) => {

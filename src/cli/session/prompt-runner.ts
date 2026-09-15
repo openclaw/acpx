@@ -21,9 +21,8 @@ import type { QueueOwnerActiveSessionController } from "../queue/owner-turn-cont
 
 export type ActiveSessionController = QueueOwnerActiveSessionController;
 
-export type RunSessionSetModeDirectOptions = {
+type SessionControlConnectionOptions = {
   sessionRecordId: string;
-  modeId: string;
   mcpServers?: McpServer[];
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;
@@ -36,50 +35,21 @@ export type RunSessionSetModeDirectOptions = {
   onClientClosed?: () => void;
 };
 
-export type RunSessionSetConfigOptionDirectOptions = {
-  sessionRecordId: string;
+export type RunSessionSetModeDirectOptions = SessionControlConnectionOptions & {
+  modeId: string;
+};
+
+export type RunSessionSetConfigOptionDirectOptions = SessionControlConnectionOptions & {
   configId: string;
   value: string;
-  mcpServers?: McpServer[];
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  fs?: boolean;
-  terminal?: boolean;
-  timeoutMs?: number;
-  verbose?: boolean;
-  onClientAvailable?: (controller: ActiveSessionController) => void;
-  onClientClosed?: () => void;
 };
 
-export type RunSessionSetModelDirectOptions = {
-  sessionRecordId: string;
+export type RunSessionSetModelDirectOptions = SessionControlConnectionOptions & {
   modelId: string;
-  mcpServers?: McpServer[];
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  fs?: boolean;
-  terminal?: boolean;
-  timeoutMs?: number;
-  verbose?: boolean;
-  onClientAvailable?: (controller: ActiveSessionController) => void;
-  onClientClosed?: () => void;
 };
 
-type DirectConnectedSessionOptions = {
-  sessionRecordId: string;
+type DirectConnectedSessionOptions = SessionControlConnectionOptions & {
   replacingConfigOption?: WithConnectedSessionOptions<unknown>["replacingConfigOption"];
-  mcpServers?: McpServer[];
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  fs?: boolean;
-  terminal?: boolean;
-  timeoutMs?: number;
-  verbose?: boolean;
-  onClientAvailable?: (controller: ActiveSessionController) => void;
-  onClientClosed?: () => void;
 };
 
 function buildDirectConnectedSessionOptions<T>(
