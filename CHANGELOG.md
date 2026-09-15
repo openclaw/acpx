@@ -14,6 +14,7 @@ Repo: https://github.com/openclaw/acpx
 - Source builds: document Node 22.22.1 as the minimum Node 22 development version required by lint-staged; published CLI installs still support Node 22.13 and newer.
 
 - Dependencies: refresh Zod, tsx, React Flow, Oxlint, the Pi and Claude adapters, and transitive tooling dependencies while retaining the 48-hour release-age policy.
+- Runtime/embedding: support session-specific tool servers, turn-owned permission callbacks, session handle lookup, and shutdown that waits for owned connections and cleanup.
 
 ### Breaking
 
