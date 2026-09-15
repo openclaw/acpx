@@ -164,6 +164,7 @@ acpx codex --no-wait 'and propose 1 follow-up fix'
 
 Queue mechanics:
 
+- Startup options pass directly to the detached owner through stdin; acpx does not create temporary bootstrap files containing credentials or session environment values.
 - Owner generates a Unix socket at `~/.acpx/queues/<hash>.sock` (named pipe on Windows) and a `<hash>.lock` ownership file.
 - Sockets and lock files are owner-only.
 - After the queue drains, the owner stays alive for an idle TTL (default `300s`) so quick follow-ups do not pay the spawn cost.

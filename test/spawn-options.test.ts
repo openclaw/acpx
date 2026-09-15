@@ -8,7 +8,6 @@ import { resolveClaudeCodeExecutable } from "../src/acp/agent-command.js";
 import { resolveAgentSessionCwd, runTimedExecFile } from "../src/acp/client-process.js";
 import { buildAgentSpawnOptions, buildSpawnCommandOptions } from "../src/acp/client.js";
 import { buildTerminalSpawnOptions } from "../src/acp/terminal-manager.js";
-import { buildQueueOwnerSpawnOptions } from "../src/cli/session/queue-owner-process.js";
 import {
   buildAgentSpawnCommand,
   buildTerminalShellSpawnCommand,
@@ -281,16 +280,6 @@ test("buildTerminalSpawnOptions hides Windows console windows and maps env entri
   assert.equal(options.windowsHide, true);
   assert.equal(options.env?.TMUX, "/tmp/tmux-1000/default,123,0");
   assert.equal(options.env?.TERM, "screen-256color");
-});
-
-test("buildQueueOwnerSpawnOptions hides Windows console windows and passes payload path", () => {
-  const options = buildQueueOwnerSpawnOptions("/tmp/acpx-queue-owner/payload.json");
-
-  assert.equal(options.detached, true);
-  assert.equal(options.stdio, "ignore");
-  assert.equal(options.windowsHide, true);
-  assert.equal(options.env.ACPX_QUEUE_OWNER_PAYLOAD_FILE, "/tmp/acpx-queue-owner/payload.json");
-  assert.equal(options.env.ACPX_QUEUE_OWNER_PAYLOAD, undefined);
 });
 
 test("buildSpawnCommandOptions enables shell for .cmd/.bat on Windows", () => {

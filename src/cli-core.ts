@@ -21,7 +21,7 @@ import {
   resolveOutputPolicy,
 } from "./cli/flags.js";
 import { createOutputFormatter, getTextErrorRemediationHints } from "./cli/output/output.js";
-import { runQueueOwnerFromEnv } from "./cli/queue/owner-env.js";
+import { runQueueOwnerFromStdin } from "./cli/queue/owner-input.js";
 import { flushPerfMetricsCapture, installPerfMetricsCapture } from "./perf-metrics-capture.js";
 import { EXIT_CODES, OUTPUT_FORMATS, type OutputFormat, type OutputPolicy } from "./types.js";
 import { getAcpxVersion } from "./version.js";
@@ -445,7 +445,7 @@ async function handleQueueOwnerCommand(argv: string[]): Promise<boolean> {
   }
 
   try {
-    await runQueueOwnerFromEnv(process.env);
+    await runQueueOwnerFromStdin();
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -163,7 +163,13 @@ function logDeferredCancelFailure(error: unknown, verbose?: boolean): void {
 }
 
 function queueOwnerExitIsFatal(exit: QueueOwnerProcessExitState): boolean {
-  return exit.exited && (exit.spawnError !== undefined || exit.code !== 0 || exit.signal !== null);
+  return (
+    exit.exited &&
+    (exit.spawnError !== undefined ||
+      exit.inputError !== undefined ||
+      exit.code !== 0 ||
+      exit.signal !== null)
+  );
 }
 
 function logQueueOwnerReady(params: {

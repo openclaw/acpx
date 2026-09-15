@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
@@ -10,7 +11,7 @@ import {
   queueOwnerRuntimeOptionsFromSend,
   resolveQueueOwnerSpawnArgs,
   sanitizeQueueOwnerExecArgv,
-  writeQueueOwnerPayloadFile,
+  spawnQueueOwnerProcess,
 } from "../src/cli/session/queue-owner-process.js";
 import { queueOwnerRuntimeTestInternals } from "../src/cli/session/queue-owner-runtime.js";
 import { sessionControlTestInternals } from "../src/cli/session/session-control.js";
@@ -131,22 +132,6 @@ describe("buildQueueOwnerArgOverride", () => {
   });
 });
 
-describe("writeQueueOwnerPayloadFile", () => {
-  it("writes queue owner payloads to a private temp file", async () => {
-    const payloadPath = writeQueueOwnerPayloadFile('{"sessionId":"session-1"}');
-
-    try {
-      assert.equal(await fs.readFile(payloadPath, "utf8"), '{"sessionId":"session-1"}');
-      if (process.platform !== "win32") {
-        const mode = (await fs.stat(payloadPath)).mode & 0o777;
-        assert.equal(mode, 0o600);
-      }
-    } finally {
-      await fs.rm(path.dirname(payloadPath), { recursive: true, force: true });
-    }
-  });
-});
-
 describe("queueOwnerRuntimeOptionsFromSend", () => {
   it("preserves client capability preferences", () => {
     const options = queueOwnerRuntimeOptionsFromSend({
@@ -244,25 +229,81 @@ describe("formatQueueOwnerStartupFailure", () => {
   });
 });
 
-describe("buildQueueOwnerSpawnOptions stderr capture", () => {
-  it("ignores stderr by default", async () => {
-    const { buildQueueOwnerSpawnOptions } =
-      await import("../src/cli/session/queue-owner-process.js");
-    const options = buildQueueOwnerSpawnOptions("/tmp/acpx-queue-owner/payload.json");
-    assert.equal(options.stdio, "ignore");
-  });
-
-  it("pipes stderr when captureStderr is enabled", async () => {
-    const { buildQueueOwnerSpawnOptions } =
-      await import("../src/cli/session/queue-owner-process.js");
-    const options = buildQueueOwnerSpawnOptions("/tmp/acpx-queue-owner/payload.json", {
-      captureStderr: true,
-    });
-    assert.deepEqual(options.stdio, ["ignore", "ignore", "pipe"]);
-  });
-});
-
 describe("spawnQueueOwnerProcess startup capture lifecycle", () => {
+  it("delivers large Unicode bootstrap input without writing temporary payloads", async () => {
+    await withTempDir(async (directory) => {
+      const previousArgs = process.env.ACPX_QUEUE_OWNER_ARGS;
+      const previousTmp = process.env.TMPDIR;
+      process.env.TMPDIR = directory;
+      process.env.ACPX_QUEUE_OWNER_ARGS = JSON.stringify([
+        "--input-type=module",
+        "-e",
+        `
+        import { text } from "node:stream/consumers";
+        import { createHash } from "node:crypto";
+        await new Promise(resolve => setTimeout(resolve, 25));
+        const payload = await text(process.stdin);
+        JSON.parse(payload);
+        process.stderr.write(createHash("sha256").update(payload).digest("hex"));
+      `,
+      ]);
+      const options = {
+        sessionId: "pipe-bootstrap",
+        permissionMode: "approve-reads" as const,
+        authCredentials: { synthetic: "fixture-🦞".repeat(128 * 1024) },
+      };
+      try {
+        const handle = spawnQueueOwnerProcess(options);
+        await waitForCondition(
+          () => handle.getExitState().exited,
+          "owner did not consume bootstrap input",
+          5_000,
+        );
+        assert.equal(handle.getExitState().code, 0, handle.readLogTail());
+        assert.equal(
+          handle.readLogTail(),
+          createHash("sha256").update(JSON.stringify(options)).digest("hex"),
+        );
+        assert.deepEqual(await fs.readdir(directory), []);
+      } finally {
+        if (previousArgs === undefined) {
+          delete process.env.ACPX_QUEUE_OWNER_ARGS;
+        } else {
+          process.env.ACPX_QUEUE_OWNER_ARGS = previousArgs;
+        }
+        if (previousTmp === undefined) {
+          delete process.env.TMPDIR;
+        } else {
+          process.env.TMPDIR = previousTmp;
+        }
+      }
+    });
+  });
+
+  it("keeps final stderr when the bootstrap pipe closes early", async () => {
+    const previous = process.env.ACPX_QUEUE_OWNER_ARGS;
+    process.env.ACPX_QUEUE_OWNER_ARGS = JSON.stringify([
+      "-e",
+      "require('node:fs').writeSync(2,'bootstrap-refused');process.exit(1)",
+    ]);
+    try {
+      const handle = spawnQueueOwnerProcess({
+        sessionId: "early-pipe-close",
+        permissionMode: "approve-reads",
+        authCredentials: { synthetic: "fixture".repeat(256 * 1024) },
+      });
+      await waitForCondition(() => handle.getExitState().exited, "owner did not finish early exit");
+      assert.equal(handle.getExitState().code, 1);
+      assert.match(handle.readLogTail(), /bootstrap-refused/);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ACPX_QUEUE_OWNER_ARGS;
+      } else {
+        process.env.ACPX_QUEUE_OWNER_ARGS = previous;
+      }
+    }
+  });
+
   it("lets the submitter exit while a detached owner keeps draining stderr", async () => {
     const { spawnSync } = await import("node:child_process");
     const moduleUrl = new URL("../src/cli/session/queue-owner-process.js", import.meta.url).href;

@@ -172,13 +172,10 @@ describe("queue owner lifecycle — graceful SIGTERM shutdown", () => {
       });
 
       const child = spawn(process.execPath, [CLI_PATH, "__queue-owner"], {
-        env: {
-          ...process.env,
-          HOME: homeDir,
-          ACPX_QUEUE_OWNER_PAYLOAD: payload,
-        },
-        stdio: ["ignore", "ignore", "pipe"],
+        env: { ...process.env, HOME: homeDir },
+        stdio: ["pipe", "ignore", "pipe"],
       });
+      child.stdin.end(payload);
 
       const stderrChunks: Buffer[] = [];
       child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
@@ -246,13 +243,10 @@ describe("queue owner lifecycle — graceful SIGTERM shutdown", () => {
       });
 
       const child = spawn(process.execPath, [CLI_PATH, "__queue-owner"], {
-        env: {
-          ...process.env,
-          HOME: homeDir,
-          ACPX_QUEUE_OWNER_PAYLOAD: payload,
-        },
-        stdio: ["ignore", "ignore", "pipe"],
+        env: { ...process.env, HOME: homeDir },
+        stdio: ["pipe", "ignore", "pipe"],
       });
+      child.stdin.end(payload);
 
       const stderrChunks: Buffer[] = [];
       child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
@@ -305,17 +299,15 @@ describe("queue owner lifecycle — graceful SIGTERM shutdown", () => {
 
       const socketPath = queueSocketPath(record.acpxRecordId, homeDir);
       const lockPath = queueLockFilePath(record.acpxRecordId, homeDir);
-      const child = spawn(process.execPath, [CLI_PATH, "__queue-owner"], {
-        env: {
-          ...process.env,
-          HOME: homeDir,
-          ACPX_QUEUE_OWNER_PAYLOAD: JSON.stringify({
-            sessionId: record.acpxRecordId,
-            permissionMode: "approve-reads",
-          }),
-        },
-        stdio: ["ignore", "ignore", "pipe"],
+      const payload = JSON.stringify({
+        sessionId: record.acpxRecordId,
+        permissionMode: "approve-reads",
       });
+      const child = spawn(process.execPath, [CLI_PATH, "__queue-owner"], {
+        env: { ...process.env, HOME: homeDir },
+        stdio: ["pipe", "ignore", "pipe"],
+      });
+      child.stdin.end(payload);
       const stderrChunks: Buffer[] = [];
       child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
       let idleSocket: net.Socket | undefined;
@@ -380,13 +372,10 @@ describe("queue owner lifecycle — bridge process death on SIGTERM", () => {
       });
 
       const child = spawn(process.execPath, [CLI_PATH, "__queue-owner"], {
-        env: {
-          ...process.env,
-          HOME: homeDir,
-          ACPX_QUEUE_OWNER_PAYLOAD: payload,
-        },
-        stdio: ["ignore", "ignore", "pipe"],
+        env: { ...process.env, HOME: homeDir },
+        stdio: ["pipe", "ignore", "pipe"],
       });
+      child.stdin.end(payload);
 
       const stderrChunks: Buffer[] = [];
       child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
@@ -513,13 +502,10 @@ describe("queue owner lifecycle — bridge process death on SIGTERM", () => {
       });
 
       const child = spawn(process.execPath, [CLI_PATH, "__queue-owner"], {
-        env: {
-          ...process.env,
-          HOME: homeDir,
-          ACPX_QUEUE_OWNER_PAYLOAD: payload,
-        },
-        stdio: ["ignore", "ignore", "pipe"],
+        env: { ...process.env, HOME: homeDir },
+        stdio: ["pipe", "ignore", "pipe"],
       });
+      child.stdin.end(payload);
 
       const stderrChunks: Buffer[] = [];
       child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));

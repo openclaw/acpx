@@ -1,7 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { realpathSync } from "node:fs";
 import type { SessionAgentOptions } from "../../runtime/engine/session-options.js";
 import type {
   AuthPolicy,
@@ -10,29 +8,7 @@ import type {
   PermissionMode,
 } from "../../types.js";
 
-const QUEUE_OWNER_PAYLOAD_FILE_ENV = "ACPX_QUEUE_OWNER_PAYLOAD_FILE";
-const QUEUE_OWNER_PAYLOAD_ENV = "ACPX_QUEUE_OWNER_PAYLOAD";
-
 export type QueueOwnerRuntimeOptions = {
-  sessionId: string;
-  mcpServers?: McpServer[];
-  mcpConfigPath?: string;
-  mcpConfigFingerprint?: string;
-  permissionMode: PermissionMode;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  fs?: boolean;
-  terminal?: boolean;
-  suppressSdkConsoleErrors?: boolean;
-  verbose?: boolean;
-  ttlMs?: number;
-  maxQueueDepth?: number;
-  promptRetries?: number;
-  sessionOptions?: SessionAgentOptions;
-};
-
-type SessionSendLike = {
   sessionId: string;
   mcpServers?: McpServer[];
   mcpConfigPath?: string;
@@ -158,7 +134,7 @@ export function resolveQueueOwnerSpawnArgs(argv: readonly string[] = process.arg
 }
 
 export function queueOwnerRuntimeOptionsFromSend(
-  options: SessionSendLike,
+  options: QueueOwnerRuntimeOptions,
 ): QueueOwnerRuntimeOptions {
   return {
     sessionId: options.sessionId,
@@ -180,19 +156,6 @@ export function queueOwnerRuntimeOptionsFromSend(
   };
 }
 
-export function writeQueueOwnerPayloadFile(payload: string): string {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "acpx-queue-owner-"));
-  const payloadPath = path.join(dir, "payload.json");
-  writeFileSync(payloadPath, payload, {
-    encoding: "utf8",
-    flag: "wx",
-    mode: 0o600,
-  });
-  return payloadPath;
-}
-
-export type QueueOwnerSpawnStdio = "ignore" | ["ignore", "ignore", "pipe"];
-
 /** Max stderr bytes retained for cold-start diagnostics. */
 export const QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES = 4_000;
 
@@ -201,6 +164,7 @@ export type QueueOwnerProcessExitState = {
   code: number | null;
   signal: NodeJS.Signals | null;
   spawnError?: Error;
+  inputError?: Error;
 };
 
 export type QueueOwnerProcessHandle = {
@@ -216,29 +180,6 @@ export type QueueOwnerProcessHandle = {
   stopStartupCapture: () => void;
 };
 
-export function buildQueueOwnerSpawnOptions(
-  payloadFilePath: string,
-  opts?: { captureStderr?: boolean },
-): {
-  detached: true;
-  stdio: QueueOwnerSpawnStdio;
-  env: NodeJS.ProcessEnv;
-  windowsHide: true;
-} {
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    [QUEUE_OWNER_PAYLOAD_FILE_ENV]: payloadFilePath,
-  };
-  delete env[QUEUE_OWNER_PAYLOAD_ENV];
-  const captureStderr = opts?.captureStderr === true;
-  return {
-    detached: true,
-    stdio: captureStderr ? ["ignore", "ignore", "pipe"] : "ignore",
-    env,
-    windowsHide: true,
-  };
-}
-
 export function formatQueueOwnerStartupFailure(params: {
   sessionId: string;
   exit: QueueOwnerProcessExitState;
@@ -252,6 +193,9 @@ export function formatQueueOwnerStartupFailure(params: {
     const signalPart = params.exit.signal ? `, signal ${params.exit.signal}` : "";
     parts.push(`exited with code ${codePart}${signalPart} before binding its socket`);
   }
+  if (params.exit.inputError) {
+    parts.push(`startup input failed: ${params.exit.inputError.message}`);
+  }
   const tail = params.logTail.trim();
   if (tail.length > 0) {
     parts.push(`stderr:\n${tail}`);
@@ -261,20 +205,24 @@ export function formatQueueOwnerStartupFailure(params: {
 
 export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): QueueOwnerProcessHandle {
   const payload = JSON.stringify(options);
-  const payloadPath = writeQueueOwnerPayloadFile(payload);
 
   let exited = false;
   let code: number | null = null;
   let signal: NodeJS.Signals | null = null;
   let spawnError: Error | undefined;
+  let inputError: Error | undefined;
   let capturing = true;
   let stderrTail = Buffer.alloc(0);
 
-  const child = spawn(
-    process.execPath,
-    resolveQueueOwnerSpawnArgs(),
-    buildQueueOwnerSpawnOptions(payloadPath, { captureStderr: true }),
-  );
+  const child = spawn(process.execPath, resolveQueueOwnerSpawnArgs(), {
+    detached: true,
+    stdio: ["pipe", "ignore", "pipe"],
+    windowsHide: true,
+  });
+  child.stdin.on("error", (error: Error) => {
+    inputError = error;
+  });
+  child.stdin.end(payload);
 
   const stopStartupCapture = () => {
     if (!capturing) {
@@ -333,6 +281,7 @@ export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): Queue
       code,
       signal,
       ...(spawnError ? { spawnError } : {}),
+      ...(inputError ? { inputError } : {}),
     }),
     readLogTail: (maxBytes = QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES) => {
       const start = Math.max(0, stderrTail.length - maxBytes);
