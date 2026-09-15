@@ -8,6 +8,16 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+### Breaking
+
+### Fixes
+
+## 0.16.0 - 2026-09-15
+
+**Highlights:** Embedding hosts can share session-specific tools and turn-owned approvals, recover stored handles, and shut down connections while preserving existing sessions.
+
+### Changes
+
 - Runtime/embedding: surface normalized ACP plan entries on status events and explicit empty snapshots that clear stale plans. Thanks @gadzan.
 - Dependencies: update Zod, React and its types, Vite, and lint-staged; retain the 48-hour release-age policy.
 - Dependencies: refresh Node types, Oxfmt, and Oxlint; align source builds and CI with pnpm 11.26.0. Thanks @dependabot.
