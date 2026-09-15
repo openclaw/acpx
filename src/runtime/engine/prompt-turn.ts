@@ -5,6 +5,7 @@ import {
 } from "../../session/conversation-model.js";
 import type {
   AcpElicitationHandler,
+  AcpPermissionHandler,
   PromptInput,
   RunPromptResult,
   SessionConversation,
@@ -25,11 +26,13 @@ type PromptTurnClient = {
     prompt: PromptInput | string,
     onRequestWritten?: () => Promise<void> | void,
     onElicitation?: AcpElicitationHandler,
+    onPermissionRequest?: AcpPermissionHandler,
   ) => Promise<{
     stopReason: RunPromptResult["stopReason"];
     usage?: unknown;
     _meta?: Record<string, unknown> | null;
   }>;
+  endPromptElicitation?: (sessionId: string) => void;
   waitForSessionUpdatesIdle?: (options?: { idleMs?: number; timeoutMs?: number }) => Promise<void>;
 };
 
@@ -52,6 +55,12 @@ function recoveredSessionResult(
   };
 }
 
+function abortTimedOutRequests(error: unknown, client: PromptTurnClient, sessionId: string): void {
+  if (error instanceof TimeoutError) {
+    client.endPromptElicitation?.(sessionId);
+  }
+}
+
 export async function runPromptTurn(params: {
   client: PromptTurnClient;
   sessionId: string;
@@ -62,6 +71,7 @@ export async function runPromptTurn(params: {
   onPromptRequestWritten?: () => Promise<void> | void;
   onPromptStarted?: () => Promise<void> | void;
   onElicitation?: AcpElicitationHandler;
+  onPermissionRequest?: AcpPermissionHandler;
 }): Promise<{
   stopReason: RunPromptResult["stopReason"];
   source: "rpc" | "session";
@@ -74,6 +84,7 @@ export async function runPromptTurn(params: {
       params.prompt,
       params.onPromptRequestWritten,
       params.onElicitation,
+      params.onPermissionRequest,
     );
     void promptPromise.then(
       (response) => {
@@ -99,6 +110,7 @@ export async function runPromptTurn(params: {
       ...responseMetaField(response._meta),
     };
   } catch (error) {
+    abortTimedOutRequests(error, params.client, params.sessionId);
     if (!(error instanceof TimeoutError) || !params.promptMessageId) {
       throw error;
     }

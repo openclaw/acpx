@@ -227,7 +227,6 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
     escalate: ["execute"],
     defaultAction: "deny" as const,
   };
-  const processLifecycle = {};
   const lifecycle = {
     pid: 456,
     startedAt: "2026-01-01T00:00:00.000Z",
@@ -295,7 +294,6 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
       sessionStore: store,
       permissionPolicy,
       agentProcessEnv,
-      processLifecycle,
     }),
     {
       clientFactory: (options) => {
@@ -342,10 +340,6 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
   assert.deepEqual(
     constructedOptions.map((options) => options.permissionPolicy),
     [permissionPolicy, permissionPolicy],
-  );
-  assert.deepEqual(
-    constructedOptions.map((options) => options.processLifecycle),
-    [processLifecycle, processLifecycle],
   );
   assert.deepEqual(
     constructedOptions.map((options) => options.processLaunchScope),

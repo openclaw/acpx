@@ -29,6 +29,11 @@ export type AcpPermissionDecision =
   | { outcome: "reject_always" }
   | { outcome: "cancel" };
 
+export type AcpPermissionHandler = (
+  request: AcpPermissionRequest,
+  context: { signal: AbortSignal },
+) => Promise<AcpPermissionDecision | undefined>;
+
 export const ACP_ELICITATION_MODES = ["form", "url"] as const;
 export type AcpElicitationMode = (typeof ACP_ELICITATION_MODES)[number];
 export type AcpElicitationRequest = CreateElicitationRequest;
@@ -308,10 +313,7 @@ export type AcpClientOptions = {
   onSessionUpdate?: (notification: SessionNotification) => void;
   onClientOperation?: (operation: ClientOperation) => void;
   onPermissionEscalation?: (event: PermissionEscalationEvent) => void;
-  onPermissionRequest?: (
-    req: AcpPermissionRequest,
-    ctx: { signal: AbortSignal },
-  ) => Promise<AcpPermissionDecision | undefined>;
+  onPermissionRequest?: AcpPermissionHandler;
 };
 
 export const SESSION_RECORD_SCHEMA = "acpx.session.v1" as const;

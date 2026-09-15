@@ -5,8 +5,7 @@ import { applyConfigOptionsToRecord } from "../../session/config-options.js";
 import { advertisedModelState } from "../../session/model-state.js";
 import { absolutePath, isoNow } from "../../session/persistence.js";
 import type {
-  AcpPermissionDecision,
-  AcpPermissionRequest,
+  AcpPermissionHandler,
   AcpElicitationMode,
   AuthPolicy,
   McpServer,
@@ -50,10 +49,7 @@ export type WithConnectedSessionOptions<T> = {
   permissionMode?: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   permissionPolicy?: PermissionPolicy;
-  onPermissionRequest?: (
-    req: AcpPermissionRequest,
-    ctx: { signal: AbortSignal },
-  ) => Promise<AcpPermissionDecision | undefined>;
+  onPermissionRequest?: AcpPermissionHandler;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   fs?: boolean;

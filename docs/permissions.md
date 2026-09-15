@@ -47,6 +47,15 @@ the first chance to decide; returning no decision falls back to the configured
 policy and permission mode. The embedded runtime does not currently expose
 structured permission-escalation notifications to the host.
 
+Pass `onPermissionRequest` to `startTurn()` or `runTurn()` to override the runtime
+callback for one prompt. Each turn owns its handler, including when one runtime
+serves concurrent sessions. Returning `undefined` or throwing falls back to the
+configured policy and mode, without calling the runtime callback. Use
+`permissionMode: "deny-all"` when missing host decisions must deny permission.
+The callback's signal aborts when the turn finishes, times out, is cancelled,
+or its connection closes. Pending permission requests then return cancellation;
+a late host response cannot approve the action.
+
 ## What counts as a "read"
 
 Read/search requests in `--approve-reads`:

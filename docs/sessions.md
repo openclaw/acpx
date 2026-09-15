@@ -236,6 +236,27 @@ CWD is stored as an absolute path in the scope key.
 
 Do not pass an `acpx` session id to a native provider CLI unless `agentSessionId` is also present.
 
+## Embedded session lifecycle
+
+Embedding hosts can call `findSession({ sessionKey, agent })` on `acpx/runtime`
+to recover a persistent session handle after restart. It returns `undefined` when
+the record is absent, and does not start an agent or change the record. Existing
+closed records remain available. The handle uses the record's working directory
+and session identities. `getStatus({ handle }).lastRequestId` reports the last
+host request admitted to that session.
+
+Call `shutdown()` when retiring a runtime. It cancels active prompts, closes owned
+connections, and waits for admitted work and probes to finish. New sessions,
+turns, controls and probes then reject. Stored sessions remain available for a
+new runtime to resume. Hosts must still settle their own pending lifecycle
+admission callbacks; shutdown cannot complete an external host operation.
+
+For temporary model inspection, use `ensureSession({ mode: "oneshot", ... })`,
+`getStatus({ handle })`, and `close({ handle, discardPersistentState: true, ... })`.
+Close requests ACP `session/close` and marks the host record closed for reset on
+the next ensure. It does not delete that record or promise removal of an agent's
+private session files.
+
 ## See also
 
 - [Prompting](prompting.md) — implicit prompt, `prompt`, `exec`, stdin, `--file`, `--no-wait`.

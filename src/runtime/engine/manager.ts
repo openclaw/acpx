@@ -38,6 +38,7 @@ import { advertisedModelState } from "../../session/model-state.js";
 import type { ClientOperation, SessionRecord, SessionResumePolicy } from "../../types.js";
 import type {
   AcpElicitationHandler,
+  AcpPermissionHandler,
   AcpRuntimeEvent,
   AcpRuntimeHandle,
   AcpRuntimeOptions,
@@ -49,6 +50,7 @@ import type {
 } from "../public/contract.js";
 import { AcpRuntimeError } from "../public/errors.js";
 import { parsePromptEventLine } from "../public/events.js";
+import { probeRuntime, type RuntimeHealthReport } from "../public/probe.js";
 import { withConnectedSession } from "./connected-session.js";
 import {
   applyConversation,
@@ -371,6 +373,7 @@ type RuntimeTurnTask = {
     timeoutMs?: number;
     signal?: AbortSignal;
     onElicitation?: AcpElicitationHandler;
+    onPermissionRequest?: AcpPermissionHandler;
   };
   promptInput: PromptInput | string;
   queue: AsyncEventQueue;
@@ -463,6 +466,10 @@ export class AcpRuntimeManager {
   private readonly ensureSessionLocks = new Map<string, Promise<void>>();
   private readonly runtimeOperationLocks = new Map<string, Promise<void>>();
   private readonly closingActiveRecords = new Set<string>();
+  private readonly liveClients = new Set<AcpClient>();
+  private readonly pendingTasks = new Set<Promise<unknown>>();
+  private shuttingDown = false;
+  private shutdownTask?: Promise<void>;
 
   constructor(
     private readonly options: AcpRuntimeOptions,
@@ -470,8 +477,97 @@ export class AcpRuntimeManager {
   ) {}
 
   private createClient(options: ConstructorParameters<typeof AcpClient>[0]): AcpClient {
-    const clientOptions = { ...options, agentProcessEnv: this.options.agentProcessEnv };
-    return this.deps.clientFactory?.(clientOptions) ?? new AcpClient(clientOptions);
+    this.assertOpen();
+    const clientOptions: ConstructorParameters<typeof AcpClient>[0] = {
+      ...options,
+      agentProcessEnv: this.options.agentProcessEnv,
+      processLifecycle: {
+        ...options.processLifecycle,
+        onBeforeSpawn: async (launch) => {
+          this.assertOpen();
+          await options.processLifecycle?.onBeforeSpawn?.(launch);
+          this.assertOpen();
+        },
+        onSpawned: async (process) => {
+          this.assertOpen();
+          await options.processLifecycle?.onSpawned?.(process);
+          this.assertOpen();
+        },
+      },
+    };
+    const client = this.deps.clientFactory?.(clientOptions) ?? new AcpClient(clientOptions);
+    this.liveClients.add(client);
+    return client;
+  }
+
+  async probe(): Promise<RuntimeHealthReport> {
+    let client: AcpClient | undefined;
+    try {
+      return await probeRuntime(this.options, {
+        clientFactory: (options) => (client = this.createClient(options)),
+      });
+    } finally {
+      if (client) {
+        this.liveClients.delete(client);
+      }
+    }
+  }
+
+  private assertOpen(): void {
+    if (this.shuttingDown) {
+      throw new AcpRuntimeError("ACP_BACKEND_UNAVAILABLE", "ACP runtime is shut down.");
+    }
+  }
+
+  shutdown(): Promise<void> {
+    if (!this.shutdownTask) {
+      this.shuttingDown = true;
+      this.shutdownTask = this.shutdownOwnedClients();
+    }
+    return this.shutdownTask;
+  }
+
+  private async shutdownOwnedClients(): Promise<void> {
+    const closed = await Promise.allSettled(
+      [...this.liveClients].map(async (client) => {
+        void client.requestCancelActivePrompt().catch(() => {});
+        await this.closeClient(client);
+      }),
+    );
+    await Promise.allSettled([
+      ...this.ensureSessionLocks.values(),
+      ...this.runtimeOperationLocks.values(),
+      ...this.pendingTasks,
+    ]);
+    await Promise.all(
+      [...this.retainedSessionOwners.values()].map(async (owner) => {
+        this.removeRetainedSessionOwner(owner);
+        await this.stopSessionOwner(owner);
+      }),
+    );
+    const errors: unknown[] = [];
+    for (const result of closed) {
+      if (result.status === "rejected") {
+        errors.push(result.reason);
+      }
+    }
+    if (errors.length) {
+      throw new AggregateError(errors, "ACP runtime shutdown failed.");
+    }
+  }
+
+  private trackTask<T>(task: Promise<T>): Promise<T> {
+    this.pendingTasks.add(task);
+    const remove = () => {
+      this.pendingTasks.delete(task);
+    };
+    void task.then(remove, remove);
+    return task;
+  }
+
+  private async closeClient(client: AcpClient): Promise<void> {
+    await client.close();
+    this.liveClients.delete(client);
   }
 
   private createSessionOwner(input: {
@@ -638,7 +734,7 @@ export class AcpRuntimeManager {
 
   private async stopSessionOwner(owner: RuntimeSessionOwner): Promise<void> {
     await this.flushSessionOwner(owner).catch(() => {});
-    await owner.client.close().catch(() => {});
+    await this.closeClient(owner.client).catch(() => {});
     await owner.projection?.checkpoint.flush().catch(() => {});
     try {
       owner.client.clearEventHandlers();
@@ -687,11 +783,32 @@ export class AcpRuntimeManager {
     record: SessionRecord,
   ): boolean {
     return (
+      !this.shuttingDown &&
       owner.mode === "persistent" &&
       !record.closed &&
       !(owner.client.hasUnresolvedPrompt?.() ?? false) &&
       owner.client.hasReusableSession(record.acpSessionId)
     );
+  }
+
+  private resolveMcpServers(session: {
+    sessionKey: string;
+    cwd: string;
+    agentCommand: string;
+    agentArgv?: string[];
+  }) {
+    const servers = this.options.mcpServers;
+    const { sessionKey, cwd, agentCommand, agentArgv } = session;
+    return [
+      ...(typeof servers === "function"
+        ? servers({
+            sessionKey,
+            cwd,
+            agentCommand,
+            agentArgv: agentArgv ? [...agentArgv] : undefined,
+          })
+        : (servers ?? [])),
+    ];
   }
 
   private async withRuntimeControlSession<T>(
@@ -716,35 +833,46 @@ export class AcpRuntimeManager {
       }
     }
 
-    const result = await withConnectedSession({
-      sessionRecordId: record.acpxRecordId,
-      loadRecord: async (sessionRecordId) => await this.requireRecord(sessionRecordId),
-      saveRecord: async (connectedRecord) => await this.options.sessionStore.save(connectedRecord),
-      createClient: (options) =>
-        this.createClient({
-          ...options,
-          processLifecycle: this.options.processLifecycle,
-          processLaunchScope: {
-            kind: "runtime-session",
-            sessionKey: record.name ?? record.acpxRecordId,
-          },
+    let controlClient: AcpClient | undefined;
+    try {
+      const result = await withConnectedSession({
+        sessionRecordId: record.acpxRecordId,
+        loadRecord: async (sessionRecordId) => await this.requireRecord(sessionRecordId),
+        saveRecord: async (connectedRecord) =>
+          await this.options.sessionStore.save(connectedRecord),
+        createClient: (options) =>
+          (controlClient = this.createClient({
+            ...options,
+            processLifecycle: this.options.processLifecycle,
+            processLaunchScope: {
+              kind: "runtime-session",
+              sessionKey: record.name ?? record.acpxRecordId,
+            },
+          })),
+        mcpServers: this.resolveMcpServers({
+          ...record,
+          sessionKey: record.name ?? record.acpxRecordId,
         }),
-      mcpServers: [...(this.options.mcpServers ?? [])],
-      permissionMode: this.options.permissionMode,
-      nonInteractivePermissions: this.options.nonInteractivePermissions,
-      permissionPolicy: this.options.permissionPolicy,
-      onPermissionRequest: this.options.onPermissionRequest,
-      elicitationModes: this.options.elicitationModes,
-      verbose: this.options.verbose,
-      timeoutMs: this.options.timeoutMs,
-      resumePolicy: resumePolicyForSessionMode(sessionMode),
-      replacingConfigOption,
-      run,
-    });
-    return {
-      value: result.value,
-      record: result.record,
-    };
+        permissionMode: this.options.permissionMode,
+        nonInteractivePermissions: this.options.nonInteractivePermissions,
+        permissionPolicy: this.options.permissionPolicy,
+        onPermissionRequest: this.options.onPermissionRequest,
+        elicitationModes: this.options.elicitationModes,
+        verbose: this.options.verbose,
+        timeoutMs: this.options.timeoutMs,
+        resumePolicy: resumePolicyForSessionMode(sessionMode),
+        replacingConfigOption,
+        run,
+      });
+      return {
+        value: result.value,
+        record: result.record,
+      };
+    } finally {
+      if (controlClient) {
+        this.liveClients.delete(controlClient);
+      }
+    }
   }
 
   private refreshOwnedRecordLifecycle(owner: RuntimeSessionOwner, record: SessionRecord): void {
@@ -775,6 +903,7 @@ export class AcpRuntimeManager {
     key: string,
     run: () => Promise<T>,
   ): Promise<T> {
+    this.assertOpen();
     const previous = locks.get(key) ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -784,6 +913,7 @@ export class AcpRuntimeManager {
     locks.set(key, tail);
     await previous;
     try {
+      this.assertOpen();
       return await run();
     } finally {
       release();
@@ -817,7 +947,7 @@ export class AcpRuntimeManager {
     if (!existingRecordId) {
       return undefined;
     }
-    let record = await this.options.sessionStore.load(existingRecordId);
+    let record = await this.findSession(existingRecordId);
     if (!record) {
       return undefined;
     }
@@ -827,6 +957,10 @@ export class AcpRuntimeManager {
       record = owner.projection?.record ?? record;
     }
     return { record, owner };
+  }
+
+  async findSession(sessionKey: string): Promise<SessionRecord | undefined> {
+    return await this.options.sessionStore.load(sessionKey);
   }
 
   private canReuseRuntimeSession(
@@ -882,7 +1016,7 @@ export class AcpRuntimeManager {
       agentCommand,
       agentArgv,
       cwd,
-      mcpServers: [...(this.options.mcpServers ?? [])],
+      mcpServers: this.resolveMcpServers({ ...agent, sessionKey: input.sessionKey }),
       permissionMode: this.options.permissionMode,
       nonInteractivePermissions: this.options.nonInteractivePermissions,
       permissionPolicy: this.options.permissionPolicy,
@@ -902,6 +1036,7 @@ export class AcpRuntimeManager {
 
     try {
       await client.start();
+      this.assertOpen();
       const session = await createOrLoadRuntimeSession(client, input.resumeSessionId, cwd);
       const record = await this.prepareInitialRuntimeRecord({
         input,
@@ -919,7 +1054,7 @@ export class AcpRuntimeManager {
       if (!retained) {
         owner.recordId = undefined;
         client.clearEventHandlers();
-        await client.close();
+        await this.closeClient(client);
       }
     }
   }
@@ -988,6 +1123,7 @@ export class AcpRuntimeManager {
     // The checkpoint loop also persists notifications arriving during the
     // initial async save before this owner becomes available for reuse.
     await owner.projection?.checkpoint.checkpoint();
+    this.assertOpen();
     const previousOwner = this.retainedSessionOwners.get(record.acpxRecordId);
     this.retainedSessionOwners.set(record.acpxRecordId, owner);
     if (owner.mode === "oneshot") {
@@ -1009,12 +1145,14 @@ export class AcpRuntimeManager {
     timeoutMs?: number;
     signal?: AbortSignal;
     onElicitation?: AcpElicitationHandler;
+    onPermissionRequest?: AcpPermissionHandler;
   }): AcpRuntimeTurn {
+    this.assertOpen();
     let promptInput: PromptInput | string;
     try {
       promptInput = toPromptInput(input.text, input.attachments);
     } catch (error) {
-      void this.closeRetainedOneShotHandle(input.handle).catch(() => {});
+      void this.trackTask(this.closeRetainedOneShotHandle(input.handle).catch(() => {}));
       throw error;
     }
     const queue = new AsyncEventQueue();
@@ -1066,14 +1204,16 @@ export class AcpRuntimeManager {
       if (input.signal.aborted) {
         promptStarted.reject(new Error("ACP turn cancelled before prompt submission."));
         closeStream();
-        void this.closeRetainedOneShotHandle(input.handle)
-          .catch(() => {})
-          .then(() => {
-            settleResult({
-              status: "cancelled",
-              stopReason: "cancelled",
-            });
-          });
+        void this.trackTask(
+          this.closeRetainedOneShotHandle(input.handle)
+            .catch(() => {})
+            .then(() => {
+              settleResult({
+                status: "cancelled",
+                stopReason: "cancelled",
+              });
+            }),
+        );
         return {
           requestId: input.requestId,
           promptStarted: promptStarted.promise,
@@ -1086,7 +1226,7 @@ export class AcpRuntimeManager {
       input.signal.addEventListener("abort", abortHandler, { once: true });
     }
 
-    void this.runRuntimeTurnTask({
+    const task = this.runRuntimeTurnTask({
       input,
       promptInput,
       queue,
@@ -1096,6 +1236,7 @@ export class AcpRuntimeManager {
       settleResult,
       abortHandler,
     });
+    void this.trackTask(task);
 
     return {
       requestId: input.requestId,
@@ -1125,6 +1266,7 @@ export class AcpRuntimeManager {
     try {
       turn = await this.prepareRuntimeTurn(task);
       const { sessionId, resumed, loadError } = await this.connectRuntimeTurn(task, turn);
+      this.assertOpen();
       await this.resolveRuntimeTurnReady(task, turn, resumed, loadError);
       if (this.cancelRuntimeTurnBeforePrompt(task)) {
         terminalResult = {
@@ -1167,6 +1309,7 @@ export class AcpRuntimeManager {
         promptMessageId: turn.promptMessageId,
         onPromptRequestWritten: () => task.promptStarted.resolve(),
         onElicitation: task.input.onElicitation,
+        onPermissionRequest: task.input.onPermissionRequest,
       });
     } finally {
       turn.client.endPromptElicitation?.(sessionId);
@@ -1313,7 +1456,10 @@ export class AcpRuntimeManager {
       agentCommand: record.agentCommand,
       agentArgv: record.agentArgv,
       cwd: record.cwd,
-      mcpServers: [...(this.options.mcpServers ?? [])],
+      mcpServers: this.resolveMcpServers({
+        ...record,
+        sessionKey: record.name ?? record.acpxRecordId,
+      }),
       permissionMode: this.options.permissionMode,
       nonInteractivePermissions: this.options.nonInteractivePermissions,
       permissionPolicy: this.options.permissionPolicy,
@@ -1604,7 +1750,7 @@ export class AcpRuntimeManager {
     }
     turn.owner.activeTurn = undefined;
     const clearAttempt = await settleAttempt(() => turn.client.clearEventHandlers());
-    const closeAttempt = await settleAttempt(async () => turn.client.close());
+    const closeAttempt = await settleAttempt(async () => this.closeClient(turn.client));
     const failure = firstFailedAttempt([clearAttempt, closeAttempt]);
     if (failure) {
       throw failure.error;
@@ -1652,13 +1798,19 @@ export class AcpRuntimeManager {
     timeoutMs?: number;
     signal?: AbortSignal;
     onElicitation?: AcpElicitationHandler;
+    onPermissionRequest?: AcpPermissionHandler;
   }): AsyncIterable<AcpRuntimeEvent> {
     const turn = this.startTurn(input);
     yield* turn.events;
     yield legacyTerminalEventFromTurnResult(await turn.result);
   }
 
-  async getStatus(handle: AcpRuntimeHandle): Promise<AcpRuntimeStatus> {
+  getStatus(handle: AcpRuntimeHandle): Promise<AcpRuntimeStatus> {
+    this.assertOpen();
+    return this.trackTask(this.readStatus(handle));
+  }
+
+  private async readStatus(handle: AcpRuntimeHandle): Promise<AcpRuntimeStatus> {
     const recordId = handle.acpxRecordId ?? handle.sessionKey;
     const owner = this.retainedSessionOwners.get(recordId);
     if (owner) {
@@ -1757,9 +1909,17 @@ export class AcpRuntimeManager {
     await controller?.requestCancelActivePrompt();
   }
 
-  async close(
+  close(
     handle: AcpRuntimeHandle,
     options: { discardPersistentState?: boolean } = {},
+  ): Promise<void> {
+    this.assertOpen();
+    return this.trackTask(this.closeRuntimeSession(handle, options));
+  }
+
+  private async closeRuntimeSession(
+    handle: AcpRuntimeHandle,
+    options: { discardPersistentState?: boolean },
   ): Promise<void> {
     const recordId = handle.acpxRecordId ?? handle.sessionKey;
     const record = await this.resolveRuntimeRecordForClose(recordId);
@@ -1822,7 +1982,7 @@ export class AcpRuntimeManager {
       }
     });
     const clearAttempt = await settleAttempt(() => connection.owner?.client.clearEventHandlers());
-    const closeAttempt = await settleAttempt(async () => connection.client.close());
+    const closeAttempt = await settleAttempt(async () => this.closeClient(connection.client));
     const failure = firstFailedAttempt([flushAttempt, clearAttempt, closeAttempt]);
     if (failure) {
       throw failure.error;
@@ -1838,23 +1998,7 @@ export class AcpRuntimeManager {
       return { client: owner.client, owner };
     }
     return {
-      client: this.createClient({
-        agentCommand: record.agentCommand,
-        agentArgv: record.agentArgv,
-        cwd: record.cwd,
-        mcpServers: [...(this.options.mcpServers ?? [])],
-        permissionMode: this.options.permissionMode,
-        nonInteractivePermissions: this.options.nonInteractivePermissions,
-        permissionPolicy: this.options.permissionPolicy,
-        onPermissionRequest: this.options.onPermissionRequest,
-        elicitationModes: this.options.elicitationModes,
-        processLifecycle: this.options.processLifecycle,
-        processLaunchScope: {
-          kind: "runtime-session",
-          sessionKey: record.name ?? record.acpxRecordId,
-        },
-        verbose: this.options.verbose,
-      }),
+      client: this.createTurnClient(record),
     };
   }
 

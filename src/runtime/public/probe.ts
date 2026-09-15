@@ -119,7 +119,7 @@ function createProbeClient(
     ...agentCommand,
     cwd: options.cwd,
     agentProcessEnv: options.agentProcessEnv,
-    mcpServers: [...(options.mcpServers ?? [])],
+    mcpServers: typeof options.mcpServers === "function" ? [] : [...(options.mcpServers ?? [])],
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     permissionPolicy: options.permissionPolicy,

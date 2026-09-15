@@ -207,6 +207,20 @@ Other ACP-relevant behavior:
 
 Then `acpx ci-bot 'run sanity checks'` resolves through the registry without any `--agent` flag.
 
+## Embedded session MCP servers
+
+In `acpx/runtime`, `AcpRuntimeOptions.mcpServers` accepts either an array or a
+synchronous resolver receiving `{ sessionKey, cwd, agentCommand, agentArgv }`.
+The resolver returns the complete server array for a new connection. ACPX calls
+it for session creation, reconnection, and controls or close operations that need
+a new connection. Existing retained connections keep their original servers.
+Initialization-only health probes do not invoke the resolver.
+
+The runtime does not store the resolver or its result in session records. Hosts
+must supply it again after restart. Configuration files continue to accept arrays
+only. See [Permissions](permissions.md#per-tool-policy) for turn-owned permission
+callbacks on a shared runtime.
+
 ## See also
 
 - [Agents](agents.md) — built-in registry and per-agent notes.

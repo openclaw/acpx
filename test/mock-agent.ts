@@ -24,6 +24,7 @@ import {
   type ListSessionsResponse,
   type LoadSessionRequest,
   type LoadSessionResponse,
+  type NewSessionRequest,
   type NewSessionResponse,
   type PromptRequest,
   type PromptResponse,
@@ -92,6 +93,7 @@ type SessionState = {
   transientPromptAttempts: Record<string, number>;
   modelId: string;
   lastElicitationResponse?: CreateElicitationResponse;
+  mcpServers?: NewSessionRequest["mcpServers"];
 };
 
 class CancelledError extends Error {
@@ -832,13 +834,13 @@ class MockAgent implements Agent {
     return;
   }
 
-  async newSession(): Promise<NewSessionResponse> {
+  async newSession(params: NewSessionRequest): Promise<NewSessionResponse> {
     if (this.options.hangOnNewSession) {
       return await new Promise<NewSessionResponse>(() => {});
     }
 
     const sessionId = randomUUID();
-    this.sessions.set(sessionId, createSessionState(false));
+    this.sessions.set(sessionId, { ...createSessionState(false), mcpServers: params.mcpServers });
 
     if (this.options.elicitOnNewSession) {
       const response = await this.connection.request(methods.client.elicitation.create, {
@@ -903,7 +905,10 @@ class MockAgent implements Agent {
       throw error;
     }
 
-    this.sessions.set(params.sessionId, existing ?? createSessionState(false));
+    this.sessions.set(params.sessionId, {
+      ...(existing ?? createSessionState(false)),
+      mcpServers: params.mcpServers,
+    });
 
     if (this.options.replayLoadSessionUpdates) {
       await this.sendAssistantMessage(params.sessionId, this.options.loadReplayText);
@@ -1270,6 +1275,10 @@ class MockAgent implements Agent {
     }
     if (text === "retryable-error-once") {
       return "recovered after retry";
+    }
+
+    if (text === "session-mcp-servers") {
+      return JSON.stringify(this.ensureSession(sessionId).mcpServers);
     }
 
     if (text === "client-capabilities") {

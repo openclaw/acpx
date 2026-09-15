@@ -63,6 +63,7 @@ import { buildAgentSpawnCommand, buildSpawnCommandOptions } from "../spawn-comma
 import type {
   AcpClientOptions,
   AcpElicitationHandler,
+  AcpPermissionHandler,
   AcpElicitationMode,
   AcpProcessLaunch,
   AcpProcessLaunchScope,
@@ -187,13 +188,21 @@ function elicitationRequestScopeId(request: CreateElicitationRequest): JsonRpcId
     : undefined;
 }
 
-function waitForAbort(signal: AbortSignal): Promise<{ kind: "aborted" }> {
-  if (signal.aborted) {
-    return Promise.resolve({ kind: "aborted" });
-  }
-  return new Promise((resolve) => {
-    signal.addEventListener("abort", () => resolve({ kind: "aborted" }), { once: true });
+async function raceWithAbort<T>(signal: AbortSignal, pending: Promise<T>): Promise<T | undefined> {
+  let onAbort!: () => void;
+  const aborted = new Promise<undefined>((resolve) => {
+    onAbort = () => resolve(undefined);
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
   });
+  try {
+    return await Promise.race([pending, aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
 }
 
 type LoadSessionOptions = {
@@ -263,6 +272,7 @@ type ActivePromptState = {
   cancelPromise?: Promise<void>;
   onRequestWritten?: () => Promise<void> | void;
   elicitationHandler?: AcpElicitationHandler;
+  permissionHandler?: AcpPermissionHandler;
   elicitationController: AbortController;
 };
 
@@ -612,6 +622,7 @@ export class AcpClient {
     this.logAgentLaunch(launch);
     await this.ensureLaunchSupport(launch);
     const { child, process: startedProcess } = await this.spawnAgentProcess(launch);
+    this.agent = child;
     this.closing = false;
     this.agentStartedAt = startedProcess.startedAt;
     this.lastAgentExit = undefined;
@@ -871,7 +882,6 @@ export class AcpClient {
       ]);
       params.startupFailure.dispose();
       this.connection = params.connection;
-      this.agent = params.child;
       this.initResult = initResult;
       this.log(`initialized protocol version ${initResult.protocolVersion}`);
     } catch (error) {
@@ -1072,6 +1082,7 @@ export class AcpClient {
     prompt: PromptInput | string,
     onRequestWritten?: () => Promise<void> | void,
     onElicitation?: AcpElicitationHandler,
+    onPermissionRequest?: AcpPermissionHandler,
   ): Promise<PromptResponse> {
     const connection = this.getConnection();
     const normalizedPrompt = this.normalizePromptForAgent(prompt);
@@ -1080,7 +1091,12 @@ export class AcpClient {
       : undefined;
 
     const previousActivePrompt = this.activePrompt;
-    const activePrompt = this.beginActivePrompt(sessionId, onRequestWritten, onElicitation);
+    const activePrompt = this.beginActivePrompt(
+      sessionId,
+      onRequestWritten,
+      onElicitation,
+      onPermissionRequest,
+    );
 
     let promptPromise: Promise<PromptResponse>;
     try {
@@ -1115,12 +1131,14 @@ export class AcpClient {
     sessionId: string,
     onRequestWritten: (() => Promise<void> | void) | undefined,
     elicitationHandler: AcpElicitationHandler | undefined,
+    permissionHandler: AcpPermissionHandler | undefined,
   ): ActivePromptState {
     this.cancellingSessionIds.delete(sessionId);
     const active: ActivePromptState = {
       sessionId,
       onRequestWritten,
       elicitationHandler,
+      permissionHandler,
       elicitationController: new AbortController(),
     };
     this.activePrompt = active;
@@ -1852,12 +1870,12 @@ export class AcpClient {
         (response) => ({ kind: "response" as const, response }),
         (error: unknown) => ({ kind: "error" as const, error }),
       );
-    const outcome = await Promise.race([handlerAttempt, waitForAbort(signal)]);
+    const outcome = await raceWithAbort(signal, handlerAttempt);
 
     if (this.activePrompt !== active) {
       return cancelledElicitationResponse(ELICITATION_CANCEL_MESSAGES.inactive);
     }
-    if (outcome.kind === "aborted" || signal.aborted) {
+    if (!outcome || signal.aborted) {
       return cancelledElicitationResponse(ELICITATION_CANCEL_MESSAGES.cancelled);
     }
     if (outcome.kind === "error" || !isKnownElicitationResponse(outcome.response)) {
@@ -1914,21 +1932,52 @@ export class AcpClient {
     return this.closing || this.cancellingSessionIds.has(sessionId);
   }
 
+  private resolvePermissionOwner(sessionId: string):
+    | {
+        handler: AcpPermissionHandler;
+        signal: AbortSignal;
+      }
+    | undefined {
+    const active = this.activePrompt;
+    const handler = active?.permissionHandler ?? this.options.onPermissionRequest;
+    if (!handler) {
+      return undefined;
+    }
+    const signal = this.cancellationSignalForSession(sessionId);
+    if (!active?.permissionHandler) {
+      return { handler, signal };
+    }
+    return {
+      handler,
+      signal:
+        active.sessionId === sessionId
+          ? AbortSignal.any([signal, active.elicitationController.signal])
+          : AbortSignal.abort(),
+    };
+  }
+
   private async tryHandlePermissionRequestWithHost(
     params: RequestPermissionRequest,
   ): Promise<RequestPermissionResponse | undefined> {
-    if (!this.options.onPermissionRequest) {
+    const owner = this.resolvePermissionOwner(params.sessionId);
+    if (!owner) {
       return undefined;
     }
-    const signal = this.cancellationSignalForSession(params.sessionId);
+    const { handler, signal } = owner;
+    if (signal.aborted) {
+      return this.hostPermissionDecisionResponse(params, signal, undefined);
+    }
     try {
-      const decision = await this.options.onPermissionRequest(
-        {
-          sessionId: params.sessionId,
-          raw: params,
-          inferredKind: inferToolKind(params),
-        },
-        { signal },
+      const decision = await raceWithAbort(
+        signal,
+        handler(
+          {
+            sessionId: params.sessionId,
+            raw: params,
+            inferredKind: inferToolKind(params),
+          },
+          { signal },
+        ),
       );
       return this.hostPermissionDecisionResponse(params, signal, decision);
     } catch (error) {

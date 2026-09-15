@@ -10,6 +10,7 @@ import { asOptionalString } from "../public/shared.js";
 
 export function runtimeStatusFromRecord(record: SessionRecord): AcpRuntimeStatus {
   return {
+    ...(record.lastRequestId ? { lastRequestId: record.lastRequestId } : {}),
     summary: statusSummary(record),
     acpxRecordId: record.acpxRecordId,
     backendSessionId: record.acpSessionId,

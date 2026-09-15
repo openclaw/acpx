@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { getEventListeners } from "node:events";
 import path from "node:path";
 import { PassThrough, type Readable, type Writable } from "node:stream";
 import test, { type TestContext } from "node:test";
@@ -2621,3 +2622,20 @@ function restoreDescriptor(
     delete (target as Record<string, unknown>)[key];
   }
 }
+
+test("host permission decisions release their abort listeners after settlement", async () => {
+  let signal: AbortSignal | undefined;
+  const client = makeClient({
+    onPermissionRequest: async (_request, context) => {
+      signal = context.signal;
+      return { outcome: "allow_once" };
+    },
+  });
+  for (let index = 0; index < 3; index++) {
+    await asInternals(client).handlePermissionRequest?.(
+      makePermissionRequest("idle-permissions", "edit"),
+    );
+  }
+  assert.ok(signal);
+  assert.equal(getEventListeners(signal, "abort").length, 0);
+});

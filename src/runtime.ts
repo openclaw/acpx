@@ -20,11 +20,12 @@ import type {
   AcpRuntimeStatus,
   AcpRuntimeTurnInput,
   AcpSessionStore,
+  AcpSessionRecord,
 } from "./runtime/public/contract.js";
 import { AcpRuntimeError } from "./runtime/public/errors.js";
 import { createFileSessionStore } from "./runtime/public/file-session-store.js";
 import { decodeAcpxRuntimeHandleState, writeHandleState } from "./runtime/public/handle-state.js";
-import { normalizeRuntimeDetails, probeRuntime } from "./runtime/public/probe.js";
+import { normalizeRuntimeDetails } from "./runtime/public/probe.js";
 import { deriveAgentFromSessionKey, type AcpxHandleState } from "./runtime/public/shared.js";
 
 export { DEFAULT_AGENT_NAME, createFileSessionStore };
@@ -53,6 +54,7 @@ export type {
   AcpElicitationResponse,
   AcpFileSessionStoreOptions,
   AcpPermissionDecision,
+  AcpPermissionHandler,
   AcpPermissionRequest,
   AcpProcessExit,
   AcpProcessLaunch,
@@ -145,6 +147,8 @@ function normalizeRegistryOverride(value: string | string[]): string | string[] 
 
 export class AcpxRuntime implements AcpxRuntimeLike {
   private healthy = false;
+  private shutdownTask?: Promise<void>;
+  private readonly probeTasks = new Set<Promise<unknown>>();
   private manager: AcpRuntimeManager | null = null;
   private managerPromise: Promise<AcpRuntimeManager> | null = null;
 
@@ -184,7 +188,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     };
   }
 
-  async ensureSession(input: AcpRuntimeEnsureInput): Promise<AcpRuntimeHandle> {
+  private resolveSessionIdentity(input: { sessionKey: string; agent: string }) {
     const sessionName = input.sessionKey.trim();
     if (!sessionName) {
       throw new AcpRuntimeError("ACP_SESSION_INIT_FAILED", "ACP session key is required.");
@@ -194,6 +198,25 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       throw new AcpRuntimeError("ACP_SESSION_INIT_FAILED", "ACP agent id is required.");
     }
 
+    return { sessionName, agent };
+  }
+
+  async findSession(input: {
+    sessionKey: string;
+    agent: string;
+  }): Promise<AcpRuntimeHandle | undefined> {
+    const { sessionName, agent } = this.resolveSessionIdentity(input);
+    const record = await (await this.getManager()).findSession(sessionName);
+    return record
+      ? this.createSessionHandle(
+          { sessionKey: input.sessionKey, agent, mode: "persistent" },
+          record,
+        )
+      : undefined;
+  }
+
+  async ensureSession(input: AcpRuntimeEnsureInput): Promise<AcpRuntimeHandle> {
+    const { sessionName, agent } = this.resolveSessionIdentity(input);
     const manager = await this.getManager();
     const record = await manager.ensureSession({
       sessionKey: sessionName,
@@ -204,6 +227,13 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       sessionOptions: input.sessionOptions,
     });
 
+    return this.createSessionHandle({ ...input, agent }, record);
+  }
+
+  private createSessionHandle(
+    input: Pick<AcpRuntimeEnsureInput, "sessionKey" | "agent" | "mode">,
+    record: AcpSessionRecord,
+  ): AcpRuntimeHandle {
     const handle: AcpRuntimeHandle = {
       sessionKey: input.sessionKey,
       backend: ACPX_BACKEND_ID,
@@ -214,8 +244,8 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       agentSessionId: record.agentSessionId,
     };
     writeHandleState(handle, {
-      name: sessionName,
-      agent,
+      name: input.sessionKey.trim(),
+      agent: input.agent,
       cwd: record.cwd,
       mode: input.mode,
       acpxRecordId: record.acpxRecordId,
@@ -239,6 +269,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
         timeoutMs: input.timeoutMs,
         signal: input.signal,
         onElicitation: input.onElicitation,
+        onPermissionRequest: input.onPermissionRequest,
       }),
     );
     return {
@@ -277,6 +308,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       timeoutMs: input.timeoutMs,
       signal: input.signal,
       onElicitation: input.onElicitation,
+      onPermissionRequest: input.onPermissionRequest,
     });
   }
 
@@ -348,7 +380,25 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     });
   }
 
+  shutdown(): Promise<void> {
+    if (!this.shutdownTask) {
+      this.healthy = false;
+      const managerShutdown = this.managerPromise?.then((manager) => manager.shutdown());
+      this.shutdownTask = Promise.allSettled([managerShutdown, ...this.probeTasks]).then(
+        ([manager]) => {
+          if (manager.status === "rejected") {
+            throw manager.reason;
+          }
+        },
+      );
+    }
+    return this.shutdownTask;
+  }
+
   private async getManager(): Promise<AcpRuntimeManager> {
+    if (this.shutdownTask) {
+      throw new AcpRuntimeError("ACP_BACKEND_UNAVAILABLE", "ACP runtime is shut down.");
+    }
     if (this.manager) {
       return this.manager;
     }
@@ -364,7 +414,22 @@ export class AcpxRuntime implements AcpxRuntimeLike {
   }
 
   private async runProbe() {
-    return await (this.testOptions?.probeRunner?.(this.options) ?? probeRuntime(this.options));
+    if (this.shutdownTask) {
+      throw new AcpRuntimeError("ACP_BACKEND_UNAVAILABLE", "ACP runtime is shut down.");
+    }
+    const probe =
+      this.testOptions?.probeRunner?.(this.options) ??
+      this.getManager().then((manager) => manager.probe());
+    this.probeTasks.add(probe);
+    try {
+      const report = await probe;
+      if (this.shutdownTask) {
+        throw new AcpRuntimeError("ACP_BACKEND_UNAVAILABLE", "ACP runtime is shut down.");
+      }
+      return report;
+    } finally {
+      this.probeTasks.delete(probe);
+    }
   }
 
   private resolveManagerHandle(handle: AcpRuntimeHandle): {

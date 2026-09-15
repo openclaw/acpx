@@ -7,8 +7,7 @@ import type {
 import type {
   AcpElicitationHandler,
   AcpElicitationMode,
-  AcpPermissionDecision,
-  AcpPermissionRequest,
+  AcpPermissionHandler,
   AcpProcessLifecycle,
   McpServer,
   NonInteractivePermissionPolicy,
@@ -27,6 +26,7 @@ export type {
   AcpElicitationRequest,
   AcpElicitationResponse,
   AcpPermissionDecision,
+  AcpPermissionHandler,
   AcpPermissionRequest,
   AcpProcessExit,
   AcpProcessLaunch,
@@ -100,6 +100,8 @@ export type AcpRuntimeTurnInput = {
   requestId: string;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Overrides the runtime permission callback for this prompt turn. */
+  onPermissionRequest?: AcpPermissionHandler;
   /** Handles ACP elicitation requests owned by this prompt turn. */
   onElicitation?: AcpElicitationHandler;
 };
@@ -175,6 +177,8 @@ export type AcpRuntimeSessionUsage = {
 };
 
 export type AcpRuntimeStatus = {
+  /** Most recent host request id admitted for a prompt on this session. */
+  lastRequestId?: string;
   summary?: string;
   acpxRecordId?: string;
   backendSessionId?: string;
@@ -336,6 +340,10 @@ export interface AcpRuntimeTurn {
 }
 
 export interface AcpRuntime {
+  /** Stops owned connections and joins admitted work; stored sessions remain resumable. */
+  shutdown?(): Promise<void>;
+  /** Finds a persistent session handle without starting or reconnecting an agent. */
+  findSession?(input: { sessionKey: string; agent: string }): Promise<AcpRuntimeHandle | undefined>;
   ensureSession(input: AcpRuntimeEnsureInput): Promise<AcpRuntimeHandle>;
   startTurn(input: AcpRuntimeTurnInput): AcpRuntimeTurn;
   /**
@@ -381,7 +389,20 @@ export type AcpRuntimeOptions = {
   agentProcessEnv?: Record<string, string>;
   sessionStore: AcpSessionStore;
   agentRegistry: AcpAgentRegistry;
-  mcpServers?: McpServer[];
+  /**
+   * Servers for new and reconnected session clients. A resolver runs at connection
+   * creation with the session's stored identity; its result is never persisted.
+   * Retained connections keep their original servers. Initialization-only health
+   * probes do not call the resolver.
+   */
+  mcpServers?:
+    | McpServer[]
+    | ((session: {
+        sessionKey: string;
+        cwd: string;
+        agentCommand: string;
+        agentArgv?: string[];
+      }) => McpServer[]);
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   permissionPolicy?: PermissionPolicy;
@@ -392,10 +413,7 @@ export type AcpRuntimeOptions = {
   elicitationModes?: readonly AcpElicitationMode[];
   /** Optional lifecycle observer for ACP agent processes owned by this runtime. */
   processLifecycle?: AcpProcessLifecycle;
-  onPermissionRequest?: (
-    req: AcpPermissionRequest,
-    ctx: { signal: AbortSignal },
-  ) => Promise<AcpPermissionDecision | undefined>;
+  onPermissionRequest?: AcpPermissionHandler;
 };
 
 export type AcpFileSessionStoreOptions = {
