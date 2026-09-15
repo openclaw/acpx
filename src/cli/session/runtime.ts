@@ -5,7 +5,7 @@ import {
   isRetryablePromptError,
   normalizeOutputError,
 } from "../../acp/error-normalization.js";
-import { InterruptedError, withInterrupt, withTimeout } from "../../async-control.js";
+import { InterruptedError, TimeoutError, withInterrupt, withTimeout } from "../../async-control.js";
 export { InterruptedError, TimeoutError } from "../../async-control.js";
 import { formatPerfMetric, measurePerf, startPerfTimer } from "../../perf-metrics.js";
 import { textPrompt } from "../../prompt-content.js";
@@ -39,6 +39,7 @@ import {
   resolveSessionRecord,
   writeSessionRecord,
 } from "../../session/persistence.js";
+import { acquireSessionTurn } from "../../session/turn-ownership.js";
 import type {
   AcpJsonRpcMessage,
   AcpMessageDirection,
@@ -68,6 +69,7 @@ type RunSessionPromptOptions = Omit<
   "maxQueueDepth" | "sessionId" | "ttlMs" | "waitForCompletion"
 > & {
   sessionRecordId: string;
+  waitSignal?: AbortSignal;
   handleProcessInterrupts?: boolean;
   onClientAvailable?: (controller: ActiveSessionController) => void;
   onClientClosed?: () => void;
@@ -551,6 +553,7 @@ function buildQueuedTaskRunOptions(
     onClientClosed: options.onClientClosed,
     onPromptActive: options.onPromptActive,
     handleProcessInterrupts: options.handleProcessInterrupts,
+    waitSignal: options.waitSignal,
     client: options.sharedClient,
   };
 }
@@ -607,6 +610,7 @@ export async function runQueuedTask(
     onClientClosed?: () => void;
     onPromptActive?: () => Promise<void> | void;
     handleProcessInterrupts?: boolean;
+    waitSignal?: AbortSignal;
   },
 ): Promise<void> {
   const outputFormatter = task.waitForCompletion
@@ -628,7 +632,65 @@ export async function runQueuedTask(
   }
 }
 
+async function waitForSessionTurn(options: RunSessionPromptOptions): Promise<{
+  recordId: string;
+  ownership: AsyncDisposable;
+}> {
+  const waiting = new AbortController();
+  const onInterrupt = () => waiting.abort(new InterruptedError());
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  for (const signal of signals) {
+    process.once(signal, onInterrupt);
+  }
+  const timeoutMs = options.timeoutMs;
+  const timeout =
+    timeoutMs != null && timeoutMs > 0
+      ? setTimeout(() => waiting.abort(new TimeoutError(timeoutMs)), timeoutMs)
+      : undefined;
+  const signal = options.waitSignal
+    ? AbortSignal.any([waiting.signal, options.waitSignal])
+    : waiting.signal;
+  try {
+    // Resolve aliases for the lock key only; read the authoritative record again after admission.
+    const { acpxRecordId } = await resolveSessionRecord(options.sessionRecordId);
+    const ownership = await acquireSessionTurn(acpxRecordId, signal);
+    return { recordId: acpxRecordId, ownership };
+  } catch (error) {
+    signal.throwIfAborted();
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    for (const signal of signals) {
+      process.off(signal, onInterrupt);
+    }
+  }
+}
+
 async function runSessionPrompt(options: RunSessionPromptOptions): Promise<SessionSendResult> {
+  let turn: Awaited<ReturnType<typeof waitForSessionTurn>>;
+  try {
+    turn = await waitForSessionTurn(options);
+  } catch (error) {
+    if (options.waitSignal?.aborted && error === options.waitSignal.reason) {
+      const record = await resolveSessionRecord(options.sessionRecordId);
+      return {
+        sessionId: record.acpxRecordId,
+        stopReason: "cancelled",
+        permissionStats: { requested: 0, approved: 0, denied: 0, cancelled: 0 },
+        record,
+        resumed: false,
+      };
+    }
+    throw error;
+  }
+  try {
+    return await runOwnedSessionPrompt({ ...options, sessionRecordId: turn.recordId });
+  } finally {
+    await turn.ownership[Symbol.asyncDispose]();
+  }
+}
+
+async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<SessionSendResult> {
   const stopTotalTimer = startPerfTimer("runtime.prompt.total");
   const output = options.outputFormatter;
   const shouldMarkAcpErrorsEmitted = rendersAcpErrors(options.errorEmissionPolicy);

@@ -3,10 +3,9 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
-import { readBundleFile } from "./filesystem-bundle-reader.js";
 import { createFilesystemRunSource } from "./live-source.js";
 import { createReplayLiveSyncServer } from "./live-sync.js";
-import { defaultRunsDir, listRunBundles } from "./run-bundles.js";
+import { defaultRunsDir, listRunBundles, readRunBundleFile } from "./run-bundles.js";
 
 const SERVER_ID = "acpx-flow-replay-viewer";
 
@@ -70,39 +69,40 @@ export async function createReplayViewerServer(
     return closePromise;
   };
 
-  const server = http.createServer(async (request, response) => {
-    if (
-      await handleApiRequest(request, response, host, port, runsDir, {
-        requestClose,
-      })
-    ) {
-      return;
-    }
-
-    vite.middlewares(request, response, (error: unknown) => {
-      if (error) {
-        response.statusCode = 500;
-        response.setHeader("content-type", "application/json; charset=utf-8");
-        response.end(
-          JSON.stringify({
-            error: formatPublicError(error),
-          }),
-        );
+  const server = http.createServer((request, response) => {
+    const fail = () => {
+      if (response.headersSent) {
+        response.destroy();
         return;
       }
+      writeJson(response, 500, { error: "Replay viewer request failed" });
+    };
+    void handleApiRequest(request, response, host, port, runsDir, { requestClose })
+      .then((handled) => {
+        if (handled) {
+          return;
+        }
+        vite.middlewares(request, response, (error: unknown) => {
+          if (error) {
+            fail();
+            return;
+          }
 
-      response.statusCode = 404;
-      response.end("Not found");
-    });
+          response.statusCode = 404;
+          response.end("Not found");
+        });
+      })
+      .catch(fail);
   });
 
   server.on("upgrade", (request, socket, head) => {
-    void liveSyncServer.handleUpgrade(request, socket, head).then((handled) => {
-      if (handled) {
-        return;
+    try {
+      if (!liveSyncServer.handleUpgrade(request, socket, head)) {
+        socket.destroy();
       }
+    } catch {
       socket.destroy();
-    });
+    }
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -165,7 +165,9 @@ export async function handleApiRequest(
       ok: true,
     });
     setImmediate(() => {
-      void options.requestClose?.();
+      void options.requestClose?.().catch((error: unknown) => {
+        console.error("Replay viewer shutdown failed", error);
+      });
     });
     return true;
   }
@@ -180,17 +182,12 @@ export async function handleApiRequest(
 
   const runFileMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/files\/(.+)$/);
   if (runFileMatch) {
-    const [, encodedRunId, encodedRelativePath] = runFileMatch;
-    const runId = decodeURIComponent(encodedRunId ?? "");
-    const relativePath = encodedRelativePath
-      ?.split("/")
-      .map((segment) => decodeURIComponent(segment))
-      .join("/");
-
     try {
-      const payload = await readBundleFile(runsDir, runId, relativePath ?? "");
+      const runId = decodeURIComponent(runFileMatch[1] ?? "");
+      const relativePath = decodeURIComponent(runFileMatch[2] ?? "");
+      const payload = await readRunBundleFile(runsDir, runId, relativePath);
       response.statusCode = 200;
-      response.setHeader("content-type", contentTypeFor(relativePath ?? ""));
+      response.setHeader("content-type", contentTypeFor(relativePath));
       response.end(payload);
     } catch {
       writeJson(response, 404, {
@@ -272,19 +269,6 @@ function writeJson(response: http.ServerResponse, statusCode: number, value: unk
   response.statusCode = statusCode;
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(value));
-}
-
-function formatPublicError(error: unknown): string {
-  if (error instanceof Error) {
-    return "Replay viewer request failed";
-  }
-  if (typeof error === "string") {
-    return error;
-  }
-  if (typeof error === "number" || typeof error === "boolean" || typeof error === "bigint") {
-    return String(error);
-  }
-  return "Unknown error";
 }
 
 function contentTypeFor(filePath: string): string {

@@ -33,6 +33,7 @@ export class QueueOwnerTurnController {
   private state: QueueOwnerTurnState = "idle";
   private pendingCancel = false;
   private activeController?: QueueOwnerActiveSessionController;
+  private waitingTurn?: AbortController;
 
   constructor(options: QueueOwnerTurnControllerOptions) {
     this.options = options;
@@ -46,9 +47,11 @@ export class QueueOwnerTurnController {
     return this.pendingCancel;
   }
 
-  beginTurn(): void {
+  beginTurn(): AbortSignal {
     this.state = "starting";
     this.pendingCancel = false;
+    this.waitingTurn = new AbortController();
+    return this.waitingTurn.signal;
   }
 
   markPromptActive(): void {
@@ -60,6 +63,7 @@ export class QueueOwnerTurnController {
   endTurn(): void {
     this.state = "idle";
     this.pendingCancel = false;
+    this.waitingTurn = undefined;
   }
 
   beginClosing(): void {
@@ -98,6 +102,7 @@ export class QueueOwnerTurnController {
 
     if (this.state === "starting" || this.state === "active") {
       this.pendingCancel = true;
+      this.waitingTurn?.abort();
       return true;
     }
 

@@ -201,6 +201,60 @@ test("replay viewer releases startup resources when its HTTP port is occupied", 
   }
 });
 
+test("replay viewer contains malformed routes and failed runs-directory reads", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-request-errors-"));
+  const runsDir = path.join(directory, "runs");
+  const savedRunsDir = path.join(directory, "saved-runs");
+  await fs.mkdir(runsDir);
+  const viewer = await createReplayViewerServer({
+    host: "127.0.0.1",
+    port: 0,
+    runsDir,
+    disableDependencyOptimization: true,
+  });
+  const request = async (target: string) =>
+    await new Promise<{ status: number | undefined; body: string }>((resolve, reject) => {
+      http
+        .get({ hostname: "127.0.0.1", port: viewer.port, path: target }, (response) => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk: string) => {
+            body += chunk;
+          });
+          response.on("end", () => resolve({ status: response.statusCode, body }));
+          response.on("error", reject);
+        })
+        .on("error", reject);
+    });
+
+  try {
+    for (const target of [
+      "/api/runs/%FF/files/manifest.json",
+      "/api/runs/synthetic/files/%E0%A4%A",
+    ]) {
+      const response = await request(target);
+      assert.equal(response.status, 404);
+      assert.deepEqual(JSON.parse(response.body), { error: "Run bundle file not found" });
+    }
+    const malformedUrl = await request("http://[");
+    assert.equal(malformedUrl.status, 500);
+    assert.deepEqual(JSON.parse(malformedUrl.body), { error: "Replay viewer request failed" });
+
+    await fs.rename(runsDir, savedRunsDir);
+    await fs.writeFile(runsDir, "not a directory");
+    const unavailable = await request("/api/runs");
+    assert.equal(unavailable.status, 500);
+    assert.deepEqual(JSON.parse(unavailable.body), { error: "Replay viewer request failed" });
+    await fs.rm(runsDir);
+    await fs.rename(savedRunsDir, runsDir);
+    assert.deepEqual(JSON.parse((await request("/api/runs")).body), { runs: [] });
+    assert.equal((await request("/api/health")).status, 200);
+  } finally {
+    await viewer.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("replay viewer blocks file reads that escape the runs directory via runId", async () => {
   const fakeHome = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-traversal-"));
   const runsDir = path.join(fakeHome, ".acpx", "flows", "runs");

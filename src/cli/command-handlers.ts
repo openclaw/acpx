@@ -1,15 +1,8 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import { isLegacyZedCodexAcpInvocation } from "../acp/codex-compat.js";
 import { AgentSpawnError } from "../errors.js";
 import { loadPermissionPolicySpec } from "../permission-policy.js";
-import {
-  mergePromptSourceWithText,
-  parsePromptSource,
-  PromptInputValidationError,
-  textPrompt,
-} from "../prompt-content.js";
 import { exportSession } from "../session/export.js";
 import { importSession } from "../session/import.js";
 import {
@@ -47,6 +40,7 @@ import {
   type StatusFlags,
 } from "./flags.js";
 import { emitJsonResult } from "./output/json-output.js";
+import { readPromptInput } from "./prompt-input.js";
 import type { SessionListResult } from "./session/contracts.js";
 
 class NoSessionError extends Error {
@@ -77,65 +71,6 @@ function loadOutputModule(): Promise<OutputModule> {
 function loadOutputRenderModule(): Promise<OutputRenderModule> {
   outputRenderModulePromise ??= import("./output/render.js");
   return outputRenderModulePromise;
-}
-
-async function readPromptInputFromStdin(): Promise<string> {
-  let data = "";
-  for await (const chunk of process.stdin) {
-    data += String(chunk);
-  }
-  return data;
-}
-
-async function readPrompt(
-  promptParts: string[],
-  filePath: string | undefined,
-  cwd: string,
-): Promise<import("../types.js").PromptInput> {
-  try {
-    if (filePath) {
-      return await readPromptFromFile(filePath, cwd, promptParts);
-    }
-
-    const joined = promptParts.join(" ").trim();
-    if (joined.length > 0) {
-      return textPrompt(joined);
-    }
-
-    if (process.stdin.isTTY) {
-      throw new InvalidArgumentError(
-        "Prompt is required (pass as argument, --file, or pipe via stdin)",
-      );
-    }
-
-    const prompt = parsePromptSource(await readPromptInputFromStdin());
-    if (prompt.length === 0) {
-      throw new InvalidArgumentError("Prompt from stdin is empty");
-    }
-
-    return prompt;
-  } catch (error) {
-    if (error instanceof PromptInputValidationError) {
-      throw new InvalidArgumentError(error.message);
-    }
-    throw error;
-  }
-}
-
-async function readPromptFromFile(
-  filePath: string,
-  cwd: string,
-  promptParts: string[],
-): Promise<import("../types.js").PromptInput> {
-  const source =
-    filePath === "-"
-      ? await readPromptInputFromStdin()
-      : await fs.readFile(path.resolve(cwd, filePath), "utf8");
-  const prompt = mergePromptSourceWithText(source, promptParts.join(" "));
-  if (prompt.length === 0) {
-    throw new InvalidArgumentError("Prompt from --file is empty");
-  }
-  return prompt;
 }
 
 function applyPermissionExitCode(
@@ -323,7 +258,7 @@ export async function handlePrompt(
   const outputPolicy = resolveRequestedOutputPolicy(globalFlags);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
-  const prompt = await readPrompt(promptParts, flags.file, globalFlags.cwd);
+  const prompt = await readPromptInput(flags.file, promptParts.join(" "), globalFlags.cwd);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
   const [
     { createOutputFormatter },
@@ -424,7 +359,7 @@ export async function handleExec(
   const outputPolicy = resolveRequestedOutputPolicy(globalFlags);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
-  const prompt = await readPrompt(promptParts, flags.file, globalFlags.cwd);
+  const prompt = await readPromptInput(flags.file, promptParts.join(" "), globalFlags.cwd);
   const [{ createOutputFormatter }, { runOnce }] = await Promise.all([
     loadOutputModule(),
     loadSessionModule(),

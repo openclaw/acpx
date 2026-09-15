@@ -1,9 +1,6 @@
 import type { BundleReader } from "../src/lib/bundle-reader.js";
 import type { RunBundleSummary } from "../src/types.js";
-import {
-  readRunBundleFile as readContainedRunBundleFile,
-  readRunBundleTextFile,
-} from "./run-bundles.js";
+import { readRunBundleTextFile } from "./run-bundles.js";
 
 export function createFilesystemBundleReader(
   runsDir: string,
@@ -22,12 +19,4 @@ export function createFilesystemBundleReader(
       return JSON.parse(text) as T;
     },
   };
-}
-
-export async function readBundleFile(
-  runsDir: string,
-  runId: string,
-  relativePath: string,
-): Promise<Buffer> {
-  return await readContainedRunBundleFile(runsDir, runId, relativePath);
 }

@@ -13,6 +13,7 @@ import {
   recordPromptSubmission,
   recordSessionUpdate,
 } from "../src/session/conversation-model.js";
+import type { SessionRecord } from "../src/types.js";
 import {
   extractAgentMessageChunkText,
   extractJsonRpcId,
@@ -34,6 +35,9 @@ const FLOW_ACP_DISCONNECT_FIXTURE_PATH = fileURLToPath(
 );
 const FLOW_WAIT_FIXTURE_PATH = fileURLToPath(
   new URL("./fixtures/flow-wait.flow.js", import.meta.url),
+);
+const FLOW_SESSION_TURN_FIXTURE_PATH = fileURLToPath(
+  new URL("./fixtures/flow-session-turn.flow.js", import.meta.url),
 );
 const FLOW_WORKDIR_FIXTURE_PATH = fileURLToPath(
   new URL("./fixtures/flow-workdir.flow.js", import.meta.url),
@@ -76,6 +80,81 @@ test("integration: exec echo baseline", async () => {
     }
   });
 });
+
+for (const completion of ["complete", "timeout", "cancel"] as const) {
+  test(`integration: session turn ownership preserves a live flow during CLI ${completion}`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      await fs.mkdir(cwd);
+      const base = [...baseLoadCapableAgentArgs(cwd), "--format", "json", "--ttl", "1"];
+      const flow = runCli([...base, "flow", "run", FLOW_SESSION_TURN_FIXTURE_PATH], homeDir);
+      let queued: Promise<CliRunResult> | undefined;
+      let name: string | undefined;
+      try {
+        const entry = await waitFor(async () => {
+          const index = JSON.parse(
+            await fs.readFile(path.join(homeDir, ".acpx", "sessions", "index.json"), "utf8"),
+          ) as { entries: Array<{ name: string; file: string; acpxRecordId: string }> };
+          return (
+            index.entries.find((value) => value.name.startsWith("fixture-session-turn")) ?? null
+          );
+        }, 5_000);
+        name = entry.name;
+        const recordPath = path.join(homeDir, ".acpx", "sessions", entry.file);
+        await waitFor(async () => {
+          const record = JSON.parse(await fs.readFile(recordPath, "utf8")) as SessionRecord;
+          return record.messages.some(
+            (message) =>
+              typeof message === "object" &&
+              "Agent" in message &&
+              JSON.stringify(message.Agent.content).includes("flow-held"),
+          )
+            ? true
+            : null;
+        }, 5_000);
+        const timeoutArgs = completion === "timeout" ? ["--timeout", "0.2"] : [];
+        queued = runCli(
+          [...base, ...timeoutArgs, "prompt", "-s", name, `echo cli-${completion}`],
+          homeDir,
+        );
+        if (completion === "cancel") {
+          await waitFor(async () => {
+            const cancelled = await runCli([...base, "cancel", "-s", entry.name], homeDir);
+            if (cancelled.code !== 0) {
+              return null;
+            }
+            return (JSON.parse(cancelled.stdout) as { cancelled: boolean }).cancelled ? true : null;
+          }, 5_000);
+        }
+        const queuedResult = await queued;
+        const flowResult = await flow;
+        assert.equal(flowResult.code, 0, flowResult.stderr);
+        const record = await fs.readFile(recordPath, "utf8");
+        assert.match(record, /stream-sleep done: flow-held/);
+        if (completion === "complete") {
+          assert.equal(queuedResult.code, 0, queuedResult.stderr);
+          assert.match(record, /cli-complete/);
+          const saved = JSON.parse(record) as { last_seq: number };
+          const events = await fs.readFile(recordPath.replace(/\.json$/, ".stream.ndjson"), "utf8");
+          assert.equal(saved.last_seq, events.trim().split("\n").length);
+        } else {
+          assert.doesNotMatch(record, new RegExp(`cli-${completion}`));
+          if (completion === "timeout") {
+            assert.notEqual(queuedResult.code, 0);
+          } else {
+            assert.equal(queuedResult.code, 0, queuedResult.stderr);
+            assert.equal(queuedResult.stdout, "", "canceled waiters must not send ACP requests");
+          }
+        }
+      } finally {
+        await Promise.allSettled([flow, queued]);
+        if (name) {
+          await runCli([...base, "sessions", "close", name], homeDir);
+        }
+      }
+    });
+  });
+}
 
 test("integration: built-in cursor agent resolves to cursor-agent acp", async () => {
   await withTempHome(async (homeDir) => {

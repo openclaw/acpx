@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -27,6 +28,102 @@ import type {
   ViewerRunLiveState,
   ViewerRunsState,
 } from "../examples/flows/replay-viewer/src/types.js";
+
+test("replay viewer rejects malformed messages and isolates invalid frames", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-admission-"));
+  const viewer = await createReplayViewerServer({
+    host: "127.0.0.1",
+    port: 0,
+    runsDir,
+    livePollIntervalMs: 50,
+  });
+  const socket = new WebSocket(viewer.baseUrl.replace(/^http/, "ws") + "/api/live");
+  const inbox = createMessageInbox(socket);
+  let invalidSocket: WebSocket | undefined;
+  try {
+    await onceOpen(socket);
+    for (const payload of [
+      "null",
+      "{",
+      JSON.stringify({ type: "subscribe_run", runId: 7 }),
+      JSON.stringify({ type: "resync_run" }),
+    ]) {
+      socket.send(payload);
+      const error = await inbox.next((message) => message.type === "error");
+      assert.equal(error.code, "protocol_error");
+    }
+    socket.send(JSON.stringify({ type: "hello", protocol: "unsupported" }));
+    assert.equal(
+      (await inbox.next((message) => message.type === "error")).message,
+      "Unsupported replay protocol.",
+    );
+    socket.send(Buffer.from(JSON.stringify({ type: "ping" })));
+    await inbox.next((message) => message.type === "pong");
+
+    invalidSocket = new WebSocket(viewer.baseUrl.replace(/^http/, "ws") + "/api/live");
+    await onceOpen(invalidSocket);
+    const closed = once(invalidSocket, "close");
+    invalidSocket.send(Buffer.from([0xff]), { binary: false });
+    await closed;
+    socket.send(JSON.stringify({ type: "ping" }));
+    await inbox.next((message) => message.type === "pong");
+    socket.send(JSON.stringify({ type: "subscribe_runs" }));
+    assert.deepEqual(
+      (await inbox.next((message) => message.type === "runs_snapshot")).state.order,
+      [],
+    );
+  } finally {
+    invalidSocket?.terminate();
+    await closeSocket(socket);
+    await viewer.close();
+    await fs.rm(runsDir, { recursive: true, force: true });
+  }
+});
+
+test("replay viewer reports polling failures and resumes live run updates", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-poll-error-"));
+  const runsDir = path.join(directory, "runs");
+  const savedRunsDir = path.join(directory, "saved-runs");
+  await fs.mkdir(runsDir);
+  const viewer = await createReplayViewerServer({
+    host: "127.0.0.1",
+    port: 0,
+    runsDir,
+    livePollIntervalMs: 50,
+  });
+  const socket = new WebSocket(viewer.baseUrl.replace(/^http/, "ws") + "/api/live");
+  const inbox = createMessageInbox(socket);
+  try {
+    await onceOpen(socket);
+    socket.send(JSON.stringify({ type: "subscribe_runs" }));
+    const initial = await inbox.next((message) => message.type === "runs_snapshot");
+    await fs.rename(runsDir, savedRunsDir);
+    await fs.writeFile(runsDir, "not a directory");
+    assert.equal((await inbox.next((message) => message.type === "error")).code, "internal_error");
+    await fs.rm(runsDir);
+    await fs.rename(savedRunsDir, runsDir);
+    await writeRunBundle(runsDir, {
+      runId: "recovered",
+      flowName: "synthetic",
+      runTitle: "Recovered synthetic run",
+      startedAt: "2026-09-15T00:00:00.000Z",
+      projectedStatus: "running",
+      liveStatus: "running",
+      updatedAt: "2026-09-15T00:00:00.000Z",
+      currentNode: "first",
+      steps: [],
+    });
+    const update = await inbox.next((message) => message.type === "runs_patch");
+    assert.equal(
+      applyReplayPatch<ViewerRunsState>(initial.state, update.ops).runsById.recovered?.status,
+      "running",
+    );
+  } finally {
+    await closeSocket(socket);
+    await viewer.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("replay viewer streams live sidebar and run patches over websocket", async () => {
   const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-live-"));
@@ -499,11 +596,9 @@ async function createReplayViewerServer(options: {
   });
 
   server.on("upgrade", (request, socket, head) => {
-    void liveSyncServer.handleUpgrade(request, socket, head).then((handled) => {
-      if (!handled) {
-        socket.destroy();
-      }
-    });
+    if (!liveSyncServer.handleUpgrade(request, socket, head)) {
+      socket.destroy();
+    }
   });
 
   await new Promise<void>((resolve, reject) => {

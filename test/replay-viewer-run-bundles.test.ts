@@ -143,6 +143,36 @@ test("listRunBundles prefers live status over stale run projections", async () =
   }
 });
 
+test("listRunBundles skips corrupt sort fields without hiding valid runs", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-invalid-sort-"));
+  try {
+    for (const runId of ["bad-id", "bad-time", "valid"]) {
+      await writeRunBundle(runsDir, {
+        runId,
+        flowName: "synthetic",
+        status: "completed",
+        startedAt: "2026-09-15T00:00:00.000Z",
+      });
+      if (runId !== "valid") {
+        const manifestPath = path.join(runsDir, runId, "manifest.json");
+        const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as Record<
+          string,
+          unknown
+        >;
+        manifest[runId === "bad-id" ? "runId" : "startedAt"] =
+          runId === "bad-id" ? 7 : { toString: null, valueOf: null };
+        await fs.writeFile(manifestPath, JSON.stringify(manifest));
+      }
+    }
+    assert.deepEqual(
+      (await listRunBundles(runsDir)).map((run) => run.runId),
+      ["valid"],
+    );
+  } finally {
+    await fs.rm(runsDir, { recursive: true, force: true });
+  }
+});
+
 test("listRunBundles ignores bundles whose manifest paths escape the bundle", async () => {
   const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-list-escape-"));
   const secretDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-secret-"));

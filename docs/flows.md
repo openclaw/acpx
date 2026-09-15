@@ -165,6 +165,10 @@ pnpm viewer
 
 The viewer is read-only. It opens a saved bundle and lets you inspect what happened; it does not re-run the flow.
 
+Malformed HTTP or WebSocket input is rejected without stopping the viewer.
+Corrupt bundle metadata is skipped, and transient read failures do not prevent
+subsequent live updates.
+
 ## Example flows in the source tree
 
 Under `examples/flows/`:

@@ -404,10 +404,10 @@ async function runQueueOwnerRuntime(
     return true;
   };
 
-  const runPromptTurn = async <T>(run: () => Promise<T>): Promise<T> => {
-    turnController.beginTurn();
+  const runPromptTurn = async <T>(run: (waitSignal: AbortSignal) => Promise<T>): Promise<T> => {
+    const waitSignal = turnController.beginTurn();
     try {
-      return await run();
+      return await run(waitSignal);
     } finally {
       turnController.endTurn();
     }
@@ -493,7 +493,7 @@ async function runQueueOwnerRuntime(
       }
       isFirstTask = false;
 
-      const turnPromise = runPromptTurn(async () => {
+      const turnPromise = runPromptTurn(async (waitSignal) => {
         try {
           await runQueuedTask(options.sessionId, task, {
             sharedClient,
@@ -512,6 +512,7 @@ async function runQueueOwnerRuntime(
               await applyPendingCancel();
             },
             handleProcessInterrupts: false,
+            waitSignal,
           });
         } finally {
           checkpointPerfMetricsCapture();

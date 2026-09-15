@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { appendRegularFileSync } from "@openclaw/fs-safe/advanced";
 import { getPerfMetricsSnapshot, resetPerfMetrics } from "./perf-metrics.js";
 
 const PERF_METRICS_FILE_ENV = "ACPX_PERF_METRICS_FILE";
@@ -44,7 +45,11 @@ function payloadHasMetrics(payload: Record<string, unknown>): boolean {
 
 function appendPerfMetricsPayload(payload: Record<string, unknown>): void {
   fs.mkdirSync(path.dirname(captureFilePath!), { recursive: true });
-  fs.appendFileSync(captureFilePath!, `${JSON.stringify(payload)}\n`, "utf8");
+  appendRegularFileSync({
+    filePath: captureFilePath!,
+    content: `${JSON.stringify(payload)}\n`,
+    mode: 0o600,
+  });
   captureSequence += 1;
 }
 

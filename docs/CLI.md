@@ -652,6 +652,11 @@ Claude Code user settings. By default, they load only project and local settings
 to avoid globally enabled channel or daemon plugins interfering with spawned ACP
 sessions.
 
+`ACPX_PERF_METRICS_FILE` enables optional NDJSON performance capture, including
+command arguments. On POSIX, capture files use `0600`; existing parent directory
+permissions are preserved. Symbolic links, hardlinked files, and special files such
+as FIFOs are skipped. Capture failures leave the command's exit status unchanged.
+
 Related runtime behavior:
 
 - session storage path is derived from OS home directory (`~/.acpx/sessions`)

@@ -21,6 +21,9 @@ Repo: https://github.com/openclaw/acpx
 - Storage/hardening: share private atomic writes across sessions, flow bundles, imports, and exports; keep history and new config files private while preserving output-directory permissions and append ordering.
 - Queue/hardening: deliver detached-owner startup options through stdin instead of temporary credential-bearing files, preserving large payloads and startup diagnostics.
 - Queue/ownership: keep lease records private and complete during heartbeat updates, drain pending writes before shutdown, and preserve replacement owners during stale recovery.
+- Sessions: preserve both completions when flows and CLI prompts share a session; keep live writers protected and cancel waiting turns without starting delayed prompts.
+- Replay viewer: reject malformed HTTP/WebSocket input and corrupt bundle metadata without terminating the server; recover live updates after transient read failures.
+- CLI/hardening: preserve Unicode across piped prompt chunks and keep optional performance captures private without blocking on special-file targets.
 
 ## 0.16.0 - 2026-09-15
 

@@ -7,6 +7,7 @@ import { AGENT_REGISTRY } from "../src/agent-registry.js";
 import { defaultSessionEventLog } from "../src/session/event-log.js";
 import { SessionEventWriter, listSessionEvents } from "../src/session/events.js";
 import { resolveSessionRecord, writeSessionRecord } from "../src/session/persistence.js";
+import { acquireSessionTurn } from "../src/session/turn-ownership.js";
 import type { SessionRecord } from "../src/types.js";
 
 async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {
@@ -197,7 +198,7 @@ test("listSessionEvents skips malformed NDJSON lines", async () => {
   });
 });
 
-test("SessionEventWriter recovers stale stream lock files", async () => {
+test("session turn ownership recovers stale stream lock files", async (t) => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
@@ -221,6 +222,8 @@ test("SessionEventWriter recovers stale stream lock files", async () => {
       "utf8",
     );
 
+    const ownership = await acquireSessionTurn(sessionId);
+    t.after(() => ownership[Symbol.asyncDispose]());
     const writer = await SessionEventWriter.open(record);
     await writer.appendMessage({
       jsonrpc: "2.0",

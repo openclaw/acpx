@@ -30,6 +30,9 @@ acpx codex prompt -f ./brief.md
 git diff | acpx codex --file - 'and call out anything risky'
 ```
 
+Unicode text is preserved across piped input chunks, including structured prompts,
+`--file -`, and `compare`.
+
 The `--file -` form is particularly handy for piping a long prompt from another tool while still tacking on a short instruction at the end.
 
 ## Persistent vs. one-shot

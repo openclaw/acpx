@@ -2,9 +2,9 @@ import type http from "node:http";
 import type net from "node:net";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
+import { z } from "zod";
 import { createReplayPatch } from "../src/lib/json-patch-plus.js";
 import type {
-  ReplayClientMessage,
   ReplayJsonPatchOperation,
   ReplayProtocol,
   ReplayServerMessage,
@@ -15,6 +15,14 @@ import type { ViewerRunSource } from "./live-source.js";
 
 const PROTOCOL: ReplayProtocol = "acpx.replay.v1";
 const DEFAULT_POLL_INTERVAL_MS = 50;
+const replayClientMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("hello"), protocol: z.string() }),
+  z.object({ type: z.enum(["subscribe_runs", "unsubscribe_runs", "resync_runs", "ping"]) }),
+  z.object({
+    type: z.enum(["subscribe_run", "unsubscribe_run", "resync_run"]),
+    runId: z.string(),
+  }),
+]);
 
 type ReplayLiveSyncOptions = {
   source: ViewerRunSource;
@@ -38,11 +46,7 @@ type ClientSubscriptionState = {
 };
 
 export type ReplayLiveSyncServer = {
-  handleUpgrade(
-    request: http.IncomingMessage,
-    socket: net.Socket | Duplex,
-    head: Buffer,
-  ): Promise<boolean>;
+  handleUpgrade(request: http.IncomingMessage, socket: net.Socket | Duplex, head: Buffer): boolean;
   close(): Promise<void>;
 };
 
@@ -88,8 +92,11 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
     });
 
     socket.on("message", (data) => {
-      void handleMessage(client, data);
+      void handleMessage(client, data).catch((error: unknown) => {
+        sendInternalError(socket, error);
+      });
     });
+    socket.on("error", () => socket.terminate());
     socket.on("close", () => {
       clients.delete(client);
       pruneRunResources();
@@ -98,9 +105,12 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
   });
 
   async function handleMessage(client: ClientSubscriptionState, data: RawData): Promise<void> {
-    let message: ReplayClientMessage;
+    let message: z.infer<typeof replayClientMessageSchema>;
     try {
-      message = JSON.parse(decodeMessage(data)) as ReplayClientMessage;
+      if (!Buffer.isBuffer(data)) {
+        throw new Error("Expected buffered WebSocket data");
+      }
+      message = replayClientMessageSchema.parse(JSON.parse(data.toString()));
     } catch {
       sendMessage(client.socket, {
         type: "error",
@@ -144,12 +154,6 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
         pruneRunResources();
         refreshPollingState();
         return;
-      default:
-        sendMessage(client.socket, {
-          type: "error",
-          code: "protocol_error",
-          message: `Unsupported replay viewer message: ${JSON.stringify(message)}`,
-        });
     }
   }
 
@@ -351,6 +355,12 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
 
       pruneRunResources();
       refreshPollingState();
+    } catch (error) {
+      for (const client of clients) {
+        if (client.wantsRuns) {
+          sendInternalError(client.socket, error);
+        }
+      }
     } finally {
       syncing = false;
     }
@@ -395,20 +405,17 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
     }
   }
 
-  async function handleUpgrade(
+  function handleUpgrade(
     request: http.IncomingMessage,
     socket: net.Socket | Duplex,
     head: Buffer,
-  ): Promise<boolean> {
+  ): boolean {
     if (request.url !== "/api/live") {
       return false;
     }
 
-    await new Promise<void>((resolve) => {
-      server.handleUpgrade(request, socket, head, (ws) => {
-        server.emit("connection", ws, request);
-        resolve();
-      });
+    server.handleUpgrade(request, socket, head, (ws) => {
+      server.emit("connection", ws, request);
     });
     return true;
   }
@@ -436,19 +443,6 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
     handleUpgrade,
     close,
   };
-}
-
-function decodeMessage(data: RawData): string {
-  if (typeof data === "string") {
-    return data;
-  }
-  if (data instanceof ArrayBuffer) {
-    return Buffer.from(data).toString("utf8");
-  }
-  if (Array.isArray(data)) {
-    return Buffer.concat(data).toString("utf8");
-  }
-  return data.toString("utf8");
 }
 
 function sendMessage(socket: WebSocket, message: ReplayServerMessage): void {

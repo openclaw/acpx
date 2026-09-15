@@ -86,6 +86,9 @@ async function readRunBundleSummary(runsDir: string, runId: string): Promise<Run
   const manifest = JSON.parse(
     await readRunBundleTextFile(runsDir, runId, "manifest.json"),
   ) as FlowRunManifest;
+  if (typeof manifest.runId !== "string" || typeof manifest.startedAt !== "string") {
+    throw new Error("Invalid run bundle identity or start time");
+  }
   // The manifest is bundle-controlled data, so its projection paths are
   // constrained to the run bundle before being read. Otherwise a crafted
   // manifest could point runProjection/liveProjection at an arbitrary file

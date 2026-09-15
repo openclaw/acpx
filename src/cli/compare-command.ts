@@ -1,15 +1,7 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { Command, InvalidArgumentError } from "commander";
 import { TimeoutError } from "../async-control.js";
 import { loadPermissionPolicySpec } from "../permission-policy.js";
-import {
-  mergePromptSourceWithText,
-  parsePromptSource,
-  PromptInputValidationError,
-  textPrompt,
-} from "../prompt-content.js";
 import { runOnce } from "../session/session.js";
 import type {
   AcpJsonRpcMessage,
@@ -36,6 +28,7 @@ import {
   resolveOutputPolicy,
   resolvePermissionMode,
 } from "./flags.js";
+import { readPromptInput } from "./prompt-input.js";
 
 const DEFAULT_COMPARE_TIMEOUT_MS = 300_000;
 const FINAL_MESSAGE_PREVIEW_CHARS = 200;
@@ -131,66 +124,6 @@ function truncate(value: string, maxChars: number): string {
     return value;
   }
   return `${value.slice(0, Math.max(0, maxChars - 3))}...`;
-}
-
-async function readStdin(): Promise<string> {
-  let data = "";
-  for await (const chunk of process.stdin) {
-    data += String(chunk);
-  }
-  return data;
-}
-
-async function readPromptFile(
-  filePath: string,
-  promptText: string,
-  cwd: string,
-): Promise<PromptInput> {
-  const source =
-    filePath === "-" ? await readStdin() : await fs.readFile(path.resolve(cwd, filePath), "utf8");
-  const prompt = mergePromptSourceWithText(source, promptText);
-  if (prompt.length === 0) {
-    throw new InvalidArgumentError("Prompt from --file is empty");
-  }
-  return prompt;
-}
-
-async function readPromptFromStdin(): Promise<PromptInput> {
-  if (process.stdin.isTTY) {
-    throw new InvalidArgumentError(
-      "Prompt is required (pass as final argument, --file, or pipe via stdin)",
-    );
-  }
-
-  const prompt = parsePromptSource(await readStdin());
-  if (prompt.length === 0) {
-    throw new InvalidArgumentError("Prompt from stdin is empty");
-  }
-  return prompt;
-}
-
-async function readPromptInput(
-  filePath: string | undefined,
-  promptText: string,
-  cwd: string,
-): Promise<PromptInput> {
-  try {
-    if (filePath) {
-      return await readPromptFile(filePath, promptText, cwd);
-    }
-
-    const joined = promptText.trim();
-    if (joined.length > 0) {
-      return textPrompt(joined);
-    }
-
-    return await readPromptFromStdin();
-  } catch (error) {
-    if (error instanceof PromptInputValidationError) {
-      throw new InvalidArgumentError(error.message);
-    }
-    throw error;
-  }
 }
 
 function promptTokensAfterDoubleDash(command: Command): string[] {
@@ -514,7 +447,12 @@ export function registerCompareCommand(program: Command, config: ResolvedAcpxCon
       );
       const promptFile = resolvePromptFile(flags);
       const { agents, promptText } = splitCompareArgs(args, promptFile, this);
-      const prompt = await readPromptInput(promptFile, promptText, globalFlags.cwd);
+      const prompt = await readPromptInput(
+        promptFile,
+        promptText,
+        globalFlags.cwd,
+        "final argument",
+      );
       const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
 
       const rows: CompareRow[] = [];

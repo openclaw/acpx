@@ -171,6 +171,12 @@ Queue mechanics:
 - Override TTL with `--ttl <seconds>`. `--ttl 0` keeps it alive indefinitely (until idle shutdown is otherwise triggered).
 - Owner generation IDs are cryptographically random so rapid restarts cannot reuse a stale generation token.
 
+Persistent turns from flows and CLI prompts share one owner for each saved session.
+A waiting prompt reads history after the previous turn finishes its final checkpoint,
+so both completions are retained. Waiting can be cancelled or timed out. A live
+writer keeps ownership until it finishes; abandoned locks remain recoverable after
+its process exits.
+
 ## --no-wait
 
 By default the submitter blocks until the queued prompt completes, streaming events back. `--no-wait` returns as soon as the running queue owner acknowledges the submission. Useful for scripted "queue up follow-ups" patterns.
