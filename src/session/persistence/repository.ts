@@ -6,7 +6,7 @@ import { SessionNotFoundError, SessionResolutionError } from "../../errors.js";
 import { incrementPerfCounter, measurePerf } from "../../perf-metrics.js";
 import { assertPersistedKeyPolicy } from "../../persisted-key-policy.js";
 import type { SessionRecord } from "../../types.js";
-import { createAtomicWriteTempPath } from "./atomic-write.js";
+import { writePrivateSessionFile } from "./atomic-write.js";
 import {
   loadOrRebuildSessionIndex,
   rebuildSessionIndex,
@@ -43,7 +43,7 @@ function sessionBaseDir(): string {
 }
 
 async function ensureSessionDir(): Promise<void> {
-  await fs.mkdir(sessionBaseDir(), { recursive: true });
+  await fs.mkdir(sessionBaseDir(), { recursive: true, mode: 0o700 });
 }
 
 async function loadRecordFromIndexEntry(
@@ -85,16 +85,12 @@ function matchesSessionEntry(
 
 export async function writeSessionRecord(record: SessionRecord): Promise<void> {
   await measurePerf("session.write_record", async () => {
-    await ensureSessionDir();
-
     const persisted = serializeSessionRecordForDisk(record);
     assertPersistedKeyPolicy(persisted);
 
     const file = sessionFilePath(record.acpxRecordId);
-    const tempFile = createAtomicWriteTempPath(file);
     const payload = JSON.stringify(persisted, null, 2);
-    await fs.writeFile(tempFile, `${payload}\n`, "utf8");
-    await fs.rename(tempFile, file);
+    await writePrivateSessionFile(file, `${payload}\n`);
 
     const sessionDir = sessionBaseDir();
     const index = await loadOrRebuildSessionIndex(sessionDir);

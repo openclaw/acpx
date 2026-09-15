@@ -366,7 +366,60 @@ test("createFileSessionStore preserves environment name casing across reloads", 
   assert.deepEqual(restored?.acpx?.session_options?.env, env);
 });
 
-test("createFileSessionStore supports concurrent saves in the same millisecond", async (t) => {
+for (const [scenario, existingFileMode, existingDirMode] of [
+  ["new records", undefined, undefined],
+  ["private rewrites", 0o600, 0o700],
+  ["legacy shared rewrites", 0o664, 0o775],
+  ["symlinked session directories", undefined, undefined],
+] as const) {
+  test(
+    `createFileSessionStore keeps ${scenario} private under a permissive umask`,
+    { skip: process.platform === "win32" },
+    async (t) => {
+      const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-store-private-"));
+      t.after(async () => {
+        await fs.rm(stateDir, { recursive: true, force: true });
+      });
+      const previousUmask = process.umask(0o002);
+      try {
+        const store = createFileSessionStore({ stateDir });
+        const record = createSessionRecord({ title: "before" });
+        const sessionDir = path.join(stateDir, "sessions");
+        const recordPath = path.join(sessionDir, `${encodeURIComponent(record.acpxRecordId)}.json`);
+        const symlinkTarget = path.join(stateDir, "session-target");
+
+        if (scenario === "symlinked session directories") {
+          await fs.mkdir(symlinkTarget, { mode: 0o775 });
+          await fs.symlink(symlinkTarget, sessionDir, "dir");
+        }
+
+        if (existingFileMode !== undefined && existingDirMode !== undefined) {
+          await store.save(record);
+          await fs.chmod(recordPath, existingFileMode);
+          await fs.chmod(sessionDir, existingDirMode);
+        }
+
+        record.title = "after";
+        record.messages = [{ Agent: { content: [{ Text: "saved reply" }], tool_results: {} } }];
+        await store.save(record);
+
+        assert.equal((await fs.stat(recordPath)).mode & 0o777, 0o600, "session record mode");
+        assert.equal((await fs.stat(sessionDir)).mode & 0o777, 0o700, "session directory mode");
+        if (scenario === "symlinked session directories") {
+          assert.equal(await fs.readlink(sessionDir), symlinkTarget);
+          assert.equal((await fs.stat(symlinkTarget)).mode & 0o777, 0o700, "symlink target mode");
+        }
+        const restored = await createFileSessionStore({ stateDir }).load(record.acpxRecordId);
+        assert.equal(restored?.title, "after");
+        assert.deepEqual(restored?.messages, record.messages);
+      } finally {
+        process.umask(previousUmask);
+      }
+    },
+  );
+}
+
+test("createFileSessionStore supports concurrent saves with long session IDs in the same millisecond", async (t) => {
   const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-store-concurrent-"));
   t.after(async () => {
     await fs.rm(stateDir, { recursive: true, force: true });
@@ -380,7 +433,7 @@ test("createFileSessionStore supports concurrent saves in the same millisecond",
 
   const store = createFileSessionStore({ stateDir });
   const record = createSessionRecord({
-    acpxRecordId: "agent:codex:acp:concurrent",
+    acpxRecordId: "x".repeat(220),
     acpSessionId: "sid-concurrent",
   });
 
@@ -388,10 +441,9 @@ test("createFileSessionStore supports concurrent saves in the same millisecond",
 
   const loaded = await store.load(record.acpxRecordId);
   assert.equal(loaded?.acpSessionId, "sid-concurrent");
-  assert.deepEqual(
-    (await fs.readdir(path.join(stateDir, "sessions"))).filter((file) => file.endsWith(".tmp")),
-    [],
-  );
+  assert.deepEqual(await fs.readdir(path.join(stateDir, "sessions")), [
+    `${record.acpxRecordId}.json`,
+  ]);
 });
 
 test("createFileSessionStore.load() returns undefined for a corrupt session file (#378)", async (t) => {

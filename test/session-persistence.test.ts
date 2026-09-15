@@ -5,7 +5,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { AGENT_ARGV_REGISTRY, AGENT_REGISTRY } from "../src/agent-registry.js";
-import { parseSessionRecord, serializeSessionRecordForDisk } from "../src/session/persistence.js";
+import {
+  parseSessionRecord,
+  resolveSessionRecord,
+  serializeSessionRecordForDisk,
+  writeSessionRecord as persistSessionRecord,
+} from "../src/session/persistence.js";
 import {
   fileExists,
   makeSessionRecord as makeSessionRecordFixture,
@@ -530,6 +535,74 @@ test("findSession and findSessionByDirectoryWalk resolve expected records", asyn
     assert.equal(walked?.acpxRecordId, "session-packages");
   });
 });
+
+for (const [scenario, existingFileMode, existingDirMode] of [
+  ["new records", undefined, undefined],
+  ["private rewrites", 0o600, 0o700],
+  ["legacy shared rewrites", 0o664, 0o775],
+  ["symlinked session directories", undefined, undefined],
+] as const) {
+  test(
+    `writeSessionRecord keeps records and index private for ${scenario} under a permissive umask`,
+    { skip: process.platform === "win32" },
+    async () => {
+      await withTempHome(async (homeDir) => {
+        const previousUmask = process.umask(0o002);
+        try {
+          const session = await loadSessionModule();
+          const record = makeSessionRecord({
+            acpxRecordId: "private-session",
+            acpSessionId: "private-session",
+            agentCommand: "agent-a",
+            cwd: path.join(homeDir, "repo"),
+            name: "before",
+          });
+          const recordPath = sessionFilePath(homeDir, record.acpxRecordId);
+          const sessionDir = path.dirname(recordPath);
+          const indexPath = path.join(sessionDir, "index.json");
+          const symlinkTarget = path.join(homeDir, "session-target");
+
+          if (scenario === "symlinked session directories") {
+            await fs.mkdir(path.dirname(sessionDir), { recursive: true });
+            await fs.mkdir(symlinkTarget, { mode: 0o775 });
+            await fs.symlink(symlinkTarget, sessionDir, "dir");
+          }
+
+          if (existingFileMode !== undefined && existingDirMode !== undefined) {
+            await persistSessionRecord(record);
+            await fs.chmod(recordPath, existingFileMode);
+            await fs.chmod(indexPath, existingFileMode);
+            await fs.chmod(sessionDir, existingDirMode);
+          }
+
+          record.name = "after";
+          record.messages = [{ Agent: { content: [{ Text: "saved reply" }], tool_results: {} } }];
+          await persistSessionRecord(record);
+
+          assert.equal((await fs.stat(recordPath)).mode & 0o777, 0o600, "session record mode");
+          assert.equal((await fs.stat(indexPath)).mode & 0o777, 0o600, "session index mode");
+          assert.equal((await fs.stat(sessionDir)).mode & 0o777, 0o700, "session directory mode");
+          if (scenario === "symlinked session directories") {
+            assert.equal(await fs.readlink(sessionDir), symlinkTarget);
+            assert.equal((await fs.stat(symlinkTarget)).mode & 0o777, 0o700, "symlink target mode");
+          }
+          assert.deepEqual(
+            (await resolveSessionRecord(record.acpxRecordId)).messages,
+            record.messages,
+          );
+          const indexed = await session.findSession({
+            agentCommand: record.agentCommand,
+            cwd: record.cwd,
+            name: "after",
+          });
+          assert.equal(indexed?.acpxRecordId, record.acpxRecordId);
+        } finally {
+          process.umask(previousUmask);
+        }
+      });
+    },
+  );
+}
 
 test("writeSessionRecord maintains an index and listSessions rebuilds it when missing", async () => {
   await withTempHome(async (homeDir) => {
