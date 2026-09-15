@@ -96,6 +96,40 @@ test("runner reports missing adapter commands as failed initialize cases", async
   assert.match(report.results[0]?.error ?? "", /failed to spawn agent process/i);
 });
 
+test("runner rejects successful operations when an error is expected", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-conformance-runner-"));
+  try {
+    const { profilePath, casesDir } = await writeFixture(
+      tmp,
+      [{}, { message_any: ["error"] }].map((expect_error, index) => ({
+        id: `custom.expected_error.${index}`,
+        steps: [{ action: "new_session", expect_error }],
+      })),
+    );
+    const result = await runRunner([
+      "--profile",
+      profilePath,
+      "--cases-dir",
+      casesDir,
+      "--cwd",
+      tmp,
+      "--agent-command",
+      MOCK_AGENT_COMMAND,
+      "--format",
+      "json",
+    ]);
+    assert.equal(result.code, 1, result.stderr);
+    const report = parseReport(result.stdout);
+    assert.deepEqual(report.totals, { cases: 2, passed: 0, failed: 2 });
+    for (const result of report.results) {
+      assert.equal(result.passed, false);
+      assert.match(result.error ?? "", /session\/new succeeded but error was expected/);
+    }
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("runner resolves relative file reads within session cwd without changing adapter command cwd", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-conformance-runner-"));
   try {

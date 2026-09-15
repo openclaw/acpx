@@ -2,9 +2,9 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import fs from "node:fs/promises";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import { queueLockFilePath, queueSocketPath } from "../src/cli/queue/paths.js";
+import { withTempHome as withTempHomeFixture } from "./runtime-test-helpers.js";
 
 export type QueuePaths = {
   lockPath: string;
@@ -18,21 +18,8 @@ export function queuePaths(homeDir: string, sessionId: string): QueuePaths {
   };
 }
 
-export async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {
-  const originalHome = process.env.HOME;
-  const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-test-home-"));
-  process.env.HOME = tempHome;
-
-  try {
-    await run(tempHome);
-  } finally {
-    if (originalHome == null) {
-      delete process.env.HOME;
-    } else {
-      process.env.HOME = originalHome;
-    }
-    await fs.rm(tempHome, { recursive: true, force: true });
-  }
+export function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {
+  return withTempHomeFixture("acpx-test-home-", run);
 }
 
 export async function startKeeperProcess(): Promise<ReturnType<typeof spawn>> {

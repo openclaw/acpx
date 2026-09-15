@@ -388,15 +388,7 @@ function readArgValue(argv: string[], index: number, flag: string): string {
   return value.trim();
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  return awaitWithTimeout(promise, timeoutMs, label);
-}
-
-async function awaitWithTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  label: string,
-): Promise<T> {
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return await new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`${label} timed out after ${timeoutMs}ms`));
@@ -622,11 +614,12 @@ async function createHarness(options: CliOptions): Promise<Harness> {
           child.kill("SIGKILL");
         }
       }, 1500);
+      const completionTimeout = setTimeout(resolve, 2500);
       child.once("exit", () => {
         clearTimeout(timer);
+        clearTimeout(completionTimeout);
         resolve();
       });
-      setTimeout(() => resolve(), 2500);
     });
     await cleanupClientState();
   };
@@ -754,12 +747,9 @@ async function executeWithExpectation<T>(params: {
   expectError?: ErrorExpectation;
   operation: () => Promise<T>;
 }): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
+  let value: T;
   try {
-    const value = await withTimeout(params.operation(), params.timeoutMs, params.label);
-    if (params.expectError) {
-      throw new Error(`${params.label} succeeded but error was expected`);
-    }
-    return { ok: true, value };
+    value = await withTimeout(params.operation(), params.timeoutMs, params.label);
   } catch (error) {
     if (!params.expectError) {
       throw error;
@@ -767,6 +757,10 @@ async function executeWithExpectation<T>(params: {
     validateExpectedError(error, params.expectError);
     return { ok: false, error };
   }
+  if (params.expectError) {
+    throw new Error(`${params.label} succeeded but error was expected`);
+  }
+  return { ok: true, value };
 }
 
 async function executeCaseStep(params: {

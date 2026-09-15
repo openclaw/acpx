@@ -1,95 +1,18 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { AGENT_REGISTRY } from "../src/agent-registry.js";
 import { exportSession } from "../src/session/export.js";
 import { importSession } from "../src/session/import.js";
 import { resolveSessionRecord, serializeSessionRecordForDisk } from "../src/session/persistence.js";
-import type { SessionRecord } from "../src/types.js";
-
-function makeSessionRecord(
-  overrides: Partial<SessionRecord> & {
-    acpxRecordId: string;
-    acpSessionId: string;
-    agentCommand: string;
-    cwd: string;
-  },
-): SessionRecord {
-  const timestamp = "2026-01-01T00:00:00.000Z";
-  return {
-    schema: "acpx.session.v1",
-    acpxRecordId: overrides.acpxRecordId,
-    acpSessionId: overrides.acpSessionId,
-    agentSessionId: overrides.agentSessionId,
-    agentCommand: overrides.agentCommand,
-    cwd: path.resolve(overrides.cwd),
-    name: overrides.name ?? overrides.acpxRecordId,
-    createdAt: overrides.createdAt ?? timestamp,
-    lastUsedAt: overrides.lastUsedAt ?? timestamp,
-    lastSeq: overrides.lastSeq ?? 0,
-    lastRequestId: overrides.lastRequestId,
-    eventLog: overrides.eventLog ?? {
-      active_path: ".stream.ndjson",
-      segment_count: 1,
-      max_segment_bytes: 1024,
-      max_segments: 1,
-      last_write_at: overrides.lastUsedAt ?? timestamp,
-      last_write_error: null,
-    },
-    closed: overrides.closed ?? false,
-    closedAt: overrides.closedAt,
-    pid: overrides.pid,
-    agentStartedAt: overrides.agentStartedAt,
-    lastPromptAt: overrides.lastPromptAt,
-    lastAgentExitCode: overrides.lastAgentExitCode,
-    lastAgentExitSignal: overrides.lastAgentExitSignal,
-    lastAgentExitAt: overrides.lastAgentExitAt,
-    lastAgentDisconnectReason: overrides.lastAgentDisconnectReason,
-    protocolVersion: overrides.protocolVersion,
-    agentCapabilities: overrides.agentCapabilities,
-    title: overrides.title ?? null,
-    messages: overrides.messages ?? [],
-    updated_at: overrides.updated_at ?? overrides.lastUsedAt ?? timestamp,
-    cumulative_token_usage: overrides.cumulative_token_usage ?? {},
-    request_token_usage: overrides.request_token_usage ?? {},
-    acpx: overrides.acpx ?? {},
-    importedFrom: overrides.importedFrom,
-  };
-}
-
-async function withTempHome<T>(prefix: string, run: (homeDir: string) => Promise<T>): Promise<T> {
-  const originalHome = process.env.HOME;
-  const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
-  process.env.HOME = tempHome;
-
-  try {
-    return await run(tempHome);
-  } finally {
-    if (originalHome == null) {
-      delete process.env.HOME;
-    } else {
-      process.env.HOME = originalHome;
-    }
-    await fs.rm(tempHome, { recursive: true, force: true });
-  }
-}
-
-function sessionFilePath(homeDir: string, acpxRecordId: string): string {
-  return path.join(homeDir, ".acpx", "sessions", `${encodeURIComponent(acpxRecordId)}.json`);
-}
-
-async function writeSessionRecordFile(homeDir: string, record: SessionRecord): Promise<void> {
-  const filePath = sessionFilePath(homeDir, record.acpxRecordId);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(
-    filePath,
-    `${JSON.stringify(serializeSessionRecordForDisk(record), null, 2)}\n`,
-    "utf8",
-  );
-}
+import {
+  makeSessionRecord,
+  sessionFilePath,
+  withTempHome,
+  writeSessionRecordFile,
+} from "./runtime-test-helpers.js";
 
 function streamPath(homeDir: string, recordId: string): string {
   return path.join(homeDir, ".acpx", "sessions", `${encodeURIComponent(recordId)}.stream.ndjson`);

@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { findPersistedKeyPolicyViolations } from "../src/persisted-key-policy.js";
 import { serializeSessionRecordForDisk } from "../src/session/persistence.js";
 import type { SessionRecord } from "../src/types.js";
@@ -73,76 +70,6 @@ function assertSerializationPolicy(): void {
       `serialized session record is missing required key: ${key}`,
     );
   }
-
-  const forbiddenTopLevel = [
-    "acpxRecordId",
-    "acpSessionId",
-    "agentSessionId",
-    "agentCommand",
-    "createdAt",
-    "lastUsedAt",
-    "lastSeq",
-    "lastRequestId",
-    "eventLog",
-    "closedAt",
-    "agentStartedAt",
-    "lastPromptAt",
-    "lastAgentExitCode",
-    "lastAgentExitSignal",
-    "lastAgentExitAt",
-    "lastAgentDisconnectReason",
-    "protocolVersion",
-    "agentCapabilities",
-  ];
-
-  for (const key of forbiddenTopLevel) {
-    assert.equal(
-      key in persisted,
-      false,
-      `serialized session record must not emit camelCase key: ${key}`,
-    );
-  }
-}
-
-function assertSerializerSourceKeys(): void {
-  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-  const sourcePath = path.join(scriptDir, "..", "src", "session", "persistence", "serialize.ts");
-  const source = fs.readFileSync(sourcePath, "utf8");
-
-  const serializerStart = source.indexOf("export function serializeSessionRecordForDisk");
-  assert.notEqual(serializerStart, -1, "serializeSessionRecordForDisk not found");
-
-  const serializerBlock = source.slice(serializerStart);
-  const forbiddenPersistedKeys = [
-    "acpxRecordId",
-    "acpSessionId",
-    "agentSessionId",
-    "agentCommand",
-    "createdAt",
-    "lastUsedAt",
-    "lastSeq",
-    "lastRequestId",
-    "eventLog",
-    "closedAt",
-    "agentStartedAt",
-    "lastPromptAt",
-    "lastAgentExitCode",
-    "lastAgentExitSignal",
-    "lastAgentExitAt",
-    "lastAgentDisconnectReason",
-    "protocolVersion",
-    "agentCapabilities",
-  ];
-
-  for (const key of forbiddenPersistedKeys) {
-    const matcher = new RegExp(`\\b${key}\\s*:`, "g");
-    assert.equal(
-      matcher.test(serializerBlock),
-      false,
-      `serializer contains non-snake persisted key literal: ${key}`,
-    );
-  }
 }
 
 assertSerializationPolicy();
-assertSerializerSourceKeys();

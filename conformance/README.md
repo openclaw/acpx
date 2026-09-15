@@ -97,6 +97,10 @@ Each case file can define:
   - `updates_all_session`
   - `updates_text_includes`
 
+When a step declares `expect_error`, its operation must fail. Optional `codes`
+and `message_any` fields filter the failure; `{}` accepts any error. A successful
+operation always fails the case.
+
 ## Nightly Workflow
 
 - Workflow file: `.github/workflows/conformance-nightly.yml`

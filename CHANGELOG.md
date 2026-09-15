@@ -24,6 +24,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions: preserve both completions when flows and CLI prompts share a session; keep live writers protected and cancel waiting turns without starting delayed prompts.
 - Replay viewer: reject malformed HTTP/WebSocket input and corrupt bundle metadata without terminating the server; recover live updates after transient read failures.
 - CLI/hardening: preserve Unicode across piped prompt chunks and keep optional performance captures private without blocking on special-file targets.
+- Conformance runner: reject successful operations when a case expects an error, and clear shutdown timers after the adapter exits.
 
 ## 0.16.0 - 2026-09-15
 

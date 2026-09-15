@@ -23,18 +23,6 @@ type SessionModule = typeof import("../src/session/session.js");
 
 const SESSION_MODULE_URL = new URL("../src/session/session.js", import.meta.url);
 
-test("SessionRecord allows optional closed and closedAt fields", () => {
-  const record = makeSessionRecord({
-    acpxRecordId: "type-check",
-    acpSessionId: "type-check",
-    agentCommand: "agent",
-    cwd: "/tmp/type-check",
-  });
-
-  assert.equal(record.closed, false);
-  assert.equal(record.closedAt, undefined);
-});
-
 test("parseSessionRecord preserves structured agent argv", () => {
   const serialized = serializeSessionRecordForDisk(
     makeSessionRecord({
