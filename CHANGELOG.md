@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Runtime/model selection: expose a model setter that uses the adapter's advertised control and preserves the selected model across reconnects.
+
 ### Breaking
 
 ### Fixes

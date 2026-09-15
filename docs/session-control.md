@@ -54,6 +54,8 @@ After a genuine resume or load, ACPX restores the saved model first when the ada
 
 For applications using `acpx/runtime`, `AcpxRuntime.setConfigOption(...)` returns the ACP response's complete `configOptions` after saving the accepted state. Use that response to update displayed controls, including changed or removed sibling options.
 
+For model selection in an application, use `runtime.setModel({ handle, model })`. It uses the adapter's advertised model control and saves the accepted selection for reconnect. Read `runtime.getStatus({ handle })` for the current model and available IDs. Treat each model ID as opaque.
+
 ### `set model <id>`
 
 `set model <id>` is a special-case interception. `acpx` prefers an advertised model session config option and updates it through `session/set_config_option`. If an adapter explicitly advertises legacy `models` metadata instead, `acpx` preserves compatibility through `session/set_model`.

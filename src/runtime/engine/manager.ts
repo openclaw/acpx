@@ -1855,6 +1855,46 @@ export class AcpRuntimeManager {
     await this.options.sessionStore.save(targetRecord);
   }
 
+  async setModel(
+    handle: AcpRuntimeHandle,
+    model: string,
+    sessionMode: "persistent" | "oneshot" = "persistent",
+  ): Promise<void> {
+    const recordId = handle.acpxRecordId ?? handle.sessionKey;
+    await this.withManagerLock(this.runtimeOperationLocks, recordId, async () =>
+      this.setModelWithOwnership(handle, model, sessionMode),
+    );
+  }
+
+  private async setModelWithOwnership(
+    handle: AcpRuntimeHandle,
+    model: string,
+    sessionMode: "persistent" | "oneshot",
+  ): Promise<void> {
+    const record = await this.requireRecord(handle.acpxRecordId ?? handle.sessionKey);
+    const controller = this.activeControllers.get(record.acpxRecordId);
+    if (controller) {
+      const response = await controller.setSessionModel(model);
+      record.acpx = applyModelSelection(record.acpx, model, response);
+      await this.options.sessionStore.save(record);
+      return;
+    }
+    const result = await this.withRuntimeControlSession(
+      record,
+      sessionMode,
+      async ({ client, sessionId, record: connectedRecord }) => {
+        const response = await client.setSessionModel(
+          sessionId,
+          model,
+          advertisedModelState(connectedRecord.acpx),
+        );
+        connectedRecord.acpx = applyModelSelection(connectedRecord.acpx, model, response);
+      },
+      { key: "model" },
+    );
+    await this.options.sessionStore.save(result.record);
+  }
+
   async setConfigOption(
     handle: AcpRuntimeHandle,
     key: string,

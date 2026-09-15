@@ -95,7 +95,12 @@ export type {
 export const ACPX_BACKEND_ID = "acpx";
 
 const ACPX_CAPABILITIES: AcpRuntimeCapabilities = {
-  controls: ["session/set_mode", "session/set_config_option", "session/status"],
+  controls: [
+    "session/set_mode",
+    "session/set_model",
+    "session/set_config_option",
+    "session/status",
+  ],
 };
 
 type AcpxRuntimeLike = AcpRuntime & {
@@ -350,6 +355,12 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     const { handle, state } = this.resolveManagerHandle(input.handle);
     const manager = await this.getManager();
     await manager.setMode(handle, input.mode, state.mode);
+  }
+
+  async setModel(input: { handle: AcpRuntimeHandle; model: string }): Promise<void> {
+    const { handle, state } = this.resolveManagerHandle(input.handle);
+    const manager = await this.getManager();
+    await manager.setModel(handle, input.model, state.mode);
   }
 
   async setConfigOption(input: {

@@ -655,7 +655,12 @@ test("AcpxRuntime falls back to plain runtimeSessionName handles and reuses a si
   await runtime.probeAvailability();
   assert.equal(runtime.isHealthy(), true);
   assert.deepEqual(await runtime.getCapabilities(), {
-    controls: ["session/set_mode", "session/set_config_option", "session/status"],
+    controls: [
+      "session/set_mode",
+      "session/set_model",
+      "session/set_config_option",
+      "session/status",
+    ],
   });
 
   const plainHandle = {
@@ -741,7 +746,12 @@ test("AcpxRuntime exposes advertised config option keys for resolved handles", a
       },
     }),
     {
-      controls: ["session/set_mode", "session/set_config_option", "session/status"],
+      controls: [
+        "session/set_mode",
+        "session/set_model",
+        "session/set_config_option",
+        "session/status",
+      ],
       configOptionKeys: ["mode", "model"],
     },
   );
@@ -789,3 +799,129 @@ test("AcpxRuntime snapshots transient child environment for manager and probes",
   assert.deepEqual(observed, [{ ACPX_TEST_RUNTIME_OVERLAY: "construction-value" }]);
   assert.equal(process.env.ACPX_TEST_RUNTIME_OVERLAY, undefined);
 });
+
+for (const control of [
+  { name: "config option", args: ["--model-config-id", "llm"], model: "fast-model" },
+  { name: "legacy models", args: ["--advertise-legacy-models"], model: "alternate-model" },
+]) {
+  test(`public model control persists ${control.name} through active turns and reconnect`, async (t) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-model-"));
+    const store = createFileSessionStore({ stateDir: path.join(cwd, "state") });
+    const options = {
+      cwd,
+      sessionStore: store,
+      agentRegistry: createAgentRegistry({
+        overrides: {
+          fixture: [process.execPath, MOCK_AGENT_PATH, "--supports-load-session", ...control.args],
+        },
+      }),
+      permissionMode: "approve-reads" as const,
+    };
+    let runtime = createAcpRuntime(options);
+    t.after(async () => {
+      await runtime.shutdown();
+      await fs.rm(cwd, { recursive: true, force: true });
+    });
+    const handle = await runtime.ensureSession({
+      sessionKey: "models",
+      agent: "fixture",
+      mode: "persistent",
+    });
+    await runtime.setModel({ handle, model: control.model });
+    assert.equal((await runtime.getStatus({ handle })).models?.currentModelId, control.model);
+    const turn = runtime.startTurn({
+      handle,
+      text: "sleep 10000",
+      mode: "prompt",
+      requestId: "model-active",
+    });
+    const events = (async () => {
+      for await (const event of turn.events) {
+        void event;
+      }
+    })();
+    await turn.promptStarted;
+    await runtime.setModel({ handle, model: "default-model" });
+    assert.equal((await runtime.getStatus({ handle })).models?.currentModelId, "default-model");
+    await turn.cancel();
+    await events;
+    assert.equal((await turn.result).status, "cancelled");
+    await runtime.shutdown();
+    runtime = createAcpRuntime(options);
+    await runtime.setModel({ handle, model: control.model });
+    assert.equal((await runtime.getStatus({ handle })).models?.currentModelId, control.model);
+    const stored = await store.load(handle.acpxRecordId ?? handle.sessionKey);
+    assert.equal(stored?.acpx?.session_options?.model, control.model);
+    assert.equal(stored?.acpx?.current_model_id, control.model);
+    await runtime.shutdown();
+    runtime = createAcpRuntime(options);
+    const resumed = runtime.startTurn({
+      handle,
+      text: "echo resumed",
+      mode: "prompt",
+      requestId: "model-resumed",
+    });
+    for await (const event of resumed.events) {
+      void event;
+    }
+    assert.equal((await resumed.result).status, "completed");
+    assert.equal((await runtime.getStatus({ handle })).models?.currentModelId, control.model);
+  });
+
+  test(`public model control preserves saved selection after ${control.name} rejection`, async (t) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-model-reject-"));
+    const store = createFileSessionStore({ stateDir: path.join(cwd, "state") });
+    const runtime = createAcpRuntime({
+      cwd,
+      sessionStore: store,
+      agentRegistry: createAgentRegistry({
+        overrides: {
+          fixture: [
+            process.execPath,
+            MOCK_AGENT_PATH,
+            ...control.args,
+            "--set-session-model-fails",
+          ],
+        },
+      }),
+      permissionMode: "approve-reads",
+    });
+    t.after(async () => {
+      await runtime.shutdown();
+      await fs.rm(cwd, { recursive: true, force: true });
+    });
+    const handle = await runtime.ensureSession({
+      sessionKey: "rejected-model",
+      agent: "fixture",
+      mode: "persistent",
+      sessionOptions: { model: "default-model" },
+    });
+    const before = await store.load(handle.acpxRecordId ?? handle.sessionKey);
+    await assert.rejects(
+      runtime.setModel({ handle, model: control.model }),
+      /setSessionModel failed/,
+    );
+    const turn = runtime.startTurn({
+      handle,
+      text: "sleep 10000",
+      mode: "prompt",
+      requestId: "rejected-active-model",
+    });
+    const events = (async () => {
+      for await (const event of turn.events) {
+        void event;
+      }
+    })();
+    await turn.promptStarted;
+    await assert.rejects(
+      runtime.setModel({ handle, model: control.model }),
+      /setSessionModel failed/,
+    );
+    await turn.cancel();
+    await events;
+    assert.equal((await turn.result).status, "cancelled");
+    const after = await store.load(handle.acpxRecordId ?? handle.sessionKey);
+    assert.equal(after?.acpx?.current_model_id, before?.acpx?.current_model_id);
+    assert.deepEqual(after?.acpx?.session_options, before?.acpx?.session_options);
+  });
+}
