@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import path from "node:path";
 import { PassThrough, type Readable, type Writable } from "node:stream";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import type {
   AnyMessage,
   RequestPermissionRequest,
@@ -143,6 +143,7 @@ type ClientInternals = {
     | {
         sessionId: string;
         promise: Promise<{ stopReason: "end_turn" | "cancelled" }>;
+        elicitationController?: AbortController;
       }
     | undefined;
   cancellingSessionIds: Set<string>;
@@ -652,10 +653,8 @@ test("AcpClient onPermissionRequest receives an AbortSignal that fires on sessio
   assert(observedSignal instanceof AbortSignal);
   assert.equal(observedSignal?.aborted, false);
 
-  const internals = asInternals(client) as unknown as {
-    abortAndDropPermissionSignal: (sessionId: string) => void;
-  };
-  internals.abortAndDropPermissionSignal("session-cb-4");
+  asInternals(client).connection = { cancel: async () => {} };
+  await client.cancel("session-cb-4");
   assert.equal(observedSignal?.aborted, true);
 });
 
@@ -678,17 +677,15 @@ test("AcpClient onPermissionRequest cancels a late decision after session cancel
       return await decisionPromise;
     },
   });
-  const internals = asInternals(client) as ClientInternals & {
-    abortAndDropPermissionSignal: (sessionId: string) => void;
-  };
+  const internals = asInternals(client);
+  internals.connection = { cancel: async () => {} };
 
   const responsePromise = internals.handlePermissionRequest?.(
     makePermissionRequest("session-cb-5", "edit"),
   );
   await callbackStartedPromise;
 
-  internals.cancellingSessionIds.add("session-cb-5");
-  internals.abortAndDropPermissionSignal("session-cb-5");
+  await client.cancel("session-cb-5");
   assert.equal(observedSignal?.aborted, true);
 
   resolveDecision({ outcome: "allow_once" });
@@ -722,17 +719,15 @@ test("AcpClient onPermissionRequest treats abort rejections as cancelled", async
       });
     },
   });
-  const internals = asInternals(client) as ClientInternals & {
-    abortAndDropPermissionSignal: (sessionId: string) => void;
-  };
+  const internals = asInternals(client);
+  internals.connection = { cancel: async () => {} };
 
   const responsePromise = internals.handlePermissionRequest?.(
     makePermissionRequest("session-cb-6", "edit"),
   );
   await callbackStartedPromise;
 
-  internals.cancellingSessionIds.add("session-cb-6");
-  internals.abortAndDropPermissionSignal("session-cb-6");
+  await client.cancel("session-cb-6");
   const response = await responsePromise;
 
   assert.deepEqual(response, {
@@ -1229,6 +1224,479 @@ test("AcpClient lifecycle snapshot and cancel helpers reflect active prompt stat
   const cancelled = await client.cancelActivePrompt(50);
   assert.deepEqual(cancelled, { stopReason: "cancelled" });
 });
+
+test(
+  "AcpClient coalesces cancellation until the active prompt finishes",
+  { timeout: 5_000 },
+  async (t) => {
+    const fixture = createCancellationFixture(t);
+    const { client } = fixture;
+    const first = fixture.prompt("session-cancel", "first");
+    await fixture.message(0);
+
+    assert.deepEqual(
+      await Promise.all([
+        client.cancel("session-cancel"),
+        client.requestCancelActivePrompt(),
+        client.cancelActivePrompt(0),
+      ]),
+      [undefined, true, undefined],
+    );
+    assert.equal(await client.requestCancelActivePrompt(), true);
+    assert.deepEqual(
+      fixture.messages.map((message) => "method" in message && message.method),
+      ["session/prompt", "session/cancel"],
+    );
+    await fixture.reply(await fixture.message(0));
+    await first;
+    assert.equal(await client.requestCancelActivePrompt(), false);
+    assert.equal(await client.cancelActivePrompt(0), undefined);
+    assert.equal(fixture.messages.length, 2);
+
+    const second = fixture.prompt("session-cancel", "second");
+    await fixture.message(2);
+    const waiting = fixture.track(client.cancelActivePrompt(5_000));
+    await fixture.message(3);
+    await fixture.reply(await fixture.message(2));
+    assert.deepEqual(await waiting, { stopReason: "end_turn" });
+    await second;
+    assert.equal(fixture.messages.length, 4);
+
+    await client.cancel("inactive-session");
+    assert.deepEqual(fixture.messages[4], {
+      jsonrpc: "2.0",
+      method: "session/cancel",
+      params: { sessionId: "inactive-session" },
+    });
+  },
+);
+
+test(
+  "AcpClient cancellation of another session leaves the active prompt available",
+  { timeout: 5_000 },
+  async (t) => {
+    let permissionSignal: AbortSignal | undefined;
+    const fixture = createCancellationFixture(t, {
+      client: {
+        onPermissionRequest: async (_request, { signal }) => {
+          permissionSignal = signal;
+          return { outcome: "allow_once" };
+        },
+      },
+    });
+    const { client } = fixture;
+    const prompt = fixture.prompt("session-active", "hello");
+    const request = await fixture.message(0);
+    await fixture.permission("session-active");
+    assert(permissionSignal);
+    await client.cancel("session-other");
+    assert.equal(client.hasActivePrompt("session-active"), true);
+    assert.equal(permissionSignal.aborted, false);
+    assert.deepEqual(fixture.messages[1], {
+      jsonrpc: "2.0",
+      method: "session/cancel",
+      params: { sessionId: "session-other" },
+    });
+
+    assert.equal(await client.requestCancelActivePrompt(), true);
+    assert.equal(permissionSignal.aborted, true);
+    assert.deepEqual(fixture.messages[2], {
+      jsonrpc: "2.0",
+      method: "session/cancel",
+      params: { sessionId: "session-active" },
+    });
+    assert.equal(fixture.messages.length, 3);
+    await fixture.reply(request);
+    await prompt;
+  },
+);
+
+test(
+  "AcpClient coalesces synchronous elicitation and permission abort reentry",
+  { timeout: 5_000 },
+  async (t) => {
+    const reentered: Array<Promise<boolean>> = [];
+    const fixture = createCancellationFixture(t, {
+      client: {
+        onPermissionRequest: async (_request, { signal }) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              reentered.push(fixture.track(fixture.client.requestCancelActivePrompt()));
+            },
+            { once: true },
+          );
+          return { outcome: "allow_once" };
+        },
+      },
+    });
+    const { client } = fixture;
+    const prompt = fixture.prompt("session-reentry", "hello");
+    await fixture.message(0);
+    await fixture.permission("session-reentry");
+    const active = asInternals(client).activePrompt;
+    assert(active?.elicitationController);
+    active.elicitationController.signal.addEventListener(
+      "abort",
+      () => {
+        reentered.push(fixture.track(client.requestCancelActivePrompt()));
+      },
+      { once: true },
+    );
+
+    await client.cancel("session-reentry");
+    assert.equal(reentered.length, 2);
+    assert.deepEqual(await Promise.all(reentered), [true, true]);
+    assert.deepEqual(
+      fixture.messages.map((message) => "method" in message && message.method),
+      ["session/prompt", "session/cancel"],
+    );
+    await fixture.reply(await fixture.message(0));
+    await prompt;
+  },
+);
+
+test(
+  "AcpClient queues cancellation before an abort listener starts the next prompt",
+  { timeout: 5_000 },
+  async (t) => {
+    const fixture = createCancellationFixture(t);
+    const { client } = fixture;
+    const first = fixture.prompt("session-next", "first");
+    await fixture.message(0);
+    const active = asInternals(client).activePrompt;
+    assert(active?.elicitationController);
+    let second: Promise<unknown> | undefined;
+    active.elicitationController.signal.addEventListener(
+      "abort",
+      () => {
+        second = fixture.prompt("session-next", "second");
+      },
+      { once: true },
+    );
+
+    await client.cancel("session-next");
+    const secondRequest = await fixture.message(2);
+    assert.deepEqual(
+      fixture.messages.map((message) => "method" in message && message.method),
+      ["session/prompt", "session/cancel", "session/prompt"],
+    );
+    assert(second);
+    await fixture.reply(await fixture.message(0));
+    await fixture.reply(secondRequest);
+    await Promise.all([first, second]);
+  },
+);
+
+test(
+  "AcpClient queues a replacement prompt before abort listeners cancel its owner",
+  { timeout: 5_000 },
+  async (t) => {
+    const releaseSecondWrite = createDeferred<void>();
+    let promptsWritten = 0;
+    const fixture = createCancellationFixture(t, {
+      async write(message) {
+        if ("method" in message && message.method === "session/prompt" && ++promptsWritten === 2) {
+          await releaseSecondWrite.promise;
+        }
+      },
+      release: () => releaseSecondWrite.resolve(),
+    });
+    const { client } = fixture;
+    const first = fixture.prompt("session-replaced", "first");
+    await fixture.message(0);
+    const active = asInternals(client).activePrompt;
+    assert(active?.elicitationController);
+    let cancellation: Promise<boolean> | undefined;
+    active.elicitationController.signal.addEventListener(
+      "abort",
+      () => {
+        cancellation = fixture.track(client.requestCancelActivePrompt());
+      },
+      { once: true },
+    );
+
+    const second = fixture.prompt("session-replaced", "second");
+    const secondRequest = await fixture.message(1);
+    assert("method" in secondRequest);
+    assert.equal(secondRequest.method, "session/prompt");
+    assert.equal(fixture.messages.length, 2);
+    assert(cancellation);
+    releaseSecondWrite.resolve();
+    assert.equal(await cancellation, true);
+    assert.equal(await client.requestCancelActivePrompt(), true);
+    assert.deepEqual(
+      fixture.messages.map((message) => "method" in message && message.method),
+      ["session/prompt", "session/prompt", "session/cancel"],
+    );
+    await fixture.reply(await fixture.message(0));
+    await fixture.reply(secondRequest);
+    await Promise.all([first, second]);
+  },
+);
+
+test(
+  "AcpClient shares a failed cancellation attempt but permits an explicit retry",
+  { timeout: 5_000 },
+  async (t) => {
+    const attempt = createDeferred<void>();
+    const called = createDeferred<void>();
+    const fixture = createCancellationFixture(t, { release: () => attempt.resolve() });
+    const { client } = fixture;
+    const prompt = fixture.prompt("session-retry", "hello");
+    await fixture.message(0);
+    const connection = asInternals(client).connection as {
+      cancel: (params: { sessionId: string }) => Promise<void>;
+    };
+    const sendCancel = connection.cancel;
+    let calls = 0;
+    connection.cancel = (params) => {
+      calls += 1;
+      if (calls === 1) {
+        called.resolve();
+        return attempt.promise;
+      }
+      return sendCancel(params);
+    };
+    const failure = new Error("cancel was not enqueued");
+    const results = fixture.track(
+      Promise.allSettled([client.cancel("session-retry"), client.requestCancelActivePrompt()]),
+    );
+    await called.promise;
+    assert.equal(calls, 1);
+    attempt.reject(failure);
+    for (const result of await results) {
+      assert(result.status === "rejected");
+      assert.equal(result.reason, failure);
+    }
+
+    assert.equal(await client.requestCancelActivePrompt(), true);
+    assert.equal(await client.requestCancelActivePrompt(), true);
+    assert.equal(calls, 2);
+    assert.deepEqual(
+      fixture.messages.map((message) => "method" in message && message.method),
+      ["session/prompt", "session/cancel"],
+    );
+    await fixture.reply(await fixture.message(0));
+    await prompt;
+  },
+);
+
+test(
+  "AcpClient keeps a successor cancellation when an older attempt rejects",
+  { timeout: 5_000 },
+  async (t) => {
+    const oldAttempt = createDeferred<void>();
+    const oldCalled = createDeferred<void>();
+    const releaseNewSend = createDeferred<void>();
+    const fixture = createCancellationFixture(t, {
+      async write(message) {
+        if ("method" in message && message.method === "session/cancel") {
+          await releaseNewSend.promise;
+        }
+      },
+      release() {
+        oldAttempt.resolve();
+        releaseNewSend.resolve();
+      },
+    });
+    const { client } = fixture;
+    const first = fixture.prompt("session-isolation", "first");
+    await fixture.message(0);
+    const connection = asInternals(client).connection as {
+      cancel: (params: { sessionId: string }) => Promise<void>;
+    };
+    const sendCancel = connection.cancel;
+    let calls = 0;
+    connection.cancel = (params) => {
+      calls += 1;
+      if (calls === 1) {
+        oldCalled.resolve();
+        return oldAttempt.promise;
+      }
+      return sendCancel(params);
+    };
+    const oldResult = fixture.track(Promise.allSettled([client.requestCancelActivePrompt()]));
+    await oldCalled.promise;
+    const second = fixture.prompt("session-isolation", "second");
+    const secondRequest = await fixture.message(1);
+    const newer = fixture.track(client.requestCancelActivePrompt());
+    await fixture.message(2);
+    const failure = new Error("old cancel was not enqueued");
+    oldAttempt.reject(failure);
+    const [result] = await oldResult;
+    assert(result?.status === "rejected");
+    assert.equal(result.reason, failure);
+    const repeated = fixture.track(client.requestCancelActivePrompt());
+    releaseNewSend.resolve();
+    assert.deepEqual(await Promise.all([newer, repeated]), [true, true]);
+    assert.equal(calls, 2);
+    assert.deepEqual(
+      fixture.messages.map((message) => "method" in message && message.method),
+      ["session/prompt", "session/prompt", "session/cancel"],
+    );
+    await fixture.reply(await fixture.message(0));
+    await fixture.reply(secondRequest);
+    await Promise.all([first, second]);
+  },
+);
+
+for (const mode of ["same-session-live", "same-session-cancelled", "different-session"]) {
+  test(
+    "AcpClient preserves successor permission ownership: " + mode,
+    { timeout: 5_000 },
+    async (t) => {
+      const signals: AbortSignal[] = [];
+      const fixture = createCancellationFixture(t, {
+        client: {
+          onPermissionRequest: async (_request, { signal }) => {
+            signals.push(signal);
+            return { outcome: "allow_once" };
+          },
+        },
+      });
+      const { client } = fixture;
+      const first = fixture.prompt("session-old", "first");
+      const firstRequest = await fixture.message(0);
+      await fixture.permission("session-old");
+      const nextSession = mode === "different-session" ? "session-other" : "session-old";
+      const second = fixture.prompt(nextSession, "second");
+      const secondRequest = await fixture.message(1);
+      await fixture.permission(nextSession);
+      assert.equal(signals.length, 2);
+      if (mode === "same-session-cancelled") {
+        await client.cancel(nextSession);
+      }
+
+      await fixture.reply(firstRequest);
+      await first;
+      if (mode === "same-session-cancelled") {
+        assert.deepEqual(await fixture.permission(nextSession), {
+          outcome: { outcome: "cancelled" },
+        });
+        assert.equal(signals.length, 2);
+      } else {
+        assert.equal(signals[1]?.aborted, false);
+        assert.equal(signals[0]?.aborted, mode === "different-session");
+        await client.cancel(nextSession);
+        assert.equal(signals[1]?.aborted, true);
+      }
+      assert.deepEqual(await fixture.permission(nextSession), {
+        outcome: { outcome: "cancelled" },
+      });
+      assert.equal(signals.length, 2);
+      await fixture.reply(secondRequest);
+      await second;
+    },
+  );
+}
+
+for (const completion of ["older", "newer"]) {
+  test(
+    "AcpClient preserves pending session permissions behind another active session: " + completion,
+    { timeout: 5_000 },
+    async (t) => {
+      const permissionEntered = createDeferred<AbortSignal>();
+      const releasePermission = createDeferred<void>();
+      const fixture = createCancellationFixture(t, {
+        client: {
+          onPermissionRequest: async (_request, { signal }) => {
+            permissionEntered.resolve(signal);
+            await releasePermission.promise;
+            return { outcome: "allow_once" };
+          },
+        },
+        release: () => releasePermission.resolve(),
+      });
+      const first = fixture.prompt("session-overlap", "first");
+      const firstRequest = await fixture.message(0);
+      const second = fixture.prompt("session-overlap", "second");
+      const secondRequest = await fixture.message(1);
+      const permission = fixture.permission("session-overlap");
+      const signal = await permissionEntered.promise;
+      const third = fixture.prompt("session-other", "third");
+      const thirdRequest = await fixture.message(2);
+      const finishOlder = completion === "older";
+
+      await fixture.reply(finishOlder ? firstRequest : secondRequest);
+      await (finishOlder ? first : second);
+      releasePermission.resolve();
+      assert.deepEqual(
+        await permission,
+        finishOlder
+          ? { outcome: { outcome: "selected", optionId: "allow" } }
+          : { outcome: { outcome: "cancelled" } },
+      );
+      assert.equal(signal.aborted, !finishOlder);
+
+      await fixture.reply(finishOlder ? secondRequest : firstRequest);
+      await (finishOlder ? second : first);
+      assert.equal(signal.aborted, true);
+      await fixture.reply(thirdRequest);
+      await third;
+    },
+  );
+}
+
+for (const phase of ["cancel", "settle"]) {
+  test(
+    "AcpClient detaches permission ownership before " + phase + " callbacks",
+    { timeout: 5_000 },
+    async (t) => {
+      const signals: AbortSignal[] = [];
+      const fixture = createCancellationFixture(t, {
+        client: {
+          onPermissionRequest: async (_request, { signal }) => {
+            signals.push(signal);
+            return { outcome: "allow_once" };
+          },
+        },
+      });
+      const { client } = fixture;
+      const first = fixture.prompt("session-callback", "first");
+      const firstRequest = await fixture.message(0);
+      await fixture.permission("session-callback");
+      const active = asInternals(client).activePrompt;
+      assert(active?.elicitationController);
+      let second: Promise<unknown> | undefined;
+      let nextPermission: Promise<RequestPermissionResponse> | undefined;
+      active.elicitationController.signal.addEventListener(
+        "abort",
+        () => {
+          second = fixture.prompt("session-callback", "second");
+          nextPermission = fixture.permission("session-callback");
+        },
+        { once: true },
+      );
+
+      if (phase === "cancel") {
+        await client.cancel("session-callback");
+      } else {
+        await fixture.reply(firstRequest);
+        await first;
+      }
+      const secondRequest = await fixture.message(phase === "cancel" ? 2 : 1);
+      assert(second);
+      assert(nextPermission);
+      assert.deepEqual(await nextPermission, {
+        outcome: { outcome: "selected", optionId: "allow" },
+      });
+      assert.equal(signals.length, 2);
+      assert.notEqual(signals[0], signals[1]);
+      assert.equal(signals[0]?.aborted, true);
+      assert.equal(signals[1]?.aborted, false);
+      await client.cancel("session-callback");
+      assert.equal(signals[1]?.aborted, true);
+
+      if (phase === "cancel") {
+        await fixture.reply(firstRequest);
+        await first;
+      }
+      await fixture.reply(secondRequest);
+      await second;
+    },
+  );
+}
 
 test("AcpClient reports prompt readiness only after the transport accepts the request", async () => {
   const writeEntered = createDeferred<AnyMessage>();
@@ -1968,6 +2436,64 @@ function createDeferred<T>(): Deferred<T> {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+function createCancellationFixture(
+  t: TestContext,
+  options: {
+    client?: Partial<ConstructorParameters<typeof AcpClient>[0]>;
+    write?: (message: AnyMessage) => Promise<void> | void;
+    release?: () => void;
+  } = {},
+) {
+  const client = makeClient(options.client);
+  const incoming = new TransformStream<AnyMessage>();
+  const messages: AnyMessage[] = [];
+  const written: Array<Deferred<AnyMessage>> = [];
+  const pending: Array<Promise<unknown>> = [];
+  const message = (index: number) => (written[index] ??= createDeferred<AnyMessage>()).promise;
+  function track<T>(operation: Promise<T>): Promise<T> {
+    pending.push(operation);
+    void operation.catch(() => {});
+    return operation;
+  }
+  connectClientToStream(client, {
+    readable: incoming.readable,
+    writable: new WritableStream<AnyMessage>({
+      async write(value) {
+        const index = messages.push(value) - 1;
+        void message(index);
+        written[index].resolve(value);
+        await options.write?.(value);
+      },
+    }),
+  });
+  t.after(async () => {
+    options.release?.();
+    try {
+      await incoming.writable.close();
+    } finally {
+      await client.close();
+      await Promise.allSettled(pending);
+    }
+  });
+  return {
+    client,
+    messages,
+    message,
+    track,
+    prompt(sessionId: string, text: string) {
+      return track(client.prompt(sessionId, text));
+    },
+    permission(sessionId: string) {
+      const handler = asInternals(client).handlePermissionRequest;
+      assert(handler);
+      return track(handler.call(client, makePermissionRequest(sessionId, "edit")));
+    },
+    reply(request: AnyMessage) {
+      return writeAgentMessage(incoming.writable, promptResponseFor(request));
+    },
+  };
 }
 
 function connectClientToStream(

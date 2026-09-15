@@ -260,6 +260,7 @@ type ActivePromptState = {
   sessionId: string;
   requestId?: JsonRpcId;
   promise?: Promise<PromptResponse>;
+  cancelPromise?: Promise<void>;
   onRequestWritten?: () => Promise<void> | void;
   elicitationHandler?: AcpElicitationHandler;
   elicitationController: AbortController;
@@ -1078,6 +1079,7 @@ export class AcpClient {
       ? installSdkConsoleErrorSuppression()
       : undefined;
 
+    const previousActivePrompt = this.activePrompt;
     const activePrompt = this.beginActivePrompt(sessionId, onRequestWritten, onElicitation);
 
     let promptPromise: Promise<PromptResponse>;
@@ -1097,6 +1099,8 @@ export class AcpClient {
     activePrompt.promise = promptPromise;
 
     try {
+      // Queue this prompt before abort listeners can cancel its newly published owner.
+      previousActivePrompt?.elicitationController?.abort();
       return this.returnPromptResponseOrPermissionFailure(sessionId, await promptPromise);
     } catch (error) {
       this.throwPromptPermissionFailureIfPresent(sessionId);
@@ -1104,9 +1108,6 @@ export class AcpClient {
     } finally {
       restoreConsoleError?.();
       this.clearActivePrompt(activePrompt);
-      this.cancellingSessionIds.delete(sessionId);
-      this.abortAndDropPermissionSignal(sessionId);
-      this.promptPermissionFailures.delete(sessionId);
     }
   }
 
@@ -1115,7 +1116,6 @@ export class AcpClient {
     onRequestWritten: (() => Promise<void> | void) | undefined,
     elicitationHandler: AcpElicitationHandler | undefined,
   ): ActivePromptState {
-    const previous = this.activePrompt;
     this.cancellingSessionIds.delete(sessionId);
     const active: ActivePromptState = {
       sessionId,
@@ -1125,7 +1125,6 @@ export class AcpClient {
     };
     this.activePrompt = active;
     this.pendingPromptOwners.push(active);
-    previous?.elicitationController?.abort();
     return active;
   }
 
@@ -1157,14 +1156,26 @@ export class AcpClient {
   }
 
   private clearActivePrompt(active: ActivePromptState): void {
+    // Other sessions may be globally active while a newer same-session prompt still owns state.
+    const pendingIndex = this.pendingPromptOwners.indexOf(active);
+    const clearSession = !this.pendingPromptOwners.some(
+      (candidate, index) => index > pendingIndex && candidate.sessionId === active.sessionId,
+    );
     if (this.activePrompt === active) {
       this.activePrompt = undefined;
     }
-    const pendingIndex = this.pendingPromptOwners.indexOf(active);
     if (pendingIndex >= 0) {
       this.pendingPromptOwners.splice(pendingIndex, 1);
     }
+    let permissionController: AbortController | undefined;
+    if (clearSession) {
+      this.cancellingSessionIds.delete(active.sessionId);
+      permissionController = this.takePermissionAbortController(active.sessionId);
+      this.promptPermissionFailures.delete(active.sessionId);
+    }
+    // Finish bookkeeping before callbacks can admit another prompt or permission request.
     active.elicitationController.abort();
+    permissionController?.abort();
   }
 
   private normalizePromptForAgent(prompt: PromptInput | string): PromptInput {
@@ -1351,19 +1362,26 @@ export class AcpClient {
 
   async cancel(sessionId: string): Promise<void> {
     const connection = this.getConnection();
-    const active = this.activePrompt;
-    if (active?.sessionId === sessionId) {
+    const active = this.activePrompt?.sessionId === sessionId ? this.activePrompt : undefined;
+    // Queue and latch before abort listeners can reenter cancellation or start another prompt.
+    const cancellation: Promise<void> =
+      active?.cancelPromise ??
+      this.runConnectionRequest(() => connection.cancel({ sessionId })).catch((error: unknown) => {
+        if (active?.cancelPromise === cancellation) {
+          active.cancelPromise = undefined;
+        }
+        throw error;
+      });
+    const permissionController = this.takePermissionAbortController(sessionId);
+    if (active) {
+      active.cancelPromise = cancellation;
       this.cancellingSessionIds.add(sessionId);
       active.elicitationController?.abort();
     } else {
       this.cancellingSessionIds.delete(sessionId);
     }
-    this.abortAndDropPermissionSignal(sessionId);
-    await this.runConnectionRequest(() =>
-      connection.cancel({
-        sessionId,
-      }),
-    );
+    permissionController?.abort();
+    await cancellation;
   }
 
   async closeSession(sessionId: string): Promise<void> {
@@ -2219,12 +2237,10 @@ export class AcpClient {
     return controller.signal;
   }
 
-  private abortAndDropPermissionSignal(sessionId: string): void {
+  private takePermissionAbortController(sessionId: string): AbortController | undefined {
     const controller = this.permissionAbortControllers.get(sessionId);
-    if (controller) {
-      controller.abort();
-      this.permissionAbortControllers.delete(sessionId);
-    }
+    this.permissionAbortControllers.delete(sessionId);
+    return controller;
   }
 
   private recordPermissionDecision(decision: "approved" | "denied" | "cancelled"): void {
