@@ -427,13 +427,6 @@ async function emitRequestedError(
   }
 }
 
-async function runWithOutputPolicy<T>(
-  _outputPolicy: OutputPolicy,
-  run: () => Promise<T>,
-): Promise<T> {
-  return await run();
-}
-
 async function handleQueueOwnerCommand(argv: string[]): Promise<boolean> {
   installPerfMetricsCapture({
     argv: argv.slice(2),
@@ -568,13 +561,9 @@ export async function main(argv: string[] = process.argv): Promise<void> {
   });
 
   try {
-    await runWithOutputPolicy(requestedOutputPolicy, async () => {
-      try {
-        await program.parseAsync(normalizedArgv);
-      } catch (error) {
-        await handleProgramParseError(error, requestedOutputPolicy);
-      }
-    });
+    await program.parseAsync(normalizedArgv);
+  } catch (error) {
+    await handleProgramParseError(error, requestedOutputPolicy);
   } finally {
     flushPerfMetricsCapture();
   }

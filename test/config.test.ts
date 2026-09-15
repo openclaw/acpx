@@ -110,6 +110,37 @@ test("loadResolvedConfig merges global and project config with project priority"
   });
 });
 
+test("project scalar values skip invalid shadowed global values", async () => {
+  await withTempEnv(async ({ homeDir }) => {
+    const cwd = path.join(homeDir, "workspace");
+    const globalPath = path.join(homeDir, ".acpx", "config.json");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.dirname(globalPath), { recursive: true });
+    const project = {
+      defaultAgent: "custom",
+      defaultPermissions: "deny-all",
+      nonInteractivePermissions: "fail",
+      authPolicy: "fail",
+      ttl: 2,
+      queueMaxDepth: 3,
+      format: "quiet",
+      disableExec: false,
+    };
+    await fs.writeFile(
+      globalPath,
+      JSON.stringify(Object.fromEntries(Object.keys(project).map((key) => [key, {}]))),
+    );
+    await fs.writeFile(path.join(cwd, ".acpxrc.json"), JSON.stringify(project));
+    const resolved = await loadResolvedConfig(cwd);
+    assert.deepEqual(toConfigDisplay(resolved), {
+      ...project,
+      timeout: null,
+      agents: {},
+      authMethods: [],
+    });
+  });
+});
+
 test("loadResolvedConfig normalizes timer values through the CLI timer boundary", async () => {
   await withTempEnv(async ({ homeDir }) => {
     const cwd = path.join(homeDir, "workspace");

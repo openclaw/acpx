@@ -245,7 +245,7 @@ function parseArgvAgentEntry(
     );
   }
   const argv = parseAgentArgv(raw.argv, name, sourcePath);
-  return { command: renderArgv(argv), argv };
+  return { command: renderArgvIdentity(argv), argv };
 }
 
 function parseLegacyAgentEntry(
@@ -319,10 +319,6 @@ function parseAgentArgs(value: unknown, agentName: string, sourcePath: string): 
 
 function quoteCommandArg(value: string): string {
   return JSON.stringify(value);
-}
-
-function renderArgv(argv: readonly string[]): string {
-  return renderArgvIdentity(argv);
 }
 
 function parseAuth(value: unknown, sourcePath: string): Record<string, string> | undefined {
@@ -402,26 +398,6 @@ async function loadExplicitMcpConfig(
   };
 }
 
-function mergeAgents(
-  globalAgents: Record<string, ResolvedAgentConfig> | undefined,
-  projectAgents: Record<string, ResolvedAgentConfig> | undefined,
-): Record<string, ResolvedAgentConfig> {
-  return {
-    ...globalAgents,
-    ...projectAgents,
-  };
-}
-
-function mergeAuth(
-  globalAuth: Record<string, string> | undefined,
-  projectAuth: Record<string, string> | undefined,
-): Record<string, string> {
-  return {
-    ...globalAuth,
-    ...projectAuth,
-  };
-}
-
 export async function loadResolvedConfig(
   cwd: string,
   options: LoadResolvedConfigOptions = {},
@@ -438,16 +414,43 @@ export async function loadResolvedConfig(
   const globalConfig = globalResult.config;
   const projectConfig = projectResult.config;
 
-  const scalar = resolveScalarConfigValues(projectConfig, projectPath, globalConfig, globalPath);
+  function resolveScalar<T>(
+    key: keyof ConfigFileShape,
+    parse: (value: unknown, sourcePath: string) => T | undefined,
+    fallback: T,
+  ): T {
+    return (
+      parse(projectConfig?.[key], projectPath) ?? parse(globalConfig?.[key], globalPath) ?? fallback
+    );
+  }
 
-  const agents = mergeAgents(
-    parseAgents(globalConfig?.agents, globalPath),
-    parseAgents(projectConfig?.agents, projectPath),
-  );
-  const auth = mergeAuth(
-    parseAuth(globalConfig?.auth, globalPath),
-    parseAuth(projectConfig?.auth, projectPath),
-  );
+  const scalar = {
+    defaultAgent: resolveScalar("defaultAgent", parseDefaultAgent, DEFAULT_AGENT_NAME),
+    defaultPermissions: resolveScalar(
+      "defaultPermissions",
+      parsePermissionMode,
+      DEFAULT_PERMISSION_MODE,
+    ),
+    nonInteractivePermissions: resolveScalar(
+      "nonInteractivePermissions",
+      parseNonInteractivePermissionPolicy,
+      DEFAULT_NON_INTERACTIVE_PERMISSION_POLICY,
+    ),
+    authPolicy: resolveScalar("authPolicy", parseAuthPolicy, DEFAULT_AUTH_POLICY),
+    ttlMs: resolveScalar("ttl", parseTtlMs, DEFAULT_TTL_MS),
+    timeoutMs: resolveTimeoutMs(projectConfig, projectPath, globalConfig, globalPath),
+    queueMaxDepth: resolveScalar("queueMaxDepth", parseQueueMaxDepth, DEFAULT_QUEUE_MAX_DEPTH),
+    format: resolveScalar("format", parseOutputFormat, DEFAULT_OUTPUT_FORMAT),
+  };
+
+  const agents = {
+    ...parseAgents(globalConfig?.agents, globalPath),
+    ...parseAgents(projectConfig?.agents, projectPath),
+  };
+  const auth = {
+    ...parseAuth(globalConfig?.auth, globalPath),
+    ...parseAuth(projectConfig?.auth, projectPath),
+  };
 
   const mcpServers = resolveMcpServers(
     projectConfig,
@@ -457,7 +460,7 @@ export async function loadResolvedConfig(
     explicitMcp.config,
     explicitMcp.path,
   );
-  const disableExec = resolveDisableExec(projectConfig, projectPath, globalConfig, globalPath);
+  const disableExec = resolveScalar("disableExec", parseDisableExec, DEFAULT_DISABLE_EXEC);
 
   return {
     ...scalar,
@@ -474,135 +477,6 @@ export async function loadResolvedConfig(
     hasGlobalConfig: globalResult.exists,
     hasProjectConfig: projectResult.exists,
   };
-}
-
-function resolveScalarConfigValues(
-  projectConfig: ConfigFileShape | undefined,
-  projectPath: string,
-  globalConfig: ConfigFileShape | undefined,
-  globalPath: string,
-): Pick<
-  ResolvedAcpxConfig,
-  | "defaultAgent"
-  | "defaultPermissions"
-  | "nonInteractivePermissions"
-  | "authPolicy"
-  | "ttlMs"
-  | "timeoutMs"
-  | "queueMaxDepth"
-  | "format"
-> {
-  return {
-    defaultAgent: resolveDefaultAgent(projectConfig, projectPath, globalConfig, globalPath),
-    defaultPermissions: resolveDefaultPermissions(
-      projectConfig,
-      projectPath,
-      globalConfig,
-      globalPath,
-    ),
-    nonInteractivePermissions: resolveNonInteractivePermissions(
-      projectConfig,
-      projectPath,
-      globalConfig,
-      globalPath,
-    ),
-    authPolicy: resolveAuthPolicy(projectConfig, projectPath, globalConfig, globalPath),
-    ttlMs: resolveTtlMs(projectConfig, projectPath, globalConfig, globalPath),
-    timeoutMs: resolveTimeoutMs(projectConfig, projectPath, globalConfig, globalPath),
-    queueMaxDepth: resolveQueueMaxDepth(projectConfig, projectPath, globalConfig, globalPath),
-    format: resolveFormat(projectConfig, projectPath, globalConfig, globalPath),
-  };
-}
-
-function resolveDefaultAgent(
-  projectConfig: ConfigFileShape | undefined,
-  projectPath: string,
-  globalConfig: ConfigFileShape | undefined,
-  globalPath: string,
-): string {
-  return (
-    parseDefaultAgent(projectConfig?.defaultAgent, projectPath) ??
-    parseDefaultAgent(globalConfig?.defaultAgent, globalPath) ??
-    DEFAULT_AGENT_NAME
-  );
-}
-
-function resolveDefaultPermissions(
-  projectConfig: ConfigFileShape | undefined,
-  projectPath: string,
-  globalConfig: ConfigFileShape | undefined,
-  globalPath: string,
-): PermissionMode {
-  return (
-    parsePermissionMode(projectConfig?.defaultPermissions, projectPath) ??
-    parsePermissionMode(globalConfig?.defaultPermissions, globalPath) ??
-    DEFAULT_PERMISSION_MODE
-  );
-}
-
-function resolveNonInteractivePermissions(
-  projectConfig: ConfigFileShape | undefined,
-  projectPath: string,
-  globalConfig: ConfigFileShape | undefined,
-  globalPath: string,
-): NonInteractivePermissionPolicy {
-  return (
-    parseNonInteractivePermissionPolicy(projectConfig?.nonInteractivePermissions, projectPath) ??
-    parseNonInteractivePermissionPolicy(globalConfig?.nonInteractivePermissions, globalPath) ??
-    DEFAULT_NON_INTERACTIVE_PERMISSION_POLICY
-  );
-}
-
-function resolveAuthPolicy(
-  projectConfig: ConfigFileShape | undefined,
-  projectPath: string,
-  globalConfig: ConfigFileShape | undefined,
-  globalPath: string,
-): AuthPolicy {
-  return (
-    parseAuthPolicy(projectConfig?.authPolicy, projectPath) ??
-    parseAuthPolicy(globalConfig?.authPolicy, globalPath) ??
-    DEFAULT_AUTH_POLICY
-  );
-}
-
-function resolveTtlMs(
-  projectConfig: ConfigFileShape | undefined,
-  projectPath: string,
-  globalConfig: ConfigFileShape | undefined,
-  globalPath: string,
-): number {
-  return (
-    parseTtlMs(projectConfig?.ttl, projectPath) ??
-    parseTtlMs(globalConfig?.ttl, globalPath) ??
-    DEFAULT_TTL_MS
-  );
-}
-
-function resolveQueueMaxDepth(
-  projectConfig: ConfigFileShape | undefined,
-  projectPath: string,
-  globalConfig: ConfigFileShape | undefined,
-  globalPath: string,
-): number {
-  return (
-    parseQueueMaxDepth(projectConfig?.queueMaxDepth, projectPath) ??
-    parseQueueMaxDepth(globalConfig?.queueMaxDepth, globalPath) ??
-    DEFAULT_QUEUE_MAX_DEPTH
-  );
-}
-
-function resolveFormat(
-  projectConfig: ConfigFileShape | undefined,
-  projectPath: string,
-  globalConfig: ConfigFileShape | undefined,
-  globalPath: string,
-): OutputFormat {
-  return (
-    parseOutputFormat(projectConfig?.format, projectPath) ??
-    parseOutputFormat(globalConfig?.format, globalPath) ??
-    DEFAULT_OUTPUT_FORMAT
-  );
 }
 
 function hasConfigKey(config: ConfigFileShape | undefined, key: keyof ConfigFileShape): boolean {
@@ -642,19 +516,6 @@ function resolveMcpServers(
     return parseMcpServers(globalConfig?.mcpServers, globalPath);
   }
   return [];
-}
-
-function resolveDisableExec(
-  projectConfig: ConfigFileShape | undefined,
-  projectPath: string,
-  globalConfig: ConfigFileShape | undefined,
-  globalPath: string,
-): boolean {
-  return (
-    parseDisableExec(projectConfig?.disableExec, projectPath) ??
-    parseDisableExec(globalConfig?.disableExec, globalPath) ??
-    DEFAULT_DISABLE_EXEC
-  );
 }
 
 export function toConfigDisplay(config: ResolvedAcpxConfig): {
