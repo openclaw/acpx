@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { PromptInput } from "../src/prompt-content.js";
 import { runPromptTurn } from "../src/runtime/engine/prompt-turn.js";
 import {
@@ -3423,6 +3423,33 @@ test("integration: fs/read_text_file through mock agent", async () => {
       const result = await runCli([...baseExecArgs(cwd), `read ${readPath}`], homeDir);
       assert.equal(result.code, 0, result.stderr);
       assert.match(result.stdout, /mock read content/);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: missing file reads return the ACP resource-not-found error", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const readPath = path.join(cwd, "missing.txt");
+
+    try {
+      const result = await runCli(
+        [...baseAgentArgs(cwd), "--format", "json", "--json-strict", "exec", `read ${readPath}`],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+      const messages = parseJsonRpcOutputLines(result.stdout);
+      const request = messages.find((message) => message.method === "fs/read_text_file");
+      assert.ok(request);
+      const response = messages.find((message) => message.id === request.id && "error" in message);
+      const uri = pathToFileURL(readPath).href;
+      assert.deepEqual(response?.error, {
+        code: -32002,
+        message: `Resource not found: ${uri}`,
+        data: { uri },
+      });
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }

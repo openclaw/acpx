@@ -1,8 +1,10 @@
 import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
+import { pathToFileURL } from "node:url";
 import {
   PROTOCOL_VERSION,
+  RequestError,
   client,
   methods,
   type AnyMessage,
@@ -2231,6 +2233,9 @@ export class AcpClient {
       return await this.filesystem.readTextFile(params);
     } catch (error) {
       this.recordPermissionError(params.sessionId, error);
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        throw RequestError.resourceNotFound(pathToFileURL(params.path).href);
+      }
       throw error;
     }
   }

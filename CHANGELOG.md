@@ -14,6 +14,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Sessions/hardening: keep session records and indexes private across atomic rewrites, including embedded file stores.
 
+- ACP/filesystem: return the standard resource-not-found error for missing files so agents can distinguish new files from failed reads.
+
 ## 0.16.0 - 2026-09-15
 
 **Highlights:** Embedding hosts can share session-specific tools and turn-owned approvals, recover stored handles, and shut down connections while preserving existing sessions.
