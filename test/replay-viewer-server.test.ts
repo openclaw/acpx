@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { once } from "node:events";
 import fs from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   REPLAY_VIEWER_HELP_TEXT,
-  main as replayViewerMain,
   parseReplayViewerCliArgs,
 } from "../examples/flows/replay-viewer/server.js";
 import {
@@ -14,6 +18,35 @@ import {
   isServerAlreadyRunning,
   requestViewerServerShutdown,
 } from "../examples/flows/replay-viewer/server/viewer-server.js";
+
+const execFileAsync = promisify(execFile);
+const viewerCliPath = fileURLToPath(
+  new URL("../examples/flows/replay-viewer/server.js", import.meta.url),
+);
+
+async function startHealthFixture(runsDir: string): Promise<{
+  port: number;
+  close(): Promise<void>;
+}> {
+  const server = http.createServer((request, response) => {
+    response.writeHead(request.url === "/api/health" ? 200 : 404, {
+      "content-type": "application/json",
+    });
+    response.end(JSON.stringify({ service: "acpx-flow-replay-viewer", runsDir }));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  return {
+    port: address.port,
+    async close() {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    },
+  };
+}
 
 test("parseReplayViewerCliArgs defaults to start and supports control flags", () => {
   assert.deepEqual(parseReplayViewerCliArgs([]), {
@@ -51,22 +84,9 @@ test("parseReplayViewerCliArgs rejects invalid flags", () => {
 });
 
 test("replay viewer CLI prints help without starting a server", async () => {
-  const lines: string[] = [];
-  const originalWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = (chunk: string | Uint8Array) => {
-    lines.push(String(chunk));
-    return true;
-  };
-
-  try {
-    await replayViewerMain(["--help"]);
-  } finally {
-    process.stdout.write = originalWrite;
-  }
-
-  const output = lines.join("");
-  assert.equal(output, REPLAY_VIEWER_HELP_TEXT);
-  assert.match(output, /--runs-dir <path>/);
+  const { stdout } = await execFileAsync(process.execPath, [viewerCliPath, "--help"]);
+  assert.equal(stdout, REPLAY_VIEWER_HELP_TEXT);
+  assert.match(stdout, /--runs-dir <path>/);
 });
 
 test("replay viewer status and stop helpers report and stop a running server", async () => {
@@ -95,51 +115,89 @@ test("replay viewer status and stop helpers report and stop a running server", a
 
 test("replay viewer CLI status prints running details", async () => {
   const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-status-cli-"));
-  const viewerServer = await createReplayViewerServer({
-    host: "127.0.0.1",
-    port: 0,
-    runsDir,
-    disableDependencyOptimization: true,
-  });
-
-  const lines: string[] = [];
-  const originalWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = (chunk: string | Uint8Array) => {
-    lines.push(String(chunk));
-    return true;
-  };
+  const viewerServer = await startHealthFixture(runsDir);
 
   try {
-    await replayViewerMain(["status", "--port", String(viewerServer.port)]);
+    const { stdout } = await execFileAsync(process.execPath, [
+      viewerCliPath,
+      "status",
+      "--port",
+      String(viewerServer.port),
+    ]);
+    assert.match(stdout, /Viewer is running at http:\/\/127\.0\.0\.1:/);
+    assert.match(stdout, new RegExp(`Runs dir: ${escapeRegExp(runsDir)}`));
   } finally {
-    process.stdout.write = originalWrite;
     await viewerServer.close();
     await fs.rm(runsDir, { recursive: true, force: true });
   }
-
-  assert.match(lines.join(""), /Viewer is running at http:\/\/127\.0\.0\.1:/);
-  assert.match(lines.join(""), new RegExp(`Runs dir: ${escapeRegExp(runsDir)}`));
 });
 
 test("replay viewer start rejects reusing a server for a different runs dir", async () => {
   const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-start-runs-a-"));
   const otherRunsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-start-runs-b-"));
-  const viewerServer = await createReplayViewerServer({
-    host: "127.0.0.1",
-    port: 0,
-    runsDir,
-    disableDependencyOptimization: true,
-  });
+  const viewerServer = await startHealthFixture(runsDir);
 
   try {
     await assert.rejects(
-      replayViewerMain(["start", "--port", String(viewerServer.port), "--runs-dir", otherRunsDir]),
+      execFileAsync(process.execPath, [
+        viewerCliPath,
+        "start",
+        "--port",
+        String(viewerServer.port),
+        "--runs-dir",
+        otherRunsDir,
+      ]),
       /Viewer is already running .* not .*acpx-replay-start-runs-b-/,
     );
   } finally {
     await viewerServer.close().catch(() => {});
     await fs.rm(runsDir, { recursive: true, force: true });
     await fs.rm(otherRunsDir, { recursive: true, force: true });
+  }
+});
+
+test("replay viewer releases startup resources when its HTTP port is occupied", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-startup-"));
+  const occupied = http.createServer();
+  occupied.listen(0, "127.0.0.1");
+  await once(occupied, "listening");
+  const address = occupied.address();
+  assert.ok(address && typeof address !== "string");
+
+  try {
+    await assert.rejects(
+      execFileAsync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `
+            const { createReplayViewerServer } = await import(process.argv[1]);
+            try {
+              await createReplayViewerServer({
+                host: "127.0.0.1",
+                port: Number(process.argv[2]),
+                runsDir: process.argv[3],
+                disableDependencyOptimization: true,
+              });
+            } catch (error) {
+              process.stderr.write(error.code + "\\n");
+              process.exitCode = 1;
+            }
+          `,
+          new URL("../examples/flows/replay-viewer/server/viewer-server.js", import.meta.url).href,
+          String(address.port),
+          runsDir,
+        ],
+        { timeout: 10_000, killSignal: "SIGKILL" },
+      ),
+      { code: 1, killed: false, signal: null, stderr: "EADDRINUSE\n" },
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      occupied.close((error) => (error ? reject(error) : resolve()));
+    });
+    await fs.rm(runsDir, { recursive: true, force: true });
   }
 });
 

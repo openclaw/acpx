@@ -48,7 +48,10 @@ test("coverage script excludes generated package output", () => {
   assert.match(coverageScript, /dist-test\/src\/flows\/schema\.js/);
   assert.match(coverageScript, /dist-test\/src\/runtime\/public\/\*\*\/\*\.js/);
   assert.match(coverageScript, /dist-test\/src\/runtime\/engine\/manager\.js/);
-  assert.match(coverageScript, /node --test dist-test\/test\/\*\.test\.js && c8\b/);
+  assert.match(
+    coverageScript,
+    /node --test(?: --test-concurrency=\d+)? dist-test\/test\/\*\.test\.js && c8\b/,
+  );
   assert.match(coverageScript, /dist-test\/test\/flows\.test\.js/);
   assert.match(coverageScript, /dist-test\/test\/runtime-manager\.test\.js/);
   assert.match(coverageScript, /--exclude ['"]?dist\/\*\*\/\*\.js['"]?/);

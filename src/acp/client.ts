@@ -39,6 +39,7 @@ import {
   type WriteTextFileResponse,
   type SessionConfigOption,
 } from "@agentclientprotocol/sdk";
+import { FsSafeError } from "@openclaw/fs-safe/errors";
 import { resolveBuiltInAgentLaunch } from "../agent-registry.js";
 import { TimeoutError, withTimeout } from "../async-control.js";
 import {
@@ -2233,7 +2234,10 @@ export class AcpClient {
       return await this.filesystem.readTextFile(params);
     } catch (error) {
       this.recordPermissionError(params.sessionId, error);
-      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      if (
+        (error instanceof FsSafeError && error.code === "not-found") ||
+        (error instanceof Error && "code" in error && error.code === "ENOENT")
+      ) {
         throw RequestError.resourceNotFound(pathToFileURL(params.path).href);
       }
       throw error;

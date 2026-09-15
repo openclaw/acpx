@@ -51,6 +51,7 @@ export async function createReplayViewerServer(
     server: {
       middlewareMode: true,
       hmr: false,
+      ws: false,
       host,
       port,
       strictPort: false,
@@ -110,6 +111,9 @@ export async function createReplayViewerServer(
       server.off("error", reject);
       resolve();
     });
+  }).catch(async (error) => {
+    await requestClose().catch(() => {});
+    throw error;
   });
 
   const address = server.address();

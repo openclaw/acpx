@@ -1,4 +1,3 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 import type {
   ReadTextFileRequest,
@@ -6,6 +5,8 @@ import type {
   WriteTextFileRequest,
   WriteTextFileResponse,
 } from "@agentclientprotocol/sdk";
+import { isPathInside } from "@openclaw/fs-safe/path";
+import { root, type Root } from "@openclaw/fs-safe/root";
 import { PermissionDeniedError, PermissionPromptUnavailableError } from "./errors.js";
 import { promptForPermission } from "./permission-prompt.js";
 import type { ClientOperation, NonInteractivePermissionPolicy, PermissionMode } from "./types.js";
@@ -23,11 +24,6 @@ export type FileSystemHandlersOptions = {
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function isWithinRoot(rootDir: string, targetPath: string): boolean {
-  const relative = path.relative(rootDir, targetPath);
-  return relative.length === 0 || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function toWritePreview(content: string): string {
@@ -61,6 +57,7 @@ function canPromptForPermission(): boolean {
 
 export class FileSystemHandlers {
   private readonly rootDir: string;
+  private workspace?: Promise<Root>;
   private permissionMode: PermissionMode;
   private nonInteractivePermissions: NonInteractivePermissionPolicy;
   private readonly onOperation?: (operation: ClientOperation) => void;
@@ -100,7 +97,10 @@ export class FileSystemHandlers {
         throw new PermissionDeniedError("Permission denied for fs/read_text_file (--deny-all)");
       }
 
-      const content = await fs.readFile(filePath, "utf8");
+      const workspace = await this.getWorkspace();
+      const content = await workspace.readText(
+        `.${path.sep}${path.relative(this.rootDir, filePath)}`,
+      );
       const sliced = this.sliceContent(content, params.line, params.limit);
 
       this.emitOperation({
@@ -142,8 +142,16 @@ export class FileSystemHandlers {
         throw new PermissionDeniedError("Permission denied for fs/write_text_file");
       }
 
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.writeFile(filePath, params.content, "utf8");
+      const workspace = await this.getWorkspace();
+      const file = await workspace.openWritable(
+        `.${path.sep}${path.relative(this.rootDir, filePath)}`,
+        { mode: 0o666 },
+      );
+      try {
+        await file.handle.writeFile(params.content, "utf8");
+      } finally {
+        await file.handle.close();
+      }
 
       this.emitOperation({
         method: "fs/write_text_file",
@@ -188,10 +196,18 @@ export class FileSystemHandlers {
       throw new Error(`Path must be absolute: ${rawPath}`);
     }
     const resolved = path.resolve(rawPath);
-    if (!isWithinRoot(this.rootDir, resolved)) {
+    if (!isPathInside(this.rootDir, resolved)) {
       throw new Error(`Path is outside allowed cwd subtree: ${resolved}`);
     }
     return resolved;
+  }
+
+  private getWorkspace(): Promise<Root> {
+    return (this.workspace ??= root(this.rootDir, {
+      symlinks: "follow-within-root",
+      hardlinks: "allow",
+      maxBytes: Infinity,
+    }));
   }
 
   private sliceContent(

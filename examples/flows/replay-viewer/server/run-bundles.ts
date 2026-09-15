@@ -1,7 +1,8 @@
-import { constants as fsConstants } from "node:fs";
-import fs, { type FileHandle } from "node:fs/promises";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { isPathInside } from "@openclaw/fs-safe/path";
+import { root } from "@openclaw/fs-safe/root";
 import { mergeLiveRunState } from "../src/lib/run-state.js";
 import type { FlowRunManifest, FlowRunState, RunBundleSummary } from "../src/types.js";
 
@@ -46,57 +47,12 @@ export async function listRunBundles(
     });
 }
 
-export async function resolveRunBundleFilePath(
-  runsDir: string,
-  runId: string,
-  relativePath: string,
-): Promise<string> {
-  return (await resolveRunBundleFileTarget(runsDir, runId, relativePath)).realPath;
-}
-
-async function resolveRunBundleFileTarget(
-  runsDir: string,
-  runId: string,
-  relativePath: string,
-): Promise<{ realPath: string; realRunDir: string }> {
-  const normalizedRelativePath = normalizeRelativePath(relativePath);
-  const resolvedRunsDir = path.resolve(runsDir);
-  const runDir = path.resolve(resolvedRunsDir, runId);
-  if (!isPathInsideDirectory(resolvedRunsDir, runDir, { allowSamePath: false })) {
-    throw new Error(`Refusing to read run bundle outside runs directory: ${runId}`);
-  }
-  const resolvedPath = path.resolve(runDir, normalizedRelativePath);
-
-  if (!isPathInsideDirectory(runDir, resolvedPath)) {
-    throw new Error(`Refusing to read outside run bundle: ${relativePath}`);
-  }
-
-  const [realRunsDir, realRunDir, realPath] = await Promise.all([
-    fs.realpath(resolvedRunsDir),
-    fs.realpath(runDir),
-    fs.realpath(resolvedPath),
-  ]);
-  if (!isPathInsideDirectory(realRunsDir, realRunDir, { allowSamePath: false })) {
-    throw new Error(`Refusing to read run bundle outside runs directory: ${runId}`);
-  }
-  if (!isPathInsideDirectory(realRunDir, realPath)) {
-    throw new Error(`Refusing to read outside run bundle: ${relativePath}`);
-  }
-
-  return { realPath, realRunDir };
-}
-
 export async function readRunBundleTextFile(
   runsDir: string,
   runId: string,
   relativePath: string,
 ): Promise<string> {
-  const file = await openContainedRunBundleFile(runsDir, runId, relativePath);
-  try {
-    return await file.readFile("utf8");
-  } finally {
-    await file.close();
-  }
+  return (await readRunBundleFile(runsDir, runId, relativePath)).toString("utf8");
 }
 
 export async function readRunBundleFile(
@@ -104,43 +60,25 @@ export async function readRunBundleFile(
   runId: string,
   relativePath: string,
 ): Promise<Buffer> {
-  const file = await openContainedRunBundleFile(runsDir, runId, relativePath);
-  try {
-    return await file.readFile();
-  } finally {
-    await file.close();
+  const normalizedRelativePath = normalizeRelativePath(relativePath);
+  const resolvedRunsDir = path.resolve(runsDir);
+  const runDir = path.resolve(resolvedRunsDir, runId);
+  if (runDir === resolvedRunsDir || !isPathInside(resolvedRunsDir, runDir)) {
+    throw new Error(`Refusing to read run bundle outside runs directory: ${runId}`);
   }
-}
-
-async function openContainedRunBundleFile(
-  runsDir: string,
-  runId: string,
-  relativePath: string,
-): Promise<FileHandle> {
-  const { realPath: checkedPath, realRunDir } = await resolveRunBundleFileTarget(
-    runsDir,
-    runId,
-    relativePath,
+  const runs = await root(resolvedRunsDir);
+  const bundle = await root(
+    await runs.resolve(`.${path.sep}${path.relative(resolvedRunsDir, runDir)}`),
+    {
+      symlinks: "follow-within-root",
+      hardlinks: "allow",
+      maxBytes: Infinity,
+    },
   );
-  const noFollow = fsConstants.O_NOFOLLOW ?? 0;
-  const file = await fs.open(checkedPath, fsConstants.O_RDONLY | noFollow);
-  try {
-    const [openedStat, currentPath] = await Promise.all([
-      file.stat(),
-      fs.realpath(path.resolve(runsDir, runId, normalizeRelativePath(relativePath))),
-    ]);
-    if (!isPathInsideDirectory(realRunDir, currentPath)) {
-      throw new Error(`Refusing to read outside run bundle: ${relativePath}`);
-    }
-    const currentStat = await fs.stat(currentPath);
-    if (openedStat.dev !== currentStat.dev || openedStat.ino !== currentStat.ino) {
-      throw new Error(`Refusing changed run bundle path: ${relativePath}`);
-    }
-    return file;
-  } catch (error) {
-    await file.close();
-    throw error;
+  if (bundle.rootReal === runs.rootReal || !isPathInside(runs.rootReal, bundle.rootReal)) {
+    throw new Error(`Refusing to read run bundle outside runs directory: ${runId}`);
   }
+  return await bundle.readBytes(`.${path.sep}${normalizedRelativePath}`);
 }
 
 async function readRunBundleSummary(runsDir: string, runId: string): Promise<RunBundleSummary> {
@@ -186,21 +124,4 @@ function normalizeRelativePath(relativePath: string): string {
     throw new Error("Parent directory traversal is not allowed");
   }
   return normalized;
-}
-
-function isPathInsideDirectory(
-  rootDir: string,
-  candidatePath: string,
-  options: { allowSamePath?: boolean } = {},
-): boolean {
-  const relativePath = path.relative(rootDir, candidatePath);
-  if (!options.allowSamePath && relativePath.length === 0) {
-    return false;
-  }
-  return (
-    relativePath.length === 0 ||
-    (!relativePath.startsWith(`..${path.sep}`) &&
-      relativePath !== ".." &&
-      !path.isAbsolute(relativePath))
-  );
 }

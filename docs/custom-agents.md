@@ -76,7 +76,10 @@ A custom agent must:
 - Implement the standard ACP methods (`initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/resume` or `session/load`, `session/close`).
 - Advertise `agentCapabilities` and model controls honestly. Prefer a categorized model config option for ACP 0.25; existing adapters may continue to return legacy `models` metadata and implement `session/set_model`.
 
-`fs/*` and `terminal/*` client methods are stable on the `acpx` side and respect cwd sandboxing — your adapter can request file reads, writes, and terminal calls and they will be routed through `acpx`'s permission policy.
+`fs/*` and `terminal/*` client methods are routed through acpx's permission
+policy. File operations apply cwd containment checks; terminal commands are not
+an OS sandbox. See [Permissions](permissions.md#sandboxing-with-cwd) for the
+filesystem guarantees and limitations.
 
 ### Troubleshooting `session/new`
 

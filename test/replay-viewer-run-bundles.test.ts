@@ -1,12 +1,88 @@
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
   listRunBundles,
-  resolveRunBundleFilePath,
+  readRunBundleFile,
+  readRunBundleTextFile,
 } from "../examples/flows/replay-viewer/server/run-bundles.js";
+
+test(
+  "viewer reads reject FIFOs instead of waiting for a producer",
+  { skip: process.platform === "win32" },
+  async () => {
+    const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-viewer-fifo-"));
+    try {
+      await fs.mkdir(path.join(runsDir, "run"));
+      execFileSync("mkfifo", [path.join(runsDir, "run", "pipe")]);
+      const moduleUrl = new URL(
+        "../examples/flows/replay-viewer/server/run-bundles.js",
+        import.meta.url,
+      ).href;
+      const probe = spawnSync(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          "--input-type=module",
+          "-e",
+          `
+      const { readRunBundleFile } = await import(process.argv[1]);
+      try {
+        await readRunBundleFile(process.argv[2], "run", "pipe");
+        process.exitCode = 1;
+      } catch { process.stdout.write("rejected"); }
+    `,
+          moduleUrl,
+          runsDir,
+        ],
+        { encoding: "utf8", timeout: 10_000, killSignal: "SIGKILL" },
+      );
+      assert.ifError(probe.error);
+      assert.equal(probe.status, 0, probe.stderr);
+      assert.equal(probe.stdout, "rejected");
+    } finally {
+      await fs.rm(runsDir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "viewer reads preserve contained aliases, literal names, and large files within each bundle",
+  { skip: process.platform === "win32" },
+  async () => {
+    const parent = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-viewer-roots-"));
+    try {
+      const runsDir = path.join(parent, "runs");
+      const bundle = path.join(runsDir, "~");
+      const other = path.join(parent, "outside");
+      await fs.mkdir(bundle, { recursive: true });
+      await fs.mkdir(other);
+      const content = "x".repeat(16 * 1024 * 1024 + 1);
+      const file = path.join(bundle, "..large");
+      await fs.writeFile(file, content);
+      await fs.symlink(file, path.join(bundle, "alias"));
+      await fs.link(file, path.join(bundle, "c:hardlink"));
+      assert.equal((await readRunBundleFile(runsDir, "~", "alias")).byteLength, content.length);
+      assert.equal(await readRunBundleTextFile(runsDir, "~", "c:hardlink"), content);
+      await fs.writeFile(path.join(other, "data"), "must not read");
+      await fs.symlink(other, path.join(runsDir, "escape"));
+      await fs.symlink(path.join(other, "data"), path.join(bundle, "escape"));
+      await assert.rejects(readRunBundleFile(runsDir, "escape", "data"));
+      await assert.rejects(readRunBundleFile(runsDir, "~", "escape"));
+      const sibling = path.join(runsDir, "sibling");
+      await fs.mkdir(sibling);
+      await fs.writeFile(path.join(sibling, "data"), "other bundle");
+      await fs.symlink(path.join(sibling, "data"), path.join(bundle, "cross-bundle"));
+      await assert.rejects(readRunBundleFile(runsDir, "~", "cross-bundle"));
+    } finally {
+      await fs.rm(parent, { recursive: true, force: true });
+    }
+  },
+);
 
 test("listRunBundles returns newest valid bundles first", async () => {
   const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-list-"));
@@ -188,19 +264,13 @@ test("listRunBundles ignores bundles whose manifest symlink escapes the bundle",
   }
 });
 
-test("resolveRunBundleFilePath rejects traversal outside a run bundle", async () => {
+test("readRunBundleFile rejects traversal outside a run bundle", async () => {
   const runsDir = path.join(os.tmpdir(), "acpx-run-list");
 
+  await assert.rejects(readRunBundleFile(runsDir, "run-id", "../manifest.json"), /not allowed/);
+  await assert.rejects(readRunBundleFile(runsDir, "run-id", "/tmp/manifest.json"), /not allowed/);
   await assert.rejects(
-    resolveRunBundleFilePath(runsDir, "run-id", "../manifest.json"),
-    /not allowed/,
-  );
-  await assert.rejects(
-    resolveRunBundleFilePath(runsDir, "run-id", "/tmp/manifest.json"),
-    /not allowed/,
-  );
-  await assert.rejects(
-    resolveRunBundleFilePath(runsDir, "../sessions", "session.json"),
+    readRunBundleFile(runsDir, "../sessions", "session.json"),
     /outside runs directory/,
   );
 });

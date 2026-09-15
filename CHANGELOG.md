@@ -15,8 +15,9 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Sessions/hardening: keep session records and indexes private across atomic rewrites, including embedded file stores.
-
 - ACP/filesystem: return the standard resource-not-found error for missing files so agents can distinguish new files from failed reads.
+- Filesystem/hardening: use fs-safe roots for ACP file operations and replay-viewer reads, rejecting outside symlinks and special files while preserving contained aliases, normal file modes, and large reads.
+- Viewer/startup: release server resources when the HTTP port is unavailable and avoid opening an unused Vite WebSocket listener.
 
 ## 0.16.0 - 2026-09-15
 

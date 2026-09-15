@@ -7,6 +7,109 @@ import { PermissionPromptUnavailableError } from "../src/errors.js";
 import { FileSystemHandlers } from "../src/filesystem.js";
 import type { ClientOperation } from "../src/types.js";
 
+for (const kind of ["file", "directory"] as const) {
+  test(
+    `ACP file handlers reject outside ${kind} symlinks before reading or writing`,
+    { skip: process.platform === "win32" },
+    async () => {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-boundary-"));
+      try {
+        const cwd = path.join(directory, "workspace");
+        const outside = path.join(directory, "outside");
+        await fs.mkdir(cwd);
+        await fs.mkdir(outside);
+        const target = path.join(outside, "target.txt");
+        await fs.writeFile(target, "outside remains unchanged");
+        const alias = path.join(cwd, "alias");
+        await fs.symlink(kind === "file" ? target : outside, alias);
+        const requested = kind === "file" ? alias : path.join(alias, "target.txt");
+        const handlers = new FileSystemHandlers({ cwd, permissionMode: "approve-all" });
+        await assert.rejects(handlers.readTextFile({ sessionId: "synthetic", path: requested }));
+        await assert.rejects(
+          handlers.writeTextFile({
+            sessionId: "synthetic",
+            path: requested,
+            content: "must not write",
+          }),
+        );
+        if (kind === "directory") {
+          await assert.rejects(
+            handlers.writeTextFile({
+              sessionId: "synthetic",
+              path: path.join(alias, "new", "file.txt"),
+              content: "must not create",
+            }),
+          );
+        }
+        assert.equal(await fs.readFile(target, "utf8"), "outside remains unchanged");
+        assert.deepEqual(await fs.readdir(outside), ["target.txt"]);
+      } finally {
+        await fs.rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+}
+
+test(
+  "ACP file handlers preserve contained aliases, filenames, and executable in-place writes",
+  { skip: process.platform === "win32" },
+  async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-compatible-"));
+    try {
+      const handlers = new FileSystemHandlers({ cwd, permissionMode: "approve-all" });
+      for (const name of ["..notes", "~/notes", "c:notes"]) {
+        const file = path.join(cwd, name);
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await handlers.writeTextFile({ sessionId: "synthetic", path: file, content: name });
+        assert.equal(
+          (await handlers.readTextFile({ sessionId: "synthetic", path: file })).content,
+          name,
+        );
+      }
+      const target = path.join(cwd, "script.sh");
+      await fs.writeFile(target, "long original script", { mode: 0o755 });
+      await fs.chmod(target, 0o755);
+      const before = await fs.stat(target);
+      const alias = path.join(cwd, "script-alias");
+      await fs.symlink(target, alias);
+      await handlers.writeTextFile({ sessionId: "synthetic", path: alias, content: "short" });
+      const after = await fs.stat(target);
+      assert.equal(await fs.readFile(target, "utf8"), "short");
+      assert.equal(after.ino, before.ino);
+      assert.equal(after.mode & 0o777, 0o755);
+      assert.equal((await fs.lstat(alias)).isSymbolicLink(), true);
+      const hardlink = path.join(cwd, "hardlink");
+      await fs.link(target, hardlink);
+      assert.equal(
+        (await handlers.readTextFile({ sessionId: "synthetic", path: hardlink })).content,
+        "short",
+      );
+      await assert.rejects(
+        handlers.writeTextFile({ sessionId: "synthetic", path: hardlink, content: "refused" }),
+      );
+      assert.equal(await fs.readFile(target, "utf8"), "short");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  },
+);
+
+test("ACP file reads preserve content larger than fs-safe's default limit", async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-large-"));
+  try {
+    const content = "x".repeat(16 * 1024 * 1024 + 1);
+    const file = path.join(cwd, "large.txt");
+    await fs.writeFile(file, content);
+    const handlers = new FileSystemHandlers({ cwd, permissionMode: "approve-reads" });
+    assert.equal(
+      (await handlers.readTextFile({ sessionId: "synthetic", path: file })).content,
+      content,
+    );
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("readTextFile respects line/limit and logs operations", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-test-"));
   try {
