@@ -5,8 +5,8 @@ import path from "node:path";
 import { SessionNotFoundError, SessionResolutionError } from "../../errors.js";
 import { incrementPerfCounter, measurePerf } from "../../perf-metrics.js";
 import { assertPersistedKeyPolicy } from "../../persisted-key-policy.js";
+import { writePrivateJsonFile } from "../../state-files.js";
 import type { SessionRecord } from "../../types.js";
-import { writePrivateSessionFile } from "./atomic-write.js";
 import {
   loadOrRebuildSessionIndex,
   rebuildSessionIndex,
@@ -89,8 +89,7 @@ export async function writeSessionRecord(record: SessionRecord): Promise<void> {
     assertPersistedKeyPolicy(persisted);
 
     const file = sessionFilePath(record.acpxRecordId);
-    const payload = JSON.stringify(persisted, null, 2);
-    await writePrivateSessionFile(file, `${payload}\n`);
+    await writePrivateJsonFile(file, persisted);
 
     const sessionDir = sessionBaseDir();
     const index = await loadOrRebuildSessionIndex(sessionDir);

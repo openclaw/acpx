@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { writePrivateJsonFile } from "../../state-files.js";
 import type { SessionRecord } from "../../types.js";
-import { writePrivateSessionFile } from "./atomic-write.js";
 import { parseSessionRecord } from "./parse.js";
 
 const SESSION_INDEX_SCHEMA = "acpx.session-index.v1";
@@ -126,16 +126,11 @@ export async function writeSessionIndex(
   },
 ): Promise<void> {
   const filePath = sessionIndexPath(sessionDir);
-  const payload = JSON.stringify(
-    {
-      schema: SESSION_INDEX_SCHEMA,
-      files: [...index.files].toSorted(),
-      entries: [...index.entries].toSorted((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt)),
-    },
-    null,
-    2,
-  );
-  await writePrivateSessionFile(filePath, `${payload}\n`);
+  await writePrivateJsonFile(filePath, {
+    schema: SESSION_INDEX_SCHEMA,
+    files: [...index.files].toSorted(),
+    entries: [...index.entries].toSorted((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt)),
+  });
 }
 
 export async function rebuildSessionIndex(sessionDir: string): Promise<SessionIndex> {

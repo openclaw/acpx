@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { assertPersistedKeyPolicy } from "../../persisted-key-policy.js";
-import { writePrivateSessionFile } from "../../session/persistence/atomic-write.js";
 import { parseSessionRecord } from "../../session/persistence/parse.js";
 import { serializeSessionRecordForDisk } from "../../session/persistence/serialize.js";
+import { writePrivateJsonFile } from "../../state-files.js";
 import type { AcpFileSessionStoreOptions, AcpSessionRecord, AcpSessionStore } from "./contract.js";
 
 function safeSessionId(sessionId: string): string {
@@ -49,8 +49,7 @@ class FileSessionStore implements AcpSessionStore {
     const persisted = serializeSessionRecordForDisk(record);
     assertPersistedKeyPolicy(persisted);
 
-    const payload = JSON.stringify(persisted, null, 2);
-    await writePrivateSessionFile(this.filePath(record.acpxRecordId), `${payload}\n`);
+    await writePrivateJsonFile(this.filePath(record.acpxRecordId), persisted);
   }
 }
 

@@ -15,6 +15,7 @@ import {
 import { type FlowDefinition, FlowRunner } from "../flows.js";
 import { loadPermissionPolicySpec } from "../permission-policy.js";
 import { permissionModeSatisfies } from "../permissions.js";
+import { writePrivateFile } from "../state-files.js";
 import type { PermissionMode } from "../types.js";
 import { isDefinedFlow } from "./authoring.js";
 import { validateFlowDefinition } from "./graph.js";
@@ -183,7 +184,7 @@ async function prepareFlowModuleImport(
   }
 
   const tempPath = path.join(path.dirname(flowPath), `.acpx-flow-load-${randomUUID()}${extension}`);
-  await fs.writeFile(tempPath, rewritten, "utf8");
+  await writePrivateFile(tempPath, rewritten, { privateDirectory: false });
   return {
     flowUrl: pathToFileURL(tempPath).href,
     cleanup: async () => {

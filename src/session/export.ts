@@ -4,6 +4,7 @@ import path from "node:path";
 import { isAcpJsonRpcMessage } from "../acp/jsonrpc.js";
 import { AcpxOperationalError } from "../errors.js";
 import { isProcessAlive } from "../process-liveness.js";
+import { writePrivateFile } from "../state-files.js";
 import type { AcpJsonRpcMessage, SessionRecord } from "../types.js";
 import {
   sessionEventActivePath,
@@ -235,8 +236,32 @@ export async function exportSession(
     history: await readSessionHistory(record),
   };
 
-  await fs.mkdir(path.dirname(path.resolve(outputPath)), { recursive: true });
-  await fs.writeFile(outputPath, `${JSON.stringify(exported, null, 2)}\n`, "utf8");
+  const target = await resolveExportTarget(outputPath);
+  await writePrivateFile(target, `${JSON.stringify(exported, null, 2)}\n`, {
+    privateDirectory: false,
+  });
+}
+
+async function resolveExportTarget(filePath: string): Promise<string> {
+  for (let hops = 0; hops < 40; hops += 1) {
+    const stat = await fs.lstat(filePath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        return undefined;
+      }
+      throw error;
+    });
+    if (!stat || stat.isFile()) {
+      return filePath;
+    }
+    if (!stat.isSymbolicLink()) {
+      throw new Error("Session export output must be a regular file");
+    }
+    const target = await fs.readlink(filePath);
+    // Keep raw segments so native parent resolution preserves symlink/.. and
+    // Windows junctions across volumes, including dangling final symlinks.
+    filePath = path.isAbsolute(target) ? target : `${path.dirname(filePath)}${path.sep}${target}`;
+  }
+  throw new Error("Too many symbolic links in session export output");
 }
 
 function normalizeAgentName(agentName: string | undefined): string | undefined {

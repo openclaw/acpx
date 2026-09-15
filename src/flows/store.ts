@@ -1,7 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { appendRegularFile } from "@openclaw/fs-safe/advanced";
+import { writePrivateFile, writePrivateJsonFile } from "../state-files.js";
 import type { AcpJsonRpcMessage, AcpMessageDirection, SessionRecord } from "../types.js";
 import type {
   AcpNodeDefinition,
@@ -77,9 +79,9 @@ export class FlowRunStore {
 
   async createRunDir(runId: string): Promise<string> {
     const runDir = path.join(this.outputRoot, runId);
-    await fs.mkdir(path.join(runDir, PROJECTIONS_DIR), { recursive: true });
-    await fs.mkdir(path.join(runDir, SESSIONS_DIR), { recursive: true });
-    await fs.mkdir(path.join(runDir, ARTIFACTS_DIR), { recursive: true });
+    await fs.mkdir(path.join(runDir, PROJECTIONS_DIR), { recursive: true, mode: 0o700 });
+    await fs.mkdir(path.join(runDir, SESSIONS_DIR), { recursive: true, mode: 0o700 });
+    await fs.mkdir(path.join(runDir, ARTIFACTS_DIR), { recursive: true, mode: 0o700 });
     this.traceSeqByRun.set(runDir, 0);
     return runDir;
   }
@@ -116,14 +118,17 @@ export class FlowRunStore {
     };
 
     this.manifestByRun.set(runDir, manifest);
-    await writeJsonAtomic(this.resolveRunPath(runDir, FLOW_SNAPSHOT_PATH), snapshot);
-    await writeJsonAtomic(this.resolveRunPath(runDir, MANIFEST_PATH), manifest);
-    await writeJsonAtomic(this.resolveRunPath(runDir, RUN_PROJECTION_PATH), options.state);
-    await writeJsonAtomic(
+    await writePrivateJsonFile(this.resolveRunPath(runDir, FLOW_SNAPSHOT_PATH), snapshot);
+    await writePrivateJsonFile(this.resolveRunPath(runDir, MANIFEST_PATH), manifest);
+    await writePrivateJsonFile(this.resolveRunPath(runDir, RUN_PROJECTION_PATH), options.state);
+    await writePrivateJsonFile(
       this.resolveRunPath(runDir, LIVE_PROJECTION_PATH),
       createLiveState(options.state),
     );
-    await writeJsonAtomic(this.resolveRunPath(runDir, STEPS_PROJECTION_PATH), options.state.steps);
+    await writePrivateJsonFile(
+      this.resolveRunPath(runDir, STEPS_PROJECTION_PATH),
+      options.state.steps,
+    );
     await ensureFile(this.resolveRunPath(runDir, TRACE_PATH));
 
     await this.appendTrace(runDir, options.state, {
@@ -144,19 +149,19 @@ export class FlowRunStore {
     event: FlowTraceEventDraft,
   ): Promise<void> {
     state.updatedAt = isoNow();
-    await writeJsonAtomic(this.resolveRunPath(runDir, RUN_PROJECTION_PATH), state);
-    await writeJsonAtomic(
+    await writePrivateJsonFile(this.resolveRunPath(runDir, RUN_PROJECTION_PATH), state);
+    await writePrivateJsonFile(
       this.resolveRunPath(runDir, LIVE_PROJECTION_PATH),
       createLiveState(state),
     );
-    await writeJsonAtomic(this.resolveRunPath(runDir, STEPS_PROJECTION_PATH), state.steps);
+    await writePrivateJsonFile(this.resolveRunPath(runDir, STEPS_PROJECTION_PATH), state.steps);
     await this.writeManifest(runDir, state);
     await this.appendTrace(runDir, state, event);
   }
 
   async writeLive(runDir: string, state: FlowRunState, event: FlowTraceEventDraft): Promise<void> {
     state.updatedAt = isoNow();
-    await writeJsonAtomic(
+    await writePrivateJsonFile(
       this.resolveRunPath(runDir, LIVE_PROJECTION_PATH),
       createLiveState(state),
     );
@@ -192,11 +197,10 @@ export class FlowRunStore {
       `sha256-${sha256}${normalizeArtifactExtension(options.extension)}`,
     );
     const filePath = this.resolveRunPath(runDir, relativePath);
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
     try {
       await fs.access(filePath);
     } catch {
-      await fs.writeFile(filePath, buffer);
+      await writePrivateFile(filePath, buffer);
     }
 
     const artifact: FlowArtifactRef = {
@@ -228,8 +232,8 @@ export class FlowRunStore {
     record?: SessionRecord,
   ): Promise<void> {
     const sessionDir = this.resolveRunPath(runDir, sessionDirPath(binding.bundleId));
-    await fs.mkdir(sessionDir, { recursive: true });
-    await writeJsonAtomic(path.join(sessionDir, "binding.json"), binding);
+    await fs.mkdir(sessionDir, { recursive: true, mode: 0o700 });
+    await writePrivateJsonFile(path.join(sessionDir, "binding.json"), binding);
     await ensureFile(path.join(sessionDir, "events.ndjson"));
     if (record) {
       await this.writeSessionRecord(runDir, state, binding, record);
@@ -247,7 +251,7 @@ export class FlowRunStore {
         eventsPath: path.posix.join(sessionDirPath(binding.bundleId), "events.ndjson"),
       };
       manifest.sessions.push(entry);
-      await writeJsonAtomic(this.resolveRunPath(runDir, MANIFEST_PATH), manifest);
+      await writePrivateJsonFile(this.resolveRunPath(runDir, MANIFEST_PATH), manifest);
     }
 
     if (isNew) {
@@ -276,7 +280,7 @@ export class FlowRunStore {
   ): Promise<void> {
     const bundleSeq = this.sessionSeqByBundle.get(`${runDir}::${binding.bundleId}`) ?? 0;
     const bundledRecord = createBundledSessionRecord(binding, record, bundleSeq);
-    await writeJsonAtomic(
+    await writePrivateJsonFile(
       this.resolveRunPath(runDir, path.posix.join(sessionDirPath(binding.bundleId), "record.json")),
       bundledRecord,
     );
@@ -345,7 +349,7 @@ export class FlowRunStore {
 
   private async writeManifest(runDir: string, state: FlowRunState): Promise<void> {
     const manifest = this.getManifest(runDir, state);
-    await writeJsonAtomic(this.resolveRunPath(runDir, MANIFEST_PATH), manifest);
+    await writePrivateJsonFile(this.resolveRunPath(runDir, MANIFEST_PATH), manifest);
   }
 
   private nextTraceSeq(runDir: string): number {
@@ -361,8 +365,8 @@ export class FlowRunStore {
   private async appendJsonLine(filePath: string, value: unknown): Promise<void> {
     const prior = this.appendChainByPath.get(filePath) ?? Promise.resolve();
     const nextWrite = prior.then(async () => {
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.appendFile(filePath, `${JSON.stringify(value)}\n`, "utf8");
+      await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+      await appendRegularFile({ filePath, content: `${JSON.stringify(value)}\n`, mode: 0o600 });
     });
     const tracked = nextWrite.finally(() => {
       if (this.appendChainByPath.get(filePath) === tracked) {
@@ -503,17 +507,8 @@ function createBundledSessionRecord(
   };
 }
 
-async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
-  const tempPath = `${filePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
-  const payload = JSON.stringify(value, null, 2);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(tempPath, `${payload}\n`, "utf8");
-  await fs.rename(tempPath, filePath);
-}
-
 async function ensureFile(filePath: string): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.appendFile(filePath, "", "utf8");
+  await appendRegularFile({ filePath, content: "", mode: 0o600 });
 }
 
 async function fileSha256(filePath: string): Promise<string> {

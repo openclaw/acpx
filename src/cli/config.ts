@@ -695,7 +695,7 @@ export async function initGlobalConfigFile(): Promise<{
   created: boolean;
 }> {
   const configPath = defaultGlobalConfigPath();
-  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.mkdir(path.dirname(configPath), { recursive: true, mode: 0o700 });
 
   try {
     await fs.access(configPath);
@@ -724,6 +724,7 @@ export async function initGlobalConfigFile(): Promise<{
     await fs.writeFile(configPath, `${JSON.stringify(payload, null, 2)}\n`, {
       encoding: "utf8",
       flag: "wx",
+      mode: 0o600,
     });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") {

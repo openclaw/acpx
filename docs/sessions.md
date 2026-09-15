@@ -116,6 +116,13 @@ Export refuses to run if the session is locked by a live queue owner. Run `acpx 
 
 Exports preserve event order across rotated and active segments, including segments containing hundreds of thousands of events.
 
+Exports publish complete archives atomically. On POSIX systems, archives and
+imported history use `0600` permissions. Exporting preserves the selected output
+directory's permissions and follows existing or dangling output symlinks to their
+targets. Existing non-regular output targets, such as named pipes, are rejected.
+Live event segments also use `0600`; their append and rotation behavior
+is unchanged. Event-log files must be regular files, not symlink or hardlink aliases.
+
 The archive is plain JSON. Paths are stored relative to home, so an imported session lands at `~/<original-cwd-relative>` on the destination machine without embedding the source machine's absolute cwd. Override with `--cwd`.
 
 Imports keep the archive's provider session id, reopen the copied session as an idle local record, and clear source-machine process metadata. Imported sessions must resume that provider session; if the destination agent cannot load it, prompts fail clearly instead of starting an empty conversation. If the destination already has an active session for the same `(agent, cwd, name)` scope, import fails; pass `--name` or `--cwd` to choose a different scope. If a local record already uses the same provider session id, prune or remove that record before importing.

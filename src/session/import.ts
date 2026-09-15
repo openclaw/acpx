@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { z, ZodError } from "zod";
 import { AcpxOperationalError } from "../errors.js";
+import { writePrivateFile } from "../state-files.js";
 import type { AcpJsonRpcMessage, SessionRecord } from "../types.js";
 import { defaultSessionEventLog, sessionEventActivePath } from "./event-log.js";
 import {
@@ -319,10 +320,9 @@ export async function importSession(
 
   if (parsed.history.length > 0) {
     const history = parsed.history as AcpJsonRpcMessage[];
-    await fs.writeFile(
+    await writePrivateFile(
       sessionEventActivePath(newRecordId),
       `${history.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
-      "utf8",
     );
   }
 

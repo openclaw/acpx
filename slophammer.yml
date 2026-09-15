@@ -51,6 +51,7 @@ typescript:
         - src/prompt-content
         - src/runtime
         - src/session
+        - src/state-files
         - src/types
     - from: src/flows
       allow:
@@ -61,6 +62,7 @@ typescript:
         - src/permission-policy
         - src/prompt-content
         - src/session
+        - src/state-files
         - src/types
     - from: src/runtime
       allow:
@@ -72,6 +74,7 @@ typescript:
         - src/persisted-key-policy
         - src/prompt-content
         - src/session
+        - src/state-files
         - src/types
     - from: src/session
       allow:
@@ -83,4 +86,5 @@ typescript:
         - src/process-liveness
         - src/persisted-key-policy
         - src/prompt-content
+        - src/state-files
         - src/types

@@ -52,7 +52,9 @@ function makeSessionRecord(sessionId: string, cwd: string, maxSegments: number):
   };
 }
 
-test("listSessionEvents reads all configured stream segments", async () => {
+test("listSessionEvents reads all configured stream segments", async (t) => {
+  const previousUmask = process.umask(0o002);
+  t.after(() => process.umask(previousUmask));
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
@@ -83,6 +85,12 @@ test("listSessionEvents reads all configured stream segments", async () => {
 
     const events = await listSessionEvents(sessionId);
     assert.equal(events.length, 8);
+    if (process.platform !== "win32") {
+      const directory = path.dirname(record.eventLog.active_path);
+      for (const file of (await fs.readdir(directory)).filter((name) => name.endsWith(".ndjson"))) {
+        assert.equal((await fs.stat(path.join(directory, file))).mode & 0o777, 0o600);
+      }
+    }
     assert.equal(
       events.every((event) => event.jsonrpc === "2.0"),
       true,

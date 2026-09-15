@@ -27,6 +27,9 @@ Create a global template (only writes if the file does not already exist):
 acpx config init
 ```
 
+On POSIX systems, newly created config files use `0600` permissions and a newly
+created `.acpx` directory uses `0700`. Existing config files are never replaced.
+
 ## Supported keys
 
 ```json

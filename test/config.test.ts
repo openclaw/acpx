@@ -220,11 +220,17 @@ test("loadResolvedConfig rejects a missing explicit MCP config path", async () =
   });
 });
 
-test("initGlobalConfigFile creates the config once and then reports existing file", async () => {
+test("initGlobalConfigFile creates the config once and then reports existing file", async (t) => {
+  const previousUmask = process.umask(0o002);
+  t.after(() => process.umask(previousUmask));
   await withTempEnv(async ({ homeDir }) => {
     const first = await initGlobalConfigFile();
     assert.equal(first.created, true);
     assert.equal(first.path, path.join(homeDir, ".acpx", "config.json"));
+    if (process.platform !== "win32") {
+      assert.equal((await fs.stat(first.path)).mode & 0o777, 0o600);
+      assert.equal((await fs.stat(path.dirname(first.path))).mode & 0o777, 0o700);
+    }
 
     const second = await initGlobalConfigFile();
     assert.equal(second.created, false);

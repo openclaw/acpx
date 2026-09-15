@@ -36,6 +36,12 @@ What happens:
 - Run state (graph, ACP transcripts, artifacts, errors) is persisted as the run progresses.
 - The runtime exits when the graph terminates or a checkpoint pauses.
 
+On POSIX systems, run snapshots, projections, artifacts, and event logs use
+owner-only file permissions (`0600`); acpx-owned run directories use `0700`.
+Existing custom output-root directories keep their permissions. Snapshot writes
+publish complete files atomically and clean up failed staging writes. Event logs
+remain append-only and retain their existing ordering and size behavior.
+
 `--input-json` and `--input-file` are mutually exclusive ways to provide flow input. `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.
 
 ## Node types

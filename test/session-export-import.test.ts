@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -123,7 +123,76 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-test("exportSession and importSession round-trip session state with a fresh record id", async () => {
+test(
+  "exportSession preserves output aliases and rejects special files",
+  { skip: process.platform === "win32" },
+  async () => {
+    await withTempHome("acpx-export-alias-", async (homeDir) => {
+      const source = makeSessionRecord({
+        acpxRecordId: "export-alias-source",
+        acpSessionId: "export-alias-provider",
+        agentCommand: AGENT_REGISTRY.codex,
+        cwd: homeDir,
+      });
+      await writeSessionRecordFile(homeDir, source);
+      const directory = path.join(homeDir, "shared-output");
+      await fs.mkdir(directory);
+      await fs.chmod(directory, 0o775);
+      for (const existing of [false, true]) {
+        const target = path.join(directory, `target-${existing}.json`);
+        const alias = path.join(directory, `alias-${existing}.json`);
+        if (existing) {
+          await fs.writeFile(target, "previous export");
+        }
+        await fs.symlink(target, alias);
+        await exportSession(
+          { agentCommand: source.agentCommand, cwd: homeDir, name: source.name },
+          alias,
+        );
+        assert.equal((await fs.lstat(alias)).isSymbolicLink(), true);
+        assert.equal(JSON.parse(await fs.readFile(target, "utf8")).format_version, 1);
+        assert.equal((await fs.stat(target)).mode & 0o777, 0o600);
+        assert.equal((await fs.stat(directory)).mode & 0o777, 0o775);
+      }
+      assert.equal((await fs.readdir(directory)).length, 4);
+      const nestedTarget = path.join(directory, "nested");
+      await fs.mkdir(nestedTarget);
+      const directoryAlias = path.join(homeDir, "directory-alias");
+      await fs.symlink(nestedTarget, directoryAlias);
+      await exportSession(
+        { agentCommand: source.agentCommand, cwd: homeDir, name: source.name },
+        `${directoryAlias}/../parent-export.json`,
+      );
+      assert.equal(
+        JSON.parse(await fs.readFile(path.join(directory, "parent-export.json"), "utf8"))
+          .format_version,
+        1,
+      );
+      await assert.rejects(fs.access(path.join(homeDir, "parent-export.json")), { code: "ENOENT" });
+      const fifoPath = path.join(directory, "archive.pipe");
+      assert.equal(spawnSync("mkfifo", [fifoPath]).status, 0);
+      const fifoIdentity = await fs.stat(fifoPath);
+      const fifoAlias = path.join(directory, "pipe-alias");
+      await fs.symlink(fifoPath, fifoAlias);
+      for (const output of [fifoPath, fifoAlias]) {
+        await assert.rejects(
+          exportSession(
+            { agentCommand: source.agentCommand, cwd: homeDir, name: source.name },
+            output,
+          ),
+          /regular file/,
+        );
+        const after = await fs.stat(fifoPath);
+        assert.equal(after.isFIFO(), true);
+        assert.equal(after.ino, fifoIdentity.ino);
+      }
+    });
+  },
+);
+
+test("exportSession and importSession round-trip session state with a fresh record id", async (t) => {
+  const previousUmask = process.umask(0o002);
+  t.after(() => process.umask(previousUmask));
   await withTempHome("acpx-export-import-", async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
     const archivePath = path.join(homeDir, "archive.json");
@@ -174,6 +243,10 @@ test("exportSession and importSession round-trip session state with a fresh reco
     assert.equal(record.cwd, source.cwd);
     assert.deepEqual(record.messages, source.messages);
     assert.deepEqual(await readHistory(homeDir, imported.record_id), history);
+    if (process.platform !== "win32") {
+      assert.equal((await fs.stat(streamPath(homeDir, imported.record_id))).mode & 0o777, 0o600);
+      assert.equal((await fs.stat(archivePath)).mode & 0o777, 0o600);
+    }
     assert.deepEqual(record.importedFrom, {
       recordId: source.acpxRecordId,
       cwdOriginal: "workspace",

@@ -21,6 +21,51 @@ test("flowRunsBaseDir defaults under the acpx home directory", () => {
   assert.equal(flowRunsBaseDir("/tmp/home"), path.join("/tmp/home", ".acpx", "flows", "runs"));
 });
 
+test("FlowRunStore keeps private writes and cleans failed publication without changing outputRoot", async (t) => {
+  const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-private-"));
+  const previousUmask = process.umask(0o002);
+  t.after(async () => {
+    process.umask(previousUmask);
+    await fs.rm(outputRoot, { recursive: true, force: true });
+  });
+  if (process.platform !== "win32") {
+    await fs.chmod(outputRoot, 0o775);
+  }
+  const store = new FlowRunStore(outputRoot);
+  const runDir = await store.createRunDir("private-run");
+  const state: FlowRunState = {
+    runId: "private-run",
+    flowName: "private",
+    status: "running",
+    startedAt: "2026-09-15T00:00:00.000Z",
+    updatedAt: "2026-09-15T00:00:00.000Z",
+    input: {},
+    outputs: {},
+    results: {},
+    steps: [],
+    sessionBindings: {},
+  };
+  const event = { scope: "run" as const, type: "heartbeat", payload: {} };
+  await store.writeLive(runDir, state, event);
+  const livePath = path.join(runDir, "projections", "live.json");
+  if (process.platform !== "win32") {
+    await fs.chmod(livePath, 0o664);
+  }
+  state.statusDetail = "next heartbeat";
+  await store.writeLive(runDir, state, event);
+  assert.equal(JSON.parse(await fs.readFile(livePath, "utf8")).statusDetail, "next heartbeat");
+  if (process.platform !== "win32") {
+    assert.equal((await fs.stat(livePath)).mode & 0o777, 0o600);
+    assert.equal((await fs.stat(path.join(runDir, "trace.ndjson"))).mode & 0o777, 0o600);
+    assert.equal((await fs.stat(runDir)).mode & 0o777, 0o700);
+    assert.equal((await fs.stat(outputRoot)).mode & 0o777, 0o775);
+  }
+  await fs.unlink(livePath);
+  await fs.mkdir(livePath);
+  await assert.rejects(store.writeLive(runDir, state, event));
+  assert.deepEqual(await fs.readdir(path.dirname(livePath)), ["live.json"]);
+});
+
 test("FlowRunStore writes manifest, projections, flow snapshot, and trace events", async () => {
   const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-test-"));
 

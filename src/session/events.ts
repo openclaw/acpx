@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { appendRegularFile } from "@openclaw/fs-safe/advanced";
 import { isAcpJsonRpcMessage } from "../acp/jsonrpc.js";
 import { incrementPerfCounter, measurePerf } from "../perf-metrics.js";
 import { isProcessAlive } from "../process-liveness.js";
@@ -17,7 +18,7 @@ const LOCK_RETRY_MS = 15;
 const EVENT_LOCK_STALE_MS = 15_000;
 
 async function ensureSessionDir(): Promise<void> {
-  await fs.mkdir(sessionBaseDir(), { recursive: true });
+  await fs.mkdir(sessionBaseDir(), { recursive: true, mode: 0o700 });
 }
 
 async function pathExists(filePath: string): Promise<boolean> {
@@ -167,6 +168,7 @@ async function acquireEventsLock(sessionId: string): Promise<LockHandle> {
       await fs.writeFile(lockPath, `${payload}\n`, {
         encoding: "utf8",
         flag: "wx",
+        mode: 0o600,
       });
       return { filePath: lockPath };
     } catch (error) {
@@ -295,7 +297,7 @@ export class SessionEventWriter {
           incrementPerfCounter("session.events.rotate");
         }
 
-        await fs.appendFile(this.activePath, line, "utf8");
+        await appendRegularFile({ filePath: this.activePath, content: line, mode: 0o600 });
         this.activeSizeBytes += lineBytes;
 
         this.record.lastSeq += 1;
