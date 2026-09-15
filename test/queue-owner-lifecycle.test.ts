@@ -18,6 +18,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { isProcessAlive } from "../src/cli/queue/lease-store.js";
 import { queueLockFilePath, queueSocketPath } from "../src/cli/queue/paths.js";
+import { extractAgentMessageChunkText } from "./jsonrpc-test-helpers.js";
 import { makeSessionRecord, withTempHome, writeSessionRecordFile } from "./runtime-test-helpers.js";
 
 const CLI_PATH = fileURLToPath(new URL("../src/cli.js", import.meta.url));
@@ -86,8 +87,9 @@ async function waitForBridgePid(pidFilePath: string): Promise<number> {
   return bridgePid;
 }
 
-async function waitForTerminalQueueMessage(
+async function waitForQueueMessage(
   iterator: AsyncIterator<string>,
+  matches: (message: Record<string, unknown>) => boolean,
   timeoutMs = 5_000,
 ): Promise<Record<string, unknown>> {
   const deadline = Date.now() + timeoutMs;
@@ -98,25 +100,26 @@ async function waitForTerminalQueueMessage(
         iterator.next(),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
-            () => reject(new Error("timeout waiting for queue result")),
-            timeoutMs,
+            () => reject(new Error("timeout waiting for queue message")),
+            Math.max(1, deadline - Date.now()),
           );
         }),
       ]);
       if (line.done) {
-        throw new Error("queue socket closed before terminal result");
+        throw new Error("queue socket closed before expected message");
       }
       const message = JSON.parse(line.value) as Record<string, unknown>;
-      if (message.type === "result" || message.type === "error") {
+      if (matches(message)) {
         return message;
       }
+      assert.notEqual(message.type, "error", JSON.stringify(message));
     } finally {
       if (timer) {
         clearTimeout(timer);
       }
     }
   }
-  throw new Error(`Queue result not received within ${timeoutMs}ms`);
+  throw new Error(`Queue message not received within ${timeoutMs}ms`);
 }
 
 function waitForProcessExit(
@@ -534,7 +537,7 @@ describe("queue owner lifecycle — bridge process death on SIGTERM", () => {
           `${JSON.stringify({
             type: "submit_prompt",
             requestId: "req-open-socket-test",
-            message: "sleep 10000",
+            message: "stream-sleep 10000 prompt-ready",
             permissionMode: "approve-reads",
             waitForCompletion: true,
           })}\n`,
@@ -566,6 +569,15 @@ describe("queue owner lifecycle — bridge process death on SIGTERM", () => {
         );
         assert.equal(isProcessAlive(bridgePid), true, "bridge must be alive before SIGTERM");
 
+        // A PID only proves process startup, not an active ACP prompt.
+        await waitForQueueMessage(
+          iter,
+          (message) =>
+            message.type === "event" &&
+            extractAgentMessageChunkText(message.message as Record<string, unknown>) ===
+              "prompt-ready",
+        );
+
         // Delay session/cancel in the mock so the lease-retention assertion is
         // deterministic while the active turn is still unwinding.
         child.kill("SIGTERM");
@@ -578,8 +590,11 @@ describe("queue owner lifecycle — bridge process death on SIGTERM", () => {
           "lease must remain held until active turn cancellation completes",
         );
 
-        const terminalMessage = await waitForTerminalQueueMessage(iter, 5_000);
-        assert.equal(terminalMessage.type, "result");
+        const terminalMessage = await waitForQueueMessage(
+          iter,
+          (message) => message.type === "result" || message.type === "error",
+        );
+        assert.equal(terminalMessage.type, "result", JSON.stringify(terminalMessage));
         const clientResult = terminalMessage.result as { stopReason?: unknown };
         assert.equal(clientResult.stopReason, "cancelled");
 

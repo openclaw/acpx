@@ -232,6 +232,40 @@ test("exportSession scrubs source absolute paths from portable archives", async 
   });
 });
 
+test("exportSession preserves large active and rotated event segments in order", async () => {
+  await withTempHome("acpx-export-large-", async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    const archivePath = path.join(homeDir, "archive.json");
+    const record = makeSessionRecord({
+      acpxRecordId: "large-history",
+      acpSessionId: "large-history",
+      agentCommand: AGENT_REGISTRY.codex,
+      cwd,
+    });
+    await writeSessionRecordFile(homeDir, record);
+
+    const count = 150_000;
+    const history = Array.from({ length: count * 2 }, (_, id) => ({
+      jsonrpc: "2.0",
+      id,
+      result: {},
+    }));
+    await writeHistory(homeDir, record.acpxRecordId, history.slice(0, count));
+    await fs.rename(
+      streamPath(homeDir, record.acpxRecordId),
+      path.join(homeDir, ".acpx", "sessions", "large-history.stream.1.ndjson"),
+    );
+    await writeHistory(homeDir, record.acpxRecordId, history.slice(count));
+
+    await exportSession({ agentCommand: record.agentCommand, cwd, name: record.name }, archivePath);
+
+    const archive = JSON.parse(await fs.readFile(archivePath, "utf8")) as {
+      history: unknown[];
+    };
+    assert.deepEqual(archive.history, history);
+  });
+});
+
 test("exportSession skips malformed event-log lines", async () => {
   await withTempHome("acpx-export-import-", async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");

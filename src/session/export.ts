@@ -138,14 +138,13 @@ async function isSessionActive(record: SessionRecord): Promise<boolean> {
   return isProcessAlive(record.pid) || (await hasLiveEventLock(record.acpxRecordId));
 }
 
-async function readHistoryFile(filePath: string): Promise<AcpJsonRpcMessage[]> {
+async function appendHistoryFile(filePath: string, history: AcpJsonRpcMessage[]): Promise<void> {
   const payload = await fs.readFile(filePath, "utf8").catch((error) => {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return "";
     }
     throw error;
   });
-  const history: AcpJsonRpcMessage[] = [];
   for (const line of payload.split("\n").filter((entry) => entry.trim().length > 0)) {
     try {
       const parsed: unknown = JSON.parse(line);
@@ -156,7 +155,6 @@ async function readHistoryFile(filePath: string): Promise<AcpJsonRpcMessage[]> {
       // Match event listing resilience: tolerate truncated NDJSON writes.
     }
   }
-  return history;
 }
 
 async function readSessionHistory(record: SessionRecord): Promise<AcpJsonRpcMessage[]> {
@@ -166,10 +164,10 @@ async function readSessionHistory(record: SessionRecord): Promise<AcpJsonRpcMess
     : 0;
 
   for (let segment = maxSegments; segment >= 1; segment -= 1) {
-    history.push(...(await readHistoryFile(sessionEventSegmentPath(record.acpxRecordId, segment))));
+    await appendHistoryFile(sessionEventSegmentPath(record.acpxRecordId, segment), history);
   }
 
-  history.push(...(await readHistoryFile(sessionEventActivePath(record.acpxRecordId))));
+  await appendHistoryFile(sessionEventActivePath(record.acpxRecordId), history);
   return history;
 }
 

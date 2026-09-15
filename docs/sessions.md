@@ -114,6 +114,8 @@ acpx codex sessions import debug.json --name debug-on-laptop
 
 Export refuses to run if the session is locked by a live queue owner. Run `acpx codex sessions close my-debug-session` first.
 
+Exports preserve event order across rotated and active segments, including segments containing hundreds of thousands of events.
+
 The archive is plain JSON. Paths are stored relative to home, so an imported session lands at `~/<original-cwd-relative>` on the destination machine without embedding the source machine's absolute cwd. Override with `--cwd`.
 
 Imports keep the archive's provider session id, reopen the copied session as an idle local record, and clear source-machine process metadata. Imported sessions must resume that provider session; if the destination agent cannot load it, prompts fail clearly instead of starting an empty conversation. If the destination already has an active session for the same `(agent, cwd, name)` scope, import fails; pass `--name` or `--cwd` to choose a different scope. If a local record already uses the same provider session id, prune or remove that record before importing.
