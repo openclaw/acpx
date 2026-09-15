@@ -95,27 +95,7 @@ export class FlowRunStore {
     },
   ): Promise<void> {
     const snapshot = createFlowDefinitionSnapshot(options.flow);
-    const manifest: FlowRunManifest = {
-      schema: FLOW_BUNDLE_SCHEMA,
-      runId: options.state.runId,
-      flowName: options.state.flowName,
-      runTitle: options.state.runTitle,
-      flowPath: options.state.flowPath,
-      startedAt: options.state.startedAt,
-      finishedAt: options.state.finishedAt,
-      status: options.state.status,
-      traceSchema: FLOW_TRACE_SCHEMA,
-      paths: {
-        flow: FLOW_SNAPSHOT_PATH,
-        trace: TRACE_PATH,
-        runProjection: RUN_PROJECTION_PATH,
-        liveProjection: LIVE_PROJECTION_PATH,
-        stepsProjection: STEPS_PROJECTION_PATH,
-        sessionsDir: SESSIONS_DIR,
-        artifactsDir: ARTIFACTS_DIR,
-      },
-      sessions: [],
-    };
+    const manifest = createRunManifest(options.state);
 
     this.manifestByRun.set(runDir, manifest);
     await writePrivateJsonFile(this.resolveRunPath(runDir, FLOW_SNAPSHOT_PATH), snapshot);
@@ -322,27 +302,7 @@ export class FlowRunStore {
       return existing;
     }
 
-    const created: FlowRunManifest = {
-      schema: FLOW_BUNDLE_SCHEMA,
-      runId: state.runId,
-      flowName: state.flowName,
-      runTitle: state.runTitle,
-      flowPath: state.flowPath,
-      startedAt: state.startedAt,
-      finishedAt: state.finishedAt,
-      status: state.status,
-      traceSchema: FLOW_TRACE_SCHEMA,
-      paths: {
-        flow: FLOW_SNAPSHOT_PATH,
-        trace: TRACE_PATH,
-        runProjection: RUN_PROJECTION_PATH,
-        liveProjection: LIVE_PROJECTION_PATH,
-        stepsProjection: STEPS_PROJECTION_PATH,
-        sessionsDir: SESSIONS_DIR,
-        artifactsDir: ARTIFACTS_DIR,
-      },
-      sessions: [],
-    };
+    const created = createRunManifest(state);
     this.manifestByRun.set(runDir, created);
     return created;
   }
@@ -376,6 +336,30 @@ export class FlowRunStore {
     this.appendChainByPath.set(filePath, tracked);
     await tracked;
   }
+}
+
+function createRunManifest(state: FlowRunState): FlowRunManifest {
+  return {
+    schema: FLOW_BUNDLE_SCHEMA,
+    runId: state.runId,
+    flowName: state.flowName,
+    runTitle: state.runTitle,
+    flowPath: state.flowPath,
+    startedAt: state.startedAt,
+    finishedAt: state.finishedAt,
+    status: state.status,
+    traceSchema: FLOW_TRACE_SCHEMA,
+    paths: {
+      flow: FLOW_SNAPSHOT_PATH,
+      trace: TRACE_PATH,
+      runProjection: RUN_PROJECTION_PATH,
+      liveProjection: LIVE_PROJECTION_PATH,
+      stepsProjection: STEPS_PROJECTION_PATH,
+      sessionsDir: SESSIONS_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+    },
+    sessions: [],
+  };
 }
 
 function createLiveState(state: FlowRunState): FlowLiveState {

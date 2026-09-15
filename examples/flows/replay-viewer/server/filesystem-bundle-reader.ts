@@ -6,17 +6,9 @@ export function createFilesystemBundleReader(
   runsDir: string,
   run: Pick<RunBundleSummary, "runId">,
 ): BundleReader {
-  async function readText(relativePath: string): Promise<string> {
-    return await readRunBundleTextFile(runsDir, run.runId, relativePath);
-  }
-
   return {
     sourceType: "recent",
     label: `Recent run: ${run.runId}`,
-    readText,
-    async readJson<T>(relativePath: string): Promise<T> {
-      const text = await readText(relativePath);
-      return JSON.parse(text) as T;
-    },
+    readText: (relativePath) => readRunBundleTextFile(runsDir, run.runId, relativePath),
   };
 }

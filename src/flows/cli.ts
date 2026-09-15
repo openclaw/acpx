@@ -207,65 +207,36 @@ function resolveFlowRuntimeImportSpecifier(): string {
   return runtimePath.replaceAll(path.sep, "/");
 }
 
-async function loadFlowRuntimeModule(
-  flowUrl: string,
-  extension: string,
-): Promise<{
+type FlowModule = {
   default?: unknown;
   "module.exports"?: unknown;
-}> {
+};
+
+async function loadFlowRuntimeModule(flowUrl: string, extension: string): Promise<FlowModule> {
   if (extension === ".ts" || extension === ".tsx" || extension === ".cts") {
-    const { register } = (await import("tsx/cjs/api")) as {
-      register: (options: { namespace: string }) => {
-        require: (
-          specifier: string,
-          parentURL: string,
-        ) => {
-          default?: unknown;
-          "module.exports"?: unknown;
-        };
-        unregister: () => void;
-      };
-    };
+    const { register } = await import("tsx/cjs/api");
     const loader = register({ namespace: randomUUID() });
     try {
-      return loader.require(flowUrl, import.meta.url);
+      return loader.require(flowUrl, import.meta.url) as FlowModule;
     } finally {
       loader.unregister();
     }
   }
 
   if (extension === ".mts") {
-    const { register } = (await import("tsx/esm/api")) as {
-      register: (options: { namespace: string }) => {
-        import: (
-          specifier: string,
-          parentURL: string,
-        ) => Promise<{
-          default?: unknown;
-          "module.exports"?: unknown;
-        }>;
-        unregister: () => Promise<void>;
-      };
-    };
+    const { register } = await import("tsx/esm/api");
     const loader = register({ namespace: randomUUID() });
     try {
-      return await loader.import(flowUrl, import.meta.url);
+      return (await loader.import(flowUrl, import.meta.url)) as FlowModule;
     } finally {
       await loader.unregister();
     }
   }
 
-  return (await import(flowUrl)) as {
-    default?: unknown;
-    "module.exports"?: unknown;
-  };
+  return (await import(flowUrl)) as FlowModule;
 }
 
-function findFlowDefinition(module: {
-  default?: unknown;
-  "module.exports"?: unknown;
-}): FlowDefinition | null {
+function findFlowDefinition(module: FlowModule): FlowDefinition | null {
   const candidates = [
     module.default,
     module["module.exports"],

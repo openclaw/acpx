@@ -13,12 +13,12 @@ import type { BundleReader } from "./bundle-reader.js";
 import { mergeLiveRunState } from "./run-state.js";
 
 export async function loadRunBundle(reader: BundleReader): Promise<LoadedRunBundle> {
-  const manifest = await reader.readJson<FlowRunManifest>("manifest.json");
+  const manifest = await readJson<FlowRunManifest>(reader, "manifest.json");
   const [flow, run, live, steps, trace] = await Promise.all([
-    reader.readJson<FlowDefinitionSnapshot>(manifest.paths.flow),
-    reader.readJson<FlowRunState>(manifest.paths.runProjection),
-    reader.readJson<Partial<FlowRunState>>(manifest.paths.liveProjection).catch(() => null),
-    reader.readJson<FlowStepRecord[]>(manifest.paths.stepsProjection),
+    readJson<FlowDefinitionSnapshot>(reader, manifest.paths.flow),
+    readJson<FlowRunState>(reader, manifest.paths.runProjection),
+    readJson<Partial<FlowRunState>>(reader, manifest.paths.liveProjection).catch(() => null),
+    readJson<FlowStepRecord[]>(reader, manifest.paths.stepsProjection),
     readNdjson<FlowTraceEvent>(reader, manifest.paths.trace),
   ]);
 
@@ -26,8 +26,8 @@ export async function loadRunBundle(reader: BundleReader): Promise<LoadedRunBund
     await Promise.all(
       manifest.sessions.map(async (sessionEntry) => {
         const [binding, record, events] = await Promise.all([
-          reader.readJson<FlowSessionBinding>(sessionEntry.bindingPath),
-          reader.readJson<SessionRecord>(sessionEntry.recordPath),
+          readJson<FlowSessionBinding>(reader, sessionEntry.bindingPath),
+          readJson<SessionRecord>(reader, sessionEntry.recordPath),
           readNdjson<FlowBundledSessionEvent>(reader, sessionEntry.eventsPath),
         ]);
 
@@ -51,10 +51,14 @@ export async function loadRunBundle(reader: BundleReader): Promise<LoadedRunBund
     flow,
     run: mergeLiveRunState(run, live),
     live,
-    steps: steps.slice().toSorted(compareByAttemptStart),
-    trace: trace.slice().toSorted((left, right) => left.seq - right.seq),
+    steps: steps.toSorted(compareByAttemptStart),
+    trace: trace.toSorted((left, right) => left.seq - right.seq),
     sessions,
   };
+}
+
+async function readJson<T>(reader: BundleReader, relativePath: string): Promise<T> {
+  return JSON.parse(await reader.readText(relativePath)) as T;
 }
 
 async function readNdjson<T>(reader: BundleReader, relativePath: string): Promise<T[]> {
