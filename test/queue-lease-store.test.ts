@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import {
-  ensureOwnerIsUsable,
+  resolveUsableQueueOwner,
   isProcessAlive,
   readQueueOwnerRecord,
   readQueueOwnerStatus,
@@ -23,6 +24,14 @@ import {
   withTempHome,
   writeQueueOwnerLock,
 } from "./queue-test-helpers.js";
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 test("readQueueOwnerRecord returns undefined for missing and malformed lock files", async () => {
   await withTempHome(async (homeDir) => {
@@ -57,9 +66,343 @@ test("tryAcquireQueueOwnerLease creates a lease that can be refreshed and releas
     assert(record);
     assert.equal(record.queueDepth, 2);
     assert.equal(record.heartbeatAt, "2026-03-26T00:00:00.000Z");
+    if (process.platform !== "win32") {
+      assert.equal((await fs.stat(lease.lockPath)).mode & 0o777, 0o600);
+    }
 
     await releaseQueueOwnerLease(lease);
     assert.equal(await readQueueOwnerRecord("lease-create"), undefined);
+  });
+});
+
+test("lease acquisition does not publish a partially written record", async (context) => {
+  await withTempHome(async () => {
+    const lockPath = queueLockFilePath("lease-publication");
+    const writing = deferred();
+    const proceed = deferred();
+    const writer = context.mock.method(
+      fs,
+      "writeFile",
+      async (...[file, data, options]: Parameters<typeof fs.writeFile>) => {
+        assert(typeof file === "string");
+        const handle = await fs.open(file, "wx", 0o600);
+        try {
+          writing.resolve();
+          await proceed.promise;
+          await handle.writeFile(data, options);
+        } finally {
+          await handle.close();
+        }
+      },
+    );
+    const acquiring = tryAcquireQueueOwnerLease("lease-publication");
+    try {
+      await writing.promise;
+      await assert.rejects(fs.access(lockPath), { code: "ENOENT" });
+    } finally {
+      proceed.resolve();
+      const lease = await acquiring;
+      writer.mock.restore();
+      assert(lease);
+      const record = await readQueueOwnerRecord(lease.sessionId);
+      assert.equal(record?.ownerGeneration, lease.ownerGeneration);
+      await releaseQueueOwnerLease(lease);
+    }
+  });
+});
+
+test("failed lease refresh preserves the last complete owner record", async (context) => {
+  await withTempHome(async () => {
+    const lease = await tryAcquireQueueOwnerLease("lease-failed-write");
+    assert(lease);
+    const original = await fs.readFile(lease.lockPath, "utf8");
+    context.mock.method(fs, "writeFile", async (...[file]: Parameters<typeof fs.writeFile>) => {
+      assert(typeof file === "string");
+      const handle = await fs.open(file, "w", 0o600);
+      await handle.close();
+      throw new Error("injected write failure");
+    });
+    try {
+      await assert.rejects(refreshQueueOwnerLease(lease, { queueDepth: 7 }), {
+        message: "injected write failure",
+      });
+      assert.equal(await fs.readFile(lease.lockPath, "utf8"), original);
+    } finally {
+      await releaseQueueOwnerLease(lease);
+    }
+  });
+});
+
+test("lease acquisition preserves exclusivity without hardlink support", async (context) => {
+  await withTempHome(async () => {
+    const sessionId = "lease-no-hardlinks";
+    const lockPath = queueLockFilePath(sessionId);
+    const reserved = deferred();
+    const proceed = deferred();
+    const writeFile = fs.writeFile.bind(fs);
+    context.mock.method(fs, "link", async () => {
+      throw Object.assign(new Error("hardlinks unsupported"), { code: "ENOTSUP" });
+    });
+    context.mock.method(fs, "writeFile", async (...args: Parameters<typeof fs.writeFile>) => {
+      if (args[0] !== lockPath) {
+        return await writeFile(...args);
+      }
+      const handle = await fs.open(lockPath, "wx", 0o600);
+      try {
+        reserved.resolve();
+        await proceed.promise;
+        await handle.writeFile(args[1], args[2]);
+      } finally {
+        await handle.close();
+      }
+    });
+    const acquiring = tryAcquireQueueOwnerLease(sessionId);
+    try {
+      await reserved.promise;
+      assert.equal(await tryAcquireQueueOwnerLease(sessionId), undefined);
+      assert.equal(await fs.readFile(lockPath, "utf8"), "");
+    } finally {
+      proceed.resolve();
+      const lease = await acquiring;
+      assert(lease);
+      assert.equal((await readQueueOwnerRecord(sessionId))?.ownerGeneration, lease.ownerGeneration);
+      await releaseQueueOwnerLease(lease);
+    }
+  });
+});
+
+test("overlapping refreshes retain the latest queue depth", async (context) => {
+  await withTempHome(async () => {
+    const lease = await tryAcquireQueueOwnerLease("lease-ordered-refresh");
+    assert(lease);
+    const writing = deferred();
+    const proceed = deferred();
+    const writeFile = fs.writeFile.bind(fs);
+    let first = true;
+    context.mock.method(fs, "writeFile", async (...args: Parameters<typeof fs.writeFile>) => {
+      if (first) {
+        first = false;
+        writing.resolve();
+        await proceed.promise;
+      }
+      await writeFile(...args);
+    });
+    const firstRefresh = refreshQueueOwnerLease(lease, { queueDepth: 1 });
+    await writing.promise;
+    const secondRefresh = refreshQueueOwnerLease(lease, { queueDepth: 2 });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    proceed.resolve();
+    try {
+      await Promise.all([firstRefresh, secondRefresh]);
+      assert.equal((await readQueueOwnerRecord(lease.sessionId))?.queueDepth, 2);
+    } finally {
+      await releaseQueueOwnerLease(lease);
+    }
+  });
+});
+
+test("release drains a pending refresh and rejects later refreshes", async (context) => {
+  await withTempHome(async () => {
+    const lease = await tryAcquireQueueOwnerLease("lease-drain");
+    assert(lease);
+    const writing = deferred();
+    const proceed = deferred();
+    const writeFile = fs.writeFile.bind(fs);
+    context.mock.method(
+      fs,
+      "writeFile",
+      async (...[file, data, options]: Parameters<typeof fs.writeFile>) => {
+        writing.resolve();
+        await proceed.promise;
+        await writeFile(file, data, options);
+      },
+    );
+    const refreshing = refreshQueueOwnerLease(lease, { queueDepth: 1 });
+    await writing.promise;
+    const releasing = releaseQueueOwnerLease(lease);
+    proceed.resolve();
+    await Promise.all([refreshing, releasing]);
+    await refreshQueueOwnerLease(lease, { queueDepth: 2 });
+    assert.equal(await readQueueOwnerRecord(lease.sessionId), undefined);
+  });
+});
+
+test("old lease refresh and release preserve a replacement owner and socket", async () => {
+  await withTempHome(async () => {
+    const lease = await tryAcquireQueueOwnerLease("lease-replaced");
+    assert(lease);
+    const replacement = { ...lease, pid: process.pid, ownerGeneration: lease.ownerGeneration + 1 };
+    await writeQueueOwnerLock(replacement);
+    if (process.platform !== "win32") {
+      await fs.writeFile(lease.socketPath, "replacement socket");
+    }
+    await refreshQueueOwnerLease(lease, { queueDepth: 9 });
+    await releaseQueueOwnerLease(lease);
+    assert.equal(
+      (await readQueueOwnerRecord(lease.sessionId))?.ownerGeneration,
+      replacement.ownerGeneration,
+    );
+    if (process.platform !== "win32") {
+      assert.equal(await fs.readFile(lease.socketPath, "utf8"), "replacement socket");
+      await fs.unlink(lease.socketPath);
+    }
+  });
+});
+
+test("release rechecks its generation after socket cleanup", async (context) => {
+  if (process.platform === "win32") {
+    return;
+  }
+  await withTempHome(async () => {
+    const lease = await tryAcquireQueueOwnerLease("lease-cleanup-race");
+    assert(lease);
+    const unlink = fs.unlink.bind(fs);
+    context.mock.method(fs, "unlink", async (...args: Parameters<typeof fs.unlink>) => {
+      if (args[0] === lease.socketPath) {
+        await writeQueueOwnerLock({ ...lease, ownerGeneration: lease.ownerGeneration + 1 });
+        await fs.writeFile(lease.socketPath, "replacement socket");
+      } else {
+        await unlink(...args);
+      }
+    });
+    await releaseQueueOwnerLease(lease);
+    assert.equal(
+      (await readQueueOwnerRecord(lease.sessionId))?.ownerGeneration,
+      lease.ownerGeneration + 1,
+    );
+    assert.equal(await fs.readFile(lease.socketPath, "utf8"), "replacement socket");
+    await unlink(lease.socketPath);
+  });
+});
+
+test("a same-process contender cannot reclaim its live lease", async () => {
+  await withTempHome(async () => {
+    const lease = await tryAcquireQueueOwnerLease("lease-self");
+    assert(lease);
+    try {
+      assert.equal(await tryAcquireQueueOwnerLease(lease.sessionId), undefined);
+      assert.equal(
+        (await readQueueOwnerRecord(lease.sessionId))?.ownerGeneration,
+        lease.ownerGeneration,
+      );
+    } finally {
+      await releaseQueueOwnerLease(lease);
+    }
+  });
+});
+
+test("concurrent contenders acquire only one queue owner lease", async () => {
+  await withTempHome(async () => {
+    const leases = await Promise.all(
+      Array.from({ length: 12 }, () => tryAcquireQueueOwnerLease("lease-concurrent")),
+    );
+    const acquired = leases.filter((lease) => lease !== undefined);
+    try {
+      assert.equal(acquired.length, 1);
+      assert.equal(
+        (await readQueueOwnerRecord("lease-concurrent"))?.ownerGeneration,
+        acquired[0]?.ownerGeneration,
+      );
+    } finally {
+      for (const lease of acquired) {
+        await releaseQueueOwnerLease(lease);
+      }
+    }
+  });
+});
+
+test("collision preserves fresh malformed reservations and recovers abandoned ones", async () => {
+  await withTempHome(async () => {
+    const sessionId = "lease-reservation";
+    const lockPath = queueLockFilePath(sessionId);
+    await fs.mkdir(path.dirname(lockPath), { recursive: true });
+    await fs.writeFile(lockPath, "{");
+    assert.equal(await tryAcquireQueueOwnerLease(sessionId), undefined);
+    assert.equal(await fs.readFile(lockPath, "utf8"), "{");
+    await fs.utimes(lockPath, new Date(0), new Date(0));
+    assert.equal(await tryAcquireQueueOwnerLease(sessionId), undefined);
+    const lease = await tryAcquireQueueOwnerLease(sessionId);
+    assert(lease);
+    await releaseQueueOwnerLease(lease);
+  });
+});
+
+test("stale health observations do not terminate a recovered heartbeat", async (context) => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "lease-recovered-heartbeat";
+    const keeper = await startKeeperProcess();
+    const paths = queuePaths(homeDir, sessionId);
+    try {
+      await writeQueueOwnerLock({
+        ...paths,
+        sessionId,
+        pid: keeper.pid,
+        heartbeatAt: "2000-01-01T00:00:00.000Z",
+      });
+      const stale = await readQueueOwnerRecord(sessionId);
+      assert(stale);
+      const heartbeatAt = new Date().toISOString();
+      await writeQueueOwnerLock({ ...paths, ...stale, heartbeatAt });
+      assert.equal((await resolveUsableQueueOwner(sessionId, stale))?.heartbeatAt, heartbeatAt);
+      assert.equal(isProcessAlive(keeper.pid), true);
+      assert(await readQueueOwnerRecord(sessionId));
+      const readFile = fs.readFile.bind(fs);
+      let first = true;
+      context.mock.method(fs, "readFile", async (...args: Parameters<typeof fs.readFile>) => {
+        if (args[0] === paths.lockPath && first) {
+          first = false;
+          return JSON.stringify(stale);
+        }
+        return await readFile(...args);
+      });
+      const status = await readQueueOwnerStatus(sessionId);
+      assert.equal(status?.heartbeatAt, heartbeatAt);
+      assert.equal(status?.stale, false);
+      assert.equal(status?.alive, true);
+    } finally {
+      stopProcess(keeper);
+    }
+  });
+});
+
+test("a final heartbeat cannot cancel termination already in progress", async (context) => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "lease-retiring-heartbeat";
+    const paths = queuePaths(homeDir, sessionId);
+    await writeQueueOwnerLock({
+      ...paths,
+      sessionId,
+      pid: 999_999,
+      heartbeatAt: "2000-01-01T00:00:00.000Z",
+    });
+    const owner = await readQueueOwnerRecord(sessionId);
+    assert(owner);
+    let alive = true;
+    let now = Date.now();
+    const signals: Array<NodeJS.Signals | number | undefined> = [];
+    context.mock.method(Date, "now", () => (now += 10_000));
+    context.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | number) => {
+      assert.equal(pid, owner.pid);
+      if (!alive) {
+        throw Object.assign(new Error("process exited"), { code: "ESRCH" });
+      }
+      if (signal === "SIGTERM") {
+        writeFileSync(
+          paths.lockPath,
+          JSON.stringify({ ...owner, heartbeatAt: new Date(now + 60_000).toISOString() }),
+        );
+      }
+      if (signal === "SIGKILL") {
+        alive = false;
+      }
+      if (signal !== 0) {
+        signals.push(signal);
+      }
+      return true;
+    });
+    await resolveUsableQueueOwner(sessionId, owner);
+    assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+    assert.equal(await readQueueOwnerRecord(sessionId), undefined);
   });
 });
 
@@ -209,7 +552,7 @@ test("readQueueOwnerStatus returns live owner details for a healthy owner", asyn
   });
 });
 
-test("ensureOwnerIsUsable cleans up stale live owners", async () => {
+test("resolveUsableQueueOwner cleans up stale live owners", async () => {
   await withTempHome(async (homeDir) => {
     const sessionId = "stale-live-owner";
     const keeper = await startKeeperProcess();
@@ -226,7 +569,7 @@ test("ensureOwnerIsUsable cleans up stale live owners", async () => {
 
       const owner = await readQueueOwnerRecord(sessionId);
       assert(owner);
-      assert.equal(await ensureOwnerIsUsable(sessionId, owner), false);
+      assert.equal(await resolveUsableQueueOwner(sessionId, owner), undefined);
       assert.equal(await readQueueOwnerRecord(sessionId), undefined);
       assert.equal(isProcessAlive(keeper.pid), false);
     } finally {
@@ -288,6 +631,21 @@ test("terminateProcess and terminateQueueOwnerForSession handle live and missing
       stopProcess(keeper);
     }
   });
+});
+
+test("terminateProcess does not report termination while the process remains alive", async (context) => {
+  let now = Date.now();
+  context.mock.method(Date, "now", () => (now += 10_000));
+  const signals: Array<NodeJS.Signals | number | undefined> = [];
+  context.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | number) => {
+    assert.equal(pid, 999_999);
+    if (signal !== 0) {
+      signals.push(signal);
+    }
+    return true;
+  });
+  assert.equal(await terminateProcess(999_999), false);
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
 });
 
 test("terminateProcess waits long enough for a process that delays 2s before exiting on SIGTERM", async () => {

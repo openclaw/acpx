@@ -11,6 +11,7 @@ import {
   trySetModeOnRunningOwner,
   trySubmitToRunningOwner,
 } from "../src/cli/queue/ipc.js";
+import { isProcessAlive, readQueueOwnerRecord } from "../src/cli/queue/lease-store.js";
 import { QueueConnectionError, QueueProtocolError } from "../src/errors.js";
 import type { OutputFormatter } from "../src/types.js";
 import {
@@ -754,57 +755,76 @@ test("SessionQueueOwner rejects no-wait prompts when queue depth exceeds the lim
   });
 });
 
-test("trySubmitToRunningOwner clears stale owner lock on protocol mismatch", async () => {
-  await withTempHome(async (homeDir) => {
-    const sessionId = "submit-stale-owner-protocol-mismatch";
-    const keeper = await startKeeperProcess();
-    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
-    await writeQueueOwnerLock({
-      lockPath,
-      pid: keeper.pid,
-      sessionId,
-      socketPath,
-    });
-
-    const server = createSingleRequestServer((socket, request) => {
-      assert.equal(request.type, "submit_prompt");
-      socket.write(
-        `${JSON.stringify({
-          type: "accepted",
-          requestId: request.requestId,
-        })}\n`,
-      );
-      socket.write(
-        `${JSON.stringify({
-          type: "session_update",
-          requestId: request.requestId,
-          update: {
-            sessionId: "legacy-session",
-          },
-        })}\n`,
-      );
-      socket.end();
-    });
-
-    await listenServer(server, socketPath);
-
-    try {
-      const outcome = await trySubmitToRunningOwner({
+for (const replaceOwner of [false, true]) {
+  test(`protocol mismatch recovery ${replaceOwner ? "preserves a replacement owner" : "clears the observed owner"}`, async () => {
+    await withTempHome(async (homeDir) => {
+      const sessionId = "submit-stale-owner-protocol-mismatch";
+      const keeper = await startKeeperProcess();
+      const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
+      await writeQueueOwnerLock({
+        lockPath,
+        pid: keeper.pid,
         sessionId,
-        message: "hello",
-        permissionMode: "approve-reads",
-        outputFormatter: NOOP_OUTPUT_FORMATTER,
-        waitForCompletion: true,
+        socketPath,
       });
-      assert.equal(outcome, undefined);
-      await assert.rejects(fs.access(lockPath));
-    } finally {
-      await closeServer(server);
-      await cleanupOwnerArtifacts({ socketPath, lockPath });
-      stopProcess(keeper);
-    }
+
+      const server = createSingleRequestServer((socket, request) => {
+        const respond = async () => {
+          if (replaceOwner) {
+            await writeQueueOwnerLock({
+              lockPath,
+              socketPath,
+              sessionId,
+              pid: keeper.pid,
+              ownerGeneration: 42,
+            });
+          }
+          assert.equal(request.type, "submit_prompt");
+          socket.write(
+            `${JSON.stringify({
+              type: "accepted",
+              requestId: request.requestId,
+            })}\n`,
+          );
+          socket.write(
+            `${JSON.stringify({
+              type: "session_update",
+              requestId: request.requestId,
+              update: {
+                sessionId: "legacy-session",
+              },
+            })}\n`,
+          );
+          socket.end();
+        };
+        void respond().catch((error: Error) => socket.destroy(error));
+      });
+
+      await listenServer(server, socketPath);
+
+      try {
+        const outcome = await trySubmitToRunningOwner({
+          sessionId,
+          message: "hello",
+          permissionMode: "approve-reads",
+          outputFormatter: NOOP_OUTPUT_FORMATTER,
+          waitForCompletion: true,
+        });
+        assert.equal(outcome, undefined);
+        if (replaceOwner) {
+          assert.equal((await readQueueOwnerRecord(sessionId))?.ownerGeneration, 42);
+          assert.equal(isProcessAlive(keeper.pid), true);
+        } else {
+          await assert.rejects(fs.access(lockPath));
+        }
+      } finally {
+        await closeServer(server);
+        await cleanupOwnerArtifacts({ socketPath, lockPath });
+        stopProcess(keeper);
+      }
+    });
   });
-});
+}
 
 test("trySubmitToRunningOwner rejects MCP config changes for a live owner", async () => {
   await withTempHome(async (homeDir) => {

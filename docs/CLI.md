@@ -527,6 +527,11 @@ When a prompt is already in flight for a session, `acpx` uses a per-session queu
 5. submitter either blocks until completion (default) or exits immediately with `--no-wait`
 6. if interrupted (`Ctrl+C`) during an active turn, `acpx` sends `session/cancel` first, waits briefly for cancelled completion, then force-kills only if needed
 
+Queue-owner records remain private across heartbeat updates. Shutdown finishes
+pending record updates before releasing ownership, and recovery checks the
+observed owner's generation again before terminating it or removing its files.
+Abandoned incomplete reservations remain recoverable after the stale-owner window.
+
 ### Soft-close behavior
 
 - soft-closed sessions remain on disk with `closed: true` and `closedAt`

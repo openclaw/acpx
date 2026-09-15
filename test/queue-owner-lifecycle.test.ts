@@ -18,6 +18,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { isProcessAlive } from "../src/cli/queue/lease-store.js";
 import { queueLockFilePath, queueSocketPath } from "../src/cli/queue/paths.js";
+import { runSessionQueueOwner } from "../src/cli/session/queue-owner-runtime.js";
 import { extractAgentMessageChunkText } from "./jsonrpc-test-helpers.js";
 import { makeSessionRecord, withTempHome, writeSessionRecordFile } from "./runtime-test-helpers.js";
 
@@ -139,6 +140,14 @@ function waitForProcessExit(
 }
 
 describe("queue owner lifecycle — graceful SIGTERM shutdown", () => {
+  it("releases its lease when session setup fails before the socket starts", async () => {
+    await withTempHome("acpx-lifecycle-setup-", async (homeDir) => {
+      const sessionId = "missing-owner-session";
+      await assert.rejects(runSessionQueueOwner({ sessionId, permissionMode: "approve-reads" }));
+      assert.equal(await fileExists(queueLockFilePath(sessionId, homeDir)), false);
+    });
+  });
+
   it("exits with code 0 and releases its lease when it receives SIGTERM", async () => {
     if (process.platform === "win32") {
       // SIGTERM semantics differ on Windows; skip this test.

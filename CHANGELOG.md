@@ -20,6 +20,7 @@ Repo: https://github.com/openclaw/acpx
 - Viewer/startup: release server resources when the HTTP port is unavailable and avoid opening an unused Vite WebSocket listener.
 - Storage/hardening: share private atomic writes across sessions, flow bundles, imports, and exports; keep history and new config files private while preserving output-directory permissions and append ordering.
 - Queue/hardening: deliver detached-owner startup options through stdin instead of temporary credential-bearing files, preserving large payloads and startup diagnostics.
+- Queue/ownership: keep lease records private and complete during heartbeat updates, drain pending writes before shutdown, and preserve replacement owners during stale recovery.
 
 ## 0.16.0 - 2026-09-15
 

@@ -187,17 +187,12 @@ function logQueueOwnerReady(params: {
 }
 
 async function closeQueueOwnerRuntime(params: {
-  lease: QueueOwnerLease;
   owner: SessionQueueOwner | undefined;
-  heartbeatTimer: NodeJS.Timeout | undefined;
   turnController: QueueOwnerTurnController;
   sharedClient: AcpClient;
   sessionId: string;
   verbose?: boolean;
 }): Promise<void> {
-  if (params.heartbeatTimer) {
-    clearInterval(params.heartbeatTimer);
-  }
   params.turnController.beginClosing();
   // Kill the bridge before draining IPC so it cannot outlive the owner.
   await params.sharedClient.close().catch(() => {
@@ -205,7 +200,6 @@ async function closeQueueOwnerRuntime(params: {
   });
   await params.owner?.close();
   await writeQueueOwnerLifecycleSnapshot(params.sessionId, params.sharedClient);
-  await releaseQueueOwnerLease(params.lease);
   if (params.verbose) {
     process.stderr.write(`[acpx] queue owner stopped for session ${params.sessionId}\n`);
   }
@@ -253,7 +247,6 @@ type QueueOwnerShutdownController = {
 };
 
 function createQueueOwnerShutdownController(params: {
-  lease: QueueOwnerLease;
   getOwner: () => SessionQueueOwner | undefined;
   stopHeartbeat: () => void;
   turnController: QueueOwnerTurnController;
@@ -315,9 +308,7 @@ function createQueueOwnerShutdownController(params: {
       shutdownPromise ??= (async () => {
         await activeTurnShutdown;
         await closeQueueOwnerRuntime({
-          lease: params.lease,
           owner: params.getOwner(),
-          heartbeatTimer: undefined,
           turnController: params.turnController,
           sharedClient: params.sharedClient,
           sessionId: params.sessionId,
@@ -363,7 +354,17 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
   if (!lease) {
     return;
   }
+  try {
+    await runQueueOwnerRuntime(options, lease);
+  } finally {
+    await releaseQueueOwnerLease(lease);
+  }
+}
 
+async function runQueueOwnerRuntime(
+  options: QueueOwnerRuntimeOptions,
+  lease: QueueOwnerLease,
+): Promise<void> {
   const sessionRecord = await resolveSessionRecord(options.sessionId);
   let owner: SessionQueueOwner | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
@@ -413,7 +414,6 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
   };
 
   const shutdown = createQueueOwnerShutdownController({
-    lease,
     getOwner: () => owner,
     stopHeartbeat: () => {
       if (heartbeatTimer) {

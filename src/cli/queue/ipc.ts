@@ -17,7 +17,7 @@ import type {
 import { probeQueueOwnerHealth, type QueueOwnerHealth } from "./ipc-health.js";
 import { connectToQueueOwner } from "./ipc-transport.js";
 import {
-  ensureOwnerIsUsable,
+  resolveUsableQueueOwner,
   type QueueOwnerRecord,
   readQueueOwnerRecord,
   terminateQueueOwnerForSession,
@@ -72,7 +72,7 @@ async function maybeRecoverStaleOwnerAfterProtocolMismatch(params: {
     return false;
   }
 
-  await terminateQueueOwnerForSession(params.sessionId).catch(() => {
+  await terminateQueueOwnerForSession(params.sessionId, params.owner).catch(() => {
     // Preserve existing behavior if cleanup fails.
   });
   incrementPerfCounter("queue.owner.stale_recovered");
@@ -713,11 +713,12 @@ function assertQueueOwnerMcpConfigMatches(
 export async function trySubmitToRunningOwner(
   options: SubmitToQueueOwnerOptions,
 ): Promise<SessionSendOutcome | undefined> {
-  const owner = await readQueueOwnerRecord(options.sessionId);
-  if (!owner) {
+  const observed = await readQueueOwnerRecord(options.sessionId);
+  if (!observed) {
     return undefined;
   }
-  if (!(await ensureOwnerIsUsable(options.sessionId, owner))) {
+  const owner = await resolveUsableQueueOwner(options.sessionId, observed);
+  if (!owner) {
     return undefined;
   }
   assertQueueOwnerMcpConfigMatches(owner, options);
