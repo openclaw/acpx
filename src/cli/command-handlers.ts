@@ -932,9 +932,17 @@ export async function handleSessionsWatch(
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const scope = {
+    agentCommand: agent.agentCommand,
+    cwd: agent.cwd,
+    name: flags.name,
+    readOnly: true,
+  };
   const record =
-    (await findSession({ agentCommand: agent.agentCommand, cwd: agent.cwd, name: flags.name })) ??
-    (await findScopedSessionOrThrow(agent, flags.name));
+    (await findSession(scope)) ?? (await findSession({ ...scope, includeClosed: true }));
+  if (!record) {
+    throw new Error(missingScopedSessionMessage(agent, flags.name));
+  }
   const { runSessionWatch } = await import("./session-watch.js");
   await runSessionWatch(record, {
     cursor: flags.cursor,

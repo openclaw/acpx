@@ -13,6 +13,8 @@ acpx --format json pi sessions watch -s reviewer
 
 Watching replays retained events and then follows new ones. Attaching, disconnecting, pressing Ctrl+C, or closing a watcher leaves the active turn running. Watching an idle session waits without starting an agent or extending the owner's idle TTL. A closed session finishes after replaying its retained events.
 
+Session discovery reads records without creating or repairing the index. A readable session store does not need to be writable to watch it.
+
 Use `--cursor <cursor>` to resume after the last received event:
 
 ```bash

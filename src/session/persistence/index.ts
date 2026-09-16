@@ -134,7 +134,18 @@ export async function writeSessionIndex(
 }
 
 export async function rebuildSessionIndex(sessionDir: string): Promise<SessionIndex> {
-  const files = await listSessionFiles(sessionDir);
+  const index = await scanSessionIndex(sessionDir);
+  await writeSessionIndex(sessionDir, index);
+  return index;
+}
+
+export async function scanSessionIndex(sessionDir: string): Promise<SessionIndex> {
+  const files = await listSessionFiles(sessionDir).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  });
 
   const indexEntries: SessionIndexEntry[] = [];
   for (const file of files) {
@@ -146,17 +157,15 @@ export async function rebuildSessionIndex(sessionDir: string): Promise<SessionIn
       }
       indexEntries.push(toSessionIndexEntry(parsed, file));
     } catch {
-      // ignore corrupt session files while rebuilding the cache index
+      // Ignore corrupt records during discovery and cache rebuilding.
     }
   }
 
-  const index: SessionIndex = {
+  return {
     schema: SESSION_INDEX_SCHEMA,
     files,
-    entries: indexEntries,
+    entries: indexEntries.toSorted((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt)),
   };
-  await writeSessionIndex(sessionDir, index);
-  return index;
 }
 
 export async function loadOrRebuildSessionIndex(sessionDir: string): Promise<SessionIndex> {

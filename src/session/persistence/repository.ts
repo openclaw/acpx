@@ -10,6 +10,7 @@ import { safeSessionId, sessionBaseDir } from "../event-log.js";
 import {
   loadOrRebuildSessionIndex,
   rebuildSessionIndex,
+  scanSessionIndex,
   toSessionIndexEntry,
   writeSessionIndex,
   type SessionIndexEntry,
@@ -24,6 +25,7 @@ type FindSessionOptions = {
   cwd: string;
   name?: string;
   includeClosed?: boolean;
+  readOnly?: boolean;
 };
 
 type FindSessionByDirectoryWalkOptions = {
@@ -53,10 +55,13 @@ async function loadRecordFromIndexEntry(
   }
 }
 
-async function loadSessionIndexEntries(): Promise<SessionIndexEntry[]> {
-  await ensureSessionDir();
+async function loadSessionIndexEntries(readOnly = false): Promise<SessionIndexEntry[]> {
+  if (!readOnly) {
+    await ensureSessionDir();
+  }
   const index = await measurePerf("session.index_load", async () => {
-    return await loadOrRebuildSessionIndex(sessionBaseDir());
+    const load = readOnly ? scanSessionIndex : loadOrRebuildSessionIndex;
+    return await load(sessionBaseDir());
   });
   return index.entries;
 }
@@ -242,7 +247,7 @@ export async function listSessionsForAgent(agentCommand: string): Promise<Sessio
 export async function findSession(options: FindSessionOptions): Promise<SessionRecord | undefined> {
   const normalizedCwd = absolutePath(options.cwd);
   const normalizedName = normalizeName(options.name);
-  const entries = await loadSessionIndexEntries();
+  const entries = await loadSessionIndexEntries(options.readOnly);
   const match = entries.find(
     (session) =>
       session.agentCommand === options.agentCommand &&

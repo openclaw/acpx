@@ -297,7 +297,7 @@ test(
   "closed public watchers finish replay and reject foreign or invalid cursors",
   { timeout: 10_000 },
   async () => {
-    await withSharedSession(async ({ runtime, handle, cli }) => {
+    await withSharedSession(async ({ runtime, handle, cli, home }) => {
       const turn = runtime.startTurn({
         handle,
         text: "echo before-close",
@@ -320,6 +320,38 @@ test(
       assert.doesNotMatch(text, /\[done\]/u);
       const quiet = await cli("--format", "quiet", "sessions", "watch", "-s", "shared");
       assert.equal(quiet.trim(), "before-close");
+      const sessionDir = path.join(home, ".acpx", "sessions");
+      const indexPath = path.join(sessionDir, "index.json");
+      const index = await fs.readFile(indexPath, "utf8");
+      await fs.writeFile(path.join(sessionDir, "corrupt-session.json"), "{");
+      for (const contents of [undefined, "{", index]) {
+        if (contents === undefined) {
+          await fs.unlink(indexPath);
+        } else {
+          await fs.writeFile(indexPath, contents);
+        }
+        await fs.chmod(sessionDir, 0o500);
+        try {
+          const replay = await cli("--format", "json", "sessions", "watch", "-s", "shared");
+          assert.deepEqual(
+            replay
+              .trim()
+              .split("\n")
+              .map((line) => JSON.parse(line)),
+            events,
+          );
+          if (contents === undefined) {
+            await assert.rejects(fs.readFile(indexPath), { code: "ENOENT" });
+          } else {
+            assert.equal(await fs.readFile(indexPath, "utf8"), contents);
+          }
+          if (process.platform !== "win32") {
+            assert.equal((await fs.stat(sessionDir)).mode & 0o777, 0o500);
+          }
+        } finally {
+          await fs.chmod(sessionDir, 0o700);
+        }
+      }
       for (const cursor of [
         "not-a-cursor",
         Buffer.from(JSON.stringify(["another-record", 0])).toString("base64url"),
