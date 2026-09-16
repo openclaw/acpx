@@ -50,8 +50,120 @@ test("sendSessionDirect closes a shared client after reconnect preference failur
         /Failed to replay saved session model unavailable-saved-model/,
       );
       assert.equal(client.hasReusableSession(record.acpSessionId), false);
+      const saved = await resolveSessionRecord(record.acpxRecordId);
+      assert.equal(saved.acpx?.session_options?.model, "unavailable-saved-model");
     } finally {
       await client.close();
+    }
+  });
+});
+
+test("sendSessionDirect preserves delivered metadata while replaying the saved model", async () => {
+  await withTempHome(async (homeDir) => {
+    const record = makeSessionRecord({
+      acpxRecordId: "ordered-reconnect",
+      acpSessionId: "ordered-backend",
+      agentCommand: `node ${JSON.stringify(MOCK_AGENT_PATH)} --supports-load-session --advertise-models`,
+      cwd: homeDir,
+      acpx: {
+        session_options: { model: "smart-model" },
+        desired_config_options: { retired: "value" },
+      },
+    });
+    await writeSessionRecord(homeDir, record);
+    class NotifyingClient extends AcpClient {
+      private delivered: Parameters<AcpClient["setEventHandlers"]>[0] = {};
+      response: Awaited<ReturnType<AcpClient["setSessionModel"]>>;
+      override setEventHandlers(handlers: Parameters<AcpClient["setEventHandlers"]>[0]): void {
+        this.delivered = handlers;
+        super.setEventHandlers(handlers);
+      }
+      override async setSessionModel(
+        ...args: Parameters<AcpClient["setSessionModel"]>
+      ): ReturnType<AcpClient["setSessionModel"]> {
+        this.delivered.onSessionUpdate?.({
+          sessionId: args[0],
+          update: { sessionUpdate: "config_option_update", configOptions: [] },
+        });
+        this.delivered.onSessionUpdate?.({
+          sessionId: args[0],
+          update: {
+            sessionUpdate: "available_commands_update",
+            availableCommands: [{ name: "reconnected", description: "Restored command" }],
+          },
+        });
+        this.response = await super.setSessionModel(...args);
+        return this.response;
+      }
+    }
+    const client = new NotifyingClient({
+      agentCommand: record.agentCommand,
+      cwd: homeDir,
+      permissionMode: "approve-all",
+    });
+    try {
+      const result = await sendSessionDirect({
+        sessionId: record.acpxRecordId,
+        prompt: [{ type: "text", text: "echo ordered-reconnect" }],
+        permissionMode: "approve-all",
+        outputFormatter: createOutputFormatter("quiet"),
+        client,
+        timeoutMs: 5_000,
+      });
+      assert.ok(client.response);
+      for (const saved of [result.record, await resolveSessionRecord(record.acpxRecordId)]) {
+        assert.deepEqual(
+          saved.acpx?.available_commands?.map((command) => command.name),
+          ["reconnected"],
+        );
+        assert.equal(saved.acpx?.current_model_id, "smart-model");
+        assert.deepEqual(saved.acpx?.config_options, client.response.configOptions);
+        assert.equal(saved.acpx?.desired_config_options?.retired, undefined);
+      }
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+test("sendSessionDirect keeps fresh fallback model removals", async () => {
+  await withTempHome(async (homeDir) => {
+    const record = makeSessionRecord({
+      acpxRecordId: "fresh-model-removal",
+      acpSessionId: "retired-backend",
+      agentCommand: `node ${JSON.stringify(MOCK_AGENT_PATH)} --supports-load-session --load-session-not-found`,
+      cwd: homeDir,
+      acpx: {
+        current_model_id: "stale-model",
+        available_models: ["stale-model"],
+        model_control: "config_option",
+        config_options: [
+          {
+            id: "model",
+            name: "Model",
+            category: "model",
+            type: "select",
+            currentValue: "stale-model",
+            options: [{ value: "stale-model", name: "Stale" }],
+          },
+        ],
+      },
+    });
+    await writeSessionRecord(homeDir, record);
+    const result = await sendSessionDirect({
+      sessionId: record.acpxRecordId,
+      prompt: [{ type: "text", text: "echo fresh-model" }],
+      permissionMode: "approve-all",
+      outputFormatter: createOutputFormatter("quiet"),
+      timeoutMs: 5_000,
+    });
+    assert.equal(result.record.acpxRecordId, record.acpxRecordId);
+    assert.notEqual(result.record.acpSessionId, record.acpSessionId);
+    for (const saved of [result.record, await resolveSessionRecord(record.acpxRecordId)]) {
+      assert.equal(saved.acpx?.current_model_id, undefined);
+      assert.equal(saved.acpx?.available_models, undefined);
+      assert.equal(saved.acpx?.model_control, undefined);
+      assert.equal(saved.acpx?.config_options, undefined);
     }
   });
 });

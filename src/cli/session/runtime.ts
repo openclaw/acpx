@@ -54,7 +54,6 @@ import type {
   PermissionEscalationEvent,
   PermissionPolicy,
   RunPromptResult,
-  SessionAcpxState,
   SessionRecord,
   SessionSendResult,
 } from "../../types.js";
@@ -233,62 +232,6 @@ function toPromptResult(
 
 function requestedModelId(value: string | undefined): string {
   return typeof value === "string" ? value.trim() : "";
-}
-
-export function mergeConnectedModelState(
-  state: SessionAcpxState | undefined,
-  connectedState: SessionAcpxState | undefined,
-): SessionAcpxState | undefined {
-  if (!connectedState) {
-    return state;
-  }
-  const nextState = cloneSessionAcpxState(state) ?? {};
-  mergeConnectedAdvertisedModelState(nextState, connectedState);
-  mergeConnectedModelPreferences(nextState, connectedState);
-  return nextState;
-}
-
-function mergeConnectedAdvertisedModelState(
-  nextState: SessionAcpxState,
-  connectedState: SessionAcpxState,
-): void {
-  if (connectedState.config_options !== undefined) {
-    nextState.config_options = structuredClone(connectedState.config_options);
-  } else {
-    delete nextState.config_options;
-  }
-  if (connectedState.current_model_id !== undefined) {
-    nextState.current_model_id = connectedState.current_model_id;
-  } else {
-    delete nextState.current_model_id;
-  }
-  if (connectedState.available_models) {
-    nextState.available_models = [...connectedState.available_models];
-  } else {
-    delete nextState.available_models;
-  }
-  if (connectedState.model_control) {
-    nextState.model_control = connectedState.model_control;
-  } else {
-    delete nextState.model_control;
-  }
-}
-
-function mergeConnectedModelPreferences(
-  nextState: SessionAcpxState,
-  connectedState: SessionAcpxState,
-): void {
-  if (connectedState.session_options) {
-    nextState.session_options = cloneSessionAcpxState(connectedState)?.session_options;
-  }
-  if (connectedState.desired_mode_id !== undefined) {
-    nextState.desired_mode_id = connectedState.desired_mode_id;
-  }
-  if (connectedState.desired_config_options) {
-    nextState.desired_config_options = { ...connectedState.desired_config_options };
-  } else {
-    delete nextState.desired_config_options;
-  }
 }
 
 async function applyPromptModelIfAdvertised(params: {
@@ -698,13 +641,12 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     return await resolveSessionRecord(options.sessionRecordId);
   });
   const conversation = cloneSessionConversation(record);
-  let acpxState = cloneSessionAcpxState(record.acpx);
+  record.acpx = cloneSessionAcpxState(record.acpx);
   const promptStartedAt = isoNow();
   const promptMessageId = recordPromptSubmission(conversation, options.prompt, promptStartedAt);
   record.lastPromptAt = promptStartedAt;
   record.lastUsedAt = promptStartedAt;
   applyConversation(record, conversation);
-  record.acpx = acpxState;
   await writeSessionRecord(record);
 
   output.setContext({
@@ -765,7 +707,6 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
       await flushPendingMessages(false);
       record.lastUsedAt = isoNow();
       applyConversation(record, conversation);
-      record.acpx = acpxState;
       await preserveClosedState();
       await eventWriter.checkpoint();
     },
@@ -822,7 +763,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
       if (promptTurnActive) {
         promptTurnHadSideEffects = true;
       }
-      acpxState = recordConversationSessionUpdate(conversation, acpxState, notification);
+      record.acpx = recordConversationSessionUpdate(conversation, record.acpx, notification);
       trimConversationForRuntime(conversation);
       liveCheckpoint.request();
       options.onSessionUpdate?.(notification);
@@ -831,7 +772,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
       if (promptTurnActive) {
         promptTurnHadSideEffects = true;
       }
-      acpxState = recordConversationClientOperation(conversation, acpxState, operation);
+      record.acpx = recordConversationClientOperation(conversation, record.acpx, operation);
       trimConversationForRuntime(conversation);
       liveCheckpoint.request();
       options.onClientOperation?.(operation);
@@ -850,20 +791,26 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
       await client.setSessionMode(activeSessionIdForControl, modeId);
     },
     setSessionModel: async (modelId: string) => {
-      const models = advertisedModelState(acpxState);
+      const models = advertisedModelState(record.acpx);
       const response = await client.setSessionModel(activeSessionIdForControl, modelId, models);
-      acpxState = applyModelSelection(acpxState, modelId, response);
+      record.acpx = applyModelSelection(record.acpx, modelId, response);
       return response;
     },
     setSessionConfigOption: async (configId: string, value: string) => {
       // Preserve the selected control's identity across pre-ack notifications.
-      const modelConfigId = advertisedModelState(acpxState)?.configId;
+      const modelConfigId = advertisedModelState(record.acpx)?.configId;
       const response = await client.setSessionConfigOption(
         activeSessionIdForControl,
         configId,
         value,
       );
-      acpxState = applyConfigOptionSelection(acpxState, configId, value, response, modelConfigId);
+      record.acpx = applyConfigOptionSelection(
+        record.acpx,
+        configId,
+        value,
+        response,
+        modelConfigId,
+      );
       return response;
     },
   };
@@ -904,7 +851,6 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
           },
         });
       });
-      acpxState = mergeConnectedModelState(acpxState, record.acpx);
       flushConnectOutput(connected.loadError);
       emitConnectPerfMetric(connectStartedAt, options.verbose);
       return connected;
@@ -987,7 +933,6 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     output.flush();
     record.lastUsedAt = isoNow();
     applyConversation(record, conversation);
-    record.acpx = acpxState;
     const propagated = error instanceof Error ? error : new Error(formatErrorMessage(error));
     attachAcpErrorPayload(propagated, normalizedError.acp);
     (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted =
@@ -1019,7 +964,6 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     record.protocolVersion = client.initializeResult?.protocolVersion;
     record.agentCapabilities = client.initializeResult?.agentCapabilities;
     applyConversation(record, conversation);
-    record.acpx = acpxState;
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     stopTotalTimer();
     return response;
@@ -1036,7 +980,6 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
       timeoutMs: options.timeoutMs,
       suppressWarnings: options.suppressSdkConsoleErrors,
     });
-    acpxState = cloneSessionAcpxState(record.acpx);
 
     output.setContext({
       sessionId: record.acpxRecordId,
@@ -1059,7 +1002,6 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     record.lastUsedAt = isoNow();
     applyConversation(record, conversation);
-    record.acpx = acpxState;
     await flushPendingMessages(false).catch(() => {
       // best effort while process is being interrupted
     });
@@ -1094,7 +1036,6 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     applyConversation(record, conversation);
-    record.acpx = acpxState;
     await liveCheckpoint.flush().catch(() => {
       // best effort on close
     });

@@ -208,7 +208,7 @@ Saved sessions may include a cached adapter PID from the last connected helper p
 2. Attempts ACP `session/resume` with the saved provider session id when the agent advertises it, otherwise ACP `session/load`.
 3. Falls back to `session/new` if reconnecting fails, transparently updating the saved record.
 
-This makes long-running scripted sessions resilient to crashes, OS restarts, and adapter upgrades.
+This makes long-running scripted sessions resilient to crashes, OS restarts, and adapter upgrades. Metadata updates received while reconnecting, including available commands, remain available after saved settings are replayed.
 
 ## Status
 

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { modelStateFromConfigOptions } from "../src/acp/model-support.js";
-import { mergeConnectedModelState } from "../src/cli/session/runtime.js";
 import { applyConfigOptionsToState } from "../src/session/config-options.js";
 import {
   cloneSessionAcpxState,
@@ -332,33 +331,6 @@ test("model config parsing ignores malformed raw and persisted snapshots", () =>
     ]),
     undefined,
   );
-});
-
-test("connected model state propagates authoritative removals", () => {
-  const merged = mergeConnectedModelState(
-    {
-      desired_config_options: { reasoning_effort: "high" },
-      current_model_id: "stale-model",
-      available_models: ["stale-model"],
-      model_control: "config_option",
-      config_options: [
-        {
-          id: "model",
-          name: "Model",
-          category: "model",
-          type: "select",
-          currentValue: "stale-model",
-          options: [{ value: "stale-model", name: "Stale Model" }],
-        },
-      ],
-    },
-    {},
-  );
-  assert.equal(merged?.current_model_id, undefined);
-  assert.equal(merged?.available_models, undefined);
-  assert.equal(merged?.model_control, undefined);
-  assert.equal(merged?.config_options, undefined);
-  assert.equal(merged?.desired_config_options, undefined);
 });
 
 test("recordPromptSubmission preserves audio prompt content", () => {
