@@ -31,7 +31,7 @@ import {
   type RunShellActionOptions,
   type ShellProcessOwner,
 } from "./executors/shell.js";
-import { resolveNext, resolveNextForOutcome, validateFlowDefinition } from "./graph.js";
+import { resolveNext, validateFlowDefinition } from "./graph.js";
 import {
   attachStepTrace,
   clearActiveNode,
@@ -479,7 +479,7 @@ export class FlowRunner {
       step.state.outputs[step.nodeId] = step.output;
       return resolveNext(flow.edges, step.nodeId, step.output, step.nodeResult);
     }
-    const next = resolveNextForOutcome(flow.edges, step.nodeId, step.nodeResult);
+    const next = resolveNext(flow.edges, step.nodeId, undefined, step.nodeResult);
     if (next) {
       return next;
     }

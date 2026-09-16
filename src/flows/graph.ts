@@ -36,6 +36,14 @@ function validateFlowEdge(flow: FlowDefinition, edge: FlowEdge, outgoingEdges: S
   }
 }
 
+function canFollowEdge(edge: FlowEdge, result: FlowNodeResult | undefined): boolean {
+  return (
+    !result ||
+    result.outcome === "ok" ||
+    ("switch" in edge && edge.switch.on.startsWith("$result."))
+  );
+}
+
 export function resolveNext(
   edges: FlowEdge[],
   from: string,
@@ -43,7 +51,7 @@ export function resolveNext(
   result?: FlowNodeResult,
 ): string | null {
   const edge = edges.find((candidate) => candidate.from === from);
-  if (!edge) {
+  if (!edge || !canFollowEdge(edge, result)) {
     return null;
   }
 
@@ -52,29 +60,6 @@ export function resolveNext(
   }
 
   const value = getBySwitchPath(output, result, edge.switch.on);
-  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
-    throw new Error(`Flow switch value must be scalar for ${edge.switch.on}`);
-  }
-  const next = edge.switch.cases[String(value)];
-  if (!next) {
-    throw new Error(`No flow switch case for ${edge.switch.on}=${JSON.stringify(value)}`);
-  }
-  return next;
-}
-
-export function resolveNextForOutcome(
-  edges: FlowEdge[],
-  from: string,
-  result: FlowNodeResult,
-): string | null {
-  const edge = edges.find((candidate) => candidate.from === from);
-  if (!edge || "to" in edge) {
-    return null;
-  }
-  if (!edge.switch.on.startsWith("$result.")) {
-    return null;
-  }
-  const value = getBySwitchPath(undefined, result, edge.switch.on);
   if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
     throw new Error(`Flow switch value must be scalar for ${edge.switch.on}`);
   }

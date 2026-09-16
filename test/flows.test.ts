@@ -1924,6 +1924,36 @@ test("FlowRunner stores successful node results separately from outputs", async 
   });
 });
 
+test("FlowRunner preserves failures instead of following direct or output edges", async () => {
+  await withTempHome(async (homeDir) => {
+    const runner = new FlowRunner({
+      resolveAgent: () => ({ agentName: "unused", agentCommand: "unused", cwd: homeDir }),
+      permissionMode: "deny-all",
+      outputRoot: path.join(homeDir, "runs"),
+    });
+    const failure = new Error("original failure");
+    for (const target of ["direct", "$output.route", "invalid.path"]) {
+      const flow = defineFlow({
+        name: "failure-route",
+        startAt: "fail",
+        nodes: {
+          fail: compute({
+            run: () => {
+              throw failure;
+            },
+          }),
+          after: compute({ run: () => assert.fail("failed node must not continue") }),
+        },
+        edges:
+          target === "direct"
+            ? [{ from: "fail", to: "after" }]
+            : [{ from: "fail", switch: { on: target, cases: { go: "after" } } }],
+      });
+      await assert.rejects(runner.run(flow, {}), (error: unknown) => error === failure);
+    }
+  });
+});
+
 test("FlowRunner records callback and output serialization failures as failed steps", async () => {
   await withTempHome(async (homeDir) => {
     const outputRoot = path.join(homeDir, "runs");
