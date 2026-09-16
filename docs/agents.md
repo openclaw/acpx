@@ -24,6 +24,7 @@ The default agent for top-level commands like `acpx exec â€¦` and `acpx prompt â
 | `fx`         | `fx acp`                                       | [fx](https://fx.sh)                                                                                             |
 | `grok-build` | `grok agent stdio`                             | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
 | `iflow`      | `iflow --experimental-acp`                     | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
+| `junie`      | `junie --acp=true`                             | [JetBrains Junie](https://junie.jetbrains.com)                                                                  |
 | `kilocode`   | `npx -y @kilocode/cli acp`                     | [Kilocode](https://kilocode.ai)                                                                                 |
 | `kimi`       | `kimi acp`                                     | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
 | `kiro`       | `kiro-cli-chat acp`                            | [Kiro CLI](https://kiro.dev)                                                                                    |
@@ -170,6 +171,10 @@ Configure model/provider settings through fast-agent environment variables, fast
 - Built-in name: `iflow`
 - Default command: `iflow --experimental-acp`
 - Upstream: [iflow-ai/iflow-cli](https://github.com/iflow-ai/iflow-cli)
+
+### Junie
+
+`junie` launches the installed `junie --acp=true` server, matching the official ACP Registry. See the [Junie guide](https://github.com/openclaw/acpx/blob/main/agents/Junie.md) for setup and command overrides.
 
 ### Kilocode
 

@@ -99,6 +99,7 @@ const AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
   fx: { name: "fx", argv: ["fx", "acp"] },
   "grok-build": { name: "Grok Build", argv: ["grok", "agent", "stdio"] },
   iflow: { name: "iFlow", argv: ["iflow", "--experimental-acp"] },
+  junie: { name: "Junie", argv: ["junie", "--acp=true"] },
   kilocode: {
     name: "Kilo Code",
     argv: ["npx", "-y", "@kilocode/cli", "acp"],

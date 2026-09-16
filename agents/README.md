@@ -15,6 +15,7 @@ Built-in agents:
 - `fx -> fx acp`
 - `grok-build -> grok agent stdio`
 - `iflow -> iflow --experimental-acp`
+- `junie -> junie --acp=true`
 - `kilocode -> npx -y @kilocode/cli acp`
 - `kimi -> kimi acp`
 - `kiro -> kiro-cli-chat acp`
@@ -40,6 +41,7 @@ Harness-specific docs in this directory:
 - [fx](Fx.md): built-in `fx -> fx acp`
 - [Grok Build](GrokBuild.md): built-in `grok-build -> grok agent stdio`
 - [iFlow](Iflow.md): built-in `iflow -> iflow --experimental-acp`
+- [Junie](Junie.md): built-in `junie -> junie --acp=true`
 - [Kilocode](Kilocode.md): built-in `kilocode -> npx -y @kilocode/cli acp`
 - [Kimi](Kimi.md): built-in `kimi -> kimi acp`
 - [Kiro](Kiro.md): built-in `kiro -> kiro-cli-chat acp`

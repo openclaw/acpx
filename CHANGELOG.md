@@ -14,6 +14,7 @@ Repo: https://github.com/openclaw/acpx
 - Dependencies: update Zod validation to 4.6.4. Thanks @dependabot.
 - Agents/built-ins: add the `devin` shortcut for the installed Devin CLI ACP server, preserving its scoped compatibility behavior and standard model selection. Thanks @wtfsayo.
 - Agents/built-ins: add the `fx` shortcut for the installed fx ACP server. Thanks @wtfsayo.
+- Agents/built-ins: add the `junie` shortcut for JetBrains Junie using its registry-standard `--acp=true` launch argument. Thanks @junie-agent.
 
 ### Breaking
 
