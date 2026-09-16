@@ -128,19 +128,13 @@ export async function writeSessionIndex(
   const filePath = sessionIndexPath(sessionDir);
   await writePrivateJsonFile(filePath, {
     schema: SESSION_INDEX_SCHEMA,
-    files: [...index.files].toSorted(),
-    entries: [...index.entries].toSorted((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt)),
+    files: index.files.toSorted(),
+    entries: index.entries.toSorted((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt)),
   });
 }
 
 export async function rebuildSessionIndex(sessionDir: string): Promise<SessionIndex> {
-  const entries = await fs.readdir(sessionDir, { withFileTypes: true });
-  const files = entries
-    .filter(
-      (entry) => entry.isFile() && entry.name.endsWith(".json") && entry.name !== "index.json",
-    )
-    .map((entry) => entry.name)
-    .toSorted();
+  const files = await listSessionFiles(sessionDir);
 
   const indexEntries: SessionIndexEntry[] = [];
   for (const file of files) {
@@ -166,12 +160,7 @@ export async function rebuildSessionIndex(sessionDir: string): Promise<SessionIn
 }
 
 export async function loadOrRebuildSessionIndex(sessionDir: string): Promise<SessionIndex> {
-  const files = (await fs.readdir(sessionDir, { withFileTypes: true }))
-    .filter(
-      (entry) => entry.isFile() && entry.name.endsWith(".json") && entry.name !== "index.json",
-    )
-    .map((entry) => entry.name)
-    .toSorted();
+  const files = await listSessionFiles(sessionDir);
   const existing = await readSessionIndex(sessionDir);
   if (
     existing &&
@@ -181,4 +170,13 @@ export async function loadOrRebuildSessionIndex(sessionDir: string): Promise<Ses
     return existing;
   }
   return await rebuildSessionIndex(sessionDir);
+}
+
+async function listSessionFiles(sessionDir: string): Promise<string[]> {
+  return (await fs.readdir(sessionDir, { withFileTypes: true }))
+    .filter(
+      (entry) => entry.isFile() && entry.name.endsWith(".json") && entry.name !== "index.json",
+    )
+    .map((entry) => entry.name)
+    .toSorted();
 }

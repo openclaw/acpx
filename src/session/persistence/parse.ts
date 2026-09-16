@@ -428,11 +428,16 @@ function parseAcpxState(raw: unknown): SessionAcpxState | undefined {
 
   const state: SessionAcpxState = {};
 
-  assignBooleanTrue(state, "reset_on_next_ensure", record.reset_on_next_ensure);
+  if (record.reset_on_next_ensure === true) {
+    state.reset_on_next_ensure = true;
+  }
   assignStringState(state, "current_mode_id", record.current_mode_id);
   assignStringState(state, "desired_mode_id", record.desired_mode_id);
 
-  assignDesiredConfigOptions(state, record.desired_config_options);
+  const desiredConfigOptions = parseStringMap(record.desired_config_options);
+  if (desiredConfigOptions) {
+    state.desired_config_options = desiredConfigOptions;
+  }
 
   assignParsedModelState(state, record);
 
@@ -465,16 +470,6 @@ function assignParsedModelState(state: SessionAcpxState, record: Record<string, 
   }
 }
 
-function assignBooleanTrue(
-  state: SessionAcpxState,
-  key: "reset_on_next_ensure",
-  value: unknown,
-): void {
-  if (value === true) {
-    state[key] = true;
-  }
-}
-
 function assignStringState(
   state: SessionAcpxState,
   key: "current_mode_id" | "desired_mode_id" | "current_model_id",
@@ -485,21 +480,17 @@ function assignStringState(
   }
 }
 
-function assignDesiredConfigOptions(state: SessionAcpxState, raw: unknown): void {
-  const desiredConfigOptions = asRecord(raw);
-  if (!desiredConfigOptions) {
-    return;
+function parseStringMap(raw: unknown): Record<string, string> | undefined {
+  const record = asRecord(raw);
+  if (!record) {
+    return undefined;
   }
-
   const parsed = Object.fromEntries(
-    Object.entries(desiredConfigOptions).filter((entry): entry is [string, string] => {
-      const [, value] = entry;
-      return typeof value === "string";
-    }),
+    Object.entries(record).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
   );
-  if (Object.keys(parsed).length > 0) {
-    state.desired_config_options = parsed;
-  }
+  return Object.keys(parsed).length > 0 ? parsed : undefined;
 }
 
 function assignParsedSessionOptions(state: SessionAcpxState, raw: unknown): void {
@@ -509,41 +500,23 @@ function assignParsedSessionOptions(state: SessionAcpxState, raw: unknown): void
   }
 
   const parsedSessionOptions: NonNullable<SessionAcpxState["session_options"]> = {};
-  assignSessionOptionModel(parsedSessionOptions, sessionOptions.model);
-  assignSessionOptionAllowedTools(parsedSessionOptions, sessionOptions.allowed_tools);
-  assignSessionOptionMaxTurns(parsedSessionOptions, sessionOptions.max_turns);
+  if (typeof sessionOptions.model === "string") {
+    parsedSessionOptions.model = sessionOptions.model;
+  }
+  if (isStringArray(sessionOptions.allowed_tools)) {
+    parsedSessionOptions.allowed_tools = [...sessionOptions.allowed_tools];
+  }
+  if (isPositiveInteger(sessionOptions.max_turns)) {
+    parsedSessionOptions.max_turns = sessionOptions.max_turns;
+  }
   assignSessionOptionSystemPrompt(parsedSessionOptions, sessionOptions.system_prompt);
-  assignSessionOptionEnv(parsedSessionOptions, sessionOptions.env);
+  const env = parseStringMap(sessionOptions.env);
+  if (env) {
+    parsedSessionOptions.env = env;
+  }
 
   if (Object.keys(parsedSessionOptions).length > 0) {
     state.session_options = parsedSessionOptions;
-  }
-}
-
-function assignSessionOptionModel(
-  options: NonNullable<SessionAcpxState["session_options"]>,
-  value: unknown,
-): void {
-  if (typeof value === "string") {
-    options.model = value;
-  }
-}
-
-function assignSessionOptionAllowedTools(
-  options: NonNullable<SessionAcpxState["session_options"]>,
-  value: unknown,
-): void {
-  if (isStringArray(value)) {
-    options.allowed_tools = [...value];
-  }
-}
-
-function assignSessionOptionMaxTurns(
-  options: NonNullable<SessionAcpxState["session_options"]>,
-  value: unknown,
-): void {
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
-    options.max_turns = value;
   }
 }
 
@@ -559,26 +532,6 @@ function assignSessionOptionSystemPrompt(
   const appendRecord = asRecord(value);
   if (appendRecord && typeof appendRecord.append === "string" && appendRecord.append.length > 0) {
     options.system_prompt = { append: appendRecord.append };
-  }
-}
-
-function assignSessionOptionEnv(
-  options: NonNullable<SessionAcpxState["session_options"]>,
-  value: unknown,
-): void {
-  const env = asRecord(value);
-  if (!env) {
-    return;
-  }
-
-  const parsed = Object.fromEntries(
-    Object.entries(env).filter((entry): entry is [string, string] => {
-      const [, raw] = entry;
-      return typeof raw === "string";
-    }),
-  );
-  if (Object.keys(parsed).length > 0) {
-    options.env = parsed;
   }
 }
 
@@ -681,11 +634,7 @@ function normalizeOptionalPid(value: unknown): number | undefined | null {
     return undefined;
   }
 
-  if (!Number.isInteger(value) || (value as number) <= 0) {
-    return null;
-  }
-
-  return value as number;
+  return isPositiveInteger(value) ? value : null;
 }
 
 function normalizeOptionalBoolean(value: unknown, fallback = false): boolean | null {

@@ -1,12 +1,12 @@
 import { statSync } from "node:fs";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { SessionNotFoundError, SessionResolutionError } from "../../errors.js";
 import { incrementPerfCounter, measurePerf } from "../../perf-metrics.js";
 import { assertPersistedKeyPolicy } from "../../persisted-key-policy.js";
 import { writePrivateJsonFile } from "../../state-files.js";
 import type { SessionRecord } from "../../types.js";
+import { safeSessionId, sessionBaseDir } from "../event-log.js";
 import {
   loadOrRebuildSessionIndex,
   rebuildSessionIndex,
@@ -34,12 +34,8 @@ type FindSessionByDirectoryWalkOptions = {
 };
 
 function sessionFilePath(acpxRecordId: string): string {
-  const safeId = encodeURIComponent(acpxRecordId);
+  const safeId = safeSessionId(acpxRecordId);
   return path.join(sessionBaseDir(), `${safeId}.json`);
-}
-
-function sessionBaseDir(): string {
-  return path.join(os.homedir(), ".acpx", "sessions");
 }
 
 async function ensureSessionDir(): Promise<void> {
@@ -288,19 +284,6 @@ function nextWalkParent(
   return parent;
 }
 
-function killSignalCandidates(signal: NodeJS.Signals | undefined): NodeJS.Signals[] {
-  if (!signal) {
-    return ["SIGTERM", "SIGKILL"];
-  }
-
-  const normalized = signal.toUpperCase() as NodeJS.Signals;
-  if (normalized === "SIGKILL") {
-    return ["SIGKILL"];
-  }
-
-  return [normalized, "SIGKILL"];
-}
-
 export type PruneOptions = {
   agentCommand?: string;
   before?: Date;
@@ -407,7 +390,7 @@ async function pruneSessionFiles(
   dirEntries: string[],
   includeHistory: boolean,
 ): Promise<number> {
-  const safeId = encodeURIComponent(record.acpxRecordId);
+  const safeId = safeSessionId(record.acpxRecordId);
   let bytesFreed = await unlinkCountingBytes(path.join(sessionDir, `${safeId}.json`));
   if (includeHistory) {
     for (const name of dirEntries.filter((entry) => isSessionStreamFile(entry, safeId))) {
@@ -427,31 +410,4 @@ async function unlinkCountingBytes(filePath: string): Promise<number> {
   }
   await fs.unlink(filePath).catch(() => undefined);
   return bytes;
-}
-
-export async function closeSession(id: string): Promise<SessionRecord> {
-  const record = await resolveSessionRecord(id);
-  const now = isoNow();
-
-  if (record.pid) {
-    for (const signal of killSignalCandidates(record.lastAgentExitSignal ?? undefined)) {
-      try {
-        process.kill(record.pid, signal);
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  record.closed = true;
-  record.closedAt = now;
-  record.pid = undefined;
-  record.lastUsedAt = now;
-  record.lastPromptAt = record.lastPromptAt ?? now;
-
-  await writeSessionRecord(record);
-  await rebuildSessionIndex(sessionBaseDir()).catch(() => {
-    // best effort cache rebuild
-  });
-  return record;
 }
