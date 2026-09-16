@@ -8,6 +8,24 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+### Breaking
+
+### Fixes
+
+## 0.16.0 - 2026-09-16
+
+**Highlights:** Embedding hosts gain session-specific tools, turn-owned approvals, model controls, and agent discovery. Session, filesystem, queue, and process hardening improves reliability; Devin, fx, and Junie join the built-in agents.
+
+### Changes
+
+- Runtime/embedding: surface normalized ACP plan entries on status events and explicit empty snapshots that clear stale plans. Thanks @gadzan.
+- Dependencies: update Zod, React and its types, Vite, and lint-staged; retain the 48-hour release-age policy.
+- Dependencies: refresh Node types, Oxfmt, and Oxlint; align source builds and CI with pnpm 11.26.0. Thanks @dependabot.
+- Source builds: document Node 22.22.1 as the minimum Node 22 development version required by lint-staged; published CLI installs still support Node 22.13 and newer.
+
+- Dependencies: refresh Zod, tsx, React Flow, Oxlint, the Pi and Claude adapters, and transitive tooling dependencies while retaining the 48-hour release-age policy.
+- Runtime/embedding: support session-specific tool servers, turn-owned permission callbacks, session handle lookup, and shutdown that waits for owned connections and cleanup.
+
 - Runtime/model selection: expose a model setter that uses the adapter's advertised control and preserves the selected model across reconnects.
 
 - Runtime/discovery: expose installed agent entrypoints and native model display names through the existing registry and session status, with durable local fresh-session preparation for embedding hosts.
@@ -19,6 +37,12 @@ Repo: https://github.com/openclaw/acpx
 ### Breaking
 
 ### Fixes
+
+- Model selection: prefer the actual model control when an adapter also groups provider controls under the model category, while retaining custom model controls and legacy fallback. Thanks @wtfsayo.
+- Replay viewer: preserve user-message identities across repeated transcript projection so idle polling does not emit spurious patches.
+- Tooling: prevent malformed TOML configuration from hanging documentation lint by overriding the vulnerable `smol-toml` pin with 1.7.2 (GHSA-7w5x-hrqm-74c2).
+- ACP/cancellation: coalesce repeated prompt cancellation, allow explicit retries after failed sends, and preserve successor prompt ownership when abort callbacks reenter the client.
+- Sessions/export: preserve large event segments without exceeding the JavaScript argument limit.
 
 - Sessions/hardening: keep session records and indexes private across atomic rewrites, including embedded file stores.
 - ACP/filesystem: return the standard resource-not-found error for missing files so agents can distinguish new files from failed reads.
@@ -37,30 +61,6 @@ Repo: https://github.com/openclaw/acpx
 - Runtime/sessions: serialize turns per session record and finish cancellation and local finalization before acknowledging fresh-session preparation, preserving the reset across late writes and surfacing cleanup failures. Thanks @vincentkoc.
 - Codex/permissions: prefer offered one-time refusals that let the turn continue, and explain when safe cancellation can end the turn. Thanks @odrobnik.
 - ACP/processes: clean up witnessed POSIX descendants after bridge shutdown, startup failure, and observed exit, preserving signal inheritance and isolating late exits from replacement launches. Thanks @MertBasar0, @ma-pony, and @superWorldSavior.
-
-## 0.16.0 - 2026-09-15
-
-**Highlights:** Embedding hosts can share session-specific tools and turn-owned approvals, recover stored handles, and shut down connections while preserving existing sessions.
-
-### Changes
-
-- Runtime/embedding: surface normalized ACP plan entries on status events and explicit empty snapshots that clear stale plans. Thanks @gadzan.
-- Dependencies: update Zod, React and its types, Vite, and lint-staged; retain the 48-hour release-age policy.
-- Dependencies: refresh Node types, Oxfmt, and Oxlint; align source builds and CI with pnpm 11.26.0. Thanks @dependabot.
-- Source builds: document Node 22.22.1 as the minimum Node 22 development version required by lint-staged; published CLI installs still support Node 22.13 and newer.
-
-- Dependencies: refresh Zod, tsx, React Flow, Oxlint, the Pi and Claude adapters, and transitive tooling dependencies while retaining the 48-hour release-age policy.
-- Runtime/embedding: support session-specific tool servers, turn-owned permission callbacks, session handle lookup, and shutdown that waits for owned connections and cleanup.
-
-### Breaking
-
-### Fixes
-
-- Model selection: prefer the actual model control when an adapter also groups provider controls under the model category, while retaining custom model controls and legacy fallback. Thanks @wtfsayo.
-- Replay viewer: preserve user-message identities across repeated transcript projection so idle polling does not emit spurious patches.
-- Tooling: prevent malformed TOML configuration from hanging documentation lint by overriding the vulnerable `smol-toml` pin with 1.7.2 (GHSA-7w5x-hrqm-74c2).
-- ACP/cancellation: coalesce repeated prompt cancellation, allow explicit retries after failed sends, and preserve successor prompt ownership when abort callbacks reenter the client.
-- Sessions/export: preserve large event segments without exceeding the JavaScript argument limit.
 
 ## 0.15.1 - 2026-09-07
 
