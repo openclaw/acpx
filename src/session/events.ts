@@ -10,6 +10,12 @@ import {
   sessionEventActivePath as activeEventPath,
   sessionEventSegmentPath as segmentEventPath,
 } from "./event-log.js";
+import {
+  SESSION_JOURNAL_SCHEMA,
+  SessionJournalReader,
+  type SessionJournalMarker,
+  type SessionWatchResult,
+} from "./journal.js";
 import { resolveSessionRecord, writeSessionRecord } from "./persistence.js";
 
 async function ensureSessionDir(): Promise<void> {
@@ -22,15 +28,6 @@ async function pathExists(filePath: string): Promise<boolean> {
     return true;
   } catch {
     return false;
-  }
-}
-
-async function statSize(filePath: string): Promise<number> {
-  try {
-    const stats = await fs.stat(filePath);
-    return stats.size;
-  } catch {
-    return 0;
   }
 }
 
@@ -111,10 +108,18 @@ export class SessionEventWriter {
   private readonly record: SessionRecord;
   private readonly maxSegmentBytes: number;
   private readonly maxSegments: number;
-  private activePath: string;
+  private readonly activePath: string;
   private activeSizeBytes: number;
   private segmentCount: number;
   private closed = false;
+  private pending: Promise<void> = Promise.resolve();
+  private appendFailure?: { error: unknown };
+  private sequence: number;
+  private requestId: string | null;
+  private recoveryPending: boolean;
+  private needsAnchor: boolean;
+  private needsRotation: boolean;
+  private activeEntries: number;
 
   private constructor(
     record: SessionRecord,
@@ -123,6 +128,10 @@ export class SessionEventWriter {
       activePath: string;
       activeSizeBytes: number;
       segmentCount: number;
+      sequence: number;
+      requestId: string | null;
+      anchored: boolean;
+      partial: boolean;
     },
   ) {
     this.record = record;
@@ -131,6 +140,12 @@ export class SessionEventWriter {
     this.activePath = state.activePath;
     this.activeSizeBytes = state.activeSizeBytes;
     this.segmentCount = state.segmentCount;
+    this.sequence = state.sequence;
+    this.requestId = state.requestId;
+    this.recoveryPending = state.requestId !== null;
+    this.needsAnchor = !state.anchored;
+    this.needsRotation = state.activeSizeBytes > 0 && (!state.anchored || state.partial);
+    this.activeEntries = state.anchored ? 1 : 0;
   }
 
   static async open(
@@ -144,7 +159,13 @@ export class SessionEventWriter {
     const maxSegments =
       options.maxSegments ?? record.eventLog.max_segments ?? DEFAULT_EVENT_MAX_SEGMENTS;
     const activePath = activeEventPath(record.acpxRecordId);
-    const activeSizeBytes = await statSize(activePath);
+    const tail = await new SessionJournalReader({
+      ...record,
+      eventLog: { ...record.eventLog, max_segments: maxSegments },
+    }).readTail();
+    if (tail.messageSequence !== undefined) {
+      record.lastSeq = tail.messageSequence;
+    }
     const segmentCount = await resolveInitialSegmentCount(record, maxSegments);
     return new SessionEventWriter(
       record,
@@ -154,8 +175,12 @@ export class SessionEventWriter {
       },
       {
         activePath,
-        activeSizeBytes,
+        activeSizeBytes: tail.activeSize,
         segmentCount,
+        sequence: tail.sequence,
+        requestId: tail.requestId,
+        anchored: tail.activeAnchored,
+        partial: tail.activePartial,
       },
     );
   }
@@ -164,70 +189,156 @@ export class SessionEventWriter {
     return this.record;
   }
 
+  private enqueue(run: () => Promise<void>): Promise<void> {
+    if (this.closed) {
+      return Promise.reject(new Error("SessionEventWriter is closed"));
+    }
+    const operation = this.pending.then(run);
+    this.pending = operation.catch(() => {});
+    return operation;
+  }
+
+  async beginTurn(requestId: string): Promise<void> {
+    if (!requestId) {
+      throw new Error("Session journal request ID must not be empty");
+    }
+    await this.enqueue(async () => {
+      if (this.requestId !== null) {
+        if (!this.recoveryPending) {
+          throw new Error("A session journal turn is already active");
+        }
+        await this.appendEntry({
+          schema: SESSION_JOURNAL_SCHEMA,
+          type: "turn_result",
+          request_id: this.requestId,
+          result: {
+            status: "failed",
+            error: {
+              message:
+                "The previous owner ended without recording a settled result; the turn outcome is unknown.",
+              detailCode: "WATCH_OUTCOME_UNKNOWN",
+              retryable: false,
+            },
+          },
+        });
+        this.requestId = null;
+      }
+      this.recoveryPending = false;
+      await this.appendEntry({
+        schema: SESSION_JOURNAL_SCHEMA,
+        type: "turn_started",
+        request_id: requestId,
+      });
+      this.requestId = requestId;
+    });
+  }
+
+  async finishTurn(requestId: string, result: SessionWatchResult): Promise<void> {
+    await this.enqueue(async () => {
+      if (requestId !== this.requestId) {
+        throw new Error("Session journal result does not match the active request");
+      }
+      await this.appendEntry({
+        schema: SESSION_JOURNAL_SCHEMA,
+        type: "turn_result",
+        request_id: requestId,
+        result,
+      });
+      this.requestId = null;
+    });
+  }
+
   async appendMessage(message: AcpJsonRpcMessage, options: AppendOptions = {}): Promise<void> {
     await this.appendMessages([message], options);
   }
 
   async appendMessages(messages: AcpJsonRpcMessage[], options: AppendOptions = {}): Promise<void> {
-    if (this.closed) {
-      throw new Error("SessionEventWriter is closed");
-    }
-
-    if (messages.length === 0) {
-      return;
-    }
-
-    await ensureSessionDir();
-
-    await measurePerf("session.events.append_batch", async () => {
-      for (const message of messages) {
-        if (!isAcpJsonRpcMessage(message)) {
-          throw new Error("Attempted to persist invalid ACP JSON-RPC payload");
-        }
-
-        const line = `${JSON.stringify(message)}\n`;
-        const lineBytes = Buffer.byteLength(line);
-        if (this.activeSizeBytes > 0 && this.activeSizeBytes + lineBytes > this.maxSegmentBytes) {
-          await rotateSegments(this.record.acpxRecordId, this.maxSegments);
-          this.activePath = activeEventPath(this.record.acpxRecordId);
-          this.activeSizeBytes = 0;
-          this.segmentCount = Math.min(this.segmentCount + 1, this.maxSegments);
-          incrementPerfCounter("session.events.rotate");
-        }
-
-        await appendRegularFile({ filePath: this.activePath, content: line, mode: 0o600 });
-        this.activeSizeBytes += lineBytes;
-
-        this.record.lastSeq += 1;
-        if (Object.hasOwn(message, "id")) {
-          const id = (message as { id?: unknown }).id;
-          if (typeof id === "string" || typeof id === "number") {
-            this.record.lastRequestId = String(id);
+    await this.enqueue(async () => {
+      await measurePerf("session.events.append_batch", async () => {
+        for (const message of messages) {
+          if (!isAcpJsonRpcMessage(message)) {
+            throw new Error("Attempted to persist invalid ACP JSON-RPC payload");
+          }
+          await this.appendEntry(message);
+          this.record.lastSeq += 1;
+          if (Object.hasOwn(message, "id")) {
+            const id = (message as { id?: unknown }).id;
+            if (typeof id === "string" || typeof id === "number") {
+              this.record.lastRequestId = String(id);
+            }
           }
         }
-        const writeTs = new Date().toISOString();
-        this.record.lastUsedAt = writeTs;
-        this.record.eventLog = {
-          active_path: this.activePath,
-          segment_count: this.segmentCount,
-          max_segment_bytes: this.maxSegmentBytes,
-          max_segments: this.maxSegments,
-          last_write_at: writeTs,
-          last_write_error: null,
-        };
+      });
+      if (options.checkpoint === true) {
+        await writeSessionRecord(this.record);
       }
     });
+  }
 
-    if (options.checkpoint === true) {
-      await writeSessionRecord(this.record);
+  private async appendEntry(entry: AcpJsonRpcMessage | SessionJournalMarker): Promise<void> {
+    if (this.appendFailure) {
+      throw this.appendFailure.error;
+    }
+    try {
+      await this.writeEntry(entry);
+    } catch (error) {
+      // A checkpoint can recover; an incomplete append needs a newly recovered writer.
+      this.appendFailure = { error };
+      throw error;
     }
   }
 
-  async checkpoint(): Promise<void> {
-    if (this.closed) {
-      throw new Error("SessionEventWriter is closed");
+  private async writeEntry(entry: AcpJsonRpcMessage | SessionJournalMarker): Promise<void> {
+    if (!Number.isSafeInteger(this.sequence + 1)) {
+      throw new Error("Session journal sequence exceeds its supported range");
     }
-    await writeSessionRecord(this.record);
+    await ensureSessionDir();
+    const line = `${JSON.stringify(entry)}\n`;
+    const lineBytes = Buffer.byteLength(line);
+    if (
+      this.needsRotation ||
+      (this.activeEntries > 0 && this.activeSizeBytes + lineBytes > this.maxSegmentBytes)
+    ) {
+      await rotateSegments(this.record.acpxRecordId, this.maxSegments);
+      this.activeSizeBytes = 0;
+      this.activeEntries = 0;
+      this.needsAnchor = true;
+      this.needsRotation = false;
+      this.segmentCount = Math.min(this.segmentCount + 1, this.maxSegments);
+      incrementPerfCounter("session.events.rotate");
+    }
+    if (this.needsAnchor) {
+      const anchor: SessionJournalMarker = {
+        schema: SESSION_JOURNAL_SCHEMA,
+        type: "segment",
+        record_id: this.record.acpxRecordId,
+        sequence: this.sequence,
+        message_sequence: this.record.lastSeq,
+        request_id: this.requestId,
+      };
+      const header = `${JSON.stringify(anchor)}\n`;
+      await appendRegularFile({ filePath: this.activePath, content: header, mode: 0o600 });
+      this.activeSizeBytes += Buffer.byteLength(header);
+      this.needsAnchor = false;
+    }
+    await appendRegularFile({ filePath: this.activePath, content: line, mode: 0o600 });
+    this.activeSizeBytes += lineBytes;
+    this.activeEntries += 1;
+    this.sequence += 1;
+    const writeTs = new Date().toISOString();
+    this.record.lastUsedAt = writeTs;
+    this.record.eventLog = {
+      active_path: this.activePath,
+      segment_count: this.segmentCount,
+      max_segment_bytes: this.maxSegmentBytes,
+      max_segments: this.maxSegments,
+      last_write_at: writeTs,
+      last_write_error: null,
+    };
+  }
+
+  async checkpoint(): Promise<void> {
+    await this.enqueue(async () => await writeSessionRecord(this.record));
   }
 
   async close(options: AppendOptions = {}): Promise<void> {
@@ -235,47 +346,24 @@ export class SessionEventWriter {
       return;
     }
 
-    try {
-      if (options.checkpoint !== false) {
-        await writeSessionRecord(this.record);
-      }
-    } finally {
-      this.closed = true;
+    this.closed = true;
+    await this.pending;
+    if (this.appendFailure) {
+      throw this.appendFailure.error;
+    }
+    if (options.checkpoint !== false) {
+      await writeSessionRecord(this.record);
     }
   }
 }
 
-export async function listSessionEvents(sessionId: string): Promise<AcpJsonRpcMessage[]> {
-  const maxSegments = await resolveSessionMaxSegments(sessionId);
-  const files: string[] = [];
-
-  for (let segment = maxSegments; segment >= 1; segment -= 1) {
-    const filePath = segmentEventPath(sessionId, segment);
-    if (await pathExists(filePath)) {
-      files.push(filePath);
-    }
-  }
-
-  const active = activeEventPath(sessionId);
-  if (await pathExists(active)) {
-    files.push(active);
-  }
-
-  const events: AcpJsonRpcMessage[] = [];
-  for (const filePath of files) {
-    const payload = await fs.readFile(filePath, "utf8");
-    const lines = payload.split("\n").filter((line) => line.trim().length > 0);
-    for (const line of lines) {
-      try {
-        const parsed: unknown = JSON.parse(line);
-        if (isAcpJsonRpcMessage(parsed)) {
-          events.push(parsed);
-        }
-      } catch {
-        // Skip malformed lines to keep event listing resilient.
-      }
-    }
-  }
-
-  return events;
+export async function listSessionEvents(
+  sessionId: string,
+  maxSegments?: number,
+): Promise<AcpJsonRpcMessage[]> {
+  maxSegments ??= await resolveSessionMaxSegments(sessionId);
+  return await new SessionJournalReader({
+    acpxRecordId: sessionId,
+    eventLog: { max_segments: maxSegments },
+  }).readAcpMessages();
 }

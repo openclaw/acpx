@@ -9,8 +9,11 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - Runtime/shared sessions: add `createSharedAcpRuntime()` so applications and CLI processes share one local queue owner, with targeted turn cancellation and explicit submission uncertainty. Thanks @mavam.
+- Sessions/watching: add passive `sessions watch` and shared-runtime `watchSession()` with cursor replay, request IDs, and settled turn outcomes. Thanks @mavam.
 
 ### Breaking
+
+- Session journals: `.stream.ndjson` now includes local lifecycle and segment records alongside ACP messages; direct consumers must distinguish entries with `jsonrpc: "2.0"`. Built-in readers and portable ACP archives filter local records.
 
 ### Fixes
 

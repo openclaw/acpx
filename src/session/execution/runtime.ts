@@ -6,6 +6,7 @@ import {
   normalizeOutputError,
 } from "../../acp/error-normalization.js";
 import { InterruptedError, TimeoutError, withInterrupt, withTimeout } from "../../async-control.js";
+import { AcpxOperationalError } from "../../errors.js";
 export { InterruptedError, TimeoutError } from "../../async-control.js";
 import { formatPerfMetric, measurePerf, startPerfTimer } from "../../perf-metrics.js";
 import { textPrompt } from "../../prompt-content.js";
@@ -47,6 +48,7 @@ import {
   trimConversationForRuntime,
 } from "../conversation-model.js";
 import { SessionEventWriter } from "../events.js";
+import type { SessionWatchResult } from "../journal.js";
 import { LiveSessionCheckpoint } from "../live-checkpoint.js";
 import { applyRequestedModelIfAdvertised } from "../model-application.js";
 import { advertisedModelState } from "../model-state.js";
@@ -625,6 +627,93 @@ function preparePromptConversation(record: SessionRecord, options: RunSessionPro
   return { conversation, promptMessageId };
 }
 
+function failedWatchResult(error: unknown): SessionWatchResult {
+  const { message, code, detailCode, retryable } = normalizeOutputError(error, {
+    origin: "runtime",
+    detailCode: "QUEUE_RUNTIME_PROMPT_FAILED",
+  });
+  return { status: "failed", error: { message, code, detailCode, retryable } };
+}
+
+async function writeTurnMarker(write: () => Promise<void>): Promise<void> {
+  try {
+    await write();
+  } catch (error) {
+    throw new AcpxOperationalError(`Session journal write failed: ${formatErrorMessage(error)}`, {
+      outputCode: "RUNTIME",
+      detailCode: "SESSION_JOURNAL_WRITE_FAILED",
+      origin: "runtime",
+      retryable: false,
+      cause: error,
+    });
+  }
+}
+
+type SettledOperation<T> =
+  | { status: "fulfilled"; value: T }
+  | { status: "rejected"; error: unknown };
+
+async function settleOperation<T>(run: () => T | Promise<T>): Promise<SettledOperation<T>> {
+  try {
+    return { status: "fulfilled", value: await run() };
+  } catch (error) {
+    return { status: "rejected", error };
+  }
+}
+
+function settledWatchResult(outcome: SettledOperation<SessionSendResult>): SessionWatchResult {
+  if (outcome.status === "rejected") {
+    return failedWatchResult(outcome.error);
+  }
+  const result = outcome.value;
+  return {
+    status: result.stopReason === "cancelled" ? "cancelled" : "completed",
+    stopReason: result.stopReason,
+    ...(result._meta !== undefined ? { _meta: result._meta } : {}),
+  };
+}
+
+async function runFinalizedSessionPrompt(options: {
+  writer: SessionEventWriter;
+  requestId?: string;
+  run: () => Promise<SessionSendResult>;
+  cleanup: (attempt: SettledOperation<SessionSendResult>) => Promise<void>;
+}): Promise<SessionSendResult> {
+  let journalStarted = false;
+  const attempt = await settleOperation(async () => {
+    const requestId = options.requestId;
+    if (requestId !== undefined) {
+      await writeTurnMarker(() => options.writer.beginTurn(requestId));
+      journalStarted = true;
+    }
+    return await options.run();
+  });
+  const cleanup = await settleOperation(() => options.cleanup(attempt));
+  // Cleanup failure changes the actual outcome even after an ACP success response.
+  const outcome = cleanup.status === "rejected" ? cleanup : attempt;
+  const journal = await settleOperation(async () => {
+    const requestId = options.requestId;
+    if (journalStarted && requestId !== undefined) {
+      await writeTurnMarker(() =>
+        options.writer.finishTurn(requestId, settledWatchResult(outcome)),
+      );
+    }
+  });
+  const closing = await settleOperation(() =>
+    writeTurnMarker(() => options.writer.close({ checkpoint: false })),
+  );
+  if (journal.status === "rejected") {
+    throw journal.error;
+  }
+  if (outcome.status === "rejected") {
+    throw outcome.error;
+  }
+  if (closing.status === "rejected") {
+    throw closing.error;
+  }
+  return outcome.value;
+}
+
 async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<SessionSendResult> {
   const stopTotalTimer = startPerfTimer("runtime.prompt.total");
   const output = options.outputFormatter;
@@ -652,15 +741,6 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
   let promptTurnActive = false;
   let promptTurnHadSideEffects = false;
   const acpErrors = new AcpErrorTracker();
-  let eventWriterClosed = false;
-
-  const closeEventWriter = async (checkpoint: boolean): Promise<void> => {
-    if (eventWriterClosed) {
-      return;
-    }
-    eventWriterClosed = true;
-    await eventWriter.close({ checkpoint });
-  };
 
   const flushPendingMessages = async (checkpoint = false): Promise<void> => {
     if (pendingMessages.length === 0) {
@@ -993,45 +1073,72 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     }
   };
 
-  try {
-    return await runWithOptionalInterrupt({
-      handleProcessInterrupts: options.handleProcessInterrupts,
-      run: runPrompt,
-      handleInterrupt,
-    });
-  } catch (error) {
-    const matchedAcpError = acpErrors.match(error);
-    attachAcpErrorPayload(error, matchedAcpError);
-    markOutputAlreadyEmitted(error, matchedAcpError !== undefined && shouldMarkAcpErrorsEmitted);
-    throw error;
-  } finally {
-    if (options.verbose) {
-      process.stderr.write(`[acpx] ${formatPerfMetric("prompt.total", stopTotalTimer())}\n`);
-    } else {
-      stopTotalTimer();
+  const runObservedPrompt = async (): Promise<SessionSendResult> => {
+    try {
+      return await runWithOptionalInterrupt({
+        handleProcessInterrupts: options.handleProcessInterrupts,
+        run: runPrompt,
+        handleInterrupt,
+      });
+    } catch (error) {
+      const matchedAcpError = acpErrors.match(error);
+      attachAcpErrorPayload(error, matchedAcpError);
+      markOutputAlreadyEmitted(error, matchedAcpError !== undefined && shouldMarkAcpErrorsEmitted);
+      throw error;
     }
-    if (notifiedClientAvailable) {
-      options.onClientClosed?.();
+  };
+
+  const cleanupPrompt = async (attempt: SettledOperation<SessionSendResult>): Promise<void> => {
+    const steps = [
+      () => {
+        const duration = stopTotalTimer();
+        if (options.verbose) {
+          process.stderr.write(`[acpx] ${formatPerfMetric("prompt.total", duration)}\n`);
+        }
+      },
+      () => {
+        if (notifiedClientAvailable) {
+          options.onClientClosed?.();
+        }
+      },
+      () => client.clearEventHandlers(),
+      async () => {
+        const journalFailed =
+          attempt.status === "rejected" &&
+          attempt.error instanceof AcpxOperationalError &&
+          attempt.error.detailCode === "SESSION_JOURNAL_WRITE_FAILED";
+        if (closeClientOnExit || journalFailed) {
+          await client.close();
+        }
+      },
+      () => applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot()),
+      () => applyConversation(record, conversation),
+    ];
+    const outcomes: SettledOperation<void>[] = [];
+    for (const step of steps) {
+      outcomes.push(await settleOperation(step));
     }
-    client.clearEventHandlers();
-    if (closeClientOnExit) {
-      await client.close();
+    // Checkpoint failures remain best effort; an append failure is reported by finishTurn.
+    for (const checkpoint of [
+      () => liveCheckpoint.flush(),
+      () => flushPendingMessages(false),
+      preserveClosedState,
+      () => eventWriter.checkpoint(),
+    ]) {
+      await settleOperation(checkpoint);
     }
-    applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-    applyConversation(record, conversation);
-    await liveCheckpoint.flush().catch(() => {
-      // best effort on close
-    });
-    await flushPendingMessages(false).catch(() => {
-      // best effort on close
-    });
-    await preserveClosedState().catch(() => {
-      // best effort on close
-    });
-    await closeEventWriter(true).catch(() => {
-      // best effort on close
-    });
-  }
+    const failure = outcomes.find((outcome) => outcome.status === "rejected");
+    if (failure) {
+      throw failure.error;
+    }
+  };
+
+  return await runFinalizedSessionPrompt({
+    writer: eventWriter,
+    requestId: options.requestId,
+    run: runObservedPrompt,
+    cleanup: cleanupPrompt,
+  });
 }
 
 export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult> {

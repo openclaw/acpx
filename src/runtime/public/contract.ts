@@ -6,6 +6,7 @@ import type {
   ToolCallLocation,
   ToolKind,
 } from "@agentclientprotocol/sdk";
+import type { SessionWatchEvent } from "../../session/journal.js";
 import type {
   AcpElicitationHandler,
   AcpElicitationMode,
@@ -348,6 +349,12 @@ export interface AcpRuntimeTurn {
 }
 
 export interface AcpRuntime {
+  /** Passively replays and follows recorded turns when the backend supports a shared journal. */
+  watchSession?(input: {
+    handle: AcpRuntimeHandle;
+    cursor?: string;
+    signal?: AbortSignal;
+  }): AsyncIterable<SessionWatchEvent>;
   /** Stops owned connections and joins admitted work; stored sessions remain resumable. */
   shutdown?(): Promise<void>;
   /** Finds a persistent session handle without starting or reconnecting an agent. */

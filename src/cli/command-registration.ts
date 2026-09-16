@@ -13,6 +13,7 @@ import {
   handleSessionsNew,
   handleSessionsPrune,
   handleSessionsShow,
+  handleSessionsWatch,
   handleSetConfigOption,
   handleSetMode,
   parseHistoryLimit,
@@ -169,6 +170,17 @@ export function registerSessionsCommand(
         this,
         config,
       );
+    });
+
+  sessionsCommand
+    .command("watch")
+    .description("Replay and follow session events without affecting the active turn")
+    .option("-s, --name <name>", "Session name", parseSessionName)
+    .option("--cursor <cursor>", "Resume after a session watch cursor", (value: string) =>
+      parseNonEmptyValue("Cursor", value),
+    )
+    .action(async function (this: Command, flags: { name?: string; cursor?: string }) {
+      await handleSessionsWatch(explicitAgentName, flags, this, config);
     });
 
   sessionsCommand

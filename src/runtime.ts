@@ -94,6 +94,7 @@ export const ACPX_BACKEND_ID = "acpx";
 
 export { createSharedAcpRuntime, SharedAcpRuntime } from "./runtime/shared.js";
 export type { SharedAcpRuntimeOptions } from "./runtime/shared.js";
+export type { SessionWatchEvent, SessionWatchResult } from "./session/journal.js";
 
 const ACPX_CAPABILITIES: AcpRuntimeCapabilities = {
   controls: [

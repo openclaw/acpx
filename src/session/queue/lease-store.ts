@@ -26,6 +26,7 @@ export type QueueOwnerRecord = {
   ownerGeneration: number;
   queueDepth: number;
   sharedRuntime?: boolean;
+  sessionWatch?: boolean;
   mcpConfigPath?: string;
   mcpConfigFingerprint?: string;
 };
@@ -53,7 +54,7 @@ export type QueueOwnerStatus = {
 };
 
 function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+  if (!raw || typeof raw !== "object") {
     return null;
   }
   const record = raw as Record<string, unknown>;
@@ -71,6 +72,7 @@ function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
     ownerGeneration: record.ownerGeneration,
     queueDepth: record.queueDepth,
     ...(record.sharedRuntime === true ? { sharedRuntime: true } : {}),
+    ...(record.sessionWatch === true ? { sessionWatch: true } : {}),
     ...(typeof record.mcpConfigPath === "string" ? { mcpConfigPath: record.mcpConfigPath } : {}),
     ...(typeof record.mcpConfigFingerprint === "string"
       ? { mcpConfigFingerprint: record.mcpConfigFingerprint }
@@ -81,8 +83,18 @@ function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
 function hasValidQueueOwnerRecordFields(
   record: Record<string, unknown>,
 ): record is Record<string, unknown> &
-  Omit<QueueOwnerRecord, "mcpConfigPath" | "mcpConfigFingerprint"> {
+  Pick<
+    QueueOwnerRecord,
+    | "pid"
+    | "sessionId"
+    | "socketPath"
+    | "createdAt"
+    | "heartbeatAt"
+    | "ownerGeneration"
+    | "queueDepth"
+  > {
   return (
+    !Array.isArray(record) &&
     isPositiveInteger(record.pid) &&
     typeof record.sessionId === "string" &&
     typeof record.socketPath === "string" &&
@@ -474,6 +486,7 @@ async function stageQueueOwnerRecord(
       ownerGeneration: lease.ownerGeneration,
       queueDepth: Math.max(0, Math.round(queueDepth)),
       sharedRuntime: true,
+      sessionWatch: true,
       ...(lease.mcpConfigPath ? { mcpConfigPath: lease.mcpConfigPath } : {}),
       ...(lease.mcpConfigFingerprint ? { mcpConfigFingerprint: lease.mcpConfigFingerprint } : {}),
     },

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -11,7 +13,11 @@ import {
   createAgentRegistry,
   type AcpRuntimeEvent,
   type AcpRuntimeHandle,
+  type SessionWatchEvent,
 } from "../src/runtime.js";
+import { findSession } from "../src/session/persistence.js";
+import { readQueueOwnerRecord } from "../src/session/queue/lease-store.js";
+import { extractAgentMessageChunkText } from "./jsonrpc-test-helpers.js";
 import { withTempHome } from "./runtime-test-helpers.js";
 
 const run = promisify(execFile);
@@ -25,7 +31,9 @@ async function withSharedSession(
     cli: (...args: string[]) => Promise<string>;
     home: string;
     pidFile: string;
+    command: string;
   }) => Promise<void>,
+  permissionMode: "deny-all" | "approve-reads" = "deny-all",
 ): Promise<void> {
   await withTempHome("acpx-shared-runtime-", async (home) => {
     const pidFile = path.join(home, "agent.pid");
@@ -39,13 +47,13 @@ async function withSharedSession(
     const runtime = createSharedAcpRuntime({
       cwd: home,
       agentRegistry: createAgentRegistry({ overrides: { mock: command } }),
-      permissionMode: "deny-all",
+      permissionMode,
       ttlMs: 60_000,
     });
     const cli = async (...args: string[]) => {
       const result = await run(
         process.execPath,
-        [CLI, "--cwd", home, "--agent", command, "--deny-all", ...args],
+        [CLI, "--cwd", home, "--agent", command, `--${permissionMode}`, ...args],
         { env: process.env, timeout: 15_000 },
       );
       return result.stdout;
@@ -56,9 +64,12 @@ async function withSharedSession(
       mode: "persistent",
     });
     try {
-      await check({ runtime, handle, cli, home, pidFile });
+      await check({ runtime, handle, cli, home, pidFile, command });
     } finally {
-      await cli("sessions", "close", "shared");
+      const record = await findSession({ agentCommand: command, cwd: home, name: "shared" });
+      if (record) {
+        await cli("sessions", "close", "shared");
+      }
       await runtime.shutdown();
     }
   });
@@ -110,6 +121,298 @@ test("shared runtime and external CLI use the same owner and connection", async 
     assert.equal((await active.result).status, "cancelled");
   });
 });
+
+test("public watch reports uncertainty after its owner dies", { timeout: 20_000 }, async () => {
+  await withSharedSession(async ({ runtime, handle }) => {
+    const turn = runtime.startTurn({
+      handle,
+      text: "sleep 10000",
+      requestId: "owner-loss",
+      mode: "prompt",
+    });
+    await turn.promptStarted;
+    const watching = runtime.watchSession({ handle, signal: AbortSignal.timeout(10_000) });
+    const iterator = watching[Symbol.asyncIterator]();
+    assert.equal((await iterator.next()).value?.type, "turn_started");
+    const owner = await readQueueOwnerRecord(handle.acpxRecordId ?? handle.runtimeSessionName);
+    assert.ok(owner);
+    process.kill(owner.pid, "SIGKILL");
+    await assert.rejects(async () => {
+      for (;;) {
+        const next = await iterator.next();
+        if (next.done) {
+          throw new Error("Watch ended without reporting owner loss");
+        }
+      }
+    }, /outcome is unknown/u);
+    assert.equal((await turn.result).status, "failed");
+  });
+});
+
+async function watchedTurn(
+  events: AsyncIterable<SessionWatchEvent>,
+  requestId: string,
+): Promise<SessionWatchEvent[]> {
+  const captured: SessionWatchEvent[] = [];
+  for await (const event of events) {
+    captured.push(event);
+    if (event.type === "turn_result" && event.requestId === requestId) {
+      return captured;
+    }
+  }
+  throw new Error(`Watch ended without result for ${requestId}`);
+}
+
+function cliWatcher(
+  home: string,
+  command: string,
+  extra: { global?: string[]; watch?: string[] } = {},
+) {
+  const child = spawn(
+    process.execPath,
+    [
+      CLI,
+      "--cwd",
+      home,
+      "--agent",
+      command,
+      "--format",
+      "json",
+      ...(extra.global ?? []),
+      "sessions",
+      "watch",
+      "-s",
+      "shared",
+      ...(extra.watch ?? []),
+    ],
+    { env: process.env, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  const closed = once(child, "close");
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+  const lines = createInterface({ input: child.stdout });
+  const events = (async function* () {
+    for await (const line of lines) {
+      const event = JSON.parse(line) as SessionWatchEvent;
+      assert.equal(typeof event.cursor, "string", line);
+      yield event;
+    }
+  })();
+  return {
+    events,
+    stop: async () => {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGINT");
+      }
+      const [code] = await closed;
+      assert.equal(code, 0, stderr);
+    },
+  };
+}
+
+test(
+  "public and CLI watchers replay, follow and resume without affecting the shared turn",
+  { timeout: 20_000 },
+  async () => {
+    await withSharedSession(async ({ runtime, handle, home, command, pidFile }) => {
+      const turn = runtime.startTurn({
+        handle,
+        text: "stream-sleep 500 watch-one",
+        requestId: "watch-one",
+        mode: "prompt",
+      });
+      await turn.promptStarted;
+      const pid = await fs.readFile(pidFile, "utf8");
+      const cli = cliWatcher(home, command);
+      try {
+        const [apiEvents, cliEvents] = await Promise.all([
+          watchedTurn(
+            runtime.watchSession({ handle, signal: AbortSignal.timeout(10_000) }),
+            "watch-one",
+          ),
+          watchedTurn(cli.events, "watch-one"),
+        ]);
+        assert.equal((await turn.result).status, "completed");
+        assert.deepEqual(cliEvents, apiEvents);
+        const messages = apiEvents.flatMap((event) =>
+          event.type === "message" ? [event.message] : [],
+        );
+        assert.match(messages.map(extractAgentMessageChunkText).join(""), /watch-one/u);
+        assert.equal(new Set(apiEvents.map((event) => event.cursor)).size, apiEvents.length);
+        const cursor = apiEvents.at(-1)?.cursor;
+        assert.ok(cursor);
+        await cli.stop();
+        const second = runtime.startTurn({
+          handle,
+          text: "echo watch-two",
+          requestId: "watch-two",
+          mode: "prompt",
+        });
+        const secondCli = cliWatcher(home, command, { watch: ["--cursor", cursor] });
+        let resumed: SessionWatchEvent[];
+        try {
+          const [fromApi, fromCli] = await Promise.all([
+            watchedTurn(
+              runtime.watchSession({ handle, cursor, signal: AbortSignal.timeout(10_000) }),
+              "watch-two",
+            ),
+            watchedTurn(secondCli.events, "watch-two"),
+          ]);
+          assert.deepEqual(fromCli, fromApi);
+          resumed = fromApi;
+        } finally {
+          await secondCli.stop();
+        }
+        assert.equal((await second.result).status, "completed");
+        assert.ok(resumed.every((event) => event.requestId !== "watch-one"));
+        assert.equal(await fs.readFile(pidFile, "utf8"), pid);
+      } finally {
+        await cli.stop();
+      }
+    });
+  },
+);
+
+test(
+  "returning an idle public watcher does not start an owner or change session activity",
+  { timeout: 10_000 },
+  async () => {
+    await withSharedSession(async ({ runtime, handle, pidFile }) => {
+      const before = await runtime.getStatus({ handle });
+      const pid = await fs.readFile(pidFile, "utf8");
+      const iterator = runtime.watchSession({ handle })[Symbol.asyncIterator]();
+      const pending = iterator.next();
+      assert.ok(iterator.return);
+      await iterator.return();
+      assert.equal((await pending).done, true);
+      assert.deepEqual(await runtime.getStatus({ handle }), before);
+      assert.equal(await fs.readFile(pidFile, "utf8"), pid);
+    });
+  },
+);
+
+test(
+  "closed public watchers finish replay and reject foreign or invalid cursors",
+  { timeout: 10_000 },
+  async () => {
+    await withSharedSession(async ({ runtime, handle, cli }) => {
+      const turn = runtime.startTurn({
+        handle,
+        text: "echo before-close",
+        requestId: "before-close",
+        mode: "prompt",
+      });
+      const events = await watchedTurn(
+        runtime.watchSession({ handle, signal: AbortSignal.timeout(5_000) }),
+        "before-close",
+      );
+      assert.equal((await turn.result).status, "completed");
+      await runtime.close({ handle, reason: "watch closed history" });
+      const replay: SessionWatchEvent[] = [];
+      for await (const event of runtime.watchSession({ handle })) {
+        replay.push(event);
+      }
+      assert.deepEqual(replay, events);
+      const text = await cli("sessions", "watch", "-s", "shared");
+      assert.match(text, /\[before-close\] completed: end_turn/u);
+      assert.doesNotMatch(text, /\[done\]/u);
+      const quiet = await cli("--format", "quiet", "sessions", "watch", "-s", "shared");
+      assert.equal(quiet.trim(), "before-close");
+      for (const cursor of [
+        "not-a-cursor",
+        Buffer.from(JSON.stringify(["another-record", 0])).toString("base64url"),
+      ]) {
+        await assert.rejects(
+          runtime.watchSession({ handle, cursor })[Symbol.asyncIterator]().next(),
+          /cursor|another session/iu,
+        );
+      }
+    });
+  },
+);
+
+test(
+  "resumed CLI watching suppresses raw read results without their request announcement",
+  { timeout: 15_000 },
+  async () => {
+    await withSharedSession(async ({ runtime, handle, home, command }) => {
+      const file = path.join(home, "read-fixture.txt");
+      const sentinel = "SYNTHETIC_PRIVATE_READ_8274";
+      await fs.writeFile(file, sentinel);
+      const turn = runtime.startTurn({
+        handle,
+        text: `read ${file}`,
+        requestId: "read-turn",
+        mode: "prompt",
+      });
+      const all = await watchedTurn(
+        runtime.watchSession({ handle, signal: AbortSignal.timeout(10_000) }),
+        "read-turn",
+      );
+      assert.equal((await turn.result).status, "completed");
+      const request = all.find(
+        (event) =>
+          event.type === "message" &&
+          "method" in event.message &&
+          event.message.method === "fs/read_text_file",
+      );
+      assert.ok(request);
+      const watcher = cliWatcher(home, command, {
+        global: ["--suppress-reads"],
+        watch: ["--cursor", request.cursor],
+      });
+      try {
+        const resumed = await watchedTurn(watcher.events, "read-turn");
+        const results = resumed.flatMap((event) =>
+          event.type === "message" && "result" in event.message
+            ? [JSON.stringify(event.message.result)]
+            : [],
+        );
+        assert.ok(
+          results.some((result) => result.includes("[read output suppressed]")),
+          JSON.stringify(results),
+        );
+        assert.ok(results.every((result) => !result.includes(sentinel)));
+      } finally {
+        await watcher.stop();
+      }
+    }, "approve-reads");
+  },
+);
+
+test(
+  "CLI watch selects the open named session after an older session is closed",
+  { timeout: 15_000 },
+  async () => {
+    await withSharedSession(async ({ runtime, handle, home, command }) => {
+      await runtime.close({ handle, reason: "replace closed session" });
+      const current = await runtime.ensureSession({
+        sessionKey: "shared",
+        agent: "mock",
+        mode: "persistent",
+      });
+      assert.notEqual(current.acpxRecordId, handle.acpxRecordId);
+      const watcher = cliWatcher(home, command);
+      try {
+        const turn = runtime.startTurn({
+          handle: current,
+          text: "echo new-open-session",
+          requestId: "new-open",
+          mode: "prompt",
+        });
+        const events = await watchedTurn(watcher.events, "new-open");
+        assert.equal((await turn.result).status, "completed");
+        assert.ok(
+          events.some((event) => event.type === "turn_result" && event.requestId === "new-open"),
+        );
+      } finally {
+        await watcher.stop();
+      }
+    });
+  },
+);
 
 test("shared turn cancellation never cancels a different active turn", async () => {
   await withSharedSession(async ({ runtime, handle }) => {

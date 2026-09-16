@@ -30,7 +30,7 @@ acpx [global_options] cancel [-s <name>]
 acpx [global_options] set-mode <mode> [-s <name>]
 acpx [global_options] set <key> <value> [-s <name>]
 acpx [global_options] status [-s <name>]
-acpx [global_options] sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | export [name] --output <path> | import <archive> [--name <name>] [--cwd <dir>]]
+acpx [global_options] sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | watch [-s <name>] [--cursor <cursor>] | export [name] --output <path> | import <archive> [--name <name>] [--cwd <dir>]]
 acpx [global_options] config [show | init]
 
 acpx [global_options] <agent> [prompt_options] [prompt_text...]
@@ -40,7 +40,7 @@ acpx [global_options] <agent> cancel [-s <name>]
 acpx [global_options] <agent> set-mode <mode> [-s <name>]
 acpx [global_options] <agent> set <key> <value> [-s <name>]
 acpx [global_options] <agent> status [-s <name>]
-acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | export [name] --output <path> | import <archive> [--name <name>] [--cwd <dir>]]
+acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | watch [-s <name>] [--cursor <cursor>] | export [name] --output <path> | import <archive> [--name <name>] [--cwd <dir>]]
 ```
 
 The global `--mcp-config <path>` option loads an external JSON file's `mcpServers` array for the
@@ -355,6 +355,7 @@ acpx [global_options] <agent> sessions show
 acpx [global_options] <agent> sessions show <name>
 acpx [global_options] <agent> sessions history
 acpx [global_options] <agent> sessions history <name> [--limit <count>]
+acpx [global_options] <agent> sessions watch [-s <name>] [--cursor <cursor>]
 acpx [global_options] <agent> sessions export [name] --output <path> [--cwd <dir>]
 acpx [global_options] <agent> sessions import <archive> [--name <name>] [--cwd <dir>]
 acpx [global_options] <agent> sessions prune [--dry-run] [--before <date> | --older-than <days>] [--include-history]
@@ -387,6 +388,7 @@ Behavior:
 - `sessions close <name>` soft-closes current cwd named session
 - `sessions show [name]` displays stored session metadata
 - `sessions history [name]` displays stored turn history previews (default 20, configurable with `--limit`)
+- `sessions watch [-s <name>] [--cursor <cursor>]` replays retained events and follows new ones without affecting the active turn; see [Watching sessions](session-watch.md)
 - `sessions export [name] --output <path>` writes a portable JSON archive with session state and event history; `--cwd <dir>` selects a different source cwd relative to global `--cwd`
 - `sessions import <archive>` writes a fresh local record from a portable archive, reopens it as idle, keeps the provider session id, and clears source-machine process metadata
 - Imported sessions must resume that provider session; if the destination agent cannot load it, prompts fail clearly instead of starting an empty conversation

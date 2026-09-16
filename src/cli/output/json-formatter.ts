@@ -110,28 +110,16 @@ function sanitizedContent(update: Record<string, unknown>): unknown {
   return update.content;
 }
 
-class JsonOutputFormatter implements OutputFormatter {
-  private readonly stdout: WritableLike;
-  private readonly suppressReads: boolean;
-  private sessionId: string;
+export class JsonMessageSanitizer {
   private readonly requestMethodById = new Map<string, string>();
   private readonly toolStateById = new Map<string, { title?: string; kind?: string | null }>();
 
-  constructor(stdout: WritableLike, suppressReads: boolean, context?: OutputFormatterContext) {
-    this.stdout = stdout;
-    this.suppressReads = suppressReads;
-    this.sessionId = context?.sessionId?.trim() || DEFAULT_JSON_SESSION_ID;
-  }
+  constructor(
+    private readonly suppressReads: boolean,
+    private readonly partialHistory = false,
+  ) {}
 
-  setContext(context: OutputFormatterContext): void {
-    this.sessionId = context.sessionId?.trim() || this.sessionId || DEFAULT_JSON_SESSION_ID;
-  }
-
-  onAcpMessage(message: unknown): void {
-    this.stdout.write(`${JSON.stringify(this.sanitizeMessage(message))}\n`);
-  }
-
-  private sanitizeMessage(message: unknown): unknown {
+  sanitize(message: unknown): unknown {
     if (!this.suppressReads) {
       return message;
     }
@@ -177,7 +165,7 @@ class JsonOutputFormatter implements OutputFormatter {
 
     const method = this.requestMethodById.get(idKey);
     this.requestMethodById.delete(idKey);
-    if (method !== "fs/read_text_file" || !hasResult) {
+    if (!hasResult || !this.suppressReadResponse(method)) {
       return message;
     }
 
@@ -190,6 +178,10 @@ class JsonOutputFormatter implements OutputFormatter {
       ...root,
       result: sanitizeReadResult(candidate.result),
     };
+  }
+
+  private suppressReadResponse(method: string | undefined): boolean {
+    return method === "fs/read_text_file" || (this.partialHistory && method === undefined);
   }
 
   private sanitizeReadToolMessage(message: unknown): unknown {
@@ -206,7 +198,8 @@ class JsonOutputFormatter implements OutputFormatter {
     const current = this.mergeToolState(toolCallId, update);
     this.toolStateById.set(toolCallId, current);
 
-    return isReadLikeTool(current) ? sanitizeToolMessage(message) : message;
+    const unclassified = this.partialHistory && !current.kind && !current.title;
+    return isReadLikeTool(current) || unclassified ? sanitizeToolMessage(message) : message;
   }
 
   private readToolUpdate(message: unknown): Record<string, unknown> | undefined {
@@ -236,6 +229,26 @@ class JsonOutputFormatter implements OutputFormatter {
       title: typeof update.title === "string" ? update.title : previous.title,
       kind: typeof update.kind === "string" || update.kind === null ? update.kind : previous.kind,
     };
+  }
+}
+
+class JsonOutputFormatter implements OutputFormatter {
+  private readonly stdout: WritableLike;
+  private readonly sanitizer: JsonMessageSanitizer;
+  private sessionId: string;
+
+  constructor(stdout: WritableLike, suppressReads: boolean, context?: OutputFormatterContext) {
+    this.stdout = stdout;
+    this.sanitizer = new JsonMessageSanitizer(suppressReads);
+    this.sessionId = context?.sessionId?.trim() || DEFAULT_JSON_SESSION_ID;
+  }
+
+  setContext(context: OutputFormatterContext): void {
+    this.sessionId = context.sessionId?.trim() || this.sessionId || DEFAULT_JSON_SESSION_ID;
+  }
+
+  onAcpMessage(message: unknown): void {
+    this.stdout.write(`${JSON.stringify(this.sanitizer.sanitize(message))}\n`);
   }
 
   onError(params: {

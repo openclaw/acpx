@@ -179,6 +179,8 @@ its process exits.
 
 ## --no-wait
 
+An independent client can follow retained and live prompt events with [`sessions watch`](session-watch.md), including turns submitted with `--no-wait`.
+
 By default the submitter blocks until the queued prompt completes, streaming events back. `--no-wait` returns as soon as the running queue owner acknowledges the submission. Useful for scripted "queue up follow-ups" patterns.
 
 ```bash

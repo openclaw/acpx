@@ -8,8 +8,9 @@ import { DISCARD_OUTPUT_FORMATTER } from "../session/execution/discard-output.js
 import { sendSession } from "../session/execution/queue-owner-runtime.js";
 import { closeSession, cancelSessionPrompt } from "../session/execution/session-control.js";
 import { ensureSession } from "../session/execution/session-management.js";
-import { findSession, resolveSessionRecord } from "../session/persistence.js";
+import { findSession, readSessionRecord, resolveSessionRecord } from "../session/persistence.js";
 import { tryCancelOnRunningOwner } from "../session/queue/ipc.js";
+import { watchSession } from "../session/watch.js";
 import type {
   AuthPolicy,
   NonInteractivePermissionPolicy,
@@ -301,6 +302,25 @@ export class SharedAcpRuntime {
   async getStatus(input: { handle: AcpRuntimeHandle }) {
     this.assertOpen();
     return runtimeStatusFromRecord(await resolveSessionRecord(sharedRecordId(input.handle)));
+  }
+
+  watchSession(input: { handle: AcpRuntimeHandle; cursor?: string; signal?: AbortSignal }) {
+    this.assertOpen();
+    const signal = input.signal
+      ? AbortSignal.any([input.signal, this.disconnect.signal])
+      : this.disconnect.signal;
+    const recordId = sharedRecordId(input.handle);
+    const record = readSessionRecord(recordId).then((value) => {
+      if (!value || value.acpxRecordId !== recordId) {
+        throw new AcpRuntimeError(
+          "ACP_SESSION_INIT_FAILED",
+          "Shared session record is unavailable.",
+        );
+      }
+      return value;
+    });
+    void record.catch(() => {});
+    return watchSession({ record, cursor: input.cursor, signal });
   }
 
   async cancel(input: { handle: AcpRuntimeHandle; reason?: string }): Promise<void> {

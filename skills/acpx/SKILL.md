@@ -29,6 +29,7 @@ Core capabilities:
 - Prompt input via stdin or `--file`
 - Config files with global+project merge and `config show|init`
 - Session metadata/history inspection (`sessions show`, `sessions history`)
+- Passive replay and live observation (`sessions watch -s <name> --cursor <cursor>`; omit the cursor for retained history)
 - Local agent process checks via `status`
 - Stable ACP client methods for filesystem and terminal requests
 - Stable ACP `authenticate` handshake via env/config credentials
@@ -62,7 +63,7 @@ acpx [global_options] cancel [-s <name>]
 acpx [global_options] set-mode <mode> [-s <name>]
 acpx [global_options] set <key> <value> [-s <name>]
 acpx [global_options] status [-s <name>]
-acpx [global_options] sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | export [name] --output <path> | import <archive> [--name <name>] [--cwd <dir>] | prune [--dry-run] [--before <date> | --older-than <days>] [--include-history]]
+acpx [global_options] sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | watch [-s <name>] [--cursor <cursor>] | export [name] --output <path> | import <archive> [--name <name>] [--cwd <dir>] | prune [--dry-run] [--before <date> | --older-than <days>] [--include-history]]
 acpx [global_options] config [show | init]
 acpx [global_options] flow run <file> [--input-json '<json>' | --input-file <path>] [--default-agent <name>]
 
@@ -73,7 +74,7 @@ acpx [global_options] <agent> cancel [-s <name>]
 acpx [global_options] <agent> set-mode <mode> [-s <name>]
 acpx [global_options] <agent> set <key> <value> [-s <name>]
 acpx [global_options] <agent> status [-s <name>]
-acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | export [name] --output <path> | import <archive> [--name <name>] [--cwd <dir>] | prune [--dry-run] [--before <date> | --older-than <days>] [--include-history]]
+acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--name <name>] | close [name] | show [name] | history [name] [--limit <count>] | watch [-s <name>] [--cursor <cursor>] | export [name] --output <path> | import <archive> [--name <name>] [--cwd <dir>] | prune [--dry-run] [--before <date> | --older-than <days>] [--include-history]]
 ```
 
 If prompt text is omitted and stdin is piped, `acpx` reads prompt text from stdin.
@@ -210,6 +211,8 @@ Behavior:
 - `set-mode`/`set` route through queue-owner IPC when active, otherwise reconnect directly.
 
 ### Sessions
+
+Use `acpx --format json pi sessions watch -s reviewer` to observe another client's work. Resume with `--cursor` using the last event's opaque cursor. Watchers do not cancel turns when stopped; use `turn_result` for the settled outcome, and treat owner-loss errors as unknown outcomes rather than retry instructions. See [Watching sessions](https://github.com/openclaw/acpx/blob/main/docs/session-watch.md).
 
 ```bash
 acpx sessions

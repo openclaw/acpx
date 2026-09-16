@@ -11,6 +11,7 @@ export {
   listSessionsForAgent,
   normalizeName,
   pruneSessions,
+  readSessionRecord,
   resolveSessionRecord,
   writeSessionRecord,
 } from "./persistence/repository.js";

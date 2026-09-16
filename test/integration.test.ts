@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isAcpJsonRpcMessage } from "../src/acp/jsonrpc.js";
 import type { PromptInput } from "../src/prompt-content.js";
 import { runPromptTurn } from "../src/runtime/engine/prompt-turn.js";
 import {
@@ -136,7 +137,14 @@ for (const completion of ["complete", "timeout", "cancel"] as const) {
           assert.match(record, /cli-complete/);
           const saved = JSON.parse(record) as { last_seq: number };
           const events = await fs.readFile(recordPath.replace(/\.json$/, ".stream.ndjson"), "utf8");
-          assert.equal(saved.last_seq, events.trim().split("\n").length);
+          assert.equal(
+            saved.last_seq,
+            events
+              .trim()
+              .split("\n")
+              .map((line) => JSON.parse(line) as unknown)
+              .filter(isAcpJsonRpcMessage).length,
+          );
         } else {
           assert.doesNotMatch(record, new RegExp(`cli-${completion}`));
           if (completion === "timeout") {

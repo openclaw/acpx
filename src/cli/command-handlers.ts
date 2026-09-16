@@ -924,6 +924,24 @@ export async function handleSessionsHistory(
   printSessionHistoryByFormat(record, flags.limit, globalFlags.format);
 }
 
+export async function handleSessionsWatch(
+  explicitAgentName: string | undefined,
+  flags: { name?: string; cursor?: string },
+  command: Command,
+  config: ResolvedAcpxConfig,
+): Promise<void> {
+  const globalFlags = resolveGlobalFlags(command, config);
+  const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const record =
+    (await findSession({ agentCommand: agent.agentCommand, cwd: agent.cwd, name: flags.name })) ??
+    (await findScopedSessionOrThrow(agent, flags.name));
+  const { runSessionWatch } = await import("./session-watch.js");
+  await runSessionWatch(record, {
+    cursor: flags.cursor,
+    policy: resolveRequestedOutputPolicy(globalFlags),
+  });
+}
+
 export async function handleSessionsExport(
   explicitAgentName: string | undefined,
   sessionName: string | undefined,

@@ -53,6 +53,8 @@ New sessions are created using the normal CLI path. Prompt submission starts or 
 
 ## Turns, cancellation, and disconnects
 
+Use [`runtime.watchSession({ handle, cursor?, signal? })`](session-watch.md) to observe another client's session without submitting work. Watch streams replay retained events and follow new ones, independently of the submitting connection.
+
 Use a fresh `requestId` for every turn. The ID is preserved through queueing and local status. Reusing an ID while it is queued or active is rejected; IDs do not provide an idempotent retry API.
 
 `turn.promptStarted` resolves when the ACP transport accepts the actual prompt, after queue waiting and session preparation. Queue acceptance alone does not resolve it. It rejects when the turn never reaches the agent. `turn.result` settles after the owner's normal prompt finalization and checkpoint attempts; it reports `completed`, `cancelled`, or `failed`.

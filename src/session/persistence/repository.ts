@@ -100,12 +100,11 @@ export async function writeSessionRecord(record: SessionRecord): Promise<void> {
 export async function resolveSessionRecord(sessionId: string): Promise<SessionRecord> {
   await ensureSessionDir();
 
-  const directPath = sessionFilePath(sessionId);
   try {
-    const directPayload = await measurePerf("session.resolve_direct", async () => {
-      return await fs.readFile(directPath, "utf8");
-    });
-    const directRecord = parseSessionRecord(JSON.parse(directPayload));
+    const directRecord = await measurePerf(
+      "session.resolve_direct",
+      async () => await readSessionRecord(sessionId),
+    );
     if (directRecord) {
       return directRecord;
     }
@@ -142,6 +141,24 @@ export async function resolveSessionRecord(sessionId: string): Promise<SessionRe
 
   incrementPerfCounter("session.resolve_miss");
   throw new SessionNotFoundError(sessionId);
+}
+
+/** Reads a canonical record without creating directories or rebuilding the lookup index. */
+export async function readSessionRecord(sessionId: string): Promise<SessionRecord | undefined> {
+  let payload: string;
+  try {
+    payload = await fs.readFile(sessionFilePath(sessionId), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+  try {
+    return parseSessionRecord(JSON.parse(payload)) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function hasGitDirectory(dir: string): boolean {
