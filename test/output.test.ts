@@ -111,7 +111,7 @@ test("text formatter renders tool call lifecycle from ACP updates", () => {
       },
     },
   } as never);
-  formatter.onAcpMessage({
+  const finalUpdate = {
     jsonrpc: "2.0",
     method: "session/update",
     params: {
@@ -125,12 +125,25 @@ test("text formatter renders tool call lifecycle from ACP updates", () => {
         rawOutput: { stdout: "All tests passing" },
       },
     },
-  } as never);
+  } satisfies Parameters<typeof formatter.onAcpMessage>[0];
+  formatter.onAcpMessage(finalUpdate);
+  const firstFinal = writer.toString();
+  formatter.onAcpMessage(finalUpdate);
+  assert.equal(writer.toString(), firstFinal);
+  formatter.onAcpMessage({
+    ...finalUpdate,
+    params: {
+      ...finalUpdate.params,
+      update: { ...finalUpdate.params.update, rawOutput: { stdout: "Changed tool output" } },
+    },
+  });
 
   const output = writer.toString();
   assert.match(output, /\[tool\] run_command/);
   assert.match(output, /input: npm test/);
   assert.match(output, /All tests passing/);
+  assert.match(output, /Changed tool output/);
+  assert.equal((output.match(/\(completed\)/g) ?? []).length, 2);
 });
 
 test("json formatter passes through ACP messages", () => {
