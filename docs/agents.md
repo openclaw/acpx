@@ -21,6 +21,7 @@ The default agent for top-level commands like `acpx exec â€¦` and `acpx prompt â
 | `devin`      | `devin acp`                                    | [Devin CLI](https://docs.devin.ai/cli/index)                                                                    |
 | `droid`      | `droid exec --output-format acp`               | [Factory Droid](https://www.factory.ai)                                                                         |
 | `fast-agent` | `uvx fast-agent-mcp acp`                       | [fast-agent](https://fast-agent.ai/)                                                                            |
+| `fx`         | `fx acp`                                       | [fx](https://fx.sh)                                                                                             |
 | `grok-build` | `grok agent stdio`                             | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
 | `iflow`      | `iflow --experimental-acp`                     | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
 | `kilocode`   | `npx -y @kilocode/cli acp`                     | [Kilocode](https://kilocode.ai)                                                                                 |
@@ -143,6 +144,10 @@ If your Cursor install exposes ACP as `agent acp` instead of `cursor-agent acp`,
 `acpx fast-agent` starts fast-agent through its ACP entrypoint. It requires `uvx` on `PATH`.
 
 Configure model/provider settings through fast-agent environment variables, fast-agent configuration, or an `acpx` agent override with additional `fast-agent-mcp acp` arguments.
+
+### fx
+
+`fx` launches the installed `fx acp` server. See the [fx guide](https://github.com/openclaw/acpx/blob/main/agents/Fx.md) for provider authentication, model selection, and workspace behavior.
 
 ### Grok Build
 

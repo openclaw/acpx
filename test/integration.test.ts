@@ -1017,86 +1017,32 @@ test("integration: built-in grok-build agent resolves to grok agent stdio", asyn
   });
 });
 
-test("integration: built-in mcode agent resolves to mcode acp", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
-    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-mcode-"));
-
-    try {
-      await writeFakeMCodeAgent(fakeBinDir);
-
-      const result = await runCli(
-        ["--approve-all", "--cwd", cwd, "--format", "quiet", "mcode", "exec", "echo hello"],
-        homeDir,
-        {
-          env: {
-            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
-          },
-        },
-      );
-
-      assert.equal(result.code, 0, result.stderr);
-      assert.match(result.stdout, /hello/);
-    } finally {
-      await fs.rm(fakeBinDir, { recursive: true, force: true });
-      await fs.rm(cwd, { recursive: true, force: true });
-    }
+for (const [agent, acpArg] of [
+  ["fx", "acp"],
+  ["mcode", "acp"],
+  ["pool", "acp"],
+  ["zeroclaw", "acp"],
+] as const) {
+  test(`integration: built-in ${agent} resolves to ${agent} ${acpArg}`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+      const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-native-"));
+      try {
+        await writeFakeNativeAcpAgent(fakeBinDir, agent, acpArg);
+        const result = await runCli(
+          ["--approve-all", "--cwd", cwd, "--format", "quiet", agent, "exec", "echo hello"],
+          homeDir,
+          { env: { PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}` } },
+        );
+        assert.equal(result.code, 0, result.stderr);
+        assert.match(result.stdout, /hello/);
+      } finally {
+        await fs.rm(fakeBinDir, { recursive: true, force: true });
+        await fs.rm(cwd, { recursive: true, force: true });
+      }
+    });
   });
-});
-
-test("integration: built-in pool agent resolves to pool acp", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
-    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-pool-"));
-
-    try {
-      await writeFakePoolAgent(fakeBinDir);
-
-      const result = await runCli(
-        ["--approve-all", "--cwd", cwd, "--format", "quiet", "pool", "exec", "echo hello"],
-        homeDir,
-        {
-          env: {
-            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
-          },
-        },
-      );
-
-      assert.equal(result.code, 0, result.stderr);
-      assert.match(result.stdout, /hello/);
-    } finally {
-      await fs.rm(fakeBinDir, { recursive: true, force: true });
-      await fs.rm(cwd, { recursive: true, force: true });
-    }
-  });
-});
-
-test("integration: built-in zeroclaw agent resolves to zeroclaw acp", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
-    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-zeroclaw-"));
-
-    try {
-      await writeFakeZeroClawAgent(fakeBinDir);
-
-      const result = await runCli(
-        ["--approve-all", "--cwd", cwd, "--format", "quiet", "zeroclaw", "exec", "echo hello"],
-        homeDir,
-        {
-          env: {
-            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
-          },
-        },
-      );
-
-      assert.equal(result.code, 0, result.stderr);
-      assert.match(result.stdout, /hello/);
-    } finally {
-      await fs.rm(fakeBinDir, { recursive: true, force: true });
-      await fs.rm(cwd, { recursive: true, force: true });
-    }
-  });
-});
+}
 
 test("integration: built-in iflow agent resolves to iflow --experimental-acp", async () => {
   await withTempHome(async (homeDir) => {
@@ -5031,14 +4977,18 @@ async function writeFakeGrokBuildAgent(binDir: string): Promise<void> {
   );
 }
 
-async function writeFakeMCodeAgent(binDir: string): Promise<void> {
+async function writeFakeNativeAcpAgent(
+  binDir: string,
+  agent: string,
+  acpArg: string,
+): Promise<void> {
   if (process.platform === "win32") {
     await fs.writeFile(
-      path.join(binDir, "mcode.cmd"),
+      path.join(binDir, `${agent}.cmd`),
       [
         "@echo off",
         "setlocal",
-        'if not "%~1"=="acp" exit /b 2',
+        `if not "%~1"=="${acpArg}" exit /b 2`,
         `"${process.execPath}" "${MOCK_AGENT_PATH}" %2 %3 %4 %5 %6 %7 %8 %9`,
         "",
       ].join("\r\n"),
@@ -5046,81 +4996,14 @@ async function writeFakeMCodeAgent(binDir: string): Promise<void> {
     );
     return;
   }
-
   await fs.writeFile(
-    path.join(binDir, "mcode"),
+    path.join(binDir, agent),
     [
       "#!/bin/sh",
-      'if [ "$1" = "acp" ]; then',
+      `if [ "$1" = "${acpArg}" ]; then`,
       "  shift",
       "else",
-      '  echo "unexpected mcode command: $*" 1>&2',
-      "  exit 2",
-      "fi",
-      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
-      "",
-    ].join("\n"),
-    { encoding: "utf8", mode: 0o755 },
-  );
-}
-
-async function writeFakePoolAgent(binDir: string): Promise<void> {
-  if (process.platform === "win32") {
-    await fs.writeFile(
-      path.join(binDir, "pool.cmd"),
-      [
-        "@echo off",
-        "setlocal",
-        'if not "%~1"=="acp" exit /b 2',
-        `"${process.execPath}" "${MOCK_AGENT_PATH}" %2 %3 %4 %5 %6 %7 %8 %9`,
-        "",
-      ].join("\r\n"),
-      { encoding: "utf8" },
-    );
-    return;
-  }
-
-  await fs.writeFile(
-    path.join(binDir, "pool"),
-    [
-      "#!/bin/sh",
-      'if [ "$1" = "acp" ]; then',
-      "  shift",
-      "else",
-      '  echo "unexpected pool command: $*" 1>&2',
-      "  exit 2",
-      "fi",
-      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
-      "",
-    ].join("\n"),
-    { encoding: "utf8", mode: 0o755 },
-  );
-}
-
-async function writeFakeZeroClawAgent(binDir: string): Promise<void> {
-  if (process.platform === "win32") {
-    await fs.writeFile(
-      path.join(binDir, "zeroclaw.cmd"),
-      [
-        "@echo off",
-        "setlocal",
-        'if not "%~1"=="acp" exit /b 2',
-        `"${process.execPath}" "${MOCK_AGENT_PATH}" %2 %3 %4 %5 %6 %7 %8 %9`,
-        "",
-      ].join("\r\n"),
-      { encoding: "utf8" },
-    );
-    return;
-  }
-
-  await fs.writeFile(
-    path.join(binDir, "zeroclaw"),
-    [
-      "#!/bin/sh",
-      'if [ "$1" = "acp" ]; then',
-      "  shift",
-      "else",
-      '  echo "unexpected zeroclaw command: $*" 1>&2',
+      `  echo "unexpected ${agent} command: $*" 1>&2`,
       "  exit 2",
       "fi",
       `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
