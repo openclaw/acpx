@@ -11,6 +11,7 @@ Repo: https://github.com/openclaw/acpx
 - Runtime/model selection: expose a model setter that uses the adapter's advertised control and preserves the selected model across reconnects.
 
 - Runtime/discovery: expose installed agent entrypoints and native model display names through the existing registry and session status, with durable local fresh-session preparation for embedding hosts.
+- Dependencies: update Zod validation to 4.6.4. Thanks @dependabot.
 
 ### Breaking
 
