@@ -35,10 +35,10 @@ the same cleanup operation, and late exits cannot overwrite a replacement
 launch's status. The bridge retains its inherited process group and terminal
 signal behavior.
 
-Bridge and descendant teardown has an eight-second budget. Queue-owner recovery
-allows twelve seconds before forcibly stopping the owner, leaving room for that
-cleanup and cancellation. These budgets exclude host admission callbacks and
-separately managed terminals.
+Bridge and descendant teardown has an eight-second budget. POSIX queue-owner
+recovery allows twelve seconds before forcibly stopping the owner, leaving room
+for that cleanup and cancellation. These budgets exclude host admission callbacks
+and separately managed terminals.
 
 This is best-effort cleanup with OS timestamp precision and process-query races.
 A descendant can escape observation if it starts after the last snapshot and

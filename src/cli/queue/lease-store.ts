@@ -11,7 +11,7 @@ export { isProcessAlive } from "../../process-liveness.js";
 // Budget for graceful SIGTERM shutdown of a queue-owner process.
 // Allow the client's eight-second descendant cleanup budget plus cancellation
 // and event-loop headroom before forcibly terminating the owner itself.
-const PROCESS_SIGTERM_GRACE_MS = 12_000;
+const PROCESS_SIGTERM_GRACE_MS = process.platform === "win32" ? 4_000 : 12_000;
 // After SIGKILL the OS terminates the process almost immediately; 1 500 ms is generous.
 const PROCESS_SIGKILL_GRACE_MS = 1_500;
 const PROCESS_POLL_MS = 50;
