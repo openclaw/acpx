@@ -6,34 +6,25 @@ import { normalizeAgentCommandInput } from "../../acp/client-process.js";
 import { AcpClient } from "../../acp/client.js";
 import { normalizeOutputError } from "../../acp/error-normalization.js";
 import { extractAcpError, isAcpResourceNotFoundError } from "../../acp/error-shapes.js";
-import { modelStateFromConfigOptions } from "../../acp/model-support.js";
 import { withTimeout } from "../../async-control.js";
 import { textPrompt, type PromptInput } from "../../prompt-content.js";
 import {
   applyConfigOptionsToRecord,
   applyConfigOptionSelection,
   applyModelSelection,
+  applyInitialModelSelection,
 } from "../../session/config-options.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,
-  createSessionConversation,
   recordClientOperation,
   recordPromptSubmission,
   recordSessionUpdate,
   trimConversationForRuntime,
 } from "../../session/conversation-model.js";
-import { defaultSessionEventLog } from "../../session/event-log.js";
 import { LiveSessionCheckpoint } from "../../session/live-checkpoint.js";
-import {
-  setCurrentModelId,
-  setDesiredModeId,
-  syncAdvertisedModelState,
-} from "../../session/mode-preference.js";
-import {
-  applyRequestedModelIfAdvertised,
-  currentModelIdFromSetModelResponse,
-} from "../../session/model-application.js";
+import { setDesiredModeId } from "../../session/mode-preference.js";
+import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
 import { advertisedModelState } from "../../session/model-state.js";
 import type { ClientOperation, SessionRecord, SessionResumePolicy } from "../../types.js";
 import type {
@@ -55,6 +46,7 @@ import { withConnectedSession } from "./connected-session.js";
 import {
   applyConversation,
   applyLifecycleSnapshotToRecord,
+  createInitialSessionRecord,
   reconcileAgentSessionId,
 } from "./lifecycle.js";
 import { runPromptTurn } from "./prompt-turn.js";
@@ -233,36 +225,6 @@ function toPromptInput(
     );
   }
   return blocks.length > 0 ? blocks : textPrompt(text);
-}
-
-function createInitialRecord(params: {
-  recordId: string;
-  sessionName: string;
-  sessionId: string;
-  agentCommand: string;
-  agentArgv?: string[];
-  cwd: string;
-  agentSessionId?: string;
-}): SessionRecord {
-  const now = isoNow();
-  return {
-    schema: "acpx.session.v1",
-    acpxRecordId: params.recordId,
-    acpSessionId: params.sessionId,
-    agentSessionId: params.agentSessionId,
-    agentCommand: params.agentCommand,
-    agentArgv: params.agentArgv,
-    cwd: params.cwd,
-    name: params.sessionName,
-    createdAt: now,
-    lastUsedAt: now,
-    lastSeq: 0,
-    eventLog: defaultSessionEventLog(params.recordId),
-    closed: false,
-    closedAt: undefined,
-    ...createSessionConversation(now),
-    acpx: {},
-  };
 }
 
 function createRecordId(sessionKey: string, mode: "persistent" | "oneshot"): string {
@@ -1073,9 +1035,9 @@ export class AcpRuntimeManager {
     session: CreatedRuntimeSession;
   }): Promise<SessionRecord> {
     const { input, client, owner, agentCommand, agentArgv, cwd, session } = params;
-    const record = createInitialRecord({
+    const record = createInitialSessionRecord({
       recordId: createRecordId(input.sessionKey, input.mode),
-      sessionName: input.sessionKey,
+      name: input.sessionKey,
       sessionId: session.sessionId,
       agentCommand,
       agentArgv,
@@ -1097,19 +1059,12 @@ export class AcpRuntimeManager {
       agentCommand,
       timeoutMs: this.options.timeoutMs,
     });
-    applyConfigOptionsToRecord(record, modelApplication.response);
-    syncAdvertisedModelState(
+    applyInitialModelSelection(
       record,
-      modelApplication.response
-        ? modelStateFromConfigOptions(modelApplication.response.configOptions)
-        : session.sessionResult.models,
+      session.sessionResult.models,
+      input.sessionOptions?.model,
+      modelApplication,
     );
-    if (modelApplication.applied) {
-      setCurrentModelId(
-        record,
-        currentModelIdFromSetModelResponse(modelApplication.response, input.sessionOptions?.model),
-      );
-    }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     persistSessionOptions(record, input.sessionOptions);
     return record;
@@ -1265,9 +1220,9 @@ export class AcpRuntimeManager {
     let terminalResult: AcpRuntimeTurnResult;
     try {
       turn = await this.prepareRuntimeTurn(task);
-      const { sessionId, resumed, loadError } = await this.connectRuntimeTurn(task, turn);
+      const { sessionId } = await this.connectRuntimeTurn(task, turn);
       this.assertOpen();
-      await this.resolveRuntimeTurnReady(task, turn, resumed, loadError);
+      await this.resolveRuntimeTurnReady(task, turn);
       if (this.cancelRuntimeTurnBeforePrompt(task)) {
         terminalResult = {
           status: "cancelled",
@@ -1633,8 +1588,6 @@ export class AcpRuntimeManager {
   private async resolveRuntimeTurnReady(
     task: RuntimeTurnTask,
     turn: RunningRuntimeTurn,
-    resumed: boolean,
-    loadError: string | undefined,
   ): Promise<void> {
     task.sessionReady.resolve();
     turn.record.lastRequestId = task.input.requestId;
@@ -1643,21 +1596,6 @@ export class AcpRuntimeManager {
     turn.record.closedAt = undefined;
     turn.record.lastUsedAt = isoNow();
     await turn.liveCheckpoint.checkpoint();
-    this.emitRuntimeTurnLoadStatus(task, resumed, loadError);
-  }
-
-  private emitRuntimeTurnLoadStatus(
-    task: RuntimeTurnTask,
-    resumed: boolean,
-    loadError: string | undefined,
-  ): void {
-    if (!resumed && !loadError) {
-      return;
-    }
-    this.emitRuntimeTurnEvent(task, {
-      type: "status",
-      text: loadError ? `session reconnect fallback: ${loadError}` : "session resumed",
-    });
   }
 
   private cancelRuntimeTurnBeforePrompt(task: RuntimeTurnTask): boolean {

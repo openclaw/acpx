@@ -3,8 +3,15 @@ import type { SessionCreateResult, SessionLoadResult } from "../acp/client.js";
 import { modelStateFromConfigOptions } from "../acp/model-support.js";
 import type { SessionAcpxState, SessionRecord } from "../types.js";
 import { cloneSessionAcpxState } from "./conversation-model.js";
-import { clearDesiredConfigOption } from "./mode-preference.js";
-import { currentModelIdFromSetModelResponse } from "./model-application.js";
+import {
+  clearDesiredConfigOption,
+  setCurrentModelId,
+  syncAdvertisedModelState,
+} from "./mode-preference.js";
+import {
+  currentModelIdFromSetModelResponse,
+  type applyRequestedModelIfAdvertised,
+} from "./model-application.js";
 import { advertisedModelState, applyConfigOptionsModelState } from "./model-state.js";
 
 type ConfigOptionsResult = Pick<SessionCreateResult | SessionLoadResult, "configOptions">;
@@ -28,6 +35,27 @@ export function applyConfigOptionsToRecord(
   }
 
   record.acpx = applyConfigOptionsToState(record.acpx, configOptions);
+}
+
+export function applyInitialModelSelection(
+  record: SessionRecord,
+  originalModels: SessionCreateResult["models"],
+  requestedModel: string | undefined,
+  modelApplication: Awaited<ReturnType<typeof applyRequestedModelIfAdvertised>>,
+): void {
+  applyConfigOptionsToRecord(record, modelApplication.response);
+  syncAdvertisedModelState(
+    record,
+    modelApplication.response
+      ? modelStateFromConfigOptions(modelApplication.response.configOptions)
+      : originalModels,
+  );
+  if (modelApplication.applied) {
+    setCurrentModelId(
+      record,
+      currentModelIdFromSetModelResponse(modelApplication.response, requestedModel),
+    );
+  }
 }
 
 function applyAcceptedConfigOptions(

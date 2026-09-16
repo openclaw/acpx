@@ -2166,54 +2166,72 @@ test("integration: set model rejects with clear error on ACP invalid params", as
 });
 
 test("integration: status shows model after session creation with --model", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
-    const modelAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-models`;
+  for (const reportedModel of ["smart-model", "fast-model"]) {
+    await withTempHome(async (homeDir) => {
+      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+      const modelAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-models --report-model-as ${reportedModel}`;
 
-    try {
-      // Create session with --model
-      const created = await runCli(
-        [
-          "--agent",
-          modelAgentCommand,
-          "--approve-all",
-          "--cwd",
-          cwd,
-          "--model",
-          "smart-model",
-          "sessions",
-          "new",
-        ],
-        homeDir,
-      );
-      assert.equal(created.code, 0, created.stderr);
+      try {
+        const created = await runCli(
+          [
+            "--agent",
+            modelAgentCommand,
+            "--approve-all",
+            "--cwd",
+            cwd,
+            "--format",
+            "json",
+            "--model",
+            "smart-model",
+            "sessions",
+            "new",
+          ],
+          homeDir,
+        );
+        assert.equal(created.code, 0, created.stderr);
+        const { acpxRecordId } = JSON.parse(created.stdout) as { acpxRecordId: string };
+        const saved = JSON.parse(
+          await fs.readFile(
+            path.join(homeDir, ".acpx", "sessions", `${encodeURIComponent(acpxRecordId)}.json`),
+            "utf8",
+          ),
+        ) as { acpx?: { session_options?: { model?: string } } };
+        assert.equal(saved.acpx?.session_options?.model, "smart-model");
 
-      // Check status JSON
-      const status = await runCli(
-        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "--format", "json", "status"],
-        homeDir,
-      );
-      assert.equal(status.code, 0, status.stderr);
+        const status = await runCli(
+          [
+            "--agent",
+            modelAgentCommand,
+            "--approve-all",
+            "--cwd",
+            cwd,
+            "--format",
+            "json",
+            "status",
+          ],
+          homeDir,
+        );
+        assert.equal(status.code, 0, status.stderr);
 
-      const statusPayload = JSON.parse(status.stdout.trim()) as {
-        model?: string;
-        mode?: string;
-        availableModels?: string[];
-      };
-      assert.equal(statusPayload.model, "smart-model");
-      assert(Array.isArray(statusPayload.availableModels), "expected availableModels array");
+        const statusPayload = JSON.parse(status.stdout.trim()) as {
+          model?: string;
+          mode?: string;
+          availableModels?: string[];
+        };
+        assert.equal(statusPayload.model, reportedModel);
+        assert(Array.isArray(statusPayload.availableModels), "expected availableModels array");
 
-      // Check status text
-      const statusText = await runCli(
-        ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "status"],
-        homeDir,
-      );
-      assert.equal(statusText.code, 0, statusText.stderr);
-      assert.match(statusText.stdout, /model: smart-model/);
-    } finally {
-      await fs.rm(cwd, { recursive: true, force: true });
-    }
-  });
+        const statusText = await runCli(
+          ["--agent", modelAgentCommand, "--approve-all", "--cwd", cwd, "status"],
+          homeDir,
+        );
+        assert.equal(statusText.code, 0, statusText.stderr);
+        assert.ok(statusText.stdout.includes(`model: ${reportedModel}`));
+      } finally {
+        await fs.rm(cwd, { recursive: true, force: true });
+      }
+    });
+  }
 });
 
 test("integration: status shows updated model after set model", async () => {

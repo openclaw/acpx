@@ -1,23 +1,21 @@
 import { normalizeAgentSessionId } from "../../acp/agent-session-id.js";
-import { AcpClient, type SessionCreateResult } from "../../acp/client.js";
+import { AcpClient } from "../../acp/client.js";
 import { formatErrorMessage } from "../../acp/error-normalization.js";
-import { modelStateFromConfigOptions } from "../../acp/model-support.js";
 import { withInterrupt, withTimeout } from "../../async-control.js";
-import { applyLifecycleSnapshotToRecord } from "../../runtime/engine/lifecycle.js";
-import { persistSessionOptions } from "../../runtime/engine/session-options.js";
-import { applyConfigOptionsToRecord } from "../../session/config-options.js";
-import { createSessionConversation } from "../../session/conversation-model.js";
-import { defaultSessionEventLog } from "../../session/event-log.js";
-import { setCurrentModelId, syncAdvertisedModelState } from "../../session/mode-preference.js";
 import {
-  applyRequestedModelIfAdvertised,
-  currentModelIdFromSetModelResponse,
-} from "../../session/model-application.js";
+  applyLifecycleSnapshotToRecord,
+  createInitialSessionRecord,
+} from "../../runtime/engine/lifecycle.js";
+import { persistSessionOptions } from "../../runtime/engine/session-options.js";
+import {
+  applyConfigOptionsToRecord,
+  applyInitialModelSelection,
+} from "../../session/config-options.js";
+import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
 import {
   absolutePath,
   findGitRepositoryRoot,
   findSessionByDirectoryWalk,
-  isoNow,
   normalizeName,
   writeSessionRecord,
 } from "../../session/persistence.js";
@@ -36,9 +34,7 @@ type CreatedSessionState = {
   sessionId: string;
   agentSessionId: string | undefined;
   sessionResult: Awaited<ReturnType<AcpClient["createSession" | "loadSession"]>>;
-  sessionModels: SessionCreateResult["models"];
-  requestedModelApplied: boolean;
-  requestedModelResponse?: Awaited<ReturnType<AcpClient["setSessionModel"]>>;
+  modelApplication: Awaited<ReturnType<typeof applyRequestedModelIfAdvertised>>;
 };
 
 async function createSessionRecordWithClient(
@@ -53,57 +49,34 @@ async function createSessionRecordWithClient(
   const { sessionId, agentSessionId } = createdState;
 
   const lifecycle = client.getAgentLifecycleSnapshot();
-  const now = isoNow();
   const record: SessionRecord = {
-    schema: "acpx.session.v1",
-    acpxRecordId: sessionId,
-    acpSessionId: sessionId,
-    agentSessionId,
-    agentCommand: options.agentCommand,
-    agentArgv: options.agentArgv,
-    cwd,
-    name: normalizeName(options.name),
-    createdAt: now,
-    lastUsedAt: now,
-    lastSeq: 0,
+    ...createInitialSessionRecord({
+      recordId: sessionId,
+      sessionId,
+      agentSessionId,
+      agentCommand: options.agentCommand,
+      agentArgv: options.agentArgv,
+      cwd,
+      name: normalizeName(options.name),
+    }),
     lastRequestId: undefined,
-    eventLog: defaultSessionEventLog(sessionId),
-    closed: false,
-    closedAt: undefined,
     pid: lifecycle.running ? lifecycle.pid : undefined,
     agentStartedAt: lifecycle.startedAt,
     protocolVersion: client.initializeResult?.protocolVersion,
     agentCapabilities: client.initializeResult?.agentCapabilities,
-    ...createSessionConversation(now),
-    acpx: {},
   };
 
   persistSessionOptions(record, options.sessionOptions);
-  applyCreatedSessionModelState(record, createdState, options.sessionOptions?.model);
+  applyConfigOptionsToRecord(record, createdState.sessionResult);
+  applyInitialModelSelection(
+    record,
+    createdState.sessionResult.models,
+    options.sessionOptions?.model,
+    createdState.modelApplication,
+  );
 
   await writeSessionRecord(record);
   return record;
-}
-
-function applyCreatedSessionModelState(
-  record: SessionRecord,
-  state: CreatedSessionState,
-  requestedModel: string | undefined,
-): void {
-  applyConfigOptionsToRecord(record, state.sessionResult);
-  applyConfigOptionsToRecord(record, state.requestedModelResponse);
-  syncAdvertisedModelState(
-    record,
-    state.requestedModelResponse
-      ? modelStateFromConfigOptions(state.requestedModelResponse.configOptions)
-      : state.sessionModels,
-  );
-  if (state.requestedModelApplied) {
-    setCurrentModelId(
-      record,
-      currentModelIdFromSetModelResponse(state.requestedModelResponse, requestedModel),
-    );
-  }
 }
 
 async function createFreshSessionState(
@@ -125,9 +98,7 @@ async function createFreshSessionState(
     sessionId: createdSession.sessionId,
     agentSessionId: normalizeAgentSessionId(createdSession.agentSessionId),
     sessionResult: createdSession,
-    sessionModels: createdSession.models,
-    requestedModelApplied: modelApplication.applied,
-    requestedModelResponse: modelApplication.response,
+    modelApplication,
   };
 }
 
@@ -171,9 +142,7 @@ async function resumeSessionRecordWithClient(
       sessionId: options.resumeSessionId,
       agentSessionId: normalizeAgentSessionId(resumedSession.agentSessionId),
       sessionResult: resumedSession,
-      sessionModels,
-      requestedModelApplied: modelApplication.applied,
-      requestedModelResponse: modelApplication.response,
+      modelApplication,
     };
   } catch (error) {
     throw new Error(
