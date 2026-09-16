@@ -33,6 +33,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: keep existing clients synchronized when another viewer subscribes or reconnects, and serialize snapshot/poll publication to preserve patch version order.
 - Runtime/sessions: serialize turns per session record and finish cancellation and local finalization before acknowledging fresh-session preparation, preserving the reset across late writes and surfacing cleanup failures. Thanks @vincentkoc.
 - Codex/permissions: prefer offered one-time refusals that let the turn continue, and explain when safe cancellation can end the turn. Thanks @odrobnik.
+- ACP/processes: clean up witnessed POSIX descendants after bridge shutdown, startup failure, and observed exit, preserving signal inheritance and isolating late exits from replacement launches. Thanks @MertBasar0, @ma-pony, and @superWorldSavior.
 
 ## 0.16.0 - 2026-09-15
 

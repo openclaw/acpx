@@ -121,6 +121,7 @@ import {
   readMaxAcpMessageBytes,
 } from "./ndjson-stream.js";
 import { observeAcpStream } from "./observed-stream.js";
+import { ProcessDescendants } from "./process-descendants.js";
 import {
   formatSessionControlAcpSummary,
   maybeWrapSessionControlError,
@@ -142,6 +143,7 @@ const REPLAY_DRAIN_TIMEOUT_MS = 5_000;
 const DRAIN_POLL_INTERVAL_MS = 20;
 const AGENT_CLOSE_TERM_GRACE_MS = 1_500;
 const AGENT_CLOSE_KILL_GRACE_MS = 1_000;
+const AGENT_CLEANUP_BUDGET_MS = 8_000;
 const STARTUP_STDERR_MAX_CHARS = 8_192;
 const ELICITATION_CANCEL_MESSAGES = {
   inactive: "elicitation owner is no longer active",
@@ -391,6 +393,8 @@ export class AcpClient {
   private options: AcpClientOptions;
   private connection?: ClientConnection;
   private agent?: ChildProcessByStdio<Writable, Readable, Readable>;
+  private readonly agentDescendants = new WeakMap<ChildProcess, ProcessDescendants>();
+  private readonly agentCleanups = new WeakMap<ChildProcess, Promise<void>>();
   private initResult?: InitializeResponse;
   private loadedSessionId?: string;
   private eventHandlers: Pick<
@@ -662,7 +666,12 @@ export class AcpClient {
     connection.signal.addEventListener(
       "abort",
       () => {
-        this.recordAgentExit("connection_close", child.exitCode ?? null, child.signalCode ?? null);
+        this.recordAgentExit(
+          child,
+          "connection_close",
+          child.exitCode ?? null,
+          child.signalCode ?? null,
+        );
       },
       { once: true },
     );
@@ -768,6 +777,7 @@ export class AcpClient {
     }
 
     const child = requireAgentStdio(spawnedChild);
+    this.agentDescendants.set(child, new ProcessDescendants(child));
     const pid = child.pid;
     if (pid === undefined) {
       const spawnError = new AgentSpawnError(
@@ -877,6 +887,7 @@ export class AcpClient {
       params.startupFailure.dispose();
       this.connection = params.connection;
       this.initResult = initResult;
+      await this.captureAgentDescendants(params.child);
       this.log(`initialized protocol version ${initResult.protocolVersion}`);
     } catch (error) {
       params.connection.close(error);
@@ -918,15 +929,12 @@ export class AcpClient {
     error: unknown,
   ): Promise<never> {
     params.startupFailure.dispose();
+    await this.captureAgentDescendants(params.child);
     const normalizedError =
       error instanceof AcpMessageLimitError
         ? error
         : await this.normalizeInitializeError(error, params.child, params.startupStderr);
-    try {
-      params.child.kill();
-    } catch {
-      // best effort
-    }
+    await this.terminateAgentProcess(params.child);
     if (params.launch.geminiAcp && error instanceof TimeoutError) {
       throw new GeminiAcpStartupTimeoutError(
         await buildGeminiAcpStartupTimeoutMessage(params.launch.spawnCommand),
@@ -989,6 +997,7 @@ export class AcpClient {
     const configOptions = normalizeResponseConfigOptions(result);
     const models = modelStateFromSessionResponse({ configOptions, response: result });
     this.rememberSessionModels(result.sessionId, models);
+    await this.captureAgentDescendants(this.agent);
 
     return {
       sessionId: result.sessionId,
@@ -1038,6 +1047,7 @@ export class AcpClient {
     this.loadedSessionId = sessionId;
     const result = toReconnectedSessionResult(response);
     this.updateRememberedSessionModels(sessionId, result);
+    await this.captureAgentDescendants(this.agent);
     return result;
   }
 
@@ -1055,6 +1065,7 @@ export class AcpClient {
     this.loadedSessionId = sessionId;
     const result = toReconnectedSessionResult(response);
     this.updateRememberedSessionModels(sessionId, result);
+    await this.captureAgentDescendants(this.agent);
     return result;
   }
 
@@ -1536,20 +1547,54 @@ export class AcpClient {
     this.connection?.close();
   }
 
-  private async terminateAgentProcess(
+  private async captureAgentDescendants(child: ChildProcess | undefined): Promise<void> {
+    const descendants = child && this.agentDescendants.get(child);
+    if (descendants && !(await descendants.capture())) {
+      this.log("could not verify agent descendants; skipping unverified process cleanup");
+    }
+  }
+
+  private terminateAgentProcess(
     child: ChildProcessByStdio<Writable, Readable, Readable>,
   ): Promise<void> {
-    const stdinCloseGraceMs = resolveAgentCloseAfterStdinEndMs(this.options.agentCommand);
-    this.endAgentStdin(child);
-    let exited = await waitForChildExit(child, stdinCloseGraceMs);
-    exited = await this.killAgentIfRunning(child, exited, "SIGTERM", AGENT_CLOSE_TERM_GRACE_MS);
-    if (!exited) {
-      this.log(`agent did not exit after ${AGENT_CLOSE_TERM_GRACE_MS}ms; forcing SIGKILL`);
-      exited = await this.killAgentIfRunning(child, exited, "SIGKILL", AGENT_CLOSE_KILL_GRACE_MS);
+    let cleanup = this.agentCleanups.get(child);
+    if (!cleanup) {
+      cleanup = Promise.resolve().then(() => this.cleanupAgentProcess(child));
+      this.agentCleanups.set(child, cleanup);
     }
+    return cleanup;
+  }
 
-    // Ensure stdio handles don't keep this process alive after close() returns.
-    this.detachAgentHandles(child, !exited);
+  private async cleanupAgentProcess(
+    child: ChildProcessByStdio<Writable, Readable, Readable>,
+  ): Promise<void> {
+    const descendants = this.agentDescendants.get(child);
+    const deadline = Date.now() + AGENT_CLEANUP_BUDGET_MS;
+    const stdinCloseGraceMs = resolveAgentCloseAfterStdinEndMs(this.options.agentCommand);
+    try {
+      if (descendants) {
+        await descendants.capture(Math.max(1, deadline - Date.now()));
+      }
+      this.endAgentStdin(child);
+      await waitForChildExit(
+        child,
+        Math.min(stdinCloseGraceMs, Math.max(0, deadline - Date.now())),
+      );
+      const exited = await this.signalAgentAndDescendants(
+        child,
+        "SIGTERM",
+        AGENT_CLOSE_TERM_GRACE_MS,
+        deadline,
+      );
+      if (!exited) {
+        this.log("agent processes did not exit after SIGTERM; forcing SIGKILL");
+        await this.signalAgentAndDescendants(child, "SIGKILL", AGENT_CLOSE_KILL_GRACE_MS, deadline);
+      }
+    } finally {
+      descendants?.retire();
+      // Stdio must not keep acpx alive after teardown, even if an OS query failed.
+      this.detachAgentHandles(child, isChildProcessRunning(child));
+    }
   }
 
   private endAgentStdin(child: ChildProcessByStdio<Writable, Readable, Readable>): void {
@@ -1564,21 +1609,29 @@ export class AcpClient {
     }
   }
 
-  private async killAgentIfRunning(
+  private async signalAgentAndDescendants(
     child: ChildProcessByStdio<Writable, Readable, Readable>,
-    alreadyExited: boolean,
     signal: NodeJS.Signals,
     waitMs: number,
+    deadline: number,
   ): Promise<boolean> {
-    if (alreadyExited || !isChildProcessRunning(child)) {
-      return alreadyExited;
+    const descendants = this.agentDescendants.get(child);
+    if (descendants && Date.now() < deadline) {
+      await descendants.signal(signal, deadline - Date.now());
     }
-    try {
-      child.kill(signal);
-    } catch {
-      // best effort
+    if (isChildProcessRunning(child)) {
+      try {
+        child.kill(signal);
+      } catch {
+        // The direct child may have exited during descendant inspection.
+      }
     }
-    return await waitForChildExit(child, waitMs);
+    const remaining = Math.min(waitMs, Math.max(0, deadline - Date.now()));
+    const [exited, descendantsExited] = await Promise.all([
+      waitForChildExit(child, remaining),
+      descendants ? descendants.waitForExit(remaining) : Promise.resolve(true),
+    ]);
+    return exited && descendantsExited;
   }
 
   private detachAgentHandles(agent: ChildProcess, unref: boolean): void {
@@ -2095,7 +2148,8 @@ export class AcpClient {
   ): void {
     const onExit = (exitCode: number | null, signal: NodeJS.Signals | null) => {
       const exitedAt = isoNow();
-      this.recordAgentExit("process_exit", exitCode, signal);
+      this.recordAgentExit(child, "process_exit", exitCode, signal);
+      void this.terminateAgentProcess(child);
       void exitNotificationBarrier.then(() => {
         this.notifyProcessExit(startedProcess, exitCode, signal, exitedAt);
       });
@@ -2110,11 +2164,11 @@ export class AcpClient {
     }
 
     child.once("close", (exitCode, signal) => {
-      this.recordAgentExit("process_close", exitCode, signal);
+      this.recordAgentExit(child, "process_close", exitCode, signal);
     });
 
     child.stdout.once("close", () => {
-      this.recordAgentExit("pipe_close", child.exitCode ?? null, child.signalCode ?? null);
+      this.recordAgentExit(child, "pipe_close", child.exitCode ?? null, child.signalCode ?? null);
     });
   }
 
@@ -2168,11 +2222,12 @@ export class AcpClient {
   }
 
   private recordAgentExit(
+    child: ChildProcess,
     reason: AgentDisconnectReason,
     exitCode: number | null,
     signal: NodeJS.Signals | null,
   ): void {
-    if (this.lastAgentExit) {
+    if (this.agent !== child || this.lastAgentExit) {
       return;
     }
 

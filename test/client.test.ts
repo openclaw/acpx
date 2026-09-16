@@ -101,6 +101,7 @@ type ClientInternals = {
   handleSessionUpdate?: (notification: { sessionId: string }) => Promise<void>;
   waitForSessionUpdateDrain?: (idleMs: number, timeoutMs: number) => Promise<void>;
   recordAgentExit?: (
+    child: ClientInternals["agent"],
     reason: "process_exit" | "process_close" | "pipe_close" | "connection_close",
     exitCode: number | null,
     signal: NodeJS.Signals | null,
@@ -1193,8 +1194,8 @@ test("AcpClient lifecycle snapshot and cancel helpers reflect active prompt stat
   assert.equal(await client.requestCancelActivePrompt(), true);
   assert.equal(cancelledSessionId, "session-3");
 
-  internals.recordAgentExit?.("process_exit", 1, "SIGTERM");
-  internals.recordAgentExit?.("pipe_close", 0, null);
+  internals.recordAgentExit?.(internals.agent, "process_exit", 1, "SIGTERM");
+  internals.recordAgentExit?.(internals.agent, "pipe_close", 0, null);
   const snapshot = client.getAgentLifecycleSnapshot();
   assert.equal(snapshot.pid, 4321);
   assert.equal(snapshot.startedAt, "2026-01-01T00:00:00.000Z");
@@ -1953,7 +1954,7 @@ test("AcpClient does not submit a prompt after agent exit settles the queued req
   const pending = client.prompt("session-exited-before-start", "hello", () => {
     reported = true;
   });
-  internals.recordAgentExit?.("connection_close", null, null);
+  internals.recordAgentExit?.(internals.agent, "connection_close", null, null);
 
   await assert.rejects(pending, AgentDisconnectedError);
   await Promise.resolve();
@@ -1992,7 +1993,7 @@ test("AcpClient prompt rejects when the agent disconnects mid-prompt", async () 
   };
 
   const pending = client.prompt("session-5", "sleep 60000");
-  internals.recordAgentExit?.("connection_close", null, null);
+  internals.recordAgentExit?.(internals.agent, "connection_close", null, null);
 
   const result = await Promise.race([
     pending.then(
@@ -2273,15 +2274,18 @@ test("AcpClient rejects when the agent exits during successful spawned admission
   assert.deepEqual(observed, ["spawned:start", "spawned:end", "exit"]);
 });
 
-test("AcpClient reports an exit recorded before lifecycle observers attach", async () => {
+test("AcpClient reports a prior launch exit without invalidating the current launch", async (t) => {
   const observed: Array<{ exitCode: number | null; signal: NodeJS.Signals | null }> = [];
   const client = makeClient({
+    agentCommand: process.execPath,
+    agentArgv: [process.execPath, path.join(process.cwd(), "dist-test", "test", "mock-agent.js")],
     processLifecycle: {
       onExit: ({ exitCode, signal }) => {
         observed.push({ exitCode, signal });
       },
     },
   });
+  t.after(async () => await client.close());
   const child = spawn(process.execPath, ["--eval", "process.exit(17)"], {
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -2290,6 +2294,7 @@ test("AcpClient reports an exit recorded before lifecycle observers attach", asy
     child.once("exit", () => resolve());
   });
   assert.equal(child.exitCode, 17);
+  await client.start();
 
   const startedProcess: AcpProcessStarted = Object.freeze({
     launchId: "already-exited-launch",
@@ -2305,6 +2310,8 @@ test("AcpClient reports an exit recorded before lifecycle observers attach", asy
   await new Promise<void>((resolve) => setImmediate(resolve));
 
   assert.deepEqual(observed, [{ exitCode: 17, signal: null }]);
+  assert.equal(client.getAgentLifecycleSnapshot().lastExit, undefined);
+  assert.equal(client.getAgentLifecycleSnapshot().running, true);
 });
 
 test("AcpClient start fails fast when the agent exits during initialize", async () => {
