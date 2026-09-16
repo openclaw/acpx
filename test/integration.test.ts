@@ -3992,70 +3992,54 @@ test("integration: prompt recovers when loadSession fails on empty session witho
   });
 });
 
-test("integration: prompt retries stop after partial prompt output", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
-
-    try {
-      const created = await runCli([...baseAgentArgs(cwd), "sessions", "new"], homeDir);
-      assert.equal(created.code, 0, created.stderr);
-
-      const result = await runCli(
-        [
-          ...baseAgentArgs(cwd),
-          "--format",
-          "json",
-          "--prompt-retries",
-          "1",
-          "prompt",
-          "partial-retryable-error",
-        ],
-        homeDir,
-      );
-      assert.notEqual(result.code, 0, result.stderr);
-      assert.equal(result.stderr.includes("retrying in"), false, result.stderr);
-
-      const payloads = parseJsonRpcOutputLines(result.stdout);
-      const partialUpdates = payloads.filter(
-        (payload) => extractAgentMessageChunkText(payload) === "partial update",
-      );
-      assert.equal(partialUpdates.length, 1, result.stdout);
-    } finally {
-      await fs.rm(cwd, { recursive: true, force: true });
-    }
-  });
-});
-
-test("integration: exec retries stop after partial prompt output", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
-
-    try {
-      const result = await runCli(
-        [
-          ...baseAgentArgs(cwd),
-          "--format",
-          "json",
-          "--prompt-retries",
-          "1",
-          "exec",
-          "partial-retryable-error",
-        ],
-        homeDir,
-      );
-      assert.equal(result.code, 1, result.stderr);
-      assert.equal(result.stderr.includes("retrying in"), false, result.stderr);
-
-      const payloads = parseJsonRpcOutputLines(result.stdout);
-      const partialUpdates = payloads.filter(
-        (payload) => extractAgentMessageChunkText(payload) === "partial update",
-      );
-      assert.equal(partialUpdates.length, 1, result.stdout);
-    } finally {
-      await fs.rm(cwd, { recursive: true, force: true });
-    }
-  });
-});
+for (const command of ["prompt", "exec"]) {
+  for (const prompt of ["partial-retryable-error", "late-retryable-error"]) {
+    test(`integration: ${command} stops retries after ${prompt}`, async () => {
+      await withTempHome(async (homeDir) => {
+        const cwd = path.join(homeDir, "workspace");
+        await fs.mkdir(cwd);
+        try {
+          if (command === "prompt") {
+            const created = await runCli([...baseAgentArgs(cwd), "sessions", "new"], homeDir);
+            assert.equal(created.code, 0, created.stderr);
+          }
+          const result = await runCli(
+            [...baseAgentArgs(cwd), "--format", "json", "--prompt-retries", "1", command, prompt],
+            homeDir,
+          );
+          assert.equal(result.code, 1, result.stderr);
+          assert.equal(
+            result.stderr.includes("retrying in"),
+            command === "exec" && prompt === "late-retryable-error",
+            result.stderr,
+          );
+          const payloads = parseJsonRpcOutputLines(result.stdout);
+          const errorIndex = payloads.findIndex((payload) => Object.hasOwn(payload, "error"));
+          const updateIndex = payloads.findIndex(
+            (payload) => extractAgentMessageChunkText(payload) === "partial update",
+          );
+          assert.ok(errorIndex >= 0, result.stdout);
+          assert.equal(updateIndex > errorIndex, prompt === "late-retryable-error", result.stdout);
+          assert.equal(
+            payloads.filter((payload) => payload.method === "session/prompt").length,
+            1,
+            result.stdout,
+          );
+          assert.equal(
+            payloads.filter((payload) => extractAgentMessageChunkText(payload) === "partial update")
+              .length,
+            1,
+            result.stdout,
+          );
+        } finally {
+          if (command === "prompt") {
+            await runCli([...baseAgentArgs(cwd), "sessions", "close"], homeDir);
+          }
+        }
+      });
+    });
+  }
+}
 
 test("integration: prompt recovers when loadSession returns not found without emitting load error", async () => {
   await withTempHome(async (homeDir) => {

@@ -1004,9 +1004,15 @@ class MockAgent implements Agent {
     session.pendingPrompt = promptAbort;
     const text = getPromptText(params.prompt);
 
-    if (text === "partial-retryable-error") {
+    if (text === "partial-retryable-error" || text === "late-retryable-error") {
       try {
-        await this.sendAssistantMessage(params.sessionId, "partial update");
+        if (text === "late-retryable-error") {
+          setTimeout(() => {
+            void this.sendAssistantMessage(params.sessionId, "partial update").catch(() => {});
+          }, 50);
+        } else {
+          await this.sendAssistantMessage(params.sessionId, "partial update");
+        }
         const error = new Error("Internal error") as Error & {
           code: number;
           data: {

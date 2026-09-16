@@ -421,43 +421,26 @@ function emitPromptDisconnectNotice(
   );
 }
 
-function shouldRetryRuntimePrompt(
-  error: unknown,
-  attempt: number,
-  maxRetries: number,
-  snapshot: ReturnType<AcpClient["getAgentLifecycleSnapshot"]>,
-  hasSideEffects: () => boolean,
-): boolean {
-  if (!shouldRetryPromptAttempt(error, attempt, maxRetries, hasSideEffects)) {
-    return false;
-  }
-  return snapshot.lastExit?.unexpectedDuringPrompt !== true;
-}
-
-function shouldRetryPromptAttempt(
+async function preparePromptRetry(
   error: unknown,
   attempt: number,
   maxRetries: number,
   hasSideEffects: () => boolean,
-): boolean {
-  return attempt < maxRetries && !hasSideEffects() && isRetryablePromptError(error);
-}
-
-async function waitBeforePromptRetry(
-  error: unknown,
-  attempt: number,
-  maxRetries: number,
   suppressSdkConsoleErrors?: boolean,
-): Promise<void> {
-  const delayMs = Math.min(1_000 * 2 ** attempt, 10_000);
-  emitPromptRetryNotice({
-    error,
-    delayMs,
-    attempt: attempt + 1,
-    maxRetries,
-    suppressSdkConsoleErrors,
-  });
-  await waitMs(delayMs);
+): Promise<boolean> {
+  if (attempt < maxRetries && !hasSideEffects() && isRetryablePromptError(error)) {
+    const delayMs = Math.min(1_000 * 2 ** attempt, 10_000);
+    emitPromptRetryNotice({
+      error,
+      delayMs,
+      attempt: attempt + 1,
+      maxRetries,
+      suppressSdkConsoleErrors,
+    });
+    await waitMs(delayMs);
+    return !hasSideEffects();
+  }
+  return false;
 }
 
 type QueuedTaskRuntimeOptions = Parameters<typeof runQueuedTask>[2];
@@ -886,26 +869,21 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     return response;
   };
 
-  const handlePromptFailure = async (error: unknown, attempt: number): Promise<"retry"> => {
+  const handlePromptFailure = async (error: unknown, attempt: number): Promise<void> => {
     const snapshot = client.getAgentLifecycleSnapshot();
     if (
-      shouldRetryRuntimePrompt(
+      snapshot.lastExit?.unexpectedDuringPrompt !== true &&
+      (await preparePromptRetry(
         error,
         attempt,
         options.promptRetries ?? 0,
-        snapshot,
         () => promptTurnHadSideEffects,
-      )
-    ) {
-      await waitBeforePromptRetry(
-        error,
-        attempt,
-        options.promptRetries ?? 0,
         options.suppressSdkConsoleErrors,
-      );
-      return promptTurnHadSideEffects ? await failRuntimePrompt(error, snapshot) : "retry";
+      ))
+    ) {
+      return;
     }
-    return await failRuntimePrompt(error, snapshot);
+    await failRuntimePrompt(error, snapshot);
   };
 
   const failRuntimePrompt = async (
@@ -940,9 +918,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
       try {
         return await runPromptAttempt(sessionId, attempt);
       } catch (error) {
-        if ((await handlePromptFailure(error, attempt)) === "retry") {
-          continue;
-        }
+        await handlePromptFailure(error, attempt);
       }
     }
   };
@@ -1101,11 +1077,16 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
       try {
         return await runExecPromptAttempt(sessionId);
       } catch (error) {
-        if (shouldRetryPromptAttempt(error, attempt, maxRetries, () => promptTurnHadSideEffects)) {
-          await waitBeforePromptRetry(error, attempt, maxRetries, options.suppressSdkConsoleErrors);
-          if (!promptTurnHadSideEffects) {
-            continue;
-          }
+        if (
+          await preparePromptRetry(
+            error,
+            attempt,
+            maxRetries,
+            () => promptTurnHadSideEffects,
+            options.suppressSdkConsoleErrors,
+          )
+        ) {
+          continue;
         }
         promptTurnActive = false;
         throw error;
