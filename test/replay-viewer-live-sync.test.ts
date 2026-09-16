@@ -6,7 +6,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { WebSocket } from "ws";
-import { createFilesystemRunSource } from "../examples/flows/replay-viewer/server/live-source.js";
+import {
+  createFilesystemRunSource,
+  type ViewerRunSource,
+} from "../examples/flows/replay-viewer/server/live-source.js";
 import {
   computeResourceDelta,
   createReplayLiveSyncServer,
@@ -77,6 +80,216 @@ test("replay viewer rejects malformed messages and isolates invalid frames", asy
     await closeSocket(socket);
     await viewer.close();
     await fs.rm(runsDir, { recursive: true, force: true });
+  }
+});
+
+for (const { resource, overlap } of [
+  { resource: "runs", overlap: false },
+  { resource: "run", overlap: false },
+  { resource: "runs", overlap: true },
+  { resource: "run", overlap: true },
+] as const) {
+  test(`replay viewer publishes ${resource} refreshes to existing subscribers${overlap ? " during polling" : ""}`, async () => {
+    const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-refresh-"));
+    const runId = "shared-run";
+    await writeRunBundle(runsDir, {
+      runId,
+      flowName: "shared-flow",
+      runTitle: "Shared subscriber proof",
+      startedAt: "2026-09-15T00:00:00.000Z",
+      updatedAt: "2026-09-15T00:00:00.000Z",
+      projectedStatus: "running",
+      liveStatus: "running",
+      currentNode: "extract_intent",
+      steps: [],
+    });
+    const filesystem = createFilesystemRunSource(runsDir);
+    const runs = await filesystem.getRunsState();
+    const run = await filesystem.getRunState(runId);
+    let holdNextRead = false;
+    let releaseRead!: () => void;
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let reportRead!: () => void;
+    const readStarted = new Promise<void>((resolve) => {
+      reportRead = resolve;
+    });
+    const beforeRead = async () => {
+      if (holdNextRead) {
+        holdNextRead = false;
+        reportRead();
+        await readGate;
+      }
+    };
+    const viewer = await createReplayViewerServer({
+      host: "127.0.0.1",
+      port: 0,
+      runsDir,
+      livePollIntervalMs: overlap ? 50 : 60_000,
+      source: {
+        getRunsState: async () => {
+          await beforeRead();
+          return structuredClone(runs);
+        },
+        getRunState: async () => {
+          await beforeRead();
+          return structuredClone(run);
+        },
+      },
+    });
+    const first = new WebSocket(viewer.baseUrl.replace(/^http/, "ws") + "/api/live");
+    const second = new WebSocket(viewer.baseUrl.replace(/^http/, "ws") + "/api/live");
+    const firstInbox = createMessageInbox(first);
+    const secondInbox = createMessageInbox(second);
+    const subscription =
+      resource === "runs" ? { type: "subscribe_runs" } : { type: "subscribe_run", runId };
+    try {
+      await Promise.all([onceOpen(first), onceOpen(second)]);
+      first.send(JSON.stringify(subscription));
+      const initial = await firstInbox.next(
+        (message) => message.type === "runs_snapshot" || message.type === "run_snapshot",
+      );
+      if (overlap) {
+        holdNextRead = true;
+        await readStarted;
+      }
+      runs.runsById[runId].status = "completed";
+      run.run.status = "completed";
+      second.send(JSON.stringify(subscription));
+      if (overlap) {
+        second.send(JSON.stringify({ type: "ping" }));
+        await secondInbox.next((message) => message.type === "pong");
+        releaseRead();
+      }
+      const current = await secondInbox.next(
+        (message) =>
+          message.type === "runs_snapshot" ||
+          message.type === "run_snapshot" ||
+          message.type === "runs_patch" ||
+          message.type === "run_patch",
+      );
+      assert(
+        current.type === "runs_snapshot" || current.type === "run_snapshot",
+        "new subscribers need a snapshot before patches",
+      );
+      first.send(JSON.stringify({ type: "ping" }));
+      const update = await firstInbox.next(
+        (message) =>
+          message.type === "runs_patch" || message.type === "run_patch" || message.type === "pong",
+      );
+      assert.notEqual(
+        update.type,
+        "pong",
+        "a peer snapshot must not consume an unpublished version",
+      );
+      assert(update.type === "runs_patch" || update.type === "run_patch");
+      assert.equal(update.fromVersion, initial.version);
+      assert.equal(update.toVersion, current.version);
+      assert.deepEqual(applyReplayPatch(initial.state, update.ops), current.state);
+    } finally {
+      releaseRead();
+      await Promise.all([closeSocket(first), closeSocket(second)]);
+      await viewer.close();
+      await fs.rm(runsDir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("replay viewer recovers a subscription whose initial read failed", async () => {
+  let fail = true;
+  const viewer = await createReplayViewerServer({
+    host: "127.0.0.1",
+    port: 0,
+    runsDir: "/synthetic/replay",
+    livePollIntervalMs: 60_000,
+    source: {
+      getRunsState: async () => {
+        if (fail) {
+          fail = false;
+          throw new Error("transient read failure");
+        }
+        return buildViewerRunsState([]);
+      },
+      getRunState: async () => {
+        throw new Error("unexpected selected run read");
+      },
+    },
+  });
+  const socket = new WebSocket(viewer.baseUrl.replace(/^http/, "ws") + "/api/live");
+  const inbox = createMessageInbox(socket);
+  try {
+    await onceOpen(socket);
+    socket.send(JSON.stringify({ type: "subscribe_runs" }));
+    assert.equal((await inbox.next((message) => message.type === "error")).code, "internal_error");
+    socket.send(JSON.stringify({ type: "ping" }));
+    const recovered = await inbox.next(
+      (message) => message.type === "runs_snapshot" || message.type === "pong",
+    );
+    assert.equal(recovered.type, "runs_snapshot", "recovery must establish the missing snapshot");
+  } finally {
+    await closeSocket(socket);
+    await viewer.close();
+  }
+});
+
+test("replay viewer discards refresh work from a disconnected requester", async () => {
+  let reads = 0;
+  let hold = false;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let started!: () => void;
+  const reading = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const viewer = await createReplayViewerServer({
+    host: "127.0.0.1",
+    port: 0,
+    runsDir: "/synthetic/replay",
+    livePollIntervalMs: 60_000,
+    source: {
+      getRunsState: async () => {
+        reads += 1;
+        if (hold) {
+          hold = false;
+          started();
+          await gate;
+        }
+        return buildViewerRunsState([]);
+      },
+      getRunState: async () => {
+        throw new Error("unexpected selected run read");
+      },
+    },
+  });
+  const first = new WebSocket(viewer.baseUrl.replace(/^http/, "ws") + "/api/live");
+  const requester = new WebSocket(viewer.baseUrl.replace(/^http/, "ws") + "/api/live");
+  const firstInbox = createMessageInbox(first);
+  const requesterInbox = createMessageInbox(requester);
+  try {
+    await Promise.all([onceOpen(first), onceOpen(requester)]);
+    first.send(JSON.stringify({ type: "subscribe_runs" }));
+    await firstInbox.next((message) => message.type === "runs_snapshot");
+    hold = true;
+    requester.send(JSON.stringify({ type: "subscribe_runs" }));
+    await reading;
+    const beforeBurst = reads;
+    for (let index = 0; index < 25; index++) {
+      requester.send(JSON.stringify({ type: "resync_runs" }));
+    }
+    requester.send(JSON.stringify({ type: "ping" }));
+    await requesterInbox.next((message) => message.type === "pong");
+    await closeSocket(requester);
+    release();
+    first.send(JSON.stringify({ type: "ping" }));
+    await firstInbox.next((message) => message.type === "pong");
+    assert.equal(reads, beforeBurst, "disconnected requests must not leave a read backlog");
+  } finally {
+    release();
+    await Promise.all([closeSocket(first), closeSocket(requester)]);
+    await viewer.close();
   }
 });
 
@@ -585,9 +798,10 @@ async function createReplayViewerServer(options: {
   port: number;
   runsDir: string;
   livePollIntervalMs: number;
+  source?: ViewerRunSource;
 }): Promise<{ baseUrl: string; close(): Promise<void> }> {
   const liveSyncServer = createReplayLiveSyncServer({
-    source: createFilesystemRunSource(options.runsDir),
+    source: options.source ?? createFilesystemRunSource(options.runsDir),
     pollIntervalMs: options.livePollIntervalMs,
   });
   const server = http.createServer((_request, response) => {

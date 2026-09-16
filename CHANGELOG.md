@@ -27,6 +27,7 @@ Repo: https://github.com/openclaw/acpx
 - Conformance runner: reject successful operations when a case expects an error, and clear shutdown timers after the adapter exits.
 - Sessions: retain metadata updates received during saved-model replay and keep the adapter's later configuration acknowledgement authoritative.
 - Flows: settle pending ACP capture writes before reporting a prompt result, surface bundle write failures without crashing, and preserve visible adapter errors.
+- Replay viewer: keep existing clients synchronized when another viewer subscribes or reconnects, and serialize snapshot/poll publication to preserve patch version order.
 
 ## 0.16.0 - 2026-09-15
 

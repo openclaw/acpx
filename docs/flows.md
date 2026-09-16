@@ -169,7 +169,8 @@ The viewer is read-only. It opens a saved bundle and lets you inspect what happe
 
 Malformed HTTP or WebSocket input is rejected without stopping the viewer.
 Corrupt bundle metadata is skipped, and transient read failures do not prevent
-subsequent live updates.
+subsequent live updates. Opening or reconnecting another viewer preserves updates
+for clients that are already subscribed.
 
 ## Example flows in the source tree
 

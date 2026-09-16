@@ -32,6 +32,8 @@ type ReplayLiveSyncOptions = {
 type ResourceState<TState> = {
   version: number;
   state: TState | null;
+  pending?: Promise<void>;
+  snapshotRequests: Set<ClientSubscriptionState>;
 };
 
 type ResourceDelta<TState> =
@@ -39,10 +41,12 @@ type ResourceDelta<TState> =
   | { kind: "patch"; ops: ReplayJsonPatchOperation[] }
   | { kind: "snapshot"; state: TState };
 
+type SubscriptionState = "pending" | "active";
+
 type ClientSubscriptionState = {
   socket: WebSocket;
-  wantsRuns: boolean;
-  runIds: Set<string>;
+  runsSubscription?: SubscriptionState;
+  runSubscriptions: Map<string, SubscriptionState>;
 };
 
 export type ReplayLiveSyncServer = {
@@ -74,6 +78,7 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
   const runsResource: ResourceState<ViewerRunsState> = {
     version: 0,
     state: null,
+    snapshotRequests: new Set(),
   };
   const runResources = new Map<string, ResourceState<ViewerRunLiveState>>();
   let pollTimer: NodeJS.Timeout | null = null;
@@ -82,8 +87,7 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
   server.on("connection", (socket) => {
     const client: ClientSubscriptionState = {
       socket,
-      wantsRuns: false,
-      runIds: new Set<string>(),
+      runSubscriptions: new Map(),
     };
     clients.add(client);
     sendMessage(socket, {
@@ -99,6 +103,10 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
     socket.on("error", () => socket.terminate());
     socket.on("close", () => {
       clients.delete(client);
+      runsResource.snapshotRequests.delete(client);
+      for (const resource of runResources.values()) {
+        resource.snapshotRequests.delete(client);
+      }
       pruneRunResources();
       refreshPollingState();
     });
@@ -135,22 +143,27 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
         return;
       case "subscribe_runs":
       case "resync_runs":
-        client.wantsRuns = true;
+        client.runsSubscription ??= "pending";
         await sendRunsSnapshot(client);
         refreshPollingState();
         return;
       case "unsubscribe_runs":
-        client.wantsRuns = false;
+        client.runsSubscription = undefined;
+        runsResource.snapshotRequests.delete(client);
         refreshPollingState();
         return;
       case "subscribe_run":
       case "resync_run":
-        client.runIds.add(message.runId);
+        client.runSubscriptions.set(
+          message.runId,
+          client.runSubscriptions.get(message.runId) ?? "pending",
+        );
         await sendRunSnapshot(client, message.runId);
         refreshPollingState();
         return;
       case "unsubscribe_run":
-        client.runIds.delete(message.runId);
+        client.runSubscriptions.delete(message.runId);
+        runResources.get(message.runId)?.snapshotRequests.delete(client);
         pruneRunResources();
         refreshPollingState();
         return;
@@ -159,28 +172,23 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
 
   async function sendRunsSnapshot(client: ClientSubscriptionState): Promise<void> {
     try {
-      const resource = await refreshRunsState();
-      sendMessage(client.socket, {
-        type: "runs_snapshot",
-        version: resource.version,
-        state: resource.state,
-      });
+      await refreshRunsState(client);
     } catch (error) {
-      sendInternalError(client.socket, error);
+      if (client.runsSubscription) {
+        sendInternalError(client.socket, error);
+      }
     }
   }
 
   async function sendRunSnapshot(client: ClientSubscriptionState, runId: string): Promise<void> {
     try {
-      const resource = await refreshRunState(runId);
-      sendMessage(client.socket, {
-        type: "run_snapshot",
-        runId,
-        version: resource.version,
-        state: resource.state,
-      });
+      await refreshRunState(runId, client);
     } catch (error) {
-      client.runIds.delete(runId);
+      if (!client.runSubscriptions.delete(runId)) {
+        return;
+      }
+      runResources.get(runId)?.snapshotRequests.delete(client);
+      pruneRunResources();
       sendMessage(client.socket, {
         type: "error",
         code: "run_not_found",
@@ -190,74 +198,88 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
     }
   }
 
-  async function ensureRunsState(): Promise<{ version: number; state: ViewerRunsState }> {
-    if (runsResource.state == null) {
-      runsResource.state = await source.getRunsState();
-      runsResource.version = 1;
+  function refreshRunsState(snapshotClient?: ClientSubscriptionState): Promise<void> {
+    if (snapshotClient) {
+      runsResource.snapshotRequests.add(snapshotClient);
     }
-    return {
-      version: runsResource.version,
-      state: runsResource.state,
-    };
-  }
-
-  async function refreshRunsState(): Promise<{ version: number; state: ViewerRunsState }> {
-    const nextState = await source.getRunsState();
-
-    if (runsResource.state == null) {
-      runsResource.state = nextState;
-      runsResource.version = 1;
-    } else {
-      const delta = computeResourceDelta(runsResource.state, nextState);
-      if (delta.kind !== "noop") {
-        runsResource.version += 1;
-        runsResource.state = nextState;
-      }
-    }
-
-    return {
-      version: runsResource.version,
-      state: runsResource.state,
-    };
-  }
-
-  async function ensureRunState(
-    runId: string,
-  ): Promise<{ version: number; state: ViewerRunLiveState }> {
-    const resource = runResources.get(runId) ?? { version: 0, state: null };
-    if (resource.state == null) {
-      resource.state = await source.getRunState(runId);
-      resource.version = 1;
-      runResources.set(runId, resource);
-    }
-    return {
-      version: resource.version,
-      state: resource.state,
-    };
+    return refreshResource(
+      runsResource,
+      () => source.getRunsState(),
+      (state, version, delta, fromVersion) => {
+        for (const client of clients) {
+          if (!client.runsSubscription) {
+            continue;
+          }
+          if (
+            client.runsSubscription === "pending" ||
+            runsResource.snapshotRequests.has(client) ||
+            delta.kind === "snapshot"
+          ) {
+            client.runsSubscription = "active";
+            sendMessage(client.socket, { type: "runs_snapshot", version, state });
+          } else if (delta.kind === "patch") {
+            sendMessage(client.socket, {
+              type: "runs_patch",
+              fromVersion,
+              toVersion: version,
+              ops: delta.ops,
+            });
+          }
+        }
+      },
+    );
   }
 
   async function refreshRunState(
     runId: string,
-  ): Promise<{ version: number; state: ViewerRunLiveState }> {
-    const resource = runResources.get(runId) ?? { version: 0, state: null };
-    const nextState = await source.getRunState(runId);
-
-    if (resource.state == null) {
-      resource.state = nextState;
-      resource.version = 1;
-    } else {
-      const delta = computeResourceDelta(resource.state, nextState);
-      if (delta.kind !== "noop") {
-        resource.version += 1;
-        resource.state = nextState;
+    snapshotClient?: ClientSubscriptionState,
+  ): Promise<void> {
+    const resource: ResourceState<ViewerRunLiveState> = runResources.get(runId) ?? {
+      version: 0,
+      state: null,
+      snapshotRequests: new Set(),
+    };
+    runResources.set(runId, resource);
+    if (snapshotClient) {
+      resource.snapshotRequests.add(snapshotClient);
+    }
+    try {
+      await refreshResource(
+        resource,
+        () => source.getRunState(runId),
+        (state, version, delta, fromVersion) => {
+          if (runResources.get(runId) !== resource) {
+            return;
+          }
+          for (const client of clients) {
+            const subscription = client.runSubscriptions.get(runId);
+            if (!subscription) {
+              continue;
+            }
+            if (
+              subscription === "pending" ||
+              resource.snapshotRequests.has(client) ||
+              delta.kind === "snapshot"
+            ) {
+              client.runSubscriptions.set(runId, "active");
+              sendMessage(client.socket, { type: "run_snapshot", runId, version, state });
+            } else if (delta.kind === "patch") {
+              sendMessage(client.socket, {
+                type: "run_patch",
+                runId,
+                fromVersion,
+                toVersion: version,
+                ops: delta.ops,
+              });
+            }
+          }
+        },
+      );
+    } catch (error) {
+      if (runResources.get(runId) === resource) {
+        throw error;
       }
     }
-
-    runResources.set(runId, resource);
-    return {
-      version: resource.version,
-      state: resource.state,
-    };
   }
 
   function refreshPollingState(): void {
@@ -284,64 +306,18 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
 
     try {
       if (hasRunsSubscribers()) {
-        const resource = await ensureRunsState();
-        const nextState = await source.getRunsState();
-        const delta = computeResourceDelta(resource.state, nextState);
-        if (delta.kind !== "noop") {
-          const fromVersion = runsResource.version;
-          runsResource.version += 1;
-          runsResource.state = nextState;
-          if (delta.kind === "patch") {
-            broadcast((client) => client.wantsRuns, {
-              type: "runs_patch",
-              fromVersion,
-              toVersion: runsResource.version,
-              ops: delta.ops,
-            });
-          } else {
-            broadcast((client) => client.wantsRuns, {
-              type: "runs_snapshot",
-              version: runsResource.version,
-              state: nextState,
-            });
-          }
-        }
+        await refreshRunsState();
       }
 
       for (const runId of getSubscribedRunIds()) {
         try {
-          const resource = await ensureRunState(runId);
-          const nextState = await source.getRunState(runId);
-          const delta = computeResourceDelta(resource.state, nextState);
-          if (delta.kind === "noop") {
-            continue;
-          }
-          const fromVersion = resource.version;
-          resource.version += 1;
-          resource.state = nextState;
-          runResources.set(runId, resource);
-          if (delta.kind === "patch") {
-            broadcast((client) => client.runIds.has(runId), {
-              type: "run_patch",
-              runId,
-              fromVersion,
-              toVersion: resource.version,
-              ops: delta.ops,
-            });
-          } else {
-            broadcast((client) => client.runIds.has(runId), {
-              type: "run_snapshot",
-              runId,
-              version: resource.version,
-              state: nextState,
-            });
-          }
+          await refreshRunState(runId);
         } catch (error) {
           for (const client of clients) {
-            if (!client.runIds.has(runId)) {
+            if (!client.runSubscriptions.has(runId)) {
               continue;
             }
-            client.runIds.delete(runId);
+            client.runSubscriptions.delete(runId);
             sendMessage(client.socket, {
               type: "error",
               code: "run_not_found",
@@ -357,7 +333,7 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
       refreshPollingState();
     } catch (error) {
       for (const client of clients) {
-        if (client.wantsRuns) {
+        if (client.runsSubscription) {
           sendInternalError(client.socket, error);
         }
       }
@@ -377,7 +353,7 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
 
   function hasRunsSubscribers(): boolean {
     for (const client of clients) {
-      if (client.wantsRuns) {
+      if (client.runsSubscription) {
         return true;
       }
     }
@@ -387,22 +363,11 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
   function getSubscribedRunIds(): Set<string> {
     const runIds = new Set<string>();
     for (const client of clients) {
-      for (const runId of client.runIds) {
+      for (const runId of client.runSubscriptions.keys()) {
         runIds.add(runId);
       }
     }
     return runIds;
-  }
-
-  function broadcast(
-    predicate: (client: ClientSubscriptionState) => boolean,
-    message: ReplayServerMessage,
-  ): void {
-    for (const client of clients) {
-      if (predicate(client)) {
-        sendMessage(client.socket, message);
-      }
-    }
   }
 
   function handleUpgrade(
@@ -443,6 +408,38 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
     handleUpgrade,
     close,
   };
+}
+
+function refreshResource<TState extends object>(
+  resource: ResourceState<TState>,
+  read: () => Promise<TState>,
+  publish: (
+    state: TState,
+    version: number,
+    delta: ResourceDelta<TState>,
+    fromVersion: number,
+  ) => void,
+): Promise<void> {
+  if (resource.pending) {
+    return resource.pending;
+  }
+  resource.pending = (async () => {
+    const next = await read();
+    const delta: ResourceDelta<TState> =
+      resource.state === null
+        ? { kind: "snapshot", state: next }
+        : computeResourceDelta(resource.state, next);
+    const fromVersion = resource.version;
+    resource.state = next;
+    if (delta.kind !== "noop") {
+      resource.version += 1;
+    }
+    publish(next, resource.version, delta, fromVersion);
+    resource.snapshotRequests.clear();
+  })().finally(() => {
+    resource.pending = undefined;
+  });
+  return resource.pending;
 }
 
 function sendMessage(socket: WebSocket, message: ReplayServerMessage): void {
