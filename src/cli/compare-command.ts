@@ -1,16 +1,8 @@
 import { performance } from "node:perf_hooks";
 import { Command, InvalidArgumentError } from "commander";
 import { TimeoutError } from "../async-control.js";
-import { loadPermissionPolicySpec } from "../permission-policy.js";
 import { runOnce } from "../session/session.js";
 import type {
-  AcpJsonRpcMessage,
-  OutputErrorAcpPayload,
-  OutputErrorCode,
-  OutputErrorOrigin,
-  OutputFormatter,
-  OutputFormatterContext,
-  PermissionEscalationEvent,
   PermissionPolicy,
   PermissionStats,
   PromptInput,
@@ -28,6 +20,12 @@ import {
   resolveOutputPolicy,
   resolvePermissionMode,
 } from "./flags.js";
+import {
+  sessionOptionsFromGlobalFlags,
+  sessionConnectionOptions,
+  resolvePermissionPolicyFromFlags,
+} from "./invocation-options.js";
+import { DISCARD_OUTPUT_FORMATTER } from "./output/discard.js";
 import { readPromptInput } from "./prompt-input.js";
 
 const DEFAULT_COMPARE_TIMEOUT_MS = 300_000;
@@ -63,38 +61,7 @@ type CompareFlags = {
 type RunCapture = {
   finalMessage: string;
   usage: SessionTokenUsage;
-  errors: string[];
 };
-
-class CaptureFormatter implements OutputFormatter {
-  setContext(_context: OutputFormatterContext): void {
-    // Compare renders one summarized row per agent instead of streaming each turn.
-  }
-
-  onAcpMessage(_message: AcpJsonRpcMessage): void {
-    // The live update callback below owns summary extraction.
-  }
-
-  onError(params: {
-    code: OutputErrorCode;
-    detailCode?: string;
-    origin?: OutputErrorOrigin;
-    message: string;
-    retryable?: boolean;
-    acp?: OutputErrorAcpPayload;
-    timestamp?: string;
-  }): void {
-    void params;
-  }
-
-  onPermissionEscalation(_event: PermissionEscalationEvent): void {
-    // Permission counts come from RunPromptResult.permissionStats.
-  }
-
-  flush(): void {
-    // no-op
-  }
-}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -208,26 +175,6 @@ function rowStatusFromPermissionStats(stats: PermissionStats): CompareRow["statu
   return deniedOrCancelled > 0 ? "permission_denied" : "ok";
 }
 
-function sessionOptionsFromGlobalFlags(globalFlags: ReturnType<typeof resolveGlobalFlags>) {
-  return {
-    model: globalFlags.model,
-    allowedTools: globalFlags.allowedTools,
-    maxTurns: globalFlags.maxTurns,
-    systemPrompt: globalFlags.systemPrompt,
-  };
-}
-
-async function resolvePermissionPolicyFromFlags(
-  globalFlags: ReturnType<typeof resolveGlobalFlags>,
-): Promise<PermissionPolicy | undefined> {
-  try {
-    return await loadPermissionPolicySpec(globalFlags.permissionPolicy, globalFlags.cwd);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new InvalidArgumentError(`Invalid permission policy: ${message}`);
-  }
-}
-
 function buildSuccessRow(
   agentName: string,
   result: Awaited<ReturnType<typeof runOnce>>,
@@ -285,29 +232,22 @@ async function runAgentForCompare(params: {
   globalFlags: ReturnType<typeof resolveGlobalFlags>;
   permissionPolicy: PermissionPolicy | undefined;
 }): Promise<CompareRow> {
-  const capture: RunCapture = { finalMessage: "", usage: {}, errors: [] };
-  const formatter = new CaptureFormatter();
+  const capture: RunCapture = { finalMessage: "", usage: {} };
   const t0 = performance.now();
 
   try {
     const agent = resolveAgentInvocation(params.agentName, params.globalFlags, params.config);
     const result = await runOnce({
+      ...sessionConnectionOptions(params.globalFlags, params.config),
       agentCommand: agent.agentCommand,
       agentArgv: agent.agentArgv,
       cwd: agent.cwd,
       prompt: params.prompt,
-      mcpServers: params.config.mcpServers,
       permissionMode: resolvePermissionMode(params.globalFlags, params.config.defaultPermissions),
-      nonInteractivePermissions: params.globalFlags.nonInteractivePermissions,
       permissionPolicy: params.permissionPolicy,
-      authCredentials: params.config.auth,
-      authPolicy: params.globalFlags.authPolicy,
-      fs: params.globalFlags.fs,
-      terminal: params.globalFlags.terminal,
-      outputFormatter: formatter,
+      outputFormatter: DISCARD_OUTPUT_FORMATTER,
       suppressSdkConsoleErrors: true,
       timeoutMs: params.globalFlags.timeout ?? DEFAULT_COMPARE_TIMEOUT_MS,
-      verbose: params.globalFlags.verbose,
       promptRetries: params.globalFlags.promptRetries,
       sessionOptions: sessionOptionsFromGlobalFlags(params.globalFlags),
       onSessionUpdate: (notification) => captureSessionUpdate(notification, capture),

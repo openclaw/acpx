@@ -57,6 +57,7 @@ import type {
   SessionRecord,
   SessionSendResult,
 } from "../../types.js";
+import { DISCARD_OUTPUT_FORMATTER } from "../output/discard.js";
 import { type QueueOwnerMessage, type QueueTask, waitMs } from "../queue/ipc.js";
 import { type QueueOwnerActiveSessionController } from "../queue/owner-turn-controller.js";
 import type { RunOnceOptions, SessionSendOptions } from "./contracts.js";
@@ -132,14 +133,6 @@ class QueueTaskOutputFormatter implements OutputFormatter {
 
   flush(): void {}
 }
-
-const DISCARD_OUTPUT_FORMATTER: OutputFormatter = {
-  setContext() {},
-  onAcpMessage() {},
-  onError() {},
-  onPermissionEscalation() {},
-  flush() {},
-};
 
 function markOutputAlreadyEmitted(error: unknown, outputAlreadyEmitted: boolean): void {
   if (!outputAlreadyEmitted || !error || typeof error !== "object") {

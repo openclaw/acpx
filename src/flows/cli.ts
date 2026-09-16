@@ -12,8 +12,8 @@ import {
   resolvePermissionMode,
   type GlobalFlags,
 } from "../cli/flags.js";
+import { resolvePermissionPolicyFromFlags } from "../cli/invocation-options.js";
 import { type FlowDefinition, FlowRunner } from "../flows.js";
-import { loadPermissionPolicySpec } from "../permission-policy.js";
 import { permissionModeSatisfies } from "../permissions.js";
 import { writePrivateFile } from "../state-files.js";
 import type { PermissionMode } from "../types.js";
@@ -37,7 +37,7 @@ export async function handleFlowRun(
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
-  const permissionPolicy = await resolveFlowPermissionPolicy(globalFlags);
+  const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
   const outputPolicy = resolveOutputPolicy(globalFlags.format, globalFlags.jsonStrict === true);
   const input = await readFlowInput(flags);
   const flowPath = path.resolve(flowFile);
@@ -71,15 +71,6 @@ export async function handleFlowRun(
   });
 
   printFlowRunResult(result, globalFlags);
-}
-
-async function resolveFlowPermissionPolicy(globalFlags: GlobalFlags) {
-  try {
-    return await loadPermissionPolicySpec(globalFlags.permissionPolicy, globalFlags.cwd);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new InvalidArgumentError(`Invalid permission policy: ${message}`);
-  }
 }
 
 function assertFlowPermissionRequirements(

@@ -2,7 +2,6 @@ import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import { isLegacyZedCodexAcpInvocation } from "../acp/codex-compat.js";
 import { AgentSpawnError } from "../errors.js";
-import { loadPermissionPolicySpec } from "../permission-policy.js";
 import { exportSession } from "../session/export.js";
 import { importSession } from "../session/import.js";
 import {
@@ -39,9 +38,14 @@ import {
   type SessionsPruneFlags,
   type StatusFlags,
 } from "./flags.js";
+import {
+  sessionOptionsFromGlobalFlags,
+  sessionConnectionOptions,
+  resolvePermissionPolicyFromFlags,
+} from "./invocation-options.js";
 import { emitJsonResult } from "./output/json-output.js";
 import { readPromptInput } from "./prompt-input.js";
-import type { SessionListResult, SessionConnectionOptions } from "./session/contracts.js";
+import type { SessionListResult } from "./session/contracts.js";
 
 class NoSessionError extends Error {
   constructor(message: string) {
@@ -117,44 +121,6 @@ function resolveRequestedOutputPolicy(globalFlags: {
 }
 
 type ResolvedAgentInvocation = ReturnType<typeof resolveAgentInvocation>;
-
-function sessionOptionsFromGlobalFlags(
-  globalFlags: GlobalFlags,
-): NonNullable<Parameters<SessionModule["createSession"]>[0]["sessionOptions"]> {
-  return {
-    model: globalFlags.model,
-    allowedTools: globalFlags.allowedTools,
-    maxTurns: globalFlags.maxTurns,
-    systemPrompt: globalFlags.systemPrompt,
-  };
-}
-
-function sessionConnectionOptions(
-  globalFlags: GlobalFlags,
-  config: ResolvedAcpxConfig,
-): SessionConnectionOptions {
-  return {
-    mcpServers: config.mcpServers,
-    nonInteractivePermissions: globalFlags.nonInteractivePermissions,
-    authCredentials: config.auth,
-    authPolicy: globalFlags.authPolicy,
-    fs: globalFlags.fs,
-    terminal: globalFlags.terminal,
-    timeoutMs: globalFlags.timeout,
-    verbose: globalFlags.verbose,
-  };
-}
-
-async function resolvePermissionPolicyFromFlags(
-  globalFlags: GlobalFlags,
-): Promise<PermissionPolicy | undefined> {
-  try {
-    return await loadPermissionPolicySpec(globalFlags.permissionPolicy, globalFlags.cwd);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new InvalidArgumentError(`Invalid permission policy: ${message}`);
-  }
-}
 
 function buildSessionStartOptions(params: {
   agent: ResolvedAgentInvocation;
