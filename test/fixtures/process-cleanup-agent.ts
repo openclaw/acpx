@@ -22,7 +22,9 @@ await new Promise<void>((resolve, reject) => {
 });
 child.disconnect();
 child.unref();
-fs.writeFileSync(pidFile, JSON.stringify({ bridge: process.pid, descendant: child.pid }));
+const pendingPidFile = `${pidFile}.pending`;
+fs.writeFileSync(pendingPidFile, JSON.stringify({ bridge: process.pid, descendant: child.pid }));
+fs.renameSync(pendingPidFile, pidFile);
 
 const lines = readline.createInterface({ input: process.stdin });
 lines.on("line", (line) => {
