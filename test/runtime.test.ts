@@ -1016,57 +1016,91 @@ test("public model status exposes modern labels from existing configuration snap
   });
 });
 
-test("public fresh-session preparation survives restart without remote close support", async (t) => {
-  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fresh-session-"));
-  const options = {
-    cwd,
-    sessionStore: createFileSessionStore({ stateDir: path.join(cwd, "state") }),
-    agentRegistry: createAgentRegistry({
-      overrides: { fixture: [process.execPath, MOCK_AGENT_PATH, "--supports-load-session"] },
-    }),
-    permissionMode: "approve-reads" as const,
-  };
-  let runtime = createAcpRuntime(options);
-  t.after(async () => {
+for (const turnCount of [0, 1, 2]) {
+  test(`public fresh-session preparation survives restart after ${turnCount} submitted turns without remote close support`, async (t) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fresh-session-"));
+    const options = {
+      cwd,
+      sessionStore: createFileSessionStore({ stateDir: path.join(cwd, "state") }),
+      agentRegistry: createAgentRegistry({
+        overrides: {
+          fixture: [
+            process.execPath,
+            MOCK_AGENT_PATH,
+            "--supports-load-session",
+            "--cancel-delay-ms",
+            "200",
+          ],
+        },
+      }),
+      permissionMode: "approve-reads" as const,
+    };
+    let runtime = createAcpRuntime(options);
+    t.after(async () => {
+      await runtime.shutdown();
+      await fs.rm(cwd, { recursive: true, force: true });
+    });
+    const input = { sessionKey: "fresh-proof", agent: "fixture", mode: "persistent" as const };
+    const original = await runtime.ensureSession(input);
+    await runtime.close({ handle: original, reason: "release resources" });
     await runtime.shutdown();
-    await fs.rm(cwd, { recursive: true, force: true });
+    runtime = createAcpRuntime(options);
+    const resumed = await runtime.ensureSession(input);
+    assert.equal(resumed.backendSessionId, original.backendSessionId);
+    await assert.rejects(
+      runtime.close({ handle: resumed, reason: "discard", discardPersistentState: true }),
+      /does not support session\/close/,
+    );
+    assert.equal(
+      (await options.sessionStore.load(input.sessionKey))?.acpx?.reset_on_next_ensure,
+      undefined,
+    );
+    let turnsSettled = 0;
+    for (let index = 0; index < turnCount; index += 1) {
+      const retiring = runtime.startTurn({
+        handle: resumed,
+        text: "stream-sleep 30000 retiring",
+        mode: "prompt",
+        requestId: `retiring-turn-${index}`,
+      });
+      void retiring.result.then(() => {
+        turnsSettled += 1;
+      });
+      if (index === 0) {
+        for await (const event of retiring.events) {
+          if (event.type === "text_delta" && event.text.includes("retiring")) {
+            break;
+          }
+        }
+      }
+    }
+    await runtime.prepareFreshSession({ handle: resumed });
+    assert.equal(
+      turnsSettled,
+      turnCount,
+      "preparation acknowledged before all submitted turns finalized",
+    );
+    assert.equal(
+      (await options.sessionStore.load(input.sessionKey))?.acpx?.reset_on_next_ensure,
+      true,
+    );
+    await runtime.shutdown();
+    runtime = createAcpRuntime(options);
+    const fresh = await runtime.ensureSession(input);
+    assert.notEqual(fresh.backendSessionId, original.backendSessionId);
+    assert.equal(
+      (await options.sessionStore.load(input.sessionKey))?.acpx?.reset_on_next_ensure,
+      undefined,
+    );
+    const turn = runtime.startTurn({
+      handle: fresh,
+      text: "fresh prompt",
+      mode: "prompt",
+      requestId: "fresh-turn",
+    });
+    for await (const event of turn.events) {
+      assert.notEqual(event.type, "error");
+    }
+    assert.equal((await turn.result).status, "completed");
   });
-  const input = { sessionKey: "fresh-proof", agent: "fixture", mode: "persistent" as const };
-  const original = await runtime.ensureSession(input);
-  await runtime.close({ handle: original, reason: "release resources" });
-  await runtime.shutdown();
-  runtime = createAcpRuntime(options);
-  const resumed = await runtime.ensureSession(input);
-  assert.equal(resumed.backendSessionId, original.backendSessionId);
-  await assert.rejects(
-    runtime.close({ handle: resumed, reason: "discard", discardPersistentState: true }),
-    /does not support session\/close/,
-  );
-  assert.equal(
-    (await options.sessionStore.load(input.sessionKey))?.acpx?.reset_on_next_ensure,
-    undefined,
-  );
-  await runtime.prepareFreshSession({ handle: resumed });
-  assert.equal(
-    (await options.sessionStore.load(input.sessionKey))?.acpx?.reset_on_next_ensure,
-    true,
-  );
-  await runtime.shutdown();
-  runtime = createAcpRuntime(options);
-  const fresh = await runtime.ensureSession(input);
-  assert.notEqual(fresh.backendSessionId, original.backendSessionId);
-  assert.equal(
-    (await options.sessionStore.load(input.sessionKey))?.acpx?.reset_on_next_ensure,
-    undefined,
-  );
-  const turn = runtime.startTurn({
-    handle: fresh,
-    text: "fresh prompt",
-    mode: "prompt",
-    requestId: "fresh-turn",
-  });
-  for await (const event of turn.events) {
-    assert.notEqual(event.type, "error");
-  }
-  assert.equal((await turn.result).status, "completed");
-});
+}

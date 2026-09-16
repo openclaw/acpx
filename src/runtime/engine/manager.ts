@@ -324,6 +324,11 @@ type RuntimeTurnTaskState = {
   activeController: ActiveSessionController | null;
 };
 
+type RuntimeSessionTask = {
+  completion: Promise<void>;
+  cancel?: () => Promise<boolean>;
+};
+
 type RuntimeTurnTask = {
   input: {
     handle: AcpRuntimeHandle;
@@ -366,6 +371,7 @@ type RuntimeSessionProjection = {
 
 type RuntimeSessionOwner = {
   client: AcpClient;
+  retirement?: Promise<void>;
   sessionKey: string;
   mode: "persistent" | "oneshot";
   recordId?: string;
@@ -424,9 +430,11 @@ async function createOrLoadRuntimeSession(
 export class AcpRuntimeManager {
   private readonly activeControllers = new Map<string, ActiveSessionController>();
   private readonly retainedSessionOwners = new Map<string, RuntimeSessionOwner>();
+  private readonly retiringSessionOwners = new Set<RuntimeSessionOwner>();
   private readonly pendingOneShotRecordIds = new Map<string, string>();
   private readonly ensureSessionLocks = new Map<string, Promise<void>>();
   private readonly runtimeOperationLocks = new Map<string, Promise<void>>();
+  private readonly sessionTasks = new Map<string, Set<RuntimeSessionTask>>();
   private readonly closingActiveRecords = new Set<string>();
   private readonly liveClients = new Set<AcpClient>();
   private readonly pendingTasks = new Set<Promise<unknown>>();
@@ -516,6 +524,7 @@ export class AcpRuntimeManager {
     if (errors.length) {
       throw new AggregateError(errors, "ACP runtime shutdown failed.");
     }
+    this.retiringSessionOwners.clear();
   }
 
   private trackTask<T>(task: Promise<T>): Promise<T> {
@@ -525,6 +534,37 @@ export class AcpRuntimeManager {
     };
     void task.then(remove, remove);
     return task;
+  }
+
+  private queueSessionTask<T>(
+    recordId: string,
+    run: () => Promise<T>,
+    cancel?: () => Promise<boolean>,
+  ): Promise<T> {
+    const tasks = this.sessionTasks.get(recordId) ?? new Set<RuntimeSessionTask>();
+    this.sessionTasks.set(recordId, tasks);
+    const previous = [...tasks].at(-1)?.completion;
+    const result = (async () => {
+      await previous?.catch(() => {});
+      return await run();
+    })();
+    const task = { completion: result.then(() => {}), cancel };
+    void task.completion.catch(() => {});
+    tasks.add(task);
+    const remove = () => {
+      tasks.delete(task);
+      if (tasks.size === 0) {
+        this.sessionTasks.delete(recordId);
+      }
+    };
+    void result.then(remove, remove);
+    return this.trackTask(result);
+  }
+
+  private async cancelSessionTasks(recordId: string): Promise<RuntimeSessionTask[]> {
+    const tasks = [...(this.sessionTasks.get(recordId) ?? [])];
+    await Promise.all(tasks.flatMap((task) => (task.cancel ? [task.cancel()] : [])));
+    return tasks;
   }
 
   private async closeClient(client: AcpClient): Promise<void> {
@@ -696,11 +736,28 @@ export class AcpRuntimeManager {
 
   private async stopSessionOwner(owner: RuntimeSessionOwner): Promise<void> {
     await this.flushSessionOwner(owner).catch(() => {});
-    await this.closeClient(owner.client).catch(() => {});
+    await this.closeClient(owner.client).catch(() => {
+      this.retiringSessionOwners.add(owner);
+    });
     await owner.projection?.checkpoint.flush().catch(() => {});
     try {
       owner.client.clearEventHandlers();
     } catch {}
+  }
+
+  private async retrySessionCleanup(recordId: string): Promise<void> {
+    for (const owner of this.retiringSessionOwners) {
+      if (owner.recordId === recordId) {
+        owner.retirement ??= this.finalizeSessionConnection({ client: owner.client, owner })
+          .then(() => {
+            this.retiringSessionOwners.delete(owner);
+          })
+          .finally(() => {
+            owner.retirement = undefined;
+          });
+        await owner.retirement;
+      }
+    }
   }
 
   private async refreshClosedState(record: SessionRecord): Promise<boolean> {
@@ -779,6 +836,7 @@ export class AcpRuntimeManager {
     run: (context: { client: AcpClient; sessionId: string; record: SessionRecord }) => Promise<T>,
     replacingConfigOption?: ConnectAndLoadSessionOptions["replacingConfigOption"],
   ): Promise<{ value: T; record: SessionRecord }> {
+    await this.retrySessionCleanup(record.acpxRecordId);
     const owner = await this.readRetainedSessionOwner(record, { consume: false });
     if (owner) {
       const ownedRecord = owner.projection?.record ?? record;
@@ -909,6 +967,7 @@ export class AcpRuntimeManager {
     if (!existingRecordId) {
       return undefined;
     }
+    await this.retrySessionCleanup(existingRecordId);
     let record = await this.findSession(existingRecordId);
     if (!record) {
       return undefined;
@@ -1155,43 +1214,25 @@ export class AcpRuntimeManager {
     const abortHandler = () => {
       void requestCancel();
     };
-    if (input.signal) {
-      if (input.signal.aborted) {
-        promptStarted.reject(new Error("ACP turn cancelled before prompt submission."));
-        closeStream();
-        void this.trackTask(
-          this.closeRetainedOneShotHandle(input.handle)
-            .catch(() => {})
-            .then(() => {
-              settleResult({
-                status: "cancelled",
-                stopReason: "cancelled",
-              });
-            }),
-        );
-        return {
-          requestId: input.requestId,
-          promptStarted: promptStarted.promise,
-          events: queue.iterate(),
-          result: result.promise,
-          cancel: async () => {},
-          closeStream: async () => {},
-        };
-      }
+    if (input.signal && !input.signal.aborted) {
       input.signal.addEventListener("abort", abortHandler, { once: true });
     }
 
-    const task = this.runRuntimeTurnTask({
-      input,
-      promptInput,
-      queue,
-      promptStarted,
-      sessionReady,
-      state,
-      settleResult,
-      abortHandler,
-    });
-    void this.trackTask(task);
+    void this.queueSessionTask(
+      input.handle.acpxRecordId ?? input.handle.sessionKey,
+      async () =>
+        this.runRuntimeTurnTask({
+          input,
+          promptInput,
+          queue,
+          promptStarted,
+          sessionReady,
+          state,
+          settleResult,
+          abortHandler,
+        }),
+      requestCancel,
+    );
 
     return {
       requestId: input.requestId,
@@ -1219,32 +1260,37 @@ export class AcpRuntimeManager {
     let turn: RunningRuntimeTurn | undefined;
     let terminalResult: AcpRuntimeTurnResult;
     try {
-      turn = await this.prepareRuntimeTurn(task);
-      const { sessionId } = await this.connectRuntimeTurn(task, turn);
-      this.assertOpen();
-      await this.resolveRuntimeTurnReady(task, turn);
       if (this.cancelRuntimeTurnBeforePrompt(task)) {
+        await this.closeRetainedOneShotHandle(task.input.handle);
         terminalResult = {
           status: "cancelled",
           stopReason: "cancelled",
         };
       } else {
-        await this.applyPendingRuntimeTurnCancel(task, turn);
-        const response = await this.runRuntimePrompt(task, turn, sessionId);
-        await this.saveCompletedRuntimeTurn(turn);
-        terminalResult = {
-          status: response.stopReason === "cancelled" ? "cancelled" : "completed",
-          ...(response.stopReason ? { stopReason: response.stopReason } : {}),
-          ...(response._meta === undefined ? {} : { _meta: response._meta }),
-        };
+        turn = await this.prepareRuntimeTurn(task);
+        const { sessionId } = await this.connectRuntimeTurn(task, turn);
+        this.assertOpen();
+        await this.resolveRuntimeTurnReady(task, turn);
+        if (this.cancelRuntimeTurnBeforePrompt(task)) {
+          terminalResult = { status: "cancelled", stopReason: "cancelled" };
+        } else {
+          await this.applyPendingRuntimeTurnCancel(task, turn);
+          const response = await this.runRuntimePrompt(task, turn, sessionId);
+          await this.saveCompletedRuntimeTurn(turn);
+          terminalResult = {
+            status: response.stopReason === "cancelled" ? "cancelled" : "completed",
+            ...(response.stopReason ? { stopReason: response.stopReason } : {}),
+            ...(response._meta === undefined ? {} : { _meta: response._meta }),
+          };
+        }
       }
     } catch (error) {
       terminalResult = this.failRuntimeTurn(task, error);
     }
-    try {
-      await this.finalizeRuntimeTurn(task, turn);
-    } catch (error) {
-      terminalResult = this.failRuntimeTurn(task, error);
+    const finalization = await settleAttempt(async () => this.finalizeRuntimeTurn(task, turn));
+    if (!finalization.ok) {
+      task.settleResult(this.failRuntimeTurn(task, finalization.error));
+      throw finalization.error;
     }
     task.settleResult(terminalResult);
   }
@@ -1273,9 +1319,10 @@ export class AcpRuntimeManager {
 
   private async prepareRuntimeTurn(task: RuntimeTurnTask): Promise<RunningRuntimeTurn> {
     const recordId = task.input.handle.acpxRecordId ?? task.input.handle.sessionKey;
-    return await this.withManagerLock(this.runtimeOperationLocks, recordId, async () =>
-      this.prepareRuntimeTurnWithOwnership(task),
-    );
+    return await this.withManagerLock(this.runtimeOperationLocks, recordId, async () => {
+      await this.retrySessionCleanup(recordId);
+      return await this.prepareRuntimeTurnWithOwnership(task);
+    });
   }
 
   private async prepareRuntimeTurnWithOwnership(
@@ -1691,6 +1738,7 @@ export class AcpRuntimeManager {
     const closeAttempt = await settleAttempt(async () => this.closeClient(turn.client));
     const failure = firstFailedAttempt([clearAttempt, closeAttempt]);
     if (failure) {
+      this.retiringSessionOwners.add(turn.owner);
       throw failure.error;
     }
   }
@@ -1889,7 +1937,16 @@ export class AcpRuntimeManager {
 
   prepareFreshSession(handle: AcpRuntimeHandle): Promise<void> {
     this.assertOpen();
-    return this.trackTask(this.closeRuntimeSession(handle, "prepare-fresh"));
+    const recordId = handle.acpxRecordId ?? handle.sessionKey;
+    const cancelled = this.cancelSessionTasks(recordId);
+    void cancelled.catch(() => {});
+    return this.queueSessionTask(recordId, async () => {
+      const tasks = await cancelled;
+      await Promise.all(tasks.map((task) => task.completion));
+      return await this.withManagerLock(this.runtimeOperationLocks, recordId, async () =>
+        this.closeRuntimeSession(handle, "prepare-fresh"),
+      );
+    });
   }
 
   close(
@@ -1897,11 +1954,14 @@ export class AcpRuntimeManager {
     options: { discardPersistentState?: boolean } = {},
   ): Promise<void> {
     this.assertOpen();
+    const recordId = handle.acpxRecordId ?? handle.sessionKey;
     return this.trackTask(
-      this.closeRuntimeSession(
-        handle,
-        options.discardPersistentState === true ? "discard" : "release",
-      ),
+      this.withManagerLock(this.runtimeOperationLocks, recordId, async () => {
+        return await this.closeRuntimeSession(
+          handle,
+          options.discardPersistentState === true ? "discard" : "release",
+        );
+      }),
     );
   }
 
@@ -1910,9 +1970,12 @@ export class AcpRuntimeManager {
     intent: "release" | "prepare-fresh" | "discard",
   ): Promise<void> {
     const recordId = handle.acpxRecordId ?? handle.sessionKey;
+    await this.retrySessionCleanup(recordId);
     const record = await this.resolveRuntimeRecordForClose(recordId);
     this.markActiveRuntimeRecordClosing(record);
-    await this.cancel(handle);
+    if (intent !== "prepare-fresh") {
+      await this.cancelSessionTasks(recordId);
+    }
     await this.closeRuntimeRecordOwnership(record, intent);
     record.closed = true;
     record.closedAt = isoNow();
@@ -1939,6 +2002,13 @@ export class AcpRuntimeManager {
   ): Promise<void> {
     if (intent === "discard") {
       await this.closeBackendSession(record);
+    } else if (intent === "prepare-fresh") {
+      const owner = this.retainedSessionOwners.get(record.acpxRecordId);
+      if (owner) {
+        this.removeRetainedSessionOwner(owner);
+        this.retiringSessionOwners.add(owner);
+      }
+      await this.retrySessionCleanup(record.acpxRecordId);
     } else {
       await this.closeRetainedSessionOwner(record.acpxRecordId);
     }
@@ -1958,11 +2028,11 @@ export class AcpRuntimeManager {
     } catch (error) {
       this.handleBackendSessionCloseError(record, error);
     } finally {
-      await this.finalizeBackendCloseConnection(connection);
+      await this.finalizeSessionConnection(connection);
     }
   }
 
-  private async finalizeBackendCloseConnection(connection: {
+  private async finalizeSessionConnection(connection: {
     client: AcpClient;
     owner?: RuntimeSessionOwner;
   }): Promise<void> {

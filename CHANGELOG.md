@@ -30,6 +30,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions: retain metadata updates received during saved-model replay and keep the adapter's later configuration acknowledgement authoritative.
 - Flows: settle pending ACP capture writes before reporting a prompt result, surface bundle write failures without crashing, and preserve visible adapter errors.
 - Replay viewer: keep existing clients synchronized when another viewer subscribes or reconnects, and serialize snapshot/poll publication to preserve patch version order.
+- Runtime/sessions: serialize turns per session record and finish cancellation and local finalization before acknowledging fresh-session preparation, preserving the reset across late writes and surfacing cleanup failures. Thanks @vincentkoc.
 
 ## 0.16.0 - 2026-09-15
 
