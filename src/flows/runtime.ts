@@ -16,7 +16,12 @@ import {
   runOnce,
   sendSessionDirect,
 } from "../session/session.js";
-import type { PermissionPolicy, PromptInput, SessionRecord } from "../types.js";
+import type {
+  AcpJsonRpcMessage,
+  AcpMessageDirection,
+  PromptInput,
+  SessionRecord,
+} from "../types.js";
 import { acp, action, checkpoint, compute, defineFlow, shell } from "./definition.js";
 import {
   formatShellActionSummary,
@@ -150,15 +155,8 @@ type PreparedAcpPrompt = {
 export class FlowRunner {
   private readonly resolveAgent;
   private readonly defaultCwd;
-  private readonly permissionMode;
-  private readonly mcpServers?;
-  private readonly nonInteractivePermissions?;
-  private readonly permissionPolicy?: PermissionPolicy;
-  private readonly authCredentials?;
-  private readonly authPolicy?;
-  private readonly fs?;
+  private readonly connectionOptions;
   private readonly defaultNodeTimeoutMs;
-  private readonly verbose?;
   private readonly suppressSdkConsoleErrors?;
   private readonly sessionOptions?;
   private readonly services;
@@ -174,16 +172,18 @@ export class FlowRunner {
   constructor(options: FlowRunnerOptions) {
     this.resolveAgent = options.resolveAgent;
     this.defaultCwd = options.resolveAgent(undefined).cwd;
-    this.permissionMode = options.permissionMode;
-    this.mcpServers = options.mcpServers;
-    this.nonInteractivePermissions = options.nonInteractivePermissions;
-    this.permissionPolicy = options.permissionPolicy;
-    this.authCredentials = options.authCredentials;
-    this.authPolicy = options.authPolicy;
-    this.fs = options.fs;
+    this.connectionOptions = {
+      permissionMode: options.permissionMode,
+      mcpServers: options.mcpServers,
+      nonInteractivePermissions: options.nonInteractivePermissions,
+      permissionPolicy: options.permissionPolicy,
+      authCredentials: options.authCredentials,
+      authPolicy: options.authPolicy,
+      fs: options.fs,
+      verbose: options.verbose,
+    };
     this.defaultNodeTimeoutMs =
       options.defaultNodeTimeoutMs ?? options.timeoutMs ?? DEFAULT_FLOW_STEP_TIMEOUT_MS;
-    this.verbose = options.verbose;
     this.suppressSdkConsoleErrors = options.suppressSdkConsoleErrors;
     this.sessionOptions = options.sessionOptions;
     this.services = options.services ?? {};
@@ -1091,15 +1091,8 @@ export class FlowRunner {
       agentArgv: agent.agentArgv,
       cwd: agent.cwd,
       name,
-      mcpServers: this.mcpServers,
-      permissionMode: this.permissionMode,
-      nonInteractivePermissions: this.nonInteractivePermissions,
-      permissionPolicy: this.permissionPolicy,
-      authCredentials: this.authCredentials,
-      authPolicy: this.authPolicy,
-      fs: this.fs,
+      ...this.connectionOptions,
       timeoutMs,
-      verbose: this.verbose,
       sessionOptions: this.sessionOptions,
     });
 
@@ -1132,6 +1125,45 @@ export class FlowRunner {
     };
   }
 
+  private createPromptEventCapture(runDir: string, binding: FlowSessionBinding) {
+    const pending: Promise<PromiseSettledResult<number>>[] = [];
+    return {
+      onAcpMessage: (direction: AcpMessageDirection, message: AcpJsonRpcMessage): void => {
+        pending.push(
+          this.store.appendSessionEvent(runDir, binding, direction, message).then(
+            (value) => ({ status: "fulfilled" as const, value }),
+            (reason: unknown) => ({ status: "rejected" as const, reason }),
+          ),
+        );
+      },
+      async run<T>(operation: () => Promise<T>) {
+        let result: PromiseSettledResult<T>;
+        try {
+          result = { status: "fulfilled", value: await operation() };
+        } catch (reason) {
+          result = { status: "rejected", reason };
+        }
+        const writes = await Promise.all(pending);
+        if (result.status === "rejected") {
+          throw result.reason;
+        }
+        let eventStartSeq: number | undefined;
+        let eventEndSeq = 0;
+        for (const write of writes) {
+          if (write.status === "rejected") {
+            throw write.reason;
+          }
+          eventStartSeq = Math.min(eventStartSeq ?? write.value, write.value);
+          eventEndSeq = Math.max(eventEndSeq, write.value);
+        }
+        if (eventStartSeq === undefined) {
+          throw new Error(`Missing ACP event capture for session ${binding.bundleId}`);
+        }
+        return { result: result.value, eventStartSeq, eventEndSeq };
+      },
+    };
+  }
+
   private async runPersistentPrompt(
     runDir: string,
     state: FlowRunState,
@@ -1141,42 +1173,27 @@ export class FlowRunner {
   ): Promise<TracedPromptResult> {
     const capture = createQuietCaptureOutput();
     const beforeRecord = await resolveSessionRecord(binding.acpxRecordId);
-    let eventStartSeq: number | undefined;
-    let eventEndSeq: number | undefined;
-    const pendingEventWrites: Promise<void>[] = [];
+    const events = this.createPromptEventCapture(runDir, binding);
     const initialClient = this.pendingPersistentSessionClients.get(binding.key);
     if (initialClient) {
       this.pendingPersistentSessionClients.delete(binding.key);
     }
 
     try {
-      await sendSessionDirect({
-        sessionId: binding.acpxRecordId,
-        prompt,
-        resumePolicy: "same-session-only",
-        mcpServers: this.mcpServers,
-        permissionMode: this.permissionMode,
-        nonInteractivePermissions: this.nonInteractivePermissions,
-        permissionPolicy: this.permissionPolicy,
-        authCredentials: this.authCredentials,
-        authPolicy: this.authPolicy,
-        fs: this.fs,
-        outputFormatter: capture.formatter,
-        onAcpMessage: (direction, message) => {
-          const pending = this.store
-            .appendSessionEvent(runDir, binding, direction, message)
-            .then((seq) => {
-              eventStartSeq = eventStartSeq === undefined ? seq : Math.min(eventStartSeq, seq);
-              eventEndSeq = eventEndSeq === undefined ? seq : Math.max(eventEndSeq, seq);
-            });
-          pendingEventWrites.push(pending);
-        },
-        suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
-        timeoutMs,
-        verbose: this.verbose,
-        client: initialClient,
-      });
-      await Promise.all(pendingEventWrites);
+      const { eventStartSeq, eventEndSeq } = await events.run(() =>
+        sendSessionDirect({
+          sessionId: binding.acpxRecordId,
+          prompt,
+          resumePolicy: "same-session-only",
+          ...this.connectionOptions,
+          outputFormatter: capture.formatter,
+          errorEmissionPolicy: { queueErrorAlreadyEmitted: false },
+          onAcpMessage: events.onAcpMessage,
+          suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
+          timeoutMs,
+          client: initialClient,
+        }),
+      );
       const sessionInfo = await this.refreshSessionBinding(binding);
       state.sessionBindings[sessionInfo.key] = sessionInfo;
       await this.store.ensureSessionBundle(runDir, state, sessionInfo);
@@ -1194,16 +1211,8 @@ export class FlowRunner {
           sessionId: sessionInfo.bundleId,
           messageStart: messageStartResolved,
           messageEnd: Math.max(messageStartResolved, afterRecord.messages.length - 1),
-          eventStartSeq:
-            eventStartSeq ??
-            (() => {
-              throw new Error(`Missing ACP event capture for session ${sessionInfo.bundleId}`);
-            })(),
-          eventEndSeq:
-            eventEndSeq ??
-            (() => {
-              throw new Error(`Missing ACP event capture for session ${sessionInfo.bundleId}`);
-            })(),
+          eventStartSeq,
+          eventEndSeq,
         },
       };
     } finally {
@@ -1239,43 +1248,28 @@ export class FlowRunner {
     const conversation = createSessionConversation(state.currentNodeStartedAt ?? isoNow());
     let acpxState: SessionRecord["acpx"] | undefined;
     recordPromptSubmission(conversation, prompt, state.currentNodeStartedAt ?? isoNow());
-    let eventStartSeq: number | undefined;
-    let eventEndSeq: number | undefined;
-    const pendingEventWrites: Promise<void>[] = [];
-    const result = await runOnce({
-      agentCommand: agent.agentCommand,
-      agentArgv: agent.agentArgv,
-      cwd: agent.cwd,
-      prompt,
-      mcpServers: this.mcpServers,
-      permissionMode: this.permissionMode,
-      nonInteractivePermissions: this.nonInteractivePermissions,
-      permissionPolicy: this.permissionPolicy,
-      authCredentials: this.authCredentials,
-      authPolicy: this.authPolicy,
-      fs: this.fs,
-      outputFormatter: capture.formatter,
-      onAcpMessage: (direction, message) => {
-        const pending = this.store
-          .appendSessionEvent(runDir, binding, direction, message)
-          .then((seq) => {
-            eventStartSeq = eventStartSeq === undefined ? seq : Math.min(eventStartSeq, seq);
-            eventEndSeq = eventEndSeq === undefined ? seq : Math.max(eventEndSeq, seq);
-          });
-        pendingEventWrites.push(pending);
-      },
-      onSessionUpdate: (notification) => {
-        acpxState = recordConversationSessionUpdate(conversation, acpxState, notification);
-      },
-      onClientOperation: (operation) => {
-        acpxState = recordConversationClientOperation(conversation, acpxState, operation);
-      },
-      suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
-      timeoutMs,
-      verbose: this.verbose,
-      sessionOptions: this.sessionOptions,
-    });
-    await Promise.all(pendingEventWrites);
+    const events = this.createPromptEventCapture(runDir, binding);
+    const { result, eventStartSeq, eventEndSeq } = await events.run(() =>
+      runOnce({
+        agentCommand: agent.agentCommand,
+        agentArgv: agent.agentArgv,
+        cwd: agent.cwd,
+        prompt,
+        ...this.connectionOptions,
+        outputFormatter: capture.formatter,
+        errorEmissionPolicy: { queueErrorAlreadyEmitted: false },
+        onAcpMessage: events.onAcpMessage,
+        onSessionUpdate: (notification) => {
+          acpxState = recordConversationSessionUpdate(conversation, acpxState, notification);
+        },
+        onClientOperation: (operation) => {
+          acpxState = recordConversationClientOperation(conversation, acpxState, operation);
+        },
+        suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
+        timeoutMs,
+        sessionOptions: this.sessionOptions,
+      }),
+    );
     const sessionInfo: FlowSessionBinding = {
       ...binding,
       acpxRecordId: result.sessionId,
@@ -1288,7 +1282,7 @@ export class FlowRunner {
       updatedAt: conversation.updated_at,
       conversation,
       acpxState: cloneSessionAcpxState(acpxState),
-      lastSeq: eventEndSeq ?? 0,
+      lastSeq: eventEndSeq,
     });
     await this.store.writeSessionRecord(runDir, state, sessionInfo, syntheticRecord);
     return {
@@ -1298,16 +1292,8 @@ export class FlowRunner {
         sessionId: sessionInfo.bundleId,
         messageStart: 0,
         messageEnd: Math.max(0, conversation.messages.length - 1),
-        eventStartSeq:
-          eventStartSeq ??
-          (() => {
-            throw new Error(`Missing ACP event capture for session ${sessionInfo.bundleId}`);
-          })(),
-        eventEndSeq:
-          eventEndSeq ??
-          (() => {
-            throw new Error(`Missing ACP event capture for session ${sessionInfo.bundleId}`);
-          })(),
+        eventStartSeq,
+        eventEndSeq,
       },
     };
   }

@@ -138,6 +138,8 @@ Each run produces a bundle under `~/.acpx/flows/runs/<runId>/`:
 
 Bundles are immutable once a run terminates. They are the input for the [replay viewer](#replay-viewer).
 
+When an ACP prompt settles, its pending capture writes finish before the step result is recorded. Capture failures fail the step; if the agent also fails, its original prompt error remains visible and is saved with the run.
+
 ## Timeouts
 
 `acp` and `action` nodes use the global `--timeout` value as their default per-step timeout. If `--timeout` is not set, flows default to **15 minutes per active step**. Override per step in the flow definition when needed.
