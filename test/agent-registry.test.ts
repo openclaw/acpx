@@ -26,6 +26,7 @@ test("built-in command displays stay synchronized with structured argv", () => {
 });
 
 test("resolveAgentCommand maps known agents to commands", () => {
+  assert.equal(resolveAgentCommand("devin"), "devin acp");
   for (const [name, command] of Object.entries(AGENT_REGISTRY)) {
     assert.equal(resolveAgentCommand(name), command);
   }
@@ -106,6 +107,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "copilot",
   ]);
   assert.deepEqual(agents.slice(7), [
+    "devin",
     "droid",
     "fast-agent",
     "grok-build",

@@ -1,63 +1,33 @@
 # Devin
 
-- Built-in name: none
-- Raw command: `devin acp`
-- Upstream: https://www.devin.ai
+- Built-in name: `devin`
+- Default command: `devin acp`
+- Upstream: [Devin CLI](https://docs.devin.ai/cli/index)
+
+Install Devin CLI and complete its normal authentication flow first. The shortcut uses that installed CLI; acpx does not install Devin or manage its account.
+
+```bash
+acpx devin exec 'summarize this repo'
+acpx --model <id> devin exec 'summarize this repo'
+```
+
+`--model` uses Devin's advertised ACP model config option. For Devin-specific launch flags, use the raw command override and put global flags before `acp`:
+
+```bash
+acpx --agent 'devin --model swe-2-high acp' exec 'summarize this repo'
+```
 
 ## ACP compatibility contract
 
-Devin requires Windsurf-compatible client metadata during ACP initialization. `acpx` satisfies this by detecting Devin ACP launches and advertising a narrow Windsurf identity shim.
+For a `devin` executable with `acp`, `--acp`, or `--experimental-acp`, acpx preserves a scoped Windsurf identity for compatibility with supported Devin versions:
 
-### Detection
+- `clientInfo.name`: `windsurf`
+- `clientInfo.version`: `ACPX_DEVIN_WINDSURF_VERSION`, defaulting to `1.110.1`
+- Standard `fs.readTextFile`, `fs.writeTextFile`, and `terminal` capabilities according to their enabled settings
+- Vendor capability `_meta["cognition.ai/requestDiagnostics"] = true`
+- `_cognition.ai/request_diagnostics` responses: `{}`
+- Vendor extension notifications are accepted without method-not-found errors
 
-`acpx` detects Devin ACP launches when the raw command starts with `devin` and includes `acp`, `--acp`, or `--experimental-acp`.
+For example, `ACPX_DEVIN_WINDSURF_VERSION=1.120.0 acpx devin exec 'summarize this repo'` overrides the advertised version. Other agents retain standard acpx identity and capabilities.
 
-```bash
-acpx --agent 'devin acp' exec 'summarize this repo'
-```
-
-Pass Devin global flags such as `--model <model>` before `acp` when needed:
-
-```bash
-acpx --agent 'devin --model swe-1-6 acp' exec 'summarize this repo'
-```
-
-### Client identity
-
-When Devin ACP is detected, `acpx` advertises:
-
-- `clientInfo.name`: `windsurf` (instead of `acpx`)
-- `clientInfo.version`: Controlled by `ACPX_DEVIN_WINDSURF_VERSION` env var (default: `1.110.1`)
-
-### Capabilities
-
-Devin receives the same standard ACP client capabilities as other adapters:
-
-- `fs.readTextFile`
-- `fs.writeTextFile`
-- `terminal` when terminal support is enabled
-
-The only Devin-specific capability flag is `_meta["cognition.ai/requestDiagnostics"] = true`, because `acpx` handles that Devin extension request.
-
-### Extension handling
-
-`acpx` handles Devin's vendor extension traffic:
-
-- `_cognition.ai/request_diagnostics`: Returns an empty object `{}` to satisfy the request
-- Vendor extension notifications: Silently ignored to prevent method-not-found noise
-
-### Version override
-
-Set `ACPX_DEVIN_WINDSURF_VERSION` to override the advertised Windsurf version:
-
-```bash
-ACPX_DEVIN_WINDSURF_VERSION=1.120.0 acpx --agent 'devin acp' exec 'fix the bug'
-```
-
-### Scope
-
-This compatibility shim is active only for Devin ACP launches. Other agents receive standard `acpx` identity and capabilities.
-
-### Compatibility boundary
-
-Do not add broad Windsurf/Cognition capability flags unless `acpx` implements the corresponding client operation or fresh Devin proof shows the flag is required for initialization.
+Keep the compatibility scope narrow: additional Windsurf/Cognition capabilities need an implemented client operation or fresh Devin proof that initialization requires them.

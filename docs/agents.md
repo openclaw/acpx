@@ -18,6 +18,7 @@ The default agent for top-level commands like `acpx exec â€¦` and `acpx prompt â
 | `gemini`     | `gemini --acp`                                 | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
 | `cursor`     | `cursor-agent acp`                             | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
 | `copilot`    | `copilot --acp --stdio`                        | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
+| `devin`      | `devin acp`                                    | [Devin CLI](https://docs.devin.ai/cli/index)                                                                    |
 | `droid`      | `droid exec --output-format acp`               | [Factory Droid](https://www.factory.ai)                                                                         |
 | `fast-agent` | `uvx fast-agent-mcp acp`                       | [fast-agent](https://fast-agent.ai/)                                                                            |
 | `grok-build` | `grok agent stdio`                             | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
@@ -122,6 +123,10 @@ If your Cursor install exposes ACP as `agent acp` instead of `cursor-agent acp`,
 - Default command: `copilot --acp --stdio`
 - Upstream: [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line)
 - Requires a Copilot CLI release that supports ACP stdio mode. Older `copilot` binaries fail before ACP startup.
+
+### Devin
+
+`devin` launches the installed `devin acp` server. See the [Devin guide](https://github.com/openclaw/acpx/blob/main/agents/Devin.md) for setup, model selection, and the scoped compatibility contract.
 
 ### Droid (Factory)
 

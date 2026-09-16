@@ -1474,73 +1474,77 @@ test("integration: exec answers Devin diagnostics extension requests", async () 
   });
 });
 
-test("integration: Devin ACP launch advertises scoped Windsurf client info", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
-    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-devin-"));
+for (const invocation of [
+  { name: "raw command", args: ["--agent", "devin --model swe-1-6 --acp"] },
+  { name: "built-in shortcut", args: ["devin"] },
+]) {
+  test(`integration: Devin ${invocation.name} advertises scoped Windsurf client info`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+      const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-devin-"));
 
-    try {
-      await writeFakeDevinAgent(fakeBinDir);
+      try {
+        await writeFakeDevinAgent(fakeBinDir);
 
-      const result = await runCli(
-        [
-          "--agent",
-          "devin --model swe-1-6 --acp",
-          "--approve-all",
-          "--cwd",
-          cwd,
-          "--format",
-          "json",
-          "exec",
-          "echo hello",
-        ],
-        homeDir,
-        {
-          env: {
-            ACPX_DEVIN_WINDSURF_VERSION: "9.9.9-test",
-            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        const result = await runCli(
+          [
+            "--approve-all",
+            "--cwd",
+            cwd,
+            "--format",
+            "json",
+            ...invocation.args,
+            "exec",
+            "echo hello",
+          ],
+          homeDir,
+          {
+            env: {
+              ACPX_DEVIN_WINDSURF_VERSION: "9.9.9-test",
+              PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+            },
           },
-        },
-      );
-      assert.equal(result.code, 0, result.stderr);
+        );
+        assert.equal(result.code, 0, result.stderr);
 
-      const payloads = parseJsonRpcOutputLines(result.stdout);
-      const initializeRequest = payloads.find((payload) => payload.method === "initialize") as
-        | {
-            params?: {
-              clientCapabilities?: {
-                _meta?: Record<string, unknown> | null;
-                elicitation?: unknown;
-                fs?: { readTextFile?: unknown; writeTextFile?: unknown };
-                terminal?: unknown;
+        const payloads = parseJsonRpcOutputLines(result.stdout);
+        const initializeRequest = payloads.find((payload) => payload.method === "initialize") as
+          | {
+              params?: {
+                clientCapabilities?: {
+                  _meta?: Record<string, unknown> | null;
+                  elicitation?: unknown;
+                  fs?: { readTextFile?: unknown; writeTextFile?: unknown };
+                  terminal?: unknown;
+                };
+                clientInfo?: {
+                  name?: unknown;
+                  version?: unknown;
+                };
               };
-              clientInfo?: {
-                name?: unknown;
-                version?: unknown;
-              };
-            };
-          }
-        | undefined;
-      assert(initializeRequest, result.stdout);
-      assert.deepEqual(initializeRequest.params?.clientInfo, {
-        name: "windsurf",
-        version: "9.9.9-test",
-      });
-      assert.equal(initializeRequest.params?.clientCapabilities?.terminal, true);
-      assert.deepEqual(initializeRequest.params?.clientCapabilities?.fs, {
-        readTextFile: true,
-        writeTextFile: true,
-      });
-      assert.deepEqual(initializeRequest.params?.clientCapabilities?._meta, {
-        "cognition.ai/requestDiagnostics": true,
-      });
-      assert.equal(initializeRequest.params?.clientCapabilities?.elicitation, undefined);
-    } finally {
-      await fs.rm(fakeBinDir, { recursive: true, force: true });
-      await fs.rm(cwd, { recursive: true, force: true });
-    }
+            }
+          | undefined;
+        assert(initializeRequest, result.stdout);
+        assert.deepEqual(initializeRequest.params?.clientInfo, {
+          name: "windsurf",
+          version: "9.9.9-test",
+        });
+        assert.equal(initializeRequest.params?.clientCapabilities?.terminal, true);
+        assert.deepEqual(initializeRequest.params?.clientCapabilities?.fs, {
+          readTextFile: true,
+          writeTextFile: true,
+        });
+        assert.deepEqual(initializeRequest.params?.clientCapabilities?._meta, {
+          "cognition.ai/requestDiagnostics": true,
+        });
+        assert.equal(initializeRequest.params?.clientCapabilities?.elicitation, undefined);
+      } finally {
+        await fs.rm(fakeBinDir, { recursive: true, force: true });
+        await fs.rm(cwd, { recursive: true, force: true });
+      }
+    });
   });
-});
+}
 
 test("integration: exec --model sets the advertised model config option", async () => {
   await withTempHome(async (homeDir) => {

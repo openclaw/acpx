@@ -93,6 +93,7 @@ const AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
   gemini: { name: "Gemini CLI", argv: ["gemini", "--acp"] },
   cursor: { name: "Cursor", argv: ["cursor-agent", "acp"] },
   copilot: { name: "GitHub Copilot", argv: ["copilot", "--acp", "--stdio"] },
+  devin: { name: "Devin", argv: ["devin", "acp"] },
   droid: { name: "Factory Droid", argv: ["droid", "exec", "--output-format", "acp"] },
   "fast-agent": { name: "Fast Agent", argv: ["uvx", "fast-agent-mcp", "acp"] },
   "grok-build": { name: "Grok Build", argv: ["grok", "agent", "stdio"] },
