@@ -58,9 +58,9 @@ import {
 import { FlowRunStore } from "./store.js";
 import type {
   AcpNodeDefinition,
-  ActionNodeDefinition,
   CheckpointNodeDefinition,
   ComputeNodeDefinition,
+  FunctionActionNodeDefinition,
   FlowDefinition,
   FlowNodeCommon,
   FlowNodeContext,
@@ -72,8 +72,10 @@ import type {
   FlowRunnerOptions,
   FlowSessionBinding,
   FlowNodeResult,
+  FlowNodeOutcome,
   ResolvedFlowAgent,
   ShellActionExecution,
+  ShellActionNodeDefinition,
   ShellActionResult,
 } from "./types.js";
 
@@ -113,11 +115,6 @@ type FlowNodeExecutionResult = {
   sessionInfo: FlowSessionBinding | null;
   agentInfo: ResolvedFlowAgent | null;
   trace: FlowStepTrace | null;
-};
-
-type FlowRunExecutionResult = {
-  runDir: string;
-  state: FlowRunState;
 };
 
 type FlowStepExecutionResult = FlowNodeExecutionResult & {
@@ -241,7 +238,7 @@ export class FlowRunner {
     runDir: string,
     state: FlowRunState,
   ): Promise<FlowRunResult> {
-    let execution: Promise<FlowRunExecutionResult> | undefined;
+    let execution: Promise<FlowRunResult> | undefined;
     let cancellation: Promise<void> | undefined;
     let interruption: InterruptedError | undefined;
     const result = await withInterrupt(
@@ -335,7 +332,7 @@ export class FlowRunner {
     input: unknown,
     runDir: string,
     state: FlowRunState,
-  ): Promise<FlowRunExecutionResult> {
+  ): Promise<FlowRunResult> {
     let current: string | null = flow.startAt;
     const attemptCounts = new Map<string, number>();
     try {
@@ -384,16 +381,59 @@ export class FlowRunner {
     const startedAt = isoNow();
     markNodeStarted(state, nodeId, attemptId, node.nodeType, startedAt, node.statusDetail);
     await this.writeNodeStartedSnapshot(runDir, state, nodeId, attemptId, node);
-    return await this.executeStartedFlowStep({
-      flow,
-      input,
-      runDir,
-      state,
-      nodeId,
-      node,
+    const context = makeFlowNodeContext(state, input, this.services);
+    let executed: FlowNodeExecutionResult;
+    let outcome: FlowNodeOutcome = "ok";
+    let executionError: unknown;
+    try {
+      this.throwIfRunInterrupted(runDir);
+      executed = await this.executeNode(runDir, state, flow, nodeId, node, context);
+      this.throwIfRunInterrupted(runDir);
+      executed.trace = await finalizeStepTrace(
+        this.store,
+        runDir,
+        state,
+        nodeId,
+        attemptId,
+        executed.output,
+        executed.trace,
+      );
+    } catch (error) {
+      outcome = outcomeForError(error);
+      executionError = error;
+      executed = {
+        output: undefined,
+        promptText: null,
+        rawText: null,
+        sessionInfo: null,
+        agentInfo: null,
+        trace: await finalizeStepTrace(
+          this.store,
+          runDir,
+          state,
+          nodeId,
+          attemptId,
+          undefined,
+          extractAttachedStepTrace(error) ?? null,
+        ),
+      };
+    }
+    const nodeResult = createNodeResult({
       attemptId,
+      nodeId,
+      nodeType: node.nodeType,
+      outcome,
       startedAt,
+      finishedAt: isoNow(),
+      ...(outcome === "ok"
+        ? { output: executed.output }
+        : {
+            error:
+              executionError instanceof Error ? executionError.message : String(executionError),
+          }),
     });
+    state.results[nodeId] = nodeResult;
+    return { ...executed, nodeResult, executionError, attemptId, nodeId, node, startedAt, state };
   }
 
   private async writeNodeStartedSnapshot(
@@ -410,136 +450,17 @@ export class FlowRunner {
       attemptId,
       payload: {
         nodeType: node.nodeType,
-        ...(node.timeoutMs !== undefined
-          ? { timeoutMs: node.timeoutMs ?? this.defaultNodeTimeoutMs }
-          : { timeoutMs: this.defaultNodeTimeoutMs }),
+        timeoutMs: node.timeoutMs ?? this.defaultNodeTimeoutMs,
         ...(state.statusDetail ? { statusDetail: state.statusDetail } : {}),
       },
     });
-  }
-
-  private async executeStartedFlowStep(params: {
-    flow: FlowDefinition;
-    input: unknown;
-    runDir: string;
-    state: FlowRunState;
-    nodeId: string;
-    node: FlowNodeDefinition;
-    attemptId: string;
-    startedAt: string;
-  }): Promise<FlowStepExecutionResult> {
-    const context = makeFlowNodeContext(params.state, params.input, this.services);
-    try {
-      this.throwIfRunInterrupted(params.runDir);
-      const executed = await this.executeNode(
-        params.runDir,
-        params.state,
-        params.flow,
-        params.nodeId,
-        params.node,
-        context,
-      );
-      this.throwIfRunInterrupted(params.runDir);
-      return await this.createSuccessfulFlowStep(params, executed);
-    } catch (error) {
-      return await this.createFailedFlowStep(params, error);
-    }
-  }
-
-  private async createSuccessfulFlowStep(
-    params: {
-      runDir: string;
-      state: FlowRunState;
-      nodeId: string;
-      node: FlowNodeDefinition;
-      attemptId: string;
-      startedAt: string;
-    },
-    executed: FlowNodeExecutionResult,
-  ): Promise<FlowStepExecutionResult> {
-    const trace = await finalizeStepTrace(
-      this.store,
-      params.runDir,
-      params.state,
-      params.nodeId,
-      params.attemptId,
-      executed.output,
-      executed.trace,
-    );
-    const nodeResult = createNodeResult({
-      attemptId: params.attemptId,
-      nodeId: params.nodeId,
-      nodeType: params.node.nodeType,
-      outcome: "ok",
-      startedAt: params.startedAt,
-      finishedAt: isoNow(),
-      output: executed.output,
-    });
-    params.state.results[params.nodeId] = nodeResult;
-    return {
-      ...executed,
-      trace,
-      nodeResult,
-      attemptId: params.attemptId,
-      nodeId: params.nodeId,
-      node: params.node,
-      startedAt: params.startedAt,
-      state: params.state,
-    };
-  }
-
-  private async createFailedFlowStep(
-    params: {
-      runDir: string;
-      state: FlowRunState;
-      nodeId: string;
-      node: FlowNodeDefinition;
-      attemptId: string;
-      startedAt: string;
-    },
-    error: unknown,
-  ): Promise<FlowStepExecutionResult> {
-    const trace = await finalizeStepTrace(
-      this.store,
-      params.runDir,
-      params.state,
-      params.nodeId,
-      params.attemptId,
-      undefined,
-      extractAttachedStepTrace(error) ?? null,
-    );
-    const nodeResult = createNodeResult({
-      attemptId: params.attemptId,
-      nodeId: params.nodeId,
-      nodeType: params.node.nodeType,
-      outcome: outcomeForError(error),
-      startedAt: params.startedAt,
-      finishedAt: isoNow(),
-      error: error instanceof Error ? error.message : String(error),
-    });
-    params.state.results[params.nodeId] = nodeResult;
-    return {
-      output: undefined,
-      promptText: null,
-      rawText: null,
-      sessionInfo: null,
-      agentInfo: null,
-      trace,
-      nodeResult,
-      executionError: error,
-      attemptId: params.attemptId,
-      nodeId: params.nodeId,
-      node: params.node,
-      startedAt: params.startedAt,
-      state: params.state,
-    };
   }
 
   private async maybeCompleteCheckpointStep(
     runDir: string,
     state: FlowRunState,
     step: FlowStepExecutionResult,
-  ): Promise<FlowRunExecutionResult | undefined> {
+  ): Promise<FlowRunResult | undefined> {
     if (step.nodeResult.outcome !== "ok" || step.node.nodeType !== "checkpoint") {
       return undefined;
     }
@@ -548,8 +469,6 @@ export class FlowRunner {
     state.updatedAt = isoNow();
     state.status = "waiting";
     await this.recordFlowStepOutcome(runDir, state, step, {
-      sessionInfo: null,
-      agentInfo: null,
       statusDetail: (step.output as { summary?: string } | null)?.summary ?? step.nodeId,
     });
     return { runDir, state };
@@ -567,10 +486,7 @@ export class FlowRunner {
     throw step.executionError;
   }
 
-  private async completeFlowRun(
-    runDir: string,
-    state: FlowRunState,
-  ): Promise<FlowRunExecutionResult> {
+  private async completeFlowRun(runDir: string, state: FlowRunState): Promise<FlowRunResult> {
     state.status = "completed";
     state.finishedAt = isoNow();
     state.updatedAt = state.finishedAt;
@@ -590,8 +506,6 @@ export class FlowRunner {
     state: FlowRunState,
     step: FlowStepExecutionResult,
     overrides: {
-      sessionInfo?: FlowSessionBinding | null;
-      agentInfo?: ResolvedFlowAgent | null;
       statusDetail?: string;
     } = {},
   ): Promise<void> {
@@ -608,8 +522,8 @@ export class FlowRunner {
       rawText: step.rawText,
       output: step.output,
       error: step.nodeResult.error,
-      session: overrides.sessionInfo ?? step.sessionInfo,
-      agent: overrides.agentInfo ?? step.agentInfo,
+      session: step.sessionInfo,
+      agent: step.agentInfo,
       ...(step.trace ? { trace: step.trace } : {}),
     });
     await this.store.writeSnapshot(runDir, state, {
@@ -631,11 +545,13 @@ export class FlowRunner {
   ): Promise<FlowNodeExecutionResult> {
     switch (node.nodeType) {
       case "compute":
-        return await this.executeComputeNode(runDir, state, node, context);
+        return await this.executeCallbackNode(runDir, state, nodeId, node, context);
       case "action":
-        return await this.executeActionNode(runDir, state, node, context);
+        return "run" in node
+          ? await this.executeCallbackNode(runDir, state, nodeId, node, context)
+          : await this.executeShellNode(runDir, state, node, context);
       case "checkpoint":
-        return await this.executeCheckpointNode(runDir, state, nodeId, node, context);
+        return await this.executeCallbackNode(runDir, state, nodeId, node, context);
       case "acp":
         return await this.executeAcpNode(runDir, state, flow, node, context);
       default: {
@@ -645,61 +561,41 @@ export class FlowRunner {
     }
   }
 
-  private async executeComputeNode(
+  private async executeCallbackNode(
     runDir: string,
     state: FlowRunState,
-    node: ComputeNodeDefinition,
+    nodeId: string,
+    node: ComputeNodeDefinition | FunctionActionNodeDefinition | CheckpointNodeDefinition,
     context: FlowNodeContext,
   ): Promise<FlowNodeExecutionResult> {
-    const nodeTimeoutMs = node.timeoutMs ?? this.defaultNodeTimeoutMs;
-    const output = await this.runWithHeartbeat(
-      runDir,
-      state,
-      state.currentNode ?? "",
-      node,
-      nodeTimeoutMs,
-      async () => await Promise.resolve(node.run(context)),
-    );
+    const output =
+      node.nodeType === "checkpoint" && typeof node.run !== "function"
+        ? { checkpoint: nodeId, summary: node.summary ?? nodeId }
+        : await this.runWithHeartbeat(
+            runDir,
+            state,
+            nodeId,
+            node,
+            node.timeoutMs ?? this.defaultNodeTimeoutMs,
+            async () => await node.run?.(context),
+          );
     return {
       output,
       promptText: null,
       rawText: null,
       sessionInfo: null,
       agentInfo: null,
-      trace: null,
+      trace: node.nodeType === "action" ? { action: { actionType: "function" } } : null,
     };
   }
 
-  private async executeActionNode(
+  private async executeShellNode(
     runDir: string,
     state: FlowRunState,
-    node: ActionNodeDefinition,
+    node: ShellActionNodeDefinition,
     context: FlowNodeContext,
   ): Promise<FlowNodeExecutionResult> {
     const nodeTimeoutMs = node.timeoutMs ?? this.defaultNodeTimeoutMs;
-    if ("run" in node) {
-      const output = await this.runWithHeartbeat(
-        runDir,
-        state,
-        state.currentNode ?? "",
-        node,
-        nodeTimeoutMs,
-        async () => await Promise.resolve(node.run(context)),
-      );
-      return {
-        output,
-        promptText: null,
-        rawText: null,
-        sessionInfo: null,
-        agentInfo: null,
-        trace: {
-          action: {
-            actionType: "function",
-          },
-        },
-      };
-    }
-
     const shellAbort = new AbortController();
     let runningOwner: ShellProcessOwner | undefined;
     const shellControl: RunShellActionOptions = {
@@ -842,38 +738,6 @@ export class FlowRunner {
       sessionInfo: null,
       agentInfo: null,
       trace,
-    };
-  }
-
-  private async executeCheckpointNode(
-    runDir: string,
-    state: FlowRunState,
-    nodeId: string,
-    node: CheckpointNodeDefinition,
-    context: FlowNodeContext,
-  ): Promise<FlowNodeExecutionResult> {
-    const nodeTimeoutMs = node.timeoutMs ?? this.defaultNodeTimeoutMs;
-    const output =
-      typeof node.run === "function"
-        ? await this.runWithHeartbeat(
-            runDir,
-            state,
-            state.currentNode ?? "",
-            node,
-            nodeTimeoutMs,
-            async () => await Promise.resolve(node.run?.(context)),
-          )
-        : {
-            checkpoint: nodeId,
-            summary: node.summary ?? nodeId,
-          };
-    return {
-      output,
-      promptText: null,
-      rawText: null,
-      sessionInfo: null,
-      agentInfo: null,
-      trace: null,
     };
   }
 

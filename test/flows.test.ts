@@ -1924,6 +1924,53 @@ test("FlowRunner stores successful node results separately from outputs", async 
   });
 });
 
+test("FlowRunner records callback and output serialization failures as failed steps", async () => {
+  await withTempHome(async (homeDir) => {
+    const outputRoot = path.join(homeDir, "runs");
+    const runner = new FlowRunner({
+      resolveAgent: () => ({ agentName: "unused", agentCommand: "unused", cwd: homeDir }),
+      permissionMode: "deny-all",
+      outputRoot,
+    });
+    for (const makeNode of [compute, action, checkpoint]) {
+      for (const value of [undefined, null, false, new Error("callback failed"), 1n]) {
+        const flow = defineFlow({
+          name: "callback-failure",
+          startAt: "callback",
+          nodes: {
+            callback: makeNode({
+              run: () => {
+                if (typeof value === "bigint") {
+                  return value;
+                }
+                throw value;
+              },
+            }),
+          },
+          edges: [],
+        });
+        await assert.rejects(runner.run(flow, {}), (error: unknown) => {
+          if (typeof value === "bigint") {
+            assert.match(String(error), /BigInt/i);
+          } else {
+            assert.equal(error, value);
+          }
+          return true;
+        });
+        const runDir = await waitForRunDir(outputRoot, flow.name);
+        const state = await readRunJson(runDir);
+        assert.equal(state.status, "failed");
+        const result = (state.results as Record<string, Record<string, unknown>>).callback;
+        assert.equal(result.outcome, "failed");
+        assert.equal(result.nodeType, flow.nodes.callback.nodeType);
+        assert.equal(result.output, undefined);
+        assert.deepEqual(state.outputs, {});
+        await fs.rm(runDir, { recursive: true });
+      }
+    }
+  });
+});
+
 async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {
   const previousHome = process.env.HOME;
   const previousQueueOwnerArgs = process.env.ACPX_QUEUE_OWNER_ARGS;
