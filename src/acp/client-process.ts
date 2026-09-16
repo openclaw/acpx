@@ -192,35 +192,35 @@ function assertWindowsLaunchableCommand(command: string, platform: NodeJS.Platfo
   }
 }
 
+type CommandLineState = {
+  current: string;
+  quote: "'" | '"' | null;
+  escaping: boolean;
+  parts: string[];
+  hasPart: boolean;
+};
+
 export function splitCommandLine(value: string): CommandParts {
-  const parts: string[] = [];
-  let current = "";
-  let quote: "'" | '"' | null = null;
-  let escaping = false;
-  let hasPart = false;
-
+  const state: CommandLineState = {
+    current: "",
+    quote: null,
+    escaping: false,
+    parts: [],
+    hasPart: false,
+  };
   for (const ch of value) {
-    const next = readCommandLineChar({ ch, current, quote, escaping, parts, hasPart });
-    current = next.current;
-    quote = next.quote;
-    escaping = next.escaping;
-    hasPart = next.hasPart;
+    readCommandLineChar(state, ch);
   }
 
-  if (escaping) {
-    current += "\\";
-    hasPart = true;
+  if (state.escaping) {
+    state.current += "\\";
+    state.hasPart = true;
   }
-
-  if (quote) {
+  if (state.quote) {
     throw new Error("Invalid --agent command: unterminated quote");
   }
-
-  if (hasPart) {
-    parts.push(current);
-  }
-
-  return toCommandParts(parts);
+  flushCommandLinePart(state);
+  return toCommandParts(state.parts);
 }
 
 function toCommandParts(parts: string[]): CommandParts {
@@ -233,92 +233,42 @@ function toCommandParts(parts: string[]): CommandParts {
   };
 }
 
-function readCommandLineChar(state: {
-  ch: string;
-  current: string;
-  quote: "'" | '"' | null;
-  escaping: boolean;
-  parts: string[];
-  hasPart: boolean;
-}): { current: string; quote: "'" | '"' | null; escaping: boolean; hasPart: boolean } {
+function readCommandLineChar(state: CommandLineState, ch: string): void {
   if (state.escaping) {
-    return {
-      current: state.current + state.ch,
-      quote: state.quote,
-      escaping: false,
-      hasPart: true,
-    };
+    state.current += ch;
+    state.escaping = false;
+    state.hasPart = true;
+  } else if (ch === "\\" && state.quote !== "'") {
+    state.escaping = true;
+  } else if (state.quote) {
+    if (ch === state.quote) {
+      state.quote = null;
+    } else {
+      state.current += ch;
+    }
+    state.hasPart = true;
+  } else {
+    readUnquotedCommandLineChar(state, ch);
   }
-  if (state.ch === "\\" && state.quote !== "'") {
-    return {
-      current: state.current,
-      quote: state.quote,
-      escaping: true,
-      hasPart: state.hasPart,
-    };
-  }
-  if (state.quote) {
-    return readQuotedCommandLineChar({
-      ch: state.ch,
-      current: state.current,
-      quote: state.quote,
-      hasPart: state.hasPart,
-    });
-  }
-  return readUnquotedCommandLineChar(state);
 }
 
-function readQuotedCommandLineChar(state: {
-  ch: string;
-  current: string;
-  quote: "'" | '"';
-  hasPart: boolean;
-}): {
-  current: string;
-  quote: "'" | '"' | null;
-  escaping: boolean;
-  hasPart: boolean;
-} {
-  if (state.ch === state.quote) {
-    return { current: state.current, quote: null, escaping: false, hasPart: true };
+function readUnquotedCommandLineChar(state: CommandLineState, ch: string): void {
+  if (ch === "'" || ch === '"') {
+    state.quote = ch;
+    state.hasPart = true;
+  } else if (/\s/.test(ch)) {
+    flushCommandLinePart(state);
+  } else {
+    state.current += ch;
+    state.hasPart = true;
   }
-  return {
-    current: state.current + state.ch,
-    quote: state.quote,
-    escaping: false,
-    hasPart: true,
-  };
 }
 
-function readUnquotedCommandLineChar(state: {
-  ch: string;
-  current: string;
-  parts: string[];
-  hasPart: boolean;
-}): {
-  current: string;
-  quote: "'" | '"' | null;
-  escaping: boolean;
-  hasPart: boolean;
-} {
-  if (state.ch === "'" || state.ch === '"') {
-    return { current: state.current, quote: state.ch, escaping: false, hasPart: true };
-  }
-  if (/\s/.test(state.ch)) {
-    flushCommandLinePart(state.parts, state.current, state.hasPart);
-    return { current: "", quote: null, escaping: false, hasPart: false };
-  }
-  return {
-    current: state.current + state.ch,
-    quote: null,
-    escaping: false,
-    hasPart: true,
-  };
-}
-
-function flushCommandLinePart(parts: string[], current: string, hasPart: boolean): void {
-  if (hasPart) {
-    parts.push(current);
+function flushCommandLinePart(state: CommandLineState): void {
+  if (state.hasPart) {
+    state.parts.push(state.current);
+    state.current = "";
+    state.hasPart = false;
   }
 }
 

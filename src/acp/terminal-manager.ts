@@ -24,7 +24,7 @@ import {
   type TerminalSpawnCommand,
 } from "../spawn-command-options.js";
 import type { ClientOperation, NonInteractivePermissionPolicy, PermissionMode } from "../types.js";
-import { PROCESS_HELPER_TIMEOUT_MS, runTimedExecFile } from "./client-process.js";
+import { PROCESS_HELPER_TIMEOUT_MS, runTimedExecFile, waitForSpawn } from "./client-process.js";
 
 const DEFAULT_TERMINAL_OUTPUT_LIMIT_BYTES = 64 * 1024;
 const DEFAULT_KILL_GRACE_MS = 1_500;
@@ -136,22 +136,6 @@ function trimToUtf8Boundary(buffer: Buffer, limit: number): Buffer {
     start = buffer.length - limit;
   }
   return buffer.subarray(start);
-}
-
-function waitForSpawn(process: ChildProcessByStdio<null, Readable, Readable>): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onSpawn = () => {
-      process.off("error", onError);
-      resolve();
-    };
-    const onError = (error: Error) => {
-      process.off("spawn", onSpawn);
-      reject(error);
-    };
-
-    process.once("spawn", onSpawn);
-    process.once("error", onError);
-  });
 }
 
 async function defaultConfirmExecute(commandLine: string): Promise<boolean> {
