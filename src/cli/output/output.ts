@@ -12,6 +12,7 @@ import {
   extractSessionUpdateNotification,
   parseJsonRpcErrorMessage,
   parsePromptStopReason,
+  parsePermissionNotice,
 } from "../../acp/jsonrpc.js";
 import type {
   AcpJsonRpcMessage,
@@ -755,6 +756,12 @@ class TextOutputFormatter implements OutputFormatter {
   }
 
   onAcpMessage(message: AcpJsonRpcMessage): void {
+    const notice = parsePermissionNotice(message);
+    if (notice) {
+      this.beginSection();
+      this.writeLine(`${this.bold("[permission]")} ${notice}`);
+      return;
+    }
     const notification = extractSessionUpdateNotification(message);
     if (notification) {
       this.renderSessionUpdate(notification);
@@ -1080,6 +1087,11 @@ class QuietOutputFormatter implements OutputFormatter {
   }
 
   onAcpMessage(message: AcpJsonRpcMessage): void {
+    const notice = parsePermissionNotice(message);
+    if (notice) {
+      this.stderr.write(`[acpx] permission: ${notice.replace(/\r\n?|\n/g, " ")}\n`);
+      return;
+    }
     const update = extractSessionUpdateNotification(message);
     if (
       update?.update.sessionUpdate === "agent_message_chunk" &&

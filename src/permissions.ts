@@ -38,9 +38,9 @@ function cancelled(): RequestPermissionResponse {
   return { outcome: { outcome: "cancelled" } };
 }
 
-function withEscalationMetadata(
+export function withPermissionMetadata(
   response: RequestPermissionResponse,
-  event: PermissionEscalationEvent,
+  metadata: Record<string, unknown>,
 ): RequestPermissionResponse {
   return {
     ...response,
@@ -52,7 +52,7 @@ function withEscalationMetadata(
         !Array.isArray(response._meta.acpx)
           ? response._meta.acpx
           : {}),
-        permissionEscalation: event,
+        ...metadata,
       },
     },
   };
@@ -264,7 +264,7 @@ async function resolveEscalatingPermissionRequest(
   const escalation = buildEscalationEvent(params, policyMatch.matchedRule);
   const response = rejectOption ? selected(rejectOption.optionId) : cancelled();
   return {
-    response: withEscalationMetadata(response, escalation),
+    response: withPermissionMetadata(response, { permissionEscalation: escalation }),
     escalation,
   };
 }

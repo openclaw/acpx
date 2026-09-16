@@ -66,6 +66,38 @@ function errorResult(message: string, details?: string): unknown {
   };
 }
 
+for (const format of ["text", "quiet", "json"] as const) {
+  test(`${format} formatter exposes permission cancellation notices without changing the response`, () => {
+    const stdout = new CaptureWriter();
+    const stderr = new CaptureWriter();
+    const formatter = createOutputFormatter(format, { stdout, stderr });
+    const notice = "Permission cancellation may end the current turn.";
+    const message = {
+      jsonrpc: "2.0" as const,
+      id: "permission",
+      result: {
+        outcome: { outcome: "selected", optionId: "cancel" },
+        _meta: { acpx: { permissionNotice: notice } },
+      },
+    };
+    formatter.onAcpMessage(message);
+    formatter.flush();
+    if (format === "json") {
+      assert.deepEqual(JSON.parse(stdout.toString()), message);
+    } else {
+      assert.match(
+        (format === "quiet" ? stderr : stdout).toString(),
+        /Permission cancellation may end the current turn/,
+      );
+    }
+    if (format === "quiet") {
+      assert.equal(stdout.toString(), "");
+    } else {
+      assert.equal(stderr.toString(), "");
+    }
+  });
+}
+
 test("text formatter batches thought chunks from ACP notifications", () => {
   const writer = new CaptureWriter();
   const formatter = createOutputFormatter("text", { stdout: writer });

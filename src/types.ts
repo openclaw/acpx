@@ -164,6 +164,7 @@ export type PermissionStats = {
 };
 
 export type ClientOperationMethod =
+  | "session/request_permission"
   | "fs/read_text_file"
   | "fs/write_text_file"
   | "terminal/create"

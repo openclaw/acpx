@@ -129,6 +129,15 @@ export function parsePromptStopReason(message: AnyMessage): string | undefined {
   return typeof record.stopReason === "string" ? record.stopReason : undefined;
 }
 
+export function parsePermissionNotice(message: AnyMessage): string | undefined {
+  if (!Object.hasOwn(message, "id") || !Object.hasOwn(message, "result")) {
+    return undefined;
+  }
+  const result = asRecord((message as { result?: unknown }).result);
+  const notice = asRecord(asRecord(result?._meta)?.acpx)?.permissionNotice;
+  return typeof notice === "string" ? notice : undefined;
+}
+
 export function parseJsonRpcErrorMessage(message: AnyMessage): string | undefined {
   if (!Object.hasOwn(message, "error")) {
     return undefined;

@@ -12,6 +12,10 @@
 - Legacy `models` metadata may encode both values in a combined id such as `gpt-5.6-sol[max]`; ACPX uses that form only when the adapter does not advertise the newer model config option.
 - When the adapter returns `_meta.codex.turnConfiguration`, ACPX preserves the opaque metadata in direct, queued, compare, and embedded-runtime results. Structured CLI output also retains the raw ACP prompt response.
 
+## Permission refusals
+
+For the identified Codex ACP adapter, acpx prefers an offered `decline` or `reject_permissions` one-time refusal over cancellation. Permission kinds still determine approval and persistence behavior, and host callbacks receive the original request. If the selected refusal uses Codex cancellation, or no matching option exists, acpx keeps the safe cancellation and explains that it can end the turn. Text output shows a permission notice, quiet mode writes it to stderr, JSON retains it in the permission response's `_meta.acpx.permissionNotice`, and embedded runtimes emit a client-operation status. Explicit caller cancellation remains cancellation.
+
 ## Embedded inspection
 
 Embedded inspection resolves the installed `codex-acp` adapter or its installed `@agentclientprotocol/codex-acp` package. The ACP adapter supplies the launch entrypoint. Configure the adapter’s authentication before acquiring a model catalog or starting a session.

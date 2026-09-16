@@ -452,6 +452,8 @@ acpx --format json codex exec 'review changed files' \
 
 If every permission request is denied/cancelled and none approved, `acpx` exits with permission-denied status.
 
+Codex refusals prefer an offered non-cancelling one-time rejection. If safe refusal uses cancellation, acpx explains the possible turn termination in text output, quiet stderr, JSON response `_meta.acpx.permissionNotice`, and embedded status events. Permission denial never grants the requested operation. See [Codex](https://github.com/openclaw/acpx/blob/main/agents/Codex.md#permission-refusals).
+
 ## Flows (multi-agent workflows)
 
 Flows let you declare a multi-agent workflow as a graph of typed nodes connected by edges, executed by the `acpx` runtime. The runtime owns persistence, retries, timeouts, and routing — the flow file declares the shape, not the engine.

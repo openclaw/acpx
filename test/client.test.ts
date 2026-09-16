@@ -7,6 +7,7 @@ import test, { type TestContext } from "node:test";
 import type {
   AnyMessage,
   ClientConnection,
+  InitializeResponse,
   RequestPermissionRequest,
   RequestPermissionResponse,
 } from "@agentclientprotocol/sdk";
@@ -152,19 +153,7 @@ type ClientInternals = {
     | undefined;
   cancellingSessionIds: Set<string>;
   promptPermissionFailures: Map<string, PermissionPromptUnavailableError>;
-  initResult?: {
-    agentCapabilities?: {
-      promptCapabilities?: {
-        image?: boolean;
-        audio?: boolean;
-        embeddedContext?: boolean;
-      };
-      sessionCapabilities?: {
-        close?: Record<string, never>;
-        list?: Record<string, never>;
-      };
-    };
-  };
+  initResult?: Partial<InitializeResponse>;
   loadedSessionId?: string;
   lastKnownPid?: number;
   agentStartedAt?: string;
@@ -599,6 +588,110 @@ test("AcpClient onPermissionRequest decision short-circuits the mode-based resol
     cancelled: 0,
   });
 });
+
+for (const scenario of [
+  { name: "mode denial", ids: ["cancel", "decline"], expected: "decline" },
+  {
+    name: "automatic approval",
+    ids: ["cancel", "decline"],
+    expected: "allow",
+    mode: "approve-all" as const,
+  },
+  {
+    name: "noninteractive denial",
+    ids: ["cancel", "decline"],
+    expected: "decline",
+    mode: "approve-reads" as const,
+  },
+  {
+    name: "permission policy denial",
+    ids: ["cancel", "decline"],
+    expected: "decline",
+    mode: "approve-all" as const,
+    policy: { defaultAction: "deny" as const },
+  },
+  {
+    name: "permission-profile refusal",
+    ids: ["cancel", "reject_permissions"],
+    expected: "reject_permissions",
+  },
+  { name: "already ordered denial", ids: ["decline", "cancel"], expected: "decline" },
+  {
+    name: "host denial",
+    ids: ["cancel", "decline"],
+    expected: "decline",
+    host: "reject_once" as const,
+  },
+  { name: "abort-only refusal", ids: ["cancel"], expected: "cancel", notice: true },
+  { name: "missing refusal", ids: [], notice: true },
+  { name: "explicit host cancellation", ids: ["cancel", "decline"], host: "cancel" as const },
+  {
+    name: "unrelated adapter",
+    ids: ["cancel", "decline"],
+    expected: "cancel",
+    agent: "unrelated-adapter",
+  },
+]) {
+  test(`AcpClient routes Codex permission ${scenario.name} through ACP`, async (t) => {
+    const notices: string[] = [];
+    const fixture = createClientFixture(t, {
+      client: {
+        permissionMode: scenario.mode ?? "deny-all",
+        permissionPolicy: scenario.policy,
+        onClientOperation: (operation) => {
+          notices.push(operation.summary);
+        },
+        onPermissionRequest: scenario.host
+          ? async (request) => {
+              assert.deepEqual(
+                request.raw.options.map((option) => option.optionId),
+                ["allow", ...scenario.ids],
+              );
+              return { outcome: scenario.host };
+            }
+          : undefined,
+      },
+    });
+    asInternals(fixture.client).initResult = {
+      agentInfo: { name: scenario.agent ?? "@agentclientprotocol/codex-acp", version: "1.12.0" },
+    };
+    const request: RequestPermissionRequest = {
+      sessionId: "synthetic-permission",
+      toolCall: { toolCallId: "synthetic-call", title: "synthetic operation", kind: "execute" },
+      options: [
+        { optionId: "allow", name: "Allow", kind: "allow_once" },
+        ...scenario.ids.map((optionId) => ({
+          optionId,
+          name: optionId,
+          kind: "reject_once" as const,
+        })),
+      ],
+    };
+    await fixture.send({
+      jsonrpc: "2.0",
+      id: "permission",
+      method: "session/request_permission",
+      params: request,
+    });
+    const message = await fixture.message(0);
+    assert("result" in message);
+    const response = message.result as RequestPermissionResponse;
+    assert.deepEqual(
+      response.outcome,
+      scenario.expected
+        ? { outcome: "selected", optionId: scenario.expected }
+        : { outcome: "cancelled" },
+    );
+    if (scenario.notice) {
+      assert.equal(notices.length, 1);
+      assert.match(notices[0], /cancel.*turn/i);
+      assert.match(JSON.stringify(response._meta), /permissionNotice/);
+    } else {
+      assert.deepEqual(notices, []);
+      assert.equal(response._meta, undefined);
+    }
+  });
+}
 
 test("AcpClient onPermissionRequest returning undefined falls through to mode-based resolver", async () => {
   let callbackInvocations = 0;
@@ -2359,6 +2452,9 @@ function createClientFixture(
     messages,
     message,
     track,
+    send(value: AnyMessage) {
+      return writeAgentMessage(incoming.writable, value);
+    },
     prompt(sessionId: string, text: string) {
       return track(client.prompt(sessionId, text));
     },

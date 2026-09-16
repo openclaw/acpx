@@ -53,6 +53,7 @@ import {
   decisionToResponse,
   inferToolKind,
   resolvePermissionRequestWithDetails,
+  withPermissionMetadata,
 } from "../permissions.js";
 import { getUnsupportedPromptContentMessage, textPrompt } from "../prompt-content.js";
 import { buildAgentSpawnCommand, buildSpawnCommandOptions } from "../spawn-command-options.js";
@@ -105,6 +106,7 @@ import {
   waitForSpawn,
 } from "./client-process.js";
 import { resolveClientCapabilities, resolveClientInfo } from "./client-protocol.js";
+import { codexPermissionNotice, preferCodexPermissionRefusal } from "./codex-compat.js";
 import { extractAcpError } from "./error-shapes.js";
 import {
   modelStateFromConfigOptions,
@@ -1999,9 +2001,14 @@ export class AcpClient {
     if (!decision) {
       return undefined;
     }
-    const response = decisionToResponse(params, decision);
+    const response = decisionToResponse(
+      preferCodexPermissionRefusal(params, this.initResult?.agentInfo?.name),
+      decision,
+    );
     this.recordPermissionDecision(classifyPermissionDecision(params, response));
-    return response;
+    return decision.outcome === "cancel"
+      ? response
+      : this.explainPermissionRefusal(params, response);
   }
 
   private hostPermissionErrorResponse(
@@ -2028,16 +2035,33 @@ export class AcpClient {
   ): Promise<{ response: RequestPermissionResponse; recorded: boolean }> {
     try {
       const result = await resolvePermissionRequestWithDetails(
-        params,
+        preferCodexPermissionRefusal(params, this.initResult?.agentInfo?.name),
         this.options.permissionMode,
         this.options.nonInteractivePermissions ?? "deny",
         this.options.permissionPolicy,
       );
       this.emitPermissionEscalation(result.escalation);
-      return { response: result.response, recorded: false };
+      return { response: this.explainPermissionRefusal(params, result.response), recorded: false };
     } catch (error) {
       return this.handleModePermissionError(params.sessionId, error);
     }
+  }
+
+  private explainPermissionRefusal(
+    params: RequestPermissionRequest,
+    response: RequestPermissionResponse,
+  ): RequestPermissionResponse {
+    const notice = codexPermissionNotice(params, response, this.initResult?.agentInfo?.name);
+    if (!notice || this.cancellingSessionIds.has(params.sessionId)) {
+      return response;
+    }
+    this.eventHandlers.onClientOperation?.({
+      method: "session/request_permission",
+      status: "completed",
+      summary: notice,
+      timestamp: isoNow(),
+    });
+    return withPermissionMetadata(response, { permissionNotice: notice });
   }
 
   private emitPermissionEscalation(
