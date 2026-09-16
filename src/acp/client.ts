@@ -2055,12 +2055,16 @@ export class AcpClient {
     if (!notice || this.cancellingSessionIds.has(params.sessionId)) {
       return response;
     }
-    this.eventHandlers.onClientOperation?.({
-      method: "session/request_permission",
-      status: "completed",
-      summary: notice,
-      timestamp: isoNow(),
-    });
+    try {
+      this.eventHandlers.onClientOperation?.({
+        method: "session/request_permission",
+        status: "completed",
+        summary: notice,
+        timestamp: isoNow(),
+      });
+    } catch {
+      // A diagnostic observer must not change the resolved permission decision.
+    }
     return withPermissionMetadata(response, { permissionNotice: notice });
   }
 

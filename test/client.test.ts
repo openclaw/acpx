@@ -623,6 +623,22 @@ for (const scenario of [
     host: "reject_once" as const,
   },
   { name: "abort-only refusal", ids: ["cancel"], expected: "cancel", notice: true },
+  {
+    name: "host denial despite a throwing notice observer",
+    ids: ["cancel"],
+    expected: "cancel",
+    mode: "approve-all" as const,
+    host: "reject_once" as const,
+    notice: true,
+    throwNotice: true,
+  },
+  {
+    name: "mode denial despite a throwing notice observer",
+    ids: ["cancel"],
+    expected: "cancel",
+    notice: true,
+    throwNotice: true,
+  },
   { name: "missing refusal", ids: [], notice: true },
   { name: "explicit host cancellation", ids: ["cancel", "decline"], host: "cancel" as const },
   {
@@ -640,6 +656,9 @@ for (const scenario of [
         permissionPolicy: scenario.policy,
         onClientOperation: (operation) => {
           notices.push(operation.summary);
+          if (scenario.throwNotice) {
+            throw new Error("synthetic notice observer failure");
+          }
         },
         onPermissionRequest: scenario.host
           ? async (request) => {
@@ -676,6 +695,7 @@ for (const scenario of [
     const message = await fixture.message(0);
     assert("result" in message);
     const response = message.result as RequestPermissionResponse;
+    assert.equal(fixture.client.getPermissionStats().requested, 1);
     assert.deepEqual(
       response.outcome,
       scenario.expected
