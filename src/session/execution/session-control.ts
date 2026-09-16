@@ -1,15 +1,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { runTimedExecFile, splitCommandLine } from "../../acp/client-process.js";
-import { applyConfigOptionSelection, applyModelSelection } from "../../session/config-options.js";
-import { setDesiredModeId } from "../../session/mode-preference.js";
-import { resolveSessionRecord, writeSessionRecord, isoNow } from "../../session/persistence.js";
 import type {
   SessionRecord,
   SessionSetConfigOptionResult,
   SessionSetModelResult,
   SessionSetModeResult,
 } from "../../types.js";
+import { applyConfigOptionSelection, applyModelSelection } from "../config-options.js";
+import { setDesiredModeId } from "../mode-preference.js";
+import { resolveSessionRecord, writeSessionRecord, isoNow } from "../persistence.js";
 import {
   isProcessAlive,
   terminateProcess,

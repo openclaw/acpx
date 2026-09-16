@@ -9,12 +9,8 @@ import {
   mergeSessionOptions,
   sessionOptionsFromRecord,
 } from "../../runtime/engine/session-options.js";
-import {
-  absolutePath,
-  resolveSessionRecord,
-  writeSessionRecord,
-} from "../../session/persistence.js";
 import type { SessionSendOutcome } from "../../types.js";
+import { absolutePath, resolveSessionRecord, writeSessionRecord } from "../persistence.js";
 import {
   QUEUE_CONNECT_RETRY_MS,
   SessionQueueOwner,
@@ -59,11 +55,15 @@ async function submitToRunningOwner(
 ): Promise<SessionSendOutcome | undefined> {
   return await trySubmitToRunningOwner({
     sessionId: options.sessionId,
+    requestId: options.requestId,
+    requireSharedRuntime: options.requireSharedRuntime,
+    signal: options.signal,
     message: promptToDisplayText(options.prompt),
     prompt: options.prompt,
     mcpConfigPath: options.mcpConfigPath,
     mcpConfigFingerprint: options.mcpConfigFingerprint,
     permissionMode: options.permissionMode,
+    resumePolicy: options.resumePolicy,
     nonInteractivePermissions: options.nonInteractivePermissions,
     permissionPolicy: options.permissionPolicy,
     outputFormatter: options.outputFormatter,
@@ -74,7 +74,11 @@ async function submitToRunningOwner(
     waitForCompletion,
     verbose: options.verbose,
     sessionOptions: options.sessionOptions,
-    onQueueAccepted: extras?.onQueueAccepted,
+    onQueueAccepted: () => {
+      extras?.onQueueAccepted?.();
+      options.onQueueAccepted?.();
+    },
+    onPromptStarted: options.onPromptStarted,
   });
 }
 
@@ -523,6 +527,7 @@ async function runQueueOwnerRuntime(
         await turnPromise;
       } finally {
         shutdown.clearActiveTurn(turnPromise);
+        owner.completeTask(task);
       }
     }
   } finally {
@@ -534,6 +539,7 @@ async function runQueueOwnerRuntime(
 }
 
 export async function sendSession(options: SessionSendOptions): Promise<SessionSendOutcome> {
+  options.signal?.throwIfAborted();
   const waitForCompletion = options.waitForCompletion !== false;
 
   const queuedToOwner = await submitToRunningOwner(options, waitForCompletion);
@@ -541,40 +547,44 @@ export async function sendSession(options: SessionSendOptions): Promise<SessionS
     return queuedToOwner;
   }
 
-  const owner = spawnQueueOwnerProcess(queueOwnerRuntimeOptionsFromSend(options));
+  options.signal?.throwIfAborted();
+  const owner = spawnQueueOwnerProcess(
+    queueOwnerRuntimeOptionsFromSend(options),
+    options.queueOwnerArgs,
+  );
   // Stop retaining diagnostics at first IPC accept (not after full turn completion).
   const onQueueAccepted = () => {
     owner.stopStartupCapture();
   };
 
-  for (let attempt = 0; attempt < QUEUE_OWNER_STARTUP_MAX_ATTEMPTS; attempt += 1) {
-    const queued = await submitToRunningOwner(options, waitForCompletion, { onQueueAccepted });
-    if (queued) {
-      // Accept already stopped capture via onQueueAccepted; call again is idempotent.
-      owner.stopStartupCapture();
-      return queued;
+  try {
+    for (let attempt = 0; attempt < QUEUE_OWNER_STARTUP_MAX_ATTEMPTS; attempt += 1) {
+      options.signal?.throwIfAborted();
+      const queued = await submitToRunningOwner(options, waitForCompletion, { onQueueAccepted });
+      if (queued) {
+        return queued;
+      }
+      const exit = owner.getExitState();
+      if (queueOwnerExitIsFatal(exit)) {
+        const message = formatQueueOwnerStartupFailure({
+          sessionId: options.sessionId,
+          exit,
+          logTail: owner.readLogTail(),
+        });
+        throw new Error(message);
+      }
+      await waitMs(QUEUE_CONNECT_RETRY_MS);
     }
-    const exit = owner.getExitState();
-    if (queueOwnerExitIsFatal(exit)) {
-      const message = formatQueueOwnerStartupFailure({
-        sessionId: options.sessionId,
-        exit,
-        logTail: owner.readLogTail(),
-      });
-      owner.stopStartupCapture();
-      throw new Error(message);
-    }
-    await waitMs(QUEUE_CONNECT_RETRY_MS);
-  }
 
-  const finalExit = owner.getExitState();
-  const message = formatQueueOwnerStartupFailure({
-    sessionId: options.sessionId,
-    exit: finalExit.exited ? finalExit : { exited: false, code: null, signal: null },
-    logTail: owner.readLogTail(),
-  });
-  owner.stopStartupCapture();
-  throw new Error(message);
+    const message = formatQueueOwnerStartupFailure({
+      sessionId: options.sessionId,
+      exit: owner.getExitState(),
+      logTail: owner.readLogTail(),
+    });
+    throw new Error(message);
+  } finally {
+    owner.stopStartupCapture();
+  }
 }
 
 export type { QueueOwnerRuntimeOptions };

@@ -4,7 +4,7 @@ import {
   assertQueueRequestSize,
   queueRequestByteLimit,
   queueRequestExceedsLimit,
-} from "../src/cli/queue/request-limit.js";
+} from "../src/session/queue/request-limit.js";
 
 test("queue limits validate opt-in settings and count UTF-8 bytes", () => {
   assert.equal(queueRequestByteLimit("0"), undefined);

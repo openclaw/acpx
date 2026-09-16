@@ -92,6 +92,7 @@ export type QueueTask = {
   promptRetries?: number;
   sessionOptions?: NonNullable<AcpClientOptions["sessionOptions"]>;
   waitForCompletion: boolean;
+  reportPromptStarted?: boolean;
   enqueuedAt: number;
   send: (message: QueueOwnerMessage) => void;
   close: () => void;
@@ -126,6 +127,7 @@ export class SessionQueueOwner {
   private readonly maxRequestBytes?: number;
   private readonly onQueueDepthChanged?: (queueDepth: number) => void;
   private readonly pending: QueueTask[] = [];
+  private activeTask?: QueueTask;
   private readonly waiters: Array<(task: QueueTask | undefined) => void> = [];
   private readonly sockets = new Set<net.Socket>();
   private readonly taskSockets = new Set<net.Socket>();
@@ -232,6 +234,7 @@ export class SessionQueueOwner {
       const task = this.pending.shift();
       this.emitQueueDepth();
       if (task) {
+        this.activeTask = task;
         recordPerfDuration("queue.owner.wait_ms", Date.now() - task.enqueuedAt);
       }
       return task;
@@ -270,6 +273,38 @@ export class SessionQueueOwner {
     return this.pending.length;
   }
 
+  completeTask(task: QueueTask): void {
+    if (this.activeTask === task) {
+      this.activeTask = undefined;
+    }
+  }
+
+  private async cancelPrompt(targetRequestId?: string): Promise<boolean> {
+    if (targetRequestId === undefined) {
+      return await this.controlHandlers.cancelPrompt();
+    }
+    const index = this.pending.findIndex((task) => task.requestId === targetRequestId);
+    if (index >= 0) {
+      const [task] = this.pending.splice(index, 1);
+      task.send(
+        makeQueueOwnerError(
+          task.requestId,
+          "Prompt cancelled before execution",
+          "QUEUE_REQUEST_CANCELLED",
+          {
+            retryable: false,
+          },
+        ),
+      );
+      task.close();
+      this.emitQueueDepth();
+      return true;
+    }
+    return this.activeTask?.requestId === targetRequestId
+      ? await this.controlHandlers.cancelPrompt()
+      : false;
+  }
+
   private emitQueueDepth(): void {
     this.onQueueDepthChanged?.(this.pending.length);
   }
@@ -290,8 +325,27 @@ export class SessionQueueOwner {
       return false;
     }
 
+    if (
+      this.activeTask?.requestId === task.requestId ||
+      this.pending.some((queued) => queued.requestId === task.requestId)
+    ) {
+      task.send(
+        makeQueueOwnerError(
+          task.requestId,
+          "Request is already queued or active",
+          "QUEUE_REQUEST_DUPLICATE",
+          {
+            retryable: false,
+          },
+        ),
+      );
+      task.close();
+      return false;
+    }
+
     const waiter = this.waiters.shift();
     if (waiter) {
+      this.activeTask = task;
       waiter(task);
       return true;
     }
@@ -442,7 +496,7 @@ export class SessionQueueOwner {
         run: async () => ({
           type: "cancel_result",
           requestId: request.requestId,
-          cancelled: await this.controlHandlers.cancelPrompt(),
+          cancelled: await this.cancelPrompt(request.targetRequestId),
         }),
       });
       return true;
@@ -534,6 +588,7 @@ export class SessionQueueOwner {
       promptRetries: request.promptRetries,
       sessionOptions: request.sessionOptions,
       waitForCompletion: request.waitForCompletion,
+      reportPromptStarted: request.reportPromptStarted,
       enqueuedAt: Date.now(),
       send: (message) => {
         writeQueueMessage(socket, {

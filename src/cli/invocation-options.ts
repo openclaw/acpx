@@ -1,9 +1,12 @@
 import { InvalidArgumentError } from "commander";
 import { loadPermissionPolicySpec } from "../permission-policy.js";
+import type {
+  SessionConnectionOptions,
+  SessionCreateOptions,
+} from "../session/execution/contracts.js";
 import type { PermissionPolicy } from "../types.js";
 import type { ResolvedAcpxConfig } from "./config.js";
 import type { GlobalFlags } from "./flags.js";
-import type { SessionConnectionOptions, SessionCreateOptions } from "./session/contracts.js";
 
 export function sessionOptionsFromGlobalFlags(
   globalFlags: GlobalFlags,

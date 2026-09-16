@@ -252,6 +252,8 @@ Do not pass an `acpx` session id to a native provider CLI unless `agentSessionId
 
 ## Embedded session lifecycle
 
+Applications that need CLI processes to join the same live connection can use [`createSharedAcpRuntime()`](shared-sessions.md). The shared client uses the CLI's local session store and queue owner; the in-process runtime below retains caller-owned storage and callbacks.
+
 Embedding hosts can call `findSession({ sessionKey, agent })` on `acpx/runtime`
 to recover a persistent session handle after restart. It returns `undefined` when
 the record is absent, and does not start an agent or change the record. Existing

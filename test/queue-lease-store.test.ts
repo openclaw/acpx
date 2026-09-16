@@ -15,8 +15,8 @@ import {
   terminateProcess,
   terminateQueueOwnerForSession,
   tryAcquireQueueOwnerLease,
-} from "../src/cli/queue/lease-store.js";
-import { queueBaseDir, queueLockFilePath, queueSocketBaseDir } from "../src/cli/queue/paths.js";
+} from "../src/session/queue/lease-store.js";
+import { queueBaseDir, queueLockFilePath, queueSocketBaseDir } from "../src/session/queue/paths.js";
 import {
   queuePaths,
   startKeeperProcess,

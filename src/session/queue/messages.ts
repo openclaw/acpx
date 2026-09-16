@@ -37,6 +37,7 @@ export type QueueSubmitRequest = {
   suppressSdkConsoleErrors?: boolean;
   promptRetries?: number;
   waitForCompletion: boolean;
+  reportPromptStarted?: boolean;
   sessionOptions?: QueueSessionOptions;
 };
 
@@ -44,6 +45,7 @@ export type QueueCancelRequest = {
   type: "cancel_prompt";
   requestId: string;
   ownerGeneration?: number;
+  targetRequestId?: string;
 };
 
 export type QueueSetModeRequest = {
@@ -87,7 +89,7 @@ export type QueueRequest =
   | QueueCloseSessionRequest;
 
 export type QueueOwnerAcceptedMessage = {
-  type: "accepted";
+  type: "accepted" | "prompt_started";
   requestId: string;
   ownerGeneration?: number;
 };
@@ -424,11 +426,7 @@ function parseTypedQueueRequest(
     case "submit_prompt":
       return parseSubmitRequest(request, context);
     case "cancel_prompt":
-      return {
-        type: "cancel_prompt",
-        requestId: context.requestId,
-        ownerGeneration: context.ownerGeneration,
-      };
+      return parseCancelRequest(request, context);
     case "close_session":
       return { type: "close_session", ...context };
     case "set_mode":
@@ -442,6 +440,23 @@ function parseTypedQueueRequest(
   }
 }
 
+function parseCancelRequest(
+  request: Record<string, unknown>,
+  context: QueueRequestContext,
+): QueueCancelRequest | null {
+  if (request.targetRequestId != null && !parseNonEmptyString(request.targetRequestId)) {
+    return null;
+  }
+  return {
+    type: "cancel_prompt",
+    requestId: context.requestId,
+    ownerGeneration: context.ownerGeneration,
+    ...(typeof request.targetRequestId === "string"
+      ? { targetRequestId: request.targetRequestId }
+      : {}),
+  };
+}
+
 function parseSubmitRequest(
   request: Record<string, unknown>,
   context: QueueRequestContext,
@@ -452,22 +467,12 @@ function parseSubmitRequest(
   }
 
   return {
+    ...parsed,
     type: "submit_prompt",
     requestId: context.requestId,
     ownerGeneration: context.ownerGeneration,
-    message: parsed.message,
     prompt: parsed.prompt ?? textPrompt(parsed.message),
-    permissionMode: parsed.permissionMode,
-    ...(parsed.resumePolicy !== undefined ? { resumePolicy: parsed.resumePolicy } : {}),
-    nonInteractivePermissions: parsed.nonInteractivePermissions,
-    ...(parsed.permissionPolicy !== undefined ? { permissionPolicy: parsed.permissionPolicy } : {}),
     timeoutMs: context.timeoutMs,
-    ...(parsed.suppressSdkConsoleErrors !== undefined
-      ? { suppressSdkConsoleErrors: parsed.suppressSdkConsoleErrors }
-      : {}),
-    ...(parsed.promptRetries !== undefined ? { promptRetries: parsed.promptRetries } : {}),
-    waitForCompletion: parsed.waitForCompletion,
-    ...(parsed.sessionOptions !== undefined ? { sessionOptions: parsed.sessionOptions } : {}),
   };
 }
 
@@ -482,6 +487,7 @@ type ParsedSubmitRequestFields = Pick<
   | "suppressSdkConsoleErrors"
   | "promptRetries"
   | "waitForCompletion"
+  | "reportPromptStarted"
   | "sessionOptions"
 >;
 
@@ -502,10 +508,23 @@ function parseSubmitRequestFields(
     promptRetries: parseNonNegativeInteger(request.promptRetries),
     waitForCompletion:
       typeof request.waitForCompletion === "boolean" ? request.waitForCompletion : null,
+    reportPromptStarted: parseOptionalBoolean(request.reportPromptStarted),
     sessionOptions: parseSessionOptions(request.sessionOptions),
   };
   if (Object.values(parsed).some((value) => value === null)) {
     return null;
+  }
+  for (const key of [
+    "resumePolicy",
+    "permissionPolicy",
+    "suppressSdkConsoleErrors",
+    "promptRetries",
+    "reportPromptStarted",
+    "sessionOptions",
+  ] as const) {
+    if (parsed[key] === undefined) {
+      delete parsed[key];
+    }
   }
   return parsed as ParsedSubmitRequestFields;
 }
@@ -662,6 +681,7 @@ type QueueOwnerMessageParser = (
 
 const QUEUE_OWNER_MESSAGE_PARSERS: Record<string, QueueOwnerMessageParser> = {
   accepted: (_message, context) => ({ type: "accepted", ...context }),
+  prompt_started: (_message, context) => ({ type: "prompt_started", ...context }),
   event: parseEventOwnerMessage,
   permission_escalation: parsePermissionEscalationOwnerMessage,
   result: parseResultOwnerMessage,

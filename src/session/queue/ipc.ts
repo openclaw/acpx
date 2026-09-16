@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { QueueConnectionError, QueueProtocolError } from "../../errors.js";
-import { incrementPerfCounter } from "../../perf-metrics.js";
 import type {
   AcpClientOptions,
   NonInteractivePermissionPolicy,
@@ -20,7 +19,6 @@ import {
   resolveUsableQueueOwner,
   type QueueOwnerRecord,
   readQueueOwnerRecord,
-  terminateQueueOwnerForSession,
 } from "./lease-store.js";
 import {
   parseQueueOwnerMessage,
@@ -52,39 +50,6 @@ export {
 } from "./lease-store.js";
 export type { QueueOwnerLease } from "./lease-store.js";
 
-const STALE_OWNER_PROTOCOL_DETAIL_CODES = new Set([
-  "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
-  "QUEUE_PROTOCOL_UNEXPECTED_RESPONSE",
-]);
-
-async function maybeRecoverStaleOwnerAfterProtocolMismatch(params: {
-  sessionId: string;
-  owner: QueueOwnerRecord;
-  error: unknown;
-  verbose?: boolean;
-}): Promise<boolean> {
-  if (!(params.error instanceof QueueProtocolError)) {
-    return false;
-  }
-
-  const detailCode = params.error.detailCode;
-  if (!detailCode || !STALE_OWNER_PROTOCOL_DETAIL_CODES.has(detailCode)) {
-    return false;
-  }
-
-  await terminateQueueOwnerForSession(params.sessionId, params.owner).catch(() => {
-    // Preserve existing behavior if cleanup fails.
-  });
-  incrementPerfCounter("queue.owner.stale_recovered");
-
-  if (params.verbose) {
-    process.stderr.write(
-      `[acpx] dropped stale queue owner metadata after protocol mismatch for session ${params.sessionId} (${detailCode})\n`,
-    );
-  }
-
-  return true;
-}
 export { probeQueueOwnerHealth };
 export type { QueueOwnerHealth };
 export type { QueueOwnerMessage, QueueSubmitRequest } from "./messages.js";
@@ -141,25 +106,50 @@ function makeMalformedQueueMessageError(): QueueProtocolError {
   });
 }
 
+function notifyObserver(notify: (() => void) | undefined): void {
+  try {
+    notify?.();
+  } catch {
+    // A disconnected or throwing observer does not change the admitted operation.
+  }
+}
+
+function uncertainQueueOutcome(error: unknown): QueueConnectionError | QueueProtocolError {
+  const message = error instanceof Error ? error.message : "Queue request failed";
+  const options = {
+    detailCode:
+      error instanceof QueueProtocolError ? error.detailCode : "QUEUE_SUBMISSION_OUTCOME_UNKNOWN",
+    origin: "queue" as const,
+    retryable: false,
+  };
+  const ErrorType = error instanceof QueueProtocolError ? QueueProtocolError : QueueConnectionError;
+  return new ErrorType(
+    `${message}; request outcome is unknown. Do not automatically resubmit.`,
+    options,
+  );
+}
+
 function emitQueueOwnerError(
   formatter: OutputFormatter,
   policy: OutputErrorEmissionPolicy | undefined,
   sessionId: string,
   message: Extract<QueueOwnerMessage, { type: "error" }>,
 ): QueueConnectionError {
-  formatter.setContext({ sessionId });
+  notifyObserver(() => formatter.setContext({ sessionId }));
   const queueErrorAlreadyEmitted = policy?.queueErrorAlreadyEmitted ?? true;
   const shouldEmitInFormatter = message.outputAlreadyEmitted !== true || !queueErrorAlreadyEmitted;
   if (shouldEmitInFormatter) {
-    formatter.onError({
-      code: message.code ?? "RUNTIME",
-      detailCode: message.detailCode,
-      origin: message.origin ?? "queue",
-      message: message.message,
-      retryable: message.retryable,
-      acp: message.acp,
-    });
-    formatter.flush();
+    notifyObserver(() =>
+      formatter.onError({
+        code: message.code ?? "RUNTIME",
+        detailCode: message.detailCode,
+        origin: message.origin ?? "queue",
+        message: message.message,
+        retryable: message.retryable,
+        acp: message.acp,
+      }),
+    );
+    notifyObserver(() => formatter.flush());
   }
   // Mark formatter output as emitted even in quiet mode, so the CLI error
   // handler does not print the same failure again.
@@ -198,14 +188,17 @@ function parseQueueOwnerResponseLine(
 async function runQueueOwnerRequest<TResult>(options: {
   owner: QueueOwnerRecord;
   request: QueueRequest;
+  signal?: AbortSignal;
   onAccepted?: (controls: QueueOwnerRequestControls<TResult>) => void;
   onMessage: (message: QueueOwnerMessage, controls: QueueOwnerRequestControls<TResult>) => void;
   onClose: (controls: QueueOwnerRequestControls<TResult>) => void;
 }): Promise<TResult | undefined> {
+  options.signal?.throwIfAborted();
   const requestLine = JSON.stringify(options.request);
   assertQueueRequestSize(requestLine);
   const socket = await connectToQueueOwner(options.owner);
   if (!socket) {
+    options.signal?.throwIfAborted();
     return undefined;
   }
 
@@ -223,6 +216,7 @@ async function runQueueOwnerRequest<TResult>(options: {
         return;
       }
       settled = true;
+      options.signal?.removeEventListener("abort", onAbort);
       socket.removeAllListeners();
       if (!socket.destroyed) {
         socket.end();
@@ -235,12 +229,15 @@ async function runQueueOwnerRequest<TResult>(options: {
         return;
       }
       settled = true;
+      options.signal?.removeEventListener("abort", onAbort);
       socket.removeAllListeners();
       if (!socket.destroyed) {
         socket.destroy();
       }
       reject(error);
     };
+
+    const onAbort = () => finishReject(options.signal?.reason);
 
     const controls: QueueOwnerRequestControls<TResult> = {
       state,
@@ -253,17 +250,21 @@ async function runQueueOwnerRequest<TResult>(options: {
       try {
         message = parseQueueOwnerResponseLine(options.owner, options.request.requestId, line);
       } catch (error) {
-        finishReject(error);
+        finishReject(uncertainQueueOutcome(error));
         return;
       }
 
       if (message.type === "accepted") {
         state.acknowledged = true;
-        options.onAccepted?.(controls);
+        notifyObserver(() => options.onAccepted?.(controls));
         return;
       }
 
-      options.onMessage(message, controls);
+      try {
+        options.onMessage(message, controls);
+      } catch (error) {
+        finishReject(uncertainQueueOutcome(error));
+      }
     };
 
     socket.on("data", (chunk: string) => {
@@ -271,12 +272,19 @@ async function runQueueOwnerRequest<TResult>(options: {
 
       if (buffer.length > MAX_MESSAGE_BUFFER_SIZE) {
         socket.destroy();
-        finishReject(new Error(`Message buffer exceeded ${MAX_MESSAGE_BUFFER_SIZE} bytes`));
+        finishReject(
+          uncertainQueueOutcome(
+            new Error(`Message buffer exceeded ${MAX_MESSAGE_BUFFER_SIZE} bytes`),
+          ),
+        );
         return;
       }
 
       let index = buffer.indexOf("\n");
       while (index >= 0) {
+        if (settled) {
+          return;
+        }
         const line = buffer.slice(0, index).trim();
         buffer = buffer.slice(index + 1);
 
@@ -289,7 +297,7 @@ async function runQueueOwnerRequest<TResult>(options: {
     });
 
     socket.once("error", (error: Error) => {
-      finishReject(error);
+      finishReject(uncertainQueueOutcome(error));
     });
 
     socket.once("close", () => {
@@ -299,12 +307,24 @@ async function runQueueOwnerRequest<TResult>(options: {
       options.onClose(controls);
     });
 
-    socket.write(`${requestLine}\n`);
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.signal?.aborted) {
+      onAbort();
+      return;
+    }
+    try {
+      socket.write(`${requestLine}\n`);
+    } catch (error) {
+      finishReject(uncertainQueueOutcome(error));
+    }
   });
 }
 
 export type SubmitToQueueOwnerOptions = {
   sessionId: string;
+  requestId?: string;
+  requireSharedRuntime?: boolean;
+  signal?: AbortSignal;
   message: string;
   prompt?: PromptInput;
   mcpConfigPath?: string;
@@ -323,21 +343,23 @@ export type SubmitToQueueOwnerOptions = {
   sessionOptions?: NonNullable<AcpClientOptions["sessionOptions"]>;
   /** Fires when the queue owner acknowledges the request (IPC accept), before completion. */
   onQueueAccepted?: () => void;
+  /** Fires only when the owner writes the underlying ACP prompt request. */
+  onPromptStarted?: () => void;
 };
 
 function missingQueueAckError(): QueueConnectionError {
-  return new QueueConnectionError("Queue owner did not acknowledge request", {
+  return new QueueConnectionError("Queue owner did not acknowledge request; outcome unknown", {
     detailCode: "QUEUE_ACK_MISSING",
     origin: "queue",
-    retryable: true,
+    retryable: false,
   });
 }
 
 function unexpectedQueueResponseError(): QueueProtocolError {
-  return new QueueProtocolError("Queue owner returned unexpected response", {
+  return new QueueProtocolError("Queue owner returned unexpected response; outcome unknown", {
     detailCode: "QUEUE_PROTOCOL_UNEXPECTED_RESPONSE",
     origin: "queue",
-    retryable: true,
+    retryable: false,
   });
 }
 
@@ -347,15 +369,15 @@ function handleAcknowledgedSubmitMessage(
   formatter: OutputFormatter,
 ): void {
   if (message.type === "event") {
-    formatter.onAcpMessage(message.message);
+    notifyObserver(() => formatter.onAcpMessage(message.message));
     return;
   }
   if (message.type === "permission_escalation") {
-    formatter.onPermissionEscalation(message.event);
+    notifyObserver(() => formatter.onPermissionEscalation(message.event));
     return;
   }
   if (message.type === "result") {
-    formatter.flush();
+    notifyObserver(() => formatter.flush());
     controls.resolve(message.result);
     return;
   }
@@ -382,6 +404,10 @@ function handleSubmitQueueOwnerMessage(
     controls.reject(missingQueueAckError());
     return;
   }
+  if (message.type === "prompt_started") {
+    notifyObserver(options.onPromptStarted);
+    return;
+  }
   handleAcknowledgedSubmitMessage(message, controls, options.outputFormatter);
 }
 
@@ -389,7 +415,7 @@ async function submitToQueueOwner(
   owner: QueueOwnerRecord,
   options: SubmitToQueueOwnerOptions,
 ): Promise<SessionSendOutcome | undefined> {
-  const requestId = randomUUID();
+  const requestId = options.requestId ?? randomUUID();
   const request: QueueSubmitRequest = {
     type: "submit_prompt",
     requestId,
@@ -404,21 +430,27 @@ async function submitToQueueOwner(
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     promptRetries: options.promptRetries ?? 0,
     waitForCompletion: options.waitForCompletion,
+    ...(options.onPromptStarted ? { reportPromptStarted: true } : {}),
     sessionOptions: options.sessionOptions,
   };
 
-  options.outputFormatter.setContext({
-    sessionId: options.sessionId,
-  });
+  notifyObserver(() =>
+    options.outputFormatter.setContext({
+      sessionId: options.sessionId,
+    }),
+  );
 
   return await runQueueOwnerRequest<SessionSendOutcome>({
     owner,
     request,
+    signal: options.signal,
     onAccepted: ({ resolve }) => {
-      options.onQueueAccepted?.();
-      options.outputFormatter.setContext({
-        sessionId: options.sessionId,
-      });
+      notifyObserver(options.onQueueAccepted);
+      notifyObserver(() =>
+        options.outputFormatter.setContext({
+          sessionId: options.sessionId,
+        }),
+      );
       if (!options.waitForCompletion) {
         const queued: SessionEnqueueResult = {
           queued: true,
@@ -434,11 +466,14 @@ async function submitToQueueOwner(
     onClose: ({ state, resolve, reject }) => {
       if (!state.acknowledged) {
         reject(
-          new QueueConnectionError("Queue owner disconnected before acknowledging request", {
-            detailCode: "QUEUE_DISCONNECTED_BEFORE_ACK",
-            origin: "queue",
-            retryable: true,
-          }),
+          new QueueConnectionError(
+            "Queue owner disconnected before acknowledging request; outcome unknown",
+            {
+              detailCode: "QUEUE_DISCONNECTED_BEFORE_ACK",
+              origin: "queue",
+              retryable: false,
+            },
+          ),
         );
         return;
       }
@@ -454,11 +489,14 @@ async function submitToQueueOwner(
       }
 
       reject(
-        new QueueConnectionError("Queue owner disconnected before prompt completion", {
-          detailCode: "QUEUE_DISCONNECTED_BEFORE_COMPLETION",
-          origin: "queue",
-          retryable: true,
-        }),
+        new QueueConnectionError(
+          "Queue owner disconnected before prompt completion; outcome unknown",
+          {
+            detailCode: "QUEUE_DISCONNECTED_BEFORE_COMPLETION",
+            origin: "queue",
+            retryable: false,
+          },
+        ),
       );
     },
   });
@@ -493,31 +531,41 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
     onClose: ({ state, reject }) => {
       if (!state.acknowledged) {
         reject(
-          new QueueConnectionError("Queue owner disconnected before acknowledging request", {
-            detailCode: "QUEUE_DISCONNECTED_BEFORE_ACK",
-            origin: "queue",
-            retryable: true,
-          }),
+          new QueueConnectionError(
+            "Queue owner disconnected before acknowledging request; outcome unknown",
+            {
+              detailCode: "QUEUE_DISCONNECTED_BEFORE_ACK",
+              origin: "queue",
+              retryable: false,
+            },
+          ),
         );
         return;
       }
 
       reject(
-        new QueueConnectionError("Queue owner disconnected before responding", {
+        new QueueConnectionError("Queue owner disconnected before responding; outcome unknown", {
           detailCode: "QUEUE_DISCONNECTED_BEFORE_COMPLETION",
           origin: "queue",
-          retryable: true,
+          retryable: false,
         }),
       );
     },
   });
 }
 
-async function submitCancelToQueueOwner(owner: QueueOwnerRecord): Promise<boolean | undefined> {
+async function submitCancelToQueueOwner(
+  owner: QueueOwnerRecord,
+  targetRequestId?: string,
+): Promise<boolean | undefined> {
+  if (targetRequestId !== undefined) {
+    assertSharedRuntimeOwner(owner);
+  }
   const request: QueueCancelRequest = {
     type: "cancel_prompt",
     requestId: randomUUID(),
     ownerGeneration: owner.ownerGeneration,
+    ...(targetRequestId !== undefined ? { targetRequestId } : {}),
   };
   const response = await submitControlToQueueOwner(
     owner,
@@ -635,9 +683,20 @@ function assertQueueOwnerMcpConfigMatches(
   );
 }
 
+function assertSharedRuntimeOwner(owner: QueueOwnerRecord): void {
+  if (owner.sharedRuntime === true) {
+    return;
+  }
+  throw new QueueConnectionError(
+    "The running queue owner predates shared runtime support. Wait for its idle expiry or close the session before retrying.",
+    { detailCode: "QUEUE_SHARED_RUNTIME_UNSUPPORTED", origin: "queue", retryable: false },
+  );
+}
+
 export async function trySubmitToRunningOwner(
   options: SubmitToQueueOwnerOptions,
 ): Promise<SessionSendOutcome | undefined> {
+  options.signal?.throwIfAborted();
   const observed = await readQueueOwnerRecord(options.sessionId);
   if (!observed) {
     return undefined;
@@ -646,23 +705,12 @@ export async function trySubmitToRunningOwner(
   if (!owner) {
     return undefined;
   }
+  if (options.requireSharedRuntime) {
+    assertSharedRuntimeOwner(owner);
+  }
   assertQueueOwnerMcpConfigMatches(owner, options);
 
-  let submitted: SessionSendOutcome | undefined;
-  try {
-    submitted = await submitToQueueOwner(owner, options);
-  } catch (error) {
-    const recovered = await maybeRecoverStaleOwnerAfterProtocolMismatch({
-      sessionId: options.sessionId,
-      owner,
-      error,
-      verbose: options.verbose,
-    });
-    if (recovered) {
-      return undefined;
-    }
-    throw error;
-  }
+  const submitted = await submitToQueueOwner(owner, options);
   if (submitted) {
     if (options.verbose) {
       process.stderr.write(
@@ -732,13 +780,14 @@ export async function tryCloseSessionOnRunningOwner(options: {
 export async function tryCancelOnRunningOwner(options: {
   sessionId: string;
   verbose?: boolean;
+  targetRequestId?: string;
 }): Promise<boolean | undefined> {
   return await tryControlOnRunningOwner({
     sessionId: options.sessionId,
     verbose: options.verbose,
     requestName: "cancel",
     logPrefix: "[acpx] requested cancel on active owner pid",
-    submit: submitCancelToQueueOwner,
+    submit: (owner) => submitCancelToQueueOwner(owner, options.targetRequestId),
   });
 }
 

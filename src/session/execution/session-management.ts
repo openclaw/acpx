@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { normalizeAgentSessionId } from "../../acp/agent-session-id.js";
 import { AcpClient } from "../../acp/client.js";
 import { formatErrorMessage } from "../../acp/error-normalization.js";
@@ -7,19 +8,17 @@ import {
   createInitialSessionRecord,
 } from "../../runtime/engine/lifecycle.js";
 import { persistSessionOptions } from "../../runtime/engine/session-options.js";
-import {
-  applyConfigOptionsToRecord,
-  applyInitialModelSelection,
-} from "../../session/config-options.js";
-import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
+import type { SessionEnsureResult, SessionRecord } from "../../types.js";
+import { applyConfigOptionsToRecord, applyInitialModelSelection } from "../config-options.js";
+import { applyRequestedModelIfAdvertised } from "../model-application.js";
 import {
   absolutePath,
   findGitRepositoryRoot,
   findSessionByDirectoryWalk,
   normalizeName,
   writeSessionRecord,
-} from "../../session/persistence.js";
-import type { SessionEnsureResult, SessionRecord } from "../../types.js";
+} from "../persistence.js";
+import { acquireSessionTurn } from "../turn-ownership.js";
 import { DEFAULT_QUEUE_OWNER_TTL_MS } from "./contracts.js";
 import type {
   SessionCreateOptions,
@@ -157,6 +156,7 @@ async function resumeSessionRecordWithClient(
 export async function createSessionWithClient(
   options: SessionCreateOptions,
 ): Promise<SessionCreateWithClientResult> {
+  options.signal?.throwIfAborted();
   const client = new AcpClient({
     agentCommand: options.agentCommand,
     agentArgv: options.agentArgv,
@@ -173,13 +173,23 @@ export async function createSessionWithClient(
     sessionOptions: options.sessionOptions,
   });
 
+  const onAbort = () => {
+    void client.close().catch(() => {});
+  };
+  options.signal?.addEventListener("abort", onAbort, { once: true });
   try {
-    const record = await withInterrupt(
-      async () => await createSessionRecordWithClient(client, options),
-      async () => {
-        await client.close();
-      },
-    );
+    const create = async () => {
+      options.signal?.throwIfAborted();
+      const record = await createSessionRecordWithClient(client, options);
+      options.signal?.throwIfAborted();
+      return record;
+    };
+    const record =
+      options.handleProcessInterrupts === false
+        ? await create()
+        : await withInterrupt(create, async () => {
+            await client.close();
+          });
 
     return {
       record,
@@ -188,6 +198,8 @@ export async function createSessionWithClient(
   } catch (error) {
     await client.close();
     throw error;
+  } finally {
+    options.signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -255,6 +267,22 @@ export async function listAgentSessions(options: SessionListOptions): Promise<Se
 
 export async function ensureSession(options: SessionEnsureOptions): Promise<SessionEnsureResult> {
   const cwd = absolutePath(options.cwd);
+  const scope = createHash("sha256")
+    .update(JSON.stringify([options.agentCommand, cwd, normalizeName(options.name)]))
+    .digest("hex");
+  const ownership = await acquireSessionTurn(`ensure:${scope}`, options.signal);
+  try {
+    return await ensureSessionWithOwnership(options, cwd);
+  } finally {
+    await ownership[Symbol.asyncDispose]();
+  }
+}
+
+async function ensureSessionWithOwnership(
+  options: SessionEnsureOptions,
+  cwd: string,
+): Promise<SessionEnsureResult> {
+  options.signal?.throwIfAborted();
   const gitRoot = findGitRepositoryRoot(cwd);
   const walkBoundary = options.walkBoundary ?? gitRoot ?? cwd;
   const existing = await findSessionByDirectoryWalk({
@@ -287,6 +315,8 @@ export async function ensureSession(options: SessionEnsureOptions): Promise<Sess
   }
 
   const record = await createSession({
+    signal: options.signal,
+    handleProcessInterrupts: options.handleProcessInterrupts,
     agentCommand: options.agentCommand,
     agentArgv: options.agentArgv,
     cwd,

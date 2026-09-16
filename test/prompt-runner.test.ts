@@ -9,8 +9,8 @@ import {
   runSessionSetConfigOptionDirect,
   runSessionSetModelDirect,
   runSessionSetModeDirect,
-} from "../src/cli/session/prompt-runner.js";
-import { sendSessionDirect } from "../src/cli/session/runtime.js";
+} from "../src/session/execution/prompt-runner.js";
+import { sendSessionDirect } from "../src/session/execution/runtime.js";
 import { resolveSessionRecord } from "../src/session/persistence/repository.js";
 import {
   makeSessionRecord as makeSessionRecordFixture,

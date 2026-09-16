@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import readline from "node:readline";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { QueueConnectionError, QueueProtocolError } from "../src/errors.js";
+import { sendSession } from "../src/session/execution/queue-owner-runtime.js";
+import { resolveSessionRecord } from "../src/session/persistence.js";
 import {
   MAX_MESSAGE_BUFFER_SIZE,
   SessionQueueOwner,
@@ -13,9 +17,9 @@ import {
   trySetModelOnRunningOwner,
   trySetModeOnRunningOwner,
   trySubmitToRunningOwner,
-} from "../src/cli/queue/ipc.js";
-import { isProcessAlive, readQueueOwnerRecord } from "../src/cli/queue/lease-store.js";
-import { QueueConnectionError, QueueProtocolError } from "../src/errors.js";
+  terminateQueueOwnerForSession,
+} from "../src/session/queue/ipc.js";
+import { isProcessAlive, readQueueOwnerRecord } from "../src/session/queue/lease-store.js";
 import type { OutputFormatter } from "../src/types.js";
 import {
   cleanupOwnerArtifacts,
@@ -30,6 +34,7 @@ import {
   withTempHome,
   writeQueueOwnerLock,
 } from "./queue-test-helpers.js";
+import { makeSessionRecord, writeSessionRecordFile } from "./runtime-test-helpers.js";
 
 const NOOP_OUTPUT_FORMATTER: OutputFormatter = {
   setContext() {
@@ -48,6 +53,315 @@ const NOOP_OUTPUT_FORMATTER: OutputFormatter = {
     // no-op
   },
 };
+
+test(
+  "shared queue preserves turn identity, cancels only the target, and detaches observers",
+  { timeout: 15_000 },
+  async () => {
+    await withTempHome(async () => {
+      const sessionId = "shared-queue-controls";
+      const lease = await tryAcquireQueueOwnerLease(sessionId);
+      assert(lease);
+      let activeCancels = 0;
+      const owner = await SessionQueueOwner.start(lease, {
+        cancelPrompt: async () => {
+          activeCancels += 1;
+          return true;
+        },
+        closeSession: async () => false,
+        setSessionMode: async () => {},
+        setSessionModel: async () => undefined,
+        setSessionConfigOption: async () => ({ configOptions: [] }),
+      });
+      const submit = (requestId: string) => {
+        const abort = new AbortController();
+        let accept!: () => void;
+        const accepted = new Promise<void>((resolve) => {
+          accept = resolve;
+        });
+        const result = trySubmitToRunningOwner({
+          sessionId,
+          requestId,
+          requireSharedRuntime: true,
+          message: requestId,
+          permissionMode: "deny-all",
+          outputFormatter: NOOP_OUTPUT_FORMATTER,
+          waitForCompletion: true,
+          onQueueAccepted: accept,
+          signal: abort.signal,
+        });
+        void result.catch(() => {});
+        return { result, accepted, abort };
+      };
+      const submissions: ReturnType<typeof submit>[] = [];
+      try {
+        const activeReady = owner.nextTask(1_000);
+        const active = submit("active");
+        submissions.push(active);
+        await active.accepted;
+        const activeTask = await activeReady;
+        assert.equal(activeTask?.requestId, "active");
+        assert(activeTask);
+
+        const removed = submit("removed");
+        const retained = submit("retained");
+        submissions.push(removed, retained);
+        await Promise.all([removed.accepted, retained.accepted]);
+        assert.equal(owner.queueDepth(), 2);
+        assert.equal(
+          await tryCancelOnRunningOwner({ sessionId, targetRequestId: "missing" }),
+          false,
+        );
+        assert.equal(activeCancels, 0);
+
+        for (const requestId of ["active", "removed"]) {
+          const duplicate = submit(requestId);
+          submissions.push(duplicate);
+          await assert.rejects(duplicate.result, {
+            detailCode: "QUEUE_REQUEST_DUPLICATE",
+            retryable: false,
+          });
+        }
+        assert.equal(owner.queueDepth(), 2);
+
+        assert.equal(
+          await tryCancelOnRunningOwner({ sessionId, targetRequestId: "removed" }),
+          true,
+        );
+        assert.equal(activeCancels, 0, "cancelling a queued turn must not cancel the active turn");
+        await assert.rejects(removed.result, {
+          detailCode: "QUEUE_REQUEST_CANCELLED",
+          retryable: false,
+        });
+        assert.equal(owner.queueDepth(), 1);
+
+        retained.abort.abort(new Error("observer detached"));
+        await assert.rejects(retained.result, /observer detached/);
+        assert.equal(owner.queueDepth(), 1, "detachment must preserve admitted work");
+        assert.equal(await tryCancelOnRunningOwner({ sessionId, targetRequestId: "active" }), true);
+        assert.equal(
+          activeCancels,
+          1,
+          "dequeued starting turns retain their cancellation identity",
+        );
+        owner.completeTask(activeTask);
+        assert.equal(
+          await tryCancelOnRunningOwner({ sessionId, targetRequestId: "active" }),
+          false,
+        );
+        assert.equal((await owner.nextTask(100))?.requestId, "retained");
+      } finally {
+        for (const submission of submissions) {
+          submission.abort.abort();
+        }
+        await Promise.allSettled(submissions.map(({ result }) => result));
+        await owner.close();
+        await releaseQueueOwnerLease(lease);
+      }
+    });
+  },
+);
+
+test(
+  "queue acceptance and prompt write remain distinct despite throwing observers",
+  { timeout: 10_000 },
+  async () => {
+    await withTempHome(async () => {
+      const sessionId = "shared-queue-started";
+      const lease = await tryAcquireQueueOwnerLease(sessionId);
+      assert(lease);
+      const owner = await SessionQueueOwner.start(lease, {
+        cancelPrompt: async () => false,
+        closeSession: async () => false,
+        setSessionMode: async () => {},
+        setSessionModel: async () => undefined,
+        setSessionConfigOption: async () => ({ configOptions: [] }),
+      });
+      let accept!: () => void;
+      let start!: () => void;
+      let promptStarted = false;
+      const accepted = new Promise<void>((resolve) => {
+        accept = resolve;
+      });
+      const started = new Promise<void>((resolve) => {
+        start = resolve;
+      });
+      const result = trySubmitToRunningOwner({
+        sessionId,
+        requestId: "host-request",
+        requireSharedRuntime: true,
+        message: "hello",
+        permissionMode: "deny-all",
+        resumePolicy: "same-session-only",
+        outputFormatter: NOOP_OUTPUT_FORMATTER,
+        waitForCompletion: true,
+        onQueueAccepted: () => {
+          accept();
+          throw new Error("accept observer failed");
+        },
+        onPromptStarted: () => {
+          promptStarted = true;
+          start();
+          throw new Error("start observer failed");
+        },
+      });
+      void result.catch(() => {});
+      try {
+        await accepted;
+        assert.equal(promptStarted, false);
+        const task = await owner.nextTask(1_000);
+        assert(task);
+        assert.equal(task.requestId, "host-request");
+        assert.equal(task.resumePolicy, "same-session-only");
+        assert.equal(task.reportPromptStarted, true);
+        task.send({ type: "prompt_started", requestId: task.requestId });
+        await started;
+        task.send({
+          type: "error",
+          requestId: task.requestId,
+          code: "PERMISSION_DENIED",
+          detailCode: "EXPECTED_REFUSAL",
+          origin: "runtime",
+          retryable: false,
+          message: "refused",
+        });
+        await assert.rejects(result, { detailCode: "EXPECTED_REFUSAL", retryable: false });
+        task.close();
+        owner.completeTask(task);
+      } finally {
+        await owner.close();
+        await releaseQueueOwnerLease(lease);
+      }
+    });
+  },
+);
+
+test("pre-aborted shared submissions do not start an owner", async () => {
+  await withTempHome(async () => {
+    const reason = new Error("cancelled before submission");
+    await assert.rejects(
+      sendSession({
+        sessionId: "never-started",
+        prompt: [{ type: "text", text: "hello" }],
+        permissionMode: "deny-all",
+        outputFormatter: NOOP_OUTPUT_FORMATTER,
+        signal: AbortSignal.abort(reason),
+        queueOwnerArgs: ["missing-owner-entry.js"],
+      }),
+      (error) => error === reason,
+    );
+    assert.equal(await readQueueOwnerRecord("never-started"), undefined);
+  });
+});
+
+test(
+  "shared owner reports actual ACP prompt start and persists the host request ID",
+  { timeout: 20_000 },
+  async () => {
+    await withTempHome(async (homeDir) => {
+      const sessionId = "shared-runtime-native-owner";
+      const record = makeSessionRecord({
+        acpxRecordId: sessionId,
+        acpSessionId: "existing-agent-session",
+        cwd: homeDir,
+        agentCommand: process.execPath,
+        agentArgv: [
+          process.execPath,
+          fileURLToPath(new URL("./mock-agent.js", import.meta.url)),
+          "--supports-load-session",
+        ],
+      });
+      await writeSessionRecordFile(homeDir, record);
+      let start!: () => void;
+      const started = new Promise<void>((resolve) => {
+        start = resolve;
+      });
+      let settled = false;
+      const result = sendSession({
+        sessionId,
+        requestId: "host-request-survives-rpc-ids",
+        requireSharedRuntime: true,
+        prompt: [{ type: "text", text: "stream-sleep 100 shared-live" }],
+        permissionMode: "deny-all",
+        outputFormatter: NOOP_OUTPUT_FORMATTER,
+        resumePolicy: "same-session-only",
+        ttlMs: 1,
+        onPromptStarted: start,
+        queueOwnerArgs: [fileURLToPath(new URL("../src/cli.js", import.meta.url)), "__queue-owner"],
+      });
+      void result.then(
+        () => {
+          settled = true;
+        },
+        () => {},
+      );
+      try {
+        await Promise.race([
+          started,
+          result.then(() => {
+            throw new Error("owner completed without a prompt-start notification");
+          }),
+        ]);
+        assert.equal(settled, false, "promptStarted must precede turn completion");
+        const outcome = await result;
+        assert(!("queued" in outcome));
+        assert.equal(outcome.stopReason, "end_turn");
+        assert.equal(outcome.record.lastRequestId, "host-request-survives-rpc-ids");
+        assert.equal(
+          (await resolveSessionRecord(sessionId)).lastRequestId,
+          "host-request-survives-rpc-ids",
+        );
+      } finally {
+        await terminateQueueOwnerForSession(sessionId);
+      }
+    });
+  },
+);
+
+test("legacy owners reject shared submission and targeted cancellation before receiving requests", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "legacy-owner";
+    const keeper = await startKeeperProcess();
+    const paths = queuePaths(homeDir, sessionId);
+    await writeQueueOwnerLock({ ...paths, sessionId, pid: keeper.pid });
+    let requests = 0;
+    const server = createSingleRequestServer((socket, request) => {
+      requests += 1;
+      socket.write(`${JSON.stringify({ type: "accepted", requestId: request.requestId })}\n`);
+      socket.end(
+        `${JSON.stringify({ type: "cancel_result", requestId: request.requestId, cancelled: true })}\n`,
+      );
+    });
+    await listenServer(server, paths.socketPath);
+    try {
+      const unsupported = { detailCode: "QUEUE_SHARED_RUNTIME_UNSUPPORTED", retryable: false };
+      await assert.rejects(
+        trySubmitToRunningOwner({
+          sessionId,
+          requestId: "new-request",
+          message: "must not run",
+          permissionMode: "deny-all",
+          outputFormatter: NOOP_OUTPUT_FORMATTER,
+          waitForCompletion: true,
+          requireSharedRuntime: true,
+        }),
+        unsupported,
+      );
+      await assert.rejects(
+        tryCancelOnRunningOwner({ sessionId, targetRequestId: "new-request" }),
+        unsupported,
+      );
+      assert.equal(requests, 0);
+      assert.equal(isProcessAlive(keeper.pid), true);
+      assert.equal(await tryCancelOnRunningOwner({ sessionId }), true);
+      assert.equal(requests, 1, "legacy CLI cancellation remains supported");
+    } finally {
+      await closeServer(server);
+      await cleanupOwnerArtifacts(paths);
+      stopProcess(keeper);
+    }
+  });
+});
 
 test("queue controls reject invalid responses and preserve false results", async () => {
   const controls = [
@@ -105,7 +419,7 @@ test("queue controls reject invalid responses and preserve false results", async
             if (detailCode) {
               await assert.rejects(
                 control.send(sessionId),
-                { detailCode, origin: "queue", retryable: true },
+                { detailCode, origin: "queue", retryable: false },
                 `${control.type}: ${scenario}`,
               );
             } else {
@@ -344,7 +658,7 @@ test("trySubmitToRunningOwner surfaces protocol invalid JSON detail code", async
           assert(error instanceof QueueProtocolError);
           assert.equal(error.detailCode, "QUEUE_PROTOCOL_INVALID_JSON");
           assert.equal(error.origin, "queue");
-          assert.equal(error.retryable, true);
+          assert.equal(error.retryable, false);
           return true;
         },
       );
@@ -388,7 +702,7 @@ test("trySubmitToRunningOwner surfaces disconnect-before-ack detail code", async
           assert(error instanceof QueueConnectionError);
           assert.equal(error.detailCode, "QUEUE_DISCONNECTED_BEFORE_ACK");
           assert.equal(error.origin, "queue");
-          assert.equal(error.retryable, true);
+          assert.equal(error.retryable, false);
           return true;
         },
       );
@@ -833,7 +1147,7 @@ test("SessionQueueOwner rejects no-wait prompts when queue depth exceeds the lim
 });
 
 for (const replaceOwner of [false, true]) {
-  test(`protocol mismatch recovery ${replaceOwner ? "preserves a replacement owner" : "clears the observed owner"}`, async () => {
+  test(`uncertain submission preserves ${replaceOwner ? "a replacement owner" : "the observed owner"} without retry`, async () => {
     await withTempHome(async (homeDir) => {
       const sessionId = "submit-stale-owner-protocol-mismatch";
       const keeper = await startKeeperProcess();
@@ -880,20 +1194,21 @@ for (const replaceOwner of [false, true]) {
       await listenServer(server, socketPath);
 
       try {
-        const outcome = await trySubmitToRunningOwner({
-          sessionId,
-          message: "hello",
-          permissionMode: "approve-reads",
-          outputFormatter: NOOP_OUTPUT_FORMATTER,
-          waitForCompletion: true,
-        });
-        assert.equal(outcome, undefined);
+        await assert.rejects(
+          trySubmitToRunningOwner({
+            sessionId,
+            message: "hello",
+            permissionMode: "approve-reads",
+            outputFormatter: NOOP_OUTPUT_FORMATTER,
+            waitForCompletion: true,
+          }),
+          { detailCode: "QUEUE_PROTOCOL_MALFORMED_MESSAGE", retryable: false },
+        );
         if (replaceOwner) {
           assert.equal((await readQueueOwnerRecord(sessionId))?.ownerGeneration, 42);
-          assert.equal(isProcessAlive(keeper.pid), true);
-        } else {
-          await assert.rejects(fs.access(lockPath));
         }
+        await fs.access(lockPath);
+        assert.equal(isProcessAlive(keeper.pid), true);
       } finally {
         await closeServer(server);
         await cleanupOwnerArtifacts({ socketPath, lockPath });

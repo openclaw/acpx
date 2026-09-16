@@ -2,6 +2,7 @@ import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import { isLegacyZedCodexAcpInvocation } from "../acp/codex-compat.js";
 import { AgentSpawnError } from "../errors.js";
+import type { SessionListResult } from "../session/execution/contracts.js";
 import { exportSession } from "../session/export.js";
 import { importSession } from "../session/import.js";
 import {
@@ -45,7 +46,6 @@ import {
 } from "./invocation-options.js";
 import { emitJsonResult } from "./output/json-output.js";
 import { readPromptInput } from "./prompt-input.js";
-import type { SessionListResult } from "./session/contracts.js";
 
 class NoSessionError extends Error {
   constructor(message: string) {

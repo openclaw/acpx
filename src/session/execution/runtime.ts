@@ -20,26 +20,6 @@ import {
   sessionOptionsFromRecord,
   type SessionAgentOptions,
 } from "../../runtime/engine/session-options.js";
-import { applyConfigOptionSelection, applyModelSelection } from "../../session/config-options.js";
-import {
-  cloneSessionAcpxState,
-  cloneSessionConversation,
-  recordClientOperation as recordConversationClientOperation,
-  recordPromptSubmission,
-  recordSessionUpdate as recordConversationSessionUpdate,
-  trimConversationForRuntime,
-} from "../../session/conversation-model.js";
-import { SessionEventWriter } from "../../session/events.js";
-import { LiveSessionCheckpoint } from "../../session/live-checkpoint.js";
-import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
-import { advertisedModelState } from "../../session/model-state.js";
-import {
-  absolutePath,
-  isoNow,
-  resolveSessionRecord,
-  writeSessionRecord,
-} from "../../session/persistence.js";
-import { acquireSessionTurn } from "../../session/turn-ownership.js";
 import type {
   AcpJsonRpcMessage,
   AcpMessageDirection,
@@ -57,10 +37,25 @@ import type {
   SessionRecord,
   SessionSendResult,
 } from "../../types.js";
-import { DISCARD_OUTPUT_FORMATTER } from "../output/discard.js";
+import { applyConfigOptionSelection, applyModelSelection } from "../config-options.js";
+import {
+  cloneSessionAcpxState,
+  cloneSessionConversation,
+  recordClientOperation as recordConversationClientOperation,
+  recordPromptSubmission,
+  recordSessionUpdate as recordConversationSessionUpdate,
+  trimConversationForRuntime,
+} from "../conversation-model.js";
+import { SessionEventWriter } from "../events.js";
+import { LiveSessionCheckpoint } from "../live-checkpoint.js";
+import { applyRequestedModelIfAdvertised } from "../model-application.js";
+import { advertisedModelState } from "../model-state.js";
+import { absolutePath, isoNow, resolveSessionRecord, writeSessionRecord } from "../persistence.js";
 import { type QueueOwnerMessage, type QueueTask, waitMs } from "../queue/ipc.js";
 import { type QueueOwnerActiveSessionController } from "../queue/owner-turn-controller.js";
+import { acquireSessionTurn } from "../turn-ownership.js";
 import type { RunOnceOptions, SessionSendOptions } from "./contracts.js";
+import { DISCARD_OUTPUT_FORMATTER } from "./discard-output.js";
 
 const INTERRUPT_CANCEL_WAIT_MS = 2_500;
 
@@ -74,6 +69,7 @@ type RunSessionPromptOptions = Omit<
   onClientAvailable?: (controller: ActiveSessionController) => void;
   onClientClosed?: () => void;
   onPromptActive?: () => Promise<void> | void;
+  onPromptRequestWritten?: () => Promise<void> | void;
 };
 
 type ActiveSessionController = QueueOwnerActiveSessionController;
@@ -453,6 +449,7 @@ function buildQueuedTaskRunOptions(
 ): RunSessionPromptOptions {
   return {
     sessionRecordId,
+    requestId: task.requestId,
     mcpServers: options.mcpServers,
     prompt: task.prompt ?? textPrompt(task.message),
     permissionMode: task.permissionMode,
@@ -471,6 +468,11 @@ function buildQueuedTaskRunOptions(
     onClientAvailable: options.onClientAvailable,
     onClientClosed: options.onClientClosed,
     onPromptActive: options.onPromptActive,
+    onPromptRequestWritten: () => {
+      if (task.reportPromptStarted) {
+        task.send({ type: "prompt_started", requestId: task.requestId });
+      }
+    },
     handleProcessInterrupts: options.handleProcessInterrupts,
     waitSignal: options.waitSignal,
     client: options.sharedClient,
@@ -609,6 +611,20 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
   }
 }
 
+function preparePromptConversation(record: SessionRecord, options: RunSessionPromptOptions) {
+  const conversation = cloneSessionConversation(record);
+  record.acpx = cloneSessionAcpxState(record.acpx);
+  const promptStartedAt = isoNow();
+  const promptMessageId = recordPromptSubmission(conversation, options.prompt, promptStartedAt);
+  record.lastPromptAt = promptStartedAt;
+  record.lastUsedAt = promptStartedAt;
+  if (options.requestId !== undefined) {
+    record.lastRequestId = options.requestId;
+  }
+  applyConversation(record, conversation);
+  return { conversation, promptMessageId };
+}
+
 async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<SessionSendResult> {
   const stopTotalTimer = startPerfTimer("runtime.prompt.total");
   const output = options.outputFormatter;
@@ -616,13 +632,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
   const record = await measurePerf("session.resolve_prompt_record", async () => {
     return await resolveSessionRecord(options.sessionRecordId);
   });
-  const conversation = cloneSessionConversation(record);
-  record.acpx = cloneSessionAcpxState(record.acpx);
-  const promptStartedAt = isoNow();
-  const promptMessageId = recordPromptSubmission(conversation, options.prompt, promptStartedAt);
-  record.lastPromptAt = promptStartedAt;
-  record.lastUsedAt = promptStartedAt;
-  applyConversation(record, conversation);
+  const { conversation, promptMessageId } = preparePromptConversation(record, options);
   await writeSessionRecord(record);
 
   output.setContext({
@@ -661,6 +671,9 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     await measurePerf("session.events.flush_pending", async () => {
       await eventWriter.appendMessages(batch, { checkpoint });
     });
+    if (options.requestId !== undefined) {
+      record.lastRequestId = options.requestId;
+    }
   };
   const preserveClosedState = async (): Promise<void> => {
     const latest = await resolveSessionRecord(record.acpxRecordId).catch(() => undefined);
@@ -862,6 +875,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
         timeoutMs: options.timeoutMs,
         conversation,
         promptMessageId,
+        onPromptRequestWritten: options.onPromptRequestWritten,
         onPromptStarted: buildPromptStartedHook(attempt),
       });
     });

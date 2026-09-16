@@ -4,7 +4,7 @@ import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import {
   QueueOwnerTurnController,
   type QueueOwnerActiveSessionController,
-} from "../src/cli/queue/owner-turn-controller.js";
+} from "../src/session/queue/owner-turn-controller.js";
 
 test("QueueOwnerTurnController tracks explicit lifecycle states", async () => {
   const controller = createQueueOwnerTurnController();

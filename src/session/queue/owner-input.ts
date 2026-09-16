@@ -3,7 +3,7 @@ import { parseOptionalMcpServers } from "../../mcp-servers.js";
 import {
   runSessionQueueOwner,
   type QueueOwnerRuntimeOptions,
-} from "../session/queue-owner-runtime.js";
+} from "../execution/queue-owner-runtime.js";
 
 type UnknownRecord = Record<string, unknown>;
 

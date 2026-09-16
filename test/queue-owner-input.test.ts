@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseQueueOwnerPayload } from "../src/cli/queue/owner-input.js";
+import { parseQueueOwnerPayload } from "../src/session/queue/owner-input.js";
 
 describe("parseQueueOwnerPayload", () => {
   it("parses valid payload", () => {

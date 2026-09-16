@@ -4,7 +4,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { main } from "./cli-core.js";
 import { installBrokenPipeHandler } from "./cli/broken-pipe.js";
-import { buildQueueOwnerArgOverride } from "./cli/session/queue-owner-process.js";
+import { buildQueueOwnerArgOverride } from "./session/execution/queue-owner-process.js";
 
 export { formatPromptSessionBannerLine } from "./cli-core.js";
 export { parseAllowedTools, parseMaxTurns, parseTtlSeconds } from "./cli/flags.js";

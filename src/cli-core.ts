@@ -21,8 +21,8 @@ import {
   resolveOutputPolicy,
 } from "./cli/flags.js";
 import { createOutputFormatter, getTextErrorRemediationHints } from "./cli/output/output.js";
-import { runQueueOwnerFromStdin } from "./cli/queue/owner-input.js";
 import { flushPerfMetricsCapture, installPerfMetricsCapture } from "./perf-metrics-capture.js";
+import { runQueueOwnerFromStdin } from "./session/queue/owner-input.js";
 import { EXIT_CODES, OUTPUT_FORMATS, type OutputFormat, type OutputPolicy } from "./types.js";
 import { getAcpxVersion } from "./version.js";
 

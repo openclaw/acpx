@@ -328,8 +328,8 @@ Do not change release metadata or publishing behavior casually.
 - [`src/acp/client.ts`](src/acp/client.ts) — ACP client integration
 - [`src/cli/config.ts`](src/cli/config.ts) — config loading and defaults
 - [`src/agent-registry.ts`](src/agent-registry.ts) — built-in agent names and commands
-- [`src/cli/session/runtime.ts`](src/cli/session/runtime.ts) and [`src/cli/session/`](src/cli/session) — CLI session lifecycle and runtime behavior
-- [`src/cli/queue/ipc.ts`](src/cli/queue/ipc.ts) and [`src/cli/queue/ipc-server.ts`](src/cli/queue/ipc-server.ts) — queue IPC behavior
+- [`src/session/execution/runtime.ts`](src/session/execution/runtime.ts) and [`src/session/execution/`](src/session/execution) — shared session lifecycle and runtime behavior
+- [`src/session/queue/ipc.ts`](src/session/queue/ipc.ts) and [`src/session/queue/ipc-server.ts`](src/session/queue/ipc-server.ts) — queue IPC behavior
 - [`test/integration.test.ts`](test/integration.test.ts) — end-to-end CLI expectations
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — CI behavior
 - [`.github/workflows/release.yml`](.github/workflows/release.yml) — release workflow

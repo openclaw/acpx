@@ -3,7 +3,7 @@ import { once } from "node:events";
 import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
-import { queueLockFilePath, queueSocketPath } from "../src/cli/queue/paths.js";
+import { queueLockFilePath, queueSocketPath } from "../src/session/queue/paths.js";
 import { withTempHome as withTempHomeFixture } from "./runtime-test-helpers.js";
 
 export type QueuePaths = {

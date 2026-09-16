@@ -1,6 +1,7 @@
 import { performance } from "node:perf_hooks";
 import { Command, InvalidArgumentError } from "commander";
 import { TimeoutError } from "../async-control.js";
+import { DISCARD_OUTPUT_FORMATTER } from "../session/execution/discard-output.js";
 import { runOnce } from "../session/session.js";
 import type {
   PermissionPolicy,
@@ -25,7 +26,6 @@ import {
   sessionConnectionOptions,
   resolvePermissionPolicyFromFlags,
 } from "./invocation-options.js";
-import { DISCARD_OUTPUT_FORMATTER } from "./output/discard.js";
 import { readPromptInput } from "./prompt-input.js";
 
 const DEFAULT_COMPARE_TIMEOUT_MS = 300_000;

@@ -25,6 +25,7 @@ export type QueueOwnerRecord = {
   heartbeatAt: string;
   ownerGeneration: number;
   queueDepth: number;
+  sharedRuntime?: boolean;
   mcpConfigPath?: string;
   mcpConfigFingerprint?: string;
 };
@@ -69,6 +70,7 @@ function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
     heartbeatAt: record.heartbeatAt,
     ownerGeneration: record.ownerGeneration,
     queueDepth: record.queueDepth,
+    ...(record.sharedRuntime === true ? { sharedRuntime: true } : {}),
     ...(typeof record.mcpConfigPath === "string" ? { mcpConfigPath: record.mcpConfigPath } : {}),
     ...(typeof record.mcpConfigFingerprint === "string"
       ? { mcpConfigFingerprint: record.mcpConfigFingerprint }
@@ -471,6 +473,7 @@ async function stageQueueOwnerRecord(
       heartbeatAt: clock(),
       ownerGeneration: lease.ownerGeneration,
       queueDepth: Math.max(0, Math.round(queueDepth)),
+      sharedRuntime: true,
       ...(lease.mcpConfigPath ? { mcpConfigPath: lease.mcpConfigPath } : {}),
       ...(lease.mcpConfigFingerprint ? { mcpConfigFingerprint: lease.mcpConfigFingerprint } : {}),
     },

@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Runtime/shared sessions: add `createSharedAcpRuntime()` so applications and CLI processes share one local queue owner, with targeted turn cancellation and explicit submission uncertainty. Thanks @mavam.
+
 ### Breaking
 
 ### Fixes

@@ -186,11 +186,11 @@ Primary files:
   - centralized error normalization to `acpx` machine codes
 - `src/cli/output/output.ts`
   - emit envelope fields and `seq`
-- `src/cli/session/runtime.ts`
+- `src/session/execution/runtime.ts`
   - plumb `sessionId/requestId` context and preserve structured error fields
-- `src/cli/queue/ipc.ts`
+- `src/session/queue/ipc.ts`
   - ensure request lifecycle always surfaces typed queue failures
-- `src/cli/queue/messages.ts`
+- `src/session/queue/messages.ts`
   - extend queue `error` message schema with typed fields and compatibility parser
 - `src/permissions.ts` + `src/permission-prompt.ts`
   - add non-interactive policy behavior

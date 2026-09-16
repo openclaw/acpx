@@ -2,7 +2,7 @@
  * Tests that the queue owner runtime shuts down gracefully on SIGTERM/SIGINT,
  * so the codex-acp bridge adapter is never orphaned.
  *
- * See: src/cli/session/queue-owner-runtime.ts — the `runSessionQueueOwner`
+ * See: src/session/execution/queue-owner-runtime.ts — the `runSessionQueueOwner`
  * function previously had no signal handlers; SIGTERM from lease-store's
  * terminateProcess() killed the Node process before the `finally` block could
  * run closeQueueOwnerRuntime(), leaving bridge adapters orphaned.
@@ -16,9 +16,9 @@ import path from "node:path";
 import readline from "node:readline";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { isProcessAlive } from "../src/cli/queue/lease-store.js";
-import { queueLockFilePath, queueSocketPath } from "../src/cli/queue/paths.js";
-import { runSessionQueueOwner } from "../src/cli/session/queue-owner-runtime.js";
+import { runSessionQueueOwner } from "../src/session/execution/queue-owner-runtime.js";
+import { isProcessAlive } from "../src/session/queue/lease-store.js";
+import { queueLockFilePath, queueSocketPath } from "../src/session/queue/paths.js";
 import { extractAgentMessageChunkText } from "./jsonrpc-test-helpers.js";
 import { makeSessionRecord, withTempHome, writeSessionRecordFile } from "./runtime-test-helpers.js";
 

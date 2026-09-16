@@ -65,6 +65,7 @@ export type RunOnceOptions = {
 } & SessionConnectionOptions;
 
 export type SessionCreateOptions = {
+  signal?: AbortSignal;
   agentCommand: string;
   agentArgv?: string[];
   cwd: string;
@@ -74,10 +75,19 @@ export type SessionCreateOptions = {
   permissionPolicy?: PermissionPolicy;
   sessionOptions?: SessionAgentOptions;
   onModelWarning?: (message: string) => void;
+  handleProcessInterrupts?: boolean;
 } & SessionConnectionOptions;
 
 export type SessionSendOptions = {
   sessionId: string;
+  requestId?: string;
+  requireSharedRuntime?: boolean;
+  onQueueAccepted?: () => void;
+  onPromptStarted?: () => void;
+  /** Detaches this submitting client without cancelling the accepted prompt. */
+  signal?: AbortSignal;
+  /** Explicit acpx owner entry point for embedding hosts; never persisted. */
+  queueOwnerArgs?: readonly string[];
   prompt: PromptInput;
   resumePolicy?: SessionResumePolicy;
   mcpConfigPath?: string;

@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { findSession } from "../session/persistence.js";
+import { probeQueueOwnerHealth } from "../session/queue/ipc.js";
 import type { SessionRecord } from "../types.js";
 import type { ResolvedAcpxConfig } from "./config.js";
 import {
@@ -11,7 +12,6 @@ import {
 } from "./flags.js";
 import { emitJsonResult } from "./output/json-output.js";
 import { agentSessionIdPayload } from "./output/render.js";
-import { probeQueueOwnerHealth } from "./queue/ipc.js";
 
 type SessionStatusState = "running" | "idle" | "dead";
 

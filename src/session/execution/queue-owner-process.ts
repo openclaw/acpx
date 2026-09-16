@@ -203,7 +203,10 @@ export function formatQueueOwnerStartupFailure(params: {
   return parts.join(": ");
 }
 
-export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): QueueOwnerProcessHandle {
+export function spawnQueueOwnerProcess(
+  options: QueueOwnerRuntimeOptions,
+  queueOwnerArgs?: readonly string[],
+): QueueOwnerProcessHandle {
   const payload = JSON.stringify(options);
 
   let exited = false;
@@ -214,7 +217,7 @@ export function spawnQueueOwnerProcess(options: QueueOwnerRuntimeOptions): Queue
   let capturing = true;
   let stderrTail = Buffer.alloc(0);
 
-  const child = spawn(process.execPath, resolveQueueOwnerSpawnArgs(), {
+  const child = spawn(process.execPath, queueOwnerArgs ?? resolveQueueOwnerSpawnArgs(), {
     detached: true,
     stdio: ["pipe", "ignore", "pipe"],
     windowsHide: true,

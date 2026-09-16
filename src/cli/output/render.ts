@@ -1,7 +1,7 @@
 import path from "node:path";
 import { normalizeAgentSessionId } from "../../acp/agent-session-id.js";
+import { probeQueueOwnerHealth } from "../../session/queue/ipc.js";
 import type { AgentSessionListResult, OutputFormat, SessionRecord } from "../../types.js";
-import { probeQueueOwnerHealth } from "../queue/ipc.js";
 import { emitJsonResult } from "./json-output.js";
 
 function formatSessionLabel(record: SessionRecord): string {

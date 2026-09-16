@@ -12,9 +12,9 @@ import {
   resolveQueueOwnerSpawnArgs,
   sanitizeQueueOwnerExecArgv,
   spawnQueueOwnerProcess,
-} from "../src/cli/session/queue-owner-process.js";
-import { queueOwnerRuntimeTestInternals } from "../src/cli/session/queue-owner-runtime.js";
-import { sessionControlTestInternals } from "../src/cli/session/session-control.js";
+} from "../src/session/execution/queue-owner-process.js";
+import { queueOwnerRuntimeTestInternals } from "../src/session/execution/queue-owner-runtime.js";
+import { sessionControlTestInternals } from "../src/session/execution/session-control.js";
 
 async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "acpx-queue-owner-path-"));
@@ -201,7 +201,7 @@ describe("session process command parsing", () => {
 describe("formatQueueOwnerStartupFailure", () => {
   it("includes exit code when the owner dies before bind", async () => {
     const { formatQueueOwnerStartupFailure } =
-      await import("../src/cli/session/queue-owner-process.js");
+      await import("../src/session/execution/queue-owner-process.js");
     const message = formatQueueOwnerStartupFailure({
       sessionId: "sess-1",
       exit: { exited: true, code: 1, signal: null },
@@ -214,7 +214,7 @@ describe("formatQueueOwnerStartupFailure", () => {
 
   it("includes spawn error when the process cannot start", async () => {
     const { formatQueueOwnerStartupFailure } =
-      await import("../src/cli/session/queue-owner-process.js");
+      await import("../src/session/execution/queue-owner-process.js");
     const message = formatQueueOwnerStartupFailure({
       sessionId: "sess-2",
       exit: {
@@ -306,7 +306,8 @@ describe("spawnQueueOwnerProcess startup capture lifecycle", () => {
 
   it("lets the submitter exit while a detached owner keeps draining stderr", async () => {
     const { spawnSync } = await import("node:child_process");
-    const moduleUrl = new URL("../src/cli/session/queue-owner-process.js", import.meta.url).href;
+    const moduleUrl = new URL("../src/session/execution/queue-owner-process.js", import.meta.url)
+      .href;
     const brokenPipeModuleUrl = new URL("../src/cli/broken-pipe.js", import.meta.url).href;
     const ownerCode = `
       import { installBrokenPipeHandler } from ${JSON.stringify(brokenPipeModuleUrl)};
@@ -350,7 +351,8 @@ describe("spawnQueueOwnerProcess startup capture lifecycle", () => {
   });
 
   it("captures early stderr then drains without killing owner after stop", async () => {
-    const { spawnQueueOwnerProcess } = await import("../src/cli/session/queue-owner-process.js");
+    const { spawnQueueOwnerProcess } =
+      await import("../src/session/execution/queue-owner-process.js");
 
     const previous = process.env.ACPX_QUEUE_OWNER_ARGS;
     process.env.ACPX_QUEUE_OWNER_ARGS = JSON.stringify([
@@ -391,7 +393,7 @@ describe("spawnQueueOwnerProcess startup capture lifecycle", () => {
 
   it("bounds captured stderr to QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES", async () => {
     const { spawnQueueOwnerProcess, QUEUE_OWNER_STARTUP_STDERR_MAX_BYTES } =
-      await import("../src/cli/session/queue-owner-process.js");
+      await import("../src/session/execution/queue-owner-process.js");
 
     const previous = process.env.ACPX_QUEUE_OWNER_ARGS;
     process.env.ACPX_QUEUE_OWNER_ARGS = JSON.stringify([

@@ -5,10 +5,6 @@ import {
   type WithConnectedSessionOptions,
   type WithConnectedSessionResult,
 } from "../../runtime/engine/connected-session.js";
-import { applyConfigOptionSelection, applyModelSelection } from "../../session/config-options.js";
-import { setDesiredModeId } from "../../session/mode-preference.js";
-import { advertisedModelState } from "../../session/model-state.js";
-import { resolveSessionRecord, writeSessionRecord } from "../../session/persistence.js";
 import type {
   AuthPolicy,
   McpServer,
@@ -17,6 +13,10 @@ import type {
   SessionSetModelResult,
   SessionSetModeResult,
 } from "../../types.js";
+import { applyConfigOptionSelection, applyModelSelection } from "../config-options.js";
+import { setDesiredModeId } from "../mode-preference.js";
+import { advertisedModelState } from "../model-state.js";
+import { resolveSessionRecord, writeSessionRecord } from "../persistence.js";
 import type { QueueOwnerActiveSessionController } from "../queue/owner-turn-controller.js";
 
 export type ActiveSessionController = QueueOwnerActiveSessionController;
