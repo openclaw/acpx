@@ -8,33 +8,27 @@ import {
   client,
   methods,
   type AnyMessage,
+  type ClientConnection,
   type AuthMethod,
   type CreateElicitationRequest,
   type CreateElicitationResponse,
   type CreateTerminalRequest,
   type CreateTerminalResponse,
+  type InitializeRequest,
   type InitializeResponse,
   type JsonRpcId,
   type ListSessionsRequest,
   type ListSessionsResponse,
-  type KillTerminalRequest,
-  type KillTerminalResponse,
   type LoadSessionResponse,
   type NewSessionResponse,
   type PromptResponse,
   type ReadTextFileRequest,
   type ReadTextFileResponse,
-  type ReleaseTerminalRequest,
-  type ReleaseTerminalResponse,
   type ResumeSessionResponse,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionNotification,
   type SetSessionConfigOptionResponse,
-  type TerminalOutputRequest,
-  type TerminalOutputResponse,
-  type WaitForTerminalExitRequest,
-  type WaitForTerminalExitResponse,
   type WriteTextFileRequest,
   type WriteTextFileResponse,
   type SessionConfigOption,
@@ -110,12 +104,7 @@ import {
   waitForChildExit,
   waitForSpawn,
 } from "./client-process.js";
-import {
-  createAgentConnectionFacade,
-  resolveClientCapabilities,
-  resolveClientInfo,
-  type AcpAgentConnection,
-} from "./client-protocol.js";
+import { resolveClientCapabilities, resolveClientInfo } from "./client-protocol.js";
 import { extractAcpError } from "./error-shapes.js";
 import {
   modelStateFromConfigOptions,
@@ -398,7 +387,7 @@ function installSdkConsoleErrorSuppression(): () => void {
 
 export class AcpClient {
   private options: AcpClientOptions;
-  private connection?: AcpAgentConnection;
+  private connection?: ClientConnection;
   private agent?: ChildProcessByStdio<Writable, Readable, Readable>;
   private initResult?: InitializeResponse;
   private loadedSessionId?: string;
@@ -653,7 +642,7 @@ export class AcpClient {
 
     const input = Writable.toWeb(child.stdin);
     const output = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
-    let connection: AcpAgentConnection | undefined;
+    let connection: ClientConnection | undefined;
     const stream = this.createTappedStream(
       createNdJsonMessageStream(
         this.options.agentCommand,
@@ -662,7 +651,7 @@ export class AcpClient {
         maxMessageBytes,
         (error) => {
           this.rejectPendingConnectionRequests(error);
-          connection?.close?.(error);
+          connection?.close(error);
         },
       ),
     );
@@ -822,7 +811,7 @@ export class AcpClient {
       writable: WritableStream<AnyMessage>;
     },
     launch: Pick<AgentLaunchPlan, "devinAcp">,
-  ): AcpAgentConnection {
+  ): ClientConnection {
     const app = client({ name: "acpx" })
       .onNotification(methods.client.session.update, async ({ params }) => {
         await this.handleSessionUpdate(params);
@@ -844,16 +833,16 @@ export class AcpClient {
         return await this.handleCreateTerminal(params);
       })
       .onRequest(methods.client.terminal.output, async ({ params }) => {
-        return await this.handleTerminalOutput(params);
+        return await this.terminalManager.terminalOutput(params);
       })
       .onRequest(methods.client.terminal.waitForExit, async ({ params }) => {
-        return await this.handleWaitForTerminalExit(params);
+        return await this.terminalManager.waitForTerminalExit(params);
       })
       .onRequest(methods.client.terminal.kill, async ({ params }) => {
-        return await this.handleKillTerminal(params);
+        return await this.terminalManager.killTerminal(params);
       })
       .onRequest(methods.client.terminal.release, async ({ params }) => {
-        return await this.handleReleaseTerminal(params);
+        return await this.terminalManager.releaseTerminal(params);
       });
 
     if (launch.devinAcp) {
@@ -868,12 +857,12 @@ export class AcpClient {
       );
     }
 
-    return createAgentConnectionFacade(app.connect(stream));
+    return app.connect(stream);
   }
 
   private async initializeAgentConnection(params: {
     child: ChildProcessByStdio<Writable, Readable, Readable>;
-    connection: AcpAgentConnection;
+    connection: ClientConnection;
     startupFailure: StartupFailureWatcher;
     startupStderr: string[];
     launch: AgentLaunchPlan;
@@ -888,25 +877,28 @@ export class AcpClient {
       this.initResult = initResult;
       this.log(`initialized protocol version ${initResult.protocolVersion}`);
     } catch (error) {
-      params.connection.close?.(error);
+      params.connection.close(error);
       await this.handleInitializeFailure(params, error);
     }
   }
 
   private async initializeProtocolConnection(
-    connection: AcpAgentConnection,
+    connection: ClientConnection,
     launch: Pick<AgentLaunchPlan, "devinAcp" | "geminiAcp">,
   ): Promise<InitializeResponse> {
-    const initializePromise = connection.initialize({
-      protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: resolveClientCapabilities({
-        devinAcp: launch.devinAcp,
-        fs: this.options.fs !== false,
-        terminal: this.options.terminal !== false,
-        elicitationModes: this.options.elicitationModes ?? [],
-      }),
-      clientInfo: resolveClientInfo(launch.devinAcp),
-    });
+    const initializePromise = connection.agent.request<InitializeResponse, InitializeRequest>(
+      methods.agent.initialize,
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        clientCapabilities: resolveClientCapabilities({
+          devinAcp: launch.devinAcp,
+          fs: this.options.fs !== false,
+          terminal: this.options.terminal !== false,
+          elicitationModes: this.options.elicitationModes ?? [],
+        }),
+        clientInfo: resolveClientInfo(launch.devinAcp),
+      },
+    );
     const initialized = launch.geminiAcp
       ? await withTimeout(initializePromise, resolveGeminiAcpStartupTimeoutMs())
       : await initializePromise;
@@ -972,7 +964,7 @@ export class AcpClient {
     let result: NewSessionResponse;
     try {
       const createPromise = this.runConnectionRequest(() =>
-        connection.newSession({
+        connection.agent.request(methods.agent.session.new, {
           cwd: sessionCwd,
           mcpServers: this.options.mcpServers ?? [],
           _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions, claudeAcp),
@@ -1026,7 +1018,7 @@ export class AcpClient {
 
     try {
       response = await this.runConnectionRequest(() =>
-        connection.loadSession({
+        connection.agent.request(methods.agent.session.load, {
           sessionId,
           cwd: sessionCwd,
           mcpServers: this.options.mcpServers ?? [],
@@ -1051,7 +1043,7 @@ export class AcpClient {
     const connection = this.getConnection();
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
     const response = await this.runConnectionRequest(() =>
-      connection.resumeSession({
+      connection.agent.request(methods.agent.session.resume, {
         sessionId,
         cwd: sessionCwd,
         mcpServers: this.options.mcpServers ?? [],
@@ -1104,7 +1096,7 @@ export class AcpClient {
     let promptPromise: Promise<PromptResponse>;
     try {
       promptPromise = this.runConnectionRequest(() =>
-        connection.prompt({
+        connection.agent.request(methods.agent.session.prompt, {
           sessionId,
           prompt: normalizedPrompt,
         }),
@@ -1230,7 +1222,7 @@ export class AcpClient {
     const connection = this.getConnection();
     try {
       await this.runConnectionRequest(() =>
-        connection.setSessionMode({
+        connection.agent.request(methods.agent.session.setMode, {
           sessionId,
           modeId,
         }),
@@ -1248,7 +1240,7 @@ export class AcpClient {
     const connection = this.getConnection();
     try {
       return await this.runConnectionRequest(() =>
-        connection.setSessionConfigOption({
+        connection.agent.request(methods.agent.session.setConfigOption, {
           sessionId,
           configId,
           value,
@@ -1295,7 +1287,7 @@ export class AcpClient {
     const connection = this.getConnection();
     try {
       const response = await this.runConnectionRequest(() =>
-        connection.setSessionConfigOption({
+        connection.agent.request(methods.agent.session.setConfigOption, {
           sessionId,
           configId,
           value: modelId,
@@ -1315,7 +1307,10 @@ export class AcpClient {
     const connection = this.getConnection();
     try {
       await this.runConnectionRequest(() =>
-        connection.extMethod("session/set_model", { sessionId, modelId }),
+        connection.agent.request<Record<string, unknown>, Record<string, unknown>>(
+          "session/set_model",
+          { sessionId, modelId },
+        ),
       );
       return undefined;
     } catch (error) {
@@ -1387,7 +1382,9 @@ export class AcpClient {
     // Queue and latch before abort listeners can reenter cancellation or start another prompt.
     const cancellation: Promise<void> =
       active?.cancelPromise ??
-      this.runConnectionRequest(() => connection.cancel({ sessionId })).catch((error: unknown) => {
+      this.runConnectionRequest(() =>
+        connection.agent.notify(methods.agent.session.cancel, { sessionId }),
+      ).catch((error: unknown) => {
         if (active?.cancelPromise === cancellation) {
           active.cancelPromise = undefined;
         }
@@ -1412,7 +1409,7 @@ export class AcpClient {
       this.activePrompt.elicitationController?.abort();
     }
     await this.runConnectionRequest(() =>
-      connection.closeSession({
+      connection.agent.request(methods.agent.session.close, {
         sessionId,
       }),
     );
@@ -1425,7 +1422,9 @@ export class AcpClient {
 
   async listSessions(params: ListSessionsRequest = {}): Promise<ListSessionsResponse> {
     const connection = this.getConnection();
-    return await this.runConnectionRequest(() => connection.listSessions(params));
+    return await this.runConnectionRequest(() =>
+      connection.agent.request(methods.agent.session.list, params),
+    );
   }
 
   async requestCancelActivePrompt(): Promise<boolean> {
@@ -1532,7 +1531,7 @@ export class AcpClient {
   }
 
   private closeConnection(): void {
-    this.connection?.close?.();
+    this.connection?.close();
   }
 
   private async terminateAgentProcess(
@@ -1598,7 +1597,7 @@ export class AcpClient {
     }
   }
 
-  private getConnection(): AcpAgentConnection {
+  private getConnection(): ClientConnection {
     if (!this.connection) {
       throw new Error("ACP client not started");
     }
@@ -1806,7 +1805,7 @@ export class AcpClient {
   }
 
   private async authenticateIfRequired(
-    connection: AcpAgentConnection,
+    connection: ClientConnection,
     authMethods: AuthMethod[],
   ): Promise<void> {
     if (authMethods.length === 0) {
@@ -1827,7 +1826,7 @@ export class AcpClient {
       return;
     }
 
-    await connection.authenticate({
+    await connection.agent.request(methods.agent.authenticate, {
       methodId: selected.methodId,
     });
 
@@ -2262,28 +2261,6 @@ export class AcpClient {
       this.recordPermissionError(params.sessionId, error);
       throw error;
     }
-  }
-
-  private async handleTerminalOutput(
-    params: TerminalOutputRequest,
-  ): Promise<TerminalOutputResponse> {
-    return await this.terminalManager.terminalOutput(params);
-  }
-
-  private async handleWaitForTerminalExit(
-    params: WaitForTerminalExitRequest,
-  ): Promise<WaitForTerminalExitResponse> {
-    return await this.terminalManager.waitForTerminalExit(params);
-  }
-
-  private async handleKillTerminal(params: KillTerminalRequest): Promise<KillTerminalResponse> {
-    return await this.terminalManager.killTerminal(params);
-  }
-
-  private async handleReleaseTerminal(
-    params: ReleaseTerminalRequest,
-  ): Promise<ReleaseTerminalResponse> {
-    return await this.terminalManager.releaseTerminal(params);
   }
 
   private cancellationSignalForSession(sessionId: string): AbortSignal {

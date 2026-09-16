@@ -6,6 +6,7 @@ import { PassThrough, type Readable, type Writable } from "node:stream";
 import test, { type TestContext } from "node:test";
 import type {
   AnyMessage,
+  ClientConnection,
   RequestPermissionRequest,
   RequestPermissionResponse,
 } from "@agentclientprotocol/sdk";
@@ -56,7 +57,7 @@ type ClientInternals = {
       writable: WritableStream<AnyMessage>;
     },
     launch: { devinAcp: boolean },
-  ) => unknown;
+  ) => ClientConnection;
   selectAuthMethod?: (methods: Array<{ id: string }>) =>
     | {
         methodId: string;
@@ -65,7 +66,9 @@ type ClientInternals = {
       }
     | undefined;
   authenticateIfRequired?: (
-    connection: { authenticate: (params: { methodId: string }) => Promise<void> },
+    connection: {
+      agent: { request: (method: string, params: { methodId: string }) => Promise<void> };
+    },
     methods: Array<{ id: string }>,
   ) => Promise<void>;
   handlePermissionRequest?: (
@@ -285,8 +288,11 @@ test("AcpClient prefers env auth credentials over config credentials", async () 
       let authenticatedMethod: string | undefined;
       await internals.authenticateIfRequired?.(
         {
-          authenticate: async ({ methodId }: { methodId: string }) => {
-            authenticatedMethod = methodId;
+          agent: {
+            request: async (method: string, { methodId }: { methodId: string }) => {
+              assert.equal(method, "authenticate");
+              authenticatedMethod = methodId;
+            },
           },
         },
         [{ id: "api-token" }],
@@ -313,8 +319,11 @@ test("AcpClient ignores ambient normalized provider env vars for auth selection"
       let authenticatedMethod: string | undefined;
       await internals.authenticateIfRequired?.(
         {
-          authenticate: async ({ methodId }: { methodId: string }) => {
-            authenticatedMethod = methodId;
+          agent: {
+            request: async (method: string, { methodId }: { methodId: string }) => {
+              assert.equal(method, "authenticate");
+              authenticatedMethod = methodId;
+            },
           },
         },
         [{ id: "openai-api-key" }],
@@ -345,8 +354,11 @@ test("AcpClient uses XAI_API_KEY for Grok Build xai.api_key auth", async () => {
       let authenticatedMethod: string | undefined;
       await internals.authenticateIfRequired?.(
         {
-          authenticate: async ({ methodId }: { methodId: string }) => {
-            authenticatedMethod = methodId;
+          agent: {
+            request: async (method: string, { methodId }: { methodId: string }) => {
+              assert.equal(method, "authenticate");
+              authenticatedMethod = methodId;
+            },
           },
         },
         [{ id: "xai.api_key" }],
@@ -392,8 +404,11 @@ test("AcpClient selects Grok Build cached_token as agent-managed auth", async ()
       let authenticatedMethod: string | undefined;
       await internals.authenticateIfRequired?.(
         {
-          authenticate: async ({ methodId }: { methodId: string }) => {
-            authenticatedMethod = methodId;
+          agent: {
+            request: async (method: string, { methodId }: { methodId: string }) => {
+              assert.equal(method, "authenticate");
+              authenticatedMethod = methodId;
+            },
           },
         },
         [{ id: "cached_token" }],
@@ -412,7 +427,7 @@ test("AcpClient authenticateIfRequired throws when auth policy is fail and crede
     async () =>
       await internals.authenticateIfRequired?.(
         {
-          authenticate: async () => {},
+          agent: { request: async () => {} },
         },
         [{ id: "api-token" }],
       ),
@@ -637,15 +652,18 @@ test("AcpClient onPermissionRequest throws fall through to mode-based resolver",
   assert.equal(callbackInvocations, 1);
 });
 
-test("AcpClient onPermissionRequest receives an AbortSignal that fires on session cancel", async () => {
+test("AcpClient onPermissionRequest receives an AbortSignal that fires on session cancel", async (t) => {
   let observedSignal: AbortSignal | undefined;
-  const client = makeClient({
-    permissionMode: "approve-all",
-    onPermissionRequest: async (_req, ctx) => {
-      observedSignal = ctx.signal;
-      return { outcome: "allow_once" };
+  const fixture = createClientFixture(t, {
+    client: {
+      permissionMode: "approve-all",
+      onPermissionRequest: async (_req, ctx) => {
+        observedSignal = ctx.signal;
+        return { outcome: "allow_once" };
+      },
     },
   });
+  const { client } = fixture;
 
   await asInternals(client).handlePermissionRequest?.(
     makePermissionRequest("session-cb-4", "edit"),
@@ -654,12 +672,11 @@ test("AcpClient onPermissionRequest receives an AbortSignal that fires on sessio
   assert(observedSignal instanceof AbortSignal);
   assert.equal(observedSignal?.aborted, false);
 
-  asInternals(client).connection = { cancel: async () => {} };
   await client.cancel("session-cb-4");
   assert.equal(observedSignal?.aborted, true);
 });
 
-test("AcpClient onPermissionRequest cancels a late decision after session cancel", async () => {
+test("AcpClient onPermissionRequest cancels a late decision after session cancel", async (t) => {
   let resolveDecision!: (decision: { outcome: "allow_once" }) => void;
   const decisionPromise = new Promise<{ outcome: "allow_once" }>((resolve) => {
     resolveDecision = resolve;
@@ -670,16 +687,18 @@ test("AcpClient onPermissionRequest cancels a late decision after session cancel
   });
   let observedSignal: AbortSignal | undefined;
 
-  const client = makeClient({
-    permissionMode: "approve-all",
-    onPermissionRequest: async (_req, ctx) => {
-      observedSignal = ctx.signal;
-      callbackStarted();
-      return await decisionPromise;
+  const fixture = createClientFixture(t, {
+    client: {
+      permissionMode: "approve-all",
+      onPermissionRequest: async (_req, ctx) => {
+        observedSignal = ctx.signal;
+        callbackStarted();
+        return await decisionPromise;
+      },
     },
   });
+  const { client } = fixture;
   const internals = asInternals(client);
-  internals.connection = { cancel: async () => {} };
 
   const responsePromise = internals.handlePermissionRequest?.(
     makePermissionRequest("session-cb-5", "edit"),
@@ -705,23 +724,25 @@ test("AcpClient onPermissionRequest cancels a late decision after session cancel
   });
 });
 
-test("AcpClient onPermissionRequest treats abort rejections as cancelled", async () => {
+test("AcpClient onPermissionRequest treats abort rejections as cancelled", async (t) => {
   let callbackStarted!: () => void;
   const callbackStartedPromise = new Promise<void>((resolve) => {
     callbackStarted = resolve;
   });
 
-  const client = makeClient({
-    permissionMode: "approve-all",
-    onPermissionRequest: async (_req, ctx) => {
-      callbackStarted();
-      await new Promise<never>((_resolve, reject) => {
-        ctx.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-      });
+  const fixture = createClientFixture(t, {
+    client: {
+      permissionMode: "approve-all",
+      onPermissionRequest: async (_req, ctx) => {
+        callbackStarted();
+        await new Promise<never>((_resolve, reject) => {
+          ctx.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      },
     },
   });
+  const { client } = fixture;
   const internals = asInternals(client);
-  internals.connection = { cancel: async () => {} };
 
   const responsePromise = internals.handlePermissionRequest?.(
     makePermissionRequest("session-cb-6", "edit"),
@@ -800,68 +821,56 @@ test("AcpClient client-method permission errors update permission stats", async 
   assert(noted instanceof PermissionPromptUnavailableError);
 });
 
-test("AcpClient createSession forwards claudeCode options in _meta", async () => {
-  const cwd = path.resolve("/tmp/acpx-client-meta");
-  const client = makeClient({
-    sessionOptions: {
-      model: "sonnet",
-      allowedTools: ["Read", "Grep"],
-      maxTurns: 12,
+for (const scenario of [
+  {
+    name: "AcpClient createSession forwards claudeCode options in _meta",
+    options: { sessionOptions: { model: "sonnet", allowedTools: ["Read", "Grep"], maxTurns: 12 } },
+    meta: {
+      claudeCode: { options: { model: "sonnet", allowedTools: ["Read", "Grep"], maxTurns: 12 } },
     },
+  },
+  {
+    name: "AcpClient creates built-in Claude sessions without user settings by default",
+    options: { agentCommand: "npx -y @agentclientprotocol/claude-agent-acp" },
+    meta: { claudeCode: { options: { settingSources: ["project", "local"] } } },
+  },
+  {
+    name: "AcpClient createSession forwards systemPrompt string in _meta",
+    options: { sessionOptions: { systemPrompt: "you are an obsidian assistant" } },
+    meta: { systemPrompt: "you are an obsidian assistant" },
+  },
+  {
+    name: "AcpClient createSession forwards systemPrompt append in _meta alongside claudeCode options",
+    options: {
+      sessionOptions: { model: "sonnet", systemPrompt: { append: "always speak in spanish" } },
+    },
+    meta: {
+      claudeCode: { options: { model: "sonnet" } },
+      systemPrompt: { append: "always speak in spanish" },
+    },
+  },
+  {
+    name: "AcpClient createSession forwards codex model metadata without setting it explicitly",
+    options: {
+      agentCommand: "npx -y @agentclientprotocol/codex-acp",
+      sessionOptions: { model: "GPT-5-2" },
+    },
+    meta: { claudeCode: { options: { model: "GPT-5-2" } } },
+  },
+]) {
+  test(scenario.name, async (t) => {
+    const fixture = createClientFixture(t, { client: scenario.options });
+    const cwd = path.resolve("/tmp/acpx-client-meta");
+    const pending = fixture.track(fixture.client.createSession(cwd));
+    const request = await fixture.message(0);
+    assert("method" in request);
+    assert.equal(request.method, "session/new");
+    assert.deepEqual(request.params, { cwd, mcpServers: [], _meta: scenario.meta });
+    await fixture.reply(request, { sessionId: "session-meta" });
+    assert.equal((await pending).sessionId, "session-meta");
+    assert.equal(fixture.messages.length, 1, "session creation must not send a model control");
   });
-
-  let capturedParams: Record<string, unknown> | undefined;
-  asInternals(client).connection = {
-    newSession: async (params: Record<string, unknown>) => {
-      capturedParams = params;
-      return { sessionId: "session-123" };
-    },
-  };
-
-  const result = await client.createSession("/tmp/acpx-client-meta");
-  assert.equal(result.sessionId, "session-123");
-  assert.deepEqual(capturedParams, {
-    cwd,
-    mcpServers: [],
-    _meta: {
-      claudeCode: {
-        options: {
-          model: "sonnet",
-          allowedTools: ["Read", "Grep"],
-          maxTurns: 12,
-        },
-      },
-    },
-  });
-});
-
-test("AcpClient creates built-in Claude sessions without user settings by default", async () => {
-  const cwd = path.resolve("/tmp/acpx-client-claude-settings");
-  const client = makeClient({
-    agentCommand: "npx -y @agentclientprotocol/claude-agent-acp",
-  });
-
-  let capturedParams: Record<string, unknown> | undefined;
-  asInternals(client).connection = {
-    newSession: async (params: Record<string, unknown>) => {
-      capturedParams = params;
-      return { sessionId: "session-claude-settings" };
-    },
-  };
-
-  await client.createSession("/tmp/acpx-client-claude-settings");
-  assert.deepEqual(capturedParams, {
-    cwd,
-    mcpServers: [],
-    _meta: {
-      claudeCode: {
-        options: {
-          settingSources: ["project", "local"],
-        },
-      },
-    },
-  });
-});
+}
 
 test("resolveClaudeCodeSettingSources includes user settings only when explicitly enabled", () => {
   assert.deepEqual(resolveClaudeCodeSettingSources({}), ["project", "local"]);
@@ -876,166 +885,52 @@ test("resolveClaudeCodeSettingSources includes user settings only when explicitl
   ]);
 });
 
-test("AcpClient createSession forwards systemPrompt string in _meta", async () => {
-  const cwd = path.resolve("/tmp/acpx-client-system-prompt");
-  const client = makeClient({
-    sessionOptions: {
-      systemPrompt: "you are an obsidian assistant",
+for (const scenario of [
+  {
+    name: "AcpClient setSessionModel uses the model session config option",
+    client: {},
+    model: "GPT-5-2",
+    control: { configId: "model" },
+    expected: "GPT-5-2",
+  },
+  {
+    name: "AcpClient setSessionModel honors an advertised custom config id",
+    client: {},
+    model: "GPT-5-2",
+    control: { configId: "llm" },
+    expected: "GPT-5-2",
+  },
+  {
+    name: "AcpClient normalizes a Cursor model alias to its unique advertised id",
+    client: { agentCommand: "cursor-agent acp" },
+    model: "composer-2.5",
+    control: {
+      configId: "model",
+      availableModels: [{ modelId: "composer-2.5[fast=false]", name: "Composer 2.5" }],
     },
+    expected: "composer-2.5[fast=false]",
+  },
+]) {
+  test(scenario.name, async (t) => {
+    const fixture = createClientFixture(t, { client: scenario.client });
+    const pending = fixture.track(
+      fixture.client.setSessionModel("session-456", scenario.model, scenario.control),
+    );
+    const request = await fixture.message(0);
+    assert("method" in request);
+    assert.equal(request.method, "session/set_config_option");
+    assert.deepEqual(request.params, {
+      sessionId: "session-456",
+      configId: scenario.control.configId,
+      value: scenario.expected,
+    });
+    await fixture.reply(request, { configOptions: [] });
+    await pending;
   });
-
-  let capturedParams: Record<string, unknown> | undefined;
-  asInternals(client).connection = {
-    newSession: async (params: Record<string, unknown>) => {
-      capturedParams = params;
-      return { sessionId: "session-sp-string" };
-    },
-  };
-
-  await client.createSession("/tmp/acpx-client-system-prompt");
-  assert.deepEqual(capturedParams, {
-    cwd,
-    mcpServers: [],
-    _meta: {
-      systemPrompt: "you are an obsidian assistant",
-    },
-  });
-});
-
-test("AcpClient createSession forwards systemPrompt append in _meta alongside claudeCode options", async () => {
-  const cwd = path.resolve("/tmp/acpx-client-system-prompt-append");
-  const client = makeClient({
-    sessionOptions: {
-      model: "sonnet",
-      systemPrompt: { append: "always speak in spanish" },
-    },
-  });
-
-  let capturedParams: Record<string, unknown> | undefined;
-  asInternals(client).connection = {
-    newSession: async (params: Record<string, unknown>) => {
-      capturedParams = params;
-      return { sessionId: "session-sp-append" };
-    },
-  };
-
-  await client.createSession("/tmp/acpx-client-system-prompt-append");
-  assert.deepEqual(capturedParams, {
-    cwd,
-    mcpServers: [],
-    _meta: {
-      claudeCode: {
-        options: {
-          model: "sonnet",
-        },
-      },
-      systemPrompt: { append: "always speak in spanish" },
-    },
-  });
-});
-
-test("AcpClient createSession forwards codex model metadata without setting it explicitly", async () => {
-  const cwd = path.resolve("/tmp/acpx-client-codex-model");
-  const client = makeClient({
-    agentCommand: "npx -y @agentclientprotocol/codex-acp",
-    sessionOptions: {
-      model: "GPT-5-2",
-    },
-  });
-
-  let capturedNewSessionParams: Record<string, unknown> | undefined;
-  let setConfigCalled = false;
-  asInternals(client).connection = {
-    newSession: async (params: Record<string, unknown>) => {
-      capturedNewSessionParams = params;
-      return { sessionId: "session-456" };
-    },
-    setSessionConfigOption: async () => {
-      setConfigCalled = true;
-      return { configOptions: [] };
-    },
-  };
-
-  const result = await client.createSession("/tmp/acpx-client-codex-model");
-  assert.equal(result.sessionId, "session-456");
-  assert.deepEqual(capturedNewSessionParams, {
-    cwd,
-    mcpServers: [],
-    _meta: {
-      claudeCode: {
-        options: {
-          model: "GPT-5-2",
-        },
-      },
-    },
-  });
-  assert.equal(setConfigCalled, false);
-});
-
-test("AcpClient setSessionModel uses the model session config option", async () => {
-  const client = makeClient();
-
-  let capturedSetConfigParams:
-    | {
-        sessionId: string;
-        configId: string;
-        value: string;
-      }
-    | undefined;
-  asInternals(client).connection = {
-    setSessionConfigOption: async (params: {
-      sessionId: string;
-      configId: string;
-      value: string;
-    }) => {
-      capturedSetConfigParams = params;
-      return { configOptions: [] };
-    },
-  };
-
-  await client.setSessionModel("session-456", "GPT-5-2", { configId: "model" });
-  assert.deepEqual(capturedSetConfigParams, {
-    sessionId: "session-456",
-    configId: "model",
-    value: "GPT-5-2",
-  });
-});
-
-test("AcpClient setSessionModel honors an advertised custom config id", async () => {
-  const client = makeClient();
-
-  let capturedConfigId: string | undefined;
-  asInternals(client).connection = {
-    setSessionConfigOption: async (params: { configId: string }) => {
-      capturedConfigId = params.configId;
-      return { configOptions: [] };
-    },
-  };
-
-  await client.setSessionModel("session-456", "GPT-5-2", { configId: "llm" });
-  assert.equal(capturedConfigId, "llm");
-});
-
-test("AcpClient normalizes a Cursor model alias to its unique advertised id", async () => {
-  const client = makeClient({ agentCommand: "cursor-agent acp" });
-  let capturedValue: string | undefined;
-  asInternals(client).connection = {
-    setSessionConfigOption: async (params: { value: string }) => {
-      capturedValue = params.value;
-      return { configOptions: [] };
-    },
-  };
-
-  await client.setSessionModel("session-456", "composer-2.5", {
-    configId: "model",
-    availableModels: [{ modelId: "composer-2.5[fast=false]", name: "Composer 2.5" }],
-  });
-  assert.equal(capturedValue, "composer-2.5[fast=false]");
-});
+}
 
 test("AcpClient setSessionModel rejects sessions without advertised model control", async () => {
   const client = makeClient();
-  asInternals(client).connection = {};
 
   await assert.rejects(
     async () => await client.setSessionModel("session-456", "GPT-5-2"),
@@ -1043,120 +938,92 @@ test("AcpClient setSessionModel rejects sessions without advertised model contro
   );
 });
 
-test("AcpClient setSessionModel preserves explicitly advertised legacy model control", async () => {
-  const client = makeClient();
-  let capturedLegacyParams: Record<string, unknown> | undefined;
-  asInternals(client).connection = {
-    newSession: async () => ({
-      sessionId: "legacy-session",
-      models: {
-        currentModelId: "default-model",
-        availableModels: [
-          { modelId: "default-model", name: "Default Model" },
-          { modelId: "alternate-model", name: "Alternate Model" },
-        ],
-      },
-    }),
-    extMethod: async (method: string, params: Record<string, unknown>) => {
-      assert.equal(method, "session/set_model");
-      capturedLegacyParams = params;
-      return {};
-    },
-  };
-
-  const result = await client.createSession("/tmp/acpx-client-legacy-model");
-  assert.equal(result.models?.configId, undefined);
-  await client.setSessionModel(result.sessionId, "alternate-model");
-  assert.deepEqual(capturedLegacyParams, {
+test("AcpClient setSessionModel preserves explicitly advertised legacy model control", async (t) => {
+  const fixture = createClientFixture(t);
+  const created = fixture.track(fixture.client.createSession("/tmp/acpx-client-legacy-model"));
+  const createRequest = await fixture.message(0);
+  assert("method" in createRequest);
+  assert.equal(createRequest.method, "session/new");
+  await fixture.reply(createRequest, {
     sessionId: "legacy-session",
-    modelId: "alternate-model",
+    models: {
+      currentModelId: "default-model",
+      availableModels: [
+        { modelId: "default-model", name: "Default Model" },
+        { modelId: "alternate-model", name: "Alternate Model" },
+      ],
+    },
   });
+  const result = await created;
+  assert.equal(result.models?.configId, undefined);
+  const changed = fixture.track(
+    fixture.client.setSessionModel(result.sessionId, "alternate-model"),
+  );
+  const request = await fixture.message(1);
+  assert("method" in request);
+  assert.equal(request.method, "session/set_model");
+  assert.deepEqual(request.params, { sessionId: "legacy-session", modelId: "alternate-model" });
+  await fixture.reply(request, {});
+  await changed;
 });
 
-test("AcpClient treats explicit null config options as an empty snapshot", async () => {
-  const client = makeClient();
-  asInternals(client).connection = {
-    loadSession: async () => ({ configOptions: null }),
-  };
-
-  const result = await client.loadSession("session-null-config", "/tmp/acpx-null-config");
+test("AcpClient treats explicit null config options as an empty snapshot", async (t) => {
+  const fixture = createClientFixture(t);
+  const pending = fixture.track(
+    fixture.client.loadSession("session-null-config", "/tmp/acpx-null-config"),
+  );
+  const request = await fixture.message(0);
+  assert("method" in request);
+  assert.equal(request.method, "session/load");
+  await fixture.reply(request, { configOptions: null });
+  const result = await pending;
   assert.equal(result.configOptionsPresent, true);
   assert.deepEqual(result.configOptions, []);
   assert.equal(result.models, undefined);
 });
 
-test("AcpClient closes sessions through session/close and clears the loaded session id", async () => {
-  const client = makeClient();
+test("AcpClient closes sessions through session/close and clears the loaded session id", async (t) => {
+  const fixture = createClientFixture(t);
+  const { client } = fixture;
   const internals = asInternals(client);
-  let capturedCloseSessionParams: { sessionId: string } | undefined;
-  internals.initResult = {
-    agentCapabilities: {
-      sessionCapabilities: {
-        close: {},
-      },
-    },
-  };
+  internals.initResult = { agentCapabilities: { sessionCapabilities: { close: {} } } };
   internals.loadedSessionId = "session-close-1";
-  internals.connection = {
-    closeSession: async (params: { sessionId: string }) => {
-      capturedCloseSessionParams = params;
-      return {};
-    },
-  };
-
   assert.equal(client.supportsCloseSession(), true);
-  await client.closeSession("session-close-1");
-
-  assert.deepEqual(capturedCloseSessionParams, {
-    sessionId: "session-close-1",
-  });
+  const pending = fixture.track(client.closeSession("session-close-1"));
+  const request = await fixture.message(0);
+  assert("method" in request);
+  assert.equal(request.method, "session/close");
+  assert.deepEqual(request.params, { sessionId: "session-close-1" });
+  await fixture.reply(request, {});
+  await pending;
   assert.equal(internals.loadedSessionId, undefined);
 });
 
-test("AcpClient lists agent sessions through session/list", async () => {
-  const client = makeClient();
-  const internals = asInternals(client);
-  let capturedListSessionsParams:
-    | {
-        cwd?: string | null;
-        cursor?: string | null;
-      }
-    | undefined;
-  internals.initResult = {
-    agentCapabilities: {
-      sessionCapabilities: {
-        list: {},
-      },
-    },
-  };
-  internals.connection = {
-    listSessions: async (params: { cwd?: string | null; cursor?: string | null }) => {
-      capturedListSessionsParams = params;
-      return {
-        sessions: [
-          {
-            sessionId: "agent-session-1",
-            cwd: "/tmp/acpx-client-list",
-            title: "Agent session",
-            updatedAt: "2026-05-21T00:00:00.000Z",
-            _meta: { messageCount: 3 },
-          },
-        ],
-        nextCursor: "cursor-2",
-      };
-    },
-  };
-
+test("AcpClient lists agent sessions through session/list", async (t) => {
+  const fixture = createClientFixture(t);
+  const { client } = fixture;
+  asInternals(client).initResult = { agentCapabilities: { sessionCapabilities: { list: {} } } };
   assert.equal(client.supportsListSessions(), true);
-  const result = await client.listSessions({
-    cwd: "/tmp/acpx-client-list",
-    cursor: "cursor-1",
+  const pending = fixture.track(
+    client.listSessions({ cwd: "/tmp/acpx-client-list", cursor: "cursor-1" }),
+  );
+  const request = await fixture.message(0);
+  assert("method" in request);
+  assert.equal(request.method, "session/list");
+  assert.deepEqual(request.params, { cwd: "/tmp/acpx-client-list", cursor: "cursor-1" });
+  await fixture.reply(request, {
+    sessions: [
+      {
+        sessionId: "agent-session-1",
+        cwd: "/tmp/acpx-client-list",
+        title: "Agent session",
+        updatedAt: "2026-05-21T00:00:00.000Z",
+        _meta: { messageCount: 3 },
+      },
+    ],
+    nextCursor: "cursor-2",
   });
-
-  assert.deepEqual(capturedListSessionsParams, {
-    cwd: "/tmp/acpx-client-list",
-    cursor: "cursor-1",
-  });
+  const result = await pending;
   assert.equal(result.nextCursor, "cursor-2");
   assert.equal(result.sessions[0]?.sessionId, "agent-session-1");
   assert.deepEqual(result.sessions[0]?._meta, { messageCount: 3 });
@@ -1230,7 +1097,7 @@ test(
   "AcpClient coalesces cancellation until the active prompt finishes",
   { timeout: 5_000 },
   async (t) => {
-    const fixture = createCancellationFixture(t);
+    const fixture = createClientFixture(t);
     const { client } = fixture;
     const first = fixture.prompt("session-cancel", "first");
     await fixture.message(0);
@@ -1277,7 +1144,7 @@ test(
   { timeout: 5_000 },
   async (t) => {
     let permissionSignal: AbortSignal | undefined;
-    const fixture = createCancellationFixture(t, {
+    const fixture = createClientFixture(t, {
       client: {
         onPermissionRequest: async (_request, { signal }) => {
           permissionSignal = signal;
@@ -1317,7 +1184,7 @@ test(
   { timeout: 5_000 },
   async (t) => {
     const reentered: Array<Promise<boolean>> = [];
-    const fixture = createCancellationFixture(t, {
+    const fixture = createClientFixture(t, {
       client: {
         onPermissionRequest: async (_request, { signal }) => {
           signal.addEventListener(
@@ -1361,7 +1228,7 @@ test(
   "AcpClient queues cancellation before an abort listener starts the next prompt",
   { timeout: 5_000 },
   async (t) => {
-    const fixture = createCancellationFixture(t);
+    const fixture = createClientFixture(t);
     const { client } = fixture;
     const first = fixture.prompt("session-next", "first");
     await fixture.message(0);
@@ -1395,7 +1262,7 @@ test(
   async (t) => {
     const releaseSecondWrite = createDeferred<void>();
     let promptsWritten = 0;
-    const fixture = createCancellationFixture(t, {
+    const fixture = createClientFixture(t, {
       async write(message) {
         if ("method" in message && message.method === "session/prompt" && ++promptsWritten === 2) {
           await releaseSecondWrite.promise;
@@ -1442,22 +1309,21 @@ test(
   async (t) => {
     const attempt = createDeferred<void>();
     const called = createDeferred<void>();
-    const fixture = createCancellationFixture(t, { release: () => attempt.resolve() });
+    const fixture = createClientFixture(t, { release: () => attempt.resolve() });
     const { client } = fixture;
     const prompt = fixture.prompt("session-retry", "hello");
     await fixture.message(0);
-    const connection = asInternals(client).connection as {
-      cancel: (params: { sessionId: string }) => Promise<void>;
-    };
-    const sendCancel = connection.cancel;
+    const { agent } = fixture.connection;
+    const sendCancel = agent.notify.bind(agent);
     let calls = 0;
-    connection.cancel = (params) => {
+    agent.notify = (method: string, params?: unknown) => {
+      assert.equal(method, "session/cancel");
       calls += 1;
       if (calls === 1) {
         called.resolve();
         return attempt.promise;
       }
-      return sendCancel(params);
+      return sendCancel(method, params);
     };
     const failure = new Error("cancel was not enqueued");
     const results = fixture.track(
@@ -1490,7 +1356,7 @@ test(
     const oldAttempt = createDeferred<void>();
     const oldCalled = createDeferred<void>();
     const releaseNewSend = createDeferred<void>();
-    const fixture = createCancellationFixture(t, {
+    const fixture = createClientFixture(t, {
       async write(message) {
         if ("method" in message && message.method === "session/cancel") {
           await releaseNewSend.promise;
@@ -1504,18 +1370,17 @@ test(
     const { client } = fixture;
     const first = fixture.prompt("session-isolation", "first");
     await fixture.message(0);
-    const connection = asInternals(client).connection as {
-      cancel: (params: { sessionId: string }) => Promise<void>;
-    };
-    const sendCancel = connection.cancel;
+    const { agent } = fixture.connection;
+    const sendCancel = agent.notify.bind(agent);
     let calls = 0;
-    connection.cancel = (params) => {
+    agent.notify = (method: string, params?: unknown) => {
+      assert.equal(method, "session/cancel");
       calls += 1;
       if (calls === 1) {
         oldCalled.resolve();
         return oldAttempt.promise;
       }
-      return sendCancel(params);
+      return sendCancel(method, params);
     };
     const oldResult = fixture.track(Promise.allSettled([client.requestCancelActivePrompt()]));
     await oldCalled.promise;
@@ -1548,7 +1413,7 @@ for (const mode of ["same-session-live", "same-session-cancelled", "different-se
     { timeout: 5_000 },
     async (t) => {
       const signals: AbortSignal[] = [];
-      const fixture = createCancellationFixture(t, {
+      const fixture = createClientFixture(t, {
         client: {
           onPermissionRequest: async (_request, { signal }) => {
             signals.push(signal);
@@ -1599,7 +1464,7 @@ for (const completion of ["older", "newer"]) {
     async (t) => {
       const permissionEntered = createDeferred<AbortSignal>();
       const releasePermission = createDeferred<void>();
-      const fixture = createCancellationFixture(t, {
+      const fixture = createClientFixture(t, {
         client: {
           onPermissionRequest: async (_request, { signal }) => {
             permissionEntered.resolve(signal);
@@ -1645,7 +1510,7 @@ for (const phase of ["cancel", "settle"]) {
     { timeout: 5_000 },
     async (t) => {
       const signals: AbortSignal[] = [];
-      const fixture = createCancellationFixture(t, {
+      const fixture = createClientFixture(t, {
         client: {
           onPermissionRequest: async (_request, { signal }) => {
             signals.push(signal);
@@ -1727,7 +1592,7 @@ test("AcpClient reports prompt readiness only after the transport accepts the re
   await requestWritten.promise;
   assert.equal(readinessCalls, 1);
 
-  await writeAgentMessage(agentToClient.writable, promptResponseFor(request));
+  await writeAgentMessage(agentToClient.writable, responseFor(request));
   assert.deepEqual(await prompt, { stopReason: "end_turn" });
 });
 
@@ -1774,7 +1639,7 @@ test("AcpClient keeps accepted prompts alive when the readiness observer throws"
     throw new Error("observer failed");
   });
   const request = await writeEntered.promise;
-  await writeAgentMessage(agentToClient.writable, promptResponseFor(request));
+  await writeAgentMessage(agentToClient.writable, responseFor(request));
 
   assert.deepEqual(await prompt, { stopReason: "end_turn" });
 });
@@ -1823,11 +1688,11 @@ test("AcpClient keeps a queued prompt unready until its own transport write succ
   const secondRequest = await secondWriteEntered.promise;
   assert.equal(secondReadinessCalls, 0);
 
-  await writeAgentMessage(agentToClient.writable, promptResponseFor(firstRequest));
+  await writeAgentMessage(agentToClient.writable, responseFor(firstRequest));
   releaseSecondWrite.resolve();
   await secondRequestWritten.promise;
   assert.equal(secondReadinessCalls, 1);
-  await writeAgentMessage(agentToClient.writable, promptResponseFor(secondRequest));
+  await writeAgentMessage(agentToClient.writable, responseFor(secondRequest));
 
   assert.deepEqual(await firstPrompt, { stopReason: "end_turn" });
   assert.deepEqual(await secondPrompt, { stopReason: "end_turn" });
@@ -1845,9 +1710,11 @@ test("AcpClient rejects rich prompt content not advertised by promptCapabilities
     },
   };
   internals.connection = {
-    prompt: async () => {
-      promptCalled = true;
-      return { stopReason: "end_turn" };
+    agent: {
+      request: async () => {
+        promptCalled = true;
+        return { stopReason: "end_turn" };
+      },
     },
   };
 
@@ -1875,9 +1742,11 @@ test("AcpClient sends audio prompts when the agent advertises audio support", as
     },
   };
   internals.connection = {
-    prompt: async (params: { prompt: unknown }) => {
-      capturedPrompt = params.prompt;
-      return { stopReason: "end_turn" };
+    agent: {
+      request: async (_method: string, params: { prompt: unknown }) => {
+        capturedPrompt = params.prompt;
+        return { stopReason: "end_turn" };
+      },
     },
   };
 
@@ -1897,7 +1766,7 @@ test("AcpClient does not infer prompt readiness from connection promise creation
   });
   let reported = false;
   internals.connection = {
-    prompt: () => promptResponse,
+    agent: { request: () => promptResponse },
   };
 
   const pending = client.prompt("session-start", "hello", () => {
@@ -1917,8 +1786,10 @@ test("AcpClient does not report prompt readiness when request creation throws", 
   const internals = asInternals(client);
   let reported = false;
   internals.connection = {
-    prompt: () => {
-      throw new Error("request creation failed");
+    agent: {
+      request: () => {
+        throw new Error("request creation failed");
+      },
     },
   };
 
@@ -1939,7 +1810,7 @@ test("AcpClient does not report prompt readiness when the connection is already 
   const failure = new Error("ACP connection closed");
   internals.connection = {
     signal: AbortSignal.abort(failure),
-    prompt: () => Promise.reject(failure),
+    agent: { request: () => Promise.reject(failure) },
   };
 
   await assert.rejects(
@@ -1958,9 +1829,11 @@ test("AcpClient does not submit a prompt after agent exit settles the queued req
   let promptCalls = 0;
   let reported = false;
   internals.connection = {
-    prompt: async () => {
-      promptCalls += 1;
-      return { stopReason: "end_turn" as const };
+    agent: {
+      request: async () => {
+        promptCalls += 1;
+        return { stopReason: "end_turn" as const };
+      },
     },
   };
 
@@ -1982,9 +1855,11 @@ test("AcpClient does not report prompt readiness when the connection closes duri
   let reported = false;
   internals.connection = {
     signal: connection.signal,
-    prompt: () => {
-      connection.abort(new Error("closed after request creation began"));
-      return Promise.resolve({ stopReason: "end_turn" });
+    agent: {
+      request: () => {
+        connection.abort(new Error("closed after request creation began"));
+        return Promise.resolve({ stopReason: "end_turn" });
+      },
     },
   };
 
@@ -2000,7 +1875,7 @@ test("AcpClient prompt rejects when the agent disconnects mid-prompt", async () 
   const internals = asInternals(client);
 
   internals.connection = {
-    prompt: async () => await new Promise(() => {}),
+    agent: { request: async () => await new Promise(() => {}) },
   };
 
   const pending = client.prompt("session-5", "sleep 60000");
@@ -2379,7 +2254,7 @@ test("AcpClient close resets in-memory state and shuts down terminal manager", a
       unrefCalls += 1;
     },
   };
-  internals.connection = { closed: false };
+  internals.connection = { close: () => {} };
   internals.activePrompt = {
     sessionId: "session-4",
     promise: new Promise(() => {}),
@@ -2439,7 +2314,7 @@ function createDeferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-function createCancellationFixture(
+function createClientFixture(
   t: TestContext,
   options: {
     client?: Partial<ConstructorParameters<typeof AcpClient>[0]>;
@@ -2458,7 +2333,7 @@ function createCancellationFixture(
     void operation.catch(() => {});
     return operation;
   }
-  connectClientToStream(client, {
+  const connection = connectClientToStream(client, {
     readable: incoming.readable,
     writable: new WritableStream<AnyMessage>({
       async write(value) {
@@ -2480,6 +2355,7 @@ function createCancellationFixture(
   });
   return {
     client,
+    connection,
     messages,
     message,
     track,
@@ -2491,8 +2367,8 @@ function createCancellationFixture(
       assert(handler);
       return track(handler.call(client, makePermissionRequest(sessionId, "edit")));
     },
-    reply(request: AnyMessage) {
-      return writeAgentMessage(incoming.writable, promptResponseFor(request));
+    reply(request: AnyMessage, result?: Record<string, unknown>) {
+      return writeAgentMessage(incoming.writable, responseFor(request, result));
     },
   };
 }
@@ -2503,21 +2379,25 @@ function connectClientToStream(
     readable: ReadableStream<AnyMessage>;
     writable: WritableStream<AnyMessage>;
   },
-): void {
+): ClientConnection {
   const internals = asInternals(client);
   const tapped = internals.createTappedStream?.(base);
   assert(tapped);
   const connection = internals.createConnection?.(tapped, { devinAcp: false });
   assert(connection);
   internals.connection = connection;
+  return connection;
 }
 
-function promptResponseFor(request: AnyMessage): AnyMessage {
+function responseFor(
+  request: AnyMessage,
+  result: Record<string, unknown> = { stopReason: "end_turn" },
+): AnyMessage {
   assert("id" in request);
   return {
     jsonrpc: "2.0",
     id: request.id,
-    result: { stopReason: "end_turn" },
+    result,
   };
 }
 
