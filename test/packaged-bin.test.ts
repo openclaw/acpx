@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -156,4 +156,42 @@ test("packaged bin runs a mock-agent exec command through package executable map
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.stdout.trim(), "packaged-bin-ok");
   });
+});
+
+test("packaged registry imports without runtime dependencies or agent execution", async () => {
+  const packageDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-registry-package-"));
+  try {
+    await fs.cp(path.join(process.cwd(), "dist"), path.join(packageDir, "dist"), {
+      recursive: true,
+    });
+    await fs.copyFile(
+      path.join(process.cwd(), "package.json"),
+      path.join(packageDir, "package.json"),
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import assert from 'node:assert/strict';
+      import childProcess from 'node:child_process';
+      import { syncBuiltinESMExports } from 'node:module';
+      for (const name of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']) {
+        childProcess[name] = () => { throw new Error('Unexpected process execution'); };
+      }
+      syncBuiltinESMExports();
+      const { createAgentRegistry } = await import('acpx/agent-registry');
+      const registry = createAgentRegistry({ resolveExecutable: () => undefined, resolvePackageRoot: () => undefined });
+      assert.equal(registry.inspect('qwen').launch.kind, 'missing');
+      assert.ok(registry.list().includes('pi'));
+      assert.deepEqual(registry.resolve('opencode'), ['npx', '-y', 'opencode-ai', 'acp']);
+    `,
+      ],
+      { cwd: packageDir, encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    await fs.rm(packageDir, { recursive: true, force: true });
+  }
 });

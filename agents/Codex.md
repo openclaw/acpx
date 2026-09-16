@@ -11,3 +11,9 @@
 - Reconnecting restores the saved model and effort before prompting, even when the adapter resumes the conversation with different defaults.
 - Legacy `models` metadata may encode both values in a combined id such as `gpt-5.6-sol[max]`; ACPX uses that form only when the adapter does not advertise the newer model config option.
 - When the adapter returns `_meta.codex.turnConfiguration`, ACPX preserves the opaque metadata in direct, queued, compare, and embedded-runtime results. Structured CLI output also retains the raw ACP prompt response.
+
+## Embedded inspection
+
+Embedded inspection resolves the installed `codex-acp` adapter or its installed `@agentclientprotocol/codex-acp` package. The ACP adapter supplies the launch entrypoint. Configure the adapter’s authentication before acquiring a model catalog or starting a session.
+
+Inspection performs filesystem lookup only. See [embedded agent discovery](../docs/session-control.md#embedded-agent-discovery) for the registry contract and session lifecycle.

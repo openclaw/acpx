@@ -1,6 +1,6 @@
 ---
 name: acpx
-description: Use acpx as a headless ACP CLI for agent-to-agent communication, including prompt/exec/sessions workflows, session scoping, queueing, permissions, output formats, system-prompt overrides, and multi-agent flows authored with defineFlow/decision/decisionEdge.
+description: Use acpx as a headless ACP CLI for agent-to-agent communication, including installed-agent inspection, prompt/exec/sessions workflows, session scoping, queueing, permissions, output formats, system-prompt overrides, and multi-agent flows authored with defineFlow/decision/decisionEdge.
 ---
 
 # acpx
@@ -112,6 +112,14 @@ Rules:
 - Unknown positional agent tokens are treated as raw agent commands.
 - `--agent <command>` explicitly sets a raw ACP adapter command.
 - Do not combine a positional agent and `--agent` in the same command.
+
+## Embedded hosts
+
+When embedding ACPX, import `createAgentRegistry` from `acpx/agent-registry` and use `inspect(agentId)` to obtain installed launch facts without starting an agent. Treat `undefined` as uninspectable. Check the returned missing command/package requirements before acquiring a session; recheck when launching because installed files can change. Authentication and native model discovery belong to session acquisition.
+
+Use `getStatus({ handle }).models.availableModels` when present for native display names, and pass the selected opaque model ID unchanged to `setModel`. Use `prepareFreshSession({ handle })` to persist a fresh-session request across restart, then ensure without `resumeSessionId`. Ordinary `close` retains session continuity; explicit remote discard requires the adapter’s optional close capability.
+
+For installed entrypoints and prerequisites, read the matching [agent guide](https://github.com/openclaw/acpx/tree/main/agents). For resolver callbacks, custom command overrides, and lifecycle details, read [embedded agent discovery](https://github.com/openclaw/acpx/blob/main/docs/session-control.md#embedded-agent-discovery).
 
 ## Commands
 

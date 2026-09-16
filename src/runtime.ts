@@ -1,15 +1,7 @@
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
-import {
-  DEFAULT_AGENT_NAME,
-  listBuiltInAgents,
-  normalizeAgentName,
-  resolveCanonicalAgentName,
-  resolveAgentArgv,
-  resolveAgentCommand,
-} from "./agent-registry.js";
+import { DEFAULT_AGENT_NAME } from "./agent-registry.js";
 import { AcpRuntimeManager } from "./runtime/engine/manager.js";
 import type {
-  AcpAgentRegistry,
   AcpRuntime,
   AcpRuntimeCapabilities,
   AcpRuntimeDoctorReport,
@@ -29,6 +21,12 @@ import { normalizeRuntimeDetails } from "./runtime/public/probe.js";
 import { deriveAgentFromSessionKey, type AcpxHandleState } from "./runtime/public/shared.js";
 
 export { DEFAULT_AGENT_NAME, createFileSessionStore };
+export { createAgentRegistry } from "./agent-registry.js";
+export type {
+  AcpAgentInspection,
+  AcpAgentInspectionOptions,
+  AcpInspectableAgentRegistry,
+} from "./agent-registry.js";
 export { AcpRuntimeError, isAcpRuntimeError } from "./runtime/public/errors.js";
 export type { AcpRuntimeErrorCode } from "./runtime/public/errors.js";
 export {
@@ -108,47 +106,6 @@ type AcpxRuntimeLike = AcpRuntime & {
   isHealthy(): boolean;
   doctor(): Promise<AcpRuntimeDoctorReport>;
 };
-
-export function createAgentRegistry(params?: {
-  overrides?: Record<string, string | string[]>;
-}): AcpAgentRegistry {
-  const overrides = normalizeRegistryOverrides(params?.overrides);
-  return {
-    resolve(agentName: string) {
-      const normalizedAgentName = normalizeAgentName(agentName);
-      const override =
-        overrides[normalizedAgentName] ?? overrides[resolveCanonicalAgentName(agentName)];
-      return override ?? resolveAgentArgv(agentName) ?? resolveAgentCommand(agentName);
-    },
-    list() {
-      return listBuiltInAgents(overrides);
-    },
-  };
-}
-
-function normalizeRegistryOverrides(
-  values: Record<string, string | string[]> | undefined,
-): Record<string, string | string[]> {
-  const normalized: Record<string, string | string[]> = {};
-  for (const [name, value] of Object.entries(values ?? {})) {
-    const normalizedName = normalizeAgentName(name);
-    if (!normalizedName) {
-      continue;
-    }
-    const normalizedValue = normalizeRegistryOverride(value);
-    if (normalizedValue) {
-      normalized[normalizedName] = normalizedValue;
-    }
-  }
-  return normalized;
-}
-
-function normalizeRegistryOverride(value: string | string[]): string | string[] | undefined {
-  if (typeof value === "string") {
-    return value.trim() || undefined;
-  }
-  return value.length > 0 && value[0]?.length ? [...value] : undefined;
-}
 
 export class AcpxRuntime implements AcpxRuntimeLike {
   private healthy = false;
@@ -377,6 +334,12 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     const { handle } = this.resolveManagerHandle(input.handle);
     const manager = await this.getManager();
     await manager.cancel(handle);
+  }
+
+  async prepareFreshSession(input: { handle: AcpRuntimeHandle }): Promise<void> {
+    const { handle } = this.resolveManagerHandle(input.handle);
+    const manager = await this.getManager();
+    await manager.prepareFreshSession(handle);
   }
 
   async close(input: {

@@ -565,6 +565,9 @@ export function cloneSessionAcpxState(
       : undefined,
     current_model_id: state.current_model_id,
     available_models: state.available_models ? [...state.available_models] : undefined,
+    ...(state.available_model_names
+      ? { available_model_names: { ...state.available_model_names } }
+      : {}),
     model_control: state.model_control,
     available_commands: state.available_commands
       ? state.available_commands.map((command) => ({ ...command }))

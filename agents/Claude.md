@@ -17,3 +17,9 @@ claiming singleton external resources in an ACP-spawned session.
 Set `ACPX_CLAUDE_INCLUDE_USER_SETTINGS=1` only when the spawned session needs
 the user's global Claude settings and no such plugin conflict exists. Ambient
 credentials and other environment variables are still inherited normally.
+
+## Embedded inspection
+
+Embedded inspection resolves the installed `claude-agent-acp` adapter or its installed `@agentclientprotocol/claude-agent-acp` package. Configure the adapter’s authentication before acquiring a model catalog or starting a session.
+
+Inspection performs filesystem lookup only. See [embedded agent discovery](../docs/session-control.md#embedded-agent-discovery) for the registry contract and session lifecycle.

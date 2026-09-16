@@ -1887,23 +1887,33 @@ export class AcpRuntimeManager {
     await controller?.requestCancelActivePrompt();
   }
 
+  prepareFreshSession(handle: AcpRuntimeHandle): Promise<void> {
+    this.assertOpen();
+    return this.trackTask(this.closeRuntimeSession(handle, "prepare-fresh"));
+  }
+
   close(
     handle: AcpRuntimeHandle,
     options: { discardPersistentState?: boolean } = {},
   ): Promise<void> {
     this.assertOpen();
-    return this.trackTask(this.closeRuntimeSession(handle, options));
+    return this.trackTask(
+      this.closeRuntimeSession(
+        handle,
+        options.discardPersistentState === true ? "discard" : "release",
+      ),
+    );
   }
 
   private async closeRuntimeSession(
     handle: AcpRuntimeHandle,
-    options: { discardPersistentState?: boolean },
+    intent: "release" | "prepare-fresh" | "discard",
   ): Promise<void> {
     const recordId = handle.acpxRecordId ?? handle.sessionKey;
     const record = await this.resolveRuntimeRecordForClose(recordId);
     this.markActiveRuntimeRecordClosing(record);
     await this.cancel(handle);
-    await this.closeRuntimeRecordOwnership(record, options.discardPersistentState === true);
+    await this.closeRuntimeRecordOwnership(record, intent);
     record.closed = true;
     record.closedAt = isoNow();
     await this.options.sessionStore.save(record);
@@ -1925,16 +1935,18 @@ export class AcpRuntimeManager {
 
   private async closeRuntimeRecordOwnership(
     record: SessionRecord,
-    discardPersistentState: boolean,
+    intent: "release" | "prepare-fresh" | "discard",
   ): Promise<void> {
-    if (discardPersistentState) {
+    if (intent === "discard") {
       await this.closeBackendSession(record);
+    } else {
+      await this.closeRetainedSessionOwner(record.acpxRecordId);
+    }
+    if (intent !== "release") {
       record.acpx = {
         ...record.acpx,
         reset_on_next_ensure: true,
       };
-    } else {
-      await this.closeRetainedSessionOwner(record.acpxRecordId);
     }
   }
 

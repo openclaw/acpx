@@ -12,7 +12,13 @@ function legacyModelState(state: SessionAcpxState): SessionModelState | undefine
   }
   return {
     currentModelId: state.current_model_id ?? "",
-    availableModels: state.available_models.map((modelId) => ({ modelId, name: modelId })),
+    availableModels: state.available_models.map((modelId) => ({
+      modelId,
+      name:
+        state.available_model_names && Object.hasOwn(state.available_model_names, modelId)
+          ? state.available_model_names[modelId]
+          : modelId,
+    })),
   };
 }
 
@@ -38,12 +44,16 @@ export function applyAdvertisedModelState(
 ): void {
   state.current_model_id = models.currentModelId;
   state.available_models = models.availableModels.map((model) => model.modelId);
+  state.available_model_names = Object.fromEntries(
+    models.availableModels.map((model) => [model.modelId, model.name]),
+  );
   state.model_control = models.configId ? "config_option" : "legacy_set_model";
 }
 
 export function clearAdvertisedModelState(state: SessionAcpxState): void {
   delete state.current_model_id;
   delete state.available_models;
+  delete state.available_model_names;
   delete state.model_control;
 }
 

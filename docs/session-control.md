@@ -117,3 +117,17 @@ This means it is always safe to call these from scripts without worrying about w
 - [Prompting](prompting.md) — `--no-wait` and timeouts.
 - [Sessions](sessions.md) — scope rules and queue ownership.
 - [CLI reference](CLI.md#cancel-command) — formal command grammar.
+
+## Embedded agent discovery
+
+Import `createAgentRegistry` from `acpx/agent-registry` to inspect agents without loading the runtime engine. The existing `acpx/runtime` export remains available.
+
+`createAgentRegistry({ overrides })` supplies `inspect(agentId)` for checking installed launch entrypoints. A result contains the canonical `id`, display `name`, and either `launch: { kind: "installed", argv }` or `launch: { kind: "missing", requirements }`. Each missing requirement names a command or package. Inspection checks known entrypoints and prerequisites; it does not audit the behavior of arbitrary custom programs. Inspection performs filesystem lookup only; it does not start an agent, install packages, authenticate, or acquire a model catalog.
+
+The optional `resolveExecutable(command)` and `resolvePackageRoot(packageName)` callbacks let an embedding host use its own executable and plugin-package lookup. Return an absolute path, or `undefined` when absent. Explicit overrides retain their precedence. Unknown agents and installer-style overrides that cannot be checked without package execution return `undefined`. Check again when acquiring the runtime; installation facts can change. Resolved argv can contain private configured arguments and belongs in trusted launch code.
+
+The existing `list()` and `resolve()` methods retain their behavior, including configured and raw adapter commands. Custom registries implementing only those methods remain supported. `createAgentRegistry` returns the richer `AcpInspectableAgentRegistry` type.
+
+After session acquisition, `getStatus({ handle }).models.availableModels` optionally supplies `{ modelId, name }` entries with native display names. `availableModelIds` remains available. IDs are opaque; pass the selected ID unchanged to `setModel`. Older session records without name metadata may omit `availableModels` until refreshed. A missing authenticated catalog remains a setup error even when its executable is installed. Ordinary `close` releases local inspection resources; optional remote discard and deletion of native history are separate operations.
+
+`prepareFreshSession({ handle })` releases local session resources and records that the next `ensureSession` must create a fresh session, including after a runtime restart. Omit `resumeSessionId` on that ensure call. This operation does not require the optional remote `session/close` capability and does not delete native history. Ordinary `close` keeps the session resumable. Explicit `close({ handle, reason, discardPersistentState: true })` retains its remote-close requirement.

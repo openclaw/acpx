@@ -1,3 +1,5 @@
+import type { AcpAgentRegistry } from "../../agent-registry.js";
+export type { AcpAgentRegistry } from "../../agent-registry.js";
 import type {
   SetSessionConfigOptionResponse,
   ToolCallContent,
@@ -82,7 +84,7 @@ export type AcpRuntimeEnsureInput = {
    * on the underlying `session/new` request, and persisted onto the new
    * record. Ignored when an existing persistent session is reused — system
    * prompts are fixed at `newSession` time, so changing them requires a
-   * different sessionKey or closing the prior record first.
+   * different sessionKey or prepareFreshSession on the prior record first.
    */
   sessionOptions?: SessionAgentOptions;
 };
@@ -118,6 +120,8 @@ export type AcpRuntimeCapabilities = {
 export type AcpRuntimeSessionModels = {
   currentModelId?: string;
   availableModelIds: string[];
+  /** Native display names, when retained by the session snapshot. */
+  availableModels?: Array<{ modelId: string; name: string }>;
 };
 
 /**
@@ -369,6 +373,8 @@ export interface AcpRuntime {
   }): Promise<SetSessionConfigOptionResponse | void>;
   doctor?(): Promise<AcpRuntimeDoctorReport>;
   cancel(input: { handle: AcpRuntimeHandle; reason?: string }): Promise<void>;
+  /** Locally closes the session and persists fresh creation on the next ensure without resumeSessionId. */
+  prepareFreshSession?(input: { handle: AcpRuntimeHandle }): Promise<void>;
   close(input: {
     handle: AcpRuntimeHandle;
     reason: string;
@@ -381,11 +387,6 @@ export type AcpSessionRecord = SessionRecord;
 export interface AcpSessionStore {
   load(sessionId: string): Promise<AcpSessionRecord | undefined>;
   save(record: AcpSessionRecord): Promise<void>;
-}
-
-export interface AcpAgentRegistry {
-  resolve(agentName: string): string | string[];
-  list(): string[];
 }
 
 export type AcpRuntimeOptions = {

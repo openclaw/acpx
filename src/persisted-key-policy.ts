@@ -17,6 +17,7 @@ const MAP_OBJECT_PATHS = new Set([
   "request_token_usage",
   "messages.Agent.tool_results",
   "acpx.session_options.env",
+  "acpx.available_model_names",
 ]);
 
 const OPAQUE_VALUE_PATHS = new Set([

@@ -229,6 +229,10 @@ test("config option updates synchronize and clear advertised model state", () =>
 
   assert.equal(acpxState.current_model_id, "smart-model");
   assert.deepEqual(acpxState.available_models, ["fast-model", "smart-model"]);
+  assert.deepEqual(acpxState.available_model_names, {
+    "fast-model": "Fast",
+    "smart-model": "Smart",
+  });
 
   acpxState = recordSessionUpdate(conversation, acpxState, {
     sessionId: "session-1",
@@ -240,6 +244,7 @@ test("config option updates synchronize and clear advertised model state", () =>
 
   assert.equal(acpxState.current_model_id, undefined);
   assert.equal(acpxState.available_models, undefined);
+  assert.equal(acpxState.available_model_names, undefined);
 });
 
 test("config responses clear stale config models without erasing legacy model control", () => {

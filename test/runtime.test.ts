@@ -925,3 +925,148 @@ for (const control of [
     assert.deepEqual(after?.acpx?.session_options, before?.acpx?.session_options);
   });
 }
+
+test("public model status retains legacy labels through file-store reload", async (t) => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-model-labels-"));
+  const options = {
+    cwd,
+    sessionStore: createFileSessionStore({ stateDir: path.join(cwd, "state") }),
+    agentRegistry: createAgentRegistry({
+      overrides: {
+        fixture: [
+          process.execPath,
+          MOCK_AGENT_PATH,
+          "--advertise-legacy-models",
+          "--supports-load-session",
+        ],
+      },
+    }),
+    permissionMode: "approve-reads" as const,
+  };
+  let runtime = createAcpRuntime(options);
+  t.after(async () => {
+    await runtime.shutdown();
+    await fs.rm(cwd, { recursive: true, force: true });
+  });
+  const handle = await runtime.ensureSession({
+    sessionKey: "label-proof",
+    agent: "fixture",
+    mode: "persistent",
+  });
+  const expected = {
+    currentModelId: "default-model",
+    availableModelIds: ["default-model", "alternate-model"],
+    availableModels: [
+      { modelId: "default-model", name: "Default Model" },
+      { modelId: "alternate-model", name: "Alternate Model" },
+    ],
+  };
+  assert.deepEqual((await runtime.getStatus({ handle })).models, expected);
+  await runtime.shutdown();
+  runtime = createAcpRuntime(options);
+  assert.deepEqual((await runtime.getStatus({ handle })).models, expected);
+});
+
+test("public model status exposes modern labels from existing configuration snapshots", async (t) => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-modern-labels-"));
+  const store = createFileSessionStore({ stateDir: cwd });
+  const modelId = "provider/nested/model|variant";
+  const record = createSessionRecord({
+    acpxRecordId: "modern-labels",
+    cwd,
+    acpx: {
+      current_model_id: modelId,
+      available_models: [modelId, "bare-model"],
+      model_control: "config_option",
+      config_options: [
+        {
+          id: "llm",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: modelId,
+          options: [
+            { value: modelId, name: "Native Display Name" },
+            { value: "bare-model", name: "Bare Model Name" },
+          ],
+        },
+      ],
+    },
+  });
+  await store.save(record);
+  const runtime = createAcpRuntime({
+    cwd,
+    sessionStore: store,
+    agentRegistry: createAgentRegistry(),
+    permissionMode: "deny-all",
+  });
+  t.after(async () => {
+    await runtime.shutdown();
+    await fs.rm(cwd, { recursive: true, force: true });
+  });
+  const handle = await runtime.findSession({ sessionKey: "modern-labels", agent: "codex" });
+  assert.ok(handle);
+  assert.deepEqual((await runtime.getStatus({ handle })).models, {
+    currentModelId: modelId,
+    availableModelIds: [modelId, "bare-model"],
+    availableModels: [
+      { modelId, name: "Native Display Name" },
+      { modelId: "bare-model", name: "Bare Model Name" },
+    ],
+  });
+});
+
+test("public fresh-session preparation survives restart without remote close support", async (t) => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fresh-session-"));
+  const options = {
+    cwd,
+    sessionStore: createFileSessionStore({ stateDir: path.join(cwd, "state") }),
+    agentRegistry: createAgentRegistry({
+      overrides: { fixture: [process.execPath, MOCK_AGENT_PATH, "--supports-load-session"] },
+    }),
+    permissionMode: "approve-reads" as const,
+  };
+  let runtime = createAcpRuntime(options);
+  t.after(async () => {
+    await runtime.shutdown();
+    await fs.rm(cwd, { recursive: true, force: true });
+  });
+  const input = { sessionKey: "fresh-proof", agent: "fixture", mode: "persistent" as const };
+  const original = await runtime.ensureSession(input);
+  await runtime.close({ handle: original, reason: "release resources" });
+  await runtime.shutdown();
+  runtime = createAcpRuntime(options);
+  const resumed = await runtime.ensureSession(input);
+  assert.equal(resumed.backendSessionId, original.backendSessionId);
+  await assert.rejects(
+    runtime.close({ handle: resumed, reason: "discard", discardPersistentState: true }),
+    /does not support session\/close/,
+  );
+  assert.equal(
+    (await options.sessionStore.load(input.sessionKey))?.acpx?.reset_on_next_ensure,
+    undefined,
+  );
+  await runtime.prepareFreshSession({ handle: resumed });
+  assert.equal(
+    (await options.sessionStore.load(input.sessionKey))?.acpx?.reset_on_next_ensure,
+    true,
+  );
+  await runtime.shutdown();
+  runtime = createAcpRuntime(options);
+  const fresh = await runtime.ensureSession(input);
+  assert.notEqual(fresh.backendSessionId, original.backendSessionId);
+  assert.equal(
+    (await options.sessionStore.load(input.sessionKey))?.acpx?.reset_on_next_ensure,
+    undefined,
+  );
+  const turn = runtime.startTurn({
+    handle: fresh,
+    text: "fresh prompt",
+    mode: "prompt",
+    requestId: "fresh-turn",
+  });
+  for await (const event of turn.events) {
+    assert.notEqual(event.type, "error");
+  }
+  assert.equal((await turn.result).status, "completed");
+});

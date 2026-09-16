@@ -439,6 +439,11 @@ function parseAcpxState(raw: unknown): SessionAcpxState | undefined {
     state.desired_config_options = desiredConfigOptions;
   }
 
+  const modelNames = parseStringMap(record.available_model_names, true);
+  if (modelNames) {
+    state.available_model_names = modelNames;
+  }
+
   assignParsedModelState(state, record);
 
   const availableCommands = parseAvailableCommands(record.available_commands);
@@ -480,7 +485,7 @@ function assignStringState(
   }
 }
 
-function parseStringMap(raw: unknown): Record<string, string> | undefined {
+function parseStringMap(raw: unknown, preserveEmpty = false): Record<string, string> | undefined {
   const record = asRecord(raw);
   if (!record) {
     return undefined;
@@ -490,7 +495,7 @@ function parseStringMap(raw: unknown): Record<string, string> | undefined {
       (entry): entry is [string, string] => typeof entry[1] === "string",
     ),
   );
-  return Object.keys(parsed).length > 0 ? parsed : undefined;
+  return Object.keys(parsed).length > 0 || preserveEmpty ? parsed : undefined;
 }
 
 function assignParsedSessionOptions(state: SessionAcpxState, raw: unknown): void {

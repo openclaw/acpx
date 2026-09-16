@@ -1,4 +1,5 @@
-import type { SessionRecord, SessionTokenUsage } from "../../types.js";
+import { advertisedModelState } from "../../session/model-state.js";
+import type { SessionAcpxState, SessionRecord, SessionTokenUsage } from "../../types.js";
 import type {
   AcpRuntimeAvailableCommand,
   AcpRuntimeSessionModels,
@@ -41,19 +42,26 @@ function statusSummary(record: SessionRecord): string {
 }
 
 function buildModelsField(record: SessionRecord): { models?: AcpRuntimeSessionModels } {
-  const available = record.acpx?.available_models;
-  const currentModelId = record.acpx?.current_model_id;
-  if (!available || available.length === 0) {
-    return currentModelId === undefined
-      ? {}
-      : { models: { currentModelId, availableModelIds: [] } };
+  const { available_models: available = [], current_model_id: currentModelId } = record.acpx ?? {};
+  if (available.length === 0 && currentModelId === undefined) {
+    return {};
   }
   return {
     models: {
       ...(currentModelId !== undefined ? { currentModelId } : {}),
       availableModelIds: [...available],
+      ...buildModelNamesField(record.acpx),
     },
   };
+}
+
+function buildModelNamesField(
+  state: SessionAcpxState | undefined,
+): Pick<AcpRuntimeSessionModels, "availableModels"> {
+  const models = advertisedModelState(state);
+  return models && (models.configId || state?.available_model_names !== undefined)
+    ? { availableModels: models.availableModels }
+    : {};
 }
 
 function tokenUsageToBreakdown(

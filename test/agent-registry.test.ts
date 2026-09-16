@@ -15,6 +15,7 @@ import {
   resolvePackageExecBuiltInAgentLaunch,
   resolveAgentCommand,
 } from "../src/agent-registry.js";
+import { createAgentRegistry } from "../src/agent-registry.js";
 
 test("built-in command displays stay synchronized with structured argv", () => {
   assert.deepEqual(Object.keys(AGENT_ARGV_REGISTRY), Object.keys(AGENT_REGISTRY));
@@ -238,4 +239,132 @@ test("resolveBuiltInAgentLaunch accepts the legacy Claude npm exec default", () 
     packageRange: BUILT_IN_AGENT_PACKAGES.claude.packageRange,
     npmCliPath,
   });
+});
+
+test("public inspection resolves installed direct agents without running package executors", () => {
+  const commands: string[] = [];
+  const registry = createAgentRegistry({
+    resolveExecutable: (command) => {
+      commands.push(command);
+      return command === "opencode" ? "/fixture/bin/opencode" : undefined;
+    },
+  });
+  assert.deepEqual(registry.inspect("opencode"), {
+    id: "opencode",
+    name: "OpenCode",
+    launch: { kind: "installed", argv: ["/fixture/bin/opencode", "acp"] },
+  });
+  assert.deepEqual(commands, ["opencode"]);
+  assert.deepEqual(registry.inspect("qwen"), {
+    id: "qwen",
+    name: "Qwen Code",
+    launch: { kind: "missing", requirements: [{ kind: "command", name: "qwen" }] },
+  });
+  assert.deepEqual(registry.resolve("opencode"), AGENT_ARGV_REGISTRY.opencode);
+});
+
+test("public inspection respects custom overrides and never accepts package-exec readiness", () => {
+  const registry = createAgentRegistry({
+    overrides: { opencode: ["custom-agent", "--stdio"], qwen: ["npx", "custom-qwen"] },
+    resolveExecutable: (command) => "/fixture/" + command,
+  });
+  assert.deepEqual(registry.inspect("opencode")?.launch, {
+    kind: "installed",
+    argv: ["/fixture/custom-agent", "--stdio"],
+  });
+  assert.equal(registry.inspect("qwen"), undefined);
+  assert.deepEqual(registry.resolve("qwen"), ["npx", "custom-qwen"]);
+  for (const id of ["not-registered", "constructor", "__proto__"]) {
+    assert.equal(registry.inspect(id), undefined);
+  }
+  const configured = createAgentRegistry({
+    overrides: { constructor: ["custom-agent", "--stdio"] },
+    resolveExecutable: (command) => "/fixture/" + command,
+  });
+  assert.deepEqual(configured.inspect("constructor"), {
+    id: "constructor",
+    name: "constructor",
+    launch: { kind: "installed", argv: ["/fixture/custom-agent", "--stdio"] },
+  });
+});
+
+test("public inspection requires Pi's native command and refreshes installation facts", () => {
+  const installed = new Set(["pi-acp"]);
+  const registry = createAgentRegistry({
+    resolveExecutable: (command) => (installed.has(command) ? "/fixture/" + command : undefined),
+    resolvePackageRoot: () => undefined,
+  });
+  assert.deepEqual(registry.inspect("pi")?.launch, {
+    kind: "missing",
+    requirements: [{ kind: "command", name: "pi" }],
+  });
+  installed.add("pi");
+  assert.deepEqual(registry.inspect("pi")?.launch, {
+    kind: "installed",
+    argv: ["/fixture/pi-acp"],
+  });
+  installed.delete("pi-acp");
+  assert.deepEqual(registry.inspect("pi")?.launch, {
+    kind: "missing",
+    requirements: [{ kind: "package", name: "pi-acp" }],
+  });
+});
+
+test("public inspection resolves a plugin-local adapter package without executing its entrypoint", (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "acpx-inspect-package-"));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const bin = path.join(temp, "adapter.js");
+  fs.writeFileSync(
+    path.join(temp, "package.json"),
+    JSON.stringify({ name: "pi-acp", version: "0.0.33", bin: { "pi-acp": "adapter.js" } }),
+  );
+  fs.writeFileSync(bin, 'throw new Error("inspection must not execute an adapter");');
+  const registry = createAgentRegistry({
+    resolveExecutable: (command) => (command === "pi" ? "/fixture/pi" : undefined),
+    resolvePackageRoot: (name) => (name === "pi-acp" ? temp : undefined),
+  });
+  assert.deepEqual(registry.inspect("pi")?.launch, {
+    kind: "installed",
+    argv: [process.execPath, bin],
+  });
+  fs.unlinkSync(bin);
+  assert.deepEqual(registry.inspect("pi")?.launch, {
+    kind: "missing",
+    requirements: [{ kind: "package", name: "pi-acp" }],
+  });
+});
+
+test("public inspection keeps alias overrides and raw argv values intact", (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "acpx-inspect-command-"));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const executable = path.join(temp, "adapter with spaces");
+  fs.writeFileSync(executable, "#!/bin/sh\nexit 99\n", { mode: 0o755 });
+  const argv = [executable, "--stdio", "literal argument"];
+  const registry = createAgentRegistry({
+    overrides: { "factory-droid": argv, droid: "missing-other-adapter" },
+  });
+  assert.deepEqual(registry.inspect("factory-droid"), {
+    id: "droid",
+    name: "Factory Droid",
+    launch: { kind: "installed", argv },
+  });
+  assert.deepEqual(registry.resolve("factory-droid"), argv);
+  const configured = createAgentRegistry({
+    overrides: { fixture: JSON.stringify(executable) + " --stdio" },
+  });
+  assert.deepEqual(configured.inspect("fixture")?.launch, {
+    kind: "installed",
+    argv: [executable, "--stdio"],
+  });
+});
+
+test("public inspection excludes installed package executor aliases", () => {
+  for (const command of ["bun x custom-adapter", "uv tool run custom-adapter"]) {
+    const registry = createAgentRegistry({
+      overrides: { fixture: command },
+      resolveExecutable: (name) => "/fixture/" + name,
+    });
+    assert.equal(registry.inspect("fixture"), undefined);
+    assert.equal(registry.resolve("fixture"), command);
+  }
 });
