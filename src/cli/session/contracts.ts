@@ -19,7 +19,14 @@ import type {
   SessionRecord,
 } from "../../types.js";
 
-type TimedRunOptions = {
+export type SessionConnectionOptions = {
+  mcpServers?: McpServer[];
+  nonInteractivePermissions?: NonInteractivePermissionPolicy;
+  authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
+  fs?: boolean;
+  terminal?: boolean;
+  verbose?: boolean;
   timeoutMs?: number;
 };
 
@@ -43,14 +50,8 @@ export type RunOnceOptions = {
   agentArgv?: string[];
   cwd: string;
   prompt: PromptInput;
-  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
   permissionPolicy?: PermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  fs?: boolean;
-  terminal?: boolean;
   outputFormatter: OutputFormatter;
   errorEmissionPolicy?: OutputErrorEmissionPolicy;
   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
@@ -58,11 +59,10 @@ export type RunOnceOptions = {
   onClientOperation?: (operation: ClientOperation) => void;
   onPermissionEscalation?: (event: PermissionEscalationEvent) => void;
   suppressSdkConsoleErrors?: boolean;
-  verbose?: boolean;
   sessionOptions?: SessionAgentOptions;
   configOptions?: Array<{ configId: string; value: string }>;
   promptRetries?: number;
-} & TimedRunOptions;
+} & SessionConnectionOptions;
 
 export type SessionCreateOptions = {
   agentCommand: string;
@@ -70,33 +70,20 @@ export type SessionCreateOptions = {
   cwd: string;
   name?: string;
   resumeSessionId?: string;
-  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
   permissionPolicy?: PermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  fs?: boolean;
-  terminal?: boolean;
-  verbose?: boolean;
   sessionOptions?: SessionAgentOptions;
   onModelWarning?: (message: string) => void;
-} & TimedRunOptions;
+} & SessionConnectionOptions;
 
 export type SessionSendOptions = {
   sessionId: string;
   prompt: PromptInput;
   resumePolicy?: SessionResumePolicy;
-  mcpServers?: McpServer[];
   mcpConfigPath?: string;
   mcpConfigFingerprint?: string;
   permissionMode: PermissionMode;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
   permissionPolicy?: PermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  fs?: boolean;
-  terminal?: boolean;
   outputFormatter: OutputFormatter;
   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onSessionUpdate?: (notification: SessionNotification) => void;
@@ -104,14 +91,13 @@ export type SessionSendOptions = {
   onPermissionEscalation?: (event: PermissionEscalationEvent) => void;
   errorEmissionPolicy?: OutputErrorEmissionPolicy;
   suppressSdkConsoleErrors?: boolean;
-  verbose?: boolean;
   waitForCompletion?: boolean;
   ttlMs?: number;
   maxQueueDepth?: number;
   client?: AcpClient;
   promptRetries?: number;
   sessionOptions?: SessionAgentOptions;
-} & TimedRunOptions;
+} & SessionConnectionOptions;
 
 export type SessionEnsureOptions = SessionCreateOptions & {
   walkBoundary?: string;
@@ -123,16 +109,9 @@ export type SessionListOptions = {
   cwd: string;
   cursor?: string;
   filterCwd?: string;
-  mcpServers?: McpServer[];
   permissionMode: PermissionMode;
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
   permissionPolicy?: PermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  fs?: boolean;
-  terminal?: boolean;
-  verbose?: boolean;
-} & TimedRunOptions;
+} & SessionConnectionOptions;
 
 export type SessionListResult = AgentSessionListResult | undefined;
 
@@ -149,39 +128,18 @@ export type SessionCancelResult = {
 export type SessionSetModeOptions = {
   sessionId: string;
   modeId: string;
-  mcpServers?: McpServer[];
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  fs?: boolean;
-  terminal?: boolean;
-  verbose?: boolean;
-} & TimedRunOptions;
+} & SessionConnectionOptions;
 
 export type SessionSetModelOptions = {
   sessionId: string;
   modelId: string;
-  mcpServers?: McpServer[];
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  fs?: boolean;
-  terminal?: boolean;
-  verbose?: boolean;
-} & TimedRunOptions;
+} & SessionConnectionOptions;
 
 export type SessionSetConfigOptionOptions = {
   sessionId: string;
   configId: string;
   value: string;
-  mcpServers?: McpServer[];
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  fs?: boolean;
-  terminal?: boolean;
-  verbose?: boolean;
-} & TimedRunOptions;
+} & SessionConnectionOptions;
 
 export type SessionCreateWithClientResult = {
   record: SessionRecord;

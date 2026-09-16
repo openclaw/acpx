@@ -41,7 +41,7 @@ import {
 } from "./flags.js";
 import { emitJsonResult } from "./output/json-output.js";
 import { readPromptInput } from "./prompt-input.js";
-import type { SessionListResult } from "./session/contracts.js";
+import type { SessionListResult, SessionConnectionOptions } from "./session/contracts.js";
 
 class NoSessionError extends Error {
   constructor(message: string) {
@@ -129,6 +129,22 @@ function sessionOptionsFromGlobalFlags(
   };
 }
 
+function sessionConnectionOptions(
+  globalFlags: GlobalFlags,
+  config: ResolvedAcpxConfig,
+): SessionConnectionOptions {
+  return {
+    mcpServers: config.mcpServers,
+    nonInteractivePermissions: globalFlags.nonInteractivePermissions,
+    authCredentials: config.auth,
+    authPolicy: globalFlags.authPolicy,
+    fs: globalFlags.fs,
+    terminal: globalFlags.terminal,
+    timeoutMs: globalFlags.timeout,
+    verbose: globalFlags.verbose,
+  };
+}
+
 async function resolvePermissionPolicyFromFlags(
   globalFlags: GlobalFlags,
 ): Promise<PermissionPolicy | undefined> {
@@ -149,21 +165,14 @@ function buildSessionStartOptions(params: {
   permissionPolicy?: PermissionPolicy;
 }): Parameters<SessionModule["createSession"]>[0] {
   return {
+    ...sessionConnectionOptions(params.globalFlags, params.config),
     agentCommand: params.agent.agentCommand,
     agentArgv: params.agent.agentArgv,
     cwd: params.agent.cwd,
     name: params.flags.name,
     resumeSessionId: params.flags.resumeSession,
-    mcpServers: params.config.mcpServers,
     permissionMode: params.permissionMode,
-    nonInteractivePermissions: params.globalFlags.nonInteractivePermissions,
     permissionPolicy: params.permissionPolicy,
-    authCredentials: params.config.auth,
-    authPolicy: params.globalFlags.authPolicy,
-    fs: params.globalFlags.fs,
-    terminal: params.globalFlags.terminal,
-    timeoutMs: params.globalFlags.timeout,
-    verbose: params.globalFlags.verbose,
     sessionOptions: sessionOptionsFromGlobalFlags(params.globalFlags),
     onModelWarning: params.globalFlags.jsonStrict
       ? undefined
@@ -280,35 +289,23 @@ export async function handlePrompt(
 
   await printPromptSessionBanner(record, agent.cwd, outputPolicy.format, outputPolicy.jsonStrict);
   const result = await sendSession({
+    ...sessionConnectionOptions(globalFlags, config),
     sessionId: record.acpxRecordId,
     prompt,
-    mcpServers: config.mcpServers,
     mcpConfigPath: config.mcpConfigPath,
     mcpConfigFingerprint: config.mcpConfigFingerprint,
     permissionMode,
-    nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     permissionPolicy,
-    authCredentials: config.auth,
-    authPolicy: globalFlags.authPolicy,
-    fs: globalFlags.fs,
-    terminal: globalFlags.terminal,
     outputFormatter,
     errorEmissionPolicy: {
       queueErrorAlreadyEmitted: outputPolicy.queueErrorAlreadyEmitted,
     },
     suppressSdkConsoleErrors: outputPolicy.suppressSdkConsoleErrors,
-    timeoutMs: globalFlags.timeout,
     ttlMs: globalFlags.ttl,
     maxQueueDepth: config.queueMaxDepth,
     promptRetries: globalFlags.promptRetries,
-    verbose: globalFlags.verbose,
     waitForCompletion: flags.wait !== false,
-    sessionOptions: {
-      model: globalFlags.model,
-      allowedTools: globalFlags.allowedTools,
-      maxTurns: globalFlags.maxTurns,
-      systemPrompt: globalFlags.systemPrompt,
-    },
+    sessionOptions: sessionOptionsFromGlobalFlags(globalFlags),
   });
 
   if ("queued" in result) {
@@ -370,32 +367,20 @@ export async function handleExec(
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
 
   const result = await runOnce({
+    ...sessionConnectionOptions(globalFlags, config),
     agentCommand: agent.agentCommand,
     agentArgv: agent.agentArgv,
     cwd: agent.cwd,
     prompt,
-    mcpServers: config.mcpServers,
     permissionMode,
-    nonInteractivePermissions: globalFlags.nonInteractivePermissions,
     permissionPolicy,
-    authCredentials: config.auth,
-    authPolicy: globalFlags.authPolicy,
-    fs: globalFlags.fs,
-    terminal: globalFlags.terminal,
     outputFormatter,
     errorEmissionPolicy: {
       queueErrorAlreadyEmitted: outputPolicy.queueErrorAlreadyEmitted,
     },
     suppressSdkConsoleErrors: outputPolicy.suppressSdkConsoleErrors,
-    timeoutMs: globalFlags.timeout,
-    verbose: globalFlags.verbose,
     promptRetries: globalFlags.promptRetries,
-    sessionOptions: {
-      model: globalFlags.model,
-      allowedTools: globalFlags.allowedTools,
-      maxTurns: globalFlags.maxTurns,
-      systemPrompt: globalFlags.systemPrompt,
-    },
+    sessionOptions: sessionOptionsFromGlobalFlags(globalFlags),
     configOptions: flags.configOption,
   });
 
@@ -537,16 +522,9 @@ export async function handleSetMode(
     resolveSessionNameFromFlags(flags, command),
   );
   const result = await setSessionMode({
+    ...sessionConnectionOptions(globalFlags, config),
     sessionId: record.acpxRecordId,
     modeId,
-    mcpServers: config.mcpServers,
-    nonInteractivePermissions: globalFlags.nonInteractivePermissions,
-    authCredentials: config.auth,
-    authPolicy: globalFlags.authPolicy,
-    fs: globalFlags.fs,
-    terminal: globalFlags.terminal,
-    timeoutMs: globalFlags.timeout,
-    verbose: globalFlags.verbose,
   });
 
   if (globalFlags.verbose && result.loadError) {
@@ -575,16 +553,9 @@ export async function handleSetModel(
     resolveSessionNameFromFlags(flags, command),
   );
   const result = await setSessionModel({
+    ...sessionConnectionOptions(globalFlags, config),
     sessionId: record.acpxRecordId,
     modelId,
-    mcpServers: config.mcpServers,
-    nonInteractivePermissions: globalFlags.nonInteractivePermissions,
-    authCredentials: config.auth,
-    authPolicy: globalFlags.authPolicy,
-    fs: globalFlags.fs,
-    terminal: globalFlags.terminal,
-    timeoutMs: globalFlags.timeout,
-    verbose: globalFlags.verbose,
   });
 
   if (globalFlags.verbose && result.loadError) {
@@ -619,17 +590,10 @@ export async function handleSetConfigOption(
     resolveSessionNameFromFlags(flags, command),
   );
   const result = await setSessionConfigOption({
+    ...sessionConnectionOptions(globalFlags, config),
     sessionId: record.acpxRecordId,
     configId: resolvedConfigId,
     value,
-    mcpServers: config.mcpServers,
-    nonInteractivePermissions: globalFlags.nonInteractivePermissions,
-    authCredentials: config.auth,
-    authPolicy: globalFlags.authPolicy,
-    fs: globalFlags.fs,
-    terminal: globalFlags.terminal,
-    timeoutMs: globalFlags.timeout,
-    verbose: globalFlags.verbose,
   });
 
   if (globalFlags.verbose && result.loadError) {
@@ -652,21 +616,14 @@ async function tryListAgentSessions(
   const { listAgentSessions } = await loadSessionModule();
   try {
     return await listAgentSessions({
+      ...sessionConnectionOptions(globalFlags, config),
       agentCommand: agent.agentCommand,
       agentArgv: agent.agentArgv,
       cwd: agent.cwd,
       cursor: flags.cursor,
       filterCwd: resolveSessionListFilterCwd(flags, agent.cwd),
-      mcpServers: config.mcpServers,
       permissionMode,
-      nonInteractivePermissions: globalFlags.nonInteractivePermissions,
       permissionPolicy,
-      authCredentials: config.auth,
-      authPolicy: globalFlags.authPolicy,
-      fs: globalFlags.fs,
-      terminal: globalFlags.terminal,
-      timeoutMs: globalFlags.timeout,
-      verbose: globalFlags.verbose,
     });
   } catch (error) {
     if (error instanceof AgentSpawnError) {
