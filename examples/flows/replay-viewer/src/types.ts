@@ -1,182 +1,32 @@
-export type FlowEdge =
-  | {
-      from: string;
-      to: string;
-    }
-  | {
-      from: string;
-      switch: {
-        on: string;
-        cases: Record<string, string>;
-      };
-    };
+import type {
+  FlowBundledSessionEvent as PersistedSessionEvent,
+  FlowDefinitionSnapshot,
+  FlowRunManifest,
+  FlowRunState,
+  FlowSessionBinding,
+  FlowStepRecord,
+  FlowTraceEvent,
+} from "../../../../src/flows/types.js";
 
-export type FlowDefinitionSnapshot = {
-  schema: "acpx.flow-definition-snapshot.v1";
-  name: string;
-  run?: {
-    hasTitle?: boolean;
-  };
-  startAt: string;
-  nodes: Record<
-    string,
-    {
-      nodeType: "acp" | "compute" | "action" | "checkpoint";
-      profile?: string;
-      session?: {
-        handle?: string;
-        isolated?: boolean;
-      };
-      cwd?: {
-        mode: "default" | "static" | "dynamic";
-        value?: string;
-      };
-      summary?: string;
-      actionExecution?: "function" | "shell";
-      hasPrompt?: boolean;
-      hasParse?: boolean;
-      hasRun?: boolean;
-      hasExec?: boolean;
-    }
-  >;
-  edges: FlowEdge[];
-};
+export type {
+  FlowArtifactRef,
+  FlowActionReceipt,
+  FlowConversationTrace,
+  FlowDefinitionSnapshot,
+  FlowEdge,
+  FlowNodeOutcome,
+  FlowNodeResult,
+  FlowRunManifest,
+  FlowRunState,
+  FlowSessionBinding,
+  FlowStepRecord,
+  FlowStepTrace,
+  FlowTraceEvent,
+} from "../../../../src/flows/types.js";
 
-export type FlowNodeOutcome = "ok" | "timed_out" | "failed" | "cancelled";
-
-export type FlowArtifactRef = {
-  path: string;
-  mediaType: string;
-  bytes: number;
-  sha256: string;
-};
-
-export type FlowConversationTrace = {
-  sessionId: string;
-  messageStart: number;
-  messageEnd: number;
-  eventStartSeq: number;
-  eventEndSeq: number;
-};
-
-export type FlowActionReceipt = {
-  actionType: "shell" | "function";
-  command?: string;
-  args?: string[];
-  cwd?: string;
-  exitCode?: number | null;
-  signal?: string | null;
-  durationMs?: number;
-};
-
-export type FlowStepTrace = {
-  sessionId?: string;
-  promptArtifact?: FlowArtifactRef;
-  rawResponseArtifact?: FlowArtifactRef;
-  outputArtifact?: FlowArtifactRef;
-  outputInline?: unknown;
-  stdoutArtifact?: FlowArtifactRef;
-  stderrArtifact?: FlowArtifactRef;
-  conversation?: FlowConversationTrace;
-  action?: FlowActionReceipt;
-};
-
-export type FlowSessionBinding = {
-  key: string;
-  handle: string;
-  bundleId: string;
-  name: string;
-  profile?: string;
-  agentName: string;
-  agentCommand: string;
-  cwd: string;
-  acpxRecordId: string;
-  acpSessionId: string;
-  agentSessionId?: string;
-};
-
-export type FlowStepRecord = {
-  attemptId: string;
-  nodeId: string;
-  nodeType: "acp" | "compute" | "action" | "checkpoint";
-  outcome: FlowNodeOutcome;
-  startedAt: string;
-  finishedAt: string;
-  promptText: string | null;
-  rawText: string | null;
-  output: unknown;
-  error?: string;
-  session: FlowSessionBinding | null;
-  agent: {
-    agentName: string;
-    agentCommand: string;
-    cwd: string;
-  } | null;
-  trace?: FlowStepTrace;
-};
-
-export type FlowNodeResult = {
-  attemptId: string;
-  nodeId: string;
-  nodeType: FlowStepRecord["nodeType"];
-  outcome: FlowNodeOutcome;
-  startedAt: string;
-  finishedAt: string;
-  durationMs: number;
-  output?: unknown;
-  error?: string;
-};
-
-export type FlowRunState = {
-  runId: string;
-  flowName: string;
-  runTitle?: string;
-  flowPath?: string;
-  startedAt: string;
-  finishedAt?: string;
-  updatedAt: string;
-  status: "running" | "waiting" | "completed" | "failed" | "timed_out";
-  input: unknown;
-  outputs: Record<string, unknown>;
-  results: Record<string, FlowNodeResult>;
-  steps: FlowStepRecord[];
-  sessionBindings: Record<string, FlowSessionBinding>;
-  currentNode?: string;
-  currentAttemptId?: string;
-  currentNodeType?: FlowStepRecord["nodeType"];
-  currentNodeStartedAt?: string;
-  lastHeartbeatAt?: string;
-  statusDetail?: string;
-  waitingOn?: string;
-  error?: string;
-};
-
-export type FlowRunManifest = {
-  schema: "acpx.flow-run-bundle.v1";
-  runId: string;
-  flowName: string;
-  runTitle?: string;
-  flowPath?: string;
-  startedAt: string;
-  finishedAt?: string;
-  status: FlowRunState["status"];
-  traceSchema: "acpx.flow-trace-event.v1";
-  paths: {
-    flow: string;
-    trace: string;
-    runProjection: string;
-    liveProjection: string;
-    stepsProjection: string;
-    sessionsDir: string;
-    artifactsDir: string;
-  };
-  sessions: Array<{
-    id: string;
-    handle: string;
-    bindingPath: string;
-    recordPath: string;
-    eventsPath: string;
-  }>;
+// Historical bundles can contain partial or adapter-specific message envelopes.
+export type FlowBundledSessionEvent = Omit<PersistedSessionEvent, "message"> & {
+  message: Record<string, unknown>;
 };
 
 export type RunBundleSummary = {
@@ -189,26 +39,6 @@ export type RunBundleSummary = {
   updatedAt?: string;
   currentNode?: string;
   path: string;
-};
-
-export type FlowTraceEvent = {
-  seq: number;
-  at: string;
-  scope: "run" | "node" | "acp" | "action" | "session" | "artifact";
-  type: string;
-  runId: string;
-  nodeId?: string;
-  attemptId?: string;
-  sessionId?: string;
-  artifact?: FlowArtifactRef;
-  payload: Record<string, unknown>;
-};
-
-export type FlowBundledSessionEvent = {
-  seq: number;
-  at: string;
-  direction: "inbound" | "outbound";
-  message: Record<string, unknown>;
 };
 
 export type SessionRecord = {
