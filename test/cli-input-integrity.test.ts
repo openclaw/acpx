@@ -45,7 +45,7 @@ async function fixture(
   const execute = async (args: string[], input?: string, metrics?: string): Promise<Result> => {
     const child = spawn(
       process.execPath,
-      ["--import", observer, cli, "--cwd", home, "--deny-all", "--ttl", "0.05", ...args],
+      ["--import", observer, cli, "--cwd", home, "--deny-all", "--ttl", "0", ...args],
       {
         env: { ...process.env, HOME: home, ACPX_PERF_METRICS_FILE: metrics ?? "" },
         stdio: ["pipe", "pipe", "pipe"],
@@ -98,29 +98,36 @@ for (const mode of ["exec", "prompt", "compare", "structured", "file-stdin"] as 
         const created = await execute(["sessions", "new"]);
         assert.equal(created.code, 0, created.stderr);
       }
-      const args =
-        mode === "compare"
-          ? ["--format", "json", "compare", "codex", "claude", "--file", "-"]
-          : [
-              "--format",
-              "quiet",
-              mode === "prompt" ? "prompt" : "exec",
-              ...(mode === "file-stdin" ? ["--file", "-", "suffix"] : []),
-            ];
-      const input =
-        mode === "structured"
-          ? JSON.stringify([{ type: "text", text: "echo 🦞 café" }])
-          : "echo 🦞 café";
-      const result = await execute(args, input);
-      assert.equal(result.code, 0, result.stderr);
-      if (mode === "compare") {
-        const rows = JSON.parse(result.stdout) as { final_message: string }[];
-        assert.deepEqual(
-          rows.map((row) => row.final_message),
-          ["🦞 café", "🦞 café"],
-        );
-      } else {
-        assert.equal(result.stdout.trim(), mode === "file-stdin" ? "🦞 cafésuffix" : "🦞 café");
+      try {
+        const args =
+          mode === "compare"
+            ? ["--format", "json", "compare", "codex", "claude", "--file", "-"]
+            : [
+                "--format",
+                "quiet",
+                mode === "prompt" ? "prompt" : "exec",
+                ...(mode === "file-stdin" ? ["--file", "-", "suffix"] : []),
+              ];
+        const input =
+          mode === "structured"
+            ? JSON.stringify([{ type: "text", text: "echo 🦞 café" }])
+            : "echo 🦞 café";
+        const result = await execute(args, input);
+        assert.equal(result.code, 0, result.stderr);
+        if (mode === "compare") {
+          const rows = JSON.parse(result.stdout) as { final_message: string }[];
+          assert.deepEqual(
+            rows.map((row) => row.final_message),
+            ["🦞 café", "🦞 café"],
+          );
+        } else {
+          assert.equal(result.stdout.trim(), mode === "file-stdin" ? "🦞 cafésuffix" : "🦞 café");
+        }
+      } finally {
+        if (mode === "prompt") {
+          const closed = await execute(["sessions", "close"]);
+          assert.equal(closed.code, 0, closed.stderr);
+        }
       }
     });
   });
