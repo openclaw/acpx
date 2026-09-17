@@ -141,6 +141,7 @@ export async function withConnectedSession<T>(
           record,
           resumePolicy: options.resumePolicy,
           replacingConfigOption: options.replacingConfigOption,
+          authority: options.authority,
           timeoutMs: options.timeoutMs,
           verbose: options.verbose,
           activeController,

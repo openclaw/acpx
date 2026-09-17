@@ -69,6 +69,8 @@ await runtime.setModel({
 
 These fields guard request admission. After SDK admission, the response and accepted state still settle even if the signal aborts or host authority changes. This keeps the saved selection consistent with the agent. Callers that omit the fields retain their existing behavior.
 
+The same guard applies to each saved mode, model, and configuration control replayed during reconnect. Revocation stops later replay requests and preserves the original rejection. Replies already accepted by the agent remain saved, including any adjusted sibling selections.
+
 ### `set model <id>`
 
 `set model <id>` is a special-case interception. `acpx` prefers an advertised model session config option and updates it through `session/set_config_option`. If an adapter explicitly advertises legacy `models` metadata instead, `acpx` preserves compatibility through `session/set_model`.

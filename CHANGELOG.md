@@ -17,6 +17,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Runtime/session controls: check optional host authority before sending mode, model, and configuration changes, including reconnect replay; preserve accepted replies and saved selections when authority is later revoked.
+
 ## 0.16.0 - 2026-09-16
 
 **Highlights:** Embedding hosts gain session-specific tools, turn-owned approvals, model controls, and agent discovery. Session, filesystem, queue, and process hardening improves reliability; Devin, fx, and Junie join the built-in agents.

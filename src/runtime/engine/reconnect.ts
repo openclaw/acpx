@@ -11,7 +11,13 @@ import {
   modelStateFromConfigOptions,
   type SessionModelState,
 } from "../../acp/model-support.js";
-import { InterruptedError, TimeoutError, withTimeout } from "../../async-control.js";
+import {
+  assertControlAuthority,
+  InterruptedError,
+  TimeoutError,
+  withTimeout,
+  type AcpControlAuthority,
+} from "../../async-control.js";
 import {
   SessionConfigOptionReplayError,
   SessionModeReplayError,
@@ -64,6 +70,7 @@ export type ConnectAndLoadSessionOptions = {
     resolve?: (record: SessionRecord) => string;
   };
   timeoutMs?: number;
+  authority?: AcpControlAuthority;
   verbose?: boolean;
   suppressWarnings?: boolean;
   activeController: ConnectedSessionController;
@@ -80,6 +87,38 @@ export type ConnectAndLoadSessionResult = {
 };
 
 const SESSION_LOAD_UNSUPPORTED_CODES = new Set([-32601, -32602]);
+
+type ReplayState = {
+  authority?: AcpControlAuthority;
+  acknowledged: boolean;
+  isAuthorityFailure: (error: unknown) => boolean;
+};
+
+function createReplayState(authority?: AcpControlAuthority): ReplayState {
+  let failure: { error: unknown } | undefined;
+  return {
+    acknowledged: false,
+    authority: authority
+      ? {
+          assertActive() {
+            try {
+              assertControlAuthority(authority);
+            } catch (error) {
+              failure = { error };
+              throw error;
+            }
+          },
+        }
+      : undefined,
+    isAuthorityFailure: (error) => failure !== undefined && failure.error === error,
+  };
+}
+
+function rethrowAuthorityFailure(replay: ReplayState, error: unknown): void {
+  if (replay.isAuthorityFailure(error)) {
+    throw error;
+  }
+}
 
 function shouldFallbackToNewSession(error: unknown, record: SessionRecord): boolean {
   if (isHardReconnectFailure(error)) {
@@ -129,6 +168,7 @@ async function replayDesiredMode(params: {
   client: AcpClient;
   sessionId: string;
   desiredModeId: string | undefined;
+  replay: ReplayState;
   previousSessionId: string;
   timeoutMs?: number;
   verbose?: boolean;
@@ -139,15 +179,17 @@ async function replayDesiredMode(params: {
 
   try {
     await withTimeout(
-      params.client.setSessionMode(params.sessionId, params.desiredModeId),
+      params.client.setSessionMode(params.sessionId, params.desiredModeId, params.replay.authority),
       params.timeoutMs,
     );
+    params.replay.acknowledged = true;
     if (params.verbose) {
       process.stderr.write(
         `[acpx] replayed desired mode ${params.desiredModeId} on fresh ACP session ${params.sessionId} (previous ${params.previousSessionId})\n`,
       );
     }
   } catch (error) {
+    rethrowAuthorityFailure(params.replay, error);
     throw new SessionModeReplayError(
       `Failed to replay saved session mode ${params.desiredModeId} on fresh ACP session ${params.sessionId}: ${formatErrorMessage(error)}`,
       {
@@ -171,6 +213,7 @@ async function replayDesiredModel(params: {
   client: AcpClient;
   sessionId: string;
   desiredModelId: string | undefined;
+  replay: ReplayState;
   previousSessionId: string;
   record: SessionRecord;
   models: import("../../acp/client.js").SessionLoadResult["models"] | undefined;
@@ -197,9 +240,15 @@ async function replayDesiredModel(params: {
     // Reassert even an unchanged model: its acknowledgement reconciles saved
     // sibling selections left invalid by earlier model switches.
     const response = await withTimeout(
-      params.client.setSessionModel(params.sessionId, params.desiredModelId, params.models),
+      params.client.setSessionModel(
+        params.sessionId,
+        params.desiredModelId,
+        params.models,
+        params.replay.authority,
+      ),
       params.timeoutMs,
     );
+    params.replay.acknowledged = true;
     params.record.acpx = applyModelSelection(params.record.acpx, params.desiredModelId, response);
     const models = response
       ? modelStateFromConfigOptions(response.configOptions)
@@ -215,6 +264,7 @@ async function replayDesiredModel(params: {
       configOptions: response?.configOptions,
     };
   } catch (error) {
+    rethrowAuthorityFailure(params.replay, error);
     throw new SessionModelReplayError(
       `Failed to replay saved session model ${params.desiredModelId} on ACP session ${params.sessionId}: ${formatErrorMessage(error)}`,
       {
@@ -256,6 +306,7 @@ async function replayDesiredConfigOptions(params: {
   record: SessionRecord;
   sessionId: string;
   desiredConfigOptions: Record<string, string>;
+  replay: ReplayState;
   acceptedConfigOptions?: SessionConfigOption[];
   replacingConfigOption?: ConnectAndLoadSessionOptions["replacingConfigOption"];
   previousSessionId: string;
@@ -280,9 +331,15 @@ async function replayDesiredConfigOptions(params: {
     }
     try {
       const response = await withTimeout(
-        params.client.setSessionConfigOption(params.sessionId, configId, value),
+        params.client.setSessionConfigOption(
+          params.sessionId,
+          configId,
+          value,
+          params.replay.authority,
+        ),
         params.timeoutMs,
       );
+      params.replay.acknowledged = true;
       params.record.acpx = applyConfigOptionSelection(
         params.record.acpx,
         configId,
@@ -300,6 +357,7 @@ async function replayDesiredConfigOptions(params: {
         );
       }
     } catch (error) {
+      rethrowAuthorityFailure(params.replay, error);
       throw new SessionConfigOptionReplayError(
         `Failed to replay saved session config option ${configId} on ACP session ${params.sessionId}: ${formatErrorMessage(error)}`,
         {
@@ -384,6 +442,7 @@ export async function connectAndLoadSession(
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
     suppressWarnings: options.suppressWarnings,
+    authority: options.authority,
   });
 
   applyReconnectedModelState(
@@ -527,7 +586,7 @@ function resolveReplacingConfigOptionId(
   return replacement?.resolve?.(record) ?? replacement?.key;
 }
 
-async function replaySessionPreferences(params: {
+type ReplaySessionPreferencesOptions = {
   client: AcpClient;
   record: SessionRecord;
   createdFreshSession: boolean;
@@ -545,7 +604,12 @@ async function replaySessionPreferences(params: {
   timeoutMs?: number;
   verbose?: boolean;
   suppressWarnings?: boolean;
-}): Promise<PreferenceReplayResult> {
+  authority?: AcpControlAuthority;
+};
+
+async function replaySessionPreferences(
+  params: ReplaySessionPreferencesOptions,
+): Promise<PreferenceReplayResult> {
   if (params.reusingLoadedSession) {
     return {
       modelReplay: { replayed: false },
@@ -555,16 +619,19 @@ async function replaySessionPreferences(params: {
 
   let modelReplay: ModelReplayResult = { replayed: false };
   let configReplay: ConfigReplayResult = { replayed: false };
+  const replay = createReplayState(params.authority);
   const replacingModel = replacesModel(
     params.replacingConfigOption,
     params.sessionModels,
     params.originalAcpx,
   );
   try {
+    assertControlAuthority(replay.authority);
     await replayDesiredMode({
       client: params.client,
       sessionId: params.sessionId,
       desiredModeId: params.createdFreshSession ? params.desiredModeId : undefined,
+      replay,
       previousSessionId: params.originalSessionId,
       timeoutMs: params.timeoutMs,
       verbose: params.verbose,
@@ -573,6 +640,7 @@ async function replaySessionPreferences(params: {
       client: params.client,
       sessionId: params.sessionId,
       desiredModelId: replacingModel ? undefined : params.desiredModelId,
+      replay,
       previousSessionId: params.originalSessionId,
       record: params.record,
       models: params.sessionModels,
@@ -586,6 +654,7 @@ async function replaySessionPreferences(params: {
       record: params.record,
       sessionId: params.sessionId,
       desiredConfigOptions: replacingModel ? {} : params.desiredConfigOptions,
+      replay,
       acceptedConfigOptions: modelReplay.configOptions,
       replacingConfigOption: replacingModel ? undefined : params.replacingConfigOption,
       previousSessionId: params.originalSessionId,
@@ -593,12 +662,7 @@ async function replaySessionPreferences(params: {
       verbose: params.verbose,
     });
   } catch (error) {
-    restoreOriginalSessionState({
-      record: params.record,
-      sessionId: params.originalSessionId,
-      agentSessionId: params.originalAgentSessionId,
-    });
-    params.record.acpx = cloneSessionAcpxState(params.originalAcpx);
+    settleFailedReplay(params, replay, error);
     if (params.verbose) {
       process.stderr.write(`[acpx] ${formatErrorMessage(error)}\n`);
     }
@@ -608,6 +672,25 @@ async function replaySessionPreferences(params: {
   params.record.acpSessionId = params.sessionId;
   reconcileAgentSessionId(params.record, params.pendingAgentSessionId);
   return { modelReplay, configReplay };
+}
+
+function settleFailedReplay(
+  params: ReplaySessionPreferencesOptions,
+  replay: ReplayState,
+  error: unknown,
+): void {
+  if (replay.isAuthorityFailure(error) && replay.acknowledged) {
+    // Earlier replies already changed the agent; retain their accepted state.
+    params.record.acpSessionId = params.sessionId;
+    reconcileAgentSessionId(params.record, params.pendingAgentSessionId);
+  } else {
+    restoreOriginalSessionState({
+      record: params.record,
+      sessionId: params.originalSessionId,
+      agentSessionId: params.originalAgentSessionId,
+    });
+    params.record.acpx = cloneSessionAcpxState(params.originalAcpx);
+  }
 }
 
 type RuntimeSessionLoadState = {

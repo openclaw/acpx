@@ -88,15 +88,27 @@ const agent: Agent = {
   async initialize() {
     return {
       protocolVersion: PROTOCOL_VERSION,
-      agentCapabilities: { loadSession: true },
+      agentCapabilities: { loadSession: !existsSync(path.join(directory, "no-load")) },
       authMethods: [],
     };
   },
   async authenticate() {},
   async newSession() {
+    if (existsSync(path.join(directory, "hold-new"))) {
+      await fs.writeFile(path.join(directory, "new-started"), "started");
+      while (!existsSync(path.join(directory, "release-new"))) {
+        await setTimeout(5);
+      }
+    }
     return { sessionId: "authority-session", ...sessionState() };
   },
   async loadSession() {
+    if (existsSync(path.join(directory, "hold-load"))) {
+      await fs.writeFile(path.join(directory, "load-started"), "started");
+      while (!existsSync(path.join(directory, "release-load"))) {
+        await setTimeout(5);
+      }
+    }
     return sessionState();
   },
   async prompt() {
