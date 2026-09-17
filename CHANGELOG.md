@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+## 0.17.0 - 2026-09-17
+
+**Highlights:** Applications and CLI processes can share sessions through one local queue owner and watch session activity with cursor replay. Embedding hosts can guard session controls with optional authority checks. Direct session-journal consumers must distinguish local records from ACP messages.
+
 ### Changes
 
 - Runtime/shared sessions: add `createSharedAcpRuntime()` so applications and CLI processes share one local queue owner, with targeted turn cancellation and explicit submission uncertainty. Thanks @mavam.
