@@ -22,6 +22,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Runtime/shared sessions: add `createSharedAcpRuntime()` so applications and CLI processes share one local queue owner, with targeted turn cancellation and explicit submission uncertainty. Thanks @mavam.
 - Sessions/watching: add passive `sessions watch` and shared-runtime `watchSession()` with cursor replay, request IDs, and settled turn outcomes. Thanks @mavam.
+- Agents: add the official Antigravity ACP runtime shortcut and cancel its user questions instead of choosing answers through permission approval.
 
 ### Breaking
 

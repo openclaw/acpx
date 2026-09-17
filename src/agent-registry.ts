@@ -93,6 +93,13 @@ const AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
   gemini: { name: "Gemini CLI", argv: ["gemini", "--acp"] },
   cursor: { name: "Cursor", argv: ["cursor-agent", "acp"] },
   copilot: { name: "GitHub Copilot", argv: ["copilot", "--acp", "--stdio"] },
+  antigravity: {
+    name: "Google Antigravity",
+    argv:
+      process.platform === "win32"
+        ? ["agy_acp_server.exe"]
+        : ["agy_acp_server.par", ...(process.platform === "linux" ? ["--uid="] : [])],
+  },
   devin: { name: "Devin", argv: ["devin", "acp"] },
   droid: { name: "Factory Droid", argv: ["droid", "exec", "--output-format", "acp"] },
   "fast-agent": { name: "Fast Agent", argv: ["uvx", "fast-agent-mcp", "acp"] },

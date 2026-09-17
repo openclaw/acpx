@@ -427,6 +427,57 @@ test("AcpClient authenticateIfRequired throws when auth policy is fail and crede
   );
 });
 
+for (const agentName of ["antigravity-acp", "custom-agent"]) {
+  for (const toolCallId of ["interaction_question", "ordinary-tool"]) {
+    test(`AcpClient handles ${agentName} ${toolCallId} without inventing user answers`, async (t) => {
+      let hostCalls = 0;
+      const fixture = createClientFixture(t, {
+        client: {
+          permissionMode: "approve-all",
+          onPermissionRequest: async () => {
+            hostCalls += 1;
+            return { outcome: "allow_once" };
+          },
+        },
+      });
+      const internals = asInternals(fixture.client);
+      internals.initResult = { agentInfo: { name: agentName, version: "1.1.1" } };
+      const prompt = fixture.prompt("question-session", "Continue");
+      const promptRequest = await fixture.message(0);
+      await fixture.send({
+        jsonrpc: "2.0",
+        id: "question",
+        method: "session/request_permission",
+        params: {
+          sessionId: "question-session",
+          toolCall: { toolCallId, title: "Choose a deployment target", kind: "other" },
+          options: [
+            { optionId: "production", name: "Production", kind: "allow_once" },
+            { optionId: "staging", name: "Staging", kind: "allow_once" },
+          ],
+        },
+      });
+      const message = await fixture.message(1);
+      assert("result" in message);
+      const response = message.result as RequestPermissionResponse;
+      const isQuestion = agentName === "antigravity-acp" && toolCallId.startsWith("interaction_");
+      assert.deepEqual(
+        response.outcome,
+        isQuestion ? { outcome: "cancelled" } : { outcome: "selected", optionId: "production" },
+      );
+      if (isQuestion) {
+        assert.equal(hostCalls, 0);
+        await fixture.reply(promptRequest);
+        await assert.rejects(prompt, /requested a user answer/);
+      } else {
+        assert.equal(hostCalls, 1);
+        await fixture.reply(promptRequest);
+        assert.equal((await prompt).stopReason, "end_turn");
+      }
+    });
+  }
+}
+
 test("AcpClient handlePermissionRequest short-circuits cancels and tracks unavailable prompts", async () => {
   const client = makeClient({
     permissionMode: "approve-reads",

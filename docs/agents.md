@@ -9,33 +9,34 @@ The default agent for top-level commands like `acpx exec â€¦` and `acpx prompt â
 
 ## Built-in registry
 
-| Agent        | Adapter command                                | Wraps                                                                                                           |
-| ------------ | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `pi`         | `npx pi-acp`                                   | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
-| `openclaw`   | `openclaw acp`                                 | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
-| `codex`      | `npx -y @agentclientprotocol/codex-acp`        | [Codex CLI](https://codex.openai.com)                                                                           |
-| `claude`     | `npx -y @agentclientprotocol/claude-agent-acp` | [Claude Code](https://claude.ai/code)                                                                           |
-| `gemini`     | `gemini --acp`                                 | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
-| `cursor`     | `cursor-agent acp`                             | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
-| `copilot`    | `copilot --acp --stdio`                        | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
-| `devin`      | `devin acp`                                    | [Devin CLI](https://docs.devin.ai/cli/index)                                                                    |
-| `droid`      | `droid exec --output-format acp`               | [Factory Droid](https://www.factory.ai)                                                                         |
-| `fast-agent` | `uvx fast-agent-mcp acp`                       | [fast-agent](https://fast-agent.ai/)                                                                            |
-| `fx`         | `fx acp`                                       | [fx](https://fx.sh)                                                                                             |
-| `grok-build` | `grok agent stdio`                             | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
-| `iflow`      | `iflow --experimental-acp`                     | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
-| `junie`      | `junie --acp=true`                             | [JetBrains Junie](https://junie.jetbrains.com)                                                                  |
-| `kilocode`   | `npx -y @kilocode/cli acp`                     | [Kilocode](https://kilocode.ai)                                                                                 |
-| `kimi`       | `kimi acp`                                     | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
-| `kiro`       | `kiro-cli-chat acp`                            | [Kiro CLI](https://kiro.dev)                                                                                    |
-| `mcode`      | `mcode acp`                                    | [MiniMax Code](https://www.npmjs.com/package/@minimax-ai/code)                                                  |
-| `mux`        | `mux acp` via an ACPX-owned npm range          | [Mux](https://mux.coder.com)                                                                                    |
-| `opencode`   | `npx -y opencode-ai acp`                       | [OpenCode](https://opencode.ai)                                                                                 |
-| `pool`       | `pool acp`                                     | [Poolside](https://poolside.ai)                                                                                 |
-| `qoder`      | `qodercli --acp`                               | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |
-| `qwen`       | `qwen --acp`                                   | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
-| `trae`       | `traecli acp serve`                            | [Trae CLI](https://docs.trae.cn/cli)                                                                            |
-| `zeroclaw`   | `zeroclaw acp`                                 | [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw)                                                           |
+| Agent         | Adapter command                                | Wraps                                                                                                           |
+| ------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `pi`          | `npx pi-acp`                                   | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
+| `openclaw`    | `openclaw acp`                                 | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
+| `codex`       | `npx -y @agentclientprotocol/codex-acp`        | [Codex CLI](https://codex.openai.com)                                                                           |
+| `claude`      | `npx -y @agentclientprotocol/claude-agent-acp` | [Claude Code](https://claude.ai/code)                                                                           |
+| `gemini`      | `gemini --acp`                                 | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
+| `cursor`      | `cursor-agent acp`                             | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
+| `copilot`     | `copilot --acp --stdio`                        | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
+| `antigravity` | `agy_acp_server.par` (platform arguments)      | [Google Antigravity ACP](https://github.com/openclaw/acpx/blob/main/agents/Antigravity.md)                      |
+| `devin`       | `devin acp`                                    | [Devin CLI](https://docs.devin.ai/cli/index)                                                                    |
+| `droid`       | `droid exec --output-format acp`               | [Factory Droid](https://www.factory.ai)                                                                         |
+| `fast-agent`  | `uvx fast-agent-mcp acp`                       | [fast-agent](https://fast-agent.ai/)                                                                            |
+| `fx`          | `fx acp`                                       | [fx](https://fx.sh)                                                                                             |
+| `grok-build`  | `grok agent stdio`                             | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
+| `iflow`       | `iflow --experimental-acp`                     | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
+| `junie`       | `junie --acp=true`                             | [JetBrains Junie](https://junie.jetbrains.com)                                                                  |
+| `kilocode`    | `npx -y @kilocode/cli acp`                     | [Kilocode](https://kilocode.ai)                                                                                 |
+| `kimi`        | `kimi acp`                                     | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
+| `kiro`        | `kiro-cli-chat acp`                            | [Kiro CLI](https://kiro.dev)                                                                                    |
+| `mcode`       | `mcode acp`                                    | [MiniMax Code](https://www.npmjs.com/package/@minimax-ai/code)                                                  |
+| `mux`         | `mux acp` via an ACPX-owned npm range          | [Mux](https://mux.coder.com)                                                                                    |
+| `opencode`    | `npx -y opencode-ai acp`                       | [OpenCode](https://opencode.ai)                                                                                 |
+| `pool`        | `pool acp`                                     | [Poolside](https://poolside.ai)                                                                                 |
+| `qoder`       | `qodercli --acp`                               | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |
+| `qwen`        | `qwen --acp`                                   | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
+| `trae`        | `traecli acp serve`                            | [Trae CLI](https://docs.trae.cn/cli)                                                                            |
+| `zeroclaw`    | `zeroclaw acp`                                 | [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw)                                                           |
 
 `factory-droid` and `factorydroid` also resolve to the built-in `droid` adapter.
 

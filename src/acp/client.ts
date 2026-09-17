@@ -1927,6 +1927,20 @@ export class AcpClient {
       return cancelledPermissionResponse();
     }
 
+    // Antigravity encodes questions as permissions, with answers marked allow_once.
+    // Neither permission policies nor the host's allow/reject API can answer them.
+    if (
+      this.initResult?.agentInfo?.name === "antigravity-acp" &&
+      params.toolCall.toolCallId.startsWith("interaction_")
+    ) {
+      return this.handleModePermissionError(
+        params.sessionId,
+        new PermissionPromptUnavailableError(
+          "Antigravity requested a user answer. acpx cannot answer Antigravity interaction questions; continue in an interactive client.",
+        ),
+      ).response;
+    }
+
     const hostResponse = await this.tryHandlePermissionRequestWithHost(params);
     if (hostResponse) {
       return hostResponse;

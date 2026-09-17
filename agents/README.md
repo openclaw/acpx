@@ -9,6 +9,7 @@ Built-in agents:
 - `gemini -> gemini --acp`
 - `cursor -> cursor-agent acp`
 - `copilot -> copilot --acp --stdio`
+- `antigravity -> agy_acp_server.par` (`--uid=` on Linux; `.exe` on Windows)
 - `devin -> devin acp`
 - `droid -> droid exec --output-format acp` (`factory-droid` and `factorydroid` also resolve to `droid`)
 - `fast-agent -> uvx fast-agent-mcp acp`
@@ -35,6 +36,7 @@ Harness-specific docs in this directory:
 - [Gemini](Gemini.md): built-in `gemini -> gemini --acp`
 - [Cursor](Cursor.md): built-in `cursor -> cursor-agent acp`
 - [Copilot](Copilot.md): built-in `copilot -> copilot --acp --stdio`
+- [Antigravity](Antigravity.md): Google's official ACP runtime, setup and limitations
 - [Devin](Devin.md): built-in `devin -> devin acp`
 - [Droid](Droid.md): built-in `droid -> droid exec --output-format acp` with `factory-droid` and `factorydroid` aliases
 - [fast-agent](FastAgent.md): built-in `fast-agent -> uvx fast-agent-mcp acp`
