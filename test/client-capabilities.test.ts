@@ -15,6 +15,7 @@ for (const enabled of [false, true]) {
       const file = path.join(cwd, "input.txt");
       await fs.writeFile(file, "capability input");
       const messages: AnyMessage[] = [];
+      let output = "";
       const client = new AcpClient({
         agentCommand: process.execPath,
         agentArgv: [process.execPath, agent],
@@ -25,18 +26,28 @@ for (const enabled of [false, true]) {
         onAcpMessage: (_direction, message) => {
           messages.push(message);
         },
+        onSessionUpdate: ({ update }) => {
+          if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
+            output += update.content.text;
+          }
+        },
       });
       try {
         await client.start();
         client.updateRuntimeOptions({ fs: !enabled, terminal: !enabled });
         for (const allowed of [enabled, !enabled]) {
           const session = await client.createSession();
-          for (const prompt of [
-            `read ${file}`,
-            `terminal ${process.execPath} -e "process.stdout.write('capability output')"`,
+          for (const [prompt, expectedOutput] of [
+            [`read ${file}`, "capability input"],
+            [
+              `terminal ${JSON.stringify(process.execPath)} -e "process.stdout.write('capability output')"`,
+              "capability output",
+            ],
           ]) {
             messages.length = 0;
+            output = "";
             assert.equal((await client.prompt(session.sessionId, prompt)).stopReason, "end_turn");
+            assert.equal(output.includes(expectedOutput), allowed, output);
             assert.equal(
               messages.some((message) => "error" in message && message.error.code === -32601),
               !allowed,

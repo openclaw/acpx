@@ -1266,7 +1266,7 @@ test("integration: exec --no-terminal disables advertised terminal capability", 
           "json",
           "--no-terminal",
           "exec",
-          `terminal ${process.execPath} -e ${JSON.stringify(script)}`,
+          `terminal ${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`,
         ],
         homeDir,
       );
