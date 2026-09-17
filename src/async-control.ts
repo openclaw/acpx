@@ -12,6 +12,16 @@ export class InterruptedError extends Error {
   }
 }
 
+export type AcpControlAuthority = {
+  signal?: AbortSignal;
+  assertActive?: () => void;
+};
+
+export function assertControlAuthority(authority?: AcpControlAuthority): void {
+  authority?.signal?.throwIfAborted();
+  authority?.assertActive?.();
+}
+
 export async function withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
   if (timeoutMs == null || timeoutMs <= 0) {
     return await promise;

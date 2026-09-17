@@ -35,7 +35,12 @@ import {
 } from "@agentclientprotocol/sdk";
 import { FsSafeError } from "@openclaw/fs-safe/errors";
 import { resolveBuiltInAgentLaunch } from "../agent-registry.js";
-import { TimeoutError, withTimeout } from "../async-control.js";
+import {
+  assertControlAuthority,
+  TimeoutError,
+  withTimeout,
+  type AcpControlAuthority,
+} from "../async-control.js";
 import {
   AgentDisconnectedError,
   AgentSpawnError,
@@ -1231,47 +1236,52 @@ export class AcpClient {
     }
   }
 
-  async setSessionMode(sessionId: string, modeId: string): Promise<void> {
+  async setSessionMode(
+    sessionId: string,
+    modeId: string,
+    authority?: AcpControlAuthority,
+  ): Promise<void> {
     const connection = this.getConnection();
-    try {
-      await this.runConnectionRequest(() =>
+    await this.runConnectionRequest(
+      () =>
         connection.agent.request(methods.agent.session.setMode, {
           sessionId,
           modeId,
         }),
-      );
-    } catch (error) {
-      throw maybeWrapSessionControlError("session/set_mode", error, `for mode "${modeId}"`);
-    }
+      authority,
+      (error) => maybeWrapSessionControlError("session/set_mode", error, `for mode "${modeId}"`),
+    );
   }
 
   async setSessionConfigOption(
     sessionId: string,
     configId: string,
     value: string,
+    authority?: AcpControlAuthority,
   ): Promise<SetSessionConfigOptionResponse> {
     const connection = this.getConnection();
-    try {
-      return await this.runConnectionRequest(() =>
+    return await this.runConnectionRequest(
+      () =>
         connection.agent.request(methods.agent.session.setConfigOption, {
           sessionId,
           configId,
           value,
         }),
-      );
-    } catch (error) {
-      throw maybeWrapSessionControlError(
-        "session/set_config_option",
-        error,
-        `for "${configId}"="${value}"`,
-      );
-    }
+      authority,
+      (error) =>
+        maybeWrapSessionControlError(
+          "session/set_config_option",
+          error,
+          `for "${configId}"="${value}"`,
+        ),
+    );
   }
 
   async setSessionModel(
     sessionId: string,
     modelId: string,
     controlOverride?: ModelControlOverride,
+    authority?: AcpControlAuthority,
   ): Promise<SetSessionConfigOptionResponse | undefined> {
     const control = this.resolveModelControl(sessionId, controlOverride);
     if (!control) {
@@ -1288,47 +1298,55 @@ export class AcpClient {
       agentCommand: this.options.agentCommand,
     });
     return control.kind === "config_option"
-      ? await this.setSessionModelThroughConfig(sessionId, resolvedModelId, control.configId)
-      : await this.setSessionModelThroughLegacyMethod(sessionId, resolvedModelId);
+      ? await this.setSessionModelThroughConfig(
+          sessionId,
+          resolvedModelId,
+          control.configId,
+          authority,
+        )
+      : await this.setSessionModelThroughLegacyMethod(sessionId, resolvedModelId, authority);
   }
 
   private async setSessionModelThroughConfig(
     sessionId: string,
     modelId: string,
     configId: string,
+    authority?: AcpControlAuthority,
   ): Promise<SetSessionConfigOptionResponse> {
     const connection = this.getConnection();
-    try {
-      const response = await this.runConnectionRequest(() =>
+    const response = await this.runConnectionRequest(
+      () =>
         connection.agent.request(methods.agent.session.setConfigOption, {
           sessionId,
           configId,
           value: modelId,
         }),
-      );
-      this.rememberSessionModels(sessionId, modelStateFromConfigOptions(response.configOptions));
-      return response;
-    } catch (error) {
-      return this.throwSessionModelError("session/set_config_option", modelId, error);
-    }
+      authority,
+      (error) => this.throwSessionModelError("session/set_config_option", modelId, error),
+    );
+    this.rememberSessionModels(sessionId, modelStateFromConfigOptions(response.configOptions));
+    return response;
   }
 
   private async setSessionModelThroughLegacyMethod(
     sessionId: string,
     modelId: string,
+    authority?: AcpControlAuthority,
   ): Promise<undefined> {
     const connection = this.getConnection();
-    try {
-      await this.runConnectionRequest(() =>
+    await this.runConnectionRequest(
+      () =>
         connection.agent.request<Record<string, unknown>, Record<string, unknown>>(
           "session/set_model",
-          { sessionId, modelId },
+          {
+            sessionId,
+            modelId,
+          },
         ),
-      );
-      return undefined;
-    } catch (error) {
-      return this.throwSessionModelError("session/set_model", modelId, error);
-    }
+      authority,
+      (error) => this.throwSessionModelError("session/set_model", modelId, error),
+    );
+    return undefined;
   }
 
   private throwSessionModelError(
@@ -2264,11 +2282,22 @@ export class AcpClient {
     return error;
   }
 
-  private async runConnectionRequest<T>(run: () => Promise<T>): Promise<T> {
+  private async runConnectionRequest<T>(
+    run: () => Promise<T>,
+    authority?: AcpControlAuthority,
+    mapRequestError?: (error: unknown) => unknown,
+  ): Promise<T> {
     return await new Promise<T>((resolve, reject) => {
+      const rejectRequestError = (error: unknown) => {
+        try {
+          reject(mapRequestError ? mapRequestError(error) : error);
+        } catch (mappedError) {
+          reject(mappedError);
+        }
+      };
       const pending: PendingConnectionRequest = {
         settled: false,
-        reject,
+        reject: rejectRequestError,
       };
 
       const finish = (cb: () => void) => {
@@ -2286,6 +2315,13 @@ export class AcpClient {
           if (pending.settled) {
             return { started: false as const };
           }
+          // Check in the dispatch microtask; once sent, the native response must still settle.
+          try {
+            assertControlAuthority(authority);
+          } catch (error) {
+            finish(() => reject(error));
+            return { started: false as const };
+          }
           return { started: true as const, value: await run() };
         })
         .then(
@@ -2294,7 +2330,7 @@ export class AcpClient {
               finish(() => resolve(outcome.value));
             }
           },
-          (error) => finish(() => reject(error)),
+          (error) => finish(() => rejectRequestError(error)),
         );
     });
   }

@@ -1,4 +1,5 @@
 import type { AcpAgentRegistry } from "../../agent-registry.js";
+import type { AcpControlAuthority } from "../../async-control.js";
 export type { AcpAgentRegistry } from "../../agent-registry.js";
 import type {
   SetSessionConfigOptionResponse,
@@ -371,13 +372,18 @@ export interface AcpRuntime {
     handle?: AcpRuntimeHandle;
   }): Promise<AcpRuntimeCapabilities> | AcpRuntimeCapabilities;
   getStatus?(input: { handle: AcpRuntimeHandle; signal?: AbortSignal }): Promise<AcpRuntimeStatus>;
-  setMode?(input: { handle: AcpRuntimeHandle; mode: string }): Promise<void>;
-  setModel?(input: { handle: AcpRuntimeHandle; model: string }): Promise<void>;
-  setConfigOption?(input: {
-    handle: AcpRuntimeHandle;
-    key: string;
-    value: string;
-  }): Promise<SetSessionConfigOptionResponse | void>;
+  /** Authority gates dispatch; an issued control still settles its response and saved state. */
+  setMode?(input: AcpControlAuthority & { handle: AcpRuntimeHandle; mode: string }): Promise<void>;
+  setModel?(
+    input: AcpControlAuthority & { handle: AcpRuntimeHandle; model: string },
+  ): Promise<void>;
+  setConfigOption?(
+    input: AcpControlAuthority & {
+      handle: AcpRuntimeHandle;
+      key: string;
+      value: string;
+    },
+  ): Promise<SetSessionConfigOptionResponse | void>;
   doctor?(): Promise<AcpRuntimeDoctorReport>;
   cancel(input: { handle: AcpRuntimeHandle; reason?: string }): Promise<void>;
   /** Locally closes the session and persists fresh creation on the next ensure without resumeSessionId. */

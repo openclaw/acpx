@@ -6,7 +6,11 @@ import { normalizeAgentCommandInput } from "../../acp/client-process.js";
 import { AcpClient } from "../../acp/client.js";
 import { normalizeOutputError } from "../../acp/error-normalization.js";
 import { extractAcpError, isAcpResourceNotFoundError } from "../../acp/error-shapes.js";
-import { withTimeout } from "../../async-control.js";
+import {
+  assertControlAuthority,
+  withTimeout,
+  type AcpControlAuthority,
+} from "../../async-control.js";
 import type { PromptInput } from "../../prompt-content.js";
 import {
   applyConfigOptionsToRecord,
@@ -77,15 +81,20 @@ export type AcpRuntimeManagerDeps = {
 type ActiveSessionController = {
   hasActivePrompt: () => boolean;
   requestCancelActivePrompt: () => Promise<boolean>;
-  setSessionMode: (modeId: string) => Promise<void>;
-  setSessionModel: (modelId: string) => ReturnType<AcpClient["setSessionModel"]>;
+  setSessionMode: (modeId: string, authority?: AcpControlAuthority) => Promise<void>;
+  setSessionModel: (
+    modelId: string,
+    authority?: AcpControlAuthority,
+  ) => ReturnType<AcpClient["setSessionModel"]>;
   setSessionConfigOption: (
     configId: string,
     value: string,
+    authority?: AcpControlAuthority,
   ) => ReturnType<AcpClient["setSessionConfigOption"]>;
   setResolvedSessionConfigOption: (
     configId: string,
     value: string,
+    authority?: AcpControlAuthority,
   ) => Promise<{
     configId: string;
     response: Awaited<ReturnType<AcpClient["setSessionConfigOption"]>>;
@@ -719,9 +728,12 @@ export class AcpRuntimeManager {
     sessionMode: "persistent" | "oneshot",
     run: (context: { client: AcpClient; sessionId: string; record: SessionRecord }) => Promise<T>,
     replacingConfigOption?: ConnectAndLoadSessionOptions["replacingConfigOption"],
+    authority?: AcpControlAuthority,
   ): Promise<{ value: T; record: SessionRecord }> {
     await this.retrySessionCleanup(record.acpxRecordId);
+    assertControlAuthority(authority);
     const owner = await this.readRetainedSessionOwner(record, { consume: false });
+    assertControlAuthority(authority);
     if (owner) {
       const ownedRecord = owner.projection?.record ?? record;
       try {
@@ -766,6 +778,7 @@ export class AcpRuntimeManager {
         timeoutMs: this.options.timeoutMs,
         resumePolicy: resumePolicyForSessionMode(sessionMode),
         replacingConfigOption,
+        authority,
         run,
       });
       return {
@@ -806,8 +819,10 @@ export class AcpRuntimeManager {
     locks: Map<string, Promise<void>>,
     key: string,
     run: () => Promise<T>,
+    authority?: AcpControlAuthority,
   ): Promise<T> {
     this.assertOpen();
+    assertControlAuthority(authority);
     const previous = locks.get(key) ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -818,6 +833,7 @@ export class AcpRuntimeManager {
     await previous;
     try {
       this.assertOpen();
+      assertControlAuthority(authority);
       return await run();
     } finally {
       release();
@@ -1384,29 +1400,35 @@ export class AcpRuntimeManager {
     return {
       hasActivePrompt: () => turn.client.hasActivePrompt(),
       requestCancelActivePrompt: async () => await this.requestRuntimeTurnCancel(task, turn),
-      setSessionMode: async (modeId: string) => {
+      setSessionMode: async (modeId: string, authority) => {
         await this.waitForRuntimeControlSession(task, turn);
-        await turn.client.setSessionMode(turn.activeSessionId, modeId);
+        await turn.client.setSessionMode(turn.activeSessionId, modeId, authority);
         const nextState = cloneSessionAcpxState(turn.acpxState) ?? {};
         nextState.desired_mode_id = modeId;
         turn.acpxState = nextState;
       },
-      setSessionModel: async (modelId: string) => {
+      setSessionModel: async (modelId: string, authority) => {
         await this.waitForRuntimeControlSession(task, turn);
         const models = advertisedModelState(turn.acpxState);
-        const response = await turn.client.setSessionModel(turn.activeSessionId, modelId, models);
+        const response = await turn.client.setSessionModel(
+          turn.activeSessionId,
+          modelId,
+          models,
+          authority,
+        );
         turn.acpxState = applyModelSelection(turn.acpxState, modelId, response);
         return response;
       },
-      setSessionConfigOption: async (configId: string, value: string) => {
+      setSessionConfigOption: async (configId: string, value: string, authority) => {
         const result = await task.state.activeController!.setResolvedSessionConfigOption(
           configId,
           value,
+          authority,
         );
         return result.response;
       },
-      setResolvedSessionConfigOption: async (configId: string, value: string) =>
-        await this.setRuntimeResolvedSessionConfigOption(task, turn, configId, value),
+      setResolvedSessionConfigOption: async (configId: string, value: string, authority) =>
+        await this.setRuntimeResolvedSessionConfigOption(task, turn, configId, value, authority),
     };
   }
 
@@ -1439,6 +1461,7 @@ export class AcpRuntimeManager {
     turn: RunningRuntimeTurn,
     configId: string,
     value: string,
+    authority?: AcpControlAuthority,
   ): Promise<{
     configId: string;
     response: Awaited<ReturnType<AcpClient["setSessionConfigOption"]>>;
@@ -1457,6 +1480,7 @@ export class AcpRuntimeManager {
       turn.activeSessionId,
       resolvedConfigId,
       value,
+      authority,
     );
     turn.acpxState = applyConfigOptionSelection(
       turn.acpxState,
@@ -1694,10 +1718,14 @@ export class AcpRuntimeManager {
     handle: AcpRuntimeHandle,
     mode: string,
     sessionMode: "persistent" | "oneshot" = "persistent",
+    authority?: AcpControlAuthority,
   ): Promise<void> {
     const recordId = handle.acpxRecordId ?? handle.sessionKey;
-    await this.withManagerLock(this.runtimeOperationLocks, recordId, async () =>
-      this.setModeWithOwnership(handle, mode, sessionMode),
+    await this.withManagerLock(
+      this.runtimeOperationLocks,
+      recordId,
+      async () => this.setModeWithOwnership(handle, mode, sessionMode, authority),
+      authority,
     );
   }
 
@@ -1705,19 +1733,23 @@ export class AcpRuntimeManager {
     handle: AcpRuntimeHandle,
     mode: string,
     sessionMode: "persistent" | "oneshot",
+    authority?: AcpControlAuthority,
   ): Promise<void> {
     const record = await this.requireRecord(handle.acpxRecordId ?? handle.sessionKey);
+    assertControlAuthority(authority);
     const controller = this.activeControllers.get(record.acpxRecordId);
     let targetRecord = record;
     if (controller) {
-      await controller.setSessionMode(mode);
+      await controller.setSessionMode(mode, authority);
     } else {
       const result = await this.withRuntimeControlSession(
         record,
         sessionMode,
         async ({ client, sessionId }) => {
-          await client.setSessionMode(sessionId, mode);
+          await client.setSessionMode(sessionId, mode, authority);
         },
+        undefined,
+        authority,
       );
       targetRecord = result.record;
     }
@@ -1729,10 +1761,14 @@ export class AcpRuntimeManager {
     handle: AcpRuntimeHandle,
     model: string,
     sessionMode: "persistent" | "oneshot" = "persistent",
+    authority?: AcpControlAuthority,
   ): Promise<void> {
     const recordId = handle.acpxRecordId ?? handle.sessionKey;
-    await this.withManagerLock(this.runtimeOperationLocks, recordId, async () =>
-      this.setModelWithOwnership(handle, model, sessionMode),
+    await this.withManagerLock(
+      this.runtimeOperationLocks,
+      recordId,
+      async () => this.setModelWithOwnership(handle, model, sessionMode, authority),
+      authority,
     );
   }
 
@@ -1740,11 +1776,13 @@ export class AcpRuntimeManager {
     handle: AcpRuntimeHandle,
     model: string,
     sessionMode: "persistent" | "oneshot",
+    authority?: AcpControlAuthority,
   ): Promise<void> {
     const record = await this.requireRecord(handle.acpxRecordId ?? handle.sessionKey);
+    assertControlAuthority(authority);
     const controller = this.activeControllers.get(record.acpxRecordId);
     if (controller) {
-      const response = await controller.setSessionModel(model);
+      const response = await controller.setSessionModel(model, authority);
       record.acpx = applyModelSelection(record.acpx, model, response);
       await this.options.sessionStore.save(record);
       return;
@@ -1757,10 +1795,12 @@ export class AcpRuntimeManager {
           sessionId,
           model,
           advertisedModelState(connectedRecord.acpx),
+          authority,
         );
         connectedRecord.acpx = applyModelSelection(connectedRecord.acpx, model, response);
       },
       { key: "model" },
+      authority,
     );
     await this.options.sessionStore.save(result.record);
   }
@@ -1770,10 +1810,14 @@ export class AcpRuntimeManager {
     key: string,
     value: string,
     sessionMode: "persistent" | "oneshot" = "persistent",
+    authority?: AcpControlAuthority,
   ): Promise<SetSessionConfigOptionResponse> {
     const recordId = handle.acpxRecordId ?? handle.sessionKey;
-    return await this.withManagerLock(this.runtimeOperationLocks, recordId, async () =>
-      this.setConfigOptionWithOwnership(handle, key, value, sessionMode),
+    return await this.withManagerLock(
+      this.runtimeOperationLocks,
+      recordId,
+      async () => this.setConfigOptionWithOwnership(handle, key, value, sessionMode, authority),
+      authority,
     );
   }
 
@@ -1782,11 +1826,17 @@ export class AcpRuntimeManager {
     key: string,
     value: string,
     sessionMode: "persistent" | "oneshot",
+    authority?: AcpControlAuthority,
   ): Promise<SetSessionConfigOptionResponse> {
     const record = await this.requireRecord(handle.acpxRecordId ?? handle.sessionKey);
+    assertControlAuthority(authority);
     const controller = this.activeControllers.get(record.acpxRecordId);
     if (controller) {
-      const { configId, response } = await controller.setResolvedSessionConfigOption(key, value);
+      const { configId, response } = await controller.setResolvedSessionConfigOption(
+        key,
+        value,
+        authority,
+      );
       record.acpx = applyConfigOptionSelection(record.acpx, configId, value, response);
       await this.options.sessionStore.save(record);
       return response;
@@ -1798,7 +1848,7 @@ export class AcpRuntimeManager {
       async ({ client, sessionId, record: connectedRecord }) => {
         const configId = resolveSupportedConfigOptionId(connectedRecord, key);
         const modelConfigId = advertisedModelState(connectedRecord.acpx)?.configId;
-        const response = await client.setSessionConfigOption(sessionId, configId, value);
+        const response = await client.setSessionConfigOption(sessionId, configId, value, authority);
         connectedRecord.acpx = applyConfigOptionSelection(
           connectedRecord.acpx,
           configId,
@@ -1809,6 +1859,7 @@ export class AcpRuntimeManager {
         return response;
       },
       { key, resolve: (connectedRecord) => resolveSupportedConfigOptionId(connectedRecord, key) },
+      authority,
     );
     await this.options.sessionStore.save(result.record);
     return result.value;

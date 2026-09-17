@@ -1,6 +1,10 @@
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { AcpClient } from "../../acp/client.js";
-import { withInterrupt } from "../../async-control.js";
+import {
+  assertControlAuthority,
+  withInterrupt,
+  type AcpControlAuthority,
+} from "../../async-control.js";
 import { applyConfigOptionsToRecord } from "../../session/config-options.js";
 import { advertisedModelState } from "../../session/model-state.js";
 import { absolutePath, isoNow } from "../../session/persistence.js";
@@ -58,6 +62,7 @@ export type WithConnectedSessionOptions<T> = {
   resumePolicy?: SessionResumePolicy;
   replacingConfigOption?: ConnectAndLoadSessionOptions["replacingConfigOption"];
   timeoutMs?: number;
+  authority?: AcpControlAuthority;
   verbose?: boolean;
   onClientAvailable?: (controller: FullConnectedSessionController) => void;
   onClientClosed?: () => void;
@@ -101,6 +106,7 @@ export async function withConnectedSession<T>(
   options: WithConnectedSessionOptions<T>,
 ): Promise<WithConnectedSessionResult<T>> {
   const record = await options.loadRecord(options.sessionRecordId);
+  assertControlAuthority(options.authority);
   const clientOptions: ConstructorParameters<typeof AcpClient>[0] = {
     agentCommand: record.agentCommand,
     agentArgv: record.agentArgv,
@@ -148,6 +154,7 @@ export async function withConnectedSession<T>(
           },
         });
 
+        assertControlAuthority(options.authority);
         const value = await options.run({
           record,
           client,

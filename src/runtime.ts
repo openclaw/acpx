@@ -1,5 +1,6 @@
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { DEFAULT_AGENT_NAME } from "./agent-registry.js";
+import type { AcpControlAuthority } from "./async-control.js";
 import { AcpRuntimeManager } from "./runtime/engine/manager.js";
 import type {
   AcpRuntime,
@@ -312,26 +313,32 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     return await manager.getStatus(handle);
   }
 
-  async setMode(input: { handle: AcpRuntimeHandle; mode: string }): Promise<void> {
+  async setMode(
+    input: AcpControlAuthority & { handle: AcpRuntimeHandle; mode: string },
+  ): Promise<void> {
     const { handle, state } = this.resolveManagerHandle(input.handle);
     const manager = await this.getManager();
-    await manager.setMode(handle, input.mode, state.mode);
+    await manager.setMode(handle, input.mode, state.mode, input);
   }
 
-  async setModel(input: { handle: AcpRuntimeHandle; model: string }): Promise<void> {
+  async setModel(
+    input: AcpControlAuthority & { handle: AcpRuntimeHandle; model: string },
+  ): Promise<void> {
     const { handle, state } = this.resolveManagerHandle(input.handle);
     const manager = await this.getManager();
-    await manager.setModel(handle, input.model, state.mode);
+    await manager.setModel(handle, input.model, state.mode, input);
   }
 
-  async setConfigOption(input: {
-    handle: AcpRuntimeHandle;
-    key: string;
-    value: string;
-  }): Promise<SetSessionConfigOptionResponse> {
+  async setConfigOption(
+    input: AcpControlAuthority & {
+      handle: AcpRuntimeHandle;
+      key: string;
+      value: string;
+    },
+  ): Promise<SetSessionConfigOptionResponse> {
     const { handle, state } = this.resolveManagerHandle(input.handle);
     const manager = await this.getManager();
-    return await manager.setConfigOption(handle, input.key, input.value, state.mode);
+    return await manager.setConfigOption(handle, input.key, input.value, state.mode, input);
   }
 
   async cancel(input: { handle: AcpRuntimeHandle; reason?: string }): Promise<void> {
