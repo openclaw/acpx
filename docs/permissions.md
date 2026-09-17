@@ -129,6 +129,8 @@ acpx --no-terminal codex exec 'summarize without spawning shell tools'
 
 `acpx` advertises `clientCapabilities.terminal: false` during ACP `initialize`. Agents that respect the advertised capability will avoid terminal calls; agents that do not will get a hard error if they try.
 
+`--no-fs` similarly disables ACP filesystem reads and writes. Disabled methods return a JSON-RPC method-not-found error even under `--approve-all`; they never reach the local filesystem or terminal handlers. Capabilities stay fixed for the lifetime of the connection. Changing these flags takes effect when a new agent client starts, after an existing warm owner expires or is explicitly closed.
+
 This is a cleaner way to forbid shell access than blanket-denying every permission prompt, because the agent knows the capability is unavailable up front and can plan around it.
 
 ## Authentication

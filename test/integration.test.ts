@@ -1257,6 +1257,27 @@ test("integration: exec --no-terminal disables advertised terminal capability", 
         | undefined;
       assert(initializeRequest, result.stdout);
       assert.equal(initializeRequest.params?.clientCapabilities?.terminal, false);
+      const marker = path.join(cwd, "terminal-ran");
+      const script = `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`;
+      const rejected = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "json",
+          "--no-terminal",
+          "exec",
+          `terminal ${process.execPath} -e ${JSON.stringify(script)}`,
+        ],
+        homeDir,
+      );
+      assert.ok(
+        parseJsonRpcOutputLines(rejected.stdout).some(
+          (message) =>
+            isAcpJsonRpcMessage(message) && "error" in message && message.error.code === -32601,
+        ),
+        rejected.stdout,
+      );
+      await assert.rejects(fs.stat(marker), { code: "ENOENT" });
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -1289,6 +1310,24 @@ test("integration: exec --no-fs disables advertised filesystem capabilities", as
         readTextFile: false,
         writeTextFile: false,
       });
+      const file = path.join(cwd, "disabled-fs.txt");
+      const contents = "SYNTHETIC_DISABLED_FS_9063";
+      await fs.writeFile(file, contents);
+      for (const prompt of [`read ${file}`, `write ${file} changed`]) {
+        const rejected = await runCli(
+          [...baseAgentArgs(cwd), "--format", "json", "--no-fs", "exec", prompt],
+          homeDir,
+        );
+        assert.ok(
+          parseJsonRpcOutputLines(rejected.stdout).some(
+            (message) =>
+              isAcpJsonRpcMessage(message) && "error" in message && message.error.code === -32601,
+          ),
+          rejected.stdout,
+        );
+        assert.doesNotMatch(rejected.stdout, new RegExp(contents, "u"));
+        assert.equal(await fs.readFile(file, "utf8"), contents);
+      }
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }

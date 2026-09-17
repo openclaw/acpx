@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- ACP/capabilities: enforce `--no-fs` and `--no-terminal` against direct agent requests, keeping registered methods aligned with each connection's advertised capabilities.
+
 ## 0.17.0 - 2026-09-17
 
 **Highlights:** Applications and CLI processes can share sessions through one local queue owner and watch session activity with cursor replay. Embedding hosts can guard session controls with optional authority checks. Direct session-journal consumers must distinguish local records from ACP messages.

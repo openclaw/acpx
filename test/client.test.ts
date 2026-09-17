@@ -7,6 +7,7 @@ import test, { type TestContext } from "node:test";
 import type {
   AnyMessage,
   ClientConnection,
+  ClientCapabilities,
   InitializeResponse,
   RequestPermissionRequest,
   RequestPermissionResponse,
@@ -58,6 +59,7 @@ type ClientInternals = {
       writable: WritableStream<AnyMessage>;
     },
     launch: { devinAcp: boolean },
+    capabilities: ClientCapabilities,
   ) => ClientConnection;
   selectAuthMethod?: (methods: Array<{ id: string }>) =>
     | {
@@ -2506,7 +2508,14 @@ function connectClientToStream(
   const internals = asInternals(client);
   const tapped = internals.createTappedStream?.(base);
   assert(tapped);
-  const connection = internals.createConnection?.(tapped, { devinAcp: false });
+  const connection = internals.createConnection?.(
+    tapped,
+    { devinAcp: false },
+    {
+      fs: { readTextFile: true, writeTextFile: true },
+      terminal: true,
+    },
+  );
   assert(connection);
   internals.connection = connection;
   return connection;

@@ -9,6 +9,7 @@ import {
   methods,
   type AnyMessage,
   type ClientConnection,
+  type ClientCapabilities,
   type AuthMethod,
   type CreateElicitationRequest,
   type CreateElicitationResponse,
@@ -395,7 +396,7 @@ function installSdkConsoleErrorSuppression(): () => void {
 }
 
 export class AcpClient {
-  private options: AcpClientOptions;
+  private options: AcpClientOptions & { elicitationModes: readonly AcpElicitationMode[] };
   private connection?: ClientConnection;
   private agent?: ChildProcessByStdio<Writable, Readable, Readable>;
   private readonly agentDescendants = new WeakMap<ChildProcess, ProcessDescendants>();
@@ -667,7 +668,13 @@ export class AcpClient {
       ),
     );
 
-    connection = this.createConnection(stream, launch);
+    const capabilities = resolveClientCapabilities({
+      devinAcp: launch.devinAcp,
+      fs: this.options.fs !== false,
+      terminal: this.options.terminal !== false,
+      elicitationModes: this.options.elicitationModes,
+    });
+    connection = this.createConnection(stream, launch, capabilities);
     connection.signal.addEventListener(
       "abort",
       () => {
@@ -686,6 +693,7 @@ export class AcpClient {
       startupFailure,
       startupStderr,
       launch,
+      capabilities,
     });
   }
 
@@ -828,6 +836,7 @@ export class AcpClient {
       writable: WritableStream<AnyMessage>;
     },
     launch: Pick<AgentLaunchPlan, "devinAcp">,
+    capabilities: ClientCapabilities,
   ): ClientConnection {
     const app = client({ name: "acpx" })
       .onNotification(methods.client.session.update, async ({ params }) => {
@@ -839,28 +848,36 @@ export class AcpClient {
       })
       .onRequest(methods.client.elicitation.create, async ({ params, requestId, signal }) => {
         return await this.handleElicitationRequest(params, requestId, signal);
-      })
-      .onRequest(methods.client.fs.readTextFile, async ({ params }) => {
-        return await this.handleReadTextFile(params);
-      })
-      .onRequest(methods.client.fs.writeTextFile, async ({ params }) => {
-        return await this.handleWriteTextFile(params);
-      })
-      .onRequest(methods.client.terminal.create, async ({ params }) => {
-        return await this.handleCreateTerminal(params);
-      })
-      .onRequest(methods.client.terminal.output, async ({ params }) => {
-        return await this.terminalManager.terminalOutput(params);
-      })
-      .onRequest(methods.client.terminal.waitForExit, async ({ params }) => {
-        return await this.terminalManager.waitForTerminalExit(params);
-      })
-      .onRequest(methods.client.terminal.kill, async ({ params }) => {
-        return await this.terminalManager.killTerminal(params);
-      })
-      .onRequest(methods.client.terminal.release, async ({ params }) => {
-        return await this.terminalManager.releaseTerminal(params);
       });
+
+    if (capabilities.fs?.readTextFile) {
+      app.onRequest(methods.client.fs.readTextFile, async ({ params }) => {
+        return await this.handleReadTextFile(params);
+      });
+    }
+    if (capabilities.fs?.writeTextFile) {
+      app.onRequest(methods.client.fs.writeTextFile, async ({ params }) => {
+        return await this.handleWriteTextFile(params);
+      });
+    }
+    if (capabilities.terminal) {
+      app
+        .onRequest(methods.client.terminal.create, async ({ params }) => {
+          return await this.handleCreateTerminal(params);
+        })
+        .onRequest(methods.client.terminal.output, async ({ params }) => {
+          return await this.terminalManager.terminalOutput(params);
+        })
+        .onRequest(methods.client.terminal.waitForExit, async ({ params }) => {
+          return await this.terminalManager.waitForTerminalExit(params);
+        })
+        .onRequest(methods.client.terminal.kill, async ({ params }) => {
+          return await this.terminalManager.killTerminal(params);
+        })
+        .onRequest(methods.client.terminal.release, async ({ params }) => {
+          return await this.terminalManager.releaseTerminal(params);
+        });
+    }
 
     if (launch.devinAcp) {
       app.onRequest(
@@ -883,10 +900,11 @@ export class AcpClient {
     startupFailure: StartupFailureWatcher;
     startupStderr: string[];
     launch: AgentLaunchPlan;
+    capabilities: ClientCapabilities;
   }): Promise<void> {
     try {
       const initResult = await Promise.race([
-        this.initializeProtocolConnection(params.connection, params.launch),
+        this.initializeProtocolConnection(params.connection, params.launch, params.capabilities),
         params.startupFailure.promise,
       ]);
       params.startupFailure.dispose();
@@ -903,17 +921,13 @@ export class AcpClient {
   private async initializeProtocolConnection(
     connection: ClientConnection,
     launch: Pick<AgentLaunchPlan, "devinAcp" | "geminiAcp">,
+    capabilities: ClientCapabilities,
   ): Promise<InitializeResponse> {
     const initializePromise = connection.agent.request<InitializeResponse, InitializeRequest>(
       methods.agent.initialize,
       {
         protocolVersion: PROTOCOL_VERSION,
-        clientCapabilities: resolveClientCapabilities({
-          devinAcp: launch.devinAcp,
-          fs: this.options.fs !== false,
-          terminal: this.options.terminal !== false,
-          elicitationModes: this.options.elicitationModes ?? [],
-        }),
+        clientCapabilities: capabilities,
         clientInfo: resolveClientInfo(launch.devinAcp),
       },
     );
