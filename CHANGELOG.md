@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Dependencies: update fs-safe to 0.12.0 and Zod to 4.6.5, including the matching native filesystem packages.
+
 ### Fixes
 
 - ACP/capabilities: enforce `--no-fs` and `--no-terminal` against direct agent requests, keeping registered methods aligned with each connection's advertised capabilities.
