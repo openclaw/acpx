@@ -9,6 +9,11 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - Dependencies: update fs-safe to 0.12.0 and Zod to 4.6.5, including the matching native filesystem packages.
+- Agents/built-ins: add the `antigravity` shortcut for Google's official ACP runtime, with platform launch arguments and account setup guidance. Thanks @superbiche.
+
+### Breaking
+
+- Antigravity/questions: cancel fixed-choice interaction questions with a user-answer-required error instead of selecting an answer through tool approval. This also applies to existing custom launchers and takes precedence over `--approve-all`, permission policies, and embedding host permission callbacks. Continue these conversations in an interactive client supporting Antigravity questions. Thanks @superbiche.
 
 ### Fixes
 

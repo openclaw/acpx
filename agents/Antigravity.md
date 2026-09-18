@@ -59,5 +59,7 @@ Antigravity sends fixed-choice user questions through `session/request_permissio
 with an `interaction_` tool-call ID. Their options represent answers, not tool
 approvals. acpx cancels these requests and reports that a user answer is required,
 including under `--approve-all` or an embedding host's permission handler.
+This also applies to existing custom launchers when the runtime identifies itself
+as `antigravity-acp`; it is not limited to the named shortcut.
 Continue those conversations in a client supporting Antigravity questions.
 Ordinary tool permissions still follow acpx's permission policy.

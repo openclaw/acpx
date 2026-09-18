@@ -3,7 +3,7 @@ title: Agents
 description: Built-in agent registry — every friendly name acpx ships with, the ACP adapter it spawns, the upstream coding agent it wraps, and per-agent notes.
 ---
 
-`acpx` ships with a registry of friendly agent names. Each one resolves to a specific ACP adapter command. Unknown names fall through as raw commands, and `--agent <command>` is the escape hatch for anything custom (see [Custom agents](custom-agents.md)).
+`acpx` ships with a registry of friendly agent names. Each one resolves to a specific ACP adapter command. On Unix, unknown names fall through as raw commands, and `--agent <command>` supports custom launchers. On Windows, configure a named agent with structured `argv` instead (see [Custom agents](custom-agents.md)).
 
 The default agent for top-level commands like `acpx exec …` and `acpx prompt …` is `codex`.
 

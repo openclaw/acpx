@@ -11,7 +11,7 @@ Choose exactly one. The flags are mutually exclusive — passing more than one i
 
 | Flag              | Behavior                                                                     |
 | ----------------- | ---------------------------------------------------------------------------- |
-| `--approve-all`   | Auto-approve every permission request without prompting.                     |
+| `--approve-all`   | Auto-approve tool permission requests without prompting.                     |
 | `--approve-reads` | Auto-approve read/search requests; prompt for everything else. **(default)** |
 | `--deny-all`      | Auto-deny/reject every permission request whenever the protocol allows.      |
 
@@ -42,8 +42,8 @@ Policy keys:
 Rule precedence is `autoDeny`, then `autoApprove`, then `escalate`, then `defaultAction`, then the normal permission mode. Matches are case-insensitive. In non-interactive output, an escalated request is denied for the current turn. Text mode prints a `[permission]` notice; JSON mode keeps the raw ACP stream and includes structured escalation details, including tool input when supplied by the agent, in the `session/request_permission` response `_meta.acpx.permissionEscalation` object so an orchestrator can resume with a broader policy.
 
 Embedding clients that use `acpx/runtime` can apply the same policy through
-`AcpRuntimeOptions.permissionPolicy`. A host `onPermissionRequest` callback gets
-the first chance to decide; returning no decision falls back to the configured
+`AcpRuntimeOptions.permissionPolicy`. For tool permissions, a host
+`onPermissionRequest` callback gets the first chance to decide; returning no decision falls back to the configured
 policy and permission mode. The embedded runtime does not currently expose
 structured permission-escalation notifications to the host.
 
@@ -55,6 +55,16 @@ configured policy and mode, without calling the runtime callback. Use
 The callback's signal aborts when the turn finishes, times out, is cancelled,
 or its connection closes. Pending permission requests then return cancellation;
 a late host response cannot approve the action.
+
+## User questions
+
+Some agents also encode fixed-choice user questions as permission requests.
+When acpx recognizes such a question and cannot select an answer explicitly,
+it cancels the request and fails the prompt with `PERMISSION_PROMPT_UNAVAILABLE`
+(exit code `5`). This takes precedence over permission modes, per-tool policies,
+and host permission callbacks, including for existing custom launchers. Continue
+in a client that supports those questions. See the
+[supported question behavior](https://github.com/openclaw/acpx/blob/main/agents/Antigravity.md#user-questions).
 
 ## What counts as a "read"
 
