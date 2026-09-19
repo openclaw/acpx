@@ -29,7 +29,8 @@ fs.renameSync(pendingPidFile, pidFile);
 const lines = readline.createInterface({ input: process.stdin });
 lines.on("line", (line) => {
   const request = JSON.parse(line) as { id?: string | number; method: string };
-  if (request.id == null) {
+  // "silent" models a non-ACP command: it keeps stdio open and never answers.
+  if (request.id == null || mode === "silent") {
     return;
   }
   const result =
