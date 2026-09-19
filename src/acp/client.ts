@@ -431,6 +431,8 @@ export class AcpClient {
   private readonly cancellingSessionIds = new Set<string>();
   private readonly permissionAbortControllers = new Map<string, AbortController>();
   private closing = false;
+  // Bumped by close() so a start() still launching can tell it was abandoned.
+  private closeEpoch = 0;
   private agentStartedAt?: string;
   private lastAgentExit?: AgentExitInfo;
   private lastKnownPid?: number;
@@ -627,6 +629,7 @@ export class AcpClient {
       await this.close();
     }
 
+    const epoch = this.closeEpoch;
     const maxMessageBytes = readMaxAcpMessageBytes();
     const launch = await this.resolveAgentLaunchPlan();
     this.logAgentLaunch(launch);
@@ -657,6 +660,7 @@ export class AcpClient {
       startupFailure.dispose();
       throw error;
     }
+    await this.stopIfClosedDuringLaunch(epoch, startupFailure);
 
     const input = Writable.toWeb(child.stdin);
     const output = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
@@ -1541,6 +1545,7 @@ export class AcpClient {
 
   async close(): Promise<void> {
     this.closing = true;
+    this.closeEpoch += 1;
     this.abortActiveElicitation();
 
     await this.terminalManager.shutdown();
@@ -1586,6 +1591,21 @@ export class AcpClient {
     this.initResult = undefined;
     this.connection = undefined;
     this.agent = undefined;
+  }
+
+  // A caller that timed out waiting for start() closes the client before the agent may exist.
+  // The launch keeps going, so a child spawned after that close is stopped instead of adopted;
+  // it has been admitted, so embedding hosts still observe its spawn and exit.
+  private async stopIfClosedDuringLaunch(
+    epoch: number,
+    startupFailure: StartupFailureWatcher,
+  ): Promise<void> {
+    if (this.closeEpoch === epoch) {
+      return;
+    }
+    startupFailure.dispose();
+    await this.close();
+    throw new Error("ACP client was closed while the agent was starting");
   }
 
   private abortActiveElicitation(): void {

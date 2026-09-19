@@ -8,6 +8,7 @@ import { normalizeOutputError } from "../../acp/error-normalization.js";
 import { extractAcpError, isAcpResourceNotFoundError } from "../../acp/error-shapes.js";
 import {
   assertControlAuthority,
+  TimeoutError,
   withTimeout,
   type AcpControlAuthority,
 } from "../../async-control.js";
@@ -179,6 +180,30 @@ function resolveSupportedConfigOptionId(record: SessionRecord, configId: string)
     "ACP_BACKEND_UNSUPPORTED_CONTROL",
     `ACP session ${record.acpxRecordId} does not advertise config option '${configId}'. Supported config options: ${supportedText}.`,
   );
+}
+
+// A peer that never answers `initialize` (for example a one-shot runner waiting for a prompt on
+// stdin) must not leave session creation pending. The caller's teardown closes the client, which
+// stops the agent together with the descendants it has forked.
+async function startRuntimeClient(
+  client: AcpClient,
+  agent: { agentCommand: string; agentArgv?: string[] },
+  timeoutMs: number | undefined,
+): Promise<void> {
+  try {
+    await withTimeout(client.start(), timeoutMs);
+  } catch (error) {
+    if (!(error instanceof TimeoutError)) {
+      throw error;
+    }
+    // Name only the executable: configured arguments can carry credentials.
+    const executable = path.basename(agent.agentArgv?.[0] ?? agent.agentCommand.split(/\s+/)[0]);
+    throw new AcpRuntimeError(
+      "ACP_SESSION_INIT_FAILED",
+      `ACP agent ${executable} did not complete ACP initialization within ${timeoutMs}ms and was stopped. Check that the configured command starts an ACP server.`,
+      { cause: error },
+    );
+  }
 }
 
 type CreatedRuntimeSession = {
@@ -951,7 +976,7 @@ export class AcpRuntimeManager {
     let retained = false;
 
     try {
-      await client.start();
+      await startRuntimeClient(client, agent, this.options.timeoutMs);
       this.assertOpen();
       const session = await createOrLoadRuntimeSession(client, input.resumeSessionId, cwd);
       const record = await this.prepareInitialRuntimeRecord({

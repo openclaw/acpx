@@ -52,7 +52,8 @@ lines.on("line", (line) => {
     );
     return;
   }
-  if (request.id == null) {
+  // "silent" models a non-ACP command: it keeps stdio open and never answers.
+  if (request.id == null || mode === "silent") {
     return;
   }
   if (
