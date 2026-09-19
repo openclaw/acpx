@@ -1748,16 +1748,25 @@ test("AcpClient reports prompt readiness only after the transport accepts the re
   });
 
   let readinessCalls = 0;
-  const prompt = client.prompt("session-write-ready", "hello", () => {
-    readinessCalls += 1;
-    requestWritten.resolve();
-  });
+  let active = true;
+  const prompt = client.prompt(
+    "session-write-ready",
+    "hello",
+    () => {
+      readinessCalls += 1;
+      requestWritten.resolve();
+    },
+    undefined,
+    undefined,
+    { assertActive: () => assert.ok(active, "prompt admission revoked") },
+  );
   const request = await writeEntered.promise;
 
   assert.equal(readinessCalls, 0);
   releaseWrite.resolve();
   await requestWritten.promise;
   assert.equal(readinessCalls, 1);
+  active = false;
 
   await writeAgentMessage(agentToClient.writable, responseFor(request));
   assert.deepEqual(await prompt, { stopReason: "end_turn" });
@@ -1864,6 +1873,79 @@ test("AcpClient keeps a queued prompt unready until its own transport write succ
   assert.deepEqual(await firstPrompt, { stopReason: "end_turn" });
   assert.deepEqual(await secondPrompt, { stopReason: "end_turn" });
 });
+
+for (const outcome of ["revoked", "aborted", "active"] as const) {
+  test(
+    `AcpClient checks ${outcome} prompt authority after the SDK write queue`,
+    { timeout: 5_000 },
+    async (t) => {
+      const releaseWrite = createDeferred<void>();
+      const requestWritten = createDeferred<void>();
+      const fixture = createClientFixture(t, {
+        release: () => releaseWrite.resolve(),
+        async write(message) {
+          if ("method" in message && message.method === "session/cancel") {
+            await releaseWrite.promise;
+          } else {
+            await fixture.reply(message);
+          }
+        },
+      });
+      const blockedWrite = fixture.track(fixture.client.cancel("write-barrier"));
+      await fixture.message(0);
+      const error = new Error("prompt admission revoked while queued for writing");
+      const controller = new AbortController();
+      let active = true;
+      let readinessCalls = 0;
+      const pending = fixture.track(
+        fixture.client.prompt(
+          "queued-authority",
+          "guarded prompt",
+          () => {
+            readinessCalls += 1;
+            requestWritten.resolve();
+          },
+          undefined,
+          undefined,
+          {
+            signal: controller.signal,
+            assertActive: () => {
+              if (!active) {
+                throw error;
+              }
+            },
+          },
+        ),
+      );
+      // Drain dispatch microtasks while the prior transport write remains held.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (outcome === "revoked") {
+        active = false;
+      } else if (outcome === "aborted") {
+        controller.abort(error);
+      }
+      releaseWrite.resolve();
+      await blockedWrite;
+      const failure = await pending.then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+      assert.equal(failure, outcome === "active" ? undefined : error);
+      if (outcome === "active") {
+        await requestWritten.promise;
+      }
+      assert.equal(readinessCalls, outcome === "active" ? 1 : 0);
+      assert.deepEqual(
+        fixture.messages.map((message) => ("method" in message ? message.method : undefined)),
+        outcome === "active" ? ["session/cancel", "session/prompt"] : ["session/cancel"],
+      );
+      assert.equal(fixture.client.hasActivePrompt(), false);
+      if (outcome === "revoked") {
+        assert.equal(controller.signal.aborted, false);
+      }
+    },
+  );
+}
 
 test("AcpClient rejects rich prompt content not advertised by promptCapabilities", async () => {
   const client = makeClient();

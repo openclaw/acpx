@@ -13,6 +13,7 @@ type ObservedStreamOptions<T> = {
   onMessage: (direction: AcpMessageDirection, message: AnyMessage) => void;
   suppressReplaySessionUpdates: () => boolean;
   bindPromptOwner: (owner: PromptOwner) => T | undefined;
+  assertPromptActive: (active: T) => void;
   onPromptRequestWritten: (active: T, owner: PromptOwner) => void;
 };
 
@@ -68,6 +69,9 @@ export function observeAcpStream<T>(
       const sensitive = id !== undefined && elicitationRequestIds.delete(id);
       if (!sensitive) {
         options.onMessage("outbound", message);
+      }
+      if (activePrompt) {
+        options.assertPromptActive(activePrompt);
       }
       const writer = base.writable.getWriter();
       try {

@@ -543,5 +543,16 @@ test("shared mode rejects in-process callbacks and unsupported session modes", a
         }),
       /callbacks/u,
     );
+    assert.throws(
+      () =>
+        runtime.startTurn({
+          handle,
+          requestId: "authority",
+          mode: "prompt",
+          text: "no",
+          assertActive: () => {},
+        }),
+      { code: "ACP_INVALID_RUNTIME_OPTION" },
+    );
   });
 });

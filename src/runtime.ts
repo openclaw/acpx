@@ -235,6 +235,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
         requestId: input.requestId,
         timeoutMs: input.timeoutMs,
         signal: input.signal,
+        assertActive: input.assertActive,
         onElicitation: input.onElicitation,
         onPermissionRequest: input.onPermissionRequest,
       }),
@@ -274,6 +275,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       requestId: input.requestId,
       timeoutMs: input.timeoutMs,
       signal: input.signal,
+      assertActive: input.assertActive,
       onElicitation: input.onElicitation,
       onPermissionRequest: input.onPermissionRequest,
     });

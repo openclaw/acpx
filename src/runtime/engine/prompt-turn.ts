@@ -1,4 +1,4 @@
-import { TimeoutError, withTimeout } from "../../async-control.js";
+import { TimeoutError, withTimeout, type AcpControlAuthority } from "../../async-control.js";
 import {
   hasAgentReplyAfterPrompt,
   recordPromptResponseUsage,
@@ -27,6 +27,7 @@ type PromptTurnClient = {
     onRequestWritten?: () => Promise<void> | void,
     onElicitation?: AcpElicitationHandler,
     onPermissionRequest?: AcpPermissionHandler,
+    authority?: AcpControlAuthority,
   ) => Promise<{
     stopReason: RunPromptResult["stopReason"];
     usage?: unknown;
@@ -72,6 +73,7 @@ export async function runPromptTurn(params: {
   onPromptStarted?: () => Promise<void> | void;
   onElicitation?: AcpElicitationHandler;
   onPermissionRequest?: AcpPermissionHandler;
+  authority?: AcpControlAuthority;
 }): Promise<{
   stopReason: RunPromptResult["stopReason"];
   source: "rpc" | "session";
@@ -85,6 +87,7 @@ export async function runPromptTurn(params: {
       params.onPromptRequestWritten,
       params.onElicitation,
       params.onPermissionRequest,
+      params.authority,
     );
     void promptPromise.then(
       (response) => {

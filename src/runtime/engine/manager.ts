@@ -32,15 +32,12 @@ import { applyRequestedModelIfAdvertised } from "../../session/model-application
 import { advertisedModelState } from "../../session/model-state.js";
 import type { ClientOperation, SessionRecord, SessionResumePolicy } from "../../types.js";
 import type {
-  AcpElicitationHandler,
-  AcpPermissionHandler,
   AcpRuntimeEvent,
   AcpRuntimeHandle,
   AcpRuntimeOptions,
-  AcpRuntimePromptMode,
   AcpRuntimeStatus,
-  AcpRuntimeTurnAttachment,
   AcpRuntimeTurn,
+  AcpRuntimeTurnInput,
   AcpRuntimeTurnResult,
 } from "../public/contract.js";
 import { AcpRuntimeError } from "../public/errors.js";
@@ -223,18 +220,7 @@ type RuntimeSessionTask = {
 };
 
 type RuntimeTurnTask = {
-  input: {
-    handle: AcpRuntimeHandle;
-    text: string;
-    attachments?: AcpRuntimeTurnAttachment[];
-    mode: AcpRuntimePromptMode;
-    sessionMode: "persistent" | "oneshot";
-    requestId: string;
-    timeoutMs?: number;
-    signal?: AbortSignal;
-    onElicitation?: AcpElicitationHandler;
-    onPermissionRequest?: AcpPermissionHandler;
-  };
+  input: AcpRuntimeTurnInput & { sessionMode: "persistent" | "oneshot" };
   promptInput: PromptInput | string;
   queue: AsyncEventQueue;
   promptStarted: Deferred<void>;
@@ -1049,18 +1035,7 @@ export class AcpRuntimeManager {
     }
   }
 
-  startTurn(input: {
-    handle: AcpRuntimeHandle;
-    text: string;
-    attachments?: AcpRuntimeTurnAttachment[];
-    mode: AcpRuntimePromptMode;
-    sessionMode: "persistent" | "oneshot";
-    requestId: string;
-    timeoutMs?: number;
-    signal?: AbortSignal;
-    onElicitation?: AcpElicitationHandler;
-    onPermissionRequest?: AcpPermissionHandler;
-  }): AcpRuntimeTurn {
+  startTurn(input: RuntimeTurnTask["input"]): AcpRuntimeTurn {
     this.assertOpen();
     let promptInput: PromptInput | string;
     try {
@@ -1112,7 +1087,7 @@ export class AcpRuntimeManager {
     };
 
     const abortHandler = () => {
-      void requestCancel();
+      void requestCancel().catch(() => {});
     };
     if (input.signal && !input.signal.aborted) {
       input.signal.addEventListener("abort", abortHandler, { once: true });
@@ -1174,7 +1149,6 @@ export class AcpRuntimeManager {
         if (this.cancelRuntimeTurnBeforePrompt(task)) {
           terminalResult = { status: "cancelled", stopReason: "cancelled" };
         } else {
-          await this.applyPendingRuntimeTurnCancel(task, turn);
           const response = await this.runRuntimePrompt(task, turn, sessionId);
           await this.saveCompletedRuntimeTurn(turn);
           terminalResult = {
@@ -1185,7 +1159,7 @@ export class AcpRuntimeManager {
         }
       }
     } catch (error) {
-      terminalResult = this.failRuntimeTurn(task, error);
+      terminalResult = this.handleRuntimeTurnFailure(task, error);
     }
     const finalization = await settleAttempt(async () => this.finalizeRuntimeTurn(task, turn));
     if (!finalization.ok) {
@@ -1211,6 +1185,7 @@ export class AcpRuntimeManager {
         onPromptRequestWritten: () => task.promptStarted.resolve(),
         onElicitation: task.input.onElicitation,
         onPermissionRequest: task.input.onPermissionRequest,
+        authority: task.input,
       });
     } finally {
       turn.client.endPromptElicitation?.(sessionId);
@@ -1562,20 +1537,6 @@ export class AcpRuntimeManager {
     return true;
   }
 
-  private async applyPendingRuntimeTurnCancel(
-    task: RuntimeTurnTask,
-    turn: RunningRuntimeTurn,
-  ): Promise<boolean> {
-    if (!task.state.pendingCancel || !turn.client.hasActivePrompt()) {
-      return false;
-    }
-    const cancelled = await turn.client.requestCancelActivePrompt();
-    if (cancelled) {
-      task.state.pendingCancel = false;
-    }
-    return cancelled;
-  }
-
   private async saveCompletedRuntimeTurn(turn: RunningRuntimeTurn): Promise<void> {
     turn.record.acpSessionId = turn.activeSessionId;
     reconcileAgentSessionId(turn.record, turn.record.agentSessionId);
@@ -1585,6 +1546,15 @@ export class AcpRuntimeManager {
     applyConversation(turn.record, turn.conversation);
     applyLifecycleSnapshotToRecord(turn.record, turn.client.getAgentLifecycleSnapshot());
     await this.options.sessionStore.save(turn.record);
+  }
+
+  private handleRuntimeTurnFailure(task: RuntimeTurnTask, error: unknown): AcpRuntimeTurnResult {
+    if (!task.input.signal?.aborted || error !== task.input.signal.reason) {
+      return this.failRuntimeTurn(task, error);
+    }
+    task.promptStarted.reject(error);
+    task.sessionReady.reject(error);
+    return { status: "cancelled", stopReason: "cancelled" };
   }
 
   private failRuntimeTurn(task: RuntimeTurnTask, error: unknown): AcpRuntimeTurnResult {
@@ -1682,18 +1652,7 @@ export class AcpRuntimeManager {
     });
   }
 
-  async *runTurn(input: {
-    handle: AcpRuntimeHandle;
-    text: string;
-    attachments?: AcpRuntimeTurnAttachment[];
-    mode: AcpRuntimePromptMode;
-    sessionMode: "persistent" | "oneshot";
-    requestId: string;
-    timeoutMs?: number;
-    signal?: AbortSignal;
-    onElicitation?: AcpElicitationHandler;
-    onPermissionRequest?: AcpPermissionHandler;
-  }): AsyncIterable<AcpRuntimeEvent> {
+  async *runTurn(input: RuntimeTurnTask["input"]): AsyncIterable<AcpRuntimeEvent> {
     const turn = this.startTurn(input);
     yield* turn.events;
     yield legacyTerminalEventFromTurnResult(await turn.result);
