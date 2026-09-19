@@ -111,11 +111,14 @@ const agent: Agent = {
     }
     return sessionState();
   },
-  async prompt() {
+  async prompt({ sessionId, prompt }) {
+    const entry = JSON.stringify({ sessionId, prompt }) + "\n";
+    await fs.appendFile(path.join(directory, "prompts.jsonl"), entry);
     await fs.writeFile(path.join(directory, "prompt-started"), "started");
     while (!existsSync(path.join(directory, "release-prompt"))) {
       await setTimeout(5);
     }
+    await fs.appendFile(path.join(directory, "prompt-effects.jsonl"), entry);
     return { stopReason: "end_turn" };
   },
   async cancel() {},

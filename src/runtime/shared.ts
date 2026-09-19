@@ -180,7 +180,12 @@ export class SharedAcpRuntime {
 
   startTurn(input: AcpRuntimeTurnInput): AcpRuntimeTurn {
     this.assertOpen();
-    if (input.mode !== "prompt" || input.onPermissionRequest || input.onElicitation) {
+    if (
+      input.mode !== "prompt" ||
+      input.assertActive ||
+      input.onPermissionRequest ||
+      input.onElicitation
+    ) {
       invalidOption(
         "Shared turns support prompt mode and the client's static permission policy; in-process callbacks and steering are unsupported.",
       );

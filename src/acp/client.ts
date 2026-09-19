@@ -273,6 +273,8 @@ type ActivePromptState = {
   promise?: Promise<PromptResponse>;
   cancelPromise?: Promise<void>;
   onRequestWritten?: () => Promise<void> | void;
+  authority?: AcpControlAuthority;
+  admissionFailure?: { error: unknown };
   elicitationHandler?: AcpElicitationHandler;
   permissionHandler?: AcpPermissionHandler;
   elicitationController: AbortController;
@@ -581,13 +583,17 @@ export class AcpClient {
     );
   }
 
-  hasReusableSession(sessionId: string): boolean {
+  private hasLiveConnection(): boolean {
     return (
       this.connection != null &&
+      !this.connection.signal.aborted &&
       this.agent != null &&
-      isChildProcessRunning(this.agent) &&
-      this.loadedSessionId === sessionId
+      isChildProcessRunning(this.agent)
     );
+  }
+
+  hasReusableSession(sessionId: string): boolean {
+    return this.hasLiveConnection() && this.loadedSessionId === sessionId;
   }
 
   hasActivePrompt(sessionId?: string): boolean {
@@ -614,7 +620,7 @@ export class AcpClient {
   }
 
   async start(): Promise<void> {
-    if (this.connection && this.agent && isChildProcessRunning(this.agent)) {
+    if (this.hasLiveConnection()) {
       return;
     }
     if (this.connection || this.agent) {
@@ -977,6 +983,7 @@ export class AcpClient {
       },
       suppressReplaySessionUpdates: () => this.suppressReplaySessionUpdateMessages,
       bindPromptOwner: (owner) => this.bindPromptOwner(owner),
+      assertPromptActive: (active) => this.assertPromptActive(active),
       onPromptRequestWritten: (active, owner) => this.onPromptRequestWritten(active, owner),
     });
   }
@@ -1110,6 +1117,7 @@ export class AcpClient {
     onRequestWritten?: () => Promise<void> | void,
     onElicitation?: AcpElicitationHandler,
     onPermissionRequest?: AcpPermissionHandler,
+    authority?: AcpControlAuthority,
   ): Promise<PromptResponse> {
     const connection = this.getConnection();
     const normalizedPrompt = this.normalizePromptForAgent(prompt);
@@ -1123,29 +1131,26 @@ export class AcpClient {
       onRequestWritten,
       onElicitation,
       onPermissionRequest,
+      authority,
     );
 
-    let promptPromise: Promise<PromptResponse>;
     try {
-      promptPromise = this.runConnectionRequest(() =>
-        connection.agent.request(methods.agent.session.prompt, {
-          sessionId,
-          prompt: normalizedPrompt,
-        }),
+      const promptPromise = this.runConnectionRequest(
+        () =>
+          connection.agent.request(methods.agent.session.prompt, {
+            sessionId,
+            prompt: normalizedPrompt,
+          }),
+        authority,
       );
-    } catch (error) {
-      this.clearActivePrompt(activePrompt);
-      restoreConsoleError?.();
-      throw error;
-    }
-
-    activePrompt.promise = promptPromise;
-
-    try {
+      activePrompt.promise = promptPromise;
       // Queue this prompt before abort listeners can cancel its newly published owner.
       previousActivePrompt?.elicitationController?.abort();
       return this.returnPromptResponseOrPermissionFailure(sessionId, await promptPromise);
     } catch (error) {
+      if (activePrompt.admissionFailure) {
+        throw activePrompt.admissionFailure.error;
+      }
       this.throwPromptPermissionFailureIfPresent(sessionId);
       throw error;
     } finally {
@@ -1159,11 +1164,13 @@ export class AcpClient {
     onRequestWritten: (() => Promise<void> | void) | undefined,
     elicitationHandler: AcpElicitationHandler | undefined,
     permissionHandler: AcpPermissionHandler | undefined,
+    authority: AcpControlAuthority | undefined,
   ): ActivePromptState {
     this.cancellingSessionIds.delete(sessionId);
     const active: ActivePromptState = {
       sessionId,
       onRequestWritten,
+      authority,
       elicitationHandler,
       permissionHandler,
       elicitationController: new AbortController(),
@@ -1184,6 +1191,16 @@ export class AcpClient {
       active.requestId = owner.requestId;
     }
     return active;
+  }
+
+  private assertPromptActive(active: ActivePromptState): void {
+    try {
+      assertControlAuthority(active.authority);
+    } catch (error) {
+      // Connection close observers may otherwise replace this with a disconnect error.
+      active.admissionFailure = { error };
+      throw error;
+    }
   }
 
   private onPromptRequestWritten(

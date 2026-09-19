@@ -100,14 +100,17 @@ export type AcpRuntimeTurnAttachment = {
   data: string;
 };
 
-export type AcpRuntimeTurnInput = {
+/**
+ * In-process turns check synchronous host authority before prompt dispatch.
+ * A throwing assertActive rejects admission without aborting the signal.
+ */
+export type AcpRuntimeTurnInput = AcpControlAuthority & {
   handle: AcpRuntimeHandle;
   text: string;
   attachments?: AcpRuntimeTurnAttachment[];
   mode: AcpRuntimePromptMode;
   requestId: string;
   timeoutMs?: number;
-  signal?: AbortSignal;
   /** Overrides the runtime permission callback for this prompt turn. */
   onPermissionRequest?: AcpPermissionHandler;
   /** Handles ACP elicitation requests owned by this prompt turn. */

@@ -103,6 +103,43 @@ For applications using `acpx/runtime`, `AcpRuntimeTurn.promptStarted` resolves o
 
 Readiness does not mean the agent has finished processing the prompt. Await `turn.result` for the turn outcome after persistence and cleanup have settled.
 
+### Host prompt authority
+
+In-process `createAcpRuntime()` turns accept an optional synchronous `assertActive`
+callback on both `startTurn()` and `runTurn()`. Throw when the host no longer
+permits the prompt, even if its `AbortSignal` has not been aborted:
+
+```typescript
+const turn = runtime.startTurn({
+  handle,
+  requestId: crypto.randomUUID(),
+  mode: "prompt",
+  text: "Review the repository",
+  signal: abortController.signal,
+  assertActive() {
+    if (!admission.active) {
+      throw new Error("Prompt admission revoked");
+    }
+  },
+});
+```
+
+The callback may run more than once. Keep it synchronous and safe to repeat.
+ACPX checks authority after turn preparation and again immediately before the
+native prompt transport write, including after SDK write-queue waits. A rejected
+prompt is not written: `promptStarted` rejects with the original callback error,
+and `result` reports a failed turn after normal persistence and cleanup.
+`runTurn()` reports that failure as its terminal error event. An aborted turn
+signal still produces a cancelled result.
+
+This guards prompt admission, not session creation, reconnect, or local
+checkpoint writes that preparation may already have performed. A rejection at
+the transport boundary closes that connection; a persistent session reconnects
+on the next turn. After the write is admitted, changing host authority does not
+cancel the prompt or discard its result. Use `turn.cancel()` or abort the signal
+to request cancellation. Callers without `assertActive` retain their existing
+behavior. [Shared runtimes](shared-sessions.md) reject this in-process callback.
+
 ## Timeouts
 
 `--timeout <seconds>` caps how long `acpx` will wait for an agent response. It applies to:

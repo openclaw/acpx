@@ -18,6 +18,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - ACP/capabilities: enforce `--no-fs` and `--no-terminal` against direct agent requests, keeping registered methods aligned with each connection's advertised capabilities.
+- Runtime/prompt admission: accept optional synchronous host authority checks through the final native prompt write, preventing revoked prompts from reaching the agent after preparation or transport queue waits; preserve cancellation results and retire connections closed by rejected writes.
 
 ## 0.17.0 - 2026-09-17
 
