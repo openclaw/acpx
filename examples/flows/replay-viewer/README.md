@@ -47,6 +47,11 @@ for loopback connections, all at its listening port. Native status, stop, and
 WebSocket clients can continue to omit `Origin`. Deliberately binding to a network
 interface retains access for native clients on that network.
 
+With a wildcard bind (`--host 0.0.0.0` or `--host ::`), use the listener's numeric
+interface address in client URLs. Unconfigured DNS aliases now receive `403`;
+to use a hostname, bind with `--host <hostname>` and address the viewer by that
+configured hostname. Forwarded headers do not add admitted hostnames.
+
 For IPv6 loopback, use `pnpm viewer --host ::1`; the printed URL uses brackets,
 such as `http://[::1]:4173`. Pass the same `--host ::1` to status and stop.
 
