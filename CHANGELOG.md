@@ -16,6 +16,7 @@ Repo: https://github.com/openclaw/acpx
 - Permissions: serialize interactive tool, file-write, and terminal questions so one answer cannot approve multiple requests; deny waiting questions when stdin closes.
 - Permissions/runtime: retire pending tool, file, and terminal requests with their owning prompt or ACP request, reject late approvals, and recheck authority before filesystem mutations and every terminal spawn attempt.
 - Sessions/timeouts: require a final ACP response for completion, preserve late response outcomes, and retire unfinished connections before queued successors resume the saved session.
+- Filesystem: preserve symlink and parent-directory traversal when reading or writing ACP paths, including aliased working directories, instead of selecting an unrelated lexical target.
 
 ## 0.17.1 - 2026-09-19
 

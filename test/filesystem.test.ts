@@ -8,6 +8,75 @@ import { PermissionPromptUnavailableError } from "../src/errors.js";
 import { FileSystemHandlers } from "../src/filesystem.js";
 import type { ClientOperation } from "../src/types.js";
 
+for (const rootSpelling of ["temporary", "canonical", "symlink"] as const) {
+  for (const operation of ["read", "write"] as const) {
+    test(
+      `${operation}TextFile preserves symlink-parent traversal with a ${rootSpelling} cwd`,
+      { skip: process.platform === "win32" },
+      async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-parent-"));
+        try {
+          const workspace = path.join(directory, "workspace");
+          await fs.mkdir(path.join(workspace, "nested", "child"), { recursive: true });
+          await fs.symlink(path.join(workspace, "nested", "child"), path.join(workspace, "alias"));
+          const rootTarget = path.join(workspace, "target.txt");
+          const nestedTarget = path.join(workspace, "nested", "target.txt");
+          await fs.writeFile(rootTarget, "unrelated root sentinel");
+          await fs.writeFile(nestedTarget, "requested nested sentinel");
+          let cwd = workspace;
+          if (rootSpelling === "canonical") {
+            cwd = await fs.realpath(workspace);
+          } else if (rootSpelling === "symlink") {
+            cwd = path.join(directory, "cwd-alias");
+            await fs.symlink(workspace, cwd);
+          }
+          // path.join would erase the traversal before it reaches the handler.
+          const requested = `${cwd}/alias/../target.txt`;
+          const handlers = new FileSystemHandlers({ cwd, permissionMode: "approve-all" });
+          if (operation === "read") {
+            const result = await handlers.readTextFile({ sessionId: "synthetic", path: requested });
+            assert.equal(result.content, await fs.readFile(requested, "utf8"));
+            assert.equal(result.content, "requested nested sentinel");
+          } else {
+            await handlers.writeTextFile({
+              sessionId: "synthetic",
+              path: requested,
+              content: "updated nested target",
+            });
+            assert.equal(await fs.readFile(nestedTarget, "utf8"), "updated nested target");
+          }
+          assert.equal(await fs.readFile(rootTarget, "utf8"), "unrelated root sentinel");
+        } finally {
+          await fs.rm(directory, { recursive: true, force: true });
+        }
+      },
+    );
+  }
+}
+
+test("file handlers retain ordinary parent traversal without a symlink", async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-parent-control-"));
+  try {
+    await fs.mkdir(path.join(cwd, "nested"));
+    const target = path.join(cwd, "target.txt");
+    await fs.writeFile(target, "root target");
+    const requested = `${cwd}${path.sep}nested${path.sep}..${path.sep}target.txt`;
+    const handlers = new FileSystemHandlers({ cwd, permissionMode: "approve-all" });
+    assert.equal(
+      (await handlers.readTextFile({ sessionId: "synthetic", path: requested })).content,
+      "root target",
+    );
+    await handlers.writeTextFile({
+      sessionId: "synthetic",
+      path: requested,
+      content: "updated root",
+    });
+    assert.equal(await fs.readFile(target, "utf8"), "updated root");
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true });
+  }
+});
+
 for (const existing of [true, false]) {
   test(`writeTextFile checks authority at native ${existing ? "truncation" : "parent creation"}`, async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-write-authority-"));

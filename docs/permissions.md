@@ -152,6 +152,10 @@ rejected. Writes preserve existing file modes and truncate through an admitted
 descriptor; writes to hardlinked files are rejected to avoid modifying aliases.
 Reads retain their existing size behavior.
 
+Paths preserve filesystem component order: `alias/../file.txt` follows `alias`
+before selecting its parent, rather than collapsing the spelling to a different
+file. This also works when cwd itself is a symlink or OS-provided path alias.
+
 These filesystem checks are best-effort guardrails within acpx's trusted-user
 model, not an OS sandbox. They do not isolate a hostile same-user process or
 confine arbitrary shell commands launched through terminal capabilities.

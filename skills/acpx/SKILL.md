@@ -31,7 +31,7 @@ Core capabilities:
 - Session metadata/history inspection (`sessions show`, `sessions history`)
 - Passive replay and live observation (`sessions watch -s <name> --cursor <cursor>`; omit the cursor for retained history)
 - Local agent process checks via `status`
-- Stable ACP client methods for filesystem and terminal requests
+- Stable ACP client methods for filesystem and terminal requests; filesystem paths preserve symlink/parent traversal order within the working directory
 - Stable ACP `authenticate` handshake via env/config credentials
 - Structured streaming output (`text`, `json`, `quiet`) with optional `--suppress-reads`
 - Prompt-response `_meta` preservation across direct, queued, compare, and embedded-runtime results

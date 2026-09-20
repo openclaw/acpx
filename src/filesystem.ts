@@ -108,9 +108,7 @@ export class FileSystemHandlers {
       }
 
       const workspace = await this.getWorkspace();
-      const content = await workspace.readText(
-        `.${path.sep}${path.relative(this.rootDir, filePath)}`,
-      );
+      const content = await workspace.readText(filePath);
       assertControlAuthority(authority);
       const sliced = this.sliceContent(content, params.line, params.limit);
 
@@ -160,10 +158,11 @@ export class FileSystemHandlers {
       }
 
       const workspace = await this.getWorkspace();
-      const file = await workspace.openWritable(
-        `.${path.sep}${path.relative(this.rootDir, filePath)}`,
-        { mode: 0o666, assertBeforeMutation: () => assertControlAuthority(authority) },
-      );
+      const target = await workspace.resolve(filePath);
+      const file = await workspace.openWritable(target, {
+        mode: 0o666,
+        assertBeforeMutation: () => assertControlAuthority(authority),
+      });
       try {
         assertControlAuthority(authority);
         await file.handle.writeFile(params.content, "utf8");
@@ -221,7 +220,8 @@ export class FileSystemHandlers {
     if (!isPathInside(this.rootDir, resolved)) {
       throw new Error(`Path is outside allowed cwd subtree: ${resolved}`);
     }
-    return resolved;
+    // Preserve symlink/.. traversal for filesystem resolution.
+    return rawPath;
   }
 
   private getWorkspace(): Promise<Root> {
