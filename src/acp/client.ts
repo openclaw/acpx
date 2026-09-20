@@ -212,10 +212,7 @@ async function raceWithAbort<T>(signal: AbortSignal, pending: Promise<T>): Promi
 }
 
 type CreateSessionOptions = {
-  /**
-   * Reconnect fallback for persisted dirs: warn and drop instead of failing
-   * when the agent lacks additionalDirectories or a dir is missing.
-   */
+  /** Reconnect fallback: warn and drop instead of failing on missing capability/dirs. */
   lenientAdditionalDirectories?: boolean;
 };
 
@@ -1072,11 +1069,7 @@ export class AcpClient {
     };
   }
 
-  /**
-   * Session-creation additionalDirectories. Strict by default: requesting dirs
-   * from an agent without the capability, or a missing dir, fails creation.
-   * Lenient mode (reconnect fallback for persisted dirs) warns and drops.
-   */
+  /** Strict: missing capability or dir fails creation. Lenient warns and drops. */
   private async createSessionAdditionalDirectories(
     lenient: boolean,
   ): Promise<{ additionalDirectories?: string[] }> {
@@ -1090,15 +1083,9 @@ export class AcpClient {
   }
 
   /**
-   * Resolves sessionOptions.skillsDirs into synthetic roots (each exposed as
-   * `.claude/skills` and `.agents/skills`) and merges them with raw
-   * sessionOptions.additionalDirs, translating each entry for Windows agents
-   * under WSL. Returns {} when neither is set.
-   *
-   * Strict by default: a configured dir that does not exist fails session
-   * creation. Lenient when `onError` is given (session/load, session/resume):
-   * entries that fail to resolve are dropped individually with a warning so a
-   * stale session record reconnects without them rather than failing the load.
+   * Strict by default: a missing dir fails session creation. With `onError`
+   * (session/load, session/resume) bad entries are dropped with a warning so
+   * a stale record still reconnects.
    */
   private async additionalDirectoriesParams(
     onError?: (error: unknown) => void,
@@ -1109,10 +1096,8 @@ export class AcpClient {
     if (resolved === undefined) {
       return {};
     }
-    // Grant the agent's fs callbacks access to the host-side dirs we are about
-    // to advertise; without this the path guard rejects reads outside cwd.
-    // Skill targets map synthetic-root reads back onto the real skills dir so
-    // follow-within-root containment still holds.
+    // Grant fs callbacks access to the advertised dirs; skillTargets maps
+    // synthetic-root reads back onto the real skills dir.
     this.filesystem.setAdditionalRoots(resolved.dirs, resolved.skillTargets);
     const translated = await Promise.all(
       resolved.dirs.map(async (dir) => {
@@ -1147,12 +1132,7 @@ export class AcpClient {
     );
   }
 
-  /**
-   * additionalDirectories for session/load and session/resume. Unlike
-   * createSession this never throws: a session record with persisted dirs on
-   * an agent that no longer advertises the capability reconnects without them
-   * rather than failing the whole load.
-   */
+  /** Reconnect variant: never throws; drops dirs the agent can't take. */
   private async lenientAdditionalDirectoriesParams(): Promise<{
     additionalDirectories?: string[];
   }> {

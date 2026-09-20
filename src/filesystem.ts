@@ -88,11 +88,9 @@ export class FileSystemHandlers {
   }
 
   /**
-   * Grants the agent's fs callbacks access to extra workspace roots (ACP
-   * additionalDirectories). Called once the session's dirs are resolved;
-   * replaces any previously granted roots. `skillTargets` maps each synthetic
-   * skills root to the real skills dir so reads through its
-   * `.claude/skills`/`.agents/skills` links resolve inside the target.
+   * Grants fs callbacks access to extra workspace roots (ACP
+   * additionalDirectories); replaces previously granted roots. `skillTargets`
+   * maps each synthetic skills root to the real skills dir.
    */
   setAdditionalRoots(
     dirs: readonly string[],
@@ -247,17 +245,15 @@ export class FileSystemHandlers {
       // Preserve symlink/.. traversal for filesystem resolution.
       return { rootDir: this.rootDir, filePath: rawPath };
     }
-    // Additional workspace roots (ACP additionalDirectories): pick the
-    // deepest containing root so nested roots resolve correctly.
+    // Pick the deepest containing additional root so nested roots resolve.
     const match = this.extraRootDirs
       .filter((dir) => isPathInside(dir, resolved))
       .toSorted((a, b) => b.length - a.length)[0];
     if (match === undefined) {
       throw new Error(`Path is outside allowed workspace roots: ${resolved}`);
     }
-    // Synthetic skills roots expose the real dir through .claude/skills and
-    // .agents/skills symlinks; rewrite onto the target so follow-within-root
-    // containment holds and the read lands on the real files.
+    // Rewrite synthetic skills-root reads onto the real skills dir so
+    // follow-within-root containment holds.
     const skillTarget = this.skillTargets.get(match);
     if (skillTarget !== undefined) {
       const rel = path.relative(match, resolved);

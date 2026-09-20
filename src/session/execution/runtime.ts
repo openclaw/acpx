@@ -1347,12 +1347,7 @@ export async function sendSessionDirect(options: SessionSendOptions): Promise<Se
   });
 }
 
-/**
- * skillsDirs/additionalDirs are fixed at session creation: the shared queue
- * client was already constructed with its dirs, so a queued task that asks
- * for different ones must fail loudly instead of silently keeping the old
- * roots.
- */
+/** Dir options are fixed at session creation; a queued task asking for different ones must fail. */
 function assertSharedClientDirOptions(
   taskOptions: SessionAgentOptions | undefined,
   recordOptions: SessionAgentOptions | undefined,

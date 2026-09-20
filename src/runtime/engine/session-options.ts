@@ -19,18 +19,12 @@ export type SessionAgentOptions = {
    */
   env?: Record<string, string>;
   /**
-   * Directories containing skill folders (`<dir>/<name>/SKILL.md`). Each is
-   * materialized as a synthetic root exposing `.claude/skills` and
-   * `.agents/skills`, then sent as `additionalDirectories` on session/new,
-   * session/load, and session/resume when the agent advertises the
-   * capability. Persisted with the session record so reconnects keep the
-   * same roots.
+   * Directories containing skill folders (`<dir>/<name>/SKILL.md`), exposed
+   * to the agent as `.claude/skills` and `.agents/skills` via ACP
+   * `additionalDirectories`. Persisted on the session record for reconnects.
    */
   skillsDirs?: string[];
-  /**
-   * Raw ACP `additionalDirectories` workspace roots. Unlike skillsDirs these
-   * are sent verbatim — no synthetic-root wrapping.
-   */
+  /** Raw ACP `additionalDirectories` roots, sent without skills-dir wrapping. */
   additionalDirs?: string[];
 };
 
@@ -97,10 +91,7 @@ export function persistSessionOptions(
   delete record.acpx.session_options;
 }
 
-/**
- * Resolves relative dir entries against the session cwd. Shared by CLI flag
- * parsing and session-option normalization so both agree on the same dirs.
- */
+/** Resolves relative dir entries against the session cwd. */
 export function resolveDirsAgainstCwd(
   dirs: readonly string[] | undefined,
   cwd: string,
@@ -109,9 +100,9 @@ export function resolveDirsAgainstCwd(
 }
 
 /**
- * Resolves relative skillsDirs/additionalDirs against the session cwd so the
- * initial session, persistence, and reconnects all agree on the same dirs.
- * Callers must normalize before constructing the client.
+ * Normalizes dir options against the session cwd so the initial session,
+ * persistence, and reconnects all resolve the same dirs. Call before
+ * constructing the client.
  */
 export function normalizeSessionDirOptions(
   options: SessionAgentOptions,

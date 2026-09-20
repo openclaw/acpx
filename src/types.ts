@@ -308,14 +308,9 @@ export type AcpClientOptions = {
     maxTurns?: number;
     systemPrompt?: string | { append: string };
     env?: Record<string, string>;
-    /**
-     * Skill roots. Each dir is wrapped in a synthetic root exposing it as
-     * `.claude/skills` and `.agents/skills`, then sent via `additionalDirectories`.
-     */
+    /** Skill dirs, exposed as `.claude/skills` and `.agents/skills` via `additionalDirectories`. */
     skillsDirs?: string[];
-    /**
-     * Raw `additionalDirectories` workspace roots, sent verbatim.
-     */
+    /** Raw `additionalDirectories` workspace roots, sent verbatim. */
     additionalDirs?: string[];
   };
   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
