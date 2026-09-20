@@ -111,7 +111,11 @@ export type AcpRuntimeTurnInput = AcpControlAuthority & {
   mode: AcpRuntimePromptMode;
   requestId: string;
   timeoutMs?: number;
-  /** Overrides the runtime permission callback for this prompt turn. */
+  /**
+   * Overrides the client's default callback for this prompt turn. Throwing or
+   * returning undefined falls through to configured permission policy, not the
+   * default callback.
+   */
   onPermissionRequest?: AcpPermissionHandler;
   /** Handles ACP elicitation requests owned by this prompt turn. */
   onElicitation?: AcpElicitationHandler;
@@ -405,6 +409,20 @@ export interface AcpSessionStore {
   save(record: AcpSessionRecord): Promise<void>;
 }
 
+export type AcpRuntimeSessionContext = {
+  sessionKey: string;
+  cwd: string;
+  agentCommand: string;
+  agentArgv?: string[];
+};
+
+export type AcpRuntimeSessionPermissions = Partial<
+  Pick<
+    AcpRuntimeOptions,
+    "permissionMode" | "nonInteractivePermissions" | "permissionPolicy" | "onPermissionRequest"
+  >
+>;
+
 export type AcpRuntimeOptions = {
   cwd: string;
   /** Trusted child-only environment, snapshotted at construction and never persisted. */
@@ -417,14 +435,16 @@ export type AcpRuntimeOptions = {
    * Retained connections keep their original servers. Initialization-only health
    * probes do not call the resolver.
    */
-  mcpServers?:
-    | McpServer[]
-    | ((session: {
-        sessionKey: string;
-        cwd: string;
-        agentCommand: string;
-        agentArgv?: string[];
-      }) => McpServer[]);
+  mcpServers?: McpServer[] | ((session: AcpRuntimeSessionContext) => McpServer[]);
+  /**
+   * Client permissions for new and reconnected sessions, resolved from stored
+   * identity. Unspecified fields inherit runtime defaults. Retained clients keep
+   * their original policy; health probes do not call this resolver. Neither the
+   * policy nor its callback is persisted.
+   */
+  sessionPermissions?: (
+    session: AcpRuntimeSessionContext,
+  ) => AcpRuntimeSessionPermissions | undefined;
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   permissionPolicy?: PermissionPolicy;

@@ -56,6 +56,26 @@ The callback's signal aborts when the turn finishes, times out, is cancelled,
 or its connection closes. Pending permission requests then return cancellation;
 a late host response cannot approve the action.
 
+### Session-specific embedded policies
+
+Use `AcpRuntimeOptions.sessionPermissions(context)` when one embedded runtime
+serves sessions with different client permission policies. The context contains
+the stored `sessionKey`, `cwd`, `agentCommand`, and optional `agentArgv`.
+Return overrides for `permissionMode`, `nonInteractivePermissions`,
+`permissionPolicy`, or `onPermissionRequest`; omitted fields inherit the runtime
+defaults. Returning `undefined` uses all runtime defaults.
+
+ACPX resolves this policy when creating or reconnecting a session client,
+including control-only reconnections. A retained connection keeps its original
+policy. Health probes do not call the resolver, and session records do not store
+the resolved policy or callback. Shared CLI sessions do not support this option.
+
+Turn callbacks keep the precedence and fallback behavior described above.
+Approving an ACP tool request does not separately authorize `fs/*` or terminal
+operations: those use the client's permission mode. An embedding host that
+selects `approve-all` for delegated operations must still own its admission and
+approval decisions; this is not a sandbox for the agent process.
+
 ## User questions
 
 Some agents also encode fixed-choice user questions as permission requests.

@@ -100,6 +100,7 @@ export class SharedAcpRuntime {
       "sessionStore",
       "agentProcessEnv",
       "mcpServers",
+      "sessionPermissions",
       "processLifecycle",
       "onPermissionRequest",
       "elicitationModes",

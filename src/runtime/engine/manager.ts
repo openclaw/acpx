@@ -35,6 +35,7 @@ import type {
   AcpRuntimeEvent,
   AcpRuntimeHandle,
   AcpRuntimeOptions,
+  AcpRuntimeSessionContext,
   AcpRuntimeStatus,
   AcpRuntimeTurn,
   AcpRuntimeTurnInput,
@@ -689,12 +690,7 @@ export class AcpRuntimeManager {
     );
   }
 
-  private resolveMcpServers(session: {
-    sessionKey: string;
-    cwd: string;
-    agentCommand: string;
-    agentArgv?: string[];
-  }) {
+  private resolveMcpServers(session: AcpRuntimeSessionContext) {
     const servers = this.options.mcpServers;
     const { sessionKey, cwd, agentCommand, agentArgv } = session;
     return [
@@ -707,6 +703,22 @@ export class AcpRuntimeManager {
           })
         : (servers ?? [])),
     ];
+  }
+
+  private resolveSessionPermissions(session: AcpRuntimeSessionContext) {
+    const { sessionKey, cwd, agentCommand, agentArgv } = session;
+    const {
+      permissionMode = this.options.permissionMode,
+      nonInteractivePermissions = this.options.nonInteractivePermissions,
+      permissionPolicy = this.options.permissionPolicy,
+      onPermissionRequest = this.options.onPermissionRequest,
+    } = this.options.sessionPermissions?.({
+      sessionKey,
+      cwd,
+      agentCommand,
+      agentArgv: agentArgv ? [...agentArgv] : undefined,
+    }) ?? {};
+    return { permissionMode, nonInteractivePermissions, permissionPolicy, onPermissionRequest };
   }
 
   private async withRuntimeControlSession<T>(
@@ -755,10 +767,10 @@ export class AcpRuntimeManager {
           ...record,
           sessionKey: record.name ?? record.acpxRecordId,
         }),
-        permissionMode: this.options.permissionMode,
-        nonInteractivePermissions: this.options.nonInteractivePermissions,
-        permissionPolicy: this.options.permissionPolicy,
-        onPermissionRequest: this.options.onPermissionRequest,
+        ...this.resolveSessionPermissions({
+          ...record,
+          sessionKey: record.name ?? record.acpxRecordId,
+        }),
         elicitationModes: this.options.elicitationModes,
         verbose: this.options.verbose,
         timeoutMs: this.options.timeoutMs,
@@ -924,10 +936,7 @@ export class AcpRuntimeManager {
       agentArgv,
       cwd,
       mcpServers: this.resolveMcpServers({ ...agent, sessionKey: input.sessionKey }),
-      permissionMode: this.options.permissionMode,
-      nonInteractivePermissions: this.options.nonInteractivePermissions,
-      permissionPolicy: this.options.permissionPolicy,
-      onPermissionRequest: this.options.onPermissionRequest,
+      ...this.resolveSessionPermissions({ ...agent, sessionKey: input.sessionKey }),
       elicitationModes: this.options.elicitationModes,
       processLifecycle: this.options.processLifecycle,
       processLaunchScope: { kind: "runtime-session", sessionKey: input.sessionKey },
@@ -1337,10 +1346,10 @@ export class AcpRuntimeManager {
         ...record,
         sessionKey: record.name ?? record.acpxRecordId,
       }),
-      permissionMode: this.options.permissionMode,
-      nonInteractivePermissions: this.options.nonInteractivePermissions,
-      permissionPolicy: this.options.permissionPolicy,
-      onPermissionRequest: this.options.onPermissionRequest,
+      ...this.resolveSessionPermissions({
+        ...record,
+        sessionKey: record.name ?? record.acpxRecordId,
+      }),
       elicitationModes: this.options.elicitationModes,
       processLifecycle: this.options.processLifecycle,
       processLaunchScope: {

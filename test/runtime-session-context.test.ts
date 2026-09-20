@@ -27,7 +27,8 @@ async function withRuntime(
   }) => Promise<void>,
   overrides: Partial<AcpRuntimeOptions> = {},
 ) {
-  await withTempDir("acpx-session-context-", async (root) => {
+  await withTempDir("acpx-session-context-", async (directory) => {
+    const root = await fs.realpath(directory);
     const store = new InMemorySessionStore();
     const options: AcpRuntimeOptions = {
       cwd: root,
@@ -69,7 +70,10 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-async function turnText(turn: AcpRuntimeTurn): Promise<string> {
+async function turnText(
+  turn: AcpRuntimeTurn,
+  expectedStatus: "completed" | "failed" = "completed",
+): Promise<string> {
   let text = "";
   for await (const event of turn.events) {
     if (event.type === "text_delta") {
@@ -77,7 +81,7 @@ async function turnText(turn: AcpRuntimeTurn): Promise<string> {
     }
   }
   const result = await turn.result;
-  assert.equal(result.status, "completed", JSON.stringify(result));
+  assert.equal(result.status, expectedStatus, JSON.stringify(result));
   return text;
 }
 
@@ -110,7 +114,7 @@ test("one runtime isolates concurrent session servers and turn permission callba
           },
         }),
       );
-      assert.deepEqual(await Promise.all(turns.map(turnText)), [
+      assert.deepEqual(await Promise.all(turns.map((turn) => turnText(turn))), [
         "permission selected:allow",
         "permission selected:reject",
       ]);
@@ -170,6 +174,158 @@ test("session servers are resolved again for reconnect and controls without ente
       mcpServers: ({ sessionKey }) => [
         { name: `${sessionKey}-${revision}`, command: "fixture-tool", args: [], env: [] },
       ],
+    },
+  );
+});
+
+test(
+  "one runtime isolates session file permissions and refreshes policy only on reconnect",
+  { timeout: 15_000 },
+  async () => {
+    let allowWrites = true;
+    await withRuntime(
+      async ({ runtime, ensure, root }) => {
+        const [delegated, classic] = await Promise.all([ensure("delegated"), ensure("classic")]);
+        const entered = deferred<void>();
+        let requests = 0;
+        const texts = await Promise.all(
+          [delegated, classic].map((handle) =>
+            turnText(
+              runtime.startTurn({
+                ...prompt,
+                handle,
+                text: `permission-write ${handle.sessionKey}.txt approved`,
+                onPermissionRequest: async () => {
+                  if (++requests === 2) {
+                    entered.resolve();
+                  }
+                  await entered.promise;
+                  return { outcome: "allow_once" };
+                },
+              }),
+              handle === delegated ? "completed" : "failed",
+            ),
+          ),
+        );
+        assert.match(texts[1], /error:/);
+        assert.equal(await fs.readFile(path.join(root, "delegated.txt"), "utf8"), "approved");
+        await assert.rejects(fs.readFile(path.join(root, "classic.txt")), { code: "ENOENT" });
+        await fs.unlink(path.join(root, "delegated.txt"));
+
+        assert.equal(
+          await turnText(
+            runtime.startTurn({
+              ...prompt,
+              handle: delegated,
+              text: "permission-write delegated.txt unowned",
+            }),
+          ),
+          "permission cancelled",
+        );
+        await assert.rejects(fs.readFile(path.join(root, "delegated.txt")), { code: "ENOENT" });
+
+        // A turn callback that declines to decide still falls through to mode
+        // policy, not the session's default cancellation callback.
+        for (const onPermissionRequest of [
+          async () => undefined,
+          async () => {
+            throw new Error("host unavailable");
+          },
+        ]) {
+          await turnText(
+            runtime.startTurn({
+              ...prompt,
+              handle: delegated,
+              text: "permission-write delegated.txt fallback",
+              onPermissionRequest,
+            }),
+          );
+          assert.equal(await fs.readFile(path.join(root, "delegated.txt"), "utf8"), "fallback");
+          await fs.unlink(path.join(root, "delegated.txt"));
+        }
+
+        allowWrites = false;
+        const approved = {
+          ...prompt,
+          handle: delegated,
+          text: "permission-write delegated.txt retained",
+          onPermissionRequest: async () => ({ outcome: "allow_once" as const }),
+        };
+        await turnText(runtime.startTurn(approved));
+        assert.equal(await fs.readFile(path.join(root, "delegated.txt"), "utf8"), "retained");
+        await fs.unlink(path.join(root, "delegated.txt"));
+
+        await runtime.close({ handle: delegated, reason: "reconnect with current policy" });
+        assert.match(await turnText(runtime.startTurn(approved)), /error:/);
+        await assert.rejects(fs.readFile(path.join(root, "delegated.txt")), { code: "ENOENT" });
+      },
+      {
+        permissionMode: "approve-reads",
+        nonInteractivePermissions: "fail",
+        onPermissionRequest: async () => ({ outcome: "allow_once" }),
+        sessionPermissions: ({ sessionKey }) =>
+          sessionKey === "delegated"
+            ? {
+                permissionMode: allowWrites ? "approve-all" : "deny-all",
+                onPermissionRequest: async () => ({ outcome: "cancel" }),
+              }
+            : undefined,
+      },
+    );
+  },
+);
+
+test("control and turn reconnects resolve session permissions without borrowing turn approval", async () => {
+  let allowWithoutTurn = false;
+  await withRuntime(
+    async ({ runtime, ensure, root }) => {
+      const handle = await ensure("control");
+      const effect = path.join(root, "control.txt");
+      await runtime.close({ handle, reason: "release initialized client" });
+      await runtime.setConfigOption({ handle, key: "model", value: "fast-model" });
+      await assert.rejects(fs.readFile(effect), { code: "ENOENT" });
+
+      allowWithoutTurn = true;
+      await runtime.setConfigOption({ handle, key: "model", value: "smart-model" });
+      assert.equal(await fs.readFile(effect, "utf8"), "loaded");
+      await fs.unlink(effect);
+
+      allowWithoutTurn = false;
+      let contentAtApproval: string | null | undefined;
+      const turn = runtime.startTurn({
+        ...prompt,
+        handle,
+        text: "permission-write control.txt prompted",
+        onPermissionRequest: async () => {
+          contentAtApproval = await fs.readFile(effect, "utf8").catch(() => null);
+          return { outcome: "allow_once" };
+        },
+      });
+      await turnText(turn);
+      assert.equal(contentAtApproval, null);
+      assert.equal(await fs.readFile(effect, "utf8"), "prompted");
+    },
+    {
+      agentRegistry: createAgentRegistry({
+        overrides: {
+          fixture: [
+            process.execPath,
+            MOCK_AGENT_PATH,
+            "--advertise-models",
+            "--load-session-action",
+            "permission-write control.txt loaded",
+          ],
+        },
+      }),
+      sessionPermissions: ({ sessionKey }) =>
+        sessionKey === "control"
+          ? {
+              permissionMode: "approve-all",
+              onPermissionRequest: async () => ({
+                outcome: allowWithoutTurn ? "allow_once" : "cancel",
+              }),
+            }
+          : undefined,
     },
   );
 });

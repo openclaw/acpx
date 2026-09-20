@@ -62,6 +62,7 @@ type MockAgentOptions = {
   loadSessionNotFound: boolean;
   resumeSessionNotFound: boolean;
   loadSessionFailsOnEmpty: boolean;
+  loadSessionAction?: string;
   setSessionModeFails: boolean;
   setSessionModeInvalidParams: boolean;
   setSessionConfigInvalidParams: boolean;
@@ -387,6 +388,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let loadSessionNotFound = false;
   let resumeSessionNotFound = false;
   let loadSessionFailsOnEmpty = false;
+  let loadSessionAction: string | undefined;
   let setSessionModeFails = false;
   let setSessionModeInvalidParams = false;
   let setSessionConfigInvalidParams = false;
@@ -414,6 +416,13 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
 
     if (token === "--supports-load-session") {
       supportsLoadSession = true;
+      continue;
+    }
+
+    if (token === "--load-session-action") {
+      supportsLoadSession = true;
+      loadSessionAction = parseOptionValue(argv, index + 1, token);
+      index += 1;
       continue;
     }
 
@@ -624,6 +633,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     loadSessionNotFound,
     resumeSessionNotFound,
     loadSessionFailsOnEmpty,
+    loadSessionAction,
     setSessionModeFails,
     setSessionModeInvalidParams,
     setSessionConfigInvalidParams,
@@ -909,6 +919,14 @@ class MockAgent implements Agent {
       ...(existing ?? createSessionState(false)),
       mcpServers: params.mcpServers,
     });
+
+    if (this.options.loadSessionAction) {
+      await this.handlePrompt(
+        params.sessionId,
+        this.options.loadSessionAction,
+        new AbortController().signal,
+      );
+    }
 
     if (this.options.replayLoadSessionUpdates) {
       await this.sendAssistantMessage(params.sessionId, this.options.loadReplayText);
@@ -1405,6 +1423,18 @@ class MockAgent implements Agent {
       });
 
       return `read complete: ${filePath}`;
+    }
+
+    if (text.startsWith("permission-write ")) {
+      const write = text.slice("permission-write ".length);
+      const permission = await this.handlePrompt(sessionId, `permission edit ${write}`, signal);
+      return permission === "permission selected:allow"
+        ? await this.handlePrompt(
+            sessionId,
+            `write ${path.resolve(write.slice(0, write.indexOf(" ")))} ${write.slice(write.indexOf(" ") + 1)}`,
+            signal,
+          )
+        : permission;
     }
 
     if (text.startsWith("write ")) {

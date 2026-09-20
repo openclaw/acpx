@@ -75,6 +75,8 @@ export type {
   AcpRuntimePlanEntry,
   AcpRuntimePromptMode,
   AcpRuntimeSessionMode,
+  AcpRuntimeSessionContext,
+  AcpRuntimeSessionPermissions,
   AcpRuntimeSessionModels,
   AcpRuntimeSessionUsage,
   AcpRuntimeStatus,

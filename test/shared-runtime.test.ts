@@ -518,12 +518,20 @@ test("concurrent shared and CLI ensure resolve one named session", async () => {
 
 test("shared mode rejects in-process callbacks and unsupported session modes", async () => {
   await withSharedSession(async ({ runtime, handle, home }) => {
-    const unsupportedOptions = {
-      cwd: home,
-      permissionMode: "deny-all" as const,
-      onPermissionRequest: () => "approve",
-    };
-    assert.throws(() => createSharedAcpRuntime(unsupportedOptions), /in-process/u);
+    for (const callbacks of [
+      { onPermissionRequest: () => "approve" },
+      { sessionPermissions: () => ({ permissionMode: "approve-all" }) },
+    ]) {
+      assert.throws(
+        () =>
+          createSharedAcpRuntime({
+            cwd: home,
+            permissionMode: "deny-all",
+            ...callbacks,
+          }),
+        /in-process/u,
+      );
+    }
     assert.throws(
       () => runtime.ensureSession({ sessionKey: "one", agent: "mock", mode: "oneshot" }),
       /persistent mode/u,
