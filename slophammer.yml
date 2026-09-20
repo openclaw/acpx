@@ -33,6 +33,7 @@ typescript:
         - src/permissions
         - src/prompt-content
         - src/spawn-command-options
+        - src/state-files
         - src/types
         - src/version
     - from: src/cli

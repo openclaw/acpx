@@ -1,6 +1,11 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { tempFile } from "@openclaw/fs-safe/advanced";
+
+export function acpxHomeDir(): string {
+  return path.join(os.homedir(), ".acpx");
+}
 
 export async function writePrivateFile(
   filePath: string,

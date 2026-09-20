@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { AcpxOperationalError } from "../errors.js";
-import { acpxHomeDir } from "../session/event-log.js";
+import { acpxHomeDir } from "../state-files.js";
 
 export class AdditionalDirectoriesUnsupportedError extends AcpxOperationalError {
   constructor(agentCommand: string | undefined) {
