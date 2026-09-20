@@ -2151,7 +2151,7 @@ test("integration: set model rejects with clear error on ACP invalid params", as
           cwd,
           "set",
           "model",
-          "bad-model",
+          "fast-model",
         ],
         homeDir,
       );

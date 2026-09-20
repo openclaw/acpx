@@ -175,19 +175,25 @@ test("Cursor model validation keeps ambiguous suffix variants strict", () => {
   assert.throws(
     () =>
       assertRequestedModelSupported({
-        requestedModel: "composer-2.5",
+        requestedModel: "provider/composer-2.5",
         models: {
           configId: "model",
-          currentModelId: "composer-2.5[fast=false]",
+          currentModelId: "provider/composer-2.5[fast=false]",
           availableModels: [
-            { modelId: "composer-2.5[fast=false]", name: "Composer 2.5" },
-            { modelId: "composer-2.5[fast=true]", name: "Composer 2.5 Fast" },
+            { modelId: "provider/composer-2.5[fast=false]", name: "Composer 2.5" },
+            { modelId: "provider/composer-2.5[fast=true]", name: "Composer 2.5 Fast" },
+            { modelId: "composer-2.5[fast=true]", name: "Other model family" },
           ],
         },
         agentCommand: "cursor-agent acp",
         context: "apply",
       }),
-    /did not advertise that model/,
+    (error: unknown) => {
+      assert.ok(isRequestedModelUnsupportedError(error));
+      assert.equal(error.reason, "unadvertised-model");
+      assert.equal(error.ambiguous, true);
+      return true;
+    },
   );
 });
 

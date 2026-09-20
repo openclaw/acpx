@@ -1480,11 +1480,12 @@ export class AcpRuntimeManager {
       configId,
     );
     // Notifications can remove the model control before the setter resolves.
-    const modelConfigId = advertisedModelState(turn.acpxState)?.configId;
+    const models = advertisedModelState(turn.acpxState);
     const response = await turn.client.setSessionConfigOption(
       turn.activeSessionId,
       resolvedConfigId,
       value,
+      models,
       authority,
     );
     turn.acpxState = applyConfigOptionSelection(
@@ -1492,7 +1493,7 @@ export class AcpRuntimeManager {
       resolvedConfigId,
       value,
       response,
-      modelConfigId,
+      models?.configId,
     );
     return { configId: resolvedConfigId, response };
   }
@@ -1836,14 +1837,20 @@ export class AcpRuntimeManager {
       sessionMode,
       async ({ client, sessionId, record: connectedRecord }) => {
         const configId = resolveSupportedConfigOptionId(connectedRecord, key);
-        const modelConfigId = advertisedModelState(connectedRecord.acpx)?.configId;
-        const response = await client.setSessionConfigOption(sessionId, configId, value, authority);
+        const models = advertisedModelState(connectedRecord.acpx);
+        const response = await client.setSessionConfigOption(
+          sessionId,
+          configId,
+          value,
+          models,
+          authority,
+        );
         connectedRecord.acpx = applyConfigOptionSelection(
           connectedRecord.acpx,
           configId,
           value,
           response,
-          modelConfigId,
+          models?.configId,
         );
         return response;
       },

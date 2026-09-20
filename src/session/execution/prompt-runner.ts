@@ -156,8 +156,9 @@ export async function runSessionSetConfigOptionDirect(
     buildDirectConnectedSessionOptions(
       { ...options, replacingConfigOption: { key: options.configId } },
       async ({ client, sessionId, record }) => {
+        const models = advertisedModelState(record.acpx);
         const response = await withTimeout(
-          client.setSessionConfigOption(sessionId, options.configId, options.value),
+          client.setSessionConfigOption(sessionId, options.configId, options.value, models),
           options.timeoutMs,
         );
         record.acpx = applyConfigOptionSelection(
@@ -165,6 +166,7 @@ export async function runSessionSetConfigOptionDirect(
           options.configId,
           options.value,
           response,
+          models?.configId,
         );
         return response;
       },

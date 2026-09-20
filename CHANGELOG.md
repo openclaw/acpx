@@ -26,6 +26,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Sessions/controls: update the retained adapter while idle, save accepted mode/model/configuration changes before acknowledgement, and preserve them across prompt completion, timeout cleanup, and close.
 
+- Model controls: validate selections against the connected session's advertised models, including after reconnect, while preserving exact IDs, Cursor's unique aliases, and the accepted configuration response.
+
 ## 0.17.1 - 2026-09-19
 
 **Highlights:** Configured runtime initialization deadlines now stop unresponsive agents and clean up abandoned launches safely. Embedding hosts gain model inspection and session-specific permissions. Antigravity joins the built-in agents; its fixed-choice questions require an interactive client, including for existing custom launchers.

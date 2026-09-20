@@ -466,13 +466,11 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
 
     if (token === "--set-session-model-fails") {
       setSessionModelFails = true;
-      advertiseModels = true;
       continue;
     }
 
     if (token === "--set-session-model-invalid-params") {
       setSessionModelInvalidParams = true;
-      advertiseModels = true;
       continue;
     }
 
@@ -640,7 +638,9 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     setSessionModelFails,
     setSessionModelInvalidParams,
     advertiseConfigOptions,
-    advertiseModels,
+    advertiseModels:
+      advertiseModels ||
+      ((setSessionModelFails || setSessionModelInvalidParams) && !advertiseLegacyModels),
     advertiseModelProvider,
     advertiseLegacyModels,
     advertiseCommandsAfterNew,

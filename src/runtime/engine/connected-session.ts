@@ -97,7 +97,12 @@ function createActiveSessionController(params: {
       return response;
     },
     setSessionConfigOption: async (configId: string, value: string) => {
-      return await params.client.setSessionConfigOption(getActiveSessionId(), configId, value);
+      return await params.client.setSessionConfigOption(
+        getActiveSessionId(),
+        configId,
+        value,
+        advertisedModelState(params.record.acpx),
+      );
     },
   };
 }

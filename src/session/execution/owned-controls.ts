@@ -79,18 +79,24 @@ export function createOwnedSessionControls(options: OwnedControlOptions): QueueO
       );
     },
     setSessionConfigOption: async (configId, value, deadline) => {
-      const modelConfigId = advertisedModelState(options.record.acpx)?.configId;
+      const models = advertisedModelState(options.record.acpx);
       return await acceptControl(
         options,
         (authority) =>
-          options.client.setSessionConfigOption(options.sessionId(), configId, value, authority),
+          options.client.setSessionConfigOption(
+            options.sessionId(),
+            configId,
+            value,
+            models,
+            authority,
+          ),
         (response) => {
           options.record.acpx = applyConfigOptionSelection(
             options.record.acpx,
             configId,
             value,
             response,
-            modelConfigId,
+            models?.configId,
           );
         },
         deadline,

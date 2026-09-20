@@ -39,7 +39,7 @@ import type {
   SessionRecord,
   SessionSendResult,
 } from "../../types.js";
-import { applyModelSelection } from "../config-options.js";
+import { applyConfigOptionsToState, applyModelSelection } from "../config-options.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,
@@ -52,7 +52,7 @@ import { SessionEventWriter } from "../events.js";
 import type { SessionWatchResult } from "../journal.js";
 import { LiveSessionCheckpoint } from "../live-checkpoint.js";
 import { applyRequestedModelIfAdvertised } from "../model-application.js";
-import { advertisedModelState } from "../model-state.js";
+import { advertisedModelState, applyAdvertisedModelState } from "../model-state.js";
 import { absolutePath, isoNow, resolveSessionRecord, writeSessionRecord } from "../persistence.js";
 import { type QueueOwnerMessage, type QueueTask } from "../queue/ipc.js";
 import { type QueueOwnerActiveSessionController } from "../queue/owner-turn-controller.js";
@@ -1188,6 +1188,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
   const shouldMarkAcpErrorsEmitted = rendersAcpErrors(options.errorEmissionPolicy);
   let promptTurnActive = false;
   let promptTurnHadSideEffects = false;
+  let controlState: NonNullable<SessionRecord["acpx"]> = {};
   const acpErrors = new AcpErrorTracker();
   const client = new AcpClient({
     agentCommand: options.agentCommand,
@@ -1208,6 +1209,9 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
       acpErrors.observe(output, direction, message);
     },
     onSessionUpdate: (notification) => {
+      if (notification.update.sessionUpdate === "config_option_update") {
+        controlState = applyConfigOptionsToState(controlState, notification.update.configOptions);
+      }
       if (promptTurnActive) {
         promptTurnHadSideEffects = true;
       }
@@ -1270,7 +1274,11 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
           );
         });
         const sessionId = createdSession.sessionId;
-        await applyRequestedModelIfAdvertised({
+        if (createdSession.models) {
+          applyAdvertisedModelState(controlState, createdSession.models);
+        }
+        controlState = applyConfigOptionsToState(controlState, createdSession.configOptions ?? []);
+        const modelApplication = await applyRequestedModelIfAdvertised({
           client,
           sessionId,
           requestedModel: options.sessionOptions?.model,
@@ -1281,11 +1289,23 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
             ? undefined
             : (message) => process.stderr.write(`[acpx] warning: ${message}\n`),
         });
+        if (modelApplication.response) {
+          controlState = applyConfigOptionsToState(
+            controlState,
+            modelApplication.response.configOptions,
+          );
+        }
         for (const configOption of options.configOptions ?? []) {
-          await withTimeout(
-            client.setSessionConfigOption(sessionId, configOption.configId, configOption.value),
+          const response = await withTimeout(
+            client.setSessionConfigOption(
+              sessionId,
+              configOption.configId,
+              configOption.value,
+              advertisedModelState(controlState),
+            ),
             options.timeoutMs,
           );
+          controlState = applyConfigOptionsToState(controlState, response.configOptions);
         }
 
         output.setContext({

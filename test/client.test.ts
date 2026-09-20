@@ -1064,14 +1064,22 @@ for (const scenario of [
     name: "AcpClient setSessionModel uses the model session config option",
     client: {},
     model: "GPT-5-2",
-    control: { configId: "model" },
+    control: {
+      configId: "model",
+      currentModelId: "GPT-5-2",
+      availableModels: [{ modelId: "GPT-5-2", name: "GPT-5-2" }],
+    },
     expected: "GPT-5-2",
   },
   {
     name: "AcpClient setSessionModel honors an advertised custom config id",
     client: {},
     model: "GPT-5-2",
-    control: { configId: "llm" },
+    control: {
+      configId: "llm",
+      currentModelId: "GPT-5-2",
+      availableModels: [{ modelId: "GPT-5-2", name: "GPT-5-2" }],
+    },
     expected: "GPT-5-2",
   },
   {
@@ -1080,6 +1088,7 @@ for (const scenario of [
     model: "composer-2.5",
     control: {
       configId: "model",
+      currentModelId: "composer-2.5[fast=false]",
       availableModels: [{ modelId: "composer-2.5[fast=false]", name: "Composer 2.5" }],
     },
     expected: "composer-2.5[fast=false]",
@@ -1107,10 +1116,44 @@ test("AcpClient setSessionModel rejects sessions without advertised model contro
   const client = makeClient();
 
   await assert.rejects(
-    async () => await client.setSessionModel("session-456", "GPT-5-2"),
+    async () => await client.setSessionModel("session-456", "GPT-5-2", undefined),
     /did not advertise a model config option or legacy session\/set_model support/,
   );
 });
+
+for (const control of ["model", "config"] as const) {
+  test(`AcpClient ${control} control preserves authority failures before model validation`, async (t) => {
+    const fixture = createClientFixture(t);
+    const failure = new Error("model authority revoked");
+    const models = {
+      configId: "model",
+      currentModelId: "known-model",
+      availableModels: [{ modelId: "known-model", name: "Known model" }],
+    };
+    for (const authority of [
+      { signal: AbortSignal.abort(failure) },
+      {
+        assertActive: () => {
+          throw failure;
+        },
+      },
+    ]) {
+      await assert.rejects(
+        control === "model"
+          ? fixture.client.setSessionModel("session-456", "unknown-model", models, authority)
+          : fixture.client.setSessionConfigOption(
+              "session-456",
+              "model",
+              "unknown-model",
+              models,
+              authority,
+            ),
+        (error: unknown) => error === failure,
+      );
+      assert.equal(fixture.messages.length, 0);
+    }
+  });
+}
 
 test("AcpClient setSessionModel preserves explicitly advertised legacy model control", async (t) => {
   const fixture = createClientFixture(t);
@@ -1131,7 +1174,7 @@ test("AcpClient setSessionModel preserves explicitly advertised legacy model con
   const result = await created;
   assert.equal(result.models?.configId, undefined);
   const changed = fixture.track(
-    fixture.client.setSessionModel(result.sessionId, "alternate-model"),
+    fixture.client.setSessionModel(result.sessionId, "alternate-model", result.models),
   );
   const request = await fixture.message(1);
   assert("method" in request);

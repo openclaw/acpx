@@ -33,11 +33,19 @@ export type RequestedModelUnsupportedReason = (typeof REQUESTED_MODEL_UNSUPPORTE
 export class RequestedModelUnsupportedError extends Error {
   readonly code = REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE;
   readonly reason: RequestedModelUnsupportedReason;
+  readonly ambiguous?: true;
 
-  constructor(message: string, reason: RequestedModelUnsupportedReason) {
+  constructor(
+    message: string,
+    reason: RequestedModelUnsupportedReason,
+    details?: { ambiguous?: true },
+  ) {
     super(message);
     this.name = "RequestedModelUnsupportedError";
     this.reason = reason;
+    if (details?.ambiguous) {
+      this.ambiguous = true;
+    }
   }
 }
 
@@ -236,6 +244,13 @@ export function resolveRequestedModelId(params: {
   const candidates = params.models.availableModels
     .map((model) => model.modelId)
     .filter((modelId) => modelId.startsWith(`${params.requestedModel}[`));
+  if (candidates.length > 1) {
+    throw new RequestedModelUnsupportedError(
+      `Cannot select model "${params.requestedModel}": multiple advertised Cursor models match (${candidates.join(", ")}). Use an exact advertised model ID.`,
+      "unadvertised-model",
+      { ambiguous: true },
+    );
+  }
   return candidates.length === 1 ? candidates[0] : params.requestedModel;
 }
 

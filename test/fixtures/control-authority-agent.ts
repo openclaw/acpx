@@ -19,9 +19,20 @@ let mode = "auto";
 let effort = "low";
 let controlCount = 0;
 
+function modelIds(): string[] {
+  return existsSync(path.join(directory, "parameterized-models"))
+    ? [
+        "default-model",
+        "selected[fast=true]",
+        "provider/selected[fast=true]",
+        ...(existsSync(path.join(directory, "ambiguous-models")) ? ["selected[fast=false]"] : []),
+      ]
+    : ["default-model", "first-model", "second-model"];
+}
+
 function configOptions(): SessionConfigOption[] {
   return [
-    ...(route === "config"
+    ...(route === "config" && !existsSync(path.join(directory, "remove-model-control"))
       ? [
           {
             id: "llm",
@@ -29,7 +40,7 @@ function configOptions(): SessionConfigOption[] {
             category: "model",
             type: "select" as const,
             currentValue: model,
-            options: ["default-model", "first-model", "second-model"].map((value) => ({
+            options: modelIds().map((value) => ({
               value,
               name: value,
             })),
@@ -57,7 +68,7 @@ function sessionState() {
       ? {
           models: {
             currentModelId: model,
-            availableModels: ["default-model", "first-model", "second-model"].map((modelId) => ({
+            availableModels: modelIds().map((modelId) => ({
               modelId,
               name: modelId,
             })),
@@ -94,6 +105,7 @@ const agent: Agent = {
   },
   async authenticate() {},
   async newSession() {
+    await fs.appendFile(path.join(directory, "sessions.jsonl"), '"new"\n');
     if (existsSync(path.join(directory, "hold-new"))) {
       await fs.writeFile(path.join(directory, "new-started"), "started");
       while (!existsSync(path.join(directory, "release-new"))) {
@@ -103,6 +115,7 @@ const agent: Agent = {
     return { sessionId: "authority-session", ...sessionState() };
   },
   async loadSession() {
+    await fs.appendFile(path.join(directory, "sessions.jsonl"), '"load"\n');
     if (existsSync(path.join(directory, "hold-load"))) {
       await fs.writeFile(path.join(directory, "load-started"), "started");
       while (!existsSync(path.join(directory, "release-load"))) {
@@ -112,6 +125,12 @@ const agent: Agent = {
     return sessionState();
   },
   async prompt({ sessionId, prompt }) {
+    if (prompt.some((part) => part.type === "text" && part.text === "refresh-models")) {
+      await connection.sessionUpdate({
+        sessionId,
+        update: { sessionUpdate: "config_option_update", configOptions: configOptions() },
+      });
+    }
     const entry = JSON.stringify({ sessionId, prompt }) + "\n";
     await fs.appendFile(path.join(directory, "prompts.jsonl"), entry);
     await fs.writeFile(path.join(directory, "prompt-started"), "started");
@@ -135,6 +154,9 @@ const agent: Agent = {
     await control("session/set_config_option", value, () => {
       if (configId === "llm") {
         model = value;
+        if (existsSync(path.join(directory, "parameterized-models"))) {
+          effort = "low";
+        }
       } else {
         effort = value;
       }

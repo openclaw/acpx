@@ -124,7 +124,9 @@ When embedding ACPX, import `createAgentRegistry` from `acpx/agent-registry` and
 
 Custom registry names such as `constructor` and `__proto__` work with resolution, listing, and inspection. Without an explicit registry entry, unknown names remain raw commands.
 
-Use `getStatus({ handle }).models.availableModels` when present for native display names, and pass the selected opaque model ID unchanged to `setModel`. Use `prepareFreshSession({ handle })` to persist a fresh-session request across restart, then ensure without `resumeSessionId`. Ordinary `close` retains session continuity; explicit remote discard requires the adapter’s optional close capability.
+Use `getStatus({ handle }).models.availableModels` when present for native display names, and pass the selected opaque model ID, including any slashes, unchanged to `setModel`. Model changes validate against the connected session's advertised models, including after reconnect. `setConfigOption` applies the same validation when `key` names the advertised model option and returns that operation's native ACP response with the accepted `configOptions`. Use the response to update model and reasoning controls together. Embedded callers can identify unknown or ambiguous model failures with `isRequestedModelUnsupportedError(error)` and `error.reason === "unadvertised-model"`. When a Cursor alias matches multiple advertised variants, the error also has `ambiguous: true`; a selector with no advertised match omits that flag. Claude ACP retains its forwarding exception for selectors absent from its advertised list.
+
+Use `prepareFreshSession({ handle })` to persist a fresh-session request across restart, then ensure without `resumeSessionId`. Ordinary `close` retains session continuity; explicit remote discard requires the adapter’s optional close capability.
 
 For installed entrypoints and prerequisites, read the matching [agent guide](https://github.com/openclaw/acpx/tree/main/agents). For resolver callbacks, custom command overrides, and lifecycle details, read [embedded agent discovery](https://github.com/openclaw/acpx/blob/main/docs/session-control.md#embedded-agent-discovery).
 
@@ -208,7 +210,7 @@ Behavior:
 - `set`: calls ACP `session/set_config_option`.
 - Current codex-acp releases expose `model` and `reasoning_effort` as separate config options.
 - `--model <id>`: Claude-compatible adapters may consume session creation metadata; other agents must advertise a model config option or legacy `models` metadata.
-- `set model <id>`: uses `session/set_config_option` for advertised model config options and preserves `session/set_model` for explicitly advertised legacy models.
+- `set model <id>`: validates against the connected session's advertised models, uses `session/set_config_option` for model config options, and preserves `session/set_model` for explicitly advertised legacy models. Claude Code still accepts or rejects selectors absent from its advertised list.
 - Model switches can change or remove reasoning-effort controls. ACPX reconciles saved non-mode selections with the accepted response; select a supported effort again if needed.
 - After reconnect, ACPX restores the saved model when advertised and replays saved config selections before prompting. A replay failure is reported instead of silently using defaults.
 - `set-mode`/`set` route through queue-owner IPC when active, otherwise reconnect directly.
@@ -298,8 +300,11 @@ Behavior:
 - `--no-terminal`: do not advertise the ACP terminal capability — useful for review-only or sandboxed agent invocations
 - `--verbose`: verbose ACP/debug logs to stderr
 
-Cursor may advertise bracketed model ids such as `composer-2.5[fast=false]`. A bare Cursor
-model name is normalized only when exactly one advertised bracketed variant matches it.
+Cursor may advertise bracketed model IDs such as `composer-2.5[fast=false]`. An exact
+advertised ID always wins. Only Cursor accepts a bare model name through a unique
+advertised bracketed variant; unknown or ambiguous names are rejected before the
+model change. This rule uses the current connected catalog for `set model`, embedded
+`setModel`, and model selections through `setConfigOption`, including after reconnect.
 
 Permission flags are mutually exclusive.
 

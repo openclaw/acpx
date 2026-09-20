@@ -342,7 +342,7 @@ for (const route of ["config", "legacy"] as const) {
       await fs.writeFile(path.join(root, "received.jsonl"), "");
       await fs.writeFile(path.join(root, "effects.jsonl"), "");
       await client.start();
-      const { sessionId } = await client.createSession();
+      const { sessionId, models } = await client.createSession();
       const error = new Error("admission revoked before request microtask");
       const cancelled = new AbortController();
       let active = true;
@@ -354,7 +354,7 @@ for (const route of ["config", "legacy"] as const) {
           }
         },
       };
-      const pending = client.setSessionModel(sessionId, "second-model", undefined, authority).then(
+      const pending = client.setSessionModel(sessionId, "second-model", models, authority).then(
         () => undefined,
         (failure: unknown) => failure,
       );

@@ -115,7 +115,7 @@ import { resolveClientCapabilities, resolveClientInfo } from "./client-protocol.
 import { codexPermissionNotice, preferCodexPermissionRefusal } from "./codex-compat.js";
 import { extractAcpError } from "./error-shapes.js";
 import {
-  modelStateFromConfigOptions,
+  assertRequestedModelSupported,
   modelStateFromSessionResponse,
   RequestedModelUnsupportedError,
   resolveRequestedModelId,
@@ -345,10 +345,6 @@ type SessionUpdateSuppressionState = {
   suppressReplaySessionUpdateMessages: boolean;
 };
 
-type ModelControl = { kind: "config_option"; configId: string } | { kind: "legacy_set_model" };
-type ModelControlOverride = Pick<SessionModelState, "configId"> &
-  Partial<Pick<SessionModelState, "availableModels">>;
-
 export type AgentExitInfo = {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
@@ -444,8 +440,6 @@ export class AcpClient {
   private lastKnownPid?: number;
   private readonly promptPermissionFailures = new Map<string, PermissionPromptUnavailableError>();
   private readonly pendingConnectionRequests = new Set<PendingConnectionRequest>();
-  private readonly modelConfigIds = new Map<string, string>();
-  private readonly legacyModelSessionIds = new Set<string>();
 
   constructor(options: AcpClientOptions) {
     this.options = {
@@ -1036,7 +1030,6 @@ export class AcpClient {
     this.loadedSessionId = result.sessionId;
     const configOptions = normalizeResponseConfigOptions(result);
     const models = modelStateFromSessionResponse({ configOptions, response: result });
-    this.rememberSessionModels(result.sessionId, models);
     await this.captureAgentDescendants(this.agent);
 
     return {
@@ -1086,7 +1079,6 @@ export class AcpClient {
 
     this.loadedSessionId = sessionId;
     const result = toReconnectedSessionResult(response);
-    this.updateRememberedSessionModels(sessionId, result);
     await this.captureAgentDescendants(this.agent);
     return result;
   }
@@ -1104,7 +1096,6 @@ export class AcpClient {
 
     this.loadedSessionId = sessionId;
     const result = toReconnectedSessionResult(response);
-    this.updateRememberedSessionModels(sessionId, result);
     await this.captureAgentDescendants(this.agent);
     return result;
   }
@@ -1310,15 +1301,19 @@ export class AcpClient {
     sessionId: string,
     configId: string,
     value: string,
+    models: SessionModelState | undefined,
     authority?: AcpControlAuthority,
   ): Promise<SetSessionConfigOptionResponse> {
+    assertControlAuthority(authority);
+    const resolvedValue =
+      models?.configId === configId ? this.resolveSessionModelId(value, models) : value;
     const connection = this.getConnection();
     return await this.runConnectionRequest(
       () =>
         connection.agent.request(methods.agent.session.setConfigOption, {
           sessionId,
           configId,
-          value,
+          value: resolvedValue,
         }),
       authority,
       (error) =>
@@ -1333,31 +1328,35 @@ export class AcpClient {
   async setSessionModel(
     sessionId: string,
     modelId: string,
-    controlOverride?: ModelControlOverride,
+    models: SessionModelState | undefined,
     authority?: AcpControlAuthority,
   ): Promise<SetSessionConfigOptionResponse | undefined> {
-    const control = this.resolveModelControl(sessionId, controlOverride);
-    if (!control) {
+    assertControlAuthority(authority);
+    if (!models) {
       throw new RequestedModelUnsupportedError(
         `Cannot set model "${modelId}": the ACP session did not advertise a model config option or legacy session/set_model support.`,
         "missing-capability",
       );
     }
-    const resolvedModelId = resolveRequestedModelId({
-      requestedModel: modelId,
-      models: controlOverride?.availableModels
-        ? { availableModels: controlOverride.availableModels }
-        : undefined,
-      agentCommand: this.options.agentCommand,
-    });
-    return control.kind === "config_option"
+    const resolvedModelId = this.resolveSessionModelId(modelId, models);
+    return models.configId
       ? await this.setSessionModelThroughConfig(
           sessionId,
           resolvedModelId,
-          control.configId,
+          models.configId,
           authority,
         )
       : await this.setSessionModelThroughLegacyMethod(sessionId, resolvedModelId, authority);
+  }
+
+  private resolveSessionModelId(modelId: string, models: SessionModelState): string {
+    const params = {
+      requestedModel: modelId,
+      models,
+      agentCommand: this.options.agentCommand,
+    };
+    assertRequestedModelSupported({ ...params, context: "apply" });
+    return resolveRequestedModelId(params);
   }
 
   private async setSessionModelThroughConfig(
@@ -1377,7 +1376,6 @@ export class AcpClient {
       authority,
       (error) => this.throwSessionModelError("session/set_config_option", modelId, error),
     );
-    this.rememberSessionModels(sessionId, modelStateFromConfigOptions(response.configOptions));
     return response;
   }
 
@@ -1422,44 +1420,6 @@ export class AcpClient {
     });
   }
 
-  private resolveModelControl(
-    sessionId: string,
-    controlOverride: ModelControlOverride | undefined,
-  ): ModelControl | undefined {
-    if (controlOverride) {
-      return controlOverride.configId
-        ? { kind: "config_option", configId: controlOverride.configId }
-        : { kind: "legacy_set_model" };
-    }
-    const configId = this.modelConfigIds.get(sessionId);
-    if (configId) {
-      return { kind: "config_option", configId };
-    }
-    return this.legacyModelSessionIds.has(sessionId) ? { kind: "legacy_set_model" } : undefined;
-  }
-
-  private rememberSessionModels(sessionId: string, models: SessionModelState | undefined): void {
-    if (!models) {
-      this.modelConfigIds.delete(sessionId);
-      this.legacyModelSessionIds.delete(sessionId);
-      return;
-    }
-    if (models.configId) {
-      this.modelConfigIds.set(sessionId, models.configId);
-      this.legacyModelSessionIds.delete(sessionId);
-      return;
-    }
-    this.modelConfigIds.delete(sessionId);
-    this.legacyModelSessionIds.add(sessionId);
-  }
-
-  private updateRememberedSessionModels(sessionId: string, result: SessionLoadResult): void {
-    const explicitConfigRemoval = result.configOptionsPresent && this.modelConfigIds.has(sessionId);
-    if (result.models || result.legacyModelMetadataPresent || explicitConfigRemoval) {
-      this.rememberSessionModels(sessionId, result.models);
-    }
-  }
-
   async cancel(sessionId: string): Promise<void> {
     const connection = this.getConnection();
     const owners = this.pendingPromptOwners.filter((owner) => owner.sessionId === sessionId);
@@ -1502,8 +1462,6 @@ export class AcpClient {
     if (this.loadedSessionId === sessionId) {
       this.loadedSessionId = undefined;
     }
-    this.modelConfigIds.delete(sessionId);
-    this.legacyModelSessionIds.delete(sessionId);
   }
 
   async listSessions(params: ListSessionsRequest = {}): Promise<ListSessionsResponse> {
@@ -1615,8 +1573,6 @@ export class AcpClient {
     this.permissionAbortControllers.clear();
     this.promptPermissionFailures.clear();
     this.loadedSessionId = undefined;
-    this.modelConfigIds.clear();
-    this.legacyModelSessionIds.clear();
     this.initResult = undefined;
     this.connection = undefined;
     this.agent = undefined;

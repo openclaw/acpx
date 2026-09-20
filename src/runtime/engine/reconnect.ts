@@ -335,6 +335,7 @@ async function replayDesiredConfigOptions(params: {
           params.sessionId,
           configId,
           value,
+          advertisedModelState(params.record.acpx),
           params.replay.authority,
         ),
         params.timeoutMs,
@@ -423,6 +424,14 @@ export async function connectAndLoadSession(
     pendingAgentSessionId,
     sessionModels,
   } = loadState;
+
+  applyReconnectedModelState(
+    record,
+    sessionModels,
+    loadState.configOptionsPresent,
+    loadState.legacyModelMetadataPresent,
+    createdFreshSession,
+  );
 
   const preferenceReplay = await replaySessionPreferences({
     client,
