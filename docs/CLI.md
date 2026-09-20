@@ -530,9 +530,19 @@ When a prompt is already in flight for a session, `acpx` uses a per-session queu
 6. if interrupted (`Ctrl+C`) during an active turn, `acpx` sends `session/cancel` first, waits briefly for cancelled completion, then force-kills only if needed
 
 Queue-owner records remain private across heartbeat updates. Shutdown finishes
-pending record updates before releasing ownership, and recovery checks the
-observed owner's generation again before terminating it or removing its files.
-Abandoned incomplete reservations remain recoverable after the stale-owner window.
+pending record updates and closes the IPC server before releasing ownership.
+Current clients serialize lease publication, heartbeat updates, and cleanup across
+processes, so stale recovery cannot remove a replacement owner's files. Recovery
+rechecks the owner's generation while dispatching each termination signal and
+requires confirmed process exit before removing abandoned files. Permission errors
+from process probes preserve the lease.
+
+Abandoned incomplete reservations remain recoverable after the stale-owner window;
+ambiguous mutation guards are preserved instead of being removed by age. Guard
+cleanup errors remain retryable on the next status or ownership operation. A live
+owner stops accepting work and shuts down normally if its guard cleanup fails.
+The exclusion guarantee requires current clients on the same machine; older
+clients that bypass the guard do not participate.
 
 ### Soft-close behavior
 

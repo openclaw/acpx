@@ -17,6 +17,7 @@ import readline from "node:readline";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { runSessionQueueOwner } from "../src/session/execution/queue-owner-runtime.js";
+import { QueueLeaseGuardSettlementError } from "../src/session/queue/lease-mutation.js";
 import { isProcessAlive } from "../src/session/queue/lease-store.js";
 import { queueLockFilePath, queueSocketPath } from "../src/session/queue/paths.js";
 import { extractAgentMessageChunkText } from "./jsonrpc-test-helpers.js";
@@ -140,6 +141,87 @@ function waitForProcessExit(
 }
 
 describe("queue owner lifecycle — graceful SIGTERM shutdown", () => {
+  for (const failureAt of ["initial", "interval", "queue-depth"] as const) {
+    it(
+      `settles ${failureAt} heartbeat guard failure after closing the server`,
+      { timeout: 15000 },
+      async (t) => {
+        await withTempHome("acpx-lifecycle-guard-", async (homeDir) => {
+          const cwd = path.join(homeDir, "workspace");
+          await fs.mkdir(cwd, { recursive: true });
+          const record = makeSessionRecord({
+            acpxRecordId: `guard-${failureAt}`,
+            acpSessionId: `guard-native-${failureAt}`,
+            agentCommand: `node ${JSON.stringify(MOCK_AGENT_PATH)}`,
+            cwd,
+          });
+          await writeSessionRecordFile(homeDir, record);
+          const lockPath = queueLockFilePath(record.acpxRecordId);
+          const socketPath = queueSocketPath(record.acpxRecordId);
+          let releases = 0;
+          const rm = fs.rm;
+          t.mock.method(fs, "rm", async (...args: Parameters<typeof fs.rm>) => {
+            if (String(args[0]).endsWith(`${path.basename(lockPath)}.guard`)) {
+              releases += 1;
+              if (releases === (failureAt === "initial" ? 2 : 3)) {
+                throw new Error("owner heartbeat release failed");
+              }
+            }
+            return await rm(...args);
+          });
+          let serverClosed = false;
+          const close = net.Server.prototype.close;
+          t.mock.method(
+            net.Server.prototype,
+            "close",
+            function (this: net.Server, callback?: (error?: Error) => void) {
+              return close.call(this, (error?: Error) => {
+                serverClosed = true;
+                callback?.(error);
+              });
+            },
+          );
+          const unlink = fs.unlink;
+          let removedLease = false;
+          t.mock.method(fs, "unlink", async (...args: Parameters<typeof fs.unlink>) => {
+            if (String(args[0]).endsWith(path.basename(lockPath))) {
+              assert.equal(serverClosed, true, "server close callback must precede lease release");
+              removedLease = true;
+            }
+            return await unlink(...args);
+          });
+          const running = assert.rejects(
+            runSessionQueueOwner({
+              sessionId: record.acpxRecordId,
+              permissionMode: "approve-reads",
+              ttlMs: 0,
+            }),
+            QueueLeaseGuardSettlementError,
+          );
+          let socket: net.Socket | undefined;
+          try {
+            if (failureAt === "queue-depth") {
+              await waitUntil(async () => releases >= 2);
+              socket = await connectQueueSocket(socketPath);
+              socket.on("error", () => {});
+              socket.resume();
+              socket.write(
+                `${JSON.stringify({ type: "submit_prompt", requestId: "guard-failure", message: "sleep 10000", permissionMode: "approve-reads", waitForCompletion: true })}\n`,
+              );
+            }
+            await running;
+            assert.equal(serverClosed, true);
+            assert.equal(removedLease, true);
+            assert.equal(await fileExists(lockPath), false);
+            assert.equal(await fileExists(`${lockPath}.guard`), false);
+          } finally {
+            socket?.destroy();
+          }
+        });
+      },
+    );
+  }
+
   it("releases its lease when session setup fails before the socket starts", async () => {
     await withTempHome("acpx-lifecycle-setup-", async (homeDir) => {
       const sessionId = "missing-owner-session";

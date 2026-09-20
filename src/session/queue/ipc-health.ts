@@ -1,5 +1,10 @@
 import { connectToQueueOwner } from "./ipc-transport.js";
-import { readQueueOwnerRecord, readQueueOwnerStatus } from "./lease-store.js";
+import { settlePendingQueueLeaseGuard } from "./lease-mutation.js";
+import {
+  readQueueOwnerRecord,
+  resolveUsableQueueOwner,
+  type QueueOwnerRecord,
+} from "./lease-store.js";
 
 export type QueueOwnerHealth = {
   sessionId: string;
@@ -13,7 +18,13 @@ export type QueueOwnerHealth = {
   queueDepth?: number;
 };
 
+async function isStillCurrent(owner: QueueOwnerRecord): Promise<boolean> {
+  const current = await readQueueOwnerRecord(owner.sessionId);
+  return current?.pid === owner.pid && current.ownerGeneration === owner.ownerGeneration;
+}
+
 export async function probeQueueOwnerHealth(sessionId: string): Promise<QueueOwnerHealth> {
+  await settlePendingQueueLeaseGuard(sessionId);
   const ownerRecord = await readQueueOwnerRecord(sessionId);
   if (!ownerRecord) {
     return {
@@ -25,7 +36,7 @@ export async function probeQueueOwnerHealth(sessionId: string): Promise<QueueOwn
     };
   }
 
-  const owner = await readQueueOwnerStatus(sessionId);
+  const owner = await resolveUsableQueueOwner(sessionId, ownerRecord);
   if (!owner) {
     return {
       sessionId,
@@ -36,10 +47,9 @@ export async function probeQueueOwnerHealth(sessionId: string): Promise<QueueOwn
     };
   }
 
-  const pidAlive = owner.alive;
   let socketReachable = false;
   try {
-    const socket = await connectToQueueOwner(ownerRecord, 2);
+    const socket = await connectToQueueOwner(owner, 2);
     if (socket) {
       socketReachable = true;
       if (!socket.destroyed) {
@@ -50,12 +60,16 @@ export async function probeQueueOwnerHealth(sessionId: string): Promise<QueueOwn
     socketReachable = false;
   }
 
+  if (!(await isStillCurrent(owner))) {
+    return { sessionId, hasLease: false, healthy: false, socketReachable: false, pidAlive: false };
+  }
+
   return {
     sessionId,
     hasLease: true,
     healthy: socketReachable,
     socketReachable,
-    pidAlive,
+    pidAlive: true,
     pid: owner.pid,
     socketPath: owner.socketPath,
     ownerGeneration: owner.ownerGeneration,

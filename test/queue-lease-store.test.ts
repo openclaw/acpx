@@ -166,7 +166,8 @@ test("lease acquisition preserves exclusivity without hardlink support", async (
     });
     context.mock.method(fs, "writeFile", async (...args: Parameters<typeof fs.writeFile>) => {
       if (args[0] !== lockPath) {
-        return await writeFile(...args);
+        await writeFile(...args);
+        return;
       }
       const handle = await fs.open(lockPath, "wx", 0o600);
       try {
@@ -178,14 +179,17 @@ test("lease acquisition preserves exclusivity without hardlink support", async (
       }
     });
     const acquiring = tryAcquireQueueOwnerLease(sessionId);
+    let contending: ReturnType<typeof tryAcquireQueueOwnerLease> | undefined;
     try {
       await reserved.promise;
-      assert.equal(await tryAcquireQueueOwnerLease(sessionId), undefined);
+      contending = tryAcquireQueueOwnerLease(sessionId);
+      await fs.utimes(lockPath, new Date(0), new Date(0));
       assert.equal(await fs.readFile(lockPath, "utf8"), "");
     } finally {
       proceed.resolve();
       const lease = await acquiring;
       assert(lease);
+      assert.equal(await contending, undefined);
       assert.equal((await readQueueOwnerRecord(sessionId))?.ownerGeneration, lease.ownerGeneration);
       await releaseQueueOwnerLease(lease);
     }
@@ -247,6 +251,25 @@ test("release drains a pending refresh and rejects later refreshes", async (cont
     assert.equal(await readQueueOwnerRecord(lease.sessionId), undefined);
   });
 });
+
+test(
+  "release waits outside the guard for a refresh awaiting its predecessor",
+  { timeout: 5000 },
+  async () => {
+    await withTempHome(async () => {
+      const lease = await tryAcquireQueueOwnerLease("lease-release-order");
+      assert(lease);
+      const predecessor = deferred();
+      lease.updates = predecessor.promise;
+      const refreshing = refreshQueueOwnerLease(lease, { queueDepth: 3 });
+      const releasing = releaseQueueOwnerLease(lease);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      predecessor.resolve();
+      await Promise.all([refreshing, releasing]);
+      assert.equal(await readQueueOwnerRecord(lease.sessionId), undefined);
+    });
+  },
+);
 
 test("old lease refresh and release preserve a replacement owner and socket", async () => {
   await withTempHome(async () => {
@@ -401,13 +424,14 @@ test("a final heartbeat cannot cancel termination already in progress", async (c
     let alive = true;
     let now = Date.now();
     const signals: Array<NodeJS.Signals | number | undefined> = [];
-    context.mock.method(Date, "now", () => (now += 10_000));
+    context.mock.method(Date, "now", () => now);
     context.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | number) => {
       assert.equal(pid, owner.pid);
       if (!alive) {
         throw Object.assign(new Error("process exited"), { code: "ESRCH" });
       }
-      if (signal === "SIGTERM") {
+      if (signal === 0 && signals.includes("SIGTERM")) {
+        now += 10_000;
         writeFileSync(
           paths.lockPath,
           JSON.stringify({ ...owner, heartbeatAt: new Date(now + 60_000).toISOString() }),
@@ -426,6 +450,60 @@ test("a final heartbeat cannot cancel termination already in progress", async (c
     assert.equal(await readQueueOwnerRecord(sessionId), undefined);
   });
 });
+
+for (const permissionFailure of ["initial", "after-signal"] as const) {
+  test(`ambiguous owner liveness ${permissionFailure} preserves lease and endpoint`, async (context) => {
+    await withTempHome(async (homeDir) => {
+      const sessionId = `lease-ambiguous-${permissionFailure}`;
+      const paths = queuePaths(homeDir, sessionId);
+      await writeQueueOwnerLock({
+        ...paths,
+        sessionId,
+        pid: 999_999,
+        heartbeatAt: "2000-01-01T00:00:00.000Z",
+      });
+      const original = await fs.readFile(paths.lockPath, "utf8");
+      if (process.platform !== "win32") {
+        await fs.mkdir(path.dirname(paths.socketPath), { recursive: true });
+        await fs.writeFile(paths.socketPath, "retained endpoint");
+      }
+      const signals: Array<NodeJS.Signals | number | undefined> = [];
+      let now = Date.now();
+      context.mock.method(Date, "now", () => now);
+      context.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | number) => {
+        assert.equal(pid, 999_999);
+        if (signal !== 0) {
+          signals.push(signal);
+          return true;
+        }
+        if (permissionFailure === "initial" || signals.length > 0) {
+          if (signals.length > 0) {
+            now += 10_000;
+          }
+          throw Object.assign(new Error("probe denied"), { code: "EPERM" });
+        }
+        return true;
+      });
+      try {
+        await terminateQueueOwnerForSession(sessionId);
+        assert.equal(await fs.readFile(paths.lockPath, "utf8"), original);
+        if (permissionFailure === "initial") {
+          assert.deepEqual(signals, []);
+          assert.equal(await tryAcquireQueueOwnerLease(sessionId), undefined);
+        } else {
+          assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+        }
+        if (process.platform !== "win32") {
+          assert.equal(await fs.readFile(paths.socketPath, "utf8"), "retained endpoint");
+        }
+      } finally {
+        if (process.platform !== "win32") {
+          await fs.rm(paths.socketPath, { force: true });
+        }
+      }
+    });
+  });
+}
 
 test("tryAcquireQueueOwnerLease persists MCP config path metadata", async () => {
   await withTempHome(async () => {

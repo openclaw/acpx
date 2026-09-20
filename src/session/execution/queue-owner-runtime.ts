@@ -24,6 +24,7 @@ import {
   type QueueOwnerLease,
   waitMs,
 } from "../queue/ipc.js";
+import { QueueLeaseGuardSettlementError } from "../queue/lease-mutation.js";
 import { refreshQueueOwnerLease } from "../queue/lease-store.js";
 import { QueueOwnerTurnController } from "../queue/owner-turn-controller.js";
 import {
@@ -290,19 +291,38 @@ function applyRequestedShutdown(
 
 function startQueueOwnerHeartbeat(params: {
   enabled: boolean;
-  lease: QueueOwnerLease;
+  refresh: (queueDepth: number) => Promise<void>;
   owner: SessionQueueOwner;
 }): NodeJS.Timeout | undefined {
   if (!params.enabled) {
     return undefined;
   }
   return setInterval(() => {
-    void refreshQueueOwnerLease(params.lease, { queueDepth: params.owner.queueDepth() }).catch(
-      () => {
-        // best effort heartbeat refresh while owner is live
-      },
-    );
+    void params.refresh(params.owner.queueDepth());
   }, QUEUE_OWNER_HEARTBEAT_INTERVAL_MS);
+}
+
+function createLeaseHeartbeat(lease: QueueOwnerLease, shutdown: QueueOwnerShutdownController) {
+  let guardFailure: QueueLeaseGuardSettlementError | undefined;
+  return {
+    refresh: async (queueDepth: number): Promise<void> => {
+      if (shutdown.requested) {
+        return;
+      }
+      await refreshQueueOwnerLease(lease, { queueDepth }).catch((error: unknown) => {
+        if (error instanceof QueueLeaseGuardSettlementError) {
+          guardFailure ??= error;
+          // The update chain must finish before shutdown can release the lease.
+          shutdown.request();
+        }
+      });
+    },
+    throwIfFailed: () => {
+      if (guardFailure) {
+        throw guardFailure;
+      }
+    },
+  };
 }
 
 export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): Promise<void> {
@@ -313,10 +333,24 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
   if (!lease) {
     return;
   }
+  let runtimeFailure: { error: unknown } | undefined;
   try {
     await runQueueOwnerRuntime(options, lease);
-  } finally {
+  } catch (error) {
+    runtimeFailure = { error };
+  }
+  try {
     await releaseQueueOwnerLease(lease);
+  } catch (error) {
+    if (runtimeFailure) {
+      throw new AggregateError([runtimeFailure.error, error], "Queue owner shutdown failed", {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+  if (runtimeFailure) {
+    throw runtimeFailure.error;
   }
 }
 
@@ -433,6 +467,8 @@ async function runQueueOwnerRuntime(
     shutdown.request();
   };
 
+  const heartbeat = createLeaseHeartbeat(lease, shutdown);
+
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
   process.once("SIGHUP", onSignal);
@@ -474,9 +510,7 @@ async function runQueueOwnerRuntime(
         maxQueueDepth,
         onQueueDepthChanged: (queueDepth) => {
           setPerfGauge("queue.owner.depth", queueDepth);
-          void refreshQueueOwnerLease(lease, { queueDepth }).catch(() => {
-            // best effort heartbeat refresh while owner is live
-          });
+          void heartbeat.refresh(queueDepth);
         },
       },
     );
@@ -489,12 +523,10 @@ async function runQueueOwnerRuntime(
       maxQueueDepth,
       verbose: options.verbose,
     });
-    await refreshQueueOwnerLease(lease, { queueDepth: owner.queueDepth() }).catch(() => {
-      // best effort initial heartbeat
-    });
+    await heartbeat.refresh(owner.queueDepth());
     heartbeatTimer = startQueueOwnerHeartbeat({
       enabled: !shutdown.requested,
-      lease,
+      refresh: heartbeat.refresh,
       owner,
     });
     let isFirstTask = true;
@@ -552,7 +584,9 @@ async function runQueueOwnerRuntime(
     process.off("SIGTERM", onSignal);
     process.off("SIGHUP", onSignal);
     await shutdown.shutdown();
+    await lease.updates;
   }
+  heartbeat.throwIfFailed();
 }
 
 export async function sendSession(options: SessionSendOptions): Promise<SessionSendOutcome> {

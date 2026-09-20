@@ -28,6 +28,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Model controls: validate selections against the connected session's advertised models, including after reconnect, while preserving exact IDs, Cursor's unique aliases, and the accepted configuration response.
 
+- Sessions/queue: serialize owner handoffs, heartbeats, and stale cleanup across processes so an old cleanup cannot delete a replacement lease or socket; preserve owners when process liveness is uncertain and drain shutdown after guard cleanup failures.
+
 ## 0.17.1 - 2026-09-19
 
 **Highlights:** Configured runtime initialization deadlines now stop unresponsive agents and clean up abandoned launches safely. Embedding hosts gain model inspection and session-specific permissions. Antigravity joins the built-in agents; its fixed-choice questions require an interactive client, including for existing custom launchers.

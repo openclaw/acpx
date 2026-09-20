@@ -6,6 +6,7 @@ import { withTempFile } from "@openclaw/fs-safe/advanced";
 import { isHardlinkFallbackError } from "@openclaw/fs-safe/durability";
 import { acquireFileLock, type FileLockHandle } from "@openclaw/fs-safe/file-lock";
 import { incrementPerfCounter } from "../perf-metrics.js";
+import { isProcessDefinitelyDead } from "../process-liveness.js";
 import { sessionEventLockPath } from "./event-log.js";
 
 const LOCK_RETRY_MS = 15;
@@ -45,18 +46,6 @@ function parseLock(payload: string): unknown {
   }
 }
 
-function isDefinitelyDead(pid: number | undefined): boolean {
-  if (!pid || pid === process.pid) {
-    return false;
-  }
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ESRCH";
-  }
-}
-
 async function tryAcquireGuard(filePath: string): Promise<FileLockHandle | undefined> {
   try {
     return await acquireFileLock(filePath, {
@@ -67,8 +56,8 @@ async function tryAcquireGuard(filePath: string): Promise<FileLockHandle | undef
       retry: { retries: 8, minTimeout: 1, maxTimeout: 2, factor: 1, randomize: false },
       staleRecovery: "remove-if-unchanged",
       payload: () => ({ pid: process.pid }),
-      shouldReclaim: ({ payload }) => isDefinitelyDead(lockPid(payload)),
-      shouldRemoveStaleLock: ({ payload }) => isDefinitelyDead(lockPid(payload)),
+      shouldReclaim: ({ payload }) => isProcessDefinitelyDead(lockPid(payload)),
+      shouldRemoveStaleLock: ({ payload }) => isProcessDefinitelyDead(lockPid(payload)),
     });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "file_lock_timeout") {
@@ -104,7 +93,7 @@ async function recoverAbandonedLock(filePath: string): Promise<boolean> {
     return true;
   }
   const pid = lockPid(parseLock(observed.payload));
-  if (pid && !isDefinitelyDead(pid)) {
+  if (pid && !isProcessDefinitelyDead(pid)) {
     return false;
   }
   // A partial exclusive-create fallback is not evidence that its writer died.
