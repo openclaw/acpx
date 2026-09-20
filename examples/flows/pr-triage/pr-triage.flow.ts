@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -32,7 +31,7 @@ const flow = defineFlow({
       nodeType: "action",
       timeoutMs: 20 * 60_000,
       statusDetail: "Create isolated PR workspace and fetch GitHub context",
-      run: async ({ outputs }) => await prepareWorkspace(loadPrOutput(outputs)),
+      run: async (context) => await prepareWorkspace(context, loadPrOutput(context.outputs)),
     },
 
     extract_intent: {
@@ -59,8 +58,8 @@ const flow = defineFlow({
       nodeType: "action",
       timeoutMs: 20 * 60_000,
       statusDetail: "Check conflict status against the current base before validation",
-      run: async ({ outputs }) =>
-        await collectConflictState(prepared(outputs), {
+      run: async (context) =>
+        await collectConflictState(context, prepared(context.outputs), {
           phase: "initial",
         }),
     },
@@ -144,7 +143,7 @@ const flow = defineFlow({
       nodeType: "action",
       timeoutMs: 60 * 60_000,
       statusDetail: "Collect GitHub review state and run local Codex review",
-      run: async ({ outputs }) => await collectReviewState(prepared(outputs)),
+      run: async (context) => await collectReviewState(context, prepared(context.outputs)),
     },
 
     review_loop: {
@@ -162,7 +161,7 @@ const flow = defineFlow({
       nodeType: "action",
       timeoutMs: 15 * 60_000,
       statusDetail: "Collect CI state and approve workflow runs when possible",
-      run: async ({ outputs }) => await collectCiState(prepared(outputs)),
+      run: async (context) => await collectCiState(context, prepared(context.outputs)),
     },
 
     fix_ci_failures: {
@@ -180,8 +179,8 @@ const flow = defineFlow({
       nodeType: "action",
       timeoutMs: 20 * 60_000,
       statusDetail: "Check conflict status against the current base before final handoff",
-      run: async ({ outputs }) =>
-        await collectConflictState(prepared(outputs), {
+      run: async (context) =>
+        await collectConflictState(context, prepared(context.outputs), {
           phase: "final",
         }),
     },
@@ -222,8 +221,8 @@ const flow = defineFlow({
       nodeType: "action",
       timeoutMs: 15 * 60_000,
       statusDetail: "Post close comment and close the PR",
-      run: async ({ outputs }) =>
-        await postClosePr(prepared(outputs), outputs.comment_and_close_pr),
+      run: async (context) =>
+        await postClosePr(context, prepared(context.outputs), context.outputs.comment_and_close_pr),
     },
 
     comment_and_escalate_ready_for_landing: {
@@ -240,10 +239,11 @@ const flow = defineFlow({
       nodeType: "action",
       timeoutMs: 10 * 60_000,
       statusDetail: "Post ready-for-landing handoff comment",
-      run: async ({ outputs }) =>
+      run: async (context) =>
         await postEscalationComment(
-          prepared(outputs),
-          outputs.comment_and_escalate_ready_for_landing,
+          context,
+          prepared(context.outputs),
+          context.outputs.comment_and_escalate_ready_for_landing,
           "ready_for_human_landing_decision",
         ),
     },
@@ -262,10 +262,11 @@ const flow = defineFlow({
       nodeType: "action",
       timeoutMs: 10 * 60_000,
       statusDetail: "Post needs-judgment handoff comment",
-      run: async ({ outputs }) =>
+      run: async (context) =>
         await postEscalationComment(
-          prepared(outputs),
-          outputs.comment_and_escalate_needs_judgment,
+          context,
+          prepared(context.outputs),
+          context.outputs.comment_and_escalate_needs_judgment,
           "needs_human_judgment",
         ),
     },
@@ -455,16 +456,21 @@ const flow = defineFlow({
 
 export default flow;
 
-async function prepareWorkspace(pr) {
-  const prData = await ghApiJson(`repos/${pr.repo}/pulls/${pr.prNumber}`);
-  const files = await ghApiJson(`repos/${pr.repo}/pulls/${pr.prNumber}/files?per_page=100`);
+async function prepareWorkspace(context, pr) {
+  const prData = await ghApiJson(context, `repos/${pr.repo}/pulls/${pr.prNumber}`);
+  const files = await ghApiJson(
+    context,
+    `repos/${pr.repo}/pulls/${pr.prNumber}/files?per_page=100`,
+  );
   const linkedIssueNumber = extractLinkedIssueNumber(String(prData.body ?? ""));
   const issue =
     linkedIssueNumber !== null
-      ? await ghApiJson(`repos/${pr.repo}/issues/${linkedIssueNumber}`)
+      ? await ghApiJson(context, `repos/${pr.repo}/issues/${linkedIssueNumber}`)
       : null;
 
+  context.signal?.throwIfAborted();
   const workdir = await fs.mkdtemp(path.join(os.tmpdir(), `acpx-pr${pr.prNumber}-`));
+  context.signal?.throwIfAborted();
   const baseCloneUrl = String(prData.base.repo.clone_url);
   const headCloneUrl = String(prData.head.repo.clone_url);
   const baseRef = String(prData.base.ref);
@@ -473,28 +479,28 @@ async function prepareWorkspace(pr) {
   const localBranch = `pr-${pr.prNumber}-head`;
   const pushRemote = headCloneUrl === baseCloneUrl ? "origin" : "head";
 
-  await runCommand("git", ["clone", "--origin", "origin", baseCloneUrl, workdir]);
+  await runCommand(context, "git", ["clone", "--origin", "origin", baseCloneUrl, workdir]);
 
   if (pushRemote === "head") {
-    await runCommand("git", ["-C", workdir, "remote", "add", "head", headCloneUrl]);
+    await runCommand(context, "git", ["-C", workdir, "remote", "add", "head", headCloneUrl]);
   }
 
-  await runCommand("git", [
+  await runCommand(context, "git", [
     "-C",
     workdir,
     "fetch",
     "origin",
     `refs/heads/${baseRef}:refs/remotes/origin/${baseRef}`,
   ]);
-  await runCommand("git", [
+  await runCommand(context, "git", [
     "-C",
     workdir,
     "fetch",
     pushRemote,
     `refs/heads/${headRef}:refs/remotes/${pushRemote}/${headRef}`,
   ]);
-  await runCommand("git", ["-C", workdir, "checkout", "-B", localBranch, headSha]);
-  await runCommand("git", [
+  await runCommand(context, "git", ["-C", workdir, "checkout", "-B", localBranch, headSha]);
+  await runCommand(context, "git", [
     "-C",
     workdir,
     "branch",
@@ -504,11 +510,13 @@ async function prepareWorkspace(pr) {
   ]);
 
   const metaDir = path.join(workdir, FLOW_DIR);
+  context.signal?.throwIfAborted();
   await fs.mkdir(metaDir, { recursive: true });
-  await writeJson(path.join(metaDir, "pr.json"), prData);
-  await writeJson(path.join(metaDir, "files.json"), files);
-  await writeJson(path.join(metaDir, "issue.json"), issue);
-  await writeJson(path.join(metaDir, "workspace.json"), {
+  context.signal?.throwIfAborted();
+  await writeJson(context, path.join(metaDir, "pr.json"), prData);
+  await writeJson(context, path.join(metaDir, "files.json"), files);
+  await writeJson(context, path.join(metaDir, "issue.json"), issue);
+  await writeJson(context, path.join(metaDir, "workspace.json"), {
     repo: pr.repo,
     prNumber: pr.prNumber,
     prUrl: pr.prUrl,
@@ -540,23 +548,28 @@ async function prepareWorkspace(pr) {
   };
 }
 
-async function collectReviewState(pr) {
-  const reviews = await ghApiJson(`repos/${pr.repo}/pulls/${pr.prNumber}/reviews?per_page=100`);
+async function collectReviewState(context, pr) {
+  const reviews = await ghApiJson(
+    context,
+    `repos/${pr.repo}/pulls/${pr.prNumber}/reviews?per_page=100`,
+  );
   const reviewComments = await ghApiJson(
+    context,
     `repos/${pr.repo}/pulls/${pr.prNumber}/comments?per_page=100`,
   );
   const issueComments = await ghApiJson(
+    context,
     `repos/${pr.repo}/issues/${pr.prNumber}/comments?per_page=100`,
   );
 
-  await runCommand("git", ["-C", pr.workdir, "fetch", "origin", pr.baseRef]);
+  await runCommand(context, "git", ["-C", pr.workdir, "fetch", "origin", pr.baseRef]);
   const baseRef = `origin/${pr.baseRef}`;
   const mergeBase = (
-    await runCommand("git", ["-C", pr.workdir, "merge-base", "HEAD", baseRef])
+    await runCommand(context, "git", ["-C", pr.workdir, "merge-base", "HEAD", baseRef])
   ).stdout.trim();
 
   const localReviewCommand = ["review", "--base", baseRef];
-  const localReviewRun = await runCommand("codex", localReviewCommand, {
+  const localReviewRun = await runCommand(context, "codex", localReviewCommand, {
     cwd: pr.workdir,
     allowFailure: true,
     timeoutMs: 30 * 60_000,
@@ -585,7 +598,7 @@ async function collectReviewState(pr) {
     localCodexReviewExitCode: localReviewRun.exitCode,
     localCodexReviewTimedOut: localReviewRun.timedOut,
   };
-  await writeJson(path.join(pr.flowDir, "review-state.json"), reviewState);
+  await writeJson(context, path.join(pr.flowDir, "review-state.json"), reviewState);
 
   return {
     review_state_path: path.join(pr.flowDir, "review-state.json"),
@@ -595,14 +608,15 @@ async function collectReviewState(pr) {
   };
 }
 
-async function collectCiState(pr) {
-  const prView = await ghPrView(pr.repo, pr.prNumber, [
+async function collectCiState(context, pr) {
+  const prView = await ghPrView(context, pr.repo, pr.prNumber, [
     "statusCheckRollup",
     "commits",
     "isCrossRepository",
   ]);
   const headSha = String(prView?.commits?.[0]?.oid ?? pr.headSha) || pr.headSha;
   const workflowRuns = await ghApiJson(
+    context,
     `repos/${pr.repo}/actions/runs?head_sha=${encodeURIComponent(headSha)}&per_page=20`,
   );
   const runs = Array.isArray(workflowRuns?.workflow_runs) ? workflowRuns.workflow_runs : [];
@@ -611,19 +625,20 @@ async function collectCiState(pr) {
     statusCheckRollup: Array.isArray(prView?.statusCheckRollup) ? prView.statusCheckRollup : [],
     workflowRuns: runs,
   };
-  await writeJson(path.join(pr.flowDir, "ci-state.json"), ciState);
+  await writeJson(context, path.join(pr.flowDir, "ci-state.json"), ciState);
 
   return {
     ci_state_path: path.join(pr.flowDir, "ci-state.json"),
   };
 }
 
-async function collectConflictState(pr, options) {
+async function collectConflictState(context, pr, options) {
   const baseRef = `origin/${pr.baseRef}`;
-  await cleanupMergeState(pr.workdir);
-  await runCommand("git", ["-C", pr.workdir, "fetch", "origin", pr.baseRef]);
+  await cleanupMergeState(context, pr.workdir);
+  await runCommand(context, "git", ["-C", pr.workdir, "fetch", "origin", pr.baseRef]);
 
   const attempt = await runCommand(
+    context,
     "git",
     ["-C", pr.workdir, "merge", "--no-commit", "--no-ff", baseRef],
     {
@@ -632,7 +647,7 @@ async function collectConflictState(pr, options) {
   );
 
   const conflictedFiles = (
-    await runCommand("git", ["-C", pr.workdir, "diff", "--name-only", "--diff-filter=U"], {
+    await runCommand(context, "git", ["-C", pr.workdir, "diff", "--name-only", "--diff-filter=U"], {
       allowFailure: true,
     })
   ).stdout
@@ -661,10 +676,10 @@ async function collectConflictState(pr, options) {
     merge_attempt_stderr: trimTextTail(attempt.stderr, 8_000),
   };
   const statePath = path.join(pr.flowDir, `${options.phase}-conflict-state.json`);
-  await writeJson(statePath, conflictState);
+  await writeJson(context, statePath, conflictState);
 
   if (clean) {
-    await cleanupMergeState(pr.workdir);
+    await cleanupMergeState(context, pr.workdir);
   }
 
   return {
@@ -677,15 +692,17 @@ async function collectConflictState(pr, options) {
   };
 }
 
-async function postClosePr(pr, commentStep) {
+async function postClosePr(context, pr, commentStep) {
   const comment = String(commentStep?.comment ?? "").trim();
   if (!comment) {
     throw new Error("Close-path comment step did not return a comment body");
   }
 
   const commentFile = path.join(pr.flowDir, "close-comment.md");
+  context.signal?.throwIfAborted();
   await fs.writeFile(commentFile, comment, "utf8");
-  await runCommand("gh", [
+  context.signal?.throwIfAborted();
+  await runCommand(context, "gh", [
     "pr",
     "comment",
     String(pr.prNumber),
@@ -694,7 +711,7 @@ async function postClosePr(pr, commentStep) {
     "--body-file",
     commentFile,
   ]);
-  await runCommand("gh", [
+  await runCommand(context, "gh", [
     "pr",
     "close",
     String(pr.prNumber),
@@ -711,15 +728,17 @@ async function postClosePr(pr, commentStep) {
   };
 }
 
-async function postEscalationComment(pr, commentStep, route) {
+async function postEscalationComment(context, pr, commentStep, route) {
   const comment = String(commentStep?.comment ?? "").trim();
   if (!comment) {
     throw new Error("Escalation comment step did not return a comment body");
   }
 
   const commentFile = path.join(pr.flowDir, "escalation-comment.md");
+  context.signal?.throwIfAborted();
   await fs.writeFile(commentFile, comment, "utf8");
-  await runCommand("gh", [
+  context.signal?.throwIfAborted();
+  await runCommand(context, "gh", [
     "pr",
     "comment",
     String(pr.prNumber),
@@ -1226,13 +1245,13 @@ function finalCommentSummary(outputs) {
   };
 }
 
-async function ghApiJson(endpoint) {
-  const result = await runCommand("gh", ["api", endpoint]);
+async function ghApiJson(context, endpoint) {
+  const result = await runCommand(context, "gh", ["api", endpoint]);
   return JSON.parse(result.stdout);
 }
 
-async function ghPrView(repo, prNumber, fields) {
-  const result = await runCommand("gh", [
+async function ghPrView(context, repo, prNumber, fields) {
+  const result = await runCommand(context, "gh", [
     "pr",
     "view",
     String(prNumber),
@@ -1285,15 +1304,17 @@ function extractLinkedIssueNumber(body) {
   return match ? Number(match[1]) : null;
 }
 
-async function writeJson(filename, value) {
+async function writeJson(context, filename, value) {
+  context.signal?.throwIfAborted();
   await fs.writeFile(filename, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  context.signal?.throwIfAborted();
 }
 
-async function cleanupMergeState(workdir) {
-  await runCommand("git", ["-C", workdir, "merge", "--abort"], {
+async function cleanupMergeState(context, workdir) {
+  await runCommand(context, "git", ["-C", workdir, "merge", "--abort"], {
     allowFailure: true,
   });
-  await runCommand("git", ["-C", workdir, "reset", "--hard", "HEAD"], {
+  await runCommand(context, "git", ["-C", workdir, "reset", "--hard", "HEAD"], {
     allowFailure: true,
   });
 }
@@ -1314,55 +1335,26 @@ function limitText(text, maxChars) {
   return `${value.slice(0, maxChars)}...`;
 }
 
-async function runCommand(command, args, options = {}) {
-  const child = spawn(command, args, {
+async function runCommand(context, command, args, options = {}) {
+  context.signal?.throwIfAborted();
+  if (!context.runShell) {
+    throw new Error("PR triage actions require FlowRunner's managed shell execution");
+  }
+  const { stdout, stderr, timedOut, exitCode, signal } = await context.runShell({
+    command,
+    args,
     cwd: options.cwd,
-    env: {
-      ...process.env,
-      ...options.env,
-    },
-    stdio: ["ignore", "pipe", "pipe"],
+    env: options.env,
+    timeoutMs: options.timeoutMs,
   });
+  context.signal?.throwIfAborted();
 
-  let stdout = "";
-  let stderr = "";
-  let timedOut = false;
-  let timeoutId;
-
-  if (options.timeoutMs) {
-    timeoutId = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-    }, options.timeoutMs);
-  }
-
-  child.stdout.on("data", (chunk) => {
-    stdout += String(chunk);
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += String(chunk);
-  });
-
-  const exit = await new Promise((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", (exitCode, signal) => {
-      resolve({
-        exitCode,
-        signal,
-      });
-    });
-  });
-
-  if (timeoutId) {
-    clearTimeout(timeoutId);
-  }
-
-  const ok = !timedOut && exit.exitCode === 0;
+  const ok = !timedOut && exitCode === 0;
   if (!ok && options.allowFailure !== true) {
     throw new Error(
       [
         `Command failed: ${command} ${args.join(" ")}`,
-        `exitCode: ${String(exit.exitCode)}`,
+        `exitCode: ${String(exitCode)}`,
         timedOut ? "timedOut: true" : null,
         stdout ? `stdout:\n${stdout}` : null,
         stderr ? `stderr:\n${stderr}` : null,
@@ -1378,8 +1370,8 @@ async function runCommand(command, args, options = {}) {
     args,
     stdout,
     stderr,
-    exitCode: exit.exitCode,
-    signal: exit.signal,
+    exitCode,
+    signal,
     timedOut,
   };
 }

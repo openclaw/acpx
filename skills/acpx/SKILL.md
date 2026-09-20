@@ -497,6 +497,8 @@ acpx flow run ./my-flow.flow.ts --default-agent claude
 
 Run artifacts persist under `~/.acpx/flows/runs/<runId>/`. Default per-step timeout is 15 minutes when `--timeout` is unset; flows that declare permission requirements fail fast before starting.
 
+Each attempt has one deadline across preparation, execution, and parsing. Callbacks receive `context.signal`; function actions also receive `context.runShell` to run commands whose processes and output streams the runner owns. A command's own timeout returns partial output with `timedOut: true`; enclosing node cancellation rejects after cleanup and prevents later managed commands. Admitted runtime writes finish before routing or final publication. Check the signal around custom asynchronous side effects: arbitrary JavaScript cannot be forcibly stopped, and completed effects are not rolled back. Persistent reconnects must load the same backend session or fail. See `docs/flows.md` for the command result and cancellation contracts.
+
 ### Authoring a flow
 
 The authoring surface lives in `acpx/flows`. The minimal example:

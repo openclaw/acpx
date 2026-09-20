@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { normalizeAgentSessionId } from "../../acp/agent-session-id.js";
 import { AcpClient } from "../../acp/client.js";
 import { formatErrorMessage } from "../../acp/error-normalization.js";
-import { withInterrupt, withTimeout } from "../../async-control.js";
+import { assertControlAuthority, withInterrupt, withTimeout } from "../../async-control.js";
 import {
   applyLifecycleSnapshotToRecord,
   createInitialSessionRecord,
@@ -27,6 +27,7 @@ import type {
   SessionListOptions,
   SessionListResult,
 } from "./contracts.js";
+import { directExecutionError, ownDirectClient } from "./direct-lifetime.js";
 import { setSessionModel } from "./session-control.js";
 
 type CreatedSessionState = {
@@ -41,11 +42,13 @@ async function createSessionRecordWithClient(
   options: SessionCreateOptions,
 ): Promise<SessionRecord> {
   const cwd = absolutePath(options.cwd);
-  await withTimeout(client.start(), options.timeoutMs);
+  await withTimeout(client.start({ signal: options.signal }), options.timeoutMs);
+  assertControlAuthority({ signal: options.signal });
   const createdState = options.resumeSessionId
     ? await resumeSessionRecordWithClient(client, options, cwd)
     : await createFreshSessionState(client, options, cwd);
   const { sessionId, agentSessionId } = createdState;
+  assertControlAuthority({ signal: options.signal });
 
   const lifecycle = client.getAgentLifecycleSnapshot();
   const record: SessionRecord = {
@@ -75,6 +78,7 @@ async function createSessionRecordWithClient(
   );
 
   await writeSessionRecord(record);
+  assertControlAuthority({ signal: options.signal });
   return record;
 }
 
@@ -83,7 +87,11 @@ async function createFreshSessionState(
   options: SessionCreateOptions,
   cwd: string,
 ): Promise<CreatedSessionState> {
-  const createdSession = await withTimeout(client.createSession(cwd), options.timeoutMs);
+  const createdSession = await withTimeout(
+    client.createSession(cwd, { signal: options.signal }),
+    options.timeoutMs,
+  );
+  assertControlAuthority({ signal: options.signal });
   const modelApplication = await applyRequestedModelIfAdvertised({
     client,
     sessionId: createdSession.sessionId,
@@ -92,6 +100,7 @@ async function createFreshSessionState(
     agentCommand: options.agentCommand,
     timeoutMs: options.timeoutMs,
     onWarning: options.onModelWarning,
+    authority: { signal: options.signal },
   });
   return {
     sessionId: createdSession.sessionId,
@@ -123,11 +132,14 @@ async function resumeSessionRecordWithClient(
   try {
     const resumedSession = await withTimeout(
       resumeMethod === "session/resume"
-        ? client.resumeSession(options.resumeSessionId, cwd)
-        : client.loadSession(options.resumeSessionId, cwd),
+        ? client.resumeSession(options.resumeSessionId, cwd, { signal: options.signal })
+        : client.loadSessionWithOptions(options.resumeSessionId, cwd, {
+            authority: { signal: options.signal },
+          }),
       options.timeoutMs,
     );
     const sessionModels = resumedSession.models;
+    assertControlAuthority({ signal: options.signal });
     const modelApplication = await applyRequestedModelIfAdvertised({
       client,
       sessionId: options.resumeSessionId,
@@ -136,6 +148,7 @@ async function resumeSessionRecordWithClient(
       agentCommand: options.agentCommand,
       timeoutMs: options.timeoutMs,
       onWarning: options.onModelWarning,
+      authority: { signal: options.signal },
     });
     return {
       sessionId: options.resumeSessionId,
@@ -156,7 +169,7 @@ async function resumeSessionRecordWithClient(
 export async function createSessionWithClient(
   options: SessionCreateOptions,
 ): Promise<SessionCreateWithClientResult> {
-  options.signal?.throwIfAborted();
+  assertControlAuthority({ signal: options.signal });
   const client = new AcpClient({
     agentCommand: options.agentCommand,
     agentArgv: options.agentArgv,
@@ -173,22 +186,19 @@ export async function createSessionWithClient(
     sessionOptions: options.sessionOptions,
   });
 
-  const onAbort = () => {
-    void client.close().catch(() => {});
-  };
-  options.signal?.addEventListener("abort", onAbort, { once: true });
+  const closeOwnedClient = ownDirectClient(client, options.signal);
   try {
     const create = async () => {
-      options.signal?.throwIfAborted();
+      assertControlAuthority({ signal: options.signal });
       const record = await createSessionRecordWithClient(client, options);
-      options.signal?.throwIfAborted();
+      assertControlAuthority({ signal: options.signal });
       return record;
     };
     const record =
       options.handleProcessInterrupts === false
         ? await create()
         : await withInterrupt(create, async () => {
-            await client.close();
+            await closeOwnedClient();
           });
 
     return {
@@ -196,10 +206,10 @@ export async function createSessionWithClient(
       client,
     };
   } catch (error) {
-    await client.close();
-    throw error;
+    await closeOwnedClient();
+    throw directExecutionError(error, options.signal);
   } finally {
-    options.signal?.removeEventListener("abort", onAbort);
+    closeOwnedClient.release();
   }
 }
 
@@ -282,7 +292,7 @@ async function ensureSessionWithOwnership(
   options: SessionEnsureOptions,
   cwd: string,
 ): Promise<SessionEnsureResult> {
-  options.signal?.throwIfAborted();
+  assertControlAuthority({ signal: options.signal });
   const gitRoot = findGitRepositoryRoot(cwd);
   const walkBoundary = options.walkBoundary ?? gitRoot ?? cwd;
   const existing = await findSessionByDirectoryWalk({

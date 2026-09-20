@@ -19,6 +19,7 @@ import {
   type AcpControlAuthority,
 } from "../../async-control.js";
 import {
+  AgentDisconnectedError,
   SessionConfigOptionReplayError,
   SessionModeReplayError,
   SessionModelReplayError,
@@ -385,6 +386,7 @@ export async function connectAndLoadSession(
 ): Promise<ConnectAndLoadSessionResult> {
   const record = options.record;
   const client = options.client;
+  assertControlAuthority(options.authority);
   const sameSessionOnly = requiresSameSession(options.resumePolicy) || Boolean(record.importedFrom);
   const originalSessionId = record.acpSessionId;
   const originalAgentSessionId = record.agentSessionId;
@@ -401,8 +403,9 @@ export async function connectAndLoadSession(
   if (reusingLoadedSession) {
     incrementPerfCounter("runtime.connect_and_load.reused_session");
   } else {
-    await withTimeout(client.start(), options.timeoutMs);
+    await withTimeout(client.start(options.authority), options.timeoutMs);
   }
+  assertControlAuthority(options.authority);
   options.onClientAvailable?.(options.activeController);
   applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
   record.closed = false;
@@ -415,6 +418,7 @@ export async function connectAndLoadSession(
     reusingLoadedSession,
     sameSessionOnly,
     timeoutMs: options.timeoutMs,
+    authority: options.authority,
   });
   const {
     resumed,
@@ -719,6 +723,7 @@ async function loadOrCreateRuntimeSession(params: {
   reusingLoadedSession: boolean;
   sameSessionOnly: boolean;
   timeoutMs?: number;
+  authority?: AcpControlAuthority;
 }): Promise<RuntimeSessionLoadState> {
   if (params.reusingLoadedSession) {
     return {
@@ -747,7 +752,12 @@ async function loadOrCreateRuntimeSession(params: {
     });
   }
 
-  return await createFreshRuntimeSession(params.client, params.record, params.timeoutMs);
+  return await createFreshRuntimeSession(
+    params.client,
+    params.record,
+    params.timeoutMs,
+    params.authority,
+  );
 }
 
 async function loadRuntimeSession(
@@ -756,15 +766,21 @@ async function loadRuntimeSession(
     record: SessionRecord;
     sameSessionOnly: boolean;
     timeoutMs?: number;
+    authority?: AcpControlAuthority;
   },
   resume: boolean,
 ): Promise<RuntimeSessionLoadState> {
   try {
     const loadResult = await withTimeout(
       resume
-        ? params.client.resumeSession(params.record.acpSessionId, params.record.cwd)
+        ? params.client.resumeSession(
+            params.record.acpSessionId,
+            params.record.cwd,
+            params.authority,
+          )
         : params.client.loadSessionWithOptions(params.record.acpSessionId, params.record.cwd, {
             suppressReplayUpdates: true,
+            ...(params.authority ? { authority: params.authority } : {}),
           }),
       params.timeoutMs,
     );
@@ -780,7 +796,15 @@ async function loadRuntimeSession(
       createdFreshSession: false,
     };
   } catch (error) {
+    rethrowCancelledLoad(error, params.authority);
     return await recoverRuntimeSessionLoadFailure(params, error);
+  }
+}
+
+function rethrowCancelledLoad(error: unknown, authority?: AcpControlAuthority): void {
+  const signal = authority?.signal;
+  if (signal?.aborted && (error instanceof AgentDisconnectedError || error === signal.reason)) {
+    throw signal.reason;
   }
 }
 
@@ -790,6 +814,7 @@ async function recoverRuntimeSessionLoadFailure(
     record: SessionRecord;
     sameSessionOnly: boolean;
     timeoutMs?: number;
+    authority?: AcpControlAuthority;
   },
   error: unknown,
 ): Promise<RuntimeSessionLoadState> {
@@ -805,7 +830,12 @@ async function recoverRuntimeSessionLoadFailure(
     throw error;
   }
   return {
-    ...(await createFreshRuntimeSession(params.client, params.record, params.timeoutMs)),
+    ...(await createFreshRuntimeSession(
+      params.client,
+      params.record,
+      params.timeoutMs,
+      params.authority,
+    )),
     loadError,
   };
 }
@@ -814,8 +844,9 @@ async function createFreshRuntimeSession(
   client: AcpClient,
   record: SessionRecord,
   timeoutMs: number | undefined,
+  authority?: AcpControlAuthority,
 ): Promise<RuntimeSessionLoadState> {
-  const createdSession = await withTimeout(client.createSession(record.cwd), timeoutMs);
+  const createdSession = await withTimeout(client.createSession(record.cwd, authority), timeoutMs);
   applyConfigOptionsToRecord(record, createdSession);
   return {
     sessionId: createdSession.sessionId,

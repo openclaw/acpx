@@ -29,6 +29,10 @@ export type FlowNodeContext<TInput = unknown> = {
   results: Record<string, FlowNodeResult>;
   state: FlowRunState;
   services: Record<string, unknown>;
+  /** Supplied by FlowRunner; aborts when this attempt times out or is cancelled. */
+  signal?: AbortSignal;
+  /** Supplied to function actions; cancellation retires the owned command before the attempt ends. */
+  runShell?: (execution: FlowShellExecution) => Promise<FlowShellResult>;
 };
 
 export type FlowNodeCommon = {
@@ -95,6 +99,13 @@ export type ShellActionResult = {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
   durationMs: number;
+};
+
+export type FlowShellExecution = Omit<ShellActionExecution, "allowNonZeroExit">;
+
+export type FlowShellResult = ShellActionResult & {
+  /** The command's own deadline expired; an enclosing attempt cancellation rejects instead. */
+  timedOut: boolean;
 };
 
 export type ShellActionNodeDefinition = FlowNodeCommon & {

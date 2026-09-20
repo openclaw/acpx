@@ -6,7 +6,13 @@ import {
   isRetryablePromptError,
   normalizeOutputError,
 } from "../../acp/error-normalization.js";
-import { InterruptedError, TimeoutError, withInterrupt, withTimeout } from "../../async-control.js";
+import {
+  assertControlAuthority,
+  InterruptedError,
+  TimeoutError,
+  withInterrupt,
+  withTimeout,
+} from "../../async-control.js";
 import { AcpxOperationalError } from "../../errors.js";
 export { InterruptedError, TimeoutError } from "../../async-control.js";
 import { formatPerfMetric, measurePerf, startPerfTimer } from "../../perf-metrics.js";
@@ -58,6 +64,11 @@ import { type QueueOwnerMessage, type QueueTask } from "../queue/ipc.js";
 import { type QueueOwnerActiveSessionController } from "../queue/owner-turn-controller.js";
 import { acquireSessionTurn } from "../turn-ownership.js";
 import type { RunOnceOptions, SessionSendOptions } from "./contracts.js";
+import {
+  directExecutionError,
+  ownDirectClient,
+  type DirectExecutionControl,
+} from "./direct-lifetime.js";
 import { DISCARD_OUTPUT_FORMATTER } from "./discard-output.js";
 import { createOwnedSessionControls } from "./owned-controls.js";
 
@@ -69,6 +80,8 @@ type RunSessionPromptOptions = Omit<
 > & {
   sessionRecordId: string;
   waitSignal?: AbortSignal;
+  ownedSignal?: AbortSignal;
+  closeProvidedClient?: () => Promise<void>;
   handleProcessInterrupts?: boolean;
   onClientAvailable?: (controller: ActiveSessionController) => void;
   onClientClosed?: () => void;
@@ -236,6 +249,7 @@ async function applyPromptModelIfAdvertised(params: {
   record: SessionRecord;
   timeoutMs?: number;
   suppressWarnings?: boolean;
+  signal?: AbortSignal;
 }): Promise<void> {
   const requestedModel = requestedModelId(params.requestedModel);
   if (!requestedModel) {
@@ -249,6 +263,7 @@ async function applyPromptModelIfAdvertised(params: {
     models: advertisedModelState(params.record.acpx),
     agentCommand: params.record.agentCommand,
     timeoutMs: params.timeoutMs,
+    authority: { signal: params.signal },
     onWarning: params.suppressWarnings
       ? undefined
       : (message) => process.stderr.write(`[acpx] warning: ${message}\n`),
@@ -582,8 +597,10 @@ async function waitForSessionTurn(options: RunSessionPromptOptions): Promise<{
   const waiting = new AbortController();
   const onInterrupt = () => waiting.abort(new InterruptedError());
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
-  for (const signal of signals) {
-    process.once(signal, onInterrupt);
+  if (options.handleProcessInterrupts !== false) {
+    for (const signal of signals) {
+      process.once(signal, onInterrupt);
+    }
   }
   const timeoutMs = options.timeoutMs;
   const timeout =
@@ -599,8 +616,7 @@ async function waitForSessionTurn(options: RunSessionPromptOptions): Promise<{
     const ownership = await acquireSessionTurn(acpxRecordId, signal);
     return { recordId: acpxRecordId, ownership };
   } catch (error) {
-    signal.throwIfAborted();
-    throw error;
+    return throwTurnAcquisitionError(error, signal);
   } finally {
     clearTimeout(timeout);
     for (const signal of signals) {
@@ -609,11 +625,27 @@ async function waitForSessionTurn(options: RunSessionPromptOptions): Promise<{
   }
 }
 
+function throwTurnAcquisitionError(error: unknown, signal: AbortSignal): never {
+  if (
+    signal.aborted &&
+    error instanceof Error &&
+    error.name === "AbortError" &&
+    error.cause === signal.reason
+  ) {
+    throw signal.reason;
+  }
+  // Aggregate acquisition/cleanup failures must not be replaced by the abort reason.
+  throw error;
+}
+
 async function runSessionPrompt(options: RunSessionPromptOptions): Promise<SessionSendResult> {
   let turn: Awaited<ReturnType<typeof waitForSessionTurn>>;
   try {
     turn = await waitForSessionTurn(options);
   } catch (error) {
+    if (options.ownedSignal) {
+      throw error;
+    }
     if (options.waitSignal?.aborted && error === options.waitSignal.reason) {
       const record = await resolveSessionRecord(options.sessionRecordId);
       return {
@@ -741,8 +773,10 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
   const record = await measurePerf("session.resolve_prompt_record", async () => {
     return await resolveSessionRecord(options.sessionRecordId);
   });
+  options.ownedSignal?.throwIfAborted();
   const { conversation, promptMessageId } = preparePromptConversation(record, options);
   await writeSessionRecord(record);
+  options.ownedSignal?.throwIfAborted();
 
   output.setContext({
     sessionId: record.acpxRecordId,
@@ -808,7 +842,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     },
   });
 
-  let closeClientOnExit = options.client == null;
+  let closeClientOnExit = options.client == null || options.ownedSignal !== undefined;
   const client =
     options.client ??
     new AcpClient({
@@ -836,6 +870,8 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
   });
+  const closeOwnedClient =
+    options.closeProvidedClient ?? ownDirectClient(client, options.ownedSignal);
   client.setEventHandlers({
     onAcpMessage: (direction, message) => {
       pendingMessages.push(message);
@@ -916,6 +952,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
           verbose: options.verbose,
           suppressWarnings: options.suppressSdkConsoleErrors,
           activeController,
+          authority: { signal: options.ownedSignal },
           onClientAvailable: (controller) => {
             options.onClientAvailable?.(controller);
             notifiedClientAvailable = true;
@@ -1054,7 +1091,9 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
   };
 
   const runPrompt = async (): Promise<SessionSendResult> => {
+    options.ownedSignal?.throwIfAborted();
     const { sessionId: activeSessionId, resumed, loadError } = await connectForPrompt();
+    options.ownedSignal?.throwIfAborted();
 
     await applyPromptModelIfAdvertised({
       client,
@@ -1063,7 +1102,9 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
       record,
       timeoutMs: options.timeoutMs,
       suppressWarnings: options.suppressSdkConsoleErrors,
+      signal: options.ownedSignal,
     });
+    options.ownedSignal?.throwIfAborted();
 
     output.setContext({
       sessionId: record.acpxRecordId,
@@ -1090,22 +1131,28 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
       // best effort while process is being interrupted
     });
     if (closeClientOnExit) {
-      await client.close();
+      await closeOwnedClient();
     }
   };
 
   const runObservedPrompt = async (): Promise<SessionSendResult> => {
     try {
-      return await runWithOptionalInterrupt({
+      const result = await runWithOptionalInterrupt({
         handleProcessInterrupts: options.handleProcessInterrupts,
         run: runPrompt,
         handleInterrupt,
       });
+      options.ownedSignal?.throwIfAborted();
+      return result;
     } catch (error) {
-      const matchedAcpError = acpErrors.match(error);
-      attachAcpErrorPayload(error, matchedAcpError);
-      markOutputAlreadyEmitted(error, matchedAcpError !== undefined && shouldMarkAcpErrorsEmitted);
-      throw error;
+      const failure = directExecutionError(error, options.ownedSignal);
+      const matchedAcpError = acpErrors.match(failure);
+      attachAcpErrorPayload(failure, matchedAcpError);
+      markOutputAlreadyEmitted(
+        failure,
+        matchedAcpError !== undefined && shouldMarkAcpErrorsEmitted,
+      );
+      throw failure;
     }
   };
 
@@ -1131,7 +1178,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
         if (unresolvedPrompt || closeClientOnExit || journalFailed) {
           try {
             // Keep the old turn's handlers and ownership until teardown completes.
-            await client.close();
+            await closeOwnedClient();
           } catch (error) {
             options.onClientCloseFailure?.();
             throw error;
@@ -1183,7 +1230,11 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
   });
 }
 
-export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult> {
+export async function runOnce(
+  options: RunOnceOptions,
+  control?: DirectExecutionControl,
+): Promise<RunPromptResult> {
+  const authority = { signal: control?.signal };
   const output = options.outputFormatter;
   const shouldMarkAcpErrorsEmitted = rendersAcpErrors(options.errorEmissionPolicy);
   let promptTurnActive = false;
@@ -1230,10 +1281,18 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
     sessionOptions: options.sessionOptions,
   });
 
+  const closeOwnedClient = ownDirectClient(client, control?.signal);
+
   const runExecPromptAttempt = async (sessionId: string) => {
+    assertControlAuthority(authority);
     acpErrors.reset();
     return await measurePerf("runtime.exec.prompt", async () => {
-      return await withTimeout(client.prompt(sessionId, options.prompt), options.timeoutMs);
+      return await withTimeout(
+        client.prompt(sessionId, options.prompt, undefined, undefined, undefined, {
+          signal: control?.signal,
+        }),
+        options.timeoutMs,
+      );
     });
   };
 
@@ -1251,6 +1310,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
             maxRetries,
             () => promptTurnHadSideEffects,
             options.suppressSdkConsoleErrors,
+            control?.signal,
           )
         ) {
           continue;
@@ -1262,17 +1322,21 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
   };
 
   try {
-    return await withInterrupt(
-      async () => {
+    return await runWithOptionalInterrupt({
+      handleProcessInterrupts: control?.handleProcessInterrupts,
+      run: async () => {
+        assertControlAuthority(authority);
         await measurePerf("runtime.exec.start", async () => {
-          await withTimeout(client.start(), options.timeoutMs);
+          await withTimeout(client.start(authority), options.timeoutMs);
         });
+        assertControlAuthority(authority);
         const createdSession = await measurePerf("runtime.exec.create_session", async () => {
           return await withTimeout(
-            client.createSession(absolutePath(options.cwd)),
+            client.createSession(absolutePath(options.cwd), authority),
             options.timeoutMs,
           );
         });
+        assertControlAuthority(authority);
         const sessionId = createdSession.sessionId;
         if (createdSession.models) {
           applyAdvertisedModelState(controlState, createdSession.models);
@@ -1285,6 +1349,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
           models: createdSession.models,
           agentCommand: options.agentCommand,
           timeoutMs: options.timeoutMs,
+          authority: authority,
           onWarning: options.suppressSdkConsoleErrors
             ? undefined
             : (message) => process.stderr.write(`[acpx] warning: ${message}\n`),
@@ -1296,18 +1361,21 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
           );
         }
         for (const configOption of options.configOptions ?? []) {
+          assertControlAuthority(authority);
           const response = await withTimeout(
             client.setSessionConfigOption(
               sessionId,
               configOption.configId,
               configOption.value,
               advertisedModelState(controlState),
+              authority,
             ),
             options.timeoutMs,
           );
           controlState = applyConfigOptionsToState(controlState, response.configOptions);
         }
 
+        assertControlAuthority(authority);
         output.setContext({
           sessionId,
         });
@@ -1317,43 +1385,59 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
         output.flush();
         return toPromptResult(response.stopReason, sessionId, client, response._meta);
       },
-      async () => {
+      handleInterrupt: async () => {
         await client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS);
-        await client.close();
+        await closeOwnedClient();
       },
-    );
+    });
   } catch (error) {
-    const matchedAcpError = acpErrors.match(error);
-    attachAcpErrorPayload(error, matchedAcpError);
-    markOutputAlreadyEmitted(error, matchedAcpError !== undefined && shouldMarkAcpErrorsEmitted);
-    throw error;
+    const failure = directExecutionError(error, authority.signal);
+    const matchedAcpError = acpErrors.match(failure);
+    attachAcpErrorPayload(failure, matchedAcpError);
+    markOutputAlreadyEmitted(failure, matchedAcpError !== undefined && shouldMarkAcpErrorsEmitted);
+    throw failure;
   } finally {
-    await client.close();
+    await closeOwnedClient();
   }
 }
 
-export async function sendSessionDirect(options: SessionSendOptions): Promise<SessionSendResult> {
-  return await runSessionPrompt({
-    sessionRecordId: options.sessionId,
-    prompt: options.prompt,
-    mcpServers: options.mcpServers,
-    permissionMode: options.permissionMode,
-    resumePolicy: options.resumePolicy,
-    nonInteractivePermissions: options.nonInteractivePermissions,
-    permissionPolicy: options.permissionPolicy,
-    authCredentials: options.authCredentials,
-    authPolicy: options.authPolicy,
-    fs: options.fs,
-    terminal: options.terminal,
-    outputFormatter: options.outputFormatter,
-    errorEmissionPolicy: options.errorEmissionPolicy,
-    onAcpMessage: options.onAcpMessage,
-    onSessionUpdate: options.onSessionUpdate,
-    onClientOperation: options.onClientOperation,
-    onPermissionEscalation: options.onPermissionEscalation,
-    timeoutMs: options.timeoutMs,
-    suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
-    verbose: options.verbose,
-    client: options.client,
-  });
+export async function sendSessionDirect(
+  options: SessionSendOptions,
+  control?: DirectExecutionControl,
+): Promise<SessionSendResult> {
+  const closeProvidedClient =
+    control && options.client ? ownDirectClient(options.client, control.signal) : undefined;
+  try {
+    control?.signal.throwIfAborted();
+    return await runSessionPrompt({
+      ownedSignal: control?.signal,
+      closeProvidedClient,
+      waitSignal: control?.signal,
+      handleProcessInterrupts: control?.handleProcessInterrupts,
+      sessionRecordId: options.sessionId,
+      prompt: options.prompt,
+      mcpServers: options.mcpServers,
+      permissionMode: options.permissionMode,
+      resumePolicy: options.resumePolicy,
+      nonInteractivePermissions: options.nonInteractivePermissions,
+      permissionPolicy: options.permissionPolicy,
+      authCredentials: options.authCredentials,
+      authPolicy: options.authPolicy,
+      fs: options.fs,
+      terminal: options.terminal,
+      outputFormatter: options.outputFormatter,
+      errorEmissionPolicy: options.errorEmissionPolicy,
+      onAcpMessage: options.onAcpMessage,
+      onSessionUpdate: options.onSessionUpdate,
+      onClientOperation: options.onClientOperation,
+      onPermissionEscalation: options.onPermissionEscalation,
+      timeoutMs: options.timeoutMs,
+      suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
+      verbose: options.verbose,
+      client: options.client,
+    });
+  } finally {
+    // A provided initial client is owned even if cancellation wins before turn admission.
+    await closeProvidedClient?.();
+  }
 }

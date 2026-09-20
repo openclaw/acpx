@@ -1173,3 +1173,95 @@ test("terminal manager kill finishes when process listing hangs", async (t) => {
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
+
+test(
+  "terminal shutdown drains every native terminal before reporting a release failure",
+  { timeout: 10_000 },
+  async (t) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-shutdown-"));
+    const manager = new TerminalManager({ cwd, permissionMode: "approve-all", killGraceMs: 10 });
+    const children: ChildProcess[] = [];
+    const closed: Promise<void>[] = [];
+    let enterSecond = () => {};
+    const secondEntered = new Promise<void>((resolve) => {
+      enterSecond = resolve;
+    });
+    let releaseSecond = () => {};
+    const secondReleased = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const failure = new Error("synthetic first-terminal release failure");
+    const release = manager.releaseTerminal.bind(manager);
+    let running: Promise<unknown> | undefined;
+    try {
+      const ids: string[] = [];
+      await withObservedSpawns(
+        (child) => {
+          children.push(child);
+          closed.push(new Promise<void>((resolve) => child.once("close", () => resolve())));
+        },
+        async () => {
+          for (let i = 0; i < 2; i += 1) {
+            ids.push(
+              (
+                await manager.createTerminal({
+                  sessionId: "synthetic",
+                  command: process.execPath,
+                  args: ["-e", "setInterval(() => {}, 1000)"],
+                })
+              ).terminalId,
+            );
+          }
+        },
+      );
+      t.mock.method(
+        manager,
+        "releaseTerminal",
+        async (params: Parameters<TerminalManager["releaseTerminal"]>[0]) => {
+          const result = await release(params);
+          if (params.terminalId === ids[0]) {
+            throw failure;
+          }
+          enterSecond();
+          await secondReleased;
+          return result;
+        },
+      );
+      let settled = false;
+      running = manager.shutdown().then(
+        () => {
+          settled = true;
+          return undefined;
+        },
+        (error: unknown) => {
+          settled = true;
+          return error;
+        },
+      );
+      await Promise.race([
+        secondEntered,
+        running.then(() => {
+          throw new Error("shutdown stopped before releasing the second terminal");
+        }),
+      ]);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(settled, false, "shutdown must join the held terminal release");
+      releaseSecond();
+      const error = await running;
+      assert.ok(error instanceof AggregateError);
+      assert.deepEqual(error.errors, [failure]);
+      await Promise.all(closed);
+      assert.equal(children.length, 2);
+      for (const child of children) {
+        assert.ok(child.exitCode !== null || child.signalCode !== null);
+      }
+    } finally {
+      releaseSecond();
+      t.mock.restoreAll();
+      await running;
+      await manager.shutdown();
+      await Promise.all(closed);
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  },
+);

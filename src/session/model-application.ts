@@ -4,7 +4,7 @@ import {
   assertRequestedModelSupported,
   modelStateFromConfigOptions,
 } from "../acp/model-support.js";
-import { withTimeout } from "../async-control.js";
+import { withTimeout, type AcpControlAuthority } from "../async-control.js";
 
 export function currentModelIdFromSetModelResponse(
   response: SetSessionConfigOptionResponse | undefined,
@@ -20,6 +20,7 @@ export async function applyRequestedModelIfAdvertised(params: {
   models: SessionCreateResult["models"];
   agentCommand?: string;
   timeoutMs?: number;
+  authority?: AcpControlAuthority;
   onWarning?: (message: string) => void;
 }): Promise<{
   applied: boolean;
@@ -47,7 +48,12 @@ export async function applyRequestedModelIfAdvertised(params: {
   }
 
   const response = await withTimeout(
-    params.client.setSessionModel(params.sessionId, requestedModel, params.models),
+    params.client.setSessionModel(
+      params.sessionId,
+      requestedModel,
+      params.models,
+      params.authority,
+    ),
     params.timeoutMs,
   );
   return { applied: true, response };

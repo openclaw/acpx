@@ -10,6 +10,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Sessions/storage: resolve scope, directory, ID, listing, and prune queries from current saved records instead of stale index metadata; save checkpoints without a shared index write that can fail after the record is committed. Ignore mismatched record filenames so copied records cannot create false matches or authorize pruning another record.
 - Docs: correct session setup and query examples, clarify permission and storage boundaries, and synchronize agent guides with the current CLI.
+- Flows: stop late adapter and command dispatch after timeout or interruption, wait for owned process cleanup and pending writes before finishing, and keep concurrent runs' ACP clients separate. Function actions can use `context.signal` and `context.runShell`; PR triage preserves command diagnostics while refusing follow-up commands after cancellation.
 
 ## 0.18.0 - 2026-09-20
 

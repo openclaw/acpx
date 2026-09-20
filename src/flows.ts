@@ -11,6 +11,8 @@ export type {
   FlowEdge,
   FlowNodeCommon,
   FlowNodeContext,
+  FlowShellExecution,
+  FlowShellResult,
   FlowNodeDefinition,
   FlowPermissionRequirements,
   FlowRunDefinition,

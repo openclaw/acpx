@@ -438,8 +438,19 @@ export class TerminalManager {
   }
 
   async shutdown(): Promise<void> {
-    for (const terminalId of Array.from(this.terminals.keys())) {
-      await this.releaseTerminal({ terminalId, sessionId: "shutdown" });
+    const results = await Promise.allSettled(
+      Array.from(this.terminals.keys(), (terminalId) =>
+        this.releaseTerminal({ terminalId, sessionId: "shutdown" }),
+      ),
+    );
+    const failures: unknown[] = [];
+    for (const result of results) {
+      if (result.status === "rejected") {
+        failures.push(result.reason);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "Terminal shutdown failed", { cause: failures[0] });
     }
   }
 

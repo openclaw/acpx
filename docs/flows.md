@@ -154,11 +154,32 @@ Each run produces a bundle under `~/.acpx/flows/runs/<runId>/`:
 
 Bundles are immutable once a run terminates. They are the input for the [replay viewer](#replay-viewer).
 
-When an ACP prompt settles, its pending capture writes finish before the step result is recorded. Capture failures fail the step; if the agent also fails, its original prompt error remains visible and is saved with the run.
+When an ACP prompt settles, its pending capture writes finish before the step result is recorded. Capture failures fail the step; if the agent also fails, its original prompt error remains visible and is saved with the run. Admitted heartbeat and session-bundle writes also finish before the next step or terminal snapshot is published. Concurrent runs on one runner keep their pending ACP clients separate.
 
 ## Timeouts
 
-`acp` and `action` nodes use the global `--timeout` value as their default per-step timeout. If `--timeout` is not set, flows default to **15 minutes per active step**. Override per step in the flow definition when needed.
+Every node uses the global `--timeout` value as its default per-step timeout. If `--timeout` is not set, flows default to **15 minutes per active step**. Override per step in the flow definition when needed. One deadline covers preparation, execution, parsing, and admitted runtime writes.
+
+Callbacks receive `context.signal`, which aborts on timeout or interruption. After cancellation, the runtime denies new adapter launches, ACP requests, and managed shell commands, and waits for already owned work and cleanup before recording the outcome. Persistent ACP reconnection loads the same backend session; a failed load fails the step without creating a replacement session.
+
+Function actions also receive `context.runShell` for native commands:
+
+```ts
+action({
+  run: async (context) => {
+    const result = await context.runShell!({
+      command: "git",
+      args: ["status", "--short"],
+      timeoutMs: 30_000,
+    });
+    return { changedFiles: result.stdout, exitCode: result.exitCode, timedOut: result.timedOut };
+  },
+});
+```
+
+`runShell` waits for complete stdout and stderr, returns ordinary nonzero exits as results, and returns `timedOut: true` with partial output when its own deadline expires. Cancellation of the enclosing node rejects instead, after process cleanup; catching that error cannot authorize another managed command. The fields are optional on the shared `FlowNodeContext` type for compatibility with manually constructed contexts, but `FlowRunner` supplies the signal to every node and `runShell` to function actions.
+
+Arbitrary callback JavaScript cannot be forcibly stopped. Check `context.signal` before starting your own side effects and after awaits, or use `runShell` for owned native commands. The runner does not wait forever for an uncooperative callback and does not roll back completed external effects. The PR-triage example uses these boundaries for its commands and file writes.
 
 A shell action's `timeoutMs: 0` disables its own deadline; an enclosing node deadline still applies. On expiry or interruption, acpx cancels active shell commands and waits for termination and output-stream cleanup before reporting cancellation. Cleanup failures are reported instead of silently claiming cleanup succeeded. An executor that resolves after its node has timed out or been interrupted cannot launch a new shell process.
 

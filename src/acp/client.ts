@@ -208,6 +208,7 @@ async function raceWithAbort<T>(signal: AbortSignal, pending: Promise<T>): Promi
 }
 
 type LoadSessionOptions = {
+  authority?: AcpControlAuthority;
   suppressReplayUpdates?: boolean;
   replayIdleMs?: number;
   replayDrainTimeoutMs?: number;
@@ -623,7 +624,8 @@ export class AcpClient {
     fallback?.abort();
   }
 
-  async start(): Promise<void> {
+  async start(authority?: AcpControlAuthority): Promise<void> {
+    assertControlAuthority(authority);
     if (this.hasLiveConnection()) {
       return;
     }
@@ -634,9 +636,11 @@ export class AcpClient {
     const epoch = this.closeEpoch;
     const maxMessageBytes = readMaxAcpMessageBytes();
     const launch = await this.resolveAgentLaunchPlan();
+    assertControlAuthority(authority);
     this.logAgentLaunch(launch);
     await this.ensureLaunchSupport(launch);
-    const { child, process: startedProcess } = await this.spawnAgentProcess(launch);
+    assertControlAuthority(authority);
+    const { child, process: startedProcess } = await this.spawnAgentProcess(launch, authority);
     if (this.closeEpoch === epoch) {
       this.agent = child;
       this.closing = false;
@@ -664,7 +668,7 @@ export class AcpClient {
       startupFailure.dispose();
       throw error;
     }
-    await this.stopIfClosedDuringLaunch(epoch, child, startupFailure);
+    await this.stopIfClosedDuringLaunch(epoch, child, startupFailure, authority);
 
     const input = Writable.toWeb(child.stdin);
     const output = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
@@ -771,7 +775,10 @@ export class AcpClient {
     }
   }
 
-  private async spawnAgentProcess(plan: AgentLaunchPlan): Promise<{
+  private async spawnAgentProcess(
+    plan: AgentLaunchPlan,
+    authority?: AcpControlAuthority,
+  ): Promise<{
     child: ChildProcessByStdio<Writable, Readable, Readable>;
     process: AcpProcessStarted;
   }> {
@@ -789,6 +796,7 @@ export class AcpClient {
       cwd: this.options.cwd,
     });
     await this.options.processLifecycle?.onBeforeSpawn?.(launch);
+    assertControlAuthority(authority);
 
     let spawnedChild: ChildProcessByStdio<Writable, Readable, Readable>;
     try {
@@ -996,7 +1004,11 @@ export class AcpClient {
     });
   }
 
-  async createSession(cwd = this.options.cwd): Promise<SessionCreateResult> {
+  async createSession(
+    cwd = this.options.cwd,
+    authority?: AcpControlAuthority,
+  ): Promise<SessionCreateResult> {
+    assertControlAuthority(authority);
     const connection = this.getConnection();
     const { command, args } = resolveAgentCommandParts(
       this.options.agentCommand,
@@ -1007,12 +1019,14 @@ export class AcpClient {
 
     let result: NewSessionResponse;
     try {
-      const createPromise = this.runConnectionRequest(() =>
-        connection.agent.request(methods.agent.session.new, {
-          cwd: sessionCwd,
-          mcpServers: this.options.mcpServers ?? [],
-          _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions, claudeAcp),
-        }),
+      const createPromise = this.runConnectionRequest(
+        () =>
+          connection.agent.request(methods.agent.session.new, {
+            cwd: sessionCwd,
+            mcpServers: this.options.mcpServers ?? [],
+            _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions, claudeAcp),
+          }),
+        authority,
       );
       result = claudeAcp
         ? await withTimeout(createPromise, resolveClaudeAcpSessionCreateTimeoutMs())
@@ -1054,6 +1068,7 @@ export class AcpClient {
   ): Promise<SessionLoadResult> {
     const connection = this.getConnection();
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
+    assertControlAuthority(options.authority);
     const previousSuppression = this.applySessionUpdateSuppression(
       Boolean(options.suppressReplayUpdates),
     );
@@ -1061,12 +1076,14 @@ export class AcpClient {
     let response: LoadSessionResponse | undefined;
 
     try {
-      response = await this.runConnectionRequest(() =>
-        connection.agent.request(methods.agent.session.load, {
-          sessionId,
-          cwd: sessionCwd,
-          mcpServers: this.options.mcpServers ?? [],
-        }),
+      response = await this.runConnectionRequest(
+        () =>
+          connection.agent.request(methods.agent.session.load, {
+            sessionId,
+            cwd: sessionCwd,
+            mcpServers: this.options.mcpServers ?? [],
+          }),
+        options.authority,
       );
 
       await this.waitForSessionUpdateDrain(
@@ -1083,15 +1100,22 @@ export class AcpClient {
     return result;
   }
 
-  async resumeSession(sessionId: string, cwd = this.options.cwd): Promise<SessionResumeResult> {
+  async resumeSession(
+    sessionId: string,
+    cwd = this.options.cwd,
+    authority?: AcpControlAuthority,
+  ): Promise<SessionResumeResult> {
+    assertControlAuthority(authority);
     const connection = this.getConnection();
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
-    const response = await this.runConnectionRequest(() =>
-      connection.agent.request(methods.agent.session.resume, {
-        sessionId,
-        cwd: sessionCwd,
-        mcpServers: this.options.mcpServers ?? [],
-      }),
+    const response = await this.runConnectionRequest(
+      () =>
+        connection.agent.request(methods.agent.session.resume, {
+          sessionId,
+          cwd: sessionCwd,
+          mcpServers: this.options.mcpServers ?? [],
+        }),
+      authority,
     );
 
     this.loadedSessionId = sessionId;
@@ -1535,29 +1559,7 @@ export class AcpClient {
       controller.abort();
     }
 
-    await this.terminalManager.shutdown();
-
-    const agent = this.agent;
-    if (agent) {
-      await this.terminateAgentProcess(agent);
-    }
-    this.closeConnection();
-    if (this.pendingConnectionRequests.size > 0) {
-      this.rejectPendingConnectionRequests(
-        this.lastAgentExit
-          ? new AgentDisconnectedError(
-              this.lastAgentExit.reason,
-              this.lastAgentExit.exitCode,
-              this.lastAgentExit.signal,
-              {
-                outputAlreadyEmitted: Boolean(this.activePrompt),
-              },
-            )
-          : new AgentDisconnectedError("connection_close", null, null, {
-              outputAlreadyEmitted: Boolean(this.activePrompt),
-            }),
-      );
-    }
+    await this.retireNativeResources();
 
     this.sessionUpdateChain = Promise.resolve();
     this.observedSessionUpdates = 0;
@@ -1578,17 +1580,58 @@ export class AcpClient {
     this.agent = undefined;
   }
 
+  private async retireNativeResources(): Promise<void> {
+    const agent = this.agent;
+    const failures: unknown[] = [];
+    try {
+      await this.terminalManager.shutdown();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      if (agent) {
+        await this.terminateAgentProcess(agent);
+      }
+    } catch (error) {
+      failures.push(error);
+    }
+    // Transport retirement must unblock owned requests even when native cleanup fails.
+    try {
+      this.closeConnection();
+    } finally {
+      this.rejectPendingConnectionRequests(
+        this.lastAgentExit
+          ? new AgentDisconnectedError(
+              this.lastAgentExit.reason,
+              this.lastAgentExit.exitCode,
+              this.lastAgentExit.signal,
+              {
+                outputAlreadyEmitted: Boolean(this.activePrompt),
+              },
+            )
+          : new AgentDisconnectedError("connection_close", null, null, {
+              outputAlreadyEmitted: Boolean(this.activePrompt),
+            }),
+      );
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "ACP client cleanup failed", { cause: failures[0] });
+    }
+  }
+
   // Retire only this launch: close() may already have been followed by a replacement start().
   private async stopIfClosedDuringLaunch(
     epoch: number,
     child: ChildProcessByStdio<Writable, Readable, Readable>,
     startupFailure: StartupFailureWatcher,
+    authority?: AcpControlAuthority,
   ): Promise<void> {
     if (this.closeEpoch === epoch) {
       return;
     }
     startupFailure.dispose();
     await this.terminateAgentProcess(child);
+    assertControlAuthority(authority);
     throw new Error("ACP client was closed while the agent was starting");
   }
 
