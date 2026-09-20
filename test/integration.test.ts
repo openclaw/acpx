@@ -4230,7 +4230,14 @@ test("integration: cancel yields cancelled stopReason without queue error", asyn
 
       const promptChild = spawn(
         process.execPath,
-        [CLI_PATH, ...baseAgentArgs(cwd), "--format", "json", "prompt", "sleep 5000"],
+        [
+          CLI_PATH,
+          ...baseAgentArgs(cwd),
+          "--format",
+          "json",
+          "prompt",
+          "stream-sleep 5000 cancellation-ready",
+        ],
         {
           env: {
             ...process.env,
@@ -4241,30 +4248,33 @@ test("integration: cancel yields cancelled stopReason without queue error", asyn
       );
 
       try {
-        const doneEventPromise = waitForPromptDoneEvent(promptChild, 20_000, "prompt");
-
-        let cancelled = false;
-        for (let attempt = 0; attempt < 80; attempt += 1) {
-          const cancelResult = await runCli(
-            [...baseAgentArgs(cwd), "--format", "json", "cancel"],
-            homeDir,
-          );
-          assert.equal(cancelResult.code, 0, cancelResult.stderr);
-
-          const payload = JSON.parse(cancelResult.stdout.trim()) as {
-            action?: string;
-            cancelled?: boolean;
-          };
-          assert.equal(payload.action, "cancel_result");
-          cancelled = payload.cancelled === true;
-          if (cancelled) {
-            break;
+        let markReady!: () => void;
+        const ready = new Promise<void>((resolve) => {
+          markReady = resolve;
+        });
+        const doneEventPromise = waitForPromptCompletion(promptChild, 20_000, "prompt", (event) => {
+          if (extractAgentMessageChunkText(event) === "cancellation-ready") {
+            markReady();
           }
+        });
+        await Promise.race([
+          ready,
+          doneEventPromise.then(() => {
+            throw new Error("Prompt finished before readiness");
+          }),
+        ]);
 
-          await sleep(100);
-        }
-
-        assert.equal(cancelled, true, "cancel command never reached active queue owner");
+        const cancelResult = await runCli(
+          [...baseAgentArgs(cwd), "--format", "json", "cancel"],
+          homeDir,
+        );
+        assert.equal(cancelResult.code, 0, cancelResult.stderr);
+        const payload = JSON.parse(cancelResult.stdout.trim()) as {
+          action?: string;
+          cancelled?: boolean;
+        };
+        assert.equal(payload.action, "cancel_result");
+        assert.equal(payload.cancelled, true, "cancel command must reach the admitted prompt");
 
         const promptResult = await doneEventPromise;
         assert.equal(
@@ -5354,16 +5364,18 @@ type PromptDoneResult = {
   stderr: string;
 };
 
-async function waitForPromptDoneEvent(
+async function waitForPromptCompletion(
   child: ReturnType<typeof spawn>,
   timeoutMs: number,
   label: string,
+  onEvent?: (event: PromptEvent) => void,
 ): Promise<PromptDoneResult> {
   return await new Promise<PromptDoneResult>((resolve, reject) => {
     let stdout = "";
     let stderr = "";
     let lineBuffer = "";
     const events: PromptEvent[] = [];
+    let promptDone = false;
     let settled = false;
 
     const finish = (run: () => void) => {
@@ -5400,14 +5412,9 @@ async function waitForPromptDoneEvent(
       }
 
       events.push(event);
+      onEvent?.(event);
       if (event.result?.stopReason) {
-        finish(() => {
-          resolve({
-            events,
-            stdout,
-            stderr,
-          });
-        });
+        promptDone = true;
       }
     };
 
@@ -5447,9 +5454,13 @@ async function waitForPromptDoneEvent(
         return;
       }
       finish(() => {
+        if (promptDone && code === 0 && signal === null) {
+          resolve({ events, stdout, stderr });
+          return;
+        }
         reject(
           new Error(
-            `${label} exited before done event (code=${code}, signal=${signal})\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+            `${label} exited without clean prompt completion (code=${code}, signal=${signal})\nstdout:\n${stdout}\nstderr:\n${stderr}`,
           ),
         );
       });

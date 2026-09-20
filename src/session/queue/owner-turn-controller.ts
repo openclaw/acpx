@@ -93,11 +93,7 @@ export class QueueOwnerTurnController {
   async requestCancel(): Promise<boolean> {
     const activeController = this.activeController;
     if (activeController?.hasActivePrompt()) {
-      const cancelled = await activeController.requestCancelActivePrompt();
-      if (cancelled) {
-        this.pendingCancel = false;
-      }
-      return cancelled;
+      return await this.cancelActivePrompt(activeController);
     }
 
     if (this.state === "starting" || this.state === "active") {
@@ -115,8 +111,18 @@ export class QueueOwnerTurnController {
       return false;
     }
 
-    const cancelled = await activeController.requestCancelActivePrompt();
-    if (cancelled) {
+    return await this.cancelActivePrompt(activeController);
+  }
+
+  private async cancelActivePrompt(
+    activeController: QueueOwnerActiveSessionController,
+  ): Promise<boolean> {
+    const turn = this.waitingTurn;
+    // Start the native cancellation before abort callbacks can reenter.
+    const cancellation = activeController.requestCancelActivePrompt();
+    turn?.abort();
+    const cancelled = await cancellation;
+    if (cancelled && this.waitingTurn === turn) {
       this.pendingCancel = false;
     }
     return cancelled;

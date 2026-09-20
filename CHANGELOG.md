@@ -20,6 +20,7 @@ Repo: https://github.com/openclaw/acpx
 - Compare/input: honor prompt delimiters with files or stdin, and use command-local cwd for project configuration and relative input paths.
 - Compare/cancellation: stop launching remaining agents after process interruption, await active cleanup, and exit with code 130.
 - Sessions/close: preserve final cancellation output, usage and configuration updates when soft-closing an active session.
+- Sessions/retries: stop queued attempts after cancellation during backoff or prompt admission, while preserving already-received final responses and independent queued turns.
 
 ## 0.17.1 - 2026-09-19
 

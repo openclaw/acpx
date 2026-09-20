@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { AcpClient } from "../../acp/client.js";
 import {
   extractAcpError,
@@ -53,7 +54,7 @@ import { LiveSessionCheckpoint } from "../live-checkpoint.js";
 import { applyRequestedModelIfAdvertised } from "../model-application.js";
 import { advertisedModelState } from "../model-state.js";
 import { absolutePath, isoNow, resolveSessionRecord, writeSessionRecord } from "../persistence.js";
-import { type QueueOwnerMessage, type QueueTask, waitMs } from "../queue/ipc.js";
+import { type QueueOwnerMessage, type QueueTask } from "../queue/ipc.js";
 import { type QueueOwnerActiveSessionController } from "../queue/owner-turn-controller.js";
 import { acquireSessionTurn } from "../turn-ownership.js";
 import type { RunOnceOptions, SessionSendOptions } from "./contracts.js";
@@ -426,8 +427,10 @@ async function preparePromptRetry(
   maxRetries: number,
   hasSideEffects: () => boolean,
   suppressSdkConsoleErrors?: boolean,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   if (attempt < maxRetries && !hasSideEffects() && isRetryablePromptError(error)) {
+    signal?.throwIfAborted();
     const delayMs = Math.min(1_000 * 2 ** attempt, 10_000);
     emitPromptRetryNotice({
       error,
@@ -436,11 +439,21 @@ async function preparePromptRetry(
       maxRetries,
       suppressSdkConsoleErrors,
     });
-    await waitMs(delayMs);
+    await delay(delayMs, undefined, { signal }).catch((error: unknown) => {
+      signal?.throwIfAborted();
+      throw error;
+    });
+    signal?.throwIfAborted();
     return !hasSideEffects();
   }
   return false;
 }
+
+function isTurnCancellation(error: unknown, signal?: AbortSignal): boolean {
+  return signal?.aborted === true && error === signal.reason;
+}
+
+type PromptOutcome = Pick<RunPromptResult, "stopReason" | "_meta">;
 
 type QueuedTaskRuntimeOptions = Parameters<typeof runQueuedTask>[2];
 
@@ -960,6 +973,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
         promptMessageId,
         onPromptRequestWritten: options.onPromptRequestWritten,
         onPromptStarted: buildPromptStartedHook(attempt),
+        authority: { signal: options.waitSignal },
       });
     });
     emitPromptPerfMetric(promptStartedAt, options.verbose);
@@ -967,6 +981,9 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
   };
 
   const handlePromptFailure = async (error: unknown, attempt: number): Promise<void> => {
+    if (isTurnCancellation(error, options.waitSignal)) {
+      throw error;
+    }
     const snapshot = client.getAgentLifecycleSnapshot();
     if (
       snapshot.lastExit?.unexpectedDuringPrompt !== true &&
@@ -976,6 +993,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
         options.promptRetries ?? 0,
         () => promptTurnHadSideEffects,
         options.suppressSdkConsoleErrors,
+        options.waitSignal,
       ))
     ) {
       return;
@@ -1009,18 +1027,26 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     throw propagated;
   };
 
-  const runPromptWithRetries = async (sessionId: string) => {
+  const runPromptWithRetries = async (sessionId: string): Promise<PromptOutcome> => {
     promptTurnActive = true;
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await runPromptAttempt(sessionId, attempt);
-      } catch (error) {
-        await handlePromptFailure(error, attempt);
+    try {
+      for (let attempt = 0; ; attempt++) {
+        options.waitSignal?.throwIfAborted();
+        try {
+          return await runPromptAttempt(sessionId, attempt);
+        } catch (error) {
+          await handlePromptFailure(error, attempt);
+        }
       }
+    } catch (error) {
+      if (isTurnCancellation(error, options.waitSignal)) {
+        return { stopReason: "cancelled" };
+      }
+      throw error;
     }
   };
 
-  const savePromptSuccess = async (response: Awaited<ReturnType<typeof runPromptTurn>>) => {
+  const savePromptSuccess = async (response: PromptOutcome) => {
     await flushPendingMessages(false);
     output.flush();
     const now = isoNow();

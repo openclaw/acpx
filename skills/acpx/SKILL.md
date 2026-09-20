@@ -293,7 +293,7 @@ Behavior:
 - `--append-system-prompt <text>`: append text to the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt.append`; same persistence rules as `--system-prompt`.
 - `--allowed-tools <list>`: comma-separated tool whitelist (use `""` for no tools)
 - `--max-turns <count>`: cap session turn count
-- `--prompt-retries <count>`: retry failed prompt turns on transient errors (default `0`)
+- `--prompt-retries <count>`: retry failed prompt turns on transient errors (default `0`); cancelling a queued turn stops remaining attempts, while already-received final responses keep their outcome
 - `--no-fs`: advertise both ACP filesystem capabilities as disabled so compatible agents use their native file operations
 - `--no-terminal`: do not advertise the ACP terminal capability — useful for review-only or sandboxed agent invocations
 - `--verbose`: verbose ACP/debug logs to stderr

@@ -47,6 +47,82 @@ test("QueueOwnerTurnController cancels immediately for active prompts", async ()
   assert.equal(controller.hasPendingCancel, false);
 });
 
+test("QueueOwnerTurnController revokes retry admission while cooperative cancellation waits", async () => {
+  const controller = createQueueOwnerTurnController();
+  const signal = controller.beginTurn();
+  let finishCancel!: (cancelled: boolean) => void;
+  const cancellation = new Promise<boolean>((resolve) => {
+    finishCancel = resolve;
+  });
+  let calls = 0;
+  controller.setActiveController(
+    makeActiveController({
+      hasActivePrompt: () => true,
+      requestCancelActivePrompt: () => {
+        calls += 1;
+        assert.equal(
+          signal.aborted,
+          false,
+          "cooperative cancellation starts before abort listeners",
+        );
+        return cancellation;
+      },
+    }),
+  );
+  controller.markPromptActive();
+  const accepted = controller.requestCancel();
+  try {
+    assert.equal(calls, 1);
+    assert.equal(signal.aborted, true, "retry admission stops before cancellation settles");
+    finishCancel(true);
+    assert.equal(await accepted, true);
+    controller.endTurn();
+    assert.equal(controller.beginTurn().aborted, false, "the successor owns a fresh signal");
+  } finally {
+    finishCancel(false);
+    await accepted;
+  }
+});
+
+for (const kind of ["active", "deferred"]) {
+  test(`QueueOwnerTurnController keeps successor cancellation after an old ${kind} acknowledgement`, async () => {
+    const controller = createQueueOwnerTurnController();
+    controller.beginTurn();
+    let active = kind === "active";
+    let finishCancel!: (cancelled: boolean) => void;
+    const cancellation = new Promise<boolean>((resolve) => {
+      finishCancel = resolve;
+    });
+    controller.setActiveController(
+      makeActiveController({
+        hasActivePrompt: () => active,
+        requestCancelActivePrompt: () => cancellation,
+      }),
+    );
+    if (kind === "deferred") {
+      assert.equal(await controller.requestCancel(), true);
+      active = true;
+    }
+    const oldCancel =
+      kind === "active" ? controller.requestCancel() : controller.applyPendingCancel();
+    try {
+      controller.clearActiveController();
+      controller.endTurn();
+      const nextSignal = controller.beginTurn();
+      assert.equal(nextSignal.aborted, false);
+      assert.equal(await controller.requestCancel(), true);
+      const nextReason: unknown = nextSignal.reason;
+      finishCancel(true);
+      assert.equal(await oldCancel, true);
+      assert.equal(controller.hasPendingCancel, true);
+      assert.equal(nextSignal.reason, nextReason);
+    } finally {
+      finishCancel(false);
+      await oldCancel;
+    }
+  });
+}
+
 test("QueueOwnerTurnController defers cancel while turn is starting", async () => {
   const controller = createQueueOwnerTurnController();
   let promptActive = false;

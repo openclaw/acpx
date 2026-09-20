@@ -16,10 +16,16 @@ acpx cancel              # defaults to codex
 Sends ACP `session/cancel` cooperatively:
 
 - If a queue owner is running, the cancel is delivered through IPC.
-- If a prompt is mid-turn, the agent receives `session/cancel`, completes any pending writes, and resolves with `stopReason=cancelled`.
+- If a native prompt is active, acpx asks the adapter to cancel it; the adapter's reply determines the final stop reason.
 - If nothing is running, `acpx` prints `nothing to cancel` and exits success.
 
 This is the same semantics as `Ctrl+C` during a foreground turn, but available without a TTY signal — useful from scripts and other agents.
+
+Accepted cancellation stops remaining queued-turn attempts during retry backoff
+or before the next transport write. Cancellation during backoff records a
+cancelled result without sending another prompt. Completed prompt responses and
+non-retryable failures keep their actual outcomes, including responses received
+before update draining finishes. Separately queued turns remain eligible to run.
 
 ## `set-mode`
 
