@@ -722,6 +722,13 @@ export class AcpRuntimeManager {
     return { permissionMode, nonInteractivePermissions, permissionPolicy, onPermissionRequest };
   }
 
+  private resolveClientCapabilities() {
+    return {
+      fs: this.options.fs,
+      terminal: this.options.terminal,
+    };
+  }
+
   private async withRuntimeControlSession<T>(
     record: SessionRecord,
     sessionMode: "persistent" | "oneshot",
@@ -786,6 +793,7 @@ export class AcpRuntimeManager {
             ...record,
             sessionKey: record.name ?? record.acpxRecordId,
           }),
+          ...this.resolveClientCapabilities(),
           elicitationModes: this.options.elicitationModes,
           verbose: this.options.verbose,
           timeoutMs: this.options.timeoutMs,
@@ -1034,6 +1042,7 @@ export class AcpRuntimeManager {
       cwd,
       mcpServers: this.resolveMcpServers({ ...agent, sessionKey: input.sessionKey }),
       ...this.resolveSessionPermissions({ ...agent, sessionKey: input.sessionKey }),
+      ...this.resolveClientCapabilities(),
       elicitationModes: this.options.elicitationModes,
       processLifecycle: this.options.processLifecycle,
       processLaunchScope: { kind: "runtime-session", sessionKey: input.sessionKey },
@@ -1456,6 +1465,7 @@ export class AcpRuntimeManager {
         ...record,
         sessionKey: record.name ?? record.acpxRecordId,
       }),
+      ...this.resolveClientCapabilities(),
       elicitationModes: this.options.elicitationModes,
       processLifecycle: this.options.processLifecycle,
       processLaunchScope: {

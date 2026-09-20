@@ -202,6 +202,8 @@ function createProbeClient(
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     permissionPolicy: options.permissionPolicy,
+    fs: false,
+    terminal: false,
     processLifecycle: options.processLifecycle,
     processLaunchScope: { kind: "runtime-probe" as const, agent: agentName },
     verbose: options.verbose,

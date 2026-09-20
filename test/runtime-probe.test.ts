@@ -25,6 +25,8 @@ test("probeRuntime uses the default agent override and reports protocol details"
       permissionPolicy,
       agentProcessEnv,
       processLifecycle,
+      fs: true,
+      terminal: true,
       agentRegistry: createAgentRegistry({
         overrides: {
           claude: "broken-claude-acp",
@@ -49,6 +51,8 @@ test("probeRuntime uses the default agent override and reports protocol details"
   assert.deepEqual(constructed[0]?.permissionPolicy, permissionPolicy);
   assert.deepEqual(constructed[0]?.agentProcessEnv, agentProcessEnv);
   assert.equal(constructed[0]?.processLifecycle, processLifecycle);
+  assert.equal(constructed[0]?.fs, false);
+  assert.equal(constructed[0]?.terminal, false);
   assert.deepEqual(constructed[0]?.processLaunchScope, {
     kind: "runtime-probe",
     agent: "codex",

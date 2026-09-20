@@ -456,6 +456,22 @@ export type AcpRuntimeOptions = {
   /** Optional lifecycle observer for ACP agent processes owned by this runtime. */
   processLifecycle?: AcpProcessLifecycle;
   onPermissionRequest?: AcpPermissionHandler;
+  /**
+   * ACP filesystem callback capability for new and reconnected session clients.
+   * Omitted defaults to enabled, matching `AcpClientOptions`. Retained clients
+   * keep their original capability. Health probes disable filesystem callbacks
+   * and ignore this option. Disabling is a protocol callback policy, not an OS
+   * sandbox for the agent's own filesystem access. The setting is not persisted.
+   */
+  fs?: boolean;
+  /**
+   * ACP terminal callback capability for new and reconnected session clients.
+   * Omitted defaults to enabled, matching `AcpClientOptions`. Retained clients
+   * keep their original capability. Health probes disable terminal callbacks
+   * and ignore this option. Disabling is a protocol callback policy, not an OS
+   * sandbox for the agent's own process access. The setting is not persisted.
+   */
+  terminal?: boolean;
 };
 
 export type AcpFileSessionStoreOptions = {

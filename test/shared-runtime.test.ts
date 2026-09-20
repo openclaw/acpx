@@ -524,6 +524,8 @@ test("shared mode rejects in-process callbacks and unsupported session modes", a
     for (const callbacks of [
       { onPermissionRequest: () => "approve" },
       { sessionPermissions: () => ({ permissionMode: "approve-all" }) },
+      { fs: false },
+      { terminal: false },
     ]) {
       assert.throws(
         () =>

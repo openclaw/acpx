@@ -131,6 +131,8 @@ export class SharedAcpRuntime {
       "processLifecycle",
       "onPermissionRequest",
       "elicitationModes",
+      "fs",
+      "terminal",
     ]) {
       if (Object.hasOwn(options, name)) {
         invalidOption(

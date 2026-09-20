@@ -66,8 +66,11 @@ It does not send a prompt, require a session store, or save an ACPX session reco
 The agent may still create its own native session history.
 
 Inspection denies permission requests and disables ACP filesystem and terminal
-capabilities. It inherits the process environment, with an optional trusted
-`agentProcessEnv` overlay; it does not isolate the agent process itself.
+capabilities. Runtime health probes do the same and ignore host `fs`/`terminal`
+options. Disabling those ACP callbacks is a protocol callback policy, not an OS
+sandbox for the agent's own filesystem or process access. Inspection inherits
+the process environment, with an optional trusted `agentProcessEnv` overlay; it
+does not isolate the agent process itself.
 
 Pass an optional `signal` to cancel. `timeoutMs` is a positive discovery deadline
 of at most 2,147,483,647 milliseconds and defaults to 120 seconds. Success,

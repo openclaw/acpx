@@ -63,6 +63,8 @@ type MockAgentOptions = {
   resumeSessionNotFound: boolean;
   loadSessionFailsOnEmpty: boolean;
   loadSessionAction?: string;
+  newSessionAction?: string;
+  initializeAction?: string;
   setSessionModeFails: boolean;
   setSessionModeInvalidParams: boolean;
   setSessionConfigInvalidParams: boolean;
@@ -389,6 +391,8 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let resumeSessionNotFound = false;
   let loadSessionFailsOnEmpty = false;
   let loadSessionAction: string | undefined;
+  let newSessionAction: string | undefined;
+  let initializeAction: string | undefined;
   let setSessionModeFails = false;
   let setSessionModeInvalidParams = false;
   let setSessionConfigInvalidParams = false;
@@ -422,6 +426,18 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     if (token === "--load-session-action") {
       supportsLoadSession = true;
       loadSessionAction = parseOptionValue(argv, index + 1, token);
+      index += 1;
+      continue;
+    }
+
+    if (token === "--new-session-action") {
+      newSessionAction = parseOptionValue(argv, index + 1, token);
+      index += 1;
+      continue;
+    }
+
+    if (token === "--initialize-action") {
+      initializeAction = parseOptionValue(argv, index + 1, token);
       index += 1;
       continue;
     }
@@ -632,6 +648,8 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     resumeSessionNotFound,
     loadSessionFailsOnEmpty,
     loadSessionAction,
+    newSessionAction,
+    initializeAction,
     setSessionModeFails,
     setSessionModeInvalidParams,
     setSessionConfigInvalidParams,
@@ -825,6 +843,7 @@ class MockAgent implements Agent {
       ...(this.options.supportsListSessions ? { list: {} } : {}),
       ...(this.options.supportsResumeSession ? { resume: {} } : {}),
     };
+    await this.runOptionalAction("initialize", this.options.initializeAction);
     return {
       protocolVersion: PROTOCOL_VERSION,
       authMethods: [],
@@ -851,6 +870,8 @@ class MockAgent implements Agent {
 
     const sessionId = randomUUID();
     this.sessions.set(sessionId, { ...createSessionState(false), mcpServers: params.mcpServers });
+
+    await this.runOptionalAction(sessionId, this.options.newSessionAction);
 
     if (this.options.elicitOnNewSession) {
       const response = await this.connection.request(methods.client.elicitation.create, {
@@ -1282,6 +1303,17 @@ class MockAgent implements Agent {
       this.sessions.set(sessionId, session);
     }
     return session;
+  }
+
+  private async runOptionalAction(sessionId: SessionId, action: string | undefined): Promise<void> {
+    if (!action) {
+      return;
+    }
+    try {
+      await this.handlePrompt(sessionId, action, new AbortController().signal);
+    } catch {
+      // Keep the handshake going after a rejected or failed callback.
+    }
   }
 
   private async handlePrompt(

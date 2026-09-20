@@ -300,8 +300,8 @@ Behavior:
 - `--allowed-tools <list>`: comma-separated tool whitelist (use `""` for no tools)
 - `--max-turns <count>`: cap session turn count
 - `--prompt-retries <count>`: retry failed prompt turns on transient errors (default `0`); cancelling a queued turn stops remaining attempts, while already-received final responses keep their outcome
-- `--no-fs`: advertise both ACP filesystem capabilities as disabled so compatible agents use their native file operations
-- `--no-terminal`: do not advertise the ACP terminal capability — useful for review-only or sandboxed agent invocations
+- `--no-fs`: disable ACP filesystem callbacks so compatible agents use their native file operations. This is a protocol callback policy, not an OS sandbox for the agent's own filesystem access.
+- `--no-terminal`: disable the ACP terminal callback. This is a protocol callback policy, not an OS sandbox for the agent's own process access.
 - `--verbose`: verbose ACP/debug logs to stderr
 
 Cursor may advertise bracketed model IDs such as `composer-2.5[fast=false]`. An exact

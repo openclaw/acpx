@@ -160,6 +160,8 @@ export function createRuntimeOptions(params: {
   permissionPolicy?: AcpRuntimeOptions["permissionPolicy"];
   agentProcessEnv?: AcpRuntimeOptions["agentProcessEnv"];
   processLifecycle?: AcpRuntimeOptions["processLifecycle"];
+  fs?: AcpRuntimeOptions["fs"];
+  terminal?: AcpRuntimeOptions["terminal"];
   timeoutMs?: number;
 }): AcpRuntimeOptions {
   return {
@@ -178,5 +180,7 @@ export function createRuntimeOptions(params: {
     permissionPolicy: params.permissionPolicy,
     agentProcessEnv: params.agentProcessEnv,
     processLifecycle: params.processLifecycle,
+    ...(params.fs === undefined ? {} : { fs: params.fs }),
+    ...(params.terminal === undefined ? {} : { terminal: params.terminal }),
   };
 }
