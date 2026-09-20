@@ -528,6 +528,31 @@ test("resolveAgentInvocation rejects conflicting positional and override agents"
   );
 });
 
+test("resolveAgentInvocation ignores inherited agent entries and preserves explicit ones", () => {
+  const flags = {
+    cwd: process.cwd(),
+    nonInteractivePermissions: "deny" as const,
+    ttl: 300_000,
+    format: "text" as const,
+  };
+  for (const name of ["constructor", "__proto__", "toString"]) {
+    assert.deepEqual(resolveAgentInvocation(name, flags, config()), {
+      agentName: name,
+      agentCommand: name,
+      cwd: process.cwd(),
+    });
+    const agents = Object.fromEntries([
+      [name.toLowerCase(), { command: "custom-agent", argv: ["custom-agent"] }],
+    ]);
+    assert.deepEqual(resolveAgentInvocation(name, flags, config({ agents })), {
+      agentName: name,
+      agentCommand: "custom-agent",
+      agentArgv: ["custom-agent"],
+      cwd: process.cwd(),
+    });
+  }
+});
+
 test("resolveAgentInvocation applies canonical config overrides through aliases", () => {
   assert.deepEqual(
     resolveAgentInvocation(

@@ -214,12 +214,12 @@ function parseAgents(
     throw new Error(`Invalid config agents in ${sourcePath}: expected object`);
   }
 
-  const parsed: Record<string, ResolvedAgentConfig> = {};
-  for (const [name, raw] of Object.entries(value)) {
-    parsed[normalizeAgentName(name)] = parseAgentEntry(raw, name, sourcePath);
-  }
-
-  return parsed;
+  return Object.fromEntries(
+    Object.entries(value).map(([name, raw]) => [
+      normalizeAgentName(name),
+      parseAgentEntry(raw, name, sourcePath),
+    ]),
+  );
 }
 
 function parseAgentEntry(raw: unknown, name: string, sourcePath: string): ResolvedAgentConfig {
@@ -531,10 +531,12 @@ export function toConfigDisplay(config: ResolvedAcpxConfig): {
   authMethods: string[];
   disableExec: boolean;
 } {
-  const agents: Record<string, ConfigAgentEntry> = {};
-  for (const [name, agent] of Object.entries(config.agents)) {
-    agents[name] = agent.argv ? { argv: [...agent.argv] } : { command: agent.command };
-  }
+  const agents = Object.fromEntries(
+    Object.entries(config.agents).map(([name, agent]) => [
+      name,
+      agent.argv ? { argv: [...agent.argv] } : { command: agent.command },
+    ]),
+  );
 
   return {
     defaultAgent: config.defaultAgent,

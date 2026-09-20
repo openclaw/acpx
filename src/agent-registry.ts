@@ -268,32 +268,38 @@ export function resolveCanonicalAgentName(value: string): string {
   return Object.hasOwn(AGENT_ALIASES, normalized) ? AGENT_ALIASES[normalized] : normalized;
 }
 
+function findAgentEntry<T>(registry: Record<string, T>, agentName: string): T | undefined {
+  const normalized = normalizeAgentName(agentName);
+  const canonical = resolveCanonicalAgentName(agentName);
+  return Object.hasOwn(registry, normalized)
+    ? registry[normalized]
+    : Object.hasOwn(registry, canonical)
+      ? registry[canonical]
+      : undefined;
+}
+
 export function mergeAgentRegistry(overrides?: Record<string, string>): Record<string, string> {
   if (!overrides) {
     return { ...AGENT_REGISTRY };
   }
 
-  const merged = { ...AGENT_REGISTRY };
+  const entries = Object.entries(AGENT_REGISTRY);
   for (const [name, command] of Object.entries(overrides)) {
     const normalized = normalizeAgentName(name);
     if (!normalized || !command.trim()) {
       continue;
     }
-    merged[normalized] = command.trim();
+    entries.push([normalized, command.trim()]);
   }
-  return merged;
+  return Object.fromEntries(entries);
 }
 
 export function resolveAgentCommand(agentName: string, overrides?: Record<string, string>): string {
-  const normalized = normalizeAgentName(agentName);
-  const registry = mergeAgentRegistry(overrides);
-  return registry[normalized] ?? registry[AGENT_ALIASES[normalized] ?? normalized] ?? agentName;
+  return findAgentEntry(mergeAgentRegistry(overrides), agentName) ?? agentName;
 }
 
 export function resolveAgentArgv(agentName: string): string[] | undefined {
-  const normalized = normalizeAgentName(agentName);
-  const argv =
-    AGENT_ARGV_REGISTRY[normalized] ?? AGENT_ARGV_REGISTRY[resolveCanonicalAgentName(agentName)];
+  const argv = findAgentEntry(AGENT_ARGV_REGISTRY, agentName);
   return argv ? [...argv] : undefined;
 }
 
@@ -512,22 +518,14 @@ export function createAgentRegistry(
   const overrides = normalizeRegistryOverrides(params?.overrides);
   return {
     resolve(agentName: string) {
-      const normalizedAgentName = normalizeAgentName(agentName);
-      const override =
-        overrides[normalizedAgentName] ?? overrides[resolveCanonicalAgentName(agentName)];
+      const override = findAgentEntry(overrides, agentName);
       return override ?? resolveAgentArgv(agentName) ?? resolveAgentCommand(agentName);
     },
     list() {
       return listBuiltInAgents(overrides);
     },
     inspect(agentId) {
-      const normalized = normalizeAgentName(agentId);
-      const canonical = resolveCanonicalAgentName(agentId);
-      const override = Object.hasOwn(overrides, normalized)
-        ? overrides[normalized]
-        : Object.hasOwn(overrides, canonical)
-          ? overrides[canonical]
-          : undefined;
+      const override = findAgentEntry(overrides, agentId);
       return inspectAgent(agentId, override, params);
     },
   };
@@ -536,7 +534,7 @@ export function createAgentRegistry(
 function normalizeRegistryOverrides(
   values: Record<string, string | string[]> | undefined,
 ): Record<string, string | string[]> {
-  const normalized: Record<string, string | string[]> = {};
+  const entries: Array<[string, string | string[]]> = [];
   for (const [name, value] of Object.entries(values ?? {})) {
     const normalizedName = normalizeAgentName(name);
     if (!normalizedName) {
@@ -544,10 +542,10 @@ function normalizeRegistryOverrides(
     }
     const normalizedValue = normalizeRegistryOverride(value);
     if (normalizedValue) {
-      normalized[normalizedName] = normalizedValue;
+      entries.push([normalizedName, normalizedValue]);
     }
   }
-  return normalized;
+  return Object.fromEntries(entries);
 }
 
 function normalizeRegistryOverride(value: string | string[]): string | string[] | undefined {

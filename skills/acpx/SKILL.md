@@ -122,6 +122,8 @@ Rules:
 
 When embedding ACPX, import `createAgentRegistry` from `acpx/agent-registry` and use `inspect(agentId)` to obtain installed launch facts without starting an agent. Treat `undefined` as uninspectable. Check the returned missing command/package requirements before acquiring a session; recheck when launching because installed files can change. Authentication and native model discovery belong to session acquisition.
 
+Custom registry names such as `constructor` and `__proto__` work with resolution, listing, and inspection. Without an explicit registry entry, unknown names remain raw commands.
+
 Use `getStatus({ handle }).models.availableModels` when present for native display names, and pass the selected opaque model ID unchanged to `setModel`. Use `prepareFreshSession({ handle })` to persist a fresh-session request across restart, then ensure without `resumeSessionId`. Ordinary `close` retains session continuity; explicit remote discard requires the adapter’s optional close capability.
 
 For installed entrypoints and prerequisites, read the matching [agent guide](https://github.com/openclaw/acpx/tree/main/agents). For resolver callbacks, custom command overrides, and lifecycle details, read [embedded agent discovery](https://github.com/openclaw/acpx/blob/main/docs/session-control.md#embedded-agent-discovery).

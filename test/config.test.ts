@@ -6,6 +6,34 @@ import test from "node:test";
 import { resolveAgentCommandParts, splitCommandLine } from "../src/acp/client-process.js";
 import { initGlobalConfigFile, loadResolvedConfig, toConfigDisplay } from "../src/cli/config.js";
 
+test("config preserves prototype property names through loading and display", async () => {
+  await withTempEnv(async ({ homeDir }) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      '{"agents":{"__proto__":{"argv":["global-agent"]},"constructor":{"command":"custom-constructor"}}}',
+    );
+    await fs.writeFile(
+      path.join(cwd, ".acpxrc.json"),
+      '{"agents":{" __proto__ ":{"argv":["project-agent","literal argument"]}}}',
+    );
+    const config = await loadResolvedConfig(cwd);
+    assert.equal(Object.hasOwn(config.agents, "__proto__"), true);
+    assert.equal(Object.getPrototypeOf(config.agents), Object.prototype);
+    // This is a configured agent name, not the legacy prototype accessor.
+    // eslint-disable-next-line no-proto
+    assert.deepEqual(config.agents["__proto__"].argv, ["project-agent", "literal argument"]);
+    const displayed = toConfigDisplay(config);
+    assert.equal(Object.getPrototypeOf(displayed.agents), Object.prototype);
+    assert.deepEqual(JSON.parse(JSON.stringify(displayed.agents)), {
+      ["__proto__"]: { argv: ["project-agent", "literal argument"] },
+      constructor: { command: "custom-constructor" },
+    });
+  });
+});
+
 test("loadResolvedConfig merges global and project config with project priority", async () => {
   await withTempEnv(async ({ homeDir }) => {
     const cwd = path.join(homeDir, "workspace");

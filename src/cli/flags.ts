@@ -578,8 +578,12 @@ function resolveInvocationCommand(
     return { agentCommand: override };
   }
   const normalizedAgentName = normalizeAgentName(agentName);
-  const configuredAgent =
-    config.agents[normalizedAgentName] ?? config.agents[resolveCanonicalAgentName(agentName)];
+  const canonicalAgentName = resolveCanonicalAgentName(agentName);
+  const configuredAgent = Object.hasOwn(config.agents, normalizedAgentName)
+    ? config.agents[normalizedAgentName]
+    : Object.hasOwn(config.agents, canonicalAgentName)
+      ? config.agents[canonicalAgentName]
+      : undefined;
   if (configuredAgent) {
     return {
       agentCommand: configuredAgent.command,

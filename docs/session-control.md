@@ -143,6 +143,8 @@ The optional `resolveExecutable(command)` and `resolvePackageRoot(packageName)` 
 
 The existing `list()` and `resolve()` methods retain their behavior, including configured and raw adapter commands. Custom registries implementing only those methods remain supported. `createAgentRegistry` returns the richer `AcpInspectableAgentRegistry` type.
 
+Registry lookups use explicit entries only. Names such as `constructor` and `__proto__` remain raw commands unless configured; configured values also appear in `list()` and can be inspected normally.
+
 After session acquisition, `getStatus({ handle }).models.availableModels` optionally supplies `{ modelId, name }` entries with native display names. `availableModelIds` remains available. IDs are opaque; pass the selected ID unchanged to `setModel`. Older session records without name metadata may omit `availableModels` until refreshed. A missing authenticated catalog remains a setup error even when its executable is installed. Ordinary `close` releases local inspection resources; optional remote discard and deletion of native history are separate operations.
 
 Within one runtime, turns for the same session record run in submission order; different session records remain concurrent. Queued turns can be cancelled without interrupting their predecessor, and controls continue to reach the active turn.

@@ -14,6 +14,8 @@ import {
   resolveInstalledBuiltInAgentLaunch,
   resolvePackageExecBuiltInAgentLaunch,
   resolveAgentCommand,
+  resolveAgentArgv,
+  mergeAgentRegistry,
 } from "../src/agent-registry.js";
 import { createAgentRegistry } from "../src/agent-registry.js";
 
@@ -36,6 +38,43 @@ test("resolveAgentCommand maps known agents to commands", () => {
 
 test("resolveAgentCommand returns raw value for unknown agents", () => {
   assert.equal(resolveAgentCommand("custom-acp-server"), "custom-acp-server");
+});
+
+test("prototype property names remain raw commands unless explicitly configured", () => {
+  const registry = createAgentRegistry();
+  for (const name of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+    assert.equal(resolveAgentCommand(name), name);
+    assert.equal(resolveAgentArgv(name), undefined);
+    assert.equal(registry.resolve(name), name);
+  }
+});
+
+test("registry overrides preserve prototype property names as own entries", () => {
+  const overrides = Object.fromEntries([
+    [" __proto__ ", " custom-proto --stdio "],
+    ["constructor", "custom-constructor"],
+  ]);
+  const merged = mergeAgentRegistry(overrides);
+  assert.equal(Object.getPrototypeOf(merged), Object.prototype);
+  for (const name of ["__proto__", "constructor"]) {
+    assert.equal(Object.hasOwn(merged, name), true);
+    assert.equal(
+      resolveAgentCommand(name, overrides),
+      overrides[name === "__proto__" ? " __proto__ " : name].trim(),
+    );
+  }
+  const argv = ["custom-proto", "literal argument"];
+  const registry = createAgentRegistry({
+    overrides: { ...overrides, " __proto__ ": argv },
+    resolveExecutable: (command) => "/fixture/" + command,
+  });
+  assert.deepEqual(registry.resolve("__proto__"), argv);
+  assert.equal(registry.resolve("constructor"), "custom-constructor");
+  assert.equal(registry.list().includes("__proto__"), true);
+  assert.deepEqual(registry.inspect("__proto__")?.launch, {
+    kind: "installed",
+    argv: ["/fixture/custom-proto", "literal argument"],
+  });
 });
 
 test("antigravity uses the official ACP runtime and platform launch arguments", () => {
