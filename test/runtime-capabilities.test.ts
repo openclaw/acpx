@@ -47,7 +47,7 @@ function fixtureCommand(root: string, extraArgs: string[] = []): string[] {
 }
 
 async function withCapabilityRuntime(
-  overrides: Partial<AcpRuntimeOptions> & { extraArgs?: string[] },
+  overrides: Partial<AcpRuntimeOptions> & { extraArgs?: string[] | ((root: string) => string[]) },
   run: (context: {
     runtime: CapabilityRuntime;
     store: InMemorySessionStore;
@@ -59,13 +59,14 @@ async function withCapabilityRuntime(
   const { extraArgs = [], ...runtimeOverrides } = overrides;
   await withTempDir("acpx-runtime-capabilities-", async (directory) => {
     const root = await fs.realpath(directory);
+    const resolvedExtraArgs = typeof extraArgs === "function" ? extraArgs(root) : extraArgs;
     const store = new InMemorySessionStore();
     const options: AcpRuntimeOptions = {
       cwd: root,
       sessionStore: store,
       agentRegistry: createAgentRegistry({
         overrides: {
-          fixture: fixtureCommand(root, extraArgs),
+          fixture: fixtureCommand(root, resolvedExtraArgs),
         },
       }),
       permissionMode: "approve-all",
@@ -136,69 +137,88 @@ for (const [name, options, expectFs, expectTerminal] of [
 }
 
 test("public runtime reconnects with the current capability policy, not a stored one", async () => {
-  await withCapabilityRuntime({}, async ({ runtime, ensure, root, options, store }) => {
-    const handle = await ensure("reconnect");
-    const written = path.join(root, "reconnect.txt");
-    await turnText(runtime.startTurn({ ...prompt, handle, text: `write ${written} first` }));
-    assert.equal(await fs.readFile(written, "utf8"), "first");
-    const record = await store.load(handle.acpxRecordId!);
-    assert.equal(JSON.stringify(record?.acpx ?? {}).includes('"fs"'), false);
-    assert.equal(JSON.stringify(record?.acpx ?? {}).includes('"terminal"'), false);
-    await runtime.close({ handle, reason: "drop retained owner" });
-    await runtime.shutdown();
-
-    const restarted = createAcpRuntime({ ...options, fs: false, terminal: false });
-    try {
-      await turnText(
-        restarted.startTurn({ ...prompt, handle, text: `write ${written} second` }),
-        "failed",
-      );
-      await turnText(
-        restarted.startTurn({
-          ...prompt,
-          handle,
-          requestId: "capability-terminal",
-          text: terminalWritePrompt(path.join(root, "reconnect-terminal.txt")),
-        }),
-        "failed",
-      );
-      assert.equal(await fs.readFile(written, "utf8"), "first");
-      await assert.rejects(fs.readFile(path.join(root, "reconnect-terminal.txt")), {
-        code: "ENOENT",
-      });
-    } finally {
-      await restarted.shutdown();
-    }
-  });
-});
-
-test("public runtime control reconnects honor filesystem and terminal callback policy", async () => {
   await withCapabilityRuntime(
-    {
-      fs: false,
-      extraArgs: [
-        "--supports-load-session",
-        "--advertise-models",
-        "--load-session-action",
-        "write control.txt loaded",
-      ],
-    },
-    async ({ runtime, ensure, root }) => {
-      const handle = await ensure("control");
-      const effect = path.join(root, "control.txt");
-      await runtime.close({ handle, reason: "release initialized client" });
-      await runtime.setConfigOption({ handle, key: "model", value: "fast-model" }).catch(() => {});
-      await assert.rejects(fs.readFile(effect), { code: "ENOENT" });
+    { extraArgs: ["--supports-load-session"] },
+    async ({ runtime, ensure, root, options, store }) => {
+      const handle = await ensure("reconnect");
+      const written = path.join(root, "reconnect.txt");
+      await turnText(runtime.startTurn({ ...prompt, handle, text: `write ${written} first` }));
+      assert.equal(await fs.readFile(written, "utf8"), "first");
+      const record = await store.load(handle.acpxRecordId!);
+      assert.equal(JSON.stringify(record?.acpx ?? {}).includes('"fs"'), false);
+      assert.equal(JSON.stringify(record?.acpx ?? {}).includes('"terminal"'), false);
+      await runtime.close({ handle, reason: "drop retained owner" });
+      await runtime.shutdown();
+
+      const restarted = createAcpRuntime({ ...options, fs: false, terminal: false });
+      try {
+        const reconnectFsText = await turnText(
+          restarted.startTurn({ ...prompt, handle, text: `write ${written} second` }),
+        );
+        const reconnectTerminalText = await turnText(
+          restarted.startTurn({
+            ...prompt,
+            handle,
+            requestId: "capability-terminal",
+            text: terminalWritePrompt(path.join(root, "reconnect-terminal.txt")),
+          }),
+        );
+        assert.match(reconnectFsText, /error|method not found/iu);
+        assert.match(reconnectTerminalText, /error|method not found/iu);
+        assert.equal(await fs.readFile(written, "utf8"), "first");
+        await assert.rejects(fs.readFile(path.join(root, "reconnect-terminal.txt")), {
+          code: "ENOENT",
+        });
+      } finally {
+        await restarted.shutdown();
+      }
     },
   );
 });
+
+for (const [name, fsEnabled] of [
+  ["disabled", false],
+  ["enabled", true],
+] as const) {
+  test(`public runtime control reconnects honor filesystem callback policy when ${name}`, async () => {
+    await withCapabilityRuntime(
+      {
+        fs: fsEnabled,
+        extraArgs: (root) => [
+          "--supports-load-session",
+          "--advertise-models",
+          "--load-session-action",
+          `write ${path.join(root, "control.txt")} loaded`,
+        ],
+      },
+      async ({ runtime, ensure, root }) => {
+        const handle = await ensure("control");
+        const effect = path.join(root, "control.txt");
+        await runtime.close({ handle, reason: "release initialized client" });
+        let controlError: unknown;
+        try {
+          await runtime.setConfigOption({ handle, key: "model", value: "fast-model" });
+        } catch (error) {
+          controlError = error;
+        }
+        if (fsEnabled) {
+          assert.equal(controlError, undefined);
+          assert.equal(await fs.readFile(effect, "utf8"), "loaded");
+        } else {
+          assert.ok(controlError);
+          await assert.rejects(fs.readFile(effect), { code: "ENOENT" });
+        }
+      },
+    );
+  });
+}
 
 test("public runtime health probes keep filesystem and terminal callbacks disabled", async () => {
   await withCapabilityRuntime(
     {
       fs: true,
       terminal: true,
-      extraArgs: ["--initialize-action", "write probe.txt probed"],
+      extraArgs: (root) => ["--initialize-action", `write ${path.join(root, "probe.txt")} probed`],
     },
     async ({ runtime, root, options }) => {
       const probeFile = path.join(root, "probe.txt");
