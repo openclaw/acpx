@@ -633,32 +633,6 @@ export function recordPromptSubmission(
   return promptMessageId;
 }
 
-function agentMessageHasObservedReply(message: SessionAgentMessage): boolean {
-  return message.content.length > 0 || Object.keys(message.tool_results).length > 0;
-}
-
-export function hasAgentReplyAfterPrompt(
-  conversation: SessionConversation,
-  promptMessageId: string,
-): boolean {
-  let sawPrompt = false;
-
-  for (const message of conversation.messages) {
-    if (!sawPrompt) {
-      if (isUserMessage(message) && message.User.id === promptMessageId) {
-        sawPrompt = true;
-      }
-      continue;
-    }
-
-    if (isAgentMessage(message) && agentMessageHasObservedReply(message.Agent)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 export function recordSessionUpdate(
   conversation: SessionConversation,
   state: SessionAcpxState | undefined,

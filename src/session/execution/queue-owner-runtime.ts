@@ -511,6 +511,7 @@ async function runQueueOwnerRuntime(
             sessionOptions: options.sessionOptions,
             onClientAvailable: setActiveController,
             onClientClosed: clearActiveController,
+            onClientCloseFailure: shutdown.request,
             onPromptActive: async () => {
               turnController.markPromptActive();
               await applyPendingCancel();

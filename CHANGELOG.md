@@ -15,6 +15,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI/output: honor explicit JSON and quiet output flags for configuration startup errors instead of printing an uncaught stack trace.
 - Permissions: serialize interactive tool, file-write, and terminal questions so one answer cannot approve multiple requests; deny waiting questions when stdin closes.
 - Permissions/runtime: retire pending tool, file, and terminal requests with their owning prompt or ACP request, reject late approvals, and recheck authority before filesystem mutations and every terminal spawn attempt.
+- Sessions/timeouts: require a final ACP response for completion, preserve late response outcomes, and retire unfinished connections before queued successors resume the saved session.
 
 ## 0.17.1 - 2026-09-19
 

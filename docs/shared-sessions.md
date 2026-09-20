@@ -61,6 +61,8 @@ Use a fresh `requestId` for every turn. The ID is preserved through queueing and
 
 `turn.cancel()` or the turn's `AbortSignal` targets that request. Cancelling a queued turn removes it without cancelling another client's active turn. `runtime.cancel({ handle })` intentionally cancels the session's current active turn, like the CLI command.
 
+A timed-out turn with no final ACP response fails even if it produced partial text. The owner cancels and retires its unfinished connection before dispatching the next prompt, retaining final cancellation output under the original request. The successor resumes the saved provider session on a new connection. If connection cleanup fails, the owner stops accepting work and rejects queued prompts instead of reusing that connection.
+
 `turn.closeStream()` stops local event delivery while the submitted turn continues. `runtime.shutdown()` detaches the client and waits for its admitted local operations to settle. It does not kill the shared owner or cancel accepted turns. A detached turn whose result was not received reports a failed local result; the work may still be running.
 
 `runtime.close({ handle, reason })` explicitly performs the CLI's soft close: stop the owner and mark the record closed while retaining local history. A later ensure creates a new open session.

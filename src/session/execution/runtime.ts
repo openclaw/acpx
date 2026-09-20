@@ -70,6 +70,7 @@ type RunSessionPromptOptions = Omit<
   handleProcessInterrupts?: boolean;
   onClientAvailable?: (controller: ActiveSessionController) => void;
   onClientClosed?: () => void;
+  onClientCloseFailure?: () => void;
   onPromptActive?: () => Promise<void> | void;
   onPromptRequestWritten?: () => Promise<void> | void;
 };
@@ -469,6 +470,7 @@ function buildQueuedTaskRunOptions(
     sessionOptions: mergeSessionOptions(task.sessionOptions, options.sessionOptions),
     onClientAvailable: options.onClientAvailable,
     onClientClosed: options.onClientClosed,
+    onClientCloseFailure: options.onClientCloseFailure,
     onPromptActive: options.onPromptActive,
     onPromptRequestWritten: () => {
       if (task.reportPromptStarted) {
@@ -531,6 +533,7 @@ export async function runQueuedTask(
     sessionOptions?: SessionAgentOptions;
     onClientAvailable?: (controller: ActiveSessionController) => void;
     onClientClosed?: () => void;
+    onClientCloseFailure?: () => void;
     onPromptActive?: () => Promise<void> | void;
     handleProcessInterrupts?: boolean;
     waitSignal?: AbortSignal;
@@ -1089,7 +1092,33 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
   };
 
   const cleanupPrompt = async (attempt: SettledOperation<SessionSendResult>): Promise<void> => {
+    const unresolvedPrompt = client.hasUnresolvedPrompt();
     const steps = [
+      async () => {
+        if (unresolvedPrompt) {
+          await withTimeout(
+            client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS),
+            INTERRUPT_CANCEL_WAIT_MS,
+          ).catch(() => {
+            // A stalled cancellation write must not prevent connection retirement.
+          });
+        }
+      },
+      async () => {
+        const journalFailed =
+          attempt.status === "rejected" &&
+          attempt.error instanceof AcpxOperationalError &&
+          attempt.error.detailCode === "SESSION_JOURNAL_WRITE_FAILED";
+        if (unresolvedPrompt || closeClientOnExit || journalFailed) {
+          try {
+            // Keep the old turn's handlers and ownership until teardown completes.
+            await client.close();
+          } catch (error) {
+            options.onClientCloseFailure?.();
+            throw error;
+          }
+        }
+      },
       () => {
         const duration = stopTotalTimer();
         if (options.verbose) {
@@ -1102,15 +1131,6 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
         }
       },
       () => client.clearEventHandlers(),
-      async () => {
-        const journalFailed =
-          attempt.status === "rejected" &&
-          attempt.error instanceof AcpxOperationalError &&
-          attempt.error.detailCode === "SESSION_JOURNAL_WRITE_FAILED";
-        if (closeClientOnExit || journalFailed) {
-          await client.close();
-        }
-      },
       () => applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot()),
       () => applyConversation(record, conversation),
     ];

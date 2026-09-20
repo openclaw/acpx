@@ -2241,7 +2241,7 @@ test("AcpRuntimeManager live checkpoints preserve active close state", async () 
   await turn.result;
 });
 
-test("AcpRuntimeManager accepts a session reply even when the prompt RPC times out", async () => {
+test("AcpRuntimeManager preserves partial output but fails an unresolved timed-out prompt", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "late-reply-session",
     acpSessionId: "late-reply-sid",
@@ -2303,10 +2303,13 @@ test("AcpRuntimeManager accepts a session reply even when the prompt RPC times o
   assert.deepEqual(events, [
     { type: "text_delta", text: "late reply", stream: "output", tag: "agent_message_chunk" },
   ]);
-  assert.deepEqual(result, { status: "completed", stopReason: "end_turn" });
+  assert.deepEqual(result, {
+    status: "failed",
+    error: { code: "TIMEOUT", message: "Timed out after 20ms" },
+  });
 });
 
-test("AcpRuntimeManager waits for late reply chunks to settle before ending a salvaged turn", async () => {
+test("AcpRuntimeManager preserves a final response and chunks arriving during timeout draining", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "late-reply-stream-session",
     acpSessionId: "late-reply-stream-sid",
@@ -2316,6 +2319,18 @@ test("AcpRuntimeManager waits for late reply chunks to settle before ending a sa
   const store = new InMemorySessionStore([record]);
   let handlers: FakeClientHandlers = {};
   let lastUpdateAt = Date.now();
+  let resolvePrompt!: (response: {
+    stopReason: string;
+    usage: { inputTokens: number };
+    _meta: { turn: string };
+  }) => void;
+  const pending = new Promise<{
+    stopReason: string;
+    usage: { inputTokens: number };
+    _meta: { turn: string };
+  }>((resolve) => {
+    resolvePrompt = resolve;
+  });
   const client: FakeClient = {
     start: async () => {},
     close: async () => {},
@@ -2346,8 +2361,13 @@ test("AcpRuntimeManager waits for late reply chunks to settle before ending a sa
             content: { type: "text", text: " reply" },
           },
         });
+        resolvePrompt({
+          stopReason: "max_tokens",
+          usage: { inputTokens: 17 },
+          _meta: { turn: "late-response" },
+        });
       }, 300);
-      return await new Promise<{ stopReason: string }>(() => {});
+      return await pending;
     },
     requestCancelActivePrompt: async () => false,
     hasActivePrompt: () => true,
@@ -2391,7 +2411,12 @@ test("AcpRuntimeManager waits for late reply chunks to settle before ending a sa
     { type: "text_delta", text: "late", stream: "output", tag: "agent_message_chunk" },
     { type: "text_delta", text: " reply", stream: "output", tag: "agent_message_chunk" },
   ]);
-  assert.deepEqual(result, { status: "completed", stopReason: "end_turn" });
+  assert.deepEqual(result, {
+    status: "completed",
+    stopReason: "max_tokens",
+    _meta: { turn: "late-response" },
+  });
+  assert.equal((await store.load(record.acpxRecordId))?.cumulative_token_usage.input_tokens, 17);
 });
 
 test("AcpRuntimeManager routes controls through the active controller while a turn is running", async () => {

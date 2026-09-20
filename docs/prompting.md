@@ -153,7 +153,9 @@ acpx --timeout 90 codex 'investigate the intermittent test timeout'
 
 Decimal seconds are allowed. Negative or zero is rejected as a usage error.
 
-If the timeout fires, `acpx` exits with code `3` and the agent process is cancelled cooperatively first.
+If no final ACP response arrives by the end of the bounded update drain, `acpx` exits with code `3`. Partial assistant text does not count as completion. A final response received during that drain retains its actual stop reason, usage, and metadata.
+
+Before the next queued prompt starts, acpx attempts cooperative cancellation of unfinished work and closes its connection. Cancellation and process cleanup can add time beyond the response deadline. The next turn reconnects using the saved provider session; shared sessions require that exact session to resume successfully.
 
 ## Models
 

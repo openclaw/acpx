@@ -4,10 +4,7 @@ import {
   withTimeout,
   type AcpControlAuthority,
 } from "../../async-control.js";
-import {
-  hasAgentReplyAfterPrompt,
-  recordPromptResponseUsage,
-} from "../../session/conversation-model.js";
+import { recordPromptResponseUsage } from "../../session/conversation-model.js";
 import type {
   AcpElicitationHandler,
   AcpPermissionHandler,
@@ -44,19 +41,19 @@ type PromptTurnClient = {
 type PromptResponse = Awaited<ReturnType<PromptTurnClient["prompt"]>>;
 
 function recoveredSessionResult(
-  response: PromptResponse | undefined,
+  response: PromptResponse,
   conversation: SessionConversation,
   promptMessageId: string,
 ): {
-  stopReason: "end_turn";
+  stopReason: PromptResponse["stopReason"];
   source: "session";
   _meta?: Record<string, unknown> | null;
 } {
-  recordPromptResponseUsage(conversation, response?.usage, promptMessageId);
+  recordPromptResponseUsage(conversation, response.usage, promptMessageId);
   return {
-    stopReason: "end_turn",
+    stopReason: response.stopReason,
     source: "session",
-    ...responseMetaField(response?._meta),
+    ...responseMetaField(response._meta),
   };
 }
 
@@ -144,7 +141,7 @@ export async function runPromptTurn(params: {
         // Best effort. If the update drain itself times out, fall back to the prompt error.
       });
 
-    if (hasAgentReplyAfterPrompt(params.conversation, params.promptMessageId)) {
+    if (settledResponse) {
       return recoveredSessionResult(settledResponse, params.conversation, params.promptMessageId);
     }
 

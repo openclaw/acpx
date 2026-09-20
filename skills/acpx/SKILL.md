@@ -286,7 +286,7 @@ Behavior:
 - `--format <fmt>`: output format (`text`, `json`, `quiet`)
 - `--json-strict`: strict JSON mode; requires `--format json` and suppresses non-JSON stderr output
 - `--suppress-reads`: suppress raw read-file contents while preserving the selected format
-- `--timeout <seconds>`: max wait time (positive number)
+- `--timeout <seconds>`: response deadline (positive number); partial text is not completion. A final response during the bounded drain keeps its actual outcome. Queued prompts wait for cancellation and retirement of unfinished connections before reconnecting to the saved session; cleanup can extend elapsed time beyond the deadline.
 - `--ttl <seconds>`: queue owner idle TTL before shutdown (default `300`, `0` disables TTL)
 - `--model <id>`: request an agent model during session creation; non-Claude agents must advertise a model config option or legacy `models` metadata
 - `--system-prompt <text>`: replace the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt`; persisted in `session_options.system_prompt` so reuse keeps the override. Other agents ignore the field.
