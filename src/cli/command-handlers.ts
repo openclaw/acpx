@@ -140,6 +140,8 @@ function buildSessionStartOptions(params: {
     permissionMode: params.permissionMode,
     permissionPolicy: params.permissionPolicy,
     sessionOptions: sessionOptionsFromGlobalFlags(params.globalFlags),
+    suppressSdkConsoleErrors:
+      params.globalFlags.jsonStrict || params.globalFlags.format === "quiet",
     onModelWarning: params.globalFlags.jsonStrict
       ? undefined
       : (message) => process.stderr.write(`[acpx] warning: ${message}\n`),

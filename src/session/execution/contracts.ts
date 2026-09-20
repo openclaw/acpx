@@ -76,6 +76,7 @@ export type SessionCreateOptions = {
   sessionOptions?: SessionAgentOptions;
   onModelWarning?: (message: string) => void;
   handleProcessInterrupts?: boolean;
+  suppressSdkConsoleErrors?: boolean;
 } & SessionConnectionOptions;
 
 export type SessionSendOptions = {

@@ -170,6 +170,7 @@ export async function createSessionWithClient(
     fs: options.fs,
     terminal: options.terminal,
     verbose: options.verbose,
+    suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     sessionOptions: options.sessionOptions,
   });
 

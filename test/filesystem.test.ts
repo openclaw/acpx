@@ -361,7 +361,55 @@ test("writeTextFile blocks paths outside cwd subtree", async () => {
         path: outside,
         content: "nope",
       }),
-      /outside allowed cwd subtree/,
+      /outside allowed workspace roots/,
+    );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("additional roots grant fs access outside cwd while other paths stay blocked", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-roots-"));
+  try {
+    const cwd = path.join(tmp, "workspace");
+    const extra = path.join(tmp, "extra");
+    const other = path.join(tmp, "other");
+    await fs.mkdir(cwd);
+    await fs.mkdir(extra);
+    await fs.mkdir(other);
+    await fs.writeFile(path.join(extra, "note.txt"), "extra content");
+
+    const handlers = new FileSystemHandlers({ cwd, permissionMode: "approve-all" });
+    // Before granting, the extra root is outside the allowed subtree.
+    await assert.rejects(
+      handlers.readTextFile({
+        sessionId: "session-1",
+        path: path.join(extra, "note.txt"),
+      }),
+      /outside allowed workspace roots/,
+    );
+
+    handlers.setAdditionalRoots([extra]);
+    const read = await handlers.readTextFile({
+      sessionId: "session-1",
+      path: path.join(extra, "note.txt"),
+    });
+    assert.equal(read.content, "extra content");
+
+    await handlers.writeTextFile({
+      sessionId: "session-1",
+      path: path.join(extra, "written.txt"),
+      content: "written",
+    });
+    assert.equal(await fs.readFile(path.join(extra, "written.txt"), "utf8"), "written");
+
+    // Paths outside every granted root remain blocked.
+    await assert.rejects(
+      handlers.readTextFile({
+        sessionId: "session-1",
+        path: path.join(other, "nope.txt"),
+      }),
+      /outside allowed workspace roots/,
     );
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });

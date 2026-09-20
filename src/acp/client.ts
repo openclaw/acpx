@@ -1109,6 +1109,9 @@ export class AcpClient {
     if (dirs === undefined) {
       return {};
     }
+    // Grant the agent's fs callbacks access to the host-side dirs we are about
+    // to advertise; without this the path guard rejects reads outside cwd.
+    this.filesystem.setAdditionalRoots(dirs);
     const translated = await Promise.all(
       dirs.map(async (dir) => {
         try {

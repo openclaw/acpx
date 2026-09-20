@@ -23,6 +23,11 @@ export type FileSystemHandlersOptions = {
   confirmWrite?: (filePath: string, preview: string, signal?: AbortSignal) => Promise<boolean>;
 };
 
+type ResolvedFsPath = {
+  rootDir: string;
+  filePath: string;
+};
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -64,6 +69,8 @@ function canPromptForPermission(): boolean {
 export class FileSystemHandlers {
   private readonly rootDir: string;
   private workspace?: Promise<Root>;
+  private extraRoots = new Map<string, Promise<Root>>();
+  private extraRootDirs: string[] = [];
   private permissionMode: PermissionMode;
   private nonInteractivePermissions: NonInteractivePermissionPolicy;
   private readonly onOperation?: (operation: ClientOperation) => void;
@@ -79,6 +86,16 @@ export class FileSystemHandlers {
     this.confirmWrite = options.confirmWrite ?? defaultConfirmWrite;
   }
 
+  /**
+   * Grants the agent's fs callbacks access to extra workspace roots (ACP
+   * additionalDirectories). Called once the session's dirs are resolved;
+   * replaces any previously granted roots.
+   */
+  setAdditionalRoots(dirs: readonly string[]): void {
+    this.extraRootDirs = dirs.map((dir) => path.resolve(dir));
+    this.extraRoots.clear();
+  }
+
   updatePermissionPolicy(
     permissionMode: PermissionMode,
     nonInteractivePermissions?: NonInteractivePermissionPolicy,
@@ -92,7 +109,7 @@ export class FileSystemHandlers {
     authority?: AcpControlAuthority,
   ): Promise<ReadTextFileResponse> {
     assertControlAuthority(authority);
-    const filePath = this.resolvePathWithinRoot(params.path);
+    const { rootDir, filePath } = this.resolvePathWithinRoot(params.path);
     const summary = `read_text_file: ${filePath}`;
     this.emitOperation({
       method: "fs/read_text_file",
@@ -107,7 +124,7 @@ export class FileSystemHandlers {
         throw new PermissionDeniedError("Permission denied for fs/read_text_file (--deny-all)");
       }
 
-      const workspace = await this.getWorkspace();
+      const workspace = await this.getWorkspace(rootDir);
       const content = await workspace.readText(filePath);
       assertControlAuthority(authority);
       const sliced = this.sliceContent(content, params.line, params.limit);
@@ -138,7 +155,7 @@ export class FileSystemHandlers {
     authority?: AcpControlAuthority,
   ): Promise<WriteTextFileResponse> {
     assertControlAuthority(authority);
-    const filePath = this.resolvePathWithinRoot(params.path);
+    const { rootDir, filePath } = this.resolvePathWithinRoot(params.path);
     const preview = toWritePreview(params.content);
     const summary = `write_text_file: ${filePath}`;
 
@@ -157,7 +174,7 @@ export class FileSystemHandlers {
         throw new PermissionDeniedError("Permission denied for fs/write_text_file");
       }
 
-      const workspace = await this.getWorkspace();
+      const workspace = await this.getWorkspace(rootDir);
       const target = await workspace.resolve(filePath);
       const file = await workspace.openWritable(target, {
         mode: 0o666,
@@ -212,24 +229,45 @@ export class FileSystemHandlers {
     return await this.confirmWrite(filePath, preview, signal);
   }
 
-  private resolvePathWithinRoot(rawPath: string): string {
+  private resolvePathWithinRoot(rawPath: string): ResolvedFsPath {
     if (!path.isAbsolute(rawPath)) {
       throw new Error(`Path must be absolute: ${rawPath}`);
     }
     const resolved = path.resolve(rawPath);
-    if (!isPathInside(this.rootDir, resolved)) {
-      throw new Error(`Path is outside allowed cwd subtree: ${resolved}`);
+    if (isPathInside(this.rootDir, resolved)) {
+      // Preserve symlink/.. traversal for filesystem resolution.
+      return { rootDir: this.rootDir, filePath: rawPath };
+    }
+    // Additional workspace roots (ACP additionalDirectories): pick the
+    // deepest containing root so nested roots resolve correctly.
+    const match = this.extraRootDirs
+      .filter((dir) => isPathInside(dir, resolved))
+      .toSorted((a, b) => b.length - a.length)[0];
+    if (match === undefined) {
+      throw new Error(`Path is outside allowed workspace roots: ${resolved}`);
     }
     // Preserve symlink/.. traversal for filesystem resolution.
-    return rawPath;
+    return { rootDir: match, filePath: rawPath };
   }
 
-  private getWorkspace(): Promise<Root> {
-    return (this.workspace ??= root(this.rootDir, {
+  private getWorkspace(rootDir: string): Promise<Root> {
+    if (rootDir === this.rootDir) {
+      return (this.workspace ??= this.openRoot(rootDir));
+    }
+    let workspace = this.extraRoots.get(rootDir);
+    if (workspace === undefined) {
+      workspace = this.openRoot(rootDir);
+      this.extraRoots.set(rootDir, workspace);
+    }
+    return workspace;
+  }
+
+  private openRoot(rootDir: string): Promise<Root> {
+    return root(rootDir, {
       symlinks: "follow-within-root",
       hardlinks: "allow",
       maxBytes: Infinity,
-    }));
+    });
   }
 
   private sliceContent(

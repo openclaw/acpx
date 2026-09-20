@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { SessionRecord } from "../../types.js";
 
 export type SystemPromptOption = string | { append: string };
@@ -76,7 +77,10 @@ export function persistSessionOptions(
   record: SessionRecord,
   options: SessionAgentOptions | undefined,
 ): void {
-  const next = options === undefined ? undefined : persistedSessionOptions(options);
+  // Directory options are normalized against the session cwd so a record
+  // reopened from another process directory resolves the same dirs.
+  const normalized = options === undefined ? undefined : normalizeDirOptions(options, record.cwd);
+  const next = normalized === undefined ? undefined : persistedSessionOptions(normalized);
   if (next !== undefined) {
     record.acpx = {
       ...record.acpx,
@@ -90,6 +94,16 @@ export function persistSessionOptions(
   }
 
   delete record.acpx.session_options;
+}
+
+function normalizeDirOptions(options: SessionAgentOptions, cwd: string): SessionAgentOptions {
+  const resolveDirs = (dirs: string[] | undefined): string[] | undefined =>
+    dirs?.map((dir) => (path.isAbsolute(dir) ? dir : path.resolve(cwd, dir)));
+  return {
+    ...options,
+    skillsDirs: resolveDirs(options.skillsDirs),
+    additionalDirs: resolveDirs(options.additionalDirs),
+  };
 }
 
 export function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOptions | undefined {
