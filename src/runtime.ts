@@ -42,6 +42,7 @@ export type {
   RequestedModelUnsupportedErrorCode,
   RequestedModelUnsupportedReason,
 } from "./acp/model-support.js";
+export { AdditionalDirectoriesUnsupportedError } from "./acp/additional-directories.js";
 export {
   decodeAcpxRuntimeHandleState,
   encodeAcpxRuntimeHandleState,

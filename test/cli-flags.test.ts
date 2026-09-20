@@ -240,10 +240,35 @@ test("resolveGlobalFlags validates and normalizes dynamic Commander options", ()
     maxTurns: 3,
     systemPrompt: "replace",
     promptRetries: 2,
+    skillsDirs: undefined,
+    additionalDirs: undefined,
     approveAll: undefined,
     approveReads: true,
     denyAll: undefined,
   });
+});
+
+test("resolveGlobalFlags collects --skills-dir/--additional-dir relative to --cwd", () => {
+  const command = new Command();
+  addGlobalFlags(command);
+  command.parse(
+    [
+      "node",
+      "acpx",
+      "--cwd",
+      "/tmp/work",
+      "--skills-dir",
+      "skills",
+      "--skills-dir",
+      "/abs/skills",
+      "--additional-dir",
+      "extra",
+    ],
+    { from: "node" },
+  );
+  const flags = resolveGlobalFlags(command, config());
+  assert.deepEqual(flags.skillsDirs, ["/tmp/work/skills", "/abs/skills"]);
+  assert.deepEqual(flags.additionalDirs, ["/tmp/work/extra"]);
 });
 
 test("resolveGlobalFlags ignores malformed dynamic options and keeps typed config defaults", () => {

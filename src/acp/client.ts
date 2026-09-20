@@ -77,6 +77,10 @@ import type {
   PromptInput,
 } from "../types.js";
 import {
+  AdditionalDirectoriesUnsupportedError,
+  resolveAdditionalDirectories,
+} from "./additional-directories.js";
+import {
   buildClaudeAcpSessionCreateTimeoutMessage,
   buildClaudeCodeOptionsMeta,
   buildGeminiAcpStartupTimeoutMessage,
@@ -206,6 +210,14 @@ async function raceWithAbort<T>(signal: AbortSignal, pending: Promise<T>): Promi
     signal.removeEventListener("abort", onAbort);
   }
 }
+
+type CreateSessionOptions = {
+  /**
+   * Reconnect fallback for persisted dirs: warn and drop instead of failing
+   * when the agent lacks additionalDirectories or a dir is missing.
+   */
+  lenientAdditionalDirectories?: boolean;
+};
 
 type LoadSessionOptions = {
   suppressReplayUpdates?: boolean;
@@ -519,6 +531,10 @@ export class AcpClient {
 
   supportsListSessions(): boolean {
     return Boolean(this.initResult?.agentCapabilities?.sessionCapabilities?.list);
+  }
+
+  supportsAdditionalDirectories(): boolean {
+    return Boolean(this.initResult?.agentCapabilities?.sessionCapabilities?.additionalDirectories);
   }
 
   setEventHandlers(
@@ -1002,13 +1018,19 @@ export class AcpClient {
     });
   }
 
-  async createSession(cwd = this.options.cwd): Promise<SessionCreateResult> {
+  async createSession(
+    cwd = this.options.cwd,
+    options: CreateSessionOptions = {},
+  ): Promise<SessionCreateResult> {
     const connection = this.getConnection();
     const { command, args } = resolveAgentCommandParts(
       this.options.agentCommand,
       this.options.agentArgv,
     );
     const claudeAcp = isClaudeAcpCommand(command, args);
+    const additionalDirectories = await this.createSessionAdditionalDirectories(
+      options.lenientAdditionalDirectories === true,
+    );
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
 
     let result: NewSessionResponse;
@@ -1017,6 +1039,7 @@ export class AcpClient {
         connection.agent.request(methods.agent.session.new, {
           cwd: sessionCwd,
           mcpServers: this.options.mcpServers ?? [],
+          ...additionalDirectories,
           _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions, claudeAcp),
         }),
       );
@@ -1049,6 +1072,100 @@ export class AcpClient {
     };
   }
 
+  /**
+   * Session-creation additionalDirectories. Strict by default: requesting dirs
+   * from an agent without the capability, or a missing dir, fails creation.
+   * Lenient mode (reconnect fallback for persisted dirs) warns and drops.
+   */
+  private async createSessionAdditionalDirectories(
+    lenient: boolean,
+  ): Promise<{ additionalDirectories?: string[] }> {
+    if (lenient) {
+      return await this.lenientAdditionalDirectoriesParams();
+    }
+    if (this.hasRequestedAdditionalDirectories() && !this.supportsAdditionalDirectories()) {
+      throw new AdditionalDirectoriesUnsupportedError(this.options.agentCommand);
+    }
+    return await this.additionalDirectoriesParams();
+  }
+
+  /**
+   * Resolves sessionOptions.skillsDirs into synthetic roots (each exposed as
+   * `.claude/skills` and `.agents/skills`) and merges them with raw
+   * sessionOptions.additionalDirs, translating each entry for Windows agents
+   * under WSL. Returns {} when neither is set.
+   *
+   * Strict by default: a configured dir that does not exist fails session
+   * creation. Lenient when `onError` is given (session/load, session/resume):
+   * entries that fail to resolve are dropped individually with a warning so a
+   * stale session record reconnects without them rather than failing the load.
+   */
+  private async additionalDirectoriesParams(
+    onError?: (error: unknown) => void,
+  ): Promise<{ additionalDirectories?: string[] }> {
+    const dirs = await resolveAdditionalDirectories(this.options.sessionOptions, {
+      onError,
+    });
+    if (dirs === undefined) {
+      return {};
+    }
+    const translated = await Promise.all(
+      dirs.map(async (dir) => {
+        try {
+          return await resolveAgentSessionCwd(dir, this.options.agentCommand);
+        } catch (error) {
+          if (onError === undefined) {
+            throw error;
+          }
+          onError(error);
+          return undefined;
+        }
+      }),
+    );
+    const resolved = translated.filter((dir): dir is string => dir !== undefined);
+    return resolved.length > 0 ? { additionalDirectories: resolved } : {};
+  }
+
+  private warn(message: string): void {
+    // suppressSdkConsoleErrors doubles as the --json-strict/quiet stderr gate.
+    if (this.options.suppressSdkConsoleErrors) {
+      return;
+    }
+    process.stderr.write(`[acpx] warning: ${message}\n`);
+  }
+
+  private hasRequestedAdditionalDirectories(): boolean {
+    const dirs = this.options.sessionOptions;
+    return (
+      (dirs?.skillsDirs?.some((dir) => dir.length > 0) ?? false) ||
+      (dirs?.additionalDirs?.some((dir) => dir.length > 0) ?? false)
+    );
+  }
+
+  /**
+   * additionalDirectories for session/load and session/resume. Unlike
+   * createSession this never throws: a session record with persisted dirs on
+   * an agent that no longer advertises the capability reconnects without them
+   * rather than failing the whole load.
+   */
+  private async lenientAdditionalDirectoriesParams(): Promise<{
+    additionalDirectories?: string[];
+  }> {
+    if (!this.supportsAdditionalDirectories()) {
+      if (this.hasRequestedAdditionalDirectories()) {
+        this.warn(
+          "agent does not advertise additionalDirectories; --skills-dir/--additional-dir ignored on reconnect",
+        );
+      }
+      return {};
+    }
+    return await this.additionalDirectoriesParams((error) =>
+      this.warn(
+        `dropping --skills-dir/--additional-dir entry on reconnect: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    );
+  }
+
   async loadSession(sessionId: string, cwd = this.options.cwd): Promise<SessionLoadResult> {
     this.getConnection();
     return await this.loadSessionWithOptions(sessionId, cwd, {});
@@ -1061,6 +1178,7 @@ export class AcpClient {
   ): Promise<SessionLoadResult> {
     const connection = this.getConnection();
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
+    const additionalDirectories = await this.lenientAdditionalDirectoriesParams();
     const previousSuppression = this.applySessionUpdateSuppression(
       Boolean(options.suppressReplayUpdates),
     );
@@ -1073,6 +1191,7 @@ export class AcpClient {
           sessionId,
           cwd: sessionCwd,
           mcpServers: this.options.mcpServers ?? [],
+          ...additionalDirectories,
         }),
       );
 
@@ -1094,14 +1213,15 @@ export class AcpClient {
   async resumeSession(sessionId: string, cwd = this.options.cwd): Promise<SessionResumeResult> {
     const connection = this.getConnection();
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
+    const additionalDirectories = await this.lenientAdditionalDirectoriesParams();
     const response = await this.runConnectionRequest(() =>
       connection.agent.request(methods.agent.session.resume, {
         sessionId,
         cwd: sessionCwd,
         mcpServers: this.options.mcpServers ?? [],
+        ...additionalDirectories,
       }),
     );
-
     this.loadedSessionId = sessionId;
     const result = toReconnectedSessionResult(response);
     this.updateRememberedSessionModels(sessionId, result);

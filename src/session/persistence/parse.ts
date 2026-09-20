@@ -508,9 +508,7 @@ function assignParsedSessionOptions(state: SessionAcpxState, raw: unknown): void
   if (typeof sessionOptions.model === "string") {
     parsedSessionOptions.model = sessionOptions.model;
   }
-  if (isStringArray(sessionOptions.allowed_tools)) {
-    parsedSessionOptions.allowed_tools = [...sessionOptions.allowed_tools];
-  }
+  assignStringListOption(parsedSessionOptions, "allowed_tools", sessionOptions.allowed_tools);
   if (isPositiveInteger(sessionOptions.max_turns)) {
     parsedSessionOptions.max_turns = sessionOptions.max_turns;
   }
@@ -519,6 +517,8 @@ function assignParsedSessionOptions(state: SessionAcpxState, raw: unknown): void
   if (env) {
     parsedSessionOptions.env = env;
   }
+  assignStringListOption(parsedSessionOptions, "skills_dirs", sessionOptions.skills_dirs);
+  assignStringListOption(parsedSessionOptions, "additional_dirs", sessionOptions.additional_dirs);
 
   if (Object.keys(parsedSessionOptions).length > 0) {
     state.session_options = parsedSessionOptions;
@@ -537,6 +537,22 @@ function assignSessionOptionSystemPrompt(
   const appendRecord = asRecord(value);
   if (appendRecord && typeof appendRecord.append === "string" && appendRecord.append.length > 0) {
     options.system_prompt = { append: appendRecord.append };
+  }
+}
+
+function assignStringListOption(
+  options: NonNullable<SessionAcpxState["session_options"]>,
+  key: "allowed_tools" | "skills_dirs" | "additional_dirs",
+  value: unknown,
+): void {
+  if (isStringArray(value)) {
+    const items = value.filter((item) => item.length > 0);
+    // Empty strings are dropped; an explicit empty list is preserved because
+    // it is meaningful for allowed_tools ("no tools"). For the dir keys it is
+    // benign: storedStringList normalizes [] back to absent on read.
+    if (items.length > 0 || value.length === 0) {
+      options[key] = items;
+    }
   }
 }
 

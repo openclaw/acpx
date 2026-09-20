@@ -591,6 +591,10 @@ function cloneSessionOptions(
       ? { system_prompt: cloneSystemPromptOption(options.system_prompt) }
       : {}),
     ...(options.env !== undefined ? { env: { ...options.env } } : {}),
+    ...(options.skills_dirs !== undefined ? { skills_dirs: [...options.skills_dirs] } : {}),
+    ...(options.additional_dirs !== undefined
+      ? { additional_dirs: [...options.additional_dirs] }
+      : {}),
   };
 }
 

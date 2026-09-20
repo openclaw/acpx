@@ -17,6 +17,20 @@ export type SessionAgentOptions = {
    * passing them to acpx.
    */
   env?: Record<string, string>;
+  /**
+   * Directories containing skill folders (`<dir>/<name>/SKILL.md`). Each is
+   * materialized as a synthetic root exposing `.claude/skills` and
+   * `.agents/skills`, then sent as `additionalDirectories` on session/new,
+   * session/load, and session/resume when the agent advertises the
+   * capability. Persisted with the session record so reconnects keep the
+   * same roots.
+   */
+  skillsDirs?: string[];
+  /**
+   * Raw ACP `additionalDirectories` workspace roots. Unlike skillsDirs these
+   * are sent verbatim — no synthetic-root wrapping.
+   */
+  additionalDirs?: string[];
 };
 
 export function mergeSessionOptions(
@@ -24,10 +38,16 @@ export function mergeSessionOptions(
   fallback: SessionAgentOptions | undefined,
 ): SessionAgentOptions | undefined {
   const merged: SessionAgentOptions = { ...fallback };
-  assignDefinedOption(merged, "model", preferred?.model);
-  assignDefinedOption(merged, "allowedTools", preferred?.allowedTools);
-  assignDefinedOption(merged, "maxTurns", preferred?.maxTurns);
-  assignDefinedOption(merged, "systemPrompt", preferred?.systemPrompt);
+  for (const key of [
+    "model",
+    "allowedTools",
+    "maxTurns",
+    "systemPrompt",
+    "skillsDirs",
+    "additionalDirs",
+  ] as const) {
+    assignDefinedOption(merged, key, preferred?.[key]);
+  }
   assignDefinedOption(merged, "env", mergeEnvRecords(fallback?.env, preferred?.env));
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
@@ -88,6 +108,8 @@ export function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOpt
     normalizeSystemPromptOption(stored.system_prompt),
   );
   assignDefinedOption(sessionOptions, "env", storedEnvRecord(stored.env));
+  assignDefinedOption(sessionOptions, "skillsDirs", storedStringList(stored.skills_dirs));
+  assignDefinedOption(sessionOptions, "additionalDirs", storedStringList(stored.additional_dirs));
 
   return Object.keys(sessionOptions).length > 0 ? sessionOptions : undefined;
 }
@@ -103,6 +125,8 @@ function persistedSessionOptions(
     max_turns: typeof options.maxTurns === "number" ? options.maxTurns : undefined,
     system_prompt: normalizeSystemPromptOption(options.systemPrompt),
     env: storedEnvRecord(options.env),
+    skills_dirs: storedStringList(options.skillsDirs),
+    additional_dirs: storedStringList(options.additionalDirs),
   } satisfies PersistedSessionOptions;
   return hasPersistedSessionOptions(next) ? next : undefined;
 }
@@ -113,7 +137,9 @@ function hasPersistedSessionOptions(options: PersistedSessionOptions): boolean {
     options.allowed_tools !== undefined ||
     options.max_turns !== undefined ||
     options.system_prompt !== undefined ||
-    options.env !== undefined
+    options.env !== undefined ||
+    options.skills_dirs !== undefined ||
+    options.additional_dirs !== undefined
   );
 }
 
@@ -152,6 +178,16 @@ function storedAllowedTools(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === "string")
     ? [...value]
     : undefined;
+}
+
+// Unlike storedAllowedTools, empty entries and empty lists are dropped: an
+// empty dir list carries no "clear" semantics worth persisting.
+function storedStringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || !value.every((item): item is string => typeof item === "string")) {
+    return undefined;
+  }
+  const items = value.filter((item) => item.length > 0);
+  return items.length > 0 ? items : undefined;
 }
 
 function storedMaxTurns(value: unknown): number | undefined {

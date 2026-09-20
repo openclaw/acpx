@@ -296,6 +296,10 @@ Behavior:
 - `--prompt-retries <count>`: retry failed prompt turns on transient errors (default `0`); cancelling a queued turn stops remaining attempts, while already-received final responses keep their outcome
 - `--no-fs`: advertise both ACP filesystem capabilities as disabled so compatible agents use their native file operations
 - `--no-terminal`: do not advertise the ACP terminal capability — useful for review-only or sandboxed agent invocations
+- `--skills-dir <dir>`: directory containing skill folders (`<dir>/<name>/SKILL.md`); exposed to the agent as `.claude/skills/` and `.agents/skills/` via ACP `additionalDirectories` (repeatable). Requires `sessionCapabilities.additionalDirectories` at session creation; persisted on the session record for reconnects.
+- `--additional-dir <dir>`: extra workspace root sent without the skills-dir synthetic-root wrapping via the ACP `additionalDirectories` field (repeatable); same capability requirement and persistence as `--skills-dir`.
+- `--mcp-config <path>`: load `mcpServers` from an external JSON file, replacing project/global MCP config for the invocation.
+- `--auth-policy <policy>`: ACP authentication behavior — `skip` (default) or `fail` when auth is required.
 - `--verbose`: verbose ACP/debug logs to stderr
 
 Cursor may advertise bracketed model ids such as `composer-2.5[fast=false]`. A bare Cursor

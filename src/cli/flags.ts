@@ -52,6 +52,8 @@ export type GlobalFlags = PermissionFlags & {
   systemPrompt?: SystemPromptOption;
   promptRetries?: number;
   permissionPolicy?: string;
+  skillsDirs?: string[];
+  additionalDirs?: string[];
 };
 
 export type PromptFlags = {
@@ -220,6 +222,13 @@ function collectSessionConfigOptionAssignment(
   return [...previous, parseSessionConfigOptionAssignment(value)];
 }
 
+function collectNonEmptyString(label: string): (value: string, previous?: string[]) => string[] {
+  return (value: string, previous: string[] = []): string[] => [
+    ...previous,
+    parseNonEmptyValue(label, value),
+  ];
+}
+
 export function parseHistoryLimit(value: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -364,6 +373,16 @@ export function addGlobalFlags(command: Command): Command {
       (value: string) => parseNonEmptyValue("Append system prompt", value),
     )
     .option(
+      "--skills-dir <dir>",
+      "Directory containing skill folders; exposed to the agent as .claude/skills and .agents/skills via ACP additionalDirectories (repeatable)",
+      collectNonEmptyString("--skills-dir"),
+    )
+    .option(
+      "--additional-dir <dir>",
+      "Extra workspace root sent verbatim via the ACP additionalDirectories field (repeatable)",
+      collectNonEmptyString("--additional-dir"),
+    )
+    .option(
       "--prompt-retries <count>",
       "Retry failed prompt turns on transient errors (default: 0)",
       parsePromptRetries,
@@ -443,10 +462,11 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
   const jsonStrict = opts.jsonStrict === true;
   const verbose = opts.verbose === true;
   assertOutputFlagCompatibility(format, jsonStrict, verbose);
+  const cwd = resolveCwdOption(opts.cwd);
 
   return {
     agent: stringOption(opts.agent),
-    cwd: resolveCwdOption(opts.cwd),
+    cwd,
     authPolicy: resolveAuthPolicy(opts.authPolicy, config),
     nonInteractivePermissions: resolveNonInteractivePermissions(
       opts.nonInteractivePermissions,
@@ -466,10 +486,20 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
     maxTurns: numberOption(opts.maxTurns),
     systemPrompt: resolveSystemPromptFlag(opts),
     promptRetries: numberOption(opts.promptRetries),
+    skillsDirs: resolveDirListOption(opts.skillsDir, cwd),
+    additionalDirs: resolveDirListOption(opts.additionalDir, cwd),
     approveAll: opts.approveAll ? true : undefined,
     approveReads: opts.approveReads ? true : undefined,
     denyAll: opts.denyAll ? true : undefined,
   };
+}
+
+function resolveDirListOption(value: unknown, cwd: string): string[] | undefined {
+  const dirs = stringArrayOption(value);
+  if (!dirs || dirs.length === 0) {
+    return undefined;
+  }
+  return dirs.map((dir) => path.resolve(cwd, dir));
 }
 
 function resolveCwdOption(value: unknown): string {

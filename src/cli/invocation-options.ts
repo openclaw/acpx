@@ -16,6 +16,8 @@ export function sessionOptionsFromGlobalFlags(
     allowedTools: globalFlags.allowedTools,
     maxTurns: globalFlags.maxTurns,
     systemPrompt: globalFlags.systemPrompt,
+    skillsDirs: globalFlags.skillsDirs,
+    additionalDirs: globalFlags.additionalDirs,
   };
 }
 

@@ -508,6 +508,7 @@ async function runQueueOwnerRuntime(
             authPolicy: options.authPolicy,
             suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
             promptRetries: task.promptRetries ?? 0,
+            // buildQueuedTaskRunOptions merges task.sessionOptions over this.
             sessionOptions: options.sessionOptions,
             onClientAvailable: setActiveController,
             onClientClosed: clearActiveController,

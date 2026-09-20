@@ -63,6 +63,8 @@ export async function handleFlowRun(
       model: globalFlags.model,
       allowedTools: globalFlags.allowedTools,
       maxTurns: globalFlags.maxTurns,
+      skillsDirs: globalFlags.skillsDirs,
+      additionalDirs: globalFlags.additionalDirs,
     },
   });
 

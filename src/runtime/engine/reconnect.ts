@@ -806,7 +806,12 @@ async function createFreshRuntimeSession(
   record: SessionRecord,
   timeoutMs: number | undefined,
 ): Promise<RuntimeSessionLoadState> {
-  const createdSession = await withTimeout(client.createSession(record.cwd), timeoutMs);
+  // Dirs come from the persisted record, not this invocation — reconnect
+  // leniently (warn + drop) instead of failing on a downgraded agent.
+  const createdSession = await withTimeout(
+    client.createSession(record.cwd, { lenientAdditionalDirectories: true }),
+    timeoutMs,
+  );
   applyConfigOptionsToRecord(record, createdSession);
   return {
     sessionId: createdSession.sessionId,

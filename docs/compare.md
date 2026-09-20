@@ -33,19 +33,21 @@ the file or stdin.
 
 `compare` honors the same global execution controls as `exec`, including:
 
-| Option                                                         | Description                                                     |
-| -------------------------------------------------------------- | --------------------------------------------------------------- |
-| `--cwd <dir>`                                                  | Target workspace. Defaults to the current working directory.    |
-| `--approve-all` / `--approve-reads` / `--deny-all`             | Permission mode.                                                |
-| `--permission-policy <json-or-file>` / `--policy`              | Per-tool permission policy.                                     |
-| `--timeout <sec>`                                              | Per-agent timeout in seconds.                                   |
-| `--non-interactive-permissions <policy>`                       | Non-TTY prompt behavior.                                        |
-| `--auth-policy <policy>`                                       | ACP authentication behavior.                                    |
-| `--no-fs`                                                      | Do not advertise filesystem support to agents.                  |
-| `--no-terminal`                                                | Do not advertise terminal support to agents.                    |
-| `--prompt-retries <count>`                                     | Retry failed prompt turns before any side effects are observed. |
-| `--model`, `--allowed-tools`, `--max-turns`, `--system-prompt` | Session creation options forwarded to compatible agents.        |
-| `--format <text\|json\|quiet>`                                 | Summary output format.                                          |
+| Option                                                                                   | Description                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--cwd <dir>`                                                                            | Target workspace. Defaults to the current working directory.                                                                                                                                                 |
+| `--approve-all` / `--approve-reads` / `--deny-all`                                       | Permission mode.                                                                                                                                                                                             |
+| `--permission-policy <json-or-file>` / `--policy`                                        | Per-tool permission policy.                                                                                                                                                                                  |
+| `--timeout <sec>`                                                                        | Per-agent timeout in seconds.                                                                                                                                                                                |
+| `--non-interactive-permissions <policy>`                                                 | Non-TTY prompt behavior.                                                                                                                                                                                     |
+| `--auth-policy <policy>`                                                                 | ACP authentication behavior.                                                                                                                                                                                 |
+| `--no-fs`                                                                                | Do not advertise filesystem support to agents.                                                                                                                                                               |
+| `--no-terminal`                                                                          | Do not advertise terminal support to agents.                                                                                                                                                                 |
+| `--prompt-retries <count>`                                                               | Retry failed prompt turns before any side effects are observed.                                                                                                                                              |
+| `--model`, `--allowed-tools`, `--max-turns`, `--system-prompt`, `--append-system-prompt` | Session creation options forwarded to compatible agents.                                                                                                                                                     |
+| `--skills-dir`, `--additional-dir`                                                       | Workspace roots (`--additional-dir`) and skill folders (`--skills-dir`, wrapped in a synthetic root) via ACP `additionalDirectories`; session creation fails if the agent does not advertise the capability. |
+| `--mcp-config <path>`                                                                    | External MCP config file for the invocation.                                                                                                                                                                 |
+| `--format <text\|json\|quiet>`                                                           | Summary output format.                                                                                                                                                                                       |
 
 Command-local options:
 

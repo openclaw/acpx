@@ -15,6 +15,7 @@ import {
   type RequestPermissionRequest,
   type RequestPermissionResponse,
 } from "@agentclientprotocol/sdk";
+import { AdditionalDirectoriesUnsupportedError } from "../src/acp/additional-directories.js";
 import {
   AcpClient,
   buildAgentSpawnOptions,
@@ -36,6 +37,7 @@ import {
 import { runPromptTurn } from "../src/runtime/engine/prompt-turn.js";
 import { createSessionConversation } from "../src/session/conversation-model.js";
 import type { AcpProcessStarted } from "../src/types.js";
+import { withTempDir, withTempHome } from "./runtime-test-helpers.js";
 import { withMockedReadline, withTtyState } from "./tty-test-helpers.js";
 
 test("parseAcpJsonMessageLine ignores non-object JSON values", () => {
@@ -1045,6 +1047,105 @@ for (const scenario of [
     assert.equal(fixture.messages.length, 1, "session creation must not send a model control");
   });
 }
+
+test("AcpClient createSession rejects skills dirs when the agent lacks additionalDirectories", async (t) => {
+  const fixture = createClientFixture(t, {
+    client: { sessionOptions: { skillsDirs: ["/tmp/acpx-skills-gate"] } },
+  });
+  await assert.rejects(
+    fixture.track(fixture.client.createSession("/tmp/acpx-client-skills-gate")),
+    AdditionalDirectoriesUnsupportedError,
+  );
+  assert.equal(fixture.messages.length, 0, "session/new must not be sent");
+});
+test(
+  "AcpClient createSession sends skills dirs as synthetic additionalDirectories roots",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    await withTempHome("acpx-skills-home-", async (fakeHome) => {
+      await withTempDir("acpx-skills-src-", async (skillsDir) => {
+        const fixture = createClientFixture(t, {
+          client: { sessionOptions: { skillsDirs: [skillsDir] } },
+        });
+        asInternals(fixture.client).initResult = {
+          agentCapabilities: { sessionCapabilities: { additionalDirectories: {} } },
+        };
+        const cwd = path.resolve("/tmp/acpx-client-skills");
+        const pending = fixture.track(fixture.client.createSession(cwd));
+        const request = await fixture.message(0);
+        assert("method" in request);
+        assert.equal(request.method, "session/new");
+        const params = request.params as { additionalDirectories?: string[] };
+        assert.equal(params.additionalDirectories?.length, 1);
+        const root = params.additionalDirectories?.[0] ?? "";
+        assert(root.startsWith(path.join(fakeHome, ".acpx", "skills-roots")));
+        for (const layout of [".claude", ".agents"]) {
+          const link = path.join(root, layout, "skills");
+          assert.equal(await fs.realpath(link), await fs.realpath(skillsDir));
+        }
+        await fixture.reply(request, { sessionId: "session-skills" });
+        assert.equal((await pending).sessionId, "session-skills");
+      });
+    });
+  },
+);
+
+test("AcpClient createSession sends --additional-dir entries verbatim", async (t) => {
+  await withTempDir("acpx-additional-dir-", async (extraDir) => {
+    const fixture = createClientFixture(t, {
+      client: { sessionOptions: { additionalDirs: [extraDir] } },
+    });
+    asInternals(fixture.client).initResult = {
+      agentCapabilities: { sessionCapabilities: { additionalDirectories: {} } },
+    };
+    const pending = fixture.track(fixture.client.createSession("/tmp/acpx-client-extra"));
+    const request = await fixture.message(0);
+    assert("method" in request);
+    assert.equal(request.method, "session/new");
+    const params = request.params as { additionalDirectories?: string[] };
+    assert.deepEqual(params.additionalDirectories, [extraDir]);
+    await fixture.reply(request, { sessionId: "session-additional" });
+    assert.equal((await pending).sessionId, "session-additional");
+  });
+});
+
+test("AcpClient createSession lenient mode drops dirs when the agent lacks the capability", async (t) => {
+  const fixture = createClientFixture(t, {
+    client: {
+      sessionOptions: { skillsDirs: ["/tmp/acpx-skills-lenient"] },
+      suppressSdkConsoleErrors: true,
+    },
+  });
+  const pending = fixture.track(
+    fixture.client.createSession("/tmp/acpx-client-lenient", {
+      lenientAdditionalDirectories: true,
+    }),
+  );
+  const request = await fixture.message(0);
+  assert("method" in request);
+  assert.equal(request.method, "session/new");
+  const params = request.params as Record<string, unknown>;
+  assert.equal(params.additionalDirectories, undefined);
+  await fixture.reply(request, { sessionId: "session-lenient" });
+  assert.equal((await pending).sessionId, "session-lenient");
+});
+
+test("AcpClient loadSession drops persisted dirs when the agent lacks additionalDirectories", async (t) => {
+  const fixture = createClientFixture(t, {
+    client: {
+      sessionOptions: { skillsDirs: ["/tmp/acpx-skills-dropped"] },
+      suppressSdkConsoleErrors: true,
+    },
+  });
+  const pending = fixture.track(fixture.client.loadSession("session-load-drop"));
+  const request = await fixture.message(0);
+  assert("method" in request);
+  assert.equal(request.method, "session/load");
+  const params = request.params as Record<string, unknown>;
+  assert.equal(params.additionalDirectories, undefined);
+  await fixture.reply(request, {});
+  await pending;
+});
 
 test("resolveClaudeCodeSettingSources includes user settings only when explicitly enabled", () => {
   assert.deepEqual(resolveClaudeCodeSettingSources({}), ["project", "local"]);

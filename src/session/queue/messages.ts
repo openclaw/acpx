@@ -272,20 +272,22 @@ function parseSessionOptions(value: unknown): QueueSessionOptions | null | undef
   }
 
   const sessionOptions: QueueSessionOptions = {};
-  if (!assignSessionModel(sessionOptions, record.model)) {
-    return null;
-  }
-  if (!assignSessionAllowedTools(sessionOptions, record.allowedTools)) {
-    return null;
-  }
-  if (!assignSessionMaxTurns(sessionOptions, record.maxTurns)) {
-    return null;
-  }
-  if (!assignSessionSystemPrompt(sessionOptions, record.systemPrompt)) {
-    return null;
-  }
-  if (!assignSessionEnv(sessionOptions, record.env)) {
-    return null;
+  const assigners: [
+    keyof QueueSessionOptions,
+    (options: QueueSessionOptions, value: unknown) => boolean,
+  ][] = [
+    ["model", assignSessionModel],
+    ["allowedTools", assignSessionAllowedTools],
+    ["maxTurns", assignSessionMaxTurns],
+    ["systemPrompt", assignSessionSystemPrompt],
+    ["env", assignSessionEnv],
+    ["skillsDirs", assignSessionStringList("skillsDirs")],
+    ["additionalDirs", assignSessionStringList("additionalDirs")],
+  ];
+  for (const [key, assign] of assigners) {
+    if (!assign(sessionOptions, record[key])) {
+      return null;
+    }
   }
 
   return sessionOptions;
@@ -354,6 +356,26 @@ function assignSessionEnv(options: QueueSessionOptions, value: unknown): boolean
   }
   options.env = Object.fromEntries(entries) as Record<string, string>;
   return true;
+}
+
+function assignSessionStringList(
+  key: "skillsDirs" | "additionalDirs",
+): (options: QueueSessionOptions, value: unknown) => boolean {
+  return (options, value) => {
+    if (value == null) {
+      return true;
+    }
+    if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+      return false;
+    }
+    // Unlike allowedTools, an empty dir list is a no-op rather than a "clear"
+    // signal — mergeSessionOptions would otherwise inherit owner-level dirs.
+    const items = (value as string[]).filter((item) => item.length > 0);
+    if (items.length > 0) {
+      options[key] = items;
+    }
+    return true;
+  };
 }
 
 function parseOwnerGeneration(value: unknown): number | undefined | null {

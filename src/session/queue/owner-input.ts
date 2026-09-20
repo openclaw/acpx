@@ -138,6 +138,8 @@ function assignQueueOwnerSessionOptions(
   assignSessionMaxTurns(options.sessionOptions, sessionOpts.maxTurns);
   assignSessionSystemPrompt(options.sessionOptions, sessionOpts.systemPrompt);
   assignSessionEnv(options.sessionOptions, sessionOpts.env);
+  assignSessionStringList(options.sessionOptions, "skillsDirs", sessionOpts.skillsDirs);
+  assignSessionStringList(options.sessionOptions, "additionalDirs", sessionOpts.additionalDirs);
 }
 
 function assignSessionModel(
@@ -195,6 +197,21 @@ function assignSessionEnv(
   );
   if (entries.length > 0) {
     options.env = Object.fromEntries(entries);
+  }
+}
+
+function assignSessionStringList(
+  options: NonNullable<QueueOwnerRuntimeOptions["sessionOptions"]>,
+  key: "skillsDirs" | "additionalDirs",
+  value: unknown,
+): void {
+  if (Array.isArray(value)) {
+    const items = value.filter(
+      (item): item is string => typeof item === "string" && item.length > 0,
+    );
+    if (items.length > 0) {
+      options[key] = items;
+    }
   }
 }
 

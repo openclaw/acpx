@@ -4719,6 +4719,8 @@ test("AcpRuntimeManager forwards sessionOptions to createClient on fresh session
     max_turns: undefined,
     system_prompt: "Be terse.",
     env: undefined,
+    skills_dirs: undefined,
+    additional_dirs: undefined,
   });
 });
 
@@ -4791,6 +4793,8 @@ test("AcpRuntimeManager persists sessionOptions { append } and model/allowedTool
     max_turns: 5,
     system_prompt: { append: "Also review tests." },
     env: undefined,
+    skills_dirs: undefined,
+    additional_dirs: undefined,
   });
 });
 
@@ -4810,6 +4814,8 @@ test("persistSessionOptions preserves an explicit empty allowedTools list", () =
     max_turns: undefined,
     system_prompt: undefined,
     env: undefined,
+    skills_dirs: undefined,
+    additional_dirs: undefined,
   });
 });
 
@@ -4837,6 +4843,8 @@ test("persistSessionOptions preserves session env as a serialized record", () =>
       GIT_AUTHOR_EMAIL: "agent-pm@example.local",
       GIT_COMMITTER_NAME: "Agent PM",
     },
+    skills_dirs: undefined,
+    additional_dirs: undefined,
   });
 });
 

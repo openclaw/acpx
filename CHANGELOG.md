@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Sessions/skills: add `--skills-dir <dir>` (repeatable) to expose a directory of skill folders to the agent as `.claude/skills/` and `.agents/skills/` via ACP `additionalDirectories`, and `--additional-dir <dir>` (repeatable) for raw extra workspace roots. Both resolve from `--cwd`; the resolved dirs persist on the session record for reconnects and require the agent to advertise `sessionCapabilities.additionalDirectories` at session creation.
+
 ### Fixes
 
 - Sessions/prune: recheck saved closed and agent state before pruning, and preserve neighboring sessions whose IDs overlap history filenames.

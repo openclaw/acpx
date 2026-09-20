@@ -350,6 +350,12 @@ const TEXT_ERROR_HINT_RULES: TextErrorHintRule[] = [
     ],
   },
   {
+    matches: (params) => params.detailCode === "ADDITIONAL_DIRECTORIES_UNSUPPORTED",
+    hints: [
+      "hint: this agent does not support ACP `additionalDirectories`; remove `--skills-dir`/`--additional-dir`, or place skills under `<cwd>/.agents/skills/` instead.",
+    ],
+  },
+  {
     matches: (params, lowerMessage) => isRateLimitError(params.message, lowerMessage),
     hints: [
       "hint: the provider appears rate-limited; retry later, switch model, or check provider quota/billing.",

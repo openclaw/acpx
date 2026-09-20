@@ -47,6 +47,17 @@ The global `--mcp-config <path>` option loads an external JSON file's `mcpServer
 invocation, replacing project/global MCP configuration. Relative paths resolve from `--cwd`.
 For a persistent session, close the existing session before switching its MCP config.
 
+The global `--skills-dir <dir>` option (repeatable) points at a directory that directly
+contains skill folders (`<dir>/<name>/SKILL.md`). For each dir, acpx materializes a
+synthetic workspace root under `~/.acpx/skills-roots/` exposing it as both
+`.claude/skills/` and `.agents/skills/`, then sends that root via the ACP
+`additionalDirectories` field on `session/new`, `session/load`, and `session/resume`.
+Session creation fails when the agent does not advertise
+`sessionCapabilities.additionalDirectories`; reconnects drop the persisted dirs with a
+warning instead of failing. `--additional-dir <dir>` (repeatable) sends the resolved
+workspace root through the same field without the skills-dir wrapping. Both resolve relative
+paths from `--cwd` and are persisted on the session record for reconnects.
+
 `<agent>` can be:
 
 - built-in friendly name from [the README](https://github.com/openclaw/acpx/blob/main/README.md)
@@ -108,24 +119,33 @@ or close a PR if you run it against a live repository.
 
 All global options:
 
-| Option                                   | Description                                    | Details                                                                                                                                               |
-| ---------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--agent <command>`                      | Raw ACP agent command (escape hatch)           | Do not combine with positional agent token.                                                                                                           |
-| `--cwd <dir>`                            | Working directory                              | Defaults to current directory. Stored as absolute path for scoping.                                                                                   |
-| `--approve-all`                          | Auto-approve all permissions                   | Permission mode `approve-all`.                                                                                                                        |
-| `--approve-reads`                        | Auto-approve reads/searches, prompt for others | Default permission mode.                                                                                                                              |
-| `--deny-all`                             | Deny all permissions                           | Permission mode `deny-all`.                                                                                                                           |
-| `--format <fmt>`                         | Output format                                  | `text` (default), `json`, `quiet`.                                                                                                                    |
-| `--suppress-reads`                       | Suppress read file contents                    | Replaces raw read payloads with `[read output suppressed]`.                                                                                           |
-| `--json-strict`                          | Strict JSON mode                               | Requires `--format json`; suppresses non-JSON stderr output.                                                                                          |
-| `--no-fs`                                | Disable ACP filesystem capabilities            | Advertises `clientCapabilities.fs.readTextFile` and `writeTextFile` as `false` during ACP initialize for new agent clients.                           |
-| `--no-terminal`                          | Disable ACP terminal capability                | Advertises `clientCapabilities.terminal: false` during ACP initialize for new agent clients.                                                          |
-| `--non-interactive-permissions <policy>` | Non-TTY prompt policy                          | `deny` (default) or `fail` when approval prompt cannot be shown.                                                                                      |
-| `--permission-policy <json-or-file>`     | Per-tool permission policy                     | JSON object or file path with `autoApprove`, `autoDeny`, `escalate`, and optional `defaultAction` (`approve`, `deny`, `escalate`). Alias: `--policy`. |
-| `--timeout <seconds>`                    | Max wait time for agent response               | Must be positive. Decimal seconds allowed.                                                                                                            |
-| `--ttl <seconds>`                        | Queue owner idle TTL before shutdown           | Default `300`. `0` disables TTL.                                                                                                                      |
-| `--model <id>`                           | Set agent model                                | Claude-compatible adapters may consume session creation metadata; other agents must advertise a model config option or legacy `models` metadata.      |
-| `--verbose`                              | Enable verbose logs                            | Prints ACP/debug details to stderr.                                                                                                                   |
+| Option                                   | Description                                    | Details                                                                                                                                                                      |
+| ---------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--agent <command>`                      | Raw ACP agent command (escape hatch)           | Do not combine with positional agent token.                                                                                                                                  |
+| `--cwd <dir>`                            | Working directory                              | Defaults to current directory. Stored as absolute path for scoping.                                                                                                          |
+| `--approve-all`                          | Auto-approve all permissions                   | Permission mode `approve-all`.                                                                                                                                               |
+| `--approve-reads`                        | Auto-approve reads/searches, prompt for others | Default permission mode.                                                                                                                                                     |
+| `--deny-all`                             | Deny all permissions                           | Permission mode `deny-all`.                                                                                                                                                  |
+| `--format <fmt>`                         | Output format                                  | `text` (default), `json`, `quiet`.                                                                                                                                           |
+| `--suppress-reads`                       | Suppress read file contents                    | Replaces raw read payloads with `[read output suppressed]`.                                                                                                                  |
+| `--json-strict`                          | Strict JSON mode                               | Requires `--format json`; suppresses non-JSON stderr output.                                                                                                                 |
+| `--no-fs`                                | Disable ACP filesystem capabilities            | Advertises `clientCapabilities.fs.readTextFile` and `writeTextFile` as `false` during ACP initialize for new agent clients.                                                  |
+| `--no-terminal`                          | Disable ACP terminal capability                | Advertises `clientCapabilities.terminal: false` during ACP initialize for new agent clients.                                                                                 |
+| `--non-interactive-permissions <policy>` | Non-TTY prompt policy                          | `deny` (default) or `fail` when approval prompt cannot be shown.                                                                                                             |
+| `--permission-policy <json-or-file>`     | Per-tool permission policy                     | JSON object or file path with `autoApprove`, `autoDeny`, `escalate`, and optional `defaultAction` (`approve`, `deny`, `escalate`). Alias: `--policy`.                        |
+| `--timeout <seconds>`                    | Max wait time for agent response               | Must be positive. Decimal seconds allowed.                                                                                                                                   |
+| `--ttl <seconds>`                        | Queue owner idle TTL before shutdown           | Default `300`. `0` disables TTL.                                                                                                                                             |
+| `--model <id>`                           | Set agent model                                | Claude-compatible adapters may consume session creation metadata; other agents must advertise a model config option or legacy `models` metadata.                             |
+| `--skills-dir <dir>`                     | Directory of skill folders                     | Repeatable. Must be an existing directory. Exposed as `.claude/skills` and `.agents/skills` via ACP `additionalDirectories`; requires the agent to advertise the capability. |
+| `--additional-dir <dir>`                 | Extra workspace root                           | Repeatable. Must be an existing directory. Sent without the skills-dir synthetic-root wrapping via ACP `additionalDirectories`; same capability requirement.                 |
+| `--mcp-config <path>`                    | External MCP config file                       | Loads `mcpServers` from a JSON file, replacing project/global MCP config for the invocation.                                                                                 |
+| `--auth-policy <policy>`                 | ACP authentication behavior                    | `skip` (default) or `fail` when auth is required.                                                                                                                            |
+| `--allowed-tools <list>`                 | Tool whitelist                                 | Comma-separated; `""` means no tools. Forwarded to compatible agents.                                                                                                        |
+| `--max-turns <count>`                    | Cap session turn count                         | Forwarded to compatible agents.                                                                                                                                              |
+| `--system-prompt <text>`                 | Replace agent system prompt                    | Forwarded via ACP `_meta.systemPrompt`; persisted on the session record.                                                                                                     |
+| `--append-system-prompt <text>`          | Append to agent system prompt                  | Forwarded via ACP `_meta.systemPrompt.append`; same persistence rules.                                                                                                       |
+| `--prompt-retries <count>`               | Retry failed prompt turns                      | Default `0`.                                                                                                                                                                 |
+| `--verbose`                              | Enable verbose logs                            | Prints ACP/debug details to stderr.                                                                                                                                          |
 
 Permission flags are mutually exclusive. Using more than one of `--approve-all`, `--approve-reads`, `--deny-all` is a usage error.
 
