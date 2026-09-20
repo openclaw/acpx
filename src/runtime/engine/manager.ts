@@ -46,6 +46,7 @@ import { AcpRuntimeError } from "../public/errors.js";
 import { parsePromptEventLine } from "../public/events.js";
 import { probeRuntime, type RuntimeHealthReport } from "../public/probe.js";
 import { withConnectedSession } from "./connected-session.js";
+import { resolveSupportedConfigOptionId } from "./controls.js";
 import {
   applyConversation,
   applyLifecycleSnapshotToRecord,
@@ -145,41 +146,6 @@ function createRecordId(sessionKey: string, mode: "persistent" | "oneshot"): str
 
 function resumePolicyForSessionMode(mode: "persistent" | "oneshot"): SessionResumePolicy {
   return mode === "persistent" ? "same-session-only" : "allow-new";
-}
-
-function advertisedConfigOptionIds(record: SessionRecord): Set<string> | undefined {
-  const configOptions = record.acpx?.config_options;
-  if (!configOptions) {
-    return undefined;
-  }
-
-  return new Set(
-    configOptions
-      .map((option) => option.id)
-      .filter((id): id is string => typeof id === "string" && id.trim().length > 0),
-  );
-}
-
-function resolveSupportedConfigOptionId(record: SessionRecord, configId: string): string {
-  const advertisedIds = advertisedConfigOptionIds(record);
-  if (!advertisedIds) {
-    return configId;
-  }
-
-  if (advertisedIds.has(configId)) {
-    return configId;
-  }
-
-  if (configId === "thinking" && advertisedIds.has("effort")) {
-    return "effort";
-  }
-
-  const supported = [...advertisedIds].toSorted();
-  const supportedText = supported.length > 0 ? supported.join(", ") : "none";
-  throw new AcpRuntimeError(
-    "ACP_BACKEND_UNSUPPORTED_CONTROL",
-    `ACP session ${record.acpxRecordId} does not advertise config option '${configId}'. Supported config options: ${supportedText}.`,
-  );
 }
 
 // A peer that never answers `initialize` (for example a one-shot runner waiting for a prompt on

@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Runtime/shared sessions: set the mode, model, and config options of a shared session, and read its capabilities, without shelling out to the CLI. Controls run on the session's queue owner and fail with `ACP_BACKEND_UNAVAILABLE` when no owner holds it. Thanks @saariuslystoned.
+
 ### Fixes
 
 - Sessions/prune: recheck saved closed and agent state before pruning, and preserve neighboring sessions whose IDs overlap history filenames.

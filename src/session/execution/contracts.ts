@@ -135,6 +135,18 @@ export type SessionCancelResult = {
   cancelled: boolean;
 };
 
+/** Identifies a session control request that only a running queue owner serves. */
+export type SessionControlOwnerOptions = {
+  sessionId: string;
+  timeoutMs?: number;
+  verbose?: boolean;
+  /**
+   * Last chance to refuse, invoked immediately before the request is written to
+   * the owner's socket. A throw means nothing was sent.
+   */
+  assertDispatch?: () => void;
+};
+
 export type SessionSetModeOptions = {
   sessionId: string;
   modeId: string;

@@ -189,6 +189,12 @@ async function runQueueOwnerRequest<TResult>(options: {
   owner: QueueOwnerRecord;
   request: QueueRequest;
   signal?: AbortSignal;
+  /**
+   * Last chance to refuse the request, invoked immediately before the socket
+   * write. A throw means nothing was sent. It is never consulted afterwards, so
+   * a dispatched request still settles its response.
+   */
+  assertDispatch?: () => void;
   onAccepted?: (controls: QueueOwnerRequestControls<TResult>) => void;
   onMessage: (message: QueueOwnerMessage, controls: QueueOwnerRequestControls<TResult>) => void;
   onClose: (controls: QueueOwnerRequestControls<TResult>) => void;
@@ -310,6 +316,12 @@ async function runQueueOwnerRequest<TResult>(options: {
     options.signal?.addEventListener("abort", onAbort, { once: true });
     if (options.signal?.aborted) {
       onAbort();
+      return;
+    }
+    try {
+      options.assertDispatch?.();
+    } catch (error) {
+      finishReject(error);
       return;
     }
     try {
@@ -506,10 +518,12 @@ async function submitControlToQueueOwner<TResponse extends QueueOwnerMessage>(
   owner: QueueOwnerRecord,
   request: QueueRequest,
   isExpectedResponse: (message: QueueOwnerMessage) => message is TResponse,
+  assertDispatch?: () => void,
 ): Promise<TResponse | undefined> {
   return await runQueueOwnerRequest<TResponse>({
     owner,
     request,
+    assertDispatch,
     onMessage: (message, { state, resolve, reject }) => {
       if (message.type === "error") {
         reject(queueConnectionErrorFromOwner(message, false));
@@ -579,6 +593,7 @@ async function submitSetModeToQueueOwner(
   owner: QueueOwnerRecord,
   modeId: string,
   timeoutMs?: number,
+  assertDispatch?: () => void,
 ): Promise<boolean | undefined> {
   const request: QueueSetModeRequest = {
     type: "set_mode",
@@ -591,6 +606,7 @@ async function submitSetModeToQueueOwner(
     owner,
     request,
     (message): message is QueueOwnerSetModeResultMessage => message.type === "set_mode_result",
+    assertDispatch,
   );
   return response ? true : undefined;
 }
@@ -599,6 +615,7 @@ async function submitSetModelToQueueOwner(
   owner: QueueOwnerRecord,
   modelId: string,
   timeoutMs?: number,
+  assertDispatch?: () => void,
 ): Promise<QueueOwnerSetModelResultMessage | undefined> {
   const request: QueueSetModelRequest = {
     type: "set_model",
@@ -611,6 +628,7 @@ async function submitSetModelToQueueOwner(
     owner,
     request,
     (message): message is QueueOwnerSetModelResultMessage => message.type === "set_model_result",
+    assertDispatch,
   );
 }
 
@@ -619,6 +637,7 @@ async function submitSetConfigOptionToQueueOwner(
   configId: string,
   value: string,
   timeoutMs?: number,
+  assertDispatch?: () => void,
 ): Promise<SetSessionConfigOptionResponse | undefined> {
   const request: QueueSetConfigOptionRequest = {
     type: "set_config_option",
@@ -633,6 +652,7 @@ async function submitSetConfigOptionToQueueOwner(
     request,
     (message): message is QueueOwnerSetConfigOptionResultMessage =>
       message.type === "set_config_option_result",
+    assertDispatch,
   );
   return response?.response;
 }
@@ -810,6 +830,7 @@ export async function trySetModeOnRunningOwner(
   modeId: string,
   timeoutMs: number | undefined,
   verbose: boolean | undefined,
+  assertDispatch?: () => void,
 ): Promise<OwnerControlResult<boolean> | undefined> {
   return await tryControlOnRunningOwner({
     sessionId,
@@ -817,7 +838,10 @@ export async function trySetModeOnRunningOwner(
     requestName: "set_mode",
     logPrefix: "[acpx] requested session/set_mode on owner pid",
     submit: (owner) =>
-      withOwnerControlPersistence(owner, submitSetModeToQueueOwner(owner, modeId, timeoutMs)),
+      withOwnerControlPersistence(
+        owner,
+        submitSetModeToQueueOwner(owner, modeId, timeoutMs, assertDispatch),
+      ),
   });
 }
 
@@ -826,6 +850,7 @@ export async function trySetModelOnRunningOwner(
   modelId: string,
   timeoutMs: number | undefined,
   verbose: boolean | undefined,
+  assertDispatch?: () => void,
 ): Promise<OwnerControlResult<QueueOwnerSetModelResultMessage> | undefined> {
   return await tryControlOnRunningOwner({
     sessionId,
@@ -833,7 +858,10 @@ export async function trySetModelOnRunningOwner(
     requestName: "set_model",
     logPrefix: "[acpx] requested a model config update on owner pid",
     submit: (owner) =>
-      withOwnerControlPersistence(owner, submitSetModelToQueueOwner(owner, modelId, timeoutMs)),
+      withOwnerControlPersistence(
+        owner,
+        submitSetModelToQueueOwner(owner, modelId, timeoutMs, assertDispatch),
+      ),
   });
 }
 
@@ -843,6 +871,7 @@ export async function trySetConfigOptionOnRunningOwner(
   value: string,
   timeoutMs: number | undefined,
   verbose: boolean | undefined,
+  assertDispatch?: () => void,
 ): Promise<OwnerControlResult<SetSessionConfigOptionResponse> | undefined> {
   return await tryControlOnRunningOwner({
     sessionId,
@@ -852,7 +881,7 @@ export async function trySetConfigOptionOnRunningOwner(
     submit: (owner) =>
       withOwnerControlPersistence(
         owner,
-        submitSetConfigOptionToQueueOwner(owner, configId, value, timeoutMs),
+        submitSetConfigOptionToQueueOwner(owner, configId, value, timeoutMs, assertDispatch),
       ),
   });
 }

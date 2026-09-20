@@ -14,8 +14,10 @@ updates.
 If a control times out after it may have reached the adapter, treat its result as
 uncertain. acpx does not repeat the setting automatically. Accepted replies still
 finish saving their state, and unfinished connections are retired before another
-prompt uses that context. Already running older owners and older callers retain
-their previous persistence behavior until they are replaced.
+prompt uses that context. Race-free persistence requires updated callers and an
+updated owner. Already running v0.17.1 owners and older callers retain caller-side
+whole-record writes, which can race other controls or owner checkpoints. Use
+updated clients and let an older owner expire while idle before resuming work.
 
 ## `cancel`
 
@@ -74,7 +76,7 @@ For applications using `acpx/runtime`, `AcpxRuntime.setConfigOption(...)` return
 
 For model selection in an application, use `runtime.setModel({ handle, model })`. It uses the adapter's advertised model control and saves the selection for reconnect. When you need the accepted configuration response, use `setConfigOption` with the advertised model option's ID as `key`. Both methods validate the requested model against the connected session's catalog, including after reconnect. Read `runtime.getStatus({ handle })` for the current model and available IDs. Treat each model ID as opaque; pass exact advertised IDs, including IDs containing slashes, unchanged.
 
-Unknown or ambiguous model selectors are rejected before sending the model change. Embedded callers can identify these failures with `isRequestedModelUnsupportedError(error)` and `error.reason === "unadvertised-model"`. When a Cursor alias matches multiple advertised variants, the error also has `ambiguous: true`; a selector with no advertised match omits that flag. Claude ACP retains its forwarding exception: Claude Code accepts or rejects selectors absent from its advertised list. Cursor alone also accepts a bare model name when exactly one advertised bracketed variant matches; an exact advertised ID always wins. See [Cursor](https://github.com/openclaw/acpx/blob/main/agents/Cursor.md) for examples.
+Unknown or ambiguous model selectors are rejected before sending the model change. In-process runtime callers can identify these failures with `isRequestedModelUnsupportedError(error)` and `error.reason === "unadvertised-model"`. When a Cursor alias matches multiple advertised variants, the error also has `ambiguous: true`; a selector with no advertised match omits that flag. Shared runtime callers receive the owner's queue error instead of the in-process error class. Claude ACP retains its forwarding exception: Claude Code accepts or rejects selectors absent from its advertised list. Cursor alone also accepts a bare model name when exactly one advertised bracketed variant matches; an exact advertised ID always wins. See [Cursor](https://github.com/openclaw/acpx/blob/main/agents/Cursor.md) for examples.
 
 Embedded `setModel`, `setMode`, and `setConfigOption` calls also accept optional `signal` and `assertActive` fields. Supply a synchronous `assertActive` callback that throws when the host no longer permits the operation. Authority is checked after queue and storage waits and before the request is handed to the ACP SDK. Rejection preserves the original abort reason or callback error.
 

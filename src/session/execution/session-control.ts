@@ -24,6 +24,7 @@ import { acquireSessionTurn } from "../turn-ownership.js";
 import type {
   SessionCancelOptions,
   SessionCancelResult,
+  SessionControlOwnerOptions,
   SessionSetConfigOptionOptions,
   SessionSetModelOptions,
   SessionSetModeOptions,
@@ -44,26 +45,46 @@ export async function cancelSessionPrompt(
   };
 }
 
-export async function setSessionMode(
-  options: SessionSetModeOptions,
-): Promise<SessionSetModeResult> {
+/**
+ * Dispatches the mode change to a running queue owner. Returns `undefined`
+ * when no owner holds the session, leaving the direct-connection decision to
+ * the caller.
+ *
+ * An owner advertising `persistsControlState` saves the accepted state itself.
+ * Only the older caller-save path still reloads and rewrites the record here,
+ * which is not serialized against another process doing the same.
+ */
+export async function setSessionModeOnOwner(
+  options: SessionControlOwnerOptions & { modeId: string },
+): Promise<SessionSetModeResult | undefined> {
   const submittedToOwner = await trySetModeOnRunningOwner(
     options.sessionId,
     options.modeId,
     options.timeoutMs,
     options.verbose,
+    options.assertDispatch,
   );
-  if (submittedToOwner?.value) {
-    const record = await resolveSessionRecord(options.sessionId);
-    if (!submittedToOwner.persistsControlState) {
-      // v0.17.1 owners rely on the caller to persist acknowledged controls.
-      setDesiredModeId(record, options.modeId);
-      await writeSessionRecord(record);
-    }
-    return {
-      record,
-      resumed: false,
-    };
+  if (!submittedToOwner?.value) {
+    return undefined;
+  }
+  const record = await resolveSessionRecord(options.sessionId);
+  if (!submittedToOwner.persistsControlState) {
+    // v0.17.1 owners rely on the caller to persist acknowledged controls.
+    setDesiredModeId(record, options.modeId);
+    await writeSessionRecord(record);
+  }
+  return {
+    record,
+    resumed: false,
+  };
+}
+
+export async function setSessionMode(
+  options: SessionSetModeOptions,
+): Promise<SessionSetModeResult> {
+  const onOwner = await setSessionModeOnOwner(options);
+  if (onOwner) {
+    return onOwner;
   }
 
   return await runSessionSetModeDirect({
@@ -80,30 +101,42 @@ export async function setSessionMode(
   });
 }
 
-export async function setSessionModel(
-  options: SessionSetModelOptions,
-): Promise<SessionSetModelResult> {
+/** Owner-only counterpart of {@link setSessionMode} for the model control. */
+export async function setSessionModelOnOwner(
+  options: SessionControlOwnerOptions & { modelId: string },
+): Promise<SessionSetModelResult | undefined> {
   const submittedToOwner = await trySetModelOnRunningOwner(
     options.sessionId,
     options.modelId,
     options.timeoutMs,
     options.verbose,
+    options.assertDispatch,
   );
-  if (submittedToOwner) {
-    const record = await resolveSessionRecord(options.sessionId);
-    if (!submittedToOwner.persistsControlState) {
-      record.acpx = applyModelSelection(
-        record.acpx,
-        options.modelId,
-        submittedToOwner.value.response,
-      );
-      await writeSessionRecord(record);
-    }
-    return {
-      record,
-      response: submittedToOwner.value.response,
-      resumed: false,
-    };
+  if (!submittedToOwner) {
+    return undefined;
+  }
+  const record = await resolveSessionRecord(options.sessionId);
+  if (!submittedToOwner.persistsControlState) {
+    record.acpx = applyModelSelection(
+      record.acpx,
+      options.modelId,
+      submittedToOwner.value.response,
+    );
+    await writeSessionRecord(record);
+  }
+  return {
+    record,
+    response: submittedToOwner.value.response,
+    resumed: false,
+  };
+}
+
+export async function setSessionModel(
+  options: SessionSetModelOptions,
+): Promise<SessionSetModelResult> {
+  const onOwner = await setSessionModelOnOwner(options);
+  if (onOwner) {
+    return onOwner;
   }
 
   return await runSessionSetModelDirect({
@@ -120,32 +153,44 @@ export async function setSessionModel(
   });
 }
 
-export async function setSessionConfigOption(
-  options: SessionSetConfigOptionOptions,
-): Promise<SessionSetConfigOptionResult> {
+/** Owner-only counterpart of {@link setSessionMode} for the config option control. */
+export async function setSessionConfigOptionOnOwner(
+  options: SessionControlOwnerOptions & { configId: string; value: string },
+): Promise<SessionSetConfigOptionResult | undefined> {
   const ownerResponse = await trySetConfigOptionOnRunningOwner(
     options.sessionId,
     options.configId,
     options.value,
     options.timeoutMs,
     options.verbose,
+    options.assertDispatch,
   );
-  if (ownerResponse) {
-    const record = await resolveSessionRecord(options.sessionId);
-    if (!ownerResponse.persistsControlState) {
-      record.acpx = applyConfigOptionSelection(
-        record.acpx,
-        options.configId,
-        options.value,
-        ownerResponse.value,
-      );
-      await writeSessionRecord(record);
-    }
-    return {
-      record,
-      response: ownerResponse.value,
-      resumed: false,
-    };
+  if (!ownerResponse) {
+    return undefined;
+  }
+  const record = await resolveSessionRecord(options.sessionId);
+  if (!ownerResponse.persistsControlState) {
+    record.acpx = applyConfigOptionSelection(
+      record.acpx,
+      options.configId,
+      options.value,
+      ownerResponse.value,
+    );
+    await writeSessionRecord(record);
+  }
+  return {
+    record,
+    response: ownerResponse.value,
+    resumed: false,
+  };
+}
+
+export async function setSessionConfigOption(
+  options: SessionSetConfigOptionOptions,
+): Promise<SessionSetConfigOptionResult> {
+  const onOwner = await setSessionConfigOptionOnOwner(options);
+  if (onOwner) {
+    return onOwner;
   }
 
   return await runSessionSetConfigOptionDirect({

@@ -11,6 +11,7 @@ import { normalizeAgentCommandInput } from "../src/acp/client-process.js";
 import {
   createSharedAcpRuntime,
   createAgentRegistry,
+  type AcpRuntime,
   type AcpRuntimeEvent,
   type AcpRuntimeHandle,
   type SessionWatchEvent,
@@ -34,6 +35,7 @@ async function withSharedSession(
     command: string;
   }) => Promise<void>,
   permissionMode: "deny-all" | "approve-reads" = "deny-all",
+  agentArgs: string[] = [],
 ): Promise<void> {
   await withTempHome("acpx-shared-runtime-", async (home) => {
     const pidFile = path.join(home, "agent.pid");
@@ -41,6 +43,7 @@ async function withSharedSession(
       process.execPath,
       AGENT,
       "--supports-load-session",
+      ...agentArgs,
       "--pid-file",
       pidFile,
     ]).agentCommand;
@@ -563,4 +566,384 @@ test("shared mode rejects in-process callbacks and unsupported session modes", a
       { code: "ACP_INVALID_RUNTIME_OPTION" },
     );
   });
+});
+
+async function withOwnerRunning(
+  runtime: ReturnType<typeof createSharedAcpRuntime>,
+  handle: AcpRuntimeHandle,
+  requestId: string,
+): Promise<void> {
+  const turn = runtime.startTurn({ handle, text: "echo owner-up", requestId, mode: "prompt" });
+  assert.equal((await turn.result).status, "completed");
+  assert.ok(await readQueueOwnerRecord(handle.acpxRecordId ?? handle.runtimeSessionName));
+}
+
+test("shared session controls run on the running owner's connection", async () => {
+  await withSharedSession(
+    async ({ runtime, handle, cli, pidFile }) => {
+      const asRuntime: AcpRuntime = runtime;
+      assert.equal(typeof asRuntime.setConfigOption, "function");
+      // Controls sent while the owner holds an active turn must travel over that
+      // live connection instead of starting another one.
+      const turn = runtime.startTurn({
+        handle,
+        text: "stream-sleep 1500 controls-active",
+        requestId: "controls-active",
+        mode: "prompt",
+      });
+      const streamed = output(turn.events);
+      await turn.promptStarted;
+      const pid = await fs.readFile(pidFile, "utf8");
+      const owner = await readQueueOwnerRecord(handle.acpxRecordId ?? handle.runtimeSessionName);
+      assert.ok(owner);
+
+      await runtime.setModel({ handle, model: "fast-model" });
+      await runtime.setMode({ handle, mode: "plan" });
+      const response = await runtime.setConfigOption({
+        handle,
+        key: "reasoning_effort",
+        value: "high",
+      });
+
+      assert.ok(response);
+      assert.deepEqual(Object.keys(response), ["configOptions"]);
+      assert.equal(
+        response.configOptions?.find((option) => option.id === "reasoning_effort")?.currentValue,
+        "high",
+      );
+      assert.equal(await fs.readFile(pidFile, "utf8"), pid);
+      assert.deepEqual(
+        await readQueueOwnerRecord(handle.acpxRecordId ?? handle.runtimeSessionName),
+        owner,
+      );
+
+      assert.match(await streamed, /controls-active/u);
+      assert.equal((await turn.result).status, "completed");
+      assert.equal((await runtime.getStatus({ handle })).models?.currentModelId, "fast-model");
+
+      // Shared key lookup uses the persisted advertisement.
+      await assert.rejects(runtime.setConfigOption({ handle, key: "nope", value: "x" }), {
+        code: "ACP_BACKEND_UNSUPPORTED_CONTROL",
+      });
+
+      const shown = await cli("--format", "json", "sessions", "show", "shared");
+      const record = JSON.parse(shown) as {
+        acpx?: { current_model_id?: string; desired_mode_id?: string };
+      };
+      assert.equal(record.acpx?.current_model_id, "fast-model");
+      assert.equal(record.acpx?.desired_mode_id, "plan");
+    },
+    "deny-all",
+    ["--advertise-config-options"],
+  );
+});
+
+test("an idle shared owner serves controls on its retained connection", async () => {
+  await withSharedSession(
+    async ({ runtime, handle }) => {
+      await withOwnerRunning(runtime, handle, "idle-owner");
+      const owner = await readQueueOwnerRecord(handle.acpxRecordId ?? handle.runtimeSessionName);
+      assert.ok(owner);
+      const before = await runtime.getStatus({ handle });
+
+      // Between turns the owner serves the control on its retained connection.
+      // The shared client never opens one, and the owner and the saved provider
+      // session both survive the control.
+      await runtime.setModel({ handle, model: "smart-model" });
+
+      const after = await runtime.getStatus({ handle });
+      assert.equal(after.models?.currentModelId, "smart-model");
+      assert.equal(after.backendSessionId, before.backendSessionId);
+      assert.deepEqual(
+        await readQueueOwnerRecord(handle.acpxRecordId ?? handle.runtimeSessionName),
+        owner,
+      );
+    },
+    "deny-all",
+    ["--advertise-config-options"],
+  );
+});
+
+test("shared session controls fail closed when no owner holds the session", async () => {
+  await withSharedSession(
+    async ({ runtime, handle, pidFile }) => {
+      assert.equal(
+        await readQueueOwnerRecord(handle.acpxRecordId ?? handle.runtimeSessionName),
+        undefined,
+      );
+      const before = await runtime.getStatus({ handle });
+      const pid = await fs.readFile(pidFile, "utf8");
+
+      for (const control of [
+        () => runtime.setMode({ handle, mode: "plan" }),
+        () => runtime.setModel({ handle, model: "fast-model" }),
+        () => runtime.setConfigOption({ handle, key: "reasoning_effort", value: "high" }),
+      ]) {
+        await assert.rejects(control(), {
+          code: "ACP_BACKEND_UNAVAILABLE",
+          message: /No running owner holds this shared session/u,
+        });
+      }
+
+      // Failing closed must leave both the saved session and the adapter process alone.
+      assert.deepEqual(await runtime.getStatus({ handle }), before);
+      assert.equal(await fs.readFile(pidFile, "utf8"), pid);
+    },
+    "deny-all",
+    ["--advertise-config-options"],
+  );
+});
+
+test("shared session controls check local authority before sending", async () => {
+  await withSharedSession(
+    async ({ runtime, handle }) => {
+      await withOwnerRunning(runtime, handle, "authority-owner");
+      const before = await runtime.getStatus({ handle });
+
+      const inactive = () => {
+        throw new Error("host is no longer active");
+      };
+      await assert.rejects(runtime.setMode({ handle, mode: "plan", assertActive: inactive }), {
+        message: "host is no longer active",
+      });
+      await assert.rejects(
+        runtime.setModel({ handle, model: "fast-model", assertActive: inactive }),
+        { message: "host is no longer active" },
+      );
+      await assert.rejects(
+        runtime.setConfigOption({
+          handle,
+          key: "reasoning_effort",
+          value: "high",
+          assertActive: inactive,
+        }),
+        { message: "host is no longer active" },
+      );
+      await assert.rejects(
+        runtime.setModel({ handle, model: "fast-model", signal: AbortSignal.abort() }),
+        { name: "AbortError" },
+      );
+
+      // A rejected control is never sent, so the saved selection is unchanged.
+      assert.deepEqual(await runtime.getStatus({ handle }), before);
+    },
+    "deny-all",
+    ["--advertise-config-options"],
+  );
+});
+
+test("shared capabilities report the session's advertised config option keys", async () => {
+  await withSharedSession(
+    async ({ runtime, handle }) => {
+      const base = await runtime.getCapabilities();
+      assert.deepEqual(base, {
+        controls: [
+          "session/set_mode",
+          "session/set_model",
+          "session/set_config_option",
+          "session/status",
+        ],
+      });
+
+      // Handle-scoped capabilities add only what the session actually advertised.
+      const advertised = await runtime.getCapabilities({ handle });
+      assert.deepEqual(advertised.controls, base.controls);
+      assert.deepEqual(advertised.configOptionKeys, ["mode", "model", "reasoning_effort"]);
+
+      const unknown = await runtime.getCapabilities({
+        handle: { ...handle, acpxRecordId: "missing-record" },
+      });
+      assert.deepEqual(unknown, base);
+    },
+    "deny-all",
+    ["--advertise-config-options"],
+  );
+});
+
+test("CLI set-mode during an active turn survives the turn's checkpoint", async () => {
+  await withSharedSession(async ({ runtime, handle, cli }) => {
+    const turn = runtime.startTurn({
+      handle,
+      text: "stream-sleep 1500 mode-during-turn",
+      requestId: "mode-during-turn",
+      mode: "prompt",
+    });
+    const streamed = output(turn.events);
+    await turn.promptStarted;
+
+    assert.match(await cli("set-mode", "plan", "-s", "shared"), /plan/u);
+
+    assert.match(await streamed, /mode-during-turn/u);
+    assert.equal((await turn.result).status, "completed");
+    const record = JSON.parse(await cli("--format", "json", "sessions", "show", "shared")) as {
+      acpx?: { desired_mode_id?: string };
+    };
+    assert.equal(record.acpx?.desired_mode_id, "plan");
+  });
+});
+
+test("concurrent shared controls persist the last accepted selection", async () => {
+  await withSharedSession(
+    async ({ runtime, handle }) => {
+      await withOwnerRunning(runtime, handle, "concurrent-owner");
+
+      // One client's calls retain submission order through owner acknowledgement.
+      await Promise.all([
+        runtime.setModel({ handle, model: "fast-model" }),
+        runtime.setModel({ handle, model: "smart-model" }),
+        runtime.setModel({ handle, model: "gpt-5.4" }),
+      ]);
+
+      assert.equal((await runtime.getStatus({ handle })).models?.currentModelId, "gpt-5.4");
+
+      await assert.rejects(runtime.setModel({ handle, model: "not-advertised" }), {
+        message: /not-advertised/u,
+      });
+      assert.equal((await runtime.getStatus({ handle })).models?.currentModelId, "gpt-5.4");
+    },
+    "deny-all",
+    ["--advertise-config-options"],
+  );
+});
+
+test("authority withdrawn during a control's own lookup still blocks the send", async () => {
+  await withSharedSession(
+    async ({ runtime, handle }) => {
+      await withOwnerRunning(runtime, handle, "late-authority-owner");
+      const before = await runtime.getStatus({ handle });
+
+      // setConfigOption reads the record to resolve the advertised key. Authority
+      // revoked while that read is pending must still stop the control.
+      let checks = 0;
+      await assert.rejects(
+        runtime.setConfigOption({
+          handle,
+          key: "reasoning_effort",
+          value: "high",
+          assertActive: () => {
+            checks += 1;
+            if (checks > 1) {
+              throw new Error("host went inactive mid-lookup");
+            }
+          },
+        }),
+        { message: "host went inactive mid-lookup" },
+      );
+      assert.ok(checks > 1, `expected a recheck after the lookup, saw ${checks}`);
+      assert.deepEqual(await runtime.getStatus({ handle }), before);
+    },
+    "deny-all",
+    ["--advertise-config-options"],
+  );
+});
+
+test("authority withdrawn during owner lookup and connect blocks the write", async () => {
+  await withSharedSession(
+    async ({ runtime, handle }) => {
+      await withOwnerRunning(runtime, handle, "dispatch-guard-owner");
+      const before = await runtime.getStatus({ handle });
+
+      // The control still has to find the owner record and connect its socket
+      // after the first check. Revoking authority across those awaits must stop
+      // the request reaching the owner, so the selection never changes.
+      for (const [control, run] of [
+        [
+          "setMode",
+          (active: () => void) => runtime.setMode({ handle, mode: "plan", assertActive: active }),
+        ],
+        [
+          "setModel",
+          (active: () => void) =>
+            runtime.setModel({ handle, model: "fast-model", assertActive: active }),
+        ],
+        [
+          "setConfigOption",
+          (active: () => void) =>
+            runtime.setConfigOption({
+              handle,
+              key: "reasoning_effort",
+              value: "high",
+              assertActive: active,
+            }),
+        ],
+      ] as const) {
+        let checks = 0;
+        const assertActive = () => {
+          checks += 1;
+          // Config controls also check after their saved-key lookup. Keep that
+          // check active so every case reaches the final socket-write guard.
+          if (checks === (control === "setConfigOption" ? 3 : 2)) {
+            throw new Error(`${control} lost authority`);
+          }
+        };
+        await assert.rejects(run(assertActive), { message: `${control} lost authority` });
+        assert.equal(checks, control === "setConfigOption" ? 3 : 2);
+      }
+
+      assert.deepEqual(await runtime.getStatus({ handle }), before);
+    },
+    "deny-all",
+    ["--advertise-config-options"],
+  );
+});
+
+test("shared controls settle accepted state after dispatch authority is revoked", async () => {
+  await withSharedSession(
+    async ({ runtime, handle, command, home }) => {
+      await withOwnerRunning(runtime, handle, "settlement-owner");
+      for (const [finalCheck, run] of [
+        [
+          2,
+          (authority: { signal: AbortSignal; assertActive: () => void }) =>
+            runtime.setMode({ handle, mode: "plan", ...authority }),
+        ],
+        [
+          2,
+          (authority: { signal: AbortSignal; assertActive: () => void }) =>
+            runtime.setModel({ handle, model: "fast-model", ...authority }),
+        ],
+        [
+          3,
+          (authority: { signal: AbortSignal; assertActive: () => void }) =>
+            runtime.setConfigOption({
+              handle,
+              key: "reasoning_effort",
+              value: "high",
+              ...authority,
+            }),
+        ],
+      ] as const) {
+        const abort = new AbortController();
+        let checks = 0;
+        let active = true;
+        await run({
+          signal: abort.signal,
+          assertActive: () => {
+            assert.ok(active, "authority was consulted after dispatch");
+            if (++checks === finalCheck) {
+              // The synchronous socket write precedes this microtask; the
+              // asynchronous owner response must still be received and saved.
+              queueMicrotask(() => {
+                active = false;
+                abort.abort(new Error("authority revoked after dispatch"));
+              });
+            }
+          },
+        });
+        assert.equal(checks, finalCheck);
+        assert.equal(abort.signal.aborted, true);
+      }
+      const state = await runtime.getStatus({ handle });
+      assert.equal(state.models?.currentModelId, "fast-model");
+      const record = await findSession({
+        agentCommand: command,
+        cwd: home,
+        name: "shared",
+      });
+      assert.equal(record?.acpx?.desired_mode_id, "plan");
+      assert.equal(record?.acpx?.desired_config_options?.reasoning_effort, "high");
+    },
+    "deny-all",
+    ["--advertise-config-options"],
+  );
 });

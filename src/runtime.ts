@@ -1,6 +1,7 @@
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { DEFAULT_AGENT_NAME } from "./agent-registry.js";
 import type { AcpControlAuthority } from "./async-control.js";
+import { ACPX_CAPABILITIES, capabilitiesFromRecord } from "./runtime/engine/controls.js";
 import { AcpRuntimeManager } from "./runtime/engine/manager.js";
 import type {
   AcpRuntime,
@@ -100,15 +101,6 @@ export const ACPX_BACKEND_ID = "acpx";
 export { createSharedAcpRuntime, SharedAcpRuntime } from "./runtime/shared.js";
 export type { SharedAcpRuntimeOptions } from "./runtime/shared.js";
 export type { SessionWatchEvent, SessionWatchResult } from "./session/journal.js";
-
-const ACPX_CAPABILITIES: AcpRuntimeCapabilities = {
-  controls: [
-    "session/set_mode",
-    "session/set_model",
-    "session/set_config_option",
-    "session/status",
-  ],
-};
 
 type AcpxRuntimeLike = AcpRuntime & {
   probeAvailability(): Promise<void>;
@@ -291,23 +283,9 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     }
 
     const { handle } = this.resolveManagerHandle(input.handle);
-    const record = await this.options.sessionStore.load(handle.acpxRecordId ?? handle.sessionKey);
-    if (!record?.acpx?.config_options) {
-      return ACPX_CAPABILITIES;
-    }
-
-    const configOptionKeys = Array.from(
-      new Set(
-        record.acpx.config_options
-          .map((option) => option.id)
-          .filter((id): id is string => typeof id === "string" && id.trim().length > 0),
-      ),
+    return capabilitiesFromRecord(
+      await this.options.sessionStore.load(handle.acpxRecordId ?? handle.sessionKey),
     );
-
-    return {
-      ...ACPX_CAPABILITIES,
-      ...(configOptionKeys.length > 0 ? { configOptionKeys } : {}),
-    };
   }
 
   async getStatus(input: {

@@ -1,12 +1,20 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { normalizeAgentCommandInput } from "../acp/client-process.js";
 import { normalizeOutputError } from "../acp/error-normalization.js";
 import { createAgentRegistry, type AcpAgentRegistry } from "../agent-registry.js";
+import { assertControlAuthority, type AcpControlAuthority } from "../async-control.js";
 import { textPrompt } from "../prompt-content.js";
 import { DISCARD_OUTPUT_FORMATTER } from "../session/execution/discard-output.js";
 import { sendSession } from "../session/execution/queue-owner-runtime.js";
-import { closeSession, cancelSessionPrompt } from "../session/execution/session-control.js";
+import {
+  closeSession,
+  cancelSessionPrompt,
+  setSessionConfigOptionOnOwner,
+  setSessionModeOnOwner,
+  setSessionModelOnOwner,
+} from "../session/execution/session-control.js";
 import { ensureSession } from "../session/execution/session-management.js";
 import { findSession, readSessionRecord, resolveSessionRecord } from "../session/persistence.js";
 import { tryCancelOnRunningOwner } from "../session/queue/ipc.js";
@@ -18,6 +26,7 @@ import type {
   PermissionPolicy,
   SessionRecord,
 } from "../types.js";
+import { capabilitiesFromRecord, resolveSupportedConfigOptionId } from "./engine/controls.js";
 import { runtimeStatusFromRecord } from "./engine/status.js";
 import {
   AsyncEventQueue,
@@ -26,6 +35,7 @@ import {
   toPromptInput,
 } from "./engine/turn.js";
 import type {
+  AcpRuntimeCapabilities,
   AcpRuntimeEnsureInput,
   AcpRuntimeHandle,
   AcpRuntimeTurn,
@@ -72,6 +82,22 @@ function sharedRecordId(handle: AcpRuntimeHandle): string {
   return handle.acpxRecordId;
 }
 
+/**
+ * Shared controls are owner-only. Falling back to a direct connection would
+ * start a second adapter connection for a session another process owns, and
+ * that path may create a fresh provider session when the saved one no longer
+ * loads. Shared turns already refuse that trade; controls refuse it too.
+ */
+function requireOwnerDispatch<T>(result: T | undefined, control: string): T {
+  if (result === undefined) {
+    throw new AcpRuntimeError(
+      "ACP_BACKEND_UNAVAILABLE",
+      `No running owner holds this shared session, so ${control} was not sent. Submit a turn to start an owner, or apply the change with the equivalent acpx command, which connects directly instead of starting one.`,
+    );
+  }
+  return result;
+}
+
 function turnFailure(error: unknown): AcpRuntimeTurnResult {
   const normalized = normalizeOutputError(error, { defaultCode: "RUNTIME", origin: "queue" });
   if (normalized.detailCode === "QUEUE_REQUEST_CANCELLED") {
@@ -94,6 +120,7 @@ export class SharedAcpRuntime {
   private readonly options: SharedAcpRuntimeOptions;
   private readonly disconnect = new AbortController();
   private readonly pending = new Set<Promise<unknown>>();
+  private readonly controlChains = new Map<string, Promise<void>>();
 
   constructor(options: SharedAcpRuntimeOptions) {
     for (const name of [
@@ -308,6 +335,114 @@ export class SharedAcpRuntime {
   async getStatus(input: { handle: AcpRuntimeHandle }) {
     this.assertOpen();
     return runtimeStatusFromRecord(await resolveSessionRecord(sharedRecordId(input.handle)));
+  }
+
+  async getCapabilities(input?: { handle?: AcpRuntimeHandle }): Promise<AcpRuntimeCapabilities> {
+    this.assertOpen();
+    if (!input?.handle) {
+      return capabilitiesFromRecord(undefined);
+    }
+    return capabilitiesFromRecord(await readSessionRecord(sharedRecordId(input.handle)));
+  }
+
+  /**
+   * Preserves this client's control order, including caller-side persistence
+   * when talking to older owners. Updated owners checkpoint accepted controls
+   * themselves; serialization here cannot coordinate other legacy callers.
+   */
+  private chainControl<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.controlChains.get(sessionId) ?? Promise.resolve();
+    const result = previous.then(run, run);
+    const chained = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.controlChains.set(sessionId, chained);
+    void chained.then(() => {
+      if (this.controlChains.get(sessionId) === chained) {
+        this.controlChains.delete(sessionId);
+      }
+    });
+    return result;
+  }
+
+  /**
+   * Checks this client's authority locally, then hands the control to the
+   * running owner. The check gates this client's dispatch only; it cannot gate
+   * controls other clients of the same owner send, and it cannot recall a
+   * control the owner already accepted.
+   */
+  private async dispatchControl<T>(
+    input: AcpControlAuthority & { handle: AcpRuntimeHandle },
+    control: string,
+    send: (sessionId: string, assertAuthority: () => void) => Promise<T | undefined>,
+  ): Promise<T> {
+    this.assertOpen();
+    const sessionId = sharedRecordId(input.handle);
+    // Owner lookup, the config-key read and the socket connect all happen after
+    // the first check, so authority is asserted again at each point that would
+    // otherwise let a withdrawn control still reach the owner. It is never
+    // consulted after the write, so a dispatched control still settles.
+    const assertAuthority = () => {
+      this.assertOpen();
+      assertControlAuthority(input);
+    };
+    return await this.track(
+      this.chainControl(sessionId, async () => {
+        assertAuthority();
+        return requireOwnerDispatch(await send(sessionId, assertAuthority), control);
+      }),
+    );
+  }
+
+  async setMode(
+    input: AcpControlAuthority & { handle: AcpRuntimeHandle; mode: string },
+  ): Promise<void> {
+    await this.dispatchControl(input, "session/set_mode", async (sessionId, assertAuthority) =>
+      setSessionModeOnOwner({
+        sessionId,
+        modeId: input.mode,
+        timeoutMs: this.options.timeoutMs,
+        assertDispatch: assertAuthority,
+      }),
+    );
+  }
+
+  async setModel(
+    input: AcpControlAuthority & { handle: AcpRuntimeHandle; model: string },
+  ): Promise<void> {
+    await this.dispatchControl(input, "session/set_model", async (sessionId, assertAuthority) =>
+      setSessionModelOnOwner({
+        sessionId,
+        modelId: input.model,
+        timeoutMs: this.options.timeoutMs,
+        assertDispatch: assertAuthority,
+      }),
+    );
+  }
+
+  async setConfigOption(
+    input: AcpControlAuthority & { handle: AcpRuntimeHandle; key: string; value: string },
+  ): Promise<SetSessionConfigOptionResponse> {
+    const result = await this.dispatchControl(
+      input,
+      "session/set_config_option",
+      async (sessionId, assertAuthority) => {
+        const configId = resolveSupportedConfigOptionId(
+          await resolveSessionRecord(sessionId),
+          input.key,
+        );
+        assertAuthority();
+        return await setSessionConfigOptionOnOwner({
+          sessionId,
+          configId,
+          value: input.value,
+          timeoutMs: this.options.timeoutMs,
+          assertDispatch: assertAuthority,
+        });
+      },
+    );
+    return result.response;
   }
 
   watchSession(input: { handle: AcpRuntimeHandle; cursor?: string; signal?: AbortSignal }) {
