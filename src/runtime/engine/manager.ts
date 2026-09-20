@@ -238,6 +238,11 @@ type RuntimeSessionProjection = {
   conversation: ReturnType<typeof cloneSessionConversation>;
 };
 
+type RuntimeControlSession = {
+  record: SessionRecord;
+  checkpoint: LiveSessionCheckpoint;
+};
+
 type RuntimeSessionOwner = {
   client: AcpClient;
   checkpoint: LiveSessionCheckpoint;
@@ -299,6 +304,7 @@ async function createOrLoadRuntimeSession(
 
 export class AcpRuntimeManager {
   private readonly activeControllers = new Map<string, ActiveSessionController>();
+  private readonly controlSessionRecords = new Map<string, RuntimeControlSession>();
   private readonly retainedSessionOwners = new Map<string, RuntimeSessionOwner>();
   private readonly retiringSessionOwners = new Set<RuntimeSessionOwner>();
   private readonly pendingOneShotRecordIds = new Map<string, string>();
@@ -744,39 +750,62 @@ export class AcpRuntimeManager {
     }
 
     let controlClient: AcpClient | undefined;
+    let controlledRecord = record;
+    // Callback-driven ensure can reopen this record before the control replies.
+    // Serialize that save with the accepted response and cleanup.
+    const checkpoint = new LiveSessionCheckpoint({
+      save: async () => this.options.sessionStore.save(controlledRecord),
+    });
     try {
-      const result = await withConnectedSession({
-        sessionRecordId: record.acpxRecordId,
-        loadRecord: async (sessionRecordId) => await this.requireRecord(sessionRecordId),
-        saveRecord: async (connectedRecord) =>
-          await this.options.sessionStore.save(connectedRecord),
-        createClient: (options) =>
-          (controlClient = this.createClient({
-            ...options,
-            processLifecycle: this.options.processLifecycle,
-            processLaunchScope: {
-              kind: "runtime-session",
-              sessionKey: record.name ?? record.acpxRecordId,
-            },
-          })),
-        mcpServers: this.resolveMcpServers({
-          ...record,
-          sessionKey: record.name ?? record.acpxRecordId,
+      const result = await settleAttempt(async () =>
+        withConnectedSession({
+          sessionRecordId: record.acpxRecordId,
+          loadRecord: async (sessionRecordId) => {
+            controlledRecord = await this.requireRecord(sessionRecordId);
+            this.controlSessionRecords.set(sessionRecordId, {
+              record: controlledRecord,
+              checkpoint,
+            });
+            return controlledRecord;
+          },
+          saveRecord: async () => checkpoint.checkpoint(),
+          createClient: (options) =>
+            (controlClient = this.createClient({
+              ...options,
+              processLifecycle: this.options.processLifecycle,
+              processLaunchScope: {
+                kind: "runtime-session",
+                sessionKey: record.name ?? record.acpxRecordId,
+              },
+            })),
+          mcpServers: this.resolveMcpServers({
+            ...record,
+            sessionKey: record.name ?? record.acpxRecordId,
+          }),
+          ...this.resolveSessionPermissions({
+            ...record,
+            sessionKey: record.name ?? record.acpxRecordId,
+          }),
+          elicitationModes: this.options.elicitationModes,
+          verbose: this.options.verbose,
+          timeoutMs: this.options.timeoutMs,
+          resumePolicy: resumePolicyForSessionMode(sessionMode),
+          replacingConfigOption,
+          authority,
+          run,
         }),
-        ...this.resolveSessionPermissions({
-          ...record,
-          sessionKey: record.name ?? record.acpxRecordId,
-        }),
-        elicitationModes: this.options.elicitationModes,
-        verbose: this.options.verbose,
-        timeoutMs: this.options.timeoutMs,
-        resumePolicy: resumePolicyForSessionMode(sessionMode),
-        replacingConfigOption,
-        authority,
-        run,
-      });
-      return result.value;
+      );
+      this.controlSessionRecords.delete(record.acpxRecordId);
+      const flushed = await settleAttempt(async () => checkpoint.flush());
+      if (!result.ok) {
+        throw result.error;
+      }
+      if (!flushed.ok) {
+        throw flushed.error;
+      }
+      return result.value.value;
     } finally {
+      this.controlSessionRecords.delete(record.acpxRecordId);
       if (controlClient) {
         this.liveClients.delete(controlClient);
       }
@@ -850,9 +879,50 @@ export class AcpRuntimeManager {
       this.options.agentRegistry.resolve(input.agent),
     );
     const agent = { cwd, agentCommand, agentArgv };
+    if (input.mode !== "persistent") {
+      return await this.acquireRuntimeSession(input, agent);
+    }
+    const compatible = await this.reuseCompatiblePersistentSession(input, agent);
+    if (compatible) {
+      return compatible;
+    }
+    this.assertRuntimeSessionIdle(input.sessionKey);
+    return await this.withManagerLock(this.runtimeOperationLocks, input.sessionKey, async () =>
+      this.acquireRuntimeSession(input, agent),
+    );
+  }
+
+  private async reuseCompatiblePersistentSession(
+    input: RuntimeEnsureInput,
+    agent: ResolvedRuntimeAgent,
+  ): Promise<SessionRecord | undefined> {
+    const controlled = this.controlSessionRecords.get(input.sessionKey);
+    const record = controlled ? controlled.record : await this.findSession(input.sessionKey);
+    if (
+      !record ||
+      this.closingActiveRecords.has(input.sessionKey) ||
+      !shouldReuseExistingRecord(record, { ...agent, resumeSessionId: input.resumeSessionId })
+    ) {
+      return undefined;
+    }
+    if (!record.closed) {
+      return record;
+    }
+    if (!controlled || this.sessionTasks.has(input.sessionKey)) {
+      return undefined;
+    }
+    // Native control callbacks may ensure this identity before replying. Reuse
+    // the control owner's record rather than waiting for that same reply.
+    return await this.reuseRuntimeSession({ record }, controlled.checkpoint);
+  }
+
+  private async acquireRuntimeSession(
+    input: RuntimeEnsureInput,
+    agent: ResolvedRuntimeAgent,
+  ): Promise<SessionRecord> {
     const existing = await this.loadExistingRuntimeSession(input);
     if (existing && this.canReuseRuntimeSession(input, agent, existing)) {
-      return await this.reuseRuntimeSession(existing.record);
+      return await this.reuseRuntimeSession(existing);
     }
     await this.closeConflictingPersistentSession(input, existing?.owner);
     return await this.createOwnedRuntimeSession(input, agent);
@@ -905,18 +975,40 @@ export class AcpRuntimeManager {
     }
     return Boolean(
       existing.owner &&
+      !existing.record.closed &&
+      this.pendingOneShotRecordIds.get(input.sessionKey) === existing.record.acpxRecordId &&
+      this.retainedSessionOwners.get(existing.record.acpxRecordId) === existing.owner &&
       isDeepStrictEqual(sessionOptionsFromRecord(existing.record), input.sessionOptions),
     );
   }
 
-  private async reuseRuntimeSession(record: SessionRecord): Promise<SessionRecord> {
+  private assertRuntimeSessionIdle(recordId: string): void {
+    if (this.sessionTasks.has(recordId) || this.runtimeOperationLocks.has(recordId)) {
+      throw new AcpRuntimeError(
+        "ACP_SESSION_INIT_FAILED",
+        `Cannot ensure session ${recordId} with incompatible or closing state while its work is unfinished. Wait for existing work to finish or use a different session key.`,
+      );
+    }
+  }
+
+  private async reuseRuntimeSession(
+    { record, owner }: ExistingRuntimeSession,
+    checkpoint = owner?.checkpoint,
+  ): Promise<SessionRecord> {
     // sessionOptions on a reused persistent record are intentionally ignored:
     // system prompts are fixed at newSession time. Pending one-shot records are
     // reused only when their options still match.
+    if (!record.closed && !this.closingActiveRecords.has(record.acpxRecordId)) {
+      return record;
+    }
     record.closed = false;
     record.closedAt = undefined;
     this.closingActiveRecords.delete(record.acpxRecordId);
-    await this.options.sessionStore.save(record);
+    if (checkpoint) {
+      await checkpoint.checkpoint();
+    } else {
+      await this.options.sessionStore.save(record);
+    }
     return record;
   }
 
@@ -925,7 +1017,9 @@ export class AcpRuntimeManager {
     owner: RuntimeSessionOwner | undefined,
   ): Promise<void> {
     if (input.mode === "persistent" && owner?.recordId) {
-      await this.closeRetainedSessionOwner(owner.recordId);
+      this.removeRetainedSessionOwner(owner);
+      this.retiringSessionOwners.add(owner);
+      await this.retrySessionCleanup(owner.recordId);
     }
   }
 
@@ -1936,7 +2030,13 @@ export class AcpRuntimeManager {
     });
     const clearAttempt = await settleAttempt(() => connection.owner?.client.clearEventHandlers());
     const closeAttempt = await settleAttempt(async () => this.closeClient(connection.client));
-    const failure = firstFailedAttempt([flushAttempt, clearAttempt, closeAttempt]);
+    const finalFlushAttempt = await settleAttempt(async () => connection.owner?.checkpoint.flush());
+    const failure = firstFailedAttempt([
+      flushAttempt,
+      clearAttempt,
+      closeAttempt,
+      finalFlushAttempt,
+    ]);
     if (failure) {
       throw failure.error;
     }

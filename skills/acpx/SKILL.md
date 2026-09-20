@@ -130,6 +130,8 @@ Use `prepareFreshSession({ handle })` to persist a fresh-session request across 
 
 Embedded controls save accepted settings with the current conversation. Turn finalization and one-shot cleanup wait for admitted controls, preserving final output, usage, and selections in the saved session. Ordinary `close` can return before active prompt cancellation finishes; the later save preserves its close/reset markers.
 
+For persistent sessions, compatible `ensureSession` calls may reuse an active record, including from permission callbacks during control reconnects. Changing its working directory, adapter invocation, or resume identity while turns or controls remain unfinished rejects with `ACP_SESSION_INIT_FAILED`; await that work or use a different key. After an active close, await its turn result before reopening. Idle replacement retires the old owner before initializing the successor; other records and distinct one-shot sessions remain independent.
+
 For installed entrypoints and prerequisites, read the matching [agent guide](https://github.com/openclaw/acpx/tree/main/agents). For resolver callbacks, custom command overrides, and lifecycle details, read [embedded agent discovery](https://github.com/openclaw/acpx/blob/main/docs/session-control.md#embedded-agent-discovery).
 
 ## Commands

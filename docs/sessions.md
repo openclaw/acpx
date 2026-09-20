@@ -273,6 +273,21 @@ closed records remain available. The handle uses the record's working directory
 and session identities. `getStatus({ handle }).lastRequestId` reports the last
 host request admitted to that session.
 
+Compatible persistent `ensureSession()` calls can reuse a session during a turn;
+they keep its original creation options and do not rewrite live conversation
+state. Such reuse can also be awaited from host permission callbacks during a
+control reconnect. Changing the working directory, adapter command/arguments, or
+explicit resume identity requires the record's turns and controls to finish. An incompatible
+ensure rejects with `ACP_SESSION_INIT_FAILED` while work is unfinished, without
+cancelling or rerouting it. Wait for that work to finish, or use another session key.
+An active close must also finish its turn before ensure can reopen that record.
+
+Idle replacement waits for the old connection and pending saves to retire before
+initializing its successor. Retirement failure rejects replacement and leaves
+cleanup available for retry. Turns and controls on that same record wait for initialization;
+other records, including distinct one-shot records, remain independent. A one-shot
+ensure whose previously pending owner has closed creates a fresh record.
+
 Call `shutdown()` when retiring a runtime. It cancels active prompts, closes owned
 connections, and waits for admitted work and probes to finish. New sessions,
 turns, controls and probes then reject. Stored sessions remain available for a

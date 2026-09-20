@@ -38,6 +38,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Runtime/controls: preserve completed output, usage, and accepted settings when control responses overlap turn finalization, and wait for admitted controls before one-shot cleanup.
 
+- Runtime/sessions: reject incompatible replacement while turns or controls remain unfinished, preserve live state during compatible ensure, and retire old owners before publishing a replacement; avoid reusing closed one-shot owners.
+
 ## 0.17.1 - 2026-09-19
 
 **Highlights:** Configured runtime initialization deadlines now stop unresponsive agents and clean up abandoned launches safely. Embedding hosts gain model inspection and session-specific permissions. Antigravity joins the built-in agents; its fixed-choice questions require an interactive client, including for existing custom launchers.
