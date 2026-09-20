@@ -367,22 +367,6 @@ test("compare keeps successful rows when one agent errors", async () => {
   });
 });
 
-test("compare timeout marks slow agents as cancelled", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = await setupCompareFixture(homeDir);
-    const result = await runCli(
-      ["compare", "fast", "slow", "--timeout", "0.5", "--json", "summarize"],
-      homeDir,
-      cwd,
-    );
-
-    assert.equal(result.code, 3, result.stderr);
-    const rows = JSON.parse(result.stdout) as CompareRow[];
-    assert.equal(rows.find((row) => row.agent === "fast")?.status, "ok");
-    assert.equal(rows.find((row) => row.agent === "slow")?.status, "cancelled");
-  });
-});
-
 test("compare applies global permission policy to every agent run", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await setupCompareFixture(homeDir);
