@@ -7,14 +7,7 @@ import { assertPersistedKeyPolicy } from "../../persisted-key-policy.js";
 import { writePrivateJsonFile } from "../../state-files.js";
 import type { SessionRecord } from "../../types.js";
 import { safeSessionId, sessionBaseDir } from "../event-log.js";
-import {
-  loadOrRebuildSessionIndex,
-  rebuildSessionIndex,
-  scanSessionIndex,
-  toSessionIndexEntry,
-  writeSessionIndex,
-  type SessionIndexEntry,
-} from "./index.js";
+import { scanSessionRecords } from "./discovery.js";
 import { parseSessionRecord } from "./parse.js";
 import { serializeSessionRecordForDisk } from "./serialize.js";
 
@@ -44,35 +37,20 @@ async function ensureSessionDir(): Promise<void> {
   await fs.mkdir(sessionBaseDir(), { recursive: true, mode: 0o700 });
 }
 
-async function loadRecordFromIndexEntry(
-  entry: SessionIndexEntry,
-): Promise<SessionRecord | undefined> {
-  try {
-    const payload = await fs.readFile(path.join(sessionBaseDir(), entry.file), "utf8");
-    return parseSessionRecord(JSON.parse(payload)) ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function loadSessionIndexEntries(readOnly = false): Promise<SessionIndexEntry[]> {
+async function* sessionRecords(readOnly = false): AsyncGenerator<SessionRecord> {
   if (!readOnly) {
     await ensureSessionDir();
   }
-  const index = await measurePerf("session.index_load", async () => {
-    const load = readOnly ? scanSessionIndex : loadOrRebuildSessionIndex;
-    return await load(sessionBaseDir());
-  });
-  return index.entries;
+  yield* scanSessionRecords(sessionBaseDir());
 }
 
-function matchesSessionEntry(
-  session: SessionIndexEntry,
-  normalizedCwd: string,
+function matchesSession(
+  session: SessionRecord,
+  agentCommand: string,
   normalizedName: string | undefined,
   includeClosed = false,
 ): boolean {
-  if (session.cwd !== normalizedCwd) {
+  if (session.agentCommand !== agentCommand) {
     return false;
   }
   if (!includeClosed && session.closed) {
@@ -84,6 +62,10 @@ function matchesSessionEntry(
   return session.name === normalizedName;
 }
 
+function isNewer(record: SessionRecord, previous: SessionRecord | undefined): boolean {
+  return !previous || record.lastUsedAt.localeCompare(previous.lastUsedAt) > 0;
+}
+
 export async function writeSessionRecord(record: SessionRecord): Promise<void> {
   await measurePerf("session.write_record", async () => {
     const persisted = serializeSessionRecordForDisk(record);
@@ -91,14 +73,6 @@ export async function writeSessionRecord(record: SessionRecord): Promise<void> {
 
     const file = sessionFilePath(record.acpxRecordId);
     await writePrivateJsonFile(file, persisted);
-
-    const sessionDir = sessionBaseDir();
-    const index = await loadOrRebuildSessionIndex(sessionDir);
-    const fileName = path.basename(file);
-    const entries = index.entries.filter((entry) => entry.file !== fileName);
-    entries.push(toSessionIndexEntry(record, fileName));
-    const files = [...new Set([...index.files.filter((entry) => entry !== fileName), fileName])];
-    await writeSessionIndex(sessionDir, { files, entries });
   });
 }
 
@@ -110,20 +84,14 @@ export async function resolveSessionRecord(sessionId: string): Promise<SessionRe
       "session.resolve_direct",
       async () => await readSessionRecord(sessionId),
     );
-    if (directRecord) {
+    if (directRecord?.acpxRecordId === sessionId) {
       return directRecord;
     }
   } catch {
-    // fallback to indexed search
+    // Fall back to canonical discovery.
   }
 
-  const entries = await loadSessionIndexEntries();
-  const exactEntries = entries.filter(
-    (entry) => entry.acpxRecordId === sessionId || entry.acpSessionId === sessionId,
-  );
-  const exactRecords = (
-    await Promise.all(exactEntries.map((entry) => loadRecordFromIndexEntry(entry)))
-  ).filter((entry): entry is SessionRecord => Boolean(entry));
+  const { exactRecords, suffixRecords } = await findSessionIdMatches(sessionId);
   if (exactRecords.length === 1) {
     return exactRecords[0];
   }
@@ -131,12 +99,6 @@ export async function resolveSessionRecord(sessionId: string): Promise<SessionRe
     throw new SessionResolutionError(`Multiple sessions match id: ${sessionId}`);
   }
 
-  const suffixEntries = entries.filter(
-    (entry) => entry.acpxRecordId.endsWith(sessionId) || entry.acpSessionId.endsWith(sessionId),
-  );
-  const suffixRecords = (
-    await Promise.all(suffixEntries.map((entry) => loadRecordFromIndexEntry(entry)))
-  ).filter((entry): entry is SessionRecord => Boolean(entry));
   if (suffixRecords.length === 1) {
     return suffixRecords[0];
   }
@@ -148,7 +110,29 @@ export async function resolveSessionRecord(sessionId: string): Promise<SessionRe
   throw new SessionNotFoundError(sessionId);
 }
 
-/** Reads a canonical record without creating directories or rebuilding the lookup index. */
+async function findSessionIdMatches(
+  sessionId: string,
+): Promise<{ exactRecords: SessionRecord[]; suffixRecords: SessionRecord[] }> {
+  const exactRecords: SessionRecord[] = [];
+  const suffixRecords: SessionRecord[] = [];
+  for await (const record of sessionRecords()) {
+    if (record.acpxRecordId === sessionId || record.acpSessionId === sessionId) {
+      retainMatch(exactRecords, record);
+    }
+    if (record.acpxRecordId.endsWith(sessionId) || record.acpSessionId.endsWith(sessionId)) {
+      retainMatch(suffixRecords, record);
+    }
+  }
+  return { exactRecords, suffixRecords };
+}
+
+function retainMatch(matches: SessionRecord[], record: SessionRecord): void {
+  if (matches.length < 2) {
+    matches.push(record);
+  }
+}
+
+/** Reads one canonical record without creating directories or scanning other sessions. */
 export async function readSessionRecord(sessionId: string): Promise<SessionRecord | undefined> {
   let payload: string;
   try {
@@ -160,7 +144,8 @@ export async function readSessionRecord(sessionId: string): Promise<SessionRecor
     throw error;
   }
   try {
-    return parseSessionRecord(JSON.parse(payload)) ?? undefined;
+    const record = parseSessionRecord(JSON.parse(payload));
+    return record?.acpxRecordId === sessionId ? record : undefined;
   } catch {
     return undefined;
   }
@@ -219,74 +204,74 @@ export function isoNow(): string {
 }
 
 export async function listSessions(): Promise<SessionRecord[]> {
-  await ensureSessionDir();
-  const entries = await loadSessionIndexEntries();
-  const records: SessionRecord[] = [];
-
-  for (const entry of entries) {
-    const parsed = await loadRecordFromIndexEntry(entry);
-    if (parsed) {
-      records.push(parsed);
-    }
-  }
-
-  records.sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
-  return records;
+  return await collectSessionRecords();
 }
 
 export async function listSessionsForAgent(agentCommand: string): Promise<SessionRecord[]> {
-  const entries = (await loadSessionIndexEntries()).filter(
-    (session) => session.agentCommand === agentCommand,
-  );
-  const records = await Promise.all(entries.map((entry) => loadRecordFromIndexEntry(entry)));
-  return records
-    .filter((entry): entry is SessionRecord => Boolean(entry))
-    .toSorted((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
+  return await collectSessionRecords(agentCommand);
+}
+
+async function collectSessionRecords(agentCommand?: string): Promise<SessionRecord[]> {
+  const records: SessionRecord[] = [];
+  for await (const record of sessionRecords()) {
+    if (agentCommand === undefined || record.agentCommand === agentCommand) {
+      records.push(record);
+    }
+  }
+  return records.toSorted((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
 }
 
 export async function findSession(options: FindSessionOptions): Promise<SessionRecord | undefined> {
   const normalizedCwd = absolutePath(options.cwd);
   const normalizedName = normalizeName(options.name);
-  const entries = await loadSessionIndexEntries(options.readOnly);
-  const match = entries.find(
-    (session) =>
-      session.agentCommand === options.agentCommand &&
-      matchesSessionEntry(session, normalizedCwd, normalizedName, options.includeClosed),
-  );
-  if (!match) {
-    return undefined;
+  let match: SessionRecord | undefined;
+  for await (const record of sessionRecords(options.readOnly)) {
+    if (
+      record.cwd === normalizedCwd &&
+      matchesSession(record, options.agentCommand, normalizedName, options.includeClosed) &&
+      isNewer(record, match)
+    ) {
+      match = record;
+    }
   }
-  return await loadRecordFromIndexEntry(match);
+  return match;
 }
 
 export async function findSessionByDirectoryWalk(
   options: FindSessionByDirectoryWalkOptions,
 ): Promise<SessionRecord | undefined> {
   const normalizedName = normalizeName(options.name);
+  const directories = walkDirectories(options);
+  let match: SessionRecord | undefined;
+  let distance = Infinity;
+  for await (const record of sessionRecords()) {
+    const candidateDistance = directories.get(record.cwd);
+    if (
+      candidateDistance !== undefined &&
+      matchesSession(record, options.agentCommand, normalizedName) &&
+      (candidateDistance < distance || (candidateDistance === distance && isNewer(record, match)))
+    ) {
+      match = record;
+      distance = candidateDistance;
+    }
+  }
+  return match;
+}
+
+function walkDirectories(options: FindSessionByDirectoryWalkOptions): Map<string, number> {
   const normalizedStart = absolutePath(options.cwd);
   const normalizedBoundary = absolutePath(options.boundary ?? normalizedStart);
   const walkBoundary = isWithinBoundary(normalizedBoundary, normalizedStart)
     ? normalizedBoundary
     : normalizedStart;
-  const sessions = (await loadSessionIndexEntries()).filter(
-    (session) => session.agentCommand === options.agentCommand,
-  );
-
-  let current = normalizedStart;
-  const walkRoot = path.parse(current).root;
-
-  for (;;) {
-    const match = sessions.find((session) => matchesSessionEntry(session, current, normalizedName));
-    if (match) {
-      return await loadRecordFromIndexEntry(match);
-    }
-
-    const parent = nextWalkParent(current, walkBoundary, walkRoot);
-    if (!parent) {
-      return undefined;
-    }
-    current = parent;
+  const directories = new Map<string, number>();
+  const walkRoot = path.parse(normalizedStart).root;
+  let current: string | undefined = normalizedStart;
+  while (current) {
+    directories.set(current, directories.size);
+    current = nextWalkParent(current, walkBoundary, walkRoot);
   }
+  return directories;
 }
 
 function nextWalkParent(
@@ -335,16 +320,11 @@ function isSessionStreamFile(fileName: string, safeId: string): boolean {
 }
 
 export async function pruneSessions(options: PruneOptions = {}): Promise<PruneResult> {
-  await ensureSessionDir();
-  const entries = await loadSessionIndexEntries();
-
-  const eligible = entries.filter((entry) => isPruneCandidate(entry, options.agentCommand));
-
   const cutoff =
     options.before ??
     (options.olderThanMs != null ? new Date(Date.now() - options.olderThanMs) : undefined);
 
-  const records = await loadPrunableRecords(eligible, cutoff, options.agentCommand);
+  const records = await loadPrunableRecords(cutoff, options.agentCommand);
 
   if (options.dryRun) {
     return { pruned: records, bytesFreed: 0, dryRun: true };
@@ -373,10 +353,6 @@ export async function pruneSessions(options: PruneOptions = {}): Promise<PruneRe
     );
   }
 
-  await rebuildSessionIndex(sessionDir).catch(() => {
-    // best effort cache rebuild
-  });
-
   return { pruned: records, bytesFreed, dryRun: false };
 }
 
@@ -388,20 +364,17 @@ function isPruneCandidate(
 }
 
 async function loadPrunableRecords(
-  entries: SessionIndexEntry[],
   cutoff: Date | undefined,
   agentCommand: string | undefined,
 ): Promise<SessionRecord[]> {
   const records: SessionRecord[] = [];
   const cutoffIso = cutoff?.toISOString();
-  for (const entry of entries) {
-    const record = await loadRecordFromIndexEntry(entry);
-    // The lookup index can lag a concurrent canonical-record update.
-    if (record && isPruneCandidate(record, agentCommand) && isBeforeCutoff(record, cutoffIso)) {
+  for await (const record of sessionRecords()) {
+    if (isPruneCandidate(record, agentCommand) && isBeforeCutoff(record, cutoffIso)) {
       records.push(record);
     }
   }
-  return records;
+  return records.toSorted((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
 }
 
 function isBeforeCutoff(record: SessionRecord, cutoffIso: string | undefined): boolean {

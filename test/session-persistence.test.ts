@@ -531,7 +531,7 @@ for (const [scenario, existingFileMode, existingDirMode] of [
   ["symlinked session directories", undefined, undefined],
 ] as const) {
   test(
-    `writeSessionRecord keeps records and index private for ${scenario} under a permissive umask`,
+    `writeSessionRecord keeps records private for ${scenario} under a permissive umask`,
     { skip: process.platform === "win32" },
     async () => {
       await withTempHome(async (homeDir) => {
@@ -547,7 +547,6 @@ for (const [scenario, existingFileMode, existingDirMode] of [
           });
           const recordPath = sessionFilePath(homeDir, record.acpxRecordId);
           const sessionDir = path.dirname(recordPath);
-          const indexPath = path.join(sessionDir, "index.json");
           const symlinkTarget = path.join(homeDir, "session-target");
 
           if (scenario === "symlinked session directories") {
@@ -559,7 +558,6 @@ for (const [scenario, existingFileMode, existingDirMode] of [
           if (existingFileMode !== undefined && existingDirMode !== undefined) {
             await persistSessionRecord(record);
             await fs.chmod(recordPath, existingFileMode);
-            await fs.chmod(indexPath, existingFileMode);
             await fs.chmod(sessionDir, existingDirMode);
           }
 
@@ -568,7 +566,6 @@ for (const [scenario, existingFileMode, existingDirMode] of [
           await persistSessionRecord(record);
 
           assert.equal((await fs.stat(recordPath)).mode & 0o777, 0o600, "session record mode");
-          assert.equal((await fs.stat(indexPath)).mode & 0o777, 0o600, "session index mode");
           assert.equal((await fs.stat(sessionDir)).mode & 0o777, 0o700, "session directory mode");
           if (scenario === "symlinked session directories") {
             assert.equal(await fs.readlink(sessionDir), symlinkTarget);
@@ -592,7 +589,7 @@ for (const [scenario, existingFileMode, existingDirMode] of [
   );
 }
 
-test("writeSessionRecord maintains an index and listSessions rebuilds it when missing", async () => {
+test("session discovery reads canonical records without creating a legacy index", async () => {
   await withTempHome(async (homeDir) => {
     const session = await loadSessionModule();
     const cwd = path.join(homeDir, "repo");
@@ -612,15 +609,15 @@ test("writeSessionRecord maintains an index and listSessions rebuilds it when mi
       initialSessions.some((entry) => entry.acpxRecordId === "indexed-session"),
       true,
     );
-    assert.equal(await fileExists(indexPath), true);
+    assert.equal(await fileExists(indexPath), false);
 
-    await fs.rm(indexPath, { force: true });
+    await fs.writeFile(indexPath, "{");
     const sessions = await session.listSessions();
     assert.equal(
       sessions.some((entry) => entry.acpxRecordId === "indexed-session"),
       true,
     );
-    assert.equal(await fileExists(indexPath), true);
+    assert.equal(await fs.readFile(indexPath, "utf8"), "{");
   });
 });
 

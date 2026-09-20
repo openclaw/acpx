@@ -53,7 +53,7 @@ test("pruneSessions returns empty result when no closed sessions exist", async (
   });
 });
 
-test("pruneSessions deletes closed session files and removes them from the index", async () => {
+test("pruneSessions deletes closed session files", async () => {
   await withTempHome(async (homeDir) => {
     const session = await loadSessionModule();
     const cwd = path.join(homeDir, "workspace");
@@ -342,6 +342,22 @@ test("pruneSessions rechecks canonical records when index metadata is stale", as
     for (const record of records) {
       await persistSessionRecord(record);
     }
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "sessions", "index.json"),
+      JSON.stringify({
+        schema: "acpx.session-index.v1",
+        files: records.map((record) => `${record.acpxRecordId}.json`).toSorted(),
+        entries: records.map((record) => ({
+          file: `${record.acpxRecordId}.json`,
+          acpxRecordId: record.acpxRecordId,
+          acpSessionId: record.acpSessionId,
+          agentCommand: record.agentCommand,
+          cwd: record.cwd,
+          closed: record.closed,
+          lastUsedAt: record.lastUsedAt,
+        })),
+      }),
+    );
     // Concurrent index writers can leave older metadata beside newer canonical records.
     await writeSessionRecord(homeDir, { ...records[0], closed: false });
     await writeSessionRecord(homeDir, { ...records[1], agentCommand: "agent-b" });

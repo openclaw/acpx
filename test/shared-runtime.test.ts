@@ -325,11 +325,11 @@ test(
       assert.equal(quiet.trim(), "before-close");
       const sessionDir = path.join(home, ".acpx", "sessions");
       const indexPath = path.join(sessionDir, "index.json");
-      const index = await fs.readFile(indexPath, "utf8");
+      const index = JSON.stringify({ schema: "acpx.session-index.v1", files: [], entries: [] });
       await fs.writeFile(path.join(sessionDir, "corrupt-session.json"), "{");
       for (const contents of [undefined, "{", index]) {
         if (contents === undefined) {
-          await fs.unlink(indexPath);
+          await fs.rm(indexPath, { force: true });
         } else {
           await fs.writeFile(indexPath, contents);
         }

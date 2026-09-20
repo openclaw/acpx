@@ -494,7 +494,7 @@ Session records are stored in:
 ~/.acpx/sessions/*.json
 ```
 
-On POSIX systems, session records and the session index are written with mode
+On POSIX systems, session records are written with mode
 `0600`, and their session directory uses `0700`. Each write reapplies these
 private permissions, including when replacing an older, more permissive file.
 The embedded runtime's `createFileSessionStore()` uses the same policy. This is

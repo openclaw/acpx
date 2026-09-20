@@ -42,7 +42,8 @@ class FileSessionStore implements AcpSessionStore {
     } catch {
       return undefined;
     }
-    return parseSessionRecord(parsed) ?? undefined;
+    const record = parseSessionRecord(parsed);
+    return record?.acpxRecordId === sessionId ? record : undefined;
   }
 
   async save(record: AcpSessionRecord): Promise<void> {

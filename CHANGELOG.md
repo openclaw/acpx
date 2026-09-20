@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Sessions/storage: resolve scope, directory, ID, listing, and prune queries from current saved records instead of stale index metadata; save checkpoints without a shared index write that can fail after the record is committed. Ignore mismatched record filenames so copied records cannot create false matches or authorize pruning another record.
+
 ## 0.18.0 - 2026-09-20
 
 ### Highlights

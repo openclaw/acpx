@@ -14,6 +14,7 @@ import {
   recordPromptSubmission,
   recordSessionUpdate,
 } from "../src/session/conversation-model.js";
+import { parseSessionRecord } from "../src/session/persistence.js";
 import type { SessionRecord } from "../src/types.js";
 import {
   extractAgentMessageChunkText,
@@ -97,12 +98,19 @@ for (const completion of ["complete", "timeout", "cancel"] as const) {
       let name: string | undefined;
       try {
         const entry = await waitFor(async () => {
-          const index = JSON.parse(
-            await fs.readFile(path.join(homeDir, ".acpx", "sessions", "index.json"), "utf8"),
-          ) as { entries: Array<{ name: string; file: string; acpxRecordId: string }> };
-          return (
-            index.entries.find((value) => value.name.startsWith("fixture-session-turn")) ?? null
-          );
+          const sessionDir = path.join(homeDir, ".acpx", "sessions");
+          for (const file of await fs.readdir(sessionDir)) {
+            if (!file.endsWith(".json") || file === "index.json") {
+              continue;
+            }
+            const record = parseSessionRecord(
+              JSON.parse(await fs.readFile(path.join(sessionDir, file), "utf8")),
+            );
+            if (record?.name?.startsWith("fixture-session-turn")) {
+              return { name: record.name, file, acpxRecordId: record.acpxRecordId };
+            }
+          }
+          return null;
         }, 5_000);
         name = entry.name;
         const recordPath = path.join(homeDir, ".acpx", "sessions", entry.file);

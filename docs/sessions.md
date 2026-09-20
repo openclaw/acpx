@@ -18,6 +18,8 @@ That is what makes `acpx codex` in `~/repos/api` and `acpx codex` in `~/repos/we
 
 `agentCommand` comes from either the built-in registry, an unknown positional name (treated as a raw command), or `--agent <command>`. Two sessions with different commands are different sessions even if everything else matches.
 
+Local discovery reads the saved session records and uses their current scope, closed state, IDs, and last-used times. A legacy `index.json` is ignored. In the local store, a record's filename must match its encoded local ID; mismatched copies are ignored. Lookup by an exact local record ID reads that file directly; other lookups scan the saved records. Concurrent writes are observed per record, rather than as one atomic snapshot of the entire store.
+
 ## Lifecycle commands
 
 ```bash
