@@ -278,6 +278,12 @@ type ActivePromptState = {
   elicitationHandler?: AcpElicitationHandler;
   permissionHandler?: AcpPermissionHandler;
   elicitationController: AbortController;
+  requestController: AbortController;
+};
+
+type DelegatedRequestOwner = AcpControlAuthority & {
+  signal: AbortSignal;
+  permissionHandler?: AcpPermissionHandler;
 };
 
 type ElicitationOwner = {
@@ -612,13 +618,15 @@ export class AcpClient {
     return this.activePrompt !== undefined;
   }
 
-  endPromptElicitation(sessionId: string): void {
-    const active = this.activePrompt;
-    if (!active || active.sessionId !== sessionId) {
-      return;
+  private abortSessionRequests(sessionId: string): void {
+    const owners = this.pendingPromptOwners.filter((owner) => owner.sessionId === sessionId);
+    const fallback = this.takePermissionAbortController(sessionId);
+    for (const owner of owners) {
+      owner.elicitationHandler = undefined;
+      owner.elicitationController.abort();
+      owner.requestController.abort();
     }
-    active.elicitationHandler = undefined;
-    active.elicitationController.abort();
+    fallback?.abort();
   }
 
   async start(): Promise<void> {
@@ -855,27 +863,27 @@ export class AcpClient {
         await this.handleSessionUpdate(params);
       })
       .onNotification(methods.client.elicitation.complete, async () => {})
-      .onRequest(methods.client.session.requestPermission, async ({ params }) => {
-        return await this.handlePermissionRequest(params);
+      .onRequest(methods.client.session.requestPermission, async ({ params, signal }) => {
+        return await this.handlePermissionRequest(params, signal);
       })
       .onRequest(methods.client.elicitation.create, async ({ params, requestId, signal }) => {
         return await this.handleElicitationRequest(params, requestId, signal);
       });
 
     if (capabilities.fs?.readTextFile) {
-      app.onRequest(methods.client.fs.readTextFile, async ({ params }) => {
-        return await this.handleReadTextFile(params);
+      app.onRequest(methods.client.fs.readTextFile, async ({ params, signal }) => {
+        return await this.handleReadTextFile(params, signal);
       });
     }
     if (capabilities.fs?.writeTextFile) {
-      app.onRequest(methods.client.fs.writeTextFile, async ({ params }) => {
-        return await this.handleWriteTextFile(params);
+      app.onRequest(methods.client.fs.writeTextFile, async ({ params, signal }) => {
+        return await this.handleWriteTextFile(params, signal);
       });
     }
     if (capabilities.terminal) {
       app
-        .onRequest(methods.client.terminal.create, async ({ params }) => {
-          return await this.handleCreateTerminal(params);
+        .onRequest(methods.client.terminal.create, async ({ params, signal }) => {
+          return await this.handleCreateTerminal(params, signal);
         })
         .onRequest(methods.client.terminal.output, async ({ params }) => {
           return await this.terminalManager.terminalOutput(params);
@@ -1132,6 +1140,9 @@ export class AcpClient {
       : undefined;
 
     const previousActivePrompt = this.activePrompt;
+    const replacedOwners = this.pendingPromptOwners.filter(
+      (owner) => owner.sessionId === sessionId,
+    );
     const activePrompt = this.beginActivePrompt(
       sessionId,
       onRequestWritten,
@@ -1152,6 +1163,9 @@ export class AcpClient {
       activePrompt.promise = promptPromise;
       // Queue this prompt before abort listeners can cancel its newly published owner.
       previousActivePrompt?.elicitationController?.abort();
+      for (const owner of replacedOwners) {
+        owner.requestController.abort();
+      }
       return this.returnPromptResponseOrPermissionFailure(sessionId, await promptPromise);
     } catch (error) {
       if (activePrompt.admissionFailure) {
@@ -1180,6 +1194,7 @@ export class AcpClient {
       elicitationHandler,
       permissionHandler,
       elicitationController: new AbortController(),
+      requestController: new AbortController(),
     };
     this.activePrompt = active;
     this.pendingPromptOwners.push(active);
@@ -1243,6 +1258,7 @@ export class AcpClient {
     }
     // Finish bookkeeping before callbacks can admit another prompt or permission request.
     active.elicitationController.abort();
+    active.requestController.abort();
     permissionController?.abort();
   }
 
@@ -1446,7 +1462,8 @@ export class AcpClient {
 
   async cancel(sessionId: string): Promise<void> {
     const connection = this.getConnection();
-    const active = this.activePrompt?.sessionId === sessionId ? this.activePrompt : undefined;
+    const owners = this.pendingPromptOwners.filter((owner) => owner.sessionId === sessionId);
+    const active = owners.at(-1);
     // Queue and latch before abort listeners can reenter cancellation or start another prompt.
     const cancellation: Promise<void> =
       active?.cancelPromise ??
@@ -1462,9 +1479,12 @@ export class AcpClient {
     if (active) {
       active.cancelPromise = cancellation;
       this.cancellingSessionIds.add(sessionId);
-      active.elicitationController?.abort();
     } else {
       this.cancellingSessionIds.delete(sessionId);
+    }
+    for (const owner of owners) {
+      owner.elicitationController.abort();
+      owner.requestController.abort();
     }
     permissionController?.abort();
     await cancellation;
@@ -1473,9 +1493,7 @@ export class AcpClient {
   async closeSession(sessionId: string): Promise<void> {
     const connection = this.getConnection();
     this.cancellingSessionIds.add(sessionId);
-    if (this.activePrompt?.sessionId === sessionId) {
-      this.activePrompt.elicitationController?.abort();
-    }
+    this.abortSessionRequests(sessionId);
     await this.runConnectionRequest(() =>
       connection.agent.request(methods.agent.session.close, {
         sessionId,
@@ -1548,7 +1566,16 @@ export class AcpClient {
   async close(): Promise<void> {
     this.closing = true;
     this.closeEpoch += 1;
+    const permissionControllers = [...this.permissionAbortControllers.values()];
+    this.permissionAbortControllers.clear();
+    const owners = [...this.pendingPromptOwners];
     this.abortActiveElicitation();
+    for (const owner of owners) {
+      owner.requestController.abort();
+    }
+    for (const controller of permissionControllers) {
+      controller.abort();
+    }
 
     await this.terminalManager.shutdown();
 
@@ -1960,9 +1987,14 @@ export class AcpClient {
 
   private async handlePermissionRequest(
     params: RequestPermissionRequest,
+    requestSignal?: AbortSignal,
   ): Promise<RequestPermissionResponse> {
-    if (this.cancellingSessionIds.has(params.sessionId)) {
+    const owner = this.captureDelegatedRequestOwner(params.sessionId, requestSignal);
+    if (!this.isDelegatedRequestActive(owner)) {
       return cancelledPermissionResponse();
+    }
+    if (!this.hasPermissionOwner(params.sessionId)) {
+      return this.finishPermissionRequest(params, owner, cancelledPermissionResponse());
     }
 
     // Antigravity encodes questions as permissions, with answers marked allow_once.
@@ -1971,26 +2003,37 @@ export class AcpClient {
       this.initResult?.agentInfo?.name === "antigravity-acp" &&
       params.toolCall.toolCallId.startsWith("interaction_")
     ) {
-      return this.handleModePermissionError(
+      const response = this.handleModePermissionError(
         params.sessionId,
         new PermissionPromptUnavailableError(
           "Antigravity requested a user answer. acpx cannot answer Antigravity interaction questions; continue in an interactive client.",
         ),
-      ).response;
+      );
+      return this.finishPermissionRequest(params, owner, response);
     }
 
-    const hostResponse = await this.tryHandlePermissionRequestWithHost(params);
-    if (hostResponse) {
-      return hostResponse;
-    }
+    const response =
+      (await this.tryHandlePermissionRequestWithHost(params, owner)) ??
+      (await this.resolvePermissionRequestFromMode(params, owner));
+    return this.finishPermissionRequest(params, owner, response);
+  }
 
-    const { response, recorded } = await this.resolvePermissionRequestFromMode(params);
-    if (!recorded) {
-      const decision = classifyPermissionDecision(params, response);
-      this.recordPermissionDecision(decision);
-    }
+  private finishPermissionRequest(
+    params: RequestPermissionRequest,
+    owner: DelegatedRequestOwner,
+    response: RequestPermissionResponse,
+  ): RequestPermissionResponse {
+    const result = this.isDelegatedRequestActive(owner) ? response : cancelledPermissionResponse();
+    this.recordPermissionDecision(classifyPermissionDecision(params, result));
+    return result;
+  }
 
-    return response;
+  private hasPermissionOwner(sessionId: string): boolean {
+    // Unowned requests must not bypass a pending turn's permission handler via fallback policy.
+    return (
+      !this.pendingPromptOwners.some((owner) => owner.permissionHandler !== undefined) ||
+      this.pendingPromptOwners.some((owner) => owner.sessionId === sessionId)
+    );
   }
 
   private async handleElicitationRequest(
@@ -2004,9 +2047,16 @@ export class AcpClient {
     }
     const { active, handler } = resolved.owner;
 
-    const signal = AbortSignal.any([requestSignal, active.elicitationController.signal]);
+    const signal = AbortSignal.any(
+      [requestSignal, active.elicitationController.signal, active.authority?.signal].filter(
+        (candidate): candidate is AbortSignal => candidate !== undefined,
+      ),
+    );
     const handlerAttempt = Promise.resolve()
-      .then(async () => await handler(request, { requestId, signal }))
+      .then(async () => {
+        signal.throwIfAborted();
+        return await handler(request, { requestId, signal });
+      })
       .then(
         (response) => ({ kind: "response" as const, response }),
         (error: unknown) => ({ kind: "error" as const, error }),
@@ -2073,40 +2123,50 @@ export class AcpClient {
     return this.closing || this.cancellingSessionIds.has(sessionId);
   }
 
-  private resolvePermissionOwner(sessionId: string):
-    | {
-        handler: AcpPermissionHandler;
-        signal: AbortSignal;
-      }
-    | undefined {
-    const active = this.activePrompt;
-    const handler = active?.permissionHandler ?? this.options.onPermissionRequest;
-    if (!handler) {
-      return undefined;
-    }
-    const signal = this.cancellationSignalForSession(sessionId);
-    if (!active?.permissionHandler) {
-      return { handler, signal };
-    }
+  private captureDelegatedRequestOwner(
+    sessionId: string,
+    requestSignal?: AbortSignal,
+  ): DelegatedRequestOwner {
+    const active = this.pendingPromptOwners.findLast((owner) => owner.sessionId === sessionId);
+    const signal = AbortSignal.any(
+      [
+        active?.requestController.signal ?? this.cancellationSignalForSession(sessionId),
+        active?.authority?.signal,
+        requestSignal,
+      ].filter((candidate): candidate is AbortSignal => candidate !== undefined),
+    );
+    const epoch = this.closeEpoch;
     return {
-      handler,
-      signal:
-        active.sessionId === sessionId
-          ? AbortSignal.any([signal, active.elicitationController.signal])
-          : AbortSignal.abort(),
+      signal,
+      permissionHandler: active?.permissionHandler ?? this.options.onPermissionRequest,
+      assertActive: () => {
+        if (this.closing || this.closeEpoch !== epoch || this.cancellingSessionIds.has(sessionId)) {
+          throw RequestError.requestCancelled();
+        }
+      },
     };
+  }
+
+  private isDelegatedRequestActive(owner: DelegatedRequestOwner): boolean {
+    try {
+      assertControlAuthority(owner);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async tryHandlePermissionRequestWithHost(
     params: RequestPermissionRequest,
+    owner: DelegatedRequestOwner,
   ): Promise<RequestPermissionResponse | undefined> {
-    const owner = this.resolvePermissionOwner(params.sessionId);
-    if (!owner) {
+    const handler = owner.permissionHandler;
+    if (!handler) {
       return undefined;
     }
-    const { handler, signal } = owner;
-    if (signal.aborted) {
-      return this.hostPermissionDecisionResponse(params, signal, undefined);
+    const { signal } = owner;
+    if (!this.isDelegatedRequestActive(owner)) {
+      return cancelledPermissionResponse();
     }
     try {
       const decision = await raceWithAbort(
@@ -2120,19 +2180,18 @@ export class AcpClient {
           { signal },
         ),
       );
-      return this.hostPermissionDecisionResponse(params, signal, decision);
+      return this.hostPermissionDecisionResponse(params, owner, decision);
     } catch (error) {
-      return this.hostPermissionErrorResponse(params, signal, error);
+      return this.hostPermissionErrorResponse(owner, error);
     }
   }
 
   private hostPermissionDecisionResponse(
     params: RequestPermissionRequest,
-    signal: AbortSignal,
+    owner: DelegatedRequestOwner,
     decision: Parameters<typeof decisionToResponse>[1] | undefined,
   ): RequestPermissionResponse | undefined {
-    if (signal.aborted || this.cancellingSessionIds.has(params.sessionId)) {
-      this.recordPermissionDecision("cancelled");
+    if (!this.isDelegatedRequestActive(owner)) {
       return cancelledPermissionResponse();
     }
     if (!decision) {
@@ -2142,19 +2201,16 @@ export class AcpClient {
       preferCodexPermissionRefusal(params, this.initResult?.agentInfo?.name),
       decision,
     );
-    this.recordPermissionDecision(classifyPermissionDecision(params, response));
     return decision.outcome === "cancel"
       ? response
       : this.explainPermissionRefusal(params, response);
   }
 
   private hostPermissionErrorResponse(
-    params: RequestPermissionRequest,
-    signal: AbortSignal,
+    owner: DelegatedRequestOwner,
     error: unknown,
   ): RequestPermissionResponse | undefined {
-    if (signal.aborted || this.cancellingSessionIds.has(params.sessionId)) {
-      this.recordPermissionDecision("cancelled");
+    if (!this.isDelegatedRequestActive(owner)) {
       return cancelledPermissionResponse();
     }
     // Fall through to the mode-based resolver so a host UI error
@@ -2169,17 +2225,24 @@ export class AcpClient {
 
   private async resolvePermissionRequestFromMode(
     params: RequestPermissionRequest,
-  ): Promise<{ response: RequestPermissionResponse; recorded: boolean }> {
+    owner: DelegatedRequestOwner,
+  ): Promise<RequestPermissionResponse> {
     try {
+      assertControlAuthority(owner);
       const result = await resolvePermissionRequestWithDetails(
         preferCodexPermissionRefusal(params, this.initResult?.agentInfo?.name),
         this.options.permissionMode,
         this.options.nonInteractivePermissions ?? "deny",
         this.options.permissionPolicy,
+        owner.signal,
       );
+      assertControlAuthority(owner);
       this.emitPermissionEscalation(result.escalation);
-      return { response: this.explainPermissionRefusal(params, result.response), recorded: false };
+      return this.explainPermissionRefusal(params, result.response);
     } catch (error) {
+      if (!this.isDelegatedRequestActive(owner)) {
+        return cancelledPermissionResponse();
+      }
       return this.handleModePermissionError(params.sessionId, error);
     }
   }
@@ -2213,16 +2276,12 @@ export class AcpClient {
     }
   }
 
-  private handleModePermissionError(
-    sessionId: string,
-    error: unknown,
-  ): { response: RequestPermissionResponse; recorded: boolean } {
+  private handleModePermissionError(sessionId: string, error: unknown): RequestPermissionResponse {
     if (!(error instanceof PermissionPromptUnavailableError)) {
       throw error;
     }
     this.notePromptPermissionFailure(sessionId, error);
-    this.recordPermissionDecision("cancelled");
-    return { response: cancelledPermissionResponse(), recorded: true };
+    return cancelledPermissionResponse();
   }
 
   private attachAgentLifecycleObservers(
@@ -2413,11 +2472,15 @@ export class AcpClient {
     }
   }
 
-  private async handleReadTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
+  private async handleReadTextFile(
+    params: ReadTextFileRequest,
+    requestSignal?: AbortSignal,
+  ): Promise<ReadTextFileResponse> {
     try {
-      return await this.filesystem.readTextFile(params);
+      return await this.runDelegatedOperation(params.sessionId, requestSignal, (owner) =>
+        this.filesystem.readTextFile(params, owner),
+      );
     } catch (error) {
-      this.recordPermissionError(params.sessionId, error);
       if (
         (error instanceof FsSafeError && error.code === "not-found") ||
         (error instanceof Error && "code" in error && error.code === "ENOENT")
@@ -2428,22 +2491,40 @@ export class AcpClient {
     }
   }
 
-  private async handleWriteTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
-    try {
-      return await this.filesystem.writeTextFile(params);
-    } catch (error) {
-      this.recordPermissionError(params.sessionId, error);
-      throw error;
-    }
+  private async handleWriteTextFile(
+    params: WriteTextFileRequest,
+    requestSignal?: AbortSignal,
+  ): Promise<WriteTextFileResponse> {
+    return await this.runDelegatedOperation(params.sessionId, requestSignal, (owner) =>
+      this.filesystem.writeTextFile(params, owner),
+    );
   }
 
   private async handleCreateTerminal(
     params: CreateTerminalRequest,
+    requestSignal?: AbortSignal,
   ): Promise<CreateTerminalResponse> {
+    return await this.runDelegatedOperation(params.sessionId, requestSignal, (owner) =>
+      this.terminalManager.createTerminal(params, owner),
+    );
+  }
+
+  private async runDelegatedOperation<T>(
+    sessionId: string,
+    requestSignal: AbortSignal | undefined,
+    run: (owner: DelegatedRequestOwner) => Promise<T>,
+  ): Promise<T> {
+    const owner = this.captureDelegatedRequestOwner(sessionId, requestSignal);
     try {
-      return await this.terminalManager.createTerminal(params);
+      assertControlAuthority(owner);
+      const result = await run(owner);
+      assertControlAuthority(owner);
+      return result;
     } catch (error) {
-      this.recordPermissionError(params.sessionId, error);
+      if (!this.isDelegatedRequestActive(owner)) {
+        throw RequestError.requestCancelled();
+      }
+      this.recordPermissionError(sessionId, error);
       throw error;
     }
   }

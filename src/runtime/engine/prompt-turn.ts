@@ -1,4 +1,9 @@
-import { TimeoutError, withTimeout, type AcpControlAuthority } from "../../async-control.js";
+import {
+  assertControlAuthority,
+  TimeoutError,
+  withTimeout,
+  type AcpControlAuthority,
+} from "../../async-control.js";
 import {
   hasAgentReplyAfterPrompt,
   recordPromptResponseUsage,
@@ -33,7 +38,6 @@ type PromptTurnClient = {
     usage?: unknown;
     _meta?: Record<string, unknown> | null;
   }>;
-  endPromptElicitation?: (sessionId: string) => void;
   waitForSessionUpdatesIdle?: (options?: { idleMs?: number; timeoutMs?: number }) => Promise<void>;
 };
 
@@ -56,10 +60,22 @@ function recoveredSessionResult(
   };
 }
 
-function abortTimedOutRequests(error: unknown, client: PromptTurnClient, sessionId: string): void {
+function abortTimedOutRequests(error: unknown, lifetime: AbortController): void {
   if (error instanceof TimeoutError) {
-    client.endPromptElicitation?.(sessionId);
+    lifetime.abort(error);
   }
+}
+
+function promptRequestAuthority(
+  lifetime: AbortController,
+  authority?: AcpControlAuthority,
+): AcpControlAuthority {
+  return {
+    signal: authority?.signal
+      ? AbortSignal.any([authority.signal, lifetime.signal])
+      : lifetime.signal,
+    assertActive: () => assertControlAuthority(authority),
+  };
 }
 
 export async function runPromptTurn(params: {
@@ -80,6 +96,7 @@ export async function runPromptTurn(params: {
   _meta?: Record<string, unknown> | null;
 }> {
   let settledResponse: PromptResponse | undefined;
+  const lifetime = new AbortController();
   try {
     const promptPromise = params.client.prompt(
       params.sessionId,
@@ -87,7 +104,7 @@ export async function runPromptTurn(params: {
       params.onPromptRequestWritten,
       params.onElicitation,
       params.onPermissionRequest,
-      params.authority,
+      promptRequestAuthority(lifetime, params.authority),
     );
     void promptPromise.then(
       (response) => {
@@ -113,7 +130,7 @@ export async function runPromptTurn(params: {
       ...responseMetaField(response._meta),
     };
   } catch (error) {
-    abortTimedOutRequests(error, params.client, params.sessionId);
+    abortTimedOutRequests(error, lifetime);
     if (!(error instanceof TimeoutError) || !params.promptMessageId) {
       throw error;
     }
@@ -132,5 +149,7 @@ export async function runPromptTurn(params: {
     }
 
     throw error;
+  } finally {
+    lifetime.abort();
   }
 }

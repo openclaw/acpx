@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { getEventListeners } from "node:events";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { PassThrough, type Readable, type Writable } from "node:stream";
 import test, { type TestContext } from "node:test";
-import type {
-  AnyMessage,
-  ClientConnection,
-  ClientCapabilities,
-  InitializeResponse,
-  RequestPermissionRequest,
-  RequestPermissionResponse,
+import {
+  methods,
+  type AnyMessage,
+  type ClientConnection,
+  type ClientCapabilities,
+  type InitializeResponse,
+  type RequestPermissionRequest,
+  type RequestPermissionResponse,
 } from "@agentclientprotocol/sdk";
 import {
   AcpClient,
@@ -30,7 +33,10 @@ import {
   PermissionPromptUnavailableError,
   UnsupportedPromptContentError,
 } from "../src/errors.js";
+import { runPromptTurn } from "../src/runtime/engine/prompt-turn.js";
+import { createSessionConversation } from "../src/session/conversation-model.js";
 import type { AcpProcessStarted } from "../src/types.js";
+import { withMockedReadline, withTtyState } from "./tty-test-helpers.js";
 
 test("parseAcpJsonMessageLine ignores non-object JSON values", () => {
   for (const line of ["1", "null", '"diagnostic"', "[]", "[{}]"]) {
@@ -128,6 +134,7 @@ type ClientInternals = {
   };
   terminalManager?: {
     shutdown: () => Promise<void>;
+    waitForTerminalExit?: (params: { sessionId: string; terminalId: string }) => Promise<unknown>;
     createTerminal?: (params: {
       sessionId: string;
       command: string;
@@ -1597,6 +1604,7 @@ for (const mode of ["same-session-live", "same-session-cancelled", "different-se
       const secondRequest = await fixture.message(1);
       await fixture.permission(nextSession);
       assert.equal(signals.length, 2);
+      assert.equal(signals[0]?.aborted, mode !== "different-session");
       if (mode === "same-session-cancelled") {
         await client.cancel(nextSession);
       }
@@ -1610,7 +1618,7 @@ for (const mode of ["same-session-live", "same-session-cancelled", "different-se
         assert.equal(signals.length, 2);
       } else {
         assert.equal(signals[1]?.aborted, false);
-        assert.equal(signals[0]?.aborted, mode === "different-session");
+        assert.equal(signals[0]?.aborted, true);
         await client.cancel(nextSession);
         assert.equal(signals[1]?.aborted, true);
       }
@@ -2538,6 +2546,542 @@ test("AcpClient close resets in-memory state and shuts down terminal manager", a
   assert.equal(internals.closing, true);
 });
 
+for (const fallback of ["host", "mode"] as const) {
+  for (const newerPlainTurn of [false, true]) {
+    test(`unowned permission requests cannot bypass a turn handler through ${fallback} (newer plain turn: ${newerPlainTurn})`, async (t) => {
+      const calls: string[] = [];
+      const fixture = createClientFixture(t, {
+        client: {
+          permissionMode: fallback === "host" ? "deny-all" : "approve-all",
+          ...(fallback === "host"
+            ? {
+                onPermissionRequest: async () => {
+                  calls.push("runtime");
+                  return { outcome: "allow_once" as const };
+                },
+              }
+            : {}),
+        },
+      });
+      const prompt = fixture.track(
+        fixture.client.prompt("owned-session", "hello", undefined, undefined, async () => {
+          calls.push("turn");
+          return { outcome: "reject_once" };
+        }),
+      );
+      const request = await fixture.message(0);
+      const newer = newerPlainTurn ? fixture.prompt("plain-session", "hello") : undefined;
+      const newerRequest = newer ? await fixture.message(1) : undefined;
+      await fixture.send({
+        jsonrpc: "2.0",
+        id: "unowned",
+        method: "session/request_permission",
+        params: makePermissionRequest("unknown-session", "edit"),
+      });
+      const response = await fixture.response("unowned");
+      assert("result" in response);
+      assert.deepEqual(response.result, { outcome: { outcome: "cancelled" } });
+      assert.deepEqual(calls, []);
+      if (newerRequest) {
+        await fixture.send({
+          jsonrpc: "2.0",
+          id: "known-plain",
+          method: "session/request_permission",
+          params: makePermissionRequest("plain-session", "edit"),
+        });
+        const known = await fixture.response("known-plain");
+        assert("result" in known);
+        assert.deepEqual(known.result, { outcome: { outcome: "selected", optionId: "allow" } });
+        await fixture.reply(newerRequest);
+        await newer;
+        await fixture.send({
+          jsonrpc: "2.0",
+          id: "still-unowned",
+          method: "session/request_permission",
+          params: makePermissionRequest("unknown-session", "edit"),
+        });
+        const stillUnowned = await fixture.response("still-unowned");
+        assert("result" in stillUnowned);
+        assert.deepEqual(stillUnowned.result, { outcome: { outcome: "cancelled" } });
+      }
+      await fixture.reply(request);
+      await prompt;
+      await fixture.send({
+        jsonrpc: "2.0",
+        id: "outside-prompt",
+        method: "session/request_permission",
+        params: makePermissionRequest("unknown-session", "edit"),
+      });
+      const outside = await fixture.response("outside-prompt");
+      assert("result" in outside);
+      assert.deepEqual(outside.result, { outcome: { outcome: "selected", optionId: "allow" } });
+    });
+  }
+}
+
+test(
+  "a timed-out prompt cannot retire a same-session successor's permission owner",
+  { timeout: 10_000 },
+  async (t) => {
+    const startTimeout = createDeferred<void>();
+    const permissionEntered = createDeferred<AbortSignal>();
+    const releasePermission = createDeferred<void>();
+    const fixture = createClientFixture(t, {
+      client: {
+        permissionMode: "deny-all",
+        onPermissionRequest: async (_request, { signal }) => {
+          permissionEntered.resolve(signal);
+          await releasePermission.promise;
+          return { outcome: "allow_once" };
+        },
+      },
+      release: () => {
+        startTimeout.resolve();
+        releasePermission.resolve();
+      },
+    });
+    const first = fixture.track(
+      runPromptTurn({
+        client: fixture.client,
+        sessionId: "same-session",
+        prompt: "old",
+        timeoutMs: 5,
+        conversation: createSessionConversation(),
+        onPromptStarted: () => startTimeout.promise,
+      }),
+    );
+    const firstRequest = await fixture.message(0);
+    const second = fixture.prompt("same-session", "successor");
+    const secondRequest = await fixture.message(1);
+    await fixture.send({
+      jsonrpc: "2.0",
+      id: "successor-permission",
+      method: "session/request_permission",
+      params: makePermissionRequest("same-session", "edit"),
+    });
+    const signal = await permissionEntered.promise;
+    startTimeout.resolve();
+    await assert.rejects(first, /Timed out/u);
+    assert.equal(signal.aborted, false);
+    releasePermission.resolve();
+    const response = await fixture.response("successor-permission");
+    assert("result" in response);
+    assert.deepEqual(response.result, { outcome: { outcome: "selected", optionId: "allow" } });
+    await fixture.reply(firstRequest, { stopReason: "cancelled" });
+    await fixture.reply(secondRequest);
+    await second;
+  },
+);
+
+test("pending session permissions use their own turn handler behind another active session", async (t) => {
+  const calls: string[] = [];
+  const fixture = createClientFixture(t);
+  const first = fixture.track(
+    fixture.client.prompt("first-session", "hello", undefined, undefined, async () => {
+      calls.push("first");
+      return { outcome: "allow_once" };
+    }),
+  );
+  const firstRequest = await fixture.message(0);
+  const second = fixture.track(
+    fixture.client.prompt("second-session", "hello", undefined, undefined, async () => {
+      calls.push("second");
+      return { outcome: "reject_once" };
+    }),
+  );
+  const secondRequest = await fixture.message(1);
+  await fixture.send({
+    jsonrpc: "2.0",
+    id: "first-permission",
+    method: "session/request_permission",
+    params: makePermissionRequest("first-session", "edit"),
+  });
+  const response = await fixture.response("first-permission");
+  assert("result" in response);
+  assert.deepEqual(response.result, { outcome: { outcome: "selected", optionId: "allow" } });
+  assert.deepEqual(calls, ["first"]);
+  await fixture.reply(firstRequest);
+  await fixture.reply(secondRequest);
+  await Promise.all([first, second]);
+});
+
+const delegatedRequestScenarios: Array<{
+  name: string;
+  operation: "permission" | "write" | "terminal";
+  client?: Partial<ConstructorParameters<typeof AcpClient>[0]>;
+}> = [
+  { name: "permission", operation: "permission" },
+  {
+    name: "permission after empty host result",
+    operation: "permission",
+    client: { onPermissionRequest: async () => undefined },
+  },
+  {
+    name: "permission after host error",
+    operation: "permission",
+    client: {
+      onPermissionRequest: async () => {
+        throw new Error("synthetic host failure");
+      },
+    },
+  },
+  {
+    name: "escalated permission",
+    operation: "permission",
+    client: { permissionPolicy: { escalate: ["edit"] } },
+  },
+  { name: "write", operation: "write" },
+  { name: "terminal", operation: "terminal" },
+];
+
+for (const scenario of delegatedRequestScenarios) {
+  const { operation } = scenario;
+  for (const phase of ["cancel", "settle", "request-cancel"] as const) {
+    test(
+      `delegated ${scenario.name} requests cannot outlive prompt ${phase}`,
+      { timeout: 10_000 },
+      async (t) => {
+        const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-delegated-lifetime-"));
+        const question = pendingPermissionQuestion();
+        const { entered, answer } = question;
+        const fixture = createClientFixture(t, {
+          client: { cwd, permissionMode: "approve-reads", ...scenario.client },
+          release: () => answer.resolve("n"),
+        });
+        try {
+          await withTtyState({ stdin: true, stderr: true }, async () => {
+            await withMockedReadline(question.createInterface, async () => {
+              const sessionId = "session-lifetime";
+              const marker = path.join(cwd, "late-effect.txt");
+              const prompt = fixture.prompt(sessionId, "request a synthetic operation");
+              const promptRequest = await fixture.message(0);
+              const request = delegatedOperationRequest(operation, sessionId, marker);
+              await fixture.send(request);
+              await entered.promise;
+              if (phase === "cancel") {
+                await fixture.client.cancel(sessionId);
+              }
+              if (phase === "request-cancel") {
+                await fixture.send({
+                  jsonrpc: "2.0",
+                  method: "$/cancel_request",
+                  params: { requestId: "delegated-operation" },
+                });
+              } else {
+                await fixture.reply(promptRequest, {
+                  stopReason: phase === "cancel" ? "cancelled" : "end_turn",
+                });
+                await prompt;
+              }
+              await new Promise<void>((resolve) => setImmediate(resolve));
+              const closedBeforeLateAnswer = question.isClosed();
+              answer.resolve("y");
+              const response = await fixture.response("delegated-operation");
+              if (operation === "terminal" && "result" in response) {
+                const terminalId = (response.result as { terminalId?: string }).terminalId;
+                if (terminalId) {
+                  await asInternals(fixture.client).terminalManager?.waitForTerminalExit?.({
+                    sessionId,
+                    terminalId,
+                  });
+                }
+              }
+              assert.equal(closedBeforeLateAnswer, true, "retiring the turn closes its question");
+              if (operation === "permission") {
+                assert("result" in response);
+                assert.deepEqual(response.result, { outcome: { outcome: "cancelled" } });
+                assert.equal(fixture.client.getPermissionStats().approved, 0);
+              } else {
+                assert("error" in response, "retired operations must return a cancellation error");
+                await assert.rejects(fs.access(marker), { code: "ENOENT" });
+              }
+              if (phase === "request-cancel") {
+                await fixture.send({
+                  jsonrpc: "2.0",
+                  id: "still-active",
+                  method: "session/request_permission",
+                  params: makePermissionRequest(sessionId, "read"),
+                });
+                const next = await fixture.response("still-active");
+                assert("result" in next);
+                assert.deepEqual(next.result, {
+                  outcome: { outcome: "selected", optionId: "allow" },
+                });
+                await fixture.reply(promptRequest);
+                await prompt;
+              }
+            });
+          });
+        } finally {
+          answer.resolve("n");
+          await fixture.client.close();
+          await fs.rm(cwd, { recursive: true, force: true });
+        }
+      },
+    );
+  }
+}
+
+function delegatedOperationRequest(
+  operation: "permission" | "write" | "terminal",
+  sessionId: string,
+  marker: string,
+): AnyMessage {
+  if (operation === "permission") {
+    return {
+      jsonrpc: "2.0",
+      id: "delegated-operation",
+      method: "session/request_permission",
+      params: makePermissionRequest(sessionId, "edit"),
+    };
+  }
+  return {
+    jsonrpc: "2.0",
+    id: "delegated-operation",
+    method: operation === "write" ? "fs/write_text_file" : "terminal/create",
+    params:
+      operation === "write"
+        ? { sessionId, path: marker, content: "late write" }
+        : {
+            sessionId,
+            command: process.execPath,
+            args: [
+              "-e",
+              "require('node:fs').writeFileSync(process.argv[1], 'late terminal')",
+              marker,
+            ],
+          },
+  };
+}
+
+function pendingPermissionQuestion() {
+  const entered = createDeferred<void>();
+  const answer = createDeferred<string>();
+  let closed = false;
+  return {
+    entered,
+    answer,
+    isClosed: () => closed,
+    createInterface: () => ({
+      question: async (_prompt: string, options?: { signal?: AbortSignal }) => {
+        entered.resolve();
+        const aborted = createDeferred<string>();
+        const onAbort = () => aborted.reject(options?.signal?.reason);
+        options?.signal?.addEventListener("abort", onAbort, { once: true });
+        try {
+          return await Promise.race([answer.promise, aborted.promise]);
+        } finally {
+          options?.signal?.removeEventListener("abort", onAbort);
+        }
+      },
+      close: () => {
+        closed = true;
+      },
+    }),
+  };
+}
+
+test(
+  "expired runtime prompts do not invoke late elicitation handlers",
+  { timeout: 10_000 },
+  async (t) => {
+    let calls = 0;
+    const fixture = createClientFixture(t, { client: { elicitationModes: ["form"] } });
+    const turn = fixture.track(
+      runPromptTurn({
+        client: fixture.client,
+        sessionId: "expired-session",
+        prompt: "hello",
+        timeoutMs: 5,
+        conversation: createSessionConversation(),
+        onElicitation: async () => {
+          calls += 1;
+          return { action: "accept", content: { answer: "late" } };
+        },
+      }),
+    );
+    const request = await fixture.message(0);
+    await assert.rejects(turn, /Timed out/u);
+    await fixture.send({
+      jsonrpc: "2.0",
+      id: "late-elicitation",
+      method: methods.client.elicitation.create,
+      params: {
+        mode: "form",
+        sessionId: "expired-session",
+        message: "Late question",
+        requestedSchema: { type: "object", properties: { answer: { type: "string" } } },
+      },
+    });
+    const response = await fixture.response("late-elicitation");
+    assert("result" in response);
+    assert.equal((response.result as { action?: string }).action, "cancel");
+    assert.equal(calls, 0);
+    await fixture.reply(request, { stopReason: "cancelled" });
+  },
+);
+
+test(
+  "changing an admitted prompt's host guard does not revoke future tool or file permission",
+  { timeout: 10_000 },
+  async (t) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-admitted-authority-"));
+    const fixture = createClientFixture(t, { client: { cwd, permissionMode: "approve-all" } });
+    let active = true;
+    const written = createDeferred<void>();
+    const prompt = fixture.track(
+      fixture.client.prompt(
+        "admitted-session",
+        "hello",
+        () => written.resolve(),
+        undefined,
+        undefined,
+        { assertActive: () => assert(active, "admission revoked") },
+      ),
+    );
+    try {
+      const request = await fixture.message(0);
+      await written.promise;
+      active = false;
+      await fixture.send({
+        jsonrpc: "2.0",
+        id: "admitted-permission",
+        method: "session/request_permission",
+        params: makePermissionRequest("admitted-session", "edit"),
+      });
+      const permission = await fixture.response("admitted-permission");
+      assert("result" in permission);
+      assert.deepEqual(permission.result, { outcome: { outcome: "selected", optionId: "allow" } });
+      const file = path.join(cwd, "admitted.txt");
+      await fixture.send({
+        jsonrpc: "2.0",
+        id: "admitted-write",
+        method: "fs/write_text_file",
+        params: { sessionId: "admitted-session", path: file, content: "still admitted" },
+      });
+      assert("result" in (await fixture.response("admitted-write")));
+      assert.equal(await fs.readFile(file, "utf8"), "still admitted");
+      await fixture.reply(request);
+      await prompt;
+    } finally {
+      await fixture.client.close();
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "client close revokes permission questions before awaiting terminal cleanup",
+  { timeout: 10_000 },
+  async (t) => {
+    const question = pendingPermissionQuestion();
+    const shutdownEntered = createDeferred<void>();
+    const releaseShutdown = createDeferred<void>();
+    const fixture = createClientFixture(t, {
+      client: { permissionMode: "approve-reads" },
+      release: () => {
+        question.answer.resolve("n");
+        releaseShutdown.resolve();
+      },
+    });
+    const terminals = asInternals(fixture.client).terminalManager;
+    assert(terminals);
+    const shutdown = terminals.shutdown.bind(terminals);
+    terminals.shutdown = async () => {
+      shutdownEntered.resolve();
+      await releaseShutdown.promise;
+      await shutdown();
+    };
+    await withTtyState({ stdin: true, stderr: true }, async () => {
+      await withMockedReadline(question.createInterface, async () => {
+        const prompt = fixture.prompt("closing-session", "hello");
+        await fixture.message(0);
+        await fixture.send({
+          jsonrpc: "2.0",
+          id: "closing-permission",
+          method: "session/request_permission",
+          params: makePermissionRequest("closing-session", "edit"),
+        });
+        await question.entered.promise;
+        const closing = fixture.track(fixture.client.close());
+        try {
+          await shutdownEntered.promise;
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          const closedBeforeLateAnswer = question.isClosed();
+          question.answer.resolve("y");
+          const response = await fixture.response("closing-permission");
+          assert.equal(closedBeforeLateAnswer, true);
+          assert("result" in response);
+          assert.deepEqual(response.result, { outcome: { outcome: "cancelled" } });
+        } finally {
+          question.answer.resolve("n");
+          releaseShutdown.resolve();
+          await closing;
+          await Promise.allSettled([prompt]);
+        }
+      });
+    });
+  },
+);
+
+test(
+  "runtime timeout revokes pending permission before draining late updates",
+  { timeout: 10_000 },
+  async (t) => {
+    const question = pendingPermissionQuestion();
+    const drainEntered = createDeferred<void>();
+    const releaseDrain = createDeferred<void>();
+    const fixture = createClientFixture(t, {
+      client: { permissionMode: "approve-reads" },
+      release: () => {
+        question.answer.resolve("n");
+        releaseDrain.resolve();
+      },
+    });
+    fixture.client.waitForSessionUpdatesIdle = async () => {
+      drainEntered.resolve();
+      await releaseDrain.promise;
+    };
+    await withTtyState({ stdin: true, stderr: true }, async () => {
+      await withMockedReadline(question.createInterface, async () => {
+        const turn = fixture.track(
+          runPromptTurn({
+            client: fixture.client,
+            sessionId: "timeout-session",
+            prompt: "hello",
+            timeoutMs: 5,
+            conversation: createSessionConversation(),
+            promptMessageId: "synthetic-prompt",
+            onPromptStarted: () => question.entered.promise,
+          }),
+        );
+        const promptRequest = await fixture.message(0);
+        await fixture.send({
+          jsonrpc: "2.0",
+          id: "timeout-permission",
+          method: "session/request_permission",
+          params: makePermissionRequest("timeout-session", "edit"),
+        });
+        try {
+          await drainEntered.promise;
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          const closedBeforeLateAnswer = question.isClosed();
+          question.answer.resolve("y");
+          const response = await fixture.response("timeout-permission");
+          assert.equal(closedBeforeLateAnswer, true);
+          assert("result" in response);
+          assert.deepEqual(response.result, { outcome: { outcome: "cancelled" } });
+        } finally {
+          question.answer.resolve("n");
+          releaseDrain.resolve();
+          await assert.rejects(turn, /Timed out/u);
+          await fixture.reply(promptRequest, { stopReason: "cancelled" });
+        }
+      });
+    });
+  },
+);
+
 function makeClient(
   overrides: Partial<ConstructorParameters<typeof AcpClient>[0]> = {},
 ): AcpClient {
@@ -2613,6 +3157,14 @@ function createClientFixture(
     connection,
     messages,
     message,
+    async response(id: string) {
+      for (let index = 0; ; index += 1) {
+        const value = await message(index);
+        if ("id" in value && value.id === id && !("method" in value)) {
+          return value;
+        }
+      }
+    },
     track,
     send(value: AnyMessage) {
       return writeAgentMessage(incoming.writable, value);

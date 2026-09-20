@@ -14,6 +14,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI/config: load project permissions and relative MCP configuration from the final top-level `--cwd` and `--mcp-config` values, matching command execution.
 - CLI/output: honor explicit JSON and quiet output flags for configuration startup errors instead of printing an uncaught stack trace.
 - Permissions: serialize interactive tool, file-write, and terminal questions so one answer cannot approve multiple requests; deny waiting questions when stdin closes.
+- Permissions/runtime: retire pending tool, file, and terminal requests with their owning prompt or ACP request, reject late approvals, and recheck authority before filesystem mutations and every terminal spawn attempt.
 
 ## 0.17.1 - 2026-09-19
 

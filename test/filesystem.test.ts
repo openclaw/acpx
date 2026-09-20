@@ -3,9 +3,72 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { root, type Root } from "@openclaw/fs-safe/root";
 import { PermissionPromptUnavailableError } from "../src/errors.js";
 import { FileSystemHandlers } from "../src/filesystem.js";
 import type { ClientOperation } from "../src/types.js";
+
+for (const existing of [true, false]) {
+  test(`writeTextFile checks authority at native ${existing ? "truncation" : "parent creation"}`, async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-write-authority-"));
+    try {
+      const file = path.join(cwd, existing ? "sentinel.txt" : "new/nested/file.txt");
+      if (existing) {
+        await fs.writeFile(file, "keep these bytes");
+      }
+      const controller = new AbortController();
+      const revoked = new Error("write authority revoked");
+      const workspace = await root(cwd, { assertBeforeMutation: () => controller.abort(revoked) });
+      const handlers = new FileSystemHandlers({ cwd, permissionMode: "approve-all" });
+      (handlers as unknown as { workspace: Promise<Root> }).workspace = Promise.resolve(workspace);
+      await assert.rejects(
+        handlers.writeTextFile(
+          { sessionId: "synthetic", path: file, content: "must not write" },
+          { signal: controller.signal },
+        ),
+        (error) => error === revoked,
+      );
+      if (existing) {
+        assert.equal(await fs.readFile(file, "utf8"), "keep these bytes");
+      } else {
+        await assert.rejects(fs.access(path.join(cwd, "new")), { code: "ENOENT" });
+      }
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+}
+
+test("writeTextFile closes an admitted handle without writing after authority expires", async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-write-handle-authority-"));
+  try {
+    const file = path.join(cwd, "sentinel.txt");
+    await fs.writeFile(file, "already dispatched truncation is allowed");
+    const controller = new AbortController();
+    const workspace = await root(cwd);
+    const openWritable = workspace.openWritable.bind(workspace);
+    let opened: Awaited<ReturnType<Root["openWritable"]>> | undefined;
+    workspace.openWritable = async (...args) => {
+      opened = await openWritable(...args);
+      controller.abort(new Error("expired after open"));
+      return opened;
+    };
+    const handlers = new FileSystemHandlers({ cwd, permissionMode: "approve-all" });
+    (handlers as unknown as { workspace: Promise<Root> }).workspace = Promise.resolve(workspace);
+    await assert.rejects(
+      handlers.writeTextFile(
+        { sessionId: "synthetic", path: file, content: "must not write" },
+        { signal: controller.signal },
+      ),
+      /expired after open/u,
+    );
+    assert.equal(await fs.readFile(file, "utf8"), "");
+    assert(opened);
+    await assert.rejects(opened.handle.stat(), { code: "EBADF" });
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true });
+  }
+});
 
 for (const kind of ["file", "directory"] as const) {
   test(

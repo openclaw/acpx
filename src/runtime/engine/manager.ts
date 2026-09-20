@@ -1208,22 +1208,18 @@ export class AcpRuntimeManager {
     turn: RunningRuntimeTurn,
     sessionId: string,
   ): ReturnType<typeof runPromptTurn> {
-    try {
-      return await runPromptTurn({
-        client: turn.client,
-        sessionId,
-        prompt: task.promptInput,
-        timeoutMs: task.input.timeoutMs ?? this.options.timeoutMs,
-        conversation: turn.conversation,
-        promptMessageId: turn.promptMessageId,
-        onPromptRequestWritten: () => task.promptStarted.resolve(),
-        onElicitation: task.input.onElicitation,
-        onPermissionRequest: task.input.onPermissionRequest,
-        authority: task.input,
-      });
-    } finally {
-      turn.client.endPromptElicitation?.(sessionId);
-    }
+    return await runPromptTurn({
+      client: turn.client,
+      sessionId,
+      prompt: task.promptInput,
+      timeoutMs: task.input.timeoutMs ?? this.options.timeoutMs,
+      conversation: turn.conversation,
+      promptMessageId: turn.promptMessageId,
+      onPromptRequestWritten: () => task.promptStarted.resolve(),
+      onElicitation: task.input.onElicitation,
+      onPermissionRequest: task.input.onPermissionRequest,
+      authority: task.input,
+    });
   }
 
   private async prepareRuntimeTurn(task: RuntimeTurnTask): Promise<RunningRuntimeTurn> {

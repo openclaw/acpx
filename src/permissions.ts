@@ -104,11 +104,15 @@ function isAutoApprovedReadKind(kind: ToolKind | undefined): boolean {
   return kind === "read" || kind === "search";
 }
 
-async function promptForToolPermission(params: RequestPermissionRequest): Promise<boolean> {
+async function promptForToolPermission(
+  params: RequestPermissionRequest,
+  signal?: AbortSignal,
+): Promise<boolean> {
   const toolName = params.toolCall.title ?? "tool";
   const toolKind = inferToolKind(params) ?? "other";
   return await promptForPermission({
     prompt: `\n[permission] Allow ${toolName} [${toolKind}]? (y/N) `,
+    signal,
   });
 }
 
@@ -250,9 +254,10 @@ async function resolveEscalatingPermissionRequest(
   policyMatch: PermissionPolicyMatch,
   allowOption: PermissionOption | undefined,
   rejectOption: PermissionOption | undefined,
+  signal?: AbortSignal,
 ): Promise<ResolvedPermissionRequest> {
   if (canPromptForPermission()) {
-    return resolveInteractivePromptResult(params, allowOption, rejectOption);
+    return resolveInteractivePromptResult(params, allowOption, rejectOption, signal);
   }
 
   const escalation = buildEscalationEvent(params, policyMatch.matchedRule);
@@ -267,8 +272,9 @@ async function resolveInteractivePromptResult(
   params: RequestPermissionRequest,
   allowOption: PermissionOption | undefined,
   rejectOption: PermissionOption | undefined,
+  signal?: AbortSignal,
 ): Promise<ResolvedPermissionRequest> {
-  const approved = await promptForToolPermission(params);
+  const approved = await promptForToolPermission(params, signal);
   if (approved && allowOption) {
     return { response: selected(allowOption.optionId) };
   }
@@ -284,6 +290,7 @@ function resolvePolicyMatch(
   options: PermissionOption[],
   allowOption: PermissionOption | undefined,
   rejectOption: PermissionOption | undefined,
+  signal?: AbortSignal,
 ): Promise<ResolvedPermissionRequest | undefined> | ResolvedPermissionRequest | undefined {
   if (policyMatch?.action === "approve") {
     return selectedOrFirst(options, allowOption);
@@ -292,7 +299,13 @@ function resolvePolicyMatch(
     return selectedOrCancelled(rejectOption);
   }
   if (policyMatch?.action === "escalate") {
-    return resolveEscalatingPermissionRequest(params, policyMatch, allowOption, rejectOption);
+    return resolveEscalatingPermissionRequest(
+      params,
+      policyMatch,
+      allowOption,
+      rejectOption,
+      signal,
+    );
   }
   return undefined;
 }
@@ -327,6 +340,7 @@ async function resolveReadOrPromptPermission(
   nonInteractivePolicy: NonInteractivePermissionPolicy,
   allowOption: PermissionOption | undefined,
   rejectOption: PermissionOption | undefined,
+  signal?: AbortSignal,
 ): Promise<ResolvedPermissionRequest> {
   const kind = inferToolKind(params);
   if (isAutoApprovedReadKind(kind) && allowOption) {
@@ -337,7 +351,7 @@ async function resolveReadOrPromptPermission(
     return resolveNonInteractivePermission(nonInteractivePolicy, rejectOption);
   }
 
-  return resolveInteractivePromptResult(params, allowOption, rejectOption);
+  return resolveInteractivePromptResult(params, allowOption, rejectOption, signal);
 }
 
 export function permissionModeSatisfies(actual: PermissionMode, required: PermissionMode): boolean {
@@ -349,12 +363,14 @@ export async function resolvePermissionRequest(
   mode: PermissionMode,
   nonInteractivePolicy: NonInteractivePermissionPolicy = "deny",
   policy?: PermissionPolicy,
+  signal?: AbortSignal,
 ): Promise<RequestPermissionResponse> {
   const result = await resolvePermissionRequestWithDetails(
     params,
     mode,
     nonInteractivePolicy,
     policy,
+    signal,
   );
   return result.response;
 }
@@ -364,6 +380,33 @@ export async function resolvePermissionRequestWithDetails(
   mode: PermissionMode,
   nonInteractivePolicy: NonInteractivePermissionPolicy = "deny",
   policy?: PermissionPolicy,
+  signal?: AbortSignal,
+): Promise<ResolvedPermissionRequest> {
+  try {
+    signal?.throwIfAborted();
+    const result = await resolvePermissionByPolicy(
+      params,
+      mode,
+      nonInteractivePolicy,
+      policy,
+      signal,
+    );
+    signal?.throwIfAborted();
+    return result;
+  } catch (error) {
+    if (signal?.aborted) {
+      return { response: cancelled() };
+    }
+    throw error;
+  }
+}
+
+async function resolvePermissionByPolicy(
+  params: RequestPermissionRequest,
+  mode: PermissionMode,
+  nonInteractivePolicy: NonInteractivePermissionPolicy,
+  policy: PermissionPolicy | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<ResolvedPermissionRequest> {
   const options = params.options ?? [];
   if (options.length === 0) {
@@ -380,6 +423,7 @@ export async function resolvePermissionRequestWithDetails(
     options,
     allowOption,
     rejectOption,
+    signal,
   );
   if (resolvedByPolicy) {
     return resolvedByPolicy;
@@ -390,7 +434,13 @@ export async function resolvePermissionRequestWithDetails(
     return resolvedByMode;
   }
 
-  return resolveReadOrPromptPermission(params, nonInteractivePolicy, allowOption, rejectOption);
+  return resolveReadOrPromptPermission(
+    params,
+    nonInteractivePolicy,
+    allowOption,
+    rejectOption,
+    signal,
+  );
 }
 
 const DECISION_FALLBACK_ORDER: Record<

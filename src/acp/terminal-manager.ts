@@ -15,6 +15,7 @@ import type {
   WaitForTerminalExitRequest,
   WaitForTerminalExitResponse,
 } from "@agentclientprotocol/sdk";
+import { assertControlAuthority, type AcpControlAuthority } from "../async-control.js";
 import { PermissionDeniedError, PermissionPromptUnavailableError } from "../errors.js";
 import { promptForPermission } from "../permission-prompt.js";
 import {
@@ -49,7 +50,7 @@ export type TerminalManagerOptions = {
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   onOperation?: (operation: ClientOperation) => void;
-  confirmExecute?: (commandLine: string) => Promise<boolean>;
+  confirmExecute?: (commandLine: string, signal?: AbortSignal) => Promise<boolean>;
   killGraceMs?: number;
   processHelperTimeoutMs?: number;
 };
@@ -138,9 +139,10 @@ function trimToUtf8Boundary(buffer: Buffer, limit: number): Buffer {
   return buffer.subarray(start);
 }
 
-async function defaultConfirmExecute(commandLine: string): Promise<boolean> {
+async function defaultConfirmExecute(commandLine: string, signal?: AbortSignal): Promise<boolean> {
   return await promptForPermission({
     prompt: `\n[permission] Allow terminal command "${commandLine}"? (y/N) `,
+    signal,
   });
 }
 
@@ -164,7 +166,7 @@ export class TerminalManager {
   private nonInteractivePermissions: NonInteractivePermissionPolicy;
   private readonly onOperation?: (operation: ClientOperation) => void;
   private readonly usesDefaultConfirmExecute: boolean;
-  private readonly confirmExecute: (commandLine: string) => Promise<boolean>;
+  private readonly confirmExecute: NonNullable<TerminalManagerOptions["confirmExecute"]>;
   private readonly killGraceMs: number;
   private readonly processHelperTimeoutMs: number;
   private readonly outputCeilingBytes: number | undefined;
@@ -193,7 +195,11 @@ export class TerminalManager {
     this.nonInteractivePermissions = nonInteractivePermissions ?? "deny";
   }
 
-  async createTerminal(params: CreateTerminalRequest): Promise<CreateTerminalResponse> {
+  async createTerminal(
+    params: CreateTerminalRequest,
+    authority?: AcpControlAuthority,
+  ): Promise<CreateTerminalResponse> {
+    assertControlAuthority(authority);
     const commandLine = toCommandLine(params.command, params.args);
     const summary = `terminal/create: ${commandLine}`;
 
@@ -205,7 +211,9 @@ export class TerminalManager {
     });
 
     try {
-      if (!(await this.isExecuteApproved(commandLine))) {
+      const approved = await this.isExecuteApproved(commandLine, authority?.signal);
+      assertControlAuthority(authority);
+      if (!approved) {
         throw new PermissionDeniedError("Permission denied for terminal/create");
       }
 
@@ -217,7 +225,7 @@ export class TerminalManager {
         requestedLimit,
         this.outputCeilingBytes ?? Number.POSITIVE_INFINITY,
       );
-      const { proc, spawnCommand } = await spawnTerminalProcess(params, this.cwd);
+      const { proc, spawnCommand } = await spawnTerminalProcess(params, this.cwd, authority);
 
       let resolveExit: (response: WaitForTerminalExitResponse) => void = () => {};
       const exitPromise = new Promise<WaitForTerminalExitResponse>((resolve) => {
@@ -270,6 +278,12 @@ export class TerminalManager {
 
       const terminalId = randomUUID();
       this.terminals.set(terminalId, terminal);
+      try {
+        assertControlAuthority(authority);
+      } catch (error) {
+        await this.releaseTerminal({ terminalId, sessionId: params.sessionId });
+        throw error;
+      }
 
       this.emitOperation({
         method: "terminal/create",
@@ -437,7 +451,7 @@ export class TerminalManager {
     this.onOperation?.(operation);
   }
 
-  private async isExecuteApproved(commandLine: string): Promise<boolean> {
+  private async isExecuteApproved(commandLine: string, signal?: AbortSignal): Promise<boolean> {
     if (this.permissionMode === "approve-all") {
       return true;
     }
@@ -451,7 +465,7 @@ export class TerminalManager {
     ) {
       throw new PermissionPromptUnavailableError();
     }
-    return await this.confirmExecute(commandLine);
+    return await this.confirmExecute(commandLine, signal);
   }
 
   private isRunning(terminal: ManagedTerminal): boolean {
@@ -565,6 +579,7 @@ export class TerminalManager {
 async function spawnTerminalProcess(
   params: CreateTerminalRequest,
   defaultCwd: string,
+  authority?: AcpControlAuthority,
 ): Promise<{
   proc: ChildProcessByStdio<null, Readable, Readable>;
   spawnCommand: TerminalSpawnCommand;
@@ -572,7 +587,7 @@ async function spawnTerminalProcess(
   const directCommand = buildTerminalSpawnCommand(params.command, params.args);
   try {
     return {
-      proc: await spawnAndWait(directCommand, params, defaultCwd),
+      proc: await spawnAndWait(directCommand, params, defaultCwd, authority),
       spawnCommand: directCommand,
     };
   } catch (error) {
@@ -584,7 +599,7 @@ async function spawnTerminalProcess(
       throw error;
     }
     return {
-      proc: await spawnAndWait(fallbackCommand, params, defaultCwd),
+      proc: await spawnAndWait(fallbackCommand, params, defaultCwd, authority),
       spawnCommand: fallbackCommand,
     };
   }
@@ -594,6 +609,7 @@ async function spawnAndWait(
   spawnCommand: TerminalSpawnCommand,
   params: CreateTerminalRequest,
   defaultCwd: string,
+  authority?: AcpControlAuthority,
 ): Promise<ChildProcessByStdio<null, Readable, Readable>> {
   const spawnOptions = buildTerminalSpawnOptions(
     spawnCommand.command,
@@ -605,6 +621,7 @@ async function spawnAndWait(
   }
   // ACP terminal/create is a permission-gated command-execution surface.
   // CodeQL otherwise treats the intentional shell fallback as accidental injection.
+  assertControlAuthority(authority);
   // codeql[js/shell-command-injection-from-environment]
   // lgtm[js/shell-command-injection-from-environment]
   const proc = spawn(spawnCommand.command, spawnCommand.args, spawnOptions);

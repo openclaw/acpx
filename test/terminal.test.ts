@@ -1,10 +1,131 @@
 import assert from "node:assert/strict";
+import childProcess, { type ChildProcess, type SpawnOptions } from "node:child_process";
 import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { TerminalManager } from "../src/acp/terminal-manager.js";
 import { PermissionPromptUnavailableError } from "../src/errors.js";
+
+test(
+  "revoked terminal authority prevents a shell fallback spawn",
+  { skip: process.platform === "win32", timeout: 10_000 },
+  async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-fallback-authority-"));
+    const manager = new TerminalManager({ cwd, permissionMode: "approve-all" });
+    const closed: Array<Promise<void>> = [];
+    try {
+      const marker = path.join(cwd, "fallback.txt");
+      const script = "require('node:fs').writeFileSync(process.argv[1], 'fallback ran')";
+      const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)} ${JSON.stringify(marker)}`;
+      const params = { sessionId: "synthetic", command };
+      const control = await manager.createTerminal(params);
+      assert.equal(
+        (
+          await manager.waitForTerminalExit({
+            sessionId: "synthetic",
+            terminalId: control.terminalId,
+          })
+        ).exitCode,
+        0,
+      );
+      assert.equal(await fs.readFile(marker, "utf8"), "fallback ran");
+      await manager.releaseTerminal({ sessionId: "synthetic", terminalId: control.terminalId });
+      await fs.unlink(marker);
+
+      const controller = new AbortController();
+      const revoked = new Error("expired after failed direct launch");
+      let attempts = 0;
+      await withObservedSpawns(
+        (child) => {
+          attempts += 1;
+          closed.push(new Promise<void>((resolve) => child.once("close", () => resolve())));
+          child.once("error", () => controller.abort(revoked));
+        },
+        async () => {
+          await assert.rejects(
+            manager.createTerminal(params, { signal: controller.signal }),
+            (error) => error === revoked,
+          );
+        },
+      );
+      assert.equal(attempts, 1, "the revoked shell fallback must never be spawned");
+      await assert.rejects(fs.access(marker), { code: "ENOENT" });
+    } finally {
+      await manager.shutdown();
+      await Promise.all(closed);
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "terminal creation owns and cleans up a process cancelled during spawn adoption",
+  { timeout: 10_000 },
+  async (t) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-adoption-authority-"));
+    const manager = new TerminalManager({ cwd, permissionMode: "approve-all", killGraceMs: 10 });
+    let spawned: ChildProcess | undefined;
+    let closed: Promise<void> | undefined;
+    t.after(async () => {
+      if (spawned && spawned.exitCode === null && spawned.signalCode === null) {
+        spawned.kill("SIGKILL");
+      }
+      await closed;
+      await manager.shutdown();
+      await fs.rm(cwd, { recursive: true, force: true });
+    });
+    const controller = new AbortController();
+    const revoked = new Error("expired during spawn adoption");
+    await withObservedSpawns(
+      (child) => {
+        spawned = child;
+        closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
+        child.once("spawn", () => controller.abort(revoked));
+      },
+      async () => {
+        await assert.rejects(
+          manager.createTerminal(
+            {
+              sessionId: "synthetic",
+              command: process.execPath,
+              args: ["-e", "setInterval(() => {}, 1000)"],
+            },
+            { signal: controller.signal },
+          ),
+          (error) => error === revoked,
+        );
+      },
+    );
+    assert(spawned);
+    assert(
+      spawned.exitCode !== null || spawned.signalCode !== null,
+      "creation must await process cleanup before rejecting",
+    );
+    await closed;
+    assert.equal((manager as unknown as { terminals: Map<string, unknown> }).terminals.size, 0);
+  },
+);
+
+async function withObservedSpawns(
+  observe: (child: ChildProcess) => void,
+  run: () => Promise<void>,
+): Promise<void> {
+  const original = childProcess.spawn;
+  childProcess.spawn = ((command: string, args: readonly string[], options: SpawnOptions) => {
+    const child = original(command, args, options);
+    observe(child);
+    return child;
+  }) as typeof childProcess.spawn;
+  syncBuiltinESMExports();
+  try {
+    await run();
+  } finally {
+    childProcess.spawn = original;
+    syncBuiltinESMExports();
+  }
+}
 
 function getManagedStdio(
   manager: TerminalManager,

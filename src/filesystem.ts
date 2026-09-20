@@ -7,6 +7,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 import { isPathInside } from "@openclaw/fs-safe/path";
 import { root, type Root } from "@openclaw/fs-safe/root";
+import { assertControlAuthority, type AcpControlAuthority } from "./async-control.js";
 import { PermissionDeniedError, PermissionPromptUnavailableError } from "./errors.js";
 import { promptForPermission } from "./permission-prompt.js";
 import type { ClientOperation, NonInteractivePermissionPolicy, PermissionMode } from "./types.js";
@@ -19,7 +20,7 @@ export type FileSystemHandlersOptions = {
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   onOperation?: (operation: ClientOperation) => void;
-  confirmWrite?: (filePath: string, preview: string) => Promise<boolean>;
+  confirmWrite?: (filePath: string, preview: string, signal?: AbortSignal) => Promise<boolean>;
 };
 
 function nowIso(): string {
@@ -43,11 +44,16 @@ function toWritePreview(content: string): string {
   return preview;
 }
 
-async function defaultConfirmWrite(filePath: string, preview: string): Promise<boolean> {
+async function defaultConfirmWrite(
+  filePath: string,
+  preview: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
   return await promptForPermission({
     header: `[permission] Allow write to ${filePath}?`,
     details: preview,
     prompt: "Allow write? (y/N) ",
+    signal,
   });
 }
 
@@ -62,7 +68,7 @@ export class FileSystemHandlers {
   private nonInteractivePermissions: NonInteractivePermissionPolicy;
   private readonly onOperation?: (operation: ClientOperation) => void;
   private readonly usesDefaultConfirmWrite: boolean;
-  private readonly confirmWrite: (filePath: string, preview: string) => Promise<boolean>;
+  private readonly confirmWrite: NonNullable<FileSystemHandlersOptions["confirmWrite"]>;
 
   constructor(options: FileSystemHandlersOptions) {
     this.rootDir = path.resolve(options.cwd);
@@ -81,7 +87,11 @@ export class FileSystemHandlers {
     this.nonInteractivePermissions = nonInteractivePermissions ?? "deny";
   }
 
-  async readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
+  async readTextFile(
+    params: ReadTextFileRequest,
+    authority?: AcpControlAuthority,
+  ): Promise<ReadTextFileResponse> {
+    assertControlAuthority(authority);
     const filePath = this.resolvePathWithinRoot(params.path);
     const summary = `read_text_file: ${filePath}`;
     this.emitOperation({
@@ -101,6 +111,7 @@ export class FileSystemHandlers {
       const content = await workspace.readText(
         `.${path.sep}${path.relative(this.rootDir, filePath)}`,
       );
+      assertControlAuthority(authority);
       const sliced = this.sliceContent(content, params.line, params.limit);
 
       this.emitOperation({
@@ -124,7 +135,11 @@ export class FileSystemHandlers {
     }
   }
 
-  async writeTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
+  async writeTextFile(
+    params: WriteTextFileRequest,
+    authority?: AcpControlAuthority,
+  ): Promise<WriteTextFileResponse> {
+    assertControlAuthority(authority);
     const filePath = this.resolvePathWithinRoot(params.path);
     const preview = toWritePreview(params.content);
     const summary = `write_text_file: ${filePath}`;
@@ -138,16 +153,19 @@ export class FileSystemHandlers {
     });
 
     try {
-      if (!(await this.isWriteApproved(filePath, preview))) {
+      const approved = await this.isWriteApproved(filePath, preview, authority?.signal);
+      assertControlAuthority(authority);
+      if (!approved) {
         throw new PermissionDeniedError("Permission denied for fs/write_text_file");
       }
 
       const workspace = await this.getWorkspace();
       const file = await workspace.openWritable(
         `.${path.sep}${path.relative(this.rootDir, filePath)}`,
-        { mode: 0o666 },
+        { mode: 0o666, assertBeforeMutation: () => assertControlAuthority(authority) },
       );
       try {
+        assertControlAuthority(authority);
         await file.handle.writeFile(params.content, "utf8");
       } finally {
         await file.handle.close();
@@ -174,7 +192,11 @@ export class FileSystemHandlers {
     }
   }
 
-  private async isWriteApproved(filePath: string, preview: string): Promise<boolean> {
+  private async isWriteApproved(
+    filePath: string,
+    preview: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     if (this.permissionMode === "approve-all") {
       return true;
     }
@@ -188,7 +210,7 @@ export class FileSystemHandlers {
     ) {
       throw new PermissionPromptUnavailableError();
     }
-    return await this.confirmWrite(filePath, preview);
+    return await this.confirmWrite(filePath, preview, signal);
   }
 
   private resolvePathWithinRoot(rawPath: string): string {

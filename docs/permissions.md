@@ -118,6 +118,10 @@ There is no per-session "approve next 3" option. Every non-read request is its o
 
 Interactive tool, file-write, and terminal questions share one input queue per acpx process. Only one question is shown at a time, and each requires its own answer. Closing stdin denies the current question and any waiting questions.
 
+Pending permission questions, file reads/writes, and terminal creation belong to the prompt that admitted them. Cancellation, completion, a timeout, a newer prompt in the same session, or session/client closure revokes that ownership. For these operations, individual ACP request cancellation affects only that request; another session's active prompt keeps its own permissions. A late answer cannot authorize a new file mutation or terminal spawn from a retired request.
+
+File writes and terminal creation recheck the captured request lifetime at dispatch, including filesystem preparation and shell fallback. The host's `assertActive` callback remains a prompt-admission check; use cancellation or its signal to retire an accepted turn. Operating-system work already dispatched may finish; cancellation does not undo completed writes or command effects.
+
 ## Non-interactive policy
 
 When there is no TTY (pipes, CI, queued prompts driven by another process), the prompt cannot be shown. `--non-interactive-permissions` decides what happens:
