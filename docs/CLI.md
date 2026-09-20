@@ -544,6 +544,14 @@ owner stops accepting work and shuts down normally if its guard cleanup fails.
 The exclusion guarantee requires current clients on the same machine; older
 clients that bypass the guard do not participate.
 
+If an ambiguous `.acpx/queues/<queue-key>.lock.guard` file or its `.reclaim`
+directory prevents recovery, first stop all acpx commands, queue owners, and
+embedding hosts using that home directory, and prevent them from restarting.
+Only after establishing exclusive access may an operator remove the affected
+guard and reclamation directory. Leave the lease and socket for normal recovery,
+then retry status or the intended command. File age alone does not establish that
+cleanup is safe; if exclusive access cannot be established, preserve the files.
+
 ### Soft-close behavior
 
 - soft-closed sessions remain on disk with `closed: true` and `closedAt`
