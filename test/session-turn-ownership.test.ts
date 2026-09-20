@@ -51,7 +51,7 @@ test("session turn release leaves a successor's lock intact", async (t) => {
     const first = await acquireSessionTurn("successor");
     t.after(() => first[Symbol.asyncDispose]());
     const filePath = sessionEventLockPath("successor");
-    await fs.unlink(filePath);
+    await first[Symbol.asyncDispose]();
     const successor = await acquireSessionTurn("successor");
     t.after(() => successor[Symbol.asyncDispose]());
     const current = await fs.readFile(filePath, "utf8");

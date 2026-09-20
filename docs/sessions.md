@@ -176,8 +176,16 @@ Queue mechanics:
 Persistent turns from flows and CLI prompts share one owner for each saved session.
 A waiting prompt reads history after the previous turn finishes its final checkpoint,
 so both completions are retained. Waiting can be cancelled or timed out. A live
-writer keeps ownership until it finishes; abandoned locks remain recoverable after
-its process exits.
+writer keeps ownership through its final checkpoint and cleanup. Competing processes
+recovering a dead writer remain serialized, and cancellation stops a waiting
+acquisition without releasing an admitted turn.
+
+Turn ownership uses a private guard alongside the existing session marker. A guard
+with a definitely dead owner can be recovered; live owners never expire by age.
+Malformed guards and interrupted-reclamation residue fail closed and require
+cleanup only after all competing acpx processes have stopped. Older running acpx
+versions do not honor this guard, so the stronger exclusion applies when all
+participants use the updated version.
 
 ## --no-wait
 
