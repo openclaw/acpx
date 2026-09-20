@@ -12,10 +12,21 @@ returns that error. An exit during admission is delivered after the admission
 callback settles, so a late successful write cannot overwrite an earlier exit
 observation.
 
+For embedded runtime session creation, a positive `timeoutMs` bounds ACP
+initialization. If the agent never completes the handshake, `ensureSession()`
+rejects with `ACP_SESSION_INIT_FAILED` after closing the client and cleaning up
+its observed processes. Cleanup can extend beyond the initialization deadline.
+Omitting the timeout preserves unlimited initialization. This deadline does not
+bound the later `session/new` or `session/load` request.
+
 The host owns admission timeouts, cancellation and recovery. A callback that never
 settles can hold startup indefinitely; `close()` is not an admission-cancellation
 mechanism. Hosts should bound their own storage or policy operations and settle
 or reject admission when abandoning a launch.
+
+If a launch finishes admission after the client was closed, acpx stops that child
+without adopting it or disturbing a replacement connection. The admitted child
+still produces spawn and exit observations.
 
 `onSpawnFailed` and `onExit` are best-effort observations. They are not awaited,
 and their failures do not replace the process outcome. They do not guarantee that

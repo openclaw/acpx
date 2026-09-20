@@ -12,9 +12,12 @@ type FixturePids = { bridge: number; descendant: number };
 
 function isRunning(pid: number): boolean {
   const result = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8" });
-  return (
-    result.status === 0 && !result.stdout.trim().startsWith("Z") && result.stdout.trim() !== ""
-  );
+  assert.ifError(result.error);
+  if (result.status === 1) {
+    return false;
+  }
+  assert.equal(result.status, 0, result.stderr);
+  return !result.stdout.trim().startsWith("Z") && result.stdout.trim() !== "";
 }
 
 async function assertStopped(pid: number, label: string): Promise<void> {
@@ -27,7 +30,7 @@ async function assertStopped(pid: number, label: string): Promise<void> {
 
 test(
   "runtime session creation stops a peer that never answers initialize",
-  { skip: process.platform === "win32" },
+  { skip: process.platform === "win32", timeout: 15_000 },
   async (t) => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-startup-timeout-"));
     const sibling = spawn(process.execPath, ["--eval", "setInterval(() => {}, 1000)"], {
@@ -36,9 +39,11 @@ test(
     const pidFiles: string[] = [];
     t.after(async () => {
       for (const pidFile of pidFiles) {
-        const pids = JSON.parse(await fs.readFile(pidFile, "utf8")) as FixturePids;
+        const pids = JSON.parse(
+          await fs.readFile(pidFile, "utf8").catch(() => "{}"),
+        ) as Partial<FixturePids>;
         for (const pid of [pids.bridge, pids.descendant]) {
-          if (isRunning(pid)) {
+          if (pid && isRunning(pid)) {
             process.kill(pid, "SIGKILL");
           }
         }
@@ -67,6 +72,7 @@ test(
       permissionMode: "deny-all",
       timeoutMs: 500,
     });
+    t.after(() => runtime.shutdown());
 
     // Every retry must fail on its own and leave nothing behind.
     for (const [index, pidFile] of pidFiles.entries()) {
@@ -96,7 +102,7 @@ test(
 
 test(
   "a client closed before its agent spawns stops the late child instead of adopting it",
-  { skip: process.platform === "win32" },
+  { skip: process.platform === "win32", timeout: 15_000 },
   async (t) => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-late-spawn-"));
     const pidFile = path.join(rootDir, "pids.json");
@@ -136,12 +142,17 @@ test(
         },
         // As in the client cleanup tests, admit only once the fixture has forked its descendant.
         onSpawned: async () => {
-          while (!(await fs.stat(pidFile).catch(() => undefined))) {
+          for (let attempt = 0; attempt < 200; attempt += 1) {
+            if (await fs.stat(pidFile).catch(() => undefined)) {
+              return;
+            }
             await delay(10);
           }
+          throw new Error("Cleanup fixture did not start");
         },
       },
     });
+    t.after(() => client.close());
     const starting = client.start();
     await spawnHeld;
     await client.close();
@@ -150,5 +161,86 @@ test(
     const pids = JSON.parse(await fs.readFile(pidFile, "utf8")) as FixturePids;
     await assertStopped(pids.bridge, "late agent");
     await assertStopped(pids.descendant, "late agent's forked descendant");
+  },
+);
+
+test(
+  "an abandoned late launch leaves its replacement connection usable",
+  { skip: process.platform === "win32", timeout: 15_000 },
+  async (t) => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replaced-launch-"));
+    const pidFile = path.join(rootDir, "pids.json");
+    const launches: FixturePids[] = [];
+    let releaseSpawn: () => void = () => {};
+    let beforeSpawn: () => void = () => {};
+    const spawnHeld = new Promise<void>((resolve) => {
+      beforeSpawn = resolve;
+    });
+    let firstLaunch = true;
+    const client = new AcpClient({
+      agentCommand: process.execPath,
+      agentArgv: [
+        process.execPath,
+        path.resolve("dist-test/test/fixtures/process-cleanup-agent.js"),
+        "close",
+        pidFile,
+      ],
+      cwd: rootDir,
+      permissionMode: "deny-all",
+      processLifecycle: {
+        onBeforeSpawn: async () => {
+          if (!firstLaunch) {
+            return;
+          }
+          firstLaunch = false;
+          beforeSpawn();
+          await new Promise<void>((resolve) => {
+            releaseSpawn = resolve;
+          });
+        },
+        onSpawned: async ({ pid }) => {
+          for (let attempt = 0; attempt < 200; attempt += 1) {
+            const pids = JSON.parse(
+              await fs.readFile(pidFile, "utf8").catch(() => "{}"),
+            ) as Partial<FixturePids>;
+            if (pids.bridge === pid && pids.descendant) {
+              launches.push({ bridge: pid, descendant: pids.descendant });
+              return;
+            }
+            await delay(10);
+          }
+          throw new Error("Cleanup fixture did not start");
+        },
+      },
+    });
+    const starting = client.start();
+    const abandoned = assert.rejects(starting, /closed while the agent was starting/);
+    t.after(async () => {
+      releaseSpawn();
+      await starting.catch(() => {});
+      await client.close();
+      for (const pids of launches) {
+        for (const pid of [pids.bridge, pids.descendant]) {
+          if (isRunning(pid)) {
+            process.kill(pid, "SIGKILL");
+          }
+        }
+      }
+      await fs.rm(rootDir, { recursive: true, force: true });
+    });
+
+    await spawnHeld;
+    await client.close();
+    await client.start();
+    await client.createSession();
+    const replacement = launches[0];
+    releaseSpawn();
+    await abandoned;
+
+    await assertStopped(launches[1].bridge, "abandoned bridge");
+    await assertStopped(launches[1].descendant, "abandoned descendant");
+    assert.equal(client.getAgentLifecycleSnapshot().pid, replacement.bridge);
+    assert.ok(isRunning(replacement.bridge));
+    await client.createSession();
   },
 );

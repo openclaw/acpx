@@ -200,7 +200,7 @@ async function startRuntimeClient(
     const executable = path.basename(agent.agentArgv?.[0] ?? agent.agentCommand.split(/\s+/)[0]);
     throw new AcpRuntimeError(
       "ACP_SESSION_INIT_FAILED",
-      `ACP agent ${executable} did not complete ACP initialization within ${timeoutMs}ms and was stopped. Check that the configured command starts an ACP server.`,
+      `ACP agent ${executable} did not complete ACP initialization within ${timeoutMs}ms. Check that the configured command starts an ACP server.`,
       { cause: error },
     );
   }

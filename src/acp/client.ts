@@ -635,11 +635,13 @@ export class AcpClient {
     this.logAgentLaunch(launch);
     await this.ensureLaunchSupport(launch);
     const { child, process: startedProcess } = await this.spawnAgentProcess(launch);
-    this.agent = child;
-    this.closing = false;
-    this.agentStartedAt = startedProcess.startedAt;
-    this.lastAgentExit = undefined;
-    this.lastKnownPid = startedProcess.pid;
+    if (this.closeEpoch === epoch) {
+      this.agent = child;
+      this.closing = false;
+      this.agentStartedAt = startedProcess.startedAt;
+      this.lastAgentExit = undefined;
+      this.lastKnownPid = startedProcess.pid;
+    }
     const startupStderr: string[] = [];
 
     child.stderr.on("data", (chunk: Buffer | string) => {
@@ -660,7 +662,7 @@ export class AcpClient {
       startupFailure.dispose();
       throw error;
     }
-    await this.stopIfClosedDuringLaunch(epoch, startupFailure);
+    await this.stopIfClosedDuringLaunch(epoch, child, startupFailure);
 
     const input = Writable.toWeb(child.stdin);
     const output = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
@@ -1593,18 +1595,17 @@ export class AcpClient {
     this.agent = undefined;
   }
 
-  // A caller that timed out waiting for start() closes the client before the agent may exist.
-  // The launch keeps going, so a child spawned after that close is stopped instead of adopted;
-  // it has been admitted, so embedding hosts still observe its spawn and exit.
+  // Retire only this launch: close() may already have been followed by a replacement start().
   private async stopIfClosedDuringLaunch(
     epoch: number,
+    child: ChildProcessByStdio<Writable, Readable, Readable>,
     startupFailure: StartupFailureWatcher,
   ): Promise<void> {
     if (this.closeEpoch === epoch) {
       return;
     }
     startupFailure.dispose();
-    await this.close();
+    await this.terminateAgentProcess(child);
     throw new Error("ACP client was closed while the agent was starting");
   }
 
