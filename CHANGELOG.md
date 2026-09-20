@@ -19,6 +19,7 @@ Repo: https://github.com/openclaw/acpx
 - Filesystem: preserve symlink and parent-directory traversal when reading or writing ACP paths, including aliased working directories, instead of selecting an unrelated lexical target.
 - Compare/input: honor prompt delimiters with files or stdin, and use command-local cwd for project configuration and relative input paths.
 - Compare/cancellation: stop launching remaining agents after process interruption, await active cleanup, and exit with code 130.
+- Sessions/close: preserve final cancellation output, usage and configuration updates when soft-closing an active session.
 
 ## 0.17.1 - 2026-09-19
 

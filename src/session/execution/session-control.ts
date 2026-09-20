@@ -20,6 +20,7 @@ import {
   trySetModelOnRunningOwner,
   trySetModeOnRunningOwner,
 } from "../queue/ipc.js";
+import { acquireSessionTurn } from "../turn-ownership.js";
 import type {
   SessionCancelOptions,
   SessionCancelResult,
@@ -262,10 +263,16 @@ export async function closeSession(sessionId: string): Promise<SessionRecord> {
     await terminateProcess(record.pid);
   }
 
-  record.pid = undefined;
-  record.closed = true;
-  record.closedAt = isoNow();
-  await writeSessionRecord(record);
-
-  return record;
+  // The owner must finish its turn before close takes checkpoint ownership.
+  const ownership = await acquireSessionTurn(record.acpxRecordId);
+  try {
+    const current = await resolveSessionRecord(record.acpxRecordId);
+    current.pid = undefined;
+    current.closed = true;
+    current.closedAt = isoNow();
+    await writeSessionRecord(current);
+    return current;
+  } finally {
+    await ownership[Symbol.asyncDispose]();
+  }
 }

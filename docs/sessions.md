@@ -95,6 +95,8 @@ Named sessions are independent. They do not share state, queue owners, or histor
 
 `sessions close` does not delete anything. It marks the record `closed: true` with `closedAt`, asks any active queue owner to send ACP `session/close`, and tears down adapter processes.
 
+Closing during a turn preserves its final cancellation output, usage and configuration updates in the closed record and history.
+
 - Closed sessions stay on disk with their full record and history.
 - Auto-resume by scope skips closed sessions.
 - Closed sessions can still be loaded explicitly through embedding APIs.
