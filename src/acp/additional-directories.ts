@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import type { Stats } from "node:fs";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { AcpxOperationalError } from "../errors.js";
+import { acpxHomeDir } from "../session/event-log.js";
 
 export class AdditionalDirectoriesUnsupportedError extends AcpxOperationalError {
   constructor(agentCommand: string | undefined) {
@@ -146,7 +146,7 @@ async function collectEntry(
 }
 
 function skillsRootsBase(): string {
-  return path.join(os.homedir(), ".acpx", "skills-roots");
+  return path.join(acpxHomeDir(), "skills-roots");
 }
 
 /**

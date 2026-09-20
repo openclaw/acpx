@@ -8,7 +8,10 @@ import {
   resolveAgentArgv,
   resolveAgentCommand as resolveAgentCommandFromRegistry,
 } from "../agent-registry.js";
-import type { SystemPromptOption } from "../runtime/engine/session-options.js";
+import {
+  resolveDirsAgainstCwd,
+  type SystemPromptOption,
+} from "../runtime/engine/session-options.js";
 import { DEFAULT_QUEUE_OWNER_TTL_MS } from "../session/session.js";
 import {
   AUTH_POLICIES,
@@ -499,7 +502,7 @@ function resolveDirListOption(value: unknown, cwd: string): string[] | undefined
   if (!dirs || dirs.length === 0) {
     return undefined;
   }
-  return dirs.map((dir) => path.resolve(cwd, dir));
+  return resolveDirsAgainstCwd(dirs, cwd);
 }
 
 function resolveCwdOption(value: unknown): string {

@@ -5,8 +5,12 @@ import type { SessionEventLog } from "../types.js";
 export const DEFAULT_EVENT_SEGMENT_MAX_BYTES = 64 * 1024 * 1024;
 export const DEFAULT_EVENT_MAX_SEGMENTS = 5;
 
+export function acpxHomeDir(): string {
+  return path.join(os.homedir(), ".acpx");
+}
+
 export function sessionBaseDir(): string {
-  return path.join(os.homedir(), ".acpx", "sessions");
+  return path.join(acpxHomeDir(), "sessions");
 }
 
 export function safeSessionId(sessionId: string): string {

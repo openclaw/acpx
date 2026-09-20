@@ -98,6 +98,17 @@ export function persistSessionOptions(
 }
 
 /**
+ * Resolves relative dir entries against the session cwd. Shared by CLI flag
+ * parsing and session-option normalization so both agree on the same dirs.
+ */
+export function resolveDirsAgainstCwd(
+  dirs: readonly string[] | undefined,
+  cwd: string,
+): string[] | undefined {
+  return dirs?.map((dir) => path.resolve(cwd, dir));
+}
+
+/**
  * Resolves relative skillsDirs/additionalDirs against the session cwd so the
  * initial session, persistence, and reconnects all agree on the same dirs.
  * Callers must normalize before constructing the client.
@@ -106,14 +117,12 @@ export function normalizeSessionDirOptions(
   options: SessionAgentOptions,
   cwd: string,
 ): SessionAgentOptions {
-  const resolveDirs = (dirs: string[] | undefined): string[] | undefined =>
-    dirs?.map((dir) => (path.isAbsolute(dir) ? dir : path.resolve(cwd, dir)));
   const normalized: SessionAgentOptions = { ...options };
   if (options.skillsDirs !== undefined) {
-    normalized.skillsDirs = resolveDirs(options.skillsDirs);
+    normalized.skillsDirs = resolveDirsAgainstCwd(options.skillsDirs, cwd);
   }
   if (options.additionalDirs !== undefined) {
-    normalized.additionalDirs = resolveDirs(options.additionalDirs);
+    normalized.additionalDirs = resolveDirsAgainstCwd(options.additionalDirs, cwd);
   }
   return normalized;
 }
@@ -157,7 +166,7 @@ function persistedSessionOptions(
   return hasPersistedSessionOptions(next) ? next : undefined;
 }
 
-function hasPersistedSessionOptions(options: PersistedSessionOptions): boolean {
+export function hasPersistedSessionOptions(options: PersistedSessionOptions): boolean {
   return (
     options.model !== undefined ||
     options.allowed_tools !== undefined ||

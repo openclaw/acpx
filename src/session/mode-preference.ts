@@ -1,4 +1,5 @@
 import { modelStateFromConfigOptions, type SessionModelState } from "../acp/model-support.js";
+import { hasPersistedSessionOptions } from "../runtime/engine/session-options.js";
 import type { SessionAcpxState, SessionRecord } from "../types.js";
 import { applyAdvertisedModelState } from "./model-state.js";
 
@@ -76,20 +77,6 @@ export function getDesiredModelId(state: SessionAcpxState | undefined): string |
   return normalizeModelId(state?.session_options?.model);
 }
 
-function hasStoredSessionOptions(
-  options: NonNullable<SessionAcpxState["session_options"]>,
-): boolean {
-  return (
-    typeof options.model === "string" ||
-    Array.isArray(options.allowed_tools) ||
-    typeof options.max_turns === "number" ||
-    options.system_prompt !== undefined ||
-    options.env !== undefined ||
-    options.skills_dirs !== undefined ||
-    options.additional_dirs !== undefined
-  );
-}
-
 export function setDesiredModelId(
   record: SessionRecord,
   modelId: string | undefined,
@@ -105,7 +92,7 @@ export function setDesiredModelId(
     delete sessionOptions.model;
   }
 
-  if (hasStoredSessionOptions(sessionOptions)) {
+  if (hasPersistedSessionOptions(sessionOptions)) {
     acpx.session_options = sessionOptions;
   } else {
     delete acpx.session_options;

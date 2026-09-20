@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { isDeepStrictEqual } from "node:util";
 import { AcpClient } from "../../acp/client.js";
 import {
   extractAcpError,
@@ -1356,11 +1357,9 @@ function assertSharedClientDirOptions(
   taskOptions: SessionAgentOptions | undefined,
   recordOptions: SessionAgentOptions | undefined,
 ): void {
-  const same = (a?: string[], b?: string[]) =>
-    (a?.length ?? 0) === (b?.length ?? 0) && (a ?? []).every((dir, i) => dir === b?.[i]);
   if (
-    !same(taskOptions?.skillsDirs, recordOptions?.skillsDirs) ||
-    !same(taskOptions?.additionalDirs, recordOptions?.additionalDirs)
+    !isDeepStrictEqual(taskOptions?.skillsDirs, recordOptions?.skillsDirs) ||
+    !isDeepStrictEqual(taskOptions?.additionalDirs, recordOptions?.additionalDirs)
   ) {
     throw new AcpxOperationalError(
       "--skills-dir/--additional-dir are fixed at session creation; the queued session already has different roots. Start a new session to change them.",
