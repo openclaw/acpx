@@ -12,6 +12,7 @@ import { InterruptedError } from "./async-control.js";
 import { configurePublicCli } from "./cli-public.js";
 import { handlePrompt } from "./cli/command-handlers.js";
 import { registerAgentCommand, registerDefaultCommands } from "./cli/command-registration.js";
+import { scanCompareArgs } from "./cli/compare-args.js";
 import { loadResolvedConfig } from "./cli/config.js";
 import {
   addGlobalFlags,
@@ -101,6 +102,7 @@ function shouldMaybeHandleSkillflag(argv: string[]): boolean {
 
 type AgentTokenScan = {
   token?: string;
+  index?: number;
   hasAgentOverride: boolean;
 };
 
@@ -166,7 +168,7 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
     const token = argv[index];
     const step = scanAgentTokenStep(token, hasAgentOverride);
     if (step.result) {
-      return step.result;
+      return { ...step.result, index };
     }
     if (step.hasAgentOverride) {
       hasAgentOverride = true;
@@ -198,6 +200,13 @@ function lastTopLevelFlagValue(argv: string[], flag: string): string | undefined
 }
 
 function detectInitialCwd(argv: string[]): string {
+  const command = detectAgentToken(argv);
+  if (command.token === "compare" && command.index !== undefined) {
+    const { cwd } = scanCompareArgs(argv.slice(command.index + 1));
+    if (cwd !== undefined) {
+      return path.resolve(cwd);
+    }
+  }
   return path.resolve(lastTopLevelFlagValue(argv, "--cwd") ?? process.cwd());
 }
 

@@ -4,7 +4,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { withTimeout } from "../src/async-control.js";
 
 const CLI_PATH = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 const REPO_ROOT = process.cwd();
@@ -24,18 +26,19 @@ async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<vo
   }
 }
 
-async function runCli(args: string[], homeDir: string, cwd: string): Promise<CliRunResult> {
-  return await new Promise<CliRunResult>((resolve) => {
-    const child = spawn(process.execPath, [CLI_PATH, ...args], {
-      env: {
-        ...process.env,
-        HOME: homeDir,
-        ACPX_TEST_REPO_ROOT: REPO_ROOT,
-      },
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+function startCli(args: string[], homeDir: string, cwd: string, input?: string) {
+  const child = spawn(process.execPath, [CLI_PATH, ...args], {
+    env: {
+      ...process.env,
+      HOME: homeDir,
+      ACPX_TEST_REPO_ROOT: REPO_ROOT,
+    },
+    cwd,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  child.stdin.end(input);
 
+  const result = new Promise<CliRunResult>((resolve, reject) => {
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -49,7 +52,18 @@ async function runCli(args: string[], homeDir: string, cwd: string): Promise<Cli
     child.once("close", (code) => {
       resolve({ code, stdout, stderr });
     });
+    child.once("error", reject);
   });
+  return { child, result };
+}
+
+async function runCli(
+  args: string[],
+  homeDir: string,
+  cwd: string,
+  input?: string,
+): Promise<CliRunResult> {
+  return await startCli(args, homeDir, cwd, input).result;
 }
 
 async function writeCompareAgent(homeDir: string): Promise<string> {
@@ -70,6 +84,10 @@ const {
 } = await import(require.resolve("@agentclientprotocol/sdk"));
 
 const mode = process.argv[2] || "fast";
+const eventDir = process.argv[3];
+if (mode === "next") {
+  await fs.writeFile(eventDir + "/next-started", "started");
+}
 if (mode === "error") {
   process.exit(1);
 }
@@ -98,7 +116,8 @@ class CompareAgent {
 
   async authenticate() {}
 
-  async newSession() {
+  async newSession(params) {
+    this.sessionParams = params;
     const sessionId = randomUUID();
     this.sessions.add(sessionId);
     return { sessionId };
@@ -106,6 +125,18 @@ class CompareAgent {
 
   async prompt(params) {
     const text = promptText(params.prompt);
+    if (mode === "cwd") {
+      const permission = await this.connection.requestPermission({
+        sessionId: params.sessionId,
+        toolCall: {toolCallId: "cwd-check", title: "Execute", kind: "execute"},
+        options: [{optionId: "allow", name: "Allow", kind: "allow_once"}, {optionId: "reject", name: "Reject", kind: "reject_once"}],
+      });
+      await fs.writeFile("compare-cwd.json", JSON.stringify({cwd: process.cwd(), session: this.sessionParams, permission, prompt: params.prompt}));
+    }
+    if (mode === "wait" || mode === "disconnect") {
+      await fs.writeFile(eventDir + "/prompt-ready", "ready");
+      return await new Promise((resolve) => { this.finish = resolve; });
+    }
     if (mode === "lock-a" || mode === "lock-b") {
       let status = "isolated";
       try {
@@ -198,7 +229,12 @@ class CompareAgent {
     return { stopReason: "end_turn" };
   }
 
-  async cancel() {}
+  async cancel() {
+    if (mode !== "wait" && mode !== "disconnect") return;
+    await fs.writeFile(eventDir + "/cancel-observed", "cancelled");
+    if (mode === "disconnect") process.exit(0);
+    this.finish({stopReason: "cancelled"});
+  }
 }
 
 const output = Writable.toWeb(process.stdout);
@@ -420,3 +456,243 @@ test("compare runs agents serially in a shared workspace", async () => {
     );
   });
 });
+
+for (const flag of ["--file", "-f", "--prompt-file"]) {
+  test(`compare ${flag} keeps delimiter text out of agent selection`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = await setupCompareFixture(homeDir);
+      await fs.writeFile(path.join(cwd, "brief.txt"), "file prompt");
+      const marker = path.join(homeDir, "unintended-agent-started");
+      const unintendedAgent = path.join(homeDir, "unintended-agent.mjs");
+      await fs.writeFile(
+        unintendedAgent,
+        `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(marker)}, 'started');`,
+      );
+      const literalPrompt = `${JSON.stringify(process.execPath)} ${JSON.stringify(unintendedAgent)}`;
+      const result = await runCli(
+        ["compare", "fast", "--json", flag, "brief.txt", "--", literalPrompt],
+        homeDir,
+        cwd,
+      );
+      await assert.rejects(fs.access(marker), { code: "ENOENT" });
+      assert.equal(result.code, 0, result.stderr);
+      const rows = JSON.parse(result.stdout) as CompareRow[];
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].agent, "fast");
+      assert.match(rows[0].final_message, /file prompt/);
+    });
+  });
+}
+
+test("compare local cwd selects project configuration before loading the caller config", async () => {
+  await withTempHome(async (homeDir) => {
+    const source = await setupCompareFixture(homeDir);
+    const target = path.join(homeDir, "target");
+    await fs.mkdir(target);
+    await fs.writeFile(path.join(source, ".acpxrc.json"), "malformed caller configuration");
+    await fs.writeFile(path.join(target, ".acpxrc.json"), JSON.stringify({ disableExec: true }));
+    const result = await runCli(
+      ["compare", "fast", "--cwd", target, "--json", "hello"],
+      homeDir,
+      source,
+    );
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /compare subcommand is disabled/);
+    assert.doesNotMatch(result.stderr, /parse|malformed/i);
+  });
+});
+
+for (const localForm of ["before-agent", "after-agent", "inline", "relative", "root-and-local"]) {
+  test(`compare ${localForm} cwd owns agent configuration, input files, permissions and MCP`, async () => {
+    await withTempHome(async (homeDir) => {
+      const source = await setupCompareFixture(homeDir);
+      const target = path.join(homeDir, "target");
+      await fs.mkdir(target);
+      await fs.writeFile(path.join(target, "brief.txt"), "target-only brief");
+      await fs.writeFile(
+        path.join(target, "mcp.json"),
+        JSON.stringify({
+          mcpServers: [{ name: "synthetic-target", command: "unused-mcp", args: [] }],
+        }),
+      );
+      await fs.writeFile(
+        path.join(target, ".acpxrc.json"),
+        JSON.stringify({
+          defaultPermissions: "approve-all",
+          agents: {
+            "target-only": {
+              command: process.execPath,
+              args: [path.join(homeDir, "compare-agent.mjs"), "cwd"],
+            },
+          },
+        }),
+      );
+      const cwdFlags =
+        localForm === "inline"
+          ? [`--cwd=${target}`]
+          : ["--cwd", localForm === "relative" ? path.relative(source, target) : target];
+      const operands =
+        localForm === "before-agent" ? [...cwdFlags, "target-only"] : ["target-only", ...cwdFlags];
+      const rootFlags = localForm === "root-and-local" ? ["--cwd", source] : [];
+      const promptTail = localForm === "after-agent" ? ["--", "--cwd", source] : [];
+      const result = await runCli(
+        [
+          ...rootFlags,
+          "--mcp-config",
+          "mcp.json",
+          "compare",
+          ...operands,
+          "--file",
+          "brief.txt",
+          "--json",
+          ...promptTail,
+        ],
+        homeDir,
+        source,
+      );
+      assert.equal(result.code, 0, result.stderr);
+      const observed = JSON.parse(
+        await fs.readFile(path.join(target, "compare-cwd.json"), "utf8"),
+      ) as {
+        cwd: string;
+        session: { cwd: string; mcpServers: Array<{ name: string }> };
+        permission: { outcome: { optionId: string } };
+        prompt: Array<{ text: string }>;
+      };
+      assert.equal(await fs.realpath(observed.cwd), await fs.realpath(target));
+      assert.equal(await fs.realpath(observed.session.cwd), await fs.realpath(target));
+      assert.equal(observed.session.mcpServers[0]?.name, "synthetic-target");
+      assert.equal(observed.permission.outcome.optionId, "allow");
+      assert.deepEqual(observed.prompt, [
+        { type: "text", text: "target-only brief" },
+        ...(promptTail.length > 0 ? [{ type: "text", text: `--cwd ${source}` }] : []),
+      ]);
+      await assert.rejects(fs.access(path.join(source, "compare-cwd.json")), { code: "ENOENT" });
+    });
+  });
+}
+
+test("compare recognizes only an unconsumed delimiter in its own argument tail", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    await fs.writeFile(path.join(cwd, "--"), "literal delimiter file");
+    const result = await runCli(
+      [
+        "--system-prompt",
+        "compare",
+        "--allowed-tools",
+        "--",
+        "compare",
+        "fast",
+        "--file",
+        "--",
+        "--json",
+        "--",
+        "appended text",
+      ],
+      homeDir,
+      cwd,
+    );
+    assert.equal(result.code, 0, result.stderr);
+    const rows = JSON.parse(result.stdout) as CompareRow[];
+    assert.equal(rows.length, 1);
+    assert.match(rows[0].final_message, /literal delimiter file.*appended text/);
+  });
+});
+
+for (const flag of ["--file=brief.txt", "-fbrief.txt"]) {
+  test(`compare ${flag} preserves an empty prompt delimiter`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = await setupCompareFixture(homeDir);
+      await fs.writeFile(path.join(cwd, "brief.txt"), "file-only prompt");
+      const result = await runCli(["compare", "fast", "--json", flag, "--"], homeDir, cwd);
+      assert.equal(result.code, 0, result.stderr);
+      const rows = JSON.parse(result.stdout) as CompareRow[];
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].final_message, "fast: file-only prompt");
+    });
+  });
+}
+
+test("compare empty delimiter accepts stdin without consuming an agent as prompt text", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    const result = await runCli(["compare", "fast", "--json", "--"], homeDir, cwd, "stdin prompt");
+    assert.equal(result.code, 0, result.stderr);
+    const rows = JSON.parse(result.stdout) as CompareRow[];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].final_message, "fast: stdin prompt");
+  });
+});
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  for (const mode of ["wait", "disconnect"]) {
+    test(
+      `compare ${signal} stops admission after ${mode} cancellation`,
+      { skip: process.platform === "win32", timeout: 20_000 },
+      async () => {
+        await withTempHome(async (homeDir) => {
+          const cwd = await setupCompareFixture(homeDir);
+          const agentPath = path.join(homeDir, "compare-agent.mjs");
+          await fs.writeFile(
+            path.join(homeDir, ".acpx", "config.json"),
+            JSON.stringify({
+              defaultPermissions: "deny-all",
+              agents: {
+                waiting: { command: process.execPath, args: [agentPath, mode, homeDir] },
+                next: { command: process.execPath, args: [agentPath, "next", homeDir] },
+              },
+            }),
+          );
+          const { child, result } = startCli(
+            ["compare", "waiting", "next", "--json", "hello"],
+            homeDir,
+            cwd,
+          );
+          try {
+            const ready = async () => {
+              const deadline = Date.now() + 5_000;
+              while (Date.now() < deadline) {
+                try {
+                  await fs.access(path.join(homeDir, "prompt-ready"));
+                  return;
+                } catch {
+                  await delay(10);
+                }
+              }
+              throw new Error("Compare did not reach prompt readiness");
+            };
+            await withTimeout(
+              Promise.race([
+                ready(),
+                result.then((early) => {
+                  throw new Error(
+                    `Compare exited before prompt readiness: ${JSON.stringify(early)}`,
+                  );
+                }),
+              ]),
+              5_000,
+            );
+            child.kill(signal);
+            const finished = await withTimeout(result, 10_000);
+            assert.equal(
+              await fs.readFile(path.join(homeDir, "cancel-observed"), "utf8"),
+              "cancelled",
+            );
+            await assert.rejects(fs.access(path.join(homeDir, "next-started")), { code: "ENOENT" });
+            assert.equal(finished.code, 130, finished.stderr);
+            const rows = JSON.parse(finished.stdout) as CompareRow[];
+            assert.deepEqual(
+              rows.map((row) => [row.agent, row.status]),
+              [["waiting", "cancelled"]],
+            );
+          } finally {
+            if (child.exitCode == null && child.signalCode == null) {
+              child.kill("SIGKILL");
+            }
+          }
+        });
+      },
+    );
+  }
+}

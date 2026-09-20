@@ -18,11 +18,16 @@ acpx compare <agent>... '<prompt>'
 acpx compare <agent>... -- prompt words after the delimiter
 acpx compare <agent>... --file ./prompt.md
 acpx compare <agent>... -f ./prompt.md
+acpx compare pi openclaw --file ./prompt.md -- 'Focus on cancellation behavior'
 ```
 
 The final positional argument is treated as the prompt unless `--file` is
 provided. When you use `--`, every token after the delimiter is joined into the
 prompt.
+
+With a prompt file, delimiter text is appended to the file's prompt blocks.
+An empty delimiter preserves every preceding agent and reads the prompt from
+the file or stdin.
 
 ## Options
 
@@ -49,6 +54,18 @@ Command-local options:
 | `--json`               | Alias for `--format json`.    |
 | `-f, --file <path>`    | Read prompt text from a file. |
 | `--prompt-file <path>` | Alias for `--file`.           |
+
+`--cwd` may appear before or after `compare`. An explicit command-local value
+takes precedence over the top-level value. That workspace supplies the project
+configuration, agent definitions and permission defaults, and anchors relative
+prompt files, permission-policy files and top-level MCP configuration paths.
+
+## Interruption
+
+SIGINT, SIGTERM and SIGHUP during execution cancel the active run and wait for
+its cleanup. Remaining agents are skipped, the summary contains only attempted
+runs, and acpx exits with code `130`. Ordinary agent errors and per-agent
+timeouts remain individual results and allow subsequent agents to run.
 
 ## Output
 

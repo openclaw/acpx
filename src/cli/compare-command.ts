@@ -1,3 +1,4 @@
+import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { Command, InvalidArgumentError } from "commander";
 import { TimeoutError } from "../async-control.js";
@@ -11,11 +12,9 @@ import type {
   SessionTokenUsage,
 } from "../types.js";
 import { EXIT_CODES } from "../types.js";
+import { addCompareOptions, scanCompareArgs } from "./compare-args.js";
 import type { ResolvedAcpxConfig } from "./config.js";
 import {
-  parseNonEmptyValue,
-  parseOutputFormat,
-  parseTimeoutSeconds,
   resolveAgentInvocation,
   resolveGlobalFlags,
   resolveOutputPolicy,
@@ -93,42 +92,26 @@ function truncate(value: string, maxChars: number): string {
   return `${value.slice(0, Math.max(0, maxChars - 3))}...`;
 }
 
-function promptTokensAfterDoubleDash(command: Command): string[] {
-  const commandName = command.name();
-  const commandIndex = process.argv.findIndex(
-    (token, index) => index >= 2 && token === commandName,
-  );
-  if (commandIndex < 0) {
-    return [];
-  }
-  const delimiterIndex = process.argv.findIndex(
-    (token, index) => index > commandIndex && token === "--",
-  );
-  return delimiterIndex < 0 ? [] : process.argv.slice(delimiterIndex + 1);
-}
-
 function splitCompareArgs(
   args: string[],
   filePath: string | undefined,
-  command: Command,
+  promptTokens: string[] | undefined,
 ): {
   agents: string[];
   promptText: string;
 } {
+  if (promptTokens !== undefined) {
+    const agents = args.slice(0, args.length - promptTokens.length);
+    if (agents.length === 0) {
+      throw new InvalidArgumentError("At least one agent is required");
+    }
+    return { agents, promptText: promptTokens.join(" ") };
+  }
   if (filePath) {
     if (args.length === 0) {
       throw new InvalidArgumentError("At least one agent is required");
     }
     return { agents: args, promptText: "" };
-  }
-
-  const promptTokens = promptTokensAfterDoubleDash(command);
-  if (promptTokens.length > 0) {
-    const agents = args.slice(0, -promptTokens.length);
-    if (agents.length === 0) {
-      throw new InvalidArgumentError("At least one agent is required");
-    }
-    return { agents, promptText: promptTokens.join(" ") };
   }
 
   if (args.length < 2) {
@@ -344,6 +327,36 @@ function updateCompareExitCode(rows: CompareRow[]): void {
   }
 }
 
+async function runCompareAgents(
+  agents: string[],
+  run: (agentName: string) => Promise<CompareRow>,
+): Promise<{ rows: CompareRow[]; interrupted: boolean }> {
+  const rows: CompareRow[] = [];
+  let interrupted = false;
+  const onInterrupt = () => {
+    interrupted = true;
+  };
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  for (const signal of signals) {
+    process.once(signal, onInterrupt);
+  }
+  try {
+    for (const agentName of agents) {
+      if (interrupted) {
+        break;
+      }
+      // runOnce owns active cancellation and cleanup; this loop owns the next admission.
+      const row = await run(agentName);
+      rows.push(interrupted ? { ...row, status: "cancelled", error: "Interrupted" } : row);
+    }
+  } finally {
+    for (const signal of signals) {
+      process.off(signal, onInterrupt);
+    }
+  }
+  return { rows, interrupted };
+}
+
 function resolvePromptFile(flags: CompareFlags): string | undefined {
   if (flags.file && flags.promptFile && flags.file !== flags.promptFile) {
     throw new InvalidArgumentError("Use only one prompt file flag: --file or --prompt-file");
@@ -352,63 +365,45 @@ function resolvePromptFile(flags: CompareFlags): string | undefined {
 }
 
 export function registerCompareCommand(program: Command, config: ResolvedAcpxConfig): void {
-  program
-    .command("compare")
-    .description("Run one prompt across multiple agents and summarize the results")
-    .argument("<args...>", "Agents followed by prompt text, or agents with --file")
-    .option("--cwd <dir>", "Target workspace")
-    .option("--approve-all", "Auto-approve all permission requests")
-    .option("--approve-reads", "Auto-approve read/search requests and prompt for writes")
-    .option("--deny-all", "Deny all permission requests")
-    .option("--timeout <seconds>", "Per-agent timeout in seconds", parseTimeoutSeconds)
-    .option("--format <fmt>", "Output format: text, json, quiet", parseOutputFormat)
-    .option("--json", "Alias for --format json")
-    .option(
-      "-f, --file <path>",
-      "Read prompt text from file path (use - for stdin)",
-      (value: string) => parseNonEmptyValue("Prompt file", value),
-    )
-    .option("--prompt-file <path>", "Alias for --file", (value: string) =>
-      parseNonEmptyValue("Prompt file", value),
-    )
-    .action(async function (this: Command, args: string[], flags: CompareFlags) {
-      if (config.disableExec) {
-        throw new Error("compare subcommand is disabled by configuration (disableExec: true)");
-      }
+  addCompareOptions(
+    program
+      .command("compare")
+      .description("Run one prompt across multiple agents and summarize the results")
+      .argument("<args...>", "Agents followed by prompt text, or agents with --file"),
+  ).action(async function (this: Command, args: string[], flags: CompareFlags) {
+    if (config.disableExec) {
+      throw new Error("compare subcommand is disabled by configuration (disableExec: true)");
+    }
 
-      const globalFlags = resolveGlobalFlags(this, config);
-      if (globalFlags.agent) {
-        throw new InvalidArgumentError("Do not combine compare with --agent; pass agent names");
-      }
+    const globalFlags = resolveGlobalFlags(this, config);
+    if (flags.cwd !== undefined) {
+      globalFlags.cwd = path.resolve(flags.cwd);
+    }
+    if (globalFlags.agent) {
+      throw new InvalidArgumentError("Do not combine compare with --agent; pass agent names");
+    }
 
-      const outputPolicy = resolveOutputPolicy(
-        flags.json === true ? "json" : globalFlags.format,
-        globalFlags.jsonStrict === true,
-      );
-      const promptFile = resolvePromptFile(flags);
-      const { agents, promptText } = splitCompareArgs(args, promptFile, this);
-      const prompt = await readPromptInput(
-        promptFile,
-        promptText,
-        globalFlags.cwd,
-        "final argument",
-      );
-      const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
+    const outputPolicy = resolveOutputPolicy(
+      flags.json === true ? "json" : globalFlags.format,
+      globalFlags.jsonStrict === true,
+    );
+    const promptFile = resolvePromptFile(flags);
+    const { promptTokens } = scanCompareArgs(program.args.slice(1));
+    const { agents, promptText } = splitCompareArgs(args, promptFile, promptTokens);
+    const prompt = await readPromptInput(promptFile, promptText, globalFlags.cwd, "final argument");
+    const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
 
-      const rows: CompareRow[] = [];
-      for (const agentName of agents) {
-        rows.push(
-          await runAgentForCompare({
-            agentName,
-            prompt,
-            config,
-            globalFlags,
-            permissionPolicy,
-          }),
-        );
-      }
+    const { rows, interrupted } = await runCompareAgents(
+      agents,
+      async (agentName) =>
+        await runAgentForCompare({ agentName, prompt, config, globalFlags, permissionPolicy }),
+    );
 
-      printRows(rows, outputPolicy.format);
+    printRows(rows, outputPolicy.format);
+    if (interrupted) {
+      process.exitCode = EXIT_CODES.INTERRUPTED;
+    } else {
       updateCompareExitCode(rows);
-    });
+    }
+  });
 }
