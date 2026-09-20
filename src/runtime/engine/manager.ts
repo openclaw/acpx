@@ -60,6 +60,7 @@ import {
 } from "./reconnect.js";
 import { shouldReuseExistingRecord } from "./reuse-policy.js";
 import {
+  normalizeSessionDirOptions,
   persistSessionOptions,
   sessionOptionsFromRecord,
   type SessionAgentOptions,
@@ -956,6 +957,12 @@ export class AcpRuntimeManager {
     agent: ResolvedRuntimeAgent,
   ): Promise<SessionRecord> {
     const { cwd, agentCommand, agentArgv } = agent;
+    // Normalize dir options once against the session cwd so the client,
+    // persistence, and reconnects all resolve the same directories.
+    const sessionOptions =
+      input.sessionOptions === undefined
+        ? undefined
+        : normalizeSessionDirOptions(input.sessionOptions, cwd);
     const client = this.createClient({
       agentCommand,
       agentArgv,
@@ -966,7 +973,7 @@ export class AcpRuntimeManager {
       processLifecycle: this.options.processLifecycle,
       processLaunchScope: { kind: "runtime-session", sessionKey: input.sessionKey },
       verbose: this.options.verbose,
-      sessionOptions: input.sessionOptions,
+      sessionOptions,
     });
     const owner = this.createSessionOwner({
       client,

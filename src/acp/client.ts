@@ -1103,17 +1103,19 @@ export class AcpClient {
   private async additionalDirectoriesParams(
     onError?: (error: unknown) => void,
   ): Promise<{ additionalDirectories?: string[] }> {
-    const dirs = await resolveAdditionalDirectories(this.options.sessionOptions, {
+    const resolved = await resolveAdditionalDirectories(this.options.sessionOptions, {
       onError,
     });
-    if (dirs === undefined) {
+    if (resolved === undefined) {
       return {};
     }
     // Grant the agent's fs callbacks access to the host-side dirs we are about
     // to advertise; without this the path guard rejects reads outside cwd.
-    this.filesystem.setAdditionalRoots(dirs);
+    // Skill targets map synthetic-root reads back onto the real skills dir so
+    // follow-within-root containment still holds.
+    this.filesystem.setAdditionalRoots(resolved.dirs, resolved.skillTargets);
     const translated = await Promise.all(
-      dirs.map(async (dir) => {
+      resolved.dirs.map(async (dir) => {
         try {
           return await resolveAgentSessionCwd(dir, this.options.agentCommand);
         } catch (error) {
@@ -1125,8 +1127,8 @@ export class AcpClient {
         }
       }),
     );
-    const resolved = translated.filter((dir): dir is string => dir !== undefined);
-    return resolved.length > 0 ? { additionalDirectories: resolved } : {};
+    const dirs = translated.filter((dir): dir is string => dir !== undefined);
+    return dirs.length > 0 ? { additionalDirectories: dirs } : {};
   }
 
   private warn(message: string): void {

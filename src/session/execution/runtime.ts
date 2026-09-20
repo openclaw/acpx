@@ -753,6 +753,10 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     options.sessionOptions,
     sessionOptionsFromRecord(record),
   );
+  if (options.client !== undefined) {
+    assertSharedClientDirOptions(options.sessionOptions, sessionOptionsFromRecord(record));
+  }
+
   let bufferingConnectOutput = true;
   let promptTurnActive = false;
   let promptTurnHadSideEffects = false;
@@ -1340,4 +1344,27 @@ export async function sendSessionDirect(options: SessionSendOptions): Promise<Se
     verbose: options.verbose,
     client: options.client,
   });
+}
+
+/**
+ * skillsDirs/additionalDirs are fixed at session creation: the shared queue
+ * client was already constructed with its dirs, so a queued task that asks
+ * for different ones must fail loudly instead of silently keeping the old
+ * roots.
+ */
+function assertSharedClientDirOptions(
+  taskOptions: SessionAgentOptions | undefined,
+  recordOptions: SessionAgentOptions | undefined,
+): void {
+  const same = (a?: string[], b?: string[]) =>
+    (a?.length ?? 0) === (b?.length ?? 0) && (a ?? []).every((dir, i) => dir === b?.[i]);
+  if (
+    !same(taskOptions?.skillsDirs, recordOptions?.skillsDirs) ||
+    !same(taskOptions?.additionalDirs, recordOptions?.additionalDirs)
+  ) {
+    throw new AcpxOperationalError(
+      "--skills-dir/--additional-dir are fixed at session creation; the queued session already has different roots. Start a new session to change them.",
+      { outputCode: "USAGE", detailCode: "SESSION_DIRS_IMMUTABLE" },
+    );
+  }
 }

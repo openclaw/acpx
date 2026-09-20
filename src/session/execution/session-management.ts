@@ -7,7 +7,10 @@ import {
   applyLifecycleSnapshotToRecord,
   createInitialSessionRecord,
 } from "../../runtime/engine/lifecycle.js";
-import { persistSessionOptions } from "../../runtime/engine/session-options.js";
+import {
+  normalizeSessionDirOptions,
+  persistSessionOptions,
+} from "../../runtime/engine/session-options.js";
 import type { SessionEnsureResult, SessionRecord } from "../../types.js";
 import { applyConfigOptionsToRecord, applyInitialModelSelection } from "../config-options.js";
 import { applyRequestedModelIfAdvertised } from "../model-application.js";
@@ -171,7 +174,10 @@ export async function createSessionWithClient(
     terminal: options.terminal,
     verbose: options.verbose,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
-    sessionOptions: options.sessionOptions,
+    sessionOptions:
+      options.sessionOptions === undefined
+        ? undefined
+        : normalizeSessionDirOptions(options.sessionOptions, absolutePath(options.cwd)),
   });
 
   const onAbort = () => {

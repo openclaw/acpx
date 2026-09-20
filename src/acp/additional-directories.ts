@@ -59,6 +59,17 @@ export type ResolveAdditionalDirectoriesOptions = {
   onError?: (error: unknown) => void;
 };
 
+export type ResolvedAdditionalDirectories = {
+  /** Roots sent to the agent via ACP additionalDirectories. */
+  dirs: string[];
+  /**
+   * Synthetic skills-root → real skills dir. The fs layer rewrites reads
+   * through `<root>/.claude/skills` and `<root>/.agents/skills` onto the
+   * target so follow-within-root containment still holds.
+   */
+  skillTargets: Map<string, string>;
+};
+
 /**
  * Merges raw additionalDirs with skillsDirs resolved into synthetic roots
  * (each exposed as `.claude/skills` and `.agents/skills`). Returns undefined
@@ -68,10 +79,11 @@ export type ResolveAdditionalDirectoriesOptions = {
 export async function resolveAdditionalDirectories(
   sessionOptions: { skillsDirs?: string[]; additionalDirs?: string[] } | undefined,
   options: ResolveAdditionalDirectoriesOptions = {},
-): Promise<string[] | undefined> {
-  const merged = await collectRawDirs(sessionOptions?.additionalDirs, options);
-  merged.push(...(await collectSkillsRoots(sessionOptions?.skillsDirs, options)));
-  return merged.length > 0 ? merged : undefined;
+): Promise<ResolvedAdditionalDirectories | undefined> {
+  const dirs = await collectRawDirs(sessionOptions?.additionalDirs, options);
+  const skillTargets = await collectSkillsRoots(sessionOptions?.skillsDirs, options);
+  dirs.push(...skillTargets.keys());
+  return dirs.length > 0 ? { dirs, skillTargets } : undefined;
 }
 
 async function collectRawDirs(
@@ -93,8 +105,8 @@ async function collectRawDirs(
 async function collectSkillsRoots(
   dirs: readonly string[] | undefined,
   options: ResolveAdditionalDirectoriesOptions,
-): Promise<string[]> {
-  const merged: string[] = [];
+): Promise<Map<string, string>> {
+  const roots = new Map<string, string>();
   const resolved = await Promise.all(
     [
       ...new Set(
@@ -103,12 +115,19 @@ async function collectSkillsRoots(
     ].map(async (dir) => await fs.realpath(dir).catch(() => dir)),
   );
   for (const dir of new Set(resolved)) {
-    await collectEntry(merged, options, () => buildSkillsDirRoot(dir));
+    try {
+      roots.set(await buildSkillsDirRoot(dir), dir);
+    } catch (error) {
+      if (!options.onError) {
+        throw error;
+      }
+      options.onError(error);
+    }
   }
-  if (merged.length > 0) {
+  if (roots.size > 0) {
     void sweepStaleSkillsRoots().catch(() => {});
   }
-  return merged;
+  return roots;
 }
 
 async function collectEntry(

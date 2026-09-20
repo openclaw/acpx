@@ -79,7 +79,8 @@ export function persistSessionOptions(
 ): void {
   // Directory options are normalized against the session cwd so a record
   // reopened from another process directory resolves the same dirs.
-  const normalized = options === undefined ? undefined : normalizeDirOptions(options, record.cwd);
+  const normalized =
+    options === undefined ? undefined : normalizeSessionDirOptions(options, record.cwd);
   const next = normalized === undefined ? undefined : persistedSessionOptions(normalized);
   if (next !== undefined) {
     record.acpx = {
@@ -96,14 +97,25 @@ export function persistSessionOptions(
   delete record.acpx.session_options;
 }
 
-function normalizeDirOptions(options: SessionAgentOptions, cwd: string): SessionAgentOptions {
+/**
+ * Resolves relative skillsDirs/additionalDirs against the session cwd so the
+ * initial session, persistence, and reconnects all agree on the same dirs.
+ * Callers must normalize before constructing the client.
+ */
+export function normalizeSessionDirOptions(
+  options: SessionAgentOptions,
+  cwd: string,
+): SessionAgentOptions {
   const resolveDirs = (dirs: string[] | undefined): string[] | undefined =>
     dirs?.map((dir) => (path.isAbsolute(dir) ? dir : path.resolve(cwd, dir)));
-  return {
-    ...options,
-    skillsDirs: resolveDirs(options.skillsDirs),
-    additionalDirs: resolveDirs(options.additionalDirs),
-  };
+  const normalized: SessionAgentOptions = { ...options };
+  if (options.skillsDirs !== undefined) {
+    normalized.skillsDirs = resolveDirs(options.skillsDirs);
+  }
+  if (options.additionalDirs !== undefined) {
+    normalized.additionalDirs = resolveDirs(options.additionalDirs);
+  }
+  return normalized;
 }
 
 export function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOptions | undefined {

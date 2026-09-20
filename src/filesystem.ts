@@ -71,6 +71,7 @@ export class FileSystemHandlers {
   private workspace?: Promise<Root>;
   private extraRoots = new Map<string, Promise<Root>>();
   private extraRootDirs: string[] = [];
+  private skillTargets = new Map<string, string>();
   private permissionMode: PermissionMode;
   private nonInteractivePermissions: NonInteractivePermissionPolicy;
   private readonly onOperation?: (operation: ClientOperation) => void;
@@ -89,10 +90,18 @@ export class FileSystemHandlers {
   /**
    * Grants the agent's fs callbacks access to extra workspace roots (ACP
    * additionalDirectories). Called once the session's dirs are resolved;
-   * replaces any previously granted roots.
+   * replaces any previously granted roots. `skillTargets` maps each synthetic
+   * skills root to the real skills dir so reads through its
+   * `.claude/skills`/`.agents/skills` links resolve inside the target.
    */
-  setAdditionalRoots(dirs: readonly string[]): void {
+  setAdditionalRoots(
+    dirs: readonly string[],
+    skillTargets: ReadonlyMap<string, string> = new Map(),
+  ): void {
     this.extraRootDirs = dirs.map((dir) => path.resolve(dir));
+    this.skillTargets = new Map(
+      [...skillTargets].map(([rootDir, target]) => [path.resolve(rootDir), target]),
+    );
     this.extraRoots.clear();
   }
 
@@ -245,6 +254,20 @@ export class FileSystemHandlers {
       .toSorted((a, b) => b.length - a.length)[0];
     if (match === undefined) {
       throw new Error(`Path is outside allowed workspace roots: ${resolved}`);
+    }
+    // Synthetic skills roots expose the real dir through .claude/skills and
+    // .agents/skills symlinks; rewrite onto the target so follow-within-root
+    // containment holds and the read lands on the real files.
+    const skillTarget = this.skillTargets.get(match);
+    if (skillTarget !== undefined) {
+      const rel = path.relative(match, resolved);
+      for (const layout of [".claude", ".agents"]) {
+        const prefix = `${layout}${path.sep}skills`;
+        if (rel === prefix || rel.startsWith(`${prefix}${path.sep}`)) {
+          const rewritten = path.join(skillTarget, rel.slice(prefix.length + 1));
+          return { rootDir: skillTarget, filePath: rewritten };
+        }
+      }
     }
     // Preserve symlink/.. traversal for filesystem resolution.
     return { rootDir: match, filePath: rawPath };

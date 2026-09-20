@@ -12,6 +12,10 @@
 - Legacy `models` metadata may encode both values in a combined id such as `gpt-5.6-sol[max]`; ACPX uses that form only when the adapter does not advertise the newer model config option.
 - When the adapter returns `_meta.codex.turnConfiguration`, ACPX preserves the opaque metadata in direct, queued, compare, and embedded-runtime results. Structured CLI output also retains the raw ACP prompt response.
 
+## Skills and extra directories
+
+`acpx --skills-dir <dir>` exposes a directory of skill folders (`<dir>/<name>/SKILL.md`) to the agent as `.claude/skills/` and `.agents/skills/` via ACP `additionalDirectories`; `--additional-dir <dir>` grants an extra workspace root without the synthetic wrapping. Both are repeatable, resolve from `--cwd`, persist on the session record for reconnects, and require the adapter to advertise `sessionCapabilities.additionalDirectories` at session creation — codex-acp does.
+
 ## Permission refusals
 
 For the identified Codex ACP adapter, acpx prefers an offered `decline` or `reject_permissions` one-time refusal over cancellation. Permission kinds still determine approval and persistence behavior, and host callbacks receive the original request. If the selected refusal uses Codex cancellation, or no matching option exists, acpx keeps the safe cancellation and explains that it can end the turn. Text output shows a permission notice, quiet mode writes it to stderr, JSON retains it in the permission response's `_meta.acpx.permissionNotice`, and embedded runtimes emit a client-operation status. Explicit caller cancellation remains cancellation.

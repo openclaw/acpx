@@ -435,3 +435,69 @@ test("readTextFile requires absolute paths", async () => {
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
+
+test(
+  "ACP file handlers serve skills-dir reads through the synthetic root and reject escapes",
+  { skip: process.platform === "win32" },
+  async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-skills-"));
+    try {
+      const cwd = path.join(directory, "workspace");
+      const skillsDir = path.join(directory, "skills");
+      const syntheticRoot = path.join(directory, "synthetic-root");
+      const sibling = path.join(directory, "sibling");
+      await fs.mkdir(cwd);
+      await fs.mkdir(path.join(skillsDir, "demo-skill"), { recursive: true });
+      await fs.mkdir(sibling);
+      await fs.writeFile(path.join(skillsDir, "demo-skill", "SKILL.md"), "skill body");
+      await fs.writeFile(path.join(sibling, "secret.txt"), "sibling secret");
+      // Mirror the synthetic layout buildSkillsDirRoot creates.
+      await fs.mkdir(path.join(syntheticRoot, ".claude"), { recursive: true });
+      await fs.mkdir(path.join(syntheticRoot, ".agents"), { recursive: true });
+      await fs.symlink(skillsDir, path.join(syntheticRoot, ".claude", "skills"));
+      await fs.symlink(skillsDir, path.join(syntheticRoot, ".agents", "skills"));
+
+      const handlers = new FileSystemHandlers({ cwd, permissionMode: "approve-all" });
+      handlers.setAdditionalRoots([syntheticRoot], new Map([[syntheticRoot, skillsDir]]));
+
+      // Reads through both synthetic links land on the real skills dir.
+      for (const layout of [".claude", ".agents"]) {
+        const content = await handlers.readTextFile({
+          sessionId: "synthetic",
+          path: path.join(syntheticRoot, layout, "skills", "demo-skill", "SKILL.md"),
+        });
+        assert.equal(content.content, "skill body");
+      }
+
+      // The synthetic root itself is not a real tree: a path that escapes the
+      // skills links must not reach sibling dirs.
+      await assert.rejects(
+        handlers.readTextFile({
+          sessionId: "synthetic",
+          path: path.join(syntheticRoot, "..", "sibling", "secret.txt"),
+        }),
+      );
+      // A symlink inside the skills dir pointing outside is still rejected by
+      // follow-within-root on the target.
+      await fs.symlink(sibling, path.join(skillsDir, "escape"));
+      await assert.rejects(
+        handlers.readTextFile({
+          sessionId: "synthetic",
+          path: path.join(syntheticRoot, ".claude", "skills", "escape", "secret.txt"),
+        }),
+      );
+      // Writes through the synthetic link land on the real skills dir.
+      await handlers.writeTextFile({
+        sessionId: "synthetic",
+        path: path.join(syntheticRoot, ".claude", "skills", "demo-skill", "notes.txt"),
+        content: "written through link",
+      });
+      assert.equal(
+        await fs.readFile(path.join(skillsDir, "demo-skill", "notes.txt"), "utf8"),
+        "written through link",
+      );
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  },
+);

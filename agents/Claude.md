@@ -8,6 +8,10 @@
 - Model switches can change the available effort controls. ACPX updates existing saved effort selections from the accepted response and removes selections whose controls disappear.
 - Saved model and config selections are restored after reconnect, without replacing the conversation.
 
+## Skills and extra directories
+
+`acpx --skills-dir <dir>` exposes a directory of skill folders (`<dir>/<name>/SKILL.md`) to the agent as `.claude/skills/` and `.agents/skills/` via ACP `additionalDirectories`; `--additional-dir <dir>` grants an extra workspace root without the synthetic wrapping. Both are repeatable, resolve from `--cwd`, persist on the session record for reconnects, and require the adapter to advertise `sessionCapabilities.additionalDirectories` at session creation — claude-agent-acp does.
+
 ## Settings isolation
 
 Built-in `acpx claude` sessions load Claude project and local settings, but not
