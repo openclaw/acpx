@@ -4,10 +4,12 @@ import { once } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { AcpClient } from "../src/acp/client.js";
 import { ProcessDescendants } from "../src/acp/process-descendants.js";
+import { TimeoutError } from "../src/async-control.js";
+import { inspectAgentModels } from "../src/runtime/public/probe.js";
 
 type FixturePids = { bridge: number; descendant: number };
 
@@ -178,5 +180,188 @@ test(
     await fs.writeFile(tableFile, `${descendantPid} 1 S ${birth}\n`);
     await descendants.signal("SIGKILL", 1000);
     assert.deepEqual(signals, [], "a retired identity was rediscovered without an owned ancestor");
+  },
+);
+
+async function inspectionFixture(t: TestContext, mode: string) {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-model-inspection-"));
+  const pidFile = path.join(cwd, "pids.json");
+  t.after(async () => {
+    const contents = await fs.readFile(pidFile, "utf8").catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+      return undefined;
+    });
+    if (contents) {
+      const pids = JSON.parse(contents) as FixturePids;
+      for (const pid of [pids.bridge, pids.descendant]) {
+        if (isRunning(pid)) {
+          process.kill(pid, "SIGKILL");
+        }
+      }
+    }
+    await fs.rm(cwd, { recursive: true, force: true });
+  });
+  return {
+    cwd,
+    pidFile,
+    agentCommand: [
+      process.execPath,
+      path.resolve("dist-test/test/fixtures/process-cleanup-agent.js"),
+      mode,
+      pidFile,
+    ],
+  };
+}
+
+async function inspectionMessages(pidFile: string) {
+  const contents = await fs.readFile(`${pidFile}.messages`, "utf8");
+  return contents
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line)) as Array<{
+    id?: string | number;
+    method?: string;
+    params?: { clientCapabilities?: { fs?: unknown; terminal?: boolean }; mcpServers?: unknown[] };
+    result?: unknown;
+  }>;
+}
+
+test(
+  "model inspection denies tools, preserves model metadata and environment, and settles cleanup",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const fixture = await inspectionFixture(t, "inspect");
+    const agentProcessEnv = { ACPX_INSPECTION_MODEL_NAME: "Child-only model" };
+    const result = inspectAgentModels({ ...fixture, agentProcessEnv });
+    agentProcessEnv.ACPX_INSPECTION_MODEL_NAME = "Changed after launch";
+    assert.deepEqual(await result, {
+      currentModelId: "inspected",
+      availableModelIds: ["inspected"],
+      availableModels: [{ modelId: "inspected", name: "Child-only model" }],
+    });
+    const messages = await inspectionMessages(fixture.pidFile);
+    assert.deepEqual(
+      messages.filter((message) => message.method).map((message) => message.method),
+      ["initialize", "session/new"],
+    );
+    const capabilities = messages[0]?.params?.clientCapabilities;
+    assert.ok(!capabilities?.terminal);
+    assert.deepEqual(capabilities?.fs, { readTextFile: false, writeTextFile: false });
+    assert.deepEqual(messages[1]?.params?.mcpServers, []);
+    assert.deepEqual(messages.find((message) => message.id === "inspection-permission")?.result, {
+      outcome: { outcome: "selected", optionId: "deny" },
+    });
+    const pids = await readPids(fixture.pidFile);
+    assert.equal(isRunning(pids.bridge), false, "inspection returned before bridge cleanup");
+    assert.equal(
+      isRunning(pids.descendant),
+      false,
+      "inspection returned before descendant cleanup",
+    );
+  },
+);
+
+test(
+  "model inspection keeps successful metadata when cleanup exceeds the discovery deadline",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const fixture = await inspectionFixture(t, "inspect");
+    const close = AcpClient.prototype.close;
+    t.mock.method(AcpClient.prototype, "close", async function (this: AcpClient) {
+      await delay(3_100);
+      await close.call(this);
+    });
+    const models = await inspectAgentModels({ ...fixture, timeoutMs: 3_000 });
+    assert.deepEqual(models?.availableModelIds, ["inspected"]);
+    const pids = await readPids(fixture.pidFile);
+    assert.equal(isRunning(pids.bridge), false);
+    assert.equal(isRunning(pids.descendant), false);
+  },
+);
+
+for (const mode of ["close", "init-fail", "session-fail"]) {
+  test(
+    `model inspection settles cleanup after ${mode}`,
+    { skip: process.platform === "win32" },
+    async (t) => {
+      const fixture = await inspectionFixture(t, mode);
+      if (mode === "close") {
+        assert.equal(await inspectAgentModels(fixture), undefined);
+      } else {
+        await assert.rejects(
+          inspectAgentModels(fixture),
+          mode === "init-fail" ? /synthetic initialization failure/ : /synthetic session failure/,
+        );
+      }
+      const pids = await readPids(fixture.pidFile);
+      assert.equal(isRunning(pids.bridge), false);
+      assert.equal(isRunning(pids.descendant), false);
+    },
+  );
+}
+
+for (const mode of ["init-hang", "session-hang"]) {
+  for (const interruption of ["abort", "timeout"]) {
+    test(
+      `model inspection settles ${mode} before rejecting ${interruption}`,
+      { skip: process.platform === "win32" },
+      async (t) => {
+        const fixture = await inspectionFixture(t, mode);
+        const controller = new AbortController();
+        const reason = new Error("catalog retired");
+        const pending = inspectAgentModels({
+          ...fixture,
+          signal: controller.signal,
+          timeoutMs: interruption === "timeout" ? 2_000 : 10_000,
+        });
+        const rejected = assert.rejects(pending, (error) =>
+          interruption === "timeout" ? error instanceof TimeoutError : error === reason,
+        );
+        const pids = await readPids(fixture.pidFile);
+        if (interruption === "abort") {
+          const method = mode === "init-hang" ? "initialize" : "session/new";
+          for (let attempt = 0; ; attempt += 1) {
+            const messages = await inspectionMessages(fixture.pidFile).catch(
+              (error: NodeJS.ErrnoException) => {
+                if (error.code !== "ENOENT") {
+                  throw error;
+                }
+                return [];
+              },
+            );
+            if (messages.some((message) => message.method === method)) {
+              break;
+            }
+            assert.ok(attempt < 200, `inspection did not reach ${method}`);
+            await delay(10);
+          }
+          controller.abort(reason);
+        }
+        await rejected;
+        assert.equal(isRunning(pids.bridge), false, "abort returned before bridge cleanup");
+        assert.equal(isRunning(pids.descendant), false, "abort returned before descendant cleanup");
+      },
+    );
+  }
+}
+
+test(
+  "model inspection does not launch for pre-aborted or immediately aborted calls",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    for (const preAborted of [true, false]) {
+      const fixture = await inspectionFixture(t, "inspect");
+      const controller = new AbortController();
+      const reason = new Error("catalog retired before launch");
+      if (preAborted) {
+        controller.abort(reason);
+      }
+      const pending = inspectAgentModels({ ...fixture, signal: controller.signal });
+      controller.abort(reason);
+      await assert.rejects(pending, (error) => error === reason);
+      assert.deepEqual(await fs.readdir(fixture.cwd), []);
+    }
   },
 );

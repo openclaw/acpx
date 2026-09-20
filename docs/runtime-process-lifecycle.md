@@ -45,3 +45,21 @@ A descendant can escape observation if it starts after the last snapshot and
 every witnessed ancestor exits before the next one. Unavailable OS process
 information leaves unverified descendants untouched. Abrupt acpx death still
 requires separate host supervision; Windows keeps its existing process cleanup.
+
+## Inspect models without a runtime store
+
+`inspectAgentModels()` from `acpx/runtime` launches an explicit `agentCommand`
+argv in `cwd`, initializes ACP, creates a session, and returns normalized
+`AcpRuntimeSessionModels`, or `undefined` when no model metadata is advertised.
+It does not send a prompt, require a session store, or save an ACPX session record.
+The agent may still create its own native session history.
+
+Inspection denies permission requests and disables ACP filesystem and terminal
+capabilities. It inherits the process environment, with an optional trusted
+`agentProcessEnv` overlay; it does not isolate the agent process itself.
+
+Pass an optional `signal` to cancel. `timeoutMs` is a positive discovery deadline
+of at most 2,147,483,647 milliseconds and defaults to 120 seconds. Success,
+failure, cancellation, and timeout all wait for owned client cleanup. Cleanup
+can extend beyond the discovery deadline. A pre-aborted call does not launch
+the agent.

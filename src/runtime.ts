@@ -23,6 +23,8 @@ import { deriveAgentFromSessionKey, type AcpxHandleState } from "./runtime/publi
 
 export { DEFAULT_AGENT_NAME, createFileSessionStore };
 export { createAgentRegistry } from "./agent-registry.js";
+export { inspectAgentModels } from "./runtime/public/probe.js";
+export type { InspectAgentModelsOptions } from "./runtime/public/probe.js";
 export type {
   AcpAgentInspection,
   AcpAgentInspectionOptions,

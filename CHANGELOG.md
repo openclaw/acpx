@@ -10,6 +10,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Dependencies: update fs-safe to 0.12.0 and Zod to 4.6.5, including the matching native filesystem packages.
 - Agents/built-ins: add the `antigravity` shortcut for Google's official ACP runtime, with platform launch arguments and account setup guidance. Thanks @superbiche.
+- Runtime/embedding: inspect agent models without a runtime session store, with bounded discovery and awaited process cleanup.
 
 ### Breaking
 
