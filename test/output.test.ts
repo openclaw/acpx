@@ -563,7 +563,7 @@ test("json formatter leaves non-read tool updates unchanged with suppression ena
       update: {
         sessionUpdate: "tool_call_update",
         toolCallId: "tool-write-1",
-        title: "Write",
+        title: "Write README.md",
         kind: "edit",
         status: "completed",
         rawOutput: { content: "wrote file" },

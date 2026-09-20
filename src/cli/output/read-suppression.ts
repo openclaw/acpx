@@ -11,12 +11,12 @@ function inferToolKindFromTitle(title: string | undefined): string | undefined {
     return undefined;
   }
 
-  const head = normalized.split(":", 1)[0]?.trim();
+  const head = normalized.split(/[:\s]/, 1)[0];
   if (!head) {
     return undefined;
   }
 
-  if (["read", "cat", "open", "view"].some((needle) => head.includes(needle))) {
+  if (["read", "cat", "open", "view"].includes(head)) {
     return "read";
   }
 

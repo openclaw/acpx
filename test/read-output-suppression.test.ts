@@ -21,3 +21,16 @@ test("isReadLikeTool rejects unrelated titles and blanks", () => {
   assert.equal(isReadLikeTool({ title: "   " }), false);
   assert.equal(isReadLikeTool({}), false);
 });
+
+test("isReadLikeTool preserves output for non-read actions containing read-like text", () => {
+  for (const title of [
+    "Build catalog",
+    "Write README.md",
+    "Truncate: build.log",
+    "Reopen socket",
+    "Preview deployment",
+  ]) {
+    assert.equal(isReadLikeTool({ title }), false, title);
+    assert.equal(isReadLikeTool({ kind: "execute", title }), false, title);
+  }
+});

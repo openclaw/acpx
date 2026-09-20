@@ -110,7 +110,7 @@ test("deny-all cancels when no reject option exists", async () => {
 
 test("approve-reads infers read-like titles without an explicit tool kind", async () => {
   await withNonTty(async () => {
-    for (const title of ["cat: README.md", "grep: TODO", "search: prompts"]) {
+    for (const title of ["cat: README.md", "grep: TODO", "search: prompts", "Read README.md"]) {
       const response = await resolvePermissionRequest(
         makeRequestWithTitle(title, undefined),
         "approve-reads",
@@ -121,6 +121,39 @@ test("approve-reads infers read-like titles without an explicit tool kind", asyn
       });
     }
   });
+});
+
+test("read approval does not match substrings or filenames in non-read titles", async () => {
+  await withNonTty(async () => {
+    for (const title of [
+      "Truncate: build.log",
+      "Delete README.md",
+      "Run cat > output.txt",
+      "Edit catalog",
+      "search_replace",
+    ]) {
+      for (const policy of [
+        undefined,
+        { autoApprove: ["read", "search"], defaultAction: "deny" as const },
+      ]) {
+        const response = await resolvePermissionRequest(
+          makeRequestWithTitle(title),
+          "approve-reads",
+          "deny",
+          policy,
+        );
+        assert.deepEqual(response, { outcome: { outcome: "selected", optionId: "reject" } }, title);
+      }
+    }
+  });
+});
+
+test("title inference preserves explicit kinds and recognizes the leading action", () => {
+  assert.equal(inferToolKind(makeRequestWithTitle("Read README.md", "edit")), "edit");
+  assert.equal(inferToolKind(makeRequestWithTitle("Truncate: build.log", "read")), "read");
+  assert.equal(inferToolKind(makeRequestWithTitle("Delete README.md")), "delete");
+  assert.equal(inferToolKind(makeRequestWithTitle("Run cat > output.txt")), "execute");
+  assert.equal(inferToolKind(makeRequestWithTitle("Truncate: build.log")), "other");
 });
 
 test("approve-reads rejects non-read title inference when prompting is unavailable", async () => {

@@ -109,6 +109,10 @@ acpx --suppress-reads codex exec 'inspect repo and report tool usage'
 
 The replacement preserves the surrounding ACP message shape so json consumers can still parse the stream — only the content payload is masked.
 
+Title-based read detection uses complete leading words such as `Read`, `cat`,
+`Open`, and `View`; a filename or substring in another action's title does not
+suppress that action's output.
+
 ## Session-control command output
 
 Session-control query commands emit summarized JSON shapes (not ACP wire traffic) under `--format json`:

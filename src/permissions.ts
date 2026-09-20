@@ -71,15 +71,15 @@ function pickOption(
   return undefined;
 }
 
-const TOOL_KIND_TITLE_MATCHERS: Array<{ kind: ToolKind; needles: readonly string[] }> = [
-  { kind: "read", needles: ["read", "cat"] },
-  { kind: "search", needles: ["search", "find", "grep"] },
-  { kind: "edit", needles: ["write", "edit", "patch"] },
-  { kind: "delete", needles: ["delete", "remove"] },
-  { kind: "move", needles: ["move", "rename"] },
-  { kind: "execute", needles: ["run", "execute", "bash"] },
-  { kind: "fetch", needles: ["fetch", "http", "url"] },
-  { kind: "think", needles: ["think"] },
+const TOOL_KIND_TITLE_MATCHERS: Array<{ kind: ToolKind; names: readonly string[] }> = [
+  { kind: "read", names: ["read", "cat"] },
+  { kind: "search", names: ["search", "find", "grep"] },
+  { kind: "edit", names: ["write", "edit", "patch"] },
+  { kind: "delete", names: ["delete", "remove"] },
+  { kind: "move", names: ["move", "rename"] },
+  { kind: "execute", names: ["run", "execute", "bash"] },
+  { kind: "fetch", names: ["fetch", "http", "url"] },
+  { kind: "think", names: ["think"] },
 ];
 
 export function inferToolKind(params: RequestPermissionRequest): ToolKind | undefined {
@@ -92,18 +92,12 @@ export function inferToolKind(params: RequestPermissionRequest): ToolKind | unde
     return undefined;
   }
 
-  const head = title.split(":", 1)[0]?.trim();
+  const head = title.split(/[:\s]/, 1)[0];
   if (!head) {
     return undefined;
   }
 
-  return titleHeadToolKind(head) ?? "other";
-}
-
-function titleHeadToolKind(head: string): ToolKind | undefined {
-  return TOOL_KIND_TITLE_MATCHERS.find(({ needles }) =>
-    needles.some((needle) => head.includes(needle)),
-  )?.kind;
+  return TOOL_KIND_TITLE_MATCHERS.find(({ names }) => names.includes(head))?.kind ?? "other";
 }
 
 function isAutoApprovedReadKind(kind: ToolKind | undefined): boolean {

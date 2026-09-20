@@ -97,6 +97,11 @@ Read/search requests in `--approve-reads`:
 
 Everything else — write, edit, shell command, network call, etc. — falls into the prompt-or-deny path.
 
+When the adapter omits the tool kind, acpx recognizes complete leading action words
+such as `Read`, `cat`, or `grep`. A filename like `README.md` in a delete request,
+or the letters `cat` inside `Truncate`, do not grant read approval. Unrecognized
+titles follow the normal prompt-or-deny behavior.
+
 ## Interactive prompting
 
 In an interactive TTY, `--approve-reads` shows:
