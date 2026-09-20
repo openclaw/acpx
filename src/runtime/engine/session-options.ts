@@ -71,11 +71,7 @@ export function persistSessionOptions(
   record: SessionRecord,
   options: SessionAgentOptions | undefined,
 ): void {
-  // Directory options are normalized against the session cwd so a record
-  // reopened from another process directory resolves the same dirs.
-  const normalized =
-    options === undefined ? undefined : normalizeSessionDirOptions(options, record.cwd);
-  const next = normalized === undefined ? undefined : persistedSessionOptions(normalized);
+  const next = persistedSessionOptions(normalizeSessionDirOptions(options, record.cwd));
   if (next !== undefined) {
     record.acpx = {
       ...record.acpx,
@@ -105,9 +101,12 @@ export function resolveDirsAgainstCwd(
  * constructing the client.
  */
 export function normalizeSessionDirOptions(
-  options: SessionAgentOptions,
+  options: SessionAgentOptions | undefined,
   cwd: string,
-): SessionAgentOptions {
+): SessionAgentOptions | undefined {
+  if (options === undefined) {
+    return undefined;
+  }
   const normalized: SessionAgentOptions = { ...options };
   if (options.skillsDirs !== undefined) {
     normalized.skillsDirs = resolveDirsAgainstCwd(options.skillsDirs, cwd);
@@ -143,8 +142,11 @@ export function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOpt
 type PersistedSessionOptions = NonNullable<NonNullable<SessionRecord["acpx"]>["session_options"]>;
 
 function persistedSessionOptions(
-  options: SessionAgentOptions,
+  options: SessionAgentOptions | undefined,
 ): PersistedSessionOptions | undefined {
+  if (options === undefined) {
+    return undefined;
+  }
   const next = {
     model: nonEmptyString(options.model),
     allowed_tools: Array.isArray(options.allowedTools) ? [...options.allowedTools] : undefined,

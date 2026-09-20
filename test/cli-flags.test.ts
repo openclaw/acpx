@@ -249,23 +249,16 @@ test("resolveGlobalFlags validates and normalizes dynamic Commander options", ()
 });
 
 test("resolveGlobalFlags collects --skills-dir/--additional-dir relative to --cwd", () => {
-  const command = new Command();
-  addGlobalFlags(command);
-  command.parse(
-    [
-      "node",
-      "acpx",
-      "--cwd",
-      "/tmp/work",
-      "--skills-dir",
-      "skills",
-      "--skills-dir",
-      "/abs/skills",
-      "--additional-dir",
-      "extra",
-    ],
-    { from: "node" },
-  );
+  const command = parseCommand(addGlobalFlags(new Command()), [
+    "--cwd",
+    "/tmp/work",
+    "--skills-dir",
+    "skills",
+    "--skills-dir",
+    "/abs/skills",
+    "--additional-dir",
+    "extra",
+  ]);
   const flags = resolveGlobalFlags(command, config());
   assert.deepEqual(flags.skillsDirs, ["/tmp/work/skills", "/abs/skills"]);
   assert.deepEqual(flags.additionalDirs, ["/tmp/work/extra"]);

@@ -15,6 +15,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 export type { McpServer, SessionNotification } from "@agentclientprotocol/sdk";
 import type { PromptInput } from "./prompt-content.js";
+import type { SessionAgentOptions } from "./runtime/engine/session-options.js";
 
 export type AcpPermissionRequest = {
   sessionId: string;
@@ -302,17 +303,7 @@ export type AcpClientOptions = {
   processLaunchScope?: AcpProcessLaunchScope;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
-  sessionOptions?: {
-    model?: string;
-    allowedTools?: string[];
-    maxTurns?: number;
-    systemPrompt?: string | { append: string };
-    env?: Record<string, string>;
-    /** Skill dirs, exposed as `.claude/skills` and `.agents/skills` via `additionalDirectories`. */
-    skillsDirs?: string[];
-    /** Raw `additionalDirectories` workspace roots, sent verbatim. */
-    additionalDirs?: string[];
-  };
+  sessionOptions?: SessionAgentOptions;
   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onAcpOutputMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onSessionUpdate?: (notification: SessionNotification) => void;

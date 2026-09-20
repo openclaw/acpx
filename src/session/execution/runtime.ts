@@ -750,12 +750,10 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
   });
   const pendingMessages: AcpJsonRpcMessage[] = [];
   const pendingConnectOutputMessages: BufferedAcpOutputMessage[] = [];
-  const sessionOptions = mergeSessionOptions(
-    options.sessionOptions,
-    sessionOptionsFromRecord(record),
-  );
+  const recordOptions = sessionOptionsFromRecord(record);
+  const sessionOptions = mergeSessionOptions(options.sessionOptions, recordOptions);
   if (options.client !== undefined) {
-    assertSharedClientDirOptions(options.sessionOptions, sessionOptionsFromRecord(record));
+    assertSharedClientDirOptions(options.sessionOptions, recordOptions);
   }
 
   let bufferingConnectOutput = true;
@@ -1352,9 +1350,10 @@ function assertSharedClientDirOptions(
   taskOptions: SessionAgentOptions | undefined,
   recordOptions: SessionAgentOptions | undefined,
 ): void {
+  const sameDirs = (a?: string[], b?: string[]) => isDeepStrictEqual(a?.toSorted(), b?.toSorted());
   if (
-    !isDeepStrictEqual(taskOptions?.skillsDirs, recordOptions?.skillsDirs) ||
-    !isDeepStrictEqual(taskOptions?.additionalDirs, recordOptions?.additionalDirs)
+    !sameDirs(taskOptions?.skillsDirs, recordOptions?.skillsDirs) ||
+    !sameDirs(taskOptions?.additionalDirs, recordOptions?.additionalDirs)
   ) {
     throw new AcpxOperationalError(
       "--skills-dir/--additional-dir are fixed at session creation; the queued session already has different roots. Start a new session to change them.",

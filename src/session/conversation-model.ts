@@ -573,35 +573,8 @@ export function cloneSessionAcpxState(
       ? state.available_commands.map((command) => ({ ...command }))
       : undefined,
     config_options: state.config_options ? deepClone(state.config_options) : undefined,
-    session_options: cloneSessionOptions(state.session_options),
+    session_options: deepClone(state.session_options),
   };
-}
-
-function cloneSessionOptions(
-  options: SessionAcpxState["session_options"],
-): SessionAcpxState["session_options"] {
-  if (!options) {
-    return undefined;
-  }
-  return {
-    model: options.model,
-    allowed_tools: options.allowed_tools ? [...options.allowed_tools] : undefined,
-    max_turns: options.max_turns,
-    ...(options.system_prompt !== undefined
-      ? { system_prompt: cloneSystemPromptOption(options.system_prompt) }
-      : {}),
-    ...(options.env !== undefined ? { env: { ...options.env } } : {}),
-    ...(options.skills_dirs !== undefined ? { skills_dirs: [...options.skills_dirs] } : {}),
-    ...(options.additional_dirs !== undefined
-      ? { additional_dirs: [...options.additional_dirs] }
-      : {}),
-  };
-}
-
-function cloneSystemPromptOption(
-  option: NonNullable<NonNullable<SessionAcpxState["session_options"]>["system_prompt"]>,
-): NonNullable<NonNullable<SessionAcpxState["session_options"]>["system_prompt"]> {
-  return typeof option === "string" ? option : { append: option.append };
 }
 
 export function recordPromptSubmission(

@@ -451,11 +451,8 @@ test(
       await fs.mkdir(sibling);
       await fs.writeFile(path.join(skillsDir, "demo-skill", "SKILL.md"), "skill body");
       await fs.writeFile(path.join(sibling, "secret.txt"), "sibling secret");
-      // Mirror the synthetic layout buildSkillsDirRoot creates.
-      await fs.mkdir(path.join(syntheticRoot, ".claude"), { recursive: true });
-      await fs.mkdir(path.join(syntheticRoot, ".agents"), { recursive: true });
-      await fs.symlink(skillsDir, path.join(syntheticRoot, ".claude", "skills"));
-      await fs.symlink(skillsDir, path.join(syntheticRoot, ".agents", "skills"));
+      // The synthetic root is never opened on disk: resolvePathWithinRoot
+      // rewrites .claude/skills and .agents/skills reads onto the target.
 
       const handlers = new FileSystemHandlers({ cwd, permissionMode: "approve-all" });
       handlers.setAdditionalRoots([syntheticRoot], new Map([[syntheticRoot, skillsDir]]));

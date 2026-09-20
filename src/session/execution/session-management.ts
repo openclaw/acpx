@@ -174,10 +174,7 @@ export async function createSessionWithClient(
     terminal: options.terminal,
     verbose: options.verbose,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
-    sessionOptions:
-      options.sessionOptions === undefined
-        ? undefined
-        : normalizeSessionDirOptions(options.sessionOptions, absolutePath(options.cwd)),
+    sessionOptions: normalizeSessionDirOptions(options.sessionOptions, absolutePath(options.cwd)),
   });
 
   const onAbort = () => {

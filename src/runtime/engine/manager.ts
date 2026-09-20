@@ -959,10 +959,7 @@ export class AcpRuntimeManager {
     const { cwd, agentCommand, agentArgv } = agent;
     // Normalize dir options once against the session cwd so the client,
     // persistence, and reconnects all resolve the same directories.
-    const sessionOptions =
-      input.sessionOptions === undefined
-        ? undefined
-        : normalizeSessionDirOptions(input.sessionOptions, cwd);
+    const sessionOptions = normalizeSessionDirOptions(input.sessionOptions, cwd);
     const client = this.createClient({
       agentCommand,
       agentArgv,

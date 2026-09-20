@@ -1070,8 +1070,7 @@ test(
         asInternals(fixture.client).initResult = {
           agentCapabilities: { sessionCapabilities: { additionalDirectories: {} } },
         };
-        const cwd = path.resolve("/tmp/acpx-client-skills");
-        const pending = fixture.track(fixture.client.createSession(cwd));
+        const pending = fixture.track(fixture.client.createSession("/tmp/acpx-client-skills"));
         const request = await fixture.message(0);
         assert("method" in request);
         assert.equal(request.method, "session/new");

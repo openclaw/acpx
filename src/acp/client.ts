@@ -1025,7 +1025,7 @@ export class AcpClient {
       this.options.agentArgv,
     );
     const claudeAcp = isClaudeAcpCommand(command, args);
-    const additionalDirectories = await this.createSessionAdditionalDirectories(
+    const additionalDirectories = await this.additionalDirectoriesParams(
       options.lenientAdditionalDirectories === true,
     );
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
@@ -1069,30 +1069,33 @@ export class AcpClient {
     };
   }
 
-  /** Strict: missing capability or dir fails creation. Lenient warns and drops. */
-  private async createSessionAdditionalDirectories(
-    lenient: boolean,
-  ): Promise<{ additionalDirectories?: string[] }> {
-    if (lenient) {
-      return await this.lenientAdditionalDirectoriesParams();
-    }
-    if (this.hasRequestedAdditionalDirectories() && !this.supportsAdditionalDirectories()) {
-      throw new AdditionalDirectoriesUnsupportedError(this.options.agentCommand);
-    }
-    return await this.additionalDirectoriesParams();
-  }
-
   /**
-   * Strict by default: a missing dir fails session creation. With `onError`
-   * (session/load, session/resume) bad entries are dropped with a warning so
-   * a stale record still reconnects.
+   * Strict (session/new): missing capability or dir fails creation. Lenient
+   * (session/load, session/resume): warns and drops so a stale record still
+   * reconnects.
    */
   private async additionalDirectoriesParams(
-    onError?: (error: unknown) => void,
+    lenient: boolean,
   ): Promise<{ additionalDirectories?: string[] }> {
-    const resolved = await resolveAdditionalDirectories(this.options.sessionOptions, {
-      onError,
-    });
+    const requested = this.hasRequestedAdditionalDirectories();
+    if (!this.supportsAdditionalDirectories()) {
+      if (requested) {
+        if (!lenient) {
+          throw new AdditionalDirectoriesUnsupportedError(this.options.agentCommand);
+        }
+        this.warn(
+          "agent does not advertise additionalDirectories; --skills-dir/--additional-dir ignored on reconnect",
+        );
+      }
+      return {};
+    }
+    const onError = lenient
+      ? (error: unknown) =>
+          this.warn(
+            `dropping --skills-dir/--additional-dir entry on reconnect: ${error instanceof Error ? error.message : String(error)}`,
+          )
+      : undefined;
+    const resolved = await resolveAdditionalDirectories(this.options.sessionOptions, { onError });
     if (resolved === undefined) {
       return {};
     }
@@ -1132,25 +1135,6 @@ export class AcpClient {
     );
   }
 
-  /** Reconnect variant: never throws; drops dirs the agent can't take. */
-  private async lenientAdditionalDirectoriesParams(): Promise<{
-    additionalDirectories?: string[];
-  }> {
-    if (!this.supportsAdditionalDirectories()) {
-      if (this.hasRequestedAdditionalDirectories()) {
-        this.warn(
-          "agent does not advertise additionalDirectories; --skills-dir/--additional-dir ignored on reconnect",
-        );
-      }
-      return {};
-    }
-    return await this.additionalDirectoriesParams((error) =>
-      this.warn(
-        `dropping --skills-dir/--additional-dir entry on reconnect: ${error instanceof Error ? error.message : String(error)}`,
-      ),
-    );
-  }
-
   async loadSession(sessionId: string, cwd = this.options.cwd): Promise<SessionLoadResult> {
     this.getConnection();
     return await this.loadSessionWithOptions(sessionId, cwd, {});
@@ -1163,7 +1147,7 @@ export class AcpClient {
   ): Promise<SessionLoadResult> {
     const connection = this.getConnection();
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
-    const additionalDirectories = await this.lenientAdditionalDirectoriesParams();
+    const additionalDirectories = await this.additionalDirectoriesParams(true);
     const previousSuppression = this.applySessionUpdateSuppression(
       Boolean(options.suppressReplayUpdates),
     );
@@ -1198,7 +1182,7 @@ export class AcpClient {
   async resumeSession(sessionId: string, cwd = this.options.cwd): Promise<SessionResumeResult> {
     const connection = this.getConnection();
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
-    const additionalDirectories = await this.lenientAdditionalDirectoriesParams();
+    const additionalDirectories = await this.additionalDirectoriesParams(true);
     const response = await this.runConnectionRequest(() =>
       connection.agent.request(methods.agent.session.resume, {
         sessionId,

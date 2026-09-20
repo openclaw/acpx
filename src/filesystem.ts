@@ -96,7 +96,10 @@ export class FileSystemHandlers {
     dirs: readonly string[],
     skillTargets: ReadonlyMap<string, string> = new Map(),
   ): void {
-    this.extraRootDirs = dirs.map((dir) => path.resolve(dir));
+    // Deepest-first so nested roots resolve to the most specific match.
+    this.extraRootDirs = dirs
+      .map((dir) => path.resolve(dir))
+      .toSorted((a, b) => b.length - a.length);
     this.skillTargets = new Map(
       [...skillTargets].map(([rootDir, target]) => [path.resolve(rootDir), target]),
     );
@@ -245,10 +248,8 @@ export class FileSystemHandlers {
       // Preserve symlink/.. traversal for filesystem resolution.
       return { rootDir: this.rootDir, filePath: rawPath };
     }
-    // Pick the deepest containing additional root so nested roots resolve.
-    const match = this.extraRootDirs
-      .filter((dir) => isPathInside(dir, resolved))
-      .toSorted((a, b) => b.length - a.length)[0];
+    // Pick the deepest containing additional root (pre-sorted in the setter).
+    const match = this.extraRootDirs.find((dir) => isPathInside(dir, resolved));
     if (match === undefined) {
       throw new Error(`Path is outside allowed workspace roots: ${resolved}`);
     }
@@ -256,13 +257,9 @@ export class FileSystemHandlers {
     // follow-within-root containment holds.
     const skillTarget = this.skillTargets.get(match);
     if (skillTarget !== undefined) {
-      const rel = path.relative(match, resolved);
-      for (const layout of [".claude", ".agents"]) {
-        const prefix = `${layout}${path.sep}skills`;
-        if (rel === prefix || rel.startsWith(`${prefix}${path.sep}`)) {
-          const rewritten = path.join(skillTarget, rel.slice(prefix.length + 1));
-          return { rootDir: skillTarget, filePath: rewritten };
-        }
+      const [layout, skills, ...rest] = path.relative(match, resolved).split(path.sep);
+      if ((layout === ".claude" || layout === ".agents") && skills === "skills") {
+        return { rootDir: skillTarget, filePath: path.join(skillTarget, ...rest) };
       }
     }
     // Preserve symlink/.. traversal for filesystem resolution.

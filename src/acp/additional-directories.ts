@@ -68,14 +68,18 @@ export async function resolveAdditionalDirectories(
   return dirs.length > 0 ? { dirs, skillTargets } : undefined;
 }
 
+function normalizeDirs(dirs: readonly string[] | undefined): string[] {
+  return [
+    ...new Set(dirs?.filter((entry) => entry.length > 0).map((entry) => path.resolve(entry)) ?? []),
+  ];
+}
+
 async function collectRawDirs(
   dirs: readonly string[] | undefined,
   options: ResolveAdditionalDirectoriesOptions,
 ): Promise<string[]> {
   const merged: string[] = [];
-  for (const dir of new Set(
-    dirs?.filter((entry) => entry.length > 0).map((entry) => path.resolve(entry)) ?? [],
-  )) {
+  for (const dir of normalizeDirs(dirs)) {
     try {
       await assertDirectoryExists("--additional-dir", dir);
       merged.push(dir);
@@ -94,12 +98,9 @@ async function collectSkillsRoots(
   options: ResolveAdditionalDirectoriesOptions,
 ): Promise<Map<string, string>> {
   const roots = new Map<string, string>();
+  // Canonicalize so distinct lexical paths sharing a realpath map to one root.
   const resolved = await Promise.all(
-    [
-      ...new Set(
-        dirs?.filter((entry) => entry.length > 0).map((entry) => path.resolve(entry)) ?? [],
-      ),
-    ].map(async (dir) => await fs.realpath(dir).catch(() => dir)),
+    normalizeDirs(dirs).map(async (dir) => await fs.realpath(dir).catch(() => dir)),
   );
   for (const dir of new Set(resolved)) {
     try {
@@ -155,42 +156,57 @@ function skillsRootsBase(): string {
 }
 
 /**
- * Links `<root>/<layout>/skills` → target. An existing link to the same
- * target is reused; a link to a different live target means a hash collision
- * and fails; a dangling link is replaced. "junction" works on Windows without
- * elevation and is ignored on POSIX.
+ * Links `<root>/<layout>/skills` → target (already canonicalized by the
+ * caller). An existing link to the same target is reused; a link to a
+ * different live target means a hash collision and fails; a dangling link is
+ * replaced. "junction" works on Windows without elevation and is ignored on
+ * POSIX. One retry covers a concurrent creator winning the lstat→symlink gap.
  */
 async function linkSkillsDir(root: string, layout: string, target: string): Promise<void> {
   const link = path.join(root, layout, "skills");
-  const resolvedTarget = await fs.realpath(target).catch(() => target);
   await fs.mkdir(path.dirname(link), { recursive: true, mode: 0o700 });
 
-  const existing = await fs.lstat(link).catch(() => undefined);
-  if (existing?.isSymbolicLink()) {
-    const current = await fs.realpath(link).catch(() => undefined);
-    if (current === resolvedTarget) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (await clearExistingLink(root, link, target)) {
       return;
     }
-    if (current !== undefined) {
-      throw skillsRootConflictError(root, current, resolvedTarget);
+    try {
+      await fs.symlink(target, link, "junction");
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST" || attempt === 1) {
+        throw error;
+      }
     }
-    await fs.rm(link, { force: true });
-  } else if (existing) {
+  }
+}
+
+/**
+ * Handles a path already occupying `link`: returns true when it is a symlink
+ * to our target, removes a dangling symlink and returns false, and throws on
+ * a live link to a different target (hash collision) or a non-symlink.
+ */
+async function clearExistingLink(root: string, link: string, target: string): Promise<boolean> {
+  const existing = await fs.lstat(link).catch(() => undefined);
+  if (existing === undefined) {
+    return false;
+  }
+  if (!existing.isSymbolicLink()) {
     throw new AcpxOperationalError(`Cannot link skills dir: ${link} exists and is not a symlink`, {
       outputCode: "RUNTIME",
       origin: "acp",
       detailCode: "SKILLS_ROOT_CONFLICT",
     });
   }
-
-  try {
-    await fs.symlink(resolvedTarget, link, "junction");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      throw error;
-    }
-    await resolveLinkRace(root, link, resolvedTarget);
+  const current = await fs.realpath(link).catch(() => undefined);
+  if (current === target) {
+    return true;
   }
+  if (current !== undefined) {
+    throw skillsRootConflictError(root, current, target);
+  }
+  await fs.rm(link, { force: true });
+  return false;
 }
 
 function skillsRootConflictError(
@@ -202,24 +218,6 @@ function skillsRootConflictError(
     `Skills root ${root} is owned by "${owner}", not "${target}" (hash collision)`,
     { outputCode: "RUNTIME", origin: "acp", detailCode: "SKILLS_ROOT_CONFLICT" },
   );
-}
-
-/**
- * A concurrent acpx process created the link between lstat and symlink.
- * Accept it when the winner points at our target; replace a dangling winner
- * once; a live winner pointing elsewhere is a hash collision.
- */
-async function resolveLinkRace(root: string, link: string, target: string): Promise<void> {
-  const winner = await fs.realpath(link).catch(() => undefined);
-  if (winner === target) {
-    return;
-  }
-  if (winner === undefined) {
-    await fs.rm(link, { force: true });
-    await fs.symlink(target, link, "junction");
-    return;
-  }
-  throw skillsRootConflictError(root, winner, target);
 }
 
 /**

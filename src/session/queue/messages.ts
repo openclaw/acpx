@@ -365,12 +365,12 @@ function assignSessionStringList(
     if (value == null) {
       return true;
     }
-    if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    if (!Array.isArray(value) || !value.every((item): item is string => typeof item === "string")) {
       return false;
     }
     // Unlike allowedTools, an empty dir list is a no-op rather than a "clear"
     // signal — mergeSessionOptions would otherwise inherit owner-level dirs.
-    const items = (value as string[]).filter((item) => item.length > 0);
+    const items = value.filter((item) => item.length > 0);
     if (items.length > 0) {
       options[key] = items;
     }
