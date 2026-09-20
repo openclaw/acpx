@@ -5,6 +5,18 @@ description: cancel, set-mode, set, set model, and status — the verbs that adj
 
 These commands change live session state without restarting an adapter or losing history. They route through the queue owner when one is active, and reconnect directly otherwise.
 
+A warm owner applies settings on its retained adapter even when no prompt is
+running. During a prompt, controls can finish before the prompt ends. The owner
+saves accepted mode, model, and configuration changes before acknowledging them;
+prompt completion and close wait for admitted controls to finish their state
+updates.
+
+If a control times out after it may have reached the adapter, treat its result as
+uncertain. acpx does not repeat the setting automatically. Accepted replies still
+finish saving their state, and unfinished connections are retired before another
+prompt uses that context. Already running older owners and older callers retain
+their previous persistence behavior until they are replaced.
+
 ## `cancel`
 
 ```bash
