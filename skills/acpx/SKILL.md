@@ -450,6 +450,8 @@ acpx --format json codex exec 'review changed files' \
 
 If every permission request is denied/cancelled and none approved, `acpx` exits with permission-denied status.
 
+Interactive tool, file-write, and terminal questions are serialized within each acpx process. Each question needs a separate answer; EOF denies active and waiting questions.
+
 When a tool kind is absent, read/search approval is inferred only from complete leading action words. Filenames or substrings in other action titles do not grant approval; ambiguous titles still require the normal permission decision.
 
 Codex refusals prefer an offered non-cancelling one-time rejection. If safe refusal uses cancellation, acpx explains the possible turn termination in text output, quiet stderr, JSON response `_meta.acpx.permissionNotice`, and embedded status events. Permission denial never grants the requested operation. See [Codex](https://github.com/openclaw/acpx/blob/main/agents/Codex.md#permission-refusals).

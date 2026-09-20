@@ -116,6 +116,8 @@ For the identified Codex ACP adapter, acpx prefers its offered one-time refusal 
 
 There is no per-session "approve next 3" option. Every non-read request is its own prompt unless you pass `--approve-all`.
 
+Interactive tool, file-write, and terminal questions share one input queue per acpx process. Only one question is shown at a time, and each requires its own answer. Closing stdin denies the current question and any waiting questions.
+
 ## Non-interactive policy
 
 When there is no TTY (pipes, CI, queued prompts driven by another process), the prompt cannot be shown. `--non-interactive-permissions` decides what happens:

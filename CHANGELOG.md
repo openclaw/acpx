@@ -13,6 +13,7 @@ Repo: https://github.com/openclaw/acpx
 - Agents/config: preserve custom names such as `constructor` and `__proto__` through resolution, listing, and config display instead of treating them as inherited object properties.
 - CLI/config: load project permissions and relative MCP configuration from the final top-level `--cwd` and `--mcp-config` values, matching command execution.
 - CLI/output: honor explicit JSON and quiet output flags for configuration startup errors instead of printing an uncaught stack trace.
+- Permissions: serialize interactive tool, file-write, and terminal questions so one answer cannot approve multiple requests; deny waiting questions when stdin closes.
 
 ## 0.17.1 - 2026-09-19
 

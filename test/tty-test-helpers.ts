@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import readline from "node:readline/promises";
 
 type TtyState = {
@@ -43,11 +44,12 @@ export async function withMockedReadline<T>(
   run: () => Promise<T>,
 ): Promise<T> {
   const originalCreateInterface = readline.createInterface;
+  const createInterface = () => Object.assign(new EventEmitter(), factory());
   (
     readline as unknown as {
-      createInterface: typeof readline.createInterface;
+      createInterface: typeof createInterface;
     }
-  ).createInterface = factory as unknown as typeof readline.createInterface;
+  ).createInterface = createInterface;
 
   try {
     return await run();
