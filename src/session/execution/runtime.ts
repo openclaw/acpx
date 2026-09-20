@@ -40,7 +40,7 @@ import type {
   SessionRecord,
   SessionSendResult,
 } from "../../types.js";
-import { applyConfigOptionSelection, applyModelSelection } from "../config-options.js";
+import { applyModelSelection } from "../config-options.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,
@@ -60,6 +60,7 @@ import { type QueueOwnerActiveSessionController } from "../queue/owner-turn-cont
 import { acquireSessionTurn } from "../turn-ownership.js";
 import type { RunOnceOptions, SessionSendOptions } from "./contracts.js";
 import { DISCARD_OUTPUT_FORMATTER } from "./discard-output.js";
+import { createOwnedSessionControls } from "./owned-controls.js";
 
 const INTERRUPT_CANCEL_WAIT_MS = 2_500;
 
@@ -74,6 +75,7 @@ type RunSessionPromptOptions = Omit<
   onClientClosed?: () => void;
   onClientCloseFailure?: () => void;
   onPromptActive?: () => Promise<void> | void;
+  onPromptFinalizing?: () => Promise<void>;
   onPromptRequestWritten?: () => Promise<void> | void;
 };
 
@@ -486,6 +488,7 @@ function buildQueuedTaskRunOptions(
     onClientClosed: options.onClientClosed,
     onClientCloseFailure: options.onClientCloseFailure,
     onPromptActive: options.onPromptActive,
+    onPromptFinalizing: options.onPromptFinalizing,
     onPromptRequestWritten: () => {
       if (task.reportPromptStarted) {
         task.send({ type: "prompt_started", requestId: task.requestId });
@@ -549,6 +552,7 @@ export async function runQueuedTask(
     onClientClosed?: () => void;
     onClientCloseFailure?: () => void;
     onPromptActive?: () => Promise<void> | void;
+    onPromptFinalizing?: () => Promise<void>;
     handleProcessInterrupts?: boolean;
     waitSignal?: AbortSignal;
   },
@@ -872,35 +876,23 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
   });
   let activeSessionIdForControl = record.acpSessionId;
   let notifiedClientAvailable = false;
+  let controlRetirement: Promise<void> | undefined;
   const activeController: ActiveSessionController = {
     hasActivePrompt: () => client.hasActivePrompt(),
     requestCancelActivePrompt: async () => await client.requestCancelActivePrompt(),
-    setSessionMode: async (modeId: string) => {
-      await client.setSessionMode(activeSessionIdForControl, modeId);
-    },
-    setSessionModel: async (modelId: string) => {
-      const models = advertisedModelState(record.acpx);
-      const response = await client.setSessionModel(activeSessionIdForControl, modelId, models);
-      record.acpx = applyModelSelection(record.acpx, modelId, response);
-      return response;
-    },
-    setSessionConfigOption: async (configId: string, value: string) => {
-      // Preserve the selected control's identity across pre-ack notifications.
-      const modelConfigId = advertisedModelState(record.acpx)?.configId;
-      const response = await client.setSessionConfigOption(
-        activeSessionIdForControl,
-        configId,
-        value,
-      );
-      record.acpx = applyConfigOptionSelection(
-        record.acpx,
-        configId,
-        value,
-        response,
-        modelConfigId,
-      );
-      return response;
-    },
+    ...createOwnedSessionControls({
+      client,
+      record,
+      sessionId: () => activeSessionIdForControl,
+      checkpoint: () => liveCheckpoint.checkpoint(),
+      retire: () => {
+        controlRetirement ??= client.close().catch((error: unknown) => {
+          options.onClientCloseFailure?.();
+          throw error;
+        });
+        return controlRetirement;
+      },
+    }),
   };
 
   const flushConnectOutput = (loadError?: string): void => {
@@ -1121,6 +1113,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
   };
 
   const cleanupPrompt = async (attempt: SettledOperation<SessionSendResult>): Promise<void> => {
+    const controlDrain = options.onPromptFinalizing?.();
     const unresolvedPrompt = client.hasUnresolvedPrompt();
     const steps = [
       async () => {
@@ -1147,6 +1140,9 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
             throw error;
           }
         }
+      },
+      async () => {
+        await controlDrain;
       },
       () => {
         const duration = stopTotalTimer();

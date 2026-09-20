@@ -53,10 +53,13 @@ export async function setSessionMode(
     options.timeoutMs,
     options.verbose,
   );
-  if (submittedToOwner) {
+  if (submittedToOwner?.value) {
     const record = await resolveSessionRecord(options.sessionId);
-    setDesiredModeId(record, options.modeId);
-    await writeSessionRecord(record);
+    if (!submittedToOwner.persistsControlState) {
+      // v0.17.1 owners rely on the caller to persist acknowledged controls.
+      setDesiredModeId(record, options.modeId);
+      await writeSessionRecord(record);
+    }
     return {
       record,
       resumed: false,
@@ -88,11 +91,17 @@ export async function setSessionModel(
   );
   if (submittedToOwner) {
     const record = await resolveSessionRecord(options.sessionId);
-    record.acpx = applyModelSelection(record.acpx, options.modelId, submittedToOwner.response);
-    await writeSessionRecord(record);
+    if (!submittedToOwner.persistsControlState) {
+      record.acpx = applyModelSelection(
+        record.acpx,
+        options.modelId,
+        submittedToOwner.value.response,
+      );
+      await writeSessionRecord(record);
+    }
     return {
       record,
-      response: submittedToOwner.response,
+      response: submittedToOwner.value.response,
       resumed: false,
     };
   }
@@ -123,16 +132,18 @@ export async function setSessionConfigOption(
   );
   if (ownerResponse) {
     const record = await resolveSessionRecord(options.sessionId);
-    record.acpx = applyConfigOptionSelection(
-      record.acpx,
-      options.configId,
-      options.value,
-      ownerResponse,
-    );
-    await writeSessionRecord(record);
+    if (!ownerResponse.persistsControlState) {
+      record.acpx = applyConfigOptionSelection(
+        record.acpx,
+        options.configId,
+        options.value,
+        ownerResponse.value,
+      );
+      await writeSessionRecord(record);
+    }
     return {
       record,
-      response: ownerResponse,
+      response: ownerResponse.value,
       resumed: false,
     };
   }

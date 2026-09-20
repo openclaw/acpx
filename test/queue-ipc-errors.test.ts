@@ -609,7 +609,8 @@ test("trySetConfigOptionOnRunningOwner returns the queue owner response", async 
         true,
       );
       assert.deepEqual(response, {
-        configOptions: [],
+        value: { configOptions: [] },
+        persistsControlState: false,
       });
     } finally {
       await closeServer(server);

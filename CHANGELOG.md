@@ -26,6 +26,10 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/close: preserve final cancellation output, usage and configuration updates when soft-closing an active session.
 - Sessions/retries: stop queued attempts after cancellation during backoff or prompt admission, while preserving already-received final responses and independent queued turns.
 
+- Sessions/ownership: serialize abandoned turn recovery and final cleanup across processes, preserve live owners, and keep cancelled waiters from acquiring a later turn.
+
+- Sessions/controls: update the retained adapter while idle, save accepted mode/model/configuration changes before acknowledgement, and preserve them across prompt completion, timeout cleanup, and close.
+
 ## 0.17.1 - 2026-09-19
 
 **Highlights:** Configured runtime initialization deadlines now stop unresponsive agents and clean up abandoned launches safely. Embedding hosts gain model inspection and session-specific permissions. Antigravity joins the built-in agents; its fixed-choice questions require an interactive client, including for existing custom launchers.

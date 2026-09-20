@@ -376,6 +376,7 @@ export class SessionQueueOwner {
     requestId: string;
     run: () => Promise<TMessage>;
   }): void {
+    this.taskSockets.add(options.socket);
     writeQueueMessage(options.socket, {
       type: "accepted",
       requestId: options.requestId,

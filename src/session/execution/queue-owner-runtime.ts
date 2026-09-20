@@ -12,6 +12,10 @@ import {
 import type { SessionSendOutcome } from "../../types.js";
 import { absolutePath, resolveSessionRecord, writeSessionRecord } from "../persistence.js";
 import {
+  QueueOwnerControlAdmission,
+  type PromptControlTicket,
+} from "../queue/control-admission.js";
+import {
   QUEUE_CONNECT_RETRY_MS,
   SessionQueueOwner,
   releaseQueueOwnerLease,
@@ -27,12 +31,8 @@ import {
   normalizeQueueOwnerTtlMs,
   type SessionSendOptions,
 } from "./contracts.js";
-import {
-  runSessionSetConfigOptionDirect,
-  runSessionSetModelDirect,
-  runSessionSetModeDirect,
-  type ActiveSessionController,
-} from "./prompt-runner.js";
+import { runIdleOwnerControl } from "./owned-controls.js";
+import type { ActiveSessionController } from "./prompt-runner.js";
 import type {
   QueueOwnerProcessExitState,
   QueueOwnerRuntimeOptions,
@@ -103,59 +103,6 @@ function createQueueOwnerSharedClient(
       options.sessionOptions,
       sessionOptionsFromRecord(sessionRecord),
     ),
-  });
-}
-
-function createQueueOwnerTurnController(
-  options: QueueOwnerRuntimeOptions,
-): QueueOwnerTurnController {
-  return new QueueOwnerTurnController({
-    withTimeout: async (run, timeoutMs) => await withTimeout(run(), timeoutMs),
-    setSessionModeFallback: async (modeId: string, timeoutMs?: number) => {
-      await runSessionSetModeDirect({
-        sessionRecordId: options.sessionId,
-        modeId,
-        mcpServers: options.mcpServers,
-        nonInteractivePermissions: options.nonInteractivePermissions,
-        authCredentials: options.authCredentials,
-        authPolicy: options.authPolicy,
-        fs: options.fs,
-        terminal: options.terminal,
-        timeoutMs,
-        verbose: options.verbose,
-      });
-    },
-    setSessionModelFallback: async (modelId: string, timeoutMs?: number) => {
-      const result = await runSessionSetModelDirect({
-        sessionRecordId: options.sessionId,
-        modelId,
-        mcpServers: options.mcpServers,
-        nonInteractivePermissions: options.nonInteractivePermissions,
-        authCredentials: options.authCredentials,
-        authPolicy: options.authPolicy,
-        fs: options.fs,
-        terminal: options.terminal,
-        timeoutMs,
-        verbose: options.verbose,
-      });
-      return result.response;
-    },
-    setSessionConfigOptionFallback: async (configId: string, value: string, timeoutMs?: number) => {
-      const result = await runSessionSetConfigOptionDirect({
-        sessionRecordId: options.sessionId,
-        configId,
-        value,
-        mcpServers: options.mcpServers,
-        nonInteractivePermissions: options.nonInteractivePermissions,
-        authCredentials: options.authCredentials,
-        authPolicy: options.authPolicy,
-        fs: options.fs,
-        terminal: options.terminal,
-        timeoutMs,
-        verbose: options.verbose,
-      });
-      return result.response;
-    },
   });
 }
 
@@ -247,6 +194,7 @@ type QueueOwnerShutdownController = {
   request: () => void;
   setActiveTurn: (turn: Promise<void>) => void;
   clearActiveTurn: (turn: Promise<void>) => void;
+  drain: () => Promise<void>;
   shutdown: () => Promise<void>;
 };
 
@@ -254,6 +202,8 @@ function createQueueOwnerShutdownController(params: {
   getOwner: () => SessionQueueOwner | undefined;
   stopHeartbeat: () => void;
   turnController: QueueOwnerTurnController;
+  controls: QueueOwnerControlAdmission;
+  getBackendClose: () => Promise<boolean> | undefined;
   sharedClient: AcpClient;
   sessionId: string;
   verbose?: boolean;
@@ -265,15 +215,14 @@ function createQueueOwnerShutdownController(params: {
 
   const drainActiveTurn = async (): Promise<void> => {
     const turn = activeTurn;
-    if (!turn) {
-      return;
+    const pending = Promise.allSettled([turn, params.controls.drainAdmitted()]);
+    if (turn) {
+      void params.turnController.requestCancel().catch((error) => {
+        logDeferredCancelFailure(error, params.verbose);
+      });
     }
 
-    void params.turnController.requestCancel().catch((error) => {
-      logDeferredCancelFailure(error, params.verbose);
-    });
-
-    if (!(await settlesWithin(turn, QUEUE_OWNER_ACTIVE_TURN_CANCEL_GRACE_MS))) {
+    if (!(await settlesWithin(pending, QUEUE_OWNER_ACTIVE_TURN_CANCEL_GRACE_MS))) {
       // A bridge that ignores session/cancel must still be terminated before
       // the external queue-owner SIGKILL deadline. Closing it forces the active
       // turn to unwind; the lease remains held until that unwind completes.
@@ -281,15 +230,13 @@ function createQueueOwnerShutdownController(params: {
         // best effort while forcing active-turn cancellation
       });
     }
-    await turn.catch(() => {
-      // The main loop preserves the original turn result; shutdown only waits
-      // for its cleanup boundary before releasing the lease.
-    });
+    await pending;
   };
 
   const request = (): void => {
     requested = true;
     params.stopHeartbeat();
+    params.controls.stopAdmission();
     params.getOwner()?.beginShutdown();
     activeTurnShutdown ??= drainActiveTurn();
   };
@@ -301,16 +248,24 @@ function createQueueOwnerShutdownController(params: {
     request,
     setActiveTurn: (turn) => {
       activeTurn = turn;
+      if (requested) {
+        activeTurnShutdown = Promise.all([activeTurnShutdown, drainActiveTurn()]).then(() => {});
+      }
     },
     clearActiveTurn: (turn) => {
       if (activeTurn === turn) {
         activeTurn = undefined;
       }
     },
+    drain: () => {
+      request();
+      return activeTurnShutdown!;
+    },
     shutdown: () => {
       request();
       shutdownPromise ??= (async () => {
         await activeTurnShutdown;
+        await params.getBackendClose()?.catch(() => {});
         await closeQueueOwnerRuntime({
           owner: params.getOwner(),
           turnController: params.turnController,
@@ -365,6 +320,17 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
   }
 }
 
+async function keepOwnerForPendingControls(
+  controls: QueueOwnerControlAdmission,
+  shutdown: QueueOwnerShutdownController,
+): Promise<boolean> {
+  if (shutdown.requested || !controls.hasPending) {
+    return false;
+  }
+  await controls.drainAdmitted();
+  return !shutdown.requested;
+}
+
 async function runQueueOwnerRuntime(
   options: QueueOwnerRuntimeOptions,
   lease: QueueOwnerLease,
@@ -378,7 +344,22 @@ async function runQueueOwnerRuntime(
   const taskPollTimeoutMs = ttlMs === 0 ? undefined : ttlMs;
   const initialTaskPollTimeoutMs =
     taskPollTimeoutMs == null ? undefined : Math.max(taskPollTimeoutMs, 1_000);
-  const turnController = createQueueOwnerTurnController(options);
+  const turnController = new QueueOwnerTurnController();
+  let activeControls: ActiveSessionController | undefined;
+  let backendCloseRequest: Promise<boolean> | undefined;
+  const controls = new QueueOwnerControlAdmission({
+    runIdle: async (invoke, controlOptions) =>
+      await runIdleOwnerControl(
+        {
+          ...controlOptions,
+          client: sharedClient,
+          sessionId: options.sessionId,
+          verbose: options.verbose,
+          onRetirementFailure: () => shutdown.request(),
+        },
+        invoke,
+      ),
+  });
 
   const applyPendingCancel = async (): Promise<boolean> => {
     return await turnController.applyPendingCancel();
@@ -391,28 +372,43 @@ async function runQueueOwnerRuntime(
   };
 
   const setActiveController = (controller: ActiveSessionController) => {
+    activeControls = controller;
     turnController.setActiveController(controller);
     scheduleApplyPendingCancel();
   };
 
   const clearActiveController = () => {
+    activeControls = undefined;
     turnController.clearActiveController();
   };
 
-  const closeActiveBackendSession = async (timeoutMs?: number): Promise<boolean> => {
-    const latestRecord = await resolveSessionRecord(options.sessionId);
-    if (!sharedClient.supportsCloseSession()) {
-      return false;
-    }
-    await withTimeout(sharedClient.closeSession(latestRecord.acpSessionId), timeoutMs);
-    return true;
+  const closeActiveBackendSession = (timeoutMs?: number): Promise<boolean> => {
+    backendCloseRequest ??= Promise.resolve().then(async () => {
+      await shutdown.drain();
+      const latestRecord = await resolveSessionRecord(options.sessionId);
+      if (!sharedClient.supportsCloseSession()) {
+        return false;
+      }
+      await withTimeout(sharedClient.closeSession(latestRecord.acpSessionId), timeoutMs);
+      return true;
+    });
+    return backendCloseRequest;
   };
 
-  const runPromptTurn = async <T>(run: (waitSignal: AbortSignal) => Promise<T>): Promise<T> => {
+  const runPromptTurn = async <T>(
+    run: (waitSignal: AbortSignal, ticket: PromptControlTicket) => Promise<T>,
+  ): Promise<T> => {
     const waitSignal = turnController.beginTurn();
+    const { ticket, priorIdle } = controls.beginPrompt();
+    if (shutdown.requested) {
+      void turnController.requestCancel().catch(() => {});
+    }
     try {
-      return await run(waitSignal);
+      await priorIdle;
+      return await run(waitSignal, ticket);
     } finally {
+      await controls.seal(ticket);
+      controls.release(ticket);
       turnController.endTurn();
     }
   };
@@ -426,6 +422,8 @@ async function runQueueOwnerRuntime(
       }
     },
     turnController,
+    controls,
+    getBackendClose: () => backendCloseRequest,
     sharedClient,
     sessionId: options.sessionId,
     verbose: options.verbose,
@@ -453,12 +451,23 @@ async function runQueueOwnerRuntime(
         },
         closeSession: async (timeoutMs?: number) => await closeActiveBackendSession(timeoutMs),
         setSessionMode: async (modeId: string, timeoutMs?: number) => {
-          await turnController.setSessionMode(modeId, timeoutMs);
+          await controls.run(
+            (context, deadline) => context.setSessionMode(modeId, deadline),
+            timeoutMs,
+          );
         },
         setSessionModel: async (modelId: string, timeoutMs?: number) =>
-          await turnController.setSessionModel(modelId, timeoutMs),
+          await controls.run(
+            (context, deadline) => context.setSessionModel(modelId, deadline),
+            timeoutMs,
+            { key: "model" },
+          ),
         setSessionConfigOption: async (configId: string, value: string, timeoutMs?: number) => {
-          return await turnController.setSessionConfigOption(configId, value, timeoutMs);
+          return await controls.run(
+            (context, deadline) => context.setSessionConfigOption(configId, value, deadline),
+            timeoutMs,
+            { key: configId },
+          );
         },
       },
       {
@@ -493,11 +502,14 @@ async function runQueueOwnerRuntime(
       const pollTimeoutMs = isFirstTask ? initialTaskPollTimeoutMs : taskPollTimeoutMs;
       const task = await owner.nextTask(pollTimeoutMs);
       if (!task) {
+        if (await keepOwnerForPendingControls(controls, shutdown)) {
+          continue;
+        }
         break;
       }
       isFirstTask = false;
 
-      const turnPromise = runPromptTurn(async (waitSignal) => {
+      const turnPromise = runPromptTurn(async (waitSignal, ticket) => {
         try {
           await runQueuedTask(options.sessionId, task, {
             sharedClient,
@@ -513,7 +525,11 @@ async function runQueueOwnerRuntime(
             onClientAvailable: setActiveController,
             onClientClosed: clearActiveController,
             onClientCloseFailure: shutdown.request,
+            onPromptFinalizing: () => controls.seal(ticket),
             onPromptActive: async () => {
+              if (activeControls) {
+                controls.publish(ticket, activeControls);
+              }
               turnController.markPromptActive();
               await applyPendingCancel();
             },

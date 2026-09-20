@@ -791,18 +791,33 @@ export async function tryCancelOnRunningOwner(options: {
   });
 }
 
+type OwnerControlResult<T> = {
+  value: T;
+  persistsControlState: boolean;
+};
+
+async function withOwnerControlPersistence<T>(
+  owner: QueueOwnerRecord,
+  operation: Promise<T | undefined>,
+): Promise<OwnerControlResult<T> | undefined> {
+  const persistsControlState = owner.persistsControlState === true;
+  const value = await operation;
+  return value === undefined ? undefined : { value, persistsControlState };
+}
+
 export async function trySetModeOnRunningOwner(
   sessionId: string,
   modeId: string,
   timeoutMs: number | undefined,
   verbose: boolean | undefined,
-): Promise<boolean | undefined> {
+): Promise<OwnerControlResult<boolean> | undefined> {
   return await tryControlOnRunningOwner({
     sessionId,
     verbose,
     requestName: "set_mode",
     logPrefix: "[acpx] requested session/set_mode on owner pid",
-    submit: (owner) => submitSetModeToQueueOwner(owner, modeId, timeoutMs),
+    submit: (owner) =>
+      withOwnerControlPersistence(owner, submitSetModeToQueueOwner(owner, modeId, timeoutMs)),
   });
 }
 
@@ -811,13 +826,14 @@ export async function trySetModelOnRunningOwner(
   modelId: string,
   timeoutMs: number | undefined,
   verbose: boolean | undefined,
-): Promise<QueueOwnerSetModelResultMessage | undefined> {
+): Promise<OwnerControlResult<QueueOwnerSetModelResultMessage> | undefined> {
   return await tryControlOnRunningOwner({
     sessionId,
     verbose,
     requestName: "set_model",
     logPrefix: "[acpx] requested a model config update on owner pid",
-    submit: (owner) => submitSetModelToQueueOwner(owner, modelId, timeoutMs),
+    submit: (owner) =>
+      withOwnerControlPersistence(owner, submitSetModelToQueueOwner(owner, modelId, timeoutMs)),
   });
 }
 
@@ -827,12 +843,16 @@ export async function trySetConfigOptionOnRunningOwner(
   value: string,
   timeoutMs: number | undefined,
   verbose: boolean | undefined,
-): Promise<SetSessionConfigOptionResponse | undefined> {
+): Promise<OwnerControlResult<SetSessionConfigOptionResponse> | undefined> {
   return await tryControlOnRunningOwner({
     sessionId,
     verbose,
     requestName: "set_config_option",
     logPrefix: "[acpx] requested session/set_config_option on owner pid",
-    submit: (owner) => submitSetConfigOptionToQueueOwner(owner, configId, value, timeoutMs),
+    submit: (owner) =>
+      withOwnerControlPersistence(
+        owner,
+        submitSetConfigOptionToQueueOwner(owner, configId, value, timeoutMs),
+      ),
   });
 }

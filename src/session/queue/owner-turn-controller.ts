@@ -1,43 +1,17 @@
-import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
-import { QueueConnectionError } from "../../errors.js";
+import type { QueueOwnerControlMethods } from "./control-admission.js";
 
 export type QueueOwnerTurnState = "idle" | "starting" | "active" | "closing";
 
-export type QueueOwnerActiveSessionController = {
+export type QueueOwnerActiveSessionController = QueueOwnerControlMethods & {
   hasActivePrompt: () => boolean;
   requestCancelActivePrompt: () => Promise<boolean>;
-  setSessionMode: (modeId: string) => Promise<void>;
-  setSessionModel: (modelId: string) => Promise<SetSessionConfigOptionResponse | undefined>;
-  setSessionConfigOption: (
-    configId: string,
-    value: string,
-  ) => Promise<SetSessionConfigOptionResponse>;
-};
-
-type QueueOwnerTurnControllerOptions = {
-  withTimeout: <T>(run: () => Promise<T>, timeoutMs?: number) => Promise<T>;
-  setSessionModeFallback: (modeId: string, timeoutMs?: number) => Promise<void>;
-  setSessionModelFallback: (
-    modelId: string,
-    timeoutMs?: number,
-  ) => Promise<SetSessionConfigOptionResponse | undefined>;
-  setSessionConfigOptionFallback: (
-    configId: string,
-    value: string,
-    timeoutMs?: number,
-  ) => Promise<SetSessionConfigOptionResponse>;
 };
 
 export class QueueOwnerTurnController {
-  private readonly options: QueueOwnerTurnControllerOptions;
   private state: QueueOwnerTurnState = "idle";
   private pendingCancel = false;
   private activeController?: QueueOwnerActiveSessionController;
   private waitingTurn?: AbortController;
-
-  constructor(options: QueueOwnerTurnControllerOptions) {
-    this.options = options;
-  }
 
   get lifecycleState(): QueueOwnerTurnState {
     return this.state;
@@ -80,16 +54,6 @@ export class QueueOwnerTurnController {
     this.activeController = undefined;
   }
 
-  private assertCanHandleControlRequest(): void {
-    if (this.state === "closing") {
-      throw new QueueConnectionError("Queue owner is closing", {
-        detailCode: "QUEUE_OWNER_SHUTTING_DOWN",
-        origin: "queue",
-        retryable: true,
-      });
-    }
-  }
-
   async requestCancel(): Promise<boolean> {
     const activeController = this.activeController;
     if (activeController?.hasActivePrompt()) {
@@ -126,52 +90,5 @@ export class QueueOwnerTurnController {
       this.pendingCancel = false;
     }
     return cancelled;
-  }
-
-  async setSessionMode(modeId: string, timeoutMs?: number): Promise<void> {
-    this.assertCanHandleControlRequest();
-    const activeController = this.activeController;
-    if (activeController) {
-      await this.options.withTimeout(
-        async () => await activeController.setSessionMode(modeId),
-        timeoutMs,
-      );
-      return;
-    }
-
-    await this.options.setSessionModeFallback(modeId, timeoutMs);
-  }
-
-  async setSessionModel(
-    modelId: string,
-    timeoutMs?: number,
-  ): Promise<SetSessionConfigOptionResponse | undefined> {
-    this.assertCanHandleControlRequest();
-    const activeController = this.activeController;
-    if (activeController) {
-      return await this.options.withTimeout(
-        async () => await activeController.setSessionModel(modelId),
-        timeoutMs,
-      );
-    }
-
-    return await this.options.setSessionModelFallback(modelId, timeoutMs);
-  }
-
-  async setSessionConfigOption(
-    configId: string,
-    value: string,
-    timeoutMs?: number,
-  ): Promise<SetSessionConfigOptionResponse> {
-    this.assertCanHandleControlRequest();
-    const activeController = this.activeController;
-    if (activeController) {
-      return await this.options.withTimeout(
-        async () => await activeController.setSessionConfigOption(configId, value),
-        timeoutMs,
-      );
-    }
-
-    return await this.options.setSessionConfigOptionFallback(configId, value, timeoutMs);
   }
 }

@@ -51,6 +51,12 @@ acpx pi sessions show reviewer
 
 New sessions are created using the normal CLI path. Prompt submission starts or joins the existing queue owner, which keeps the live connection for its idle TTL. Shared turns require the saved provider session to resume successfully; an unavailable session produces an error instead of silently creating a different conversation. The agent must support loading or resuming sessions.
 
+CLI mode, model, and configuration controls update the same retained connection
+for a shared session, including while the owner is idle. Accepted controls are
+saved by the owner before success is returned. A prompt starting behind an idle
+control reads its saved state after that control finishes; an active prompt keeps
+its control context until pending acknowledgements and checkpoints settle.
+
 ## Turns, cancellation, and disconnects
 
 Use [`runtime.watchSession({ handle, cursor?, signal? })`](session-watch.md) to observe another client's session without submitting work. Watch streams replay retained events and follow new ones, independently of the submitting connection.

@@ -415,8 +415,10 @@ Queueing is per persistent session.
 - Other invocations submit prompts over local IPC.
 - On Unix-like systems, queue IPC uses a Unix socket under `~/.acpx/queues/<hash>.sock`.
 - Ownership is coordinated with a lock file under `~/.acpx/queues/<hash>.lock`.
+- Persistent turns retain a separate filesystem guard through checkpoint and cleanup. Waiting can be cancelled; admitted ownership ends only after cleanup. Live guards never expire by age, and ambiguous guard state is preserved. See [session ownership](../../docs/sessions.md#queue-ownership).
 - On Windows, named pipes are used instead of Unix sockets.
 - after the queue drains, owner shutdown is governed by TTL (default 300s, configurable with `--ttl`).
+- Session controls use the retained adapter while active or idle, and the owner saves accepted settings before success. Idle controls keep the owner alive; prompt completion and close drain admitted controls. Treat timed-out settings as uncertain and do not repeat them automatically. Older callers or retained owners keep their previous persistence behavior.
 
 Submission behavior:
 

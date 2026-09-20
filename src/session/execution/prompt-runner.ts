@@ -1,4 +1,4 @@
-import { withTimeout } from "../../async-control.js";
+import { TimeoutError, withTimeout } from "../../async-control.js";
 import {
   withConnectedSession,
   type FullConnectedSessionController,
@@ -18,6 +18,7 @@ import { setDesiredModeId } from "../mode-preference.js";
 import { advertisedModelState } from "../model-state.js";
 import { resolveSessionRecord, writeSessionRecord } from "../persistence.js";
 import type { QueueOwnerActiveSessionController } from "../queue/owner-turn-controller.js";
+import { acquireSessionTurn } from "../turn-ownership.js";
 
 export type ActiveSessionController = QueueOwnerActiveSessionController;
 
@@ -87,10 +88,37 @@ function toSessionMutationResult(
   };
 }
 
+async function withOwnedDirectSession<T>(
+  options: WithConnectedSessionOptions<T>,
+): Promise<WithConnectedSessionResult<T>> {
+  const waiting = new AbortController();
+  const timeoutMs = options.timeoutMs;
+  const timer =
+    timeoutMs != null && timeoutMs > 0
+      ? setTimeout(() => waiting.abort(new TimeoutError(timeoutMs)), timeoutMs)
+      : undefined;
+  let ownership: AsyncDisposable;
+  let recordId: string;
+  try {
+    recordId = (await options.loadRecord(options.sessionRecordId)).acpxRecordId;
+    ownership = await acquireSessionTurn(recordId, waiting.signal);
+  } catch (error) {
+    waiting.signal.throwIfAborted();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+  try {
+    return await withConnectedSession({ ...options, sessionRecordId: recordId });
+  } finally {
+    await ownership[Symbol.asyncDispose]();
+  }
+}
+
 export async function runSessionSetModeDirect(
   options: RunSessionSetModeDirectOptions,
 ): Promise<SessionSetModeResult> {
-  const result = await withConnectedSession(
+  const result = await withOwnedDirectSession(
     buildDirectConnectedSessionOptions(options, async ({ client, sessionId, record }) => {
       await withTimeout(client.setSessionMode(sessionId, options.modeId), options.timeoutMs);
       setDesiredModeId(record, options.modeId);
@@ -103,7 +131,7 @@ export async function runSessionSetModeDirect(
 export async function runSessionSetModelDirect(
   options: RunSessionSetModelDirectOptions,
 ): Promise<SessionSetModelResult> {
-  const result = await withConnectedSession(
+  const result = await withOwnedDirectSession(
     buildDirectConnectedSessionOptions(
       { ...options, replacingConfigOption: { key: "model" } },
       async ({ client, sessionId, record }) => {
@@ -124,7 +152,7 @@ export async function runSessionSetModelDirect(
 export async function runSessionSetConfigOptionDirect(
   options: RunSessionSetConfigOptionDirectOptions,
 ): Promise<SessionSetConfigOptionResult> {
-  const result = await withConnectedSession(
+  const result = await withOwnedDirectSession(
     buildDirectConnectedSessionOptions(
       { ...options, replacingConfigOption: { key: options.configId } },
       async ({ client, sessionId, record }) => {

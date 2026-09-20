@@ -48,11 +48,31 @@ test("readQueueOwnerRecord returns undefined for missing and malformed lock file
   });
 });
 
+test("owner control persistence capability accepts only literal true", async () => {
+  await withTempHome(async (homeDir) => {
+    const paths = queuePaths(homeDir, "control-capability");
+    await writeQueueOwnerLock({ ...paths, sessionId: "control-capability", pid: process.pid });
+    const original = JSON.parse(await fs.readFile(paths.lockPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    for (const value of [undefined, false, "true", 1, true]) {
+      await fs.writeFile(
+        paths.lockPath,
+        JSON.stringify({ ...original, persistsControlState: value }),
+      );
+      const record = await readQueueOwnerRecord("control-capability");
+      assert.equal(record?.persistsControlState, value === true ? true : undefined);
+    }
+  });
+});
+
 test("tryAcquireQueueOwnerLease creates a lease that can be refreshed and released", async () => {
   await withTempHome(async () => {
     const lease = await tryAcquireQueueOwnerLease("lease-create");
     assert(lease);
     assert.equal(lease.sessionId, "lease-create");
+    assert.equal((await readQueueOwnerRecord("lease-create"))?.persistsControlState, true);
 
     await refreshQueueOwnerLease(
       lease,
@@ -65,6 +85,7 @@ test("tryAcquireQueueOwnerLease creates a lease that can be refreshed and releas
     const record = await readQueueOwnerRecord("lease-create");
     assert(record);
     assert.equal(record.queueDepth, 2);
+    assert.equal(record.persistsControlState, true);
     assert.equal(record.heartbeatAt, "2026-03-26T00:00:00.000Z");
     if (process.platform !== "win32") {
       assert.equal((await fs.stat(lease.lockPath)).mode & 0o777, 0o600);

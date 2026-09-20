@@ -35,12 +35,12 @@ for (const disposition of ["updated", "removed"]) {
       const admission = new Promise<void>((resolve) => {
         attempted = resolve;
       });
-      const link = fs.link.bind(fs);
-      t.mock.method(fs, "link", async (...args: Parameters<typeof fs.link>) => {
-        if (args[1] === sessionEventLockPath(record.acpxRecordId)) {
+      const realpath = fs.realpath.bind(fs);
+      t.mock.method(fs, "realpath", async (...args: Parameters<typeof fs.realpath>) => {
+        if (args[0] === path.dirname(sessionEventLockPath(record.acpxRecordId))) {
           attempted();
         }
-        return await link(...args);
+        return await realpath(...args);
       });
       const closing = closeSession(record.acpSessionId);
       void closing.catch(() => {});
