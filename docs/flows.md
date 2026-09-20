@@ -73,41 +73,57 @@ The agent owns reasoning, summarization, and tool calls inside `acp` and `decisi
 Define a flow with `defineFlow` from `acpx/flows`:
 
 ```ts
-import { defineFlow, acp, action, compute, decision } from "acpx/flows";
+import { acp, decision, decisionEdge, defineFlow } from "acpx/flows";
+
+type TriageInput = {
+  task: string;
+};
+
+const classifyChoices = ["bug", "feat", "doc"] as const;
 
 export default defineFlow({
-  id: "triage",
-  input: { task: "string" },
-  steps: {
+  name: "triage",
+  startAt: "classify",
+  nodes: {
     classify: decision({
-      agent: "codex",
-      prompt: ({ task }) => `Classify: ${task}\nLabels: bug | feat | doc`,
-      choices: ["bug", "feat", "doc"],
+      question: ({ input }) => `Classify: ${(input as TriageInput).task}`,
+      choices: classifyChoices,
     }),
-    fix: acp({ prompt: ({ task }) => `Implement and verify: ${task}` }),
-    write_doc: acp({ prompt: ({ task }) => `Draft docs entry for: ${task}` }),
+    fix: acp({
+      prompt: ({ input }) => `Implement and verify: ${(input as TriageInput).task}`,
+    }),
+    write_doc: acp({
+      prompt: ({ input }) => `Draft docs entry for: ${(input as TriageInput).task}`,
+    }),
   },
   edges: [
-    ["classify", "fix", (out) => out === "bug" || out === "feat"],
-    ["classify", "write_doc", (out) => out === "doc"],
+    decisionEdge({
+      from: "classify",
+      choices: classifyChoices,
+      cases: {
+        bug: "fix",
+        feat: "fix",
+        doc: "write_doc",
+      },
+    }),
   ],
 });
 ```
 
-The example above is illustrative — see `examples/flows/branch.flow.ts` for the canonical small `decision()` example.
+This flow expects input such as `{"task":"Fix the reconnect bug"}`. Callbacks receive it through `input`; the TypeScript assertion does not validate it at runtime. See `examples/flows/branch.flow.ts` for another small `decision()` example.
 
 ## Workspace isolation
 
-`acp` nodes can pin a per-step working directory:
+`acp` nodes can set a per-step working directory from an earlier node's output:
 
 ```ts
 acp({
-  cwd: "${workdir}/.work-tree",
-  prompt: ({ task }) => `Run inside the prepped tree: ${task}`,
+  cwd: ({ outputs }) => (outputs.prepare_workspace as { workdir: string }).workdir,
+  prompt: ({ input }) => `Run inside the prepared workspace: ${(input as { task: string }).task}`,
 });
 ```
 
-This lets a flow `action` step (e.g., `git worktree add`) prepare an isolated workspace, then have downstream `acp` nodes operate inside that cwd. `examples/flows/workdir.flow.ts` shows the pattern end-to-end.
+This fragment assumes an earlier `prepare_workspace` node returns `{ workdir: string }` and an edge connects it to this ACP node. A `cwd` string is a literal path; use a callback to read prior outputs. `examples/flows/workdir.flow.ts` shows a shell action creating a temporary directory and an ACP node using it.
 
 ## Permissions
 
@@ -179,7 +195,7 @@ Under `examples/flows/`:
 - `echo.flow.ts` — minimal one-step ACP flow that returns a JSON reply
 - `branch.flow.ts` — `decision()` + `decisionEdge()` constrained-choice classification, then a deterministic branch
 - `shell.flow.ts` — one runtime-owned shell `action` returning structured JSON
-- `workdir.flow.ts` — `action` prepares a worktree, `acp` runs inside that cwd
+- `workdir.flow.ts` — `action` prepares a temporary workspace, `acp` runs inside that cwd
 - `two-turn.flow.ts` — same-session ACP example that uses tools across multiple steps
 - `pr-triage/pr-triage.flow.ts` — larger end-to-end example with a written spec; can comment on or close real GitHub PRs against a live repo
 

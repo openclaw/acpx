@@ -13,9 +13,6 @@ After a one-line install ([Quickstart](quickstart.md) walks through it), every c
 acpx codex sessions new
 acpx codex 'find the flaky test and fix it'
 
-# Switch agents, same surface.
-acpx claude 'refactor the auth middleware'
-
 # One-shot, no saved context.
 acpx codex exec 'summarize this repo in 5 bullets'
 
@@ -24,6 +21,10 @@ acpx --format json codex exec 'review changed files' \
   | jq -r 'select(.method=="session/update") | .params.update
            | select(.sessionUpdate=="tool_call" or .sessionUpdate=="tool_call_update")
            | [(.status // "-"), (.title // "-")] | @tsv'
+
+# Switch agents with a separate persistent session.
+acpx claude sessions new
+acpx claude 'refactor the auth middleware'
 
 # Run a TypeScript multi-step flow against a real agent.
 acpx flow run examples/flows/branch.flow.ts \
@@ -39,7 +40,7 @@ acpx flow run examples/flows/branch.flow.ts \
 - **Queue-aware prompts.** Submit while a turn is running; new prompts queue and drain in order. `--no-wait` enqueues and returns. `cancel` aborts cooperatively without tearing the session down.
 - **Crash-resistant.** Dead agent processes are detected and reloaded automatically. `Ctrl+C` sends ACP `session/cancel` before any force-kill.
 - **Structured output.** `text`, `json`, and `quiet` modes. Strict JSON mode keeps stderr quiet so machines can parse stdout cleanly.
-- **Permission policy as a flag.** `--approve-all`, `--approve-reads` (default), `--deny-all`. Non-interactive policy is configurable. Sandbox to a `--cwd`.
+- **Permission policy as a flag.** `--approve-all`, `--approve-reads` (default), `--deny-all`. Non-interactive policy is configurable. `--cwd` selects the working directory and root for ACP filesystem guardrails; it is not an OS sandbox.
 - **Flows.** `acpx flow run <file>` executes a TypeScript workflow over multiple ACP turns plus deterministic `action` and `compute` steps. Run state persists under `~/.acpx/flows/runs/`.
 - **Embeddable.** `acpx/runtime` and `acpx/flows` are public exports — build higher-level tools without re-implementing session storage, queue ownership, or ACP wire handling.
 

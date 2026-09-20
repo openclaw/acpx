@@ -18,6 +18,18 @@ Set `ACPX_CLAUDE_INCLUDE_USER_SETTINGS=1` only when the spawned session needs
 the user's global Claude settings and no such plugin conflict exists. Ambient
 credentials and other environment variables are still inherited normally.
 
+## System prompt overrides
+
+Choose the system prompt when creating a named session, then select that session for later prompts:
+
+```bash
+acpx --system-prompt "You are a code reviewer who challenges every implicit assumption." \
+  claude sessions new --name review
+acpx claude -s review 'review the current diff'
+```
+
+Use `--append-system-prompt` instead to append instructions to Claude's default system prompt. The override is saved with the session. `-s` selects an existing session; running `sessions new` again in the same scope closes the prior local record and creates a fresh session.
+
 ## Embedded inspection
 
 Embedded inspection resolves the installed `claude-agent-acp` adapter or its installed `@agentclientprotocol/claude-agent-acp` package. Configure the adapter’s authentication before acquiring a model catalog or starting a session.

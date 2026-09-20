@@ -15,6 +15,8 @@ What acpx implements from the ACP spec today and what is not yet implemented.
 | `initialize`                 | Handshake, capability negotiation                | yes       |
 | `session/new`                | `sessions new`                                   | yes       |
 | `session/load`               | Crash resume / reconnect                         | yes       |
+| `session/list`               | Agent-side session listing when advertised       | yes       |
+| `session/resume`             | Reconnect without history replay when advertised | yes       |
 | `session/prompt`             | `prompt`, `exec`, implicit prompt                | yes       |
 | `session/update`             | Streaming output (thinking, tools, text, diffs)  | yes       |
 | `session/cancel`             | Graceful cancel + `acpx <agent> cancel`          | yes       |
@@ -32,6 +34,11 @@ What acpx implements from the ACP spec today and what is not yet implemented.
 | `authenticate`               | Auth handshake handling                          | yes       |
 
 ### Supported Behavior Notes
+
+#### Session listing and reconnect
+
+- `sessions list` uses `session/list` when the adapter advertises `sessionCapabilities.list`. It supports adapter-side cwd filtering and cursor pagination; `--local` reads saved acpx records instead. When the capability is absent, unfiltered listing falls back to saved records.
+- Reconnect prefers `session/resume` when the adapter advertises `sessionCapabilities.resume`; otherwise it uses advertised `session/load`. `session/resume` resumes the session without returning previous messages.
 
 #### Session cancel and controls
 
@@ -61,20 +68,16 @@ What acpx implements from the ACP spec today and what is not yet implemented.
 | ACP Method         | What it does                        | Spec status |
 | ------------------ | ----------------------------------- | ----------- |
 | `session/fork`     | Branch a session into two           | unstable    |
-| `session/list`     | List sessions server-side           | unstable    |
-| `session/resume`   | Resume a paused session             | unstable    |
 | `$/cancel_request` | Cancel any pending JSON-RPC request | unstable    |
 
 ### Not Yet Supported Notes
 
 - `session/fork`: would allow branching one conversation into parallel alternatives.
-- `session/list`: would expose adapter-side session inventory in addition to acpx local store listing.
-- `session/resume`: distinct from `session/load`; expected to support resume semantics without replay-like behavior.
 - `$/cancel_request`: transport-level JSON-RPC cancellation beyond session-scoped cancel.
 
-## ACP-Adjacent Features Not Yet Supported
+## ACP-Adjacent Feature Status
 
-Things acpx needs that aren't in the ACP spec:
+Additional acpx features and remaining gaps:
 
 - [ ] **Permission policies** — Tool-kind/title policies now exist through `--permission-policy`; path/argument rules (`allow reads to src/`, `deny writes to .env`) are still not supported.
 - [ ] **Multi-agent orchestration** — Agent A prompts Agent B through acpx.
@@ -83,4 +86,4 @@ Things acpx needs that aren't in the ACP spec:
       and automation pipelines.
 - [x] **Session export/import** — Move sessions between machines.
 - [ ] **Watch mode** — Re-run prompt on file changes.
-- [ ] **Cost/token tracking** — Surface usage stats when agents/ACP expose them.
+- [x] **Cost/token reporting** — Session checkpoints retain supported adapter-reported token usage and cost from usage updates. In `quiet` mode, final prompt-result usage and cost are printed to stderr when supplied by the adapter.

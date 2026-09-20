@@ -13,7 +13,7 @@ description: Global and project JSON config files, supported keys, precedence ru
 3. CLI flags
 ```
 
-Each layer is a partial override merged on top of the previous one. Missing keys inherit; arrays and objects are replaced, not deep-merged (with the exception of the `agents` map, where keys merge and per-agent objects replace wholesale).
+Each layer is a partial override merged on top of the previous one. Missing keys inherit; arrays and objects are replaced rather than deep-merged, except that `agents` and `auth` merge by key. A project agent entry replaces the entire same-named global entry, and a project auth value replaces the same method's global value. Other global agent and auth entries remain available.
 
 When top-level `--cwd` or `--mcp-config` flags repeat, the final occurrence wins. Project configuration comes from that effective cwd, and relative MCP config paths resolve against it regardless of flag order.
 
@@ -136,6 +136,8 @@ ACPX_AUTH_OPENAI_API_KEY=sk-… acpx codex 'do the thing'
 ```json
 { "auth": { "openai_api_key": "sk-…" } }
 ```
+
+The global and project `auth` maps merge by method ID. An empty project `auth` object does not clear global credentials; matching project keys replace the corresponding global values. Matching `ACPX_AUTH_*` environment variables still take precedence over the merged config map.
 
 Ambient provider env vars like `OPENAI_API_KEY` are still passed through to child agents in their environment, but they do **not** trigger ACP auth-method selection on their own. This is intentional — it avoids surprise login flows in adapters that interpret an ambient key as "go ahead and authenticate."
 

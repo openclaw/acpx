@@ -31,6 +31,8 @@ Built-in agents:
 
 Harness-specific docs in this directory:
 
+- [Pi](Pi.md): built-in `pi -> npx pi-acp`
+- [OpenClaw](OpenClaw.md): built-in `openclaw -> openclaw acp`
 - [Codex](Codex.md): built-in `codex -> npx -y @agentclientprotocol/codex-acp`
 - [Claude](Claude.md): built-in `claude -> npx -y @agentclientprotocol/claude-agent-acp`
 - [Gemini](Gemini.md): built-in `gemini -> gemini --acp`

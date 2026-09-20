@@ -37,12 +37,12 @@ acpx --version
 acpx --help
 ```
 
-Global install is the default for most workflows because it keeps queue owners and persistent sessions warm between invocations.
+Global installation puts `acpx` on `PATH` for repeated use.
 
 ## Run without installing
 
 ```bash
-npx acpx@latest codex 'fix the failing tests'
+npx acpx@latest codex exec 'fix the failing tests'
 ```
 
 `npx` works for one-off use but pays a small startup cost on every invocation. For repeated session reuse, prefer the global install.
@@ -57,14 +57,16 @@ Check what changed in the [changelog](https://github.com/openclaw/acpx/blob/main
 
 ## Where data lives
 
-| Path                          | What it stores                                                                        |
-| ----------------------------- | ------------------------------------------------------------------------------------- |
-| `~/.acpx/sessions/*.json`     | Persistent session records (scope key, last prompt, history previews, model, options) |
-| `~/.acpx/queues/<hash>.sock`  | Unix socket for active queue owners (named pipe on Windows)                           |
-| `~/.acpx/queues/<hash>.lock`  | Ownership lock file                                                                   |
-| `~/.acpx/flows/runs/<runId>/` | Persisted flow run bundles (graph state, ACP transcripts, artifacts)                  |
-| `~/.acpx/config.json`         | Optional global config (see [Config](config.md))                                      |
-| `<cwd>/.acpxrc.json`          | Optional project config (merged on top of global, CLI flags still win)                |
+| Path                                        | What it stores                                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `~/.acpx/sessions/*.json`                   | Persistent session records (scope key, last prompt, history previews, model, options) |
+| `/tmp/acpx-<home-hash>/<session-hash>.sock` | Unix socket for an active queue owner                                                 |
+| `~/.acpx/queues/<session-hash>.lock`        | Queue-owner lease and process metadata                                                |
+| `~/.acpx/flows/runs/<runId>/`               | Persisted flow run bundles (graph state, ACP transcripts, artifacts)                  |
+| `~/.acpx/config.json`                       | Optional global config (see [Config](config.md))                                      |
+| `<cwd>/.acpxrc.json`                        | Optional project config (merged on top of global, CLI flags still win)                |
+
+Windows uses a named pipe instead of a Unix socket. The socket directory hash is derived from the home directory; the socket and lease filenames use a hash of the session record id.
 
 Queue and IPC directories are created with owner-only permissions. `acpx` re-tightens permissions on previously-permissive directories at startup.
 

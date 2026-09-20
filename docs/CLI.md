@@ -108,24 +108,24 @@ or close a PR if you run it against a live repository.
 
 All global options:
 
-| Option                                   | Description                                    | Details                                                                                                                                               |
-| ---------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--agent <command>`                      | Raw ACP agent command (escape hatch)           | Do not combine with positional agent token.                                                                                                           |
-| `--cwd <dir>`                            | Working directory                              | Defaults to current directory. Stored as absolute path for scoping.                                                                                   |
-| `--approve-all`                          | Auto-approve all permissions                   | Permission mode `approve-all`.                                                                                                                        |
-| `--approve-reads`                        | Auto-approve reads/searches, prompt for others | Default permission mode.                                                                                                                              |
-| `--deny-all`                             | Deny all permissions                           | Permission mode `deny-all`.                                                                                                                           |
-| `--format <fmt>`                         | Output format                                  | `text` (default), `json`, `quiet`.                                                                                                                    |
-| `--suppress-reads`                       | Suppress read file contents                    | Replaces raw read payloads with `[read output suppressed]`.                                                                                           |
-| `--json-strict`                          | Strict JSON mode                               | Requires `--format json`; suppresses non-JSON stderr output.                                                                                          |
-| `--no-fs`                                | Disable ACP filesystem capabilities            | Advertises `clientCapabilities.fs.readTextFile` and `writeTextFile` as `false` during ACP initialize for new agent clients.                           |
-| `--no-terminal`                          | Disable ACP terminal capability                | Advertises `clientCapabilities.terminal: false` during ACP initialize for new agent clients.                                                          |
-| `--non-interactive-permissions <policy>` | Non-TTY prompt policy                          | `deny` (default) or `fail` when approval prompt cannot be shown.                                                                                      |
-| `--permission-policy <json-or-file>`     | Per-tool permission policy                     | JSON object or file path with `autoApprove`, `autoDeny`, `escalate`, and optional `defaultAction` (`approve`, `deny`, `escalate`). Alias: `--policy`. |
-| `--timeout <seconds>`                    | Max wait time for agent response               | Must be positive. Decimal seconds allowed.                                                                                                            |
-| `--ttl <seconds>`                        | Queue owner idle TTL before shutdown           | Default `300`. `0` disables TTL.                                                                                                                      |
-| `--model <id>`                           | Set agent model                                | Claude-compatible adapters may consume session creation metadata; other agents must advertise a model config option or legacy `models` metadata.      |
-| `--verbose`                              | Enable verbose logs                            | Prints ACP/debug details to stderr.                                                                                                                   |
+| Option                                   | Description                                         | Details                                                                                                                                               |
+| ---------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--agent <command>`                      | Raw ACP agent command (escape hatch)                | Do not combine with positional agent token.                                                                                                           |
+| `--cwd <dir>`                            | Working directory                                   | Defaults to current directory. Stored as absolute path for scoping.                                                                                   |
+| `--approve-all`                          | Approve remaining tool requests                     | Per-tool policy takes precedence over permission mode `approve-all`.                                                                                  |
+| `--approve-reads`                        | Approve remaining reads/searches; prompt for others | Default mode; per-tool policy takes precedence.                                                                                                       |
+| `--deny-all`                             | Deny remaining tool requests                        | Per-tool policy takes precedence over permission mode `deny-all`.                                                                                     |
+| `--format <fmt>`                         | Output format                                       | `text` (default), `json`, `quiet`.                                                                                                                    |
+| `--suppress-reads`                       | Suppress read file contents                         | Replaces raw read payloads with `[read output suppressed]`.                                                                                           |
+| `--json-strict`                          | Strict JSON mode                                    | Requires `--format json`; suppresses non-JSON stderr output.                                                                                          |
+| `--no-fs`                                | Disable ACP filesystem capabilities                 | Advertises `clientCapabilities.fs.readTextFile` and `writeTextFile` as `false` during ACP initialize for new agent clients.                           |
+| `--no-terminal`                          | Disable ACP terminal capability                     | Advertises `clientCapabilities.terminal: false` during ACP initialize for new agent clients.                                                          |
+| `--non-interactive-permissions <policy>` | Non-TTY prompt policy                               | `deny` (default) or `fail` when approval prompt cannot be shown.                                                                                      |
+| `--permission-policy <json-or-file>`     | Per-tool permission policy                          | JSON object or file path with `autoApprove`, `autoDeny`, `escalate`, and optional `defaultAction` (`approve`, `deny`, `escalate`). Alias: `--policy`. |
+| `--timeout <seconds>`                    | Max wait time for agent response                    | Must be positive. Decimal seconds allowed.                                                                                                            |
+| `--ttl <seconds>`                        | Queue owner idle TTL before shutdown                | Default `300`. `0` disables TTL.                                                                                                                      |
+| `--model <id>`                           | Set agent model                                     | Claude-compatible adapters may consume session creation metadata; other agents must advertise a model config option or legacy `models` metadata.      |
+| `--verbose`                              | Enable verbose logs                                 | Prints ACP/debug details to stderr.                                                                                                                   |
 
 Permission flags are mutually exclusive. Using more than one of `--approve-all`, `--approve-reads`, `--deny-all` is a usage error.
 
@@ -602,22 +602,22 @@ Hard rule for the ACP stream:
 - no synthetic `type`/`stream` wrapper fields,
 - no ACP payload key renaming.
 
-### Control-command JSON mapping
+### Command-specific JSON shapes
 
-When `--format json` is used:
-
-- commands that talk to an ACP adapter emit raw ACP JSON-RPC messages.
-- local query commands (`sessions list/show/history/export/import/prune`) emit local JSON documents (not ACP stream traffic).
+With `--format json`, `prompt` and `exec` emit raw ACP JSON-RPC messages. Controls such as `cancel`, `set-mode`, and `set`, and queries such as `sessions list`, `show`, and `history`, emit command-specific JSON result documents. A command contacting an adapter does not by itself determine its output shape.
 
 ### Sessions/query command output behavior
 
-- `sessions list` with `text`: tab-separated `id`, `name`, `cwd`, `lastUsedAt` (closed sessions include a `[closed]` marker next to id)
-- `sessions list` with `json`: a single JSON array of session records
-- `sessions list` with `quiet`: one session id per line (closed sessions include `[closed]`)
+- Agent-side `sessions list` with `text`: tab-separated `sessionId`, `title`, `cwd`, `updatedAt`, and metadata; a next cursor is printed when supplied.
+- Agent-side `sessions list` with `json`: one object with `source: "agent"` and `sessions`, plus optional `_meta`, `cursor`, `cwd`, and `nextCursor`. Entries use the adapter's `sessionId`.
+- Agent-side `sessions list` with `quiet`: one adapter session id per line.
+- Local `sessions list --local`, or a local fallback, with `text`: tab-separated local id, name, cwd, and last-used time.
+- Local listing with `json`: one array of full local session records.
+- Local listing with `quiet`: one local record id per line. Closed local records have a `[closed]` marker in text and quiet output.
 - `sessions show` with `text`: key/value metadata dump
 - `sessions show` with `json`: full session record object
 - `sessions history` with `text`: tab-separated `timestamp role textPreview` entries
-- `sessions history` with `json`: object containing `entries` array
+- `sessions history` with `json`: object containing `id`, `sessionId`, `limit`, `count`, and `entries`
 - `sessions export` with `text`: output path summary
 - `sessions export` with `json`: object containing `action` and `output`
 - `sessions export` with `quiet`: output path
@@ -633,9 +633,9 @@ When `--format json` is used:
 
 Choose exactly one mode:
 
-- `--approve-all`: auto-approve all permission requests
-- `--approve-reads`: auto-approve read/search requests, prompt for other kinds (default)
-- `--deny-all`: auto-deny/reject requests when possible
+- `--approve-all`: approve tool permission requests not resolved by a per-tool policy
+- `--approve-reads`: approve remaining read/search requests and prompt for other tools (default)
+- `--deny-all`: deny tool permission requests not resolved by a per-tool policy
 
 Prompting behavior in `--approve-reads`:
 
@@ -702,9 +702,6 @@ acpx codex sessions new --name docs
 acpx codex -s backend 'fix checkout timeout'
 acpx codex -s docs 'document payment retry behavior'
 
-# One-shot ask with no saved context
-acpx claude exec 'summarize src/session.ts in 5 bullets'
-
 # Manage sessions
 acpx codex sessions
 acpx codex sessions new --name docs
@@ -727,6 +724,9 @@ acpx --format json codex exec 'review latest diff for security issues' \
   | jq -r 'select(.method=="session/update") | .params.update
            | select(.sessionUpdate=="tool_call" or .sessionUpdate=="tool_call_update")
            | [(.status // "-"), (.title // "-")] | @tsv'
+
+# One-shot ask with no saved context
+acpx claude exec 'summarize src/session.ts in 5 bullets'
 ```
 
 ### Queue request size

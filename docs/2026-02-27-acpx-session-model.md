@@ -68,8 +68,8 @@ Allowed message shapes are standard JSON-RPC 2.0 forms used by ACP:
 Examples:
 
 ```json
-{"jsonrpc":"2.0","id":"req-1","method":"session/prompt","params":{"sessionId":"019c...","prompt":"hi"}}
-{"jsonrpc":"2.0","method":"session/update","params":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hello"}}}
+{"jsonrpc":"2.0","id":"req-1","method":"session/prompt","params":{"sessionId":"019c...","prompt":[{"type":"text","text":"hi"}]}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"019c...","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hello"}}}}
 {"jsonrpc":"2.0","id":"req-1","result":{"stopReason":"end_turn"}}
 ```
 
@@ -120,7 +120,7 @@ If local command output is needed for non-ACP commands, that output is not part 
 
 ## Session Checkpoint Schema (`acpx.session.v1`)
 
-`session.json` is derived from replay + local runtime state, with top-level conversation and top-level acpx state.
+`session.json` contains the owner's saved conversation projection and local runtime state, with top-level conversation fields and an `acpx` object. Owners load this checkpoint and update it from live ACP activity and local operations.
 
 ```json
 {
@@ -163,7 +163,7 @@ Rules:
 
 - `session.json` is not a transport protocol.
 - `session.json` may include local bookkeeping, but the stream may not.
-- `session.json` must be reconstructible from stream + local deterministic projection rules.
+- Retain `session.json`: a complete checkpoint is not guaranteed to be reconstructible from retained journal entries, because rotation can remove earlier history and some local state is never journaled.
 
 ## Local State Boundary
 
@@ -200,14 +200,11 @@ Each observed entry has an opaque cursor scoped to the local record and an acpx 
 
 Following waits for future journal writes even when the session is idle or its owner restarts. Absence of a new record is not a terminal result. Callers control the observer lifetime with its abort signal or iterator closure.
 
-## Replay and Recovery
+## Checkpoint Loading and Journal Recovery
 
-On startup or repair:
+Normal session lookup and startup read the saved `<acpx_record_id>.json` checkpoint. Startup does not rebuild it by replaying all journal segments. Before appending, the event writer recovers watch and ACP sequence positions, the active request ID, and segment-tail state from retained journal anchors and complete records. Normal live and final checkpoint saves persist the owner's current projection and local state.
 
-1. Read all stream segments oldest to newest.
-2. Parse ACP messages and local journal records separately.
-3. Rebuild checkpoint projection.
-4. Atomically rewrite `session.json`.
+Journal replay exposes retained history; it does not reconstruct a missing or corrupt checkpoint. The original proposal described full checkpoint reconstruction, but no automatic reconstruction or repair path is implemented.
 
 Corrupt line policy:
 

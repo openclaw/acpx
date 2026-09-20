@@ -117,30 +117,33 @@ suppress that action's output.
 
 ## Session-control command output
 
-Session-control query commands emit summarized JSON shapes (not ACP wire traffic) under `--format json`:
+Session controls and queries emit command-specific JSON documents under `--format json`:
 
-| Command                 | `text`                             | `json`                                                                                                        | `quiet`                |
-| ----------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `sessions list`         | TSV: `id title cwd updatedAt meta` | `{ _meta, source, sessions, cursor, cwd, nextCursor }` for ACP list, or local records with `--local`/fallback | one id per line        |
-| `sessions show`         | key/value lines                    | full session record object                                                                                    | record id              |
-| `sessions history`      | TSV: `timestamp role textPreview`  | `{ entries: [...] }`                                                                                          | record id              |
-| `sessions prune`        | summary + pruned ids and time      | `{ action, dryRun, count, bytesFreed, pruned }`                                                               | one pruned id per line |
-| `sessions new`/`ensure` | record id                          | record + `acpxRecordId`/`acpxSessionId`/(`agentSessionId`)                                                    | record id              |
-| `status`                | key/value lines                    | full status object                                                                                            | state token            |
+| Command                                         | `text`                                                                    | `json`                                                                                | `quiet`                         |
+| ----------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------- |
+| Agent-side `sessions list`                      | TSV: `sessionId title cwd updatedAt meta`, plus next cursor when supplied | `{ source: "agent", sessions, ... }`; optional `_meta`, `cursor`, `cwd`, `nextCursor` | one adapter session id per line |
+| Local `sessions list --local` or local fallback | TSV: local id, name, cwd, last-used time                                  | array of full local session records                                                   | one local record id per line    |
+| `sessions show`                                 | key/value metadata                                                        | full local session record                                                             | local record id                 |
+| `sessions history`                              | session summary and TSV history entries                                   | `{ id, sessionId, limit, count, entries }`                                            | one text preview per line       |
+| `sessions prune`                                | summary plus pruned ids and time                                          | `{ action, dryRun, count, bytesFreed, pruned }`                                       | one pruned id per line          |
+| `sessions new`/`ensure`                         | local record id and creation/replacement summary                          | `session_ensured` result with `created` and local session identity                    | local record id                 |
+| `status`                                        | key/value status summary                                                  | `status_snapshot` result                                                              | state token                     |
 
-Closed sessions are marked `[closed]` in `text` and `quiet`.
+Closed records are marked `[closed]` in local-list text and quiet output.
 
 ## Identity fields in JSON
 
-Session-control JSON always includes:
+JSON field names depend on the command. Local lifecycle/control summaries and a status result with a matching record use these identity fields:
 
-| Field            | Meaning                                                           |
-| ---------------- | ----------------------------------------------------------------- |
-| `acpxRecordId`   | Local record id (also what `text`/`quiet` print)                  |
-| `acpxSessionId`  | Acpx-side session id                                              |
-| `agentSessionId` | Provider-native id, **only present** when the adapter exposes one |
+| Field            | Meaning                                                  |
+| ---------------- | -------------------------------------------------------- |
+| `acpxRecordId`   | Local acpx record id                                     |
+| `acpxSessionId`  | ACP session id stored by that record                     |
+| `agentSessionId` | Optional provider-native id, when exposed by the adapter |
 
-Do not assume the `acpxRecordId` can be passed to a native provider CLI. Use `agentSessionId` for that, when present.
+Full local records, returned by `sessions show` and local listing, name their ACP session field `acpSessionId`. Agent-side listing uses each adapter entry's `sessionId` and does not add local record identity. History, export/import, prune, and `no-session` status results have their own documented summary shapes; do not require the three fields above on every JSON result.
+
+Do not assume a local record id can be passed to a native provider CLI. Use `agentSessionId` when the adapter supplies one.
 
 ## Picking a mode
 

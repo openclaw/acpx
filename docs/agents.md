@@ -61,6 +61,31 @@ See [Prompting](prompting.md), [Sessions](sessions.md), and [Session control](se
 
 Notes that override or extend the cross-agent behavior live below.
 
+### Pi
+
+- Built-in name: `pi`
+- Default command: `npx pi-acp`
+- Upstream: [mariozechner/pi](https://github.com/mariozechner/pi)
+
+### OpenClaw
+
+- Built-in name: `openclaw`
+- Default command: `openclaw acp`
+- Upstream: [openclaw/openclaw](https://github.com/openclaw/openclaw)
+- Guide: [OpenClaw](https://github.com/openclaw/acpx/blob/main/agents/OpenClaw.md)
+
+For repo-local OpenClaw checkouts, override the built-in command in `~/.acpx/config.json` so `acpx openclaw …` spawns the ACP bridge directly without the `pnpm` wrapper:
+
+```json
+{
+  "agents": {
+    "openclaw": {
+      "command": "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 node scripts/run-node.mjs acp --url ws://127.0.0.1:18789 --token-file ~/.openclaw/gateway.token --session agent:main:main"
+    }
+  }
+}
+```
+
 ### Codex
 
 - Built-in name: `codex`
@@ -78,183 +103,9 @@ Notes that override or extend the cross-agent behavior live below.
 - On Windows, `acpx` resolves the `claude.exe` executable from `PATH` before spawning so launches do not depend on shell-specific command lookup.
 - `--system-prompt` and `--append-system-prompt` forward through ACP `_meta.systemPrompt` on `session/new`, letting you replace or append to the Claude Code system prompt without leaving a persistent session. The value persists in `session_options.system_prompt` so ensure/reuse keeps the override. Other agents ignore the field.
 
-### Pi
+### Other built-in agents
 
-- Built-in name: `pi`
-- Default command: `npx pi-acp`
-- Upstream: [mariozechner/pi](https://github.com/mariozechner/pi)
-
-### OpenClaw
-
-- Built-in name: `openclaw`
-- Default command: `openclaw acp`
-- Upstream: [openclaw/openclaw](https://github.com/openclaw/openclaw)
-
-For repo-local OpenClaw checkouts, override the built-in command in `~/.acpx/config.json` so `acpx openclaw …` spawns the ACP bridge directly without the `pnpm` wrapper:
-
-```json
-{
-  "agents": {
-    "openclaw": {
-      "command": "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 node scripts/run-node.mjs acp --url ws://127.0.0.1:18789 --token-file ~/.openclaw/gateway.token --session agent:main:main"
-    }
-  }
-}
-```
-
-### Cursor
-
-- Built-in name: `cursor`
-- Default command: `cursor-agent acp`
-- Upstream: [Cursor CLI](https://cursor.com/docs/cli/acp)
-
-If your Cursor install exposes ACP as `agent acp` instead of `cursor-agent acp`, override:
-
-```json
-{ "agents": { "cursor": { "command": "agent acp" } } }
-```
-
-### Gemini
-
-- Built-in name: `gemini`
-- Default command: `gemini --acp`
-- Upstream: [google/gemini-cli](https://github.com/google/gemini-cli)
-
-### Copilot
-
-- Built-in name: `copilot`
-- Default command: `copilot --acp --stdio`
-- Upstream: [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line)
-- Requires a Copilot CLI release that supports ACP stdio mode. Older `copilot` binaries fail before ACP startup.
-
-### Devin
-
-`devin` launches the installed `devin acp` server. See the [Devin guide](https://github.com/openclaw/acpx/blob/main/agents/Devin.md) for setup, model selection, and the scoped compatibility contract.
-
-### Droid (Factory)
-
-- Built-in names: `droid`, `factory-droid`, `factorydroid`
-- Default command: `droid exec --output-format acp`
-- Upstream: [factory.ai](https://www.factory.ai)
-
-### fast-agent
-
-- Built-in name: `fast-agent`
-- Default command: `uvx fast-agent-mcp acp`
-- Upstream: https://fast-agent.ai/acp
-
-`acpx fast-agent` starts fast-agent through its ACP entrypoint. It requires `uvx` on `PATH`.
-
-Configure model/provider settings through fast-agent environment variables, fast-agent configuration, or an `acpx` agent override with additional `fast-agent-mcp acp` arguments.
-
-### fx
-
-`fx` launches the installed `fx acp` server. See the [fx guide](https://github.com/openclaw/acpx/blob/main/agents/Fx.md) for provider authentication, model selection, and workspace behavior.
-
-### Grok Build
-
-- Built-in name: `grok-build`
-- Default command: `grok agent stdio`
-- Upstream: [xAI Grok Build](https://docs.x.ai/build/overview)
-
-`acpx grok-build` uses the installed `grok` CLI ACP server. Install Grok Build and complete its normal authentication flow before using it through `acpx`. If the Grok ACP server advertises `cached_token`, `acpx` asks it to authenticate with its agent-managed cached login. If it advertises `xai.api_key`, `acpx` also accepts `XAI_API_KEY` for this built-in.
-
-### Qoder
-
-- Built-in name: `qoder`
-- Default command: `qodercli --acp`
-- Upstream: [Qoder CLI](https://docs.qoder.com/cli/acp)
-- Reuses the Qoder CLI login state. For non-interactive runs, set `QODER_PERSONAL_ACCESS_TOKEN`.
-- `acpx qoder` forwards `--max-turns` and `--allowed-tools` into Qoder CLI startup flags when those session options are set, so you do not need a raw `--agent` override for them.
-
-### iFlow
-
-- Built-in name: `iflow`
-- Default command: `iflow --experimental-acp`
-- Upstream: [iflow-ai/iflow-cli](https://github.com/iflow-ai/iflow-cli)
-
-### Junie
-
-`junie` launches the installed `junie --acp=true` server, matching the official ACP Registry. See the [Junie guide](https://github.com/openclaw/acpx/blob/main/agents/Junie.md) for setup and command overrides.
-
-### Kilocode
-
-- Built-in name: `kilocode`
-- Default command: `npx -y @kilocode/cli acp`
-- Upstream: [kilocode.ai](https://kilocode.ai)
-
-### Kimi
-
-- Built-in name: `kimi`
-- Default command: `kimi acp`
-- Upstream: [MoonshotAI/kimi-cli](https://github.com/MoonshotAI/kimi-cli)
-
-### Kiro
-
-- Built-in name: `kiro`
-- Default command: `kiro-cli-chat acp`
-- Upstream: [kiro.dev](https://kiro.dev)
-
-### MCode
-
-- Built-in name: `mcode`
-- Default command: `mcode acp`
-- Upstream: [MiniMax Code](https://www.npmjs.com/package/@minimax-ai/code)
-
-Install MiniMax Code with `npm install -g @minimax-ai/code`, then authenticate with
-`mcode login` before launching it through acpx. The native `mcode acp` command runs an
-ACP v1 server over stdio; permission requests are handled by acpx's normal permission
-policy.
-
-Use `acpx mcode exec …` for one-shot automation. Cross-invocation conversation
-continuity depends on the installed MCode server's advertised ACP reload capability;
-a local acpx session record does not add reload support to older adapters. See the
-[MCode guide](https://github.com/openclaw/acpx/blob/main/agents/MCode.md) for setup and lifecycle details.
-
-### Mux
-
-- Built-in name: `mux`
-- Default entrypoint: `mux acp` via an ACPX-owned npm range
-- Upstream: https://mux.coder.com/integrations/acp
-
-`acpx mux` starts coder/mux through its ACP stdio bridge (`mux acp`). `mux acp` auto-starts an in-process mux server, so a separate `mux server` is not required.
-
-Configure at least one model provider before prompting (for example `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`); see https://mux.coder.com/config/providers. When using direct provider keys, make sure mux route priority includes `direct` before providers you have not authenticated. To target a remote mux server, override the command with `mux acp --server-url <url> --auth-token <token>` (or set `MUX_SERVER_URL` / `MUX_SERVER_AUTH_TOKEN`).
-
-### OpenCode
-
-- Built-in name: `opencode`
-- Default command: `npx -y opencode-ai acp`
-- Upstream: [opencode.ai](https://opencode.ai)
-
-### Pool
-
-- Built-in name: `pool`
-- Default command: `pool acp`
-- Upstream: [Poolside](https://poolside.ai)
-
-`acpx pool` uses the installed `pool` CLI ACP server (`pool acp`). Install and authenticate the CLI first; `pool login` is the normal interactive path. Focused setup notes live in `agents/Pool.md`.
-
-### Qwen
-
-- Built-in name: `qwen`
-- Default command: `qwen --acp`
-- Upstream: [QwenLM/qwen-code](https://github.com/QwenLM/qwen-code)
-
-### Trae
-
-- Built-in name: `trae`
-- Default command: `traecli acp serve`
-- Upstream: [docs.trae.cn](https://docs.trae.cn/cli)
-
-### ZeroClaw
-
-- Built-in name: `zeroclaw`
-- Default command: `zeroclaw acp`
-- Upstream: [zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw)
-- `zeroclaw acp` is ZeroClaw's native JSON-RPC 2.0 stdio server for ACP v1 (`protocolVersion: 1`, no auth methods). The `channel-acp-server` feature it needs ships in ZeroClaw's default build.
-- `session/new` does not carry a ZeroClaw agent alias, so the server binds the session to `acp.default_agent` when set, otherwise to the sole `[agents.<alias>]` entry. Single-agent configs work as-is; multi-agent configs must set `acp.default_agent` or `session/new` fails.
-- Text prompts only (no image, audio, or embedded-context capability). Session resume/close is advertised when the ZeroClaw ACP session store is available. MCP tools are opt-in per agent via `[agents.<alias>].acp_enable_mcp`.
+Setup, authentication, launch overrides, and capability notes live in the [agent guides](https://github.com/openclaw/acpx/blob/main/agents/README.md).
 
 ## Overriding a built-in
 

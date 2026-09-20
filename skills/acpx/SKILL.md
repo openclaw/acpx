@@ -84,7 +84,7 @@ If prompt text is omitted and stdin is piped, `acpx` reads prompt text from stdi
 Friendly agent names resolve to commands:
 
 - `pi` -> `npx pi-acp` (ACPX-owned package range; see `agents/Pi.md`)
-- `openclaw` -> `openclaw acp`
+- `openclaw` -> `openclaw acp` (see the [OpenClaw guide](https://github.com/openclaw/acpx/blob/main/agents/OpenClaw.md))
 - `codex` -> `npx -y @agentclientprotocol/codex-acp` (ACPX-owned package range)
 - `claude` -> `npx -y @agentclientprotocol/claude-agent-acp` (ACPX-owned package range; see `agents/Claude.md`)
 - `gemini` -> `gemini --acp`
@@ -284,11 +284,11 @@ Behavior:
 
 - `--agent <command>`: raw ACP agent command (escape hatch)
 - `--cwd <dir>`: working directory for session scope (default: current directory)
-- `--approve-all`: auto-approve all permission requests
-- `--approve-reads`: auto-approve reads/searches, prompt for writes (default mode)
-- `--deny-all`: deny all permission requests
-- `--non-interactive-permissions <policy>`: when prompting is unavailable, choose `deny` or `fail`
-- `--permission-policy <json-or-file>` / `--policy`: per-tool ACP permission rules (`autoApprove`, `autoDeny`, `escalate`, `defaultAction`)
+- `--approve-all`: approve tool permission requests not resolved by a per-tool policy
+- `--approve-reads`: approve remaining read/search requests and prompt for other tools (default mode)
+- `--deny-all`: deny tool permission requests not resolved by a per-tool policy
+- `--non-interactive-permissions <policy>`: choose `deny` or `fail` when the permission mode requires a prompt but stdin or stderr is not a TTY
+- `--permission-policy <json-or-file>` / `--policy`: per-tool ACP permission rules that take precedence over the permission mode
 - `--format <fmt>`: output format (`text`, `json`, `quiet`)
 - `--json-strict`: strict JSON mode; requires `--format json` and suppresses non-JSON stderr output
 - `--suppress-reads`: suppress raw read-file contents while preserving the selected format
@@ -317,12 +317,18 @@ Permission flags are mutually exclusive.
 `--system-prompt` and `--append-system-prompt` let you specialize a Claude session without leaving lingering one-off state, while still benefiting from persistent session reuse.
 
 ```bash
-# Replace the system prompt for a named session, persisted across reuse
-acpx --system-prompt "You are a code reviewer who challenges every implicit assumption." claude -s review
+# Create a named session with a replacement system prompt.
+acpx --system-prompt "You are a code reviewer who challenges every implicit assumption." \
+  claude sessions new --name review
+acpx claude -s review 'review the current diff'
 
-# Append a guideline on top of the default system prompt
-acpx --append-system-prompt "Always explain trade-offs before recommending a fix." claude -s impl
+# Create a named session with an appended guideline.
+acpx --append-system-prompt "Always explain trade-offs before recommending a fix." \
+  claude sessions new --name impl
+acpx claude -s impl 'implement the requested change'
 ```
+
+Run the creation command once, then select the session with `-s` for later prompts. Running `sessions new` again in the same scope closes the prior local record and creates a fresh session.
 
 The override is forwarded via ACP `_meta.systemPrompt` (or `_meta.systemPrompt.append`) on `session/new` and stored in `session_options.system_prompt`. Subsequent `prompt`/`ensure` calls in the same scope keep the override unless you explicitly create a new session. Non-Claude adapters ignore the field, so the same flag is safe inside cross-agent scripts.
 
@@ -399,7 +405,7 @@ Persistent prompt sessions are scoped by:
 Persistence:
 
 - Session records are stored in `~/.acpx/sessions/*.json`.
-- `-s/--session` creates parallel named conversations in the same repo.
+- `-s/--session` selects a named conversation; create it with `sessions new --name <name>` or `sessions ensure --name <name>` before prompting.
 - Changing `--cwd` changes scope and therefore session lookup.
 - closed sessions are retained on disk with `closed: true` and `closedAt` until pruned.
 - auto-resume by scope skips closed sessions.
@@ -418,8 +424,8 @@ Queueing is per persistent session.
 
 - The active `acpx` process for a running prompt becomes the queue owner.
 - Other invocations submit prompts over local IPC.
-- On Unix-like systems, queue IPC uses a Unix socket under `~/.acpx/queues/<hash>.sock`.
-- Ownership is coordinated with a lock file under `~/.acpx/queues/<hash>.lock`.
+- On Unix-like systems, queue IPC uses `/tmp/acpx-<home-hash>/<session-hash>.sock`.
+- Ownership is coordinated with a lease file at `~/.acpx/queues/<session-hash>.lock`.
 - Persistent turns retain a separate filesystem guard through checkpoint and cleanup. Waiting can be cancelled; admitted ownership ends only after cleanup. Live guards never expire by age, and ambiguous guard state is preserved. See [session ownership](../../docs/sessions.md#queue-ownership).
 - On Windows, named pipes are used instead of Unix sockets.
 - after the queue drains, owner shutdown is governed by TTL (default 300s, configurable with `--ttl`).
@@ -453,11 +459,17 @@ acpx --format json codex exec 'review changed files' \
 
 ## Permission modes
 
-- `--approve-all`: no interactive permission prompts
-- `--approve-reads` (default): approve reads/searches, prompt for writes
-- `--deny-all`: deny all permission requests
-- `--non-interactive-permissions <deny|fail>`: chosen behavior when no TTY is available to prompt
-- `--policy <json-or-file>`: match ACP permission requests by tool kind/title; non-interactive escalations add ACP response metadata
+For ACP tool permission requests, per-tool policy takes precedence over the permission mode. Rules are evaluated in this order: `autoDeny`, `autoApprove`, `escalate`, then `defaultAction`. The selected mode applies only when the policy does not resolve the request.
+
+- `--approve-all`: approve remaining tool permission requests without prompting
+- `--approve-reads` (default): approve remaining read/search requests and prompt for other tools
+- `--deny-all`: deny remaining tool permission requests
+- `--non-interactive-permissions <deny|fail>`: choose what happens when the mode requires a prompt but stdin or stderr is not a TTY
+- `--policy <json-or-file>`: match ACP tool permission requests by kind, title, title head, or raw input tool name
+
+An `autoApprove` rule can approve a tool request under `--deny-all`. An `escalate` rule can prompt under `--approve-all` when stdin and stderr are TTYs. Without both TTYs, escalation denies or cancels the current request and adds `_meta.acpx.permissionEscalation` to the ACP response, even when `--non-interactive-permissions fail` is selected.
+
+Per-tool policies govern `session/request_permission`. ACP filesystem and terminal operations use the client's permission mode separately; a tool approval does not bypass those operation checks.
 
 If every permission request is denied/cancelled and none approved, `acpx` exits with permission-denied status.
 
@@ -597,7 +609,8 @@ acpx codex -s docs 'draft changelog entry for release'
 Specialized Claude reviewer that survives session reuse:
 
 ```bash
-acpx --system-prompt "You are a reviewer who refuses to approve untested changes." claude -s reviewer
+acpx --system-prompt "You are a reviewer who refuses to approve untested changes." \
+  claude sessions new --name reviewer
 acpx claude -s reviewer 'review the diff in src/auth/'
 ```
 

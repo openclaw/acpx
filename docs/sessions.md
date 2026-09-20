@@ -169,7 +169,7 @@ acpx codex --no-wait 'and propose 1 follow-up fix'
 Queue mechanics:
 
 - Startup options pass directly to the detached owner through stdin; acpx does not create temporary bootstrap files containing credentials or session environment values.
-- Owner generates a Unix socket at `~/.acpx/queues/<hash>.sock` (named pipe on Windows) and a `<hash>.lock` ownership file.
+- On Unix-like systems, the owner uses `/tmp/acpx-<home-hash>/<session-hash>.sock`; its lease is `~/.acpx/queues/<session-hash>.lock`. Windows uses a named pipe instead of a Unix socket.
 - Sockets and lock files are owner-only.
 - After the queue drains, the owner stays alive for an idle TTL (default `300s`) so quick follow-ups do not pay the spawn cost.
 - Override TTL with `--ttl <seconds>`. `--ttl 0` keeps it alive indefinitely (until idle shutdown is otherwise triggered).
@@ -226,16 +226,16 @@ This makes long-running scripted sessions resilient to crashes, OS restarts, and
 
 ## Status
 
-`acpx codex status` reports local process state:
+`acpx codex status` reports local queue-owner health, not whether a prompt is currently active:
 
-| State        | Meaning                                                                          |
-| ------------ | -------------------------------------------------------------------------------- |
-| `running`    | Queue owner alive and processing a prompt                                        |
-| `idle`       | Saved session resumable, no queue owner running                                  |
-| `dead`       | Queue owner was expected but is unavailable, or the last agent exit was abnormal |
-| `no-session` | No saved record matches this scope                                               |
+| Text/quiet state | JSON `status` | Meaning                                                                                |
+| ---------------- | ------------- | -------------------------------------------------------------------------------------- |
+| `running`        | `alive`       | Queue owner is healthy, including while it waits during its idle TTL.                  |
+| `idle`           | `idle`        | Saved session is resumable and no queue owner is present.                              |
+| `dead`           | `dead`        | A queue-owner lease remains but is unhealthy, or the recorded agent exit was abnormal. |
+| `no-session`     | `no-session`  | No saved record matches this scope.                                                    |
 
-Status checks are local (`kill(pid, 0)` semantics) — they do not touch the agent.
+Checks use local lease, process, and socket information without an ACP request to the agent. Use [Watching sessions](session-watch.md) for turn events and completion.
 `closed` describes the logical session lifecycle. A helper process can exit while the session remains open and resumable. Status reports a PID only when a live queue-owner lease ties that process to the session; queue owner liveness comes from `~/.acpx/queues/*.lock` plus its heartbeat and process probe.
 
 ## CWD scoping

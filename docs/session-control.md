@@ -117,27 +117,24 @@ acpx codex status -s backend
 acpx status              # defaults to codex
 ```
 
-Reports local process status for the cwd-scoped session:
+Reports local queue-owner health for the cwd-scoped session. A healthy warm owner may be processing a prompt or waiting for more work during its idle TTL.
 
-| State        | Meaning                                                                          |
-| ------------ | -------------------------------------------------------------------------------- |
-| `running`    | Queue owner alive and processing a prompt                                        |
-| `idle`       | Saved session resumable, no queue owner running                                  |
-| `dead`       | Queue owner was expected but is unavailable, or the last agent exit was abnormal |
-| `no-session` | No saved record matches this scope                                               |
+| Text/quiet state | JSON `status` | Meaning                                                                                              |
+| ---------------- | ------------- | ---------------------------------------------------------------------------------------------------- |
+| `running`        | `alive`       | Queue owner is healthy and its socket is reachable; this does not establish that a prompt is active. |
+| `idle`           | `idle`        | Saved session is resumable and no queue owner is present.                                            |
+| `dead`           | `dead`        | A queue-owner lease remains but is unhealthy, or the recorded agent exit was abnormal.               |
+| `no-session`     | `no-session`  | No saved record matches this scope.                                                                  |
 
-Plus, when applicable: session id, agent command, live queue-owner pid, uptime,
-last prompt timestamp, and last known exit code or signal for `dead`.
+When available, output also includes the queue-owner PID, model, mode, uptime, and last prompt time. Dead status can include the recorded exit code or signal. The JSON result is a status summary, not a full session record; `no-session` has no local session identity.
 
-`status` is local — it uses `kill(pid, 0)` semantics and does not touch the
-agent. Cached session PIDs are not reported unless a live queue-owner lease ties
-them to the session. It is safe to run from automation that polls for queue
-readiness.
+Status checks use local lease, process, and socket information and do not send an ACP request to the agent. Use session watch events to observe prompt progress or settlement; owner liveness alone is not a prompt-completion signal.
 
 ### Output
 
 - `text`: key/value lines (default).
-- `json`: full record with `acpxRecordId`, `acpxSessionId`, optional `agentSessionId`, plus state and timestamps.
+- `json`: a `status_snapshot` object using the JSON status values above.
+- `quiet`: the text/quiet state token.
 
 `idle` is meaningful: it means the persistent session is saved and resumable, but no queue owner is currently running. The next prompt will start an owner and reconnect.
 
