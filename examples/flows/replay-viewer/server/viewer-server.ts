@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
 import { createFilesystemRunSource } from "./live-source.js";
 import { createReplayLiveSyncServer } from "./live-sync.js";
+import { formatViewerOrigin, isAllowedViewerRequest } from "./request-origin.js";
 import { defaultRunsDir, listRunBundles, readRunBundleFile } from "./run-bundles.js";
 
 const SERVER_ID = "acpx-flow-replay-viewer";
@@ -34,6 +35,8 @@ export async function createReplayViewerServer(
 ): Promise<ReplayViewerServer> {
   const host = options.host ?? "127.0.0.1";
   const port = options.port ?? 4173;
+  // Reject unrepresentable origins before allocating the Vite server or TCP listener.
+  formatViewerOrigin(host, port);
   const runsDir = options.runsDir ?? defaultRunsDir();
   const viewerDir = path.dirname(fileURLToPath(import.meta.url));
   const configFile = resolveViewerConfigFile(viewerDir);
@@ -70,6 +73,10 @@ export async function createReplayViewerServer(
   };
 
   const server = http.createServer((request, response) => {
+    if (!isAllowedViewerRequest(request, host)) {
+      writeJson(response, 403, { error: "Forbidden" });
+      return;
+    }
     const fail = () => {
       if (response.headersSent) {
         response.destroy();
@@ -77,7 +84,7 @@ export async function createReplayViewerServer(
       }
       writeJson(response, 500, { error: "Replay viewer request failed" });
     };
-    void handleApiRequest(request, response, host, port, runsDir, { requestClose })
+    void handleApiRequest(request, response, runsDir, { requestClose })
       .then((handled) => {
         if (handled) {
           return;
@@ -97,6 +104,12 @@ export async function createReplayViewerServer(
 
   server.on("upgrade", (request, socket, head) => {
     try {
+      if (!isAllowedViewerRequest(request, host)) {
+        socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n", () =>
+          socket.destroy(),
+        );
+        return;
+      }
       if (!liveSyncServer.handleUpgrade(request, socket, head)) {
         socket.destroy();
       }
@@ -125,7 +138,7 @@ export async function createReplayViewerServer(
   return {
     host,
     port: actualPort,
-    baseUrl: `http://${host}:${actualPort}`,
+    baseUrl: formatViewerOrigin(host, actualPort),
     async close(): Promise<void> {
       await requestClose();
     },
@@ -143,14 +156,12 @@ function resolveViewerConfigFile(viewerServerDir: string): string {
 export async function handleApiRequest(
   request: http.IncomingMessage,
   response: http.ServerResponse,
-  host: string,
-  port: number,
   runsDir: string,
   options: {
     requestClose?: () => Promise<void>;
   } = {},
 ): Promise<boolean> {
-  const url = new URL(request.url ?? "/", `http://${host}:${port}`);
+  const url = new URL(request.url ?? "/", "http://viewer.invalid");
 
   if (url.pathname === "/api/health") {
     writeJson(response, 200, {

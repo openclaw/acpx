@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { formatViewerOrigin } from "./server/request-origin.js";
 import { defaultRunsDir } from "./server/run-bundles.js";
 import {
   createReplayViewerServer,
@@ -98,7 +99,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   }
 
   const options = parseReplayViewerCliArgs(argv);
-  const baseUrl = `http://${options.host}:${options.port}`;
+  const baseUrl = formatViewerOrigin(options.host, options.port);
   const requestedRunsDir = normalizeRunsDirPath(options.runsDir);
 
   switch (options.command) {

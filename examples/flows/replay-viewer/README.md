@@ -41,6 +41,15 @@ pnpm viewer:status
 pnpm viewer:stop
 ```
 
+Browser HTTP and WebSocket requests must use the viewer's own origin. The server
+accepts its configured host, the local address of the connection, and `localhost`
+for loopback connections, all at its listening port. Native status, stop, and
+WebSocket clients can continue to omit `Origin`. Deliberately binding to a network
+interface retains access for native clients on that network.
+
+For IPv6 loopback, use `pnpm viewer --host ::1`; the printed URL uses brackets,
+such as `http://[::1]:4173`. Pass the same `--host ::1` to status and stop.
+
 The main path is the built-in **Recent runs** list sourced from:
 
 ```text
