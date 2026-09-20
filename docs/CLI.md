@@ -394,7 +394,7 @@ Behavior:
 - Imported sessions must resume that provider session; if the destination agent cannot load it, prompts fail clearly instead of starting an empty conversation
 - `sessions import --name <name>` and `--cwd <dir>` override the imported destination scope; import fails instead of creating a duplicate when an active session already exists for that `(agent, cwd, name)` scope or when another local record already uses the same provider session id
 - `sessions prune --dry-run` previews closed sessions that can be deleted
-- `sessions prune` deletes closed session records for the selected agent; add `--include-history` to delete event stream files too
+- `sessions prune` verifies the saved closed status and selected agent before deleting a record; add `--include-history` to delete only that session's active and rotated event files
 - `sessions prune --before <date>` and `--older-than <days>` filter by close time, falling back to last-used time for older records
 - close errors if the target session does not exist
 

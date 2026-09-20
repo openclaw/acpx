@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { writeSessionRecord as persistSessionRecord } from "../src/session/persistence.js";
 import {
   fileExists,
   makeSessionRecord as makeSessionRecordFixture,
@@ -274,6 +275,90 @@ test("pruneSessions --include-history deletes stream files", async () => {
     assert.ok(!(await fileExists(streamSegment)));
     assert.ok(!(await fileExists(streamLock)));
     assert.ok(await fileExists(neighborStreamFile));
+  });
+});
+
+test("pruneSessions preserves neighboring records with stream-like IDs", async () => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const cwd = path.join(homeDir, "workspace");
+    const sessionsDir = path.join(homeDir, ".acpx", "sessions");
+    for (const id of ["parent", "parent.stream.child", "parent.stream.0"]) {
+      await writeSessionRecord(
+        homeDir,
+        makeSessionRecord({
+          acpxRecordId: id,
+          acpSessionId: id,
+          agentCommand: "agent-a",
+          cwd,
+          closed: id === "parent",
+        }),
+      );
+      await fs.writeFile(path.join(sessionsDir, `${id}.stream.ndjson`), `${id}\n`);
+    }
+    const unrelated = [
+      "parent.stream.child.json",
+      "parent.stream.child.stream.ndjson",
+      "parent.stream.0.json",
+      "parent.stream.0.stream.ndjson",
+      "parent.stream.notes.ndjson",
+      "parent.stream.0.ndjson.backup",
+    ];
+    await fs.writeFile(path.join(sessionsDir, "parent.stream.0.ndjson"), "segment\n");
+    await fs.writeFile(path.join(sessionsDir, "parent.stream.notes.ndjson"), "notes\n");
+    await fs.writeFile(path.join(sessionsDir, "parent.stream.0.ndjson.backup"), "backup\n");
+    const before = await Promise.all(
+      unrelated.map((name) => fs.readFile(path.join(sessionsDir, name), "utf8")),
+    );
+
+    const result = await session.pruneSessions({ includeHistory: true });
+
+    assert.deepEqual(
+      result.pruned.map((record) => record.acpxRecordId),
+      ["parent"],
+    );
+    assert.equal(await fileExists(path.join(sessionsDir, "parent.stream.ndjson")), false);
+    assert.equal(await fileExists(path.join(sessionsDir, "parent.stream.0.ndjson")), false);
+    assert.deepEqual(
+      await Promise.all(unrelated.map((name) => fs.readFile(path.join(sessionsDir, name), "utf8"))),
+      before,
+    );
+  });
+});
+
+test("pruneSessions rechecks canonical records when index metadata is stale", async () => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const cwd = path.join(homeDir, "workspace");
+    const records = ["reopened", "changed-agent", "eligible"].map((id) =>
+      makeSessionRecord({
+        acpxRecordId: id,
+        acpSessionId: id,
+        agentCommand: "agent-a",
+        cwd,
+        closed: true,
+      }),
+    );
+    for (const record of records) {
+      await persistSessionRecord(record);
+    }
+    // Concurrent index writers can leave older metadata beside newer canonical records.
+    await writeSessionRecord(homeDir, { ...records[0], closed: false });
+    await writeSessionRecord(homeDir, { ...records[1], agentCommand: "agent-b" });
+
+    const preview = await session.pruneSessions({ agentCommand: "agent-a", dryRun: true });
+    const result = await session.pruneSessions({ agentCommand: "agent-a" });
+
+    assert.deepEqual(
+      preview.pruned.map((record) => record.acpxRecordId),
+      ["eligible"],
+    );
+    assert.deepEqual(
+      result.pruned.map((record) => record.acpxRecordId),
+      ["eligible"],
+    );
+    assert.ok(await fileExists(sessionFilePath(homeDir, "reopened")));
+    assert.ok(await fileExists(sessionFilePath(homeDir, "changed-agent")));
   });
 });
 

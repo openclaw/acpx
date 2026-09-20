@@ -325,10 +325,12 @@ function closedAtOrLastUsedAt(record: SessionRecord): string {
 }
 
 function isSessionStreamFile(fileName: string, safeId: string): boolean {
+  const segmentPrefix = `${safeId}.stream.`;
   return (
     fileName === `${safeId}.stream.ndjson` ||
     fileName === `${safeId}.stream.lock` ||
-    fileName.startsWith(`${safeId}.stream.`)
+    (fileName.startsWith(segmentPrefix) &&
+      /^\d+\.ndjson$/.test(fileName.slice(segmentPrefix.length)))
   );
 }
 
@@ -336,13 +338,13 @@ export async function pruneSessions(options: PruneOptions = {}): Promise<PruneRe
   await ensureSessionDir();
   const entries = await loadSessionIndexEntries();
 
-  const eligible = filterPruneCandidates(entries, options.agentCommand);
+  const eligible = entries.filter((entry) => isPruneCandidate(entry, options.agentCommand));
 
   const cutoff =
     options.before ??
     (options.olderThanMs != null ? new Date(Date.now() - options.olderThanMs) : undefined);
 
-  const records = await loadPrunableRecords(eligible, cutoff);
+  const records = await loadPrunableRecords(eligible, cutoff, options.agentCommand);
 
   if (options.dryRun) {
     return { pruned: records, bytesFreed: 0, dryRun: true };
@@ -378,24 +380,24 @@ export async function pruneSessions(options: PruneOptions = {}): Promise<PruneRe
   return { pruned: records, bytesFreed, dryRun: false };
 }
 
-function filterPruneCandidates(
-  entries: SessionIndexEntry[],
+function isPruneCandidate(
+  record: Pick<SessionRecord, "closed" | "agentCommand">,
   agentCommand: string | undefined,
-): SessionIndexEntry[] {
-  return entries.filter(
-    (entry) => entry.closed && (!agentCommand || entry.agentCommand === agentCommand),
-  );
+): boolean {
+  return record.closed === true && (!agentCommand || record.agentCommand === agentCommand);
 }
 
 async function loadPrunableRecords(
   entries: SessionIndexEntry[],
   cutoff: Date | undefined,
+  agentCommand: string | undefined,
 ): Promise<SessionRecord[]> {
   const records: SessionRecord[] = [];
   const cutoffIso = cutoff?.toISOString();
   for (const entry of entries) {
     const record = await loadRecordFromIndexEntry(entry);
-    if (record && isBeforeCutoff(record, cutoffIso)) {
+    // The lookup index can lag a concurrent canonical-record update.
+    if (record && isPruneCandidate(record, agentCommand) && isBeforeCutoff(record, cutoffIso)) {
       records.push(record);
     }
   }

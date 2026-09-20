@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Sessions/prune: recheck saved closed and agent state before pruning, and preserve neighboring sessions whose IDs overlap history filenames.
+
 ## 0.17.1 - 2026-09-19
 
 **Highlights:** Configured runtime initialization deadlines now stop unresponsive agents and clean up abandoned launches safely. Embedding hosts gain model inspection and session-specific permissions. Antigravity joins the built-in agents; its fixed-choice questions require an interactive client, including for existing custom launchers.
