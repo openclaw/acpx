@@ -91,6 +91,8 @@ await runtime.setModel({
 
 These fields guard request admission. After SDK admission, the response and accepted state still settle even if the signal aborts or host authority changes. This keeps the saved selection consistent with the agent. Callers that omit the fields retain their existing behavior.
 
+Within an embedded runtime, accepted controls save the current conversation and configuration together. Turn completion and one-shot cleanup wait for those controls to settle before saving final state or releasing the connection. A late control response therefore preserves final output and usage, and its accepted selection remains in the saved session for later turns and reconnect replay. Ordinary `close` still need not wait for the active prompt to finish cancellation; its closed/reset markers survive the prompt's later final save.
+
 The same guard applies to each saved mode, model, and configuration control replayed during reconnect. Revocation stops later replay requests and preserves the original rejection. Replies already accepted by the agent remain saved, including any adjusted sibling selections.
 
 ### `set model <id>`

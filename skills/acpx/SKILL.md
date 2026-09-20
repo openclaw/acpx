@@ -128,6 +128,8 @@ Use `getStatus({ handle }).models.availableModels` when present for native displ
 
 Use `prepareFreshSession({ handle })` to persist a fresh-session request across restart, then ensure without `resumeSessionId`. Ordinary `close` retains session continuity; explicit remote discard requires the adapter’s optional close capability.
 
+Embedded controls save accepted settings with the current conversation. Turn finalization and one-shot cleanup wait for admitted controls, preserving final output, usage, and selections in the saved session. Ordinary `close` can return before active prompt cancellation finishes; the later save preserves its close/reset markers.
+
 For installed entrypoints and prerequisites, read the matching [agent guide](https://github.com/openclaw/acpx/tree/main/agents). For resolver callbacks, custom command overrides, and lifecycle details, read [embedded agent discovery](https://github.com/openclaw/acpx/blob/main/docs/session-control.md#embedded-agent-discovery).
 
 ## Commands

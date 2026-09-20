@@ -36,6 +36,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Replay viewer: reject foreign Host and Origin headers before HTTP access, WebSocket subscriptions, or shutdown, and fix IPv6 listener URLs and status/stop commands while preserving native clients without an Origin header.
 
+- Runtime/controls: preserve completed output, usage, and accepted settings when control responses overlap turn finalization, and wait for admitted controls before one-shot cleanup.
+
 ## 0.17.1 - 2026-09-19
 
 **Highlights:** Configured runtime initialization deadlines now stop unresponsive agents and clean up abandoned launches safely. Embedding hosts gain model inspection and session-specific permissions. Antigravity joins the built-in agents; its fixed-choice questions require an interactive client, including for existing custom launchers.

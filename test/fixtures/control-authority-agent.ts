@@ -91,6 +91,11 @@ async function control(method: string, value: string, apply: () => void) {
       await setTimeout(5);
     }
   }
+  if (existsSync(path.join(directory, "hold-control"))) {
+    while (!existsSync(path.join(directory, "release-control"))) {
+      await setTimeout(5);
+    }
+  }
   apply();
   await fs.appendFile(path.join(directory, "effects.jsonl"), entry);
 }
@@ -99,7 +104,10 @@ const agent: Agent = {
   async initialize() {
     return {
       protocolVersion: PROTOCOL_VERSION,
-      agentCapabilities: { loadSession: !existsSync(path.join(directory, "no-load")) },
+      agentCapabilities: {
+        loadSession: !existsSync(path.join(directory, "no-load")),
+        sessionCapabilities: { close: {} },
+      },
       authMethods: [],
     };
   },
@@ -137,10 +145,39 @@ const agent: Agent = {
     while (!existsSync(path.join(directory, "release-prompt"))) {
       await setTimeout(5);
     }
+    if (existsSync(path.join(directory, "emit-final-state"))) {
+      await connection.sessionUpdate({
+        sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "final answer while control waits" },
+        },
+      });
+      await connection.sessionUpdate({
+        sessionId,
+        update: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [{ name: "after-control", description: "Final command metadata" }],
+        },
+      });
+      await connection.sessionUpdate({
+        sessionId,
+        update: {
+          sessionUpdate: "usage_update",
+          used: 12,
+          size: 500,
+          _meta: { usage: { input_tokens: 9, output_tokens: 3, total_tokens: 12 } },
+        },
+      });
+    }
     await fs.appendFile(path.join(directory, "prompt-effects.jsonl"), entry);
     return { stopReason: "end_turn" };
   },
   async cancel() {},
+  async closeSession() {
+    await fs.appendFile(path.join(directory, "sessions.jsonl"), '"close"\n');
+    return {};
+  },
   async setSessionMode({ modeId }) {
     await control("session/set_mode", modeId, () => {
       mode = modeId;

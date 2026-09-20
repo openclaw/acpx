@@ -4069,7 +4069,7 @@ test("AcpRuntimeManager closes the stream and client before reporting an unexpec
   assert.equal(clientClosedAtResult, true);
 });
 
-async function assertFinalPersistenceFailure(failAtSave: number): Promise<void> {
+test("AcpRuntimeManager fails the turn when the final owner checkpoint throws", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "finalize-persist-session",
     acpSessionId: "finalize-persist-sid",
@@ -4082,9 +4082,7 @@ async function assertFinalPersistenceFailure(failAtSave: number): Promise<void> 
     override async save(next: AcpSessionRecord): Promise<void> {
       if (promptFinished) {
         savesAfterPrompt += 1;
-        if (savesAfterPrompt >= failAtSave) {
-          throw new Error("ENOSPC: no space left on device");
-        }
+        throw new Error("ENOSPC: no space left on device");
       }
       await super.save(next);
     }
@@ -4157,16 +4155,8 @@ async function assertFinalPersistenceFailure(failAtSave: number): Promise<void> 
     },
   });
   assert.equal(closeCalls, 1);
-  assert.equal(savesAfterPrompt, failAtSave);
+  assert.equal(savesAfterPrompt, 1);
   assert.ok(events.some((event) => event.type === "text_delta"));
-}
-
-test("AcpRuntimeManager fails the turn when checkpoint flush throws", async () => {
-  await assertFinalPersistenceFailure(2);
-});
-
-test("AcpRuntimeManager fails the turn when final session persist throws", async () => {
-  await assertFinalPersistenceFailure(3);
 });
 
 test("AcpRuntimeManager fails persistent turns clearly when session reuse is unavailable", async () => {
