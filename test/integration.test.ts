@@ -88,7 +88,11 @@ for (const completion of ["complete", "timeout", "cancel"] as const) {
       const cwd = path.join(homeDir, "workspace");
       await fs.mkdir(cwd);
       const base = [...baseLoadCapableAgentArgs(cwd), "--format", "json", "--ttl", "1"];
-      const flow = runCli([...base, "flow", "run", FLOW_SESSION_TURN_FIXTURE_PATH], homeDir);
+      const releaseFile = path.join(homeDir, "release-flow-turn");
+      const flow = runCli([...base, "flow", "run", FLOW_SESSION_TURN_FIXTURE_PATH], homeDir, {
+        env: { ACPX_TEST_SESSION_TURN_RELEASE: releaseFile },
+        timeoutMs: 30_000,
+      });
       let queued: Promise<CliRunResult> | undefined;
       let name: string | undefined;
       try {
@@ -118,6 +122,17 @@ for (const completion of ["complete", "timeout", "cancel"] as const) {
           [...base, ...timeoutArgs, "prompt", "-s", name, `echo cli-${completion}`],
           homeDir,
         );
+        if (completion === "complete") {
+          await waitFor(
+            async () =>
+              await fs.stat(queuePaths(homeDir, entry.acpxRecordId).lockPath).then(
+                () => true,
+                () => null,
+              ),
+            5_000,
+          );
+          await fs.writeFile(releaseFile, "release");
+        }
         if (completion === "cancel") {
           await waitFor(async () => {
             const cancelled = await runCli([...base, "cancel", "-s", entry.name], homeDir);
@@ -128,10 +143,11 @@ for (const completion of ["complete", "timeout", "cancel"] as const) {
           }, 5_000);
         }
         const queuedResult = await queued;
+        await fs.writeFile(releaseFile, "release");
         const flowResult = await flow;
         assert.equal(flowResult.code, 0, flowResult.stderr);
         const record = await fs.readFile(recordPath, "utf8");
-        assert.match(record, /stream-sleep done: flow-held/);
+        assert.match(record, /stream-wait-file done: flow-held/);
         if (completion === "complete") {
           assert.equal(queuedResult.code, 0, queuedResult.stderr);
           assert.match(record, /cli-complete/);
@@ -155,6 +171,7 @@ for (const completion of ["complete", "timeout", "cancel"] as const) {
           }
         }
       } finally {
+        await fs.writeFile(releaseFile, "release");
         await Promise.allSettled([flow, queued]);
         if (name) {
           await runCli([...base, "sessions", "close", name], homeDir);

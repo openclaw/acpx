@@ -40,9 +40,9 @@ function message(text: string): AcpJsonRpcMessage {
   };
 }
 
-function observer(session: SessionRecord, cursor?: string) {
+function observer(session: SessionRecord, cursor?: string, timeoutMs = 3_000) {
   const abort = new AbortController();
-  const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(3_000)]);
+  const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(timeoutMs)]);
   const iterator = watchSession({ record: session, cursor, signal })[Symbol.asyncIterator]();
   return { abort, iterator };
 }
@@ -306,7 +306,8 @@ test("watch reads concurrent rotations without duplicate events or silent gaps",
     session.eventLog.max_segments = 64;
     await writeSessionRecord(session);
     const writer = await SessionEventWriter.open(session);
-    const watched = observer(session);
+    // Forty durable rotations can outlive the short watchdog on loaded runners.
+    const watched = observer(session, undefined, 15_000);
     const observed: SessionWatchEvent[] = [];
     const collect = async () => {
       for (;;) {

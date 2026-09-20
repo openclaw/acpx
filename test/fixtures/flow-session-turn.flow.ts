@@ -4,7 +4,15 @@ export default defineFlow({
   name: "fixture-session-turn",
   startAt: "hold",
   nodes: {
-    hold: acp({ prompt: () => "stream-sleep 2500 flow-held" }),
+    hold: acp({
+      prompt: () => {
+        const releaseFile = process.env.ACPX_TEST_SESSION_TURN_RELEASE;
+        if (!releaseFile) {
+          throw new Error("Missing session-turn release barrier");
+        }
+        return `stream-wait-file ${releaseFile}`;
+      },
+    }),
   },
   edges: [],
 });

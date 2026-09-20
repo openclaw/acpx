@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
@@ -1509,6 +1509,18 @@ class MockAgent implements Agent {
 
       await sleepWithCancel(Math.round(ms), signal);
       return `slept ${Math.round(ms)}ms`;
+    }
+
+    if (text.startsWith("stream-wait-file ")) {
+      const releaseFile = text.slice("stream-wait-file ".length).trim();
+      if (!releaseFile) {
+        throw new Error("Usage: stream-wait-file <release-file>");
+      }
+      await this.sendAssistantMessage(sessionId, "flow-held");
+      while (!existsSync(releaseFile)) {
+        await sleepWithCancel(10, signal);
+      }
+      return "stream-wait-file done: flow-held";
     }
 
     if (text.startsWith("stream-sleep ")) {
