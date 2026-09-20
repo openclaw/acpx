@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Runtime/embedding: expose optional `fs` and `terminal` capability switches on `AcpRuntimeOptions`, matching `AcpClientOptions`. Omitted options stay enabled; retained connections keep their original policy; health probes disable both callbacks while retaining the host permission policy. Disabled ACP callbacks are a protocol policy, not an OS sandbox. Thanks @devSejung.
+
 ### Fixes
 
 - Sessions/storage: resolve scope, directory, ID, listing, and prune queries from current saved records instead of stale index metadata; save checkpoints without a shared index write that can fail after the record is committed. Ignore mismatched record filenames so copied records cannot create false matches or authorize pruning another record.
@@ -30,8 +34,6 @@ Repo: https://github.com/openclaw/acpx
 
 - Shared sessions: update all participating clients and let older queue owners expire while idle before resuming work. The stronger ownership guards and control-persistence guarantees require updated clients and owners; mixed versions retain the older race conditions.
 - Replay viewer: wildcard binds (`--host 0.0.0.0` or `--host ::`) now reject unconfigured DNS aliases with HTTP 403. Use a numeric interface address, or bind with `--host <hostname>` to keep using that hostname.
-- Runtime/shared sessions: set the mode, model, and config options of a shared session, and read its capabilities, without shelling out to the CLI. Controls run on the session's queue owner and fail with `ACP_BACKEND_UNAVAILABLE` when no owner holds it. Thanks @saariuslystoned.
-- Runtime/embedding: expose optional `fs` and `terminal` capability switches on `AcpRuntimeOptions`, matching `AcpClientOptions`. Omitted options stay enabled; retained connections keep their original policy; health probes keep both callbacks disabled. Disabled ACP callbacks are a protocol policy, not an OS sandbox. Thanks @devSejung.
 
 ### Fixes
 
