@@ -177,77 +177,33 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
   return { hasAgentOverride };
 }
 
-function detectInitialCwd(argv: string[]): string {
+function lastTopLevelFlagValue(argv: string[], flag: string): string | undefined {
+  let value: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-
     const scan = classifyTopLevelFlagScan(token);
     if (scan.stop) {
       break;
     }
-
-    const cwd = readCwdFlagValue(token, argv[index + 1]);
-    if (cwd) {
-      return path.resolve(cwd);
+    if (token === flag) {
+      value = argv[index + 1];
+    } else if (token.startsWith(`${flag}=`)) {
+      value = token.slice(flag.length + 1);
     }
-    if (isCwdFlagToken(token)) {
-      break;
-    }
-
     if (scan.skipNext) {
       index += 1;
     }
   }
+  return value;
+}
 
-  return process.cwd();
+function detectInitialCwd(argv: string[]): string {
+  return path.resolve(lastTopLevelFlagValue(argv, "--cwd") ?? process.cwd());
 }
 
 function detectMcpConfigPath(argv: string[], cwd: string): string | undefined {
-  for (let index = 0; index < argv.length; index += 1) {
-    const scan = scanMcpConfigToken(argv[index], argv[index + 1], cwd);
-    if (scan.stop) {
-      return scan.path;
-    }
-    if (scan.skipNext) {
-      index += 1;
-    }
-  }
-  return undefined;
-}
-
-function scanMcpConfigToken(
-  token: string,
-  nextToken: string | undefined,
-  cwd: string,
-): { path?: string; skipNext?: boolean; stop?: boolean } {
-  if (token === "--" || !token.startsWith("-") || token === "-") {
-    return { stop: true };
-  }
-  if (token === "--mcp-config") {
-    return { path: resolveMcpConfigPath(nextToken, cwd), stop: true };
-  }
-  if (token.startsWith("--mcp-config=")) {
-    return { path: resolveMcpConfigPath(token.slice("--mcp-config=".length), cwd), stop: true };
-  }
-  return { skipNext: TOP_LEVEL_VERSION_VALUE_FLAGS.has(token) };
-}
-
-function resolveMcpConfigPath(value: string | undefined, cwd: string): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed && trimmed !== "--" ? path.resolve(cwd, trimmed) : undefined;
-}
-
-function isCwdFlagToken(token: string): boolean {
-  return token === "--cwd" || token.startsWith("--cwd=");
-}
-
-function readCwdFlagValue(token: string, nextToken: string | undefined): string | undefined {
-  const raw = token === "--cwd" ? nextToken : readInlineFlagValue(token, "--cwd");
-  const value = raw?.trim();
-  if (!value || value === "--") {
-    return undefined;
-  }
-  return value;
+  const value = lastTopLevelFlagValue(argv, "--mcp-config");
+  return value ? path.resolve(cwd, value) : undefined;
 }
 
 function detectRequestedOutputFormat(argv: string[], fallback: OutputFormat): OutputFormat {
@@ -526,41 +482,47 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
   await maybeHandleSkillflag(normalizedArgv);
 
-  const initialCwd = detectInitialCwd(rawArgs);
-  const config = await loadResolvedConfig(initialCwd, {
-    mcpConfigPath: detectMcpConfigPath(rawArgs, initialCwd),
-  });
   const requestedJsonStrict = detectJsonStrict(rawArgs);
-  const requestedOutputFormat = detectRequestedOutputFormat(rawArgs, config.format);
-  const requestedOutputPolicy = {
-    ...resolveOutputPolicy(requestedOutputFormat, requestedJsonStrict),
+  let requestedOutputPolicy = {
+    ...resolveOutputPolicy(detectRequestedOutputFormat(rawArgs, "text"), requestedJsonStrict),
     suppressReads: rawArgs.some((token) => token === "--suppress-reads"),
   };
 
-  const program = createProgram(requestedJsonStrict);
-
-  addGlobalFlags(program);
-
-  configurePublicCli({
-    program,
-    argv: rawArgs,
-    config,
-    requestedJsonStrict,
-    topLevelVerbs: TOP_LEVEL_VERBS,
-    listBuiltInAgents,
-    detectAgentToken,
-    registerAgentCommand,
-    registerDefaultCommands,
-    handlePromptAction: async (command, promptParts) => {
-      await handlePrompt(undefined, promptParts, {}, command, config);
-    },
-  });
-
-  program.exitOverride((error) => {
-    throw error;
-  });
-
   try {
+    const initialCwd = detectInitialCwd(rawArgs);
+    const config = await loadResolvedConfig(initialCwd, {
+      mcpConfigPath: detectMcpConfigPath(rawArgs, initialCwd),
+    });
+    requestedOutputPolicy = {
+      ...resolveOutputPolicy(
+        detectRequestedOutputFormat(rawArgs, config.format),
+        requestedJsonStrict,
+      ),
+      suppressReads: requestedOutputPolicy.suppressReads,
+    };
+    const program = createProgram(requestedJsonStrict);
+
+    addGlobalFlags(program);
+
+    configurePublicCli({
+      program,
+      argv: rawArgs,
+      config,
+      requestedJsonStrict,
+      topLevelVerbs: TOP_LEVEL_VERBS,
+      listBuiltInAgents,
+      detectAgentToken,
+      registerAgentCommand,
+      registerDefaultCommands,
+      handlePromptAction: async (command, promptParts) => {
+        await handlePrompt(undefined, promptParts, {}, command, config);
+      },
+    });
+
+    program.exitOverride((error) => {
+      throw error;
+    });
+
     await program.parseAsync(normalizedArgv);
   } catch (error) {
     await handleProgramParseError(error, requestedOutputPolicy);

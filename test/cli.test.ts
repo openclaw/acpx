@@ -137,6 +137,180 @@ test("config commands accept command-local --format json", async () => {
   });
 });
 
+test("bootstrap uses the final cwd and MCP config across repeated flag spellings", async (t) => {
+  for (const firstInline of [false, true]) {
+    for (const lastInline of [false, true]) {
+      await t.test(`first inline=${firstInline}, last inline=${lastInline}`, async () => {
+        await withTempHome(async (homeDir) => {
+          const first = path.join(homeDir, "first");
+          const last = path.join(homeDir, "last");
+          await fs.mkdir(first);
+          await fs.mkdir(last);
+          await fs.writeFile(
+            path.join(first, ".acpxrc.json"),
+            '{"defaultPermissions":"approve-all"}',
+          );
+          await fs.writeFile(path.join(last, ".acpxrc.json"), '{"defaultPermissions":"deny-all"}');
+          await fs.writeFile(path.join(last, "job.json"), '{"mcpServers":[]}');
+          const flag = (name: string, value: string, inline: boolean) =>
+            inline ? [`${name}=${value}`] : [name, value];
+          const result = await runCli(
+            [
+              ...flag("--cwd", first, firstInline),
+              ...flag("--mcp-config", "missing.json", firstInline),
+              ...flag("--mcp-config", "job.json", lastInline),
+              ...flag("--cwd", last, lastInline),
+              "--format",
+              "json",
+              "config",
+              "show",
+            ],
+            homeDir,
+          );
+          assert.equal(result.code, 0, result.stderr);
+          const shown = JSON.parse(result.stdout) as {
+            defaultPermissions: string;
+            paths: { project: string; mcp: string };
+          };
+          assert.equal(shown.defaultPermissions, "deny-all");
+          assert.equal(shown.paths.project, path.join(last, ".acpxrc.json"));
+          assert.equal(shown.paths.mcp, path.join(last, "job.json"));
+        });
+      });
+    }
+  }
+});
+
+test("bootstrap applies the final cwd permission policy to actual agent writes", async () => {
+  await withTempHome(async (homeDir) => {
+    const first = path.join(homeDir, "first");
+    const last = path.join(homeDir, "last");
+    await fs.mkdir(first);
+    await fs.mkdir(last);
+    const agents = { fixture: { argv: [process.execPath, MOCK_AGENT_PATH] } };
+    await fs.writeFile(
+      path.join(first, ".acpxrc.json"),
+      JSON.stringify({ agents, defaultPermissions: "approve-all" }),
+    );
+    await fs.writeFile(
+      path.join(last, ".acpxrc.json"),
+      JSON.stringify({ agents, defaultPermissions: "deny-all" }),
+    );
+    const target = path.join(last, "sentinel.txt");
+    const result = await runCli(
+      [
+        "--cwd",
+        first,
+        `--cwd=${last}`,
+        "--format",
+        "json",
+        "fixture",
+        "exec",
+        `write ${target} denied`,
+      ],
+      homeDir,
+    );
+    assert.equal(result.code, 5, result.stdout + result.stderr);
+    await assert.rejects(fs.access(target), { code: "ENOENT" });
+  });
+});
+
+test("bootstrap preserves empty and whitespace cwd values and skips other flag values", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, " workspace ");
+    await fs.mkdir(cwd);
+    await fs.writeFile(path.join(cwd, ".acpxrc.json"), '{"defaultPermissions":"deny-all"}');
+    for (const args of [
+      ["--cwd", homeDir, "--cwd="],
+      ["--system-prompt", "--cwd", "--cwd", cwd],
+      ["--system-prompt", "--", `--cwd=${cwd}`],
+    ]) {
+      const result = await runCli([...args, "--format", "json", "config", "show"], homeDir, {
+        cwd,
+      });
+      assert.equal(result.code, 0, result.stderr);
+      const shown = JSON.parse(result.stdout) as {
+        defaultPermissions: string;
+        paths: { project: string };
+      };
+      assert.equal(shown.defaultPermissions, "deny-all");
+      assert.equal(
+        await fs.realpath(shown.paths.project),
+        await fs.realpath(path.join(cwd, ".acpxrc.json")),
+      );
+    }
+  });
+});
+
+test("bootstrap errors respect explicit output formats", async (t) => {
+  for (const failure of ["global-json", "project-json", "typed", "mcp"]) {
+    for (const format of ["text", "json", "strict", "quiet"]) {
+      await t.test(`${failure} with ${format}`, async () => {
+        await withTempHome(async (homeDir) => {
+          const cwd = path.join(homeDir, "workspace");
+          await fs.mkdir(cwd);
+          const extra: string[] = [];
+          if (failure === "global-json") {
+            await fs.mkdir(path.join(homeDir, ".acpx"));
+            await fs.writeFile(path.join(homeDir, ".acpx", "config.json"), "{");
+          } else if (failure === "mcp") {
+            extra.push("--mcp-config", "missing.json");
+          } else {
+            await fs.writeFile(
+              path.join(cwd, ".acpxrc.json"),
+              failure === "typed" ? '{"timeout":0}' : "{",
+            );
+          }
+          const flags =
+            format === "strict" ? ["--format", "json", "--json-strict"] : ["--format", format];
+          const result = await runCli(
+            ["--cwd", cwd, ...extra, ...flags, "config", "show"],
+            homeDir,
+          );
+          assert.equal(result.code, 1);
+          if (format === "json" || format === "strict") {
+            const error = parseSingleAcpErrorLine(result.stdout);
+            assert.equal(error.data?.acpxCode, "RUNTIME");
+            assert.equal(error.data?.origin, "cli");
+            assert.equal(result.stderr, "");
+          } else {
+            assert.equal(result.stdout, "");
+            assert.doesNotMatch(result.stderr, /\n\s+at |Node\.js v/u);
+            assert.match(result.stderr, /config|MCP|Invalid JSON/u);
+            if (format === "quiet") {
+              assert.match(result.stderr, /^\[acpx\] error: RUNTIME .+\n$/u);
+            }
+          }
+        });
+      });
+    }
+  }
+});
+
+test("bootstrap keeps version independent of config and applies loaded output defaults", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd);
+    const configPath = path.join(cwd, ".acpxrc.json");
+    await fs.writeFile(configPath, "{");
+    const version = await runCli(["--cwd", cwd, "--format", "quiet", "--version"], homeDir);
+    assert.equal(version.code, 0, version.stderr);
+    assert.equal(version.stdout.trim(), PACKAGE_VERSION);
+    for (const format of ["json", "quiet"]) {
+      await fs.writeFile(configPath, JSON.stringify({ format }));
+      const result = await runCli(["--cwd", cwd, "codex", "hello"], homeDir);
+      assert.equal(result.code, 4);
+      if (format === "json") {
+        assert.equal(parseSingleAcpErrorLine(result.stdout).data?.acpxCode, "NO_SESSION");
+        assert.equal(result.stderr, "");
+      } else {
+        assert.equal(result.stdout, "");
+        assert.match(result.stderr, /^\[acpx\] error: NO_SESSION /u);
+      }
+    }
+  });
+});
+
 test("top-level output flag detection stops at the first command token", async () => {
   await withTempHome(async (homeDir) => {
     const result = await runCli(["codex", "--json-strict"], homeDir);

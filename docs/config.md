@@ -15,6 +15,8 @@ description: Global and project JSON config files, supported keys, precedence ru
 
 Each layer is a partial override merged on top of the previous one. Missing keys inherit; arrays and objects are replaced, not deep-merged (with the exception of the `agents` map, where keys merge and per-agent objects replace wholesale).
 
+When top-level `--cwd` or `--mcp-config` flags repeat, the final occurrence wins. Project configuration comes from that effective cwd, and relative MCP config paths resolve against it regardless of flag order.
+
 Inspect the resolved view:
 
 ```bash

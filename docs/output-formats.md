@@ -5,6 +5,8 @@ description: text, json, json-strict, and quiet modes — what each format emits
 
 `acpx` streams agent activity in three output modes plus two modifiers. Pick the one that matches your consumer: a human terminal, an automation pipeline, or a script that only wants the final answer.
 
+Explicit top-level output flags also apply when configuration fails to load: JSON modes emit one JSON-RPC error on stdout, quiet mode emits one stderr diagnostic, and text mode reports the error without a stack trace. If no output flag is supplied and configuration cannot load, errors use text mode.
+
 ## `text` (default)
 
 Human-readable stream:

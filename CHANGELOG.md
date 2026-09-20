@@ -11,6 +11,8 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/prune: recheck saved closed and agent state before pruning, and preserve neighboring sessions whose IDs overlap history filenames.
 - Permissions/output: match complete leading action words when inferring tool kinds, so read-like substrings in edit or command titles neither grant read approval nor hide their output.
 - Agents/config: preserve custom names such as `constructor` and `__proto__` through resolution, listing, and config display instead of treating them as inherited object properties.
+- CLI/config: load project permissions and relative MCP configuration from the final top-level `--cwd` and `--mcp-config` values, matching command execution.
+- CLI/output: honor explicit JSON and quiet output flags for configuration startup errors instead of printing an uncaught stack trace.
 
 ## 0.17.1 - 2026-09-19
 
