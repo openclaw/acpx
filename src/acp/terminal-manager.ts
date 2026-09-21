@@ -123,7 +123,7 @@ function readTerminalOutputCeiling(): number | undefined {
 }
 
 function resolveTerminalOutputLimit(
-  requested: number | undefined,
+  requested: CreateTerminalRequest["outputByteLimit"],
   ceiling: number | undefined,
 ): number {
   return Math.min(
