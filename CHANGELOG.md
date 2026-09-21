@@ -54,6 +54,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/locks: record process birth on new turn and queue mutation locks so abandoned locks can recover after PID reuse; bound identity queries while preserving live and uncertain owners.
 - Flows/replay: retain captured diagnostics, bundled conversations, and step links after failed ACP prompts; preserve parser rejection values and use the real session identity for isolated step records.
 - Flows/replay: keep the initial session-binding artifact immutable when real session IDs or agent metadata arrive later, while preserving current binding metadata for replay readers.
+- Sessions/history: preserve meaningful whitespace in text and thought chunks, retain opaque tool IDs across updates and reloads, and keep tool failure state when a partial update omits status.
 
 ## 0.18.0 - 2026-09-20
 

@@ -210,10 +210,6 @@ function ensureAgentMessage(conversation: SessionConversation): SessionAgentMess
 }
 
 function appendAgentText(agent: SessionAgentMessage, text: string): void {
-  if (!text.trim()) {
-    return;
-  }
-
   const last = agent.content.at(-1);
   if (last && isAgentTextContent(last)) {
     last.Text = trimRuntimeText(`${last.Text}${text}`, MAX_RUNTIME_AGENT_TEXT_CHARS);
@@ -227,10 +223,6 @@ function appendAgentText(agent: SessionAgentMessage, text: string): void {
 }
 
 function appendAgentThinking(agent: SessionAgentMessage, text: string): void {
-  if (!text.trim()) {
-    return;
-  }
-
   const last = agent.content.at(-1);
   if (last && isAgentThinkingContent(last)) {
     last.Thinking.text = trimRuntimeText(
@@ -331,7 +323,9 @@ function upsertToolResult(
   toolCallId: string,
   patch: Partial<SessionToolResult>,
 ): void {
-  const existing = agent.tool_results[toolCallId];
+  const existing = hasOwn(agent.tool_results, toolCallId)
+    ? agent.tool_results[toolCallId]
+    : undefined;
   const fallback = existingToolResultValues(existing);
   const next: SessionToolResult = {
     tool_use_id: toolCallId,
@@ -340,7 +334,13 @@ function upsertToolResult(
     content: patch.content ?? fallback.content,
     output: patch.output ?? fallback.output,
   };
-  agent.tool_results[toolCallId] = next;
+  // Tool IDs are opaque; __proto__ must be a serializable own entry.
+  Object.defineProperty(agent.tool_results, toolCallId, {
+    value: next,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
 }
 
 function existingToolResultValues(existing: SessionToolResult | undefined): SessionToolResult {
@@ -409,7 +409,7 @@ function applyToolResultUpdate(
 
   upsertToolResult(agent, update.toolCallId, {
     tool_name: tool.name,
-    is_error: statusIndicatesError(status),
+    is_error: status === undefined ? undefined : statusIndicatesError(status),
     content: output === undefined ? undefined : toToolResultContent(output),
     output,
   });

@@ -254,6 +254,12 @@ CWD is stored as an absolute path in the scope key.
 
 ## Session metadata fields
 
+`sessions show` with `--format json` includes the stored normalized conversation,
+including text, thoughts, and tool results keyed by the adapter's opaque tool IDs.
+Retained text and thought chunks keep their whitespace. `sessions history` joins
+and trims content for previews; the existing runtime retention limits still apply
+to saved content.
+
 `sessions show` and the JSON form of `sessions new`/`sessions ensure` and `status` include identity fields:
 
 | Field            | Meaning                                                           |

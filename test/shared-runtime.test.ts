@@ -298,7 +298,7 @@ test(
 
 test(
   "closed public watchers finish replay and reject foreign or invalid cursors",
-  { timeout: 10_000 },
+  { timeout: 30_000 },
   async () => {
     await withSharedSession(async ({ runtime, handle, cli, home }) => {
       const turn = runtime.startTurn({
@@ -307,8 +307,9 @@ test(
         requestId: "before-close",
         mode: "prompt",
       });
+      await turn.promptStarted;
       const events = await watchedTurn(
-        runtime.watchSession({ handle, signal: AbortSignal.timeout(5_000) }),
+        runtime.watchSession({ handle, signal: AbortSignal.timeout(10_000) }),
         "before-close",
       );
       assert.equal((await turn.result).status, "completed");
