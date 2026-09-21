@@ -9,6 +9,7 @@ import { isPathInside } from "@openclaw/fs-safe/path";
 import { root, type Root } from "@openclaw/fs-safe/root";
 import { assertControlAuthority, type AcpControlAuthority } from "./async-control.js";
 import { PermissionDeniedError, PermissionPromptUnavailableError } from "./errors.js";
+import { sliceReadWindow } from "./file-read-window.js";
 import { promptForPermission } from "./permission-prompt.js";
 import type { ClientOperation, NonInteractivePermissionPolicy, PermissionMode } from "./types.js";
 
@@ -110,7 +111,7 @@ export class FileSystemHandlers {
       const workspace = await this.getWorkspace();
       const content = await workspace.readText(filePath);
       assertControlAuthority(authority);
-      const sliced = this.sliceContent(content, params.line, params.limit);
+      const sliced = sliceReadWindow(content, params.line, params.limit);
 
       this.emitOperation({
         method: "fs/read_text_file",
@@ -230,30 +231,6 @@ export class FileSystemHandlers {
       hardlinks: "allow",
       maxBytes: Infinity,
     }));
-  }
-
-  private sliceContent(
-    content: string,
-    line: number | null | undefined,
-    limit: number | null | undefined,
-  ): string {
-    if (line == null && limit == null) {
-      return content;
-    }
-
-    const lines = content.split("\n");
-    const startLine = line == null ? 1 : Math.max(1, Math.trunc(line));
-    const startIndex = Math.max(0, startLine - 1);
-    const maxLines = limit == null ? undefined : Math.max(0, Math.trunc(limit));
-
-    if (maxLines === 0) {
-      return "";
-    }
-
-    const endIndex =
-      maxLines == null ? lines.length : Math.min(lines.length, startIndex + maxLines);
-
-    return lines.slice(startIndex, endIndex).join("\n");
   }
 
   private readWindowDetails(

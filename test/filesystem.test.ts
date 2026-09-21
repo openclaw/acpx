@@ -274,6 +274,46 @@ test("readTextFile respects line/limit and logs operations", async () => {
   }
 });
 
+test("readTextFile preserves window defaults and newline bytes", async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-read-window-"));
+  try {
+    const file = path.join(cwd, "notes.txt");
+    const handlers = new FileSystemHandlers({ cwd, permissionMode: "approve-reads" });
+    const content = "one\ntwo\nthree\nfour\n";
+    await fs.writeFile(file, content);
+    for (const { selectors, expected } of [
+      { selectors: {}, expected: content },
+      { selectors: { line: 2 }, expected: "two\nthree\nfour\n" },
+      { selectors: { limit: 2 }, expected: "one\ntwo" },
+      { selectors: { limit: 0 }, expected: "" },
+      { selectors: { line: 99, limit: 2 }, expected: "" },
+      { selectors: { line: null, limit: null }, expected: content },
+      { selectors: { line: null, limit: 2 }, expected: "one\ntwo" },
+      { selectors: { line: 2, limit: null }, expected: "two\nthree\nfour\n" },
+      { selectors: { line: 4, limit: 2 }, expected: "four\n" },
+    ]) {
+      assert.equal(
+        (await handlers.readTextFile({ sessionId: "synthetic", path: file, ...selectors })).content,
+        expected,
+      );
+    }
+    await fs.writeFile(file, "one\r\ntwo\r\nthree\r\n");
+    assert.equal(
+      (await handlers.readTextFile({ sessionId: "synthetic", path: file, line: 2, limit: 1 }))
+        .content,
+      "two\r",
+    );
+    await fs.writeFile(file, "");
+    assert.equal(
+      (await handlers.readTextFile({ sessionId: "synthetic", path: file, line: 2, limit: 2 }))
+        .content,
+      "",
+    );
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("readTextFile is denied in deny-all mode", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fs-test-"));
   try {

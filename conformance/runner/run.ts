@@ -22,6 +22,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import { FsSafeError } from "@openclaw/fs-safe/errors";
 import { root, type Root } from "@openclaw/fs-safe/root";
+import { sliceReadWindow } from "../../src/file-read-window.js";
 import {
   parseCaseDefinition,
   parseProfileDefinition,
@@ -141,7 +142,7 @@ class RunnerClient implements Client {
 
   async readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
     return await this.withSessionFile(params, async (workspace, filePath) => ({
-      content: await workspace.readText(filePath),
+      content: sliceReadWindow(await workspace.readText(filePath), params.line, params.limit),
     }));
   }
 

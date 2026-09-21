@@ -99,6 +99,9 @@ pnpm run conformance:run -- \
   that stay inside it. Links that escape the cwd and writes to hardlinked files
   are rejected. Relative paths use the session cwd without changing the adapter
   command's working directory.
+- Read callbacks honor the optional one-based `line` and maximum-line `limit`
+  selectors, matching the production client. Even a zero-line read must pass
+  permission and filesystem checks.
 - Run write cases in a disposable workspace: existing files can be overwritten.
   Newly created files receive best-effort cleanup within the same filesystem
   root. These callback checks do not sandbox the adapter process itself.

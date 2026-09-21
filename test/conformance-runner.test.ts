@@ -718,13 +718,20 @@ type FilesystemProbeOperation = {
   method: "fs/read_text_file" | "fs/write_text_file";
   path: string;
   content?: string;
+  line?: number | null;
+  limit?: number | null;
 };
 type FilesystemProbeReceipt = {
   sessionCwd: string;
   agentCwd: string;
   receipts: Array<{
     operation: FilesystemProbeOperation;
-    response: { result?: { content?: string }; error?: { code: number; message: string } };
+    requestLine: string;
+    response: {
+      id: number;
+      result?: { content?: string };
+      error?: { code: number; message: string };
+    };
   }>;
 };
 
@@ -780,8 +787,70 @@ async function runFilesystemProbe(
   assert.equal(receipt.sessionCwd, cwd);
   assert.equal(receipt.agentCwd, path.resolve(REPO_ROOT));
   assert.equal(receipt.receipts.length, requests.length);
+  for (const [index, { requestLine, response }] of receipt.receipts.entries()) {
+    const { method, ...params } = requests[index];
+    assert.deepEqual(JSON.parse(requestLine), {
+      jsonrpc: "2.0",
+      id: 1000 + index,
+      method,
+      params: { sessionId: "synthetic-session", ...params },
+    });
+    assert.equal(response.id, 1000 + index);
+  }
   return receipt;
 }
+
+test("runner honors read windows after filesystem admission", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-conformance-read-window-"));
+  try {
+    const cwd = path.join(tmp, "workspace");
+    await fs.mkdir(cwd);
+    const content = "one\ntwo\nthree\nfour\n";
+    await fs.writeFile(path.join(cwd, "notes.txt"), content);
+    await fs.writeFile(path.join(cwd, "crlf.txt"), "one\r\ntwo\r\nthree\r\n");
+    await fs.writeFile(path.join(cwd, "empty.txt"), "");
+    const outside = path.join(tmp, "outside.txt");
+    await fs.writeFile(outside, "outside sentinel");
+    const windows = [
+      { selectors: {}, expected: content },
+      { selectors: { line: 2, limit: 2 }, expected: "two\nthree" },
+      { selectors: { line: 2 }, expected: "two\nthree\nfour\n" },
+      { selectors: { limit: 2 }, expected: "one\ntwo" },
+      { selectors: { limit: 0 }, expected: "" },
+      { selectors: { line: 99, limit: 2 }, expected: "" },
+      { selectors: { line: null, limit: null }, expected: content },
+      { selectors: { line: null, limit: 2 }, expected: "one\ntwo" },
+      { selectors: { line: 2, limit: null }, expected: "two\nthree\nfour\n" },
+      { selectors: { line: 4, limit: 2 }, expected: "four\n" },
+    ];
+    const requests: FilesystemProbeOperation[] = windows.map(({ selectors }, index) => ({
+      method: "fs/read_text_file",
+      path: index % 2 === 0 ? "notes.txt" : path.join(cwd, "notes.txt"),
+      ...selectors,
+    }));
+    requests.push(
+      { method: "fs/read_text_file", path: "crlf.txt", line: 2, limit: 1 },
+      { method: "fs/read_text_file", path: "empty.txt", line: 2, limit: 2 },
+      { method: "fs/read_text_file", path: outside, limit: 0 },
+      { method: "fs/read_text_file", path: "missing.txt", limit: 0 },
+    );
+    const { receipts } = await runFilesystemProbe(tmp, cwd, requests);
+    const expected = [...windows.map(({ expected }) => expected), "two\r", ""];
+    assert.deepEqual(
+      receipts.slice(0, expected.length).map(({ response }) => response.result?.content),
+      expected,
+    );
+    for (const { response } of receipts.slice(expected.length)) {
+      assert.equal(response.result, undefined);
+      assert.ok(response.error);
+    }
+    assert.equal(receipts[expected.length].response.error?.code, -32001);
+    assert.equal(await fs.readFile(path.join(cwd, "notes.txt"), "utf8"), content);
+    assert.equal(await fs.readFile(outside, "utf8"), "outside sentinel");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
 
 test(
   "runner rejects outside symlink reads and existing/new writes",
@@ -835,6 +904,7 @@ test("runner denies filesystem callbacks before creating directories", async () 
       tmp,
       [
         { method: "fs/read_text_file", path: "missing.txt" },
+        { method: "fs/read_text_file", path: "missing.txt", limit: 0 },
         { method: "fs/write_text_file", path: "new/target.txt", content: "DENIED" },
       ],
       undefined,

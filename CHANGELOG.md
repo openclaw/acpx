@@ -48,6 +48,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Sessions/close: wait for the selected queue owner to exit when it releases its lease during shutdown, without signaling a replacement owner.
 - Conformance: reject malformed case/profile instructions and duplicate IDs before starting adapters; preserve negative protocol payloads and literal saved keys so inherited object properties cannot produce false passing assertions.
+- Conformance/filesystem: honor requested read line windows using the production client's selection logic, including empty windows, without bypassing permission or filesystem checks.
 
 ## 0.18.0 - 2026-09-20
 
