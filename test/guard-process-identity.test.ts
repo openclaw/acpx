@@ -84,7 +84,7 @@ for (const surface of surfaces) {
         let exited = false;
         const blocked = new Error("observed preserved legacy owner");
         const controller = new AbortController();
-        const signals: Array<NodeJS.Signals | number | undefined> = [];
+        const signals: Array<Parameters<typeof process.kill>[1]> = [];
         const kill = process.kill;
         // This is the orphan/reused-PID state without relying on OS PID churn.
         t.mock.method(process, "kill", (...args: Parameters<typeof process.kill>) => {

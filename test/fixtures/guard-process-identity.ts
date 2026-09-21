@@ -44,7 +44,7 @@ const expectedIdentity = (() => {
 const controller = new AbortController();
 const cancelled = new Error("cancelled during identity query");
 const queryTimes: number[] = [];
-const signals: Array<NodeJS.Signals | number | undefined> = [];
+const signals: Array<Parameters<typeof process.kill>[1]> = [];
 let ownQueries = 0;
 let ownUnavailable = scenario === "publish-unverified" || leaseScenario;
 let snapshots = 0;
