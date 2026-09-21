@@ -60,12 +60,18 @@ jobs:
             --report conformance-artifacts/mock-report.json
 
       - name: Add mock summary
+        if: always()
         run: |
           set -euo pipefail
           node - <<'NODE'
           const fs = require("node:fs");
 
           const reportPath = "conformance-artifacts/mock-report.json";
+          if (!fs.existsSync(reportPath)) {
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+              "### Conformance (Mock Full)\n\n- Result: report not produced (run failed before report write)\n");
+            process.exit(0);
+          }
           const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
           const lines = [
             "### Conformance (Mock Full)",
@@ -78,6 +84,7 @@ jobs:
           NODE
 
       - name: Upload mock report
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: conformance-mock-report
