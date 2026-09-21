@@ -1,6 +1,6 @@
 {
   "id": "acp.v1.session.cancel.followup_prompt",
-  "profile": "acp-core-v1",
+  "profile": "acpx-mock-v1",
   "title": "Session remains usable after cancellation",
   "description": "Verify a session can continue with a new prompt after a cancelled turn.",
   "steps": [

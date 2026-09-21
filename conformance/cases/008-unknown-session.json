@@ -15,7 +15,7 @@
       ],
       "save_as": "unknown_session_error",
       "expect_error": {
-        "codes": [-32603, -32000],
+        "codes": [-32603, -32002, -32000],
         "message_any": ["unknown session", "not found", "invalid session"]
       }
     }

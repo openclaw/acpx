@@ -1,6 +1,6 @@
 {
   "id": "acp.v1.errors.permission_denied",
-  "profile": "acp-core-v1",
+  "profile": "acpx-mock-v1",
   "title": "Permission denial is explicit and machine-readable",
   "description": "Verify denied client-authority file read is surfaced clearly.",
   "permission_mode": "deny-all",

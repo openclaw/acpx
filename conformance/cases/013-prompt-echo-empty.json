@@ -1,8 +1,8 @@
 {
   "id": "acp.v1.session.prompt.echo_empty",
   "profile": "acp-core-v1",
-  "title": "Echo without payload still completes",
-  "description": "Verify prompt with 'echo' (empty output) completes with a terminal stop reason.",
+  "title": "Short text prompt completes",
+  "description": "Verify a one-word prompt produces an update and completes without requiring particular reply text.",
   "steps": [
     {
       "action": "new_session",

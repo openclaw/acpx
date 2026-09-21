@@ -1,6 +1,6 @@
 {
   "id": "acp.v1.session.prompt.post_success_drain",
-  "profile": "acp-core-v1",
+  "profile": "acpx-mock-v1",
   "title": "Late post-success tool updates remain observable",
   "description": "Verify the harness can still observe tool updates emitted shortly after a successful prompt response.",
   "steps": [

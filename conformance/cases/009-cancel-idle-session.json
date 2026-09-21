@@ -1,8 +1,8 @@
 {
   "id": "acp.v1.session.cancel.idle",
   "profile": "acp-core-v1",
-  "title": "Cancel on idle session is acknowledged",
-  "description": "Verify cancel works even when no prompt is currently active.",
+  "title": "Idle cancellation is sent without waiting for a response",
+  "description": "Send a cancellation notification for a valid idle session; no separate acknowledgement is expected or observed.",
   "steps": [
     {
       "action": "new_session",

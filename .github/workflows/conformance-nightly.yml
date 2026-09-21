@@ -55,6 +55,7 @@ jobs:
           set -euo pipefail
           mkdir -p conformance-artifacts
           pnpm run conformance:run -- \
+            --profile conformance/profiles/acpx-mock-v1.json \
             --format json \
             --report conformance-artifacts/mock-report.json
 

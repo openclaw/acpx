@@ -33,6 +33,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Runtime/events: release buffered output and stop collecting future events when a consumer leaves a turn's event stream, while letting the turn finish independently.
 
+- Conformance: separate mock-specific requirements from the core adapter profile, use baseline resource links, accept standard resource-not-found errors, and clarify prompt completion and cancellation responses.
+
 ## 0.18.0 - 2026-09-20
 
 ### Highlights

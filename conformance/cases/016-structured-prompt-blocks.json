@@ -1,8 +1,8 @@
 {
   "id": "acp.v1.session.prompt.structured_blocks",
   "profile": "acp-core-v1",
-  "title": "Structured prompt blocks are preserved",
-  "description": "Verify non-text ACP content blocks can be sent and observed without flattening errors.",
+  "title": "Baseline structured prompt content is accepted",
+  "description": "Verify text and resource links complete without requiring optional prompt capabilities.",
   "steps": [
     {
       "action": "new_session",
@@ -14,14 +14,12 @@
       "prompt": [
         {
           "type": "text",
-          "text": "inspect-prompt"
+          "text": "Acknowledge these content blocks without opening the linked resource."
         },
         {
-          "type": "resource",
-          "resource": {
-            "uri": "file:///tmp/conformance-resource.txt",
-            "text": "conformance-resource"
-          }
+          "type": "resource_link",
+          "uri": "file:///tmp/conformance-resource.txt",
+          "name": "conformance-resource.txt"
         }
       ],
       "save_as": "inspect_prompt_result"
@@ -34,8 +32,12 @@
       "values": ["end_turn", "completed", "done"]
     },
     {
-      "type": "updates_text_includes",
-      "text": "\"type\":\"resource\""
+      "type": "updates_count_at_least",
+      "min": 1
+    },
+    {
+      "type": "updates_all_session",
+      "session": "$session_id"
     }
   ],
   "timeouts": {

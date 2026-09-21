@@ -1,6 +1,6 @@
 {
   "id": "acp.v1.permissions.write.approved",
-  "profile": "acp-core-v1",
+  "profile": "acpx-mock-v1",
   "title": "Write operation succeeds in approve-all mode",
   "description": "Verify write_text_file client operation succeeds when permissions allow it.",
   "permission_mode": "approve-all",

@@ -1,6 +1,6 @@
 {
   "id": "acp.v1.errors.permission_denied.write",
-  "profile": "acp-core-v1",
+  "profile": "acpx-mock-v1",
   "title": "Permission denial for write is explicit",
   "description": "Verify denied client-authority file write is surfaced clearly.",
   "permission_mode": "deny-all",

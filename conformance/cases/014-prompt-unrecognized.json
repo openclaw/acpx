@@ -1,8 +1,8 @@
 {
   "id": "acp.v1.session.prompt.unrecognized",
   "profile": "acp-core-v1",
-  "title": "Unrecognized prompt is surfaced in updates",
-  "description": "Verify unknown prompt text is surfaced by the adapter update stream.",
+  "title": "Ordinary prompt text completes with session updates",
+  "description": "Verify arbitrary text completes without requiring a command interpreter or particular reply wording.",
   "steps": [
     {
       "action": "new_session",
@@ -27,8 +27,12 @@
       "values": ["end_turn", "completed", "done"]
     },
     {
-      "type": "updates_text_includes",
-      "text": "unrecognized prompt"
+      "type": "updates_count_at_least",
+      "min": 1
+    },
+    {
+      "type": "updates_all_session",
+      "session": "$session_id"
     }
   ],
   "timeouts": {

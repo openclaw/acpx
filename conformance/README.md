@@ -13,7 +13,10 @@ session lifecycle flows.
 - `session/prompt`
 - `session/update`
 - `session/cancel`
-- baseline error semantics (`Invalid params`, permission denied, unknown session)
+- baseline error semantics (`Invalid params`, unknown session)
+
+Deterministic permission checks, cancellable delays, and late updates use the
+bundled mock adapter's command semantics in a separate mock profile.
 
 ## Non-goals (v1)
 
@@ -37,14 +40,22 @@ Case files are prefixed numerically to preserve stable execution ordering.
 
 Draft contract and seed case corpus.
 
-Current profile (`acp-core-v1`) includes 21 required cases.
+The default profile (`acp-core-v1`) includes 14 adapter-independent required cases.
+The explicit `acpx-mock-v1` profile includes those cases and seven mock-specific
+regressions, for 21 required cases in total.
 
 ## Run
 
-Run against the default mock ACP adapter:
+Run the core profile against the default mock ACP adapter:
 
 ```bash
 pnpm run conformance:run
+```
+
+Run all deterministic regressions with the bundled mock adapter:
+
+```bash
+pnpm run conformance:run -- --profile conformance/profiles/acpx-mock-v1.json
 ```
 
 Run a single case:
@@ -71,10 +82,19 @@ pnpm run conformance:run -- \
 ## Notes
 
 - The draft runner currently executes required case ids from the selected
-  profile and prints a pass/fail matrix.
+  profile and prints a pass/fail matrix. `--case` narrows that selected profile's
+  required cases; use the mock profile to select its permission or active-cancel
+  cases.
 - Case/profile parsing is pure Node JSON parsing (no Python dependency).
 - The runner is data-driven: it executes structured case `steps` and `checks`
   from JSON instead of hard-coded `case id -> logic` switches.
+- Core structured prompts use baseline `text` and `resource_link` content. Their
+  synthetic URI identifies a content block; the case does not require a real
+  file or prove a file read. Embedded `resource` transport and exact mock reply
+  assertions are retained in runner tests against the bundled mock, which
+  advertises `embeddedContext` support.
+- Use `acpx-mock-v1` with the bundled mock adapter: its permission prompts,
+  cancellable delays, and post-success updates depend on known mock commands.
 
 ## Data-Driven Model
 
@@ -104,8 +124,8 @@ operation always fails the case.
 ## Nightly Workflow
 
 - Workflow file: `.github/workflows/conformance-nightly.yml`
-- `Conformance (Mock Full)` always runs the full profile on the local mock
-  adapter and uploads a JSON report artifact.
+- `Conformance (Mock Full)` always runs the explicit `acpx-mock-v1` profile on the
+  local mock adapter and uploads a JSON report artifact.
 - `Conformance (Real Adapter Smoke)` runs only when repository variable
   `ACPX_CONFORMANCE_REAL=1`, using handshake smoke checks for selected
   real adapters.

@@ -1,6 +1,6 @@
 {
   "id": "acp.v1.session.cancel.in_flight",
-  "profile": "acp-core-v1",
+  "profile": "acpx-mock-v1",
   "title": "Cancel terminates active turn",
   "description": "Verify session/cancel transitions an in-flight prompt to cancelled.",
   "steps": [
