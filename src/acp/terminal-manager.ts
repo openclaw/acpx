@@ -150,17 +150,13 @@ function trimToUtf8Boundary(buffer: Buffer, limit: number): Buffer {
   if (limit <= 0) {
     return Buffer.alloc(0);
   }
-  if (buffer.length <= limit) {
-    return buffer;
-  }
-
-  let start = buffer.length - limit;
+  let start = Math.max(0, buffer.length - limit);
   while (start < buffer.length && (buffer[start] & 0b1100_0000) === 0b1000_0000) {
     start += 1;
   }
 
   if (start >= buffer.length) {
-    start = buffer.length - limit;
+    return Buffer.alloc(0);
   }
   return buffer.subarray(start);
 }
@@ -279,9 +275,10 @@ export class TerminalManager {
         }
 
         terminal.output = Buffer.concat([terminal.output, bytes]);
-        if (terminal.output.length > terminal.outputByteLimit) {
+        terminal.truncated ||= terminal.output.length > terminal.outputByteLimit;
+        // Later chunks can finish a code point whose prefix was already discarded.
+        if (terminal.truncated) {
           terminal.output = trimToUtf8Boundary(terminal.output, terminal.outputByteLimit);
-          terminal.truncated = true;
         }
       };
 

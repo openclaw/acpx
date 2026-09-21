@@ -309,6 +309,119 @@ test("terminal host ceiling preserves the UTF-8 suffix across stdout and stderr"
   }
 });
 
+const terminalUtf8Cases: Array<{
+  name: string;
+  limit: number;
+  host?: string;
+  chunks: Array<{ stream: "stdout" | "stderr"; bytes: Buffer }>;
+  expected: string;
+  truncated: boolean;
+}> = [
+  ...["é", "€", "🙂"].flatMap((text) =>
+    Array.from({ length: Buffer.byteLength(text) - 1 }, (_, index) => ({
+      name: `${text} with a ${index + 1}-byte limit`,
+      limit: index + 1,
+      chunks: [{ stream: "stdout" as const, bytes: Buffer.from(text) }],
+      expected: "",
+      truncated: true,
+    })),
+  ),
+  {
+    name: "an empty suffix when a final code point exceeds the limit",
+    limit: 2,
+    chunks: [{ stream: "stdout", bytes: Buffer.from("A🙂") }],
+    expected: "",
+    truncated: true,
+  },
+  {
+    name: "fragmented continuation bytes after the prefix was discarded",
+    limit: 2,
+    chunks: [
+      { stream: "stdout", bytes: Buffer.from([0xf0, 0x9f, 0x99]) },
+      { stream: "stdout", bytes: Buffer.from([0x82]) },
+    ],
+    expected: "",
+    truncated: true,
+  },
+  {
+    name: "fragmented continuation bytes under the host ceiling",
+    limit: 2,
+    host: "2",
+    chunks: [
+      { stream: "stdout", bytes: Buffer.from([0xf0, 0x9f, 0x99]) },
+      { stream: "stdout", bytes: Buffer.from([0x82]) },
+    ],
+    expected: "",
+    truncated: true,
+  },
+  {
+    name: "ASCII arriving after a discarded fragmented code point",
+    limit: 2,
+    chunks: [
+      { stream: "stdout", bytes: Buffer.from([0xf0, 0x9f, 0x99]) },
+      { stream: "stdout", bytes: Buffer.from([0x82]) },
+      { stream: "stdout", bytes: Buffer.from("A") },
+    ],
+    expected: "A",
+    truncated: true,
+  },
+  {
+    name: "an exactly fitting fragmented code point without truncation",
+    limit: 4,
+    chunks: [
+      { stream: "stdout", bytes: Buffer.from([0xf0, 0x9f, 0x99]) },
+      { stream: "stdout", bytes: Buffer.from([0x82]) },
+    ],
+    expected: "🙂",
+    truncated: false,
+  },
+  {
+    name: "complete stdout and stderr code points below the limit",
+    limit: 8,
+    chunks: [
+      { stream: "stdout", bytes: Buffer.from("a") },
+      { stream: "stderr", bytes: Buffer.from("é") },
+    ],
+    expected: "aé",
+    truncated: false,
+  },
+  {
+    name: "the complete newest code point across stdout and stderr",
+    limit: 4,
+    chunks: [
+      { stream: "stdout", bytes: Buffer.from("a") },
+      { stream: "stderr", bytes: Buffer.from("🙂") },
+    ],
+    expected: "🙂",
+    truncated: true,
+  },
+];
+
+for (const scenario of terminalUtf8Cases) {
+  test(`terminal output retains ${scenario.name}`, async () => {
+    const manager = createManagerWithOutputCeiling(scenario.host);
+    try {
+      const { terminalId } = await manager.createTerminal({
+        sessionId: "session-1",
+        command: process.execPath,
+        args: ["-e", "setInterval(() => {}, 1000)"],
+        outputByteLimit: scenario.host === undefined ? scenario.limit : 1000,
+      });
+      const stdio = getManagedStdio(manager, terminalId);
+      for (const chunk of scenario.chunks) {
+        stdio[chunk.stream].emit("data", chunk.bytes);
+      }
+      const output = await manager.terminalOutput({ sessionId: "session-1", terminalId });
+      assert.equal(output.output, scenario.expected);
+      assert.ok(Buffer.byteLength(output.output, "utf8") <= scenario.limit);
+      assert.doesNotMatch(output.output, /\uFFFD/u);
+      assert.equal(output.truncated, scenario.truncated);
+    } finally {
+      await manager.shutdown();
+    }
+  });
+}
+
 test("terminal manager ignores child stdout and stderr pipe-death errors", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
   try {
