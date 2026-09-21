@@ -38,6 +38,21 @@ acpx flow run examples/flows/two-turn.flow.ts \
   --input-json '{"topic":"How should we validate a new ACP adapter?"}'
 ```
 
+To start several detached PR-triage runs from a source checkout with `pnpm`,
+`tmux`, and Bash 3.2 or newer installed:
+
+```bash
+scripts/run-pr-triage-batch.sh 178 '#179' https://github.com/owner/repo/pull/180
+```
+
+Bare and hash-prefixed numbers select `openclaw/acpx`; complete GitHub PR URLs
+retain their repository. The launcher removes leading zeros, deduplicates each
+repository/PR pair, and validates the entire list before starting any run. PR
+numbers must be positive and no greater than `9007199254740991`, so the flow can
+represent their identity exactly. Each job gets separate input and log files.
+Like the direct PR-triage invocation, these jobs use `--approve-all` and can
+modify the selected GitHub PRs.
+
 Run the replay viewer from the repo root:
 
 ```bash

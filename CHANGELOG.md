@@ -21,6 +21,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI/output: preserve received assistant text in quiet mode when direct or queued prompts fail, and drain failed or cancelled watch turns without requiring a final ACP response or duplicating completed output.
 - Runtime/capabilities: return independent mutable capability snapshots so editing one result cannot change another caller's controls or advertised config keys.
 - Docs/site: preserve Markdown link destinations containing underscores, query parameters, and attribute characters while keeping label formatting and relative links intact.
+- PR-triage example: preserve the repository in pasted PR URLs, normalize decimal PR numbers without changing their identity, validate complete batches before dispatch, and support macOS Bash 3.2 with separate jobs for equal PR numbers in different repositories.
 
 ## 0.18.0 - 2026-09-20
 
