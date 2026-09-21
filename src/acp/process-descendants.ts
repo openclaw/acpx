@@ -1,67 +1,9 @@
 import type { ChildProcess } from "node:child_process";
-import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import {
-  isChildProcessRunning,
-  PROCESS_HELPER_TIMEOUT_MS,
-  runTimedExecFile,
-} from "./client-process.js";
+import { readProcessTable, type ProcessTableEntry } from "../process-identity.js";
+import { isChildProcessRunning, PROCESS_HELPER_TIMEOUT_MS } from "./client-process.js";
 
-type ProcessIdentity = { pid: number; parentPid: number; groupPid: number; birth: string };
-
-const WINDOWS_PROCESS_SNAPSHOT = [
-  "$ErrorActionPreference = 'Stop'",
-  "Get-CimInstance -ClassName Win32_Process -Property ProcessId,ParentProcessId,CreationDate | ForEach-Object {",
-  "if ($null -ne $_.CreationDate) {",
-  "'{0} {1} 0 S {2}' -f $_.ProcessId,$_.ParentProcessId,$_.CreationDate.ToUniversalTime().ToString('o')",
-  "}",
-  "}",
-].join("\n");
-
-function windowsPowerShellPath(): string {
-  const systemRoot = process.env.SystemRoot;
-  if (!systemRoot || !path.win32.isAbsolute(systemRoot)) {
-    throw new Error("Windows system directory is unavailable");
-  }
-  // A bare executable name searches the project directory before PATH on Windows.
-  return path.win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-}
-
-async function readProcessTable(timeoutMs: number): Promise<string> {
-  if (process.platform === "win32") {
-    return await runTimedExecFile(
-      windowsPowerShellPath(),
-      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_PROCESS_SNAPSHOT],
-      { timeoutMs, windowsHide: true },
-    );
-  }
-  // Keep lstart parseable when bounding the final group snapshot by root exit.
-  return await runTimedExecFile("ps", ["-eo", "pid=,ppid=,pgid=,stat=,lstart="], {
-    timeoutMs,
-    env: { ...process.env, LC_ALL: "C" },
-  });
-}
-
-function parseProcessTable(output: string): Map<number, ProcessIdentity> {
-  const table = new Map<number, ProcessIdentity>();
-  for (const line of output.split("\n")) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
-    if (match && !match[4].startsWith("Z")) {
-      const pid = Number(match[1]);
-      if (Number.isSafeInteger(pid) && pid > 1 && pid !== process.pid) {
-        table.set(pid, {
-          pid,
-          parentPid: Number(match[2]),
-          groupPid: Number(match[3]),
-          birth: match[5],
-        });
-      }
-    }
-  }
-  return table;
-}
-
-function includeDescendants(table: Map<number, ProcessIdentity>, owned: Set<number>): void {
+function includeDescendants(table: Map<number, ProcessTableEntry>, owned: Set<number>): void {
   let expanded: boolean;
   do {
     expanded = false;
@@ -82,7 +24,7 @@ function includeDescendants(table: Map<number, ProcessIdentity>, owned: Set<numb
 
 /** Best-effort cleanup for descendants witnessed during this child launch. */
 export class ProcessDescendants {
-  private identities = new Map<number, ProcessIdentity>();
+  private identities = new Map<number, ProcessTableEntry>();
   private rootBirth: string | undefined;
   private pending: Promise<boolean> | undefined;
   private retired = false;
@@ -122,9 +64,12 @@ export class ProcessDescendants {
       this.captureGroupAfterExit = false;
     }
     try {
-      const output = await readProcessTable(timeoutMs);
+      const table = await readProcessTable(timeoutMs);
       if (!this.retired) {
-        this.refresh(parseProcessTable(output), captureRootGroup);
+        // Identity probes include self and PID 1; descendant custody never does.
+        table.delete(1);
+        table.delete(process.pid);
+        this.refresh(table, captureRootGroup);
         // An in-flight snapshot can precede the shell's last fork. Join one fresh
         // exit snapshot before retiring its group ownership or resolving terminal exit.
         if (this.captureGroupAfterExit && !isChildProcessRunning(this.child)) {
@@ -140,7 +85,7 @@ export class ProcessDescendants {
     }
   }
 
-  private refresh(table: Map<number, ProcessIdentity>, rootWasRunning: boolean): void {
+  private refresh(table: Map<number, ProcessTableEntry>, rootWasRunning: boolean): void {
     const owned = new Set<number>();
     for (const [pid, identity] of this.identities) {
       if (table.get(pid)?.birth === identity.birth) {
@@ -156,7 +101,7 @@ export class ProcessDescendants {
     this.identities = new Map([...table].filter(([pid]) => owned.has(pid)));
   }
 
-  private includeRoot(table: Map<number, ProcessIdentity>, owned: Set<number>): void {
+  private includeRoot(table: Map<number, ProcessTableEntry>, owned: Set<number>): void {
     const root = this.child.pid;
     const rootIdentity = root && table.get(root);
     if (rootIdentity && isChildProcessRunning(this.child)) {
@@ -168,7 +113,7 @@ export class ProcessDescendants {
   }
 
   private includeProcessGroup(
-    table: Map<number, ProcessIdentity>,
+    table: Map<number, ProcessTableEntry>,
     owned: Set<number>,
     rootWasRunning: boolean,
   ): void {

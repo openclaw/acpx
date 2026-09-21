@@ -1,8 +1,10 @@
+import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
+import { probeProcessIdentity, type ProcessBirthIdentity } from "../src/process-identity.js";
 import { queueLockFilePath, queueSocketPath } from "../src/session/queue/paths.js";
 import { withTempHome as withTempHomeFixture } from "./runtime-test-helpers.js";
 
@@ -36,6 +38,16 @@ export function stopProcess(child: ReturnType<typeof spawn>): void {
   }
 }
 
+export async function verifiedProcessIdentity(
+  pid: number | undefined,
+): Promise<ProcessBirthIdentity> {
+  assert(pid);
+  const probe = await probeProcessIdentity(pid);
+  assert.equal(probe.state, "alive", "fixture process must have a verified birth identity");
+  assert(probe.state === "alive");
+  return probe.identity;
+}
+
 export async function writeQueueOwnerLock(options: {
   lockPath: string;
   pid: number | undefined;
@@ -47,6 +59,7 @@ export async function writeQueueOwnerLock(options: {
   mcpConfigFingerprint?: string;
   createdAt?: string;
   heartbeatAt?: string;
+  processIdentity?: ProcessBirthIdentity;
 }): Promise<void> {
   const now = new Date().toISOString();
   const createdAt = options.createdAt ?? now;
@@ -63,6 +76,7 @@ export async function writeQueueOwnerLock(options: {
       ownerGeneration:
         options.ownerGeneration ?? Date.now() * 1_000 + Math.floor(Math.random() * 1_000),
       queueDepth: options.queueDepth ?? 0,
+      ...(options.processIdentity ? { processIdentity: options.processIdentity } : {}),
       ...(options.mcpConfigPath ? { mcpConfigPath: options.mcpConfigPath } : {}),
       ...(options.mcpConfigFingerprint
         ? { mcpConfigFingerprint: options.mcpConfigFingerprint }

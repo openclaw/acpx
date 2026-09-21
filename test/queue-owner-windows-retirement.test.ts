@@ -12,7 +12,12 @@ import {
   resolveUsableQueueOwner,
   terminateQueueOwnerForSession,
 } from "../src/session/queue/lease-store.js";
-import { queuePaths, withTempHome, writeQueueOwnerLock } from "./queue-test-helpers.js";
+import {
+  queuePaths,
+  withTempHome,
+  writeQueueOwnerLock,
+  verifiedProcessIdentity,
+} from "./queue-test-helpers.js";
 
 async function startOwnerTree() {
   // Every fixture process has its own deadline even if an assertion fails.
@@ -77,6 +82,7 @@ describe(
               ...paths,
               sessionId,
               pid: owner.pid,
+              processIdentity: await verifiedProcessIdentity(owner.pid),
               heartbeatAt: mode === "stale" ? "2000-01-01T00:00:00.000Z" : undefined,
             });
             const observed = await readQueueOwnerRecord(sessionId);
@@ -119,6 +125,7 @@ describe(
           const { owner, pids } = await startOwnerTree();
           const paths = queuePaths(homeDir, sessionId);
           const execFile = childProcess.execFile;
+          const processIdentity = await verifiedProcessIdentity(owner.pid);
           let helper: ReturnType<typeof execFile> | undefined;
           const helperSource =
             failure === "timeout"
@@ -130,6 +137,9 @@ describe(
             options: ExecFileOptionsWithStringEncoding,
             callback: (error: Error | null, stdout: string, stderr: string) => void,
           ) => {
+            if (path.win32.basename(command).toLowerCase() === "powershell.exe") {
+              return execFile(command, [...args], options, callback);
+            }
             assert.equal(
               command,
               path.win32.join(process.env.SystemRoot!, "System32", "taskkill.exe"),
@@ -140,7 +150,7 @@ describe(
           }) as typeof childProcess.execFile);
           syncBuiltinESMExports();
           try {
-            await writeQueueOwnerLock({ ...paths, sessionId, pid: owner.pid });
+            await writeQueueOwnerLock({ ...paths, sessionId, pid: owner.pid, processIdentity });
             const original = await fs.readFile(paths.lockPath, "utf8");
             await assert.rejects(terminateQueueOwnerForSession(sessionId), {
               code: failure === "timeout" ? "ETIMEDOUT" : 23,

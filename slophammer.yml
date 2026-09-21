@@ -31,6 +31,7 @@ typescript:
         - src/filesystem
         - src/permission-prompt
         - src/permissions
+        - src/process-identity
         - src/prompt-content
         - src/spawn-command-options
         - src/types
@@ -85,6 +86,7 @@ typescript:
         - src/perf-metrics
         - src/perf-metrics-capture
         - src/process-liveness
+        - src/process-identity
         - src/persisted-key-policy
         - src/prompt-content
         - src/runtime

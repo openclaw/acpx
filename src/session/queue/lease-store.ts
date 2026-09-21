@@ -4,6 +4,13 @@ import path from "node:path";
 import { withTempFile } from "@openclaw/fs-safe/advanced";
 import { isHardlinkFallbackError } from "@openclaw/fs-safe/durability";
 import { runTimedExecFile } from "../../acp/client-process.js";
+import { QueueConnectionError } from "../../errors.js";
+import {
+  getOwnProcessIdentity,
+  parseProcessBirthIdentity,
+  probeProcessIdentity,
+  type ProcessBirthIdentity,
+} from "../../process-identity.js";
 import { isProcessAlive, isProcessDefinitelyDead } from "../../process-liveness.js";
 import { settlePendingQueueLeaseGuard, withQueueLeaseMutation } from "./lease-mutation.js";
 import { queueBaseDir, queueLockFilePath, queueSocketBaseDir, queueSocketPath } from "./paths.js";
@@ -26,6 +33,7 @@ export type QueueOwnerRecord = {
   createdAt: string;
   heartbeatAt: string;
   ownerGeneration: number;
+  processIdentity?: ProcessBirthIdentity;
   queueDepth: number;
   sharedRuntime?: boolean;
   sessionWatch?: boolean;
@@ -40,6 +48,7 @@ export type QueueOwnerLease = QueueOwnerIdentity & {
   lockPath: string;
   socketPath: string;
   createdAt: string;
+  processIdentity?: ProcessBirthIdentity;
   mcpConfigPath?: string;
   mcpConfigFingerprint?: string;
   updates: Promise<void>;
@@ -65,6 +74,9 @@ function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
   if (!hasValidQueueOwnerRecordFields(record)) {
     return null;
   }
+  // An absent or invalid birth identity makes retirement unverified, not the
+  // entire lease malformed: collision recovery must preserve its custody.
+  const processIdentity = parseProcessBirthIdentity(record.processIdentity);
 
   return {
     pid: record.pid,
@@ -74,6 +86,7 @@ function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
     heartbeatAt: record.heartbeatAt,
     ownerGeneration: record.ownerGeneration,
     queueDepth: record.queueDepth,
+    ...(processIdentity ? { processIdentity } : {}),
     ...parseQueueOwnerCapabilities(record),
     ...(typeof record.mcpConfigPath === "string" ? { mcpConfigPath: record.mcpConfigPath } : {}),
     ...(typeof record.mcpConfigFingerprint === "string"
@@ -388,6 +401,7 @@ export async function tryAcquireQueueOwnerLease(
   const { mcpConfigPath, clock } = resolveLeaseArguments(mcpConfigOrNowIsoFactory, nowIsoFactory);
   const mcpConfigFingerprint = readMcpConfigFingerprint(mcpConfigOrNowIsoFactory);
   const mcpConfigMetadata = createMcpConfigMetadata(mcpConfigPath, mcpConfigFingerprint);
+  const processIdentity = await getOwnProcessIdentity();
   await ensureQueueDir();
   const lockPath = queueLockFilePath(sessionId);
   const socketPath = queueSocketPath(sessionId);
@@ -400,6 +414,7 @@ export async function tryAcquireQueueOwnerLease(
     socketPath,
     createdAt,
     ownerGeneration,
+    ...(processIdentity ? { processIdentity } : {}),
     ...mcpConfigMetadata,
     updates: Promise.resolve(),
     released: false,
@@ -569,6 +584,7 @@ async function stageQueueOwnerRecord(
       createdAt: lease.createdAt,
       heartbeatAt: clock(),
       ownerGeneration: lease.ownerGeneration,
+      ...(lease.processIdentity ? { processIdentity: lease.processIdentity } : {}),
       queueDepth: Math.max(0, Math.round(queueDepth)),
       sharedRuntime: true,
       sessionWatch: true,
@@ -594,34 +610,76 @@ export async function releaseQueueOwnerLease(lease: QueueOwnerLease): Promise<vo
   await cleanupQueueOwnerFiles(lease.sessionId, lease.socketPath, () => ownsQueueLease(lease));
 }
 
-async function retireQueueOwner(owner: QueueOwnerRecord, requireStale: boolean): Promise<void> {
+async function probeQueueOwnerProcess(
+  owner: QueueOwnerRecord,
+): Promise<"matching" | "gone" | "unknown"> {
+  const probe = await probeProcessIdentity(owner.pid);
+  if (probe.state === "dead") {
+    return "gone";
+  }
+  if (probe.state !== "alive" || probe.identity.kind !== owner.processIdentity?.kind) {
+    return "unknown";
+  }
+  return probe.identity.value === owner.processIdentity.value ? "matching" : "gone";
+}
+
+function unverifiedQueueOwnerError(owner: QueueOwnerRecord): QueueConnectionError {
+  return new QueueConnectionError(
+    `Cannot safely retire queue owner pid ${owner.pid}: its process birth identity is unverified. Its lease was retained. Restore local process-query access and retry, or let the owner finish normal shutdown or idle expiry.`,
+    { detailCode: "QUEUE_OWNER_IDENTITY_UNVERIFIED", origin: "queue", retryable: true },
+  );
+}
+
+type QueueOwnerRetirement = { gone: boolean; unverified: boolean; leaseReleased: boolean };
+
+async function dispatchVerifiedQueueOwnerSignal(
+  owner: QueueOwnerRecord,
+  signal: NodeJS.Signals,
+  requireStale: boolean,
+  retirement: QueueOwnerRetirement,
+): Promise<boolean> {
+  return await withQueueLeaseMutation(owner.sessionId, async () => {
+    const current = await readQueueOwnerRecord(owner.sessionId);
+    retirement.leaseReleased = current?.pid !== owner.pid;
+    if (
+      !matchesQueueOwner(current, owner) ||
+      (requireStale && signal === "SIGTERM" && !isQueueOwnerHeartbeatStale(current))
+    ) {
+      return false;
+    }
+    // Generation protects the lease; a fresh OS birth protects the PID. The
+    // same numeric PID can belong to an unrelated process after an owner crash.
+    const identity = await probeQueueOwnerProcess(current);
+    if (identity !== "matching") {
+      retirement.gone = identity === "gone";
+      retirement.unverified = identity === "unknown";
+      return false;
+    }
+    return await dispatchQueueOwnerSignal(owner.pid, signal);
+  });
+}
+
+async function retireQueueOwner(owner: QueueOwnerRecord, requireStale: boolean): Promise<boolean> {
   const deadline = performance.now() + PROCESS_SIGTERM_GRACE_MS + PROCESS_SIGKILL_GRACE_MS;
-  let leaseReleased = false;
+  const retirement: QueueOwnerRetirement = { gone: false, unverified: false, leaseReleased: false };
   await terminateWithDispatch(
     owner.pid,
-    (signal) =>
-      withQueueLeaseMutation(owner.sessionId, async () => {
-        const current = await readQueueOwnerRecord(owner.sessionId);
-        leaseReleased = current?.pid !== owner.pid;
-        if (
-          !matchesQueueOwner(current, owner) ||
-          (requireStale && signal === "SIGTERM" && !isQueueOwnerHeartbeatStale(current))
-        ) {
-          return false;
-        }
-        return await dispatchQueueOwnerSignal(owner.pid, signal);
-      }),
+    (signal) => dispatchVerifiedQueueOwnerSignal(owner, signal, requireStale, retirement),
     isProcessDefinitelyDead,
   );
-  if (leaseReleased) {
-    // A released lease can already belong to a successor. Wait outside the
-    // mutation guard without treating the remembered PID as permission to signal.
+  if (retirement.leaseReleased || (retirement.unverified && !requireStale)) {
+    // A released lease may belong to a successor; legacy owners may also finish
+    // cooperative shutdown. Neither state permits signaling a remembered PID.
     await waitForProcessExit(
       owner.pid,
       Math.max(0, deadline - performance.now()),
       isProcessDefinitelyDead,
     );
   }
+  if (retirement.unverified && !isProcessDefinitelyDead(owner.pid)) {
+    throw unverifiedQueueOwnerError(owner);
+  }
+  return retirement.gone || isProcessDefinitelyDead(owner.pid);
 }
 
 export async function terminateQueueOwnerForSession(
@@ -631,22 +689,16 @@ export async function terminateQueueOwnerForSession(
 ): Promise<void> {
   await settlePendingQueueLeaseGuard(sessionId);
   const owner = expectedOwner ?? (await readQueueOwnerRecord(sessionId));
-  if (!owner || owner.sessionId !== sessionId) {
+  if (!owner || owner.sessionId !== sessionId || owner.pid === process.pid) {
     return;
   }
 
-  if (owner.pid !== process.pid && isProcessAlive(owner.pid)) {
-    // A final queued heartbeat must not undo retirement after SIGTERM.
-    await retireQueueOwner(owner, requireStale);
-  }
-  if (!isProcessDefinitelyDead(owner.pid)) {
+  if (!isProcessDefinitelyDead(owner.pid) && !(await retireQueueOwner(owner, requireStale))) {
     return;
   }
-  await cleanupQueueOwnerFiles(
-    sessionId,
-    owner.socketPath,
-    async () => isProcessDefinitelyDead(owner.pid) && (await ownsQueueLease(owner)),
-  );
+  // Once this incarnation is confirmed gone it cannot return. Recheck the lease
+  // generation during file cleanup; never signal a replacement occupying its PID.
+  await cleanupQueueOwnerFiles(sessionId, owner.socketPath, () => ownsQueueLease(owner));
 }
 
 export async function waitMs(ms: number): Promise<void> {

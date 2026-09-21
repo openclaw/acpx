@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import childProcess, { ChildProcess, spawn, type ExecFileOptions } from "node:child_process";
 import { once } from "node:events";
 import { writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
+import type { ProcessBirthIdentity } from "../src/process-identity.js";
 import {
   resolveUsableQueueOwner,
   isProcessAlive,
@@ -27,6 +29,7 @@ import {
   stopProcess,
   withTempHome,
   writeQueueOwnerLock,
+  verifiedProcessIdentity,
 } from "./queue-test-helpers.js";
 
 function deferred() {
@@ -35,6 +38,29 @@ function deferred() {
     resolve = done;
   });
   return { promise, resolve };
+}
+
+function mockPosixOwnerIdentity(
+  context: TestContext,
+  pid: number,
+  birth = () => "Mon Sep 21 10:00:01 2026",
+): ProcessBirthIdentity {
+  context.mock.method(childProcess, "execFile", ((
+    command: string,
+    _args: readonly string[],
+    _options: ExecFileOptions,
+    callback: (error: Error | null, stdout: string, stderr: string) => void,
+  ) => {
+    assert.equal(command, "ps");
+    queueMicrotask(() => callback(null, `${pid} 1 1 S ${birth()}\n`, ""));
+    return new ChildProcess();
+  }) as typeof childProcess.execFile);
+  syncBuiltinESMExports();
+  context.after(() => {
+    context.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  return { kind: "posix-lstart", value: "2026-09-21T10:00:01.000Z" };
 }
 
 test("readQueueOwnerRecord returns undefined for missing and malformed lock files", async () => {
@@ -425,6 +451,7 @@ test("a final heartbeat cannot cancel termination already in progress", async (c
       ...paths,
       sessionId,
       pid: 999_999,
+      processIdentity: mockPosixOwnerIdentity(context, 999_999),
       heartbeatAt: "2000-01-01T00:00:00.000Z",
     });
     const owner = await readQueueOwnerRecord(sessionId);
@@ -459,6 +486,39 @@ test("a final heartbeat cannot cancel termination already in progress", async (c
   });
 });
 
+test(
+  "queue retirement rechecks OS birth before escalating to SIGKILL",
+  { skip: process.platform === "win32" },
+  async (context) => {
+    await withTempHome(async (homeDir) => {
+      const sessionId = "lease-escalation-pid-reuse";
+      const paths = queuePaths(homeDir, sessionId);
+      let birth = "Mon Sep 21 10:00:01 2026";
+      await writeQueueOwnerLock({
+        ...paths,
+        sessionId,
+        pid: 999_999,
+        heartbeatAt: "2000-01-01T00:00:00.000Z",
+        processIdentity: mockPosixOwnerIdentity(context, 999_999, () => birth),
+      });
+      let now = Date.now();
+      context.mock.method(Date, "now", () => (now += 20_000));
+      const signals: Array<NodeJS.Signals | number | undefined> = [];
+      context.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | number) => {
+        assert.equal(pid, 999_999);
+        if (signal !== 0) {
+          signals.push(signal);
+          birth = "Mon Sep 21 10:00:02 2026";
+        }
+        return true;
+      });
+      await terminateQueueOwnerForSession(sessionId);
+      assert.deepEqual(signals, ["SIGTERM"], "a replacement incarnation must not receive SIGKILL");
+      assert.equal(await readQueueOwnerRecord(sessionId), undefined);
+    });
+  },
+);
+
 for (const permissionFailure of ["initial", "after-signal"] as const) {
   test(`ambiguous owner liveness ${permissionFailure} preserves lease and endpoint`, async (context) => {
     if (process.platform === "win32" && permissionFailure === "after-signal") {
@@ -472,6 +532,10 @@ for (const permissionFailure of ["initial", "after-signal"] as const) {
         ...paths,
         sessionId,
         pid: 999_999,
+        processIdentity:
+          permissionFailure === "after-signal"
+            ? mockPosixOwnerIdentity(context, 999_999)
+            : undefined,
         heartbeatAt: "2000-01-01T00:00:00.000Z",
       });
       const original = await fs.readFile(paths.lockPath, "utf8");
@@ -497,11 +561,19 @@ for (const permissionFailure of ["initial", "after-signal"] as const) {
         return true;
       });
       try {
-        await terminateQueueOwnerForSession(sessionId);
+        if (permissionFailure === "initial") {
+          await assert.rejects(terminateQueueOwnerForSession(sessionId, undefined, true), {
+            detailCode: "QUEUE_OWNER_IDENTITY_UNVERIFIED",
+          });
+        } else {
+          await terminateQueueOwnerForSession(sessionId);
+        }
         assert.equal(await fs.readFile(paths.lockPath, "utf8"), original);
         if (permissionFailure === "initial") {
           assert.deepEqual(signals, []);
-          assert.equal(await tryAcquireQueueOwnerLease(sessionId), undefined);
+          await assert.rejects(tryAcquireQueueOwnerLease(sessionId), {
+            detailCode: "QUEUE_OWNER_IDENTITY_UNVERIFIED",
+          });
         } else {
           assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
         }
@@ -673,6 +745,7 @@ test("resolveUsableQueueOwner cleans up stale live owners", async () => {
       await writeQueueOwnerLock({
         lockPath,
         pid: keeper.pid,
+        processIdentity: await verifiedProcessIdentity(keeper.pid),
         sessionId,
         socketPath,
         heartbeatAt: "2000-01-01T00:00:00.000Z",
@@ -699,6 +772,7 @@ test("tryAcquireQueueOwnerLease terminates stale live owners before retry acquis
       await writeQueueOwnerLock({
         lockPath,
         pid: keeper.pid,
+        processIdentity: await verifiedProcessIdentity(keeper.pid),
         sessionId,
         socketPath,
         heartbeatAt: "2000-01-01T00:00:00.000Z",
@@ -850,6 +924,7 @@ test("terminateProcess and terminateQueueOwnerForSession handle live and missing
       await writeQueueOwnerLock({
         lockPath,
         pid: keeper.pid,
+        processIdentity: await verifiedProcessIdentity(keeper.pid),
         sessionId,
         socketPath,
       });

@@ -48,6 +48,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Sessions/close: wait for the selected queue owner to exit when it releases its lease during shutdown, without signaling a replacement owner.
 
+- Sessions/queue: verify the owner's OS birth identity before forced retirement so stale leases cannot terminate a different process that reused the PID. Preserve healthy legacy IPC use and report unverified live ownership without discarding its lease.
+
 ## 0.18.0 - 2026-09-20
 
 ### Highlights

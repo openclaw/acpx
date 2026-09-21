@@ -108,6 +108,17 @@ test("Windows descendants reject stale ancestry from reused parent PIDs", async 
   assert.deepEqual(fixture.signals, [{ pid: childPid, signal: "SIGTERM" }]);
 });
 
+test("descendant custody excludes self and PID 1 from the shared process table", async (t) => {
+  const fixture = windowsProcesses(t);
+  fixture.snapshot.output =
+    processRow(rootPid, process.pid, rootBirth) +
+    processRow(process.pid, rootPid, childBirth) +
+    processRow(1, rootPid, childBirth) +
+    processRow(childPid, rootPid, childBirth);
+  await fixture.descendants.signal("SIGTERM", 1_000);
+  assert.deepEqual(fixture.signals, [{ pid: childPid, signal: "SIGTERM" }]);
+});
+
 test("Windows descendants do not rediscover a reused bridge PID", async (t) => {
   const fixture = windowsProcesses(t);
   fixture.snapshot.output = processRow(rootPid, process.pid, rootBirth);
