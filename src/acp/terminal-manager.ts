@@ -180,7 +180,10 @@ export class TerminalManager {
     this.onOperation = options.onOperation;
     this.usesDefaultConfirmExecute = options.confirmExecute == null;
     this.confirmExecute = options.confirmExecute ?? defaultConfirmExecute;
-    this.killGraceMs = Math.max(0, Math.round(options.killGraceMs ?? DEFAULT_KILL_GRACE_MS));
+    const killGraceMs = Math.max(0, Math.round(options.killGraceMs ?? DEFAULT_KILL_GRACE_MS));
+    // Match Node's timer clamp so invalid delays cannot create an infinite deadline.
+    this.killGraceMs =
+      Number.isFinite(killGraceMs) && killGraceMs <= 2_147_483_647 ? killGraceMs : 1;
     this.processHelperTimeoutMs = Math.max(
       1,
       Math.round(options.processHelperTimeoutMs ?? PROCESS_HELPER_TIMEOUT_MS),
@@ -269,6 +272,7 @@ export class TerminalManager {
         terminal.processGroupSnapshotPromise = rememberProcessGroupPids(terminal);
         void (async () => {
           await terminal.processGroupSnapshotPromise;
+          terminal.processGroupSnapshotPromise = undefined;
           terminal.resolveExit({
             exitCode: exitCode ?? null,
             signal: signal ?? null,
@@ -570,20 +574,22 @@ export class TerminalManager {
   }
 
   private async waitForCleanupAfterSignal(terminal: ManagedTerminal): Promise<boolean> {
-    return await Promise.race([
-      this.waitForTerminalAndTrackedDescendants(terminal).then(() => true),
-      waitMs(this.killGraceMs).then(() => false),
-    ]);
-  }
-
-  private async waitForTerminalAndTrackedDescendants(terminal: ManagedTerminal): Promise<void> {
-    await terminal.exitPromise;
-    while (hasLiveTerminalProcessGroup(terminal)) {
-      await waitMs(25);
+    const deadline = performance.now() + this.killGraceMs;
+    // This deadline owns every poll, including the exit snapshot. Racing an
+    // unbounded waiter leaves timers retaining terminal state after cleanup returns.
+    while (
+      this.isRunning(terminal) ||
+      terminal.processGroupSnapshotPromise ||
+      hasLiveTerminalProcessGroup(terminal) ||
+      hasLivePid(terminal.descendantPids)
+    ) {
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) {
+        return false;
+      }
+      await waitMs(Math.min(25, remaining));
     }
-    while (hasLivePid(terminal.descendantPids)) {
-      await waitMs(25);
-    }
+    return true;
   }
 }
 
