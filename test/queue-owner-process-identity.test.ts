@@ -24,7 +24,28 @@ type Actor = {
 };
 
 async function startActor(source: string): Promise<Actor> {
-  const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+  const actorSource = `
+    let onFixtureFinish = async () => {};
+    let finishing = false;
+    const finishFixture = async () => {
+      if (finishing) return;
+      finishing = true;
+      try {
+        await onFixtureFinish();
+        process.exit(0);
+      } catch (error) {
+        console.error(error);
+        process.exit(1);
+      }
+    };
+    process.on('message', message => {
+      if (message === 'finish') void finishFixture();
+    });
+    process.once('SIGTERM', () => void finishFixture());
+    setTimeout(() => void finishFixture(), 30_000);
+    ${source}
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", actorSource], {
     detached: true,
     stdio: ["ignore", "ignore", "pipe", "ipc"],
   });
@@ -45,19 +66,43 @@ async function startActor(source: string): Promise<Actor> {
     assert.equal(message[0], child.pid);
     return { child, exited, pids: message as number[] };
   } catch (error) {
-    if (child.exitCode == null && child.signalCode == null) {
-      child.kill("SIGKILL");
-    }
-    await exited;
+    await stopActor({ child, exited, pids: child.pid ? [child.pid] : [] });
     throw error;
   }
 }
 
-async function stopActor(actor: Actor): Promise<void> {
-  if (actor.child.exitCode == null && actor.child.signalCode == null) {
-    actor.child.kill("SIGTERM");
+async function waitForActorExit(actor: Actor): Promise<boolean> {
+  let reaped = false;
+  void actor.exited.then(() => {
+    reaped = true;
+  });
+  // Fixed attempts keep cleanup bounded even when a test replaces Date.now.
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (reaped && !actor.pids.some(isProcessAlive)) {
+      return true;
+    }
+    await delay(20);
   }
-  await actor.exited;
+  return reaped && !actor.pids.some(isProcessAlive);
+}
+
+async function stopActor(actor: Actor): Promise<void> {
+  if (actor.child.connected) {
+    actor.child.send("finish", () => {});
+  }
+  if (await waitForActorExit(actor)) {
+    return;
+  }
+  // A recorded descendant PID is not permission to kill a later incarnation.
+  // Only the live direct-child handle can support this single-process fallback.
+  if (actor.pids.length === 1 && actor.child.exitCode == null && actor.child.signalCode == null) {
+    actor.child.kill("SIGKILL");
+  }
+  assert.equal(
+    await waitForActorExit(actor),
+    true,
+    `fixture cleanup left live PIDs: ${actor.pids.filter(isProcessAlive).join(", ")}`,
+  );
 }
 
 async function startLeaseOwner(sessionId: string): Promise<Actor> {
@@ -67,13 +112,7 @@ async function startLeaseOwner(sessionId: string): Promise<Actor> {
     const lease = await tryAcquireQueueOwnerLease(${JSON.stringify(sessionId)},
       () => '2000-01-01T00:00:00.000Z');
     if (!lease) throw new Error('Fixture could not acquire its lease');
-    process.on('message', async message => {
-      if (message === 'finish') {
-        await releaseQueueOwnerLease(lease);
-        process.exit(0);
-      }
-    });
-    setTimeout(() => process.exit(0), 30_000);
+    onFixtureFinish = () => releaseQueueOwnerLease(lease);
     process.send([process.pid]);
   `);
 }
@@ -81,16 +120,15 @@ async function startLeaseOwner(sessionId: string): Promise<Actor> {
 async function startSentinel(): Promise<Actor> {
   return await startActor(`
     import { spawn } from 'node:child_process';
+    import { once } from 'node:events';
     const leaf = spawn(process.execPath, ['-e', 'setTimeout(() => process.exit(0), 30_000)'], {
       stdio: 'ignore',
     });
-    const stop = () => {
-      if (leaf.exitCode != null || leaf.signalCode != null) process.exit(0);
-      leaf.once('close', () => process.exit(0));
-      leaf.kill('SIGKILL');
+    const leafExited = once(leaf, 'close');
+    onFixtureFinish = async () => {
+      if (leaf.exitCode == null && leaf.signalCode == null) leaf.kill('SIGKILL');
+      await leafExited;
     };
-    process.once('SIGTERM', stop);
-    setTimeout(stop, 30_000);
     leaf.once('spawn', () => process.send([process.pid, leaf.pid]));
   `);
 }
@@ -364,7 +402,7 @@ test(
       const sessionId = "unverified-self-publication";
       const moduleUrl = new URL("../src/session/queue/lease-store.js", import.meta.url).href;
       const owner = await startActor(`
-      const { tryAcquireQueueOwnerLease, refreshQueueOwnerLease } = await import(${JSON.stringify(moduleUrl)});
+      const { tryAcquireQueueOwnerLease, refreshQueueOwnerLease, releaseQueueOwnerLease } = await import(${JSON.stringify(moduleUrl)});
       const key = process.platform === 'win32' ? 'SystemRoot' : 'PATH';
       const previous = process.env[key];
       process.env[key] = '';
@@ -372,7 +410,7 @@ test(
       if (!lease || lease.processIdentity) throw new Error('Expected an unverified published lease');
       if (previous === undefined) delete process.env[key]; else process.env[key] = previous;
       await refreshQueueOwnerLease(lease, {queueDepth:2});
-      setTimeout(() => process.exit(0), 30_000);
+      onFixtureFinish = () => releaseQueueOwnerLease(lease);
       process.send([process.pid]);
     `);
       try {
