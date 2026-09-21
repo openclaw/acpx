@@ -123,10 +123,22 @@ Each case file can define:
   - `updates_count_at_least`
   - `updates_all_session`
   - `updates_text_includes`
+  - `updates_session_update_includes`
 
 When a step declares `expect_error`, its operation must fail. Optional `codes`
 and `message_any` fields filter the failure; `{}` accepts any error. A successful
 operation always fails the case.
+
+The runner validates the profile and every JSON file in the cases directory
+before launching an adapter, including files outside a `--case` selection.
+Unknown fields, actions or checks, malformed control values, duplicate case IDs
+and duplicate required IDs are startup errors. Known descriptive metadata remains
+optional; minimal cases and empty step/check arrays are supported.
+
+Validation applies to runner instructions. Session cwd and session-ID payloads,
+and the contents of prompt blocks, remain unchanged so negative protocol cases
+can deliberately send invalid ACP inputs. Saved keys are literal names; inherited
+JavaScript properties cannot satisfy a saved-value assertion.
 
 ## Nightly Workflow
 

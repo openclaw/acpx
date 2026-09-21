@@ -11,6 +11,11 @@
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "examples/flows/pr-triage/review-text.js"],
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "conformance/**/*.ts",
+    "examples/flows/pr-triage/review-text.js"
+  ],
   "exclude": ["node_modules", "dist", "dist-test"]
 }

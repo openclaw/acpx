@@ -7,7 +7,6 @@ import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
   ClientSideConnection,
-  type ContentBlock,
   PROTOCOL_VERSION,
   type PromptResponse,
   type ReadTextFileRequest,
@@ -23,6 +22,14 @@ import {
 } from "@agentclientprotocol/sdk";
 import { FsSafeError } from "@openclaw/fs-safe/errors";
 import { root, type Root } from "@openclaw/fs-safe/root";
+import {
+  parseCaseDefinition,
+  parseProfileDefinition,
+  type CaseDefinition,
+  type CaseStep,
+  type ErrorExpectation,
+  type ProfileDefinition,
+} from "./schema.js";
 
 type PermissionMode = "approve-all" | "deny-all";
 type OutputFormat = "text" | "json";
@@ -39,100 +46,6 @@ type CliOptions = {
   cwd: string;
   onlyCaseIds: Set<string> | undefined;
 };
-
-type ProfileDefinition = {
-  id: string;
-  required_cases: string[];
-};
-
-type CaseDefinition = {
-  id: string;
-  title?: string;
-  permission_mode?: PermissionMode;
-  steps?: CaseStep[];
-  checks?: CaseCheck[];
-  timeouts?: {
-    request_timeout_ms?: number;
-    update_timeout_ms?: number;
-    settle_timeout_ms?: number;
-  };
-};
-
-type ErrorExpectation = {
-  codes?: number[];
-  message_any?: string[];
-};
-
-type CaseStep =
-  | {
-      action: "new_session";
-      cwd?: unknown;
-      save_as?: string;
-      expect_error?: ErrorExpectation;
-    }
-  | {
-      action: "prompt";
-      session: unknown;
-      prompt: ContentBlock[];
-      save_as?: string;
-      expect_error?: ErrorExpectation;
-      suppress_console_error?: boolean;
-    }
-  | {
-      action: "prompt_background";
-      session: unknown;
-      prompt: ContentBlock[];
-      save_as: string;
-    }
-  | {
-      action: "await_background";
-      from: string;
-      save_as?: string;
-      expect_error?: ErrorExpectation;
-    }
-  | {
-      action: "cancel";
-      session: unknown;
-      expect_error?: ErrorExpectation;
-    }
-  | {
-      action: "sleep";
-      ms: number;
-    };
-
-type CaseCheck =
-  | {
-      type: "initialize_protocol_version_number";
-    }
-  | {
-      type: "saved_non_empty_string";
-      key: string;
-    }
-  | {
-      type: "saved_error_present";
-      key: string;
-    }
-  | {
-      type: "saved_stop_reason_in";
-      key: string;
-      values: string[];
-    }
-  | {
-      type: "updates_count_at_least";
-      min: number;
-    }
-  | {
-      type: "updates_all_session";
-      session: string;
-    }
-  | {
-      type: "updates_text_includes";
-      text: string;
-    }
-  | {
-      type: "updates_session_update_includes";
-      values: string[];
-    };
 
 type CaseResult = {
   id: string;
@@ -495,7 +408,7 @@ function splitCommandLine(value: string): ParsedCommand {
   return { command: parts[0], args: parts.slice(1) };
 }
 
-async function loadJsonFile<T>(filePath: string): Promise<T> {
+async function loadJsonFile(filePath: string): Promise<unknown> {
   let raw: string;
   try {
     raw = await fs.readFile(filePath, "utf8");
@@ -506,7 +419,7 @@ async function loadJsonFile<T>(filePath: string): Promise<T> {
   }
 
   try {
-    return JSON.parse(raw) as T;
+    return JSON.parse(raw) as unknown;
   } catch (error) {
     throw new Error(`Failed to parse JSON ${filePath}: ${toErrorMessage(error)}`, { cause: error });
   }
@@ -517,21 +430,26 @@ async function loadProfileAndCases(options: CliOptions): Promise<{
   casesById: Map<string, CaseDefinition>;
   selectedCaseIds: string[];
 }> {
-  const profile = await loadJsonFile<ProfileDefinition>(options.profilePath);
-  if (!profile || typeof profile.id !== "string" || !Array.isArray(profile.required_cases)) {
-    throw new Error(`Invalid profile file: ${options.profilePath}`);
-  }
+  const profile = parseProfileDefinition(
+    await loadJsonFile(options.profilePath),
+    options.profilePath,
+  );
 
   const caseFiles = (await fs.readdir(options.casesDir))
     .filter((name) => name.endsWith(".json"))
     .map((name) => path.join(options.casesDir, name));
   const casesById = new Map<string, CaseDefinition>();
+  const sourcesById = new Map<string, string>();
 
   for (const filePath of caseFiles) {
-    const definition = await loadJsonFile<CaseDefinition>(filePath);
-    if (!definition || typeof definition.id !== "string") {
-      throw new Error(`Invalid case file (missing id): ${filePath}`);
+    const definition = parseCaseDefinition(await loadJsonFile(filePath), filePath);
+    const previous = sourcesById.get(definition.id);
+    if (previous !== undefined) {
+      throw new Error(
+        `Duplicate case ID ${JSON.stringify(definition.id)} in ${previous} and ${filePath}`,
+      );
     }
+    sourcesById.set(definition.id, filePath);
     casesById.set(definition.id, definition);
   }
 
@@ -895,6 +813,8 @@ async function executeCaseStep(params: {
       });
       return;
     }
+    default:
+      throw new Error("Unsupported conformance step");
   }
 }
 
@@ -959,10 +879,10 @@ function evaluateCaseChecks(params: {
         break;
       }
       case "updates_session_update_includes": {
-        const seen = new Set(
+        const seen = new Set<string>(
           params.harness.client.updates
             .map((update) => update.update?.sessionUpdate)
-            .filter((value): value is string => typeof value === "string"),
+            .filter((value) => typeof value === "string"),
         );
 
         for (const value of check.values) {
@@ -974,6 +894,8 @@ function evaluateCaseChecks(params: {
         }
         break;
       }
+      default:
+        throw new Error("Unsupported conformance check");
     }
   }
 }
@@ -991,7 +913,7 @@ async function runCase(
       : options;
   let harness: Harness | undefined;
   const context: ExecutionContext = {
-    saved: {},
+    saved: Object.create(null) as Record<string, unknown>,
     background: new Map(),
   };
   try {
