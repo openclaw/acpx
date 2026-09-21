@@ -364,7 +364,7 @@ function parseReport(stdout: string): RunReport {
 
 async function runRunner(
   args: string[],
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; home?: string } = {},
 ): Promise<RunnerResult> {
   return await new Promise<RunnerResult>((resolve) => {
     const child = spawn(process.execPath, ["--import", "tsx", RUNNER_PATH, ...args], {
@@ -372,6 +372,7 @@ async function runRunner(
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
+        ...(options.home === undefined ? {} : { HOME: options.home }),
         NODE_V8_COVERAGE: "",
         NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=DEP0205`.trim(),
       },
@@ -821,6 +822,7 @@ async function runFilesystemProbe(
   requests: FilesystemProbeOperation[],
   cleanupSwap?: { source: string; moved: string; target: string },
   permissionMode = "approve-all",
+  home?: string,
 ): Promise<FilesystemProbeReceipt> {
   const receiptPath = path.join(fixtureDir, "filesystem-receipts.json");
   const configPath = path.join(fixtureDir, "filesystem-config.json");
@@ -843,20 +845,23 @@ async function runFilesystemProbe(
   const adapter = fileURLToPath(
     new URL("./fixtures/conformance-filesystem-agent.js", import.meta.url),
   );
-  const result = await runRunner([
-    "--profile",
-    profilePath,
-    "--cases-dir",
-    casesDir,
-    "--cwd",
-    cwd,
-    "--permission-mode",
-    permissionMode,
-    "--agent-command",
-    [process.execPath, adapter, configPath].map((value) => JSON.stringify(value)).join(" "),
-    "--format",
-    "json",
-  ]);
+  const result = await runRunner(
+    [
+      "--profile",
+      profilePath,
+      "--cases-dir",
+      casesDir,
+      "--cwd",
+      cwd,
+      "--permission-mode",
+      permissionMode,
+      "--agent-command",
+      [process.execPath, adapter, configPath].map((value) => JSON.stringify(value)).join(" "),
+      "--format",
+      "json",
+    ],
+    { home },
+  );
   assert.equal(result.code, 0, result.stderr);
   assert.deepEqual(parseReport(result.stdout).totals, { cases: 1, passed: 1, failed: 0 });
   const receipt = JSON.parse(await fs.readFile(receiptPath, "utf8")) as FilesystemProbeReceipt;
@@ -956,6 +961,41 @@ test("runner keeps large reads and refuses writes through hardlinks", async () =
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
+
+for (const homeLocation of ["root", "inside", "outside"] as const) {
+  const relation = homeLocation === "root" ? "equal to" : homeLocation;
+  test(`runner cleans literal tilde paths with HOME ${relation} the session root`, async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-conformance-tilde-"));
+    try {
+      const cwd = path.join(tmp, "workspace");
+      const home =
+        homeLocation === "root" ? cwd : path.join(homeLocation === "inside" ? cwd : tmp, "home");
+      await fs.mkdir(cwd, { recursive: true });
+      await fs.mkdir(home, { recursive: true });
+      const sentinel = path.join(home, "notes");
+      await fs.writeFile(sentinel, "EXISTING_HOME_NOTES");
+      const receipt = await runFilesystemProbe(
+        tmp,
+        cwd,
+        [
+          { method: "fs/write_text_file", path: "~/notes", content: "LITERAL_TILDE_NOTES" },
+          { method: "fs/read_text_file", path: "~/notes" },
+        ],
+        undefined,
+        "approve-all",
+        home,
+      );
+      for (const { response } of receipt.receipts) {
+        assert.equal(response.error, undefined);
+      }
+      assert.equal(receipt.receipts[1]?.response.result?.content, "LITERAL_TILDE_NOTES");
+      assert.equal(await fs.readFile(sentinel, "utf8"), "EXISTING_HOME_NOTES");
+      await assert.rejects(fs.stat(path.join(cwd, "~", "notes")), { code: "ENOENT" });
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+}
 
 test(
   "runner preserves contained aliases and raw parent traversal, and cleans new files",

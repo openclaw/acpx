@@ -247,7 +247,9 @@ class RunnerClient implements Client {
   async cleanup(): Promise<void> {
     for (const [filePath, workspace] of this.createdFiles) {
       try {
-        await workspace.remove(path.relative(workspace.rootReal, filePath), {
+        // Root expands leading ~/; keep recorded filenames literal during removal.
+        const relativePath = `.${path.sep}${path.relative(workspace.rootReal, filePath)}`;
+        await workspace.remove(relativePath, {
           force: true,
           mutationSymlinks: "reject",
         });
