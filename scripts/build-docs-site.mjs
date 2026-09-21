@@ -468,22 +468,33 @@ function markdownToHtml(markdown, currentRel) {
 
 function inline(text, currentRel) {
   const stash = [];
+  const hrefs = [];
   let out = text.replace(/`([^`]+)`/g, (_, code) => {
     stash.push(`<code>${escapeHtml(code)}</code>`);
     return `@@ACPXCODE${stash.length - 1}@@`;
+  });
+  out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, href) => {
+    hrefs.push(href);
+    return `[${label}](@@ACPXLINK${hrefs.length - 1}@@)`;
   });
   out = escapeHtml(out)
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1<em>$2</em>")
     .replace(/(^|[^_])_([^_\s][^_]*?)_(?!_)/g, "$1<em>$2</em>")
-    .replace(
-      /\[([^\]]+)\]\(([^)]+)\)/g,
-      (_, label, href) => `<a href="${escapeAttr(rewriteHref(href, currentRel))}">${label}</a>`,
-    )
     .replace(/&lt;(https?:\/\/[^\s<>]+)&gt;/g, '<a href="$1">$1</a>');
   out = out.replace(/\\\|/g, "|");
   out = out.replace(/&lt;br&gt;/g, "<br>");
-  return out.replace(/@@ACPXCODE(\d+)@@/g, (_, i) => stash[Number(i)]);
+  return out.replace(
+    /\[([^\]]+)\]\(@@ACPXLINK(\d+)@@\)|@@ACPXCODE(\d+)@@/g,
+    (_, label, linkIndex, codeIndex) => {
+      if (codeIndex !== undefined) {
+        return stash[Number(codeIndex)];
+      }
+      const labelHtml = label.replace(/@@ACPXCODE(\d+)@@/g, (_, i) => stash[Number(i)]);
+      const href = rewriteHref(hrefs[Number(linkIndex)], currentRel);
+      return `<a href="${escapeAttr(href)}">${labelHtml}</a>`;
+    },
+  );
 }
 
 function rewriteHref(href, currentRel) {

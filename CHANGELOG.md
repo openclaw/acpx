@@ -20,6 +20,7 @@ Repo: https://github.com/openclaw/acpx
 - Flows/JSON: bound compatibility recovery by scanning and parsing work instead of collecting every candidate, preserving large and late embedded JSON while stopping excessive recovery through ambiguous text. Direct and fenced JSON parsing are unchanged. Thanks @SebTardif.
 - CLI/output: preserve received assistant text in quiet mode when direct or queued prompts fail, and drain failed or cancelled watch turns without requiring a final ACP response or duplicating completed output.
 - Runtime/capabilities: return independent mutable capability snapshots so editing one result cannot change another caller's controls or advertised config keys.
+- Docs/site: preserve Markdown link destinations containing underscores, query parameters, and attribute characters while keeping label formatting and relative links intact.
 
 ## 0.18.0 - 2026-09-20
 
