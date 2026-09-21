@@ -64,6 +64,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI: reject explicitly empty or whitespace-only `--agent` commands before reading prompt input or selecting the default adapter.
 - CLI/output: route disabled-exec errors through shared formatting, preserving `EXEC_DISABLED` and exit `1` while emitting complete JSON-RPC errors and structured quiet diagnostics.
 - Conformance: fail initialization when returned agent capabilities are null, arrays, or primitive values instead of reporting a passing handshake.
+- Sessions: preserve Node loader arguments after bare debugger flags when starting a queue owner, and filter debugger wait mode and inspector flag aliases.
 
 ## 0.18.0 - 2026-09-20
 

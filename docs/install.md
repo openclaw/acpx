@@ -89,6 +89,10 @@ Run during development without rebuilding:
 pnpm dev codex 'fix the tests'
 ```
 
+When the source CLI generates arguments for a background queue owner, it removes
+Node command-line debugger flags while preserving loader options such as
+`--import` and `--loader`.
+
 See [`CONTRIBUTING.md`](https://github.com/openclaw/acpx/blob/main/CONTRIBUTING.md) for tests, lint, and the conformance suite.
 
 ## Tell your agent about acpx

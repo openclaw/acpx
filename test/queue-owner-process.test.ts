@@ -96,17 +96,58 @@ describe("sanitizeQueueOwnerExecArgv", () => {
     );
   });
 
+  for (const inspector of [
+    "--inspect",
+    "--inspect-brk",
+    "--inspect-wait",
+    "--inspect_brk",
+    "--inspect_wait",
+  ]) {
+    for (const loader of ["--import", "--loader"]) {
+      it(`keeps ${loader} and its value after bare ${inspector}`, () => {
+        assert.deepEqual(
+          sanitizeQueueOwnerExecArgv([inspector, loader, "fixture-module", "--trace-warnings"]),
+          [loader, "fixture-module", "--trace-warnings"],
+        );
+      });
+    }
+  }
+
   it("drops debugger flags from queue-owner exec args", () => {
     assert.deepEqual(
       sanitizeQueueOwnerExecArgv([
+        "--inspect=9228",
         "--inspect-brk=9229",
+        "--inspect-wait=127.0.0.1:0",
+        "--inspect_brk=0",
+        "--inspect_wait=0",
         "--inspect-port",
         "9230",
         "--debug-port=9231",
+        "--inspect-publish-uid",
+        "stderr,http",
         "--import",
         "tsx",
       ]),
       ["--import", "tsx"],
+    );
+  });
+
+  it("recognizes value-bearing inspector aliases without rewriting retained arguments", () => {
+    assert.deepEqual(
+      sanitizeQueueOwnerExecArgv([
+        "--inspect_port",
+        "0",
+        "--inspect_publish-uid",
+        "stderr,http",
+        "--inspect-publish_uid=stderr,http",
+        "--debug_port=0",
+        "--import",
+        "./loader_with_underscores.mjs",
+        "--trace_warnings",
+        "__inspect",
+      ]),
+      ["--import", "./loader_with_underscores.mjs", "--trace_warnings", "__inspect"],
     );
   });
 });
@@ -122,6 +163,21 @@ describe("buildQueueOwnerArgOverride", () => {
       ]),
       null,
     );
+  });
+
+  it("uses the normal entrypoint fallback for inspector-only arguments", () => {
+    for (const inspector of ["--inspect", "--inspect-brk", "--inspect-wait", "--inspect_wait"]) {
+      assert.equal(buildQueueOwnerArgOverride("/tmp/cli.js", [inspector]), null);
+    }
+  });
+
+  it("keeps a preload before the owner entrypoint after a bare inspector flag", () => {
+    for (const inspector of ["--inspect", "--inspect-brk", "--inspect-wait", "--inspect_wait"]) {
+      assert.equal(
+        buildQueueOwnerArgOverride("/tmp/cli.js", [inspector, "--import", "tsx"]),
+        JSON.stringify(["--import", "tsx", "/tmp/cli.js", "__queue-owner"]),
+      );
+    }
   });
 
   it("returns a serialized override when loader args are required", () => {

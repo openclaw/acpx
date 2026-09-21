@@ -49,40 +49,37 @@ const NODE_TEST_FLAGS_WITH_VALUE = new Set([
   "--test-reporter-destination",
 ]);
 
+const INSPECTOR_FLAGS = new Set(["--inspect", "--inspect-brk", "--inspect-wait"]);
+
 const INSPECTOR_FLAGS_WITH_VALUE = new Set([
-  "--inspect",
-  "--inspect-brk",
   "--inspect-port",
   "--inspect-publish-uid",
   "--debug-port",
 ]);
 
-const INSPECTOR_FLAG_PREFIXES = [
-  "--inspect=",
-  "--inspect-brk=",
-  "--inspect-port=",
-  "--inspect-publish-uid=",
-  "--debug-port=",
-];
-
 type ExecArgvDecision = "keep" | "drop" | "drop-with-value";
 
-function classifyExecArgv(value: string | undefined): ExecArgvDecision {
-  if (value === undefined) {
-    return "drop";
-  }
-  if (NODE_TEST_FLAGS_WITH_VALUE.has(value) || INSPECTOR_FLAGS_WITH_VALUE.has(value)) {
+function classifyExecArgv(value: string): ExecArgvDecision {
+  if (NODE_TEST_FLAGS_WITH_VALUE.has(value)) {
     return "drop-with-value";
   }
-  return dropSingleExecArgv(value) ? "drop" : "keep";
+  if (NODE_TEST_FLAGS.has(value) || value.startsWith("--test-")) {
+    return "drop";
+  }
+  return classifyInspectorArgv(value);
 }
 
-function dropSingleExecArgv(value: string): boolean {
-  return (
-    NODE_TEST_FLAGS.has(value) ||
-    value.startsWith("--test-") ||
-    INSPECTOR_FLAG_PREFIXES.some((prefix) => value.startsWith(prefix))
-  );
+function classifyInspectorArgv(value: string): ExecArgvDecision {
+  const [name] = value.split("=", 1);
+  if (!name?.startsWith("--")) {
+    return "keep";
+  }
+  // Node accepts underscores in option names; retained arguments stay unchanged.
+  const flag = name.replaceAll("_", "-");
+  if (INSPECTOR_FLAGS_WITH_VALUE.has(flag)) {
+    return value.includes("=") ? "drop" : "drop-with-value";
+  }
+  return INSPECTOR_FLAGS.has(flag) ? "drop" : "keep";
 }
 
 export function sanitizeQueueOwnerExecArgv(
