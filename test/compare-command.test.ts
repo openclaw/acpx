@@ -202,14 +202,32 @@ class CompareAgent {
       return { stopReason: "end_turn" };
     }
 
+    if (mode === "usage-context" || mode === "usage-partial" || mode === "usage-zero") {
+      const usage = mode === "usage-zero"
+        ? { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+        : mode === "usage-partial"
+          ? { input_tokens: 10, output_tokens: 20 }
+          : undefined;
+      await this.connection.sessionUpdate({
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: "usage_update",
+          used: 123,
+          size: 200000,
+          ...(usage === undefined ? {} : { _meta: { usage } }),
+        },
+      });
+      return { stopReason: "end_turn" };
+    }
+
     const delay = mode === "slow" ? 1200 : 10;
     await sleep(delay);
     await this.connection.sessionUpdate({
       sessionId: params.sessionId,
       update: {
         sessionUpdate: "usage_update",
-        size: mode === "slow" ? 70 : 30,
-        used: mode === "slow" ? 70 : 30,
+        size: 200000,
+        used: 123,
         _meta: {
           usage: {
             inputTokens: mode === "slow" ? 30 : 10,
@@ -256,6 +274,9 @@ async function writeCompareConfig(homeDir: string, agentPath: string): Promise<v
         defaultPermissions: "deny-all",
         agents: {
           fast: { command: process.execPath, args: [agentPath, "fast"] },
+          "usage-context": { command: process.execPath, args: [agentPath, "usage-context"] },
+          "usage-partial": { command: process.execPath, args: [agentPath, "usage-partial"] },
+          "usage-zero": { command: process.execPath, args: [agentPath, "usage-zero"] },
           slow: { command: process.execPath, args: [agentPath, "slow"] },
           error: { command: process.execPath, args: [agentPath, "error"] },
           permission: { command: process.execPath, args: [agentPath, "permission"] },
@@ -330,6 +351,44 @@ test("compare --format json emits CompareRow array", async () => {
     assert.equal(rows[0]?.total_tokens, 30);
     assert.equal(rows[1]?.input_tokens, 30);
     assert.equal(rows[1]?.output_tokens, 40);
+  });
+});
+
+test("compare reports explicit token counts without inventing totals from context or partial usage", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    const result = await runCli(
+      [
+        "--format",
+        "json",
+        "compare",
+        "usage-context",
+        "usage-partial",
+        "usage-zero",
+        "fast",
+        "summarize",
+      ],
+      homeDir,
+      cwd,
+    );
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    const rows = JSON.parse(result.stdout) as CompareRow[];
+    assert.deepEqual(
+      rows.map((row) => ({
+        agent: row.agent,
+        status: row.status,
+        input: row.input_tokens,
+        output: row.output_tokens,
+        total: row.total_tokens,
+      })),
+      [
+        { agent: "usage-context", status: "ok", input: null, output: null, total: null },
+        { agent: "usage-partial", status: "ok", input: 10, output: 20, total: null },
+        { agent: "usage-zero", status: "ok", input: 0, output: 0, total: 0 },
+        { agent: "fast", status: "ok", input: 10, output: 20, total: 30 },
+      ],
+    );
   });
 });
 

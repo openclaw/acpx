@@ -130,7 +130,7 @@ function captureUsage(update: Record<string, unknown>, capture: RunCapture): voi
   capture.usage = {
     input_tokens: numberField(source, ["input_tokens", "inputTokens"]) ?? undefined,
     output_tokens: numberField(source, ["output_tokens", "outputTokens"]) ?? undefined,
-    total_tokens: numberField(source, ["total_tokens", "totalTokens", "size", "used"]) ?? undefined,
+    total_tokens: numberField(source, ["total_tokens", "totalTokens"]) ?? undefined,
   };
 }
 

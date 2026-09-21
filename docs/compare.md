@@ -84,6 +84,11 @@ Text output includes one row per agent:
 | `final_message` | First 200 characters of assistant text output.               |
 | `error`         | Error preview for failed runs.                               |
 
+Token counts use explicitly reported input, output, and total fields from the
+latest `usage_update`. Context occupancy (`used`) and capacity (`size`) are not
+token totals. Missing counts appear as `-` in text output and `null` in JSON;
+a missing total is not calculated from input and output counts.
+
 `--format json` emits an array of rows:
 
 ```json
