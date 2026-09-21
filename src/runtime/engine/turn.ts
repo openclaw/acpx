@@ -66,12 +66,18 @@ export class AsyncEventQueue {
   }
 
   async *iterate(): AsyncIterable<AcpRuntimeEvent> {
-    while (true) {
-      const next = await this.next();
-      if (!next) {
-        return;
+    try {
+      while (true) {
+        const next = await this.next();
+        if (!next) {
+          return;
+        }
+        yield next;
       }
-      yield next;
+    } finally {
+      // The turn can outlive its observer; stop retaining events after iteration ends.
+      this.close();
+      this.clear();
     }
   }
 }

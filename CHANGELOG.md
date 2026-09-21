@@ -24,6 +24,8 @@ Repo: https://github.com/openclaw/acpx
 - PR-triage example: preserve the repository in pasted PR URLs, normalize decimal PR numbers without changing their identity, validate complete batches before dispatch, and support macOS Bash 3.2 with separate jobs for equal PR numbers in different repositories.
 - Sessions/config: preserve config-option transport for newly saved options named `mode`, including replay after reconnect, without overwriting independent legacy mode preferences.
 
+- Runtime/events: release buffered output and stop collecting future events when a consumer leaves a turn's event stream, while letting the turn finish independently.
+
 ## 0.18.0 - 2026-09-20
 
 ### Highlights

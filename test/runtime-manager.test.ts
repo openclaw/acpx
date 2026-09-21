@@ -1797,105 +1797,117 @@ test("AcpRuntimeManager projects session updates before, during, and after turns
   assert.equal(closeCalls, 1);
 });
 
-test("AcpRuntimeManager closeStream suppresses future live events while preserving terminal completion", async () => {
-  const record = makeSessionRecord({
-    acpxRecordId: "stream-close-session",
-    acpSessionId: "stream-close-sid",
-    agentCommand: "codex --acp",
-    cwd: "/workspace",
-  });
-  const store = new InMemorySessionStore([record]);
-  let handlers: FakeClientHandlers = {};
-  let resolvePromptStart!: () => void;
-  let resolvePrompt!: (value: { stopReason: string }) => void;
-  const promptStarted = new Promise<void>((resolve) => {
-    resolvePromptStart = resolve;
-  });
-  const promptResult = new Promise<{ stopReason: string }>((resolve) => {
-    resolvePrompt = resolve;
-  });
-  const client: FakeClient = {
-    start: async () => {},
-    close: async () => {},
-    createSession: async () => ({ sessionId: "unused" }),
-    loadSession: async () => ({ agentSessionId: "unused" }),
-    hasReusableSession: () => true,
-    supportsLoadSession: () => true,
-    supportsResumeSession: () => false,
-    loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
-    getAgentLifecycleSnapshot: () => ({ running: true }),
-    prompt: async () => {
-      resolvePromptStart();
-      return await promptResult;
-    },
-    requestCancelActivePrompt: async () => false,
-    hasActivePrompt: () => true,
-    setSessionMode: async () => {},
-    setSessionConfigOption: async () => {},
-    clearEventHandlers: () => {
-      handlers = {};
-    },
-    setEventHandlers: (nextHandlers) => {
-      handlers = nextHandlers;
-    },
-  };
-  const manager = new AcpRuntimeManager(
-    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
-    {
-      clientFactory: () => client as never,
-    },
-  );
+for (const stopReading of ["closeStream", "break"] as const) {
+  test(`AcpRuntimeManager ${stopReading} suppresses future live events while preserving terminal completion`, async () => {
+    const record = makeSessionRecord({
+      acpxRecordId: "stream-close-session",
+      acpSessionId: "stream-close-sid",
+      agentCommand: "codex --acp",
+      cwd: "/workspace",
+    });
+    const store = new InMemorySessionStore([record]);
+    let handlers: FakeClientHandlers = {};
+    let resolvePromptStart!: () => void;
+    let resolvePrompt!: (value: { stopReason: string }) => void;
+    const promptStarted = new Promise<void>((resolve) => {
+      resolvePromptStart = resolve;
+    });
+    const promptResult = new Promise<{ stopReason: string }>((resolve) => {
+      resolvePrompt = resolve;
+    });
+    const client: FakeClient = {
+      start: async () => {},
+      close: async () => {},
+      createSession: async () => ({ sessionId: "unused" }),
+      loadSession: async () => ({ agentSessionId: "unused" }),
+      hasReusableSession: () => true,
+      supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
+      loadSessionWithOptions: async () => ({ agentSessionId: "unused" }),
+      getAgentLifecycleSnapshot: () => ({ running: true }),
+      prompt: async () => {
+        resolvePromptStart();
+        return await promptResult;
+      },
+      requestCancelActivePrompt: async () => false,
+      hasActivePrompt: () => true,
+      setSessionMode: async () => {},
+      setSessionConfigOption: async () => {},
+      clearEventHandlers: () => {
+        handlers = {};
+      },
+      setEventHandlers: (nextHandlers) => {
+        handlers = nextHandlers;
+      },
+    };
+    const manager = new AcpRuntimeManager(
+      createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+      {
+        clientFactory: () => client as never,
+      },
+    );
 
-  const turn = manager.startTurn({
-    handle: createHandle("stream-close-session"),
-    text: "hello",
-    mode: "prompt",
-    sessionMode: "persistent",
-    requestId: "req-close-stream",
-  });
-  const iterator = turn.events[Symbol.asyncIterator]();
+    const turn = manager.startTurn({
+      handle: createHandle("stream-close-session"),
+      text: "hello",
+      mode: "prompt",
+      sessionMode: "persistent",
+      requestId: "req-close-stream",
+    });
+    const iterator = turn.events[Symbol.asyncIterator]();
 
-  const firstEventPromise = iterator.next();
-  await promptStarted;
-  handlers.onSessionUpdate?.({
-    sessionId: "stream-close-sid",
-    update: {
-      sessionUpdate: "agent_message_chunk",
-      content: { type: "text", text: "visible" },
-    },
-  });
+    const firstEventPromise =
+      stopReading === "break"
+        ? (async () => {
+            let firstEvent: AcpRuntimeEvent | undefined;
+            for await (const event of turn.events) {
+              firstEvent = event;
+              break;
+            }
+            return { done: false, value: firstEvent };
+          })()
+        : iterator.next();
+    await promptStarted;
+    handlers.onSessionUpdate?.({
+      sessionId: "stream-close-sid",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "visible" },
+      },
+    });
 
-  assert.deepEqual(await firstEventPromise, {
-    done: false,
-    value: { type: "text_delta", text: "visible", stream: "output", tag: "agent_message_chunk" },
-  });
+    assert.deepEqual(await firstEventPromise, {
+      done: false,
+      value: { type: "text_delta", text: "visible", stream: "output", tag: "agent_message_chunk" },
+    });
 
-  await turn.closeStream({
-    reason: "observer closed stream",
-  });
+    if (stopReading === "closeStream") {
+      await turn.closeStream({ reason: "observer closed stream" });
+    }
 
-  handlers.onSessionUpdate?.({
-    sessionId: "stream-close-sid",
-    update: {
-      sessionUpdate: "agent_message_chunk",
-      content: { type: "text", text: "suppressed" },
-    },
-  });
-  resolvePrompt({ stopReason: "end_turn" });
+    handlers.onSessionUpdate?.({
+      sessionId: "stream-close-sid",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "suppressed" },
+      },
+    });
+    resolvePrompt({ stopReason: "end_turn" });
 
-  assert.deepEqual(await iterator.next(), {
-    done: true,
-    value: undefined,
+    assert.deepEqual(await iterator.next(), {
+      done: true,
+      value: undefined,
+    });
+    assert.deepEqual(await turn.result, {
+      status: "completed",
+      stopReason: "end_turn",
+    });
+    assert.deepEqual(await iterator.next(), {
+      done: true,
+      value: undefined,
+    });
   });
-  assert.deepEqual(await turn.result, {
-    status: "completed",
-    stopReason: "end_turn",
-  });
-  assert.deepEqual(await iterator.next(), {
-    done: true,
-    value: undefined,
-  });
-});
+}
 
 test("AcpRuntimeManager does not pool a persistent client after active close", async () => {
   const record = makeSessionRecord({
