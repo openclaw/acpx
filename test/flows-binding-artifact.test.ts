@@ -15,6 +15,7 @@ import type {
   FlowSessionBinding,
   FlowTraceEvent,
 } from "../src/flows/types.js";
+import { createDeferred } from "../src/runtime/engine/turn.js";
 import { makeSessionRecord, withTempDir } from "./runtime-test-helpers.js";
 
 type BindingFixture = {
@@ -432,8 +433,8 @@ test("concurrent bindings retain the first snapshot and publish later metadata i
       acpSessionId: "resumed-provider",
       agentSessionId: "resumed-agent",
     };
-    const written = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
+    const written = createDeferred<void>();
+    const release = createDeferred<void>();
     const writeArtifact = fixture.store.writeArtifact.bind(fixture.store);
     let first = true;
     t.mock.method(
