@@ -69,7 +69,7 @@ function isResourceLinkBlock(
   return (
     record?.type === "resource_link" &&
     isNonEmptyString(record.uri) &&
-    (record.title === undefined || typeof record.title === "string") &&
+    (record.title == null || typeof record.title === "string") &&
     (record.name === undefined || typeof record.name === "string")
   );
 }
@@ -170,8 +170,8 @@ function validateResourceLinkContentBlock(
   if (!isNonEmptyString(record.uri)) {
     return `prompt[${index}] resource_link block must include a non-empty uri`;
   }
-  if (record.title !== undefined && typeof record.title !== "string") {
-    return `prompt[${index}] resource_link block title must be a string when present`;
+  if (record.title != null && typeof record.title !== "string") {
+    return `prompt[${index}] resource_link block title must be a string or null when present`;
   }
   if (record.name !== undefined && typeof record.name !== "string") {
     return `prompt[${index}] resource_link block name must be a string when present`;

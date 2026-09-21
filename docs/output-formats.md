@@ -185,3 +185,10 @@ omitted field supplies no structured snapshot. Entries with blank content or
 invalid status are skipped, and invalid priorities are omitted. Legacy updates
 without valid statuses can still produce a text summary. CLI JSON output
 continues to expose the original ACP payload.
+
+## Embedded runtime tool calls
+
+The `acpx/runtime` turn stream exposes both ACP `tool_call` and `tool_call_update`
+notifications as `tool_call` events, retaining the original tag. The optional
+`kind` preserves known ACP classifications, including `switch_mode`. Missing or
+unknown kinds are omitted without dropping the tool event.

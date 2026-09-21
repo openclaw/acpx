@@ -112,7 +112,7 @@ test("parseMcpServers rejects invalid nested header, args, env, and meta values"
         "config.json",
       ),
     {
-      message: "Invalid mcpServers[0] in config.json.headers[0].value: expected non-empty string",
+      message: "Invalid mcpServers[0] in config.json.headers[0].value: expected string",
     },
   );
 
@@ -140,13 +140,13 @@ test("parseMcpServers rejects invalid nested header, args, env, and meta values"
           {
             name: "broken",
             command: "node",
-            env: [{ name: "X", value: "" }],
+            env: [{ name: "X", value: null }],
           },
         ],
         "config.json",
       ),
     {
-      message: "Invalid mcpServers[0] in config.json.env[0].value: expected non-empty string",
+      message: "Invalid mcpServers[0] in config.json.env[0].value: expected string",
     },
   );
 

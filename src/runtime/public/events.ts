@@ -443,6 +443,7 @@ const TOOL_KINDS = new Set([
   "execute",
   "fetch",
   "think",
+  "switch_mode",
   "other",
 ]);
 

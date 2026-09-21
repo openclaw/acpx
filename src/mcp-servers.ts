@@ -16,6 +16,13 @@ function parseNonEmptyString(value: unknown, path: string): string {
   return value.trim();
 }
 
+function parseString(value: unknown, path: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`Invalid ${path}: expected string`);
+  }
+  return value;
+}
+
 function parseNameValuePairs(value: unknown, path: string): Array<{ name: string; value: string }> {
   if (value == null) {
     return [];
@@ -32,7 +39,7 @@ function parseNameValuePairs(value: unknown, path: string): Array<{ name: string
     }
     entries.push({
       name: parseNonEmptyString(entry.name, `${path}[${index}].name`),
-      value: parseNonEmptyString(entry.value, `${path}[${index}].value`),
+      value: parseString(entry.value, `${path}[${index}].value`),
     });
   }
   return entries;
@@ -48,10 +55,7 @@ function parseArgs(value: unknown, path: string): string[] {
 
   const args: string[] = [];
   for (const [index, rawArg] of value.entries()) {
-    if (typeof rawArg !== "string") {
-      throw new Error(`Invalid ${path}[${index}]: expected string`);
-    }
-    args.push(rawArg);
+    args.push(parseString(rawArg, `${path}[${index}]`));
   }
   return args;
 }

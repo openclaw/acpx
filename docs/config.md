@@ -78,6 +78,10 @@ Use `--mcp-config <path>` when MCP servers belong to a session or automation job
 working tree. The file must contain the same top-level `mcpServers` array shown above; it replaces
 the project/global `mcpServers` value for that invocation. Relative paths resolve from `--cwd`.
 
+MCP `env` and `headers` entries use `{ "name": "…", "value": "…" }` pairs.
+Values are literal strings: empty strings and leading or trailing whitespace are
+preserved when creating or loading a session. Names must be non-empty and are trimmed.
+
 ```bash
 acpx --cwd /workspace --mcp-config /run/job-mcp.json codex 'use the configured tools'
 ```
