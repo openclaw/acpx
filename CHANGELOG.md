@@ -60,6 +60,7 @@ Repo: https://github.com/openclaw/acpx
 - MCP/config: preserve empty and whitespace-containing environment and header values through session creation, loading, and queue-owner startup.
 - Prompts: accept and preserve nullable resource-link titles in structured input and queued prompts.
 - Runtime/events: preserve the ACP `switch_mode` tool kind on initial calls and updates.
+- Prompts: validate required resource-link names and embedded text/blob payloads locally, while preserving valid text or blob alternatives.
 
 ## 0.18.0 - 2026-09-20
 

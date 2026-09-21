@@ -70,7 +70,7 @@ function isResourceLinkBlock(
     record?.type === "resource_link" &&
     isNonEmptyString(record.uri) &&
     (record.title == null || typeof record.title === "string") &&
-    (record.name === undefined || typeof record.name === "string")
+    typeof record.name === "string"
   );
 }
 
@@ -79,7 +79,7 @@ function isResourcePayload(value: unknown): boolean {
   if (!record || !isNonEmptyString(record.uri)) {
     return false;
   }
-  return record.text === undefined || typeof record.text === "string";
+  return typeof record.text === "string" || typeof record.blob === "string";
 }
 
 function isResourceBlock(value: unknown): value is Extract<ContentBlock, { type: "resource" }> {
@@ -173,8 +173,8 @@ function validateResourceLinkContentBlock(
   if (record.title != null && typeof record.title !== "string") {
     return `prompt[${index}] resource_link block title must be a string or null when present`;
   }
-  if (record.name !== undefined && typeof record.name !== "string") {
-    return `prompt[${index}] resource_link block name must be a string when present`;
+  if (typeof record.name !== "string") {
+    return `prompt[${index}] resource_link block must include a string name`;
   }
   return undefined;
 }
@@ -188,7 +188,7 @@ function validateResourceContentBlock(
   }
   return isResourcePayload(record.resource)
     ? undefined
-    : `prompt[${index}] resource block resource must include a non-empty uri and optional text`;
+    : `prompt[${index}] resource block resource must include a non-empty uri and a string text or blob field`;
 }
 
 function getContentBlockValidationError(value: unknown, index: number): string | undefined {

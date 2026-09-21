@@ -154,7 +154,7 @@ test("parsePromptSource rejects invalid text and resource block shapes", () => {
     (error: unknown) =>
       error instanceof PromptInputValidationError &&
       error.message.includes(
-        "resource block resource must include a non-empty uri and optional text",
+        "resource block resource must include a non-empty uri and a string text or blob field",
       ),
   );
 });

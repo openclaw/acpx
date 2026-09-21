@@ -33,9 +33,11 @@ git diff | acpx codex --file - 'and call out anything risky'
 Unicode text is preserved across piped input chunks, including structured prompts,
 `--file -`, and `compare`.
 
-Structured JSON prompts can include ACP `resource_link` blocks. Their optional
-`title` may be a string or `null`; both are preserved through file input, stdin,
-and queued prompts.
+Structured JSON prompts can include ACP `resource_link` blocks with a string
+`name` and non-empty `uri`. Their optional `title` may be a string or `null`;
+both are preserved through file input, stdin, and queued prompts. Embedded
+`resource` blocks require a string `resource.text` or `resource.blob`, plus the
+agent's `embeddedContext` capability. Empty strings are valid names and payloads.
 
 The `--file -` form is particularly handy for piping a long prompt from another tool while still tacking on a short instruction at the end.
 
