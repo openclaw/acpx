@@ -136,6 +136,16 @@ function tracksTerminalDescendants(terminal: ManagedTerminal): boolean {
   return terminal.killProcessGroup || terminal.descendants !== undefined;
 }
 
+function createTerminalDescendants(
+  proc: ManagedTerminal["process"],
+  killProcessGroup: boolean,
+): ProcessDescendants | undefined {
+  // Windows shell launches retain their taskkill tree-cleanup path.
+  return process.platform === "win32" && killProcessGroup
+    ? undefined
+    : new ProcessDescendants(proc, { ownProcessGroup: true });
+}
+
 function trimToUtf8Boundary(buffer: Buffer, limit: number): Buffer {
   if (limit <= 0) {
     return Buffer.alloc(0);
@@ -251,10 +261,7 @@ export class TerminalManager {
         process: proc,
         killProcessGroup: spawnCommand.killProcessGroup,
         descendantPids: new Set(),
-        descendants:
-          process.platform === "win32"
-            ? undefined
-            : new ProcessDescendants(proc, { ownProcessGroup: true }),
+        descendants: createTerminalDescendants(proc, spawnCommand.killProcessGroup),
         processHelperTimeoutMs: this.processHelperTimeoutMs,
         output: Buffer.alloc(0),
         truncated: false,
