@@ -40,6 +40,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Conformance: separate mock-specific requirements from the core adapter profile, use baseline resource links, accept standard resource-not-found errors, and clarify prompt completion and cancellation responses.
 
+- Sessions/close: wait for the selected queue owner to exit when it releases its lease during shutdown, without signaling a replacement owner.
+
 ## 0.18.0 - 2026-09-20
 
 ### Highlights

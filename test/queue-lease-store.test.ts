@@ -18,6 +18,10 @@ import {
 } from "../src/session/queue/lease-store.js";
 import { queueBaseDir, queueLockFilePath, queueSocketBaseDir } from "../src/session/queue/paths.js";
 import {
+  closeServer,
+  connectSocket,
+  createSingleRequestServer,
+  listenServer,
   queuePaths,
   startKeeperProcess,
   stopProcess,
@@ -712,6 +716,124 @@ test("tryAcquireQueueOwnerLease terminates stale live owners before retry acquis
     }
   });
 });
+
+test(
+  "owner retirement waits for its replaced process and preserves a different-PID successor",
+  { timeout: 5_000 },
+  async (context) => {
+    await withTempHome(async (homeDir) => {
+      const sessionId = "retirement-successor";
+      const paths = queuePaths(homeDir, sessionId);
+      const retiring = spawn(
+        process.execPath,
+        ["-e", "process.on('message', () => process.exit(17)); process.send('ready');"],
+        { stdio: ["ignore", "ignore", "ignore", "ipc"] },
+      );
+      const ready = once(retiring, "message");
+      const retired = once(retiring, "exit");
+      const successor = await startKeeperProcess();
+      const server = createSingleRequestServer(() => {});
+      try {
+        await ready;
+        await writeQueueOwnerLock({ ...paths, sessionId, pid: retiring.pid });
+        const observed = await readQueueOwnerRecord(sessionId);
+        assert.ok(observed);
+        await writeQueueOwnerLock({
+          ...paths,
+          ...observed,
+          pid: successor.pid,
+          ownerGeneration: observed.ownerGeneration + 1,
+        });
+        await listenServer(server, paths.socketPath);
+        const saved = await fs.readFile(paths.lockPath, "utf8");
+        const readFile = fs.readFile.bind(fs),
+          kill = process.kill.bind(process);
+        let successorObserved = false,
+          probes = 0;
+        const signals: Array<NodeJS.Signals | number | undefined> = [];
+        context.mock.method(fs, "readFile", async (...args: Parameters<typeof fs.readFile>) => {
+          const result = await readFile(...args);
+          if (args[0] === paths.lockPath) {
+            successorObserved = true;
+          }
+          return result;
+        });
+        context.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | number) => {
+          if ((pid === retiring.pid || pid === successor.pid) && signal !== 0) {
+            signals.push(signal);
+          }
+          const result = kill(pid, signal);
+          // A skipped wait reaches the owner-alive assertion on its second probe;
+          // a real retirement wait releases and observes the child's exit first.
+          if (pid === retiring.pid && successorObserved && signal === 0 && ++probes === 2) {
+            retiring.send("release");
+          }
+          return result;
+        });
+        await terminateQueueOwnerForSession(sessionId, observed);
+        assert.equal(isProcessAlive(retiring.pid), false);
+        assert.deepEqual(await retired, [17, null]);
+        assert.deepEqual(signals, []);
+        assert.equal(isProcessAlive(successor.pid), true);
+        assert.equal(await fs.readFile(paths.lockPath, "utf8"), saved);
+        const socket = await connectSocket(paths.socketPath);
+        socket.destroy();
+      } finally {
+        stopProcess(retiring);
+        stopProcess(successor);
+        await retired;
+        await closeServer(server);
+      }
+    });
+  },
+);
+
+for (const disposition of ["replacement", "renewed"] as const) {
+  test(
+    `owner retirement preserves a ${disposition} lease without waiting for its live process`,
+    { timeout: 5_000 },
+    async () => {
+      await withTempHome(async (homeDir) => {
+        const sessionId = `retirement-${disposition}`;
+        const keeper = await startKeeperProcess();
+        const paths = queuePaths(homeDir, sessionId);
+        try {
+          await writeQueueOwnerLock({
+            ...paths,
+            sessionId,
+            pid: keeper.pid,
+            heartbeatAt: "2000-01-01T00:00:00.000Z",
+          });
+          const observed = await readQueueOwnerRecord(sessionId);
+          assert.ok(observed);
+          const successor = {
+            ...paths,
+            ...observed,
+            ownerGeneration: observed.ownerGeneration + (disposition === "replacement" ? 1 : 0),
+            heartbeatAt: new Date().toISOString(),
+          };
+          await writeQueueOwnerLock(successor);
+          if (process.platform !== "win32") {
+            await fs.mkdir(path.dirname(paths.socketPath), { recursive: true });
+            await fs.writeFile(paths.socketPath, "owned endpoint");
+          }
+          const saved = await fs.readFile(paths.lockPath, "utf8");
+          await terminateQueueOwnerForSession(sessionId, observed, disposition === "renewed");
+          assert.equal(isProcessAlive(keeper.pid), true);
+          assert.equal(await fs.readFile(paths.lockPath, "utf8"), saved);
+          if (process.platform !== "win32") {
+            assert.equal(await fs.readFile(paths.socketPath, "utf8"), "owned endpoint");
+          }
+        } finally {
+          stopProcess(keeper);
+          if (process.platform !== "win32") {
+            await fs.rm(paths.socketPath, { force: true });
+          }
+        }
+      });
+    },
+  );
+}
 
 test("terminateProcess and terminateQueueOwnerForSession handle live and missing owners", async () => {
   await withTempHome(async (homeDir) => {

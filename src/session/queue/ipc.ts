@@ -787,13 +787,19 @@ export async function tryCloseSessionOnRunningOwner(options: {
   sessionId: string;
   timeoutMs?: number;
   verbose?: boolean;
+  onOwnerSelected?: (owner: QueueOwnerRecord) => void;
 }): Promise<boolean | undefined> {
   return await tryControlOnRunningOwner({
     sessionId: options.sessionId,
     verbose: options.verbose,
     requestName: "close_session",
     logPrefix: "[acpx] requested session/close on active owner pid",
-    submit: (owner) => submitCloseSessionToQueueOwner(owner, options.timeoutMs),
+    submit: (owner) => {
+      // Retain the selected generation even if close fails or has no response;
+      // looking it up after shutdown could miss this owner or select its successor.
+      options.onOwnerSelected?.(owner);
+      return submitCloseSessionToQueueOwner(owner, options.timeoutMs);
+    },
   });
 }
 

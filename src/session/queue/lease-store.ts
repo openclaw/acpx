@@ -228,11 +228,9 @@ async function cleanupGuardedQueueOwnerFiles(
   });
 }
 
-async function ownsQueueLease(owner: QueueOwnerIdentity, requireStale = false): Promise<boolean> {
+async function ownsQueueLease(owner: QueueOwnerIdentity): Promise<boolean> {
   const current = await readQueueOwnerRecord(owner.sessionId);
-  return (
-    matchesQueueOwner(current, owner) && (!requireStale || isQueueOwnerHeartbeatStale(current))
-  );
+  return matchesQueueOwner(current, owner);
 }
 
 function matchesQueueOwner(
@@ -596,6 +594,36 @@ export async function releaseQueueOwnerLease(lease: QueueOwnerLease): Promise<vo
   await cleanupQueueOwnerFiles(lease.sessionId, lease.socketPath, () => ownsQueueLease(lease));
 }
 
+async function retireQueueOwner(owner: QueueOwnerRecord, requireStale: boolean): Promise<void> {
+  const deadline = performance.now() + PROCESS_SIGTERM_GRACE_MS + PROCESS_SIGKILL_GRACE_MS;
+  let leaseReleased = false;
+  await terminateWithDispatch(
+    owner.pid,
+    (signal) =>
+      withQueueLeaseMutation(owner.sessionId, async () => {
+        const current = await readQueueOwnerRecord(owner.sessionId);
+        leaseReleased = current?.pid !== owner.pid;
+        if (
+          !matchesQueueOwner(current, owner) ||
+          (requireStale && signal === "SIGTERM" && !isQueueOwnerHeartbeatStale(current))
+        ) {
+          return false;
+        }
+        return await dispatchQueueOwnerSignal(owner.pid, signal);
+      }),
+    isProcessDefinitelyDead,
+  );
+  if (leaseReleased) {
+    // A released lease can already belong to a successor. Wait outside the
+    // mutation guard without treating the remembered PID as permission to signal.
+    await waitForProcessExit(
+      owner.pid,
+      Math.max(0, deadline - performance.now()),
+      isProcessDefinitelyDead,
+    );
+  }
+}
+
 export async function terminateQueueOwnerForSession(
   sessionId: string,
   expectedOwner?: QueueOwnerRecord,
@@ -609,17 +637,7 @@ export async function terminateQueueOwnerForSession(
 
   if (owner.pid !== process.pid && isProcessAlive(owner.pid)) {
     // A final queued heartbeat must not undo retirement after SIGTERM.
-    await terminateWithDispatch(
-      owner.pid,
-      (signal) =>
-        withQueueLeaseMutation(sessionId, async () => {
-          if (!(await ownsQueueLease(owner, requireStale && signal === "SIGTERM"))) {
-            return false;
-          }
-          return await dispatchQueueOwnerSignal(owner.pid, signal);
-        }),
-      isProcessDefinitelyDead,
-    );
+    await retireQueueOwner(owner, requireStale);
   }
   if (!isProcessDefinitelyDead(owner.pid)) {
     return;

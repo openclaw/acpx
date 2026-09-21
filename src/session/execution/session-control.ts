@@ -20,6 +20,7 @@ import {
   trySetModelOnRunningOwner,
   trySetModeOnRunningOwner,
 } from "../queue/ipc.js";
+import type { QueueOwnerRecord } from "../queue/lease-store.js";
 import { acquireSessionTurn } from "../turn-ownership.js";
 import type {
   SessionCancelOptions,
@@ -306,10 +307,18 @@ export const sessionControlTestInternals = { firstAgentCommandToken, splitComman
 
 export async function closeSession(sessionId: string): Promise<SessionRecord> {
   const record = await resolveSessionRecord(sessionId);
-  await tryCloseSessionOnRunningOwner({ sessionId: record.acpxRecordId }).catch(() => {
+  let selectedOwner: QueueOwnerRecord | undefined;
+  await tryCloseSessionOnRunningOwner({
+    sessionId: record.acpxRecordId,
+    onOwnerSelected: (owner) => {
+      selectedOwner = owner;
+    },
+  }).catch(() => {
     // Preserve local close semantics even if best-effort ACP session shutdown fails.
   });
-  await terminateQueueOwnerForSession(record.acpxRecordId);
+  if (selectedOwner) {
+    await terminateQueueOwnerForSession(record.acpxRecordId, selectedOwner);
+  }
 
   if (
     record.pid != null &&

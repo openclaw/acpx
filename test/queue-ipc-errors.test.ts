@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { unlinkSync } from "node:fs";
 import fs from "node:fs/promises";
 import readline from "node:readline";
 import test from "node:test";
@@ -19,7 +20,11 @@ import {
   trySubmitToRunningOwner,
   terminateQueueOwnerForSession,
 } from "../src/session/queue/ipc.js";
-import { isProcessAlive, readQueueOwnerRecord } from "../src/session/queue/lease-store.js";
+import {
+  isProcessAlive,
+  readQueueOwnerRecord,
+  type QueueOwnerRecord,
+} from "../src/session/queue/lease-store.js";
 import type { OutputFormatter } from "../src/types.js";
 import {
   cleanupOwnerArtifacts,
@@ -364,11 +369,18 @@ test("legacy owners reject shared submission and targeted cancellation before re
 });
 
 test("queue controls reject invalid responses and preserve false results", async () => {
+  let selectedCloseOwner: QueueOwnerRecord | undefined;
   const controls = [
     { type: "cancel_prompt", send: (sessionId: string) => tryCancelOnRunningOwner({ sessionId }) },
     {
       type: "close_session",
-      send: (sessionId: string) => tryCloseSessionOnRunningOwner({ sessionId }),
+      send: (sessionId: string) =>
+        tryCloseSessionOnRunningOwner({
+          sessionId,
+          onOwnerSelected: (owner) => {
+            selectedCloseOwner = owner;
+          },
+        }),
     },
     {
       type: "set_mode",
@@ -389,6 +401,7 @@ test("queue controls reject invalid responses and preserve false results", async
     const keeper = await startKeeperProcess();
     const paths = queuePaths(homeDir, sessionId);
     await writeQueueOwnerLock({ ...paths, sessionId, pid: keeper.pid });
+    const expectedOwner = await readQueueOwnerRecord(sessionId);
     try {
       for (const control of controls) {
         for (const [scenario, detailCode] of [
@@ -399,7 +412,11 @@ test("queue controls reject invalid responses and preserve false results", async
             ? [["false-result", undefined]]
             : []),
         ]) {
+          const responseErrors: NodeJS.ErrnoException[] = [];
           const server = createSingleRequestServer((socket, request) => {
+            // Rejecting a malformed reply can close a named pipe while this
+            // fixture is still writing its next response.
+            socket.on("error", (error: NodeJS.ErrnoException) => responseErrors.push(error));
             assert.equal(request.type, control.type);
             if (scenario !== "missing-ack") {
               socket.write(
@@ -416,6 +433,7 @@ test("queue controls reject invalid responses and preserve false results", async
           });
           await listenServer(server, paths.socketPath);
           try {
+            selectedCloseOwner = undefined;
             if (detailCode) {
               await assert.rejects(
                 control.send(sessionId),
@@ -425,8 +443,15 @@ test("queue controls reject invalid responses and preserve false results", async
             } else {
               assert.equal(await control.send(sessionId), false, control.type);
             }
+            if (control.type === "close_session") {
+              assert.deepEqual(selectedCloseOwner, expectedOwner);
+            }
           } finally {
             await closeServer(server);
+          }
+          for (const error of responseErrors) {
+            assert(detailCode, "valid control responses must not disconnect early");
+            assert.equal(error.code, "EPIPE");
           }
         }
       }
@@ -434,6 +459,25 @@ test("queue controls reject invalid responses and preserve false results", async
       await cleanupOwnerArtifacts(paths);
       stopProcess(keeper);
     }
+  });
+});
+
+test("close keeps the selected owner when its endpoint and lease disappear", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionId = "close-owner-disappears";
+    const paths = queuePaths(homeDir, sessionId);
+    await writeQueueOwnerLock({ ...paths, sessionId, pid: process.pid });
+    const expectedOwner = await readQueueOwnerRecord(sessionId);
+    let selectedOwner: QueueOwnerRecord | undefined;
+    const result = await tryCloseSessionOnRunningOwner({
+      sessionId,
+      onOwnerSelected: (owner) => {
+        selectedOwner = owner;
+        unlinkSync(paths.lockPath);
+      },
+    });
+    assert.equal(result, undefined);
+    assert.deepEqual(selectedOwner, expectedOwner);
   });
 });
 
