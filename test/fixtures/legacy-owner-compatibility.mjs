@@ -1,5 +1,5 @@
 // Run after compiling both revisions: node test/fixtures/legacy-owner-compatibility.mjs
-// <current dist-test directory> <released dist-test/src/cli.js>
+// <current dist-test directory> <released dist/cli.js>
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import fs from "node:fs/promises";
@@ -18,6 +18,7 @@ const { sendSession } = await load("src/session/execution/queue-owner-runtime.js
 const { closeSession } = await load("src/session/execution/session-control.js");
 const { readQueueOwnerRecord, isProcessAlive } = await load("src/session/queue/lease-store.js");
 const { queueSocketBaseDir } = await load("src/session/queue/paths.js");
+const { probeProcessIdentity } = await load("src/process-identity.js");
 
 const agentSource = `
 import { spawn } from 'node:child_process';
@@ -79,7 +80,8 @@ for (const supportsClose of [false, true]) {
       });
     let owner;
     let children = [];
-    const originalKill = process.kill;
+    const ownedIdentities = new Map();
+    const originalKill = process.kill.bind(process);
     const originalExecFile = childProcess.execFile;
     const forcedSignals = [];
     try {
@@ -91,6 +93,11 @@ for (const supportsClose of [false, true]) {
       );
       children = JSON.parse(await fs.readFile(pidFile, "utf8"));
       assert.equal(children.length, 2);
+      for (const pid of [owner.pid, ...children]) {
+        const observed = await probeProcessIdentity(pid);
+        assert.equal(observed.state, "alive", "capture fixture birth at owned readiness");
+        ownedIdentities.set(pid, observed.identity);
+      }
       await prompt();
       const reused = await readQueueOwnerRecord(sessionId);
       assert(reused && !reused.processIdentity);
@@ -149,8 +156,25 @@ for (const supportsClose of [false, true]) {
       for (const pid of [...children.toReversed(), owner?.pid].filter((pid) =>
         Number.isSafeInteger(pid),
       )) {
-        if (isProcessAlive(pid)) {
-          originalKill(pid, "SIGKILL");
+        // Never establish ownership during fallback: a saved PID may already
+        // belong to another incarnation after cooperative shutdown.
+        const expected = ownedIdentities.get(pid);
+        if (!expected || !isProcessAlive(pid)) {
+          continue;
+        }
+        const observed = await probeProcessIdentity(pid);
+        if (
+          observed.state === "alive" &&
+          observed.identity.kind === expected.kind &&
+          observed.identity.value === expected.value
+        ) {
+          try {
+            originalKill(pid, "SIGKILL");
+          } catch (error) {
+            if (error.code !== "ESRCH") {
+              throw error;
+            }
+          }
         }
       }
       const ownedPids = [...children, owner?.pid].filter((pid) => Number.isSafeInteger(pid));
