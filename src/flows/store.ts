@@ -77,6 +77,16 @@ export class FlowRunStore {
     this.outputRoot = outputRoot;
   }
 
+  releaseRun(runDir: string): void {
+    this.traceSeqByRun.delete(runDir);
+    this.manifestByRun.delete(runDir);
+    for (const key of this.sessionSeqByBundle.keys()) {
+      if (key.startsWith(`${runDir}::`)) {
+        this.sessionSeqByBundle.delete(key);
+      }
+    }
+  }
+
   async createRunDir(runId: string): Promise<string> {
     const runDir = path.join(this.outputRoot, runId);
     await fs.mkdir(path.join(runDir, PROJECTIONS_DIR), { recursive: true, mode: 0o700 });

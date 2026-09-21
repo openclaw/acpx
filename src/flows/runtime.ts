@@ -215,21 +215,26 @@ export class FlowRunner {
       steps: [],
       sessionBindings: {},
     };
-    const inputArtifact = await this.store.writeArtifact(runDir, state, input, {
-      mediaType: "application/json",
-      extension: "json",
-      emitTrace: false,
-    });
-    await this.store.initializeRunBundle(runDir, {
-      flow,
-      state,
-      inputArtifact,
-    });
-
     try {
+      const inputArtifact = await this.store.writeArtifact(runDir, state, input, {
+        mediaType: "application/json",
+        extension: "json",
+        emitTrace: false,
+      });
+      await this.store.initializeRunBundle(runDir, {
+        flow,
+        state,
+        inputArtifact,
+      });
       return await this.runWithOwnership(flow, input, runDir, state);
     } finally {
-      await this.closePendingPersistentSessionClients(runDir);
+      try {
+        await this.closePendingPersistentSessionClients(runDir);
+      } finally {
+        // Publication and client cleanup own these caches until both settle.
+        // Release only this run; the runner can host concurrent executions.
+        this.store.releaseRun(runDir);
+      }
     }
   }
 
@@ -1261,13 +1266,17 @@ export class FlowRunner {
   private async closePendingPersistentSessionClients(runDir: string): Promise<void> {
     const pendingClients = [...(this.pendingPersistentSessionClients.get(runDir)?.values() ?? [])];
     this.pendingPersistentSessionClients.delete(runDir);
-    await Promise.all(
+    const closed = await Promise.allSettled(
       pendingClients.map(async (client) => {
         this.pendingClientReleases.get(client)?.();
         this.pendingClientReleases.delete(client);
         await client.close();
       }),
     );
+    const failure = closed.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") {
+      throw failure.reason;
+    }
   }
 
   private async runIsolatedPrompt(
