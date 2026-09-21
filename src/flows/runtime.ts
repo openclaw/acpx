@@ -792,6 +792,7 @@ export class FlowRunner {
     const resolvedAgent = this.resolveAgent(node.profile);
     const agentInfo = {
       ...resolvedAgent,
+      agentArgv: resolvedAgent.agentArgv?.slice(),
       cwd: await resolveNodeCwd(resolvedAgent.cwd, node.cwd, context.nodeContext),
     };
     context.attempt.assertActive();
@@ -1076,7 +1077,7 @@ export class FlowRunner {
     attempt: FlowAttempt,
   ): Promise<FlowSessionBinding> {
     const handle = node.session?.handle ?? "main";
-    const key = createSessionBindingKey(agent.agentCommand, agent.cwd, handle);
+    const key = createSessionBindingKey(agent.agentCommand, agent.cwd, handle, agent.agentArgv);
     const existing = state.sessionBindings[key];
     if (existing) {
       await attempt.own(() => this.store.ensureSessionBundle(runDir, state, existing));

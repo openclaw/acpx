@@ -225,8 +225,13 @@ export function createRunId(flowName: string): string {
   return `${stamp}-${slug}-${randomUUID().slice(0, 8)}`;
 }
 
-export function createSessionBindingKey(agentCommand: string, cwd: string, handle: string): string {
-  return `${agentCommand}::${cwd}::${handle}`;
+export function createSessionBindingKey(
+  agentCommand: string,
+  cwd: string,
+  handle: string,
+  agentArgv?: readonly string[],
+): string {
+  return JSON.stringify([agentCommand, agentArgv ?? null, cwd, handle]);
 }
 
 export function createSessionName(

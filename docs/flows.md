@@ -141,6 +141,8 @@ acp({
 
 This fragment assumes an earlier `prepare_workspace` node returns `{ workdir: string }` and an edge connects it to this ACP node. A `cwd` string is a literal path; use a callback to read prior outputs. `examples/flows/workdir.flow.ts` shows a shell action creating a temporary directory and an ACP node using it.
 
+Persistent ACP steps reuse a session when their resolved command, explicit argument vector (when supplied), working directory, and session handle match. Different profile names may share a session when those values match. Argument boundaries and empty arguments are significant. Each step snapshots its resolved arguments, so a custom resolver reusing an array cannot change earlier step metadata.
+
 ## Permissions
 
 Flows can declare an explicit permission requirement. If a flow needs `approve-all` and you forget the flag, `acpx` fails fast before the first step runs and prints the flag to add:
