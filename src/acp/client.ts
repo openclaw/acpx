@@ -434,6 +434,7 @@ export class AcpClient {
   private readonly cancellingSessionIds = new Set<string>();
   private readonly permissionAbortControllers = new Map<string, AbortController>();
   private closing = false;
+  private closeTask?: Promise<void>;
   // Bumped by close() so a start() still launching can tell it was abandoned.
   private closeEpoch = 0;
   private agentStartedAt?: string;
@@ -588,6 +589,7 @@ export class AcpClient {
 
   private hasLiveConnection(): boolean {
     return (
+      !this.closing &&
       this.connection != null &&
       !this.connection.signal.aborted &&
       this.agent != null &&
@@ -629,11 +631,7 @@ export class AcpClient {
     if (this.hasLiveConnection()) {
       return;
     }
-    if (this.connection || this.agent) {
-      await this.close();
-    }
-
-    const epoch = this.closeEpoch;
+    const epoch = await this.waitForPreviousClose();
     const maxMessageBytes = readMaxAcpMessageBytes();
     const launch = await this.resolveAgentLaunchPlan();
     assertControlAuthority(authority);
@@ -693,18 +691,15 @@ export class AcpClient {
       elicitationModes: this.options.elicitationModes,
     });
     connection = this.createConnection(stream, launch, capabilities);
-    connection.signal.addEventListener(
-      "abort",
-      () => {
-        this.recordAgentExit(
-          child,
-          "connection_close",
-          child.exitCode ?? null,
-          child.signalCode ?? null,
-        );
-      },
-      { once: true },
-    );
+    const onConnectionClose = () => {
+      this.handleAgentDisconnect(
+        child,
+        "connection_close",
+        child.exitCode ?? null,
+        child.signalCode ?? null,
+      );
+    };
+    connection.signal.addEventListener("abort", onConnectionClose, { once: true });
     await this.initializeAgentConnection({
       child,
       connection,
@@ -713,6 +708,20 @@ export class AcpClient {
       launch,
       capabilities,
     });
+    if (connection.signal.aborted) {
+      onConnectionClose();
+    }
+  }
+
+  private async waitForPreviousClose(): Promise<number> {
+    const cleanup = this.closeTask ?? (this.connection || this.agent ? this.close() : undefined);
+    const epoch = this.closeEpoch;
+    await cleanup;
+    // A start may wait for retirement, but a later close must still cancel it.
+    if (this.closeEpoch !== epoch) {
+      throw new Error("ACP client was closed while the agent was starting");
+    }
+    return epoch;
   }
 
   private async resolveAgentLaunchPlan(): Promise<AgentLaunchPlan> {
@@ -1545,9 +1554,23 @@ export class AcpClient {
     }
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     this.closing = true;
     this.closeEpoch += 1;
+    if (this.closeTask) {
+      return this.closeTask;
+    }
+    // Publish retirement before callbacks can start a replacement. Every closer
+    // must await the same cleanup so an older close cannot reset a newer launch.
+    this.closeTask = Promise.resolve()
+      .then(() => this.finishClose())
+      .finally(() => {
+        this.closeTask = undefined;
+      });
+    return this.closeTask;
+  }
+
+  private async finishClose(): Promise<void> {
     const permissionControllers = [...this.permissionAbortControllers.values()];
     this.permissionAbortControllers.clear();
     const owners = [...this.pendingPromptOwners];
@@ -2290,7 +2313,7 @@ export class AcpClient {
   ): void {
     const onExit = (exitCode: number | null, signal: NodeJS.Signals | null) => {
       const exitedAt = isoNow();
-      this.recordAgentExit(child, "process_exit", exitCode, signal);
+      this.handleAgentDisconnect(child, "process_exit", exitCode, signal);
       void this.terminateAgentProcess(child);
       void exitNotificationBarrier.then(() => {
         this.notifyProcessExit(startedProcess, exitCode, signal, exitedAt);
@@ -2306,11 +2329,35 @@ export class AcpClient {
     }
 
     child.once("close", (exitCode, signal) => {
-      this.recordAgentExit(child, "process_close", exitCode, signal);
+      this.handleAgentDisconnect(child, "process_close", exitCode, signal);
     });
 
     child.stdout.once("close", () => {
-      this.recordAgentExit(child, "pipe_close", child.exitCode ?? null, child.signalCode ?? null);
+      this.handleAgentDisconnect(
+        child,
+        "pipe_close",
+        child.exitCode ?? null,
+        child.signalCode ?? null,
+      );
+    });
+  }
+
+  private handleAgentDisconnect(
+    child: ChildProcess,
+    reason: AgentDisconnectReason,
+    exitCode: number | null,
+    signal: NodeJS.Signals | null,
+  ): void {
+    this.recordAgentExit(child, reason, exitCode, signal);
+    // Initialization owns its failure cleanup so retirement cannot replace the
+    // original protocol error with the process exit caused by that cleanup.
+    if (this.agent !== child || this.closing || !this.connection) {
+      return;
+    }
+    // Idle owners have no turn finalizer to retire a broken transport's agent
+    // and delegated terminals. Stale launch events must not close a replacement.
+    void this.close().catch((error: unknown) => {
+      this.log(`disconnected agent cleanup failed: ${String(error)}`);
     });
   }
 

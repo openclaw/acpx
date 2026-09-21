@@ -2522,6 +2522,57 @@ test("AcpClient start fails fast when the agent exits during initialize", async 
   assert(Date.now() - startedAt < 2_000);
 });
 
+test("AcpClient shares in-flight cleanup across concurrent close calls", async () => {
+  const client = makeClient();
+  const entered = createDeferred<void>();
+  const release = createDeferred<void>();
+  let shutdowns = 0;
+  asInternals(client).terminalManager = {
+    shutdown: async () => {
+      shutdowns += 1;
+      entered.resolve();
+      await release.promise;
+    },
+  };
+  const first = client.close();
+  await entered.promise;
+  const second = client.close();
+  try {
+    assert.equal(first, second);
+    assert.equal(shutdowns, 1);
+  } finally {
+    release.resolve();
+    await Promise.all([first, second]);
+  }
+});
+
+test("AcpClient close cancels a start waiting for earlier cleanup", async () => {
+  let launches = 0;
+  const client = makeClient({
+    processLifecycle: {
+      onBeforeSpawn: () => {
+        launches += 1;
+        throw new Error("queued start reached spawn after close");
+      },
+    },
+  });
+  const entered = createDeferred<void>();
+  const release = createDeferred<void>();
+  asInternals(client).terminalManager = {
+    shutdown: async () => {
+      entered.resolve();
+      await release.promise;
+    },
+  };
+  const retiring = client.close();
+  await entered.promise;
+  const starting = assert.rejects(client.start(), /closed while the agent was starting/);
+  const closing = client.close();
+  release.resolve();
+  await Promise.all([retiring, starting, closing]);
+  assert.equal(launches, 0);
+});
+
 test("AcpClient close resets in-memory state and shuts down terminal manager", async () => {
   const client = makeClient();
   const internals = asInternals(client);
