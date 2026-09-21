@@ -95,6 +95,13 @@ pnpm run conformance:run -- \
   advertises `embeddedContext` support.
 - Use `acpx-mock-v1` with the bundled mock adapter: its permission prompts,
   cancellable delays, and post-success updates depend on known mock commands.
+- Filesystem callbacks resolve paths within the session cwd, including symlinks
+  that stay inside it. Links that escape the cwd and writes to hardlinked files
+  are rejected. Relative paths use the session cwd without changing the adapter
+  command's working directory.
+- Run write cases in a disposable workspace: existing files can be overwritten.
+  Newly created files receive best-effort cleanup within the same filesystem
+  root. These callback checks do not sandbox the adapter process itself.
 
 ## Data-Driven Model
 

@@ -21,6 +21,8 @@ import {
   type WriteTextFileRequest,
   type WriteTextFileResponse,
 } from "@agentclientprotocol/sdk";
+import { FsSafeError } from "@openclaw/fs-safe/errors";
+import { root, type Root } from "@openclaw/fs-safe/root";
 
 type PermissionMode = "approve-all" | "deny-all";
 type OutputFormat = "text" | "json";
@@ -176,27 +178,13 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_UPDATE_TIMEOUT_MS = 30_000;
 const DEFAULT_INITIALIZE_TIMEOUT_MS = 10_000;
 
-function isWithinRoot(rootDir: string, targetPath: string): boolean {
-  const relative = path.relative(rootDir, targetPath);
-  return relative.length === 0 || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-function resolvePathWithinRoot(rootDir: string, rawPath: string): string {
-  const resolved = path.isAbsolute(rawPath)
-    ? path.resolve(rawPath)
-    : path.resolve(rootDir, rawPath);
-  if (!isWithinRoot(rootDir, resolved)) {
-    throw new RequestError(-32001, `Path is outside session cwd root: ${resolved}`);
-  }
-  return resolved;
-}
-
 class RunnerClient implements Client {
   readonly updates: SessionNotification[] = [];
   private readonly permissionMode: PermissionMode;
   private readonly defaultSessionCwd: string;
   private readonly sessionCwds = new Map<SessionId, string>();
-  private readonly createdFiles = new Set<string>();
+  private readonly workspaces = new Map<string, Promise<Root>>();
+  private readonly createdFiles = new Map<string, Root>();
 
   constructor(params: { permissionMode: PermissionMode; defaultSessionCwd: string }) {
     this.permissionMode = params.permissionMode;
@@ -239,32 +227,30 @@ class RunnerClient implements Client {
   }
 
   async readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
-    const filePath = this.resolveSessionPath(params);
-    if (this.permissionMode === "deny-all") {
-      throw new RequestError(-32001, "Permission denied by conformance runner");
-    }
-    const content = await fs.readFile(filePath, "utf8");
-    return { content };
+    return await this.withSessionFile(params, async (workspace, filePath) => ({
+      content: await workspace.readText(filePath),
+    }));
   }
 
   async writeTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
-    const filePath = this.resolveSessionPath(params);
-    if (this.permissionMode === "deny-all") {
-      throw new RequestError(-32001, "Permission denied by conformance runner");
-    }
-    const fileDidExist = await this.pathExists(filePath);
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, params.content, "utf8");
-    if (!fileDidExist) {
-      this.createdFiles.add(filePath);
-    }
-    return {};
+    return await this.withSessionFile(params, async (workspace, filePath) => {
+      const target = await workspace.resolve(filePath);
+      await using file = await workspace.openWritable(target, { mode: 0o666 });
+      if (file.createdForWrite) {
+        this.createdFiles.set(file.realPath, workspace);
+      }
+      await file.handle.writeFile(params.content, "utf8");
+      return {};
+    });
   }
 
   async cleanup(): Promise<void> {
-    for (const filePath of this.createdFiles) {
+    for (const [filePath, workspace] of this.createdFiles) {
       try {
-        await fs.rm(filePath, { force: true });
+        await workspace.remove(path.relative(workspace.rootReal, filePath), {
+          force: true,
+          mutationSymlinks: "reject",
+        });
       } catch {
         // Best-effort cleanup for scratch files created by conformance cases.
       }
@@ -272,17 +258,37 @@ class RunnerClient implements Client {
     this.createdFiles.clear();
   }
 
-  private resolveSessionPath(params: { sessionId: SessionId; path: string }): string {
+  private async withSessionFile<T>(
+    params: { sessionId: SessionId; path: string },
+    operation: (workspace: Root, filePath: string) => Promise<T>,
+  ): Promise<T> {
+    if (this.permissionMode === "deny-all") {
+      throw new RequestError(-32001, "Permission denied by conformance runner");
+    }
     const sessionCwd = this.sessionCwds.get(params.sessionId) ?? this.defaultSessionCwd;
-    return resolvePathWithinRoot(sessionCwd, params.path);
-  }
-
-  private async pathExists(filePath: string): Promise<boolean> {
+    // Keep symlink/.. traversal and literal ~/ names for filesystem resolution.
+    const filePath = path.isAbsolute(params.path)
+      ? params.path
+      : `${sessionCwd}${path.sep}${params.path}`;
     try {
-      await fs.access(filePath);
-      return true;
-    } catch {
-      return false;
+      let workspace = this.workspaces.get(sessionCwd);
+      if (!workspace) {
+        workspace = root(sessionCwd, {
+          symlinks: "follow-within-root",
+          hardlinks: "allow",
+          maxBytes: Infinity,
+        });
+        this.workspaces.set(sessionCwd, workspace);
+      }
+      return await operation(await workspace, filePath);
+    } catch (error) {
+      if (
+        error instanceof FsSafeError &&
+        ["outside-workspace", "path-alias", "symlink"].includes(error.code)
+      ) {
+        throw new RequestError(-32001, `Path is outside session cwd root: ${filePath}`);
+      }
+      throw error;
     }
   }
 }

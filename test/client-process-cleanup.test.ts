@@ -224,16 +224,45 @@ async function inspectionFixture(t: TestContext, mode: string) {
 
 async function inspectionMessages(pidFile: string) {
   const contents = await fs.readFile(`${pidFile}.messages`, "utf8");
-  return contents
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line)) as Array<{
-    id?: string | number;
-    method?: string;
-    params?: { clientCapabilities?: { fs?: unknown; terminal?: boolean }; mcpServers?: unknown[] };
-    result?: unknown;
-  }>;
+  return (
+    contents
+      .split("\n")
+      // Only newline-terminated records have finished publishing.
+      .slice(0, -1)
+      .map((line) => JSON.parse(line)) as Array<{
+      id?: string | number;
+      method?: string;
+      params?: {
+        clientCapabilities?: { fs?: unknown; terminal?: boolean };
+        mcpServers?: unknown[];
+      };
+      result?: unknown;
+    }>
+  );
 }
+
+test("model inspection log polling waits for complete records", async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-inspection-log-"));
+  const pidFile = path.join(cwd, "pids.json");
+  const messagesFile = `${pidFile}.messages`;
+  try {
+    await fs.writeFile(messagesFile, "");
+    assert.deepEqual(await inspectionMessages(pidFile), []);
+    await fs.appendFile(messagesFile, '{"method":"initialize"}');
+    assert.deepEqual(await inspectionMessages(pidFile), []);
+    await fs.appendFile(messagesFile, '\n{"method":');
+    assert.deepEqual(await inspectionMessages(pidFile), [{ method: "initialize" }]);
+    await fs.appendFile(messagesFile, '"session/new"}\n');
+    assert.deepEqual(await inspectionMessages(pidFile), [
+      { method: "initialize" },
+      { method: "session/new" },
+    ]);
+    await fs.appendFile(messagesFile, "invalid\n");
+    await assert.rejects(inspectionMessages(pidFile), SyntaxError);
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true });
+  }
+});
 
 test(
   "model inspection denies tools, preserves model metadata and environment, and settles cleanup",

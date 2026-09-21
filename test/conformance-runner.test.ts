@@ -800,3 +800,266 @@ test("mock retains exact unknown-command output and embedded prompt-block transp
   assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
   assert.deepEqual(parseReport(result.stdout).totals, { cases: 2, passed: 2, failed: 0 });
 });
+
+type FilesystemProbeOperation = {
+  method: "fs/read_text_file" | "fs/write_text_file";
+  path: string;
+  content?: string;
+};
+type FilesystemProbeReceipt = {
+  sessionCwd: string;
+  agentCwd: string;
+  receipts: Array<{
+    operation: FilesystemProbeOperation;
+    response: { result?: { content?: string }; error?: { code: number; message: string } };
+  }>;
+};
+
+async function runFilesystemProbe(
+  fixtureDir: string,
+  cwd: string,
+  requests: FilesystemProbeOperation[],
+  cleanupSwap?: { source: string; moved: string; target: string },
+  permissionMode = "approve-all",
+): Promise<FilesystemProbeReceipt> {
+  const receiptPath = path.join(fixtureDir, "filesystem-receipts.json");
+  const configPath = path.join(fixtureDir, "filesystem-config.json");
+  await fs.writeFile(configPath, JSON.stringify({ receiptPath, requests, cleanupSwap }));
+  const { profilePath, casesDir } = await writeFixture(fixtureDir, [
+    {
+      id: "custom.filesystem.boundary",
+      steps: [
+        { action: "new_session", save_as: "session_id" },
+        {
+          action: "prompt",
+          session: "$session_id",
+          prompt: [{ type: "text", text: "run synthetic filesystem requests" }],
+          save_as: "prompt_result",
+        },
+      ],
+      checks: [{ type: "saved_stop_reason_in", key: "prompt_result", values: ["end_turn"] }],
+    },
+  ]);
+  const adapter = fileURLToPath(
+    new URL("./fixtures/conformance-filesystem-agent.js", import.meta.url),
+  );
+  const result = await runRunner([
+    "--profile",
+    profilePath,
+    "--cases-dir",
+    casesDir,
+    "--cwd",
+    cwd,
+    "--permission-mode",
+    permissionMode,
+    "--agent-command",
+    [process.execPath, adapter, configPath].map((value) => JSON.stringify(value)).join(" "),
+    "--format",
+    "json",
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(parseReport(result.stdout).totals, { cases: 1, passed: 1, failed: 0 });
+  const receipt = JSON.parse(await fs.readFile(receiptPath, "utf8")) as FilesystemProbeReceipt;
+  assert.equal(receipt.sessionCwd, cwd);
+  assert.equal(receipt.agentCwd, path.resolve(REPO_ROOT));
+  assert.equal(receipt.receipts.length, requests.length);
+  return receipt;
+}
+
+test(
+  "runner rejects outside symlink reads and existing/new writes",
+  {
+    skip: process.platform === "win32",
+  },
+  async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-conformance-f3-"));
+    try {
+      const cwd = path.join(tmp, "workspace");
+      const outside = path.join(tmp, "outside");
+      await fs.mkdir(cwd);
+      await fs.mkdir(outside);
+      const sentinel = path.join(outside, "existing.txt");
+      await fs.writeFile(sentinel, "SYNTHETIC_OUTSIDE_ORIGINAL");
+      await fs.symlink(sentinel, path.join(cwd, "file-alias"));
+      await fs.symlink(outside, path.join(cwd, "directory-alias"), "dir");
+      const receipt = await runFilesystemProbe(tmp, cwd, [
+        { method: "fs/read_text_file", path: "file-alias" },
+        { method: "fs/read_text_file", path: "directory-alias/existing.txt" },
+        { method: "fs/write_text_file", path: "file-alias", content: "bad replacement" },
+        {
+          method: "fs/write_text_file",
+          path: "directory-alias/existing.txt",
+          content: "bad replacement",
+        },
+        {
+          method: "fs/write_text_file",
+          path: "directory-alias/new/nested.txt",
+          content: "bad creation",
+        },
+      ]);
+      for (const { response } of receipt.receipts) {
+        assert.equal(response.result, undefined);
+        assert.equal(response.error?.code, -32001);
+        assert.match(response.error?.message ?? "", /outside session cwd root/i);
+      }
+      assert.equal(await fs.readFile(sentinel, "utf8"), "SYNTHETIC_OUTSIDE_ORIGINAL");
+      await assert.rejects(fs.stat(path.join(outside, "new")), { code: "ENOENT" });
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  },
+);
+
+test("runner denies filesystem callbacks before creating directories", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-conformance-fs-denied-"));
+  try {
+    const receipt = await runFilesystemProbe(
+      tmp,
+      tmp,
+      [
+        { method: "fs/read_text_file", path: "missing.txt" },
+        { method: "fs/write_text_file", path: "new/target.txt", content: "DENIED" },
+      ],
+      undefined,
+      "deny-all",
+    );
+    for (const { response } of receipt.receipts) {
+      assert.equal(response.error?.code, -32001);
+      assert.match(response.error?.message ?? "", /permission denied/i);
+    }
+    await assert.rejects(fs.stat(path.join(tmp, "new")), { code: "ENOENT" });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("runner keeps large reads and refuses writes through hardlinks", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-conformance-fs-policy-"));
+  try {
+    const content = "x".repeat(16 * 1024 * 1024 + 1);
+    await fs.writeFile(path.join(tmp, "large.txt"), content);
+    const original = path.join(tmp, "original.txt");
+    const alias = path.join(tmp, "hardlink.txt");
+    await fs.writeFile(original, "HARDLINK_ORIGINAL");
+    await fs.link(original, alias);
+    const receipt = await runFilesystemProbe(tmp, tmp, [
+      { method: "fs/read_text_file", path: "large.txt" },
+      { method: "fs/read_text_file", path: "hardlink.txt" },
+      { method: "fs/write_text_file", path: "hardlink.txt", content: "REJECTED" },
+    ]);
+    assert.equal(receipt.receipts[0]?.response.result?.content, content);
+    assert.equal(receipt.receipts[1]?.response.result?.content, "HARDLINK_ORIGINAL");
+    assert.ok(receipt.receipts[2]?.response.error);
+    assert.equal(await fs.readFile(original, "utf8"), "HARDLINK_ORIGINAL");
+    assert.equal(await fs.readFile(alias, "utf8"), "HARDLINK_ORIGINAL");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test(
+  "runner preserves contained aliases and raw parent traversal, and cleans new files",
+  {
+    skip: process.platform === "win32",
+  },
+  async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-conformance-f3-control-"));
+    try {
+      const actualCwd = path.join(tmp, "workspace");
+      await fs.mkdir(path.join(actualCwd, "nested", "child"), { recursive: true });
+      await fs.mkdir(path.join(actualCwd, "~"));
+      await fs.writeFile(path.join(actualCwd, "target.txt"), "ROOT_SENTINEL");
+      await fs.writeFile(path.join(actualCwd, "nested", "target.txt"), "NESTED_SENTINEL");
+      await fs.writeFile(path.join(actualCwd, "..notes"), "DOT_NAME");
+      await fs.writeFile(path.join(actualCwd, "~", "notes"), "LITERAL_TILDE");
+      await fs.symlink(
+        path.join(actualCwd, "nested", "child"),
+        path.join(actualCwd, "alias"),
+        "dir",
+      );
+      await fs.symlink(
+        path.join(actualCwd, "nested", "target.txt"),
+        path.join(actualCwd, "file-alias"),
+      );
+      const cwd = path.join(tmp, "cwd-alias");
+      await fs.symlink(actualCwd, cwd, "dir");
+      const receipt = await runFilesystemProbe(tmp, cwd, [
+        { method: "fs/read_text_file", path: "..notes" },
+        { method: "fs/read_text_file", path: "~/notes" },
+        { method: "fs/read_text_file", path: "nested/../target.txt" },
+        { method: "fs/read_text_file", path: `${cwd}/alias/../target.txt` },
+        {
+          method: "fs/write_text_file",
+          path: `${cwd}/alias/../target.txt`,
+          content: "UPDATED_NESTED",
+        },
+        { method: "fs/read_text_file", path: "file-alias" },
+        { method: "fs/write_text_file", path: "new-file.txt", content: "NEW_FILE" },
+        { method: "fs/read_text_file", path: `${cwd}/new-file.txt` },
+      ]);
+      for (const { response } of receipt.receipts) {
+        assert.equal(response.error, undefined);
+      }
+      assert.deepEqual(
+        receipt.receipts
+          .filter(({ operation }) => operation.method === "fs/read_text_file")
+          .map(({ response }) => response.result?.content),
+        [
+          "DOT_NAME",
+          "LITERAL_TILDE",
+          "ROOT_SENTINEL",
+          "NESTED_SENTINEL",
+          "UPDATED_NESTED",
+          "NEW_FILE",
+        ],
+      );
+      assert.equal(await fs.readFile(path.join(actualCwd, "target.txt"), "utf8"), "ROOT_SENTINEL");
+      // Existing-file restoration is separate from callback root confinement.
+      assert.equal(
+        await fs.readFile(path.join(actualCwd, "nested", "target.txt"), "utf8"),
+        "UPDATED_NESTED",
+      );
+      await assert.rejects(fs.stat(path.join(actualCwd, "new-file.txt")), { code: "ENOENT" });
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "runner cleanup cannot be redirected through a replaced parent to an outside file",
+  {
+    skip: process.platform === "win32",
+  },
+  async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-conformance-f3-cleanup-"));
+    try {
+      const cwd = path.join(tmp, "workspace");
+      const outside = path.join(tmp, "outside");
+      await fs.mkdir(cwd);
+      await fs.mkdir(outside);
+      const outsideFile = path.join(outside, "file.txt");
+      await fs.writeFile(outsideFile, "OUTSIDE_CLEANUP_SENTINEL");
+      const receipt = await runFilesystemProbe(
+        tmp,
+        cwd,
+        [
+          { method: "fs/write_text_file", path: "created/file.txt", content: "OWNED_NEW_FILE" },
+          { method: "fs/read_text_file", path: "created/file.txt" },
+        ],
+        {
+          source: path.join(cwd, "created"),
+          moved: path.join(cwd, "moved-created"),
+          target: outside,
+        },
+      );
+      for (const { response } of receipt.receipts) {
+        assert.equal(response.error, undefined);
+      }
+      assert.equal(receipt.receipts[1]?.response.result?.content, "OWNED_NEW_FILE");
+      assert.equal(await fs.readFile(outsideFile, "utf8"), "OUTSIDE_CLEANUP_SENTINEL");
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  },
+);
