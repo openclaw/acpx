@@ -3,6 +3,7 @@ import childProcess, { ChildProcess, type ExecFileOptions } from "node:child_pro
 import { once } from "node:events";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
+import os from "node:os";
 import test, { type TestContext } from "node:test";
 import { runInNewContext } from "node:vm";
 import {
@@ -279,6 +280,7 @@ test("foreign Linux scope plus local ESRCH retains queue custody and reports unc
   fixture.state.dead = true;
   fixture.state.observation.targetStat = null;
   await withTempHome(async (homeDir) => {
+    t.mock.method(os, "homedir", () => homeDir);
     const sessionId = "foreign-scope-local-esrch";
     const paths = queuePaths(homeDir, sessionId);
     await writeQueueOwnerLock({
@@ -384,7 +386,6 @@ test(
               () => reject(new Error("identity helper did not exit")),
               2_000,
             );
-            timer.unref();
             void closed.finally(() => clearTimeout(timer));
           }),
         ]);
