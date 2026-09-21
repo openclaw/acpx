@@ -69,6 +69,7 @@ Notes:
 - Top-level `flow run <file>` executes a user-authored workflow module and persists run state under `~/.acpx/flows/runs/`.
 - If a prompt argument is omitted, `acpx` reads prompt text from stdin when piped.
 - `--file` works for implicit prompt, `prompt`, and `exec` commands.
+- After an agent name, `--file` may appear before or after `prompt`/`exec`; an explicit value on the subcommand wins. `--no-wait` works before or after `prompt`, and omission still waits normally.
 - `acpx` with no args in an interactive terminal shows help.
 
 ## `flow run` subcommand
@@ -366,6 +367,7 @@ acpx [global_options] sessions ...   # defaults to codex
 Behavior:
 
 - `sessions` and `sessions list` are equivalent
+- `--local`, `--filter-cwd`, and the list `--cursor` may appear on `sessions` or `list`; explicit `list` values win. Combining `--local` with a cursor is rejected across either placement.
 - list uses ACP `session/list` when the agent advertises
   `sessionCapabilities.list`, returning agent-native `SessionInfo` metadata and
   `nextCursor` in JSON output
@@ -389,6 +391,7 @@ Behavior:
 - `sessions show [name]` displays stored session metadata
 - `sessions history [name]` displays stored turn history previews (default 20, configurable with `--limit`)
 - `sessions watch [-s <name>] [--cursor <cursor>]` replays retained events and follows new ones without affecting the active turn; see [Watching sessions](session-watch.md)
+- Watch inherits the agent's `-s`/`--session` selection unless its own `-s`/`--name` is set. Its journal cursor comes only from `watch --cursor`, independently of the list pagination cursor on `sessions`.
 - `sessions export [name] --output <path>` writes a portable JSON archive with session state and event history; `--cwd <dir>` selects a different source cwd relative to global `--cwd`
 - `sessions import <archive>` writes a fresh local record from a portable archive, reopens it as idle, keeps the provider session id, and clears source-machine process metadata
 - Imported sessions must resume that provider session; if the destination agent cannot load it, prompts fail clearly instead of starting an empty conversation

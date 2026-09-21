@@ -594,6 +594,8 @@ See `examples/flows/` in the repo for working samples (`branch.flow.ts`, `pr-tri
 
 ## Practical workflows
 
+For explicit `prompt` and `exec`, an agent-level `--file` is inherited unless the subcommand supplies its own file. Agent-level `--no-wait` also applies to `prompt`. Session-list options work on `sessions` or `list`, with explicit child values taking precedence. Watch inherits the agent's session selector unless `watch --name`/`-s` overrides it; its `--cursor` stays local to watch and never inherits the list pagination cursor.
+
 Persistent repo assistant:
 
 ```bash

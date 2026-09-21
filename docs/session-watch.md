@@ -13,6 +13,8 @@ acpx --format json pi sessions watch -s reviewer
 
 Watching replays retained events and then follows new ones. Attaching, disconnecting, pressing Ctrl+C, or closing a watcher leaves the active turn running. Watching an idle session waits without starting an agent or extending the owner's idle TTL. A closed session finishes after replaying its retained events.
 
+You can also select the session on the agent, as in `acpx pi -s reviewer sessions watch`. An explicit `watch -s` or `watch --name` takes precedence. Without either selector, watch uses the cwd's default session.
+
 Session discovery reads records without creating or repairing the index. A readable session store does not need to be writable to watch it.
 
 Use `--cursor <cursor>` to resume after the last received event:
@@ -22,6 +24,8 @@ acpx --format json pi sessions watch -s reviewer --cursor "$LAST_CURSOR"
 ```
 
 Cursors are opaque, ordered within a local session record, and exclusive on resume. Do not decode or compare their strings. A malformed, foreign, future, or expired cursor produces an explicit error. Omit the cursor to replay the currently retained window.
+
+The watch cursor is independent of ACP session-list pagination: place it after `watch`. A `--cursor` on the parent `sessions` command does not become a journal cursor.
 
 ## Shared runtime
 

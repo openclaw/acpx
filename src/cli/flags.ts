@@ -425,6 +425,35 @@ function parseOptionalSessionName(value: unknown): string | undefined {
   return session === undefined ? undefined : parseSessionName(session);
 }
 
+function resolveCommandOption(command: Command, key: string, fallback: unknown): unknown {
+  // Explicit child values win; a child's --no-wait default must not hide a parent flag.
+  for (let current: Command | null = command; current; current = current.parent) {
+    if (current.getOptionValueSource(key) === "cli") {
+      return current.opts<Record<string, unknown>>()[key];
+    }
+  }
+  return fallback;
+}
+
+export function resolvePromptFlags(flags: PromptFlags, command: Command): PromptFlags {
+  return {
+    ...flags,
+    file: stringOption(resolveCommandOption(command, "file", flags.file)),
+    wait: resolveCommandOption(command, "wait", flags.wait) !== false,
+  };
+}
+
+export function resolveSessionsListFlags(
+  flags: SessionsListFlags,
+  command: Command,
+): SessionsListFlags {
+  return {
+    cursor: stringOption(resolveCommandOption(command, "cursor", flags.cursor)),
+    filterCwd: stringOption(resolveCommandOption(command, "filterCwd", flags.filterCwd)),
+    local: resolveCommandOption(command, "local", flags.local) === true,
+  };
+}
+
 export function addPromptInputOption(command: Command): Command {
   return command.option("-f, --file <path>", "Read prompt text from file path (use - for stdin)");
 }

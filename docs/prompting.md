@@ -77,6 +77,8 @@ Available on `prompt`, the bare implicit form, and `exec`:
 
 `--no-wait` is per-prompt; the next call without `--no-wait` will block normally.
 
+After an agent name, `--file` and `--no-wait` can appear before the explicit `prompt` subcommand or on it. `exec` accepts `--file` in either position as well. When both levels supply a file, the subcommand's explicit file wins. File input still combines with positional text, including when `--file -` reads stdin; text after `--` remains literal prompt content.
+
 ## Queue submission
 
 When a turn is already in flight for the target session, `acpx` does not spawn a second adapter. It submits to the running queue owner over local IPC. The submitter then either:

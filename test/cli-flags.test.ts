@@ -27,7 +27,9 @@ import {
   resolveGlobalFlags,
   resolveOutputPolicy,
   resolvePermissionMode,
+  resolvePromptFlags,
   resolveSessionNameFromFlags,
+  resolveSessionsListFlags,
   resolveSystemPromptFlag,
 } from "../src/cli/flags.js";
 
@@ -454,6 +456,74 @@ test("resolveSessionNameFromFlags honors direct and inherited Commander options"
     parseCommand(parent, [...argv]);
     assert.equal(resolveSessionNameFromFlags({}, child), expected);
     assert.equal(resolveSessionNameFromFlags({ session: "direct" }, child), "direct");
+  }
+});
+
+test("prompt flags select explicit child or parent options before parser defaults", () => {
+  const cases = [
+    { argv: ["prompt"], file: undefined, wait: true },
+    { argv: ["-f", " parent file ", "prompt"], file: " parent file ", wait: true },
+    { argv: ["prompt", "--file", "child"], file: "child", wait: true },
+    { argv: ["-f", "parent", "prompt", "-f", "-"], file: "-", wait: true },
+    { argv: ["--no-wait", "prompt"], file: undefined, wait: false },
+    { argv: ["prompt", "--no-wait"], file: undefined, wait: false },
+    { argv: ["--no-wait", "prompt", "--no-wait"], file: undefined, wait: false },
+  ];
+  for (const expected of cases) {
+    const parent = addPromptInputOption(addSessionOption(new Command())).enablePositionalOptions();
+    const child = addPromptInputOption(addSessionOption(parent.command("prompt"))).action(() => {});
+    parseCommand(parent, expected.argv);
+    const parentBefore = structuredClone(parent.opts());
+    const childBefore = structuredClone(child.opts());
+    const actual = resolvePromptFlags(child.opts(), child);
+    assert.equal(actual.file, expected.file, expected.argv.join(" "));
+    assert.equal(actual.wait, expected.wait, expected.argv.join(" "));
+    assert.deepEqual(parent.opts(), parentBefore);
+    assert.deepEqual(child.opts(), childBefore);
+  }
+});
+
+test("list flags resolve explicit values from the closest command without merging other options", () => {
+  const listOptions = (command: Command) =>
+    command.option("--local").option("--cursor <cursor>").option("--filter-cwd <dir>");
+  const cases = [
+    { argv: ["list"], local: false, cursor: undefined, filterCwd: undefined },
+    { argv: ["--local", "list"], local: true, cursor: undefined, filterCwd: undefined },
+    { argv: ["list", "--local"], local: true, cursor: undefined, filterCwd: undefined },
+    {
+      argv: ["--cursor", "parent", "--filter-cwd", "parent-dir", "list"],
+      local: false,
+      cursor: "parent",
+      filterCwd: "parent-dir",
+    },
+    {
+      argv: [
+        "--cursor",
+        "parent",
+        "--filter-cwd",
+        "parent-dir",
+        "list",
+        "--cursor",
+        "child",
+        "--filter-cwd",
+        "child-dir",
+      ],
+      local: false,
+      cursor: "child",
+      filterCwd: "child-dir",
+    },
+  ];
+  for (const { argv, ...expected } of cases) {
+    const parent = listOptions(new Command())
+      .enablePositionalOptions()
+      .option("--unrelated <value>");
+    const child = listOptions(parent.command("list")).action(() => {});
+    parseCommand(parent, ["--unrelated", "keep-local", ...argv]);
+    const parentBefore = structuredClone(parent.opts());
+    const childBefore = structuredClone(child.opts());
+    assert.deepEqual(resolveSessionsListFlags(child.opts(), child), expected);
+    assert.deepEqual(parent.opts(), parentBefore);
+    assert.deepEqual(child.opts(), childBefore);
   }
 });
 

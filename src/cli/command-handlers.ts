@@ -27,7 +27,9 @@ import {
   resolveGlobalFlags,
   resolveOutputPolicy,
   resolvePermissionMode,
+  resolvePromptFlags,
   resolveSessionNameFromFlags,
+  resolveSessionsListFlags,
   type ExecFlags,
   type GlobalFlags,
   type SessionsExportFlags,
@@ -229,11 +231,12 @@ export async function handlePrompt(
   command: Command,
   config: ResolvedAcpxConfig,
 ): Promise<void> {
+  const promptFlags = resolvePromptFlags(flags, command);
   const globalFlags = resolveGlobalFlags(command, config);
   const outputPolicy = resolveRequestedOutputPolicy(globalFlags);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
-  const prompt = await readPromptInput(flags.file, promptParts.join(" "), globalFlags.cwd);
+  const prompt = await readPromptInput(promptFlags.file, promptParts.join(" "), globalFlags.cwd);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
   const [
     { createOutputFormatter },
@@ -270,7 +273,7 @@ export async function handlePrompt(
     ttlMs: globalFlags.ttl,
     maxQueueDepth: config.queueMaxDepth,
     promptRetries: globalFlags.promptRetries,
-    waitForCompletion: flags.wait !== false,
+    waitForCompletion: promptFlags.wait,
     sessionOptions: sessionOptionsFromGlobalFlags(globalFlags),
   });
 
@@ -322,7 +325,11 @@ export async function handleExec(
   const outputPolicy = resolveRequestedOutputPolicy(globalFlags);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
-  const prompt = await readPromptInput(flags.file, promptParts.join(" "), globalFlags.cwd);
+  const prompt = await readPromptInput(
+    resolvePromptFlags(flags, command).file,
+    promptParts.join(" "),
+    globalFlags.cwd,
+  );
   const [{ createOutputFormatter }, { runOnce }] = await Promise.all([
     loadOutputModule(),
     loadSessionModule(),
@@ -605,12 +612,13 @@ export async function handleSessionsList(
   command: Command,
   config: ResolvedAcpxConfig,
 ): Promise<void> {
+  const listFlags = resolveSessionsListFlags(flags, command);
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
-  const filterCwd = resolveSessionListFilterCwd(flags, agent.cwd);
+  const filterCwd = resolveSessionListFilterCwd(listFlags, agent.cwd);
 
-  if (flags.local) {
-    if (flags.cursor) {
+  if (listFlags.local) {
+    if (listFlags.cursor) {
       throw new InvalidArgumentError("--cursor cannot be combined with --local");
     }
     await printLocalSessionsList(agent.agentCommand, filterCwd, globalFlags.format);
@@ -618,12 +626,12 @@ export async function handleSessionsList(
   }
 
   const [result, { printAgentSessionsByFormat }] = await Promise.all([
-    tryListAgentSessions(agent, flags, globalFlags, config),
+    tryListAgentSessions(agent, listFlags, globalFlags, config),
     loadOutputRenderModule(),
   ]);
 
   if (!result || result === "spawn-failed") {
-    if (result !== "spawn-failed" && (flags.cursor || flags.filterCwd)) {
+    if (result !== "spawn-failed" && (listFlags.cursor || listFlags.filterCwd)) {
       throw new Error(
         `Agent command "${agent.agentCommand}" does not advertise sessionCapabilities.list; cannot use agent-side session/list filters`,
       );
@@ -932,16 +940,17 @@ export async function handleSessionsWatch(
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const sessionName = resolveSessionNameFromFlags({ session: flags.name }, command);
   const scope = {
     agentCommand: agent.agentCommand,
     cwd: agent.cwd,
-    name: flags.name,
+    name: sessionName,
     readOnly: true,
   };
   const record =
     (await findSession(scope)) ?? (await findSession({ ...scope, includeClosed: true }));
   if (!record) {
-    throw new Error(missingScopedSessionMessage(agent, flags.name));
+    throw new Error(missingScopedSessionMessage(agent, sessionName));
   }
   const { runSessionWatch } = await import("./session-watch.js");
   await runSessionWatch(record, {
