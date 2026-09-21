@@ -570,6 +570,13 @@ async function createHarness(options: CliOptions): Promise<Harness> {
       DEFAULT_INITIALIZE_TIMEOUT_MS,
       "initialize",
     );
+    const capabilities: unknown = initializeResult.agentCapabilities;
+    if (
+      capabilities !== undefined &&
+      (capabilities === null || typeof capabilities !== "object" || Array.isArray(capabilities))
+    ) {
+      throw new Error("initialize response agentCapabilities must be an object when present");
+    }
   } catch (error) {
     await shutdown();
     const detail = stderrBuffer.trim();

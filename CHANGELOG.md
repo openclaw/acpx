@@ -63,6 +63,7 @@ Repo: https://github.com/openclaw/acpx
 - Prompts: validate required resource-link names and embedded text/blob payloads locally, while preserving valid text or blob alternatives.
 - CLI: reject explicitly empty or whitespace-only `--agent` commands before reading prompt input or selecting the default adapter.
 - CLI/output: route disabled-exec errors through shared formatting, preserving `EXEC_DISABLED` and exit `1` while emitting complete JSON-RPC errors and structured quiet diagnostics.
+- Conformance: fail initialization when returned agent capabilities are null, arrays, or primitive values instead of reporting a passing handshake.
 
 ## 0.18.0 - 2026-09-20
 
