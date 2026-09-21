@@ -12,6 +12,7 @@ import {
   type ProcessBirthIdentity,
 } from "../../process-identity.js";
 import { isProcessAlive, isProcessDefinitelyDead } from "../../process-liveness.js";
+import type { CapturedProcessIdentity } from "../lock-owner.js";
 import { settlePendingQueueLeaseGuard, withQueueLeaseMutation } from "./lease-mutation.js";
 import { queueBaseDir, queueLockFilePath, queueSocketBaseDir, queueSocketPath } from "./paths.js";
 
@@ -213,10 +214,17 @@ async function cleanupQueueOwnerFiles(
   sessionId: string,
   socketPath: string,
   isCurrent: () => Promise<boolean>,
+  capturedIdentity?: CapturedProcessIdentity,
 ): Promise<void> {
-  await withQueueLeaseMutation(sessionId, async () => {
-    await cleanupGuardedQueueOwnerFiles(sessionId, socketPath, isCurrent);
-  });
+  // Only a local lease supplies this receipt; a foreign owner's birth cannot
+  // identify the current guard writer, even when both use the same numeric PID.
+  await withQueueLeaseMutation(
+    sessionId,
+    async () => {
+      await cleanupGuardedQueueOwnerFiles(sessionId, socketPath, isCurrent);
+    },
+    { capturedIdentity },
+  );
 }
 
 async function cleanupGuardedQueueOwnerFiles(
@@ -443,7 +451,7 @@ export async function tryAcquireQueueOwnerLease(
         });
         return lease;
       },
-      reservation,
+      { reservation, capturedIdentity: lease },
     );
   } catch (error) {
     return await handleLeaseCollision(sessionId, error);
@@ -557,14 +565,18 @@ export function refreshQueueOwnerLease(
     return Promise.resolve();
   }
   const update = lease.updates.then(async () => {
-    await withQueueLeaseMutation(lease.sessionId, async () => {
-      if (!(await ownsQueueLease(lease))) {
-        return;
-      }
-      await stageQueueOwnerRecord(lease, options.queueDepth, nowIsoFactory, async (tempPath) => {
-        await fs.rename(tempPath, lease.lockPath);
-      });
-    });
+    await withQueueLeaseMutation(
+      lease.sessionId,
+      async () => {
+        if (!(await ownsQueueLease(lease))) {
+          return;
+        }
+        await stageQueueOwnerRecord(lease, options.queueDepth, nowIsoFactory, async (tempPath) => {
+          await fs.rename(tempPath, lease.lockPath);
+        });
+      },
+      { capturedIdentity: lease },
+    );
   });
   lease.updates = update.catch(() => {});
   return update;
@@ -607,7 +619,12 @@ async function stageQueueOwnerRecord(
 export async function releaseQueueOwnerLease(lease: QueueOwnerLease): Promise<void> {
   lease.released = true;
   await lease.updates;
-  await cleanupQueueOwnerFiles(lease.sessionId, lease.socketPath, () => ownsQueueLease(lease));
+  await cleanupQueueOwnerFiles(
+    lease.sessionId,
+    lease.socketPath,
+    () => ownsQueueLease(lease),
+    lease,
+  );
 }
 
 function unverifiedQueueOwnerError(owner: QueueOwnerRecord): QueueConnectionError {

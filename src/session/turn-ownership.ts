@@ -6,8 +6,8 @@ import { withTempFile } from "@openclaw/fs-safe/advanced";
 import { isHardlinkFallbackError } from "@openclaw/fs-safe/durability";
 import { acquireFileLock, type FileLockHandle } from "@openclaw/fs-safe/file-lock";
 import { incrementPerfCounter } from "../perf-metrics.js";
-import { isProcessDefinitelyDead } from "../process-liveness.js";
 import { sessionEventLockPath } from "./event-log.js";
+import { createLockOwner, lockOwnerPid, type LockOwner } from "./lock-owner.js";
 
 const LOCK_RETRY_MS = 15;
 const INCOMPLETE_RESERVATION_GRACE_MS = 15_000;
@@ -16,6 +16,7 @@ let lastCreatedAt = 0;
 type LockSnapshot = { stat: BigIntStats; payload: string };
 
 type TurnCleanup = {
+  owner: LockOwner;
   guard?: FileLockHandle;
   removeMarker?: () => Promise<unknown>;
   admitted: boolean;
@@ -43,14 +44,6 @@ async function readLock(filePath: string): Promise<LockSnapshot | undefined> {
   }
 }
 
-function lockPid(value: unknown): number | undefined {
-  if (!value || typeof value !== "object" || !("pid" in value)) {
-    return undefined;
-  }
-  const pid = value.pid;
-  return typeof pid === "number" && Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
-}
-
 function parseLock(payload: string): unknown {
   try {
     return JSON.parse(payload) as unknown;
@@ -59,7 +52,11 @@ function parseLock(payload: string): unknown {
   }
 }
 
-async function tryAcquireGuard(filePath: string): Promise<FileLockHandle | undefined> {
+async function tryAcquireGuard(
+  filePath: string,
+  owner: LockOwner,
+  signal?: AbortSignal,
+): Promise<FileLockHandle | undefined> {
   try {
     return await acquireFileLock(filePath, {
       managerKey: "acpx.session-turn",
@@ -68,9 +65,9 @@ async function tryAcquireGuard(filePath: string): Promise<FileLockHandle | undef
       timeoutMs: LOCK_RETRY_MS,
       retry: { retries: 8, minTimeout: 1, maxTimeout: 2, factor: 1, randomize: false },
       staleRecovery: "remove-if-unchanged",
-      payload: () => ({ pid: process.pid }),
-      shouldReclaim: ({ payload }) => isProcessDefinitelyDead(lockPid(payload)),
-      shouldRemoveStaleLock: ({ payload }) => isProcessDefinitelyDead(lockPid(payload)),
+      payload: () => owner.payload,
+      shouldReclaim: ({ payload }) => owner.hasExited(payload, false, signal),
+      shouldRemoveStaleLock: ({ payload }) => owner.hasExited(payload, true, signal),
     });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "file_lock_timeout") {
@@ -100,13 +97,23 @@ async function removeObservedLock(filePath: string, observed: LockSnapshot): Pro
   return true;
 }
 
-async function recoverAbandonedLock(filePath: string): Promise<boolean> {
+async function recoverAbandonedLock(
+  filePath: string,
+  owner: LockOwner,
+  signal?: AbortSignal,
+): Promise<boolean> {
   const observed = await readLock(filePath);
   if (!observed) {
     return true;
   }
-  const pid = lockPid(parseLock(observed.payload));
-  if (pid && !isProcessDefinitelyDead(pid)) {
+  const payload = parseLock(observed.payload);
+  const pid = lockOwnerPid(payload);
+  // Cached custody can delay recovery; removing a marker needs a fresh confirmation.
+  if (
+    pid &&
+    (!(await owner.hasExited(payload, false, signal)) ||
+      !(await owner.hasExited(payload, true, signal)))
+  ) {
     return false;
   }
   // A partial exclusive-create fallback is not evidence that its writer died.
@@ -176,7 +183,8 @@ async function removeTurnMarker(filePath: string, receipt: TurnCleanup): Promise
   if (receipt.guard && !(await receipt.guard.verifyStillHeld())) {
     await releaseTurnGuard(receipt);
   }
-  receipt.guard ??= await tryAcquireGuard(filePath);
+  // A canceled admission must not poison a later cleanup attempt with its signal.
+  receipt.guard ??= await tryAcquireGuard(filePath, receipt.owner);
   if (!receipt.guard) {
     return false;
   }
@@ -237,6 +245,7 @@ async function disposeTurn(filePath: string, receipt: TurnCleanup): Promise<void
 async function tryPublishLock(
   filePath: string,
   payload: string,
+  owner: LockOwner,
   signal?: AbortSignal,
 ): Promise<boolean> {
   for (;;) {
@@ -247,7 +256,7 @@ async function tryPublishLock(
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
         throw error;
       }
-      if (!(await recoverAbandonedLock(filePath))) {
+      if (!(await recoverAbandonedLock(filePath, owner, signal))) {
         return false;
       }
     }
@@ -257,6 +266,8 @@ async function tryPublishLock(
 async function tryAcquireTurnCleanup(
   filePath: string,
   payload: string,
+  owner: LockOwner,
+  signal?: AbortSignal,
 ): Promise<TurnCleanup | undefined> {
   const previous = localTurns.get(filePath);
   if (previous) {
@@ -266,6 +277,7 @@ async function tryAcquireTurnCleanup(
     return undefined;
   }
   const receipt: TurnCleanup = {
+    owner,
     removeMarker: async () => await removePublishedLock(filePath, payload),
     admitted: false,
     failed: false,
@@ -273,7 +285,7 @@ async function tryAcquireTurnCleanup(
   };
   localTurns.set(filePath, receipt);
   try {
-    receipt.guard = await tryAcquireGuard(filePath);
+    receipt.guard = await tryAcquireGuard(filePath, owner, signal);
   } catch (error) {
     localTurns.delete(filePath);
     throw error;
@@ -288,15 +300,16 @@ async function tryAcquireTurnCleanup(
 async function tryAcquireTurn(
   filePath: string,
   payload: string,
+  owner: LockOwner,
   signal?: AbortSignal,
 ): Promise<AsyncDisposable | undefined> {
-  const receipt = await tryAcquireTurnCleanup(filePath, payload);
+  const receipt = await tryAcquireTurnCleanup(filePath, payload, owner, signal);
   if (!receipt) {
     return undefined;
   }
   try {
     signal?.throwIfAborted();
-    if (!(await tryPublishLock(filePath, payload, signal))) {
+    if (!(await tryPublishLock(filePath, payload, owner, signal))) {
       await disposeTurn(filePath, receipt);
       return undefined;
     }
@@ -323,12 +336,13 @@ export async function acquireSessionTurn(
     await fs.realpath(path.dirname(requestedPath)),
     path.basename(requestedPath),
   );
-  // Keep the legacy marker bytes; the guard serializes every marker mutation through disposal.
+  const owner = await createLockOwner({ signal });
+  // Publish the same birth in the marker and guard; either can survive a crash.
   lastCreatedAt = Math.max(Date.now(), lastCreatedAt + 1);
-  const payload = `${JSON.stringify({ pid: process.pid, created_at: new Date(lastCreatedAt).toISOString() }, null, 2)}\n`;
+  const payload = `${JSON.stringify({ ...owner.payload, created_at: new Date(lastCreatedAt).toISOString() }, null, 2)}\n`;
   for (;;) {
     signal?.throwIfAborted();
-    const turn = await tryAcquireTurn(filePath, payload, signal);
+    const turn = await tryAcquireTurn(filePath, payload, owner, signal);
     if (turn) {
       return turn;
     }

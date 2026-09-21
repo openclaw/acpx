@@ -46,7 +46,7 @@ test("a matching identity does not grant rollback authority without publication"
         async () => {
           throw collision;
         },
-        reservation,
+        { reservation },
       ),
       (error) => error === collision,
     );

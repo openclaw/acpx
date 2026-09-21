@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { acquireFileLock, type FileLockHandle } from "@openclaw/fs-safe/file-lock";
 import { QueueConnectionError } from "../../errors.js";
-import { isProcessDefinitelyDead } from "../../process-liveness.js";
+import { createLockOwner, type CapturedProcessIdentity, type LockOwner } from "../lock-owner.js";
 import { queueLockFilePath } from "./paths.js";
 
 const GUARD_WAIT_MS = 2_000;
@@ -15,8 +15,14 @@ type QueueLeaseIdentity = {
 
 export type QueueLeaseReservation = QueueLeaseIdentity & { published: boolean };
 
+type QueueLeaseMutationOptions = {
+  reservation?: QueueLeaseReservation;
+  capturedIdentity?: CapturedProcessIdentity;
+};
+
 type FailedSettlement = {
   guard: FileLockHandle;
+  owner: LockOwner;
   reservation?: QueueLeaseIdentity;
 };
 
@@ -51,17 +57,7 @@ async function canonicalLeasePath(sessionId: string): Promise<string> {
   }
 }
 
-function guardOwnerHasExited({ payload }: { payload: unknown }): boolean {
-  return (
-    payload !== null &&
-    typeof payload === "object" &&
-    "pid" in payload &&
-    typeof payload.pid === "number" &&
-    isProcessDefinitelyDead(payload.pid)
-  );
-}
-
-async function acquireGuard(lockPath: string): Promise<FileLockHandle> {
+async function acquireGuard(lockPath: string, owner: LockOwner): Promise<FileLockHandle> {
   return await acquireFileLock(lockPath, {
     managerKey: "acpx.queue-lease-mutation",
     lockPath: `${lockPath}.guard`,
@@ -69,9 +65,9 @@ async function acquireGuard(lockPath: string): Promise<FileLockHandle> {
     timeoutMs: GUARD_WAIT_MS,
     retry: { minTimeout: 5, maxTimeout: 15, factor: 1, randomize: false },
     staleRecovery: "remove-if-unchanged",
-    payload: () => ({ pid: process.pid }),
-    shouldReclaim: guardOwnerHasExited,
-    shouldRemoveStaleLock: guardOwnerHasExited,
+    payload: () => owner.payload,
+    shouldReclaim: ({ payload }) => owner.hasExited(payload),
+    shouldRemoveStaleLock: ({ payload }) => owner.hasExited(payload, true),
   });
 }
 
@@ -113,7 +109,7 @@ async function settleReceipt(lockPath: string, receipt: FailedSettlement): Promi
   if (receipt.reservation) {
     if (!(await receipt.guard.verifyStillHeld())) {
       await receipt.guard.release();
-      receipt.guard = await acquireGuard(lockPath);
+      receipt.guard = await acquireGuard(lockPath, receipt.owner);
     }
     await rollbackReservation(lockPath, receipt.reservation);
     receipt.reservation = undefined;
@@ -175,8 +171,9 @@ export async function settlePendingQueueLeaseGuard(sessionId: string): Promise<v
 export async function withQueueLeaseMutation<T>(
   sessionId: string,
   mutate: () => Promise<T>,
-  reservation?: QueueLeaseReservation,
+  options: QueueLeaseMutationOptions = {},
 ): Promise<T> {
+  const { reservation, capturedIdentity } = options;
   await fs.mkdir(path.dirname(queueLockFilePath(sessionId)), { recursive: true, mode: 0o700 });
   const lockPath = await canonicalLeasePath(sessionId);
   const expected = reservation
@@ -189,7 +186,8 @@ export async function withQueueLeaseMutation<T>(
   const publishedReservation = () => (reservation?.published ? expected : undefined);
   return await locallySerialized(lockPath, async (state) => {
     await settleFailedGuard(lockPath, state);
-    const guard = await acquireGuard(lockPath);
+    const owner = await createLockOwner({ capturedIdentity });
+    const guard = await acquireGuard(lockPath, owner);
     let outcome: { ok: true; value: T } | { ok: false; error: unknown };
     try {
       outcome = { ok: true, value: await mutate() };
@@ -199,6 +197,7 @@ export async function withQueueLeaseMutation<T>(
     const published = publishedReservation();
     const receipt: FailedSettlement = {
       guard,
+      owner,
       reservation: outcome.ok ? undefined : published,
     };
     try {
