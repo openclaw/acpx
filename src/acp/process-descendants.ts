@@ -27,6 +27,21 @@ function windowsPowerShellPath(): string {
   return path.win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
 
+async function readProcessTable(timeoutMs: number): Promise<string> {
+  if (process.platform === "win32") {
+    return await runTimedExecFile(
+      windowsPowerShellPath(),
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_PROCESS_SNAPSHOT],
+      { timeoutMs, windowsHide: true },
+    );
+  }
+  // Keep lstart parseable when bounding the final group snapshot by root exit.
+  return await runTimedExecFile("ps", ["-eo", "pid=,ppid=,pgid=,stat=,lstart="], {
+    timeoutMs,
+    env: { ...process.env, LC_ALL: "C" },
+  });
+}
+
 function parseProcessTable(output: string): Map<number, ProcessIdentity> {
   const table = new Map<number, ProcessIdentity>();
   for (const line of output.split("\n")) {
@@ -107,18 +122,7 @@ export class ProcessDescendants {
       this.captureGroupAfterExit = false;
     }
     try {
-      // Keep POSIX lstart parseable when bounding the final group snapshot by root exit.
-      const output =
-        process.platform === "win32"
-          ? await runTimedExecFile(
-              windowsPowerShellPath(),
-              ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_PROCESS_SNAPSHOT],
-              { timeoutMs, windowsHide: true },
-            )
-          : await runTimedExecFile("ps", ["-eo", "pid=,ppid=,pgid=,stat=,lstart="], {
-              timeoutMs,
-              env: { ...process.env, LC_ALL: "C" },
-            });
+      const output = await readProcessTable(timeoutMs);
       if (!this.retired) {
         this.refresh(parseProcessTable(output), captureRootGroup);
         // An in-flight snapshot can precede the shell's last fork. Join one fresh
