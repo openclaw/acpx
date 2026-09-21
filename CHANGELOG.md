@@ -8,7 +8,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
-- Runtime/embedding: expose optional `fs` and `terminal` capability switches on `AcpRuntimeOptions`, matching `AcpClientOptions`. Omitted options stay enabled; retained connections keep their original policy; health probes disable both callbacks while retaining the host permission policy. Disabled ACP callbacks are a protocol policy, not an OS sandbox. Thanks @devSejung.
+- Runtime/embedding: expose optional `fs` and `terminal` capability switches on `AcpRuntimeOptions`, matching `AcpClientOptions`. Omitted options stay enabled; retained connections keep their original policy; health probes disable both callbacks while retaining the host permission policy. Disabled ACP callbacks are a protocol policy, not an OS sandbox. Thanks @saariuslystoned and @devSejung.
 
 ### Fixes
 
