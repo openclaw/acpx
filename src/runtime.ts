@@ -1,7 +1,7 @@
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { DEFAULT_AGENT_NAME } from "./agent-registry.js";
 import type { AcpControlAuthority } from "./async-control.js";
-import { ACPX_CAPABILITIES, capabilitiesFromRecord } from "./runtime/engine/controls.js";
+import { capabilitiesFromRecord } from "./runtime/engine/controls.js";
 import { AcpRuntimeManager } from "./runtime/engine/manager.js";
 import type {
   AcpRuntime,
@@ -279,7 +279,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
 
   async getCapabilities(input?: { handle?: AcpRuntimeHandle }): Promise<AcpRuntimeCapabilities> {
     if (!input?.handle) {
-      return ACPX_CAPABILITIES;
+      return capabilitiesFromRecord(undefined);
     }
 
     const { handle } = this.resolveManagerHandle(input.handle);

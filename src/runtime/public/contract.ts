@@ -121,6 +121,7 @@ export type AcpRuntimeTurnInput = AcpControlAuthority & {
   onElicitation?: AcpElicitationHandler;
 };
 
+/** Caller-owned snapshot; local mutations do not change runtime capabilities. */
 export type AcpRuntimeCapabilities = {
   controls: AcpRuntimeControl[];
   configOptionKeys?: string[];

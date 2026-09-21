@@ -19,6 +19,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI/output: skip malformed message chunks and plan updates in text and quiet output so later valid output and completion survive; preserve raw notifications in JSON output. Thanks @SebTardif.
 - Flows/JSON: bound compatibility recovery by scanning and parsing work instead of collecting every candidate, preserving large and late embedded JSON while stopping excessive recovery through ambiguous text. Direct and fenced JSON parsing are unchanged. Thanks @SebTardif.
 - CLI/output: preserve received assistant text in quiet mode when direct or queued prompts fail, and drain failed or cancelled watch turns without requiring a final ACP response or duplicating completed output.
+- Runtime/capabilities: return independent mutable capability snapshots so editing one result cannot change another caller's controls or advertised config keys.
 
 ## 0.18.0 - 2026-09-20
 

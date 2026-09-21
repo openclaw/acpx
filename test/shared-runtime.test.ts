@@ -756,6 +756,27 @@ test("shared capabilities report the session's advertised config option keys", a
         handle: { ...handle, acpxRecordId: "missing-record" },
       });
       assert.deepEqual(unknown, base);
+      assert.notStrictEqual(unknown, base);
+      assert.notStrictEqual(base.controls, advertised.controls);
+      assert.notStrictEqual(unknown.controls, base.controls);
+      base.controls.length = 0;
+      base.configOptionKeys = ["injected"];
+      advertised.controls = ["session/status"];
+      advertised.configOptionKeys?.push("changed");
+      const expected = {
+        controls: [
+          "session/set_mode",
+          "session/set_model",
+          "session/set_config_option",
+          "session/status",
+        ],
+      };
+      assert.deepEqual(unknown, expected);
+      assert.deepEqual(await runtime.getCapabilities(), expected);
+      assert.deepEqual(await runtime.getCapabilities({ handle }), {
+        ...expected,
+        configOptionKeys: ["mode", "model", "reasoning_effort"],
+      });
     },
     "deny-all",
     ["--advertise-config-options"],

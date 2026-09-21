@@ -16,6 +16,7 @@ import {
   type AcpRuntimeEvent,
   type AcpSessionRecord,
 } from "../src/runtime.js";
+import { withTempHome } from "./runtime-test-helpers.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
 
@@ -690,7 +691,89 @@ test("AcpxRuntime falls back to plain runtimeSessionName handles and reuses a si
   assert.equal(managerFactoryCalls, 1);
 });
 
-test("AcpxRuntime exposes advertised config option keys for resolved handles", async () => {
+for (const shape of ["unscoped", "missing", "empty", "configured"] as const) {
+  test(`runtime capability results own their mutable arrays for ${shape} metadata`, async () => {
+    await withTempHome("acpx-capabilities-", async (cwd) => {
+      const stores = ["a", "b"].map((name) =>
+        createFileSessionStore({ stateDir: path.join(cwd, name) }),
+      );
+      const record = createSessionRecord({
+        cwd,
+        acpx:
+          shape === "configured"
+            ? {
+                config_options: ["mode", "model", "mode"].map((id) => ({
+                  id,
+                  name: id,
+                  type: "select",
+                  currentValue: "default",
+                  options: [{ value: "default", name: "Default" }],
+                })),
+              }
+            : {},
+      });
+      if (shape !== "missing") {
+        for (const store of stores) {
+          await store.save(record);
+        }
+      }
+      const runtimes = stores.map((sessionStore) =>
+        createAcpRuntime({
+          cwd,
+          sessionStore,
+          agentRegistry: createAgentRegistry(),
+          permissionMode: "deny-all",
+        }),
+      );
+      const input =
+        shape === "unscoped"
+          ? undefined
+          : {
+              handle: {
+                sessionKey: record.acpxRecordId,
+                backend: "acpx",
+                cwd,
+                runtimeSessionName: record.name ?? record.acpxRecordId,
+                acpxRecordId: record.acpxRecordId,
+              },
+            };
+      const expected = {
+        controls: [
+          "session/set_mode",
+          "session/set_model",
+          "session/set_config_option",
+          "session/status",
+        ],
+        ...(shape === "configured" ? { configOptionKeys: ["mode", "model"] } : {}),
+      };
+      const first = await runtimes[0].getCapabilities(input);
+      const sibling = await runtimes[0].getCapabilities(input);
+      const other = await runtimes[1].getCapabilities(input);
+      // Fail before mutation on the old singleton so other tests stay independent.
+      assert.notStrictEqual(first, sibling);
+      assert.notStrictEqual(first.controls, sibling.controls);
+      assert.notStrictEqual(first.controls, other.controls);
+      if (first.configOptionKeys) {
+        assert.notStrictEqual(first.configOptionKeys, sibling.configOptionKeys);
+      }
+      first.controls.length = 0;
+      first.controls = ["session/status"];
+      first.configOptionKeys?.push("changed");
+      first.configOptionKeys = ["injected"];
+      assert.deepEqual(sibling, expected);
+      assert.deepEqual(other, expected);
+      for (const runtime of runtimes) {
+        assert.deepEqual(await runtime.getCapabilities(input), expected);
+      }
+      if (shape !== "missing") {
+        const stored = await stores[0].load(record.acpxRecordId);
+        assert.deepEqual(stored?.acpx?.config_options, record.acpx?.config_options);
+      }
+    });
+  });
+}
+
+test("AcpxRuntime exposes advertised config option keys for resolved handles", async (t) => {
   const encoded = encodeAcpxRuntimeHandleState({
     name: "agent:codex:acp:test",
     agent: "codex",
@@ -700,7 +783,9 @@ test("AcpxRuntime exposes advertised config option keys for resolved handles", a
     backendSessionId: "sid-1",
     agentSessionId: "inner-1",
   });
-  const store = createFileSessionStore({ stateDir: "/tmp/acpx-runtime-config-options" });
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-config-options-"));
+  t.after(async () => await fs.rm(stateDir, { recursive: true, force: true }));
+  const store = createFileSessionStore({ stateDir });
   await store.save(
     createSessionRecord({
       acpx: {

@@ -2,16 +2,6 @@ import type { SessionRecord } from "../../types.js";
 import type { AcpRuntimeCapabilities } from "../public/contract.js";
 import { AcpRuntimeError } from "../public/errors.js";
 
-/** Controls acpx implements for every backend it exposes. */
-export const ACPX_CAPABILITIES: AcpRuntimeCapabilities = {
-  controls: [
-    "session/set_mode",
-    "session/set_model",
-    "session/set_config_option",
-    "session/status",
-  ],
-};
-
 export function advertisedConfigOptionIds(
   record: SessionRecord | undefined,
 ): Set<string> | undefined {
@@ -27,13 +17,18 @@ export function advertisedConfigOptionIds(
   );
 }
 
-/** Reports the config option keys the session last advertised, if any. */
+/** Caller-owned controls and the config option keys the session last advertised. */
 export function capabilitiesFromRecord(record: SessionRecord | undefined): AcpRuntimeCapabilities {
   const advertisedIds = advertisedConfigOptionIds(record);
-  if (!advertisedIds || advertisedIds.size === 0) {
-    return ACPX_CAPABILITIES;
-  }
-  return { ...ACPX_CAPABILITIES, configOptionKeys: [...advertisedIds] };
+  return {
+    controls: [
+      "session/set_mode",
+      "session/set_model",
+      "session/set_config_option",
+      "session/status",
+    ],
+    ...(advertisedIds?.size ? { configOptionKeys: [...advertisedIds] } : {}),
+  };
 }
 
 export function resolveSupportedConfigOptionId(record: SessionRecord, configId: string): string {
