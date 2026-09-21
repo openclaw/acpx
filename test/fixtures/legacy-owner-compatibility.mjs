@@ -84,6 +84,72 @@ for (const supportsClose of [false, true]) {
     const originalKill = process.kill.bind(process);
     const originalExecFile = childProcess.execFile;
     const forcedSignals = [];
+    let failure;
+    async function cleanupFixture() {
+      try {
+        process.kill = originalKill;
+        childProcess.execFile = originalExecFile;
+        syncBuiltinESMExports();
+        owner ??= await readQueueOwnerRecord(sessionId);
+        if (children.length === 0) {
+          const saved = await fs.readFile(pidFile, "utf8").catch((error) => {
+            if (error.code !== "ENOENT") {
+              throw error;
+            }
+            return undefined;
+          });
+          if (saved) {
+            children = JSON.parse(saved);
+          }
+        }
+        for (const pid of [...children.toReversed(), owner?.pid].filter((pid) =>
+          Number.isSafeInteger(pid),
+        )) {
+          // Never establish ownership during fallback: a saved PID may already
+          // belong to another incarnation after cooperative shutdown.
+          const expected = ownedIdentities.get(pid);
+          if (!expected || !isProcessAlive(pid)) {
+            continue;
+          }
+          const observed = await probeProcessIdentity(pid);
+          if (
+            observed.state === "alive" &&
+            observed.identity.kind === expected.kind &&
+            observed.identity.value === expected.value
+          ) {
+            try {
+              originalKill(pid, "SIGKILL");
+            } catch (error) {
+              if (error.code !== "ESRCH") {
+                throw error;
+              }
+            }
+          }
+        }
+        const ownedPids = [...children, owner?.pid].filter((pid) => Number.isSafeInteger(pid));
+        for (let attempt = 0; attempt < 100 && ownedPids.some(isProcessAlive); attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(
+          ownedPids.some(isProcessAlive),
+          false,
+          "owned compatibility processes did not exit",
+        );
+        const socketDir = queueSocketBaseDir(home);
+        if (socketDir) {
+          await fs.rm(socketDir, { recursive: true, force: true });
+        }
+      } catch (cleanupError) {
+        if (failure !== undefined) {
+          throw new AggregateError(
+            [failure, cleanupError],
+            "Released-owner proof and cleanup both failed",
+            { cause: failure },
+          );
+        }
+        throw cleanupError;
+      }
+    }
     try {
       await prompt();
       owner = await readQueueOwnerRecord(sessionId);
@@ -137,59 +203,11 @@ for (const supportsClose of [false, true]) {
           closeMs: Math.round(performance.now() - started),
         }),
       );
+    } catch (error) {
+      failure = error;
+      throw error;
     } finally {
-      process.kill = originalKill;
-      childProcess.execFile = originalExecFile;
-      syncBuiltinESMExports();
-      owner ??= await readQueueOwnerRecord(sessionId);
-      if (children.length === 0) {
-        const saved = await fs.readFile(pidFile, "utf8").catch((error) => {
-          if (error.code !== "ENOENT") {
-            throw error;
-          }
-          return undefined;
-        });
-        if (saved) {
-          children = JSON.parse(saved);
-        }
-      }
-      for (const pid of [...children.toReversed(), owner?.pid].filter((pid) =>
-        Number.isSafeInteger(pid),
-      )) {
-        // Never establish ownership during fallback: a saved PID may already
-        // belong to another incarnation after cooperative shutdown.
-        const expected = ownedIdentities.get(pid);
-        if (!expected || !isProcessAlive(pid)) {
-          continue;
-        }
-        const observed = await probeProcessIdentity(pid);
-        if (
-          observed.state === "alive" &&
-          observed.identity.kind === expected.kind &&
-          observed.identity.value === expected.value
-        ) {
-          try {
-            originalKill(pid, "SIGKILL");
-          } catch (error) {
-            if (error.code !== "ESRCH") {
-              throw error;
-            }
-          }
-        }
-      }
-      const ownedPids = [...children, owner?.pid].filter((pid) => Number.isSafeInteger(pid));
-      for (let attempt = 0; attempt < 100 && ownedPids.some(isProcessAlive); attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-      assert.equal(
-        ownedPids.some(isProcessAlive),
-        false,
-        "owned compatibility processes did not exit",
-      );
-      const socketDir = queueSocketBaseDir(home);
-      if (socketDir) {
-        await fs.rm(socketDir, { recursive: true, force: true });
-      }
+      await cleanupFixture();
     }
   });
 }
