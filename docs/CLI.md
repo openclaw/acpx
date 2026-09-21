@@ -324,6 +324,7 @@ Behavior:
 - Routes through queue-owner IPC when an owner is active.
 - Falls back to a direct client reconnect when no owner is running.
 - When fresh fallback is allowed, replaces the previous saved mode without replaying it; other saved settings restore first. A rejected replacement keeps the previous mode preference.
+- Prompt reconnect uses model metadata received while restoring a saved mode, including changed model controls and removed model support.
 
 ## `set` command
 

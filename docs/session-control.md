@@ -63,6 +63,8 @@ Unsupported mode ids are rejected by the adapter, often as `Invalid params`. `ac
 
 When reconnect permits a fresh session, an explicit mode change replaces the saved mode without replaying that previous mode first. This lets you replace a mode the adapter no longer supports. Other saved model and config selections still restore before the requested change. The new mode is saved only after the adapter accepts it; rejection keeps the prior mode preference. Persistent runtime sessions and imported records still require the original native session.
 
+During prompt reconnect, model metadata received while restoring a saved mode takes effect before the saved model is restored. This includes changed model lists, renamed model controls, and removed model support. The final session metadata retains those changes even when no model selection needs replaying.
+
 ## `set <key> <value>`
 
 ```bash

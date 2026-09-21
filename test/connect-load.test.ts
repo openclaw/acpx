@@ -1252,7 +1252,9 @@ for (const [connection, modelMetadata, replacingConfig, savedEffort, siblingChan
           sessionId: "fresh-session",
           agentSessionId: "fresh-runtime",
           configOptions: configOptions("low", "ask", "default-model"),
+          configOptionsPresent: true,
           models: buildModelsState("default-model"),
+          legacyModelMetadataPresent: false,
         }),
         setSessionMode: async (sessionId, value) => {
           assert.equal(connection, "fresh", "legacy mode must remain fresh-only");

@@ -168,15 +168,16 @@ function makeSessionResumeRequiredError(params: {
 
 async function replayDesiredMode(params: {
   client: AcpClient;
+  record: SessionRecord;
   sessionId: string;
   desiredModeId: string | undefined;
   replay: ReplayState;
   previousSessionId: string;
   timeoutMs?: number;
   verbose?: boolean;
-}): Promise<void> {
+}): Promise<PreferenceReplayResult["modeMetadata"]> {
   if (!params.desiredModeId) {
-    return;
+    return undefined;
   }
 
   try {
@@ -190,6 +191,11 @@ async function replayDesiredMode(params: {
         `[acpx] replayed desired mode ${params.desiredModeId} on fresh ACP session ${params.sessionId} (previous ${params.previousSessionId})\n`,
       );
     }
+    // A received mode update may remove models; an absent catalog is authoritative.
+    return {
+      models: advertisedModelState(params.record.acpx),
+      configOptionsPresent: params.record.acpx?.config_options !== undefined,
+    };
   } catch (error) {
     rethrowAuthorityFailure(params.replay, error);
     throw new SessionModeReplayError(
@@ -301,6 +307,10 @@ type ConfigReplayResult =
 type PreferenceReplayResult = {
   modelReplay: ModelReplayResult;
   configReplay: ConfigReplayResult;
+  modeMetadata?: {
+    models: SessionModelState | undefined;
+    configOptionsPresent: boolean;
+  };
 };
 
 async function replayDesiredConfigOptions(params: {
@@ -481,13 +491,21 @@ function resolveModelsAfterReplay(
   replay: PreferenceReplayResult,
   initialModels: SessionModelState | undefined,
 ): SessionModelState | undefined {
+  const models = resolveModeReplayModels(replay.modeMetadata, initialModels);
   if (replay.configReplay.replayed) {
     return (
       replay.configReplay.models ??
-      preserveLegacyModels(replay.modelReplay.replayed ? replay.modelReplay.models : initialModels)
+      preserveLegacyModels(replay.modelReplay.replayed ? replay.modelReplay.models : models)
     );
   }
-  return replay.modelReplay.replayed ? replay.modelReplay.models : initialModels;
+  return replay.modelReplay.replayed ? replay.modelReplay.models : models;
+}
+
+function resolveModeReplayModels(
+  modeMetadata: PreferenceReplayResult["modeMetadata"],
+  initialModels: SessionModelState | undefined,
+): SessionModelState | undefined {
+  return modeMetadata ? modeMetadata.models : initialModels;
 }
 
 function preserveLegacyModels(
@@ -502,6 +520,7 @@ function resolveConfigOptionsPresenceAfterReplay(
 ): boolean {
   return (
     initiallyPresent ||
+    replay.modeMetadata?.configOptionsPresent === true ||
     replay.configReplay.replayed ||
     replay.modelReplay.configOptions !== undefined
   );
@@ -633,16 +652,13 @@ async function replaySessionPreferences(
 
   let modelReplay: ModelReplayResult = { replayed: false };
   let configReplay: ConfigReplayResult = { replayed: false };
+  let modeMetadata: PreferenceReplayResult["modeMetadata"];
   const replay = createReplayState(params.authority);
-  const replacingModel = replacesModel(
-    params.replacingConfigOption,
-    params.sessionModels,
-    params.originalAcpx,
-  );
   try {
     assertControlAuthority(replay.authority);
-    await replayDesiredMode({
+    modeMetadata = await replayDesiredMode({
       client: params.client,
+      record: params.record,
       sessionId: params.sessionId,
       desiredModeId: params.createdFreshSession ? params.desiredModeId : undefined,
       replay,
@@ -650,6 +666,12 @@ async function replaySessionPreferences(
       timeoutMs: params.timeoutMs,
       verbose: params.verbose,
     });
+    const effectiveModels = resolveModeReplayModels(modeMetadata, params.sessionModels);
+    const replacingModel = replacesModel(
+      params.replacingConfigOption,
+      effectiveModels,
+      params.originalAcpx,
+    );
     modelReplay = await replayDesiredModel({
       client: params.client,
       sessionId: params.sessionId,
@@ -657,7 +679,7 @@ async function replaySessionPreferences(
       replay,
       previousSessionId: params.originalSessionId,
       record: params.record,
-      models: params.sessionModels,
+      models: effectiveModels,
       createdFreshSession: params.createdFreshSession,
       timeoutMs: params.timeoutMs,
       verbose: params.verbose,
@@ -685,7 +707,7 @@ async function replaySessionPreferences(
 
   params.record.acpSessionId = params.sessionId;
   reconcileAgentSessionId(params.record, params.pendingAgentSessionId);
-  return { modelReplay, configReplay };
+  return { modelReplay, configReplay, modeMetadata };
 }
 
 function settleFailedReplay(
