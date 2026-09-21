@@ -162,7 +162,7 @@ test("turn disposal keeps ownership until marker deletion finishes", async (t) =
   });
 });
 
-test("turn cleanup can be retried without losing ownership", async (t) => {
+test("the next acquisition retries marker cleanup and preserves its successor", async (t) => {
   await withTempHome(async () => {
     const marker = sessionEventLockPath("retry-release");
     const first = await acquireSessionTurn("retry-release");
@@ -179,9 +179,7 @@ test("turn cleanup can be retried without losing ownership", async (t) => {
       async () => await first[Symbol.asyncDispose](),
       /injected deletion failure/,
     );
-    await assert.rejects(acquireSessionTurn("retry-release", AbortSignal.timeout(60)));
-    await Promise.all([first[Symbol.asyncDispose](), first[Symbol.asyncDispose]()]);
-    const next = await acquireSessionTurn("retry-release");
+    const next = await acquireSessionTurn("retry-release", AbortSignal.timeout(2000));
     try {
       const payload = await fs.readFile(marker, "utf8");
       await first[Symbol.asyncDispose]();

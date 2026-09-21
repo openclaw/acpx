@@ -122,7 +122,7 @@ test("an admitted turn retains ownership after its admission signal is aborted",
   });
 });
 
-test("guard release failure retains exclusion and can be retried", async (t) => {
+test("the next acquisition retries failed guard release without the original receipt", async (t) => {
   await withTempHome(async () => {
     const first = await acquireSessionTurn("guard-release");
     const rm = fs.rm;
@@ -134,16 +134,13 @@ test("guard release failure retains exclusion and can be retried", async (t) => 
       }
       return await rm(...args);
     });
-    try {
-      await assert.rejects(
-        async () => await first[Symbol.asyncDispose](),
-        /injected guard release failure/,
-      );
-      await assert.rejects(acquireSessionTurn("guard-release", AbortSignal.timeout(60)));
-    } finally {
-      await first[Symbol.asyncDispose]();
-    }
-    await (await acquireSessionTurn("guard-release"))[Symbol.asyncDispose]();
+    await assert.rejects(
+      async () => await first[Symbol.asyncDispose](),
+      /injected guard release failure/,
+    );
+    await (
+      await acquireSessionTurn("guard-release", AbortSignal.timeout(2000))
+    )[Symbol.asyncDispose]();
   });
 });
 

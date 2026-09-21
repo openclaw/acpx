@@ -15,6 +15,19 @@ let lastCreatedAt = 0;
 
 type LockSnapshot = { stat: BigIntStats; payload: string };
 
+type TurnCleanup = {
+  guard?: FileLockHandle;
+  removeMarker?: () => Promise<unknown>;
+  admitted: boolean;
+  failed: boolean;
+  settled: boolean;
+  pending?: Promise<boolean>;
+};
+
+// Retain failed receipts by canonical path. Active turns and in-flight cleanup
+// stay registered too, so another acquisition cannot settle or replace them.
+const localTurns = new Map<string, TurnCleanup>();
+
 async function readLock(filePath: string): Promise<LockSnapshot | undefined> {
   try {
     const stat = await fs.lstat(filePath, { bigint: true });
@@ -134,17 +147,14 @@ async function removePublishedLock(filePath: string, payload: string): Promise<v
 
 async function rejectAcquisition(
   filePath: string,
-  payload: string,
-  guard: FileLockHandle,
+  receipt: TurnCleanup,
   error: unknown,
 ): Promise<never> {
   const failures = [error];
-  await removePublishedLock(filePath, payload).catch((cleanupError: unknown) => {
-    failures.push(cleanupError);
-  });
-  // No admitted turn or pending marker mutation remains, even if cleanup failed.
-  await guard.release().catch((releaseError: unknown) => {
-    failures.push(releaseError);
+  await disposeTurn(filePath, receipt).catch((cleanupError: unknown) => {
+    failures.push(
+      ...(cleanupError instanceof AggregateError ? cleanupError.errors : [cleanupError]),
+    );
   });
   if (failures.length > 1) {
     throw new AggregateError(failures, "Session turn acquisition and cleanup failed");
@@ -152,32 +162,76 @@ async function rejectAcquisition(
   throw error;
 }
 
-function turnReceipt(
-  filePath: string,
-  observed: LockSnapshot,
-  guard: FileLockHandle,
-): AsyncDisposable {
-  let disposed = false;
-  let disposal: Promise<void> | undefined;
-  return {
-    [Symbol.asyncDispose]: async () => {
-      if (disposed) {
-        return;
+async function releaseTurnGuard(receipt: TurnCleanup): Promise<void> {
+  await receipt.guard?.release();
+  receipt.guard = undefined;
+}
+
+async function removeTurnMarker(filePath: string, receipt: TurnCleanup): Promise<boolean> {
+  if (!receipt.removeMarker) {
+    return true;
+  }
+  // Failed admission may already have released its guard. Re-establish
+  // exclusion before replaying marker cleanup, including uncertain releases.
+  if (receipt.guard && !(await receipt.guard.verifyStillHeld())) {
+    await releaseTurnGuard(receipt);
+  }
+  receipt.guard ??= await tryAcquireGuard(filePath);
+  if (!receipt.guard) {
+    return false;
+  }
+  await receipt.removeMarker();
+  receipt.removeMarker = undefined;
+  return true;
+}
+
+async function settleTurn(filePath: string, receipt: TurnCleanup): Promise<boolean> {
+  if (receipt.settled) {
+    return true;
+  }
+  const pending = (receipt.pending ??= (async () => {
+    receipt.failed = false;
+    const failures: unknown[] = [];
+    try {
+      if (!(await removeTurnMarker(filePath, receipt))) {
+        return false;
       }
-      const pending = (disposal ??= (async () => {
-        await removeObservedLock(filePath, observed);
-        await guard.release();
-        disposed = true;
-      })());
+    } catch (error) {
+      failures.push(error);
+    }
+    // Unadmitted cleanup still releases exclusion when marker removal fails.
+    // An admitted turn keeps its guard until all marker mutations have finished.
+    if (failures.length === 0 || !receipt.admitted) {
       try {
-        await pending;
-      } finally {
-        if (disposal === pending) {
-          disposal = undefined;
-        }
+        await releaseTurnGuard(receipt);
+      } catch (error) {
+        failures.push(error);
       }
-    },
-  };
+    }
+    if (failures.length > 1) {
+      throw new AggregateError(failures, "Session turn cleanup failed");
+    }
+    if (failures.length === 1) {
+      throw failures[0];
+    }
+    receipt.settled = true;
+    localTurns.delete(filePath);
+    return true;
+  })());
+  try {
+    return await pending;
+  } finally {
+    if (receipt.pending === pending) {
+      receipt.pending = undefined;
+      receipt.failed = !receipt.settled;
+    }
+  }
+}
+
+async function disposeTurn(filePath: string, receipt: TurnCleanup): Promise<void> {
+  if (!(await settleTurn(filePath, receipt))) {
+    throw new Error(`Session turn cleanup is waiting for its guard: ${filePath}`);
+  }
 }
 
 async function tryPublishLock(
@@ -200,19 +254,50 @@ async function tryPublishLock(
   }
 }
 
+async function tryAcquireTurnCleanup(
+  filePath: string,
+  payload: string,
+): Promise<TurnCleanup | undefined> {
+  const previous = localTurns.get(filePath);
+  if (previous) {
+    if (previous.failed) {
+      await settleTurn(filePath, previous);
+    }
+    return undefined;
+  }
+  const receipt: TurnCleanup = {
+    removeMarker: async () => await removePublishedLock(filePath, payload),
+    admitted: false,
+    failed: false,
+    settled: false,
+  };
+  localTurns.set(filePath, receipt);
+  try {
+    receipt.guard = await tryAcquireGuard(filePath);
+  } catch (error) {
+    localTurns.delete(filePath);
+    throw error;
+  }
+  if (!receipt.guard) {
+    localTurns.delete(filePath);
+    return undefined;
+  }
+  return receipt;
+}
+
 async function tryAcquireTurn(
   filePath: string,
   payload: string,
   signal?: AbortSignal,
 ): Promise<AsyncDisposable | undefined> {
-  const guard = await tryAcquireGuard(filePath);
-  if (!guard) {
+  const receipt = await tryAcquireTurnCleanup(filePath, payload);
+  if (!receipt) {
     return undefined;
   }
   try {
     signal?.throwIfAborted();
     if (!(await tryPublishLock(filePath, payload, signal))) {
-      await guard.release();
+      await disposeTurn(filePath, receipt);
       return undefined;
     }
     const observed = await readLock(filePath);
@@ -220,9 +305,11 @@ async function tryAcquireTurn(
       throw new Error(`Session turn ownership changed before admission: ${filePath}`);
     }
     signal?.throwIfAborted();
-    return turnReceipt(filePath, observed, guard);
+    receipt.admitted = true;
+    receipt.removeMarker = async () => await removeObservedLock(filePath, observed);
+    return { [Symbol.asyncDispose]: async () => await disposeTurn(filePath, receipt) };
   } catch (error) {
-    return await rejectAcquisition(filePath, payload, guard, error);
+    return await rejectAcquisition(filePath, receipt, error);
   }
 }
 
