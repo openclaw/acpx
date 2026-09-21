@@ -47,7 +47,7 @@ for (const surface of surfaces) {
     "foreign-time-namespace",
     "foreign-namespace-missing-pid",
     "prior-boot",
-    "unsupported-time-namespace",
+    "reused-unsupported-time-namespace",
     "malformed",
     "changed-during-reclaim",
     "refresh-matching",

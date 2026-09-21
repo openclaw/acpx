@@ -13,7 +13,9 @@ const savedIdentity = {
   kind: "linux-proc",
   bootId: "11111111-1111-4111-8111-111111111111",
   pidNamespace: "pid:[4026531836]",
-  timeNamespace: "time:[4026531834]",
+  // The positive no-CONFIG_TIME_NS case keeps both owners in the same scope.
+  timeNamespace:
+    scenario === "reused-unsupported-time-namespace" ? "unsupported" : "time:[4026531834]",
   startTicks: "100",
 };
 const blocked = [
@@ -35,8 +37,6 @@ const expectedIdentity = (() => {
       return { ...savedIdentity, timeNamespace: "time:[4026539999]" };
     case "prior-boot":
       return { ...savedIdentity, bootId: "22222222-2222-4222-8222-222222222222" };
-    case "unsupported-time-namespace":
-      return { ...savedIdentity, timeNamespace: "unsupported" };
     default:
       return savedIdentity;
   }
@@ -187,7 +187,7 @@ fs.lstat = (async (...args: Parameters<typeof fs.lstat>) => {
   return result;
 }) as typeof fs.lstat;
 
-const kill = process.kill;
+const kill = process.kill.bind(process);
 process.kill = (...args: Parameters<typeof process.kill>) => {
   if (args[0] !== orphanPid) {
     return kill(...args);
@@ -318,7 +318,7 @@ if (leaseScenario) {
       assert.equal(queryTimes.length, 0);
     } else {
       assert.ok(queryTimes.length > 0);
-      const elapsed = Date.now() - queryTimes[0]!;
+      const elapsed = Date.now() - queryTimes[0];
       assert.ok(
         queryTimes.length <= Math.ceil(elapsed / 1_000) + 3,
         "bound OS queries during retries",
@@ -328,14 +328,17 @@ if (leaseScenario) {
   if (scenario === "changed-during-reclaim") {
     assert.ok(queryTimes.length >= 2, "fresh observation must veto deletion");
   }
-  if (["reused", "prior-boot", "unsupported-time-namespace"].includes(scenario ?? "") || refresh) {
+  if (
+    ["reused", "prior-boot", "reused-unsupported-time-namespace"].includes(scenario ?? "") ||
+    refresh
+  ) {
     assert.ok(queryTimes.length >= 2, "confirm the birth mismatch before deletion");
     assert.equal(payloadAtExit, undefined, "recover while the reused PID remains alive");
   }
   if (refresh) {
     assert.ok(snapshots >= 20, "cache must span acquisition retries");
     assert.ok(
-      queryTimes[1]! - queryTimes[0]! >= 950,
+      queryTimes[1] - queryTimes[0] >= 950,
       "refresh the bounded observation, not every retry",
     );
     assert.ok(queryTimes.length <= 3);
