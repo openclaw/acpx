@@ -60,6 +60,7 @@ export type WithConnectedSessionOptions<T> = {
   terminal?: boolean;
   elicitationModes?: readonly AcpElicitationMode[];
   resumePolicy?: SessionResumePolicy;
+  replacingMode?: true;
   replacingConfigOption?: ConnectAndLoadSessionOptions["replacingConfigOption"];
   timeoutMs?: number;
   authority?: AcpControlAuthority;
@@ -145,6 +146,7 @@ export async function withConnectedSession<T>(
           client,
           record,
           resumePolicy: options.resumePolicy,
+          replacingMode: options.replacingMode,
           replacingConfigOption: options.replacingConfigOption,
           authority: options.authority,
           timeoutMs: options.timeoutMs,

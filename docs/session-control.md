@@ -61,6 +61,8 @@ Unsupported mode ids are rejected by the adapter, often as `Invalid params`. `ac
 
 `set-mode` routes through the queue owner when active and falls back to a fresh client connection otherwise.
 
+When reconnect permits a fresh session, an explicit mode change replaces the saved mode without replaying that previous mode first. This lets you replace a mode the adapter no longer supports. Other saved model and config selections still restore before the requested change. The new mode is saved only after the adapter accepts it; rejection keeps the prior mode preference. Persistent runtime sessions and imported records still require the original native session.
+
 ## `set <key> <value>`
 
 ```bash

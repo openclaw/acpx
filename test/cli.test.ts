@@ -1303,7 +1303,7 @@ test("codex set model passes the requested model through unchanged", async () =>
   });
 });
 
-test("set-mode load fallback failure does not persist the fresh session id to disk", async () => {
+test("saved mode replay failure during a config change preserves the original session", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
     await fs.mkdir(cwd, { recursive: true });
@@ -1339,7 +1339,7 @@ test("set-mode load fallback failure does not persist the fresh session id to di
     });
 
     const result = await runCli(
-      ["--cwd", cwd, "--format", "json", "codex", "set-mode", "plan"],
+      ["--cwd", cwd, "--format", "json", "codex", "set", "reasoning_effort", "high"],
       homeDir,
     );
     assert.equal(result.code, 1, result.stderr);
@@ -1363,6 +1363,87 @@ test("set-mode load fallback failure does not persist the fresh session id to di
     assert.equal(storedRecord.acpx?.desired_mode_id, "plan");
   });
 });
+
+for (const rejected of [false, true]) {
+  test(`explicit mode replacement ${rejected ? "rejects only the requested mode" : "replaces a retired mode"} after fresh fallback`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      const markers = path.join(homeDir, "markers");
+      await fs.mkdir(cwd);
+      await fs.mkdir(markers);
+      await fs.mkdir(path.join(homeDir, ".acpx"));
+      const peer = fileURLToPath(new URL("./fixtures/control-authority-agent.js", import.meta.url));
+      await fs.writeFile(
+        path.join(homeDir, ".acpx", "config.json"),
+        JSON.stringify({
+          agents: { fixture: { argv: [process.execPath, peer, markers, "config"] } },
+        }),
+      );
+      for (const name of ["no-load", "received.jsonl", "effects.jsonl"]) {
+        await fs.writeFile(path.join(markers, name), "");
+      }
+      const invoke = (args: string[]) =>
+        runCli(["--cwd", cwd, "--timeout", "5", "--format", "json", "fixture", ...args], homeDir, {
+          timeoutMs: 15_000,
+        });
+      for (const args of [
+        ["sessions", "new", "--name", "proof"],
+        ["set-mode", "-s", "proof", "plan"],
+        ["set", "-s", "proof", "model", "first-model"],
+        ["set", "-s", "proof", "effort", "high"],
+      ]) {
+        const result = await invoke(args);
+        assert.equal(result.code, 0, result.stderr);
+      }
+      try {
+        const beforeResult = await invoke(["sessions", "show", "proof"]);
+        assert.equal(beforeResult.code, 0, beforeResult.stderr);
+        const before = JSON.parse(beforeResult.stdout) as SessionRecord;
+        assert.equal(before.acpx?.desired_mode_id, "plan");
+        assert.equal(before.acpx?.session_options?.model, "first-model");
+        assert.equal(before.acpx?.desired_config_options?.effort, "high");
+        for (const name of ["received.jsonl", "effects.jsonl", "retired-plan"]) {
+          await fs.writeFile(path.join(markers, name), "");
+        }
+        if (rejected) {
+          await fs.writeFile(path.join(markers, "reject-auto"), "");
+        }
+        const result = await invoke(["set-mode", "-s", "proof", "auto"]);
+        assert.equal(result.code, rejected ? 1 : 0, result.stderr);
+        if (rejected) {
+          const error = parseSingleAcpErrorLine(result.stdout);
+          assert.equal(error.code, -32602);
+          assert.equal(error.data?.modeId, "auto");
+        }
+        const readControls = async (name: string) =>
+          (await fs.readFile(path.join(markers, name), "utf8"))
+            .trim()
+            .split("\n")
+            .filter(Boolean)
+            .map((line): unknown => JSON.parse(line));
+        const siblings = [
+          { sequence: 1, method: "session/set_config_option", value: "first-model" },
+          { sequence: 2, method: "session/set_config_option", value: "high" },
+        ];
+        const requested = { sequence: 3, method: "session/set_mode", value: "auto" };
+        assert.deepEqual(await readControls("received.jsonl"), [...siblings, requested]);
+        assert.deepEqual(
+          await readControls("effects.jsonl"),
+          rejected ? siblings : [...siblings, requested],
+        );
+        const shown = await invoke(["sessions", "show", "proof"]);
+        assert.equal(shown.code, 0, shown.stderr);
+        const record = JSON.parse(shown.stdout) as SessionRecord;
+        assert.equal(record.acpx?.desired_mode_id, rejected ? "plan" : "auto");
+        assert.equal(record.acpx?.session_options?.model, "first-model");
+        assert.equal(record.acpx?.desired_config_options?.effort, "high");
+      } finally {
+        const closed = await invoke(["sessions", "close", "proof"]);
+        assert.equal(closed.code, 0, closed.stderr);
+      }
+    });
+  });
+}
 
 test("set-mode surfaces actionable guidance when agent rejects session/set_mode params", async () => {
   await withTempHome(async (homeDir) => {

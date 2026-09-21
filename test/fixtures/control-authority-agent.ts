@@ -6,6 +6,7 @@ import {
   AgentSideConnection,
   ndJsonStream,
   PROTOCOL_VERSION,
+  RequestError,
   type Agent,
   type SessionConfigOption,
 } from "@agentclientprotocol/sdk";
@@ -62,7 +63,10 @@ function sessionState() {
     configOptions: configOptions(),
     modes: {
       currentModeId: mode,
-      availableModes: ["auto", "plan"].map((id) => ({ id, name: id })),
+      availableModes: [
+        "auto",
+        ...(existsSync(path.join(directory, "retired-plan")) ? [] : ["plan"]),
+      ].map((id) => ({ id, name: id })),
     },
     ...(route === "legacy"
       ? {
@@ -180,6 +184,12 @@ const agent: Agent = {
   },
   async setSessionMode({ modeId }) {
     await control("session/set_mode", modeId, () => {
+      if (
+        (modeId === "plan" && existsSync(path.join(directory, "retired-plan"))) ||
+        (modeId === "auto" && existsSync(path.join(directory, "reject-auto")))
+      ) {
+        throw RequestError.invalidParams({ modeId });
+      }
       mode = modeId;
     });
     return {};

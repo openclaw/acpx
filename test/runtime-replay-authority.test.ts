@@ -15,7 +15,12 @@ const peer = fileURLToPath(
   ),
 );
 
-async function fixture(t: TestContext, route: "config" | "legacy", fresh = false) {
+async function fixture(
+  t: TestContext,
+  route: "config" | "legacy",
+  fresh = false,
+  sessionMode: "oneshot" | "persistent" = fresh ? "oneshot" : "persistent",
+) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-authority-"));
   const disk = createFileSessionStore({ stateDir: path.join(root, "state") });
   const pids: number[] = [];
@@ -76,7 +81,7 @@ async function fixture(t: TestContext, route: "config" | "legacy", fresh = false
   const handle = await seed.ensureSession({
     sessionKey: "replay-authority",
     agent: "fixture",
-    mode: fresh ? "oneshot" : "persistent",
+    mode: sessionMode,
   });
   recordId = handle.acpxRecordId ?? handle.sessionKey;
   await seed.setModel({ handle, model: "first-model" });
@@ -105,10 +110,19 @@ async function fixture(t: TestContext, route: "config" | "legacy", fresh = false
       }
     },
     record: () => disk.load(handle.acpxRecordId ?? handle.sessionKey),
-    async controls(expected: Array<{ method: string; value: string }>) {
-      const entries = expected.map((entry, index) => ({ sequence: index + 1, ...entry }));
-      assert.deepEqual(await logs("received.jsonl"), entries, "requests received by peer");
-      assert.deepEqual(await logs("effects.jsonl"), entries, "effects applied by peer");
+    async controls(expected: Array<{ method: string; value: string }>, expectedEffects = expected) {
+      const entries = (values: typeof expected) =>
+        values.map((entry, index) => ({ sequence: index + 1, ...entry }));
+      assert.deepEqual(
+        await logs("received.jsonl"),
+        entries(expected),
+        "requests received by peer",
+      );
+      assert.deepEqual(
+        await logs("effects.jsonl"),
+        entries(expectedEffects),
+        "effects applied by peer",
+      );
     },
   };
 }
@@ -213,7 +227,7 @@ test(
 );
 
 test(
-  "fresh-session reconnect rejects cancellation before saved mode replay",
+  "fresh mode replacement rejects cancellation before saved controls dispatch",
   { timeout: 15_000 },
   async (t) => {
     const context = await fixture(t, "config", true);
@@ -241,3 +255,84 @@ test(
     assert.deepEqual((await context.record())?.acpx, context.before?.acpx);
   },
 );
+
+test("oneshot mode replacement skips a retired mode and restores sibling selections", async (t) => {
+  const context = await fixture(t, "config", true);
+  await context.write("no-load");
+  await context.write("retired-plan");
+  await context.runtime.setMode({ handle: context.handle, mode: "auto" });
+  await context.controls([
+    { method: "session/set_config_option", value: "first-model" },
+    { method: "session/set_config_option", value: "high" },
+    { method: "session/set_mode", value: "auto" },
+  ]);
+  const record = await context.record();
+  assert.equal(record?.acpx?.desired_mode_id, "auto");
+  assert.equal(record?.acpx?.session_options?.model, "first-model");
+  assert.equal(record?.acpx?.desired_config_options?.effort, "high");
+});
+
+test("rejected oneshot mode replacement preserves the prior mode and accepted siblings", async (t) => {
+  const context = await fixture(t, "config", true);
+  await context.write("no-load");
+  await context.write("retired-plan");
+  await context.write("reject-auto");
+  await assert.rejects(
+    context.runtime.setMode({ handle: context.handle, mode: "auto" }),
+    /for mode "auto"/u,
+  );
+  const siblings = [
+    { method: "session/set_config_option", value: "first-model" },
+    { method: "session/set_config_option", value: "high" },
+  ];
+  await context.controls([...siblings, { method: "session/set_mode", value: "auto" }], siblings);
+  const record = await context.record();
+  assert.equal(record?.acpx?.desired_mode_id, "plan");
+  assert.equal(record?.acpx?.session_options?.model, "first-model");
+  assert.equal(record?.acpx?.desired_config_options?.effort, "high");
+});
+
+test("persistent mode replacement still requires the original native session", async (t) => {
+  const context = await fixture(t, "config", true, "persistent");
+  await context.write("no-load");
+  await context.write("retired-plan");
+  await assert.rejects(context.runtime.setMode({ handle: context.handle, mode: "auto" }), {
+    name: "SessionResumeRequiredError",
+  });
+  await context.controls([]);
+  const record = await context.record();
+  assert.deepEqual(record?.acpx, context.before?.acpx);
+  assert.equal(record?.acpSessionId, context.before?.acpSessionId);
+});
+
+test("mode replacement preserves admitted model replay when authority is later revoked", async (t) => {
+  const context = await fixture(t, "config", true);
+  await context.write("no-load");
+  await context.write("retired-plan");
+  await context.write("hold-first");
+  const revoked = new Error("replacement authority revoked after model dispatch");
+  let active = true;
+  const pending = context.runtime
+    .setMode({
+      handle: context.handle,
+      mode: "auto",
+      assertActive: () => {
+        if (!active) {
+          throw revoked;
+        }
+      },
+    })
+    .then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+  await context.wait("received-1");
+  active = false;
+  await context.write("release-first");
+  assert.equal(await pending, revoked);
+  await context.controls([{ method: "session/set_config_option", value: "first-model" }]);
+  const record = await context.record();
+  assert.equal(record?.acpx?.desired_mode_id, "plan");
+  assert.equal(record?.acpx?.session_options?.model, "first-model");
+  assert.equal(record?.acpx?.desired_config_options?.effort, "low");
+});

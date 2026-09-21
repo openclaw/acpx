@@ -50,6 +50,7 @@ export type RunSessionSetModelDirectOptions = SessionControlConnectionOptions & 
 };
 
 type DirectConnectedSessionOptions = SessionControlConnectionOptions & {
+  replacingMode?: true;
   replacingConfigOption?: WithConnectedSessionOptions<unknown>["replacingConfigOption"];
 };
 
@@ -59,6 +60,7 @@ function buildDirectConnectedSessionOptions<T>(
 ): WithConnectedSessionOptions<T> {
   return {
     sessionRecordId: options.sessionRecordId,
+    replacingMode: options.replacingMode,
     replacingConfigOption: options.replacingConfigOption,
     loadRecord: resolveSessionRecord,
     saveRecord: writeSessionRecord,
@@ -119,10 +121,13 @@ export async function runSessionSetModeDirect(
   options: RunSessionSetModeDirectOptions,
 ): Promise<SessionSetModeResult> {
   const result = await withOwnedDirectSession(
-    buildDirectConnectedSessionOptions(options, async ({ client, sessionId, record }) => {
-      await withTimeout(client.setSessionMode(sessionId, options.modeId), options.timeoutMs);
-      setDesiredModeId(record, options.modeId);
-    }),
+    buildDirectConnectedSessionOptions(
+      { ...options, replacingMode: true },
+      async ({ client, sessionId, record }) => {
+        await withTimeout(client.setSessionMode(sessionId, options.modeId), options.timeoutMs);
+        setDesiredModeId(record, options.modeId);
+      },
+    ),
   );
 
   return toSessionMutationResult(result);

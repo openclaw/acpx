@@ -211,6 +211,7 @@ Behavior:
 - `cancel`: sends cooperative `session/cancel` through queue-owner IPC.
 - `set-mode`: calls ACP `session/set_mode`.
 - `set-mode` mode ids are adapter-defined; unsupported values are rejected by the adapter (often `Invalid params`).
+- On allowed fresh fallback, `set-mode` replaces the old saved mode without replaying it. Other saved settings restore first; the new mode preference is saved only after acceptance.
 - `set`: calls ACP `session/set_config_option`.
 - A config key named `mode` keeps config-option transport; explicit `set-mode` uses the separate `session/set_mode` control.
 - Current codex-acp releases expose `model` and `reasoning_effort` as separate config options.

@@ -31,6 +31,7 @@ import type {
   ViewerRunLiveState,
   ViewerRunsState,
 } from "../examples/flows/replay-viewer/src/types.js";
+import { writePrivateJsonFile } from "../src/state-files.js";
 
 test("replay viewer rejects malformed messages and isolates invalid frames", async () => {
   const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-admission-"));
@@ -397,12 +398,26 @@ test("replay viewer streams live sidebar and run patches over websocket", async 
       steps: [firstStep, secondStep],
     });
 
-    const runsPatch = await inbox.next(
-      (message): message is Extract<ReplayServerMessage, { type: "runs_patch" }> =>
-        message.type === "runs_patch",
+    let nextRunsState = runsSnapshot.state;
+    let version = runsSnapshot.version;
+    const deadline = Date.now() + 5_000;
+    do {
+      const remainingMs = deadline - Date.now();
+      assert.ok(remainingMs > 0, "Timed out waiting for the live run update");
+      const runsPatch = await inbox.next(
+        (message): message is Extract<ReplayServerMessage, { type: "runs_patch" }> =>
+          message.type === "runs_patch",
+        remainingMs,
+      );
+      assert.equal(runsPatch.fromVersion, version);
+      assert.equal(runsPatch.toVersion, version + 1);
+      nextRunsState = applyReplayPatch<ViewerRunsState>(nextRunsState, runsPatch.ops);
+      version = runsPatch.toVersion;
+    } while (
+      nextRunsState.runsById[runId]?.status !== "waiting" ||
+      nextRunsState.runsById[runId]?.currentNode !== "judge_solution" ||
+      nextRunsState.runsById[runId]?.updatedAt !== "2026-03-31T08:00:10.000Z"
     );
-
-    const nextRunsState = applyReplayPatch<ViewerRunsState>(runsSnapshot.state, runsPatch.ops);
 
     assert.equal(listViewerRuns(nextRunsState)[0]?.status, "waiting");
     assert.equal(listViewerRuns(nextRunsState)[0]?.currentNode, "judge_solution");
@@ -946,22 +961,19 @@ async function updateRunBundle(
     await fs.readFile(path.join(projectionsDir, "run.json"), "utf8"),
   ) as FlowRunState;
 
-  await fs.writeFile(
-    path.join(projectionsDir, "live.json"),
-    JSON.stringify({
-      runId,
-      flowName: run.flowName,
-      runTitle: run.runTitle,
-      startedAt: run.startedAt,
-      updatedAt: options.updatedAt,
-      status: options.liveStatus,
-      currentNode: options.currentNode,
-      currentAttemptId: options.steps.at(-1)?.attemptId,
-      currentNodeType: options.steps.at(-1)?.nodeType,
-      currentNodeStartedAt: options.steps.at(-1)?.startedAt,
-    } satisfies Partial<FlowRunState>),
-  );
-  await fs.writeFile(path.join(projectionsDir, "steps.json"), JSON.stringify(options.steps));
+  await writePrivateJsonFile(path.join(projectionsDir, "live.json"), {
+    runId,
+    flowName: run.flowName,
+    runTitle: run.runTitle,
+    startedAt: run.startedAt,
+    updatedAt: options.updatedAt,
+    status: options.liveStatus,
+    currentNode: options.currentNode,
+    currentAttemptId: options.steps.at(-1)?.attemptId,
+    currentNodeType: options.steps.at(-1)?.nodeType,
+    currentNodeStartedAt: options.steps.at(-1)?.startedAt,
+  } satisfies Partial<FlowRunState>);
+  await writePrivateJsonFile(path.join(projectionsDir, "steps.json"), options.steps);
 }
 
 function makeFlow(): FlowDefinitionSnapshot {

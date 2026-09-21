@@ -733,7 +733,7 @@ export class AcpRuntimeManager {
     record: SessionRecord,
     sessionMode: "persistent" | "oneshot",
     run: (context: { client: AcpClient; sessionId: string; record: SessionRecord }) => Promise<T>,
-    replacingConfigOption?: ConnectAndLoadSessionOptions["replacingConfigOption"],
+    replayOptions?: Pick<ConnectAndLoadSessionOptions, "replacingMode" | "replacingConfigOption">,
     authority?: AcpControlAuthority,
   ): Promise<T> {
     await this.retrySessionCleanup(record.acpxRecordId);
@@ -798,7 +798,8 @@ export class AcpRuntimeManager {
           verbose: this.options.verbose,
           timeoutMs: this.options.timeoutMs,
           resumePolicy: resumePolicyForSessionMode(sessionMode),
-          replacingConfigOption,
+          replacingMode: replayOptions?.replacingMode,
+          replacingConfigOption: replayOptions?.replacingConfigOption,
           authority,
           run,
         }),
@@ -1819,7 +1820,7 @@ export class AcpRuntimeManager {
         await client.setSessionMode(sessionId, mode, authority);
         setDesiredModeId(connectedRecord, mode);
       },
-      undefined,
+      { replacingMode: true },
       authority,
     );
   }
@@ -1864,7 +1865,7 @@ export class AcpRuntimeManager {
         );
         connectedRecord.acpx = applyModelSelection(connectedRecord.acpx, model, response);
       },
-      { key: "model" },
+      { replacingConfigOption: { key: "model" } },
       authority,
     );
   }
@@ -1922,7 +1923,12 @@ export class AcpRuntimeManager {
         );
         return response;
       },
-      { key, resolve: (connectedRecord) => resolveSupportedConfigOptionId(connectedRecord, key) },
+      {
+        replacingConfigOption: {
+          key,
+          resolve: (connectedRecord) => resolveSupportedConfigOptionId(connectedRecord, key),
+        },
+      },
       authority,
     );
   }

@@ -66,6 +66,7 @@ export type ConnectAndLoadSessionOptions = {
   client: AcpClient;
   record: SessionRecord;
   resumePolicy?: SessionResumePolicy;
+  replacingMode?: true;
   replacingConfigOption?: {
     key: string;
     resolve?: (record: SessionRecord) => string;
@@ -391,7 +392,7 @@ export async function connectAndLoadSession(
   const originalSessionId = record.acpSessionId;
   const originalAgentSessionId = record.agentSessionId;
   const originalAcpx = cloneSessionAcpxState(record.acpx);
-  const desiredModeId = getDesiredModeId(record.acpx);
+  const desiredModeId = options.replacingMode ? undefined : getDesiredModeId(record.acpx);
   const desiredModelId = getDesiredModelId(record.acpx);
   const desiredConfigOptions = getDesiredConfigOptions(record.acpx);
   const storedProcessAlive = isProcessAlive(record.pid);
