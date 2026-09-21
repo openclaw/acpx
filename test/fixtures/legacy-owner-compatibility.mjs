@@ -144,7 +144,7 @@ for (const supportsClose of [false, true]) {
           throw new AggregateError(
             [failure, cleanupError],
             "Released-owner proof and cleanup both failed",
-            { cause: failure },
+            { cause: cleanupError },
           );
         }
         throw cleanupError;
