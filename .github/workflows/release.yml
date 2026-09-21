@@ -9,24 +9,24 @@ concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+permissions: {}
+
 env:
   NODE_VERSION: 24
 
 jobs:
-  release:
-    # DO NOT change this job back to a self-hosted runner.
-    # npm trusted publishing + provenance for GitHub Actions releases
-    # requires a GitHub-hosted runner, and publishing fails on self-hosted
-    # environments with:
-    # "Unsupported GitHub Actions runner environment: self-hosted".
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+    outputs:
+      artifact_id: ${{ steps.artifact.outputs.artifact-id }}
+      package_sha256: ${{ steps.package.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -42,40 +42,21 @@ jobs:
         run: |
           node - <<'NODE'
           const { readFileSync } = require("node:fs");
-
           const pkg = JSON.parse(readFileSync("package.json", "utf8"));
-          const expectedAuthor = "OpenClaw Team <dev@openclaw.ai>";
-          const expectedRepoUrl = "https://github.com/openclaw/acpx";
-
-          const normalizeRepoUrl = (value) =>
-            String(value ?? "")
-              .trim()
-              .replace(/^git\+/, "")
-              .replace(/\.git$/i, "")
-              .replace(/\/+$/, "");
-
-          const actualRepoUrl = normalizeRepoUrl(pkg?.repository?.url);
-          const expectedRepoUrlNormalized = normalizeRepoUrl(expectedRepoUrl);
-
+          const normalizeRepoUrl = (value) => String(value ?? "")
+            .trim().replace(/^git\+/, "").replace(/\.git$/i, "").replace(/\/+$/, "");
           const errors = [];
-          if (actualRepoUrl !== expectedRepoUrlNormalized) {
-            errors.push(
-              `package.json repository.url must resolve to ${expectedRepoUrlNormalized}; found ${actualRepoUrl || "<missing>"}`
-            );
+          if (pkg.name !== "acpx") errors.push("package.json name must be acpx");
+          if (normalizeRepoUrl(pkg.repository?.url) !== "https://github.com/openclaw/acpx") {
+            errors.push("package.json repository.url must resolve to https://github.com/openclaw/acpx");
           }
-          if ((pkg?.author ?? "") !== expectedAuthor) {
-            errors.push(
-              `package.json author must be exactly "${expectedAuthor}"; found "${pkg?.author ?? ""}"`
-            );
+          if (pkg.author !== "OpenClaw Team <dev@openclaw.ai>") {
+            errors.push("package.json author must be OpenClaw Team <dev@openclaw.ai>");
           }
-
-          if (errors.length > 0) {
-            for (const err of errors) {
-              console.error(err);
-            }
+          if (errors.length) {
+            errors.forEach((error) => console.error(error));
             process.exit(1);
           }
-
           console.log("Package metadata validated.");
           NODE
 
@@ -93,7 +74,7 @@ jobs:
 
           const releaseTag = process.env.RELEASE_TAG ?? "";
           const releaseSha = process.env.RELEASE_SHA ?? "";
-          const semverTag = /^v\d+\.\d+\.\d+$/;
+          const semverTag = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
 
           if (!semverTag.test(releaseTag)) {
             console.error(
@@ -131,26 +112,169 @@ jobs:
           NODE
 
       - name: Ensure version is not already published
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
           error_log="$(mktemp)"
-
-          if npm view "acpx@${PACKAGE_VERSION}" version >/dev/null 2>"${error_log}"; then
-            echo "acpx@$PACKAGE_VERSION is already published on npm."
+          if npm view "acpx@${RELEASE_TAG#v}" version --registry=https://registry.npmjs.org > /dev/null 2>"${error_log}"; then
+            echo "This version is already published on npm."
             exit 1
           fi
-
           if ! grep -Eq "E404|404 Not Found" "${error_log}"; then
             cat "${error_log}" >&2
             exit 1
           fi
 
-          echo "Publishing acpx@$PACKAGE_VERSION"
-
       - run: pnpm run lint
       - run: pnpm run typecheck
       - run: pnpm run build
 
-      - name: Publish
-        run: npm publish --access public --provenance
+      - name: Package without rerunning lifecycle scripts
+        id: package
+        run: |
+          set -euo pipefail
+          package_directory="${RUNNER_TEMP}/npm-package"
+          mkdir -p "${package_directory}"
+          npm pack --ignore-scripts --json --pack-destination "${package_directory}" > "${RUNNER_TEMP}/npm-pack.json"
+          node - <<'NODE'
+          const { readFileSync, renameSync, appendFileSync } = require("node:fs");
+          const { createHash } = require("node:crypto");
+          const { join } = require("node:path");
+          const packed = JSON.parse(readFileSync(join(process.env.RUNNER_TEMP, "npm-pack.json"), "utf8"));
+          if (packed.length !== 1 || !/^acpx-[0-9]+\.[0-9]+\.[0-9]+\.tgz$/.test(packed[0].filename)) {
+            throw new Error("Expected exactly one acpx release tarball.");
+          }
+          const directory = join(process.env.RUNNER_TEMP, "npm-package");
+          const destination = join(directory, "package.tgz");
+          renameSync(join(directory, packed[0].filename), destination);
+          const digest = createHash("sha256").update(readFileSync(destination)).digest("hex");
+          appendFileSync(process.env.GITHUB_OUTPUT, `sha256=${digest}\n`);
+          NODE
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        id: artifact
+        with:
+          name: npm-package-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/npm-package/package.tgz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs: build
+    # npm trusted publishing with provenance requires a GitHub-hosted runner.
+    runs-on: ubuntu-latest
+    environment: stable-release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          check-latest: true
+          registry-url: https://registry.npmjs.org
+
+      - name: Require one immutable artifact ID
+        env:
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
+        run: |
+          node - <<'NODE'
+          if (!/^[1-9][0-9]*$/.test(process.env.ARTIFACT_ID ?? "")) {
+            throw new Error("Build must identify exactly one immutable artifact.");
+          }
+          NODE
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: ${{ runner.temp }}/npm-package
+          merge-multiple: true
+
+      - name: Verify the exact package before exposing it to npm
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          PACKAGE_SHA256: ${{ needs.build.outputs.package_sha256 }}
+        run: |
+          python3 -I - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import tarfile
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+
+          tag = os.environ["RELEASE_TAG"]
+          require(re.fullmatch(r"v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", tag), "Invalid release tag")
+          require(os.environ["RELEASE_REPOSITORY"] == "openclaw/acpx", "Unexpected release repository")
+          directory = Path(os.environ["RUNNER_TEMP"]) / "npm-package"
+          archive = directory / "package.tgz"
+          require(list(directory.iterdir()) == [archive], "Expected only package.tgz in the artifact")
+          require(archive.is_file() and not archive.is_symlink(), "Package must be a regular file")
+          require(archive.stat().st_size <= 128 * 1024 * 1024, "Package archive is too large")
+          digest = os.environ["PACKAGE_SHA256"]
+          require(re.fullmatch(r"[a-f0-9]{64}", digest), "Invalid expected package digest")
+          require(hashlib.sha256(archive.read_bytes()).hexdigest() == digest, "Package digest mismatch")
+          names = set()
+          size = 0
+          metadata = None
+          with tarfile.open(archive, "r:gz") as package:
+              for member in package:
+                  name = member.name.rstrip("/") if member.isdir() else member.name
+                  components = name.split("/")
+                  require(
+                      name and components[0] == "package"
+                      and all(part not in ("", ".", "..") for part in components)
+                      and "\\" not in name and not any(ord(char) < 32 or ord(char) == 127 for char in name),
+                      "Unsafe archive path",
+                  )
+                  require(member.isfile() or member.isdir(), "Archive links and special files are forbidden")
+                  require(not member.issparse() and member.size >= 0, "Sparse or invalid archive entry")
+                  require(name not in names, "Duplicate archive path")
+                  names.add(name)
+                  size += member.size
+                  require(len(names) <= 10000 and size <= 512 * 1024 * 1024, "Package contents exceed limits")
+                  if name == "package/package.json":
+                      require(member.isfile() and member.size <= 1024 * 1024, "Invalid package metadata entry")
+                      metadata = json.load(package.extractfile(member))
+
+          require(isinstance(metadata, dict), "Missing package/package.json")
+          require(metadata.get("name") == "acpx", "Unexpected package name")
+          require(metadata.get("version") == tag[1:], "Package version does not match release tag")
+          require(metadata.get("author") == "OpenClaw Team <dev@openclaw.ai>", "Unexpected package author")
+          repository = metadata.get("repository")
+          require(isinstance(repository, dict) and isinstance(repository.get("url"), str), "Missing package repository")
+          repository_url = repository["url"].strip().removeprefix("git+").rstrip("/")
+          repository_url = re.sub(r"\.git$", "", repository_url, flags=re.IGNORECASE)
+          require(repository_url == "https://github.com/openclaw/acpx", "Unexpected package repository")
+          require("publishConfig" not in metadata, "Package publishConfig requires a separate workflow review")
+          print("Verified acpx package identity, archive paths and digest.")
+          PY
+
+      - name: Ensure version is still unpublished
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          error_log="$(mktemp)"
+          if npm view "acpx@${RELEASE_TAG#v}" version --registry=https://registry.npmjs.org > /dev/null 2>"${error_log}"; then
+            echo "This version is already published on npm."
+            exit 1
+          fi
+          if ! grep -Eq "E404|404 Not Found" "${error_log}"; then
+            cat "${error_log}" >&2
+            exit 1
+          fi
+
+      - name: Publish the verified tarball without lifecycle scripts
+        run: |
+          set -euo pipefail
+          mkdir "${RUNNER_TEMP}/npm-publish"
+          cd "${RUNNER_TEMP}/npm-publish"
+          npm publish "${RUNNER_TEMP}/npm-package/package.tgz" --ignore-scripts --access public --tag latest --registry=https://registry.npmjs.org --provenance

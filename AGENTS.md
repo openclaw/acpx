@@ -298,12 +298,16 @@ CI lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 Release automation lives in [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
-- Releases run when a `vX.Y.Z` tag is pushed
+- Releases run when Stable creates an authorized `vX.Y.Z` tag
 - The workflow installs dependencies with `pnpm install --frozen-lockfile`
 - It validates `package.json` release metadata before publishing
 - It validates that the tag matches `package.json` version and that the tagged commit is on `main`
 - It runs `pnpm run lint`, `pnpm run typecheck`, and `pnpm run build`
-- It publishes directly to npm with trusted publishing and provenance
+- The build job packages the release without publishing authority
+- The publish job requires the `stable-release` environment gate and publishes
+  the verified build artifact to npm with trusted publishing and provenance
+- Release requests go through Stable; maintainers with permission to merge to
+  `main` can authorize the exact version and commit
 
 The release workflow currently requires these `package.json` values:
 
