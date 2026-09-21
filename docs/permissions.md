@@ -178,8 +178,6 @@ acpx --no-terminal codex exec 'summarize using the available capabilities'
 
 This disables terminal operations provided by the acpx client. It does not prevent the adapter from running its own native tools or child processes. Use the adapter's controls or an external sandbox when those operations must be restricted.
 
-This is a cleaner way to forbid shell access than blanket-denying every permission prompt, because the agent knows the capability is unavailable up front and can plan around it.
-
 ## Embedded runtime filesystem and terminal callbacks
 
 Embedding hosts can set `AcpRuntimeOptions.fs` and `AcpRuntimeOptions.terminal`
