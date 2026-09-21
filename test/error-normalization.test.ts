@@ -191,6 +191,19 @@ test("normalizeOutputError extracts ACP payload from wrapped errors", () => {
   });
 });
 
+test("disabled exec keeps its public code and exit through shared normalization", () => {
+  const message = "exec subcommand is disabled by configuration (disableExec: true)";
+  const error = Object.assign(new Error(message), {
+    outputCode: "EXEC_DISABLED",
+    origin: "cli",
+  });
+  const normalized = normalizeOutputError(error);
+  assert.equal(normalized.code, "EXEC_DISABLED");
+  assert.equal(normalized.origin, "cli");
+  assert.equal(normalized.message, message);
+  assert.equal(exitCodeForOutputErrorCode(normalized.code), 1);
+});
+
 test("exitCodeForOutputErrorCode maps machine codes to stable exits", () => {
   assert.equal(exitCodeForOutputErrorCode("USAGE"), 2);
   assert.equal(exitCodeForOutputErrorCode("TIMEOUT"), 3);

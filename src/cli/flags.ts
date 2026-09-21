@@ -474,7 +474,7 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
   assertOutputFlagCompatibility(format, jsonStrict, verbose);
 
   return {
-    agent: stringOption(opts.agent),
+    agent: resolveAgentOverride(stringOption(opts.agent)),
     cwd: resolveCwdOption(opts.cwd),
     authPolicy: resolveAuthPolicy(opts.authPolicy, config),
     nonInteractivePermissions: resolveNonInteractivePermissions(
@@ -562,6 +562,10 @@ function resolveModelOption(value: unknown): string | undefined {
   return model === undefined ? undefined : parseNonEmptyValue("Model", model);
 }
 
+function resolveAgentOverride(value: string | undefined): string | undefined {
+  return value === undefined ? undefined : parseNonEmptyValue("Agent command", value);
+}
+
 export function resolveOutputPolicy(format: OutputFormat, jsonStrict: boolean): OutputPolicy {
   return {
     format,
@@ -583,8 +587,8 @@ export function resolveAgentInvocation(
   agentArgv?: string[];
   cwd: string;
 } {
-  const override = globalFlags.agent?.trim();
-  if (override && explicitAgentName) {
+  const override = resolveAgentOverride(globalFlags.agent);
+  if (override !== undefined && explicitAgentName !== undefined) {
     throw new InvalidArgumentError("Do not combine positional agent with --agent override");
   }
 
@@ -603,7 +607,7 @@ function resolveInvocationCommand(
   override: string | undefined,
   config: ResolvedAcpxConfig,
 ): { agentCommand: string; agentArgv?: string[] } {
-  if (override) {
+  if (override !== undefined) {
     return { agentCommand: override };
   }
   const normalizedAgentName = normalizeAgentName(agentName);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import type { ResolvedAcpxConfig } from "../src/cli/config.js";
 import {
   addExecConfigOption,
@@ -545,6 +545,37 @@ test("resolveOutputPolicy maps json-strict output behavior", () => {
     queueErrorAlreadyEmitted: false,
     suppressSdkConsoleErrors: true,
   });
+});
+
+test("raw-agent resolution distinguishes omission from an explicitly blank command", () => {
+  const defaults = config({
+    defaultAgent: "fixture",
+    agents: { fixture: { command: "default-fixture" } },
+  });
+  const flags = resolveGlobalFlags(commandWithOptions({}), defaults);
+  assert.equal(flags.agent, undefined);
+  assert.equal(resolveAgentInvocation(undefined, flags, defaults).agentCommand, "default-fixture");
+
+  for (const agent of ["", " \t\n"]) {
+    assert.throws(
+      () => resolveGlobalFlags(commandWithOptions({ agent }), defaults),
+      InvalidArgumentError,
+    );
+    for (const positional of [undefined, "fixture"]) {
+      assert.throws(
+        () => resolveAgentInvocation(positional, { ...flags, agent }, defaults),
+        InvalidArgumentError,
+      );
+    }
+  }
+});
+
+test("raw-agent resolution preserves quoting and spaces inside a valid command", () => {
+  const agent = '  node "./agent dir/server.mjs" --label "  two words  "  ';
+  const flags = resolveGlobalFlags(commandWithOptions({ agent }), config());
+  const invocation = resolveAgentInvocation(undefined, flags, config());
+  assert.equal(invocation.agentCommand, agent.trim());
+  assert.equal(invocation.agentArgv, undefined);
 });
 
 test("resolveAgentInvocation rejects conflicting positional and override agents", () => {

@@ -32,36 +32,43 @@ This document defines how `acpx` should represent errors across:
 - `acpx` machine codes (stable, small enum for orchestration)
 - raw ACP error details (numeric JSON-RPC code/message/data) when the source error is ACP-native
 
-## JSON error event shape
+## JSON error response shape
 
-In JSON mode, fatal failures should emit:
+Locally generated CLI errors use JSON-RPC responses in JSON mode. For example,
+disabled one-shot execution emits:
 
 ```json
 {
-  "type": "error",
-  "code": "NO_SESSION|TIMEOUT|PERMISSION_DENIED|PERMISSION_PROMPT_UNAVAILABLE|RUNTIME|USAGE",
-  "detailCode": "AUTH_REQUIRED|QUEUE_PROTOCOL_INVALID_JSON|QUEUE_OWNER_CLOSED|...",
-  "origin": "cli|runtime|queue|acp",
-  "message": "...",
-  "retryable": true,
-  "sessionId": "...",
-  "requestId": "...",
-  "timestamp": "...",
-  "acp": {
-    "code": -32002,
-    "message": "Resource not found: ...",
-    "data": {}
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": -32603,
+    "message": "exec subcommand is disabled by configuration (disableExec: true)",
+    "data": {
+      "acpxCode": "EXEC_DISABLED",
+      "origin": "cli",
+      "sessionId": "unknown"
+    }
   }
 }
 ```
 
-Field rules:
+For local errors:
 
-- `code`: required stable `acpx` code.
-- `detailCode`: optional, fine-grained diagnostics.
-- `origin`: optional source classification for debugging and metrics.
-- `retryable`: optional hint for orchestrator retry policy.
-- `acp`: optional raw ACP/JSON-RPC error envelope when available.
+- `id` is present and is `null` when the error has no associated RPC request.
+- `error.code` is the numeric JSON-RPC code; `error.message` is the diagnostic.
+- `error.data.acpxCode` carries the stable `acpx` classification.
+- Optional `detailCode`, `origin`, `retryable`, `timestamp`, and `sessionId` fields live in `error.data` when available.
+
+Streamed ACP messages remain raw JSON-RPC. When the shared builder renders an
+ACP-native error, it retains the original numeric code, message, and data. Object
+data is supplemented with available client metadata without overwriting the
+agent's fields; non-object data is preserved as supplied. Do not require local
+metadata on every native error.
+
+The shared normalization layer calls the machine classification `code` and keeps
+the original ACP error in `acp`. Those internal fields are projected into the
+JSON-RPC response; the CLI does not emit a separate `type: "error"` envelope.
 
 ## Top-level `acpx` codes
 
@@ -70,6 +77,7 @@ Field rules:
 - `PERMISSION_DENIED`: permission request denied/cancelled by policy/user.
 - `PERMISSION_PROMPT_UNAVAILABLE`: non-interactive prompt policy is `fail` and prompt cannot be shown.
 - `USAGE`: CLI/config invocation errors.
+- `EXEC_DISABLED`: the configured `disableExec` policy blocks one-shot execution; exit `1`, with JSON-RPC code `-32603`.
 - `RUNTIME`: all other failures.
 
 Auth-required policy:
@@ -121,7 +129,7 @@ Cancellation is a normal completion path, not an error path:
 
 ## Implementation notes
 
-- Use one shared normalization path (for example `src/error-normalization.ts`) consumed by CLI, runtime, and queue.
+- Use the shared normalization path in `src/acp/error-normalization.ts` for CLI, runtime, and queue.
 - Avoid duplicate mapping logic per layer.
 - Keep mapping tests table-driven to prevent drift.
 

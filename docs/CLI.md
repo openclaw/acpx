@@ -491,6 +491,7 @@ Rules:
 - Do not combine positional agent and `--agent` in one command.
 - The resolved command string becomes the session scope key (`agentCommand`).
 - Invalid empty command or unterminated quoting in `--agent` is a usage error.
+- An explicitly empty or whitespace-only `--agent` is rejected before prompt input or adapter startup; omit the flag to use the configured default.
 
 ## Session behavior and scoping
 

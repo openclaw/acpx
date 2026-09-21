@@ -1,7 +1,7 @@
 import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import { isLegacyZedCodexAcpInvocation } from "../acp/codex-compat.js";
-import { AgentSpawnError } from "../errors.js";
+import { AcpxOperationalError, AgentSpawnError } from "../errors.js";
 import type { SessionListResult } from "../session/execution/contracts.js";
 import { exportSession } from "../session/export.js";
 import { importSession } from "../session/import.js";
@@ -298,30 +298,14 @@ export async function handleExec(
   command: Command,
   config: ResolvedAcpxConfig,
 ): Promise<void> {
+  const globalFlags = resolveGlobalFlags(command, config);
   if (config.disableExec) {
-    const globalFlags = resolveGlobalFlags(command, config);
-    const outputPolicy = resolveRequestedOutputPolicy(globalFlags);
-    if (outputPolicy.format === "json") {
-      process.stdout.write(
-        `${JSON.stringify({
-          jsonrpc: "2.0",
-          error: {
-            code: -32603,
-            message: "exec subcommand is disabled by configuration (disableExec: true)",
-            data: { acpxCode: "EXEC_DISABLED" },
-          },
-        })}\n`,
-      );
-    } else {
-      process.stderr.write(
-        "Error: exec subcommand is disabled by configuration (disableExec: true)\n",
-      );
-    }
-    process.exitCode = 1;
-    return;
+    throw new AcpxOperationalError(
+      "exec subcommand is disabled by configuration (disableExec: true)",
+      { outputCode: "EXEC_DISABLED", origin: "cli" },
+    );
   }
 
-  const globalFlags = resolveGlobalFlags(command, config);
   const outputPolicy = resolveRequestedOutputPolicy(globalFlags);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
   const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);

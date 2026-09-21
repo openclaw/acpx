@@ -61,6 +61,8 @@ Repo: https://github.com/openclaw/acpx
 - Prompts: accept and preserve nullable resource-link titles in structured input and queued prompts.
 - Runtime/events: preserve the ACP `switch_mode` tool kind on initial calls and updates.
 - Prompts: validate required resource-link names and embedded text/blob payloads locally, while preserving valid text or blob alternatives.
+- CLI: reject explicitly empty or whitespace-only `--agent` commands before reading prompt input or selecting the default adapter.
+- CLI/output: route disabled-exec errors through shared formatting, preserving `EXEC_DISABLED` and exit `1` while emitting complete JSON-RPC errors and structured quiet diagnostics.
 
 ## 0.18.0 - 2026-09-20
 

@@ -3031,6 +3031,76 @@ test("config defaults are loaded from global and project config files", async ()
   });
 });
 
+test("CLI rejects blank raw-agent overrides before reading input or launching its default", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    const configDir = path.join(homeDir, ".acpx");
+    const pidFile = path.join(homeDir, "adapter.pid");
+    await fs.mkdir(cwd);
+    await fs.mkdir(configDir);
+    await fs.writeFile(
+      path.join(configDir, "config.json"),
+      JSON.stringify({
+        defaultAgent: "fixture",
+        agents: {
+          fixture: { argv: [process.execPath, MOCK_AGENT_PATH, "--pid-file", pidFile] },
+        },
+      }),
+    );
+    const cases = [
+      {
+        agent: ["--agent", ""],
+        json: false,
+        command: ["sessions", "list", "--local"],
+      },
+      {
+        agent: ["--agent="],
+        json: true,
+        command: ["exec", "--file", path.join(cwd, "missing-prompt.txt")],
+      },
+      {
+        agent: ["--agent", " \t"],
+        json: false,
+        command: ["exec", "echo must-not-run"],
+      },
+      {
+        agent: ["--agent= \t"],
+        json: true,
+        command: ["sessions", "list", "--local"],
+      },
+    ];
+    for (const entry of cases) {
+      const output = entry.json ? ["--format", "json", "--json-strict"] : ["--format", "quiet"];
+      const result = await runCli(
+        ["--cwd", cwd, ...output, ...entry.agent, ...entry.command],
+        homeDir,
+        { timeoutMs: 10_000 },
+      );
+      assert.equal(result.code, 2, result.stdout + result.stderr);
+      if (entry.json) {
+        const error = parseSingleAcpErrorLine(result.stdout);
+        assert.equal(error.data?.acpxCode, "USAGE");
+        assert.match(error.message ?? "", /agent.*empty/iu);
+        assert.equal(result.stderr, "");
+      } else {
+        assert.equal(result.stdout, "");
+        assert.match(result.stderr, /^\[acpx\] error: USAGE [^\n]*agent[^\n]*empty[^\n]*\n$/iu);
+      }
+      await assert.rejects(fs.access(pidFile), { code: "ENOENT" });
+      assert.deepEqual(await fs.readdir(configDir), ["config.json"]);
+    }
+
+    const control = await runCli(
+      ["--cwd", cwd, "--format", "quiet", "exec", "echo default-control"],
+      homeDir,
+      { timeoutMs: 10_000 },
+    );
+    assert.equal(control.code, 0, control.stderr);
+    assert.equal(control.stdout.trim(), "default-control");
+    await fs.access(pidFile);
+  });
+});
+
 test("exec subcommand is blocked when disableExec is true", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
@@ -3059,40 +3129,63 @@ test("exec subcommand is blocked when disableExec is true", async () => {
   });
 });
 
-test("exec subcommand is blocked in json format when disableExec is true", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = path.join(homeDir, "workspace");
-    await fs.mkdir(cwd, { recursive: true });
-    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
-
-    await fs.writeFile(
-      path.join(homeDir, ".acpx", "config.json"),
-      `${JSON.stringify(
-        {
+for (const mode of ["json", "strict", "quiet", "config-quiet"] as const) {
+  test(`disabled exec preserves ${mode} diagnostics before reading prompt input`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      const configDir = path.join(homeDir, ".acpx");
+      const pidFile = path.join(homeDir, "adapter.pid");
+      await fs.mkdir(cwd);
+      await fs.mkdir(configDir);
+      await fs.writeFile(
+        path.join(configDir, "config.json"),
+        JSON.stringify({
           disableExec: true,
+          format: mode === "config-quiet" ? "quiet" : "text",
           agents: {
-            codex: { command: MOCK_AGENT_COMMAND },
+            codex: { argv: [process.execPath, MOCK_AGENT_PATH, "--pid-file", pidFile] },
           },
-        },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
-
-    const result = await runCli(
-      ["--cwd", cwd, "--format", "json", "codex", "exec", "hello"],
-      homeDir,
-    );
-
-    assert.equal(result.code, 1);
-    const payload = JSON.parse(result.stdout.trim()) as {
-      error?: { code?: number; data?: { acpxCode?: string } };
-    };
-    assert.equal(payload.error?.code, -32603);
-    assert.equal(payload.error?.data?.acpxCode, "EXEC_DISABLED");
+        }),
+      );
+      const flags =
+        mode === "strict"
+          ? ["--format", "json", "--json-strict"]
+          : mode === "config-quiet"
+            ? []
+            : ["--format", mode];
+      const keepStdinOpen = mode === "config-quiet";
+      const file = keepStdinOpen ? "-" : path.join(cwd, "missing-prompt.txt");
+      const result = await runCli(
+        ["--cwd", cwd, ...flags, "codex", "exec", "--file", file],
+        homeDir,
+        { keepStdinOpen, timeoutMs: 10_000 },
+      );
+      const message = "exec subcommand is disabled by configuration (disableExec: true)";
+      assert.equal(result.code, 1, result.stdout + result.stderr);
+      if (mode === "json" || mode === "strict") {
+        const lines = result.stdout.trimEnd().split(/\r?\n/u);
+        assert.equal(lines.length, 1);
+        const payload = JSON.parse(lines[0]) as {
+          jsonrpc?: string;
+          id?: unknown;
+          error?: ParsedAcpError;
+        };
+        assert.equal(payload.jsonrpc, "2.0");
+        assert.equal(payload.id, null);
+        assert.equal(payload.error?.code, -32603);
+        assert.equal(payload.error?.message, message);
+        assert.equal(payload.error?.data?.acpxCode, "EXEC_DISABLED");
+        assert.equal(payload.error?.data?.origin, "cli");
+        assert.equal(result.stderr, "");
+      } else {
+        assert.equal(result.stdout, "");
+        assert.equal(result.stderr, `[acpx] error: EXEC_DISABLED ${message}\n`);
+      }
+      await assert.rejects(fs.access(pidFile), { code: "ENOENT" });
+      assert.deepEqual(await fs.readdir(configDir), ["config.json"]);
+    });
   });
-});
+}
 
 test("exec subcommand works when disableExec is false", async () => {
   await withTempHome(async (homeDir) => {
@@ -3136,6 +3229,7 @@ async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<vo
 
 type CliRunOptions = {
   stdin?: string;
+  keepStdinOpen?: boolean;
   cwd?: string;
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
@@ -3199,10 +3293,10 @@ async function runCli(
       stderr += chunk;
     });
 
-    if (options.stdin != null) {
+    if (!options.keepStdinOpen) {
       child.stdin.end(options.stdin);
-    } else {
-      child.stdin.end();
+    } else if (options.stdin != null) {
+      child.stdin.write(options.stdin);
     }
 
     let timedOut = false;
