@@ -333,12 +333,18 @@ Do not inline large or multi-line payloads.
   "sessionId": "main-8c7c0d6d",
   "handle": "main",
   "bindingArtifact": {
-    "path": "sessions/main-8c7c0d6d/binding.json",
+    "path": "artifacts/sha256-....json",
     "mediaType": "application/json",
     "sha256": "..."
   }
 }
 ```
+
+`bindingArtifact` is an immutable snapshot of the initial binding. The manifest's
+`bindingPath` points to the current binding, which can acquire real session IDs
+or updated agent metadata later. Readers should resolve each reference separately.
+Older bundles may reference the mutable binding file from this event; the snapshot
+guarantee applies to newly written events and does not repair historical bundles.
 
 #### `artifact_written`
 

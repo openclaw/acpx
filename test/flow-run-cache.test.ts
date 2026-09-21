@@ -34,7 +34,7 @@ function caches(store: FlowRunStore) {
     traceSeqByRun: Map<string, number>;
     manifestByRun: Map<string, unknown>;
     sessionSeqByBundle: Map<string, unknown>;
-    appendChainByPath: Map<string, Promise<void>>;
+    writeChainByPath: Map<string, Promise<void>>;
   };
 }
 
@@ -43,7 +43,7 @@ function assertReleased(store: FlowRunStore): void {
   assert.equal(retained.traceSeqByRun.size, 0);
   assert.equal(retained.manifestByRun.size, 0);
   assert.equal(retained.sessionSeqByBundle.size, 0);
-  assert.equal(retained.appendChainByPath.size, 0);
+  assert.equal(retained.writeChainByPath.size, 0);
 }
 
 function simpleFlow() {

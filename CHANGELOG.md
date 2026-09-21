@@ -53,6 +53,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/queue: verify the owner's OS birth identity before forced retirement so stale leases cannot terminate a different process that reused the PID. Use boot- and namespace-scoped Linux start ticks that survive wall-clock changes. Preserve healthy legacy IPC use and report unverified live ownership without discarding its lease.
 - Sessions/locks: record process birth on new turn and queue mutation locks so abandoned locks can recover after PID reuse; bound identity queries while preserving live and uncertain owners.
 - Flows/replay: retain captured diagnostics, bundled conversations, and step links after failed ACP prompts; preserve parser rejection values and use the real session identity for isolated step records.
+- Flows/replay: keep the initial session-binding artifact immutable when real session IDs or agent metadata arrive later, while preserving current binding metadata for replay readers.
 
 ## 0.18.0 - 2026-09-20
 

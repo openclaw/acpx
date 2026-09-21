@@ -85,3 +85,9 @@ The bundled sample under `public/sample-run/` still exists for development and
 test fixtures. It comes from a real run of `examples/flows/two-turn.flow.ts`
 against the repo's mock ACP agent, with the machine-specific paths sanitized
 for readability.
+
+This is a legacy bundle: its `session_bound.bindingArtifact` references the mutable
+binding file and has a stale digest. It remains a reader-compatibility fixture,
+not an artifact-integrity example. Newly generated bundles store an immutable
+initial binding snapshot; the viewer continues to read current session metadata
+through the manifest's `bindingPath`.

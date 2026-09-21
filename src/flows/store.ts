@@ -71,7 +71,7 @@ export class FlowRunStore {
   private readonly traceSeqByRun = new Map<string, number>();
   private readonly sessionSeqByBundle = new Map<string, { allocated: number; persisted: number }>();
   private readonly manifestByRun = new Map<string, FlowRunManifest>();
-  private readonly appendChainByPath = new Map<string, Promise<void>>();
+  private readonly writeChainByPath = new Map<string, Promise<void>>();
 
   constructor(outputRoot: string = flowRunsBaseDir()) {
     this.outputRoot = outputRoot;
@@ -218,48 +218,50 @@ export class FlowRunStore {
   async ensureSessionBundle(
     runDir: string,
     state: FlowRunState,
-    binding: FlowSessionBinding,
+    inputBinding: FlowSessionBinding,
     record?: SessionRecord,
   ): Promise<void> {
+    const binding = structuredClone(inputBinding);
     const sessionDir = this.resolveRunPath(runDir, sessionDirPath(binding.bundleId));
-    await fs.mkdir(sessionDir, { recursive: true, mode: 0o700 });
-    await writePrivateJsonFile(path.join(sessionDir, "binding.json"), binding);
-    await ensureFile(path.join(sessionDir, "events.ndjson"));
-    if (record) {
-      await this.writeSessionRecord(runDir, state, binding, record);
-    }
+    // Preserve the first binding and publication order across concurrent metadata updates.
+    await this.serializeWrite(path.join(sessionDir, "binding.json"), async () => {
+      await fs.mkdir(sessionDir, { recursive: true, mode: 0o700 });
+      await writePrivateJsonFile(path.join(sessionDir, "binding.json"), binding);
+      await ensureFile(path.join(sessionDir, "events.ndjson"));
+      if (record) {
+        await this.writeSessionRecord(runDir, state, binding, record);
+      }
 
-    const manifest = this.getManifest(runDir, state);
-    const existing = manifest.sessions.find((entry) => entry.id === binding.bundleId);
-    const isNew = !existing;
-    if (isNew) {
-      const entry: FlowManifestSessionEntry = {
-        id: binding.bundleId,
-        handle: binding.handle,
-        bindingPath: path.posix.join(sessionDirPath(binding.bundleId), "binding.json"),
-        recordPath: path.posix.join(sessionDirPath(binding.bundleId), "record.json"),
-        eventsPath: path.posix.join(sessionDirPath(binding.bundleId), "events.ndjson"),
-      };
-      manifest.sessions.push(entry);
-      await writePrivateJsonFile(this.resolveRunPath(runDir, MANIFEST_PATH), manifest);
-    }
-
-    if (isNew) {
-      await this.appendTrace(runDir, state, {
-        scope: "session",
-        type: "session_bound",
-        sessionId: binding.bundleId,
-        payload: {
-          sessionId: binding.bundleId,
+      const manifest = this.getManifest(runDir, state);
+      const existing = manifest.sessions.find((entry) => entry.id === binding.bundleId);
+      if (!existing) {
+        // The trace keeps its initial snapshot while binding.json tracks current metadata.
+        const bindingArtifact = await this.writeArtifact(runDir, state, binding, {
+          mediaType: "application/json",
+          extension: "json",
+          emitTrace: false,
+        });
+        const entry: FlowManifestSessionEntry = {
+          id: binding.bundleId,
           handle: binding.handle,
-          bindingArtifact: {
-            path: path.posix.join(sessionDirPath(binding.bundleId), "binding.json"),
-            mediaType: "application/json",
-            sha256: await fileSha256(path.join(sessionDir, "binding.json")),
+          bindingPath: path.posix.join(sessionDirPath(binding.bundleId), "binding.json"),
+          recordPath: path.posix.join(sessionDirPath(binding.bundleId), "record.json"),
+          eventsPath: path.posix.join(sessionDirPath(binding.bundleId), "events.ndjson"),
+        };
+        manifest.sessions.push(entry);
+        await writePrivateJsonFile(this.resolveRunPath(runDir, MANIFEST_PATH), manifest);
+        await this.appendTrace(runDir, state, {
+          scope: "session",
+          type: "session_bound",
+          sessionId: binding.bundleId,
+          payload: {
+            sessionId: binding.bundleId,
+            handle: binding.handle,
+            bindingArtifact,
           },
-        },
-      });
-    }
+        });
+      }
+    });
   }
 
   async writeSessionRecord(
@@ -336,17 +338,21 @@ export class FlowRunStore {
   }
 
   private async appendJsonLine(filePath: string, value: unknown): Promise<void> {
-    const prior = this.appendChainByPath.get(filePath) ?? Promise.resolve();
-    const nextWrite = prior.then(async () => {
+    await this.serializeWrite(filePath, async () => {
       await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
       await appendRegularFile({ filePath, content: `${JSON.stringify(value)}\n`, mode: 0o600 });
     });
+  }
+
+  private async serializeWrite(filePath: string, write: () => Promise<void>): Promise<void> {
+    const prior = this.writeChainByPath.get(filePath) ?? Promise.resolve();
+    const nextWrite = prior.then(write);
     const tracked = nextWrite.finally(() => {
-      if (this.appendChainByPath.get(filePath) === tracked) {
-        this.appendChainByPath.delete(filePath);
+      if (this.writeChainByPath.get(filePath) === tracked) {
+        this.writeChainByPath.delete(filePath);
       }
     });
-    this.appendChainByPath.set(filePath, tracked);
+    this.writeChainByPath.set(filePath, tracked);
     await tracked;
   }
 }
@@ -506,11 +512,6 @@ function createBundledSessionRecord(
 
 async function ensureFile(filePath: string): Promise<void> {
   await appendRegularFile({ filePath, content: "", mode: 0o600 });
-}
-
-async function fileSha256(filePath: string): Promise<string> {
-  const payload = await fs.readFile(filePath);
-  return createHash("sha256").update(payload).digest("hex");
 }
 
 function toArtifactBuffer(content: unknown, mediaType: string): Buffer {
