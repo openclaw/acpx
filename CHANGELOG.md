@@ -14,7 +14,6 @@ Repo: https://github.com/openclaw/acpx
 
 - Sessions/storage: resolve scope, directory, ID, listing, and prune queries from current saved records instead of stale index metadata; save checkpoints without a shared index write that can fail after the record is committed. Ignore mismatched record filenames so copied records cannot create false matches or authorize pruning another record.
 - Sessions/ownership: retry failed turn-lock cleanup before the next operation so transient file errors cannot strand a live session, while preserving active owners and replacement locks.
-- Sessions/locks: record process birth on new turn and queue mutation locks so abandoned locks can recover after PID reuse; bound identity queries while preserving live and uncertain owners.
 - Docs: correct session setup and query examples, clarify permission and storage boundaries, and synchronize agent guides with the current CLI.
 - Flows: stop late adapter and command dispatch after timeout or interruption, wait for owned process cleanup and pending writes before finishing, and keep concurrent runs' ACP clients separate. Function actions can use `context.signal` and `context.runShell`; PR triage preserves command diagnostics while refusing follow-up commands after cancellation.
 - Flows: release completed runs' cached manifests and sequence counters after cleanup so repeated runs on one runner do not retain past run metadata.
@@ -52,6 +51,7 @@ Repo: https://github.com/openclaw/acpx
 - Conformance/filesystem: honor requested read line windows using the production client's selection logic, including empty windows, without bypassing permission or filesystem checks.
 
 - Sessions/queue: verify the owner's OS birth identity before forced retirement so stale leases cannot terminate a different process that reused the PID. Use boot- and namespace-scoped Linux start ticks that survive wall-clock changes. Preserve healthy legacy IPC use and report unverified live ownership without discarding its lease.
+- Sessions/locks: record process birth on new turn and queue mutation locks so abandoned locks can recover after PID reuse; bound identity queries while preserving live and uncertain owners.
 
 ## 0.18.0 - 2026-09-20
 
