@@ -5,7 +5,11 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { SessionQueueOwner, type QueueTask } from "../src/session/queue/ipc-server.js";
+
+const STALLED_TIMEOUT_SKIP =
+  process.platform === "win32" && "Windows named pipes do not expose partial write progress";
 
 async function withOwner(
   run: (
@@ -54,7 +58,7 @@ function submit(client: net.Socket, requestId: string): void {
   );
 }
 
-function sendOutput(task: QueueTask, count: number): void {
+function sendEvents(task: QueueTask, count: number): void {
   for (let index = 0; index < count; index += 1) {
     task.send({
       type: "event",
@@ -72,13 +76,106 @@ function sendOutput(task: QueueTask, count: number): void {
       },
     });
   }
+}
+
+function sendOutput(task: QueueTask, count: number): void {
+  sendEvents(task, count);
   task.send({ type: "error", requestId: task.requestId, message: "finished fixture" });
 }
+
+test(
+  "active queue sockets release stalled output despite continuing writes",
+  { timeout: 8000, skip: STALLED_TIMEOUT_SKIP },
+  async () => {
+    await withOwner(async (owner, connect) => {
+      const { client, serverSocket } = await connect();
+      client.pause();
+      submit(client, "active-stalled");
+      const task = await owner.nextTask(1000);
+      assert.ok(task);
+      const closed = once(serverSocket, "close", { signal: AbortSignal.timeout(4000) });
+      sendEvents(task, 16);
+      assert.ok(serverSocket.writableLength > 0);
+      const writing = setInterval(() => sendEvents(task, 1), 25);
+      try {
+        await closed;
+        assert.equal(serverSocket.writableLength, 0);
+      } finally {
+        clearInterval(writing);
+        task.close();
+        owner.completeTask(task);
+      }
+    });
+  },
+);
+
+test(
+  "active queue sockets preserve quiet turns and progressing reads",
+  { timeout: 12_000 },
+  async () => {
+    await withOwner(async (owner, connect) => {
+      const { client, serverSocket } = await connect();
+      submit(client, "active-progressing");
+      const task = await owner.nextTask(1000);
+      assert.ok(task);
+      await delay(1250);
+      assert.equal(serverSocket.destroyed, false, "a quiet prompt has no stalled output");
+
+      let receivedBytes = 0;
+      const reading = setInterval(() => {
+        const chunk = client.read(64 * 1024) as Buffer | null;
+        if (chunk) {
+          receivedBytes += chunk.length;
+        }
+      }, 50);
+      try {
+        const drained = once(serverSocket, "drain", { signal: AbortSignal.timeout(4000) });
+        const started = Date.now();
+        sendEvents(task, 16);
+        assert.ok(serverSocket.writableLength > 0);
+        await drained;
+        assert.ok(Date.now() - started > 1000, "reading must continue beyond the idle timeout");
+        await delay(1250);
+        assert.equal(serverSocket.destroyed, false, "a drained prompt may become quiet again");
+        assert.ok(receivedBytes >= 2 * 1024 * 1024);
+      } finally {
+        clearInterval(reading);
+        task.close();
+        owner.completeTask(task);
+      }
+    });
+  },
+);
+
+test(
+  "active queue sockets rearm stalled-output cleanup after draining",
+  { timeout: 8000, skip: STALLED_TIMEOUT_SKIP },
+  async () => {
+    await withOwner(async (owner, connect) => {
+      const { client, serverSocket } = await connect();
+      client.resume();
+      submit(client, "rearmed");
+      const task = await owner.nextTask(1000);
+      assert.ok(task);
+      const drained = once(serverSocket, "drain", { signal: AbortSignal.timeout(3000) });
+      sendEvents(task, 16);
+      await drained;
+      client.pause();
+      const closed = once(serverSocket, "close", { signal: AbortSignal.timeout(4000) });
+      sendEvents(task, 128);
+      await closed;
+      assert.equal(serverSocket.writableLength, 0);
+      task.close();
+      owner.completeTask(task);
+    });
+  },
+);
 
 test(
   "completed queue sockets release stalled output while the owner stays usable",
   {
     timeout: 10_000,
+    skip: STALLED_TIMEOUT_SKIP,
   },
   async () => {
     await withOwner(async (owner, connect) => {
@@ -103,6 +200,36 @@ test(
       assert.equal(successor.requestId, "successor");
       successor.close();
       owner.completeTask(successor);
+    });
+  },
+);
+
+test(
+  "Windows completed queue output survives a pause until its reader resumes",
+  { timeout: 8000, skip: process.platform !== "win32" },
+  async () => {
+    await withOwner(async (owner, connect) => {
+      const { client, serverSocket } = await connect();
+      client.pause();
+      submit(client, "windows-paused");
+      const task = await owner.nextTask(1000);
+      assert.ok(task);
+      sendOutput(task, 16);
+      task.close();
+      owner.completeTask(task);
+      await delay(1500);
+      assert.equal(serverSocket.destroyed, false, "opaque pipe progress is not a safe cutoff");
+      let receivedBytes = 0;
+      let tail = "";
+      const ended = once(client, "end", { signal: AbortSignal.timeout(4000) });
+      client.on("data", (chunk: Buffer) => {
+        receivedBytes += chunk.length;
+        tail = (tail + chunk.toString("utf8")).slice(-128);
+      });
+      client.resume();
+      await ended;
+      assert.ok(receivedBytes > 2 * 1024 * 1024);
+      assert.match(tail, /"message":"finished fixture"/u);
     });
   },
 );

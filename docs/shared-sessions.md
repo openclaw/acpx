@@ -77,6 +77,8 @@ A timed-out turn with no final ACP response fails even if it produced partial te
 
 After a submission loses its connection, acpx cannot always know whether the agent ran it. Such uncertain failures are not automatically retried, and the owner is not killed to retry the prompt. Inspect the session before deciding whether to submit new work.
 
+On macOS and Linux, the owner disconnects an output observer whose buffered writes stop progressing, while the admitted turn continues and remains observable through session watching; Windows retains stalled output because named pipes do not report partial write progress reliably enough to disconnect without truncating a reader that is still consuming output.
+
 ## Configuration and compatibility
 
 Shared runtime options are `cwd`, optional `agentRegistry`, required `permissionMode`, and optional `nonInteractivePermissions`, `permissionPolicy`, `authCredentials`, `authPolicy`, `timeoutMs`, and `ttlMs`. The default registry uses built-in agent commands. Applications with custom commands should pass `createAgentRegistry({ overrides: ... })` and use the identical command in CLI configuration or `--agent`.

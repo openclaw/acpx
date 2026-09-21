@@ -72,11 +72,22 @@ function makeQueueOwnerErrorFromUnknown(
   };
 }
 
+function armSocketDrainTimeout(socket: net.Socket): void {
+  // Windows reports named-pipe progress only when an entire write completes.
+  // Its idle timeout can truncate a reader that is still consuming output.
+  if (process.platform !== "win32") {
+    socket.setTimeout(QUEUE_SOCKET_DRAIN_TIMEOUT_MS);
+  }
+}
+
 function writeQueueMessage(socket: net.Socket, message: QueueOwnerMessage): void {
   if (socket.destroyed || !socket.writable) {
     return;
   }
-  socket.write(`${JSON.stringify(message)}\n`);
+  // Queued writes must not keep refreshing a stalled observer's idle deadline.
+  if (!socket.write(`${JSON.stringify(message)}\n`) && !socket.timeout) {
+    armSocketDrainTimeout(socket);
+  }
 }
 
 export type QueueTask = {
@@ -414,7 +425,7 @@ export class SessionQueueOwner {
     this.drainingSockets.add(socket);
     // Bound stalled drains without cutting off a reader still consuming output.
     // Active sessions can otherwise retain completed sockets indefinitely.
-    socket.setTimeout(QUEUE_SOCKET_DRAIN_TIMEOUT_MS, () => socket.destroy());
+    armSocketDrainTimeout(socket);
     socket.end(() => {
       this.drainingSockets.delete(socket);
       socket.destroy();
@@ -623,6 +634,13 @@ export class SessionQueueOwner {
   private handleConnection(socket: net.Socket): void {
     this.sockets.add(socket);
     socket.setEncoding("utf8");
+    socket.on("timeout", () => socket.destroy());
+    socket.on("drain", () => {
+      // Completed responses keep endSocket's drain deadline.
+      if (!socket.writableEnded) {
+        socket.setTimeout(0);
+      }
+    });
     socket.once("close", () => {
       this.sockets.delete(socket);
       this.taskSockets.delete(socket);

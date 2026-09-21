@@ -23,6 +23,7 @@ Repo: https://github.com/openclaw/acpx
 - ACP: avoid repeated rescanning of unfinished message lines so large fragmented responses parse in linear time while preserving UTF-8 and message byte limits.
 - CLI/output: preserve received assistant text in quiet mode when direct or queued prompts fail, and drain failed or cancelled watch turns without requiring a final ACP response or duplicating completed output.
 - Sessions/queue: release completed IPC sockets and buffered output when a waiting client stops reading, without waiting for the shared owner to shut down.
+- Sessions/queue: preserve progressing Windows named-pipe readers, and release stalled live-output observers on macOS and Linux without cancelling or replaying their admitted prompts or disconnecting quiet active turns.
 - Runtime/capabilities: return independent mutable capability snapshots so editing one result cannot change another caller's controls or advertised config keys.
 - Docs/site: preserve Markdown link destinations containing underscores, query parameters, and attribute characters while keeping label formatting and relative links intact.
 - Windows/processes: clean up observed ACP bridge descendants after close, startup failure, or bridge exit, checking process creation timestamps before terminating them and ignoring stale parent links from reused PIDs.
