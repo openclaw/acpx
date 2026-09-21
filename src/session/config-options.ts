@@ -116,10 +116,6 @@ export function applyConfigOptionSelection(
     return applyModelSelection(state, value, response);
   }
   const next = cloneSessionAcpxState(state) ?? {};
-  if (configId === "mode") {
-    next.desired_mode_id = value;
-  } else {
-    next.desired_config_options = { ...next.desired_config_options, [configId]: value };
-  }
+  next.desired_config_options = { ...next.desired_config_options, [configId]: value };
   return applyAcceptedConfigOptions(next, response);
 }

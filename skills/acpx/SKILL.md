@@ -212,10 +212,11 @@ Behavior:
 - `set-mode`: calls ACP `session/set_mode`.
 - `set-mode` mode ids are adapter-defined; unsupported values are rejected by the adapter (often `Invalid params`).
 - `set`: calls ACP `session/set_config_option`.
+- A config key named `mode` keeps config-option transport; explicit `set-mode` uses the separate `session/set_mode` control.
 - Current codex-acp releases expose `model` and `reasoning_effort` as separate config options.
 - `--model <id>`: Claude-compatible adapters may consume session creation metadata; other agents must advertise a model config option or legacy `models` metadata.
 - `set model <id>`: validates against the connected session's advertised models, uses `session/set_config_option` for model config options, and preserves `session/set_model` for explicitly advertised legacy models. Claude Code still accepts or rejects selectors absent from its advertised list.
-- Model switches can change or remove reasoning-effort controls. ACPX reconciles saved non-mode selections with the accepted response; select a supported effort again if needed.
+- Model switches can change or remove reasoning-effort controls. ACPX reconciles saved config selections with the accepted response; select a supported effort again if needed.
 - After reconnect, ACPX restores the saved model when advertised and replays saved config selections before prompting. A replay failure is reported instead of silently using defaults.
 - `set-mode`/`set` route through queue-owner IPC when active, otherwise reconnect directly.
 

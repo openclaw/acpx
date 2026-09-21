@@ -68,7 +68,9 @@ acpx claude set verbosity terse
 acpx set model gpt-5.4         # defaults to codex
 ```
 
-Calls ACP `session/set_config_option` with the adapter's config key. Values for its advertised model control follow the model-selection rules below; other values are sent unchanged. Non-mode selections are saved using the adapter's accepted values and restored after reconnect, before the next prompt. If a control changes another saved selection, such as reasoning effort after a model switch, ACPX saves the adjusted value or removes the selection when its control disappears. Unselected defaults are not pinned.
+Calls ACP `session/set_config_option` with the adapter's config key. Values for its advertised model control follow the model-selection rules below; other values are sent unchanged. Config selections are saved using the adapter's accepted values and restored after reconnect, before the next prompt. If a control changes another saved selection, such as reasoning effort after a model switch, ACPX saves the adjusted value or removes the selection when its control disappears. Unselected defaults are not pinned.
+
+A config key named `mode` keeps config-option transport; `set-mode` uses the separate legacy mode control. Their saved preferences remain independent. Existing legacy-mode preferences are not reinterpreted as config selections.
 
 After a genuine resume or load, ACPX restores the saved model first when the adapter advertises model controls, then replays saved configuration. An already loaded, reusable session needs no replay. A failed replay stops the operation with an error instead of silently continuing with defaults.
 
