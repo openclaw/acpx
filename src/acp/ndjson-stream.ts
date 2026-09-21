@@ -77,13 +77,25 @@ function enqueueNdJsonLine(
   }
 }
 
-function enqueueNdJsonLines(
+function enqueueNdJsonChunk(
   agentCommand: string,
-  lines: string[],
+  chunk: string,
+  fragments: string[],
   controller: ReadableStreamDefaultController<AnyMessage>,
 ): void {
+  // Scan each chunk once; rescanning an unfinished line makes large,
+  // fragmented messages quadratic. Join retained fragments only at LF.
+  const lines = chunk.split("\n");
+  const suffix = lines.pop() || "";
+  if (lines.length > 0 && fragments.length > 0) {
+    lines[0] = fragments.join("") + lines[0];
+    fragments.length = 0;
+  }
   for (const line of lines) {
     enqueueNdJsonLine(agentCommand, line, controller);
+  }
+  if (suffix) {
+    fragments.push(suffix);
   }
 }
 
@@ -102,7 +114,7 @@ export function createNdJsonMessageStream(
 
   const readable = new ReadableStream<AnyMessage>({
     async start(controller) {
-      let content = "";
+      const fragments: string[] = [];
       let retainedBytes = 0;
       const reader = input.getReader();
       try {
@@ -114,10 +126,12 @@ export function createNdJsonMessageStream(
           if (maxMessageBytes !== undefined) {
             retainedBytes = countLineBytes(value, retainedBytes, maxMessageBytes);
           }
-          content += textDecoder.decode(value, { stream: true });
-          const lines = content.split("\n");
-          content = lines.pop() || "";
-          enqueueNdJsonLines(agentCommand, lines, controller);
+          enqueueNdJsonChunk(
+            agentCommand,
+            textDecoder.decode(value, { stream: true }),
+            fragments,
+            controller,
+          );
         }
         controller.close();
       } catch (err) {

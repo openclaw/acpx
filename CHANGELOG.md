@@ -18,6 +18,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI: honor inherited prompt files, queue wait intent, and session-list options before subcommands; prefer explicit child values and apply validation to the combined options. Watch now honors inherited named-session selection while keeping its journal cursor separate from list pagination.
 - CLI/output: skip malformed message chunks and plan updates in text and quiet output so later valid output and completion survive; preserve raw notifications in JSON output. Thanks @SebTardif.
 - Flows/JSON: bound compatibility recovery by scanning and parsing work instead of collecting every candidate, preserving large and late embedded JSON while stopping excessive recovery through ambiguous text. Direct and fenced JSON parsing are unchanged. Thanks @SebTardif.
+- ACP: avoid repeated rescanning of unfinished message lines so large fragmented responses parse in linear time while preserving UTF-8 and message byte limits.
 - CLI/output: preserve received assistant text in quiet mode when direct or queued prompts fail, and drain failed or cancelled watch turns without requiring a final ACP response or duplicating completed output.
 - Runtime/capabilities: return independent mutable capability snapshots so editing one result cannot change another caller's controls or advertised config keys.
 - Docs/site: preserve Markdown link destinations containing underscores, query parameters, and attribute characters while keeping label formatting and relative links intact.

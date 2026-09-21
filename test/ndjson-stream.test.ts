@@ -145,3 +145,59 @@ test("createNdJsonMessageStream parses small multi-line NDJSON", async () => {
     { jsonrpc: "2.0", method: "session/update", params: { n: 2 } },
   ]);
 });
+
+test("fragmented ACP messages scan each decoded character once", async (t) => {
+  const message = { jsonrpc: "2.0", id: 1, result: "x".repeat(64 * 1024) };
+  const text = JSON.stringify(message) + "\n";
+  const bytes = new TextEncoder().encode(text);
+  const chunks: Uint8Array[] = [];
+  for (let offset = 0; offset < bytes.length; offset += 256) {
+    chunks.push(bytes.subarray(offset, offset + 256));
+  }
+
+  const originalSplit = String.prototype.split;
+  let scannedCharacters = 0;
+  t.mock.method(
+    String.prototype,
+    "split",
+    function (this: string, separator: unknown, limit?: number): string[] {
+      if (separator === "\n") {
+        scannedCharacters += this.length;
+      }
+      return Reflect.apply(originalSplit, this, [separator, limit]) as string[];
+    },
+  );
+  const stream = createNdJsonMessageStream(
+    "fixture",
+    sinkWritable(),
+    bytesFrom(chunks),
+    DEFAULT_MAX_ACP_MESSAGE_BYTES,
+  );
+
+  assert.deepEqual(await readAll(stream.readable), [message]);
+  assert.ok(scannedCharacters <= text.length, "unfinished fragments must not be rescanned");
+});
+
+test("fragment assembly preserves UTF-8, empty chunks, multiple lines, and discarded final suffixes", async () => {
+  const messages = [
+    { jsonrpc: "2.0", id: 1, result: "before 😀 after é" },
+    { jsonrpc: "2.0", id: 2, result: "next" },
+  ];
+  const bytes = new TextEncoder().encode(
+    `\n${messages.map((message) => JSON.stringify(message)).join("\r\n")}\n` +
+      '{"jsonrpc":"2.0","id":3,"result":"unterminated"}',
+  );
+  for (const chunkSize of [1, 7, bytes.length]) {
+    const chunks: Uint8Array[] = [];
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      chunks.push(new Uint8Array(), bytes.subarray(offset, offset + chunkSize));
+    }
+    const stream = createNdJsonMessageStream(
+      "fixture",
+      sinkWritable(),
+      bytesFrom(chunks),
+      readMaxAcpMessageBytes("0"),
+    );
+    assert.deepEqual(await readAll(stream.readable), messages);
+  }
+});
