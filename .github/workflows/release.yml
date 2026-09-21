@@ -85,7 +85,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main --depth=1
+          git fetch --no-tags origin main
 
           node - <<'NODE'
           const { execFileSync } = require("node:child_process");
