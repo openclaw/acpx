@@ -91,13 +91,15 @@ Object.assign(globalThis, {
       if (ownerExited) {
         return "gone";
       }
-      if (scenario === "unknown" || (scenario === "refresh-unknown" && queryTimes.length === 1)) {
+      if (
+        scenario === "unknown" ||
+        (scenario === "unknown-during-reclaim" && queryTimes.length > 1) ||
+        (scenario === "refresh-unknown" && queryTimes.length === 1)
+      ) {
         return "unknown";
       }
       const matching =
-        scenario === "matching" ||
-        (scenario === "changed-during-reclaim" && queryTimes.length > 1) ||
-        (scenario === "refresh-matching" && queryTimes.length === 1);
+        scenario === "matching" || (scenario === "refresh-matching" && queryTimes.length === 1);
       return matching ? "matching" : "gone";
     },
   },
@@ -143,9 +145,10 @@ const guard = `${surface === "mutation guard" ? queueLockFilePath(id) : marker}.
 fixturePath = surface === "turn marker" ? marker : guard;
 const publishing = scenario === "publish" || scenario === "publish-unverified" || leaseScenario;
 const refresh = scenario === "refresh-matching" || scenario === "refresh-unknown";
-const preserve = ["matching", "unknown", "malformed", "changed-during-reclaim"].includes(
-  scenario ?? "",
-);
+const freshVeto = scenario === "unknown-during-reclaim";
+const preserve =
+  ["matching", "unknown", "malformed"].includes(scenario ?? "") ||
+  (freshVeto && surface === "turn marker");
 const fixturePayload = JSON.stringify({
   pid: orphanPid,
   created_at: "2000-01-01",
@@ -288,7 +291,14 @@ if (leaseScenario) {
 } else if (blocked) {
   await assert.rejects(
     acquire,
-    surface === "mutation guard" ? { code: "file_lock_timeout" } : (error) => error === cancelled,
+    surface === "mutation guard"
+      ? { code: "file_lock_timeout" }
+      : (error) =>
+          error === cancelled ||
+          (error instanceof Error &&
+            error.name === "AbortError" &&
+            (error as NodeJS.ErrnoException).code === "ABORT_ERR" &&
+            error.cause === cancelled),
   );
   assert.equal(admitted, false);
   assert.equal(await fs.readFile(fixturePath, "utf8"), fixturePayload);
@@ -301,9 +311,23 @@ if (leaseScenario) {
   assert.equal(queryTimes.length, 1);
   assert.equal(await fs.readFile(fixturePath, "utf8"), fixturePayload);
 } else {
+  if (freshVeto && surface !== "turn marker") {
+    // fs-safe refuses this acquisition after a fresh veto; it does not promise
+    // to retry. A separate acquisition needs its own admissible observation.
+    await assert.rejects(acquire, { code: "file_lock_stale" });
+    assert.equal(admitted, false);
+    assert.equal(queryTimes.length, 2);
+    assert.equal(await fs.readFile(fixturePath, "utf8"), fixturePayload);
+    await assert.rejects(fs.access(`${fixturePath}.reclaim`), { code: "ENOENT" });
+    ownerExited = true;
+  }
   await acquire();
   assert.equal(admitted, true);
-  assert.equal(ownQueries, 1, "capture own birth once, outside the lock retry loop");
+  assert.equal(
+    ownQueries,
+    freshVeto && surface !== "turn marker" ? 2 : 1,
+    "capture own birth once per acquisition, outside the lock retry loop",
+  );
   for (const record of published) {
     assert.equal(record.pid, process.pid);
     assert.deepEqual(
@@ -325,7 +349,7 @@ if (leaseScenario) {
       );
     }
   }
-  if (scenario === "changed-during-reclaim") {
+  if (freshVeto) {
     assert.ok(queryTimes.length >= 2, "fresh observation must veto deletion");
   }
   if (

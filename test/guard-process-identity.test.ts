@@ -49,7 +49,7 @@ for (const surface of surfaces) {
     "prior-boot",
     "reused-unsupported-time-namespace",
     "malformed",
-    "changed-during-reclaim",
+    "unknown-during-reclaim",
     "refresh-matching",
     "refresh-unknown",
     "publish",
