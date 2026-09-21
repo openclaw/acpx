@@ -36,15 +36,20 @@ These hooks report ACPX-owned processes; they do not persist process leases,
 reconcile a host restart, terminate arbitrary descendants, or guarantee cleanup
 after abrupt owner death. Hosts retain responsibility for those policies.
 
-On POSIX systems, acpx also performs cooperative descendant cleanup when a
+acpx also performs cooperative descendant cleanup when a
 bridge closes, fails initialization or admission, or exits after setup. It
 captures descendants after initialization and session setup, and before ending
 the bridge's stdin. Surviving processes receive `SIGTERM`, followed by `SIGKILL`
 if needed. Cleanup rechecks each process's OS birth timestamp before signaling;
 it never treats a saved PID alone as authority. Concurrent teardown paths share
 the same cleanup operation, and late exits cannot overwrite a replacement
-launch's status. The bridge retains its inherited process group and terminal
-signal behavior.
+launch's status. On POSIX, the bridge retains its inherited process group and
+terminal signal behavior.
+
+On Windows, snapshots use Windows PowerShell and `Win32_Process` creation times.
+Processes whose parent PID was reused after their creation are not adopted.
+Closing stdin remains the graceful step; Node terminates Windows processes
+forcefully for both `SIGTERM` and `SIGKILL`.
 
 Bridge and descendant teardown has an eight-second budget. POSIX queue-owner
 recovery allows twelve seconds before forcibly stopping the owner, leaving room
@@ -55,7 +60,7 @@ This is best-effort cleanup with OS timestamp precision and process-query races.
 A descendant can escape observation if it starts after the last snapshot and
 every witnessed ancestor exits before the next one. Unavailable OS process
 information leaves unverified descendants untouched. Abrupt acpx death still
-requires separate host supervision; Windows keeps its existing process cleanup.
+requires separate host supervision.
 
 ## Inspect models without a runtime store
 

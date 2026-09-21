@@ -14,6 +14,17 @@ import { inspectAgentModels } from "../src/runtime/public/probe.js";
 type FixturePids = { bridge: number; descendant: number };
 
 function isRunning(pid: number): boolean {
+  if (process.platform === "win32") {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+        throw error;
+      }
+      return false;
+    }
+  }
   const result = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8" });
   assert.ifError(result.error);
   if (result.status === 1) {
@@ -53,68 +64,64 @@ for (const mode of [
   "detached",
   "ignore-term",
 ]) {
-  test(
-    `AcpClient cleans descendants after ${mode}`,
-    { skip: process.platform === "win32" },
-    async (t) => {
-      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-cleanup-"));
-      const pidFile = path.join(cwd, "pids.json");
-      const sibling = spawn(process.execPath, ["--eval", "setInterval(() => {}, 1000)"], {
-        stdio: "ignore",
-      });
-      const admissionError = new Error("synthetic admission failure");
-      const client = new AcpClient({
-        agentCommand: process.execPath,
-        agentArgv: [
-          process.execPath,
-          path.resolve("dist-test/test/fixtures/process-cleanup-agent.js"),
-          mode,
-          pidFile,
-        ],
-        cwd,
-        permissionMode: "deny-all",
-        processLifecycle:
-          mode === "admission-fail"
-            ? {
-                onSpawned: async () => {
-                  await readPids(pidFile);
-                  throw admissionError;
-                },
-              }
-            : undefined,
-      });
-      t.after(async () => {
-        await client.close();
-        const pids = await readPids(pidFile);
-        if (isRunning(pids.descendant)) {
-          process.kill(pids.descendant, "SIGKILL");
-        }
-        sibling.kill("SIGKILL");
-        await fs.rm(cwd, { recursive: true, force: true });
-      });
-
-      if (mode === "init-fail") {
-        await assert.rejects(() => client.start(), /synthetic initialization failure/);
-      } else if (mode === "admission-fail") {
-        await assert.rejects(
-          () => client.start(),
-          (error) => error === admissionError,
-        );
-      } else {
-        await client.start();
-      }
+  test(`AcpClient cleans descendants after ${mode}`, {}, async (t) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-cleanup-"));
+    const pidFile = path.join(cwd, "pids.json");
+    const sibling = spawn(process.execPath, ["--eval", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore",
+    });
+    const admissionError = new Error("synthetic admission failure");
+    const client = new AcpClient({
+      agentCommand: process.execPath,
+      agentArgv: [
+        process.execPath,
+        path.resolve("dist-test/test/fixtures/process-cleanup-agent.js"),
+        mode,
+        pidFile,
+      ],
+      cwd,
+      permissionMode: "deny-all",
+      processLifecycle:
+        mode === "admission-fail"
+          ? {
+              onSpawned: async () => {
+                await readPids(pidFile);
+                throw admissionError;
+              },
+            }
+          : undefined,
+    });
+    t.after(async () => {
+      await client.close();
       const pids = await readPids(pidFile);
-      if (mode === "bridge-exit") {
-        await client.createSession();
-      } else {
-        await Promise.all([client.close(), client.close()]);
+      if (isRunning(pids.descendant)) {
+        process.kill(pids.descendant, "SIGKILL");
       }
-      await assertStopped(pids.bridge, "bridge");
-      await assertStopped(pids.descendant, "descendant");
-      assert.equal(sibling.exitCode, null, "unrelated sibling was terminated");
-      assert(sibling.pid && isRunning(sibling.pid));
-    },
-  );
+      sibling.kill("SIGKILL");
+      await fs.rm(cwd, { recursive: true, force: true });
+    });
+
+    if (mode === "init-fail") {
+      await assert.rejects(() => client.start(), /synthetic initialization failure/);
+    } else if (mode === "admission-fail") {
+      await assert.rejects(
+        () => client.start(),
+        (error) => error === admissionError,
+      );
+    } else {
+      await client.start();
+    }
+    const pids = await readPids(pidFile);
+    if (mode === "bridge-exit") {
+      await client.createSession();
+    } else {
+      await Promise.all([client.close(), client.close()]);
+    }
+    await assertStopped(pids.bridge, "bridge");
+    await assertStopped(pids.descendant, "descendant");
+    assert.equal(sibling.exitCode, null, "unrelated sibling was terminated");
+    assert(sibling.pid && isRunning(sibling.pid));
+  });
 }
 
 test(

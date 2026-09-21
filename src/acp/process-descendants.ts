@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   isChildProcessRunning,
@@ -7,6 +8,24 @@ import {
 } from "./client-process.js";
 
 type ProcessIdentity = { pid: number; parentPid: number; birth: string };
+
+const WINDOWS_PROCESS_SNAPSHOT = [
+  "$ErrorActionPreference = 'Stop'",
+  "Get-CimInstance -ClassName Win32_Process -Property ProcessId,ParentProcessId,CreationDate | ForEach-Object {",
+  "if ($null -ne $_.CreationDate) {",
+  "'{0} {1} S {2}' -f $_.ProcessId,$_.ParentProcessId,$_.CreationDate.ToUniversalTime().ToString('o')",
+  "}",
+  "}",
+].join("\n");
+
+function windowsPowerShellPath(): string {
+  const systemRoot = process.env.SystemRoot;
+  if (!systemRoot || !path.win32.isAbsolute(systemRoot)) {
+    throw new Error("Windows system directory is unavailable");
+  }
+  // A bare executable name searches the project directory before PATH on Windows.
+  return path.win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+}
 
 function parseProcessTable(output: string): Map<number, ProcessIdentity> {
   const table = new Map<number, ProcessIdentity>();
@@ -27,6 +46,12 @@ function includeDescendants(table: Map<number, ProcessIdentity>, owned: Set<numb
   do {
     expanded = false;
     for (const identity of table.values()) {
+      const parent = table.get(identity.parentPid);
+      // Windows keeps the creator PID after it exits. A later process with that
+      // PID cannot own an older child; UTC roundtrip timestamps sort by birth.
+      if (process.platform === "win32" && (!parent || parent.birth > identity.birth)) {
+        continue;
+      }
       if (owned.has(identity.parentPid) && !owned.has(identity.pid)) {
         owned.add(identity.pid);
         expanded = true;
@@ -35,16 +60,17 @@ function includeDescendants(table: Map<number, ProcessIdentity>, owned: Set<numb
   } while (expanded);
 }
 
-/** Best-effort POSIX cleanup for descendants witnessed during this child launch. */
+/** Best-effort cleanup for descendants witnessed during this child launch. */
 export class ProcessDescendants {
   private identities = new Map<number, ProcessIdentity>();
+  private rootBirth: string | undefined;
   private pending: Promise<boolean> | undefined;
   private retired = false;
 
   constructor(private readonly child: ChildProcess) {}
 
   capture(timeoutMs = PROCESS_HELPER_TIMEOUT_MS): Promise<boolean> {
-    if (this.retired || process.platform === "win32") {
+    if (this.retired) {
       return Promise.resolve(true);
     }
     this.pending ??= this.readSnapshot(timeoutMs).finally(() => {
@@ -55,9 +81,14 @@ export class ProcessDescendants {
 
   private async readSnapshot(timeoutMs: number): Promise<boolean> {
     try {
-      const output = await runTimedExecFile("ps", ["-eo", "pid=,ppid=,stat=,lstart="], {
-        timeoutMs,
-      });
+      const output =
+        process.platform === "win32"
+          ? await runTimedExecFile(
+              windowsPowerShellPath(),
+              ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_PROCESS_SNAPSHOT],
+              { timeoutMs, windowsHide: true },
+            )
+          : await runTimedExecFile("ps", ["-eo", "pid=,ppid=,stat=,lstart="], { timeoutMs });
       if (!this.retired) {
         this.refresh(parseProcessTable(output));
       }
@@ -74,13 +105,21 @@ export class ProcessDescendants {
         owned.add(pid);
       }
     }
-    const root = this.child.pid;
-    if (root && isChildProcessRunning(this.child)) {
-      owned.add(root);
-    }
+    this.includeRoot(table, owned);
     includeDescendants(table, owned);
-    owned.delete(root ?? 0);
+    owned.delete(this.child.pid ?? 0);
     this.identities = new Map([...table].filter(([pid]) => owned.has(pid)));
+  }
+
+  private includeRoot(table: Map<number, ProcessIdentity>, owned: Set<number>): void {
+    const root = this.child.pid;
+    const rootIdentity = root && table.get(root);
+    if (rootIdentity && isChildProcessRunning(this.child)) {
+      this.rootBirth ??= rootIdentity.birth;
+      if (rootIdentity.birth === this.rootBirth) {
+        owned.add(rootIdentity.pid);
+      }
+    }
   }
 
   async signal(signal: NodeJS.Signals, timeoutMs: number): Promise<void> {
