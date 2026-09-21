@@ -127,9 +127,10 @@ test("Linux queries parse raw stat ticks after the final comm delimiter and igno
     identity.startTicks,
     "a ) nested\n(name)",
   );
-  t.mock.method(Date, "now", () => 1);
+  let clock = 1;
+  t.mock.method(Date, "now", () => clock);
   const before = await probeProcessIdentity(fixturePid);
-  t.mock.method(Date, "now", () => 9_000_000_000_000);
+  clock = 9_000_000_000_000;
   const after = await probeProcessIdentity(fixturePid);
   assert.deepEqual(before, { state: "alive", identity });
   assert.deepEqual(after, before, "a wall-clock step must not change a live process identity");
