@@ -93,6 +93,8 @@ If a quiet prompt fails, `acpx` exits non-zero and emits exactly one single-line
 
 `DETAIL_CODE` is omitted when unavailable. Embedded line endings in the message are replaced with spaces. The diagnostic never goes to stdout; quiet stdout remains reserved for any assistant text the adapter produced. This stderr contract applies to direct and queued prompts; it does not change the `json` or `--json-strict` streams.
 
+Text already received is preserved even when a failed turn has no final ACP response. Quiet session-watch replay also emits buffered text when a failed or cancelled turn settles, without duplicating output from completed turns.
+
 `quiet` is unaffected by `--suppress-reads` because it does not print tool call output to begin with.
 
 ## `--suppress-reads`

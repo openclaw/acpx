@@ -1074,7 +1074,8 @@ class QuietOutputFormatter implements OutputFormatter {
   private readonly stdout: WritableLike;
   private readonly stderr: WritableLike;
   private chunks: string[] = [];
-  private flushed = false;
+  private finished = false;
+  private outputWritten = false;
   private metadataFlushed = false;
 
   constructor(stdout: WritableLike, stderr: WritableLike) {
@@ -1097,12 +1098,17 @@ class QuietOutputFormatter implements OutputFormatter {
       update?.update.sessionUpdate === "agent_message_chunk" &&
       update.update.content.type === "text"
     ) {
-      this.chunks.push(update.update.content.text);
+      if (!this.finished) {
+        this.chunks.push(update.update.content.text);
+      }
       return;
     }
 
     if (parsePromptStopReason(message)) {
-      this.flushBufferedOutput();
+      if (!this.finished) {
+        this.finished = true;
+        this.flushBufferedOutput(true);
+      }
       this.flushMetadata(message);
     }
   }
@@ -1116,6 +1122,7 @@ class QuietOutputFormatter implements OutputFormatter {
     acp?: OutputErrorAcpPayload;
     timestamp?: string;
   }): void {
+    this.flush();
     const qualifier = params.detailCode ? `${params.code} ${params.detailCode}` : params.code;
     const message = preferredAcpErrorDetails(params.acp) ?? params.message;
     this.stderr.write(`[acpx] error: ${qualifier} ${message.replace(/\r\n?|\n/g, " ")}\n`);
@@ -1126,16 +1133,16 @@ class QuietOutputFormatter implements OutputFormatter {
   }
 
   flush(): void {
-    // no-op for streaming output
+    this.flushBufferedOutput();
   }
 
-  private flushBufferedOutput(): void {
-    if (this.flushed) {
+  private flushBufferedOutput(allowEmpty = false): void {
+    const text = this.chunks.join("");
+    this.chunks = [];
+    if (text.length === 0 && (!allowEmpty || this.outputWritten)) {
       return;
     }
-
-    this.flushed = true;
-    const text = this.chunks.join("");
+    this.outputWritten = true;
     this.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
   }
 

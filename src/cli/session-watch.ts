@@ -32,7 +32,9 @@ function watchRenderer(policy: OutputPolicy): (event: SessionWatchEvent) => stri
     } else if (event.type === "message") {
       renderWatchMessage(event, sanitizer, formatter, policy.format === "quiet");
     } else {
-      formatter.flush();
+      if (event.type === "turn_result") {
+        formatter.flush();
+      }
       if (policy.format !== "quiet") {
         chunks.push(watchLifecycleLine(event));
       }

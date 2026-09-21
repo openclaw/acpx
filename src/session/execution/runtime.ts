@@ -1382,7 +1382,6 @@ export async function runOnce(
 
         const response = await runExecPromptWithRetries(sessionId);
         promptTurnActive = false;
-        output.flush();
         return toPromptResult(response.stopReason, sessionId, client, response._meta);
       },
       handleInterrupt: async () => {
@@ -1397,7 +1396,11 @@ export async function runOnce(
     markOutputAlreadyEmitted(failure, matchedAcpError !== undefined && shouldMarkAcpErrorsEmitted);
     throw failure;
   } finally {
-    await closeOwnedClient();
+    try {
+      await closeOwnedClient();
+    } finally {
+      output.flush();
+    }
   }
 }
 

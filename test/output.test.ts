@@ -694,6 +694,56 @@ test("quiet formatter outputs only agent text and flushes on prompt result", () 
   assert.equal(writer.toString(), "Hello world\n");
 });
 
+test("quiet formatter drains pending text without sealing an empty or intermediate flush", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("quiet", { stdout: writer });
+  formatter.flush();
+  assert.equal(writer.toString(), "");
+  formatter.onAcpMessage(messageChunk("PARTIAL-π 🦞\nsecond line") as never);
+  formatter.flush();
+  formatter.flush();
+  assert.equal(writer.toString(), "PARTIAL-π 🦞\nsecond line\n");
+  formatter.onAcpMessage(messageChunk("later text\n") as never);
+  formatter.onAcpMessage(doneResult("end_turn") as never);
+  formatter.flush();
+  assert.equal(writer.toString(), "PARTIAL-π 🦞\nsecond line\nlater text\n");
+});
+
+test("quiet formatter preserves pending text once on terminal error", () => {
+  const stdout = new CaptureWriter();
+  const stderr = new CaptureWriter();
+  const formatter = createOutputFormatter("quiet", { stdout, stderr });
+  formatter.onAcpMessage(messageChunk("partial ") as never);
+  formatter.onAcpMessage(errorResult("intermediate callback error") as never);
+  assert.equal(stdout.toString(), "");
+  formatter.onAcpMessage(messageChunk("answer\n") as never);
+  formatter.onError({ code: "RUNTIME", message: "synthetic failure" });
+  formatter.flush();
+  assert.equal(stdout.toString(), "partial answer\n");
+  assert.equal(stderr.toString(), "[acpx] error: RUNTIME synthetic failure\n");
+});
+
+test("quiet formatter preserves empty success without duplicating final drains", () => {
+  const stdout = new CaptureWriter();
+  const formatter = createOutputFormatter("quiet", { stdout });
+  formatter.flush();
+  formatter.onAcpMessage(doneResult("end_turn") as never);
+  formatter.flush();
+  formatter.onAcpMessage(doneResult("end_turn") as never);
+  assert.equal(stdout.toString(), "\n");
+});
+
+test("quiet formatter does not append a blank line when completion follows a drain", () => {
+  const stdout = new CaptureWriter();
+  const formatter = createOutputFormatter("quiet", { stdout });
+  formatter.onAcpMessage(messageChunk("answer") as never);
+  formatter.flush();
+  formatter.onAcpMessage(doneResult("end_turn") as never);
+  formatter.onAcpMessage(messageChunk("late after success") as never);
+  formatter.flush();
+  assert.equal(stdout.toString(), "answer\n");
+});
+
 test("quiet formatter emits final usage and cost metadata to stderr", () => {
   const stdout = new CaptureWriter();
   const stderr = new CaptureWriter();

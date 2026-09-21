@@ -4126,6 +4126,53 @@ for (const command of ["prompt", "exec"]) {
   }
 }
 
+for (const command of ["exec", "prompt"] as const) {
+  const prompt = "partial-retryable-error";
+  test(`integration: quiet ${command} preserves text after ${prompt}`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      await fs.mkdir(cwd);
+      let warmText = "";
+      try {
+        if (command === "prompt") {
+          const created = await runCli([...baseAgentArgs(cwd), "sessions", "new"], homeDir);
+          assert.equal(created.code, 0, created.stderr);
+          const warm = await runCli(
+            [...baseAgentArgs(cwd), "--format", "quiet", "prompt", "echo warm"],
+            homeDir,
+          );
+          assert.equal(warm.code, 0, warm.stderr);
+          assert.match(warm.stdout, /warm/);
+          warmText = warm.stdout;
+        }
+        const result = await runCli(
+          [...baseAgentArgs(cwd), "--format", "quiet", "--prompt-retries", "0", command, prompt],
+          homeDir,
+        );
+        assert.equal(result.code, 1, result.stderr);
+        assert.equal(result.stdout, "partial update\n");
+        const detail = command === "prompt" ? " QUEUE_RUNTIME_PROMPT_FAILED" : "";
+        assert.equal(result.stderr, `[acpx] error: RUNTIME${detail} Internal error\n`);
+        if (command === "prompt") {
+          const closed = await runCli([...baseAgentArgs(cwd), "sessions", "close"], homeDir);
+          assert.equal(closed.code, 0, closed.stderr);
+          const replay = await runCli(
+            [...baseAgentArgs(cwd), "--format", "quiet", "sessions", "watch"],
+            homeDir,
+          );
+          assert.equal(replay.code, 0, replay.stderr);
+          assert.equal(replay.stdout, `${warmText}partial update\n`);
+          assert.equal(replay.stderr, "");
+        }
+      } finally {
+        if (command === "prompt") {
+          await runCli([...baseAgentArgs(cwd), "sessions", "close"], homeDir);
+        }
+      }
+    });
+  });
+}
+
 test("integration: prompt recovers when loadSession returns not found without emitting load error", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

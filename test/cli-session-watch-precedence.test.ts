@@ -48,7 +48,14 @@ async function runCli(home: string, args: string[]): Promise<CliResult> {
   });
 }
 
-async function saveClosedJournal(home: string, name?: string): Promise<string> {
+async function saveClosedJournal(
+  home: string,
+  name?: string,
+  result: Parameters<SessionEventWriter["finishTurn"]>[1] = {
+    status: "completed",
+    stopReason: "end_turn",
+  },
+): Promise<string> {
   const label = name ?? "default";
   const id = `watch-${label}`;
   const record = makeSessionRecord(
@@ -79,7 +86,7 @@ async function saveClosedJournal(home: string, name?: string): Promise<string> {
         },
       },
     });
-    await writer.finishTurn(id, { status: "completed", stopReason: "end_turn" });
+    await writer.finishTurn(id, result);
   } finally {
     await writer.close();
   }
@@ -129,6 +136,31 @@ function assertReplay(result: CliResult, name: string, afterStarted = false): vo
         content: { type: "text", text: `saved-${name}-output` },
       },
     },
+  });
+}
+
+for (const result of [
+  { status: "failed", error: { message: "synthetic failure" } },
+  { status: "cancelled" },
+  { status: "cancelled", stopReason: "cancelled" },
+] satisfies Parameters<SessionEventWriter["finishTurn"]>[1][]) {
+  test(`quiet watch drains ${JSON.stringify(result)} without a raw ACP completion`, async () => {
+    await fixture(async (home) => {
+      await saveClosedJournal(home, "settled", result);
+      const replay = await runCli(home, [
+        "--format",
+        "quiet",
+        "codex",
+        "sessions",
+        "watch",
+        "-s",
+        "settled",
+      ]);
+      assert.equal(replay.signal, null, replay.stderr);
+      assert.equal(replay.code, 0, replay.stderr);
+      assert.equal(replay.stdout, "saved-settled-output\n");
+      assert.equal(replay.stderr, "");
+    });
   });
 }
 
