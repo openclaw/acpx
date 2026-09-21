@@ -412,6 +412,9 @@ export class SessionQueueOwner {
     }
     this.taskSockets.delete(socket);
     this.drainingSockets.add(socket);
+    // Bound stalled drains without cutting off a reader still consuming output.
+    // Active sessions can otherwise retain completed sockets indefinitely.
+    socket.setTimeout(QUEUE_SOCKET_DRAIN_TIMEOUT_MS, () => socket.destroy());
     socket.end(() => {
       this.drainingSockets.delete(socket);
       socket.destroy();
