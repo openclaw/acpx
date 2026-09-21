@@ -542,23 +542,27 @@ processes, so stale recovery cannot remove a replacement owner's files. Recovery
 rechecks the owner's generation and recorded OS birth identity before each
 termination signal. A confirmed exit or a different birth identity permits
 cleanup of that generation's abandoned files without signaling a replacement
-process. POSIX birth timestamps have one-second precision; process queries and
-signals are separate OS operations.
+process. Linux uses raw process start ticks, boot identity, and the observer's PID
+and time namespaces, so wall-clock changes do not change process identity. Other
+POSIX birth timestamps have one-second precision. Process queries and signals
+are separate OS operations.
 
 Healthy owners from older versions remain usable through IPC. Explicit close
 requests their normal shutdown and waits for exit. A live owner without a
 verifiable birth identity is never forcibly terminated: recovery preserves its
 lease and reports `QUEUE_OWNER_IDENTITY_UNVERIFIED`. Restore local process-query
 access and retry, or let the owner finish its normal shutdown or idle expiry.
-Missing or incompatible identity data also preserves a live owner's lease;
-confirmed process exit still permits cleanup of older records.
+Missing identity data also preserves a live owner's lease; confirmed local
+process exit still permits cleanup of older records. Incompatible identity kinds,
+unknown process scope, and another namespace in the same boot preserve custody,
+even when the numeric PID does not exist locally.
 
 Abandoned incomplete reservations remain recoverable after the stale-owner window;
 ambiguous mutation guards are preserved instead of being removed by age. Guard
 cleanup errors remain retryable on the next status or ownership operation. A live
 owner stops accepting work and shuts down normally if its guard cleanup fails.
 The exclusion guarantee requires current clients in the same machine's local
-PID namespace; do not share the queue home across hosts or PID namespaces. Older
+PID and time namespaces; do not share the queue home across hosts or namespaces. Older
 clients that bypass the guard do not participate.
 
 If an ambiguous `.acpx/queues/<queue-key>.lock.guard` file or its `.reclaim`

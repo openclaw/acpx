@@ -14,7 +14,7 @@ const fixturePid = 2_000_001;
 const posixBirth = "2026-09-21T10:00:01.000Z";
 const windowsBirth = "2026-09-21T10:00:01.1234567Z";
 
-function processQuery(t: TestContext, platform: NodeJS.Platform = "linux") {
+function processQuery(t: TestContext, platform: NodeJS.Platform = "darwin") {
   const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
   const originalRoot = process.env.SystemRoot;
   Object.defineProperty(process, "platform", { value: platform });

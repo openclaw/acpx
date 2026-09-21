@@ -38,6 +38,7 @@ import {
   stopProcess,
   withTempHome,
   writeQueueOwnerLock,
+  verifiedProcessIdentity,
 } from "./queue-test-helpers.js";
 import { makeSessionRecord, writeSessionRecordFile } from "./runtime-test-helpers.js";
 
@@ -1319,6 +1320,7 @@ test("trySubmitToRunningOwner recovers stale owners before MCP conflict checks",
       mcpConfigPath: "/tmp/old-mcp.json",
       mcpConfigFingerprint: "fingerprint-v1",
       heartbeatAt: "2000-01-01T00:00:00.000Z",
+      processIdentity: await verifiedProcessIdentity(keeper.pid),
     });
 
     try {

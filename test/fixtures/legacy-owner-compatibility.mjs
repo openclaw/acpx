@@ -18,7 +18,7 @@ const { sendSession } = await load("src/session/execution/queue-owner-runtime.js
 const { closeSession } = await load("src/session/execution/session-control.js");
 const { readQueueOwnerRecord, isProcessAlive } = await load("src/session/queue/lease-store.js");
 const { queueSocketBaseDir } = await load("src/session/queue/paths.js");
-const { probeProcessIdentity } = await load("src/process-identity.js");
+const { probeProcessIdentity, compareProcessBirthIdentity } = await load("src/process-identity.js");
 
 const agentSource = `
 import { spawn } from 'node:child_process';
@@ -114,8 +114,7 @@ for (const supportsClose of [false, true]) {
           const observed = await probeProcessIdentity(pid);
           if (
             observed.state === "alive" &&
-            observed.identity.kind === expected.kind &&
-            observed.identity.value === expected.value
+            compareProcessBirthIdentity(expected, observed.identity) === "matching"
           ) {
             try {
               originalKill(pid, "SIGKILL");

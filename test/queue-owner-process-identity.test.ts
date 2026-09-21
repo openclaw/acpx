@@ -180,7 +180,7 @@ for (const [name, retire] of Object.entries(retirementPaths)) {
           original.child.kill("SIGKILL");
           await original.exited;
           assert.deepEqual(await readQueueOwnerRecord(sessionId), recorded);
-          if (process.platform !== "win32") {
+          if (process.platform !== "win32" && process.platform !== "linux") {
             // POSIX lstart has one-second precision; model distinct incarnations.
             await delay(1_100);
           }
@@ -262,13 +262,19 @@ test(
         assert(recorded?.processIdentity);
         const stale = {
           ...recorded,
-          processIdentity: {
-            kind: recorded.processIdentity.kind,
-            value:
-              process.platform === "win32"
-                ? "2000-01-01T00:00:00.0000000Z"
-                : "2000-01-01T00:00:00.000Z",
-          },
+          processIdentity:
+            recorded.processIdentity.kind === "linux-proc"
+              ? {
+                  ...recorded.processIdentity,
+                  startTicks: (BigInt(recorded.processIdentity.startTicks) + 1n).toString(),
+                }
+              : {
+                  kind: recorded.processIdentity.kind,
+                  value:
+                    process.platform === "win32"
+                      ? "2000-01-01T00:00:00.0000000Z"
+                      : "2000-01-01T00:00:00.000Z",
+                },
         };
         const successor = { ...recorded, ownerGeneration: recorded.ownerGeneration + 1 };
         const lockPath = queueLockFilePath(sessionId);
@@ -314,6 +320,7 @@ for (const uncertainty of ["legacy", "malformed", "incompatible", "query-failure
         const owner = await startLeaseOwner(sessionId);
         const queryEnv = process.platform === "win32" ? "SystemRoot" : "PATH";
         const previousQueryEnv = process.env[queryEnv];
+        const previousExecPath = process.execPath;
         let socketPath: string | undefined;
         try {
           const recorded = await readQueueOwnerRecord(sessionId);
@@ -340,6 +347,9 @@ for (const uncertainty of ["legacy", "malformed", "incompatible", "query-failure
           if (uncertainty === "query-failure") {
             // Native helper discovery fails while the already-published owner stays alive.
             process.env[queryEnv] = process.platform === "win32" ? "relative" : "";
+            if (process.platform === "linux") {
+              process.execPath = "/proc/self/acpx-missing-identity-helper";
+            }
           }
           await assert.rejects(resolveUsableQueueOwner(sessionId, observed), (error) => {
             assert(error instanceof QueueConnectionError);
@@ -353,6 +363,7 @@ for (const uncertainty of ["legacy", "malformed", "incompatible", "query-failure
             assert.equal(await fs.readFile(socketPath, "utf8"), "retained endpoint");
           }
         } finally {
+          process.execPath = previousExecPath;
           if (previousQueryEnv === undefined) {
             delete process.env[queryEnv];
           } else {
@@ -405,10 +416,13 @@ test(
       const { tryAcquireQueueOwnerLease, refreshQueueOwnerLease, releaseQueueOwnerLease } = await import(${JSON.stringify(moduleUrl)});
       const key = process.platform === 'win32' ? 'SystemRoot' : 'PATH';
       const previous = process.env[key];
+      const previousExecPath = process.execPath;
       process.env[key] = '';
+      if (process.platform === 'linux') process.execPath = '/proc/self/acpx-missing-identity-helper';
       const lease = await tryAcquireQueueOwnerLease(${JSON.stringify(sessionId)});
       if (!lease || lease.processIdentity) throw new Error('Expected an unverified published lease');
       if (previous === undefined) delete process.env[key]; else process.env[key] = previous;
+      process.execPath = previousExecPath;
       await refreshQueueOwnerLease(lease, {queueDepth:2});
       onFixtureFinish = () => releaseQueueOwnerLease(lease);
       process.send([process.pid]);

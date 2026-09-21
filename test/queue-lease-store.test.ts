@@ -45,6 +45,8 @@ function mockPosixOwnerIdentity(
   pid: number,
   birth = () => "Mon Sep 21 10:00:01 2026",
 ): ProcessBirthIdentity {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { value: "darwin" });
   context.mock.method(childProcess, "execFile", ((
     command: string,
     _args: readonly string[],
@@ -59,6 +61,9 @@ function mockPosixOwnerIdentity(
   context.after(() => {
     context.mock.restoreAll();
     syncBuiltinESMExports();
+    if (originalPlatform) {
+      Object.defineProperty(process, "platform", originalPlatform);
+    }
   });
   return { kind: "posix-lstart", value: "2026-09-21T10:00:01.000Z" };
 }

@@ -7,8 +7,8 @@ import { runTimedExecFile } from "../../acp/client-process.js";
 import { QueueConnectionError } from "../../errors.js";
 import {
   getOwnProcessIdentity,
+  observeProcessIncarnation,
   parseProcessBirthIdentity,
-  probeProcessIdentity,
   type ProcessBirthIdentity,
 } from "../../process-identity.js";
 import { isProcessAlive, isProcessDefinitelyDead } from "../../process-liveness.js";
@@ -610,22 +610,9 @@ export async function releaseQueueOwnerLease(lease: QueueOwnerLease): Promise<vo
   await cleanupQueueOwnerFiles(lease.sessionId, lease.socketPath, () => ownsQueueLease(lease));
 }
 
-async function probeQueueOwnerProcess(
-  owner: QueueOwnerRecord,
-): Promise<"matching" | "gone" | "unknown"> {
-  const probe = await probeProcessIdentity(owner.pid);
-  if (probe.state === "dead") {
-    return "gone";
-  }
-  if (probe.state !== "alive" || probe.identity.kind !== owner.processIdentity?.kind) {
-    return "unknown";
-  }
-  return probe.identity.value === owner.processIdentity.value ? "matching" : "gone";
-}
-
 function unverifiedQueueOwnerError(owner: QueueOwnerRecord): QueueConnectionError {
   return new QueueConnectionError(
-    `Cannot safely retire queue owner pid ${owner.pid}: its process birth identity is unverified. Its lease was retained. Restore local process-query access and retry, or let the owner finish normal shutdown or idle expiry.`,
+    `Cannot safely retire queue owner pid ${owner.pid}: its process birth identity is unverified. Its lease was retained. Retry from the same local process namespace with process-query access, or let the owner finish normal shutdown or idle expiry.`,
     { detailCode: "QUEUE_OWNER_IDENTITY_UNVERIFIED", origin: "queue", retryable: true },
   );
 }
@@ -649,7 +636,7 @@ async function dispatchVerifiedQueueOwnerSignal(
     }
     // Generation protects the lease; a fresh OS birth protects the PID. The
     // same numeric PID can belong to an unrelated process after an owner crash.
-    const identity = await probeQueueOwnerProcess(current);
+    const identity = await observeProcessIncarnation(current.pid, current.processIdentity);
     if (identity !== "matching") {
       retirement.gone = identity === "gone";
       retirement.unverified = identity === "unknown";
@@ -667,7 +654,10 @@ async function retireQueueOwner(owner: QueueOwnerRecord, requireStale: boolean):
     (signal) => dispatchVerifiedQueueOwnerSignal(owner, signal, requireStale, retirement),
     isProcessDefinitelyDead,
   );
-  if (retirement.leaseReleased || (retirement.unverified && !requireStale)) {
+  if (retirement.unverified && requireStale) {
+    throw unverifiedQueueOwnerError(owner);
+  }
+  if (retirement.leaseReleased || retirement.unverified) {
     // A released lease may belong to a successor; legacy owners may also finish
     // cooperative shutdown. Neither state permits signaling a remembered PID.
     await waitForProcessExit(
@@ -676,10 +666,15 @@ async function retireQueueOwner(owner: QueueOwnerRecord, requireStale: boolean):
       isProcessDefinitelyDead,
     );
   }
-  if (retirement.unverified && !isProcessDefinitelyDead(owner.pid)) {
+  // Numeric exit is only a waiting hint. Revalidate the expected scope before
+  // cleanup: a locally absent PID can still name a foreign namespace's owner.
+  const gone =
+    retirement.gone ||
+    (await observeProcessIncarnation(owner.pid, owner.processIdentity)) === "gone";
+  if (retirement.unverified && !gone) {
     throw unverifiedQueueOwnerError(owner);
   }
-  return retirement.gone || isProcessDefinitelyDead(owner.pid);
+  return gone;
 }
 
 export async function terminateQueueOwnerForSession(
@@ -693,7 +688,7 @@ export async function terminateQueueOwnerForSession(
     return;
   }
 
-  if (!isProcessDefinitelyDead(owner.pid) && !(await retireQueueOwner(owner, requireStale))) {
+  if (!(await retireQueueOwner(owner, requireStale))) {
     return;
   }
   // Once this incarnation is confirmed gone it cannot return. Recheck the lease
