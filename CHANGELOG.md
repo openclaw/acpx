@@ -55,6 +55,7 @@ Repo: https://github.com/openclaw/acpx
 - Flows/replay: retain captured diagnostics, bundled conversations, and step links after failed ACP prompts; preserve parser rejection values and use the real session identity for isolated step records.
 - Flows/replay: keep the initial session-binding artifact immutable when real session IDs or agent metadata arrive later, while preserving current binding metadata for replay readers.
 - Sessions/history: preserve meaningful whitespace in text and thought chunks, retain opaque tool IDs across updates and reloads, and keep tool failure state when a partial update omits status.
+- Runtime: keep early turn errors available for delayed consumers without an unhandled rejection terminating the host.
 
 ## 0.18.0 - 2026-09-20
 

@@ -236,6 +236,8 @@ export class AcpxRuntime implements AcpxRuntimeLike {
         onPermissionRequest: input.onPermissionRequest,
       }),
     );
+    // Callers may hold the turn before reading its lazy promises or events.
+    void turnPromise.catch(() => {});
     return {
       requestId: input.requestId,
       get promptStarted() {

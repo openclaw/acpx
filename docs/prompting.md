@@ -105,6 +105,8 @@ For applications using `acpx/runtime`, `AcpRuntimeTurn.promptStarted` resolves o
 
 Readiness does not mean the agent has finished processing the prompt. Await `turn.result` for the turn outcome after persistence and cleanup have settled.
 
+You may hold the object returned by `startTurn()` before reading its promises or events. Early startup or admission errors remain observable when you later consume that turn.
+
 ### Host prompt authority
 
 In-process `createAcpRuntime()` turns accept an optional synchronous `assertActive`
