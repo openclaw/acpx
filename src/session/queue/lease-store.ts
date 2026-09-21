@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { withTempFile } from "@openclaw/fs-safe/advanced";
 import { isHardlinkFallbackError } from "@openclaw/fs-safe/durability";
+import { runTimedExecFile } from "../../acp/client-process.js";
 import { isProcessAlive, isProcessDefinitelyDead } from "../../process-liveness.js";
 import { settlePendingQueueLeaseGuard, withQueueLeaseMutation } from "./lease-mutation.js";
 import { queueBaseDir, queueLockFilePath, queueSocketBaseDir, queueSocketPath } from "./paths.js";
@@ -288,6 +289,25 @@ function dispatchSignal(pid: number, signal: NodeJS.Signals): boolean {
   } catch {
     return false;
   }
+}
+
+async function dispatchQueueOwnerSignal(pid: number, signal: NodeJS.Signals): Promise<boolean> {
+  if (process.platform !== "win32") {
+    return dispatchSignal(pid, signal);
+  }
+  // Windows SIGTERM bypasses the owner's shutdown handler. Retire its tree
+  // before losing the parent; a failed helper must not authorize lease cleanup.
+  const systemRoot = process.env.SystemRoot;
+  if (!systemRoot || !path.win32.isAbsolute(systemRoot)) {
+    throw new Error("Windows queue-owner cleanup requires an absolute SystemRoot directory");
+  }
+  // Do not let the working directory supply an executable named taskkill.
+  const taskkill = path.win32.join(systemRoot, "System32", "taskkill.exe");
+  await runTimedExecFile(taskkill, ["/pid", String(pid), "/T", "/F"], {
+    timeoutMs: PROCESS_SIGTERM_GRACE_MS,
+    windowsHide: true,
+  });
+  return true;
 }
 
 async function terminateWithDispatch(
@@ -596,7 +616,7 @@ export async function terminateQueueOwnerForSession(
           if (!(await ownsQueueLease(owner, requireStale && signal === "SIGTERM"))) {
             return false;
           }
-          return dispatchSignal(owner.pid, signal);
+          return await dispatchQueueOwnerSignal(owner.pid, signal);
         }),
       isProcessDefinitelyDead,
     );

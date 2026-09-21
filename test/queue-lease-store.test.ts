@@ -410,6 +410,10 @@ test("stale health observations do not terminate a recovered heartbeat", async (
 });
 
 test("a final heartbeat cannot cancel termination already in progress", async (context) => {
+  if (process.platform === "win32") {
+    context.skip("POSIX signal escalation; Windows retires the owner tree in one command");
+    return;
+  }
   await withTempHome(async (homeDir) => {
     const sessionId = "lease-retiring-heartbeat";
     const paths = queuePaths(homeDir, sessionId);
@@ -453,6 +457,10 @@ test("a final heartbeat cannot cancel termination already in progress", async (c
 
 for (const permissionFailure of ["initial", "after-signal"] as const) {
   test(`ambiguous owner liveness ${permissionFailure} preserves lease and endpoint`, async (context) => {
+    if (process.platform === "win32" && permissionFailure === "after-signal") {
+      context.skip("POSIX signal escalation; Windows helper failures have separate coverage");
+      return;
+    }
     await withTempHome(async (homeDir) => {
       const sessionId = `lease-ambiguous-${permissionFailure}`;
       const paths = queuePaths(homeDir, sessionId);
