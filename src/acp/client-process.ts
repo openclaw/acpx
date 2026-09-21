@@ -13,6 +13,7 @@ export async function runTimedExecFile(
     timeoutMs?: number;
     maxBufferBytes?: number;
     windowsHide?: boolean;
+    env?: NodeJS.ProcessEnv;
   } = {},
 ): Promise<string> {
   const timeoutMs = Math.max(1, Math.round(options.timeoutMs ?? PROCESS_HELPER_TIMEOUT_MS));
@@ -27,6 +28,7 @@ export async function runTimedExecFile(
         maxBuffer: options.maxBufferBytes ?? PROCESS_HELPER_MAX_BUFFER_BYTES,
         killSignal: "SIGKILL",
         windowsHide: options.windowsHide,
+        env: options.env,
       },
       (error, stdout) => {
         if (settled) {

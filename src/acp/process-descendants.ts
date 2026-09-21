@@ -7,13 +7,13 @@ import {
   runTimedExecFile,
 } from "./client-process.js";
 
-type ProcessIdentity = { pid: number; parentPid: number; birth: string };
+type ProcessIdentity = { pid: number; parentPid: number; groupPid: number; birth: string };
 
 const WINDOWS_PROCESS_SNAPSHOT = [
   "$ErrorActionPreference = 'Stop'",
   "Get-CimInstance -ClassName Win32_Process -Property ProcessId,ParentProcessId,CreationDate | ForEach-Object {",
   "if ($null -ne $_.CreationDate) {",
-  "'{0} {1} S {2}' -f $_.ProcessId,$_.ParentProcessId,$_.CreationDate.ToUniversalTime().ToString('o')",
+  "'{0} {1} 0 S {2}' -f $_.ProcessId,$_.ParentProcessId,$_.CreationDate.ToUniversalTime().ToString('o')",
   "}",
   "}",
 ].join("\n");
@@ -30,11 +30,16 @@ function windowsPowerShellPath(): string {
 function parseProcessTable(output: string): Map<number, ProcessIdentity> {
   const table = new Map<number, ProcessIdentity>();
   for (const line of output.split("\n")) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
-    if (match && !match[3].startsWith("Z")) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
+    if (match && !match[4].startsWith("Z")) {
       const pid = Number(match[1]);
       if (Number.isSafeInteger(pid) && pid > 1 && pid !== process.pid) {
-        table.set(pid, { pid, parentPid: Number(match[2]), birth: match[4] });
+        table.set(pid, {
+          pid,
+          parentPid: Number(match[2]),
+          groupPid: Number(match[3]),
+          birth: match[5],
+        });
       }
     }
   }
@@ -66,8 +71,23 @@ export class ProcessDescendants {
   private rootBirth: string | undefined;
   private pending: Promise<boolean> | undefined;
   private retired = false;
+  private readonly ownProcessGroup: boolean;
+  private captureGroupAfterExit: boolean;
+  private groupExitedAt: number | undefined;
+  private readonly onRootExit = () => {
+    this.groupExitedAt = Date.now();
+  };
 
-  constructor(private readonly child: ChildProcess) {}
+  constructor(
+    private readonly child: ChildProcess,
+    options: { ownProcessGroup?: boolean } = {},
+  ) {
+    this.ownProcessGroup = process.platform !== "win32" && Boolean(options.ownProcessGroup);
+    this.captureGroupAfterExit = this.ownProcessGroup && isChildProcessRunning(child);
+    if (this.ownProcessGroup) {
+      child.once("exit", this.onRootExit);
+    }
+  }
 
   capture(timeoutMs = PROCESS_HELPER_TIMEOUT_MS): Promise<boolean> {
     if (this.retired) {
@@ -80,7 +100,14 @@ export class ProcessDescendants {
   }
 
   private async readSnapshot(timeoutMs: number): Promise<boolean> {
+    const deadline = performance.now() + timeoutMs;
+    const rootWasRunning = isChildProcessRunning(this.child);
+    const captureRootGroup = rootWasRunning || this.captureGroupAfterExit;
+    if (!rootWasRunning) {
+      this.captureGroupAfterExit = false;
+    }
     try {
+      // Keep POSIX lstart parseable when bounding the final group snapshot by root exit.
       const output =
         process.platform === "win32"
           ? await runTimedExecFile(
@@ -88,17 +115,28 @@ export class ProcessDescendants {
               ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_PROCESS_SNAPSHOT],
               { timeoutMs, windowsHide: true },
             )
-          : await runTimedExecFile("ps", ["-eo", "pid=,ppid=,stat=,lstart="], { timeoutMs });
+          : await runTimedExecFile("ps", ["-eo", "pid=,ppid=,pgid=,stat=,lstart="], {
+              timeoutMs,
+              env: { ...process.env, LC_ALL: "C" },
+            });
       if (!this.retired) {
-        this.refresh(parseProcessTable(output));
+        this.refresh(parseProcessTable(output), captureRootGroup);
+        // An in-flight snapshot can precede the shell's last fork. Join one fresh
+        // exit snapshot before retiring its group ownership or resolving terminal exit.
+        if (this.captureGroupAfterExit && !isChildProcessRunning(this.child)) {
+          return await this.readSnapshot(Math.max(1, deadline - performance.now()));
+        }
       }
       return true;
     } catch {
+      if (!isChildProcessRunning(this.child)) {
+        this.captureGroupAfterExit = false;
+      }
       return false;
     }
   }
 
-  private refresh(table: Map<number, ProcessIdentity>): void {
+  private refresh(table: Map<number, ProcessIdentity>, rootWasRunning: boolean): void {
     const owned = new Set<number>();
     for (const [pid, identity] of this.identities) {
       if (table.get(pid)?.birth === identity.birth) {
@@ -106,6 +144,9 @@ export class ProcessDescendants {
       }
     }
     this.includeRoot(table, owned);
+    if (this.ownProcessGroup) {
+      this.includeProcessGroup(table, owned, rootWasRunning);
+    }
     includeDescendants(table, owned);
     owned.delete(this.child.pid ?? 0);
     this.identities = new Map([...table].filter(([pid]) => owned.has(pid)));
@@ -118,6 +159,26 @@ export class ProcessDescendants {
       this.rootBirth ??= rootIdentity.birth;
       if (rootIdentity.birth === this.rootBirth) {
         owned.add(rootIdentity.pid);
+      }
+    }
+  }
+
+  private includeProcessGroup(
+    table: Map<number, ProcessIdentity>,
+    owned: Set<number>,
+    rootWasRunning: boolean,
+  ): void {
+    const root = this.child.pid;
+    // A shell can exit while its first snapshot is in flight. Its recorded exit
+    // bounds the final snapshot; subsequent discovery requires a witnessed member.
+    if (root && (rootWasRunning || [...owned].some((pid) => table.get(pid)?.groupPid === root))) {
+      for (const identity of table.values()) {
+        if (
+          identity.groupPid === root &&
+          (this.groupExitedAt === undefined || Date.parse(identity.birth) <= this.groupExitedAt)
+        ) {
+          owned.add(identity.pid);
+        }
       }
     }
   }
@@ -136,6 +197,10 @@ export class ProcessDescendants {
     }
   }
 
+  hasTrackedProcesses(): boolean {
+    return this.identities.size > 0;
+  }
+
   async waitForExit(timeoutMs: number): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     do {
@@ -152,6 +217,7 @@ export class ProcessDescendants {
 
   retire(): void {
     this.retired = true;
+    this.child.off("exit", this.onRootExit);
     this.identities.clear();
   }
 }

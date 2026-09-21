@@ -63,7 +63,7 @@ function windowsProcesses(t: TestContext) {
 }
 
 function processRow(pid: number, parent: number, birth: string): string {
-  return `${pid} ${parent} S ${birth}\r\n`;
+  return `${pid} ${parent} 0 S ${birth}\r\n`;
 }
 
 test("Windows descendants include nested processes and survive bridge exit", async (t) => {

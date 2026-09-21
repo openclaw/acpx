@@ -172,7 +172,7 @@ test(
     const birth = "Wed Sep 16 10:00:00 2026";
     await fs.writeFile(
       tableFile,
-      `${root.pid} 1 S ${birth}\n${descendantPid} ${root.pid} S ${birth}\n${descendantPid + 1} 1 S ${birth}\n`,
+      `${root.pid} 1 ${root.pid} S ${birth}\n${descendantPid} ${root.pid} ${root.pid} S ${birth}\n${descendantPid + 1} 1 1 S ${birth}\n`,
     );
     await descendants.signal("SIGTERM", 1000);
     assert.deepEqual(signals, [{ pid: descendantPid, signal: "SIGTERM" }]);
@@ -180,11 +180,11 @@ test(
 
     root.kill("SIGTERM");
     await once(root, "exit");
-    await fs.writeFile(tableFile, `${descendantPid} 1 S Wed Sep 16 10:00:01 2026\n`);
+    await fs.writeFile(tableFile, `${descendantPid} 1 ${root.pid} S Wed Sep 16 10:00:01 2026\n`);
     await descendants.signal("SIGKILL", 1000);
     assert.deepEqual(signals, [], "a reused PID received a signal");
 
-    await fs.writeFile(tableFile, `${descendantPid} 1 S ${birth}\n`);
+    await fs.writeFile(tableFile, `${descendantPid} 1 ${root.pid} S ${birth}\n`);
     await descendants.signal("SIGKILL", 1000);
     assert.deepEqual(signals, [], "a retired identity was rediscovered without an owned ancestor");
   },

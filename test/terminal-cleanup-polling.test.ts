@@ -17,6 +17,10 @@ function createCleanupHarness(killGraceMs = 10) {
     signal: null as NodeJS.Signals | null | undefined,
     exitPromise: Promise.resolve({ exitCode: 0, signal: null }),
     processGroupSnapshotPromise: undefined as Promise<void> | undefined,
+    processHelperTimeoutMs: 8000,
+    descendants: undefined as
+      | { capture(timeoutMs: number): Promise<boolean>; hasTrackedProcesses(): boolean }
+      | undefined,
   };
   const cleanup = manager as unknown as {
     waitForCleanupAfterSignal(value: typeof terminal): Promise<boolean>;
@@ -109,4 +113,24 @@ test("terminal cleanup deadline ignores backward wall-clock adjustments", async 
     terminal.signal = null;
     await waiting;
   }
+});
+
+test("terminal cleanup gives descendant snapshots only its remaining grace period", async () => {
+  const killGraceMs = 30;
+  const { terminal, wait } = createCleanupHarness(killGraceMs);
+  const budgets: number[] = [];
+  terminal.descendants = {
+    async capture(timeoutMs) {
+      budgets.push(timeoutMs);
+      await delay(Math.min(timeoutMs, 60));
+      return true;
+    },
+    hasTrackedProcesses: () => true,
+  };
+  assert.equal(await wait(), false);
+  assert.ok(budgets.length > 0);
+  assert.ok(budgets.every((timeoutMs) => timeoutMs > 0 && timeoutMs <= killGraceMs));
+  const capturesAtReturn = budgets.length;
+  await delay(75);
+  assert.equal(budgets.length, capturesAtReturn, "expired cleanup must not leave snapshot pollers");
 });
