@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createSyntheticSessionRecord } from "../src/flows/runtime-support.js";
 import {
   defineFlow,
   acp,
@@ -600,5 +601,110 @@ test("FlowRunStore preserves bundled session event order across concurrent appen
     );
   } finally {
     await fs.rm(outputRoot, { recursive: true, force: true });
+  }
+});
+
+test("FlowRunStore excludes failed and pending appends from the persisted cursor", async (t) => {
+  const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-event-cursor-"));
+  t.after(async () => fs.rm(outputRoot, { recursive: true, force: true }));
+  const store = new FlowRunStore(outputRoot);
+  const runDir = await store.createRunDir("cursor");
+  const now = "2026-09-21T00:00:00.000Z";
+  const state: FlowRunState = {
+    runId: "cursor",
+    flowName: "cursor",
+    status: "running",
+    startedAt: now,
+    updatedAt: now,
+    input: {},
+    outputs: {},
+    results: {},
+    steps: [],
+    sessionBindings: {},
+  };
+  const binding = {
+    key: "capture",
+    handle: "capture",
+    bundleId: "capture",
+    name: "capture",
+    agentName: "unused",
+    agentCommand: "unused",
+    cwd: outputRoot,
+    acpxRecordId: "record",
+    acpSessionId: "provider",
+  };
+  const record = createSyntheticSessionRecord({
+    binding,
+    createdAt: now,
+    updatedAt: now,
+    conversation: createSessionConversation(now),
+    acpxState: undefined,
+    lastSeq: 999,
+  });
+  await store.ensureSessionBundle(runDir, state, binding, record);
+  const eventsPath = path.join(runDir, "sessions", binding.bundleId, "events.ndjson");
+  const savedPath = `${eventsPath}.saved`;
+  const append = () =>
+    store.appendSessionEvent(runDir, binding, "inbound", {
+      jsonrpc: "2.0",
+      method: "test/message",
+      params: {},
+    });
+  const readCursor = async () => {
+    await store.writeSessionRecord(runDir, state, binding, record);
+    const saved = JSON.parse(
+      await fs.readFile(path.join(runDir, "sessions", binding.bundleId, "record.json"), "utf8"),
+    ) as SessionRecord;
+    return saved.lastSeq;
+  };
+  assert.equal(await readCursor(), 0);
+
+  // Force a real append refusal while leaving record publication available.
+  await fs.rename(eventsPath, savedPath);
+  await fs.mkdir(eventsPath);
+  try {
+    await assert.rejects(append());
+  } finally {
+    await fs.rmdir(eventsPath);
+    await fs.rename(savedPath, eventsPath);
+  }
+  assert.equal(await fs.readFile(eventsPath, "utf8"), "");
+  assert.equal(await readCursor(), 0, "a rejected append is not a replay boundary");
+
+  assert.deepEqual(await Promise.all([append(), append()]), [2, 3]);
+  assert.equal(await readCursor(), 3);
+  const seqs = (await fs.readFile(eventsPath, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => (JSON.parse(line) as { seq: number }).seq);
+  assert.deepEqual(seqs, [2, 3], "failed reservations must not reuse a later event's identity");
+
+  let release!: () => void;
+  let enter!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const harness = store as unknown as {
+    appendJsonLine(file: string, value: unknown): Promise<void>;
+  };
+  const original = harness.appendJsonLine.bind(store);
+  t.mock.method(harness, "appendJsonLine", async (file: string, value: unknown) => {
+    enter();
+    await held;
+    await original(file, value);
+  });
+  const pending = append();
+  try {
+    await entered;
+    assert.equal(await readCursor(), 3, "a pending append is not a replay boundary");
+    release();
+    assert.equal(await pending, 4);
+    assert.equal(await readCursor(), 4);
+  } finally {
+    release();
+    await pending;
   }
 });

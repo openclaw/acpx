@@ -133,26 +133,28 @@ type FlowStepExecutionResult = FlowNodeExecutionResult & {
 type TracedPromptResult = {
   rawText: string;
   sessionInfo: FlowSessionBinding;
-  conversation: {
-    sessionId: string;
-    messageStart: number;
-    messageEnd: number;
-    eventStartSeq: number;
-    eventEndSeq: number;
-  };
+  conversation?: FlowStepTrace["conversation"];
+  rawResponseArtifact: FlowArtifactRef;
+};
+
+type PromptCaptureReceipt<T> = {
+  outcome: PromiseSettledResult<T>;
+  events?: { eventStartSeq: number; eventEndSeq: number };
+  lastSeq: number;
 };
 
 type PreparedAcpPrompt = {
   agentInfo: ResolvedFlowAgent;
   prompt: PromptInput;
-  promptText: string;
   promptArtifact: FlowArtifactRef;
   attempt: FlowAttempt;
+  result: FlowNodeExecutionResult;
 };
 
 type FlowAttemptContext = {
   nodeContext: FlowNodeContext;
   attempt: FlowAttempt;
+  acpResult?: FlowNodeExecutionResult;
 };
 
 export class FlowRunner {
@@ -426,6 +428,7 @@ export class FlowRunner {
         rawText: null,
         sessionInfo: null,
         agentInfo: null,
+        ...context.acpResult,
         trace: await finalizeStepTrace(
           this.store,
           runDir,
@@ -433,7 +436,7 @@ export class FlowRunner {
           nodeId,
           attemptId,
           undefined,
-          extractAttachedStepTrace(error) ?? null,
+          context.acpResult ? context.acpResult.trace : (extractAttachedStepTrace(error) ?? null),
         ),
       };
     } finally {
@@ -795,6 +798,15 @@ export class FlowRunner {
     const prompt = normalizePromptInput(await Promise.resolve(node.prompt(context.nodeContext)));
     context.attempt.assertActive();
     const promptText = promptToDisplayText(prompt);
+    const result: FlowNodeExecutionResult = {
+      output: undefined,
+      promptText,
+      rawText: null,
+      sessionInfo: null,
+      agentInfo,
+      trace: null,
+    };
+    context.acpResult = result;
     updateStatusDetail(state, summarizePrompt(promptText, node.statusDetail));
     await context.attempt.own(() => this.writeAcpPromptHeartbeat(runDir, state, context.attempt));
     const promptArtifact = await context.attempt.own(() =>
@@ -805,12 +817,13 @@ export class FlowRunner {
         attemptId: context.attempt.attemptId,
       }),
     );
+    result.trace = { promptArtifact };
     return {
       agentInfo,
       prompt,
-      promptText,
       promptArtifact,
       attempt: context.attempt,
+      result,
     };
   }
 
@@ -845,6 +858,7 @@ export class FlowRunner {
       node.profile,
       prepared.agentInfo,
     );
+    prepared.result.sessionInfo = binding;
     await prepared.attempt.own(() =>
       this.initializeIsolatedSessionBundle(runDir, state, binding, prepared.attempt),
     );
@@ -858,16 +872,9 @@ export class FlowRunner {
       ),
     );
     const prompt = await prepared.attempt.own(() =>
-      this.runIsolatedPrompt(
-        runDir,
-        state,
-        binding,
-        prepared.agentInfo,
-        prepared.prompt,
-        prepared.attempt,
-      ),
+      this.runIsolatedPrompt(runDir, state, binding, prepared),
     );
-    return await this.finishAcpPrompt(runDir, state, node, context, prepared, prompt, binding);
+    return await this.finishAcpPrompt(runDir, state, node, context, prepared, prompt);
   }
 
   private async initializeIsolatedSessionBundle(
@@ -896,6 +903,7 @@ export class FlowRunner {
     prepared: PreparedAcpPrompt,
     binding: FlowSessionBinding,
   ): Promise<FlowNodeExecutionResult> {
+    prepared.result.sessionInfo = binding;
     await prepared.attempt.own(() =>
       this.appendAcpPromptPreparedTrace(
         runDir,
@@ -906,17 +914,9 @@ export class FlowRunner {
       ),
     );
     const prompt = await prepared.attempt.own(() =>
-      this.runPersistentPrompt(runDir, state, binding, prepared.prompt, prepared.attempt),
+      this.runPersistentPrompt(runDir, state, binding, prepared),
     );
-    return await this.finishAcpPrompt(
-      runDir,
-      state,
-      node,
-      context,
-      prepared,
-      prompt,
-      prompt.sessionInfo,
-    );
+    return await this.finishAcpPrompt(runDir, state, node, context, prepared, prompt);
   }
 
   private async appendAcpPromptPreparedTrace(
@@ -946,60 +946,57 @@ export class FlowRunner {
     context: FlowAttemptContext,
     prepared: PreparedAcpPrompt,
     prompt: TracedPromptResult,
-    sessionInfo: FlowSessionBinding,
   ): Promise<FlowNodeExecutionResult> {
-    const rawResponseArtifact = await prepared.attempt.own(() =>
-      this.writeAcpRawResponseArtifact(runDir, state, prompt, sessionInfo, prepared.attempt),
-    );
     await prepared.attempt.own(() =>
-      this.appendAcpResponseParsedTrace(
-        runDir,
-        state,
-        prompt,
-        sessionInfo,
-        rawResponseArtifact,
-        prepared.attempt,
-      ),
+      this.appendAcpResponseParsedTrace(runDir, state, prompt, prepared.attempt),
     );
+    const output = await this.parseAcpOutput(node, context, prompt.rawText);
+    return { ...prepared.result, output };
+  }
+
+  private async publishAcpCapture(
+    runDir: string,
+    state: FlowRunState,
+    prepared: PreparedAcpPrompt,
+    sessionInfo: FlowSessionBinding,
+    record: SessionRecord,
+    messageStart: number,
+    rawText: string,
+    events: PromptCaptureReceipt<unknown>["events"],
+  ): Promise<TracedPromptResult> {
+    const result = prepared.result;
+    result.sessionInfo = sessionInfo;
     const trace: FlowStepTrace = {
       sessionId: sessionInfo.bundleId,
       promptArtifact: prepared.promptArtifact,
-      rawResponseArtifact,
-      conversation: prompt.conversation,
     };
-    const output = await this.parseAcpOutput(node, context, prompt.rawText, trace);
-    return {
-      output,
-      promptText: prepared.promptText,
-      rawText: prompt.rawText,
-      sessionInfo,
-      agentInfo: prepared.agentInfo,
-      trace,
-    };
-  }
-
-  private async writeAcpRawResponseArtifact(
-    runDir: string,
-    state: FlowRunState,
-    prompt: TracedPromptResult,
-    sessionInfo: FlowSessionBinding,
-    attempt: FlowAttempt,
-  ): Promise<FlowArtifactRef> {
-    return await this.store.writeArtifact(runDir, state, prompt.rawText, {
+    result.trace = trace;
+    // This finalization belongs to the admitted prompt, including after abort.
+    await this.store.ensureSessionBundle(runDir, state, sessionInfo);
+    await this.store.writeSessionRecord(runDir, state, sessionInfo, record);
+    if (events) {
+      trace.conversation = {
+        sessionId: sessionInfo.bundleId,
+        messageStart,
+        messageEnd: Math.max(messageStart, record.messages.length - 1),
+        ...events,
+      };
+    }
+    const rawResponseArtifact = await this.store.writeArtifact(runDir, state, rawText, {
       mediaType: "text/plain",
       extension: "txt",
-      nodeId: attempt.nodeId,
-      attemptId: attempt.attemptId,
+      nodeId: prepared.attempt.nodeId,
+      attemptId: prepared.attempt.attemptId,
       sessionId: sessionInfo.bundleId,
     });
+    trace.rawResponseArtifact = rawResponseArtifact;
+    return { rawText, sessionInfo, conversation: trace.conversation, rawResponseArtifact };
   }
 
   private async appendAcpResponseParsedTrace(
     runDir: string,
     state: FlowRunState,
     prompt: TracedPromptResult,
-    sessionInfo: FlowSessionBinding,
-    rawResponseArtifact: FlowArtifactRef,
     attempt: FlowAttempt,
   ): Promise<void> {
     await this.store.appendTrace(runDir, state, {
@@ -1007,11 +1004,11 @@ export class FlowRunner {
       type: "acp_response_parsed",
       nodeId: attempt.nodeId,
       attemptId: attempt.attemptId,
-      sessionId: sessionInfo.bundleId,
+      sessionId: prompt.sessionInfo.bundleId,
       payload: {
-        sessionId: sessionInfo.bundleId,
+        sessionId: prompt.sessionInfo.bundleId,
         conversation: prompt.conversation,
-        rawResponseArtifact,
+        rawResponseArtifact: prompt.rawResponseArtifact,
       },
     });
   }
@@ -1020,16 +1017,11 @@ export class FlowRunner {
     node: AcpNodeDefinition,
     context: FlowAttemptContext,
     rawText: string,
-    trace: FlowStepTrace,
   ): Promise<unknown> {
-    try {
-      context.attempt.assertActive();
-      const output = node.parse ? await node.parse(rawText, context.nodeContext) : rawText;
-      context.attempt.assertActive();
-      return output;
-    } catch (error) {
-      throw attachStepTrace(error, trace);
-    }
+    context.attempt.assertActive();
+    const output = node.parse ? await node.parse(rawText, context.nodeContext) : rawText;
+    context.attempt.assertActive();
+    return output;
   }
 
   private startHeartbeat(
@@ -1142,21 +1134,17 @@ export class FlowRunner {
     return binding;
   }
 
-  private async refreshSessionBinding(binding: FlowSessionBinding): Promise<FlowSessionBinding> {
-    const record = await resolveSessionRecord(binding.acpxRecordId);
-    return {
-      ...binding,
-      acpSessionId: record.acpSessionId,
-      agentSessionId: record.agentSessionId,
-    };
-  }
-
   private createPromptEventCapture(runDir: string, binding: FlowSessionBinding) {
     const pending = new Set<Promise<void>>();
     let ordinal = 0;
     let failure: { ordinal: number; reason: unknown } | undefined;
     let eventStartSeq: number | undefined;
     let eventEndSeq = 0;
+    const snapshot = <T>(outcome: PromiseSettledResult<T>): PromptCaptureReceipt<T> => ({
+      outcome,
+      events: !failure && eventStartSeq !== undefined ? { eventStartSeq, eventEndSeq } : undefined,
+      lastSeq: eventEndSeq,
+    });
     return {
       onAcpMessage: (direction: AcpMessageDirection, message: AcpJsonRpcMessage): void => {
         const index = ordinal++;
@@ -1178,14 +1166,27 @@ export class FlowRunner {
         // settled write. Error precedence still follows event admission order.
         pending.add(write);
       },
-      async run<T>(operation: () => Promise<T>) {
+      async run<T, F>(
+        operation: () => Promise<T>,
+        finalize: (receipt: PromptCaptureReceipt<T>) => Promise<F>,
+      ): Promise<F> {
         let result: PromiseSettledResult<T>;
         try {
           result = { status: "fulfilled", value: await operation() };
         } catch (reason) {
           result = { status: "rejected", reason };
         }
+        // The enclosing attempt still owns this drain, including its deadline and interrupts.
         await Promise.all(pending);
+        let finalized: PromiseSettledResult<F>;
+        try {
+          finalized = {
+            status: "fulfilled",
+            value: await finalize(snapshot(result)),
+          };
+        } catch (reason) {
+          finalized = { status: "rejected", reason };
+        }
         if (result.status === "rejected") {
           throw result.reason;
         }
@@ -1195,7 +1196,10 @@ export class FlowRunner {
         if (eventStartSeq === undefined) {
           throw new Error(`Missing ACP event capture for session ${binding.bundleId}`);
         }
-        return { result: result.value, eventStartSeq, eventEndSeq };
+        if (finalized.status === "rejected") {
+          throw finalized.reason;
+        }
+        return finalized.value;
       },
     };
   }
@@ -1204,9 +1208,9 @@ export class FlowRunner {
     runDir: string,
     state: FlowRunState,
     binding: FlowSessionBinding,
-    prompt: PromptInput,
-    attempt: FlowAttempt,
+    prepared: PreparedAcpPrompt,
   ): Promise<TracedPromptResult> {
+    const { attempt, prompt } = prepared;
     const capture = createQuietCaptureOutput();
     const beforeRecord = await resolveSessionRecord(binding.acpxRecordId);
     attempt.assertActive();
@@ -1219,48 +1223,44 @@ export class FlowRunner {
       this.pendingClientReleases.delete(initialClient);
     }
 
-    const { eventStartSeq, eventEndSeq } = await events.run(() =>
-      sendSessionDirect(
-        {
-          sessionId: binding.acpxRecordId,
-          prompt,
-          resumePolicy: "same-session-only",
-          ...this.connectionOptions,
-          outputFormatter: capture.formatter,
-          errorEmissionPolicy: { queueErrorAlreadyEmitted: false },
-          onAcpMessage: events.onAcpMessage,
-          suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
-          client: initialClient,
-        },
-        { signal: attempt.signal, handleProcessInterrupts: false },
-      ),
-    );
-    attempt.assertActive();
-    const sessionInfo = await this.refreshSessionBinding(binding);
-    attempt.assertActive();
-    state.sessionBindings[sessionInfo.key] = sessionInfo;
-    await this.store.ensureSessionBundle(runDir, state, sessionInfo);
-    attempt.assertActive();
-    const afterRecord = await resolveSessionRecord(sessionInfo.acpxRecordId);
-    attempt.assertActive();
-    await this.store.writeSessionRecord(runDir, state, sessionInfo, afterRecord);
-    attempt.assertActive();
-    const messageStartResolved = findConversationDeltaStart(
-      beforeRecord.messages,
-      afterRecord.messages,
-    );
-
-    return {
-      rawText: capture.read(),
-      sessionInfo,
-      conversation: {
-        sessionId: sessionInfo.bundleId,
-        messageStart: messageStartResolved,
-        messageEnd: Math.max(messageStartResolved, afterRecord.messages.length - 1),
-        eventStartSeq,
-        eventEndSeq,
+    return await events.run(
+      () =>
+        sendSessionDirect(
+          {
+            sessionId: binding.acpxRecordId,
+            prompt,
+            resumePolicy: "same-session-only",
+            ...this.connectionOptions,
+            outputFormatter: capture.formatter,
+            errorEmissionPolicy: { queueErrorAlreadyEmitted: false },
+            onAcpMessage: events.onAcpMessage,
+            suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
+            client: initialClient,
+          },
+          { signal: attempt.signal, handleProcessInterrupts: false },
+        ),
+      async (receipt) => {
+        const rawText = capture.read();
+        prepared.result.rawText = rawText;
+        const afterRecord = await resolveSessionRecord(binding.acpxRecordId);
+        const sessionInfo = {
+          ...binding,
+          acpSessionId: afterRecord.acpSessionId,
+          agentSessionId: afterRecord.agentSessionId,
+        };
+        state.sessionBindings[sessionInfo.key] = sessionInfo;
+        return await this.publishAcpCapture(
+          runDir,
+          state,
+          prepared,
+          sessionInfo,
+          afterRecord,
+          findConversationDeltaStart(beforeRecord.messages, afterRecord.messages),
+          rawText,
+          receipt.events,
+        );
       },
-    };
+    );
   }
 
   private async closePendingPersistentSessionClients(runDir: string): Promise<void> {
@@ -1283,66 +1283,67 @@ export class FlowRunner {
     runDir: string,
     state: FlowRunState,
     binding: FlowSessionBinding,
-    agent: ResolvedFlowAgent,
-    prompt: PromptInput,
-    attempt: FlowAttempt,
+    prepared: PreparedAcpPrompt,
   ): Promise<TracedPromptResult> {
+    const { agentInfo: agent, prompt, attempt } = prepared;
     const capture = createQuietCaptureOutput();
     const conversation = createSessionConversation(attempt.startedAt);
     let acpxState: SessionRecord["acpx"] | undefined;
     recordPromptSubmission(conversation, prompt, attempt.startedAt);
     const events = this.createPromptEventCapture(runDir, binding);
-    const { result, eventStartSeq, eventEndSeq } = await events.run(() =>
-      runOnce(
-        {
-          agentCommand: agent.agentCommand,
-          agentArgv: agent.agentArgv,
-          cwd: agent.cwd,
-          prompt,
-          ...this.connectionOptions,
-          outputFormatter: capture.formatter,
-          errorEmissionPolicy: { queueErrorAlreadyEmitted: false },
-          onAcpMessage: events.onAcpMessage,
-          onSessionUpdate: (notification) => {
-            acpxState = recordConversationSessionUpdate(conversation, acpxState, notification);
+    return await events.run(
+      () =>
+        runOnce(
+          {
+            agentCommand: agent.agentCommand,
+            agentArgv: agent.agentArgv,
+            cwd: agent.cwd,
+            prompt,
+            ...this.connectionOptions,
+            outputFormatter: capture.formatter,
+            errorEmissionPolicy: { queueErrorAlreadyEmitted: false },
+            onAcpMessage: events.onAcpMessage,
+            onSessionUpdate: (notification) => {
+              acpxState = recordConversationSessionUpdate(conversation, acpxState, notification);
+            },
+            onClientOperation: (operation) => {
+              acpxState = recordConversationClientOperation(conversation, acpxState, operation);
+            },
+            suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
+            sessionOptions: this.sessionOptions,
           },
-          onClientOperation: (operation) => {
-            acpxState = recordConversationClientOperation(conversation, acpxState, operation);
-          },
-          suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
-          sessionOptions: this.sessionOptions,
-        },
-        { signal: attempt.signal, handleProcessInterrupts: false },
-      ),
-    );
-    attempt.assertActive();
-    const sessionInfo: FlowSessionBinding = {
-      ...binding,
-      acpxRecordId: result.sessionId,
-      acpSessionId: result.sessionId,
-    };
-    await this.store.ensureSessionBundle(runDir, state, sessionInfo);
-    attempt.assertActive();
-    const syntheticRecord = createSyntheticSessionRecord({
-      binding: sessionInfo,
-      createdAt: attempt.startedAt,
-      updatedAt: conversation.updated_at,
-      conversation,
-      acpxState: cloneSessionAcpxState(acpxState),
-      lastSeq: eventEndSeq,
-    });
-    await this.store.writeSessionRecord(runDir, state, sessionInfo, syntheticRecord);
-    attempt.assertActive();
-    return {
-      rawText: capture.read(),
-      sessionInfo,
-      conversation: {
-        sessionId: sessionInfo.bundleId,
-        messageStart: 0,
-        messageEnd: Math.max(0, conversation.messages.length - 1),
-        eventStartSeq,
-        eventEndSeq,
+          { signal: attempt.signal, handleProcessInterrupts: false },
+        ),
+      async (receipt) => {
+        const rawText = capture.read();
+        prepared.result.rawText = rawText;
+        const sessionId =
+          receipt.outcome.status === "fulfilled"
+            ? receipt.outcome.value.sessionId
+            : capture.sessionId();
+        const sessionInfo =
+          sessionId === undefined
+            ? binding
+            : { ...binding, acpxRecordId: sessionId, acpSessionId: sessionId };
+        const record = createSyntheticSessionRecord({
+          binding: sessionInfo,
+          createdAt: attempt.startedAt,
+          updatedAt: conversation.updated_at,
+          conversation,
+          acpxState: cloneSessionAcpxState(acpxState),
+          lastSeq: receipt.lastSeq,
+        });
+        return await this.publishAcpCapture(
+          runDir,
+          state,
+          prepared,
+          sessionInfo,
+          record,
+          0,
+          rawText,
+          receipt.events,
+        );
       },
-    };
+    );
   }
 }

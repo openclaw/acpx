@@ -1835,18 +1835,14 @@ test("FlowRunner times out async ACP parse callbacks", async () => {
     const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
     const runner = new FlowRunner({
       resolveAgent: () => ({
-        agentName: "unused",
-        agentCommand: "unused",
+        agentName: "mock",
+        agentCommand: MOCK_AGENT_COMMAND,
         cwd: process.cwd(),
       }),
       permissionMode: "approve-all",
       outputRoot,
     });
-    const runnerHarness = runner as unknown as {
-      runIsolatedPrompt: () => Promise<string>;
-    };
-    runnerHarness.runIsolatedPrompt = async () => "hello";
-
+    let parseCalls = 0;
     const flow = defineFlow({
       name: "acp-parse-timeout-test",
       startAt: "slow",
@@ -1855,15 +1851,19 @@ test("FlowRunner times out async ACP parse callbacks", async () => {
           session: {
             isolated: true,
           },
-          timeoutMs: 50,
+          timeoutMs: 5_000,
           prompt: () => "hello",
-          parse: async () => await new Promise(() => {}),
+          parse: async () => {
+            parseCalls += 1;
+            return await new Promise(() => {});
+          },
         }),
       },
       edges: [],
     });
 
     await assert.rejects(async () => await runner.run(flow, {}), TimeoutError);
+    assert.equal(parseCalls, 1, "the deadline must exercise an admitted parser callback");
     const runDir = await waitForRunDir(outputRoot, "acp-parse-timeout-test");
     const state = await readRunJson(runDir);
     const slowResult = (state.results as Record<string, Record<string, unknown>>).slow;

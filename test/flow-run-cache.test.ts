@@ -33,7 +33,7 @@ function caches(store: FlowRunStore) {
   return store as unknown as {
     traceSeqByRun: Map<string, number>;
     manifestByRun: Map<string, unknown>;
-    sessionSeqByBundle: Map<string, number>;
+    sessionSeqByBundle: Map<string, unknown>;
     appendChainByPath: Map<string, Promise<void>>;
   };
 }

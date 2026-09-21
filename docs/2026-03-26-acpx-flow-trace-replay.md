@@ -499,7 +499,22 @@ For ACP node attempts, `node_outcome.payload` must include:
 - `eventStartSeq` / `eventEndSeq`: inclusive sequence numbers into the bundled
   `sessions/<id>/events.ndjson`
 - `promptArtifact`: rendered prompt text or structured prompt payload
-- `rawResponseArtifact`: raw final ACP text prior to parsing
+- `rawResponseArtifact`: captured ACP text prior to parsing, including partial
+  text received before a failed prompt
+
+Failed prompts retain their available prompt, diagnostic text, session identity,
+and conversation linkage. A raw-response artifact does not imply that the agent
+returned a successful prompt response. Failed prompts do not invoke the node's
+parser, and isolated steps use the actual session ID once it has been observed.
+
+Capture finalization drains admitted writes before the attempt settles. A prompt
+failure retains its original rejection even if diagnostic publication also fails;
+only successfully written artifacts are linked, and incomplete event capture does
+not claim a complete conversation range. Unavailable storage can therefore leave
+partial diagnostics. A successful prompt with failed publication still fails.
+The record's `lastSeq` advances only for successfully written session events.
+Node deadlines and interruptions remain active during this drain and can produce
+an `AggregateError` containing both cancellation and the original prompt failure.
 
 Both message and event ranges are needed:
 

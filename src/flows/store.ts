@@ -69,7 +69,7 @@ export function flowRunsBaseDir(homeDir: string = os.homedir()): string {
 export class FlowRunStore {
   readonly outputRoot: string;
   private readonly traceSeqByRun = new Map<string, number>();
-  private readonly sessionSeqByBundle = new Map<string, number>();
+  private readonly sessionSeqByBundle = new Map<string, { allocated: number; persisted: number }>();
   private readonly manifestByRun = new Map<string, FlowRunManifest>();
   private readonly appendChainByPath = new Map<string, Promise<void>>();
 
@@ -268,7 +268,7 @@ export class FlowRunStore {
     binding: FlowSessionBinding,
     record: SessionRecord,
   ): Promise<void> {
-    const bundleSeq = this.sessionSeqByBundle.get(`${runDir}::${binding.bundleId}`) ?? 0;
+    const bundleSeq = this.sessionSeqByBundle.get(`${runDir}::${binding.bundleId}`)?.persisted ?? 0;
     const bundledRecord = createBundledSessionRecord(binding, record, bundleSeq);
     await writePrivateJsonFile(
       this.resolveRunPath(runDir, path.posix.join(sessionDirPath(binding.bundleId), "record.json")),
@@ -283,8 +283,10 @@ export class FlowRunStore {
     message: AcpJsonRpcMessage,
   ): Promise<number> {
     const sessionKey = `${runDir}::${binding.bundleId}`;
-    const seq = (this.sessionSeqByBundle.get(sessionKey) ?? 0) + 1;
-    this.sessionSeqByBundle.set(sessionKey, seq);
+    const sequence = this.sessionSeqByBundle.get(sessionKey) ?? { allocated: 0, persisted: 0 };
+    this.sessionSeqByBundle.set(sessionKey, sequence);
+    // Reserve ordering immediately, but publish only successfully written cursors.
+    const seq = ++sequence.allocated;
     await this.appendJsonLine(
       this.resolveRunPath(
         runDir,
@@ -297,6 +299,7 @@ export class FlowRunStore {
         message,
       },
     );
+    sequence.persisted = Math.max(sequence.persisted, seq);
     return seq;
   }
 

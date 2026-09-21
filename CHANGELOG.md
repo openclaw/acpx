@@ -49,6 +49,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/close: wait for the selected queue owner to exit when it releases its lease during shutdown, without signaling a replacement owner.
 - Conformance: reject malformed case/profile instructions and duplicate IDs before starting adapters; preserve negative protocol payloads and literal saved keys so inherited object properties cannot produce false passing assertions.
 - Conformance/filesystem: honor requested read line windows using the production client's selection logic, including empty windows, without bypassing permission or filesystem checks.
+- Flows/replay: retain captured diagnostics, bundled conversations, and step links after failed ACP prompts; preserve parser rejection values and use the real session identity for isolated step records.
 
 - Sessions/queue: verify the owner's OS birth identity before forced retirement so stale leases cannot terminate a different process that reused the PID. Use boot- and namespace-scoped Linux start ticks that survive wall-clock changes. Preserve healthy legacy IPC use and report unverified live ownership without discarding its lease.
 - Sessions/locks: record process birth on new turn and queue mutation locks so abandoned locks can recover after PID reuse; bound identity queries while preserving live and uncertain owners.
