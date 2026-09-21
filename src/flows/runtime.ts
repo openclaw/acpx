@@ -1147,15 +1147,31 @@ export class FlowRunner {
   }
 
   private createPromptEventCapture(runDir: string, binding: FlowSessionBinding) {
-    const pending: Promise<PromiseSettledResult<number>>[] = [];
+    const pending = new Set<Promise<void>>();
+    let ordinal = 0;
+    let failure: { ordinal: number; reason: unknown } | undefined;
+    let eventStartSeq: number | undefined;
+    let eventEndSeq = 0;
     return {
       onAcpMessage: (direction: AcpMessageDirection, message: AcpJsonRpcMessage): void => {
-        pending.push(
-          this.store.appendSessionEvent(runDir, binding, direction, message).then(
-            (value) => ({ status: "fulfilled" as const, value }),
-            (reason: unknown) => ({ status: "rejected" as const, reason }),
-          ),
-        );
+        const index = ordinal++;
+        const write = this.store
+          .appendSessionEvent(runDir, binding, direction, message)
+          .then(
+            (seq) => {
+              eventStartSeq = Math.min(eventStartSeq ?? seq, seq);
+              eventEndSeq = Math.max(eventEndSeq, seq);
+            },
+            (reason: unknown) => {
+              if (!failure || index < failure.ordinal) {
+                failure = { ordinal: index, reason };
+              }
+            },
+          )
+          .finally(() => pending.delete(write));
+        // Only unfinished I/O owns a promise; long prompts must not retain every
+        // settled write. Error precedence still follows event admission order.
+        pending.add(write);
       },
       async run<T>(operation: () => Promise<T>) {
         let result: PromiseSettledResult<T>;
@@ -1164,18 +1180,12 @@ export class FlowRunner {
         } catch (reason) {
           result = { status: "rejected", reason };
         }
-        const writes = await Promise.all(pending);
+        await Promise.all(pending);
         if (result.status === "rejected") {
           throw result.reason;
         }
-        let eventStartSeq: number | undefined;
-        let eventEndSeq = 0;
-        for (const write of writes) {
-          if (write.status === "rejected") {
-            throw write.reason;
-          }
-          eventStartSeq = Math.min(eventStartSeq ?? write.value, write.value);
-          eventEndSeq = Math.max(eventEndSeq, write.value);
+        if (failure) {
+          throw failure.reason;
         }
         if (eventStartSeq === undefined) {
           throw new Error(`Missing ACP event capture for session ${binding.bundleId}`);
