@@ -19,16 +19,25 @@ type Report = {
   signalAborted: boolean;
   acknowledgedTermination: boolean;
   aliveAtReturn: number[];
+  ownedPids: number[];
+  aliveBeforeDeadline: number[];
+  runStatus?: string;
+  nodeOutcome?: string;
 };
 
 async function nativeCase(mode: string): Promise<Report> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-managed-command-"));
+  let report: Report | undefined;
+  let failed = false;
+  let originalFailure: unknown;
   try {
     const { stdout } = await exec(process.execPath, [fixture, root, mode], {
       cwd: root,
-      env: { HOME: root, USERPROFILE: root, PATH: process.env.PATH, TMPDIR: root },
+      // Preserve native Windows process-discovery variables as well as PATH.
+      env: { ...process.env, HOME: root, USERPROFILE: root, TMPDIR: root, TMP: root, TEMP: root },
       timeout: 15_000,
     });
+    report = JSON.parse(stdout) as Report;
     assert.equal(
       await fs.stat(path.join(root, "late-command")).then(
         () => true,
@@ -41,25 +50,66 @@ async function nativeCase(mode: string): Promise<Report> {
       ),
       false,
     );
-    return JSON.parse(stdout) as Report;
-  } finally {
-    await cleanupNativeChildren(root);
-    await fs.rm(root, { recursive: true, force: true });
+  } catch (error) {
+    failed = true;
+    originalFailure = error;
   }
+  const retired = new Set<number>();
+  if (report) {
+    for (const pid of report.ownedPids) {
+      if (!report.aliveAtReturn.includes(pid)) {
+        retired.add(pid);
+      }
+    }
+  }
+  try {
+    await cleanupNativeChildren(root, retired);
+    await fs.rm(root, { recursive: true, force: true });
+  } catch (cleanupError) {
+    throw new AggregateError(
+      failed ? [originalFailure, cleanupError] : [cleanupError],
+      "Managed command fixture cleanup failed",
+      { cause: cleanupError },
+    );
+  }
+  if (failed) {
+    throw originalFailure;
+  }
+  assert.ok(report);
+  return report;
 }
 
-async function cleanupNativeChildren(root: string): Promise<void> {
-  // The PID list names only children created by this case, including on assertion/host failure.
-  const pids = await fs.readFile(path.join(root, "owned-pids"), "utf8").catch(() => "");
+async function cleanupNativeChildren(root: string, retired: ReadonlySet<number>): Promise<void> {
+  // Do not signal a PID already proved gone by this case's pre-rescue observation.
+  const pids = await fs.readFile(path.join(root, "owned-pids"), "utf8").catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  });
   for (const value of pids.trim().split("\n")) {
     const pid = Number(value);
-    if (pid > 0) {
+    if (Number.isSafeInteger(pid) && pid > 0 && !retired.has(pid)) {
       try {
         process.kill(pid, "SIGKILL");
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
           throw error;
         }
+        continue;
+      }
+      const deadline = Date.now() + 2_000;
+      for (;;) {
+        try {
+          process.kill(pid, 0);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+            throw error;
+          }
+          break;
+        }
+        assert.ok(Date.now() < deadline, `fixture rescue did not retire PID ${pid}`);
+        await new Promise<void>((resolve) => setTimeout(resolve, 20));
       }
     }
   }
@@ -135,4 +185,25 @@ test("function command returns ordinary nonzero diagnostics without ending the n
   assert.equal(report.result?.exitCode, 7);
   assert.equal(report.result?.signal, null);
   assert.equal(report.result?.timedOut, false);
+});
+
+test("FlowRunner reaps shell child when outer node deadline expires", async () => {
+  const report = await nativeCase("shell-outer-timeout");
+  assert.equal(report.ownedPids.length, 1);
+  assert.deepEqual(report.aliveBeforeDeadline, report.ownedPids);
+  assert.equal(report.ending, "TimeoutError");
+  assert.equal(report.runStatus, "timed_out");
+  assert.equal(report.nodeOutcome, "timed_out");
+  assert.deepEqual(
+    report.aliveAtReturn,
+    [],
+    "outer deadline must reap the real ready child before return",
+  );
+  if (process.platform !== "win32") {
+    assert.equal(
+      report.acknowledgedTermination,
+      true,
+      "POSIX child must observe TERM before escalation",
+    );
+  }
 });

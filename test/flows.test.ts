@@ -1616,61 +1616,6 @@ test("FlowRunner preserves shell timeoutMs 0 as no action deadline", async () =>
   });
 });
 
-test("FlowRunner reaps shell child when outer node deadline expires", async () => {
-  await withTempHome(async () => {
-    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
-    const pidDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-shell-pid-"));
-    const pidFile = path.join(pidDir, "pid");
-    const runner = new FlowRunner({
-      resolveAgent: () => ({
-        agentName: "unused",
-        agentCommand: "unused",
-        cwd: process.cwd(),
-      }),
-      permissionMode: "approve-all",
-      outputRoot,
-    });
-
-    const flow = defineFlow({
-      name: "timeout-outer-reap",
-      startAt: "slow",
-      nodes: {
-        slow: shell({
-          // Enabled outer deadline; action timeout stays zero (no shell-level deadline).
-          timeoutMs: 500,
-          exec: () => ({
-            command: process.execPath,
-            args: [
-              "-e",
-              `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 30_000)`,
-            ],
-            timeoutMs: 0,
-          }),
-        }),
-      },
-      edges: [],
-    });
-
-    await assert.rejects(async () => await runner.run(flow, {}), TimeoutError);
-    const runDir = await waitForRunDir(outputRoot, "timeout-outer-reap");
-    const state = await readRunJson(runDir);
-    assert.equal(state.status, "timed_out");
-    const slowResult = (state.results as Record<string, Record<string, unknown>>).slow;
-    assert.equal(slowResult.outcome, "timed_out");
-
-    const pid = Number(await fs.readFile(pidFile, "utf8"));
-    assert.ok(pid > 0);
-    let alive = true;
-    try {
-      process.kill(pid, 0);
-    } catch {
-      alive = false;
-    }
-    assert.equal(alive, false, "outer deadline must reap the shell child");
-    await fs.rm(pidDir, { recursive: true, force: true });
-  });
-});
-
 test("FlowRunner can route timed out nodes by outcome", async () => {
   await withTempHome(async () => {
     const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
