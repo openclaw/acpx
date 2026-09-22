@@ -40,6 +40,8 @@ function watchFixture(t: TestContext, platform: NodeJS.Platform = "darwin") {
     } as QueueOwnerRecord | undefined,
     now: 0,
     queries: 0,
+    queryKills: 0,
+    queryUnrefs: 0,
     sequence: 0,
     quiet: false,
     signalError: "",
@@ -100,7 +102,17 @@ function watchFixture(t: TestContext, platform: NodeJS.Platform = "darwin") {
     state.queries += 1;
     const output = state.output;
     void state.onQuery().then(() => callback(state.queryError, output, ""));
-    return new ChildProcess();
+    const child = new ChildProcess();
+    // Timed queries exercise cleanup without signaling an unspawned native handle.
+    t.mock.method(child, "kill", (signal?: NodeJS.Signals | number) => {
+      assert.equal(signal, "SIGKILL");
+      state.queryKills += 1;
+      return true;
+    });
+    t.mock.method(child, "unref", () => {
+      state.queryUnrefs += 1;
+    });
+    return child;
   }) as typeof childProcess.execFile);
   syncBuiltinESMExports();
   t.after(async () => {
@@ -165,8 +177,11 @@ test("watch observes a reused Windows PID when its query exceeds the reuse caden
   await setImmediate();
   // A truncated query leaves ownership unknown and only finishes on this abort.
   controller.abort();
+  t.diagnostic(`query cleanup: kills=${state.queryKills}, unrefs=${state.queryUnrefs}`);
   await rejected;
   assert.equal(state.queries, 1, "the departed incarnation is retained after journal replay");
+  assert.equal(state.queryKills, 0, "a query within the provider budget is not terminated");
+  assert.equal(state.queryUnrefs, 0);
 });
 
 test("idle watches retain gone observations until the owner incarnation changes", async (t) => {
