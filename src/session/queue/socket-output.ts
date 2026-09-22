@@ -7,7 +7,12 @@ import type { QueueOwnerMessage } from "./messages.js";
 
 const OUTPUT_CHUNK_BYTES = 64 * 1024;
 const DRAIN_TIMEOUT_MS = 1_000;
-const DEFAULT_LIMITS = Object.freeze({
+type QueueOutputLimits = Readonly<{
+  observerBytes: number;
+  totalBytes: number;
+  observers: number;
+}>;
+const DEFAULT_LIMITS: QueueOutputLimits = Object.freeze({
   observerBytes: 64 * 1024 * 1024,
   totalBytes: 256 * 1024 * 1024,
   observers: 64,
