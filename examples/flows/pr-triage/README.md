@@ -17,6 +17,10 @@ collector selects the final assistant block, or the final non-log block when no
 assistant marker is present. Standalone command markers delimit logs; review
 prose such as “execution” remains part of the finding.
 
+Handoff prompts and final summaries report each conflict phase's latest successful
+check, judgment, or resolution in recorded execution order. Repeated final checks
+can supersede an earlier resolution; the earlier results remain in the run history.
+
 This workflow intentionally keeps one persistent `main` ACP session across the
 judgment lane. That shared session is part of the workflow's reasoning state,
 not just a performance optimization. If the live ACP connection dies, the

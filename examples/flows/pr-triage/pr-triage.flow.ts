@@ -211,8 +211,8 @@ const flow = defineFlow({
       nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
-      async prompt({ outputs }) {
-        return promptCommentAndClose(prepared(outputs), outputs);
+      async prompt({ outputs, state }) {
+        return promptCommentAndClose(prepared(outputs), outputs, state.steps);
       },
       parse: (text) => extractJsonObject(text),
     },
@@ -229,8 +229,8 @@ const flow = defineFlow({
       nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
-      async prompt({ outputs }) {
-        return promptCommentAndEscalateReadyForLanding(prepared(outputs), outputs);
+      async prompt({ outputs, state }) {
+        return promptCommentAndEscalateReadyForLanding(prepared(outputs), outputs, state.steps);
       },
       parse: (text) => extractJsonObject(text),
     },
@@ -252,8 +252,8 @@ const flow = defineFlow({
       nodeType: "acp",
       session: MAIN_SESSION,
       cwd: ({ outputs }) => prepared(outputs).workdir,
-      async prompt({ outputs }) {
-        return promptCommentAndEscalateNeedsJudgment(prepared(outputs), outputs);
+      async prompt({ outputs, state }) {
+        return promptCommentAndEscalateNeedsJudgment(prepared(outputs), outputs, state.steps);
       },
       parse: (text) => extractJsonObject(text),
     },
@@ -282,23 +282,7 @@ const flow = defineFlow({
           outputs.comment_and_escalate_ready_for_landing ??
           outputs.comment_and_escalate_needs_judgment ??
           null,
-        intent: outputs.extract_intent ?? null,
-        solution: outputs.judge_solution ?? null,
-        validationPath: outputs.bug_or_feature ?? null,
-        validation: outputs.reproduce_bug_and_test_fix ?? outputs.test_feature_directly ?? null,
-        initialConflict:
-          outputs.check_initial_conflicts ??
-          outputs.judge_initial_conflicts ??
-          outputs.resolve_initial_conflicts ??
-          null,
-        refactor: outputs.judge_refactor ?? null,
-        review: outputs.review_loop ?? null,
-        ci: outputs.fix_ci_failures ?? null,
-        finalConflict:
-          outputs.check_final_conflicts ??
-          outputs.judge_final_conflicts ??
-          outputs.resolve_final_conflicts ??
-          null,
+        ...finalCommentSummary(outputs, state.steps),
         workspace: outputs.prepare_workspace ?? null,
         sessionBindings: state.sessionBindings,
       }),
@@ -1095,8 +1079,8 @@ function promptResolveFinalConflicts(pr, outputs) {
   ].join("\n");
 }
 
-function promptCommentAndClose(pr, outputs) {
-  const summary = finalCommentSummary(outputs);
+function promptCommentAndClose(pr, outputs, steps) {
+  const summary = finalCommentSummary(outputs, steps);
   return [
     "You are on the close path for this PR.",
     `Target PR: ${prRef(pr)}`,
@@ -1120,8 +1104,8 @@ function promptCommentAndClose(pr, outputs) {
   ].join("\n");
 }
 
-function promptCommentAndEscalateReadyForLanding(pr, outputs) {
-  const summary = finalCommentSummary(outputs);
+function promptCommentAndEscalateReadyForLanding(pr, outputs, steps) {
+  const summary = finalCommentSummary(outputs, steps);
   return [
     "You are on the ready-for-landing human handoff path for this PR.",
     `Target PR: ${prRef(pr)}`,
@@ -1145,8 +1129,8 @@ function promptCommentAndEscalateReadyForLanding(pr, outputs) {
   ].join("\n");
 }
 
-function promptCommentAndEscalateNeedsJudgment(pr, outputs) {
-  const summary = finalCommentSummary(outputs);
+function promptCommentAndEscalateNeedsJudgment(pr, outputs, steps) {
+  const summary = finalCommentSummary(outputs, steps);
   return [
     "You are on the needs-judgment human handoff path for this PR.",
     `Target PR: ${prRef(pr)}`,
@@ -1216,25 +1200,27 @@ function prRef(pr) {
   return `${pr.repo}#${pr.prNumber} (${pr.prUrl})`;
 }
 
-function finalCommentSummary(outputs) {
+function latestConflictOutcome(steps, phase) {
+  const nodes = new Set([
+    `check_${phase}_conflicts`,
+    `judge_${phase}_conflicts`,
+    `resolve_${phase}_conflicts`,
+  ]);
+  // A later loop check or judgment can supersede an earlier resolution.
+  return steps.findLast((step) => step.outcome === "ok" && nodes.has(step.nodeId))?.output ?? null;
+}
+
+function finalCommentSummary(outputs, steps) {
   return {
     intent: outputs.extract_intent ?? null,
     solution: outputs.judge_solution ?? null,
-    initialConflict:
-      outputs.check_initial_conflicts ??
-      outputs.judge_initial_conflicts ??
-      outputs.resolve_initial_conflicts ??
-      null,
+    initialConflict: latestConflictOutcome(steps, "initial"),
     validationPath: outputs.bug_or_feature ?? null,
     validation: outputs.reproduce_bug_and_test_fix ?? outputs.test_feature_directly ?? null,
     refactor: outputs.judge_refactor ?? null,
     review: outputs.review_loop ?? null,
     ci: outputs.fix_ci_failures ?? null,
-    finalConflict:
-      outputs.check_final_conflicts ??
-      outputs.judge_final_conflicts ??
-      outputs.resolve_final_conflicts ??
-      null,
+    finalConflict: latestConflictOutcome(steps, "final"),
   };
 }
 
