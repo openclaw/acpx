@@ -151,11 +151,22 @@ describe(
           syncBuiltinESMExports();
           try {
             await writeQueueOwnerLock({ ...paths, sessionId, pid: owner.pid, processIdentity });
-            const original = await fs.readFile(paths.lockPath, "utf8");
+            const original = await readQueueOwnerRecord(sessionId);
             await assert.rejects(terminateQueueOwnerForSession(sessionId), {
               code: failure === "timeout" ? "ETIMEDOUT" : 23,
             });
-            assert.equal(await fs.readFile(paths.lockPath, "utf8"), original);
+            const retained = await readQueueOwnerRecord(sessionId);
+            assert(retained?.retirement);
+            assert.deepEqual(
+              { ...retained, retirement: undefined },
+              { ...original, retirement: undefined },
+            );
+            assert.deepEqual(
+              retained.retirement.descendants
+                .map((witness) => witness.pid)
+                .toSorted((a, b) => a - b),
+              pids.slice(1).toSorted((a, b) => a - b),
+            );
             assert.deepEqual(
               pids.map(isProcessAlive),
               [failure !== "partial", failure !== "partial", true],

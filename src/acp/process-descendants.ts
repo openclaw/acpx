@@ -22,7 +22,10 @@ function hasStaleWindowsParent(
   );
 }
 
-function includeDescendants(table: Map<number, ProcessTableEntry>, owned: Set<number>): void {
+export function includeProcessDescendants(
+  table: Map<number, ProcessTableEntry>,
+  owned: Set<number>,
+): void {
   let expanded: boolean;
   do {
     expanded = false;
@@ -128,7 +131,7 @@ export class ProcessDescendants {
     if (this.ownProcessGroup) {
       this.includeProcessGroup(table, owned, rootWasRunning);
     }
-    includeDescendants(table, owned);
+    includeProcessDescendants(table, owned);
     owned.delete(this.child.pid ?? 0);
     this.identities = new Map([...table].filter(([pid]) => owned.has(pid)));
   }

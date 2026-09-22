@@ -175,6 +175,15 @@ Queue mechanics:
 - Override TTL with `--ttl <seconds>`. `--ttl 0` keeps it alive indefinitely (until idle shutdown is otherwise triggered).
 - Owner generation IDs are cryptographically random so rapid restarts cannot reuse a stale generation token.
 
+On Windows, forced queue-owner cleanup records observed descendants in the existing
+lease before terminating the process tree. If cleanup fails, a later client can
+retry it even after the owner exits. The lease remains pending until every recorded
+process incarnation is gone; unavailable process information or an invalid cleanup
+receipt leaves it intact and reports an error. Update all participating clients:
+older versions can discard this receipt when they refresh or release the lease.
+This recovery covers witnessed descendants. Abrupt death before observation still
+requires host supervision.
+
 Persistent turns from flows and CLI prompts share one owner for each saved session.
 A waiting prompt reads history after the previous turn finishes its final checkpoint,
 so both completions are retained. Waiting can be cancelled or timed out. A live

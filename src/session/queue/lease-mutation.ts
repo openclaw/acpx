@@ -4,6 +4,7 @@ import { acquireFileLock, type FileLockHandle } from "@openclaw/fs-safe/file-loc
 import { QueueConnectionError } from "../../errors.js";
 import { createLockOwner, type CapturedProcessIdentity, type LockOwner } from "../lock-owner.js";
 import { queueLockFilePath } from "./paths.js";
+import { hasQueueRetirementReceipt } from "./retirement-receipt.js";
 
 const GUARD_WAIT_MS = 2_000;
 
@@ -95,7 +96,9 @@ async function rollbackReservation(lockPath: string, expected: QueueLeaseIdentit
     } catch {
       return;
     }
-    if (matchesReservation(value, expected)) {
+    // Another process may have admitted retirement after an uncertain release.
+    // Its witnesses outlive this unadmitted acquisition, even if malformed.
+    if (matchesReservation(value, expected) && !hasQueueRetirementReceipt(value)) {
       await fs.unlink(lockPath);
     }
   } catch (error) {

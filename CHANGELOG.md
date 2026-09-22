@@ -9,6 +9,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Compare: preserve actual permission counts on failed runs, distinguish permission failures from runtime errors, and reject conflicting permission modes before reading prompt or policy input.
+- Sessions/Windows: retain witnessed descendants in the existing queue-owner lease before forced cleanup, so another updated client can finish partial cleanup after the owner exits. Preserve incomplete or unverified cleanup through heartbeat and release; all participating clients must be updated for this guarantee.
 - Embedding: preserve host logging during overlapping ACP prompts and when the application replaces its logger.
 - Runtime: reuse pending one-shot initialization when repeated creation options differ only by undefined fields or empty environment maps, avoiding duplicate agent sessions and retained clients.
 - Processes/Linux: retain witnessed descendants across wall-clock adjustments by comparing scoped kernel start ticks, and keep terminal group cutoffs and cleanup deadlines independent of wall time.
