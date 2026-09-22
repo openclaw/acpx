@@ -16,6 +16,7 @@ export type SnapshotCase =
   | "bounded"
   | "missing-self"
   | "root-replaced"
+  | "root-stalled"
   | "new-custody"
   | "publication-failure"
   | "batch-error"
@@ -42,7 +43,7 @@ async function runCase(mode: SnapshotCase, count: number): Promise<void> {
   const root = 2_000_001;
   assert(process.pid < root || process.pid > root + count);
   const pids = Array.from({ length: count }, (_, index) => root + index + 1);
-  const retained = !["bounded", "missing-self", "root-replaced"].includes(mode);
+  const retained = !["bounded", "missing-self", "root-replaced", "root-stalled"].includes(mode);
   const alive = new Set(retained ? pids : [root, ...pids]);
   const births = new Map([root, ...pids].map((pid) => [pid, birth]));
   if (mode === "reused-parent") {
@@ -139,8 +140,10 @@ async function runCase(mode: SnapshotCase, count: number): Promise<void> {
       assert.equal(path.win32.basename(command).toLowerCase(), "taskkill.exe");
       guard();
       event("taskkill", { pid: root });
-      // The root exits successfully while recorded children survive independently.
-      alive.delete(root);
+      // Taskkill may report success while the owner or recorded children survive.
+      if (mode !== "root-stalled") {
+        alive.delete(root);
+      }
       source = "process.exit(0)";
     }
     const child = execFile(process.execPath, ["-e", source], options, (error, stdout, stderr) => {

@@ -133,6 +133,7 @@ describe(
             if (stalled) {
               assert(
                 ["QUEUE_OWNER_RETIREMENT_INCOMPLETE", "ETIMEDOUT"].includes(String(result.code)),
+                JSON.stringify(result),
               );
               assert(result.taskkillCalls > 0);
             } else {

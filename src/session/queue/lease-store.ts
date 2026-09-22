@@ -764,9 +764,11 @@ async function prepareRetiringOwner(
   retirement: QueueOwnerRetirement,
 ): Promise<boolean> {
   const windows = process.platform === "win32";
+  // A second dispatch follows receipt publication. Keep refresh/deadline errors
+  // as incomplete retirement instead of losing that saved custody context.
   const table =
     windows && signal !== "SIGTERM"
-      ? await readRetirementSnapshot(retirement.deadline).catch(() => undefined)
+      ? await readRetirementSnapshot(retirement.deadline)
       : retirement.snapshot;
   let identity = windows
     ? observeRetirementSnapshot(owner, table)

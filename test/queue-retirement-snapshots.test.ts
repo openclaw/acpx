@@ -64,6 +64,21 @@ test(
       assert(!result.events.some(({ name }) => name === "taskkill"));
       assert.deepEqual(result.queries, [null, root]);
     });
+    await t.test(
+      "a stalled root preserves deadline exhaustion after receipt publication",
+      async () => {
+        const result = await run("root-stalled", 1);
+        assert.equal(result.code, "QUEUE_OWNER_RETIREMENT_INCOMPLETE");
+        assert.equal(result.retained, true);
+        assert.deepEqual(result.alive, [root, root + 1]);
+        assert.deepEqual(result.signals, []);
+        assert.deepEqual(result.queries, [null, root]);
+        const publication = result.events.findIndex(({ name }) => name === "publication");
+        const dispatch = result.events.findIndex(({ name }) => name === "taskkill");
+        assert(publication >= 0 && dispatch > publication);
+        assert.equal(result.events.filter(({ name }) => name === "taskkill").length, 1);
+      },
+    );
     await t.test("new custody is published and reobserved before signals", async () => {
       const result = await run("new-custody", 2);
       assert.equal(result.code, undefined);
