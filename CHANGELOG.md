@@ -17,6 +17,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: keep appended patch payloads unchanged when later operations edit their inserted data, and reuse private state while processing live patches.
 - Replay viewer: recover selected run streams after transient bundle read failures, preserving the last good state and clearing the matching warning after recovery.
 - Replay viewer: keep completed ACP conversation context visible while replaying later compute, action, and checkpoint steps.
+- PR triage example: retain complete review findings whose prose begins with “execution” and select the final assistant block instead of intermediate commentary and command logs.
 
 ## 0.19.1 - 2026-09-22
 

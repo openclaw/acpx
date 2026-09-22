@@ -12,6 +12,11 @@ and PR conversation comments. CI evidence records the observed PR head and queri
 runs for that commit; missing head metadata falls back to the prepared workspace's
 recorded head.
 
+Local review text prefers stdout. When the reviewer writes only to stderr, the
+collector selects the final assistant block, or the final non-log block when no
+assistant marker is present. Standalone command markers delimit logs; review
+prose such as “execution” remains part of the finding.
+
 This workflow intentionally keeps one persistent `main` ACP session across the
 judgment lane. That shared session is part of the workflow's reasoning state,
 not just a performance optimization. If the live ACP connection dies, the

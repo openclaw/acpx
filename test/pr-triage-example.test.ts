@@ -144,3 +144,59 @@ test("pr-triage configures a descriptive run title from repo and PR number", () 
     assert.match(source, /return `PR-triage-\$\{repoName\}-\$\{pr\.prNumber\}`;/);
   });
 });
+
+test("review fallback keeps a finding whose explanation starts with execution", () => {
+  const expected = [
+    "[P1] Reject untrusted commands before execution",
+    "execution currently happens before the permission check.",
+    "Move the permission check before spawning the process.",
+  ].join("\n");
+  const stderr = `2026-03-27T10:31:41.894302Z WARN test diagnostic\n${expected}`;
+
+  assert.equal(extractCodexReviewTail(stderr), expected);
+  assert.equal(selectLocalCodexReviewText("", stderr), expected);
+});
+
+test("review selection keeps only the final assistant block after intermediate command logs", () => {
+  const expected = [
+    "[P1] Final review finding",
+    "",
+    "The final explanation must stay attached to its heading.",
+  ].join("\n");
+  const stderr = [
+    "codex",
+    "Intermediate progress must not become review evidence.",
+    "exec",
+    "/bin/zsh -lc true",
+    "codex",
+    expected,
+  ].join("\n");
+
+  assert.equal(extractCodexReviewTail(stderr), expected);
+  assert.equal(selectLocalCodexReviewText("", stderr), expected);
+});
+
+test("review fallback still stops at a standalone exec marker", () => {
+  const expected = "[P2] This final review remains after the command marker.";
+  const stderr = ["Earlier command output must not be retained.", "exec   ", expected].join("\n");
+
+  assert.equal(extractCodexReviewTail(stderr), expected);
+  assert.equal(selectLocalCodexReviewText("", stderr), expected);
+});
+
+test("assistant review extraction preserves internal CRLF and blank lines", () => {
+  const expected = "[P2] Preserve this heading.\r\n\r\nKeep the explanation unchanged.";
+  const stderr = `exec\r\n/bin/zsh -lc true\r\nCoDeX \t\r\n${expected}\r\n`;
+
+  assert.equal(extractCodexReviewTail(stderr), expected);
+  assert.equal(selectLocalCodexReviewText("", stderr), expected);
+});
+
+test("review selection retains empty and raw-stderr fallback behavior", () => {
+  const diagnostics = "exec\n/bin/zsh -lc true";
+
+  assert.equal(selectLocalCodexReviewText("", ""), "");
+  assert.equal(extractCodexReviewTail(diagnostics), "");
+  assert.equal(selectLocalCodexReviewText("", diagnostics), diagnostics);
+  assert.equal(selectLocalCodexReviewText("STDOUT-REVIEW", diagnostics), "STDOUT-REVIEW");
+});
