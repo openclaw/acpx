@@ -131,10 +131,7 @@ export function requireAgentStdio(
   return child as ChildProcessByStdio<Writable, Readable, Readable>;
 }
 
-export function waitForChildExit(
-  child: ChildProcessByStdio<Writable, Readable, Readable>,
-  timeoutMs: number,
-): Promise<boolean> {
+export function waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
   if (!isChildProcessRunning(child)) {
     return Promise.resolve(true);
   }

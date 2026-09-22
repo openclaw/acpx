@@ -6,6 +6,20 @@ unique `launchId`, immutable command/argument data, and a scope identifying a
 runtime session or a runtime probe. Spawned and exit events also identify the
 child PID and timestamps. Environment values are not included.
 
+Compatibility and startup-diagnostic invocations of the selected adapter also
+use these hooks. One session or runtime probe can create several processes:
+correlate events by `launchId`, not only by scope. Each invocation reports its
+actual command and arguments, including version/help checks before the ACP
+startup arguments have been selected. Denied compatibility admission prevents
+startup; a denied optional diagnostic omits version enrichment and preserves
+the original startup failure. Short POSIX checks own separate process groups;
+the ACP bridge keeps its inherited process group.
+
+Compatibility commands retain their execution deadline after spawning. Their
+owned cleanup can extend settlement beyond that deadline; host admission waits
+remain under host control. Probe completion does not settle a pending host
+admission callback or permit a later launch after the client has closed.
+
 `onBeforeSpawn` and `onSpawned` are awaited admission boundaries. Rejecting before
 spawn prevents launch. Rejecting after spawn terminates the child before startup
 returns that error. An exit during admission is delivered after the admission

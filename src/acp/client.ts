@@ -113,6 +113,11 @@ import {
 } from "./client-process.js";
 import { resolveClientCapabilities, resolveClientInfo } from "./client-protocol.js";
 import { codexPermissionNotice, preferCodexPermissionRefusal } from "./codex-compat.js";
+import {
+  admitCommandProbe,
+  captureCommandProbeOutput,
+  CommandProbeAdmissionError,
+} from "./command-probe.js";
 import { extractAcpError } from "./error-shapes.js";
 import {
   assertRequestedModelSupported,
@@ -333,6 +338,7 @@ type AgentLaunchPlan = {
   copilotAcp: boolean;
   claudeAcp: boolean;
   spawnOptions: ReturnType<typeof buildAgentSpawnOptions>;
+  commandContext: Parameters<typeof resolveGeminiCommandArgs>[2];
 };
 
 type StartupFailureWatcher = {
@@ -384,6 +390,7 @@ export class AcpClient {
   private agent?: ChildProcessByStdio<Writable, Readable, Readable>;
   private readonly agentDescendants = new WeakMap<ChildProcess, ProcessDescendants>();
   private readonly agentCleanups = new WeakMap<ChildProcess, Promise<void>>();
+  private readonly commandProbes = new Set<ChildProcess>();
   private initResult?: InitializeResponse;
   private loadedSessionId?: string;
   private eventHandlers: Pick<
@@ -611,11 +618,11 @@ export class AcpClient {
     }
     const epoch = await this.waitForPreviousClose();
     const maxMessageBytes = readMaxAcpMessageBytes();
-    const launch = await this.resolveAgentLaunchPlan();
-    assertControlAuthority(authority);
+    const launch = await this.resolveAgentLaunchPlan(epoch, authority);
+    this.assertCommandProbeActive(epoch, authority);
     this.logAgentLaunch(launch);
     await this.ensureLaunchSupport(launch);
-    assertControlAuthority(authority);
+    this.assertCommandProbeActive(epoch, authority);
     const { child, process: startedProcess } = await this.spawnAgentProcess(launch, authority);
     if (this.closeEpoch === epoch) {
       this.agent = child;
@@ -702,7 +709,10 @@ export class AcpClient {
     return epoch;
   }
 
-  private async resolveAgentLaunchPlan(): Promise<AgentLaunchPlan> {
+  private async resolveAgentLaunchPlan(
+    epoch: number,
+    authority?: AcpControlAuthority,
+  ): Promise<AgentLaunchPlan> {
     const configuredCommand = resolveAgentCommandParts(
       this.options.agentCommand,
       this.options.agentArgv,
@@ -715,8 +725,34 @@ export class AcpClient {
       this.options.sessionOptions?.env,
       this.options.agentProcessEnv,
     );
+    const commandContext: AgentLaunchPlan["commandContext"] = {
+      env: spawnOptions.env,
+      readOutput: async (command, args, timeoutMs, diagnostic = false) => {
+        try {
+          const output = await this.readAgentCommandOutput(
+            command,
+            args,
+            timeoutMs,
+            spawnOptions,
+            epoch,
+            authority,
+          );
+          // Retirement may await while close() revokes this startup generation.
+          await admitCommandProbe(() => this.assertCommandProbeActive(epoch, authority));
+          return output;
+        } catch (error) {
+          if (error instanceof CommandProbeAdmissionError) {
+            if (diagnostic) {
+              return undefined;
+            }
+            throw error.reason;
+          }
+          throw error;
+        }
+      },
+    };
     let args = resolvedBuiltInLaunch?.args ?? configuredCommand.args;
-    args = await resolveGeminiCommandArgs(spawnCommand, args, spawnOptions);
+    args = await resolveGeminiCommandArgs(spawnCommand, args, commandContext);
     if (isQoderAcpCommand(spawnCommand, args)) {
       args = buildQoderAcpCommandArgs(args, this.options);
     }
@@ -729,6 +765,7 @@ export class AcpClient {
       copilotAcp: isCopilotAcpCommand(spawnCommand, args),
       claudeAcp: isClaudeAcpCommand(spawnCommand, args),
       spawnOptions,
+      commandContext,
     };
   }
 
@@ -751,7 +788,7 @@ export class AcpClient {
 
   private async ensureLaunchSupport(plan: AgentLaunchPlan): Promise<void> {
     if (plan.copilotAcp) {
-      await ensureCopilotAcpSupport(plan.spawnCommand, plan.spawnOptions);
+      await ensureCopilotAcpSupport(plan.spawnCommand, plan.commandContext);
     }
     if (!plan.claudeAcp) {
       return;
@@ -763,6 +800,28 @@ export class AcpClient {
     }
   }
 
+  private prepareProcessLaunch(
+    command: string,
+    args: readonly string[],
+    options: Pick<ReturnType<typeof buildAgentSpawnOptions>, "cwd" | "env">,
+  ): { launch: AcpProcessLaunch; windowsVerbatimArguments?: boolean } {
+    const resolved = buildAgentSpawnCommand(command, args, process.platform, options.env);
+    return {
+      launch: Object.freeze({
+        launchId: randomUUID(),
+        scope: snapshotProcessLaunchScope(this.options.processLaunchScope),
+        command: resolved.command,
+        args: Object.freeze([...resolved.args]),
+        cwd: options.cwd,
+      }),
+      windowsVerbatimArguments: resolved.windowsVerbatimArguments,
+    };
+  }
+
+  private startedProcess(launch: AcpProcessLaunch, pid: number): AcpProcessStarted {
+    return Object.freeze({ ...launch, pid, startedAt: isoNow() });
+  }
+
   private async spawnAgentProcess(
     plan: AgentLaunchPlan,
     authority?: AcpControlAuthority,
@@ -770,27 +829,16 @@ export class AcpClient {
     child: ChildProcessByStdio<Writable, Readable, Readable>;
     process: AcpProcessStarted;
   }> {
-    const spawnCommand = buildAgentSpawnCommand(
-      plan.spawnCommand,
-      plan.args,
-      process.platform,
-      plan.spawnOptions.env,
-    );
-    const launch: AcpProcessLaunch = Object.freeze({
-      launchId: randomUUID(),
-      scope: snapshotProcessLaunchScope(this.options.processLaunchScope),
-      command: spawnCommand.command,
-      args: Object.freeze([...spawnCommand.args]),
-      cwd: this.options.cwd,
-    });
+    const prepared = this.prepareProcessLaunch(plan.spawnCommand, plan.args, plan.spawnOptions);
+    const { launch } = prepared;
     await this.options.processLifecycle?.onBeforeSpawn?.(launch);
     assertControlAuthority(authority);
 
     let spawnedChild: ChildProcessByStdio<Writable, Readable, Readable>;
     try {
-      spawnedChild = spawn(spawnCommand.command, spawnCommand.args, {
+      spawnedChild = spawn(launch.command, [...launch.args], {
         ...plan.spawnOptions,
-        windowsVerbatimArguments: spawnCommand.windowsVerbatimArguments,
+        windowsVerbatimArguments: prepared.windowsVerbatimArguments,
       });
       await waitForSpawn(spawnedChild);
     } catch (error) {
@@ -811,27 +859,118 @@ export class AcpClient {
       await this.terminateAgentProcess(child);
       throw spawnError;
     }
-    return {
-      child,
-      process: Object.freeze({
-        ...launch,
-        pid,
-        startedAt: isoNow(),
-      }),
-    };
+    return { child, process: this.startedProcess(launch, pid) };
+  }
+
+  private assertCommandProbeActive(epoch: number, authority?: AcpControlAuthority): void {
+    assertControlAuthority(authority);
+    if (this.closeEpoch !== epoch) {
+      throw new Error("ACP client was closed while the agent was starting");
+    }
+  }
+
+  private async readAgentCommandOutput(
+    command: string,
+    args: readonly string[],
+    timeoutMs: number,
+    options: Pick<ReturnType<typeof buildAgentSpawnOptions>, "cwd" | "env">,
+    epoch: number,
+    authority?: AcpControlAuthority,
+  ): Promise<string | undefined> {
+    const prepared = this.prepareProcessLaunch(command, args, options);
+    const { launch } = prepared;
+    await admitCommandProbe(async () => {
+      this.assertCommandProbeActive(epoch, authority);
+      await this.options.processLifecycle?.onBeforeSpawn?.(launch);
+    });
+    // No await may separate this check from the actual probe spawn.
+    try {
+      this.assertCommandProbeActive(epoch, authority);
+    } catch (error) {
+      throw new CommandProbeAdmissionError(error);
+    }
+
+    let child: ChildProcess;
+    try {
+      child = spawn(launch.command, [...launch.args], {
+        cwd: options.cwd,
+        env: options.env,
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+        windowsVerbatimArguments: prepared.windowsVerbatimArguments,
+        detached: process.platform !== "win32",
+      });
+    } catch (error) {
+      this.notifyProcessSpawnFailure(launch, new AgentSpawnError(command, error));
+      return undefined;
+    }
+    this.commandProbes.add(child);
+    this.agentDescendants.set(child, new ProcessDescendants(child, { ownProcessGroup: true }));
+    const capture = captureCommandProbeOutput(child, timeoutMs, () =>
+      this.terminateAgentProcess(child),
+    );
+    try {
+      try {
+        await waitForSpawn(child);
+      } catch (error) {
+        this.notifyProcessSpawnFailure(launch, new AgentSpawnError(command, error));
+        return undefined;
+      }
+      if (child.pid === undefined) {
+        this.notifyProcessSpawnFailure(
+          launch,
+          new AgentSpawnError(command, new Error("spawned probe did not expose a PID")),
+        );
+        return undefined;
+      }
+      const started = this.startedProcess(launch, child.pid);
+      await this.admitSpawnedProcess(
+        child,
+        (barrier) => this.attachProcessExitObserver(child, started, barrier),
+        () =>
+          admitCommandProbe(async () => {
+            await this.options.processLifecycle?.onSpawned?.(started);
+            this.assertCommandProbeActive(epoch, authority);
+          }),
+      );
+      const output = await capture.result;
+      await admitCommandProbe(() => this.assertCommandProbeActive(epoch, authority));
+      return output;
+    } finally {
+      try {
+        await this.terminateAgentProcess(child);
+      } finally {
+        capture.dispose();
+        this.commandProbes.delete(child);
+      }
+    }
   }
 
   private async admitAndObserveSpawnedProcess(
     child: ChildProcessByStdio<Writable, Readable, Readable>,
     process: AcpProcessStarted,
   ): Promise<void> {
+    await this.admitSpawnedProcess(
+      child,
+      (barrier) => this.attachAgentLifecycleObservers(child, process, barrier),
+      async () => {
+        await this.options.processLifecycle?.onSpawned?.(process);
+      },
+    );
+  }
+
+  private async admitSpawnedProcess(
+    child: ChildProcess,
+    observe: (barrier: Promise<void>) => void,
+    admit: () => Promise<void>,
+  ): Promise<void> {
     let releaseExitNotification = () => {};
-    const exitNotificationBarrier = new Promise<void>((resolve) => {
+    const barrier = new Promise<void>((resolve) => {
       releaseExitNotification = resolve;
     });
-    this.attachAgentLifecycleObservers(child, process, exitNotificationBarrier);
+    observe(barrier);
     try {
-      await this.options.processLifecycle?.onSpawned?.(process);
+      await admit();
     } catch (error) {
       await this.terminateAgentProcess(child);
       throw error;
@@ -968,7 +1107,7 @@ export class AcpClient {
       throw new GeminiAcpStartupTimeoutError(
         await buildGeminiAcpStartupTimeoutMessage(
           params.launch.spawnCommand,
-          params.launch.spawnOptions,
+          params.launch.commandContext,
         ),
         {
           cause: error,
@@ -1582,19 +1721,20 @@ export class AcpClient {
   }
 
   private async retireNativeResources(): Promise<void> {
-    const agent = this.agent;
+    const owned = [...this.commandProbes, ...(this.agent ? [this.agent] : [])];
     const failures: unknown[] = [];
     try {
       await this.terminalManager.shutdown();
     } catch (error) {
       failures.push(error);
     }
-    try {
-      if (agent) {
-        await this.terminateAgentProcess(agent);
+    const retired = await Promise.allSettled(
+      owned.map((child) => this.terminateAgentProcess(child)),
+    );
+    for (const result of retired) {
+      if (result.status === "rejected") {
+        failures.push(result.reason);
       }
-    } catch (error) {
-      failures.push(error);
     }
     // Transport retirement must unblock owned requests even when native cleanup fails.
     try {
@@ -1651,9 +1791,12 @@ export class AcpClient {
     }
   }
 
-  private terminateAgentProcess(
-    child: ChildProcessByStdio<Writable, Readable, Readable>,
-  ): Promise<void> {
+  private terminateAgentProcess(child: ChildProcess): Promise<void> {
+    if (child.pid === undefined) {
+      this.agentDescendants.get(child)?.retire();
+      this.detachAgentHandles(child, true);
+      return Promise.resolve();
+    }
     let cleanup = this.agentCleanups.get(child);
     if (!cleanup) {
       cleanup = Promise.resolve().then(() => this.cleanupAgentProcess(child));
@@ -1662,9 +1805,7 @@ export class AcpClient {
     return cleanup;
   }
 
-  private async cleanupAgentProcess(
-    child: ChildProcessByStdio<Writable, Readable, Readable>,
-  ): Promise<void> {
+  private async cleanupAgentProcess(child: ChildProcess): Promise<void> {
     const descendants = this.agentDescendants.get(child);
     const deadline = performance.now() + AGENT_CLEANUP_BUDGET_MS;
     const stdinCloseGraceMs = resolveAgentCloseAfterStdinEndMs(this.options.agentCommand);
@@ -1694,9 +1835,9 @@ export class AcpClient {
     }
   }
 
-  private endAgentStdin(child: ChildProcessByStdio<Writable, Readable, Readable>): void {
+  private endAgentStdin(child: ChildProcess): void {
     // Closing stdin is the most graceful shutdown signal for stdio-based ACP agents.
-    if (child.stdin.destroyed) {
+    if (!child.stdin || child.stdin.destroyed) {
       return;
     }
     try {
@@ -1707,7 +1848,7 @@ export class AcpClient {
   }
 
   private async signalAgentAndDescendants(
-    child: ChildProcessByStdio<Writable, Readable, Readable>,
+    child: ChildProcess,
     signal: NodeJS.Signals,
     waitMs: number,
     deadline: number,
@@ -2289,22 +2430,15 @@ export class AcpClient {
     startedProcess: AcpProcessStarted,
     exitNotificationBarrier: Promise<void>,
   ): void {
-    const onExit = (exitCode: number | null, signal: NodeJS.Signals | null) => {
-      const exitedAt = isoNow();
-      this.handleAgentDisconnect(child, "process_exit", exitCode, signal);
-      void this.terminateAgentProcess(child);
-      void exitNotificationBarrier.then(() => {
-        this.notifyProcessExit(startedProcess, exitCode, signal, exitedAt);
-      });
-    };
-    child.once("exit", onExit);
-
-    // A child can exit between spawn completion and observer attachment.
-    // Replay Node's recorded state so host process ownership cannot remain stale.
-    if (child.exitCode !== null || child.signalCode !== null) {
-      child.off("exit", onExit);
-      onExit(child.exitCode, child.signalCode);
-    }
+    this.attachProcessExitObserver(
+      child,
+      startedProcess,
+      exitNotificationBarrier,
+      (exitCode, signal) => {
+        this.handleAgentDisconnect(child, "process_exit", exitCode, signal);
+        void this.terminateAgentProcess(child);
+      },
+    );
 
     child.once("close", (exitCode, signal) => {
       this.handleAgentDisconnect(child, "process_close", exitCode, signal);
@@ -2318,6 +2452,25 @@ export class AcpClient {
         child.signalCode ?? null,
       );
     });
+  }
+
+  private attachProcessExitObserver(
+    child: ChildProcess,
+    started: AcpProcessStarted,
+    barrier: Promise<void>,
+    onProcessExit?: (exitCode: number | null, signal: NodeJS.Signals | null) => void,
+  ): void {
+    const onExit = (exitCode: number | null, signal: NodeJS.Signals | null) => {
+      const exitedAt = isoNow();
+      onProcessExit?.(exitCode, signal);
+      void barrier.then(() => this.notifyProcessExit(started, exitCode, signal, exitedAt));
+    };
+    child.once("exit", onExit);
+    // Short probes may finish before their spawned-admission observer is attached.
+    if (child.exitCode !== null || child.signalCode !== null) {
+      child.off("exit", onExit);
+      onExit(child.exitCode, child.signalCode);
+    }
   }
 
   private handleAgentDisconnect(

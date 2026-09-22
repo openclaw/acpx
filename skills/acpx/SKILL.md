@@ -118,6 +118,7 @@ Rules:
 - `--agent <command>` explicitly sets a raw ACP adapter command.
 - Do not combine a positional agent and `--agent` in the same command.
 - Gemini version checks, Copilot ACP support checks, and their startup diagnostics use the selected agent's working directory and child environment, including session environment and embedded runtime overrides.
+- Embedded host lifecycle admission also covers compatibility and diagnostic invocations. Correlate their events by `launchId`; one session can produce several adapter processes. Checks retire their owned processes and output pipes before settling.
 
 ## Embedded hosts
 

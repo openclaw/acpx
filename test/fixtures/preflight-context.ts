@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
@@ -7,6 +8,7 @@ export type PeerProfile = {
   version: string;
   flag: "--acp" | "--experimental-acp" | null;
   silentInitialize?: boolean;
+  probeBehavior?: "hold" | "inherited-pipes";
 };
 export type FixtureConfig = {
   root: string;
@@ -15,10 +17,14 @@ export type FixtureConfig = {
   sessionEnv: Record<string, string>;
   runtimeEnv?: Record<string, string>;
   authCredentials?: Record<string, string>;
+  denyDiagnostic?: boolean;
+  cleanupToken?: string;
   profiles: Record<"parent" | "session", PeerProfile> & { runtime?: PeerProfile };
 };
 export type PeerTrace = {
-  event: "invocation" | "safety-deadline";
+  event: "invocation" | "descendant" | "fixture-cleanup" | "safety-deadline";
+  pid: number;
+  parentPid: number;
   source: Source;
   args: string[];
   cwd: string;
@@ -30,6 +36,7 @@ export type DriverResult = {
   errorName?: string;
   message?: string;
   parentUnchanged: boolean;
+  versionAdmissions?: number;
 };
 
 async function runClient(config: FixtureConfig): Promise<void> {
@@ -42,6 +49,7 @@ async function runClient(config: FixtureConfig): Promise<void> {
   };
   const command = config.relative ? `./bin/${config.agent}` : config.agent;
   const argv = [command, "--acp", ...(config.agent === "copilot" ? ["--stdio"] : [])];
+  let versionAdmissions = 0;
   const client = new AcpClient({
     agentCommand: argv.join(" "),
     agentArgv: argv,
@@ -50,6 +58,15 @@ async function runClient(config: FixtureConfig): Promise<void> {
     sessionOptions: { env: config.sessionEnv },
     agentProcessEnv: config.runtimeEnv,
     authCredentials: config.authCredentials,
+    processLifecycle: config.denyDiagnostic
+      ? {
+          onBeforeSpawn: (launch) => {
+            if (launch.args.includes("--version") && ++versionAdmissions === 2) {
+              throw new Error("synthetic diagnostic admission denied");
+            }
+          },
+        }
+      : undefined,
   });
   const watchdog = setTimeout(() => {
     process.stderr.write("synthetic driver safety deadline\n");
@@ -72,6 +89,7 @@ async function runClient(config: FixtureConfig): Promise<void> {
     process.env.PATH === parent.path &&
     process.env.GEMINI_API_KEY === parent.gemini &&
     process.env.GOOGLE_API_KEY === parent.google;
+  result.versionAdmissions = versionAdmissions;
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
@@ -81,19 +99,30 @@ function runPeer(config: FixtureConfig, source: Source, args: string[]): void {
     throw new Error("Missing synthetic peer profile");
   }
   const observation = {
+    pid: process.pid,
+    parentPid: process.ppid,
     source,
     args,
     cwd: process.cwd(),
     hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
     hasGoogleKey: Boolean(process.env.GOOGLE_API_KEY),
   };
-  const trace = (event: PeerTrace["event"]) => {
+  const trace = (event: PeerTrace["event"], extra: Partial<PeerTrace> = {}) => {
     fs.appendFileSync(
       path.join(config.root, "trace.jsonl"),
-      `${JSON.stringify({ event, ...observation })}\n`,
+      `${JSON.stringify({ event, ...observation, ...extra })}\n`,
     );
   };
   trace("invocation");
+  if ((args[0] === "--version" || args[0] === "--help") && profile.probeBehavior) {
+    if (profile.probeBehavior === "inherited-pipes") {
+      spawn(process.execPath, [process.argv[1], "probe-descendant", configPath, source], {
+        stdio: ["ignore", "inherit", "inherit"],
+      });
+    }
+    keepProbeFixtureAlive(config, trace);
+    return;
+  }
   if (args[0] === "--version") {
     process.stdout.write(`${profile.version}\n`);
     return;
@@ -134,6 +163,53 @@ function runPeer(config: FixtureConfig, source: Source, args: string[]): void {
   });
 }
 
+function keepProbeFixtureAlive(
+  config: FixtureConfig,
+  trace: (event: "fixture-cleanup" | "safety-deadline") => void,
+): void {
+  if (!config.cleanupToken) {
+    throw new Error("Held probe fixtures require a private cleanup token");
+  }
+  setInterval(() => {
+    let requested: string;
+    try {
+      requested = fs.readFileSync(path.join(config.root, "fixture-stop"), "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
+    if (requested === config.cleanupToken) {
+      trace("fixture-cleanup");
+      process.exit(0);
+    }
+  }, 20);
+  setTimeout(() => {
+    trace("safety-deadline");
+    process.exit(95);
+  }, 20_000);
+}
+
+function runProbeDescendant(config: FixtureConfig, source: Source): void {
+  const observation = {
+    pid: process.pid,
+    parentPid: process.ppid,
+    source,
+    args: ["--inherited-probe-pipes"],
+    cwd: process.cwd(),
+    hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
+    hasGoogleKey: Boolean(process.env.GOOGLE_API_KEY),
+  };
+  const trace = (event: PeerTrace["event"]) =>
+    fs.appendFileSync(
+      path.join(config.root, "trace.jsonl"),
+      `${JSON.stringify({ event, ...observation })}\n`,
+    );
+  trace("descendant");
+  keepProbeFixtureAlive(config, trace);
+}
+
 const [mode, configPath, source, ...args] = process.argv.slice(2);
 if (!configPath) {
   throw new Error("Expected synthetic fixture config");
@@ -146,6 +222,11 @@ if (mode === "driver") {
   (source === "parent" || source === "session" || source === "runtime")
 ) {
   runPeer(config, source, args);
+} else if (
+  mode === "probe-descendant" &&
+  (source === "parent" || source === "session" || source === "runtime")
+) {
+  runProbeDescendant(config, source);
 } else {
   throw new Error("Unexpected synthetic fixture mode");
 }

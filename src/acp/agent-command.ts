@@ -1,10 +1,5 @@
-import { spawn } from "node:child_process";
 import { CopilotAcpUnsupportedError } from "../errors.js";
-import {
-  buildSpawnCommandOptions,
-  readWindowsEnvValue,
-  resolveWindowsExecutablePath,
-} from "../spawn-command-options.js";
+import { readWindowsEnvValue, resolveWindowsExecutablePath } from "../spawn-command-options.js";
 import { type AcpClientOptions } from "../types.js";
 import { basenameToken, splitCommandLine } from "./client-process.js";
 
@@ -18,8 +13,13 @@ const COPILOT_HELP_TIMEOUT_MS = 2_000;
 const CLAUDE_CODE_DEFAULT_SETTING_SOURCES = ["project", "local"] as const;
 
 type AgentCommandContext = {
-  cwd: string;
   env: NodeJS.ProcessEnv;
+  readOutput: (
+    command: string,
+    args: readonly string[],
+    timeoutMs: number,
+    diagnostic?: boolean,
+  ) => Promise<string | undefined>;
 };
 
 type GeminiVersion = {
@@ -176,12 +176,13 @@ function compareVersionParts(left: readonly number[], right: readonly number[]):
 async function detectGeminiVersion(
   command: string,
   context: AgentCommandContext,
+  diagnostic = false,
 ): Promise<GeminiVersion | undefined> {
-  const output = await readCommandOutput(
+  const output = await context.readOutput(
     command,
     ["--version"],
     GEMINI_VERSION_TIMEOUT_MS,
-    context,
+    diagnostic,
   );
   const versionLine = output
     ?.split(/\r?\n/)
@@ -207,65 +208,6 @@ export async function resolveGeminiCommandArgs(
   return [...args];
 }
 
-async function readCommandOutput(
-  command: string,
-  args: readonly string[],
-  timeoutMs: number,
-  context: AgentCommandContext,
-): Promise<string | undefined> {
-  return await new Promise<string | undefined>((resolve) => {
-    const child = spawn(
-      command,
-      [...args],
-      buildSpawnCommandOptions(
-        command,
-        {
-          cwd: context.cwd,
-          env: context.env,
-          stdio: ["ignore", "pipe", "pipe"],
-          windowsHide: true,
-        },
-        process.platform,
-        context.env,
-      ),
-    );
-
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const finish = (value: string | undefined) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      child.removeAllListeners();
-      child.stdout?.removeAllListeners();
-      child.stderr?.removeAllListeners();
-      resolve(value);
-    };
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish(undefined);
-    }, timeoutMs);
-
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.once("error", () => {
-      finish(undefined);
-    });
-    child.once("close", () => {
-      finish(`${stdout}\n${stderr}`);
-    });
-  });
-}
-
 export async function buildGeminiAcpStartupTimeoutMessage(
   command: string,
   context: AgentCommandContext,
@@ -275,7 +217,7 @@ export async function buildGeminiAcpStartupTimeoutMessage(
     "This usually means the local Gemini CLI is waiting on interactive OAuth or has incompatible ACP subprocess behavior.",
   ];
 
-  const version = await detectGeminiVersion(command, context);
+  const version = await detectGeminiVersion(command, context, true);
   if (version) {
     parts.push(`Detected Gemini CLI version: ${version.raw}.`);
   }
@@ -310,7 +252,7 @@ export async function ensureCopilotAcpSupport(
   command: string,
   context: AgentCommandContext,
 ): Promise<void> {
-  const helpOutput = await readCommandOutput(command, ["--help"], COPILOT_HELP_TIMEOUT_MS, context);
+  const helpOutput = await context.readOutput(command, ["--help"], COPILOT_HELP_TIMEOUT_MS);
   if (typeof helpOutput === "string" && !helpOutput.includes("--acp")) {
     throw new CopilotAcpUnsupportedError(buildCopilotAcpUnsupportedMessage(), {
       retryable: false,
