@@ -1,6 +1,8 @@
 import type http from "node:http";
 import type net from "node:net";
 import type { Duplex } from "node:stream";
+import { FsSafeError } from "@openclaw/fs-safe";
+import { hasNodeErrorCode } from "@openclaw/fs-safe/path";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { z } from "zod";
 import { createReplayPatch } from "../src/lib/json-patch-plus.js";
@@ -12,6 +14,7 @@ import type {
   ViewerRunsState,
 } from "../src/types.js";
 import type { ViewerRunSource } from "./live-source.js";
+import { RunBundleNotFoundError } from "./run-bundles.js";
 
 const PROTOCOL: ReplayProtocol = "acpx.replay.v1";
 const DEFAULT_POLL_INTERVAL_MS = 50;
@@ -34,6 +37,7 @@ type ResourceState<TState> = {
   state: TState | null;
   pending?: Promise<void>;
   snapshotRequests: Set<ClientSubscriptionState>;
+  readErrors?: Map<ClientSubscriptionState, string>;
 };
 
 type ResourceDelta<TState> =
@@ -106,6 +110,7 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
       runsResource.snapshotRequests.delete(client);
       for (const resource of runResources.values()) {
         resource.snapshotRequests.delete(client);
+        resource.readErrors?.delete(client);
       }
       pruneRunResources();
       refreshPollingState();
@@ -164,6 +169,7 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
       case "unsubscribe_run":
         client.runSubscriptions.delete(message.runId);
         runResources.get(message.runId)?.snapshotRequests.delete(client);
+        runResources.get(message.runId)?.readErrors?.delete(client);
         pruneRunResources();
         refreshPollingState();
         return;
@@ -184,17 +190,24 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
     try {
       await refreshRunState(runId, client);
     } catch (error) {
-      if (!client.runSubscriptions.delete(runId)) {
-        return;
-      }
-      runResources.get(runId)?.snapshotRequests.delete(client);
+      reportRunReadError(runId, error, [client]);
       pruneRunResources();
-      sendMessage(client.socket, {
-        type: "error",
-        code: "run_not_found",
-        message: error instanceof Error ? error.message : String(error),
-        runId,
-      });
+    }
+  }
+
+  function reportRunReadError(
+    runId: string,
+    error: unknown,
+    recipients: Iterable<ClientSubscriptionState>,
+  ): void {
+    const resource = runResources.get(runId);
+    if (!resource) {
+      return;
+    }
+    for (const client of recipients) {
+      if (client.runSubscriptions.has(runId)) {
+        reportSubscribedRunReadError(client, resource, runId, error);
+      }
     }
   }
 
@@ -310,22 +323,14 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
       }
 
       for (const runId of getSubscribedRunIds()) {
+        // Earlier reads can outlast another run's terminal error or unsubscribe.
+        if (!hasRunSubscribers(runId)) {
+          continue;
+        }
         try {
           await refreshRunState(runId);
         } catch (error) {
-          for (const client of clients) {
-            if (!client.runSubscriptions.has(runId)) {
-              continue;
-            }
-            client.runSubscriptions.delete(runId);
-            sendMessage(client.socket, {
-              type: "error",
-              code: "run_not_found",
-              message: error instanceof Error ? error.message : String(error),
-              runId,
-            });
-          }
-          runResources.delete(runId);
+          reportRunReadError(runId, error, clients);
         }
       }
 
@@ -349,6 +354,15 @@ export function createReplayLiveSyncServer(options: ReplayLiveSyncOptions): Repl
         runResources.delete(runId);
       }
     }
+  }
+
+  function hasRunSubscribers(runId: string): boolean {
+    for (const client of clients) {
+      if (client.runSubscriptions.has(runId)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function hasRunsSubscribers(): boolean {
@@ -436,10 +450,54 @@ function refreshResource<TState extends object>(
     }
     publish(next, resource.version, delta, fromVersion);
     resource.snapshotRequests.clear();
+    resource.readErrors?.clear();
   })().finally(() => {
     resource.pending = undefined;
   });
   return resource.pending;
+}
+
+function reportSubscribedRunReadError(
+  client: ClientSubscriptionState,
+  resource: ResourceState<ViewerRunLiveState>,
+  runId: string,
+  error: unknown,
+): void {
+  if (!isRecoverableRunReadError(error)) {
+    client.runSubscriptions.delete(runId);
+    resource.snapshotRequests.delete(client);
+    resource.readErrors?.delete(client);
+    sendMessage(client.socket, {
+      type: "error",
+      code: "run_not_found",
+      message: "Run bundle not found",
+      runId,
+    });
+    return;
+  }
+
+  resource.snapshotRequests.add(client);
+  resource.readErrors ??= new Map();
+  const message = error instanceof Error ? error.message : String(error);
+  if (resource.readErrors.get(client) !== message) {
+    resource.readErrors.set(client, message);
+    sendMessage(client.socket, { type: "error", code: "internal_error", message, runId });
+  }
+}
+
+function isRecoverableRunReadError(error: unknown): boolean {
+  if (error instanceof RunBundleNotFoundError) {
+    return false;
+  }
+  if (error instanceof FsSafeError) {
+    return ["path-mismatch", "not-found", "read-failed", "timeout"].includes(error.code);
+  }
+  return (
+    error instanceof SyntaxError ||
+    ["EACCES", "EPERM", "ENOENT", "ENOTDIR", "EIO", "EMFILE", "ENFILE", "EBUSY"].some((code) =>
+      hasNodeErrorCode(error, code),
+    )
+  );
 }
 
 function sendMessage(socket: WebSocket, message: ReplayServerMessage): void {

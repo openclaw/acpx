@@ -505,6 +505,13 @@ load-time snapshot.
 
 ## Reconnections and resync
 
+Recoverable reads of a selected run keep the last good state, version, and
+subscription. The server retries on its normal polling interval and sends a
+snapshot when reading succeeds again, even if the state is unchanged. Repeated
+identical warnings are suppressed until recovery, and an accepted update clears
+only the matching run's read warning. A missing required file in an existing run
+can recover; confirmed missing run directories and denied paths remain unavailable.
+
 On reconnect:
 
 1. reopen WebSocket
