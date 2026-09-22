@@ -5,6 +5,10 @@ import fs from "node:fs/promises";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { QueueConnectionError } from "../src/errors.js";
+import { observeProcessIncarnation } from "../src/process-identity.js";
+import { createSharedAcpRuntime } from "../src/runtime.js";
+import { defaultSessionEventLog, sessionEventActivePath } from "../src/session/event-log.js";
+import { SessionEventWriter } from "../src/session/events.js";
 import { probeQueueOwnerHealth } from "../src/session/queue/ipc-health.js";
 import {
   isProcessAlive,
@@ -16,6 +20,11 @@ import {
 } from "../src/session/queue/lease-store.js";
 import { queueLockFilePath, queueSocketBaseDir } from "../src/session/queue/paths.js";
 import { withTempHome } from "./queue-test-helpers.js";
+import {
+  makeSessionRecord,
+  sessionFilePath,
+  writeSessionRecordFile,
+} from "./runtime-test-helpers.js";
 
 type Actor = {
   child: ChildProcess;
@@ -133,10 +142,10 @@ async function startSentinel(): Promise<Actor> {
   `);
 }
 
-async function withFixtureHome(run: () => Promise<void>): Promise<void> {
+async function withFixtureHome(run: (homeDir: string) => Promise<void>): Promise<void> {
   await withTempHome(async (homeDir) => {
     try {
-      await run();
+      await run(homeDir);
     } finally {
       const socketDir = queueSocketBaseDir(homeDir);
       if (socketDir) {
@@ -164,6 +173,97 @@ const retirementPaths = {
     await terminateQueueOwnerForSession(owner.sessionId, owner);
   },
 };
+
+test(
+  "public watch detects PID reuse without changing the sentinel or session",
+  { timeout: 20_000 },
+  async () => {
+    await withFixtureHome(async (home) => {
+      const sessionId = "watch-reused-owner";
+      const original = await startLeaseOwner(sessionId);
+      const runtime = createSharedAcpRuntime({ cwd: home, permissionMode: "deny-all" });
+      const abort = new AbortController();
+      let sentinel: Actor | undefined;
+      try {
+        const recorded = await readQueueOwnerRecord(sessionId);
+        assert(recorded?.processIdentity);
+        const session = makeSessionRecord({
+          acpxRecordId: sessionId,
+          acpSessionId: "provider-session",
+          agentCommand: "fixture-agent",
+          cwd: home,
+          eventLog: defaultSessionEventLog(sessionId),
+        });
+        await writeSessionRecordFile(home, session);
+        const writer = await SessionEventWriter.open(session);
+        try {
+          await writer.beginTurn("lost-owner");
+        } finally {
+          await writer.close();
+        }
+        original.child.kill("SIGKILL");
+        await original.exited;
+        if (process.platform !== "win32" && process.platform !== "linux") {
+          // lstart records whole seconds; keep the two fixture births distinct.
+          await delay(1_100);
+        }
+        sentinel = await startSentinel();
+        const reused = { ...recorded, pid: sentinel.pids[0] };
+        const lockPath = queueLockFilePath(sessionId);
+        await fs.writeFile(lockPath, JSON.stringify(reused));
+        assert.equal(await observeProcessIncarnation(reused.pid, reused.processIdentity), "gone");
+        assert.deepEqual(sentinel.pids.map(isProcessAlive), [true, true]);
+        const paths = [
+          lockPath,
+          sessionFilePath(home, sessionId),
+          sessionEventActivePath(sessionId),
+        ];
+        const before = await Promise.all(paths.map((file) => fs.readFile(file, "utf8")));
+        const iterator = runtime
+          .watchSession({
+            handle: {
+              backend: "acpx-shared",
+              sessionKey: sessionId,
+              runtimeSessionName: sessionId,
+              acpxRecordId: sessionId,
+            },
+            signal: AbortSignal.any([abort.signal, AbortSignal.timeout(4_000)]),
+          })
+          [Symbol.asyncIterator]();
+        assert.equal((await iterator.next()).value?.type, "turn_started");
+        process.stdout.write(
+          `WATCH_REUSE_STARTED ${JSON.stringify({ pids: [...original.pids, ...sentinel.pids] })}\n`,
+        );
+        try {
+          await assert.rejects(iterator.next(), { code: "WATCH_OUTCOME_UNKNOWN" });
+        } finally {
+          assert.deepEqual(sentinel.pids.map(isProcessAlive), [true, true]);
+          assert.deepEqual(
+            await Promise.all(paths.map((file) => fs.readFile(file, "utf8"))),
+            before,
+          );
+          abort.abort();
+          await iterator.return?.();
+        }
+      } finally {
+        abort.abort();
+        await runtime.shutdown();
+        const actors = sentinel ? [original, sentinel] : [original];
+        const stopped = await Promise.allSettled(actors.map(stopActor));
+        process.stdout.write(
+          `WATCH_REUSE_CLEANUP ${JSON.stringify({
+            pids: actors.flatMap((actor) => actor.pids),
+            alive: actors.flatMap((actor) => actor.pids).map(isProcessAlive),
+            errors: stopped.flatMap((result) =>
+              result.status === "rejected" ? [String(result.reason)] : [],
+            ),
+          })}\n`,
+        );
+        assert.ok(stopped.every((result) => result.status === "fulfilled"));
+      }
+    });
+  },
+);
 
 for (const [name, retire] of Object.entries(retirementPaths)) {
   test(
