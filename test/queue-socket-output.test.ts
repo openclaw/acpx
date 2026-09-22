@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import type net from "node:net";
+import os from "node:os";
+import path from "node:path";
 import test, { type TestContext } from "node:test";
 import type { QueueOwnerMessage } from "../src/session/queue/messages.js";
 import { QueueOutputBudget, QueueSocketOutput } from "../src/session/queue/socket-output.js";
+import { withTempDir } from "./runtime-test-helpers.js";
 
 const CHUNK_BYTES = 64 * 1024;
 
@@ -85,7 +88,9 @@ function spoolHandles(t: TestContext): number[] {
   const open = fs.openSync;
   t.mock.method(fs, "openSync", (...args: Parameters<typeof open>) => {
     const fd = open(...args);
-    handles.push(fd);
+    if (args[1] === "wx+" && args[2] === 0o600) {
+      handles.push(fd);
+    }
     return fd;
   });
   return handles;
@@ -399,8 +404,12 @@ test("failed unlink and ambiguous constructor cleanup retain the descriptor rese
     emptyPath = file;
     throw new Error("fixture unlink failure");
   });
-  t.mock.method(fs, "closeSync", () => {
-    throw new Error("fixture close failure");
+  t.mock.method(fs, "closeSync", (fd: number) => {
+    // A cold secure-temp root closes its own directory before the ring opens.
+    if (handles.includes(fd)) {
+      throw new Error("fixture close failure");
+    }
+    close(fd);
   });
   try {
     output.send(message("x".repeat(3 * CHUNK_BYTES)));
@@ -413,4 +422,109 @@ test("failed unlink and ambiguous constructor cleanup retain the descriptor rese
     assert.ok(emptyPath);
     unlink(emptyPath);
   }
+});
+
+test("cold and warm output roots close directory and spool handles and refuse an unsafe root", async (t) => {
+  await withTempDir("acpx-output-root-", async (directory) => {
+    const envKeys = ["TMPDIR", "TEMP", "TMP"] as const;
+    const saved = envKeys.map((key) => process.env[key]);
+    const umask = process.platform === "win32" ? undefined : process.umask(0o077);
+    const sockets: PausedSocket[] = [];
+    const active = new Map<number, { kind: "directory" | "spool"; pathname: string }>();
+    const opened = { directory: 0, spool: 0 };
+    const closed = { directory: 0, spool: 0 };
+    let payloadWrites = 0;
+    const { openSync, closeSync, writeSync } = fs;
+    t.mock.method(fs, "openSync", (...args: Parameters<typeof openSync>) => {
+      const fd = openSync(...args);
+      const pathname = String(args[0]);
+      if (pathname.startsWith(`${directory}${path.sep}`)) {
+        const kind = fs.fstatSync(fd).isDirectory() ? "directory" : "spool";
+        if (kind === "directory" || (args[1] === "wx+" && args[2] === 0o600)) {
+          active.set(fd, { kind, pathname });
+          opened[kind] += 1;
+        }
+      }
+      return fd;
+    });
+    t.mock.method(fs, "closeSync", (fd: number) => {
+      closeSync(fd);
+      const receipt = active.get(fd);
+      if (receipt) {
+        closed[receipt.kind] += 1;
+        active.delete(fd);
+      }
+    });
+    t.mock.method(fs, "writeSync", (...args: Parameters<typeof writeSync>) => {
+      const receipt = active.get(args[0]);
+      if (receipt?.kind === "spool") {
+        assert.throws(() => fs.statSync(receipt.pathname), { code: "ENOENT" });
+        payloadWrites += 1;
+      }
+      return writeSync(...args);
+    });
+    try {
+      for (const key of envKeys) {
+        process.env[key] = directory;
+      }
+      assert.equal(os.tmpdir(), directory);
+      const messageValue = message("🍵".repeat(CHUNK_BYTES));
+      for (const phase of ["cold", "warm"] as const) {
+        const { socket, output, budget } = fixture(t);
+        sockets.push(socket);
+        output.send(messageValue);
+        assert.equal(socket.error, undefined, phase);
+        assert.equal(active.size, 1, "only the live spool retains a descriptor");
+        output.end();
+        drain(socket);
+        assert.deepEqual(Buffer.concat(socket.chunks), wire(messageValue));
+        assert.equal(counts(budget).bytes, 0);
+        assert.equal(counts(budget).files, 0);
+        assert.equal(counts(budget).observers, 0);
+        assert.equal(active.size, 0);
+      }
+      assert.equal(opened.directory, process.platform === "win32" ? 0 : 1);
+      assert.equal(opened.spool, 2);
+      assert.deepEqual(closed, opened);
+      assert.ok(payloadWrites > 0);
+      const entries = fs.readdirSync(directory);
+      assert.equal(entries.length, 1);
+      const root = path.join(directory, entries[0]);
+      assert.deepEqual(fs.readdirSync(root), []);
+      if (umask !== undefined) {
+        assert.equal(fs.statSync(root).mode & 0o777, 0o700);
+      }
+      fs.rmdirSync(root);
+      fs.writeFileSync(root, "fixture-owned obstruction");
+      const denied = fixture(t);
+      sockets.push(denied.socket);
+      denied.output.send(messageValue);
+      assert.match(denied.socket.error!.message, /Unsafe fallback/u);
+      assert.equal(denied.socket.destroyed, true);
+      assert.equal(denied.socket.writableEnded, false);
+      assert.equal(counts(denied.budget).files, 0);
+      assert.equal(counts(denied.budget).bytes, 0);
+      assert.equal(counts(denied.budget).observers, 0);
+      assert.equal(opened.spool, 2, "unsafe root cannot admit a payload descriptor");
+      assert.equal(fs.readFileSync(root, "utf8"), "fixture-owned obstruction");
+    } finally {
+      for (const socket of sockets) {
+        socket.destroy();
+      }
+      t.mock.restoreAll();
+      if (umask !== undefined) {
+        process.umask(umask);
+      }
+      envKeys.forEach((key, index) => {
+        const value = saved[index];
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      });
+    }
+    assert.equal(active.size, 0);
+    assert.deepEqual(closed, opened);
+  });
 });
