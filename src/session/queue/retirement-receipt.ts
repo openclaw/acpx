@@ -141,10 +141,10 @@ export function observeRetirementSnapshot(
   if (process.platform !== "win32" || !isWindowsRetirementIdentity(witness.processIdentity)) {
     return "unknown";
   }
-  const comparison = compareProcessBirthIdentity(
-    witness.processIdentity,
-    table?.get(witness.pid)?.birth,
-  );
+  const observed = table?.get(witness.pid);
+  const comparison = observed
+    ? compareProcessBirthIdentity(witness.processIdentity, observed.birth)
+    : "unknown";
   // A missing row is unknown. Only an exact birth mismatch or a separate ESRCH
   // observation proves that this saved incarnation cannot return.
   if (comparison === "different" || isProcessDefinitelyDead(witness.pid)) {
