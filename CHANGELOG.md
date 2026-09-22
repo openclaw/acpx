@@ -15,6 +15,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: preserve recorded attempt order when timestamps tie or move backward, and carry rounded seconds into minute duration labels.
 - Replay viewer: count readable run summaries toward the recent-run limit so incomplete directories cannot hide older valid runs.
 - Replay viewer: keep appended patch payloads unchanged when later operations edit their inserted data, and reuse private state while processing live patches.
+- Sessions/Windows: preserve native command-line paths when closing saved agents, including batch launch wrappers, while leaving unmatched or unobservable processes alone.
 
 ## 0.19.1 - 2026-09-22
 

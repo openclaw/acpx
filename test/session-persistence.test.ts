@@ -4,7 +4,9 @@ import { once } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { normalizeAgentCommandInput } from "../src/acp/client-process.js";
 import { AGENT_ARGV_REGISTRY, AGENT_REGISTRY } from "../src/agent-registry.js";
+import { withTimeout } from "../src/async-control.js";
 import {
   parseSessionRecord,
   resolveSessionRecord,
@@ -625,27 +627,26 @@ test("closeSession soft-closes and terminates matching process", async () => {
   await withTempHome(async (homeDir) => {
     const session = await loadSessionModule();
 
-    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000);"], {
+    const argv = [process.execPath, "-e", "setInterval(() => {}, 1000);"];
+    const child = spawn(argv[0], argv.slice(1), {
       stdio: "ignore",
     });
-    await once(child, "spawn");
-
-    const sessionId = "live-session";
-    const cwd = path.join(homeDir, "repo");
-    await writeSessionRecord(
-      homeDir,
-      makeSessionRecord({
-        acpxRecordId: sessionId,
-        acpSessionId: sessionId,
-        agentCommand: process.execPath,
-        cwd,
-        pid: child.pid,
-      }),
-    );
-
-    const filePath = sessionFilePath(homeDir, sessionId);
-
+    const childClosed = new Promise<void>((resolve) => child.once("close", () => resolve()));
     try {
+      await withTimeout(once(child, "spawn"), 5_000);
+      const sessionId = "live-session";
+      const cwd = path.join(homeDir, "repo");
+      await writeSessionRecord(
+        homeDir,
+        makeSessionRecord({
+          acpxRecordId: sessionId,
+          acpSessionId: sessionId,
+          ...normalizeAgentCommandInput(argv),
+          cwd,
+          pid: child.pid,
+        }),
+      );
+      const filePath = sessionFilePath(homeDir, sessionId);
       const closed = await session.closeSession(sessionId);
       assert.equal(closed.closed, true);
       assert.equal(typeof closed.closedAt, "string");
@@ -656,12 +657,12 @@ test("closeSession soft-closes and terminates matching process", async () => {
       assert.equal(stored.closed, true);
       assert.equal(typeof stored.closed_at, "string");
 
-      const exited = await waitForExit(child.pid);
-      assert.equal(exited, true);
+      await withTimeout(childClosed, 3_000);
     } finally {
       if (child.exitCode == null && child.signalCode == null) {
         child.kill("SIGKILL");
       }
+      await withTimeout(childClosed, 5_000);
     }
   });
 });
@@ -699,24 +700,4 @@ function makeSessionRecord(
   overrides: Parameters<typeof makeSessionRecordFixture>[0],
 ): ReturnType<typeof makeSessionRecordFixture> {
   return makeSessionRecordFixture(overrides, { defaultName: false, defaultAcpx: false });
-}
-
-async function waitForExit(pid: number | undefined): Promise<boolean> {
-  if (pid == null) {
-    return true;
-  }
-
-  const deadline = Date.now() + 2_000;
-  while (Date.now() < deadline) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return true;
-    }
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 50);
-    });
-  }
-
-  return false;
 }

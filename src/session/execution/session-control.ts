@@ -35,6 +35,7 @@ import {
   runSessionSetModelDirect,
   runSessionSetModeDirect,
 } from "./prompt-runner.js";
+import { splitWindowsProcessCommandLine } from "./windows-process-command.js";
 
 export async function cancelSessionPrompt(
   options: SessionCancelOptions,
@@ -209,7 +210,10 @@ export async function setSessionConfigOption(
   });
 }
 
-function firstAgentCommandToken(command: string): string | undefined {
+function firstAgentCommandToken(command: string, argv?: readonly string[]): string | undefined {
+  if (argv) {
+    return argv[0] || undefined;
+  }
   try {
     const parsed = splitCommandLine(command);
     return parsed.command || undefined;
@@ -218,8 +222,8 @@ function firstAgentCommandToken(command: string): string | undefined {
   }
 }
 
-async function isLikelyMatchingProcess(pid: number, agentCommand: string): Promise<boolean> {
-  const expectedToken = firstAgentCommandToken(agentCommand);
+async function isLikelyMatchingProcess(pid: number, record: SessionRecord): Promise<boolean> {
+  const expectedToken = firstAgentCommandToken(record.agentCommand, record.agentArgv);
   if (!expectedToken) {
     return false;
   }
@@ -288,9 +292,15 @@ async function readWindowsCommandLine(pid: number): Promise<string | undefined> 
   }
 }
 
-function splitCommandLineLike(commandLine: string | undefined): string[] {
+function splitCommandLineLike(
+  commandLine: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
   if (!commandLine) {
     return [];
+  }
+  if (platform === "win32") {
+    return splitWindowsProcessCommandLine(commandLine);
   }
   try {
     const parsed = splitCommandLine(commandLine);
@@ -323,7 +333,7 @@ export async function closeSession(sessionId: string): Promise<SessionRecord> {
   if (
     record.pid != null &&
     isProcessAlive(record.pid) &&
-    (await isLikelyMatchingProcess(record.pid, record.agentCommand))
+    (await isLikelyMatchingProcess(record.pid, record))
   ) {
     await terminateProcess(record.pid);
   }
