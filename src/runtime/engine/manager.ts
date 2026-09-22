@@ -61,6 +61,7 @@ import {
 } from "./reconnect.js";
 import { shouldReuseExistingRecord } from "./reuse-policy.js";
 import {
+  normalizeSessionOptionShape,
   persistSessionOptions,
   sessionOptionsFromRecord,
   type SessionAgentOptions,
@@ -987,7 +988,10 @@ export class AcpRuntimeManager {
       !existing.record.closed &&
       this.pendingOneShotRecordIds.get(input.sessionKey) === existing.record.acpxRecordId &&
       this.retainedSessionOwners.get(existing.record.acpxRecordId) === existing.owner &&
-      isDeepStrictEqual(sessionOptionsFromRecord(existing.record), input.sessionOptions),
+      isDeepStrictEqual(
+        sessionOptionsFromRecord(existing.record),
+        normalizeSessionOptionShape(input.sessionOptions),
+      ),
     );
   }
 

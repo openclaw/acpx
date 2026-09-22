@@ -10,6 +10,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Compare: preserve actual permission counts on failed runs, distinguish permission failures from runtime errors, and reject conflicting permission modes before reading prompt or policy input.
 - Embedding: preserve host logging during overlapping ACP prompts and when the application replaces its logger.
+- Runtime: reuse pending one-shot initialization when repeated creation options differ only by undefined fields or empty environment maps, avoiding duplicate agent sessions and retained clients.
 
 ## 0.19.0 - 2026-09-22
 

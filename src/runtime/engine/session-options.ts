@@ -32,6 +32,16 @@ export function mergeSessionOptions(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+export function normalizeSessionOptionShape(
+  options: SessionAgentOptions | undefined,
+): SessionAgentOptions | undefined {
+  const normalized = mergeSessionOptions(options, undefined);
+  if (normalized?.env !== undefined && Object.keys(normalized.env).length === 0) {
+    delete normalized.env;
+  }
+  return normalized && Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
 function mergeEnvRecords(
   fallback: Record<string, string> | undefined,
   preferred: Record<string, string> | undefined,

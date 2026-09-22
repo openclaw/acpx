@@ -350,95 +350,181 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
   );
 });
 
-test("AcpRuntimeManager reuses pending oneshot initialization and closes it after the turn", async () => {
-  const store = new InMemorySessionStore();
-  let createdSessions = 0;
-  let loadSessionCalls = 0;
-  let closeCalls = 0;
-  const manager = new AcpRuntimeManager(
-    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
-    {
-      clientFactory: () =>
-        ({
-          initializeResult: {
-            protocolVersion: 1,
-            agentCapabilities: { loadSession: true },
-          },
-          start: async () => {},
-          close: async () => {
-            closeCalls += 1;
-          },
-          createSession: async () => ({
-            sessionId: `new-session-${++createdSessions}`,
-            agentSessionId: `agent-session-${createdSessions}`,
-          }),
-          loadSession: async () => ({ agentSessionId: "unused" }),
-          hasReusableSession: () => true,
-          supportsLoadSession: () => true,
-          supportsResumeSession: () => false,
-          loadSessionWithOptions: async () => {
-            loadSessionCalls += 1;
-            return { agentSessionId: "runtime-session" };
-          },
-          getAgentLifecycleSnapshot: () => ({ running: true }),
-          prompt: async () => ({ stopReason: "end_turn" }),
-          requestCancelActivePrompt: async () => false,
-          hasActivePrompt: () => false,
-          setSessionMode: async () => {},
-          setSessionConfigOption: async () => {},
-          clearEventHandlers: () => {},
-          setEventHandlers: () => {},
-        }) as never,
-    },
-  );
+type PendingOneShotOptions = Parameters<AcpRuntimeManager["ensureSession"]>[0]["sessionOptions"];
 
-  const [first, second] = await Promise.all([
-    manager.ensureSession({
+const pendingOneShotOptionCases: Array<{
+  label: string;
+  first?: PendingOneShotOptions;
+  second?: PendingOneShotOptions;
+  reuse: boolean;
+}> = [
+  { label: "omitted options", reuse: true },
+  { label: "omitted versus whitespace replacement", second: { systemPrompt: " " }, reuse: false },
+  {
+    label: "omitted versus whitespace append",
+    second: { systemPrompt: { append: " " } },
+    reuse: false,
+  },
+  {
+    label: "omitted versus own proto env key",
+    second: { env: Object.fromEntries([["__proto__", "SYNTHETIC_PROTO"]]) },
+    reuse: false,
+  },
+  { label: "empty options", first: {}, second: {}, reuse: true },
+  { label: "empty environment", first: { env: {} }, second: { env: {} }, reuse: true },
+  {
+    label: "explicit undefined beside an empty tool list",
+    first: { allowedTools: [], maxTurns: undefined },
+    second: { allowedTools: [], maxTurns: undefined },
+    reuse: true,
+  },
+  {
+    label: "explicit empty tool list",
+    first: { allowedTools: [] },
+    second: { allowedTools: [] },
+    reuse: true,
+  },
+  { label: "omitted followed by empty options", second: {}, reuse: true },
+  {
+    label: "omitted tools versus explicit empty tools",
+    second: { allowedTools: [] },
+    reuse: false,
+  },
+  { label: "explicit zero turns versus omitted turns", first: { maxTurns: 0 }, reuse: false },
+  {
+    label: "replacement versus appended system prompt",
+    first: { systemPrompt: "Synthetic guidance" },
+    second: { systemPrompt: { append: "Synthetic guidance" } },
+    reuse: false,
+  },
+  {
+    label: "literal environment whitespace",
+    first: { env: { SYNTHETIC_OPTION: "first" } },
+    second: { env: { SYNTHETIC_OPTION: " first " } },
+    reuse: false,
+  },
+  {
+    label: "literal system-prompt whitespace",
+    first: { systemPrompt: "Synthetic guidance" },
+    second: { systemPrompt: " Synthetic guidance " },
+    reuse: false,
+  },
+  {
+    label: "literal model spelling",
+    first: { model: "literal-model" },
+    second: { model: " literal-model " },
+    reuse: false,
+  },
+];
+
+for (const scenario of pendingOneShotOptionCases) {
+  test(`pending oneshot ownership preserves ${scenario.label}`, async (t) => {
+    const store = new InMemorySessionStore();
+    let createdSessions = 0;
+    let loadSessionCalls = 0;
+    let closeCalls = 0;
+    const manager = new AcpRuntimeManager(
+      createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+      {
+        clientFactory: () =>
+          ({
+            initializeResult: {
+              protocolVersion: 1,
+              agentCapabilities: { loadSession: true },
+            },
+            start: async () => {},
+            close: async () => {
+              closeCalls += 1;
+            },
+            createSession: async () => ({
+              sessionId: `new-session-${++createdSessions}`,
+              agentSessionId: `agent-session-${createdSessions}`,
+              models: {
+                currentModelId: "literal-model",
+                availableModels: [{ modelId: "literal-model", name: "Synthetic model" }],
+              },
+            }),
+            loadSession: async () => ({ agentSessionId: "unused" }),
+            hasReusableSession: () => true,
+            supportsLoadSession: () => true,
+            supportsResumeSession: () => false,
+            loadSessionWithOptions: async () => {
+              loadSessionCalls += 1;
+              return { agentSessionId: "runtime-session" };
+            },
+            getAgentLifecycleSnapshot: () => ({ running: true }),
+            prompt: async () => ({ stopReason: "end_turn" }),
+            requestCancelActivePrompt: async () => false,
+            hasActivePrompt: () => false,
+            setSessionMode: async () => {},
+            setSessionModel: async () => {},
+            setSessionConfigOption: async () => {},
+            clearEventHandlers: () => {},
+            setEventHandlers: () => {},
+          }) as never,
+      },
+    );
+    t.after(() => manager.shutdown());
+
+    const [first, second] = await Promise.all([
+      manager.ensureSession({
+        sessionKey: "oneshot-session",
+        agent: "codex",
+        mode: "oneshot",
+        sessionOptions: scenario.first,
+      }),
+      manager.ensureSession({
+        sessionKey: "oneshot-session",
+        agent: "codex",
+        mode: "oneshot",
+        sessionOptions: scenario.second,
+      }),
+    ]);
+    const initializedCount = scenario.reuse ? 1 : 2;
+    assert.equal(first.acpxRecordId === second.acpxRecordId, scenario.reuse);
+    assert.equal(first.acpSessionId === second.acpSessionId, scenario.reuse);
+    assert.equal(first.name, "oneshot-session");
+    assert.equal(second.name, "oneshot-session");
+    assert.equal(createdSessions, initializedCount);
+    assert.equal(store.records.size, initializedCount);
+    assert.equal(closeCalls, 0);
+
+    const turn = manager.startTurn({
+      handle: createHandle("oneshot-session", second.acpxRecordId),
+      text: "hello",
+      mode: "prompt",
+      sessionMode: "oneshot",
+      requestId: "req-oneshot",
+    });
+    assert.deepEqual((await collectTurn(turn)).result, {
+      status: "completed",
+      stopReason: "end_turn",
+    });
+    assert.equal(loadSessionCalls, 0);
+    assert.equal(closeCalls, 1);
+
+    const next = await manager.ensureSession({
       sessionKey: "oneshot-session",
       agent: "codex",
       mode: "oneshot",
-    }),
-    manager.ensureSession({
-      sessionKey: "oneshot-session",
-      agent: "codex",
-      mode: "oneshot",
-    }),
-  ]);
+      sessionOptions: scenario.second,
+    });
+    assert.notEqual(
+      next.acpxRecordId,
+      second.acpxRecordId,
+      "a consumed one-shot owner must not be reused",
+    );
+    assert.equal(createdSessions, initializedCount + 1);
+    assert.equal(store.records.size, initializedCount + 1);
 
-  assert.equal(first.acpxRecordId, second.acpxRecordId);
-  assert.equal(first.acpSessionId, second.acpSessionId);
-  assert.equal(first.name, "oneshot-session");
-  assert.equal(second.name, "oneshot-session");
-  assert.equal(createdSessions, 1);
-  assert.equal(store.records.size, 1);
-  assert.equal(closeCalls, 0);
-
-  const turn = manager.startTurn({
-    handle: createHandle("oneshot-session", second.acpxRecordId),
-    text: "hello",
-    mode: "prompt",
-    sessionMode: "oneshot",
-    requestId: "req-oneshot",
+    await manager.close(createHandle("oneshot-session", next.acpxRecordId));
+    assert.equal(closeCalls, 2);
+    if (!scenario.reuse) {
+      await manager.close(createHandle("oneshot-session", first.acpxRecordId));
+      assert.equal(closeCalls, 3, "a distinct earlier one-shot record keeps its own owner");
+    }
   });
-  assert.deepEqual((await collectTurn(turn)).result, {
-    status: "completed",
-    stopReason: "end_turn",
-  });
-  assert.equal(loadSessionCalls, 0);
-  assert.equal(closeCalls, 1);
-
-  const next = await manager.ensureSession({
-    sessionKey: "oneshot-session",
-    agent: "codex",
-    mode: "oneshot",
-  });
-  assert.notEqual(next.acpxRecordId, second.acpxRecordId);
-  assert.equal(createdSessions, 2);
-  assert.equal(store.records.size, 2);
-
-  await manager.close(createHandle("oneshot-session", next.acpxRecordId));
-  assert.equal(closeCalls, 2);
-});
+}
 
 test("AcpRuntimeManager closes retained oneshot owners on pre-turn exits", async () => {
   const store = new InMemorySessionStore();

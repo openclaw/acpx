@@ -296,6 +296,10 @@ cleanup available for retry. Turns and controls on that same record wait for ini
 other records, including distinct one-shot records, remain independent. A one-shot
 ensure whose previously pending owner has closed creates a fresh record.
 
+Pending one-shot reuse ignores undefined option fields and empty environment maps.
+An explicit empty tool list still differs from omitted tools. Ensuring again after
+a one-shot turn completes creates a fresh record.
+
 Call `shutdown()` when retiring a runtime. It cancels active prompts, closes owned
 connections, and waits for admitted work and probes to finish. New sessions,
 turns, controls and probes then reject. Stored sessions remain available for a
