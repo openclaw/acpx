@@ -21,6 +21,7 @@ Repo: https://github.com/openclaw/acpx
 - PR triage example: report the latest completed conflict outcome in handoff prompts and final summaries, retaining resolution details and reasons that need human judgment across repeated checks.
 - Replay viewer: keep the latest run selection when a superseded load finishes, including reselecting the run already displayed.
 - Replay viewer: keep graph nodes visible during replay updates while retaining natural card resizing.
+- Replay viewer: render complete flow definitions containing unreachable loops without crashing.
 
 ## 0.19.1 - 2026-09-22
 

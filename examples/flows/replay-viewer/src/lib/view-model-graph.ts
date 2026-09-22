@@ -752,6 +752,8 @@ function computeTailDepths(
       memo.set(nodeId, null);
       return null;
     }
+    // A cycle of sole successors has no terminal tail.
+    memo.set(nodeId, null);
     const childDepth = visit(targets[0]);
     const depth = childDepth == null ? null : childDepth + 1;
     memo.set(nodeId, depth);

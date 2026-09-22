@@ -81,6 +81,8 @@ history locally, so you can still rewind while new steps continue to arrive.
 
 The full flow definition remains the main graph. The run is shown as an overlay
 on that graph rather than replacing it with an execution-only path.
+Unused components, including loops, remain visible even when the run completes
+without reaching them.
 
 Graph nodes remain visible during playback, and their cards resize as content changes.
 

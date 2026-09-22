@@ -23,11 +23,13 @@ import {
   selectAttemptView,
 } from "../examples/flows/replay-viewer/src/lib/view-model.js";
 import type {
+  FlowDefinitionSnapshot,
   FlowRunManifest,
   FlowRunState,
   FlowStepRecord,
   LoadedRunBundle,
 } from "../examples/flows/replay-viewer/src/types.js";
+import { validateFlowDefinition } from "../src/flows/graph.js";
 
 test("selectAttemptView shapes ACP session content into readable conversation parts", () => {
   const step = baseStep("extract_intent", "acp", "ok");
@@ -103,6 +105,86 @@ test("buildGraph infers start terminal and branch semantics across the full defi
   assert.equal(nodeMap.get("escalate")?.isTerminal, true);
   assert.ok(graph.edges.every((edge) => edge.label == null));
 });
+
+for (const fixture of [
+  {
+    name: "an unreachable two-node cycle",
+    nodeIds: ["a", "b"],
+    edges: [
+      { from: "a", to: "b" },
+      { from: "b", to: "a" },
+    ],
+  },
+  {
+    name: "an unreachable self-loop",
+    nodeIds: ["a"],
+    edges: [{ from: "a", to: "a" }],
+  },
+  {
+    name: "an unreachable chain entering a cycle",
+    nodeIds: ["a", "b", "c"],
+    edges: [
+      { from: "a", to: "b" },
+      { from: "b", to: "c" },
+      { from: "c", to: "b" },
+    ],
+  },
+  {
+    name: "multiple unreachable cyclic components",
+    nodeIds: ["a", "b", "c"],
+    edges: [
+      { from: "a", to: "b" },
+      { from: "b", to: "a" },
+      { from: "c", to: "c" },
+    ],
+  },
+]) {
+  for (const layoutMode of ["fallback", "elk"] as const) {
+    test(`buildGraph projects ${fixture.name} with ${layoutMode} layout`, async () => {
+      const nodeIds = ["s", ...fixture.nodeIds];
+      const flow: FlowDefinitionSnapshot = {
+        schema: "acpx.flow-definition-snapshot.v1",
+        name: "unused-cycle-flow",
+        startAt: "s",
+        nodes: Object.fromEntries(
+          nodeIds.map((nodeId) => [nodeId, { nodeType: "compute" as const }]),
+        ),
+        edges: fixture.edges,
+      };
+      validateFlowDefinition({
+        name: flow.name,
+        startAt: flow.startAt,
+        nodes: Object.fromEntries(
+          nodeIds.map((nodeId) => [nodeId, { nodeType: "compute" as const, run: () => ({}) }]),
+        ),
+        edges: flow.edges,
+      });
+      const bundle = makeBundle(baseStep("s", "compute", "ok"), { flow, sessions: {} });
+      const layout = layoutMode === "elk" ? await buildGraphLayout(flow) : null;
+      if (layoutMode === "elk") {
+        assert.ok(layout, "the real layout engine must succeed before testing its projection");
+      }
+
+      const graph = buildGraph(bundle, 0, null, layout);
+
+      assert.deepEqual(graph.nodes.map((node) => node.id).toSorted(), nodeIds.toSorted());
+      assert.deepEqual(
+        graph.edges.map((edge) => [edge.source, edge.target]),
+        fixture.edges.map((edge) => [edge.from, edge.to]),
+      );
+      for (const node of graph.nodes) {
+        assert.ok(Number.isFinite(node.position.x));
+        assert.ok(Number.isFinite(node.position.y));
+        assert.equal(node.data.status, node.id === "s" ? "completed" : "queued");
+        assert.equal(node.data.attempts, node.id === "s" ? 1 : 0);
+        assert.equal(node.data.isTerminal, node.id === "s");
+        if (layout) {
+          assert.deepEqual(node.position, layout.nodePositions[node.id]);
+        }
+      }
+    });
+  }
+}
 
 test("buildGraph applies playback progress to the active node during preview", () => {
   const load = baseStep("load_pr", "action", "ok");
