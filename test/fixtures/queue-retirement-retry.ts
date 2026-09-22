@@ -11,6 +11,7 @@ import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { withTimeout } from "../../src/async-control.js";
 import {
   compareProcessBirthIdentity,
   observeProcessIncarnation,
@@ -233,14 +234,26 @@ function savedReceiptWitnesses(sessionId: string): Witness[] {
 export async function settleRetirerHelpers(
   helpers: { child: ChildProcess; closed: Promise<void> }[],
 ): Promise<void> {
-  await Promise.all(
+  const results = await Promise.allSettled(
     helpers.map(async ({ child, closed }) => {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGKILL");
+      // The production deadline unrefs helpers before close. Restore this fixture's
+      // reference so its final report cannot disappear with an unsettled await.
+      child.ref();
+      try {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
+        }
+        await withTimeout(closed, 5_000);
+      } finally {
+        child.unref();
       }
-      await closed;
     }),
   );
+  for (const result of results) {
+    if (result.status === "rejected") {
+      throw result.reason;
+    }
+  }
 }
 
 async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {

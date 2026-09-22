@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { ChildProcess, execFile } from "node:child_process";
 import test from "node:test";
 import { promisify } from "node:util";
+import { TimeoutError } from "../src/async-control.js";
+import { settleRetirerHelpers } from "./fixtures/queue-retirement-retry.js";
 
 test("retirement worker joins an unreferenced delayed close before reporting", async () => {
   const fixture = new URL("./fixtures/queue-retirement-retry.js", import.meta.url).href;
@@ -32,4 +34,26 @@ test("retirement worker joins an unreferenced delayed close before reporting", a
   );
   assert.equal(stderr, "");
   assert.deepEqual(JSON.parse(stdout), ["ref", "kill", "close", "unref", "report"]);
+});
+
+test("retirement helper settlement bounds missing close and releases every reference", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const references = [0, 0];
+  const helpers = references.map((_, index) => {
+    const child = new ChildProcess();
+    child.ref = () => {
+      references[index] += 1;
+    };
+    child.unref = () => {
+      references[index] -= 1;
+    };
+    child.kill = () => true;
+    const closed = index === 0 ? Promise.resolve() : new Promise<void>(() => {});
+    return { child, closed };
+  });
+  const rejected = assert.rejects(settleRetirerHelpers(helpers), TimeoutError);
+  assert.deepEqual(references, [1, 1]);
+  t.mock.timers.tick(5_000);
+  await rejected;
+  assert.deepEqual(references, [0, 0]);
 });
