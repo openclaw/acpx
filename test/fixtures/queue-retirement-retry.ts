@@ -41,6 +41,7 @@ type WorkerReport = {
   taskkillCalls: number;
   receiptWitnesses: Witness[];
   publishedReceiptWitnesses?: Witness[];
+  signalReceiptWitnesses?: Witness[];
 };
 
 function reachesFixtureRoot(
@@ -260,6 +261,7 @@ async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
   const originalExecFile = childProcess.execFile.bind(childProcess);
   const rename = fs.rename.bind(fs);
   const rm = fs.rm.bind(fs);
+  const kill = process.kill.bind(process);
   const owner = await readQueueOwnerRecord(sessionId);
   assert(owner);
   const report: WorkerReport = { taskkillCalls: 0, receiptWitnesses: [] };
@@ -298,9 +300,9 @@ async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
     const countedQuery =
       mode === "slow-retry" &&
       path.win32.basename(command).toLowerCase() === "powershell.exe" &&
-      Number(queriedPid) !== process.pid;
+      (queriedPid === undefined || Number(queriedPid) !== process.pid);
     const observeDuration = (error: Error | null, stdout: string, stderr: string) => {
-      // Native CIM still determines identity. Charge its foreign observations
+      // Native CIM still determines identity. Charge full and foreign observations
       // near the query ceiling without host-clock changes or timing-sensitive sleeps.
       if (countedQuery) {
         observedTime += 1_900;
@@ -335,6 +337,12 @@ async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
       throw new Error("injected guard acknowledgement failure");
     }
   };
+  process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+    if (signal === "SIGKILL") {
+      report.signalReceiptWitnesses = savedReceiptWitnesses(sessionId);
+    }
+    return kill(pid, signal);
+  }) as typeof process.kill;
   syncBuiltinESMExports();
   if (mode === "success-stalled") {
     let now = Date.now();

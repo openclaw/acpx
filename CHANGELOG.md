@@ -18,6 +18,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: recover selected run streams after transient bundle read failures, preserving the last good state and clearing the matching warning after recovery.
 - Replay viewer: keep completed ACP conversation context visible while replaying later compute, action, and checkpoint steps.
 - PR triage example: retain complete review findings whose prose begins with “execution” and select the final assistant block instead of intermediate commentary and command logs.
+- Sessions/Windows: retire witnessed queue-owner descendants with bounded process snapshots, preserving birth checks and durable custody while avoiding one process query per survivor.
 
 ## 0.19.1 - 2026-09-22
 

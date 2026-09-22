@@ -233,6 +233,53 @@ describe(
       });
     });
 
+    test("new descendant custody must publish before any saved member is signaled", async () => {
+      await withTempHome(async (home) => {
+        const sessionId = "retirement-new-custody-publication";
+        const tree = await startWitnessedTree();
+        const [root, bridge, leaf] = tree.witnesses;
+        assert(root && bridge && leaf);
+        try {
+          const paths = queuePaths(home, sessionId);
+          const savedRoot = {
+            ...root,
+            processIdentity: {
+              kind: "windows-creation" as const,
+              value: "2000-01-01T00:00:00.0000000Z",
+            },
+          };
+          await writeQueueOwnerLock({ ...paths, sessionId, ...savedRoot });
+          const owner = await readQueueOwnerRecord(sessionId);
+          assert(owner);
+          const original = JSON.stringify({
+            ...owner,
+            retirement: {
+              ownerGeneration: owner.ownerGeneration,
+              root: savedRoot,
+              descendants: [bridge],
+            },
+          });
+          await fs.writeFile(paths.lockPath, original);
+          // The saved bridge discovers a previously unrecorded leaf. Neither
+          // member may be signaled when that new custody cannot be published.
+          const refused = await runRetirer("write-failure", sessionId);
+          assert.equal(refused.code, "EIO");
+          assert.equal(refused.taskkillCalls, 0);
+          assert.equal(refused.signalReceiptWitnesses, undefined);
+          assert.equal(refused.publishedReceiptWitnesses, undefined);
+          assert.equal(await fs.readFile(paths.lockPath, "utf8"), original);
+          assert.deepEqual(await witnessStates(tree.witnesses), [
+            "matching",
+            "matching",
+            "matching",
+          ]);
+        } finally {
+          await stopWitnesses(tree.expectedWitnesses);
+          await tree.closed;
+        }
+      });
+    });
+
     test("live reused PIDs cannot starve a later saved survivor across slow retries", async () => {
       await withTempHome(async (home) => {
         const sessionId = "retirement-reused-progress";
@@ -267,15 +314,6 @@ describe(
           });
           await fs.writeFile(paths.lockPath, original);
 
-          // Failed publication cannot authorize signals or discard prior custody.
-          const refused = await runRetirer("write-failure", sessionId);
-          assert.equal(refused.code, "EIO");
-          assert.equal(refused.taskkillCalls, 0);
-          assert.equal(refused.publishedReceiptWitnesses, undefined);
-          assert.equal(await fs.readFile(paths.lockPath, "utf8"), original);
-          assert.deepEqual(await witnessStates(tree.witnesses), ["gone", "gone", "matching"]);
-          assert.deepEqual(await witnessStates(replacements.witnesses), ["matching", "matching"]);
-
           for (
             let attempt = 0;
             attempt < 2 && (await readQueueOwnerRecord(sessionId));
@@ -291,10 +329,12 @@ describe(
           );
           assert.equal(attempts.at(-1)?.code, undefined);
           assert.equal(await readQueueOwnerRecord(sessionId), undefined);
-          const published = attempts[0]?.publishedReceiptWitnesses;
-          assert(published);
-          assert(published.every((witness) => !replaced.some((old) => old.pid === witness.pid)));
-          assert(published.some((witness) => witness.pid === tree.witnesses[2].pid));
+          const duringSignal = attempts[0]?.signalReceiptWitnesses;
+          assert(duringSignal);
+          assert(duringSignal.some((witness) => witness.pid === tree.witnesses[2].pid));
+          // Already-persisted custody can remain on disk through the batch.
+          // Pruning stale births need not add an I/O gap before a verified signal.
+          assert(replaced.every((old) => duringSignal.some((witness) => witness.pid === old.pid)));
           assert.deepEqual(
             await witnessStates(replacements.expectedWitnesses),
             replacements.expectedWitnesses.map(() => "matching"),
