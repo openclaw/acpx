@@ -376,24 +376,35 @@ test("journal offsets stay with exact files when numeric identities alias", asyn
 
       // Only public numeric receipts collide. Exact descriptor/path admission still
       // observes the real files, including after their names change during rotation.
-      function project<T extends Stats | BigIntStats | undefined>(stat: T, identity: BigIntStats): T {
+      function project<T extends Stats | BigIntStats | undefined>(
+        stat: T,
+        identity: BigIntStats,
+      ): T {
         if (stat && typeof stat.ino === "number" && selected.has(exactId(identity))) {
           stat.ino = roundedIno;
           stat.birthtimeMs = sharedBirthtime;
         }
         return stat;
       }
-      const fstat = t.mock.method(fsSync, "fstatSync", (...args: Parameters<typeof originalFstat>) => {
-        const stat = originalFstat(...args);
-        return args[1]?.bigint ? stat : project(stat, originalFstat(args[0], { bigint: true }));
-      });
+      const fstat = t.mock.method(
+        fsSync,
+        "fstatSync",
+        (...args: Parameters<typeof originalFstat>) => {
+          const stat = originalFstat(...args);
+          return args[1]?.bigint ? stat : project(stat, originalFstat(args[0], { bigint: true }));
+        },
+      );
       restoreMocks.push(() => fstat.mock.restore());
-      const lstat = t.mock.method(fsSync, "lstatSync", (...args: Parameters<typeof originalLstat>) => {
-        const stat = originalLstat(...args);
-        return !stat || args[1]?.bigint
-          ? stat
-          : project(stat, originalLstat(args[0], { bigint: true }));
-      });
+      const lstat = t.mock.method(
+        fsSync,
+        "lstatSync",
+        (...args: Parameters<typeof originalLstat>) => {
+          const stat = originalLstat(...args);
+          return !stat || args[1]?.bigint
+            ? stat
+            : project(stat, originalLstat(args[0], { bigint: true }));
+        },
+      );
       restoreMocks.push(() => lstat.mock.restore());
 
       const reader = new SessionJournalReader(session);
