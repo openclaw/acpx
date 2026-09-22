@@ -15,6 +15,7 @@ Repo: https://github.com/openclaw/acpx
 - Processes/Linux: retain witnessed descendants across wall-clock adjustments by comparing scoped kernel start ticks, and keep terminal group cutoffs and cleanup deadlines independent of wall time.
 - Output: preserve live JSON read suppression when client and agent request IDs collide, including queued prompts with overlapping controls, without changing the raw ACP message format.
 - Sessions: reuse parent-directory sessions within worktrees, submodules, and directories beginning with two dots, while respecting the nearest repository boundary.
+- Flows: execute empty-string node IDs, retain outputs and results for names such as `__proto__`, and validate and route only declared own graph entries.
 
 ## 0.19.0 - 2026-09-22
 

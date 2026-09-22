@@ -126,7 +126,8 @@ const flowNodeTypeSchema = z.object({
 export function assertValidFlowDefinitionShape(flow: FlowDefinition): void {
   const parsed = parseWithSchema("flow definition", flowDefinitionSchema, flow);
 
-  for (const [nodeId, node] of Object.entries(parsed.nodes)) {
+  // Zod strips __proto__ record entries; validate the original own node values.
+  for (const [nodeId, node] of Object.entries(flow.nodes)) {
     assertValidFlowNodeDefinitionShape(node, `flow node "${nodeId}"`);
   }
   parsed.edges.forEach((edge, index) => {
@@ -203,6 +204,11 @@ function assertValidFlowEdgeShape(edge: unknown, label: string): void {
   }
 
   parseWithSchema(label, switchFlowEdgeSchema, edge);
+  // The shape check validates the containers, but skips __proto__ record values.
+  const cases = (edge as { switch: { cases: Record<string, unknown> } }).switch.cases;
+  for (const [key, target] of Object.entries(cases)) {
+    parseWithSchema(`${label}: switch.cases.${key}`, z.string(), target);
+  }
 }
 
 function parseWithSchema<T>(label: string, schema: z.ZodType<T>, value: unknown): T {

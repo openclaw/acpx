@@ -86,6 +86,11 @@ The agent owns reasoning, summarization, and tool calls inside `acp` and `decisi
 
 ## Authoring surface
 
+Node IDs and raw switch case keys are exact own string entries, including empty
+strings and names such as `__proto__`. Use a computed property such as
+`["__proto__"]` when declaring that key in JavaScript. Inherited properties do not
+declare nodes, cases, or edge routing fields.
+
 Define a flow with `defineFlow` from `acpx/flows`:
 
 ```ts

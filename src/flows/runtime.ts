@@ -157,6 +157,16 @@ type FlowAttemptContext = {
   acpResult?: FlowNodeExecutionResult;
 };
 
+function setNodeValue<T>(values: Record<string, T>, nodeId: string, value: T): void {
+  // Define data properties so __proto__ is an ordinary node ID.
+  Object.defineProperty(values, nodeId, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+}
+
 export class FlowRunner {
   private readonly resolveAgent;
   private readonly defaultCwd;
@@ -341,7 +351,7 @@ export class FlowRunner {
     let current: string | null = flow.startAt;
     const attemptCounts = new Map<string, number>();
     try {
-      while (current) {
+      while (current !== null) {
         this.throwIfRunInterrupted(runDir);
         const step = await this.executeFlowStep(flow, input, runDir, state, current, attemptCounts);
         this.throwIfRunInterrupted(runDir, step.executionError);
@@ -378,10 +388,10 @@ export class FlowRunner {
     nodeId: string,
     attemptCounts: Map<string, number>,
   ): Promise<FlowStepExecutionResult> {
-    const node = flow.nodes[nodeId];
-    if (!node) {
+    if (!Object.hasOwn(flow.nodes, nodeId)) {
       throw new Error(`Unknown flow node: ${nodeId}`);
     }
+    const node = flow.nodes[nodeId];
     const attemptId = nextAttemptId(attemptCounts, nodeId);
     const startedAt = isoNow();
     markNodeStarted(state, nodeId, attemptId, node.nodeType, startedAt, node.statusDetail);
@@ -457,7 +467,7 @@ export class FlowRunner {
               executionError instanceof Error ? executionError.message : String(executionError),
           }),
     });
-    state.results[nodeId] = nodeResult;
+    setNodeValue(state.results, nodeId, nodeResult);
     return { ...executed, nodeResult, executionError, attemptId, nodeId, node, startedAt, state };
   }
 
@@ -507,7 +517,7 @@ export class FlowRunner {
     if (step.nodeResult.outcome !== "ok" || step.node.nodeType !== "checkpoint") {
       return undefined;
     }
-    state.outputs[step.nodeId] = step.output;
+    setNodeValue(state.outputs, step.nodeId, step.output);
     state.waitingOn = step.nodeId;
     state.updatedAt = isoNow();
     state.status = "waiting";
@@ -519,11 +529,11 @@ export class FlowRunner {
 
   private resolveNextNode(flow: FlowDefinition, step: FlowStepExecutionResult): string | null {
     if (step.nodeResult.outcome === "ok") {
-      step.state.outputs[step.nodeId] = step.output;
+      setNodeValue(step.state.outputs, step.nodeId, step.output);
       return resolveNext(flow.edges, step.nodeId, step.output, step.nodeResult);
     }
     const next = resolveNext(flow.edges, step.nodeId, undefined, step.nodeResult);
-    if (next) {
+    if (next !== null) {
       return next;
     }
     throw step.executionError;

@@ -21,6 +21,7 @@ import {
 } from "../src/flows/runtime.js";
 import type {
   FlowDefinition,
+  FlowRunState,
   FunctionActionNodeDefinition,
   ShellActionExecution,
   ShellActionNodeDefinition,
@@ -2158,5 +2159,408 @@ test("FlowRunner does not launch a shell action when its executor resolves after
       release();
       await fs.rm(outputRoot, { recursive: true, force: true });
     }
+  });
+});
+
+const GRAPH_KEYS = ["", "__proto__", "constructor", "toString"] as const;
+const INHERITED_KEYS = ["__proto__", "constructor", "toString"] as const;
+
+async function withGraphKeyRunner(
+  run: (runner: FlowRunner, root: string) => Promise<void>,
+): Promise<void> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-keys-"));
+  try {
+    const runner = new FlowRunner({
+      resolveAgent: () => ({ agentName: "unused", agentCommand: "unused", cwd: root }),
+      permissionMode: "deny-all",
+      outputRoot: root,
+    });
+    await run(runner, root);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
+async function readGraphKeyRun(runDir: string): Promise<FlowRunState> {
+  return JSON.parse(
+    await fs.readFile(path.join(runDir, "projections", "run.json"), "utf8"),
+  ) as FlowRunState;
+}
+
+function assertOwnSuccessfulNode(state: FlowRunState, key: string, output: unknown): void {
+  assert.equal(Object.hasOwn(state.outputs, key), true, `own output ${JSON.stringify(key)}`);
+  assert.equal(Object.hasOwn(state.results, key), true, `own result ${JSON.stringify(key)}`);
+  assert.deepEqual(state.outputs[key], output);
+  assert.equal(state.results[key].nodeId, key);
+  assert.equal(state.results[key].outcome, "ok");
+  assert.deepEqual(state.results[key].output, output);
+}
+
+test("flow keys: FlowRunner preserves every exact graph key through callbacks and persistence", async () => {
+  await withGraphKeyRunner(async (runner) => {
+    const visited: string[] = [];
+    const nodes = Object.fromEntries(
+      GRAPH_KEYS.map((key, index) => [
+        key,
+        compute({
+          run: ({ state }) => {
+            visited.push(key);
+            const previous = GRAPH_KEYS[index - 1];
+            if (previous !== undefined) {
+              assertOwnSuccessfulNode(state, previous, { nodeId: previous });
+            }
+            return { nodeId: key };
+          },
+        }),
+      ]),
+    );
+    const flow = defineFlow({
+      name: "exact-graph-keys",
+      startAt: "",
+      nodes,
+      edges: GRAPH_KEYS.slice(1).map((to, index) => ({ from: GRAPH_KEYS[index], to })),
+    });
+    const result = await runner.run(flow, {});
+    assert.equal(result.state.status, "completed");
+    assert.deepEqual(visited, [...GRAPH_KEYS]);
+    assert.deepEqual(
+      result.state.steps.map((step) => step.nodeId),
+      [...GRAPH_KEYS],
+    );
+    const saved = await readGraphKeyRun(result.runDir);
+    assert.equal(saved.status, "completed");
+    assert.deepEqual(
+      saved.steps.map((step) => step.nodeId),
+      [...GRAPH_KEYS],
+    );
+    for (const key of GRAPH_KEYS) {
+      assertOwnSuccessfulNode(result.state, key, { nodeId: key });
+      assertOwnSuccessfulNode(saved, key, { nodeId: key });
+    }
+    assert.deepEqual(Object.keys(saved.outputs), [...GRAPH_KEYS]);
+    assert.deepEqual(Object.keys(saved.results), [...GRAPH_KEYS]);
+    const snapshot = JSON.parse(
+      await fs.readFile(path.join(result.runDir, "flow.json"), "utf8"),
+    ) as {
+      startAt: string;
+      nodes: Record<string, unknown>;
+    };
+    assert.equal(snapshot.startAt, "");
+    assert.deepEqual(Object.keys(snapshot.nodes), [...GRAPH_KEYS]);
+  });
+});
+
+test("flow keys: FlowRunner routes own raw switch keys and targets including empty strings", async () => {
+  await withGraphKeyRunner(async (runner) => {
+    for (const key of GRAPH_KEYS) {
+      const visited: string[] = [];
+      const output = { marker: "selected", key };
+      const flow = defineFlow({
+        name: "own-case-keys",
+        startAt: "choose",
+        nodes: {
+          choose: compute({ run: () => ({ route: key }) }),
+          [key]: compute({
+            run: () => {
+              visited.push(key);
+              return output;
+            },
+          }),
+          observe: compute({
+            run: ({ state }) => {
+              assertOwnSuccessfulNode(state, key, output);
+              return "observed";
+            },
+          }),
+        },
+        edges: [
+          { from: "choose", switch: { on: "$.route", cases: { [key]: key } } },
+          { from: key, to: "observe" },
+        ],
+      });
+      const result = await runner.run(flow, {});
+      assert.equal(result.state.status, "completed");
+      assert.deepEqual(visited, [key]);
+      assert.deepEqual(
+        result.state.steps.map((step) => step.nodeId),
+        ["choose", key, "observe"],
+      );
+      assertOwnSuccessfulNode(result.state, key, output);
+      assertOwnSuccessfulNode(await readGraphKeyRun(result.runDir), key, output);
+    }
+  });
+});
+
+test("flow keys: FlowRunner follows a direct edge to an empty-string node", async () => {
+  await withGraphKeyRunner(async (runner) => {
+    const result = await runner.run(
+      defineFlow({
+        name: "empty-direct-target",
+        startAt: "first",
+        nodes: {
+          first: compute({ run: () => "first" }),
+          "": compute({ run: () => "empty target" }),
+        },
+        edges: [{ from: "first", to: "" }],
+      }),
+      {},
+    );
+    assert.deepEqual(
+      result.state.steps.map((step) => step.nodeId),
+      ["first", ""],
+    );
+    assertOwnSuccessfulNode(await readGraphKeyRun(result.runDir), "", "empty target");
+  });
+});
+
+test("flow keys: FlowRunner routes failed results to an empty-string recovery node", async () => {
+  await withGraphKeyRunner(async (runner) => {
+    const result = await runner.run(
+      defineFlow({
+        name: "empty-recovery-target",
+        startAt: "work",
+        nodes: {
+          work: compute({
+            run: () => {
+              throw new Error("recoverable");
+            },
+          }),
+          "": compute({ run: () => ({ recovered: true }) }),
+        },
+        edges: [{ from: "work", switch: { on: "$result.outcome", cases: { failed: "" } } }],
+      }),
+      {},
+    );
+    for (const state of [result.state, await readGraphKeyRun(result.runDir)]) {
+      assert.equal(state.status, "completed");
+      assert.deepEqual(
+        state.steps.map((step) => step.nodeId),
+        ["work", ""],
+      );
+      assert.equal(state.results.work.outcome, "failed");
+      assert.equal(state.results.work.error, "recoverable");
+      assert.equal(Object.hasOwn(state.outputs, "work"), false);
+      assertOwnSuccessfulNode(state, "", { recovered: true });
+    }
+  });
+});
+
+test("flow keys: FlowRunner publishes special-key checkpoint outputs and exact waiting IDs", async () => {
+  await withGraphKeyRunner(async (runner) => {
+    for (const key of ["", "__proto__"]) {
+      const output = { summary: "review marker", key };
+      const result = await runner.run(
+        defineFlow({
+          name: "special-checkpoint",
+          startAt: key,
+          nodes: {
+            [key]: checkpoint({ run: () => output }),
+            after: compute({ run: () => assert.fail("checkpoint successor must not run") }),
+          },
+          edges: [{ from: key, to: "after" }],
+        }),
+        {},
+      );
+      for (const state of [result.state, await readGraphKeyRun(result.runDir)]) {
+        assert.equal(state.status, "waiting");
+        assert.equal(state.waitingOn, key);
+        assert.deepEqual(
+          state.steps.map((step) => step.nodeId),
+          [key],
+        );
+        assertOwnSuccessfulNode(state, key, output);
+        assert.equal(Object.hasOwn(state.results, "after"), false);
+      }
+    }
+  });
+});
+
+test("flow keys: FlowRunner rejects inherited node references before executing callbacks", async () => {
+  await withGraphKeyRunner(async (runner, root) => {
+    for (const missing of INHERITED_KEYS) {
+      for (const position of ["start", "from", "to", "case"] as const) {
+        let called = false;
+        const node = compute({
+          run: () => {
+            called = true;
+            return { route: "go" };
+          },
+        });
+        const flow = defineFlow({
+          name: "missing-own-node",
+          startAt: position === "start" ? missing : "start",
+          nodes: { start: node, done: node },
+          edges:
+            position === "start"
+              ? []
+              : position === "case"
+                ? [{ from: "start", switch: { on: "$.route", cases: { go: missing } } }]
+                : [
+                    {
+                      from: position === "from" ? missing : "start",
+                      to: position === "to" ? missing : "done",
+                    },
+                  ],
+        });
+        const diagnostic =
+          position === "start"
+            ? /Flow start node is missing:/
+            : position === "from"
+              ? /Flow edge references unknown from-node:/
+              : position === "to"
+                ? /Flow edge references unknown to-node:/
+                : /Flow switch references unknown to-node:/;
+        await assert.rejects(runner.run(flow, {}), diagnostic);
+        assert.equal(called, false);
+      }
+    }
+    assert.deepEqual(await fs.readdir(root), []);
+  });
+});
+
+test("flow keys: FlowRunner rejects unmatched inherited switch cases and persists the routing failure", async () => {
+  await withGraphKeyRunner(async (runner, root) => {
+    for (const missing of INHERITED_KEYS) {
+      let successorCalled = false;
+      const before = new Set(await fs.readdir(root));
+      const flow = defineFlow({
+        name: "missing-own-case",
+        startAt: "choose",
+        nodes: {
+          choose: compute({ run: () => ({ route: missing }) }),
+          done: compute({
+            run: () => {
+              successorCalled = true;
+              return "unexpected";
+            },
+          }),
+        },
+        edges: [{ from: "choose", switch: { on: "$.route", cases: { allowed: "done" } } }],
+      });
+      await assert.rejects(runner.run(flow, {}), /No flow switch case for \$\.route=/);
+      assert.equal(successorCalled, false);
+      const created = (await fs.readdir(root)).filter((name) => !before.has(name));
+      assert.equal(created.length, 1);
+      const saved = await readGraphKeyRun(path.join(root, created[0]));
+      assert.equal(saved.status, "failed");
+      assert.match(saved.error ?? "", /No flow switch case for \$\.route=/);
+      assert.deepEqual(
+        saved.steps.map((step) => step.nodeId),
+        ["choose"],
+      );
+      assertOwnSuccessfulNode(saved, "choose", { route: missing });
+      assert.equal(Object.hasOwn(saved.results, "done"), false);
+    }
+  });
+});
+
+test("flow keys: defineFlow validates original own __proto__ node and case values", () => {
+  assert.throws(
+    () =>
+      defineFlow({
+        name: "invalid-prototype-node",
+        startAt: "__proto__",
+        nodes: { ["__proto__"]: { nodeType: "compute", run: "not callable" } },
+        edges: [],
+      } as unknown as FlowDefinition),
+    /Invalid flow node "__proto__":/,
+  );
+  assert.throws(
+    () =>
+      defineFlow({
+        name: "invalid-prototype-case",
+        startAt: "choose",
+        nodes: { choose: compute({ run: () => ({ route: "__proto__" }) }) },
+        edges: [{ from: "choose", switch: { on: "$.route", cases: { ["__proto__"]: 7 } } }],
+      } as unknown as FlowDefinition),
+    /Invalid flow definition:/,
+  );
+});
+
+for (const key of ["ordinary", "__proto__", "constructor", "toString"]) {
+  test(`flow keys: a standalone ${key} node publishes own output and result`, async () => {
+    await withGraphKeyRunner(async (runner) => {
+      const output = { marker: key };
+      const result = await runner.run(
+        defineFlow({
+          name: "standalone-key",
+          startAt: key,
+          nodes: { [key]: compute({ run: () => output }) },
+          edges: [],
+        }),
+        {},
+      );
+      assertOwnSuccessfulNode(result.state, key, output);
+      assertOwnSuccessfulNode(await readGraphKeyRun(result.runDir), key, output);
+    });
+  });
+}
+
+test("flow keys: an own switch ignores an inherited direct target", async () => {
+  await withGraphKeyRunner(async (runner) => {
+    const visited: string[] = [];
+    const edge = {
+      from: "choose",
+      switch: { on: "$.route", cases: { go: "selected" } },
+    };
+    Object.setPrototypeOf(edge, { to: "unselected" });
+    const result = await runner.run(
+      defineFlow({
+        name: "own-switch",
+        startAt: "choose",
+        nodes: {
+          choose: compute({ run: () => ({ route: "go" }) }),
+          selected: compute({
+            run: () => {
+              visited.push("selected");
+              return "selected";
+            },
+          }),
+          unselected: compute({
+            run: () => {
+              visited.push("unselected");
+              return "unselected";
+            },
+          }),
+        },
+        edges: [edge],
+      }),
+      {},
+    );
+    assert.deepEqual(visited, ["selected"]);
+    assert.deepEqual(
+      result.state.steps.map((step) => step.nodeId),
+      ["choose", "selected"],
+    );
+  });
+});
+
+test("flow keys: an own direct edge cannot recover through an inherited result switch", async () => {
+  await withGraphKeyRunner(async (runner) => {
+    let successorCalled = false;
+    const edge = { from: "work", to: "after" };
+    Object.setPrototypeOf(edge, {
+      switch: { on: "$result.outcome", cases: { failed: "after" } },
+    });
+    const flow = defineFlow({
+      name: "own-direct-failure",
+      startAt: "work",
+      nodes: {
+        work: compute({
+          run: () => {
+            throw new Error("unhandled work failure");
+          },
+        }),
+        after: compute({
+          run: () => {
+            successorCalled = true;
+            return "unexpected";
+          },
+        }),
+      },
+      edges: [edge],
+    });
+    await assert.rejects(runner.run(flow, {}), /unhandled work failure/);
+    assert.equal(successorCalled, false);
   });
 });
