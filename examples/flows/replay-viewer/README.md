@@ -84,6 +84,9 @@ on that graph rather than replacing it with an execution-only path.
 
 Replay follows the saved attempt order, including attempts with matching
 timestamps. Duration labels carry rounded seconds into the next minute.
+When a later step shows an earlier ACP conversation as context, the completed
+text stays visible during replay. Progressive reveal belongs to the attempt
+that produced the conversation.
 
 ## Included sample
 

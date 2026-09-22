@@ -5,6 +5,7 @@ import {
   resolvePlaybackResumeMs,
   resolveSelectedStepIndexAfterBundleUpdate,
 } from "../examples/flows/replay-viewer/src/hooks/use-playback-controller.js";
+import { resolveSessionRenderState } from "../examples/flows/replay-viewer/src/lib/session-render-state.js";
 import {
   buildGraph,
   buildGraphLayout,
@@ -809,3 +810,132 @@ function baseStep(
     },
   };
 }
+
+const fallbackReply =
+  "CURRENT-ANSWER-START. This answer was already completed before the next step. CURRENT-ANSWER-END.";
+
+function makeFallbackRevealBundle(nodeType: "compute" | "action" | "checkpoint"): LoadedRunBundle {
+  const acp = baseStep("extract_intent", "acp", "ok");
+  acp.trace!.conversation!.messageStart = 2;
+  acp.trace!.conversation!.messageEnd = 3;
+  const following = baseStep(`following_${nodeType}`, nodeType, "ok");
+  following.session = null;
+  following.agent = null;
+  following.trace = undefined;
+  // Pass the ACP step to makeBundle so its session binding remains real fixture data.
+  const bundle = makeBundle(acp, { steps: [acp, following] });
+  bundle.sessions["main-bundle"].record.messages = [
+    { User: { id: "prefix-user", content: [{ Text: "Earlier synthetic context." }] } },
+    { Agent: { content: [{ Text: "PREFIX-CONTEXT-READY" }], tool_results: {} } },
+    { User: { id: "current-user", content: [{ Text: "Provide the current synthetic answer." }] } },
+    { Agent: { content: [{ Text: fallbackReply }], tool_results: {} } },
+  ];
+  return bundle;
+}
+
+for (const nodeType of ["compute", "action", "checkpoint"] as const) {
+  test(`a ${nodeType} fallback retains completed ACP context throughout replay`, () => {
+    const bundle = makeFallbackRevealBundle(nodeType);
+    const selected = selectAttemptView(bundle, 1);
+    assert.ok(selected);
+    assert.equal(selected.sessionFromFallback, true);
+    assert.equal(selected.sessionSourceStep?.attemptId, bundle.steps[0]?.attemptId);
+    const item = listSessionViews(bundle, selected).find((entry) => entry.id === "main-bundle");
+    assert.ok(item);
+    // Setting the source session ID to null would silently lose this range.
+    assert.deepEqual(
+      item.sessionSlice.map((message) => message.highlighted),
+      [false, false, true, true],
+    );
+    assert.deepEqual(item.sessionSlice, selected.sessionSlice);
+    for (const progress of [0, 0.25, 0.8, 1]) {
+      const rendered = resolveSessionRenderState({
+        sessionSlice: item.sessionSlice,
+        isStreamingSource: item.isStreamingSource,
+        sessionRevealProgress: progress,
+        liveStreaming: false,
+      });
+      assert.equal(
+        rendered.renderedSessionSlice.at(-1)?.textBlocks[0],
+        fallbackReply,
+        `completed reply shortened at progress ${progress}`,
+      );
+      assert.deepEqual(rendered.renderedSessionSlice, item.sessionSlice);
+      assert.equal(rendered.animateConversation, false);
+      assert.equal(rendered.autoFollowConversation, false);
+    }
+    assert.equal(item.isStreamingSource, false);
+  });
+}
+
+test("the direct ACP attempt still reveals its own range and preserves earlier context", () => {
+  const bundle = makeFallbackRevealBundle("compute");
+  const selected = selectAttemptView(bundle, 0);
+  assert.ok(selected);
+  assert.equal(selected.sessionFromFallback, false);
+  const item = listSessionViews(bundle, selected).find((entry) => entry.id === "main-bundle");
+  assert.ok(item);
+  assert.equal(item.isStreamingSource, true);
+  assert.deepEqual(
+    item.sessionSlice.map((message) => message.highlighted),
+    [false, false, true, true],
+  );
+  const partial = resolveSessionRenderState({
+    sessionSlice: item.sessionSlice,
+    isStreamingSource: item.isStreamingSource,
+    sessionRevealProgress: 0.25,
+    liveStreaming: false,
+  });
+  assert.equal(partial.renderedSessionSlice[1]?.textBlocks[0], "PREFIX-CONTEXT-READY");
+  const currentText = partial.renderedSessionSlice.at(-1)?.textBlocks[0] ?? "";
+  assert(currentText.length > 0 && currentText.length < fallbackReply.length);
+  assert(fallbackReply.startsWith(currentText));
+  assert.equal(partial.animateConversation, true);
+  assert.equal(partial.autoFollowConversation, true);
+  for (const [progress, liveStreaming] of [
+    [1, false],
+    [0.25, true],
+  ] as const) {
+    const rendered = resolveSessionRenderState({
+      sessionSlice: item.sessionSlice,
+      isStreamingSource: item.isStreamingSource,
+      sessionRevealProgress: progress,
+      liveStreaming,
+    });
+    assert.deepEqual(rendered.renderedSessionSlice, item.sessionSlice);
+    assert.equal(rendered.autoFollowConversation, true);
+    assert.equal(rendered.animateConversation, !liveStreaming);
+  }
+});
+
+test("an unrelated session remains fully visible without becoming the reveal source", () => {
+  const bundle = makeFallbackRevealBundle("compute");
+  const main = bundle.sessions["main-bundle"];
+  bundle.sessions.other = {
+    ...main,
+    id: "other",
+    binding: { ...main.binding, bundleId: "other", name: "other" },
+    record: {
+      ...main.record,
+      name: "other",
+      messages: [{ Agent: { content: [{ Text: "UNRELATED-COMPLETE-ANSWER" }], tool_results: {} } }],
+    },
+  };
+  const selected = selectAttemptView(bundle, 0);
+  assert.ok(selected);
+  const other = listSessionViews(bundle, selected).find((entry) => entry.id === "other");
+  assert.ok(other);
+  assert.equal(other.isStreamingSource, false);
+  assert.deepEqual(
+    other.sessionSlice.map((message) => message.highlighted),
+    [false],
+  );
+  const rendered = resolveSessionRenderState({
+    sessionSlice: other.sessionSlice,
+    isStreamingSource: other.isStreamingSource,
+    sessionRevealProgress: 0.25,
+    liveStreaming: false,
+  });
+  assert.deepEqual(rendered.renderedSessionSlice, other.sessionSlice);
+  assert.equal(rendered.animateConversation, false);
+});
