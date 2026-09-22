@@ -72,9 +72,7 @@ function promotePrefixedAuthEnvironment(env: NodeJS.ProcessEnv): Set<string> {
 
     protectEnvKey(protectedKeys, key);
     protectEnvKey(protectedKeys, normalized);
-    if (env[normalized] == null) {
-      env[normalized] = value;
-    }
+    assignIfMissing(env, normalized, value);
   }
   return protectedKeys;
 }
@@ -160,8 +158,8 @@ function assignAuthCredentialEnv(
     return;
   }
 
-  if (!methodId.includes("=") && !methodId.includes("\u0000") && env[methodId] == null) {
-    env[methodId] = credential;
+  if (!methodId.includes("=") && !methodId.includes("\u0000")) {
+    assignIfMissing(env, methodId, credential);
   }
 
   const normalized = toEnvToken(methodId);
@@ -172,9 +170,21 @@ function assignAuthCredentialEnv(
 }
 
 function assignIfMissing(env: NodeJS.ProcessEnv, key: string, value: string): void {
-  if (env[key] == null) {
-    env[key] = value;
+  if (env[key] != null) {
+    return;
   }
+
+  const normalizedKey = protectedEnvKey(key);
+  if (
+    process.platform === "win32" &&
+    Object.entries(env).some(
+      ([existingKey, existingValue]) =>
+        existingValue != null && protectedEnvKey(existingKey) === normalizedKey,
+    )
+  ) {
+    return;
+  }
+  env[key] = value;
 }
 
 export function resolveConfiguredAuthCredential(

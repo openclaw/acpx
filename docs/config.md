@@ -145,6 +145,10 @@ The global and project `auth` maps merge by method ID. An empty project `auth` o
 
 Ambient provider env vars like `OPENAI_API_KEY` are still passed through to child agents in their environment, but they do **not** trigger ACP auth-method selection on their own. This is intentional — it avoids surprise login flows in adapters that interpret an ambient key as "go ahead and authenticate."
 
+When adding authentication aliases to the child environment, acpx preserves
+inherited values, including empty strings. On Windows, differently cased names
+refer to the same environment variable; Unix names remain case sensitive.
+
 When an adapter advertises auth methods, `acpx` invokes `authenticate` if it
 finds a matching `ACPX_AUTH_*` environment variable or `auth` config value.
 `authPolicy` controls what happens when no matching credential is available:

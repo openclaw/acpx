@@ -35,6 +35,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: render complete flow definitions containing unreachable loops without crashing.
 - Replay viewer: advance replay at the selected speed without losing animation intervals after renders or updates to the same run.
 - Sessions/watch: keep journal read offsets tied to exact file identities so rounded filesystem metadata cannot mix distinct segments during rotation.
+- Windows/authentication: preserve inherited credential values when auth aliases use different environment-variable casing.
 
 ## 0.19.1 - 2026-09-22
 
