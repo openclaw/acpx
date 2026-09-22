@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
@@ -44,7 +45,7 @@ const DISCARD_OUTPUT: OutputFormatter = {
   flush() {},
 };
 
-for (const detachment of ["stalled", "disconnected"] as const) {
+for (const detachment of ["stalled", "disconnected", "spool failure"] as const) {
   test(
     `${detachment} submitters detach while their prompt completes once and the successor runs`,
     {
@@ -55,6 +56,13 @@ for (const detachment of ["stalled", "disconnected"] as const) {
         "Windows named pipes do not expose partial write progress",
     },
     async (t) => {
+      if (detachment === "spool failure") {
+        // The synchronous descriptor is exclusively the output spool; journal
+        // persistence uses async writes and must still record the settled turn.
+        t.mock.method(fsSync, "writeSync", () => {
+          throw Object.assign(new Error("fixture output disk full"), { code: "ENOSPC" });
+        });
+      }
       await withTempHome("acpx-observer-detach-", async (home) => {
         const agentPath = path.join(home, "agent.mjs");
         const logPath = path.join(home, "agent.jsonl");

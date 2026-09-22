@@ -536,6 +536,26 @@ When a prompt is already in flight for a session, `acpx` uses a per-session queu
 5. submitter either blocks until completion (default) or exits immediately with `--no-wait`
 6. if interrupted (`Ctrl+C`) during an active turn, `acpx` sends `session/cancel` first, waits briefly for cancelled completion, then force-kills only if needed
 
+Slow submitters retain ordered live output in a temporary disk spool instead of
+an unbounded socket buffer. Each observer can retain up to 64 MiB of unread spool
+data; one queue owner allows at most 256 MiB of spool file extent, 64 open
+spools, and 64 observers with pending output, including completed responses whose last
+chunk is still buffered by the socket. Consumed disk space is reused.
+These are backlog limits, not limits on the total output of a progressing turn.
+The current serialized message still requires memory proportional to its size.
+
+Spill and replay use bounded synchronous file operations. A full spool, exhausted
+owner budget, or storage failure disconnects that observer with a nonretryable
+unknown-outcome error. The admitted prompt continues and is not automatically
+replayed or cancelled. Use `sessions watch` or `sessions history` to inspect the
+recorded outcome before submitting again. When all output slots are occupied,
+new prompt and control responses are disconnected before queuing their bytes;
+their commands may still execute. Spools are unlinked before receiving
+payload and are discarded on disconnect or owner exit; they do not provide
+transport replay after a crash. macOS and Linux still disconnect readers that
+make no socket progress for one second. Windows preserves paused named-pipe
+readers within the storage limits because partial write progress is opaque.
+
 Queue-owner records remain private across heartbeat updates. Shutdown finishes
 pending record updates and closes the IPC server before releasing ownership.
 Current clients serialize lease publication, heartbeat updates, and cleanup across

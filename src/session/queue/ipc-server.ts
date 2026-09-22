@@ -17,13 +17,14 @@ import {
   type QueueRequest,
 } from "./messages.js";
 import { queueRequestByteLimit, queueRequestExceedsLimit } from "./request-limit.js";
+import { QueueOutputBudget, QueueSocketOutput } from "./socket-output.js";
+
+const QUEUE_SOCKET_DRAIN_TIMEOUT_MS = 1_000;
 
 type QueueOwnerSocketLease = {
   socketPath: string;
   ownerGeneration?: number;
 };
-
-const QUEUE_SOCKET_DRAIN_TIMEOUT_MS = 1_000;
 
 function makeQueueOwnerError(
   requestId: string,
@@ -70,24 +71,6 @@ function makeQueueOwnerErrorFromUnknown(
     retryable: normalized.retryable,
     acp: normalized.acp,
   };
-}
-
-function armSocketDrainTimeout(socket: net.Socket): void {
-  // Windows reports named-pipe progress only when an entire write completes.
-  // Its idle timeout can truncate a reader that is still consuming output.
-  if (process.platform !== "win32") {
-    socket.setTimeout(QUEUE_SOCKET_DRAIN_TIMEOUT_MS);
-  }
-}
-
-function writeQueueMessage(socket: net.Socket, message: QueueOwnerMessage): void {
-  if (socket.destroyed || !socket.writable) {
-    return;
-  }
-  // Queued writes must not keep refreshing a stalled observer's idle deadline.
-  if (!socket.write(`${JSON.stringify(message)}\n`) && !socket.timeout) {
-    armSocketDrainTimeout(socket);
-  }
 }
 
 export type QueueTask = {
@@ -143,6 +126,8 @@ export class SessionQueueOwner {
   private readonly sockets = new Set<net.Socket>();
   private readonly taskSockets = new Set<net.Socket>();
   private readonly drainingSockets = new Set<net.Socket>();
+  private readonly outputBudget = new QueueOutputBudget();
+  private readonly outputs = new Map<net.Socket, QueueSocketOutput>();
   private closed = false;
 
   private constructor(
@@ -388,7 +373,7 @@ export class SessionQueueOwner {
     run: () => Promise<TMessage>;
   }): void {
     this.taskSockets.add(options.socket);
-    writeQueueMessage(options.socket, {
+    this.writeQueueMessage(options.socket, {
       type: "accepted",
       requestId: options.requestId,
       ownerGeneration: this.ownerGeneration,
@@ -397,13 +382,13 @@ export class SessionQueueOwner {
     void options
       .run()
       .then((message) => {
-        writeQueueMessage(options.socket, {
+        this.writeQueueMessage(options.socket, {
           ...message,
           ownerGeneration: this.ownerGeneration,
         });
       })
       .catch((error) => {
-        writeQueueMessage(options.socket, {
+        this.writeQueueMessage(options.socket, {
           ...makeQueueOwnerErrorFromUnknown(
             options.requestId,
             error,
@@ -417,19 +402,17 @@ export class SessionQueueOwner {
       });
   }
 
+  private writeQueueMessage(socket: net.Socket, message: QueueOwnerMessage): void {
+    this.outputs.get(socket)?.send(message);
+  }
+
   private endSocket(socket: net.Socket): void {
     if (socket.destroyed || this.drainingSockets.has(socket)) {
       return;
     }
     this.taskSockets.delete(socket);
     this.drainingSockets.add(socket);
-    // Bound stalled drains without cutting off a reader still consuming output.
-    // Active sessions can otherwise retain completed sockets indefinitely.
-    armSocketDrainTimeout(socket);
-    socket.end(() => {
-      this.drainingSockets.delete(socket);
-      socket.destroy();
-    });
+    this.outputs.get(socket)?.end();
   }
 
   private failRequest(
@@ -438,7 +421,7 @@ export class SessionQueueOwner {
     message: string,
     detailCode: string,
   ): void {
-    writeQueueMessage(socket, {
+    this.writeQueueMessage(socket, {
       ...makeQueueOwnerError(requestId, message, detailCode, {
         retryable: false,
       }),
@@ -488,7 +471,7 @@ export class SessionQueueOwner {
     if (!this.closed) {
       return false;
     }
-    writeQueueMessage(socket, {
+    this.writeQueueMessage(socket, {
       ...makeQueueOwnerError(
         request.requestId,
         "Queue owner is shutting down",
@@ -606,7 +589,7 @@ export class SessionQueueOwner {
       reportPromptStarted: request.reportPromptStarted,
       enqueuedAt: Date.now(),
       send: (message) => {
-        writeQueueMessage(socket, {
+        this.writeQueueMessage(socket, {
           ...message,
           ownerGeneration: this.ownerGeneration,
         });
@@ -621,7 +604,7 @@ export class SessionQueueOwner {
       return;
     }
 
-    writeQueueMessage(socket, {
+    this.writeQueueMessage(socket, {
       type: "accepted",
       requestId: request.requestId,
       ownerGeneration: this.ownerGeneration,
@@ -633,15 +616,11 @@ export class SessionQueueOwner {
 
   private handleConnection(socket: net.Socket): void {
     this.sockets.add(socket);
+    this.outputs.set(socket, new QueueSocketOutput(socket, this.outputBudget));
     socket.setEncoding("utf8");
     socket.on("timeout", () => socket.destroy());
-    socket.on("drain", () => {
-      // Completed responses keep endSocket's drain deadline.
-      if (!socket.writableEnded) {
-        socket.setTimeout(0);
-      }
-    });
     socket.once("close", () => {
+      this.outputs.delete(socket);
       this.sockets.delete(socket);
       this.taskSockets.delete(socket);
       this.drainingSockets.delete(socket);

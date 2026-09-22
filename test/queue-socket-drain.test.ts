@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { withTimeout } from "../src/async-control.js";
 import { SessionQueueOwner, type QueueTask } from "../src/session/queue/ipc-server.js";
 import type { QueueOwnerMessage } from "../src/session/queue/messages.js";
 
@@ -166,6 +167,56 @@ test(
 );
 
 test(
+  "paused queue backlog stays bounded after repeated garbage collection",
+  { timeout: 15_000, skip: !global.gc && "run with --expose-gc for retained-memory proof" },
+  async () => {
+    await withOwner(async (owner, connect) => {
+      const { client, serverSocket } = await connect();
+      client.pause();
+      submit(client, "retained-backlog");
+      const task = await owner.nextTask(1_000);
+      assert(task);
+      global.gc!();
+      const before = process.memoryUsage();
+      const samples = [];
+      for (let round = 0; round < 4; round += 1) {
+        const started = performance.now();
+        sendEvents(task, 32);
+        const spillMs = performance.now() - started;
+        global.gc!();
+        global.gc!();
+        const after = process.memoryUsage();
+        samples.push({
+          round,
+          spillMs,
+          heapGrowth: after.heapUsed - before.heapUsed,
+          bufferGrowth: after.arrayBuffers - before.arrayBuffers,
+        });
+        assert.ok(after.heapUsed - before.heapUsed < 4 * 1024 * 1024);
+        assert.ok(after.arrayBuffers - before.arrayBuffers < 2 * 1024 * 1024);
+        assert.ok(serverSocket.writableLength <= serverSocket.writableHighWaterMark + 64 * 1024);
+      }
+      process.stdout.write(`QUEUE_SPOOL_MEMORY ${JSON.stringify(samples)}\n`);
+      const next = await connect();
+      let response = "";
+      next.client.setEncoding("utf8").on("data", (chunk: string) => {
+        response += chunk;
+      });
+      const ended = once(next.client, "end", { signal: AbortSignal.timeout(2_000) });
+      const controlStart = performance.now();
+      next.client.write(`${JSON.stringify({ type: "cancel_prompt", requestId: "control" })}\n`);
+      await ended;
+      process.stdout.write(
+        `QUEUE_SPOOL_CONTROL ${JSON.stringify({ elapsedMs: performance.now() - controlStart })}\n`,
+      );
+      assert.match(response, /"cancelled":false/u);
+      task.close();
+      owner.completeTask(task);
+    });
+  },
+);
+
+test(
   "active queue sockets preserve quiet turns and progressing reads",
   { timeout: 12_000 },
   async () => {
@@ -178,18 +229,26 @@ test(
       assert.equal(serverSocket.destroyed, false, "a quiet prompt has no stalled output");
 
       let receivedBytes = 0;
+      let completeRead!: () => void;
+      const received = new Promise<void>((resolve) => {
+        completeRead = resolve;
+      });
       const reading = setInterval(() => {
         const chunk = client.read(64 * 1024) as Buffer | null;
         if (chunk) {
           receivedBytes += chunk.length;
+          if (receivedBytes >= 2 * 1024 * 1024) {
+            completeRead();
+          }
         }
       }, 50);
       try {
-        const drained = once(serverSocket, "drain", { signal: AbortSignal.timeout(4000) });
         const started = Date.now();
         sendEvents(task, 16);
         assert.ok(serverSocket.writableLength > 0);
-        await drained;
+        // A chunk drain is no longer the whole response. Keep reading the same
+        // two MiB before checking that the prompt can return to a quiet state.
+        await withTimeout(received, 4_000);
         assert.ok(Date.now() - started > 1000, "reading must continue beyond the idle timeout");
         await delay(1250);
         assert.equal(serverSocket.destroyed, false, "a drained prompt may become quiet again");
@@ -286,6 +345,31 @@ test(
       await ended;
       assert.ok(receivedBytes > 2 * 1024 * 1024);
       assert.match(tail, /"message":"finished fixture"/u);
+    });
+  },
+);
+
+test(
+  "owner shutdown releases completed output spools within its existing grace",
+  { timeout: 5_000 },
+  async () => {
+    await withOwner(async (owner, connect) => {
+      const { client, serverSocket } = await connect();
+      client.pause();
+      submit(client, "shutdown-backlog");
+      const task = await owner.nextTask(1_000);
+      assert(task);
+      sendEvents(task, 16);
+      task.close();
+      owner.completeTask(task);
+      const budget = (owner as unknown as { outputBudget: { files: number; bytes: number } })
+        .outputBudget;
+      assert.equal(budget.files, 1);
+      const closed = once(serverSocket, "close");
+      await owner.close();
+      await closed;
+      assert.equal(budget.files, 0);
+      assert.equal(budget.bytes, 0);
     });
   },
 );
