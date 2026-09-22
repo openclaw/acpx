@@ -558,6 +558,10 @@ process exit still permits cleanup of older records. Incompatible identity kinds
 unknown process scope, and another namespace in the same boot preserve custody,
 even when the numeric PID does not exist locally.
 
+An invalid descendant-retirement receipt also preserves its owner's
+lease and reports `QUEUE_OWNER_RETIREMENT_INCOMPLETE`. This includes receipt data
+that cannot be sized safely; recovery does not treat it as an absent owner.
+
 Abandoned incomplete reservations remain recoverable after the stale-owner window;
 ambiguous mutation guards are preserved instead of being removed by age. Guard
 cleanup errors remain retryable on the next status or ownership operation. A live

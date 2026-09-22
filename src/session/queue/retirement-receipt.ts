@@ -61,7 +61,15 @@ export function parseQueueRetirementReceipt(
     return null;
   }
   const descendants = parseDescendants(value.descendants, root.pid);
-  if (!descendants || Buffer.byteLength(JSON.stringify(raw)) > MAX_RETIREMENT_BYTES) {
+  if (!descendants) {
+    return null;
+  }
+  try {
+    if (Buffer.byteLength(JSON.stringify(raw)) > MAX_RETIREMENT_BYTES) {
+      return null;
+    }
+  } catch {
+    // Sizing deeply nested JSON can fail; retain invalid custody, not an absent owner.
     return null;
   }
   return { ownerGeneration: owner.ownerGeneration, root, descendants };
