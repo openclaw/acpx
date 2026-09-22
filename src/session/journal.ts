@@ -1,5 +1,5 @@
-import type { Stats } from "node:fs";
-import type { FileHandle } from "node:fs/promises";
+import type { BigIntStats } from "node:fs";
+import fs, { type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { root, type OpenResult } from "@openclaw/fs-safe";
@@ -153,8 +153,20 @@ type SegmentState = {
   requestId: string | null;
 };
 
-function fileIdentity(stat: Stats): string {
-  return `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
+function fileIdentity(stat: BigIntStats): string {
+  // Numeric inode receipts can alias distinct files and transfer a cached read offset.
+  return `${stat.dev}:${stat.ino}:${stat.birthtimeNs}`;
+}
+
+async function pathIdentity(filePath: string): Promise<string | undefined> {
+  try {
+    return fileIdentity(await fs.lstat(filePath, { bigint: true }));
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 function emptySegment(): SegmentState {
@@ -192,16 +204,9 @@ export class SessionJournalReader {
       try {
         const paths = await this.openPresentSegments(segments);
         // Pin all files before reading: path renumbering must not skip or duplicate a segment.
-        const current = await Promise.all(paths.map((filePath) => statRegularFile(filePath)));
+        const current = await Promise.all(paths.map(pathIdentity));
         const identities = new Map(segments.map((entry) => [entry.filePath, entry.identity]));
-        if (
-          paths.every((filePath, index) => {
-            const entry = current[index];
-            return (
-              (entry.missing ? undefined : fileIdentity(entry.stat)) === identities.get(filePath)
-            );
-          })
-        ) {
+        if (paths.every((filePath, index) => current[index] === identities.get(filePath))) {
           return segments;
         }
       } catch (error) {
@@ -230,7 +235,14 @@ export class SessionJournalReader {
             symlinks: "reject",
             nonBlockingRead: true,
           });
-          return { filePath, opened, identity: fileIdentity(opened.stat) };
+          try {
+            const identity = fileIdentity(await opened.handle.stat({ bigint: true }));
+            return { filePath, opened, identity };
+          } catch (error) {
+            // Failed entries never reach the snapshot's shared descriptor cleanup.
+            await opened[Symbol.asyncDispose]();
+            throw error;
+          }
         }),
     );
     let failure: unknown;

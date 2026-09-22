@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fsSync, { constants, type BigIntStats, type Stats } from "node:fs";
-import fs from "node:fs/promises";
+import fs, { type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import {
@@ -450,6 +450,71 @@ test("journal offsets stay with exact files when numeric identities alias", asyn
         restore();
       }
       await writer.close();
+    }
+  });
+});
+
+test("journal identity stat failure closes its descriptor and fulfilled siblings", async (t) => {
+  await withTempHome("acpx-watch-identity-stat-", async (home) => {
+    const session = record(home);
+    session.eventLog.max_segment_bytes = 1;
+    await writeSessionRecord(session);
+    const writer = await SessionEventWriter.open(session);
+    await writer.beginTurn("request");
+    await writer.appendMessage(message("first"));
+    await writer.close();
+
+    const activePath = sessionEventActivePath(session.acpxRecordId);
+    const previousPath = sessionEventSegmentPath(session.acpxRecordId, 1);
+    const activePaths = new Set([activePath, await fs.realpath(activePath)]);
+    const journalPaths = new Set([...activePaths, previousPath, await fs.realpath(previousPath)]);
+    const failure = Object.assign(new Error("journal identity stat failed"), { code: "EIO" });
+    const handles: FileHandle[] = [];
+    const fulfilled = new Set<FileHandle>();
+    const restoreStats: Array<() => void> = [];
+    let failedStatCalls = 0;
+    const open = fs.open;
+    const mocked = t.mock.method(fs, "open", async (...args: Parameters<typeof fs.open>) => {
+      const handle = await open(...args);
+      if (journalPaths.has(String(args[0]))) {
+        handles.push(handle);
+        const stat = handle.stat.bind(handle);
+        const mockedStat = t.mock.method(
+          handle,
+          "stat",
+          async (...options: Parameters<typeof stat>) => {
+            assert.deepEqual(options, [{ bigint: true }]);
+            if (activePaths.has(String(args[0]))) {
+              failedStatCalls += 1;
+              throw failure;
+            }
+            const identity = await stat({ bigint: true });
+            fulfilled.add(handle);
+            return identity;
+          },
+        );
+        restoreStats.push(() => mockedStat.mock.restore());
+      }
+      return handle;
+    });
+    try {
+      await assert.rejects(
+        new SessionJournalReader(session).read(),
+        (error: unknown) => error === failure,
+      );
+      assert.equal(failedStatCalls, 1);
+      assert.equal(handles.length, 2);
+      assert.equal(fulfilled.size, 1, "the other admitted segment must finish its identity stat");
+      assert.ok(
+        handles.every((handle) => handle.fd === -1),
+        "all admitted descriptors must close before rejection",
+      );
+    } finally {
+      mocked.mock.restore();
+      for (const restore of restoreStats) {
+        restore();
+      }
+      await Promise.all(handles.map((handle) => handle.close()));
     }
   });
 });
