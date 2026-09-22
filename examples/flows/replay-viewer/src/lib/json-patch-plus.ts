@@ -8,13 +8,7 @@ export function applyReplayPatch<TState extends object>(
   let nextDocument = structuredClone(state) as unknown;
 
   for (const op of ops) {
-    assertSafePatchOperation(op);
-    if (op.op === "append") {
-      applyAppendOperation(nextDocument, op.path, op.value);
-      continue;
-    }
-
-    nextDocument = fastJsonPatch.applyPatch(nextDocument, [op], true, false).newDocument;
+    nextDocument = applyOwnedOperation(nextDocument, op);
   }
 
   return nextDocument as TState;
@@ -30,19 +24,32 @@ export function createReplayPatch<TState extends object>(
   }
 
   const normalized: ReplayJsonPatchOperation[] = [];
-  let workingState = structuredClone(previousState);
+  let workingState: unknown = structuredClone(previousState);
 
   for (const op of rawOps) {
     const nextOp = normalizeReplayOperation(workingState, op);
     normalized.push(nextOp);
-    workingState = applyReplayPatch(workingState, [nextOp]);
+    workingState = applyOwnedOperation(workingState, nextOp);
   }
 
   return normalized;
 }
 
+function applyOwnedOperation(document: unknown, op: ReplayJsonPatchOperation): unknown {
+  assertSafePatchOperation(op);
+  if (op.op === "append") {
+    applyAppendOperation(document, op.path, structuredClone(op.value));
+    return document;
+  }
+
+  // Inserted values belong to the caller or an emitted patch, not this scratch document.
+  const ownedOp =
+    op.op === "add" || op.op === "replace" ? { ...op, value: structuredClone(op.value) } : op;
+  return fastJsonPatch.applyPatch(document, [ownedOp], true, true).newDocument;
+}
+
 function normalizeReplayOperation(
-  state: object,
+  state: unknown,
   op: ReplayJsonPatchOperation,
 ): ReplayJsonPatchOperation {
   if (op.op === "replace") {

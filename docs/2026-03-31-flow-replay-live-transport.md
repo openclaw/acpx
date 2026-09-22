@@ -321,6 +321,9 @@ That means:
 - the transport also allows `append`
 - patch application failure triggers a resync
 
+Patch application uses a private working document. A failed batch leaves the
+previously published state and the received operations intact.
+
 There are no extra transport-specific patch operations beyond JSON Patch+.
 
 ### Versioning
