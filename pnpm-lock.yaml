@@ -20,8 +20,8 @@ importers:
         specifier: ^1.4.0
         version: 1.4.0(zod@4.6.5)
       '@openclaw/fs-safe':
-        specifier: ^0.12.0
-        version: 0.12.0
+        specifier: ^0.16.0
+        version: 0.16.0
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -30,7 +30,7 @@ importers:
         version: 0.2.1
       tsx:
         specifier: ^4.23.13
-        version: 4.23.13
+        version: 4.23.15
       zod:
         specifier: ^4.6.2
         version: 4.6.5
@@ -58,7 +58,7 @@ importers:
         version: typescript@7.0.2
       '@vitejs/plugin-react':
         specifier: ^6.1.1
-        version: 6.1.1(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0))
+        version: 6.1.1(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.0))
       '@xyflow/react':
         specifier: ^12.11.6
         version: 12.11.6(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -100,13 +100,13 @@ importers:
         version: 19.3.0(react@19.3.0)
       tsdown:
         specifier: ^0.23.0
-        version: 0.23.0(@typescript/typescript6@6.0.2)(tsx@4.23.13)(unrun@0.2.37)
+        version: 0.23.0(@typescript/typescript6@6.0.2)(tsx@4.23.15)(unrun@0.2.37)
       typescript:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'
       vite:
         specifier: ^8.3.0
-        version: 8.3.0(@types/node@26.6.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0)
+        version: 8.3.0(@types/node@26.6.1)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.0)
       ws:
         specifier: ^8.21.3
         version: 8.21.3
@@ -650,54 +650,54 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@openclaw/fs-safe-darwin-arm64@0.12.0':
-    resolution: {integrity: sha512-N0eX53qE+1zRErYTVeUz4/YBIZCvI4iNaFdCdny9BIc32UrnP1L/3Zj4+B0GSOGQFQBffDRd4M8orHjpiCgzIw==}
+  '@openclaw/fs-safe-darwin-arm64@0.16.0':
+    resolution: {integrity: sha512-DG0FwUHQOEYYNmNJ6voKiIMTSzj8WVlmWkRs3WXDr49zGslI8sVNyGVnDzmk2EYj4kV1WYcib3J5zNlOzfM9hg==}
     engines: {node: '>=22'}
     cpu: [arm64]
     os: [darwin]
 
-  '@openclaw/fs-safe-darwin-x64@0.12.0':
-    resolution: {integrity: sha512-az+rfw1exd1t0m3mJSSAqhExngWs5yT9igPewsOU59WvGsE13n2v0YrK1jtaYaBEebMYOdm6WnIFXuIq6KLHyQ==}
+  '@openclaw/fs-safe-darwin-x64@0.16.0':
+    resolution: {integrity: sha512-GhaeCtVtZbHaX+O0Zd8Q9wL86SB5ofor6xJB/heV3bDwKFDxRS6lCa55sn1hglzjlpkBQNJqpXCwOiwf+NZABw==}
     engines: {node: '>=22'}
     cpu: [x64]
     os: [darwin]
 
-  '@openclaw/fs-safe-linux-arm64-gnu@0.12.0':
-    resolution: {integrity: sha512-ADBxjAz+Kjmfuv1tyH0B/pRBSlbymUpemCpc7MjzYwNF1lVunQKxaK5BM4e741Cz1Di6djKs/sIPag5TeL2Edw==}
+  '@openclaw/fs-safe-linux-arm64-gnu@0.16.0':
+    resolution: {integrity: sha512-ziWqlIeft+eQVbtdGxboffiOEqy8RltS67UXT5QIPd+VQjOMmcdi3tV2cyR2dwOsD3mlr13Vw8ldT9GjFIVciA==}
     engines: {node: '>=22'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@openclaw/fs-safe-linux-arm64-musl@0.12.0':
-    resolution: {integrity: sha512-Gs9xHGxwgEi2/yJgE9SO5qfxO55Ly+HDdjNyRLR5EAXZlh521b5mbh0ccNb5ivwT5X3MFOq2p0hSWdhW63fQpg==}
+  '@openclaw/fs-safe-linux-arm64-musl@0.16.0':
+    resolution: {integrity: sha512-eWeboLCUKDnlMqzAqfj2zQgyogqjL5gudg9l35mRUl3joSmi10i1MU+pAXR6IHlCCy314Txsq4sBF0wWAf7/sw==}
     engines: {node: '>=22'}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  '@openclaw/fs-safe-linux-x64-gnu@0.12.0':
-    resolution: {integrity: sha512-xyrhaPVsCjIlbcOjjw99+7vDD23dO9J+uod2pN3W/J8dpLXiCcBsdK/L8QQ/106f9uF13jOFTRkIkmbPp+PuaA==}
+  '@openclaw/fs-safe-linux-x64-gnu@0.16.0':
+    resolution: {integrity: sha512-H644Ko4Jf3gMZTERErwK6yf6ayWW0IkTCmP4VPfX17Kohvi0pV28F11F1FeoUxgxpiVQpaoVopNPBBSrKTnpuw==}
     engines: {node: '>=22'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@openclaw/fs-safe-linux-x64-musl@0.12.0':
-    resolution: {integrity: sha512-7PN3Rg/76HFZoP/Pnr2SsWUAMjm1EB+41Rf0oVUGsrvey8gCAHixdt7d70FbODwj+xkd2mur9ed0HhN1INeY2g==}
+  '@openclaw/fs-safe-linux-x64-musl@0.16.0':
+    resolution: {integrity: sha512-ha43qH1ZAfYzZbsqRBwwTSariQxfFvfRnXaYwja9ojRJ9LNJSGTO7MULTMFa4fipU9iTIhz1NYP3Ez2107KbGQ==}
     engines: {node: '>=22'}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  '@openclaw/fs-safe-win32-x64-msvc@0.12.0':
-    resolution: {integrity: sha512-hI+0jj3uwl6iWlOLu6bYAfaUzYwITIeM8z5P38mY59vnVppduBHyomKwsuO/aW6xsNKwR9rDH/FrsLbiTyZW/A==}
+  '@openclaw/fs-safe-win32-x64-msvc@0.16.0':
+    resolution: {integrity: sha512-hSQv6mRpd66364JxFXAyx7rz4G9I9s0q3VbfyKKMntHzPKaj4mPs8HuDuI3NBMjV2AkDo11xMcthXEd9iwEoTg==}
     engines: {node: '>=22'}
     cpu: [x64]
     os: [win32]
 
-  '@openclaw/fs-safe@0.12.0':
-    resolution: {integrity: sha512-Dwu2BZL6+n9pTeSLwijjL+dUBN0ktOjyucZPDjwSpuIkiPx9aussFWdyiWUD9UvNu3gwfLRAcktz1HfYT8QW1w==}
+  '@openclaw/fs-safe@0.16.0':
+    resolution: {integrity: sha512-jRCVSEfnJQdyAV7LyYOnysV09EQRoQ7KcEysLLhBtzdNVwjYtZApnwwoDDpf38IF2pXIeok0cB679yVUUkAOpg==}
     engines: {node: '>=22'}
 
   '@oxc-project/types@0.127.0':
@@ -2700,8 +2700,8 @@ packages:
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
-  tsx@4.23.13:
-    resolution: {integrity: sha512-BL5MGkRln6aDYhb0xbQlEAGw743BaZYWdbWtdJOBriYJboKgUUYCadFp2/FpBBZquBC/ezNBn7wMMPx7FDZUDw==}
+  tsx@4.23.15:
+    resolution: {integrity: sha512-Yiex1Ovn8z2xPpOWckIiysV1SSyRMY9BkLF++q0yKiDxCqRhosKfMg3janKkiLBwZ5c/YryloKwGZcrEmtwxKw==}
     engines: {node: '>=18.0.0'}
     hasBin: true
 
@@ -3398,36 +3398,36 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.3
 
-  '@openclaw/fs-safe-darwin-arm64@0.12.0':
+  '@openclaw/fs-safe-darwin-arm64@0.16.0':
     optional: true
 
-  '@openclaw/fs-safe-darwin-x64@0.12.0':
+  '@openclaw/fs-safe-darwin-x64@0.16.0':
     optional: true
 
-  '@openclaw/fs-safe-linux-arm64-gnu@0.12.0':
+  '@openclaw/fs-safe-linux-arm64-gnu@0.16.0':
     optional: true
 
-  '@openclaw/fs-safe-linux-arm64-musl@0.12.0':
+  '@openclaw/fs-safe-linux-arm64-musl@0.16.0':
     optional: true
 
-  '@openclaw/fs-safe-linux-x64-gnu@0.12.0':
+  '@openclaw/fs-safe-linux-x64-gnu@0.16.0':
     optional: true
 
-  '@openclaw/fs-safe-linux-x64-musl@0.12.0':
+  '@openclaw/fs-safe-linux-x64-musl@0.16.0':
     optional: true
 
-  '@openclaw/fs-safe-win32-x64-msvc@0.12.0':
+  '@openclaw/fs-safe-win32-x64-msvc@0.16.0':
     optional: true
 
-  '@openclaw/fs-safe@0.12.0':
+  '@openclaw/fs-safe@0.16.0':
     optionalDependencies:
-      '@openclaw/fs-safe-darwin-arm64': 0.12.0
-      '@openclaw/fs-safe-darwin-x64': 0.12.0
-      '@openclaw/fs-safe-linux-arm64-gnu': 0.12.0
-      '@openclaw/fs-safe-linux-arm64-musl': 0.12.0
-      '@openclaw/fs-safe-linux-x64-gnu': 0.12.0
-      '@openclaw/fs-safe-linux-x64-musl': 0.12.0
-      '@openclaw/fs-safe-win32-x64-msvc': 0.12.0
+      '@openclaw/fs-safe-darwin-arm64': 0.16.0
+      '@openclaw/fs-safe-darwin-x64': 0.16.0
+      '@openclaw/fs-safe-linux-arm64-gnu': 0.16.0
+      '@openclaw/fs-safe-linux-arm64-musl': 0.16.0
+      '@openclaw/fs-safe-linux-x64-gnu': 0.16.0
+      '@openclaw/fs-safe-linux-x64-musl': 0.16.0
+      '@openclaw/fs-safe-win32-x64-msvc': 0.16.0
       jszip: 3.10.2
 
   '@oxc-project/types@0.127.0':
@@ -3857,10 +3857,10 @@ snapshots:
     dependencies:
       '@typescript/old': typescript@6.0.3
 
-  '@vitejs/plugin-react@6.1.1(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0))':
+  '@vitejs/plugin-react@6.1.1(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.0))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
-      vite: 8.3.0(@types/node@26.6.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0)
+      vite: 8.3.0(@types/node@26.6.1)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.0)
 
   '@xyflow/react@12.11.6(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
@@ -5168,7 +5168,7 @@ snapshots:
 
   tree-kill@1.2.2: {}
 
-  tsdown@0.23.0(@typescript/typescript6@6.0.2)(tsx@4.23.13)(unrun@0.2.37):
+  tsdown@0.23.0(@typescript/typescript6@6.0.2)(tsx@4.23.15)(unrun@0.2.37):
     dependencies:
       cac: 7.0.0
       defu: 6.1.7
@@ -5185,7 +5185,7 @@ snapshots:
       unconfig-core: 7.5.0
       verkit: 0.4.0
     optionalDependencies:
-      tsx: 4.23.13
+      tsx: 4.23.15
       typescript: '@typescript/typescript6@6.0.2'
       unrun: 0.2.37
     transitivePeerDependencies:
@@ -5196,7 +5196,7 @@ snapshots:
 
   tslib@2.8.1: {}
 
-  tsx@4.23.13:
+  tsx@4.23.15:
     dependencies:
       esbuild: 0.28.2
     optionalDependencies:
@@ -5282,7 +5282,7 @@ snapshots:
 
   verkit@0.4.0: {}
 
-  vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0):
+  vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -5293,7 +5293,7 @@ snapshots:
       '@types/node': 26.6.1
       esbuild: 0.28.2
       fsevents: 2.3.3
-      tsx: 4.23.13
+      tsx: 4.23.15
       yaml: 2.9.0
 
   weapon-regex@2.0.5: {}
