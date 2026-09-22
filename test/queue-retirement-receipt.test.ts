@@ -65,6 +65,67 @@ test("any retirement field presence preserves rollback custody", () => {
   }
 });
 
+test(
+  "snapshot progress preserves missing, unknown and current-self custody",
+  {
+    skip: process.platform !== "win32",
+  },
+  async () => {
+    const identityUrl = new URL("../src/process-identity.js", import.meta.url).href;
+    const receiptUrl = new URL("../src/session/queue/retirement-receipt.js", import.meta.url).href;
+    // Only the table is synthetic in this child. The canonical comparator/parser
+    // and production capture path decide which saved witnesses remain.
+    const child = spawn(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+    import assert from 'node:assert/strict';
+    import {registerHooks} from 'node:module';
+    const identityUrl = ${JSON.stringify(identityUrl)};
+    const birth = ${JSON.stringify(birth)};
+    const older = {...birth, value:'2000-01-01T00:00:00.0000000Z'};
+    const entry = (pid, identity) => [pid, {pid, parentPid:0, groupPid:0, birth:identity}];
+    globalThis.receiptTable = [
+      entry(2_000_002, birth),
+      entry(2_000_004, {kind:'posix-lstart', value:birth.value}),
+      entry(2_000_005, birth),
+      entry(process.pid, birth),
+    ];
+    registerHooks({load(url, context, nextLoad) {
+      if (url !== identityUrl) return nextLoad(url, context);
+      return {format:'module', shortCircuit:true, source:
+        'export * from ' + JSON.stringify(identityUrl + '?capture-policy') + ';' +
+        'export async function readProcessTable() { return new Map(globalThis.receiptTable); }'};
+    }});
+    const {captureQueueRetirementReceipt} = await import(${JSON.stringify(receiptUrl)});
+    const owner = ${JSON.stringify(owner)};
+    const saved = [
+      {pid:2_000_002, processIdentity:birth},
+      {pid:2_000_003, processIdentity:birth},
+      {pid:2_000_004, processIdentity:birth},
+      {pid:2_000_005, processIdentity:older},
+    ];
+    for (const selfBirth of [birth, older]) {
+      const self = {pid:process.pid, processIdentity:selfBirth};
+      const previous = {ownerGeneration:owner.ownerGeneration, root:owner, descendants:[...saved,self]};
+      const captured = await captureQueueRetirementReceipt(owner, previous, false, performance.now()+2_000);
+      assert.deepEqual(captured.descendants, [...saved.slice(0,3), ...(selfBirth === birth ? [self] : [])]);
+    }
+  `,
+      ],
+      { stdio: ["ignore", "ignore", "pipe"], timeout: 5_000, killSignal: "SIGKILL" },
+    );
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString()).slice(-2_000);
+    });
+    const [code] = await once(child, "close");
+    assert.equal(code, 0, stderr);
+  },
+);
+
 for (const invalid of [null, false, "oversized"] as const) {
   test(`invalid retirement custody survives refresh, release and close (${String(invalid)})`, async () => {
     await withTempHome(async (home) => {

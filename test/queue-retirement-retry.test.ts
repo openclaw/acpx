@@ -233,6 +233,100 @@ describe(
       });
     });
 
+    test("live reused PIDs cannot starve a later saved survivor across slow retries", async () => {
+      await withTempHome(async (home) => {
+        const sessionId = "retirement-reused-progress";
+        const tree = await startWitnessedTree();
+        const trees = [tree];
+        const attempts: Awaited<ReturnType<typeof runRetirer>>[] = [];
+        const progress: string[][] = [];
+        try {
+          // These live actors belong to a separate tree, not the retired owner.
+          // Persist older births to reproduce PID reuse without churning PIDs.
+          const replacements = await startWitnessedTree(0);
+          trees.push(replacements);
+          const paths = queuePaths(home, sessionId);
+          await writeQueueOwnerLock({ ...paths, sessionId, ...tree.witnesses[0] });
+          assert.equal((await runRetirer("partial", sessionId)).code, 23);
+          const pending = await readQueueOwnerRecord(sessionId);
+          assert(pending?.retirement);
+          const replaced = replacements.witnesses.map((witness) => ({
+            ...witness,
+            processIdentity: {
+              kind: "windows-creation" as const,
+              value: "2000-01-01T00:00:00.0000000Z",
+            },
+          }));
+          const original = JSON.stringify({
+            ...pending,
+            retirement: {
+              ...pending.retirement,
+              descendants: [...replaced, ...pending.retirement.descendants],
+            },
+          });
+          await fs.writeFile(paths.lockPath, original);
+
+          // Failed publication cannot authorize signals or discard prior custody.
+          const refused = await runRetirer("write-failure", sessionId);
+          assert.equal(refused.code, "EIO");
+          assert.equal(refused.taskkillCalls, 0);
+          assert.equal(refused.publishedReceiptWitnesses, undefined);
+          assert.equal(await fs.readFile(paths.lockPath, "utf8"), original);
+          assert.deepEqual(await witnessStates(tree.witnesses), ["gone", "gone", "matching"]);
+          assert.deepEqual(await witnessStates(replacements.witnesses), ["matching", "matching"]);
+
+          for (
+            let attempt = 0;
+            attempt < 2 && (await readQueueOwnerRecord(sessionId));
+            attempt += 1
+          ) {
+            attempts.push(await runRetirer("slow-retry", sessionId));
+            progress.push(await witnessStates(tree.witnesses));
+          }
+          assert.deepEqual(
+            progress.at(-1),
+            ["gone", "gone", "gone"],
+            "fresh retries must reach the survivor after the live replacement prefix",
+          );
+          assert.equal(attempts.at(-1)?.code, undefined);
+          assert.equal(await readQueueOwnerRecord(sessionId), undefined);
+          const published = attempts[0]?.publishedReceiptWitnesses;
+          assert(published);
+          assert(published.every((witness) => !replaced.some((old) => old.pid === witness.pid)));
+          assert(published.some((witness) => witness.pid === tree.witnesses[2].pid));
+          assert.deepEqual(
+            await witnessStates(replacements.expectedWitnesses),
+            replacements.expectedWitnesses.map(() => "matching"),
+          );
+        } finally {
+          // Cleanup authority comes from each independently observed fixture tree,
+          // never from the deliberately stale retirement receipt.
+          const cleanup = await Promise.allSettled(
+            trees.map(async (owned) => {
+              try {
+                await stopWitnesses(owned.expectedWitnesses);
+              } finally {
+                await owned.closed;
+              }
+            }),
+          );
+          process.stdout.write(
+            `${JSON.stringify({
+              mode: "reused-progress",
+              attempts,
+              progress,
+              cleanup: await witnessStates(trees.flatMap((owned) => owned.expectedWitnesses)),
+            })}\n`,
+          );
+          for (const result of cleanup) {
+            if (result.status === "rejected") {
+              throw result.reason;
+            }
+          }
+        }
+      });
+    });
+
     for (const reused of ["root", "child"] as const) {
       test(`a different ${reused} birth is not signaled while finishing saved custody`, async () => {
         await withTempHome(async (home) => {

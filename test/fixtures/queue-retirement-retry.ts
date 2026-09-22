@@ -35,7 +35,12 @@ export type RetirerMode =
   | "slow-retry"
   | "query-failure"
   | "write-failure";
-type WorkerReport = { code?: string | number; taskkillCalls: number; receiptWitnesses: Witness[] };
+type WorkerReport = {
+  code?: string | number;
+  taskkillCalls: number;
+  receiptWitnesses: Witness[];
+  publishedReceiptWitnesses?: Witness[];
+};
 
 function reachesFixtureRoot(
   entry: ProcessTableEntry,
@@ -293,6 +298,9 @@ async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
       throw Object.assign(new Error("injected receipt publication failure"), { code: "EIO" });
     }
     await rename(...args);
+    if (args[1] === queueLockFilePath(sessionId)) {
+      report.publishedReceiptWitnesses = savedReceiptWitnesses(sessionId);
+    }
   };
   fs.rm = async (...args: Parameters<typeof fs.rm>) => {
     await rm(...args);

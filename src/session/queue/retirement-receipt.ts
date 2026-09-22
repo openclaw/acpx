@@ -128,7 +128,7 @@ export async function captureQueueRetirementReceipt(
   const table = await readProcessTable(retirementTimeRemaining(deadline)).catch(() => {
     throw queueRetirementIncomplete();
   });
-  const saved = previous ? previous.descendants : [];
+  const saved = unsettledSnapshotWitnesses(table, previous ? previous.descendants : []);
   const owned = matchingSnapshotPids(table, rootRunning ? [root, ...saved] : saved);
   if (rootRunning && !owned.has(root.pid)) {
     throw queueRetirementIncomplete();
@@ -146,6 +146,21 @@ export async function captureQueueRetirementReceipt(
     throw queueRetirementIncomplete();
   }
   return receipt;
+}
+
+function unsettledSnapshotWitnesses(
+  table: Map<number, ProcessTableEntry>,
+  witnesses: ProcessWitness[],
+): ProcessWitness[] {
+  // A different canonical birth proves the saved incarnation is gone. Persist
+  // that progress before signaling so live reused PIDs cannot starve later members.
+  return witnesses.filter((witness) => {
+    const observed = table.get(witness.pid);
+    return (
+      !observed ||
+      compareProcessBirthIdentity(witness.processIdentity, observed.birth) !== "different"
+    );
+  });
 }
 
 function matchingSnapshotPids(
