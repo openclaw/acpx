@@ -82,6 +82,8 @@ history locally, so you can still rewind while new steps continue to arrive.
 The full flow definition remains the main graph. The run is shown as an overlay
 on that graph rather than replacing it with an execution-only path.
 
+Graph nodes remain visible during playback, and their cards resize as content changes.
+
 Replay follows the saved attempt order, including attempts with matching
 timestamps. Duration labels carry rounded seconds into the next minute.
 When a later step shows an earlier ACP conversation as context, the completed

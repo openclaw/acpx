@@ -20,6 +20,7 @@ Repo: https://github.com/openclaw/acpx
 - PR triage example: retain complete review findings whose prose begins with “execution” and select the final assistant block instead of intermediate commentary and command logs.
 - PR triage example: report the latest completed conflict outcome in handoff prompts and final summaries, retaining resolution details and reasons that need human judgment across repeated checks.
 - Replay viewer: keep the latest run selection when a superseded load finishes, including reselecting the run already displayed.
+- Replay viewer: keep graph nodes visible during replay updates while retaining natural card resizing.
 
 ## 0.19.1 - 2026-09-22
 
