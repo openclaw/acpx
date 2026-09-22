@@ -95,6 +95,9 @@ that produced the conversation.
 Selecting the displayed run again keeps it selected even if an earlier choice
 finishes loading later. A superseded load cannot replace it or show an obsolete error.
 
+Playback advances with elapsed animation time at the selected speed, including
+when the displayed run receives an updated bundle.
+
 ## Included sample
 
 The bundled sample under `public/sample-run/` still exists for development and

@@ -22,6 +22,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: keep the latest run selection when a superseded load finishes, including reselecting the run already displayed.
 - Replay viewer: keep graph nodes visible during replay updates while retaining natural card resizing.
 - Replay viewer: render complete flow definitions containing unreachable loops without crashing.
+- Replay viewer: advance replay at the selected speed without losing animation intervals after renders or updates to the same run.
 
 ## 0.19.1 - 2026-09-22
 
