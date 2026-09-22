@@ -880,3 +880,195 @@ test("quiet formatter onError collapses CRLF line endings in message to a single
   );
   assert.equal(stderrStr, "[acpx] error: RUNTIME line one line two line three\n");
 });
+
+type SuppressionDirection = "inbound" | "outbound";
+type SuppressionMessage = Parameters<ReturnType<typeof createOutputFormatter>["onAcpMessage"]>[0];
+type DirectedSuppressionFrame = { direction?: SuppressionDirection; message: SuppressionMessage };
+
+function renderDirectedSuppression(frames: DirectedSuppressionFrame[]): unknown[] {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("json", { stdout: writer, suppressReads: true });
+  // A one-argument baseline method is assignable here and ignores the extra
+  // argument at runtime, so the same test exposes the behavior before the fix.
+  const emit: (message: SuppressionMessage, direction?: SuppressionDirection) => void =
+    formatter.onAcpMessage.bind(formatter);
+  for (const frame of frames) {
+    emit(frame.message, frame.direction);
+  }
+  formatter.flush();
+  return writer
+    .toString()
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as unknown);
+}
+
+for (const id of [7, "7"] as const) {
+  for (const readRequestFirst of [true, false]) {
+    for (const readResponseFirst of [true, false]) {
+      test(`read suppression separates duplex ${typeof id} ID with request/read-first=${readRequestFirst}, response/read-first=${readResponseFirst}`, () => {
+        const readRequest = {
+          jsonrpc: "2.0" as const,
+          id,
+          method: "fs/read_text_file",
+          params: { sessionId: "synthetic", path: "/synthetic/file" },
+        };
+        const controlRequest = {
+          jsonrpc: "2.0" as const,
+          id,
+          method: "session/set_mode",
+          params: { sessionId: "synthetic", modeId: "plan" },
+        };
+        const readResponse = {
+          jsonrpc: "2.0" as const,
+          id,
+          result: { content: "SYNTHETIC_FILE_BODY", _meta: { fixture: "read metadata" } },
+        };
+        const controlResponse = {
+          jsonrpc: "2.0" as const,
+          id,
+          result: { _meta: { content: "SYNTHETIC_CONTROL_METADATA", direction: "opaque value" } },
+        };
+        const read: DirectedSuppressionFrame = { direction: "inbound", message: readRequest };
+        const control: DirectedSuppressionFrame = {
+          direction: "outbound",
+          message: controlRequest,
+        };
+        const readResult: DirectedSuppressionFrame = {
+          direction: "outbound",
+          message: readResponse,
+        };
+        const controlResult: DirectedSuppressionFrame = {
+          direction: "inbound",
+          message: controlResponse,
+        };
+        const frames = [
+          ...(readRequestFirst ? [read, control] : [control, read]),
+          ...(readResponseFirst ? [readResult, controlResult] : [controlResult, readResult]),
+        ];
+        const before = JSON.stringify(frames);
+        const output = renderDirectedSuppression(frames);
+        assert.deepEqual(
+          output,
+          frames.map(({ message }) =>
+            message === readResponse
+              ? {
+                  ...readResponse,
+                  result: { ...readResponse.result, content: "[read output suppressed]" },
+                }
+              : message,
+          ),
+        );
+        assert.equal(JSON.stringify(frames), before, "formatting must not mutate protocol input");
+      });
+    }
+  }
+
+  test(`opposite-direction ${typeof id} error does not retire read suppression`, () => {
+    const controlRequest = {
+      jsonrpc: "2.0" as const,
+      id,
+      method: "session/set_mode",
+      params: { sessionId: "synthetic", modeId: "plan" },
+    };
+    const readRequest = {
+      jsonrpc: "2.0" as const,
+      id,
+      method: "fs/read_text_file",
+      params: { sessionId: "synthetic", path: "/synthetic/file" },
+    };
+    const controlError = {
+      jsonrpc: "2.0" as const,
+      id,
+      error: {
+        code: -32602,
+        message: "synthetic control refusal",
+        data: { content: "CONTROL_ERROR_DATA" },
+      },
+    };
+    const readResponse = {
+      jsonrpc: "2.0" as const,
+      id,
+      result: { content: "SYNTHETIC_FILE_BODY" },
+    };
+    assert.deepEqual(
+      renderDirectedSuppression([
+        { direction: "outbound", message: controlRequest },
+        { direction: "inbound", message: readRequest },
+        { direction: "inbound", message: controlError },
+        { direction: "outbound", message: readResponse },
+      ]),
+      [
+        controlRequest,
+        readRequest,
+        controlError,
+        { ...readResponse, result: { content: "[read output suppressed]" } },
+      ],
+    );
+  });
+}
+
+test("direction-aware suppression retains numeric/string ID separation within an endpoint", () => {
+  const frames: DirectedSuppressionFrame[] = [
+    ...[7, "7"].map((id) => ({
+      direction: "inbound" as const,
+      message: {
+        jsonrpc: "2.0" as const,
+        id,
+        method: "fs/read_text_file",
+        params: { sessionId: "synthetic", path: `/synthetic/${typeof id}` },
+      },
+    })),
+    ...[7, "7"].map((id) => ({
+      direction: "outbound" as const,
+      message: { jsonrpc: "2.0" as const, id, result: { content: `SYNTHETIC_${typeof id}` } },
+    })),
+  ];
+  assert.deepEqual(renderDirectedSuppression(frames), [
+    frames[0]?.message,
+    frames[1]?.message,
+    { jsonrpc: "2.0", id: 7, result: { content: "[read output suppressed]" } },
+    { jsonrpc: "2.0", id: "7", result: { content: "[read output suppressed]" } },
+  ]);
+});
+
+for (const readDirection of ["inbound", undefined] as const) {
+  test(`read suppression keeps ${readDirection ?? "legacy"} requests separate from the other metadata namespace`, () => {
+    const readRequest = {
+      jsonrpc: "2.0" as const,
+      id: 7,
+      method: "fs/read_text_file",
+      params: { sessionId: "synthetic", path: "/synthetic/file" },
+    };
+    const controlRequest = {
+      jsonrpc: "2.0" as const,
+      id: 7,
+      method: "session/set_mode",
+      params: { sessionId: "synthetic", modeId: "plan" },
+    };
+    const controlResponse = { jsonrpc: "2.0" as const, id: 7, result: {} };
+    const readResponse = {
+      jsonrpc: "2.0" as const,
+      id: 7,
+      result: { content: "SYNTHETIC_FILE_BODY" },
+    };
+    const controlDirection = readDirection === undefined ? "outbound" : undefined;
+    assert.deepEqual(
+      renderDirectedSuppression([
+        { direction: readDirection, message: readRequest },
+        { direction: controlDirection, message: controlRequest },
+        {
+          direction: controlDirection === undefined ? undefined : "inbound",
+          message: controlResponse,
+        },
+        { direction: readDirection === undefined ? undefined : "outbound", message: readResponse },
+      ]),
+      [
+        readRequest,
+        controlRequest,
+        controlResponse,
+        { ...readResponse, result: { content: "[read output suppressed]" } },
+      ],
+    );
+  });
+}

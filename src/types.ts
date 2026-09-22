@@ -224,7 +224,7 @@ export type OutputErrorEmissionPolicy = {
 
 export interface OutputFormatter {
   setContext(context: OutputFormatterContext): void;
-  onAcpMessage(message: AcpJsonRpcMessage): void;
+  onAcpMessage(message: AcpJsonRpcMessage, direction?: AcpMessageDirection): void;
   onError(params: {
     code: OutputErrorCode;
     detailCode?: string;

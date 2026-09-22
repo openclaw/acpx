@@ -1,5 +1,6 @@
 import { buildJsonRpcErrorResponse } from "../../acp/jsonrpc-error.js";
 import type {
+  AcpMessageDirection,
   OutputErrorAcpPayload,
   OutputErrorCode,
   OutputErrorOrigin,
@@ -42,6 +43,23 @@ function jsonRpcIdKey(value: unknown): string | undefined {
     return `n:${value}`;
   }
   return undefined;
+}
+
+function requestCorrelationKey(
+  id: unknown,
+  direction: AcpMessageDirection | undefined,
+): string | undefined {
+  const idKey = jsonRpcIdKey(id);
+  return idKey === undefined ? undefined : `${direction ?? "unknown"}:${idKey}`;
+}
+
+function reverseDirection(
+  direction: AcpMessageDirection | undefined,
+): AcpMessageDirection | undefined {
+  if (direction === undefined) {
+    return undefined;
+  }
+  return direction === "inbound" ? "outbound" : "inbound";
 }
 
 function sanitizeReadResult(result: unknown): unknown {
@@ -119,12 +137,12 @@ export class JsonMessageSanitizer {
     private readonly partialHistory = false,
   ) {}
 
-  sanitize(message: unknown): unknown {
+  sanitize(message: unknown, direction?: AcpMessageDirection): unknown {
     if (!this.suppressReads) {
       return message;
     }
 
-    const sanitizedResponse = this.sanitizeReadResponse(message);
+    const sanitizedResponse = this.sanitizeReadResponse(message, direction);
     if (sanitizedResponse !== message) {
       return sanitizedResponse;
     }
@@ -134,25 +152,28 @@ export class JsonMessageSanitizer {
       return sanitizedToolMessage;
     }
 
-    this.trackRequestMethod(message);
+    this.trackRequestMethod(message, direction);
     return message;
   }
 
-  private trackRequestMethod(message: unknown): void {
+  private trackRequestMethod(message: unknown, direction: AcpMessageDirection | undefined): void {
     const candidate = message as JsonRpcRequestMessage;
     if (typeof candidate.method !== "string") {
       return;
     }
-    const idKey = jsonRpcIdKey(candidate.id);
+    const idKey = requestCorrelationKey(candidate.id, direction);
     if (!idKey) {
       return;
     }
     this.requestMethodById.set(idKey, candidate.method);
   }
 
-  private sanitizeReadResponse(message: unknown): unknown {
+  private sanitizeReadResponse(
+    message: unknown,
+    direction: AcpMessageDirection | undefined,
+  ): unknown {
     const candidate = message as JsonRpcResponseMessage;
-    const idKey = jsonRpcIdKey(candidate.id);
+    const idKey = requestCorrelationKey(candidate.id, reverseDirection(direction));
     if (!idKey) {
       return message;
     }
@@ -247,8 +268,8 @@ class JsonOutputFormatter implements OutputFormatter {
     this.sessionId = context.sessionId?.trim() || this.sessionId || DEFAULT_JSON_SESSION_ID;
   }
 
-  onAcpMessage(message: unknown): void {
-    this.stdout.write(`${JSON.stringify(this.sanitizer.sanitize(message))}\n`);
+  onAcpMessage(message: unknown, direction?: AcpMessageDirection): void {
+    this.stdout.write(`${JSON.stringify(this.sanitizer.sanitize(message, direction))}\n`);
   }
 
   onError(params: {

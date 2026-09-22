@@ -14,6 +14,7 @@ import {
 } from "../../types.js";
 import type {
   AcpJsonRpcMessage,
+  AcpMessageDirection,
   NonInteractivePermissionPolicy,
   PermissionMode,
   PromptInput,
@@ -98,6 +99,7 @@ export type QueueOwnerEventMessage = {
   type: "event";
   requestId: string;
   ownerGeneration?: number;
+  direction?: AcpMessageDirection;
   message: AcpJsonRpcMessage;
 };
 
@@ -709,7 +711,16 @@ function parseEventOwnerMessage(
   if (!isAcpJsonRpcMessage(message.message)) {
     return null;
   }
-  return { type: "event", ...context, message: message.message };
+  const direction = message.direction;
+  if (direction !== undefined && direction !== "inbound" && direction !== "outbound") {
+    return null;
+  }
+  return {
+    type: "event",
+    ...context,
+    ...(direction === undefined ? {} : { direction }),
+    message: message.message,
+  };
 }
 
 function parsePermissionEscalationOwnerMessage(

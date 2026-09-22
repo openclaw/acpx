@@ -381,7 +381,7 @@ function handleAcknowledgedSubmitMessage(
   formatter: OutputFormatter,
 ): void {
   if (message.type === "event") {
-    notifyObserver(() => formatter.onAcpMessage(message.message));
+    notifyObserver(() => formatter.onAcpMessage(message.message, message.direction));
     return;
   }
   if (message.type === "permission_escalation") {

@@ -673,3 +673,45 @@ test("parseQueueOwnerMessage rejects invalid structured owner message payloads",
     null,
   );
 });
+
+for (const direction of ["inbound", "outbound"] as const) {
+  test(`queue event retains ${direction} transport metadata outside ACP JSON`, () => {
+    const message = { jsonrpc: "2.0", id: 7, result: { content: "SYNTHETIC_RESULT" } };
+    const input = { type: "event", requestId: "synthetic-submit", direction, message };
+    assert.deepEqual(parseQueueOwnerMessage(input), {
+      type: "event",
+      requestId: "synthetic-submit",
+      ownerGeneration: undefined,
+      direction,
+      message,
+    });
+    assert.deepEqual(message, { jsonrpc: "2.0", id: 7, result: { content: "SYNTHETIC_RESULT" } });
+  });
+}
+
+test("legacy queue event without direction remains accepted without inventing an endpoint", () => {
+  const message = { jsonrpc: "2.0", id: 7, result: {} };
+  const parsed = parseQueueOwnerMessage({ type: "event", requestId: "synthetic-submit", message });
+  assert.deepEqual(parsed, {
+    type: "event",
+    requestId: "synthetic-submit",
+    ownerGeneration: undefined,
+    message,
+  });
+  assert(parsed);
+  assert.equal(Object.hasOwn(parsed, "direction"), false);
+});
+
+for (const direction of [null, "incoming", "outgoing", 7, true]) {
+  test(`queue event rejects malformed direction ${JSON.stringify(direction)}`, () => {
+    assert.equal(
+      parseQueueOwnerMessage({
+        type: "event",
+        requestId: "synthetic-submit",
+        direction,
+        message: { jsonrpc: "2.0", id: 7, result: {} },
+      }),
+      null,
+    );
+  });
+}

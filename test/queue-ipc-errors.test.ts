@@ -25,7 +25,7 @@ import {
   readQueueOwnerRecord,
   type QueueOwnerRecord,
 } from "../src/session/queue/lease-store.js";
-import type { OutputFormatter } from "../src/types.js";
+import type { AcpJsonRpcMessage, AcpMessageDirection, OutputFormatter } from "../src/types.js";
 import {
   cleanupOwnerArtifacts,
   closeServer,
@@ -822,11 +822,45 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
     });
 
     const events: string[] = [];
+    const queuedMessages: Array<{
+      message: AcpJsonRpcMessage;
+      direction?: AcpMessageDirection;
+    }> = [
+      {
+        direction: "outbound",
+        message: {
+          jsonrpc: "2.0",
+          id: "direction-prompt",
+          method: "session/prompt",
+          params: { sessionId: "agent-session", prompt: [{ type: "text", text: "hello" }] },
+        },
+      },
+      {
+        direction: "inbound",
+        message: {
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: "agent-session",
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "hello" },
+            },
+          },
+        },
+      },
+      { message: { jsonrpc: "2.0", id: "direction-prompt", result: { stopReason: "end_turn" } } },
+    ];
+    const receivedMessages: Array<{
+      message: AcpJsonRpcMessage;
+      direction: AcpMessageDirection | undefined;
+    }> = [];
     const formatter: OutputFormatter = {
       setContext(context) {
         events.push(`context:${context.sessionId}`);
       },
-      onAcpMessage(message) {
+      onAcpMessage(message, direction?: AcpMessageDirection) {
+        receivedMessages.push({ message, direction });
         if ("method" in message && typeof message.method === "string") {
           events.push(`event:${message.method}`);
           return;
@@ -852,23 +886,11 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
           requestId: request.requestId,
         })}\n`,
       );
-      socket.write(
-        `${JSON.stringify({
-          type: "event",
-          requestId: request.requestId,
-          message: {
-            jsonrpc: "2.0",
-            method: "session/update",
-            params: {
-              sessionId: "agent-session",
-              update: {
-                sessionUpdate: "agent_message_chunk",
-                content: { type: "text", text: "hello" },
-              },
-            },
-          },
-        })}\n`,
-      );
+      for (const event of queuedMessages) {
+        socket.write(
+          `${JSON.stringify({ type: "event", requestId: request.requestId, ...event })}\n`,
+        );
+      }
       socket.write(
         `${JSON.stringify({
           type: "result",
@@ -937,6 +959,10 @@ test("trySubmitToRunningOwner streams queued lifecycle and returns result", asyn
       );
       assert.equal(events.includes("event:session/update"), true);
       assert.equal(events.includes("flush"), true);
+      assert.deepEqual(
+        receivedMessages,
+        queuedMessages.map(({ message, direction }) => ({ message, direction })),
+      );
       assert.equal(
         events.some((entry) => entry.startsWith("error:")),
         false,

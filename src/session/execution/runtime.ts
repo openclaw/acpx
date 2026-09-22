@@ -109,10 +109,11 @@ class QueueTaskOutputFormatter implements OutputFormatter {
 
   setContext(_context: { sessionId: string }): void {}
 
-  onAcpMessage(message: AcpJsonRpcMessage): void {
+  onAcpMessage(message: AcpJsonRpcMessage, direction?: AcpMessageDirection): void {
     this.send({
       type: "event",
       requestId: this.requestId,
+      ...(direction === undefined ? {} : { direction }),
       message,
     });
   }
@@ -205,7 +206,7 @@ class AcpErrorTracker {
     direction: AcpMessageDirection,
     message: AcpJsonRpcMessage,
   ): void {
-    output.onAcpMessage(message);
+    output.onAcpMessage(message, direction);
     const acp = extractAcpError(message);
     if (!acp) {
       return;

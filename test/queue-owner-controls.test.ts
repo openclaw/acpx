@@ -14,7 +14,7 @@ import {
 } from "../src/session/execution/session-control.js";
 import { resolveSessionRecord } from "../src/session/persistence.js";
 import { isProcessAlive } from "../src/session/queue/lease-store.js";
-import type { AcpJsonRpcMessage, OutputFormatter } from "../src/types.js";
+import type { AcpJsonRpcMessage, AcpMessageDirection, OutputFormatter } from "../src/types.js";
 import { makeSessionRecord, withTempHome, writeSessionRecordFile } from "./runtime-test-helpers.js";
 
 const AGENT = `
@@ -50,16 +50,46 @@ readline.createInterface({input:process.stdin}).on('line', line => {
 
 type BackendState = { pid: number; mode: string; model: string; effort: string };
 
-function capture(messages: AcpJsonRpcMessage[]): OutputFormatter {
+type DirectionalDelivery = {
+  message: AcpJsonRpcMessage;
+  direction: AcpMessageDirection | undefined;
+};
+
+function capture(
+  messages: AcpJsonRpcMessage[],
+  deliveries?: DirectionalDelivery[],
+): OutputFormatter {
   return {
     setContext() {},
-    onAcpMessage(message) {
+    onAcpMessage(message, direction?: AcpMessageDirection) {
       messages.push(message);
+      deliveries?.push({ message, direction });
     },
     onError() {},
     onPermissionEscalation() {},
     flush() {},
   };
+}
+
+function assertPromptDirections(deliveries: DirectionalDelivery[]): void {
+  const request = deliveries.find(
+    ({ message }) => "method" in message && message.method === "session/prompt" && "id" in message,
+  );
+  assert.ok(request);
+  assert.ok("id" in request.message);
+  assert.equal(request.direction, "outbound");
+  const requestId = request.message.id;
+  const update = deliveries.find(
+    ({ message }) => "method" in message && message.method === "session/update",
+  );
+  assert.ok(update);
+  assert.equal(update.direction, "inbound");
+  const response = deliveries.find(
+    ({ message }) =>
+      "id" in message && message.id === requestId && !("method" in message) && "result" in message,
+  );
+  assert.ok(response);
+  assert.equal(response.direction, "inbound");
 }
 
 function backendState(messages: AcpJsonRpcMessage[]): BackendState {
@@ -90,6 +120,7 @@ for (const control of ["mode", "model", "effort"]) {
       });
       await writeSessionRecordFile(home, record);
       const messages: AcpJsonRpcMessage[] = [];
+      const deliveries: DirectionalDelivery[] = [];
       const prompt = () =>
         sendSession({
           sessionId: record.acpxRecordId,
@@ -101,12 +132,14 @@ for (const control of ["mode", "model", "effort"]) {
             "__queue-owner",
           ],
           timeoutMs: 5_000,
-          outputFormatter: capture(messages),
+          outputFormatter: capture(messages, deliveries),
         });
       try {
         await prompt();
+        assertPromptDirections(deliveries);
         const first = backendState(messages);
         messages.length = 0;
+        deliveries.length = 0;
         if (control === "mode") {
           await setSessionMode({
             sessionId: record.acpxRecordId,
@@ -128,6 +161,7 @@ for (const control of ["mode", "model", "effort"]) {
           });
         }
         await prompt();
+        assertPromptDirections(deliveries);
         const after = backendState(messages);
         assert.equal(after.pid, first.pid, "controls must retain the warm adapter");
         assert.equal(

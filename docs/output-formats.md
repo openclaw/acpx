@@ -113,6 +113,11 @@ acpx --suppress-reads codex exec 'inspect repo and report tool usage'
 
 The replacement preserves the surrounding ACP message shape so json consumers can still parse the stream — only the content payload is masked.
 
+Live JSON read suppression keeps file responses separate from overlapping control
+responses, even when the client and agent use the same request ID. This requires
+an updated client and queue owner; older owners and saved raw session journals
+retain their existing behavior when transport direction is unavailable.
+
 Title-based read detection uses complete leading words such as `Read`, `cat`,
 `Open`, and `View`; a filename or substring in another action's title does not
 suppress that action's output.

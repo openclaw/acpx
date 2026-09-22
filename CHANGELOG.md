@@ -12,6 +12,7 @@ Repo: https://github.com/openclaw/acpx
 - Embedding: preserve host logging during overlapping ACP prompts and when the application replaces its logger.
 - Runtime: reuse pending one-shot initialization when repeated creation options differ only by undefined fields or empty environment maps, avoiding duplicate agent sessions and retained clients.
 - Processes/Linux: retain witnessed descendants across wall-clock adjustments by comparing scoped kernel start ticks, and keep terminal group cutoffs and cleanup deadlines independent of wall time.
+- Output: preserve live JSON read suppression when client and agent request IDs collide, including queued prompts with overlapping controls, without changing the raw ACP message format.
 
 ## 0.19.0 - 2026-09-22
 
