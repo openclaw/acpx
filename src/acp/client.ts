@@ -361,8 +361,6 @@ export type AgentLifecycleSnapshot = {
   lastExit?: AgentExitInfo;
 };
 
-type ConsoleErrorMethod = typeof console.error;
-
 function childProcessIsRunning(
   agent: ChildProcessByStdio<Writable, Readable, Readable> | undefined,
 ): boolean {
@@ -377,26 +375,6 @@ function cancelledPermissionResponse(): RequestPermissionResponse {
     outcome: {
       outcome: "cancelled",
     },
-  };
-}
-
-function shouldSuppressSdkConsoleError(args: unknown[]): boolean {
-  if (args.length === 0) {
-    return false;
-  }
-  return typeof args[0] === "string" && args[0] === "Error handling request";
-}
-
-function installSdkConsoleErrorSuppression(): () => void {
-  const originalConsoleError: ConsoleErrorMethod = console.error;
-  console.error = (...args: unknown[]) => {
-    if (shouldSuppressSdkConsoleError(args)) {
-      return;
-    }
-    originalConsoleError(...args);
-  };
-  return () => {
-    console.error = originalConsoleError;
   };
 }
 
@@ -1159,9 +1137,6 @@ export class AcpClient {
   ): Promise<PromptResponse> {
     const connection = this.getConnection();
     const normalizedPrompt = this.normalizePromptForAgent(prompt);
-    const restoreConsoleError = this.options.suppressSdkConsoleErrors
-      ? installSdkConsoleErrorSuppression()
-      : undefined;
 
     const previousActivePrompt = this.activePrompt;
     const replacedOwners = this.pendingPromptOwners.filter(
@@ -1198,7 +1173,6 @@ export class AcpClient {
       this.throwPromptPermissionFailureIfPresent(sessionId);
       throw error;
     } finally {
-      restoreConsoleError?.();
       this.clearActivePrompt(activePrompt);
     }
   }

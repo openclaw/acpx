@@ -3430,3 +3430,139 @@ test("host permission decisions release their abort listeners after settlement",
   assert.ok(signal);
   assert.equal(getEventListeners(signal, "abort").length, 0);
 });
+
+const consoleOverlapScenarios = [
+  {
+    name: "start-order completion",
+    completionOrder: [0, 1],
+    rejectFirst: false,
+    replaceLogger: false,
+    secondSuppressed: true,
+  },
+  {
+    name: "reverse-order completion",
+    completionOrder: [1, 0],
+    rejectFirst: false,
+    replaceLogger: false,
+    secondSuppressed: true,
+  },
+  {
+    name: "a rejected first prompt",
+    completionOrder: [0, 1],
+    rejectFirst: true,
+    replaceLogger: false,
+    secondSuppressed: true,
+  },
+  {
+    name: "host logger replacement beside an unsuppressed client",
+    completionOrder: [0, 1],
+    rejectFirst: false,
+    replaceLogger: true,
+    secondSuppressed: false,
+  },
+] as const;
+
+for (const scenario of consoleOverlapScenarios) {
+  test(
+    `overlapping ACP prompts preserve host console ownership with ${scenario.name}`,
+    { timeout: 5_000 },
+    async (t) => {
+      const originalLogger = console.error;
+      const logged: Array<{ logger: string; args: unknown[] }> = [];
+      const expectedLogs: Array<{ logger: string; args: unknown[] }> = [];
+      const identities: Array<{
+        phase: string;
+        actual: typeof console.error;
+        expected: typeof console.error;
+      }> = [];
+      const hostLogger = (...args: unknown[]) => {
+        logged.push({ logger: "host", args });
+      };
+      const replacementLogger = (...args: unknown[]) => {
+        logged.push({ logger: "replacement", args });
+      };
+      let expectedLogger = hostLogger;
+      let loggerLabel = "host";
+      const payload = { source: "embedding host" };
+      const probeHostLogger = (phase: string) => {
+        identities.push({ phase, actual: console.error, expected: expectedLogger });
+        // This is a host diagnostic, even when its text resembles an old SDK message.
+        const args = ["Error handling request", phase, payload];
+        expectedLogs.push({ logger: loggerLabel, args });
+        console.error(...args);
+      };
+      const fixtures = [
+        createClientFixture(t, { client: { suppressSdkConsoleErrors: true } }),
+        createClientFixture(t, {
+          client: { suppressSdkConsoleErrors: scenario.secondSuppressed },
+        }),
+      ];
+      const pending: Array<Promise<unknown>> = [];
+      console.error = hostLogger;
+      try {
+        const outcomes = fixtures.map((fixture, index) => {
+          const prompt = fixture.prompt(`console-session-${index}`, "synthetic overlap");
+          pending.push(prompt);
+          return prompt.then(
+            (value) => ({ ok: true as const, value }),
+            (error: unknown) => ({ ok: false as const, error }),
+          );
+        });
+        const requests = await Promise.all(fixtures.map((fixture) => fixture.message(0)));
+        probeHostLogger("both prompts active");
+        if (scenario.replaceLogger) {
+          console.error = replacementLogger;
+          expectedLogger = replacementLogger;
+          loggerLabel = "replacement";
+          probeHostLogger("host replaced its logger");
+        }
+        for (const [position, index] of scenario.completionOrder.entries()) {
+          const fixture = fixtures[index];
+          const request = requests[index];
+          assert(fixture && request && "id" in request);
+          if (scenario.rejectFirst && index === 0) {
+            await fixture.send({
+              jsonrpc: "2.0",
+              id: request.id,
+              error: { code: -32000, message: "synthetic prompt failure" },
+            });
+          } else {
+            await fixture.reply(request);
+          }
+          await outcomes[index];
+          probeHostLogger(position === 0 ? "one prompt remains" : "both prompts settled");
+        }
+        const results = await Promise.all(outcomes);
+        for (const [index, result] of results.entries()) {
+          if (scenario.rejectFirst && index === 0) {
+            assert.equal(result.ok, false);
+            if (!result.ok) {
+              assert(result.error instanceof Error);
+              assert.match(result.error.message, /synthetic prompt failure/u);
+              assert.equal((result.error as Error & { code?: number }).code, -32000);
+            }
+          } else {
+            assert.equal(result.ok, true);
+            if (result.ok) {
+              assert.equal(result.value.stopReason, "end_turn");
+            }
+          }
+        }
+        for (const identity of identities) {
+          assert.equal(identity.actual, identity.expected, identity.phase);
+        }
+        assert.deepEqual(logged, expectedLogs);
+        assert.equal(console.error, expectedLogger);
+      } finally {
+        // Settle prompt finalizers before restoring the test's host logger, even
+        // when an assertion fails on the old overlapping-wrapper implementation.
+        try {
+          await Promise.allSettled(fixtures.map((fixture) => fixture.client.close()));
+          await Promise.allSettled(pending);
+        } finally {
+          console.error = originalLogger;
+        }
+      }
+    },
+  );
+}

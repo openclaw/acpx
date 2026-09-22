@@ -172,6 +172,12 @@ absent, and an explicit `null` stays `null`. Nested values are opaque,
 adapter-defined data; ACPX does not authenticate them or treat them as proof of
 model identity or configuration. Raw JSON output retains the original ACP response.
 
+## Embedded host logging
+
+Embedded ACP prompts leave the application's `console.error` function unchanged,
+including while prompts overlap or the host replaces its logger. Existing output
+modes and acpx warning and retry suppression controls keep their behavior.
+
 ## Embedded runtime plans
 
 The `acpx/runtime` turn stream exposes ACP plan notifications as `status` events

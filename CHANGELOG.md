@@ -9,6 +9,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Compare: preserve actual permission counts on failed runs, distinguish permission failures from runtime errors, and reject conflicting permission modes before reading prompt or policy input.
+- Embedding: preserve host logging during overlapping ACP prompts and when the application replaces its logger.
 
 ## 0.19.0 - 2026-09-22
 
