@@ -65,6 +65,9 @@ If the viewer starts before any runs exist, it stays empty and waits for the
 first real run instead of falling back to a demo bundle. New runs appear in the
 left sidebar automatically, and the first recent run opens on its own.
 
+Recent runs shows up to 24 readable run summaries. Directories with missing or
+unreadable summaries do not use a slot or hide older readable runs.
+
 When a recent run is still active, the sidebar and the selected run view update
 live over the viewer WebSocket transport. The viewer keeps the accumulated
 history locally, so you can still rewind while new steps continue to arrive.

@@ -11,6 +11,7 @@ Repo: https://github.com/openclaw/acpx
 - Watching: drain retained events when a session closes while its observer is paused, preserving unfinished-outcome errors and exclusive cursor resumption.
 - PR triage example: collect all review/comment pages and query CI runs for the observed PR head instead of the oldest commit.
 - Replay viewer: preserve recorded attempt order when timestamps tie or move backward, and carry rounded seconds into minute duration labels.
+- Replay viewer: count readable run summaries toward the recent-run limit so incomplete directories cannot hide older valid runs.
 
 ## 0.19.1 - 2026-09-22
 

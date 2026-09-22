@@ -376,3 +376,116 @@ async function writeRunBundle(
     }),
   );
 }
+
+test("listRunBundles finds a valid older run behind a full quota of empty directories", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-valid-quota-"));
+  const runId = "2026-09-21T000000000Z-valid";
+  try {
+    await writeRunBundle(runsDir, {
+      runId,
+      flowName: "synthetic-quota",
+      runTitle: "Synthetic retained run",
+      status: "completed",
+      startedAt: "2026-09-21T00:00:00.000Z",
+    });
+    for (let index = 0; index < 24; index += 1) {
+      await fs.mkdir(
+        path.join(runsDir, `2026-09-22T000000000Z-empty-${String(index).padStart(2, "0")}`),
+      );
+    }
+    // Establish that this same bundle is readable even on the old candidate cap.
+    assert.deepEqual(
+      (await listRunBundles(runsDir, 25)).map((run) => run.runId),
+      [runId],
+    );
+    const runs = await listRunBundles(runsDir);
+    assert.deepEqual(
+      runs.map((run) => run.runId),
+      [runId],
+    );
+    assert.equal(runs[0]?.runTitle, "Synthetic retained run");
+    assert.equal(runs[0]?.status, "completed");
+  } finally {
+    await fs.rm(runsDir, { recursive: true, force: true });
+  }
+});
+
+test("listRunBundles fills the requested valid quota without changing selection or display order", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-quota-order-"));
+  try {
+    for (const [runId, startedAt] of [
+      ["y-selected", "2026-09-20T00:00:00.000Z"],
+      ["w-selected", "2026-09-21T00:00:00.000Z"],
+      ["v-selected", "2026-09-21T00:00:00.000Z"],
+      ["u-not-selected", "2026-09-22T00:00:00.000Z"],
+    ]) {
+      await writeRunBundle(runsDir, {
+        runId,
+        flowName: "synthetic-order",
+        status: "completed",
+        startedAt,
+      });
+    }
+    const expected = ["w-selected", "v-selected", "y-selected"];
+    // Existing behavior chooses by directory ID, then displays by date and ID.
+    assert.deepEqual(
+      (await listRunBundles(runsDir, 3)).map((run) => run.runId),
+      expected,
+    );
+    await fs.mkdir(path.join(runsDir, "z-malformed"));
+    await fs.writeFile(path.join(runsDir, "z-malformed", "manifest.json"), "{unfinished");
+    await writeRunBundle(runsDir, {
+      runId: "x-incomplete",
+      flowName: "synthetic-incomplete",
+      status: "running",
+      startedAt: "2026-09-22T00:00:00.000Z",
+    });
+    await fs.unlink(path.join(runsDir, "x-incomplete", "projections", "run.json"));
+    assert.deepEqual(
+      (await listRunBundles(runsDir, 3)).map((run) => run.runId),
+      expected,
+    );
+    assert.deepEqual(
+      (await listRunBundles(runsDir, 1)).map((run) => run.runId),
+      ["y-selected"],
+    );
+    assert.deepEqual(await listRunBundles(runsDir, 0), []);
+  } finally {
+    await fs.rm(runsDir, { recursive: true, force: true });
+  }
+});
+
+test("listRunBundles still returns at most 24 valid summaries after skipping newer incomplete runs", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-run-default-quota-"));
+  try {
+    const ids: string[] = [];
+    for (let index = 0; index < 26; index += 1) {
+      const runId = `2026-09-21T000000000Z-valid-${String(index).padStart(2, "0")}`;
+      ids.push(runId);
+      await writeRunBundle(runsDir, {
+        runId,
+        flowName: "synthetic-cap",
+        status: "completed",
+        startedAt: "2026-09-21T00:00:00.000Z",
+      });
+    }
+    const expected = ids.toReversed().slice(0, 24);
+    assert.deepEqual(
+      (await listRunBundles(runsDir)).map((run) => run.runId),
+      expected,
+    );
+    for (let index = 0; index < 25; index += 1) {
+      await fs.mkdir(
+        path.join(runsDir, `2026-09-22T000000000Z-empty-${String(index).padStart(2, "0")}`),
+      );
+    }
+    const runs = await listRunBundles(runsDir);
+    assert.equal(runs.length, 24);
+    assert.deepEqual(
+      runs.map((run) => run.runId),
+      expected,
+    );
+  } finally {
+    await fs.rm(runsDir, { recursive: true, force: true });
+  }
+});

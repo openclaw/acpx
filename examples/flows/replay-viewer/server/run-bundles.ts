@@ -29,22 +29,29 @@ export async function listRunBundles(
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .toSorted()
-    .toReversed()
-    .slice(0, maxRuns);
+    .toReversed();
 
-  const runs = await Promise.all(
-    candidateIds.map(async (runId) => readRunBundleSummary(runsDir, runId).catch(() => null)),
-  );
+  const limit = candidateIds.slice(0, maxRuns).length;
+  const runs: RunBundleSummary[] = [];
+  for (let offset = 0; offset < candidateIds.length && runs.length < limit;) {
+    const batchIds = candidateIds.slice(
+      offset,
+      offset + Math.min(DEFAULT_MAX_RUNS, limit - runs.length),
+    );
+    offset += batchIds.length;
+    const batch = await Promise.all(
+      batchIds.map((runId) => readRunBundleSummary(runsDir, runId).catch(() => null)),
+    );
+    runs.push(...batch.filter((run): run is RunBundleSummary => run != null));
+  }
 
-  return runs
-    .filter((run): run is RunBundleSummary => run != null)
-    .toSorted((left, right) => {
-      const byStartedAt = Date.parse(right.startedAt) - Date.parse(left.startedAt);
-      if (byStartedAt !== 0) {
-        return byStartedAt;
-      }
-      return right.runId.localeCompare(left.runId);
-    });
+  return runs.toSorted((left, right) => {
+    const byStartedAt = Date.parse(right.startedAt) - Date.parse(left.startedAt);
+    if (byStartedAt !== 0) {
+      return byStartedAt;
+    }
+    return right.runId.localeCompare(left.runId);
+  });
 }
 
 export async function readRunBundleTextFile(
