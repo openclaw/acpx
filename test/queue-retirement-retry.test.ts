@@ -240,6 +240,7 @@ describe(
         const trees = [tree];
         const attempts: Awaited<ReturnType<typeof runRetirer>>[] = [];
         const progress: string[][] = [];
+        let cleanup: PromiseSettledResult<void>[] = [];
         try {
           // These live actors belong to a separate tree, not the retired owner.
           // Persist older births to reproduce PID reuse without churning PIDs.
@@ -301,7 +302,7 @@ describe(
         } finally {
           // Cleanup authority comes from each independently observed fixture tree,
           // never from the deliberately stale retirement receipt.
-          const cleanup = await Promise.allSettled(
+          cleanup = await Promise.allSettled(
             trees.map(async (owned) => {
               try {
                 await stopWitnesses(owned.expectedWitnesses);
@@ -318,10 +319,10 @@ describe(
               cleanup: await witnessStates(trees.flatMap((owned) => owned.expectedWitnesses)),
             })}\n`,
           );
-          for (const result of cleanup) {
-            if (result.status === "rejected") {
-              throw result.reason;
-            }
+        }
+        for (const result of cleanup) {
+          if (result.status === "rejected") {
+            throw result.reason;
           }
         }
       });
