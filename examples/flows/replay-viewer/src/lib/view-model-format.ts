@@ -24,8 +24,9 @@ export function formatDuration(durationMs: number | undefined): string {
   if (seconds < 60) {
     return `${seconds.toFixed(1)} s`;
   }
-  const minutes = Math.floor(seconds / 60);
-  const remainder = Math.round(seconds % 60);
+  const roundedSeconds = Math.round(seconds);
+  const minutes = Math.floor(roundedSeconds / 60);
+  const remainder = roundedSeconds % 60;
   return `${minutes}m ${remainder}s`;
 }
 

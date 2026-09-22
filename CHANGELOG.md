@@ -25,6 +25,7 @@ Repo: https://github.com/openclaw/acpx
 - Flows: execute empty-string node IDs, retain outputs and results for names such as `__proto__`, and validate and route only declared own graph entries.
 - Adapter startup: use the selected child environment and working directory for compatibility checks and diagnostics, honor host admission for every adapter invocation, and retire timed-out probes and inherited output pipes.
 - Sessions: preserve queue-owner leases when deeply nested retirement receipt data cannot be sized, instead of treating the owner as missing during recovery.
+- Replay viewer: preserve recorded attempt order when timestamps tie or move backward, and carry rounded seconds into minute duration labels.
 
 ## 0.19.0 - 2026-09-22
 

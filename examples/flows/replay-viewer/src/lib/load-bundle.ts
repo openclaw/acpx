@@ -51,7 +51,7 @@ export async function loadRunBundle(reader: BundleReader): Promise<LoadedRunBund
     flow,
     run: mergeLiveRunState(run, live),
     live,
-    steps: steps.toSorted(compareByAttemptStart),
+    steps,
     trace: trace.toSorted((left, right) => left.seq - right.seq),
     sessions,
   };
@@ -68,12 +68,4 @@ async function readNdjson<T>(reader: BundleReader, relativePath: string): Promis
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => JSON.parse(line) as T);
-}
-
-function compareByAttemptStart(left: FlowStepRecord, right: FlowStepRecord): number {
-  const started = Date.parse(left.startedAt) - Date.parse(right.startedAt);
-  if (started !== 0) {
-    return started;
-  }
-  return left.attemptId.localeCompare(right.attemptId);
 }
