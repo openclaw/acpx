@@ -219,17 +219,16 @@ test(
           sessionEventActivePath(sessionId),
         ];
         const before = await Promise.all(paths.map((file) => fs.readFile(file, "utf8")));
-        const iterator = runtime
-          .watchSession({
-            handle: {
-              backend: "acpx-shared",
-              sessionKey: sessionId,
-              runtimeSessionName: sessionId,
-              acpxRecordId: sessionId,
-            },
-            signal: AbortSignal.any([abort.signal, AbortSignal.timeout(4_000)]),
-          })
-          [Symbol.asyncIterator]();
+        const events = runtime.watchSession({
+          handle: {
+            backend: "acpx-shared",
+            sessionKey: sessionId,
+            runtimeSessionName: sessionId,
+            acpxRecordId: sessionId,
+          },
+          signal: AbortSignal.any([abort.signal, AbortSignal.timeout(4_000)]),
+        });
+        const iterator = events[Symbol.asyncIterator]();
         assert.equal((await iterator.next()).value?.type, "turn_started");
         process.stdout.write(
           `WATCH_REUSE_STARTED ${JSON.stringify({ pids: [...original.pids, ...sentinel.pids] })}\n`,
