@@ -230,6 +230,19 @@ function savedReceiptWitnesses(sessionId: string): Witness[] {
   return raw.retirement?.descendants ?? [];
 }
 
+export async function settleRetirerHelpers(
+  helpers: { child: ChildProcess; closed: Promise<void> }[],
+): Promise<void> {
+  await Promise.all(
+    helpers.map(async ({ child, closed }) => {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+      }
+      await closed;
+    }),
+  );
+}
+
 async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
   const originalExecFile = childProcess.execFile.bind(childProcess);
   const rename = fs.rename.bind(fs);
@@ -326,14 +339,7 @@ async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
     }
   } finally {
     // Join every helper directly; a failed Node24 assertion need not print after hooks.
-    await Promise.all(
-      helpers.map(async ({ child, closed }) => {
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGKILL");
-        }
-        await closed;
-      }),
-    );
+    await settleRetirerHelpers(helpers);
   }
   process.stdout.write(JSON.stringify(report));
 }
