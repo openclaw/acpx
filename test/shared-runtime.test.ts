@@ -39,24 +39,30 @@ async function withSharedSession(
 ): Promise<void> {
   await withTempHome("acpx-shared-runtime-", async (home) => {
     const pidFile = path.join(home, "agent.pid");
-    const command = normalizeAgentCommandInput([
+    const argv = [
       process.execPath,
       AGENT,
       "--supports-load-session",
       ...agentArgs,
       "--pid-file",
       pidFile,
-    ]).agentCommand;
+    ];
+    const command = normalizeAgentCommandInput(argv).agentCommand;
+    await fs.mkdir(path.join(home, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(home, ".acpx", "config.json"),
+      JSON.stringify({ defaultAgent: "mock", agents: { mock: { argv } } }),
+    );
     const runtime = createSharedAcpRuntime({
       cwd: home,
-      agentRegistry: createAgentRegistry({ overrides: { mock: command } }),
+      agentRegistry: createAgentRegistry({ overrides: { mock: argv } }),
       permissionMode,
       ttlMs: 60_000,
     });
     const cli = async (...args: string[]) => {
       const result = await run(
         process.execPath,
-        [CLI, "--cwd", home, "--agent", command, `--${permissionMode}`, ...args],
+        [CLI, "--cwd", home, `--${permissionMode}`, ...args],
         { env: process.env, timeout: 15_000 },
       );
       return result.stdout;
@@ -166,19 +172,13 @@ async function watchedTurn(
   throw new Error(`Watch ended without result for ${requestId}`);
 }
 
-function cliWatcher(
-  home: string,
-  command: string,
-  extra: { global?: string[]; watch?: string[] } = {},
-) {
+function cliWatcher(home: string, extra: { global?: string[]; watch?: string[] } = {}) {
   const child = spawn(
     process.execPath,
     [
       CLI,
       "--cwd",
       home,
-      "--agent",
-      command,
       "--format",
       "json",
       ...(extra.global ?? []),
@@ -209,8 +209,11 @@ function cliWatcher(
       if (child.exitCode === null && child.signalCode === null) {
         child.kill("SIGINT");
       }
-      const [code] = await closed;
-      assert.equal(code, 0, stderr);
+      const [code, signal] = await closed;
+      // Windows kill uses TerminateProcess instead of invoking the CLI's signal
+      // handler. The joined child must report the exact signal sent by this fixture.
+      const expected = process.platform === "win32" && child.killed ? [null, "SIGINT"] : [0, null];
+      assert.deepEqual([code, signal], expected, stderr);
     },
   };
 }
@@ -219,7 +222,7 @@ test(
   "public and CLI watchers replay, follow and resume without affecting the shared turn",
   { timeout: 20_000 },
   async () => {
-    await withSharedSession(async ({ runtime, handle, home, command, pidFile }) => {
+    await withSharedSession(async ({ runtime, handle, home, pidFile }) => {
       const turn = runtime.startTurn({
         handle,
         text: "stream-sleep 500 watch-one",
@@ -228,7 +231,7 @@ test(
       });
       await turn.promptStarted;
       const pid = await fs.readFile(pidFile, "utf8");
-      const cli = cliWatcher(home, command);
+      const cli = cliWatcher(home);
       try {
         const [apiEvents, cliEvents] = await Promise.all([
           watchedTurn(
@@ -253,7 +256,7 @@ test(
           requestId: "watch-two",
           mode: "prompt",
         });
-        const secondCli = cliWatcher(home, command, { watch: ["--cursor", cursor] });
+        const secondCli = cliWatcher(home, { watch: ["--cursor", cursor] });
         let resumed: SessionWatchEvent[];
         try {
           const [fromApi, fromCli] = await Promise.all([
@@ -373,7 +376,7 @@ test(
   "resumed CLI watching suppresses raw read results without their request announcement",
   { timeout: 15_000 },
   async () => {
-    await withSharedSession(async ({ runtime, handle, home, command }) => {
+    await withSharedSession(async ({ runtime, handle, home }) => {
       const file = path.join(home, "read-fixture.txt");
       const sentinel = "SYNTHETIC_PRIVATE_READ_8274";
       await fs.writeFile(file, sentinel);
@@ -395,7 +398,7 @@ test(
           event.message.method === "fs/read_text_file",
       );
       assert.ok(request);
-      const watcher = cliWatcher(home, command, {
+      const watcher = cliWatcher(home, {
         global: ["--suppress-reads"],
         watch: ["--cursor", request.cursor],
       });
@@ -422,7 +425,7 @@ test(
   "CLI watch selects the open named session after an older session is closed",
   { timeout: 15_000 },
   async () => {
-    await withSharedSession(async ({ runtime, handle, home, command }) => {
+    await withSharedSession(async ({ runtime, handle, home }) => {
       await runtime.close({ handle, reason: "replace closed session" });
       const current = await runtime.ensureSession({
         sessionKey: "shared",
@@ -430,7 +433,7 @@ test(
         mode: "persistent",
       });
       assert.notEqual(current.acpxRecordId, handle.acpxRecordId);
-      const watcher = cliWatcher(home, command);
+      const watcher = cliWatcher(home);
       try {
         const turn = runtime.startTurn({
           handle: current,
