@@ -12,9 +12,12 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
+  compareProcessBirthIdentity,
   observeProcessIncarnation,
   probeProcessIdentity,
+  readProcessTable,
   type ProcessBirthIdentity,
+  type ProcessTableEntry,
 } from "../../src/process-identity.js";
 import {
   readQueueOwnerRecord,
@@ -32,7 +35,75 @@ export type RetirerMode =
   | "slow-retry"
   | "query-failure"
   | "write-failure";
-type WorkerReport = { code?: string | number; taskkillCalls: number; receiptPids: number[] };
+type WorkerReport = { code?: string | number; taskkillCalls: number; receiptWitnesses: Witness[] };
+
+function reachesFixtureRoot(
+  entry: ProcessTableEntry,
+  table: Map<number, ProcessTableEntry>,
+  rootPid: number,
+): boolean {
+  const seen = new Set<number>();
+  let current = entry;
+  while (current.pid !== rootPid) {
+    if (seen.has(current.pid)) {
+      return false;
+    }
+    seen.add(current.pid);
+    const parent = table.get(current.parentPid);
+    if (
+      parent?.birth.kind !== "windows-creation" ||
+      current.birth.kind !== "windows-creation" ||
+      parent.birth.value > current.birth.value
+    ) {
+      return false;
+    }
+    current = parent;
+  }
+  return true;
+}
+
+async function observeFixtureTree(root: Witness): Promise<Witness[]> {
+  const table = await readProcessTable(2_000);
+  const observed = table.get(root.pid);
+  assert(
+    observed && compareProcessBirthIdentity(root.processIdentity, observed.birth) === "matching",
+  );
+  // A detached Windows Node actor can also create a console host. Derive the
+  // complete expected tree independently, without the production selector.
+  return [...table.values()]
+    .filter((entry) => reachesFixtureRoot(entry, table, root.pid))
+    .map((entry) => ({ pid: entry.pid, processIdentity: entry.birth }));
+}
+
+function fixtureCleanupWitnesses(known: Witness[], expected: Witness[]): Witness[] {
+  return [
+    ...new Map(
+      [...known, ...expected].map((witness) => [JSON.stringify(witness), witness]),
+    ).values(),
+  ];
+}
+
+async function settleFixtureStartup(
+  child: ChildProcess,
+  closed: Promise<unknown>,
+  witnesses: Witness[],
+): Promise<void> {
+  let results: PromiseSettledResult<unknown>[] = [];
+  try {
+    if (child.connected) {
+      const stopped = once(child, "close", { signal: AbortSignal.timeout(5_000) });
+      child.send("stop");
+      await stopped;
+    }
+  } finally {
+    results = await Promise.allSettled([stopWitnesses(witnesses), closed]);
+  }
+  for (const result of results) {
+    if (result.status === "rejected") {
+      throw result.reason;
+    }
+  }
+}
 
 export async function startWitnessedTree(leafCount = 1) {
   // All fixtures expire independently, including a detached leaf whose parent died.
@@ -68,6 +139,7 @@ export async function startWitnessedTree(leafCount = 1) {
   });
   const closed = once(child, "close");
   const witnesses: Witness[] = [];
+  let expectedWitnesses: Witness[] = [];
   try {
     const [message] = await once(child, "message", { signal: AbortSignal.timeout(10_000) });
     assert(Array.isArray(message) && message.length === leafCount + 2);
@@ -77,17 +149,24 @@ export async function startWitnessedTree(leafCount = 1) {
       assert(probe.state === "alive");
       witnesses.push({ pid, processIdentity: probe.identity });
     }
-    return { child, closed, witnesses };
+    expectedWitnesses = await observeFixtureTree(witnesses[0]);
+    for (const witness of witnesses) {
+      const expected = expectedWitnesses.find((entry) => entry.pid === witness.pid);
+      assert(
+        expected &&
+          compareProcessBirthIdentity(witness.processIdentity, expected.processIdentity) ===
+            "matching",
+      );
+    }
+    return { child, closed, witnesses, expectedWitnesses };
   } catch (error) {
     // Setup can fail before births are known. Ask each spawning process to join
     // its own child handles instead of signaling an unverified numeric PID.
-    if (child.connected) {
-      const stopped = once(child, "close", { signal: AbortSignal.timeout(5_000) });
-      child.send("stop");
-      await stopped;
-    }
-    await closed;
-    await stopWitnesses(witnesses);
+    await settleFixtureStartup(
+      child,
+      closed,
+      fixtureCleanupWitnesses(witnesses, expectedWitnesses),
+    );
     throw error;
   }
 }
@@ -139,11 +218,11 @@ export async function runRetirer(mode: RetirerMode, sessionId: string): Promise<
   return JSON.parse(stdout) as WorkerReport;
 }
 
-function savedReceiptPids(sessionId: string): number[] {
+function savedReceiptWitnesses(sessionId: string): Witness[] {
   const raw = JSON.parse(readFileSync(queueLockFilePath(sessionId), "utf8")) as {
-    retirement?: { descendants?: { pid: number }[] };
+    retirement?: { descendants?: Witness[] };
   };
-  return raw.retirement?.descendants?.map((witness) => witness.pid) ?? [];
+  return raw.retirement?.descendants ?? [];
 }
 
 async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
@@ -152,7 +231,7 @@ async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
   const rm = fs.rm.bind(fs);
   const owner = await readQueueOwnerRecord(sessionId);
   assert(owner);
-  const report: WorkerReport = { taskkillCalls: 0, receiptPids: [] };
+  const report: WorkerReport = { taskkillCalls: 0, receiptWitnesses: [] };
   const helpers: { child: ChildProcess; closed: Promise<void> }[] = [];
   let released = false;
   let observedTime = performance.now();
@@ -168,7 +247,7 @@ async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
     const taskkill = path.win32.basename(command).toLowerCase() === "taskkill.exe";
     if (taskkill) {
       report.taskkillCalls += 1;
-      report.receiptPids = savedReceiptPids(sessionId);
+      report.receiptWitnesses = savedReceiptWitnesses(sessionId);
     }
     let substitute: string | undefined;
     if (

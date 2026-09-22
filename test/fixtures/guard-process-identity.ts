@@ -124,7 +124,7 @@ registerHooks({
         format: "module",
         shortCircuit: true,
         source: `
-          export { parseProcessBirthIdentity, compareProcessBirthIdentity } from ${JSON.stringify(`${identityUrl}?fixture-parser`)};
+          export * from ${JSON.stringify(`${identityUrl}?fixture-parser`)};
           export const getOwnProcessIdentity = globalThis.guardIdentityFixture.getOwnProcessIdentity;
           export const observeProcessIncarnation = globalThis.guardIdentityFixture.observeProcessIncarnation;
         `,

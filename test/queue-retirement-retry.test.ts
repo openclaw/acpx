@@ -46,11 +46,17 @@ describe(
             assert.equal(second.code, undefined);
             assert.equal(await readQueueOwnerRecord(sessionId), undefined);
             assert.deepEqual(
-              first.receiptPids.toSorted((a, b) => a - b),
-              [bridge.pid, leaf.pid].toSorted((a, b) => a - b),
+              first.receiptWitnesses.toSorted((a, b) => a.pid - b.pid),
+              tree.expectedWitnesses
+                .filter((witness) => witness.pid !== root.pid)
+                .toSorted((a, b) => a.pid - b.pid),
+            );
+            assert.deepEqual(
+              await witnessStates(tree.expectedWitnesses),
+              tree.expectedWitnesses.map(() => "gone"),
             );
           } finally {
-            await stopWitnesses(tree.witnesses);
+            await stopWitnesses(tree.expectedWitnesses);
             await tree.closed;
             // Bounded direct evidence is emitted even when the baseline assertion fails.
             process.stdout.write(
@@ -60,7 +66,8 @@ describe(
                 beforeRetry,
                 second,
                 afterRetry,
-                cleanup: await witnessStates(tree.witnesses),
+                expectedWitnesses: tree.expectedWitnesses,
+                cleanup: await witnessStates(tree.expectedWitnesses),
               })}\n`,
             );
           }
@@ -95,10 +102,10 @@ describe(
             ]);
             assert.equal(await fs.readFile(paths.lockPath, "utf8"), original);
           } finally {
-            await stopWitnesses(tree.witnesses);
+            await stopWitnesses(tree.expectedWitnesses);
             await tree.closed;
             process.stdout.write(
-              `${JSON.stringify({ mode, cleanup: await witnessStates(tree.witnesses) })}\n`,
+              `${JSON.stringify({ mode, cleanup: await witnessStates(tree.expectedWitnesses) })}\n`,
             );
           }
         });
@@ -135,10 +142,14 @@ describe(
               await witnessStates(tree.witnesses),
               tree.witnesses.map(() => (stalled ? "matching" : "gone")),
             );
+            assert.deepEqual(
+              await witnessStates(tree.expectedWitnesses),
+              tree.expectedWitnesses.map(() => (stalled ? "matching" : "gone")),
+            );
             const saved = await readQueueOwnerRecord(sessionId);
             assert.equal(saved !== undefined && Object.hasOwn(saved, "retirement"), stalled);
           } finally {
-            await stopWitnesses(tree.witnesses);
+            await stopWitnesses(tree.expectedWitnesses);
             await tree.closed;
           }
         });
@@ -161,8 +172,12 @@ describe(
           assert.equal(await fs.readFile(paths.lockPath, "utf8"), pending);
           assert.equal((await runRetirer("retry", sessionId)).code, undefined);
           assert.deepEqual(await witnessStates(tree.witnesses), ["gone", "gone", "gone"]);
+          assert.deepEqual(
+            await witnessStates(tree.expectedWitnesses),
+            tree.expectedWitnesses.map(() => "gone"),
+          );
         } finally {
-          await stopWitnesses(tree.witnesses);
+          await stopWitnesses(tree.expectedWitnesses);
           await tree.closed;
         }
       });
@@ -200,15 +215,19 @@ describe(
             }
           }
           assert.equal(progress.at(-1), 0);
+          assert.deepEqual(
+            await witnessStates(tree.expectedWitnesses),
+            tree.expectedWitnesses.map(() => "gone"),
+          );
           assert(
             performance.now() - started < 40_000,
             "cleanup must precede fixture lifetime expiry",
           );
         } finally {
-          await stopWitnesses(tree.witnesses);
+          await stopWitnesses(tree.expectedWitnesses);
           await tree.closed;
           process.stdout.write(
-            `${JSON.stringify({ progress, cleanup: await witnessStates(tree.witnesses) })}\n`,
+            `${JSON.stringify({ progress, cleanup: await witnessStates(tree.expectedWitnesses) })}\n`,
           );
         }
       });
@@ -258,7 +277,7 @@ describe(
             );
             assert.equal(await readQueueOwnerRecord(sessionId), undefined);
           } finally {
-            await stopWitnesses(tree.witnesses);
+            await stopWitnesses(tree.expectedWitnesses);
             await tree.closed;
           }
         });
