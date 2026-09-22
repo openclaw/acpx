@@ -142,7 +142,7 @@ function fixture(t: TestContext, connection: Connection, configId = "mode") {
 }
 
 for (const connection of ["fresh", "load"] as const) {
-  for (const configId of ["mode", "agent_mode"] as const) {
+  for (const configId of ["mode", "agent_mode", "__proto__", " custom "] as const) {
     test(`accepted config ${configId} keeps its transport after ${connection}`, async (t) => {
       const f = fixture(t, connection, configId);
       await f.select();

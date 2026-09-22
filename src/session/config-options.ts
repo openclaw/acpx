@@ -72,17 +72,17 @@ function applyAcceptedConfigOptions(
   }
   // A control response can change sibling options. Reconcile only saved
   // selections; new/load snapshots must not replace preferences with defaults.
-  const desired: Record<string, string> = {};
+  const desiredEntries: Array<[string, string]> = [];
   for (const option of response.configOptions) {
     if (
       typeof option.currentValue === "string" &&
       Object.hasOwn(next.desired_config_options, option.id)
     ) {
-      desired[option.id] = option.currentValue;
+      desiredEntries.push([option.id, option.currentValue]);
     }
   }
-  if (Object.keys(desired).length > 0) {
-    next.desired_config_options = desired;
+  if (desiredEntries.length > 0) {
+    next.desired_config_options = Object.fromEntries(desiredEntries);
   } else {
     delete next.desired_config_options;
   }
