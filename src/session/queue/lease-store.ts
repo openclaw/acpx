@@ -783,7 +783,9 @@ async function retireQueueOwner(
     isProcessDefinitelyDead,
     process.platform === "win32" ? deadline : Infinity,
   );
-  await waitForReleasedOwner(owner, requireStale, retirement);
+  if (await waitForReleasedOwner(owner, requireStale, retirement)) {
+    return false;
+  }
   // Numeric exit is only a waiting hint. Revalidate the expected scope before
   // cleanup: a locally absent PID can still name a foreign namespace's owner.
   const gone = retirement.gone || (await observeRetiringOwner(owner, deadline)) === "gone";
@@ -797,7 +799,7 @@ async function waitForReleasedOwner(
   owner: QueueOwnerRecord,
   requireStale: boolean,
   retirement: QueueOwnerRetirement,
-): Promise<void> {
+): Promise<boolean> {
   if (retirement.unverified && requireStale) {
     throw unverifiedQueueOwnerError(owner);
   }
@@ -809,7 +811,16 @@ async function waitForReleasedOwner(
       Math.max(0, retirement.deadline - performance.now()),
       isProcessDefinitelyDead,
     );
+    if (performance.now() >= retirement.deadline) {
+      if (retirement.unverified) {
+        throw unverifiedQueueOwnerError(owner);
+      }
+      // The selected lease was released. A passive timeout grants no custody
+      // for another query, signal or cleanup of its absent/replacement record.
+      return true;
+    }
   }
+  return false;
 }
 
 async function retireRecordedDescendants(owner: QueueOwnerRecord, deadline: number): Promise<void> {

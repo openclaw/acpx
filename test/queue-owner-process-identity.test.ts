@@ -483,14 +483,26 @@ test(
         const legacy = { ...recorded, processIdentity: undefined };
         const payload = JSON.stringify(legacy);
         await fs.writeFile(queueLockFilePath(sessionId), payload);
-        let now = Date.now();
-        t.mock.method(Date, "now", () => (now += 20_000));
+        const now = performance.now.bind(performance);
+        const kill = process.kill.bind(process);
+        let probes = 0;
+        t.mock.method(performance, "now", () => now() + (probes >= 2 ? 60_000 : 0));
+        t.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | number) => {
+          const result = kill(pid, signal);
+          // Let the canonical legacy observation return unknown, then expire
+          // the passive wait on its first liveness probe without changing wall time.
+          if (pid === owner.child.pid && signal === 0) {
+            probes += 1;
+          }
+          return result;
+        });
         await assert.rejects(terminateQueueOwnerForSession(sessionId, legacy), {
           detailCode: "QUEUE_OWNER_IDENTITY_UNVERIFIED",
         });
         assert.equal(isProcessAlive(owner.child.pid), true);
         assert.equal(await fs.readFile(queueLockFilePath(sessionId), "utf8"), payload);
       } finally {
+        t.mock.restoreAll();
         await stopActor(owner);
       }
     });

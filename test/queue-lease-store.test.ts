@@ -867,6 +867,63 @@ test(
   },
 );
 
+for (const disposition of ["absent", "successor"] as const) {
+  test(`released owner timeout preserves an ${disposition} lease without signaling`, async (context) => {
+    await withTempHome(async (homeDir) => {
+      const sessionId = `retirement-timeout-${disposition}`;
+      const paths = queuePaths(homeDir, sessionId);
+      const keeper = await startKeeperProcess();
+      const closed = once(keeper, "close");
+      try {
+        await writeQueueOwnerLock({ ...paths, sessionId, pid: keeper.pid });
+        const observed = await readQueueOwnerRecord(sessionId);
+        assert(observed);
+        if (disposition === "successor") {
+          await writeQueueOwnerLock({
+            ...paths,
+            ...observed,
+            pid: process.pid,
+            ownerGeneration: observed.ownerGeneration + 1,
+          });
+        } else {
+          await fs.unlink(paths.lockPath);
+        }
+        const saved = await readQueueOwnerRecord(sessionId);
+        const readFile = fs.readFile.bind(fs);
+        const now = performance.now.bind(performance);
+        const kill = process.kill.bind(process);
+        let releasedObserved = false;
+        const signals: Array<NodeJS.Signals | number | undefined> = [];
+        context.mock.method(fs, "readFile", async (...args: Parameters<typeof fs.readFile>) => {
+          try {
+            return await readFile(...args);
+          } finally {
+            if (args[0] === paths.lockPath) {
+              releasedObserved = true;
+            }
+          }
+        });
+        context.mock.method(performance, "now", () => now() + (releasedObserved ? 60_000 : 0));
+        context.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | number) => {
+          if ((pid === keeper.pid || pid === process.pid) && signal !== 0) {
+            signals.push(signal);
+          }
+          return kill(pid, signal);
+        });
+        await terminateQueueOwnerForSession(sessionId, observed);
+        assert(releasedObserved);
+        assert.deepEqual(signals, []);
+        assert(isProcessAlive(keeper.pid));
+        assert.deepEqual(await readQueueOwnerRecord(sessionId), saved);
+      } finally {
+        context.mock.restoreAll();
+        stopProcess(keeper);
+        await closed;
+      }
+    });
+  });
+}
+
 for (const disposition of ["replacement", "renewed"] as const) {
   test(
     `owner retirement preserves a ${disposition} lease without waiting for its live process`,
