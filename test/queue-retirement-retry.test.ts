@@ -317,6 +317,9 @@ describe(
               attempts,
               progress,
               cleanup: await witnessStates(trees.flatMap((owned) => owned.expectedWitnesses)),
+              cleanupErrors: cleanup
+                .filter((result) => result.status === "rejected")
+                .map((result) => String(result.reason)),
             })}\n`,
           );
         }
