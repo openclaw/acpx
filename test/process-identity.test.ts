@@ -185,7 +185,14 @@ test("full process tables preserve group ownership and exclude zombie rows", asy
   const table = await readProcessTable(100);
   assert.deepEqual(
     [...table.values()],
-    [{ pid: fixturePid, parentPid: 1, groupPid: 42, birth: posixBirth }],
+    [
+      {
+        pid: fixturePid,
+        parentPid: 1,
+        groupPid: 42,
+        birth: { kind: "posix-lstart", value: posixBirth },
+      },
+    ],
   );
   assert.equal(fixture.queries[0]?.args[0], "-e");
 });

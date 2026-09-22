@@ -125,9 +125,17 @@ for (const mode of [
 }
 
 test(
-  "descendant cleanup retires disappeared and reused process identities",
+  "timestamp descendant cleanup retires disappeared and reused process identities",
   { skip: process.platform === "win32" },
   async (t) => {
+    // Exercise macOS timestamp custody; Linux uses a raw proc table instead.
+    const platform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    t.after(() => {
+      if (platform) {
+        Object.defineProperty(process, "platform", platform);
+      }
+    });
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-process-identities-"));
     const bin = path.join(cwd, "bin");
     const tableFile = path.join(cwd, "processes");

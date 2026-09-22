@@ -1,5 +1,6 @@
+import fs from "node:fs";
 import path from "node:path";
-import { runTimedExecFile } from "./acp/client-process.js";
+import { PROCESS_HELPER_MAX_BUFFER_BYTES, runTimedExecFile } from "./acp/client-process.js";
 import { isProcessDefinitelyDead } from "./process-liveness.js";
 
 type TimestampIdentity = {
@@ -28,8 +29,11 @@ export type ProcessTableEntry = {
   pid: number;
   parentPid: number;
   groupPid: number;
-  birth: string;
+  birth: ProcessBirthIdentity;
+  clockTicksPerSecond?: bigint;
 };
+
+export type LinuxExitClock = { centiseconds: bigint; timeNamespace: string };
 
 const IDENTITY_QUERY_TIMEOUT_MS = 2_000;
 // A single builtin-only helper bounds proc I/O without leaving uncancellable
@@ -43,6 +47,39 @@ const LINUX_PROCESS_QUERY = `
     if (error.code === 'ENOENT') return 'unsupported';
     throw error;
   });
+  const prefix = async (name, size) => {
+    const file = await fs.open(name, 'r');
+    try {
+      const buffer = Buffer.alloc(size);
+      const { bytesRead } = await file.read(buffer, 0, size, 0);
+      return buffer.subarray(0, bytesRead).toString('base64');
+    } finally { await file.close(); }
+  };
+  const targets = async () => {
+    if (targetPid !== 'all') {
+      return { targetStat: await fs.readFile('/proc/' + targetPid + '/stat', 'utf8').catch(() => null) };
+    }
+    const required = new Set(JSON.parse(process.argv[3] || '[]'));
+    const pids = new Set((await fs.readdir('/proc')).filter(pid => /^[1-9][0-9]*$/.test(pid)));
+    for (const pid of required) pids.add(String(pid));
+    const processStats = [];
+    let bytes = 0;
+    // Sequential reads keep proc I/O and retained memory bounded within this
+    // single killable helper; never launch one helper or pending read per PID.
+    for (const pid of [...pids].sort((a, b) => Number(a) - Number(b))) {
+      let stat;
+      try { stat = await fs.readFile('/proc/' + pid + '/stat', 'utf8'); }
+      catch (error) {
+        if (error.code === 'ENOENT' || error.code === 'ESRCH') continue;
+        if (!required.has(Number(pid)) && (error.code === 'EACCES' || error.code === 'EPERM')) continue;
+        throw error;
+      }
+      bytes += Buffer.byteLength(JSON.stringify(stat)) + 1;
+      if (bytes > ${PROCESS_HELPER_MAX_BUFFER_BYTES} - 8192) throw new Error('Process table exceeds its byte limit');
+      processStats.push(stat);
+    }
+    return { processStats, auxv: await prefix('/proc/self/auxv', 4096), elf: await prefix('/proc/self/exe', 6) };
+  };
   Promise.all([
     fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8'),
     fs.readlink('/proc/self/ns/pid'),
@@ -50,12 +87,12 @@ const LINUX_PROCESS_QUERY = `
     fs.readlink('/proc/' + observerPid + '/ns/pid'),
     timeNamespace(observerPid),
     fs.readFile('/proc/self/stat', 'utf8'),
-    fs.readFile('/proc/' + targetPid + '/stat', 'utf8').catch(() => null),
+    targets(),
   ]).then(([bootId, pidNamespace, timeNamespace, observerPidNamespace,
-    observerTimeNamespace, selfStat, targetStat]) => {
+    observerTimeNamespace, selfStat, target]) => {
     process.stdout.write(JSON.stringify({bootId: bootId.trim(), pidNamespace,
       timeNamespace, observerPidNamespace, observerTimeNamespace,
-      helperPid: process.pid, selfStat, targetStat}));
+      helperPid: process.pid, selfStat, ...target}));
   }).catch(() => { process.exitCode = 1; });
 `;
 const POSIX_MONTHS = [
@@ -189,7 +226,9 @@ export function compareProcessBirthIdentity(
   return "unknown";
 }
 
-function parseLinuxStat(raw: unknown): { pid: number; startTicks: string } | undefined {
+function parseLinuxStat(
+  raw: unknown,
+): { pid: number; parentPid: number; groupPid: number; startTicks: string } | undefined {
   if (typeof raw !== "string") {
     return undefined;
   }
@@ -205,22 +244,49 @@ function parseLinuxStat(raw: unknown): { pid: number; startTicks: string } | und
     .trim()
     .split(/\s+/u);
   const startTicks = fields[19];
-  if (!isPositivePid(pid) || !isStartTicks(startTicks) || !/^[RSDTtKWPI]$/.test(fields[0] ?? "")) {
+  if (!isPositivePid(pid) || !isStartTicks(startTicks) || !/^[RSDTtKWPI]$/.test(fields[0])) {
     return undefined;
   }
-  return { pid, startTicks };
+  const parentPid = Number(fields[1]);
+  const groupPid = Number(fields[2]);
+  return validProcessLinks(parentPid, groupPid)
+    ? { pid, parentPid, groupPid, startTicks }
+    : undefined;
 }
 
-async function readLinuxObservation(
-  pid: number,
-  timeoutMs: number,
-): Promise<{ scope: LinuxProcessScope; identity?: LinuxProcessIdentity } | undefined> {
-  const output = await runTimedExecFile(
-    process.execPath,
-    ["--input-type=commonjs", "-e", LINUX_PROCESS_QUERY, String(pid), String(process.pid)],
-    { timeoutMs, maxBufferBytes: 8_192, env: { ...process.env, NODE_OPTIONS: "" } },
+function validProcessLinks(parentPid: number, groupPid: number): boolean {
+  return (
+    Number.isSafeInteger(parentPid) &&
+    parentPid >= 0 &&
+    Number.isSafeInteger(groupPid) &&
+    groupPid >= 0
   );
-  const raw = JSON.parse(output) as Record<string, unknown>;
+}
+
+async function readLinuxQuery(
+  pid: number | "all",
+  timeoutMs: number,
+  requiredPids: readonly number[] = [],
+): Promise<Record<string, unknown>> {
+  const args = [
+    "--input-type=commonjs",
+    "-e",
+    LINUX_PROCESS_QUERY,
+    String(pid),
+    String(process.pid),
+  ];
+  if (pid === "all") {
+    args.push(JSON.stringify(requiredPids));
+  }
+  const output = await runTimedExecFile(process.execPath, args, {
+    timeoutMs,
+    maxBufferBytes: pid === "all" ? PROCESS_HELPER_MAX_BUFFER_BYTES : 8_192,
+    env: { ...process.env, NODE_OPTIONS: "" },
+  });
+  return JSON.parse(output) as Record<string, unknown>;
+}
+
+function verifiedLinuxScope(raw: Record<string, unknown>): LinuxProcessScope | undefined {
   const scope = parseLinuxScope(raw);
   const self = parseLinuxStat(raw.selfStat);
   if (
@@ -232,6 +298,18 @@ async function readLinuxObservation(
   ) {
     return undefined;
   }
+  return scope;
+}
+
+async function readLinuxObservation(
+  pid: number,
+  timeoutMs: number,
+): Promise<{ scope: LinuxProcessScope; identity?: LinuxProcessIdentity } | undefined> {
+  const raw = await readLinuxQuery(pid, timeoutMs);
+  const scope = verifiedLinuxScope(raw);
+  if (!scope) {
+    return undefined;
+  }
   const target = parseLinuxStat(raw.targetStat);
   return {
     scope,
@@ -239,6 +317,117 @@ async function readLinuxObservation(
       ? { identity: { kind: "linux-proc", ...scope, startTicks: target.startTicks } as const }
       : {}),
   };
+}
+
+function linuxAuxv(raw: Record<string, unknown>): {
+  auxv: Buffer;
+  size: number;
+  littleEndian: boolean;
+} {
+  if (typeof raw.elf !== "string" || typeof raw.auxv !== "string") {
+    throw new Error("Linux process clock is unavailable");
+  }
+  const elf = Buffer.from(raw.elf, "base64");
+  const auxv = Buffer.from(raw.auxv, "base64");
+  if (
+    elf.subarray(0, 4).toString("hex") !== "7f454c46" ||
+    ![1, 2].includes(elf[4]) ||
+    ![1, 2].includes(elf[5])
+  ) {
+    throw new Error("Linux process clock has an invalid ELF format");
+  }
+  const size = elf[4] === 1 ? 4 : 8;
+  return { auxv, size, littleEndian: elf[5] === 1 };
+}
+
+function linuxClockTicks(raw: Record<string, unknown>): bigint {
+  const { auxv, size, littleEndian } = linuxAuxv(raw);
+  const word = (offset: number) => readAuxvWord(auxv, offset, size, littleEndian);
+  // AT_CLKTCK is supplied by the ELF loader in native unsigned-long words.
+  // Keep both ABI widths and byte orders; do not assume USER_HZ is 100.
+  for (let offset = 0; offset + size * 2 <= auxv.length; offset += size * 2) {
+    const key = word(offset);
+    if (key === 0n) {
+      break;
+    }
+    if (key === 17n && word(offset + size) > 0n) {
+      return word(offset + size);
+    }
+  }
+  throw new Error("Linux process clock has no AT_CLKTCK");
+}
+
+function readAuxvWord(buffer: Buffer, offset: number, size: number, littleEndian: boolean): bigint {
+  if (size === 8) {
+    return littleEndian ? buffer.readBigUInt64LE(offset) : buffer.readBigUInt64BE(offset);
+  }
+  return BigInt(littleEndian ? buffer.readUInt32LE(offset) : buffer.readUInt32BE(offset));
+}
+
+async function readLinuxProcessTable(
+  timeoutMs: number,
+  requiredPids: readonly number[],
+  pid?: number,
+): Promise<Map<number, ProcessTableEntry>> {
+  const raw = await readLinuxQuery("all", timeoutMs, requiredPids);
+  const scope = verifiedLinuxScope(raw);
+  if (!scope || !Array.isArray(raw.processStats)) {
+    throw new Error("Linux process table scope is unverified");
+  }
+  const clockTicksPerSecond = linuxClockTicks(raw);
+  const table = new Map<number, ProcessTableEntry>();
+  for (const value of raw.processStats as unknown[]) {
+    const stat = parseLinuxStat(value);
+    if (stat && (pid === undefined || stat.pid === pid)) {
+      table.set(stat.pid, {
+        pid: stat.pid,
+        parentPid: stat.parentPid,
+        groupPid: stat.groupPid,
+        birth: { kind: "linux-proc", ...scope, startTicks: stat.startTicks },
+        clockTicksPerSecond,
+      });
+    }
+  }
+  return table;
+}
+
+export function readLinuxExitClock(): LinuxExitClock | undefined {
+  // The exit observer needs the cutoff now, before another process can reuse
+  // the group. This capped native proc read has no fallback or I/O deadline.
+  let descriptor: number | undefined;
+  try {
+    descriptor = fs.openSync("/proc/uptime", "r");
+    const buffer = Buffer.alloc(64);
+    const bytes = fs.readSync(descriptor, buffer, 0, buffer.length, 0);
+    const match = /^(\d+)\.(\d{2})\s/u.exec(buffer.toString("ascii", 0, bytes));
+    return match
+      ? {
+          centiseconds: BigInt(match[1]) * 100n + BigInt(match[2]),
+          timeNamespace: readOwnTimeNamespace(),
+        }
+      : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        fs.closeSync(descriptor);
+      } catch {
+        // Never retry close: an interrupted Linux close may already release its fd.
+      }
+    }
+  }
+}
+
+function readOwnTimeNamespace(): string {
+  try {
+    return fs.readlinkSync("/proc/self/ns/time");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return "unsupported";
+    }
+    throw error;
+  }
 }
 
 function isPositivePid(pid: number): boolean {
@@ -291,7 +480,12 @@ function parseProcessTable(output: string): Map<number, ProcessTableEntry> {
     const pid = Number(match[1]);
     const birth = processTableBirth(match[5]);
     if (Number.isSafeInteger(pid) && pid > 0 && birth) {
-      table.set(pid, { pid, parentPid: Number(match[2]), groupPid: Number(match[3]), birth });
+      table.set(pid, {
+        pid,
+        parentPid: Number(match[2]),
+        groupPid: Number(match[3]),
+        birth: processBirthIdentity(birth),
+      });
     }
   }
   return table;
@@ -307,6 +501,7 @@ function processTableBirth(value: string): string | undefined {
 export async function readProcessTable(
   timeoutMs: number,
   pid?: number,
+  requiredPids: readonly number[] = [],
 ): Promise<Map<number, ProcessTableEntry>> {
   if (pid !== undefined && (!Number.isSafeInteger(pid) || pid <= 0)) {
     throw new Error("Process identity requires a positive PID");
@@ -318,6 +513,9 @@ export async function readProcessTable(
       { timeoutMs, windowsHide: true },
     );
     return parseProcessTable(output);
+  }
+  if (process.platform === "linux") {
+    return await readLinuxProcessTable(timeoutMs, requiredPids, pid);
   }
   const selection = pid === undefined ? ["-e"] : ["-p", String(pid)];
   const output = await runTimedExecFile(
@@ -363,7 +561,7 @@ async function readNativeIdentity(
     return (await readLinuxObservation(pid, timeoutMs))?.identity;
   }
   const entry = (await readProcessTable(timeoutMs, pid)).get(pid);
-  return entry ? processBirthIdentity(entry.birth) : undefined;
+  return entry?.birth;
 }
 
 function processBirthIdentity(value: string): TimestampIdentity {

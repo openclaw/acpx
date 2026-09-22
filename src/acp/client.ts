@@ -1662,16 +1662,16 @@ export class AcpClient {
     child: ChildProcessByStdio<Writable, Readable, Readable>,
   ): Promise<void> {
     const descendants = this.agentDescendants.get(child);
-    const deadline = Date.now() + AGENT_CLEANUP_BUDGET_MS;
+    const deadline = performance.now() + AGENT_CLEANUP_BUDGET_MS;
     const stdinCloseGraceMs = resolveAgentCloseAfterStdinEndMs(this.options.agentCommand);
     try {
       if (descendants) {
-        await descendants.capture(Math.max(1, deadline - Date.now()));
+        await descendants.capture(Math.max(1, deadline - performance.now()));
       }
       this.endAgentStdin(child);
       await waitForChildExit(
         child,
-        Math.min(stdinCloseGraceMs, Math.max(0, deadline - Date.now())),
+        Math.min(stdinCloseGraceMs, Math.max(0, deadline - performance.now())),
       );
       const exited = await this.signalAgentAndDescendants(
         child,
@@ -1709,8 +1709,8 @@ export class AcpClient {
     deadline: number,
   ): Promise<boolean> {
     const descendants = this.agentDescendants.get(child);
-    if (descendants && Date.now() < deadline) {
-      await descendants.signal(signal, deadline - Date.now());
+    if (descendants && performance.now() < deadline) {
+      await descendants.signal(signal, deadline - performance.now());
     }
     if (isChildProcessRunning(child)) {
       try {
@@ -1719,7 +1719,7 @@ export class AcpClient {
         // The direct child may have exited during descendant inspection.
       }
     }
-    const remaining = Math.min(waitMs, Math.max(0, deadline - Date.now()));
+    const remaining = Math.min(waitMs, Math.max(0, deadline - performance.now()));
     const [exited, descendantsExited] = await Promise.all([
       waitForChildExit(child, remaining),
       descendants ? descendants.waitForExit(remaining) : Promise.resolve(true),

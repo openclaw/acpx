@@ -94,9 +94,17 @@ for (const launch of ["argv", "shell"] as const) {
 }
 
 test(
-  "terminal group ownership forgets reused PIDs and never adopts a recycled group",
+  "timestamp terminal group ownership forgets reused PIDs and never adopts a recycled group",
   { skip: process.platform === "win32" },
   async (t) => {
+    // Exercise macOS timestamp custody; Linux uses a raw proc table instead.
+    const platform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    t.after(() => {
+      if (platform) {
+        Object.defineProperty(process, "platform", platform);
+      }
+    });
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-identities-"));
     const tableFile = path.join(cwd, "processes");
     await fs.writeFile(
