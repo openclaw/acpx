@@ -10,7 +10,7 @@ import {
 } from "../process-identity.js";
 import { isChildProcessRunning, PROCESS_HELPER_TIMEOUT_MS } from "./client-process.js";
 
-function hasStaleWindowsParent(
+export function hasStaleWindowsParent(
   identity: ProcessTableEntry,
   parent: ProcessTableEntry | undefined,
 ): boolean {

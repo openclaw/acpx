@@ -91,6 +91,21 @@ test(
       assert.deepEqual(result.alive, [root + 1]);
       assert.deepEqual(result.signals, []);
     });
+    await t.test("a reused parent PID cannot form a false cycle with its older child", async () => {
+      const result = await run("reused-parent", 2);
+      assert.equal(result.code, undefined);
+      assert.equal(result.retained, false);
+      assert.deepEqual(result.alive, []);
+      assert.deepEqual(result.signals, [root + 2, root + 1]);
+      assert.deepEqual(result.queries, [null, null]);
+    });
+    await t.test("an unexplained ancestry cycle still refuses all signals", async () => {
+      const result = await run("parent-cycle", 2);
+      assert.equal(result.code, "QUEUE_OWNER_RETIREMENT_INCOMPLETE");
+      assert.equal(result.originalPreserved, true);
+      assert.deepEqual(result.alive, [root + 1, root + 2]);
+      assert.deepEqual(result.signals, []);
+    });
     await t.test("a stalled survivor retains the receipt and full-query polling floor", async () => {
       const result = await run("poll", 1);
       assert.equal(result.code, "QUEUE_OWNER_RETIREMENT_INCOMPLETE");

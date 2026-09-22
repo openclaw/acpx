@@ -19,6 +19,8 @@ export type SnapshotCase =
   | "new-custody"
   | "publication-failure"
   | "batch-error"
+  | "reused-parent"
+  | "parent-cycle"
   | "missing"
   | "poll";
 export type SnapshotReport = {
@@ -43,12 +45,13 @@ async function runCase(mode: SnapshotCase, count: number): Promise<void> {
   const retained = !["bounded", "missing-self", "root-replaced"].includes(mode);
   const alive = new Set(retained ? pids : [root, ...pids]);
   const births = new Map([root, ...pids].map((pid) => [pid, birth]));
+  if (mode === "reused-parent") births.set(pids[1], replacement);
   const reparented = new Set<number>();
   const sessionId = "snapshot-retirement";
   const lock = queueLockFilePath(sessionId);
   const witness = (pid: number) => ({
     pid,
-    processIdentity: { kind: "windows-creation", value: birth },
+    processIdentity: { kind: "windows-creation", value: births.get(pid) },
   });
   const lateChild = mode === "new-custody" || mode === "publication-failure";
   const owner = {
@@ -119,7 +122,10 @@ async function runCase(mode: SnapshotCase, count: number): Promise<void> {
           return alive.has(id) && !(mode === "missing" && id === pids[0]);
         })
         .map((id) => {
-          const parent = id === process.pid || id === root || reparented.has(id) ? 0 : id - 1;
+          let parent = id === process.pid || id === root || reparented.has(id) ? 0 : id - 1;
+          if (["reused-parent", "parent-cycle"].includes(mode) && id === pids[0]) {
+            parent = pids[1];
+          }
           return `${id} ${parent} 0 S ${id === process.pid ? selfBirth : births.get(id)}`;
         });
       source = `process.stdout.write(${JSON.stringify(rows.join("\n"))})`;

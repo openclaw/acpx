@@ -4,6 +4,7 @@ import path from "node:path";
 import { withTempFile } from "@openclaw/fs-safe/advanced";
 import { isHardlinkFallbackError } from "@openclaw/fs-safe/durability";
 import { runTimedExecFile } from "../../acp/client-process.js";
+import { hasStaleWindowsParent } from "../../acp/process-descendants.js";
 import { QueueConnectionError } from "../../errors.js";
 import {
   compareProcessBirthIdentity,
@@ -954,7 +955,12 @@ function leafFirstRetirementWitnesses(
 }
 
 function retirementParent(pid: number, table: Map<number, ProcessTableEntry>) {
-  return table.get(pid)?.parentPid ?? 0;
+  const identity = table.get(pid);
+  // Ordering uses the same ancestry as discovery: a recycled creator PID can
+  // point back to a younger descendant without forming a real process cycle.
+  return identity && !hasStaleWindowsParent(identity, table.get(identity.parentPid))
+    ? identity.parentPid
+    : 0;
 }
 
 function signalRecordedDescendants(
