@@ -77,7 +77,9 @@ export function listSessionViews(
         session.id === streamingSessionId ? conversation?.messageStart : undefined,
         session.id === streamingSessionId ? conversation?.messageEnd : undefined,
       ),
-      isStreamingSource: session.id === streamingSessionId,
+      isStreamingSource:
+        session.id === streamingSessionId &&
+        selectedAttempt.sessionSourceStep?.attemptId === selectedAttempt.step.attemptId,
     }));
 }
 

@@ -9,7 +9,9 @@ import {
 import { buildViewerRunsState } from "../examples/flows/replay-viewer/src/lib/runs-state.js";
 import type {
   LoadedRunBundle,
+  ReplayServerMessage,
   RunBundleSummary,
+  ViewerRunLiveState,
 } from "../examples/flows/replay-viewer/src/types.js";
 
 Object.assign(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }, {
@@ -748,4 +750,433 @@ function installFakeBrowser(): () => void {
       (globalThis as { WebSocket?: unknown }).WebSocket = previousWebSocket;
     }
   };
+}
+
+const liveReadWarning = "Synthetic run files could not be read";
+const recoveredLiveRunTitle = "Recovered live update";
+
+for (const recovery of ["snapshot", "patch"] as const) {
+  test(`useRunBundleLoader clears a run read warning after an accepted same-run ${recovery}`, async () => {
+    await withLiveReadRecoveryLoader(async (context) => {
+      await context.send({
+        type: "error",
+        code: "internal_error",
+        runId: context.run.runId,
+        message: liveReadWarning,
+      });
+
+      assert.equal(context.read().errorMessage, liveReadWarning);
+      assert.equal(context.read().bundle?.run.runTitle, context.run.runTitle);
+
+      await context.send(healthyLiveReadMessage(context, recovery));
+
+      assert.equal(context.read().bundle?.run.runTitle, recoveredLiveRunTitle);
+      assert.equal(context.read().activeRunId, context.run.runId);
+      assert.equal(context.read().errorMessage, null);
+    });
+  });
+}
+
+test("useRunBundleLoader keeps a run read warning through unrelated or rejected live updates", async () => {
+  await withLiveReadRecoveryLoader(async (context) => {
+    const { run, state, socket, send, read } = context;
+    await send({
+      type: "error",
+      code: "internal_error",
+      runId: run.runId,
+      message: liveReadWarning,
+    });
+    assert.equal(read().errorMessage, liveReadWarning);
+
+    await send({
+      type: "runs_snapshot",
+      version: 2,
+      state: buildViewerRunsState([{ ...run, runTitle: "Sidebar snapshot" }]),
+    });
+    assert.equal(read().recentRuns[0]?.runTitle, "Sidebar snapshot");
+    assert.equal(read().errorMessage, liveReadWarning);
+
+    await send({
+      type: "runs_patch",
+      fromVersion: 2,
+      toVersion: 3,
+      ops: [
+        {
+          op: "replace",
+          path: `/runsById/${run.runId}/runTitle`,
+          value: "Sidebar patch",
+        },
+      ],
+    });
+    assert.equal(read().recentRuns[0]?.runTitle, "Sidebar patch");
+    assert.equal(read().errorMessage, liveReadWarning);
+
+    const otherRun = { ...run, runId: `${run.runId}-other`, runTitle: "Other run" };
+    await send({
+      type: "run_snapshot",
+      runId: otherRun.runId,
+      version: 2,
+      state: {
+        ...makeLoadedRunBundle(otherRun),
+        schema: "acpx.viewer-run-live.v1",
+      },
+    });
+    assert.equal(read().activeRunId, run.runId);
+    assert.deepEqual(read().bundle, state);
+    assert.equal(read().errorMessage, liveReadWarning);
+
+    await send({
+      type: "run_patch",
+      runId: otherRun.runId,
+      fromVersion: 1,
+      toVersion: 2,
+      ops: [{ op: "replace", path: "/run/runTitle", value: "Wrong run patch" }],
+    });
+    assert.deepEqual(read().bundle, state);
+    assert.equal(read().errorMessage, liveReadWarning);
+
+    await send({
+      type: "run_patch",
+      runId: run.runId,
+      fromVersion: 99,
+      toVersion: 100,
+      ops: [{ op: "replace", path: "/run/runTitle", value: "Wrong version patch" }],
+    });
+    assert.deepEqual(read().bundle, state);
+    assert.equal(read().errorMessage, liveReadWarning);
+    assert.deepEqual(JSON.parse(socket.sent.at(-1) ?? "null"), {
+      type: "resync_run",
+      runId: run.runId,
+    });
+
+    const sentBeforeInvalidPatch = socket.sent.length;
+    await send({
+      type: "run_patch",
+      runId: run.runId,
+      fromVersion: 1,
+      toVersion: 2,
+      ops: [
+        { op: "replace", path: "/run/runTitle", value: "Uncommitted partial patch" },
+        { op: "replace", path: "/run/missingField", value: "Invalid replacement" },
+      ],
+    });
+    assert.equal(socket.sent.length, sentBeforeInvalidPatch + 1);
+    assert.deepEqual(JSON.parse(socket.sent.at(-1) ?? "null"), {
+      type: "resync_run",
+      runId: run.runId,
+    });
+    assert.deepEqual(read().bundle, state);
+    assert.equal(read().errorMessage, liveReadWarning);
+
+    // Neither rejected patch may advance the accepted version or consume recovery.
+    await send(healthyLiveReadMessage(context, "patch"));
+    assert.equal(read().bundle?.run.runTitle, recoveredLiveRunTitle);
+    assert.equal(read().errorMessage, null);
+  });
+});
+
+for (const origin of [
+  "global live error",
+  "different live error code",
+  "bootstrap failure",
+  "different-run load failure",
+] as const) {
+  for (const recovery of ["snapshot", "patch"] as const) {
+    test(`useRunBundleLoader preserves a ${origin} through a healthy same-run ${recovery}`, async () => {
+      await withLiveReadRecoveryLoader(async (context) => {
+        const { run, deps, send, read } = context;
+        await send({
+          type: "error",
+          code: "internal_error",
+          runId: run.runId,
+          message: liveReadWarning,
+        });
+        assert.equal(read().errorMessage, liveReadWarning);
+
+        // Reuse identical text to require origin tracking, not string matching.
+        switch (origin) {
+          case "global live error":
+            await send({ type: "error", code: "internal_error", message: liveReadWarning });
+            break;
+          case "different live error code":
+            await send({
+              type: "error",
+              code: "protocol_error",
+              runId: run.runId,
+              message: liveReadWarning,
+            });
+            break;
+          case "bootstrap failure":
+            deps.listRecentRuns = async () => {
+              throw new Error(liveReadWarning);
+            };
+            await act(async () => {
+              await read().bootstrap();
+              await flushReactWork();
+            });
+            break;
+          case "different-run load failure":
+            deps.loadRunBundle = async () => {
+              throw new Error(liveReadWarning);
+            };
+            await act(async () => {
+              await read().loadRecentRun({ ...run, runId: `${run.runId}-other` });
+              await flushReactWork();
+            });
+            break;
+        }
+
+        assert.equal(read().errorMessage, liveReadWarning);
+        assert.equal(read().activeRunId, run.runId);
+        assert.equal(read().bundle?.run.runTitle, run.runTitle);
+
+        await send(healthyLiveReadMessage(context, recovery));
+
+        assert.equal(read().bundle?.run.runTitle, recoveredLiveRunTitle);
+        assert.equal(read().errorMessage, liveReadWarning);
+      });
+    });
+  }
+}
+
+type LiveReadRecoveryTestContext = {
+  run: RunBundleSummary;
+  state: ViewerRunLiveState;
+  deps: RunBundleLoaderDeps;
+  socket: FakeWebSocket;
+  read: () => ReturnType<typeof useRunBundleLoader>;
+  send: (message: ReplayServerMessage) => Promise<void>;
+};
+
+function healthyLiveReadMessage(
+  { run, state }: LiveReadRecoveryTestContext,
+  recovery: "snapshot" | "patch",
+): ReplayServerMessage {
+  if (recovery === "snapshot") {
+    return {
+      type: "run_snapshot",
+      runId: run.runId,
+      version: 2,
+      state: { ...state, run: { ...state.run, runTitle: recoveredLiveRunTitle } },
+    };
+  }
+  return {
+    type: "run_patch",
+    runId: run.runId,
+    fromVersion: 1,
+    toVersion: 2,
+    ops: [{ op: "replace", path: "/run/runTitle", value: recoveredLiveRunTitle }],
+  };
+}
+
+async function withLiveReadRecoveryLoader(
+  runCase: (context: LiveReadRecoveryTestContext) => Promise<void>,
+): Promise<void> {
+  const run: RunBundleSummary = {
+    runId: "2026-09-22T100000000Z-synthetic-live-read-recovery",
+    flowName: "synthetic-live-read-recovery",
+    runTitle: "Before recovery",
+    status: "running",
+    startedAt: "2026-09-22T10:00:00.000Z",
+    updatedAt: "2026-09-22T10:00:01.000Z",
+    currentNode: "extract_intent",
+    path: "/tmp/acpx-synthetic-live-read-recovery",
+  };
+  const bundle = makeLoadedRunBundle(run);
+  const state: ViewerRunLiveState = { ...bundle, schema: "acpx.viewer-run-live.v1" };
+  const deps: RunBundleLoaderDeps = {
+    createRecentRunBundleReader: () => ({ source: "recent" }) as never,
+    listRecentRuns: async () => [run],
+    loadRunBundle: async () => bundle,
+  };
+  let current: ReturnType<typeof useRunBundleLoader> | null = null;
+  const read = () => {
+    assert.ok(current);
+    return current;
+  };
+  function Harness() {
+    const loader = useRunBundleLoader(deps);
+    useEffect(() => {
+      void loader.bootstrap();
+    }, [loader.bootstrap]);
+    current = loader;
+    return createElement("div");
+  }
+
+  const restoreBrowser = installFakeBrowser();
+  let renderer: ReturnType<typeof create> | null = null;
+  try {
+    await act(async () => {
+      renderer = createRenderer(createElement(Harness));
+      await flushReactWork();
+    });
+    await act(async () => {
+      await flushReactWork();
+    });
+    const socket = FakeWebSocket.instances.at(-1);
+    assert.ok(socket);
+    const send = async (message: ReplayServerMessage): Promise<void> => {
+      await act(async () => {
+        socket.emitMessage(message);
+        await flushReactWork();
+      });
+    };
+    await send({ type: "ready", protocol: "acpx.replay.v1" });
+    await send({ type: "run_snapshot", runId: run.runId, version: 1, state });
+    assert.equal(read().activeRunId, run.runId);
+    assert.deepEqual(read().bundle, state);
+    assert.equal(read().errorMessage, null);
+    await runCase({ run, state, deps, socket, read, send });
+  } finally {
+    await act(async () => {
+      renderer?.unmount();
+      await flushReactWork();
+    });
+    restoreBrowser();
+  }
+}
+
+for (const scenario of ["stale success", "stale error", "repeat pending B"] as const) {
+  test(`useRunBundleLoader honors selection intent after ${scenario}`, async () => {
+    const runA: RunBundleSummary = {
+      runId: "synthetic-selection-A",
+      flowName: "selection-intent",
+      runTitle: "Selection A",
+      status: "completed",
+      startedAt: "2026-09-22T10:00:00.000Z",
+      path: "/synthetic/selection-A",
+    };
+    const runB: RunBundleSummary = {
+      ...runA,
+      runId: "synthetic-selection-B",
+      runTitle: "Selection B",
+      path: "/synthetic/selection-B",
+    };
+    const bundleA = makeLoadedRunBundle(runA);
+    const bundleB = makeLoadedRunBundle(runB);
+    let resolveB!: (bundle: LoadedRunBundle) => void;
+    let rejectB!: (error: Error) => void;
+    const firstB = new Promise<LoadedRunBundle>((resolve, reject) => {
+      resolveB = resolve;
+      rejectB = reject;
+    });
+    let loadsA = 0;
+    let loadsB = 0;
+    const deps: RunBundleLoaderDeps = {
+      createRecentRunBundleReader: (run) => ({
+        sourceType: "recent",
+        label: run.runId,
+        readText: async () => {
+          throw new Error("Unexpected fixture file read");
+        },
+      }),
+      listRecentRuns: async () => [],
+      loadRunBundle: async (reader) => {
+        if (reader.label === runA.runId) {
+          loadsA += 1;
+          return bundleA;
+        }
+        assert.equal(reader.label, runB.runId);
+        loadsB += 1;
+        return loadsB === 1 ? firstB : bundleB;
+      },
+    };
+    let current: ReturnType<typeof useRunBundleLoader> | null = null;
+    const read = () => {
+      assert(current);
+      return current;
+    };
+    const pathname = () =>
+      (
+        globalThis as unknown as {
+          window: { location: { pathname: string } };
+        }
+      ).window.location.pathname;
+    function Harness() {
+      current = useRunBundleLoader(deps);
+      return createElement("div");
+    }
+    const restoreBrowser = installFakeBrowser();
+    let renderer: ReturnType<typeof create> | null = null;
+    let pendingLoad: Promise<LoadedRunBundle | null> | null = null;
+    let lastSelection: Promise<LoadedRunBundle | null> | null = null;
+    try {
+      await act(async () => {
+        renderer = createRenderer(createElement(Harness));
+        await flushReactWork();
+      });
+      await act(async () => {
+        await read().loadRecentRun(runA);
+        await flushReactWork();
+      });
+      assert.equal(read().activeRunId, runA.runId);
+      assert.equal(pathname(), `/run/${runA.runId}`);
+      assert.equal(read().loadingState, null);
+
+      await act(async () => {
+        pendingLoad = read().loadRecentRun(runB);
+        await flushReactWork();
+      });
+      assert.equal(read().activeRunId, runA.runId);
+      assert.equal(read().loadingState, "run");
+      assert.equal(loadsB, 1);
+
+      await act(async () => {
+        lastSelection = read().loadRecentRun(scenario === "repeat pending B" ? runB : runA);
+        await flushReactWork();
+      });
+      const afterSelection = {
+        activeRunId: read().activeRunId,
+        bundle: read().bundle,
+        pathname: pathname(),
+        loadingState: read().loadingState,
+        errorMessage: read().errorMessage,
+      };
+      await act(async () => {
+        if (scenario === "stale error") {
+          rejectB(new Error("Obsolete B load failed"));
+        } else {
+          resolveB(bundleB);
+        }
+        await pendingLoad;
+        await lastSelection;
+        await flushReactWork();
+      });
+
+      const expectedRun = scenario === "repeat pending B" ? runB : runA;
+      const expectedBundle = scenario === "repeat pending B" ? bundleB : bundleA;
+      assert.equal(read().activeRunId, expectedRun.runId);
+      assert.strictEqual(read().bundle, expectedBundle);
+      assert.equal(pathname(), `/run/${expectedRun.runId}`);
+      assert.equal(read().loadingState, null);
+      assert.equal(read().errorMessage, null);
+      assert.equal(loadsA, 1, "reselecting displayed A must not refetch A");
+      assert.equal(loadsB, 1, "repeating a pending B selection must not duplicate its read");
+      assert.equal(afterSelection.activeRunId, runA.runId);
+      assert.strictEqual(afterSelection.bundle, bundleA);
+      assert.equal(afterSelection.pathname, `/run/${runA.runId}`);
+      assert.equal(afterSelection.errorMessage, null);
+      assert.equal(afterSelection.loadingState, scenario === "repeat pending B" ? "run" : null);
+
+      if (scenario !== "repeat pending B") {
+        await act(async () => {
+          await read().loadRecentRun(runB);
+          await flushReactWork();
+        });
+        assert.equal(loadsB, 2, "superseded loading identity must not block a fresh B selection");
+        assert.equal(read().activeRunId, runB.runId);
+        assert.equal(pathname(), `/run/${runB.runId}`);
+        assert.equal(read().loadingState, null);
+      }
+    } finally {
+      await act(async () => {
+        resolveB(bundleB);
+        await pendingLoad;
+        await lastSelection;
+        renderer?.unmount();
+        await flushReactWork();
+      });
+      restoreBrowser();
+    }
+  });
 }

@@ -11,6 +11,7 @@ import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { withTimeout } from "../../src/async-control.js";
 import {
   compareProcessBirthIdentity,
   observeProcessIncarnation,
@@ -40,6 +41,7 @@ type WorkerReport = {
   taskkillCalls: number;
   receiptWitnesses: Witness[];
   publishedReceiptWitnesses?: Witness[];
+  signalReceiptWitnesses?: Witness[];
 };
 
 function reachesFixtureRoot(
@@ -230,10 +232,36 @@ function savedReceiptWitnesses(sessionId: string): Witness[] {
   return raw.retirement?.descendants ?? [];
 }
 
+export async function settleRetirerHelpers(
+  helpers: { child: ChildProcess; closed: Promise<void> }[],
+): Promise<void> {
+  const results = await Promise.allSettled(
+    helpers.map(async ({ child, closed }) => {
+      // The production deadline unrefs helpers before close. Restore this fixture's
+      // reference so its final report cannot disappear with an unsettled await.
+      child.ref();
+      try {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
+        }
+        await withTimeout(closed, 5_000);
+      } finally {
+        child.unref();
+      }
+    }),
+  );
+  for (const result of results) {
+    if (result.status === "rejected") {
+      throw result.reason;
+    }
+  }
+}
+
 async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
   const originalExecFile = childProcess.execFile.bind(childProcess);
   const rename = fs.rename.bind(fs);
   const rm = fs.rm.bind(fs);
+  const kill = process.kill.bind(process);
   const owner = await readQueueOwnerRecord(sessionId);
   assert(owner);
   const report: WorkerReport = { taskkillCalls: 0, receiptWitnesses: [] };
@@ -272,9 +300,9 @@ async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
     const countedQuery =
       mode === "slow-retry" &&
       path.win32.basename(command).toLowerCase() === "powershell.exe" &&
-      Number(queriedPid) !== process.pid;
+      (queriedPid === undefined || Number(queriedPid) !== process.pid);
     const observeDuration = (error: Error | null, stdout: string, stderr: string) => {
-      // Native CIM still determines identity. Charge its foreign observations
+      // Native CIM still determines identity. Charge full and foreign observations
       // near the query ceiling without host-clock changes or timing-sensitive sleeps.
       if (countedQuery) {
         observedTime += 1_900;
@@ -309,6 +337,12 @@ async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
       throw new Error("injected guard acknowledgement failure");
     }
   };
+  process.kill = (pid: number, signal?: NodeJS.Signals | number) => {
+    if (signal === "SIGKILL") {
+      report.signalReceiptWitnesses = savedReceiptWitnesses(sessionId);
+    }
+    return kill(pid, signal);
+  };
   syncBuiltinESMExports();
   if (mode === "success-stalled") {
     let now = Date.now();
@@ -326,14 +360,7 @@ async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
     }
   } finally {
     // Join every helper directly; a failed Node24 assertion need not print after hooks.
-    await Promise.all(
-      helpers.map(async ({ child, closed }) => {
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGKILL");
-        }
-        await closed;
-      }),
-    );
+    await settleRetirerHelpers(helpers);
   }
   process.stdout.write(JSON.stringify(report));
 }

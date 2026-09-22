@@ -6,8 +6,10 @@ import {
   parseProcessBirthIdentity,
   readProcessTable,
   type ProcessBirthIdentity,
+  type ProcessIncarnation,
   type ProcessTableEntry,
 } from "../../process-identity.js";
+import { isProcessDefinitelyDead } from "../../process-liveness.js";
 
 // The process-helper output cap does not bound accumulated, persisted witnesses.
 // Refuse before signaling instead of truncating the only receipt for a survivor.
@@ -123,20 +125,50 @@ export function retirementTimeRemaining(deadline: number, maximumMs = 2_000): nu
   return Math.min(maximumMs, remaining);
 }
 
-export async function captureQueueRetirementReceipt(
+export async function readRetirementSnapshot(deadline: number) {
+  if (process.platform !== "win32") {
+    throw queueRetirementIncomplete();
+  }
+  return await readProcessTable(retirementTimeRemaining(deadline)).catch(() => {
+    throw queueRetirementIncomplete();
+  });
+}
+
+export function observeRetirementSnapshot(
+  witness: Pick<RetirementOwner, "pid" | "processIdentity">,
+  table: Map<number, ProcessTableEntry> | undefined,
+): ProcessIncarnation {
+  if (process.platform !== "win32" || !isWindowsRetirementIdentity(witness.processIdentity)) {
+    return "unknown";
+  }
+  const observed = table?.get(witness.pid);
+  const comparison = observed
+    ? compareProcessBirthIdentity(witness.processIdentity, observed.birth)
+    : "unknown";
+  // A missing row is unknown. Only an exact birth mismatch or a separate ESRCH
+  // observation proves that this saved incarnation cannot return.
+  if (comparison === "different" || isProcessDefinitelyDead(witness.pid)) {
+    return "gone";
+  }
+  return witness.pid === process.pid ? "unknown" : comparison;
+}
+
+function isWindowsRetirementIdentity(identity: ProcessBirthIdentity | undefined): boolean {
+  return identity === undefined || identity.kind === "windows-creation";
+}
+
+export function captureQueueRetirementReceipt(
   owner: RetirementOwner,
   previous: QueueRetirementReceipt | undefined,
   rootRunning: boolean,
-  deadline: number,
-): Promise<QueueRetirementReceipt> {
+  snapshot: Map<number, ProcessTableEntry>,
+): QueueRetirementReceipt {
   const root = parseWitness({ pid: owner.pid, processIdentity: owner.processIdentity });
   if (!root || process.platform !== "win32") {
     throw queueRetirementIncomplete();
   }
-  const table = await readProcessTable(retirementTimeRemaining(deadline)).catch(() => {
-    throw queueRetirementIncomplete();
-  });
-  const saved = unsettledSnapshotWitnesses(table, previous ? previous.descendants : []);
+  const saved = previous ? previous.descendants : [];
+  const table = new Map(snapshot);
   const owned = matchingSnapshotPids(table, rootRunning ? [root, ...saved] : saved);
   if (rootRunning && !owned.has(root.pid)) {
     throw queueRetirementIncomplete();
@@ -148,7 +180,12 @@ export async function captureQueueRetirementReceipt(
   const receipt = {
     ownerGeneration: owner.ownerGeneration,
     root,
-    descendants: mergeSnapshotDescendants(table, owned, saved),
+    // Expand from matching parents before pruning: an exited parent can still
+    // have a child in the snapshot which must enter durable custody.
+    descendants: unsettledSnapshotWitnesses(
+      snapshot,
+      mergeSnapshotDescendants(table, owned, saved),
+    ),
   };
   if (!parseQueueRetirementReceipt(receipt, owner)) {
     throw queueRetirementIncomplete();
@@ -160,8 +197,8 @@ function unsettledSnapshotWitnesses(
   table: Map<number, ProcessTableEntry>,
   witnesses: ProcessWitness[],
 ): ProcessWitness[] {
-  // A different canonical birth proves the saved incarnation is gone. Persist
-  // that progress before signaling so live reused PIDs cannot starve later members.
+  // Pruning does not grant signal authority. Already-persisted witnesses may
+  // remain on disk until dispatch finishes; new witnesses must be published first.
   return witnesses.filter((witness) => {
     const observed = table.get(witness.pid);
     return (
@@ -221,8 +258,16 @@ export async function assertQueueRetirementComplete(
   if (receipt === null) {
     throw queueRetirementIncomplete();
   }
-  for (const witness of receipt?.descendants ?? []) {
-    if ((await observeRetirementWitness(witness, deadline)) !== "gone") {
+  const witnesses = receipt?.descendants ?? [];
+  if (witnesses.length === 0) {
+    return;
+  }
+  const live = witnesses.filter(
+    (witness) => observeRetirementSnapshot(witness, undefined) !== "gone",
+  );
+  const table = live.length > 0 ? await readRetirementSnapshot(deadline) : undefined;
+  for (const witness of live) {
+    if (observeRetirementSnapshot(witness, table) !== "gone") {
       throw queueRetirementIncomplete();
     }
   }

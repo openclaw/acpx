@@ -5,6 +5,7 @@ import {
   resolvePlaybackResumeMs,
   resolveSelectedStepIndexAfterBundleUpdate,
 } from "../examples/flows/replay-viewer/src/hooks/use-playback-controller.js";
+import { resolveSessionRenderState } from "../examples/flows/replay-viewer/src/lib/session-render-state.js";
 import {
   buildGraph,
   buildGraphLayout,
@@ -22,11 +23,13 @@ import {
   selectAttemptView,
 } from "../examples/flows/replay-viewer/src/lib/view-model.js";
 import type {
+  FlowDefinitionSnapshot,
   FlowRunManifest,
   FlowRunState,
   FlowStepRecord,
   LoadedRunBundle,
 } from "../examples/flows/replay-viewer/src/types.js";
+import { validateFlowDefinition } from "../src/flows/graph.js";
 
 test("selectAttemptView shapes ACP session content into readable conversation parts", () => {
   const step = baseStep("extract_intent", "acp", "ok");
@@ -102,6 +105,86 @@ test("buildGraph infers start terminal and branch semantics across the full defi
   assert.equal(nodeMap.get("escalate")?.isTerminal, true);
   assert.ok(graph.edges.every((edge) => edge.label == null));
 });
+
+for (const fixture of [
+  {
+    name: "an unreachable two-node cycle",
+    nodeIds: ["a", "b"],
+    edges: [
+      { from: "a", to: "b" },
+      { from: "b", to: "a" },
+    ],
+  },
+  {
+    name: "an unreachable self-loop",
+    nodeIds: ["a"],
+    edges: [{ from: "a", to: "a" }],
+  },
+  {
+    name: "an unreachable chain entering a cycle",
+    nodeIds: ["a", "b", "c"],
+    edges: [
+      { from: "a", to: "b" },
+      { from: "b", to: "c" },
+      { from: "c", to: "b" },
+    ],
+  },
+  {
+    name: "multiple unreachable cyclic components",
+    nodeIds: ["a", "b", "c"],
+    edges: [
+      { from: "a", to: "b" },
+      { from: "b", to: "a" },
+      { from: "c", to: "c" },
+    ],
+  },
+]) {
+  for (const layoutMode of ["fallback", "elk"] as const) {
+    test(`buildGraph projects ${fixture.name} with ${layoutMode} layout`, async () => {
+      const nodeIds = ["s", ...fixture.nodeIds];
+      const flow: FlowDefinitionSnapshot = {
+        schema: "acpx.flow-definition-snapshot.v1",
+        name: "unused-cycle-flow",
+        startAt: "s",
+        nodes: Object.fromEntries(
+          nodeIds.map((nodeId) => [nodeId, { nodeType: "compute" as const }]),
+        ),
+        edges: fixture.edges,
+      };
+      validateFlowDefinition({
+        name: flow.name,
+        startAt: flow.startAt,
+        nodes: Object.fromEntries(
+          nodeIds.map((nodeId) => [nodeId, { nodeType: "compute" as const, run: () => ({}) }]),
+        ),
+        edges: flow.edges,
+      });
+      const bundle = makeBundle(baseStep("s", "compute", "ok"), { flow, sessions: {} });
+      const layout = layoutMode === "elk" ? await buildGraphLayout(flow) : null;
+      if (layoutMode === "elk") {
+        assert.ok(layout, "the real layout engine must succeed before testing its projection");
+      }
+
+      const graph = buildGraph(bundle, 0, null, layout);
+
+      assert.deepEqual(graph.nodes.map((node) => node.id).toSorted(), nodeIds.toSorted());
+      assert.deepEqual(
+        graph.edges.map((edge) => [edge.source, edge.target]),
+        fixture.edges.map((edge) => [edge.from, edge.to]),
+      );
+      for (const node of graph.nodes) {
+        assert.ok(Number.isFinite(node.position.x));
+        assert.ok(Number.isFinite(node.position.y));
+        assert.equal(node.data.status, node.id === "s" ? "completed" : "queued");
+        assert.equal(node.data.attempts, node.id === "s" ? 1 : 0);
+        assert.equal(node.data.isTerminal, node.id === "s");
+        if (layout) {
+          assert.deepEqual(node.position, layout.nodePositions[node.id]);
+        }
+      }
+    });
+  }
+}
 
 test("buildGraph applies playback progress to the active node during preview", () => {
   const load = baseStep("load_pr", "action", "ok");
@@ -809,3 +892,132 @@ function baseStep(
     },
   };
 }
+
+const fallbackReply =
+  "CURRENT-ANSWER-START. This answer was already completed before the next step. CURRENT-ANSWER-END.";
+
+function makeFallbackRevealBundle(nodeType: "compute" | "action" | "checkpoint"): LoadedRunBundle {
+  const acp = baseStep("extract_intent", "acp", "ok");
+  acp.trace!.conversation!.messageStart = 2;
+  acp.trace!.conversation!.messageEnd = 3;
+  const following = baseStep(`following_${nodeType}`, nodeType, "ok");
+  following.session = null;
+  following.agent = null;
+  following.trace = undefined;
+  // Pass the ACP step to makeBundle so its session binding remains real fixture data.
+  const bundle = makeBundle(acp, { steps: [acp, following] });
+  bundle.sessions["main-bundle"].record.messages = [
+    { User: { id: "prefix-user", content: [{ Text: "Earlier synthetic context." }] } },
+    { Agent: { content: [{ Text: "PREFIX-CONTEXT-READY" }], tool_results: {} } },
+    { User: { id: "current-user", content: [{ Text: "Provide the current synthetic answer." }] } },
+    { Agent: { content: [{ Text: fallbackReply }], tool_results: {} } },
+  ];
+  return bundle;
+}
+
+for (const nodeType of ["compute", "action", "checkpoint"] as const) {
+  test(`a ${nodeType} fallback retains completed ACP context throughout replay`, () => {
+    const bundle = makeFallbackRevealBundle(nodeType);
+    const selected = selectAttemptView(bundle, 1);
+    assert.ok(selected);
+    assert.equal(selected.sessionFromFallback, true);
+    assert.equal(selected.sessionSourceStep?.attemptId, bundle.steps[0]?.attemptId);
+    const item = listSessionViews(bundle, selected).find((entry) => entry.id === "main-bundle");
+    assert.ok(item);
+    // Setting the source session ID to null would silently lose this range.
+    assert.deepEqual(
+      item.sessionSlice.map((message) => message.highlighted),
+      [false, false, true, true],
+    );
+    assert.deepEqual(item.sessionSlice, selected.sessionSlice);
+    for (const progress of [0, 0.25, 0.8, 1]) {
+      const rendered = resolveSessionRenderState({
+        sessionSlice: item.sessionSlice,
+        isStreamingSource: item.isStreamingSource,
+        sessionRevealProgress: progress,
+        liveStreaming: false,
+      });
+      assert.equal(
+        rendered.renderedSessionSlice.at(-1)?.textBlocks[0],
+        fallbackReply,
+        `completed reply shortened at progress ${progress}`,
+      );
+      assert.deepEqual(rendered.renderedSessionSlice, item.sessionSlice);
+      assert.equal(rendered.animateConversation, false);
+      assert.equal(rendered.autoFollowConversation, false);
+    }
+    assert.equal(item.isStreamingSource, false);
+  });
+}
+
+test("the direct ACP attempt still reveals its own range and preserves earlier context", () => {
+  const bundle = makeFallbackRevealBundle("compute");
+  const selected = selectAttemptView(bundle, 0);
+  assert.ok(selected);
+  assert.equal(selected.sessionFromFallback, false);
+  const item = listSessionViews(bundle, selected).find((entry) => entry.id === "main-bundle");
+  assert.ok(item);
+  assert.equal(item.isStreamingSource, true);
+  assert.deepEqual(
+    item.sessionSlice.map((message) => message.highlighted),
+    [false, false, true, true],
+  );
+  const partial = resolveSessionRenderState({
+    sessionSlice: item.sessionSlice,
+    isStreamingSource: item.isStreamingSource,
+    sessionRevealProgress: 0.25,
+    liveStreaming: false,
+  });
+  assert.equal(partial.renderedSessionSlice[1]?.textBlocks[0], "PREFIX-CONTEXT-READY");
+  const currentText = partial.renderedSessionSlice.at(-1)?.textBlocks[0] ?? "";
+  assert(currentText.length > 0 && currentText.length < fallbackReply.length);
+  assert(fallbackReply.startsWith(currentText));
+  assert.equal(partial.animateConversation, true);
+  assert.equal(partial.autoFollowConversation, true);
+  for (const [progress, liveStreaming] of [
+    [1, false],
+    [0.25, true],
+  ] as const) {
+    const rendered = resolveSessionRenderState({
+      sessionSlice: item.sessionSlice,
+      isStreamingSource: item.isStreamingSource,
+      sessionRevealProgress: progress,
+      liveStreaming,
+    });
+    assert.deepEqual(rendered.renderedSessionSlice, item.sessionSlice);
+    assert.equal(rendered.autoFollowConversation, true);
+    assert.equal(rendered.animateConversation, !liveStreaming);
+  }
+});
+
+test("an unrelated session remains fully visible without becoming the reveal source", () => {
+  const bundle = makeFallbackRevealBundle("compute");
+  const main = bundle.sessions["main-bundle"];
+  bundle.sessions.other = {
+    ...main,
+    id: "other",
+    binding: { ...main.binding, bundleId: "other", name: "other" },
+    record: {
+      ...main.record,
+      name: "other",
+      messages: [{ Agent: { content: [{ Text: "UNRELATED-COMPLETE-ANSWER" }], tool_results: {} } }],
+    },
+  };
+  const selected = selectAttemptView(bundle, 0);
+  assert.ok(selected);
+  const other = listSessionViews(bundle, selected).find((entry) => entry.id === "other");
+  assert.ok(other);
+  assert.equal(other.isStreamingSource, false);
+  assert.deepEqual(
+    other.sessionSlice.map((message) => message.highlighted),
+    [false],
+  );
+  const rendered = resolveSessionRenderState({
+    sessionSlice: other.sessionSlice,
+    isStreamingSource: other.isStreamingSource,
+    sessionRevealProgress: 0.25,
+    liveStreaming: false,
+  });
+  assert.deepEqual(rendered.renderedSessionSlice, other.sessionSlice);
+  assert.equal(rendered.animateConversation, false);
+});

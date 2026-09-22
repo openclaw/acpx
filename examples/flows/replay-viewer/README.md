@@ -81,9 +81,22 @@ history locally, so you can still rewind while new steps continue to arrive.
 
 The full flow definition remains the main graph. The run is shown as an overlay
 on that graph rather than replacing it with an execution-only path.
+Unused components, including loops, remain visible even when the run completes
+without reaching them.
+
+Graph nodes remain visible during playback, and their cards resize as content changes.
 
 Replay follows the saved attempt order, including attempts with matching
 timestamps. Duration labels carry rounded seconds into the next minute.
+When a later step shows an earlier ACP conversation as context, the completed
+text stays visible during replay. Progressive reveal belongs to the attempt
+that produced the conversation.
+
+Selecting the displayed run again keeps it selected even if an earlier choice
+finishes loading later. A superseded load cannot replace it or show an obsolete error.
+
+Playback advances with elapsed animation time at the selected speed, including
+when the displayed run receives an updated bundle.
 
 ## Included sample
 

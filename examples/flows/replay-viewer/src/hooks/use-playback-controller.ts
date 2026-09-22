@@ -17,6 +17,7 @@ export function usePlaybackController(bundle: LoadedRunBundle | null) {
   const [playheadMs, setPlayheadMs] = useState<number | null>(null);
   const [playbackRate, setPlaybackRate] = useState<number>(DEFAULT_PLAYBACK_RATE);
   const previousBundleRef = useRef<LoadedRunBundle | null>(null);
+  const lastTimestampRef = useRef<number | null>(null);
 
   useEffect(() => {
     const previousBundle = previousBundleRef.current;
@@ -48,21 +49,22 @@ export function usePlaybackController(bundle: LoadedRunBundle | null) {
   );
 
   useEffect(() => {
-    if (playbackMode !== "playing" || !playbackTimeline || playheadMs == null) {
+    lastTimestampRef.current = null;
+  }, [bundle?.run.runId, playbackMode, playbackRate]);
+
+  useEffect(() => {
+    if (playbackMode !== "playing" || !playbackTimeline) {
       return undefined;
     }
     if (playbackTimeline.segments.length === 0) {
       return undefined;
     }
     let frameId = 0;
-    let lastTimestamp: number | null = null;
 
     const tick = (timestamp: number) => {
-      if (lastTimestamp == null) {
-        lastTimestamp = timestamp;
-      }
-      const deltaMs = timestamp - lastTimestamp;
-      lastTimestamp = timestamp;
+      const previousTimestamp = lastTimestampRef.current;
+      const deltaMs = previousTimestamp == null ? 0 : timestamp - previousTimestamp;
+      lastTimestampRef.current = timestamp;
 
       setPlayheadMs((current) => {
         if (current == null) {
@@ -78,7 +80,7 @@ export function usePlaybackController(bundle: LoadedRunBundle | null) {
 
     frameId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frameId);
-  }, [playbackMode, playbackRate, playbackTimeline, playheadMs]);
+  }, [playbackMode, playbackRate, playbackTimeline]);
 
   useEffect(() => {
     if (

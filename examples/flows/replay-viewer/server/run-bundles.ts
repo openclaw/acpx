@@ -1,12 +1,20 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { isPathInside } from "@openclaw/fs-safe/path";
-import { root } from "@openclaw/fs-safe/root";
+import { FsSafeError } from "@openclaw/fs-safe";
+import { hasNodeErrorCode, isPathInside } from "@openclaw/fs-safe/path";
+import { root, type Root } from "@openclaw/fs-safe/root";
 import { mergeLiveRunState } from "../src/lib/run-state.js";
 import type { FlowRunManifest, FlowRunState, RunBundleSummary } from "../src/types.js";
 
 const DEFAULT_MAX_RUNS = 24;
+
+export class RunBundleNotFoundError extends Error {
+  constructor(cause: unknown) {
+    super("Run bundle not found", { cause });
+    this.name = "RunBundleNotFoundError";
+  }
+}
 
 export function defaultRunsDir(): string {
   return process.env.ACPX_FLOW_RUNS_DIR ?? path.join(os.homedir(), ".acpx", "flows", "runs");
@@ -73,19 +81,63 @@ export async function readRunBundleFile(
   if (runDir === resolvedRunsDir || !isPathInside(resolvedRunsDir, runDir)) {
     throw new Error(`Refusing to read run bundle outside runs directory: ${runId}`);
   }
-  const runs = await root(resolvedRunsDir);
-  const bundle = await root(
-    await runs.resolve(`.${path.sep}${path.relative(resolvedRunsDir, runDir)}`),
-    {
-      symlinks: "follow-within-root",
-      hardlinks: "allow",
-      maxBytes: Infinity,
-    },
+  const runs = await openRunsRoot(resolvedRunsDir);
+  const bundle = await openBundleRoot(
+    runs,
+    `.${path.sep}${path.relative(resolvedRunsDir, runDir)}`,
   );
   if (bundle.rootReal === runs.rootReal || !isPathInside(runs.rootReal, bundle.rootReal)) {
     throw new Error(`Refusing to read run bundle outside runs directory: ${runId}`);
   }
-  return await bundle.readBytes(`.${path.sep}${normalizedRelativePath}`);
+  const relativeFilePath = `.${path.sep}${normalizedRelativePath}`;
+  try {
+    return await bundle.readBytes(relativeFilePath);
+  } catch (error) {
+    // A dangling denied file alias must not become a recoverable missing-file error.
+    await bundle.stat(relativeFilePath);
+    throw error;
+  }
+}
+
+async function openRunsRoot(runsDir: string): Promise<Root> {
+  try {
+    return await root(runsDir);
+  } catch (error) {
+    if (error instanceof FsSafeError && error.code === "not-found") {
+      throw new RunBundleNotFoundError(error);
+    }
+    throw error;
+  }
+}
+
+async function openBundleRoot(runs: Root, relativeRunPath: string): Promise<Root> {
+  const resolvedRunPath = await runs.resolve(relativeRunPath);
+  try {
+    return await root(resolvedRunPath, {
+      symlinks: "follow-within-root",
+      hardlinks: "allow",
+      maxBytes: Infinity,
+    });
+  } catch (error) {
+    // A failed final-symlink target must pass strict containment before absence is trusted.
+    await confirmMissingBundleRoot(runs, relativeRunPath);
+    throw error;
+  }
+}
+
+async function confirmMissingBundleRoot(runs: Root, relativeRunPath: string): Promise<void> {
+  try {
+    await runs.stat(relativeRunPath);
+  } catch (error) {
+    if (
+      error instanceof FsSafeError &&
+      error.code === "not-found" &&
+      (hasNodeErrorCode(error.cause, "ENOENT") || hasNodeErrorCode(error.cause, "ENOTDIR"))
+    ) {
+      throw new RunBundleNotFoundError(error);
+    }
+    throw error;
+  }
 }
 
 async function readRunBundleSummary(runsDir: string, runId: string): Promise<RunBundleSummary> {

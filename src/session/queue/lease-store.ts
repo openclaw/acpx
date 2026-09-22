@@ -4,12 +4,15 @@ import path from "node:path";
 import { withTempFile } from "@openclaw/fs-safe/advanced";
 import { isHardlinkFallbackError } from "@openclaw/fs-safe/durability";
 import { runTimedExecFile } from "../../acp/client-process.js";
+import { hasStaleWindowsParent } from "../../acp/process-descendants.js";
 import { QueueConnectionError } from "../../errors.js";
 import {
+  compareProcessBirthIdentity,
   getOwnProcessIdentity,
   observeProcessIncarnation,
   parseProcessBirthIdentity,
   type ProcessBirthIdentity,
+  type ProcessTableEntry,
 } from "../../process-identity.js";
 import { isProcessAlive, isProcessDefinitelyDead } from "../../process-liveness.js";
 import type { CapturedProcessIdentity } from "../lock-owner.js";
@@ -19,9 +22,11 @@ import {
   assertQueueRetirementComplete,
   captureQueueRetirementReceipt,
   hasQueueRetirementReceipt,
+  observeRetirementSnapshot,
   observeRetirementWitness,
   parseQueueRetirementReceipt,
   queueRetirementIncomplete,
+  readRetirementSnapshot,
   retirementTimeRemaining,
   type QueueRetirementReceipt,
 } from "./retirement-receipt.js";
@@ -693,7 +698,29 @@ type QueueOwnerRetirement = {
   unverified: boolean;
   leaseReleased: boolean;
   deadline: number;
+  snapshot?: Map<number, ProcessTableEntry>;
+  capturedIdentity?: CapturedProcessIdentity;
 };
+
+async function createQueueOwnerRetirement(deadline: number): Promise<QueueOwnerRetirement> {
+  const snapshot =
+    process.platform === "win32"
+      ? await readRetirementSnapshot(deadline).catch(() => undefined)
+      : undefined;
+  return {
+    gone: false,
+    unverified: false,
+    leaseReleased: false,
+    deadline,
+    snapshot,
+    // Only self's row identifies this guard writer. The explicit empty carrier
+    // also prevents every guard from retrying unavailable self discovery.
+    capturedIdentity:
+      process.platform === "win32"
+        ? { processIdentity: snapshot?.get(process.pid)?.birth }
+        : undefined,
+  };
+}
 
 async function observeRetiringOwner(owner: QueueOwnerRecord, deadline: number) {
   return await observeProcessIncarnation(
@@ -718,16 +745,40 @@ function retirementBlockedByHeartbeat(
 
 async function prepareWindowsRetirement(
   owner: QueueOwnerRecord,
+  table: Map<number, ProcessTableEntry> | undefined,
   deadline: number,
-): Promise<boolean> {
-  if (owner.retirement === null) {
+) {
+  if (owner.retirement === null || !table) {
     throw queueRetirementIncomplete();
   }
-  owner.retirement = await captureQueueRetirementReceipt(owner, owner.retirement, true, deadline);
+  owner.retirement = captureQueueRetirementReceipt(owner, owner.retirement, true, table);
   await replaceQueueOwnerRecord(owner);
   // Publication is the recovery boundary. Recheck birth after filesystem I/O
   // so neither a reused root nor its unrelated children receive taskkill.
-  return (await observeRetirementWitness(owner.retirement.root, deadline)) === "matching";
+  return await observeRetirementWitness(owner.retirement.root, deadline);
+}
+
+async function prepareRetiringOwner(
+  owner: QueueOwnerRecord,
+  signal: NodeJS.Signals,
+  retirement: QueueOwnerRetirement,
+): Promise<boolean> {
+  const windows = process.platform === "win32";
+  // A second dispatch follows receipt publication. Keep refresh/deadline errors
+  // as incomplete retirement instead of losing that saved custody context.
+  const table =
+    windows && signal !== "SIGTERM"
+      ? await readRetirementSnapshot(retirement.deadline)
+      : retirement.snapshot;
+  let identity = windows
+    ? observeRetirementSnapshot(owner, table)
+    : await observeRetiringOwner(owner, retirement.deadline);
+  if (identity === "matching" && windows) {
+    identity = await prepareWindowsRetirement(owner, table, retirement.deadline);
+  }
+  retirement.gone = identity === "gone";
+  retirement.unverified = identity === "unknown";
+  return identity === "matching";
 }
 
 async function dispatchVerifiedQueueOwnerSignal(
@@ -736,48 +787,36 @@ async function dispatchVerifiedQueueOwnerSignal(
   requireStale: boolean,
   retirement: QueueOwnerRetirement,
 ): Promise<boolean> {
-  return await withQueueLeaseMutation(owner.sessionId, async () => {
-    const current = await readQueueOwnerRecord(owner.sessionId);
-    retirement.leaseReleased = current?.pid !== owner.pid;
-    if (
-      !matchesQueueOwner(current, owner) ||
-      retirementBlockedByHeartbeat(current, signal, requireStale)
-    ) {
-      return false;
-    }
-    if (current.retirement === null) {
-      throw queueRetirementIncomplete();
-    }
-    // Generation protects the lease; a fresh OS birth protects the PID. The
-    // same numeric PID can belong to an unrelated process after an owner crash.
-    const identity = await observeRetiringOwner(current, retirement.deadline);
-    if (identity !== "matching") {
-      retirement.gone = identity === "gone";
-      retirement.unverified = identity === "unknown";
-      return false;
-    }
-    if (
-      process.platform === "win32" &&
-      !(await prepareWindowsRetirement(current, retirement.deadline))
-    ) {
-      return false;
-    }
-    return await dispatchQueueOwnerSignal(owner.pid, signal, retirement.deadline);
-  });
+  return await withQueueLeaseMutation(
+    owner.sessionId,
+    async () => {
+      const current = await readQueueOwnerRecord(owner.sessionId);
+      retirement.leaseReleased = current?.pid !== owner.pid;
+      if (
+        !matchesQueueOwner(current, owner) ||
+        retirementBlockedByHeartbeat(current, signal, requireStale)
+      ) {
+        return false;
+      }
+      if (current.retirement === null) {
+        throw queueRetirementIncomplete();
+      }
+      if (!(await prepareRetiringOwner(current, signal, retirement))) {
+        return false;
+      }
+      return await dispatchQueueOwnerSignal(owner.pid, signal, retirement.deadline);
+    },
+    { capturedIdentity: retirement.capturedIdentity },
+  );
 }
 
 async function retireQueueOwner(
   owner: QueueOwnerRecord,
   requireStale: boolean,
-  deadline: number,
+  retirement: QueueOwnerRetirement,
 ): Promise<boolean> {
-  const retirement: QueueOwnerRetirement = {
-    gone: false,
-    unverified: false,
-    leaseReleased: false,
-    deadline,
-  };
-  await terminateWithDispatch(
+  const { deadline } = retirement;
+  const exited = await terminateWithDispatch(
     owner.pid,
     (signal) => dispatchVerifiedQueueOwnerSignal(owner, signal, requireStale, retirement),
     isProcessDefinitelyDead,
@@ -786,9 +825,12 @@ async function retireQueueOwner(
   if (await waitForReleasedOwner(owner, requireStale, retirement)) {
     return false;
   }
-  // Numeric exit is only a waiting hint. Revalidate the expected scope before
-  // cleanup: a locally absent PID can still name a foreign namespace's owner.
-  const gone = retirement.gone || (await observeRetiringOwner(owner, deadline)) === "gone";
+  // Windows ESRCH already proves this incarnation exited. POSIX must still
+  // validate scope: a locally absent PID can name a foreign namespace's owner.
+  const gone =
+    retirement.gone ||
+    (process.platform === "win32" && exited) ||
+    (await observeRetiringOwner(owner, deadline)) === "gone";
   if (retirement.unverified && !gone) {
     throw unverifiedQueueOwnerError(owner);
   }
@@ -823,65 +865,137 @@ async function waitForReleasedOwner(
   return false;
 }
 
-async function retireRecordedDescendants(owner: QueueOwnerRecord, deadline: number): Promise<void> {
-  await withQueueLeaseMutation(owner.sessionId, async () => {
-    const current = await readQueueOwnerRecord(owner.sessionId);
-    if (!matchesQueueOwner(current, owner) || current.retirement === undefined) {
-      return;
-    }
-    if (current.retirement === null || process.platform !== "win32") {
-      throw queueRetirementIncomplete();
-    }
-    if (current.retirement.descendants.length === 0) {
-      return;
-    }
-    current.retirement = await captureQueueRetirementReceipt(
-      current,
-      current.retirement,
-      false,
-      deadline,
-    );
-    await replaceQueueOwnerRecord(current);
-    await signalRecordedDescendants(current.retirement, deadline);
-    await waitForRecordedDescendants(current.retirement, deadline);
-  });
+async function retireRecordedDescendants(
+  owner: QueueOwnerRecord,
+  retirement: QueueOwnerRetirement,
+): Promise<void> {
+  await withQueueLeaseMutation(
+    owner.sessionId,
+    async () => {
+      const current = await readQueueOwnerRecord(owner.sessionId);
+      if (!matchesQueueOwner(current, owner) || current.retirement === undefined) {
+        return;
+      }
+      if (current.retirement === null || process.platform !== "win32") {
+        throw queueRetirementIncomplete();
+      }
+      await retireSnapshotDescendants(current, current.retirement, retirement.deadline);
+    },
+    { capturedIdentity: retirement.capturedIdentity },
+  );
 }
 
-async function hasSurvivingRetirementDescendant(
+function hasNewRetirementWitness(
+  previous: QueueRetirementReceipt,
   receipt: QueueRetirementReceipt,
-  deadline: number,
-): Promise<boolean> {
-  for (const witness of receipt.descendants) {
-    const state = await observeRetirementWitness(witness, deadline);
-    if (state === "unknown") {
-      throw queueRetirementIncomplete();
-    }
-    if (state === "matching") {
-      return true;
-    }
-  }
-  return false;
+): boolean {
+  const saved = new Map(
+    previous.descendants.map((witness) => [witness.pid, witness.processIdentity]),
+  );
+  return receipt.descendants.some(
+    (witness) =>
+      compareProcessBirthIdentity(saved.get(witness.pid), witness.processIdentity) !== "matching",
+  );
 }
 
-async function signalRecordedDescendants(
+async function retireSnapshotDescendants(
+  owner: QueueOwnerRecord,
   receipt: QueueRetirementReceipt,
   deadline: number,
 ): Promise<void> {
-  for (const witness of receipt.descendants) {
-    const state = await observeRetirementWitness(witness, deadline);
-    if (state === "unknown") {
-      throw queueRetirementIncomplete();
+  while (receipt.descendants.length > 0) {
+    const table = await readRetirementSnapshot(deadline);
+    const discovered = captureQueueRetirementReceipt(owner, receipt, false, table);
+    if (hasNewRetirementWitness(receipt, discovered)) {
+      receipt = discovered;
+      owner.retirement = receipt;
+      await replaceQueueOwnerRecord(owner);
+      // New custody must be durable before signaling. Filesystem work invalidates
+      // the observation, so query again even if publication was fast.
+      continue;
     }
-    if (state === "matching") {
-      retirementTimeRemaining(deadline);
-      try {
-        process.kill(witness.pid, "SIGKILL");
-      } catch (error) {
-        if ((await observeRetirementWitness(witness, deadline)) !== "gone") {
-          throw error;
-        }
+    signalRecordedDescendants(discovered, table, deadline);
+    await waitForRecordedDescendants(discovered, deadline);
+    discovered.descendants = discovered.descendants.filter(
+      (witness) => !isProcessDefinitelyDead(witness.pid),
+    );
+    // Old custody stays durable through dispatch and a crash. Pruning cannot
+    // authorize a signal, so publish only after the synchronous batch finishes.
+    receipt = discovered;
+    owner.retirement = receipt;
+    await replaceQueueOwnerRecord(owner);
+  }
+}
+
+function leafFirstRetirementWitnesses(
+  receipt: QueueRetirementReceipt,
+  table: Map<number, ProcessTableEntry>,
+) {
+  const children = new Map(receipt.descendants.map((witness) => [witness.pid, 0]));
+  for (const witness of receipt.descendants) {
+    const parent = retirementParent(witness.pid, table);
+    const count = children.get(parent);
+    if (count !== undefined) {
+      children.set(parent, count + 1);
+    }
+  }
+  const pending = receipt.descendants.filter((witness) => children.get(witness.pid) === 0);
+  const byPid = new Map(receipt.descendants.map((witness) => [witness.pid, witness]));
+  for (let index = 0; index < pending.length; index += 1) {
+    const parent = retirementParent(pending[index].pid, table);
+    const count = children.get(parent);
+    if (count !== undefined) {
+      const remaining = count - 1;
+      children.set(parent, remaining);
+      if (remaining === 0) {
+        pending.push(byPid.get(parent)!);
       }
     }
+  }
+  if (pending.length !== receipt.descendants.length) {
+    throw queueRetirementIncomplete();
+  }
+  return pending;
+}
+
+function retirementParent(pid: number, table: Map<number, ProcessTableEntry>) {
+  const identity = table.get(pid);
+  // Ordering uses the same ancestry as discovery: a recycled creator PID can
+  // point back to a younger descendant without forming a real process cycle.
+  return identity && !hasStaleWindowsParent(identity, table.get(identity.parentPid))
+    ? identity.parentPid
+    : 0;
+}
+
+function signalRecordedDescendants(
+  receipt: QueueRetirementReceipt,
+  table: Map<number, ProcessTableEntry>,
+  deadline: number,
+): void {
+  if (
+    receipt.descendants.some((witness) => observeRetirementSnapshot(witness, table) === "unknown")
+  ) {
+    throw queueRetirementIncomplete();
+  }
+  const ordered = leafFirstRetirementWitnesses(receipt, table);
+  let failure: unknown;
+  // No await, publication or asynchronous error probe may split this verified
+  // batch. Finish its independent members before surfacing a signal failure.
+  for (const witness of ordered) {
+    if (observeRetirementSnapshot(witness, table) !== "matching") {
+      continue;
+    }
+    retirementTimeRemaining(deadline);
+    try {
+      process.kill(witness.pid, "SIGKILL");
+    } catch (error) {
+      if (!isProcessDefinitelyDead(witness.pid)) {
+        failure ??= error;
+      }
+    }
+  }
+  if (failure) {
+    throw failure;
   }
 }
 
@@ -889,12 +1003,13 @@ async function waitForRecordedDescendants(
   receipt: QueueRetirementReceipt,
   deadline: number,
 ): Promise<void> {
-  while (true) {
-    if (!(await hasSurvivingRetirementDescendant(receipt, deadline))) {
+  for (let waited = 0; waited < 1_000; waited += PROCESS_POLL_MS) {
+    if (receipt.descendants.every((witness) => isProcessDefinitelyDead(witness.pid))) {
       return;
     }
-    // A slow survivor must not start a fresh CIM helper on every liveness poll.
-    await waitMs(Math.min(1_000, retirementTimeRemaining(deadline)));
+    // Cheap ESRCH probes can finish promptly; full snapshots remain at least a
+    // second apart while a survivor stays alive.
+    await waitMs(Math.min(PROCESS_POLL_MS, retirementTimeRemaining(deadline)));
   }
 }
 
@@ -922,18 +1037,19 @@ export async function terminateQueueOwnerForSession(
     return;
   }
   const deadline = retirementDeadline();
-  if (!(await retireQueueOwner(owner, requireStale, deadline))) {
+  const retirement = await createQueueOwnerRetirement(deadline);
+  if (!(await retireQueueOwner(owner, requireStale, retirement))) {
     await assertNoPendingRetirement(owner);
     return;
   }
-  await retireRecordedDescendants(owner, deadline);
+  await retireRecordedDescendants(owner, retirement);
   // Once this incarnation is confirmed gone it cannot return. Recheck the lease
   // generation during file cleanup; never signal a replacement occupying its PID.
   await cleanupQueueOwnerFiles(
     sessionId,
     owner.socketPath,
     () => ownsQueueLease(owner),
-    undefined,
+    retirement.capturedIdentity,
     deadline,
   );
 }

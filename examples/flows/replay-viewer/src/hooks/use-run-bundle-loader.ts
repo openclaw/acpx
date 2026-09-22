@@ -35,7 +35,8 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
   const [recentRuns, setRecentRunsState] = useState<RunBundleSummary[]>([]);
   const [activeRunId, setActiveRunIdState] = useState<string | null>(null);
   const [loadingState, setLoadingState] = useState<RunBundleLoadingState>("bootstrap");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessageState] = useState<string | null>(null);
+  const liveRunErrorRef = useRef<string | null>(null);
 
   const bundleRef = useRef<LoadedRunBundle | null>(null);
   const recentRunsRef = useRef<RunBundleSummary[]>([]);
@@ -50,6 +51,20 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
   const loadingRunIdRef = useRef<string | null>(null);
   const bootstrapSequenceRef = useRef(0);
   const loadRunSequenceRef = useRef(0);
+
+  const setErrorMessage = useCallback((message: string | null, runId?: string) => {
+    liveRunErrorRef.current = runId ?? null;
+    setErrorMessageState(message);
+  }, []);
+
+  const clearRecoveredRunError = useCallback(
+    (runId: string) => {
+      if (liveRunErrorRef.current === runId) {
+        setErrorMessage(null);
+      }
+    },
+    [setErrorMessage],
+  );
 
   const setBundle = useCallback((next: LoadedRunBundle | null) => {
     bundleRef.current = next;
@@ -113,6 +128,10 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
   const loadRecentRun = useCallback(
     async (run: RunBundleSummary): Promise<LoadedRunBundle | null> => {
       if (activeRunIdRef.current === run.runId && bundleRef.current?.sourceType === "recent") {
+        // A cached selection still supersedes an older run load.
+        loadRunSequenceRef.current += 1;
+        loadingRunIdRef.current = null;
+        setLoadingState((current) => (current === "run" ? null : current));
         return bundleRef.current;
       }
       if (loadingRunIdRef.current === run.runId) {
@@ -145,7 +164,7 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
         }
       }
     },
-    [deps, setActiveRunId, setBundle],
+    [deps, setActiveRunId, setBundle, setErrorMessage],
   );
 
   const bootstrap = useCallback(async (): Promise<void> => {
@@ -189,7 +208,15 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
     } finally {
       setLoadingState(null);
     }
-  }, [deps, loadRecentRun, resolvePreferredRecentRun, setActiveRunId, setBundle, setRecentRuns]);
+  }, [
+    deps,
+    loadRecentRun,
+    resolvePreferredRecentRun,
+    setActiveRunId,
+    setBundle,
+    setErrorMessage,
+    setRecentRuns,
+  ]);
 
   useEffect(() => {
     if (recentRuns.length === 0) {
@@ -322,6 +349,7 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
             }
             setBundle(message.state);
             runVersionRef.current = message.version;
+            clearRecoveredRunError(message.runId);
             return;
           case "run_patch":
             if (
@@ -340,6 +368,7 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
             try {
               setBundle(applyReplayPatch(bundleRef.current as ViewerRunLiveState, message.ops));
               runVersionRef.current = message.toVersion;
+              clearRecoveredRunError(message.runId);
             } catch {
               sendLiveMessage({
                 type: "resync_run",
@@ -349,7 +378,10 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
             return;
           case "error":
             if (!message.runId || message.runId === activeRunIdRef.current) {
-              setErrorMessage(message.message);
+              setErrorMessage(
+                message.message,
+                message.code === "internal_error" ? message.runId : undefined,
+              );
             }
             return;
         }
@@ -381,7 +413,7 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
       liveSocketRef.current?.close();
       liveSocketRef.current = null;
     };
-  }, [sendLiveMessage, setBundle, setRecentRuns]);
+  }, [clearRecoveredRunError, sendLiveMessage, setBundle, setErrorMessage, setRecentRuns]);
 
   return {
     bundle,

@@ -2638,6 +2638,8 @@ test("integration: perf report tolerates malformed lines and keeps role and gaug
 
 test("integration: perf metrics capture preserves SIGTERM termination semantics", async () => {
   const metricsPath = path.join(os.tmpdir(), `acpx-perf-signal-${Date.now()}.ndjson`);
+  const readyMessage = "perf-metrics-ready\n";
+  let readinessTimedOut = false;
 
   try {
     const result = await new Promise<CliRunResult>((resolve, reject) => {
@@ -2652,6 +2654,7 @@ test("integration: perf metrics capture preserves SIGTERM termination semantics"
             `installPerfMetricsCapture({ filePath: ${JSON.stringify(metricsPath)} });`,
             "recordPerfDuration('signal.test', 1);",
             "setInterval(() => {}, 1000);",
+            `process.stdout.write(${JSON.stringify(readyMessage)});`,
           ].join(" "),
         ],
         {
@@ -2663,20 +2666,31 @@ test("integration: perf metrics capture preserves SIGTERM termination semantics"
 
       let stdout = "";
       let stderr = "";
+      let ready = false;
+      const readinessTimeout = setTimeout(() => {
+        readinessTimedOut = true;
+        child.kill("SIGTERM");
+      }, 10_000);
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {
         stdout += chunk;
+        if (!ready && stdout.includes(readyMessage)) {
+          ready = true;
+          clearTimeout(readinessTimeout);
+          child.kill("SIGTERM");
+        }
       });
       child.stderr.on("data", (chunk: string) => {
         stderr += chunk;
       });
 
-      child.once("error", reject);
-      setTimeout(() => {
-        child.kill("SIGTERM");
-      }, 500);
+      child.once("error", (error) => {
+        clearTimeout(readinessTimeout);
+        reject(error);
+      });
       child.once("close", (code, signal) => {
+        clearTimeout(readinessTimeout);
         resolve({
           code,
           signal,
@@ -2686,6 +2700,8 @@ test("integration: perf metrics capture preserves SIGTERM termination semantics"
       });
     });
 
+    assert.equal(readinessTimedOut, false, "fixture readiness timed out");
+    assert.ok(result.stdout.includes(readyMessage), "fixture must be ready before signaling");
     assert.equal(result.code === 143 || result.signal === "SIGTERM", true);
     const records = await readPerfRecords(metricsPath);
     assert.equal(records.length >= 1, true);

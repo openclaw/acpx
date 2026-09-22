@@ -3,10 +3,13 @@ import fs from "node:fs/promises";
 import net, { type Socket } from "node:net";
 import path from "node:path";
 import { mock } from "node:test";
-import { FlowRunner, action, defineFlow } from "../../src/flows/runtime.js";
+import { FlowRunner, action, defineFlow, shell } from "../../src/flows/runtime.js";
 import type { FlowNodeContext, FlowShellResult } from "../../src/flows/types.js";
 
 const [root, mode] = process.argv.slice(2);
+const shellNode = mode === "shell-outer-timeout";
+const deadlineMs = 20_000;
+let finishing = false;
 const pidFile = path.join(root, "owned-pids");
 const sockets = new Set<Socket>();
 let acceptReady: (socket: Socket) => void = () => {};
@@ -130,22 +133,50 @@ async function run(context: FlowNodeContext): Promise<void> {
   }
 }
 
-const hasDeadline = mode === "own-deadline" || mode === "outer-timeout";
+const hasDeadline = mode === "own-deadline" || mode === "outer-timeout" || shellNode;
+let clockArmed = hasDeadline;
+const expireAndRestore = () => {
+  if (!clockArmed) {
+    return;
+  }
+  clockArmed = false;
+  try {
+    mock.timers.tick(deadlineMs);
+  } finally {
+    // Keep native TERM/KILL and stream cleanup on real timers.
+    mock.timers.reset();
+  }
+};
+let outcome: Promise<string> | undefined;
+let aliveBeforeDeadline: number[] = [];
 if (hasDeadline) {
   mock.timers.enable({ apis: ["setTimeout"] });
 }
 try {
-  const outcome = runner
+  outcome = runner
     .run(
       defineFlow({
         name: `managed-${mode}`,
         startAt: "command",
         nodes: {
-          command: action({
-            run,
-            heartbeatMs: 0,
-            timeoutMs: mode === "outer-timeout" ? 20_000 : 0,
-          }),
+          command: shellNode
+            ? shell({
+                heartbeatMs: 0,
+                timeoutMs: deadlineMs,
+                exec: () => {
+                  assert.equal(finishing, false, "teardown forbids late shell admission");
+                  return {
+                    command: process.execPath,
+                    args: ["-e", `/* ACPX_SHELL_REAP_READY */\n${resistantChild}`],
+                    timeoutMs: 0,
+                  };
+                },
+              })
+            : action({
+                run,
+                heartbeatMs: 0,
+                timeoutMs: mode === "outer-timeout" ? deadlineMs : 0,
+              }),
         },
         edges: [],
       }),
@@ -163,15 +194,24 @@ try {
       }),
     ]);
     if (hasDeadline) {
+      if (shellNode) {
+        aliveBeforeDeadline = (await fs.readFile(pidFile, "utf8")).trim().split("\n").map(Number);
+        assert.equal(aliveBeforeDeadline.length, 1);
+        for (const pid of aliveBeforeDeadline) {
+          assert.ok(Number.isSafeInteger(pid) && pid > 0);
+          assert.equal(process.kill(pid, 0), true, "a real child must be alive before expiry");
+        }
+      }
       // Admission and signal handlers are proven ready before either deadline fires.
-      mock.timers.tick(20_000);
-      mock.timers.reset();
+      expireAndRestore();
     } else {
       socket.write("release");
     }
   }
   const ending = await outcome;
-  await callbackDone;
+  if (!shellNode) {
+    await callbackDone;
+  }
   const pids = await fs.readFile(pidFile, "utf8").then(
     (text) => text.trim().split("\n").map(Number),
     (error: unknown) => {
@@ -192,9 +232,26 @@ try {
       return false;
     }
   });
+  let runStatus: string | undefined;
+  let nodeOutcome: string | undefined;
+  if (shellNode) {
+    const runs = (await fs.readdir(path.join(root, "runs"), { withFileTypes: true })).filter(
+      (entry) => entry.isDirectory(),
+    );
+    assert.equal(runs.length, 1);
+    const state = JSON.parse(
+      await fs.readFile(path.join(root, "runs", runs[0].name, "projections", "run.json"), "utf8"),
+    ) as { status: string; results: Record<string, { outcome: string }> };
+    runStatus = state.status;
+    nodeOutcome = state.results.command.outcome;
+  }
   process.stdout.write(
     JSON.stringify({
       ending,
+      ownedPids: pids,
+      aliveBeforeDeadline,
+      runStatus,
+      nodeOutcome,
       result,
       firstError,
       nextError,
@@ -205,9 +262,10 @@ try {
     }) + "\n",
   );
 } finally {
-  if (hasDeadline) {
-    mock.timers.reset();
-  }
+  finishing = true;
+  expireAndRestore();
+  // Join the already-observed runner outcome before fixture socket teardown.
+  await outcome;
   for (const socket of sockets) {
     socket.destroy();
   }

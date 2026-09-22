@@ -9,13 +9,24 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Sessions/watch: detect departed queue owners after PID reuse without signaling unrelated processes or changing session state. Bound identity observations and reread the journal after slow queries so replacement owners and settled results win over an unknown-outcome error.
+- Sessions/watch: allow process identity queries their existing provider budget so slow Windows observations can detect a departed owner instead of waiting indefinitely for an unfinished result.
 - Watching: drain retained events when a session closes while its observer is paused, preserving unfinished-outcome errors and exclusive cursor resumption.
+- Sessions/Windows: retire witnessed queue-owner descendants with bounded process snapshots, preserving birth checks and durable custody while avoiding one process query per survivor.
 - Sessions/output: spool slow queue observers to bounded temporary storage, preserve ordered delivery when readers resume, and detach failed observers without cancelling or replaying their prompts.
+- Sessions/Windows: preserve native command-line paths when closing saved agents, including batch launch wrappers, while leaving unmatched or unobservable processes alone.
 - Sessions/filesystem: update fs-safe to 0.18.1 so lock waits use elapsed time across system-clock adjustments and temporary output storage uses verified directory ownership.
 - PR triage example: collect all review/comment pages and query CI runs for the observed PR head instead of the oldest commit.
 - Replay viewer: preserve recorded attempt order when timestamps tie or move backward, and carry rounded seconds into minute duration labels.
 - Replay viewer: count readable run summaries toward the recent-run limit so incomplete directories cannot hide older valid runs.
 - Replay viewer: keep appended patch payloads unchanged when later operations edit their inserted data, and reuse private state while processing live patches.
+- Replay viewer: recover selected run streams after transient bundle read failures, preserving the last good state and clearing the matching warning after recovery.
+- Replay viewer: keep completed ACP conversation context visible while replaying later compute, action, and checkpoint steps.
+- PR triage example: retain complete review findings whose prose begins with “execution” and select the final assistant block instead of intermediate commentary and command logs.
+- PR triage example: report the latest completed conflict outcome in handoff prompts and final summaries, retaining resolution details and reasons that need human judgment across repeated checks.
+- Replay viewer: keep the latest run selection when a superseded load finishes, including reselecting the run already displayed.
+- Replay viewer: keep graph nodes visible during replay updates while retaining natural card resizing.
+- Replay viewer: render complete flow definitions containing unreachable loops without crashing.
+- Replay viewer: advance replay at the selected speed without losing animation intervals after renders or updates to the same run.
 
 ## 0.19.1 - 2026-09-22
 

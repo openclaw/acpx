@@ -10,7 +10,6 @@ import { readSessionRecord } from "./persistence.js";
 import { readQueueOwnerRecord, type QueueOwnerRecord } from "./queue/lease-store.js";
 
 const OWNER_OBSERVATION_REUSE_MS = 1_000;
-const OWNER_QUERY_TIMEOUT_MS = 1_000;
 
 type WatchObservation = {
   ownerKey: string | null;
@@ -63,11 +62,8 @@ async function runningOwner(
   // idle watches; other observations are bounded independently of journal polls.
   if (!reuseObservation(cached)) {
     queried = true;
-    const state = await observeProcessIncarnation(
-      owner.pid,
-      owner.processIdentity,
-      OWNER_QUERY_TIMEOUT_MS,
-    );
+    // Observation cadence must not truncate the canonical provider's query budget.
+    const state = await observeProcessIncarnation(owner.pid, owner.processIdentity);
     owner = await readQueueOwnerRecord(recordId);
     if (selectOwner(owner, observation)) {
       // A replacement may have settled or recovered the journal during the

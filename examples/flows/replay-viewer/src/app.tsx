@@ -1,7 +1,8 @@
-import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
+import { Background, Controls, type Node } from "@xyflow/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { FlowNodeCard } from "./components/flow-node-card.js";
 import { InspectorPanel } from "./components/inspector-panel.js";
+import { MeasuredFlow } from "./components/measured-flow.js";
 import { RoutedFlowEdge } from "./components/routed-flow-edge.js";
 import { RunBrowser } from "./components/run-browser.js";
 import { StepTimeline } from "./components/step-timeline.js";
@@ -154,7 +155,7 @@ export function App() {
             {bundle ? (
               <section className="canvas-card">
                 <div className="canvas-card__flow" style={{ minHeight: "360px" }}>
-                  <ReactFlow
+                  <MeasuredFlow
                     key={bundle.run.runId}
                     nodes={graph.nodes}
                     edges={graph.edges}
@@ -178,7 +179,7 @@ export function App() {
                       }}
                     />
                     <Background color="rgba(148, 163, 184, 0.08)" gap={40} />
-                  </ReactFlow>
+                  </MeasuredFlow>
                   <div className="canvas-card__camera">
                     <div
                       className="timeline__mode-switcher"

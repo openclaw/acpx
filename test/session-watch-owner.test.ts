@@ -3,6 +3,7 @@ import childProcess, { ChildProcess, type ExecFileOptions } from "node:child_pro
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import test, { type TestContext } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import type { ProcessBirthIdentity } from "../src/process-identity.js";
 import { SessionJournalReader, type SessionWatchEvent } from "../src/session/journal.js";
 import { serializeSessionRecordForDisk } from "../src/session/persistence.js";
@@ -39,6 +40,8 @@ function watchFixture(t: TestContext, platform: NodeJS.Platform = "darwin") {
     } as QueueOwnerRecord | undefined,
     now: 0,
     queries: 0,
+    queryKills: 0,
+    queryUnrefs: 0,
     sequence: 0,
     quiet: false,
     signalError: "",
@@ -99,7 +102,17 @@ function watchFixture(t: TestContext, platform: NodeJS.Platform = "darwin") {
     state.queries += 1;
     const output = state.output;
     void state.onQuery().then(() => callback(state.queryError, output, ""));
-    return new ChildProcess();
+    const child = new ChildProcess();
+    // Timed queries exercise cleanup without signaling an unspawned native handle.
+    t.mock.method(child, "kill", (signal?: NodeJS.Signals | number) => {
+      assert.equal(signal, "SIGKILL");
+      state.queryKills += 1;
+      return true;
+    });
+    t.mock.method(child, "unref", () => {
+      state.queryUnrefs += 1;
+    });
+    return child;
   }) as typeof childProcess.execFile);
   syncBuiltinESMExports();
   t.after(async () => {
@@ -132,6 +145,43 @@ test("watch bounds matching observations across journal polls and heartbeat refr
   state.now = 1_000;
   await iterator.next();
   assert.equal(state.queries, 2);
+});
+
+test("watch observes a reused Windows PID when its query exceeds the reuse cadence", async (t) => {
+  const { state, iterator, controller } = watchFixture(t, "win32");
+  assert(state.owner);
+  state.owner.processIdentity = {
+    kind: "windows-creation",
+    value: "2026-09-21T10:00:01.0000000Z",
+  };
+  state.output = `${fixturePid} 1 0 S 2026-09-21T10:00:02.0000000Z\n`;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  state.onQuery = () => new Promise((resolve) => setTimeout(resolve, 1_500));
+
+  await iterator.next();
+  const replay = iterator.next();
+  await setImmediate();
+  assert.equal(state.queries, 1);
+  state.now = 1_500;
+  t.mock.timers.tick(1_500);
+  // Let the actual observer settle before advancing the journal's polling timer.
+  await setImmediate();
+  t.mock.timers.tick(100);
+  assert.equal((await replay).done, false);
+
+  state.quiet = true;
+  const outcome = iterator.next();
+  const rejected = assert.rejects(outcome, { code: "WATCH_OUTCOME_UNKNOWN" });
+  await setImmediate();
+  t.mock.timers.tick(100);
+  await setImmediate();
+  // A truncated query leaves ownership unknown and only finishes on this abort.
+  controller.abort();
+  t.diagnostic(`query cleanup: kills=${state.queryKills}, unrefs=${state.queryUnrefs}`);
+  await rejected;
+  assert.equal(state.queries, 1, "the departed incarnation is retained after journal replay");
+  assert.equal(state.queryKills, 0, "a query within the provider budget is not terminated");
+  assert.equal(state.queryUnrefs, 0);
 });
 
 test("idle watches retain gone observations until the owner incarnation changes", async (t) => {
