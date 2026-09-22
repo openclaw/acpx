@@ -103,7 +103,7 @@ class OutputRing {
 
   read(): Buffer {
     const capacity = this.budget.limits.observerBytes;
-    const bytes = Buffer.allocUnsafe(
+    const bytes = Buffer.allocUnsafeSlow(
       Math.min(OUTPUT_CHUNK_BYTES, this.length, capacity - this.readOffset),
     );
     let offset = 0;
@@ -173,9 +173,11 @@ export class QueueSocketOutput {
     let offset = 0;
     while (!this.blocked && offset < bytes.length) {
       const end = Math.min(offset + OUTPUT_CHUNK_BYTES, bytes.length);
-      // Copy rather than retain a view into the entire serialized frame while
-      // the socket is blocked. Only the current frame remains transiently live.
-      this.write(Buffer.from(bytes.subarray(offset, end)));
+      // Queued chunks must own their backing memory: even a pooled copy can
+      // retain a larger slab or the serialized frame while the socket is blocked.
+      const chunk = Buffer.allocUnsafeSlow(end - offset);
+      bytes.copy(chunk, 0, offset, end);
+      this.write(chunk);
       offset = end;
     }
     if (offset < bytes.length) {

@@ -100,20 +100,31 @@ function drain(socket: PausedSocket): void {
 
 test("socket output copies bounded chunks and flushes exact UTF-8 before EOF", (t) => {
   const { socket, output, budget } = fixture(t);
+  const prefix = message("prefix");
   const first = message(`first:${"🍵".repeat(50_000)}`);
   const last = message("last");
+  output.send(prefix);
+  assert.equal(socket.chunks.length, 1);
+  socket.drain();
   output.send(first);
   output.send(last);
   output.end();
-  assert.equal(socket.chunks.length, 1, "a false write immediately stops socket admission");
+  assert.equal(socket.chunks.length, 2, "a false write immediately stops socket admission");
   assert.equal(socket.writableEnded, false, "EOF waits for the committed disk backlog");
   assert.equal(counts(budget).files, 1);
   drain(socket);
   assert.equal(socket.error, undefined);
-  assert.deepEqual(Buffer.concat(socket.chunks), Buffer.concat([wire(first), wire(last)]));
+  assert.deepEqual(
+    Buffer.concat(socket.chunks),
+    Buffer.concat([wire(prefix), wire(first), wire(last)]),
+  );
   for (const chunk of socket.chunks) {
     assert.ok(chunk.length <= CHUNK_BYTES);
-    assert.ok(chunk.buffer.byteLength <= CHUNK_BYTES, "a queued chunk cannot retain the frame");
+    assert.equal(
+      chunk.buffer.byteLength,
+      chunk.length,
+      "a queued chunk owns only its copied bytes",
+    );
   }
   assert.equal(counts(budget).bytes, 0);
   assert.equal(counts(budget).files, 0);
