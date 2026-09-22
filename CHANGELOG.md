@@ -9,8 +9,8 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Watching: drain retained events when a session closes while its observer is paused, preserving unfinished-outcome errors and exclusive cursor resumption.
-- PR triage example: collect all review/comment pages and query CI runs for the observed PR head instead of the oldest commit.
 - Sessions/output: spool slow queue observers to bounded temporary storage, preserve ordered delivery when readers resume, and detach failed observers without cancelling or replaying their prompts.
+- PR triage example: collect all review/comment pages and query CI runs for the observed PR head instead of the oldest commit.
 
 ## 0.19.1 - 2026-09-22
 
