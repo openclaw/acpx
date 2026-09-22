@@ -39,7 +39,8 @@ function watchFixture(t: TestContext, platform: NodeJS.Platform = "darwin") {
     } as QueueOwnerRecord | undefined,
     now: 0,
     queries: 0,
-    reads: 0,
+    sequence: 0,
+    quiet: false,
     signalError: "",
     queryError: null as Error | null,
     output: `${fixturePid} 1 1 S Mon Sep 21 10:00:01 2026\n`,
@@ -70,7 +71,8 @@ function watchFixture(t: TestContext, platform: NodeJS.Platform = "darwin") {
     return JSON.stringify(serializeSessionRecordForDisk(session));
   });
   t.mock.method(SessionJournalReader.prototype, "read", async () => {
-    const sequence = ++state.reads;
+    // Terminal decisions need an empty confirming page at the retained sequence.
+    const sequence = state.quiet ? state.sequence : ++state.sequence;
     const event = state.event ?? {
       type: "message" as const,
       cursor: String(sequence),
@@ -78,7 +80,7 @@ function watchFixture(t: TestContext, platform: NodeJS.Platform = "darwin") {
       message: { jsonrpc: "2.0" as const, method: "fixture/update", params: {} },
     };
     return {
-      events: [{ ...event, sequence }],
+      events: state.quiet ? [] : [{ ...event, sequence }],
       hasMore: false,
       sequence,
       messageSequence: sequence,
@@ -228,6 +230,7 @@ test("owner disappearance and replacement reset the missing-result grace", async
   await iterator.next();
   state.owner = undefined;
   await iterator.next();
+  state.quiet = true;
   await assert.rejects(iterator.next(), { code: "WATCH_OUTCOME_UNKNOWN" });
 });
 
@@ -347,6 +350,7 @@ test("closed history finishes after rereading an idle reused owner's journal", a
   session.closed = true;
   await iterator.next();
   assert.equal((await iterator.next()).done, false);
+  state.quiet = true;
   assert.equal((await iterator.next()).done, true);
   assert.equal(state.queries, 1);
   await iterator.return?.();
@@ -371,6 +375,7 @@ test("closing during an idle identity query still delivers the final journal mar
   };
   await iterator.next();
   assert.equal((await iterator.next()).value?.type, "turn_result");
+  state.quiet = true;
   assert.equal((await iterator.next()).done, true);
 });
 
