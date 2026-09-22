@@ -151,10 +151,11 @@ export async function readSessionRecord(sessionId: string): Promise<SessionRecor
   }
 }
 
-function hasGitDirectory(dir: string): boolean {
+function hasGitMarker(dir: string): boolean {
   const gitPath = path.join(dir, ".git");
   try {
-    return statSync(gitPath).isDirectory();
+    const marker = statSync(gitPath);
+    return marker.isDirectory() || marker.isFile();
   } catch {
     return false;
   }
@@ -162,7 +163,7 @@ function hasGitDirectory(dir: string): boolean {
 
 function isWithinBoundary(boundary: string, target: string): boolean {
   const relative = path.relative(boundary, target);
-  return relative.length === 0 || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
 export function absolutePath(value: string): string {
@@ -174,7 +175,7 @@ export function findGitRepositoryRoot(startDir: string): string | undefined {
   const root = path.parse(current).root;
 
   for (;;) {
-    if (hasGitDirectory(current)) {
+    if (hasGitMarker(current)) {
       return current;
     }
 

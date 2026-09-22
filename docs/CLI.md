@@ -513,7 +513,7 @@ to their target directory. Windows access remains governed by the directory's AC
 
 For prompt commands:
 
-1. Detect the nearest git root by checking for `.git` while walking up from `absoluteCwd`.
+1. Detect the nearest git root by checking for a `.git` directory or file while walking up from `absoluteCwd`, including worktrees and submodules.
 2. If a git root is found, walk from `absoluteCwd` up to that git root (inclusive).
 3. If no git root exists, only check exact `absoluteCwd` (no parent-directory walk).
 4. At each checked directory, find the first active (non-closed) session matching `(agentCommand, dir, optionalName)`.

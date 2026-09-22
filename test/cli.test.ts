@@ -964,34 +964,42 @@ test("sessions ensure exits even when agent ignores SIGTERM", async () => {
   });
 });
 
-test("sessions ensure resolves existing session by directory walk", async () => {
-  await withTempHome(async (homeDir) => {
-    const root = path.join(homeDir, "workspace");
-    const child = path.join(root, "packages", "app");
-    await fs.mkdir(child, { recursive: true });
-    await fs.mkdir(path.join(root, ".git"), { recursive: true });
+for (const layout of ["directory", "gitfile", "dotdot-child"] as const) {
+  test(`sessions ensure resolves existing session by directory walk (${layout})`, async () => {
+    await withTempHome(async (homeDir) => {
+      const root = path.join(homeDir, "workspace");
+      const child = path.join(root, layout === "dotdot-child" ? "..cache" : "packages", "app");
+      await fs.mkdir(child, { recursive: true });
+      if (layout === "gitfile") {
+        const metadata = path.join(homeDir, "metadata");
+        await fs.mkdir(metadata);
+        await fs.writeFile(path.join(root, ".git"), `gitdir: ${metadata}\n`);
+      } else {
+        await fs.mkdir(path.join(root, ".git"));
+      }
 
-    await writeSessionRecord(homeDir, {
-      acpxRecordId: "parent-session",
-      acpSessionId: "parent-session",
-      agentCommand: AGENT_REGISTRY.codex,
-      cwd: root,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      lastUsedAt: "2026-01-01T00:00:00.000Z",
-      closed: false,
+      await writeSessionRecord(homeDir, {
+        acpxRecordId: "parent-session",
+        acpSessionId: "parent-session",
+        agentCommand: MOCK_AGENT_COMMAND,
+        cwd: root,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        lastUsedAt: "2026-01-01T00:00:00.000Z",
+        closed: false,
+      });
+
+      const result = await runCli(
+        ["--agent", MOCK_AGENT_COMMAND, "--cwd", child, "--format", "json", "sessions", "ensure"],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+      const payload = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
+      assert.equal(payload.acpxRecordId, "parent-session");
+      assert.equal(payload.action, "session_ensured");
+      assert.equal(payload.created, false);
     });
-
-    const result = await runCli(
-      ["--cwd", child, "--format", "json", "codex", "sessions", "ensure"],
-      homeDir,
-    );
-    assert.equal(result.code, 0, result.stderr);
-    const payload = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
-    assert.equal(payload.acpxRecordId, "parent-session");
-    assert.equal(payload.action, "session_ensured");
-    assert.equal(payload.created, false);
   });
-});
+}
 
 test("sessions and status surface agentSessionId for codex and claude in JSON mode", async () => {
   await withTempHome(async (homeDir) => {

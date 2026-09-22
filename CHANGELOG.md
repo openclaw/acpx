@@ -13,6 +13,7 @@ Repo: https://github.com/openclaw/acpx
 - Runtime: reuse pending one-shot initialization when repeated creation options differ only by undefined fields or empty environment maps, avoiding duplicate agent sessions and retained clients.
 - Processes/Linux: retain witnessed descendants across wall-clock adjustments by comparing scoped kernel start ticks, and keep terminal group cutoffs and cleanup deadlines independent of wall time.
 - Output: preserve live JSON read suppression when client and agent request IDs collide, including queued prompts with overlapping controls, without changing the raw ACP message format.
+- Sessions: reuse parent-directory sessions within worktrees, submodules, and directories beginning with two dots, while respecting the nearest repository boundary.
 
 ## 0.19.0 - 2026-09-22
 

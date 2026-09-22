@@ -57,7 +57,7 @@ saved `~/.acpx/sessions` records.
 
 Prompt commands (`acpx codex 'fix tests'`, `acpx codex prompt …`) resume an existing session rather than create one. Lookup is a directory walk:
 
-1. Detect the nearest git root by walking up from the absolute `cwd`.
+1. Detect the nearest git root by walking up from the absolute `cwd`. A `.git` directory or file marks the root, including worktrees and submodules.
 2. If a git root exists, walk from `cwd` up to that root **inclusive**, checking each directory.
 3. If no git root is found, only check `cwd` exactly — no parent walk.
 4. At each directory, find the first **active** (non-closed) session matching `(agentCommand, dir, optionalName)`.
