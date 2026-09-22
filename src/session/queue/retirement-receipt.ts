@@ -182,7 +182,10 @@ export function captureQueueRetirementReceipt(
     root,
     // Expand from matching parents before pruning: an exited parent can still
     // have a child in the snapshot which must enter durable custody.
-    descendants: unsettledSnapshotWitnesses(snapshot, mergeSnapshotDescendants(table, owned, saved)),
+    descendants: unsettledSnapshotWitnesses(
+      snapshot,
+      mergeSnapshotDescendants(table, owned, saved),
+    ),
   };
   if (!parseQueueRetirementReceipt(receipt, owner)) {
     throw queueRetirementIncomplete();
@@ -259,7 +262,9 @@ export async function assertQueueRetirementComplete(
   if (witnesses.length === 0) {
     return;
   }
-  const live = witnesses.filter((witness) => observeRetirementSnapshot(witness, undefined) !== "gone");
+  const live = witnesses.filter(
+    (witness) => observeRetirementSnapshot(witness, undefined) !== "gone",
+  );
   const table = live.length > 0 ? await readRetirementSnapshot(deadline) : undefined;
   for (const witness of live) {
     if (observeRetirementSnapshot(witness, table) !== "gone") {

@@ -887,7 +887,9 @@ function hasNewRetirementWitness(
   previous: QueueRetirementReceipt,
   receipt: QueueRetirementReceipt,
 ): boolean {
-  const saved = new Map(previous.descendants.map((witness) => [witness.pid, witness.processIdentity]));
+  const saved = new Map(
+    previous.descendants.map((witness) => [witness.pid, witness.processIdentity]),
+  );
   return receipt.descendants.some(
     (witness) =>
       compareProcessBirthIdentity(saved.get(witness.pid), witness.processIdentity) !== "matching",
@@ -968,7 +970,9 @@ function signalRecordedDescendants(
   table: Map<number, ProcessTableEntry>,
   deadline: number,
 ): void {
-  if (receipt.descendants.some((witness) => observeRetirementSnapshot(witness, table) === "unknown")) {
+  if (
+    receipt.descendants.some((witness) => observeRetirementSnapshot(witness, table) === "unknown")
+  ) {
     throw queueRetirementIncomplete();
   }
   const ordered = leafFirstRetirementWitnesses(receipt, table);
