@@ -4,7 +4,7 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { normalizeAgentCommandInput } from "../src/acp/client-process.js";
 import { withTimeout } from "../src/async-control.js";
@@ -45,6 +45,32 @@ const DISCARD_OUTPUT: OutputFormatter = {
   flush() {},
 };
 
+function failSpoolWrites(t: TestContext) {
+  const state = { writes: 0, descriptors: new Set<number>() };
+  const { openSync, closeSync, writeSync } = fsSync;
+  t.mock.method(fsSync, "openSync", (...args: Parameters<typeof openSync>) => {
+    const fd = openSync(...args);
+    // Only the output ring opens a private read/write sync descriptor here.
+    // Native lease guards also use writeSync and must retain their real writes.
+    if (args[1] === "wx+" && args[2] === 0o600) {
+      state.descriptors.add(fd);
+    }
+    return fd;
+  });
+  t.mock.method(fsSync, "closeSync", (fd: number) => {
+    closeSync(fd);
+    state.descriptors.delete(fd);
+  });
+  t.mock.method(fsSync, "writeSync", (...args: Parameters<typeof writeSync>) => {
+    if (state.descriptors.has(args[0])) {
+      state.writes += 1;
+      throw Object.assign(new Error("fixture output disk full"), { code: "ENOSPC" });
+    }
+    return writeSync(...args);
+  });
+  return state;
+}
+
 for (const detachment of ["stalled", "disconnected", "spool failure"] as const) {
   test(
     `${detachment} submitters detach while their prompt completes once and the successor runs`,
@@ -56,13 +82,7 @@ for (const detachment of ["stalled", "disconnected", "spool failure"] as const) 
         "Windows named pipes do not expose partial write progress",
     },
     async (t) => {
-      if (detachment === "spool failure") {
-        // The synchronous descriptor is exclusively the output spool; journal
-        // persistence uses async writes and must still record the settled turn.
-        t.mock.method(fsSync, "writeSync", () => {
-          throw Object.assign(new Error("fixture output disk full"), { code: "ENOSPC" });
-        });
-      }
+      const spoolFailure = detachment === "spool failure" ? failSpoolWrites(t) : undefined;
       await withTempHome("acpx-observer-detach-", async (home) => {
         const agentPath = path.join(home, "agent.mjs");
         const logPath = path.join(home, "agent.jsonl");
@@ -145,6 +165,10 @@ for (const detachment of ["stalled", "disconnected", "spool failure"] as const) 
           }
           await closed;
           assert.equal(socket.writableLength, 0);
+          if (spoolFailure) {
+            assert.equal(spoolFailure.writes, 1, "the owned output spool must hit ENOSPC");
+            assert.equal(spoolFailure.descriptors.size, 0, "the failed spool must close");
+          }
           assert.ok(client);
           client.resume();
           await assert.rejects(first, {
