@@ -599,6 +599,7 @@ async function* iterateJournal(
   let after = options.cursor === undefined ? -1 : parseCursor(record.acpxRecordId, options.cursor);
   const reader = new SessionJournalReader(record);
   let first = true;
+  const observation = { stopObserved: false };
   for (;;) {
     if (signal.aborted) {
       return;
@@ -619,7 +620,7 @@ async function* iterateJournal(
       after = sequence;
       yield event;
     }
-    if (!(await continueAfterPage(record, snapshot, options))) {
+    if (!(await continueAfterPage(record, snapshot, options, observation))) {
       return;
     }
   }
@@ -627,8 +628,9 @@ async function* iterateJournal(
 
 async function continueAfterPage(
   record: SessionRecord,
-  snapshot: { hasMore: boolean; requestId: string | null },
+  snapshot: { hasMore: boolean; requestId: string | null; events: readonly JournalEvent[] },
   options: WatchSessionOptions & { signal: AbortSignal },
+  observation: { stopObserved: boolean },
 ): Promise<boolean> {
   if (!snapshot.hasMore && options.continueWatching) {
     const keep = await settleUnlessAborted(
@@ -636,8 +638,12 @@ async function continueAfterPage(
       options.signal,
     );
     if (!keep) {
-      return false;
+      // Closure can be newer than the yielded page; stop only after an empty reread.
+      const drained = observation.stopObserved && snapshot.events.length === 0;
+      observation.stopObserved = true;
+      return !drained && !options.signal.aborted;
     }
+    observation.stopObserved = false;
   }
   await settleUnlessAborted(
     delay(snapshot.hasMore ? 0 : 100, undefined, { signal: options.signal }),

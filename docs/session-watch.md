@@ -13,6 +13,10 @@ acpx --format json pi sessions watch -s reviewer
 
 Watching replays retained events and then follows new ones. Attaching, disconnecting, pressing Ctrl+C, or closing a watcher leaves the active turn running. Watching an idle session waits without starting an agent or extending the owner's idle TTL. A closed session finishes after replaying its retained events.
 
+If the session closes while the consumer is handling an event, watching rereads
+and drains retained history before finishing. An unfinished attempt still reports
+an unknown outcome instead of becoming a successful end of the stream.
+
 You can also select the session on the agent, as in `acpx pi -s reviewer sessions watch`. An explicit `watch -s` or `watch --name` takes precedence. Without either selector, watch uses the cwd's default session.
 
 Session discovery reads records without creating or repairing the index. A readable session store does not need to be writable to watch it.
