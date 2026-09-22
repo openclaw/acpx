@@ -5,6 +5,7 @@ import { SessionEventWriter } from "../src/session/events.js";
 import { closeSession } from "../src/session/execution/session-control.js";
 import {
   SessionJournalReader,
+  SessionWatchError,
   watchSession as watchJournal,
   type SessionWatchEvent,
 } from "../src/session/journal.js";
@@ -12,6 +13,102 @@ import { writeSessionRecord } from "../src/session/persistence.js";
 import { watchSession } from "../src/session/watch.js";
 import type { AcpJsonRpcMessage, SessionRecord } from "../src/types.js";
 import { makeSessionRecord, withTempHome } from "./runtime-test-helpers.js";
+
+for (const outcome of ["closed", "unknown"] as const) {
+  test(`watch confirms a stable ${outcome} outcome without another policy call`, async () => {
+    await withTempHome("acpx-watch-confirm-", async (home) => {
+      const id = "synthetic-terminal-confirmation";
+      const record = makeSessionRecord({
+        acpxRecordId: id,
+        acpSessionId: "synthetic-provider",
+        agentCommand: "synthetic-unused",
+        cwd: home,
+        eventLog: { ...defaultSessionEventLog(id), segment_count: 1 },
+      });
+      await writeSessionRecord(record);
+      await appendTurn(record, "A", undefined, outcome === "closed");
+      const terminalError = new SessionWatchError("WATCH_OUTCOME_UNKNOWN", "Pending A");
+      const signal = AbortSignal.timeout(10_000);
+      let calls = 0;
+      const events: SessionWatchEvent[] = [];
+      const consume = async () => {
+        for await (const event of watchJournal({
+          record,
+          signal,
+          continueWatching: async (_record, pendingRequestId) => {
+            calls += 1;
+            assert.equal(calls, 1, "the confirming read must precede any further policy call");
+            assert.equal(pendingRequestId, outcome === "closed" ? null : "A");
+            if (outcome === "unknown") {
+              throw terminalError;
+            }
+            return false;
+          },
+        })) {
+          events.push(event);
+        }
+      };
+      if (outcome === "unknown") {
+        await assert.rejects(consume, (error: unknown) => error === terminalError);
+      } else {
+        await consume();
+      }
+      assert.equal(calls, 1);
+      assert.equal(events.length, outcome === "closed" ? 2 : 1);
+      assert.equal(signal.aborted, false);
+    });
+  });
+}
+
+test("watch drains a retained result before accepting a pending-outcome decision", async () => {
+  await withTempHome("acpx-watch-pending-drain-", async (home) => {
+    const id = "synthetic-pending-drain";
+    const record = makeSessionRecord({
+      acpxRecordId: id,
+      acpSessionId: "synthetic-provider",
+      agentCommand: "synthetic-unused",
+      cwd: home,
+      eventLog: { ...defaultSessionEventLog(id), segment_count: 1 },
+    });
+    await writeSessionRecord(record);
+    const writer = await SessionEventWriter.open(record);
+    await writer.beginTurn("A");
+    await writer.appendMessage(message("A output"));
+    const stopped = new AbortController();
+    const signal = AbortSignal.any([stopped.signal, AbortSignal.timeout(10_000)]);
+    let completed = false;
+    const iterator = watchJournal({
+      record,
+      signal,
+      continueWatching: async (_record, pendingRequestId) => {
+        if (!completed) {
+          assert.equal(pendingRequestId, "A");
+          await writer.finishTurn("A", { status: "completed", stopReason: "end_turn" });
+          await writer.close();
+          await closeSession(id);
+          completed = true;
+          // The policy decision used the page yielded before this retained settlement.
+          throw new SessionWatchError("WATCH_OUTCOME_UNKNOWN", "Stale pending A observation");
+        }
+        assert.equal(pendingRequestId, null);
+        return false;
+      },
+    })[Symbol.asyncIterator]();
+    try {
+      await nextEvent(iterator, "turn_started", "A");
+      await nextEvent(iterator, "message", "A");
+      const result = await nextEvent(iterator, "turn_result", "A");
+      assert(result.type === "turn_result");
+      assert.deepEqual(result.result, { status: "completed", stopReason: "end_turn" });
+      assert.equal((await iterator.next()).done, true);
+      assert.equal(signal.aborted, false);
+    } finally {
+      stopped.abort();
+      await iterator.return?.();
+      await writer.close();
+    }
+  });
+});
 
 function message(text: string): AcpJsonRpcMessage {
   return {

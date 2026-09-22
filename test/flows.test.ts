@@ -1771,23 +1771,35 @@ test("FlowRunner times out async shell parse callbacks", async () => {
       outputRoot,
     });
 
+    let parseEntered = false;
+    let parseSignal: AbortSignal | undefined;
     const flow = defineFlow({
       name: "shell-parse-timeout-test",
       startAt: "slow",
       nodes: {
         slow: shell({
-          timeoutMs: 50,
+          timeoutMs: 2_000,
           exec: () => ({
             command: process.execPath,
             args: ["-e", 'process.stdout.write("ok")'],
           }),
-          parse: async () => await new Promise(() => {}),
+          parse: async (result, context) => {
+            assert.equal(result.stdout, "ok");
+            assert.equal(result.exitCode, 0);
+            assert.equal(result.signal, null);
+            assert.equal(context.signal?.aborted, false);
+            parseEntered = true;
+            parseSignal = context.signal;
+            return await new Promise(() => {});
+          },
         }),
       },
       edges: [],
     });
 
     await assert.rejects(async () => await runner.run(flow, {}), TimeoutError);
+    assert.equal(parseEntered, true, "the deadline must expire during parsing, not startup");
+    assert.equal(parseSignal?.aborted, true);
     const runDir = await waitForRunDir(outputRoot, "shell-parse-timeout-test");
     const state = await readRunJson(runDir);
     const slowResult = (state.results as Record<string, Record<string, unknown>>).slow;
