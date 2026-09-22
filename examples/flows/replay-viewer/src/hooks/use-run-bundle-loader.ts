@@ -128,6 +128,10 @@ export function useRunBundleLoader(deps: RunBundleLoaderDeps = DEFAULT_DEPS) {
   const loadRecentRun = useCallback(
     async (run: RunBundleSummary): Promise<LoadedRunBundle | null> => {
       if (activeRunIdRef.current === run.runId && bundleRef.current?.sourceType === "recent") {
+        // A cached selection still supersedes an older run load.
+        loadRunSequenceRef.current += 1;
+        loadingRunIdRef.current = null;
+        setLoadingState((current) => (current === "run" ? null : current));
         return bundleRef.current;
       }
       if (loadingRunIdRef.current === run.runId) {

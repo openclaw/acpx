@@ -88,6 +88,9 @@ When a later step shows an earlier ACP conversation as context, the completed
 text stays visible during replay. Progressive reveal belongs to the attempt
 that produced the conversation.
 
+Selecting the displayed run again keeps it selected even if an earlier choice
+finishes loading later. A superseded load cannot replace it or show an obsolete error.
+
 ## Included sample
 
 The bundled sample under `public/sample-run/` still exists for development and

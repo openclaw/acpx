@@ -1035,3 +1035,148 @@ async function withLiveReadRecoveryLoader(
     restoreBrowser();
   }
 }
+
+for (const scenario of ["stale success", "stale error", "repeat pending B"] as const) {
+  test(`useRunBundleLoader honors selection intent after ${scenario}`, async () => {
+    const runA: RunBundleSummary = {
+      runId: "synthetic-selection-A",
+      flowName: "selection-intent",
+      runTitle: "Selection A",
+      status: "completed",
+      startedAt: "2026-09-22T10:00:00.000Z",
+      path: "/synthetic/selection-A",
+    };
+    const runB: RunBundleSummary = {
+      ...runA,
+      runId: "synthetic-selection-B",
+      runTitle: "Selection B",
+      path: "/synthetic/selection-B",
+    };
+    const bundleA = makeLoadedRunBundle(runA);
+    const bundleB = makeLoadedRunBundle(runB);
+    let resolveB!: (bundle: LoadedRunBundle) => void;
+    let rejectB!: (error: Error) => void;
+    const firstB = new Promise<LoadedRunBundle>((resolve, reject) => {
+      resolveB = resolve;
+      rejectB = reject;
+    });
+    let loadsA = 0;
+    let loadsB = 0;
+    const deps: RunBundleLoaderDeps = {
+      createRecentRunBundleReader: (run) => ({
+        sourceType: "recent",
+        label: run.runId,
+        readText: async () => {
+          throw new Error("Unexpected fixture file read");
+        },
+      }),
+      listRecentRuns: async () => [],
+      loadRunBundle: async (reader) => {
+        if (reader.label === runA.runId) {
+          loadsA += 1;
+          return bundleA;
+        }
+        assert.equal(reader.label, runB.runId);
+        loadsB += 1;
+        return loadsB === 1 ? firstB : bundleB;
+      },
+    };
+    let current: ReturnType<typeof useRunBundleLoader> | null = null;
+    const read = () => {
+      assert(current);
+      return current;
+    };
+    const pathname = () =>
+      (
+        globalThis as unknown as {
+          window: { location: { pathname: string } };
+        }
+      ).window.location.pathname;
+    function Harness() {
+      current = useRunBundleLoader(deps);
+      return createElement("div");
+    }
+    const restoreBrowser = installFakeBrowser();
+    let renderer: ReturnType<typeof create> | null = null;
+    let pendingLoad: Promise<LoadedRunBundle | null> | null = null;
+    let lastSelection: Promise<LoadedRunBundle | null> | null = null;
+    try {
+      await act(async () => {
+        renderer = createRenderer(createElement(Harness));
+        await flushReactWork();
+      });
+      await act(async () => {
+        await read().loadRecentRun(runA);
+        await flushReactWork();
+      });
+      assert.equal(read().activeRunId, runA.runId);
+      assert.equal(pathname(), `/run/${runA.runId}`);
+      assert.equal(read().loadingState, null);
+
+      await act(async () => {
+        pendingLoad = read().loadRecentRun(runB);
+        await flushReactWork();
+      });
+      assert.equal(read().activeRunId, runA.runId);
+      assert.equal(read().loadingState, "run");
+      assert.equal(loadsB, 1);
+
+      await act(async () => {
+        lastSelection = read().loadRecentRun(scenario === "repeat pending B" ? runB : runA);
+        await flushReactWork();
+      });
+      const afterSelection = {
+        activeRunId: read().activeRunId,
+        bundle: read().bundle,
+        pathname: pathname(),
+        loadingState: read().loadingState,
+        errorMessage: read().errorMessage,
+      };
+      await act(async () => {
+        if (scenario === "stale error") {
+          rejectB(new Error("Obsolete B load failed"));
+        } else {
+          resolveB(bundleB);
+        }
+        await pendingLoad;
+        await lastSelection;
+        await flushReactWork();
+      });
+
+      const expectedRun = scenario === "repeat pending B" ? runB : runA;
+      const expectedBundle = scenario === "repeat pending B" ? bundleB : bundleA;
+      assert.equal(read().activeRunId, expectedRun.runId);
+      assert.strictEqual(read().bundle, expectedBundle);
+      assert.equal(pathname(), `/run/${expectedRun.runId}`);
+      assert.equal(read().loadingState, null);
+      assert.equal(read().errorMessage, null);
+      assert.equal(loadsA, 1, "reselecting displayed A must not refetch A");
+      assert.equal(loadsB, 1, "repeating a pending B selection must not duplicate its read");
+      assert.equal(afterSelection.activeRunId, runA.runId);
+      assert.strictEqual(afterSelection.bundle, bundleA);
+      assert.equal(afterSelection.pathname, `/run/${runA.runId}`);
+      assert.equal(afterSelection.errorMessage, null);
+      assert.equal(afterSelection.loadingState, scenario === "repeat pending B" ? "run" : null);
+
+      if (scenario !== "repeat pending B") {
+        await act(async () => {
+          await read().loadRecentRun(runB);
+          await flushReactWork();
+        });
+        assert.equal(loadsB, 2, "superseded loading identity must not block a fresh B selection");
+        assert.equal(read().activeRunId, runB.runId);
+        assert.equal(pathname(), `/run/${runB.runId}`);
+        assert.equal(read().loadingState, null);
+      }
+    } finally {
+      await act(async () => {
+        resolveB(bundleB);
+        await pendingLoad;
+        await lastSelection;
+        renderer?.unmount();
+        await flushReactWork();
+      });
+      restoreBrowser();
+    }
+  });
+}
