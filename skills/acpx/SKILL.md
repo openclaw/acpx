@@ -117,6 +117,7 @@ Rules:
 - Unknown positional agent tokens are treated as raw agent commands.
 - `--agent <command>` explicitly sets a raw ACP adapter command.
 - Do not combine a positional agent and `--agent` in the same command.
+- Gemini version checks, Copilot ACP support checks, and their startup diagnostics use the selected agent's working directory and child environment, including session environment and embedded runtime overrides.
 
 ## Embedded hosts
 

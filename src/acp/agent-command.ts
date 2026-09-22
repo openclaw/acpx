@@ -17,6 +17,11 @@ const GEMINI_ACP_FLAG_VERSION = [0, 33, 0] as const;
 const COPILOT_HELP_TIMEOUT_MS = 2_000;
 const CLAUDE_CODE_DEFAULT_SETTING_SOURCES = ["project", "local"] as const;
 
+type AgentCommandContext = {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+};
+
 type GeminiVersion = {
   raw: string;
   parts: [number, number, number];
@@ -168,8 +173,16 @@ function compareVersionParts(left: readonly number[], right: readonly number[]):
   return 0;
 }
 
-async function detectGeminiVersion(command: string): Promise<GeminiVersion | undefined> {
-  const output = await readCommandOutput(command, ["--version"], GEMINI_VERSION_TIMEOUT_MS);
+async function detectGeminiVersion(
+  command: string,
+  context: AgentCommandContext,
+): Promise<GeminiVersion | undefined> {
+  const output = await readCommandOutput(
+    command,
+    ["--version"],
+    GEMINI_VERSION_TIMEOUT_MS,
+    context,
+  );
   const versionLine = output
     ?.split(/\r?\n/)
     .map((line) => line.trim())
@@ -180,12 +193,13 @@ async function detectGeminiVersion(command: string): Promise<GeminiVersion | und
 export async function resolveGeminiCommandArgs(
   command: string,
   args: readonly string[],
+  context: AgentCommandContext,
 ): Promise<string[]> {
   if (basenameToken(command) !== "gemini" || !args.includes("--acp")) {
     return [...args];
   }
 
-  const version = await detectGeminiVersion(command);
+  const version = await detectGeminiVersion(command, context);
   if (version && compareVersionParts(version.parts, GEMINI_ACP_FLAG_VERSION) < 0) {
     return args.map((arg) => (arg === "--acp" ? "--experimental-acp" : arg));
   }
@@ -197,15 +211,23 @@ async function readCommandOutput(
   command: string,
   args: readonly string[],
   timeoutMs: number,
+  context: AgentCommandContext,
 ): Promise<string | undefined> {
   return await new Promise<string | undefined>((resolve) => {
     const child = spawn(
       command,
       [...args],
-      buildSpawnCommandOptions(command, {
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-      }),
+      buildSpawnCommandOptions(
+        command,
+        {
+          cwd: context.cwd,
+          env: context.env,
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        },
+        process.platform,
+        context.env,
+      ),
     );
 
     let stdout = "";
@@ -244,18 +266,22 @@ async function readCommandOutput(
   });
 }
 
-export async function buildGeminiAcpStartupTimeoutMessage(command: string): Promise<string> {
+export async function buildGeminiAcpStartupTimeoutMessage(
+  command: string,
+  context: AgentCommandContext,
+): Promise<string> {
   const parts = [
     "Gemini CLI ACP startup timed out before initialize completed.",
     "This usually means the local Gemini CLI is waiting on interactive OAuth or has incompatible ACP subprocess behavior.",
   ];
 
-  const version = await detectGeminiVersion(command);
+  const version = await detectGeminiVersion(command, context);
   if (version) {
     parts.push(`Detected Gemini CLI version: ${version.raw}.`);
   }
 
-  if (!process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
+  const env = context.env;
+  if (!env.GEMINI_API_KEY && !env.GOOGLE_API_KEY) {
     parts.push("No GEMINI_API_KEY or GOOGLE_API_KEY was set for non-interactive auth.");
   }
 
@@ -271,27 +297,22 @@ export function buildClaudeAcpSessionCreateTimeoutMessage(): string {
   ].join(" ");
 }
 
-async function buildCopilotAcpUnsupportedMessage(command: string): Promise<string> {
-  const parts = [
+function buildCopilotAcpUnsupportedMessage(): string {
+  return [
     "GitHub Copilot CLI ACP stdio mode is not available in the installed copilot binary.",
     "acpx copilot expects a Copilot CLI release that supports --acp --stdio.",
-  ];
-
-  const helpOutput = await readCommandOutput(command, ["--help"], COPILOT_HELP_TIMEOUT_MS);
-  if (typeof helpOutput === "string" && !helpOutput.includes("--acp")) {
-    parts.push("Detected copilot --help output without --acp support.");
-  }
-
-  parts.push(
+    "Detected copilot --help output without --acp support.",
     "Upgrade GitHub Copilot CLI to a release with ACP stdio support, or use --agent with another ACP-compatible adapter in the meantime.",
-  );
-  return parts.join(" ");
+  ].join(" ");
 }
 
-export async function ensureCopilotAcpSupport(command: string): Promise<void> {
-  const helpOutput = await readCommandOutput(command, ["--help"], COPILOT_HELP_TIMEOUT_MS);
+export async function ensureCopilotAcpSupport(
+  command: string,
+  context: AgentCommandContext,
+): Promise<void> {
+  const helpOutput = await readCommandOutput(command, ["--help"], COPILOT_HELP_TIMEOUT_MS, context);
   if (typeof helpOutput === "string" && !helpOutput.includes("--acp")) {
-    throw new CopilotAcpUnsupportedError(await buildCopilotAcpUnsupportedMessage(command), {
+    throw new CopilotAcpUnsupportedError(buildCopilotAcpUnsupportedMessage(), {
       retryable: false,
     });
   }

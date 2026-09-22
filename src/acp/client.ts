@@ -709,8 +709,14 @@ export class AcpClient {
     );
     const resolvedBuiltInLaunch = resolveBuiltInAgentLaunch(this.options.agentCommand);
     const spawnCommand = resolvedBuiltInLaunch?.command ?? configuredCommand.command;
+    const spawnOptions = buildAgentSpawnOptions(
+      this.options.cwd,
+      this.options.authCredentials,
+      this.options.sessionOptions?.env,
+      this.options.agentProcessEnv,
+    );
     let args = resolvedBuiltInLaunch?.args ?? configuredCommand.args;
-    args = await resolveGeminiCommandArgs(spawnCommand, args);
+    args = await resolveGeminiCommandArgs(spawnCommand, args, spawnOptions);
     if (isQoderAcpCommand(spawnCommand, args)) {
       args = buildQoderAcpCommandArgs(args, this.options);
     }
@@ -722,12 +728,7 @@ export class AcpClient {
       geminiAcp: isGeminiAcpCommand(spawnCommand, args),
       copilotAcp: isCopilotAcpCommand(spawnCommand, args),
       claudeAcp: isClaudeAcpCommand(spawnCommand, args),
-      spawnOptions: buildAgentSpawnOptions(
-        this.options.cwd,
-        this.options.authCredentials,
-        this.options.sessionOptions?.env,
-        this.options.agentProcessEnv,
-      ),
+      spawnOptions,
     };
   }
 
@@ -750,7 +751,7 @@ export class AcpClient {
 
   private async ensureLaunchSupport(plan: AgentLaunchPlan): Promise<void> {
     if (plan.copilotAcp) {
-      await ensureCopilotAcpSupport(plan.spawnCommand);
+      await ensureCopilotAcpSupport(plan.spawnCommand, plan.spawnOptions);
     }
     if (!plan.claudeAcp) {
       return;
@@ -965,7 +966,10 @@ export class AcpClient {
     await this.terminateAgentProcess(params.child);
     if (params.launch.geminiAcp && error instanceof TimeoutError) {
       throw new GeminiAcpStartupTimeoutError(
-        await buildGeminiAcpStartupTimeoutMessage(params.launch.spawnCommand),
+        await buildGeminiAcpStartupTimeoutMessage(
+          params.launch.spawnCommand,
+          params.launch.spawnOptions,
+        ),
         {
           cause: error,
           retryable: true,

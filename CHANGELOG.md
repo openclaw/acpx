@@ -16,6 +16,7 @@ Repo: https://github.com/openclaw/acpx
 - Output: preserve live JSON read suppression when client and agent request IDs collide, including queued prompts with overlapping controls, without changing the raw ACP message format.
 - Sessions: reuse parent-directory sessions within worktrees, submodules, and directories beginning with two dots, while respecting the nearest repository boundary.
 - Flows: execute empty-string node IDs, retain outputs and results for names such as `__proto__`, and validate and route only declared own graph entries.
+- Adapter startup: use the selected child environment and working directory for Gemini version checks, Copilot ACP support checks, and startup diagnostics.
 
 ## 0.19.0 - 2026-09-22
 
