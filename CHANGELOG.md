@@ -9,6 +9,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Sessions/watch: detect departed queue owners after PID reuse without signaling unrelated processes or changing session state. Bound identity observations and reread the journal after slow queries so replacement owners and settled results win over an unknown-outcome error.
+- Sessions/watch: allow process identity queries their existing provider budget so slow Windows observations can detect a departed owner instead of waiting indefinitely for an unfinished result.
 - Watching: drain retained events when a session closes while its observer is paused, preserving unfinished-outcome errors and exclusive cursor resumption.
 - Sessions/output: spool slow queue observers to bounded temporary storage, preserve ordered delivery when readers resume, and detach failed observers without cancelling or replaying their prompts.
 - PR triage example: collect all review/comment pages and query CI runs for the observed PR head instead of the oldest commit.
@@ -18,7 +19,6 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: recover selected run streams after transient bundle read failures, preserving the last good state and clearing the matching warning after recovery.
 - Replay viewer: keep completed ACP conversation context visible while replaying later compute, action, and checkpoint steps.
 - PR triage example: retain complete review findings whose prose begins with “execution” and select the final assistant block instead of intermediate commentary and command logs.
-- Sessions/watch: allow process identity queries their existing provider budget so slow Windows observations can detect a departed owner instead of waiting indefinitely for an unfinished result.
 
 ## 0.19.1 - 2026-09-22
 
