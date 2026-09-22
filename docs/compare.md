@@ -66,6 +66,12 @@ takes precedence over the top-level value. That workspace supplies the project
 configuration, agent definitions and permission defaults, and anchors relative
 prompt files, permission-policy files and top-level MCP configuration paths.
 
+Conflicting permission modes fail the invocation before prompt or policy input is
+read. Permission counters include observed decisions on failed runs. A known
+permission failure reports `permission_denied`; a genuine runtime failure remains
+`error` even if a permission request was denied earlier. Completed runs with any
+denied or cancelled request still report `permission_denied`.
+
 ## Interruption
 
 SIGINT, SIGTERM and SIGHUP during execution cancel the active run and wait for

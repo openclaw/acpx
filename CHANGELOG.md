@@ -81,6 +81,7 @@ Repo: https://github.com/openclaw/acpx
 - Compare: report only explicit token counts, leaving missing totals unknown instead of treating context capacity or occupancy as token consumption.
 - Compare: accept the `--json` alias with strict JSON output and honor command-local output selection for configuration and prompt-input errors, while preserving format precedence and literal prompt values.
 - Sessions/config: preserve opaque config option IDs through saving, replay, and removal, including `__proto__` and space-padded keys that differ from their unpadded siblings.
+- Compare: preserve actual permission counts on failed runs, distinguish permission failures from runtime errors, and reject conflicting permission modes before reading prompt or policy input.
 
 ## 0.18.0 - 2026-09-20
 

@@ -12,6 +12,7 @@ import type {
   PermissionEscalationEvent,
   PermissionMode,
   PermissionPolicy,
+  PermissionStats,
   PromptInput,
   AgentSessionListResult,
   SessionNotification,
@@ -58,6 +59,7 @@ export type RunOnceOptions = {
   onSessionUpdate?: (notification: SessionNotification) => void;
   onClientOperation?: (operation: ClientOperation) => void;
   onPermissionEscalation?: (event: PermissionEscalationEvent) => void;
+  onPermissionStats?: (stats: PermissionStats) => void;
   suppressSdkConsoleErrors?: boolean;
   sessionOptions?: SessionAgentOptions;
   configOptions?: Array<{ configId: string; value: string }>;

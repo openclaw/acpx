@@ -1399,6 +1399,11 @@ export async function runOnce(
     try {
       await closeOwnedClient();
     } finally {
+      try {
+        options.onPermissionStats?.(client.getPermissionStats());
+      } catch {
+        // Accounting observers must not replace execution or cleanup outcomes.
+      }
       output.flush();
     }
   }

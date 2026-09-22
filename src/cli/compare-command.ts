@@ -1,10 +1,12 @@
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { Command, InvalidArgumentError } from "commander";
+import { normalizeOutputError } from "../acp/error-normalization.js";
 import { TimeoutError } from "../async-control.js";
 import { DISCARD_OUTPUT_FORMATTER } from "../session/execution/discard-output.js";
 import { runOnce } from "../session/session.js";
 import type {
+  PermissionMode,
   PermissionPolicy,
   PermissionStats,
   PromptInput,
@@ -59,6 +61,7 @@ type CompareFlags = {
 type RunCapture = {
   finalMessage: string;
   usage: SessionTokenUsage;
+  permissionStats: PermissionStats;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -183,6 +186,16 @@ function buildSuccessRow(
   };
 }
 
+function rowStatusFromError(error: unknown): CompareRow["status"] {
+  if (error instanceof TimeoutError) {
+    return "cancelled";
+  }
+  const { code } = normalizeOutputError(error);
+  return code === "PERMISSION_PROMPT_UNAVAILABLE" || code === "PERMISSION_DENIED"
+    ? "permission_denied"
+    : "error";
+}
+
 function buildErrorRow(
   agentName: string,
   caught: unknown,
@@ -191,7 +204,7 @@ function buildErrorRow(
 ): CompareRow {
   return {
     agent: agentName,
-    status: caught instanceof TimeoutError ? "cancelled" : "error",
+    status: rowStatusFromError(caught),
     stop_reason: null,
     wall_ms: Math.round(performance.now() - startedAt),
     input_tokens: capture.usage.input_tokens ?? null,
@@ -202,8 +215,8 @@ function buildErrorRow(
       collapseWhitespace(caught instanceof Error ? caught.message : String(caught)),
       FINAL_MESSAGE_PREVIEW_CHARS,
     ),
-    permission_requests: 0,
-    permission_denied: 0,
+    permission_requests: capture.permissionStats.requested,
+    permission_denied: capture.permissionStats.denied + capture.permissionStats.cancelled,
   };
 }
 
@@ -212,9 +225,14 @@ async function runAgentForCompare(params: {
   prompt: PromptInput;
   config: ResolvedAcpxConfig;
   globalFlags: ReturnType<typeof resolveGlobalFlags>;
+  permissionMode: PermissionMode;
   permissionPolicy: PermissionPolicy | undefined;
 }): Promise<CompareRow> {
-  const capture: RunCapture = { finalMessage: "", usage: {} };
+  const capture: RunCapture = {
+    finalMessage: "",
+    usage: {},
+    permissionStats: { requested: 0, approved: 0, denied: 0, cancelled: 0 },
+  };
   const t0 = performance.now();
 
   try {
@@ -225,7 +243,7 @@ async function runAgentForCompare(params: {
       agentArgv: agent.agentArgv,
       cwd: agent.cwd,
       prompt: params.prompt,
-      permissionMode: resolvePermissionMode(params.globalFlags, params.config.defaultPermissions),
+      permissionMode: params.permissionMode,
       permissionPolicy: params.permissionPolicy,
       outputFormatter: DISCARD_OUTPUT_FORMATTER,
       suppressSdkConsoleErrors: true,
@@ -233,6 +251,9 @@ async function runAgentForCompare(params: {
       promptRetries: params.globalFlags.promptRetries,
       sessionOptions: sessionOptionsFromGlobalFlags(params.globalFlags),
       onSessionUpdate: (notification) => captureSessionUpdate(notification, capture),
+      onPermissionStats: (stats) => {
+        capture.permissionStats = stats;
+      },
     });
     return buildSuccessRow(params.agentName, result, capture, t0);
   } catch (caught) {
@@ -386,13 +407,21 @@ export function registerCompareCommand(program: Command, config: ResolvedAcpxCon
     const promptFile = resolvePromptFile(flags);
     const { promptTokens } = scanCompareArgs(program.args.slice(1));
     const { agents, promptText } = splitCompareArgs(args, promptFile, promptTokens);
+    const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
     const prompt = await readPromptInput(promptFile, promptText, globalFlags.cwd, "final argument");
     const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
 
     const { rows, interrupted } = await runCompareAgents(
       agents,
       async (agentName) =>
-        await runAgentForCompare({ agentName, prompt, config, globalFlags, permissionPolicy }),
+        await runAgentForCompare({
+          agentName,
+          prompt,
+          config,
+          globalFlags,
+          permissionMode,
+          permissionPolicy,
+        }),
     );
 
     printRows(rows, outputPolicy.format);

@@ -74,12 +74,14 @@ async function writeCompareAgent(homeDir: string): Promise<string> {
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { Readable, Writable } from "node:stream";
 
 const require = createRequire(process.env.ACPX_TEST_REPO_ROOT + "/package.json");
 const {
   AgentSideConnection,
   PROTOCOL_VERSION,
+  RequestError,
   ndJsonStream,
 } = await import(require.resolve("@agentclientprotocol/sdk"));
 
@@ -162,7 +164,26 @@ class CompareAgent {
       return { stopReason: "end_turn" };
     }
 
-    if (mode === "permission" || mode === "permission-mixed") {
+    if (mode === "filesystem-permission-error") {
+      try {
+        await this.connection.readTextFile({
+          sessionId: params.sessionId,
+          path: path.join(process.cwd(), "permission-input.txt"),
+        });
+      } catch {
+        throw RequestError.internalError(
+          { fixture: mode },
+          "SYNTHETIC_COMPARE_FILESYSTEM_RUNTIME_FAILURE",
+        );
+      }
+      throw new Error("Synthetic filesystem read unexpectedly succeeded");
+    }
+
+    if (mode === "cancelled") {
+      return { stopReason: "cancelled" };
+    }
+
+    if (mode === "permission" || mode === "permission-mixed" || mode === "permission-error") {
       const outcomes = [];
       if (mode === "permission-mixed") {
         const readResponse = await this.connection.requestPermission({
@@ -192,6 +213,12 @@ class CompareAgent {
         ],
       });
       outcomes.push(response.outcome.optionId);
+      if (mode === "permission-error") {
+        throw RequestError.internalError(
+          { fixture: mode },
+          "SYNTHETIC_COMPARE_PERMISSION_RUNTIME_FAILURE",
+        );
+      }
       await this.connection.sessionUpdate({
         sessionId: params.sessionId,
         update: {
@@ -281,6 +308,13 @@ async function writeCompareConfig(homeDir: string, agentPath: string): Promise<v
           error: { command: process.execPath, args: [agentPath, "error"] },
           permission: { command: process.execPath, args: [agentPath, "permission"] },
           "permission-mixed": { command: process.execPath, args: [agentPath, "permission-mixed"] },
+          "permission-error": { command: process.execPath, args: [agentPath, "permission-error"] },
+          "filesystem-permission-error": {
+            command: process.execPath,
+            args: [agentPath, "filesystem-permission-error"],
+          },
+          cancelled: { command: process.execPath, args: [agentPath, "cancelled"] },
+          next: { command: process.execPath, args: [agentPath, "next", homeDir] },
           "lock-a": { command: process.execPath, args: [agentPath, "lock-a"] },
           "lock-b": { command: process.execPath, args: [agentPath, "lock-b"] },
         },
@@ -576,6 +610,198 @@ test("compare keeps successful rows when one agent errors", async () => {
   });
 });
 
+for (const placement of ["root", "local", "split"] as const) {
+  test(`compare rejects conflicting ${placement} permission flags before creating rows`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = await setupCompareFixture(homeDir);
+      const args =
+        placement === "root"
+          ? ["--approve-all", "--deny-all", "compare", "next", "--json", "summarize"]
+          : placement === "local"
+            ? ["compare", "next", "--approve-reads", "--deny-all", "--json", "summarize"]
+            : ["--approve-all", "compare", "next", "--approve-reads", "--json", "summarize"];
+      const result = await runCli(args, homeDir, cwd);
+      const error = compareInvocationError(result, 2);
+      assert.equal(error.code, -32602);
+      assert.equal(error.data?.acpxCode, "USAGE");
+      assert.equal(
+        error.message,
+        "Use only one permission mode: --approve-all, --approve-reads, or --deny-all",
+      );
+      await assert.rejects(fs.access(path.join(homeDir, "next-started")), { code: "ENOENT" });
+    });
+  });
+}
+
+for (const input of ["prompt", "policy"] as const) {
+  test(`compare rejects conflicting permission modes before ${input} input errors`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = await setupCompareFixture(homeDir);
+      const missing = path.join(cwd, `missing-${input}.txt`);
+      const prefix = ["--approve-all", "--deny-all"];
+      if (input === "policy") {
+        prefix.push("--policy", missing);
+      }
+      const tail = input === "prompt" ? ["--file", missing] : ["summarize"];
+      const result = await runCli([...prefix, "compare", "next", "--json", ...tail], homeDir, cwd);
+      const error = compareInvocationError(result, 2);
+      assert.equal(error.code, -32602);
+      assert.equal(error.data?.acpxCode, "USAGE");
+      assert.equal(
+        error.message,
+        "Use only one permission mode: --approve-all, --approve-reads, or --deny-all",
+      );
+      await assert.rejects(fs.access(path.join(homeDir, "next-started")), { code: "ENOENT" });
+      await assert.rejects(fs.access(missing), { code: "ENOENT" });
+    });
+  });
+}
+
+test("compare reports unavailable permission prompts with actual counts and continues", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    const result = await runCli(
+      [
+        "--approve-reads",
+        "--non-interactive-permissions",
+        "fail",
+        "--prompt-retries",
+        "0",
+        "--json-strict",
+        "compare",
+        "permission",
+        "next",
+        "--json",
+        "summarize",
+      ],
+      homeDir,
+      cwd,
+    );
+    assert.equal(result.code, 5, result.stdout + result.stderr);
+    assert.equal(result.stderr, "");
+    const rows = JSON.parse(result.stdout) as CompareRow[];
+    assert.deepEqual(
+      rows.map((row) => [row.agent, row.status, row.permission_requests, row.permission_denied]),
+      [
+        ["permission", "permission_denied", 1, 1],
+        ["next", "ok", 0, 0],
+      ],
+    );
+    assert.equal(rows[0]?.stop_reason, null);
+    assert.match(rows[0]?.error ?? "", /Permission prompt unavailable in non-interactive mode/);
+    assert.equal(rows[1]?.error, null);
+    assert.equal(await fs.readFile(path.join(homeDir, "next-started"), "utf8"), "started");
+  });
+});
+
+test("compare retains denied counts without relabeling a later runtime failure", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    const result = await runCli(
+      [
+        "--deny-all",
+        "--prompt-retries",
+        "0",
+        "--json-strict",
+        "compare",
+        "permission",
+        "permission-error",
+        "cancelled",
+        "next",
+        "--json",
+        "summarize",
+      ],
+      homeDir,
+      cwd,
+    );
+    assert.equal(result.code, 1, result.stdout + result.stderr);
+    assert.equal(result.stderr, "");
+    const rows = JSON.parse(result.stdout) as CompareRow[];
+    assert.deepEqual(
+      rows.map((row) => [row.agent, row.status, row.permission_requests, row.permission_denied]),
+      [
+        ["permission", "permission_denied", 1, 1],
+        ["permission-error", "error", 1, 1],
+        ["cancelled", "cancelled", 0, 0],
+        ["next", "ok", 0, 0],
+      ],
+    );
+    assert.equal(rows[1]?.stop_reason, null);
+    assert.match(rows[1]?.error ?? "", /SYNTHETIC_COMPARE_PERMISSION_RUNTIME_FAILURE/);
+    assert.equal(rows[3]?.error, null);
+    assert.equal(await fs.readFile(path.join(homeDir, "next-started"), "utf8"), "started");
+  });
+});
+
+test("compare preserves approved counts on runtime failure without inventing denials", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    const result = await runCli(
+      [
+        "--approve-all",
+        "--prompt-retries",
+        "0",
+        "--json-strict",
+        "compare",
+        "permission-error",
+        "next",
+        "--json",
+        "summarize",
+      ],
+      homeDir,
+      cwd,
+    );
+    assert.equal(result.code, 1, result.stdout + result.stderr);
+    assert.equal(result.stderr, "");
+    const rows = JSON.parse(result.stdout) as CompareRow[];
+    assert.deepEqual(
+      rows.map((row) => [row.agent, row.status, row.permission_requests, row.permission_denied]),
+      [
+        ["permission-error", "error", 1, 0],
+        ["next", "ok", 0, 0],
+      ],
+    );
+    assert.match(rows[0]?.error ?? "", /SYNTHETIC_COMPARE_PERMISSION_RUNTIME_FAILURE/);
+    assert.equal(rows[1]?.error, null);
+  });
+});
+
+test("compare includes delegated filesystem denials in failed-run counts", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    const target = path.join(cwd, "permission-input.txt");
+    await fs.writeFile(target, "synthetic protected input");
+    const result = await runCli(
+      [
+        "--deny-all",
+        "--prompt-retries",
+        "0",
+        "--json-strict",
+        "compare",
+        "filesystem-permission-error",
+        "next",
+        "--json",
+        "summarize",
+      ],
+      homeDir,
+      cwd,
+    );
+    assert.equal(result.code, 1, result.stdout + result.stderr);
+    assert.equal(result.stderr, "");
+    const rows = JSON.parse(result.stdout) as CompareRow[];
+    assert.deepEqual(
+      rows.map((row) => [row.agent, row.status, row.permission_requests, row.permission_denied]),
+      [
+        ["filesystem-permission-error", "error", 1, 1],
+        ["next", "ok", 0, 0],
+      ],
+    );
+    assert.match(rows[0]?.error ?? "", /SYNTHETIC_COMPARE_FILESYSTEM_RUNTIME_FAILURE/);
+    assert.equal(await fs.readFile(target, "utf8"), "synthetic protected input");
+    assert.equal(rows[1]?.error, null);
+  });
+});
+
 test("compare applies global permission policy to every agent run", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await setupCompareFixture(homeDir);
@@ -616,6 +842,8 @@ test("compare reports partial permission denial as denied", async () => {
         "json",
         "compare",
         "permission-mixed",
+        "cancelled",
+        "next",
         "summarize",
       ],
       homeDir,
@@ -629,6 +857,17 @@ test("compare reports partial permission denial as denied", async () => {
     assert.equal(rows[0]?.permission_requests, 2);
     assert.equal(rows[0]?.permission_denied, 1);
     assert.match(rows[0]?.final_message ?? "", /permission selected:allow,reject/);
+    assert.equal(result.stderr, "");
+    assert.equal(rows[0]?.stop_reason, "end_turn");
+    assert.equal(rows[0]?.error, null);
+    assert.deepEqual(
+      rows.map((row) => [row.agent, row.status, row.permission_requests, row.permission_denied]),
+      [
+        ["permission-mixed", "permission_denied", 2, 1],
+        ["cancelled", "cancelled", 0, 0],
+        ["next", "ok", 0, 0],
+      ],
+    );
   });
 });
 
