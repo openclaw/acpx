@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import fs from "node:fs/promises";
 import net from "node:net";
@@ -7,6 +8,7 @@ import path from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { SessionQueueOwner, type QueueTask } from "../src/session/queue/ipc-server.js";
+import type { QueueOwnerMessage } from "../src/session/queue/messages.js";
 
 const STALLED_TIMEOUT_SKIP =
   process.platform === "win32" && "Windows named pipes do not expose partial write progress";
@@ -82,6 +84,60 @@ function sendOutput(task: QueueTask, count: number): void {
   sendEvents(task, count);
   task.send({ type: "error", requestId: task.requestId, message: "finished fixture" });
 }
+
+test(
+  "paused queue output has bounded socket memory and replays every byte in order",
+  { timeout: 10_000 },
+  async () => {
+    await withOwner(async (owner, connect) => {
+      const { client, serverSocket } = await connect();
+      client.pause();
+      submit(client, "ordered-backlog");
+      const task = await owner.nextTask(1_000);
+      assert(task);
+      const expected = createHash("sha256");
+      expected.update(`${JSON.stringify({ type: "accepted", requestId: task.requestId })}\n`);
+      for (let index = 0; index < 64; index += 1) {
+        const message: QueueOwnerMessage = {
+          type: "event",
+          requestId: task.requestId,
+          message: {
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: { text: `${index}:🍵${"x".repeat(128 * 1024)}` },
+          },
+        };
+        task.send(message);
+        expected.update(`${JSON.stringify(message)}\n`);
+      }
+      const result: QueueOwnerMessage = {
+        type: "error",
+        requestId: task.requestId,
+        message: "fixture complete",
+      };
+      task.send(result);
+      expected.update(`${JSON.stringify(result)}\n`);
+      process.stdout.write(
+        `QUEUE_BACKLOG ${JSON.stringify({
+          writableBytes: serverSocket.writableLength,
+          highWaterMark: serverSocket.writableHighWaterMark,
+        })}\n`,
+      );
+      assert.ok(
+        serverSocket.writableLength <= serverSocket.writableHighWaterMark + 64 * 1024,
+        "synchronous output must stop filling socket memory at backpressure",
+      );
+      const actual = createHash("sha256");
+      client.on("data", (chunk: Buffer) => actual.update(chunk));
+      const ended = once(client, "end", { signal: AbortSignal.timeout(5_000) });
+      task.close();
+      owner.completeTask(task);
+      client.resume();
+      await ended;
+      assert.equal(actual.digest("hex"), expected.digest("hex"));
+    });
+  },
+);
 
 test(
   "active queue sockets release stalled output despite continuing writes",
