@@ -6,9 +6,21 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+## 0.19.0 - 2026-09-22
+
+### Highlights
+
+- **Process and lock recovery:** clean up observed child processes across platforms and verify process birth identity before reclaiming queue owners and abandoned locks.
+- **Lower resource use:** release completed flow state and abandoned event buffers, stop orphaned terminal polling, and parse fragmented ACP messages in linear time.
+- **Embedding controls:** configure filesystem and terminal capabilities through the runtime while preserving existing defaults.
+
 ### Changes
 
 - Runtime/embedding: expose optional `fs` and `terminal` capability switches on `AcpRuntimeOptions`, matching `AcpClientOptions`. Omitted options stay enabled; retained connections keep their original policy; health probes disable both callbacks while retaining the host permission policy. Disabled ACP callbacks are a protocol policy, not an OS sandbox. Thanks @saariuslystoned and @devSejung.
+
+### Upgrade notes
+
+- Sessions/ownership: update participating clients, restart embedding hosts after active turns finish, and let older queue owners expire while idle. New owners and locks record process birth identity. Healthy legacy owners remain usable, but forced retirement is refused when their live process identity cannot be verified.
 
 ### Fixes
 
