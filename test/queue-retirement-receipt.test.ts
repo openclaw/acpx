@@ -65,15 +65,24 @@ test("any retirement field presence preserves rollback custody", () => {
   }
 });
 
-for (const invalid of [null, false, { padding: "x".repeat(1024 * 1024) }]) {
-  test(`invalid retirement custody survives refresh, release and close (${typeof invalid})`, async () => {
+for (const invalid of [null, false, "oversized"] as const) {
+  test(`invalid retirement custody survives refresh, release and close (${String(invalid)})`, async () => {
     await withTempHome(async (home) => {
       const sessionId = "invalid-retirement";
       const lease = await tryAcquireQueueOwnerLease(sessionId);
       assert.ok(lease);
       const current = await readQueueOwnerRecord(sessionId);
       assert.ok(current);
-      const payload = JSON.stringify({ ...current, retirement: invalid });
+      const retirement =
+        invalid === "oversized"
+          ? {
+              ...receipt,
+              ownerGeneration: current.ownerGeneration,
+              root: { pid: current.pid, processIdentity: birth },
+              padding: "x".repeat(1024 * 1024),
+            }
+          : invalid;
+      const payload = JSON.stringify({ ...current, processIdentity: birth, retirement });
       await fs.writeFile(lease.lockPath, payload);
       await fs.utimes(lease.lockPath, 0, 0);
       const parsed = await readQueueOwnerRecord(sessionId);
