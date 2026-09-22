@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import childProcess, { type ExecFileOptionsWithStringEncoding } from "node:child_process";
+import childProcess, {
+  type ChildProcess,
+  type ExecFileOptionsWithStringEncoding,
+} from "node:child_process";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 import {
   isProcessAlive,
   readQueueOwnerRecord,
@@ -23,14 +25,29 @@ import {
   verifiedProcessIdentity,
 } from "./queue-test-helpers.js";
 
-async function stopFixtureProcesses(pids: number[]): Promise<void> {
-  for (const pid of pids.toReversed()) {
-    if (isProcessAlive(pid)) {
-      process.kill(pid, "SIGKILL");
+async function settleOwnerTree(
+  tree: Awaited<ReturnType<typeof startWitnessedTree>>,
+  helper?: ChildProcess,
+  helperClosed?: Promise<void>,
+): Promise<void> {
+  const finishHelper = async () => {
+    try {
+      if (helper && helper.exitCode === null && helper.signalCode === null) {
+        helper.kill("SIGKILL");
+      }
+    } finally {
+      await helperClosed;
     }
-  }
-  for (let attempt = 0; attempt < 100 && pids.some(isProcessAlive); attempt += 1) {
-    await delay(10);
+  };
+  const results = await Promise.allSettled([
+    stopWitnesses(tree.expectedWitnesses),
+    tree.closed,
+    finishHelper(),
+  ]);
+  for (const result of results) {
+    if (result.status === "rejected") {
+      throw result.reason;
+    }
   }
 }
 
@@ -96,8 +113,7 @@ describe(
             }
           } finally {
             process.chdir(previousCwd);
-            await stopWitnesses(tree.expectedWitnesses);
-            await tree.closed;
+            await settleOwnerTree(tree);
           }
         });
       });
@@ -114,6 +130,7 @@ describe(
           const execFile = childProcess.execFile;
           const processIdentity = await verifiedProcessIdentity(owner.pid);
           let helper: ReturnType<typeof execFile> | undefined;
+          let helperClosed: Promise<void> | undefined;
           const helperSource =
             failure === "timeout"
               ? "setInterval(() => {}, 1000)"
@@ -133,6 +150,8 @@ describe(
             );
             assert.deepEqual(args, ["/pid", String(owner.pid), "/T", "/F"]);
             helper = execFile(process.execPath, ["-e", helperSource], options, callback);
+            const spawned = helper;
+            helperClosed = new Promise((resolve) => spawned.once("close", () => resolve()));
             return helper;
           }) as typeof childProcess.execFile);
           syncBuiltinESMExports();
@@ -162,9 +181,7 @@ describe(
           } finally {
             stub.mock.restore();
             syncBuiltinESMExports();
-            await stopWitnesses(tree.expectedWitnesses);
-            await tree.closed;
-            await stopFixtureProcesses(helper?.pid ? [helper.pid] : []);
+            await settleOwnerTree(tree, helper, helperClosed);
           }
         });
       });
