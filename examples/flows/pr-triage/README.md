@@ -7,6 +7,11 @@ This flow requires an explicit `--approve-all` grant when run through
 
 Tuning notes for this workflow live in [TUNING.md](./TUNING.md).
 
+The review collector follows every page of GitHub reviews, inline review comments,
+and PR conversation comments. CI evidence records the observed PR head and queries
+runs for that commit; missing head metadata falls back to the prepared workspace's
+recorded head.
+
 This workflow intentionally keeps one persistent `main` ACP session across the
 judgment lane. That shared session is part of the workflow's reasoning state,
 not just a performance optimization. If the live ACP connection dies, the

@@ -549,15 +549,15 @@ async function prepareWorkspace(context, pr) {
 }
 
 async function collectReviewState(context, pr) {
-  const reviews = await ghApiJson(
+  const reviews = await ghApiList(
     context,
     `repos/${pr.repo}/pulls/${pr.prNumber}/reviews?per_page=100`,
   );
-  const reviewComments = await ghApiJson(
+  const reviewComments = await ghApiList(
     context,
     `repos/${pr.repo}/pulls/${pr.prNumber}/comments?per_page=100`,
   );
-  const issueComments = await ghApiJson(
+  const issueComments = await ghApiList(
     context,
     `repos/${pr.repo}/issues/${pr.prNumber}/comments?per_page=100`,
   );
@@ -584,13 +584,9 @@ async function collectReviewState(context, pr) {
   const reviewState = {
     baseRef,
     mergeBase,
-    githubReviews: Array.isArray(reviews) ? reviews.map(normalizeGitHubReview) : [],
-    githubReviewComments: Array.isArray(reviewComments)
-      ? reviewComments.map(normalizeGitHubReviewComment)
-      : [],
-    githubIssueComments: Array.isArray(issueComments)
-      ? issueComments.map(normalizeGitHubIssueComment)
-      : [],
+    githubReviews: reviews.map(normalizeGitHubReview),
+    githubReviewComments: reviewComments.map(normalizeGitHubReviewComment),
+    githubIssueComments: issueComments.map(normalizeGitHubIssueComment),
     localCodexReviewText: localReviewText,
     localCodexReviewStdout: localReviewStdout,
     localCodexReviewStderr: localReviewStderr,
@@ -609,12 +605,8 @@ async function collectReviewState(context, pr) {
 }
 
 async function collectCiState(context, pr) {
-  const prView = await ghPrView(context, pr.repo, pr.prNumber, [
-    "statusCheckRollup",
-    "commits",
-    "isCrossRepository",
-  ]);
-  const headSha = String(prView?.commits?.[0]?.oid ?? pr.headSha) || pr.headSha;
+  const prView = await ghPrView(context, pr.repo, pr.prNumber, ["statusCheckRollup", "headRefOid"]);
+  const headSha = String(prView?.headRefOid ?? pr.headSha) || pr.headSha;
   const workflowRuns = await ghApiJson(
     context,
     `repos/${pr.repo}/actions/runs?head_sha=${encodeURIComponent(headSha)}&per_page=20`,
@@ -622,6 +614,7 @@ async function collectCiState(context, pr) {
   const runs = Array.isArray(workflowRuns?.workflow_runs) ? workflowRuns.workflow_runs : [];
 
   const ciState = {
+    headSha,
     statusCheckRollup: Array.isArray(prView?.statusCheckRollup) ? prView.statusCheckRollup : [],
     workflowRuns: runs,
   };
@@ -1248,6 +1241,15 @@ function finalCommentSummary(outputs) {
 async function ghApiJson(context, endpoint) {
   const result = await runCommand(context, "gh", ["api", endpoint]);
   return JSON.parse(result.stdout);
+}
+
+async function ghApiList(context, endpoint) {
+  const result = await runCommand(context, "gh", ["api", endpoint, "--paginate", "--slurp"]);
+  const pages = JSON.parse(result.stdout);
+  if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) {
+    throw new Error(`Expected array pages from GitHub API: ${endpoint}`);
+  }
+  return pages.flat();
 }
 
 async function ghPrView(context, repo, prNumber, fields) {
