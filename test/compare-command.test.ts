@@ -406,6 +406,156 @@ test("compare --json is an alias for machine-readable rows", async () => {
   });
 });
 
+function compareInvocationError(
+  result: CliRunResult,
+  exitCode = 1,
+): {
+  code?: number;
+  message?: string;
+  data?: { acpxCode?: string };
+} {
+  assert.equal(result.code, exitCode, result.stdout + result.stderr);
+  assert.equal(result.stderr, "");
+  const payload = JSON.parse(result.stdout) as {
+    jsonrpc?: string;
+    id?: unknown;
+    error?: { code?: number; message?: string; data?: { acpxCode?: string } };
+  };
+  assert.equal(payload.jsonrpc, "2.0");
+  assert.equal(payload.id, null);
+  assert.ok(payload.error);
+  assert.equal(typeof payload.error.message, "string");
+  return payload.error;
+}
+
+for (const scenario of [
+  { name: "alias", output: ["--json"], agents: ["fast"], code: 0, statuses: ["ok"] },
+  { name: "long form", output: ["--format", "json"], agents: ["fast"], code: 0, statuses: ["ok"] },
+  {
+    name: "agent failure",
+    output: ["--json"],
+    agents: ["fast", "error"],
+    code: 1,
+    statuses: ["ok", "error"],
+  },
+]) {
+  test(`compare strict JSON preserves summary arrays with ${scenario.name}`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = await setupCompareFixture(homeDir);
+      const result = await runCli(
+        ["--json-strict", "compare", ...scenario.agents, ...scenario.output, "summarize"],
+        homeDir,
+        cwd,
+      );
+      assert.equal(result.code, scenario.code, result.stdout + result.stderr);
+      assert.equal(result.stderr, "");
+      const rows = JSON.parse(result.stdout) as CompareRow[];
+      assert.deepEqual(
+        rows.map((row) => row.agent),
+        scenario.agents,
+      );
+      assert.deepEqual(
+        rows.map((row) => row.status),
+        scenario.statuses,
+      );
+      assert.equal(rows[0]?.final_message, "fast: summarize");
+    });
+  });
+}
+
+test("compare keeps alias, root, local and configured format precedence", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    await fs.writeFile(path.join(cwd, ".acpxrc.json"), JSON.stringify({ format: "quiet" }));
+    for (const scenario of [
+      {
+        args: ["--format", "quiet", "compare", "fast", "--json", "--format", "text", "hello"],
+        json: true,
+      },
+      {
+        args: ["--format", "quiet", "compare", "fast", "--format", "text", "--json", "hello"],
+        json: true,
+      },
+      { args: ["--format", "quiet", "compare", "fast", "--format", "json", "hello"], json: false },
+      { args: ["compare", "fast", "--format", "json", "hello"], json: true },
+    ]) {
+      const result = await runCli(scenario.args, homeDir, cwd);
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stderr, "");
+      if (scenario.json) {
+        const rows = JSON.parse(result.stdout) as CompareRow[];
+        assert.deepEqual(
+          rows.map((row) => [row.agent, row.status]),
+          [["fast", "ok"]],
+        );
+      } else {
+        assert.equal(result.stdout, "fast\tok\n");
+      }
+    }
+  });
+});
+
+for (const failure of ["config", "prompt-file"]) {
+  test(`compare alias and local format select JSON for ${failure} errors`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = await setupCompareFixture(homeDir);
+      if (failure === "config") {
+        await fs.writeFile(path.join(cwd, ".acpxrc.json"), "{");
+      }
+      const messages = [];
+      for (const output of [["--json"], ["--format", "json"]]) {
+        const tail = failure === "config" ? ["hello"] : ["--file", "missing-prompt.txt"];
+        const result = await runCli(["compare", "fast", ...output, ...tail], homeDir, cwd);
+        const error = compareInvocationError(result);
+        assert.equal(error.code, -32603);
+        assert.equal(error.data?.acpxCode, "RUNTIME");
+        messages.push(error.message);
+      }
+      assert.equal(messages[0], messages[1]);
+    });
+  });
+}
+
+test("compare alias preserves strict validation and remains command-local", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    const result = await runCli(
+      ["--json-strict", "--verbose", "compare", "fast", "--json", "hello"],
+      homeDir,
+      cwd,
+    );
+    const error = compareInvocationError(result, 2);
+    assert.equal(error.code, -32602);
+    assert.equal(error.data?.acpxCode, "USAGE");
+    assert.match(error.message ?? "", /--json-strict cannot be combined with --verbose/);
+    const globalAlias = await runCli(
+      ["--json-strict", "--json", "compare", "fast", "hello"],
+      homeDir,
+      cwd,
+    );
+    const unsupported = compareInvocationError(globalAlias, 2);
+    assert.equal(unsupported.data?.acpxCode, "USAGE");
+    assert.match(unsupported.message ?? "", /unknown option '--json'/);
+  });
+});
+
+test("compare error policy ignores format-looking values and delimiter text", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await setupCompareFixture(homeDir);
+    await fs.writeFile(path.join(cwd, ".acpxrc.json"), JSON.stringify({ disableExec: true }));
+    for (const args of [
+      ["compare", "fast", "--file", "--json"],
+      ["compare", "fast", "--", "--json"],
+      ["--system-prompt", "--json", "compare", "fast", "hello"],
+    ]) {
+      const result = await runCli(args, homeDir, cwd);
+      assert.equal(result.code, 1);
+      assert.equal(result.stdout, "");
+      assert.match(result.stderr, /compare subcommand is disabled/);
+    }
+  });
+});
+
 test("compare keeps successful rows when one agent errors", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await setupCompareFixture(homeDir);
@@ -534,14 +684,18 @@ test("compare local cwd selects project configuration before loading the caller 
     await fs.mkdir(target);
     await fs.writeFile(path.join(source, ".acpxrc.json"), "malformed caller configuration");
     await fs.writeFile(path.join(target, ".acpxrc.json"), JSON.stringify({ disableExec: true }));
-    const result = await runCli(
-      ["compare", "fast", "--cwd", target, "--json", "hello"],
-      homeDir,
-      source,
-    );
-    assert.equal(result.code, 1);
-    assert.match(result.stderr, /compare subcommand is disabled/);
-    assert.doesNotMatch(result.stderr, /parse|malformed/i);
+    for (const output of [["--json"], ["--format", "json"]]) {
+      const result = await runCli(
+        ["compare", "fast", "--cwd", target, ...output, "hello"],
+        homeDir,
+        source,
+      );
+      const error = compareInvocationError(result);
+      assert.equal(error.code, -32603);
+      assert.equal(error.data?.acpxCode, "RUNTIME");
+      assert.match(error.message ?? "", /compare subcommand is disabled/);
+      assert.doesNotMatch(error.message ?? "", /parse|malformed/i);
+    }
   });
 });
 

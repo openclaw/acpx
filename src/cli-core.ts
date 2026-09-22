@@ -216,7 +216,7 @@ function detectMcpConfigPath(argv: string[], cwd: string): string | undefined {
 }
 
 function detectRequestedOutputFormat(argv: string[], fallback: OutputFormat): OutputFormat {
-  let detectedFormat = fallback;
+  let detectedFormat: OutputFormat | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -240,7 +240,22 @@ function detectRequestedOutputFormat(argv: string[], fallback: OutputFormat): Ou
     }
   }
 
-  return detectedFormat;
+  return detectCompareOutputFormat(argv, detectedFormat, fallback);
+}
+
+function detectCompareOutputFormat(
+  argv: string[],
+  rootFormat: OutputFormat | undefined,
+  fallback: OutputFormat,
+): OutputFormat {
+  const command = detectAgentToken(argv);
+  if (command.token !== "compare" || command.index === undefined) {
+    return rootFormat ?? fallback;
+  }
+  const local = scanCompareArgs(argv.slice(command.index + 1));
+  const localFormat = isOutputFormat(local.format) ? local.format : undefined;
+  // Match parsed options: the alias wins, otherwise globals overwrite locals.
+  return local.json ? "json" : (rootFormat ?? localFormat ?? fallback);
 }
 
 function classifyTopLevelFlagScan(token: string): TopLevelFlagStep {

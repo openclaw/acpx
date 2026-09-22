@@ -55,6 +55,12 @@ Command-local options:
 | `-f, --file <path>`    | Read prompt text from a file. |
 | `--prompt-file <path>` | Alias for `--file`.           |
 
+`--json` also selects JSON diagnostics for configuration and prompt-input failures.
+It works with top-level `--json-strict` and forces JSON even when another valid
+`--format` value is supplied. Without `--json`, an explicit top-level format takes
+precedence over a command-local format, which otherwise takes precedence over the
+configured default. Strict mode still rejects `--verbose`.
+
 `--cwd` may appear before or after `compare`. An explicit command-local value
 takes precedence over the top-level value. That workspace supplies the project
 configuration, agent definitions and permission defaults, and anchors relative

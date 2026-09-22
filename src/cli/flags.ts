@@ -468,7 +468,9 @@ export function addExecConfigOption(command: Command): Command {
 
 export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig): GlobalFlags {
   const opts = command.optsWithGlobals<Record<string, unknown>>();
-  const format = parseOutputFormat(stringOption(opts.format) ?? config.format ?? "text");
+  const format = parseOutputFormat(
+    opts.json === true ? "json" : (stringOption(opts.format) ?? config.format ?? "text"),
+  );
   const jsonStrict = opts.jsonStrict === true;
   const verbose = opts.verbose === true;
   assertOutputFlagCompatibility(format, jsonStrict, verbose);

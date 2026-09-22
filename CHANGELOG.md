@@ -67,6 +67,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions: preserve Node loader arguments after bare debugger flags when starting a queue owner, and filter debugger wait mode and inspector flag aliases.
 - Terminals: retain a valid UTF-8 suffix within small output limits, including when a discarded character's continuation bytes arrive in later writes.
 - Compare: report only explicit token counts, leaving missing totals unknown instead of treating context capacity or occupancy as token consumption.
+- Compare: accept the `--json` alias with strict JSON output and honor command-local output selection for configuration and prompt-input errors, while preserving format precedence and literal prompt values.
 
 ## 0.18.0 - 2026-09-20
 

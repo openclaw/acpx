@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Command, InvalidArgumentError } from "commander";
+import { scanCompareArgs } from "../src/cli/compare-args.js";
 import type { ResolvedAcpxConfig } from "../src/cli/config.js";
 import {
   addExecConfigOption,
@@ -337,6 +338,52 @@ test("resolveGlobalFlags rejects invalid json-strict combinations", () => {
       ),
     /--json-strict cannot be combined with --verbose/,
   );
+});
+
+test("resolveGlobalFlags applies the compare JSON alias before strict validation", () => {
+  for (const format of ["text", "quiet"]) {
+    const command = commandWithOptions({ format, json: true, jsonStrict: true });
+    assert.equal(resolveGlobalFlags(command, config()).format, "json");
+  }
+  assert.throws(
+    () =>
+      resolveGlobalFlags(
+        commandWithOptions({ format: "text", json: true, jsonStrict: true, verbose: true }),
+        config(),
+      ),
+    /--json-strict cannot be combined with --verbose/,
+  );
+});
+
+test("compare output discovery skips consumed values and stops at its delimiter", () => {
+  assert.deepEqual(
+    scanCompareArgs(["fast", "--json", "--format=quiet", "--", "--format", "text"]),
+    {
+      cwd: undefined,
+      json: true,
+      format: "quiet",
+      promptTokens: ["--format", "text"],
+    },
+  );
+  for (const flag of ["--file", "-f", "--prompt-file"]) {
+    assert.deepEqual(scanCompareArgs([flag, "--json", "fast"]), { cwd: undefined });
+  }
+  assert.deepEqual(scanCompareArgs(["--file=--json", "fast"]), { cwd: undefined });
+  assert.deepEqual(scanCompareArgs(["--format", "--json", "fast"]), {
+    cwd: undefined,
+    format: "--json",
+  });
+  assert.deepEqual(scanCompareArgs(["--file", "--", "--json", "--", "literal"]), {
+    cwd: undefined,
+    json: true,
+    promptTokens: ["literal"],
+  });
+  assert.deepEqual(scanCompareArgs(["fast", "--", "--json"]), {
+    cwd: undefined,
+    promptTokens: ["--json"],
+  });
+  assert.deepEqual(scanCompareArgs(["--format", "invalid"]), { cwd: undefined, format: "invalid" });
+  assert.deepEqual(scanCompareArgs(["--format"]), { cwd: undefined, format: undefined });
 });
 
 test("global flag registration parses each supported option", () => {

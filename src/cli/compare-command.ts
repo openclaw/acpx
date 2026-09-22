@@ -52,7 +52,6 @@ type CompareFlags = {
   denyAll?: boolean;
   timeout?: number;
   format?: string;
-  json?: boolean;
   file?: string;
   promptFile?: string;
 };
@@ -383,10 +382,7 @@ export function registerCompareCommand(program: Command, config: ResolvedAcpxCon
       throw new InvalidArgumentError("Do not combine compare with --agent; pass agent names");
     }
 
-    const outputPolicy = resolveOutputPolicy(
-      flags.json === true ? "json" : globalFlags.format,
-      globalFlags.jsonStrict === true,
-    );
+    const outputPolicy = resolveOutputPolicy(globalFlags.format, globalFlags.jsonStrict === true);
     const promptFile = resolvePromptFile(flags);
     const { promptTokens } = scanCompareArgs(program.args.slice(1));
     const { agents, promptText } = splitCompareArgs(args, promptFile, promptTokens);

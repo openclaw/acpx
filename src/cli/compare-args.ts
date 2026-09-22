@@ -26,21 +26,41 @@ const VALUE_FLAGS = new Set(
     .flatMap((option) => [option.long, option.short].filter((flag) => flag !== undefined)),
 );
 
-export function scanCompareArgs(argv: string[]): { cwd?: string; promptTokens?: string[] } {
+type CompareOutputFlags = { format?: string; json?: true };
+
+function captureCompareOutputFlag(
+  output: CompareOutputFlags,
+  token: string,
+  nextToken: string | undefined,
+): void {
+  if (token === "--json") {
+    output.json = true;
+  } else if (token === "--format") {
+    output.format = nextToken;
+  } else if (token.startsWith("--format=")) {
+    output.format = token.slice("--format=".length);
+  }
+}
+
+export function scanCompareArgs(
+  argv: string[],
+): CompareOutputFlags & { cwd?: string; promptTokens?: string[] } {
   let cwd: string | undefined;
+  const output: CompareOutputFlags = {};
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === "--") {
-      return { cwd, promptTokens: argv.slice(index + 1) };
+      return { cwd, ...output, promptTokens: argv.slice(index + 1) };
     }
     if (token === "--cwd") {
       cwd = argv[index + 1];
     } else if (token.startsWith("--cwd=")) {
       cwd = token.slice("--cwd=".length);
     }
+    captureCompareOutputFlag(output, token, argv[index + 1]);
     if (VALUE_FLAGS.has(token)) {
       index += 1;
     }
   }
-  return { cwd };
+  return { cwd, ...output };
 }
