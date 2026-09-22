@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import net from "node:net";
@@ -46,7 +45,11 @@ const DISCARD_OUTPUT: OutputFormatter = {
 };
 
 function failSpoolWrites(t: TestContext) {
-  const state = { writes: 0, descriptors: new Set<number>() };
+  const state = {
+    writes: 0,
+    descriptors: new Set<number>(),
+    error: Object.assign(new Error("fixture output disk full"), { code: "ENOSPC" }),
+  };
   const { openSync, closeSync, writeSync } = fsSync;
   t.mock.method(fsSync, "openSync", (...args: Parameters<typeof openSync>) => {
     const fd = openSync(...args);
@@ -64,11 +67,32 @@ function failSpoolWrites(t: TestContext) {
   t.mock.method(fsSync, "writeSync", (...args: Parameters<typeof writeSync>) => {
     if (state.descriptors.has(args[0])) {
       state.writes += 1;
-      throw Object.assign(new Error("fixture output disk full"), { code: "ENOSPC" });
+      throw state.error;
     }
     return writeSync(...args);
   });
   return state;
+}
+
+function observeSocketClose(socket: net.Socket) {
+  const errors: Error[] = [];
+  const onError = (error: Error) => errors.push(error);
+  socket.on("error", onError);
+  // events.once(close) rejects on the intentional spool error before close.
+  // Observe both events from connection admission and assert the error below.
+  let onClose!: () => void;
+  const closed = withTimeout(
+    new Promise<void>((resolve) => {
+      onClose = resolve;
+      socket.once("close", onClose);
+    }),
+    5000,
+  ).finally(() => {
+    socket.off("close", onClose);
+    socket.off("error", onError);
+  });
+  void closed.catch(() => {});
+  return { socket, errors, closed };
 }
 
 for (const detachment of ["stalled", "disconnected", "spool failure"] as const) {
@@ -109,8 +133,8 @@ for (const detachment of ["stalled", "disconnected", "spool failure"] as const) 
           return client;
         });
         let observeConnection!: (socket: net.Socket) => void;
-        const connected = new Promise<net.Socket>((resolve) => {
-          observeConnection = resolve;
+        const connected = new Promise<ReturnType<typeof observeSocketClose>>((resolve) => {
+          observeConnection = (socket) => resolve(observeSocketClose(socket));
         });
         const start = SessionQueueOwner.start;
         t.mock.method(SessionQueueOwner, "start", async (...args: Parameters<typeof start>) => {
@@ -157,15 +181,16 @@ for (const detachment of ["stalled", "disconnected", "spool failure"] as const) 
           });
           void first.catch(() => {});
           await withTimeout(Promise.race([accepted, first]), 5000);
-          const socket = await connected;
-          const closed = once(socket, "close", { signal: AbortSignal.timeout(5000) });
+          const { socket, errors, closed } = await connected;
           if (detachment === "disconnected") {
             assert.ok(client);
             client.destroy();
           }
           await closed;
           assert.equal(socket.writableLength, 0);
+          assert.equal(errors.length, spoolFailure ? 1 : 0);
           if (spoolFailure) {
+            assert.equal(errors[0], spoolFailure.error);
             assert.equal(spoolFailure.writes, 1, "the owned output spool must hit ENOSPC");
             assert.equal(spoolFailure.descriptors.size, 0, "the failed spool must close");
           }
