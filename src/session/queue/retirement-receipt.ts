@@ -167,7 +167,7 @@ export function captureQueueRetirementReceipt(
   if (!root || process.platform !== "win32") {
     throw queueRetirementIncomplete();
   }
-  const saved = previous?.descendants ?? [];
+  const saved = previous ? previous.descendants : [];
   const table = new Map(snapshot);
   const owned = matchingSnapshotPids(table, rootRunning ? [root, ...saved] : saved);
   if (rootRunning && !owned.has(root.pid)) {

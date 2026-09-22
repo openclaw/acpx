@@ -940,7 +940,7 @@ function leafFirstRetirementWitnesses(
   const pending = receipt.descendants.filter((witness) => children.get(witness.pid) === 0);
   const byPid = new Map(receipt.descendants.map((witness) => [witness.pid, witness]));
   for (let index = 0; index < pending.length; index += 1) {
-    const parent = retirementParent(pending[index]!.pid, table);
+    const parent = retirementParent(pending[index].pid, table);
     const count = children.get(parent);
     if (count !== undefined) {
       const remaining = count - 1;

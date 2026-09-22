@@ -337,12 +337,12 @@ async function runWorker(mode: RetirerMode, sessionId: string): Promise<void> {
       throw new Error("injected guard acknowledgement failure");
     }
   };
-  process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+  process.kill = (pid: number, signal?: NodeJS.Signals | number) => {
     if (signal === "SIGKILL") {
       report.signalReceiptWitnesses = savedReceiptWitnesses(sessionId);
     }
     return kill(pid, signal);
-  }) as typeof process.kill;
+  };
   syncBuiltinESMExports();
   if (mode === "success-stalled") {
     let now = Date.now();

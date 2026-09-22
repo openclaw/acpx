@@ -45,7 +45,9 @@ async function runCase(mode: SnapshotCase, count: number): Promise<void> {
   const retained = !["bounded", "missing-self", "root-replaced"].includes(mode);
   const alive = new Set(retained ? pids : [root, ...pids]);
   const births = new Map([root, ...pids].map((pid) => [pid, birth]));
-  if (mode === "reused-parent") births.set(pids[1], replacement);
+  if (mode === "reused-parent") {
+    births.set(pids[1], replacement);
+  }
   const reparented = new Set<number>();
   const sessionId = "snapshot-retirement";
   const lock = queueLockFilePath(sessionId);
@@ -117,8 +119,12 @@ async function runCase(mode: SnapshotCase, count: number): Promise<void> {
       event("query", pid ? { pid: Number(pid) } : {});
       const rows = [process.pid, root, ...pids]
         .filter((id) => {
-          if (pid && id !== Number(pid)) return false;
-          if (id === process.pid) return mode !== "missing-self";
+          if (pid && id !== Number(pid)) {
+            return false;
+          }
+          if (id === process.pid) {
+            return mode !== "missing-self";
+          }
           return alive.has(id) && !(mode === "missing" && id === pids[0]);
         })
         .map((id) => {
@@ -138,19 +144,25 @@ async function runCase(mode: SnapshotCase, count: number): Promise<void> {
       source = "process.exit(0)";
     }
     const child = execFile(process.execPath, ["-e", source], options, (error, stdout, stderr) => {
-      if (query) charged += 1_250;
+      if (query) {
+        charged += 1_250;
+      }
       callback(error, stdout, stderr);
     });
     helpers.push({ child, closed: new Promise((resolve) => child.once("close", () => resolve())) });
     return child;
   }) as typeof childProcess.execFile;
-  process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+  process.kill = (pid: number, signal?: NodeJS.Signals | number) => {
     // Synthetic PIDs never reach the OS; helper cleanup uses owned child handles.
-    if (pid < root || pid > root + count) return kill(pid, signal);
+    if (pid < root || pid > root + count) {
+      return kill(pid, signal);
+    }
     if (!alive.has(pid)) {
       throw Object.assign(new Error("fixture process is gone"), { code: "ESRCH" });
     }
-    if (signal === 0) return true;
+    if (signal === 0) {
+      return true;
+    }
     assert.equal(signal, "SIGKILL");
     guard();
     event("signal", { pid });
@@ -160,9 +172,11 @@ async function runCase(mode: SnapshotCase, count: number): Promise<void> {
       queueMicrotask(() => event("after-error-microtask"));
       throw Object.assign(new Error("fixture signal refused"), { code: "EPERM" });
     }
-    if (mode !== "poll") alive.delete(pid);
+    if (mode !== "poll") {
+      alive.delete(pid);
+    }
     return true;
-  }) as typeof process.kill;
+  };
   fs.rename = async (...args: Parameters<typeof fs.rename>) => {
     if (args[1] === lock) {
       guard();
@@ -174,7 +188,9 @@ async function runCase(mode: SnapshotCase, count: number): Promise<void> {
       if (mode === "publication-failure") {
         throw Object.assign(new Error("new custody publication refused"), { code: "EIO" });
       }
-      if (mode === "root-replaced") births.set(root, replacement);
+      if (mode === "root-replaced") {
+        births.set(root, replacement);
+      }
       if (mode === "new-custody" && captured.includes(pids[1])) {
         births.set(pids[1], replacement);
         reparented.add(pids[1]);
