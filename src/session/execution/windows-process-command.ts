@@ -64,6 +64,10 @@ function readBatchCommand(commandLine: string): string | undefined {
   if (!body) {
     return undefined;
   }
+  return readBatchExecutable(body);
+}
+
+function readBatchExecutable(body: string): string | undefined {
   let command = "";
   for (let index = 0; index < body.length; index += 1) {
     const char = body[index];

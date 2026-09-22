@@ -111,7 +111,7 @@ async function withOwnedProcess(
   });
   const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
   const spawned = once(child, "spawn");
-  const ready = once(child.stdout!, "data");
+  const ready = once(child.stdout, "data");
   child.stderr?.resume();
   try {
     await withTimeout(Promise.all([spawned, ready]), 5_000);
