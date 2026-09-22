@@ -286,7 +286,8 @@ async function readWindowsCommandLine(pid: number): Promise<string | undefined> 
       ],
       { windowsHide: true },
     );
-    return stdout.trim() || undefined;
+    // PowerShell adds a record newline. Other trailing whitespace can belong to argv.
+    return stdout.replace(/\r?\n$/u, "") || undefined;
   } catch {
     return undefined;
   }

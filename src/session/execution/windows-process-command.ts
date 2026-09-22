@@ -2,6 +2,10 @@ import path from "node:path";
 
 type ArgumentState = { value: string; index: number; quoted: boolean };
 
+function skipSeparators(value: string): string {
+  return value.replace(/^[ \t]+/u, "");
+}
+
 function readQuote(commandLine: string, state: ArgumentState, executable: boolean): void {
   if (!executable && state.quoted && commandLine[state.index + 1] === '"') {
     state.value += '"';
@@ -82,7 +86,7 @@ function readBatchCommand(commandLine: string): string | undefined {
 
 /** Decode process observations, not saved command identities or POSIX launch strings. */
 export function splitWindowsProcessCommandLine(commandLine: string): string[] {
-  const line = commandLine.trim();
+  const line = skipSeparators(commandLine);
   const executable = readArgument(line, 0, true);
   if (!executable?.value) {
     return [];
@@ -94,14 +98,14 @@ export function splitWindowsProcessCommandLine(commandLine: string): string[] {
     const batch = readBatchCommand(line.slice(executable.index));
     return batch ? [...argv, batch] : argv;
   }
-  let rest = line.slice(executable.index).trimStart();
+  let rest = skipSeparators(line.slice(executable.index));
   while (rest) {
     const argument = readArgument(rest, 0, false);
     if (!argument) {
       return [];
     }
     argv.push(argument.value);
-    rest = rest.slice(argument.index).trimStart();
+    rest = skipSeparators(rest.slice(argument.index));
   }
   return argv;
 }

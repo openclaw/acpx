@@ -53,6 +53,13 @@ test("the canonical saved argv takes precedence over display identity parsing", 
   );
 });
 
+test("Windows command delimiters preserve nonbreaking spaces inside tokens", () => {
+  assert.deepEqual(
+    splitWindowsProcessCommandLine("C:\\other.exe \u00a0agent.exe agent.exe\u00a0"),
+    ["C:\\other.exe", "\u00a0agent.exe", "agent.exe\u00a0"],
+  );
+});
+
 for (const command of [
   "C:\\Program Files\\agent.cmd",
   "C:\\tools & helpers\\agent.bat",
@@ -150,6 +157,27 @@ test("closeSession leaves a nonmatching owned process alive", async () => {
     });
   });
 });
+
+for (const argument of ["\u00a0agent.exe", "agent.exe\u00a0"]) {
+  test(
+    "closeSession preserves a nonmatching Windows argument " + JSON.stringify(argument),
+    { skip: process.platform !== "win32" },
+    async () => {
+      await withTempHome("acpx-close-whitespace-", async (home) => {
+        await withOwnedProcess(
+          { command: process.execPath, args: [...keeperArgs, argument] },
+          async (child) => {
+            const sessionId = await saveProcess(home, child.pid!, [path.join(home, "agent.exe")]);
+            assert.equal((await closeSession(sessionId)).closed, true);
+            assert.equal(child.exitCode, null);
+            assert.equal(child.signalCode, null);
+            assert.doesNotThrow(() => process.kill(child.pid!, 0));
+          },
+        );
+      });
+    },
+  );
+}
 
 for (const extension of ["cmd", "bat"]) {
   test(
