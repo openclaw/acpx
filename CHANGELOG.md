@@ -14,7 +14,6 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/Windows: retire witnessed queue-owner descendants with bounded process snapshots, preserving birth checks and durable custody while avoiding one process query per survivor.
 - Sessions/output: spool slow queue observers to bounded temporary storage, preserve ordered delivery when readers resume, and detach failed observers without cancelling or replaying their prompts.
 - Sessions/Windows: preserve native command-line paths when closing saved agents, including batch launch wrappers, while leaving unmatched or unobservable processes alone.
-- Sessions/filesystem: update fs-safe to 0.18.1 so lock waits use elapsed time across system-clock adjustments and temporary output storage uses verified directory ownership.
 - PR triage example: collect all review/comment pages and query CI runs for the observed PR head instead of the oldest commit.
 - Replay viewer: preserve recorded attempt order when timestamps tie or move backward, and carry rounded seconds into minute duration labels.
 - Replay viewer: count readable run summaries toward the recent-run limit so incomplete directories cannot hide older valid runs.
@@ -28,6 +27,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: render complete flow definitions containing unreachable loops without crashing.
 - Replay viewer: advance replay at the selected speed without losing animation intervals after renders or updates to the same run.
 - Sessions/watch: keep journal read offsets tied to exact file identities so rounded filesystem metadata cannot mix distinct segments during rotation.
+- Sessions/filesystem: update fs-safe to 0.18.1 so lock waits use elapsed time across system-clock adjustments and temporary output storage uses verified directory ownership.
 
 ## 0.19.1 - 2026-09-22
 
