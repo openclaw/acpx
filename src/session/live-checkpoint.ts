@@ -64,7 +64,12 @@ export class LiveSessionCheckpoint {
   private async flushDirty(): Promise<void> {
     while (this.dirty) {
       this.dirty = false;
-      await this.save();
+      try {
+        await this.save();
+      } catch (error) {
+        this.dirty = true;
+        throw error;
+      }
     }
   }
 }

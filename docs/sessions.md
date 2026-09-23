@@ -311,6 +311,10 @@ Pending one-shot reuse ignores undefined option fields and empty environment map
 An explicit empty tool list still differs from omitted tools. Ensuring again after
 a one-shot turn completes creates a fresh record.
 
+For retained sessions, status and session operations retry pending checkpoint data
+after storage recovers. Checkpoint retry saves current state without replaying the
+agent request.
+
 Call `shutdown()` when retiring a runtime. It cancels active prompts, closes owned
 connections, and waits for admitted work and probes to finish. New sessions,
 turns, controls and probes then reject. Stored sessions remain available for a

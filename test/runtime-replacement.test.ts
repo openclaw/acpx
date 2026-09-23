@@ -543,6 +543,12 @@ for (const failSave of [false, true]) {
       if (failSave) {
         await assert.rejects(replacing, (error) => error === failure);
         assert.equal(f.owners.length, 1);
+        await assert.rejects(
+          f.runtime.ensureSession({ ...f.input, cwd: "/new" }),
+          (error) => error === failure,
+        );
+        assert.equal(f.owners.length, 1);
+        f.store.save = save;
       } else {
         assert.equal((await replacing).backendSessionId, "native-2");
       }

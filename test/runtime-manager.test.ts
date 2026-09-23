@@ -4253,7 +4253,7 @@ test("AcpRuntimeManager fails the turn when the final owner checkpoint throws", 
     },
   });
   assert.equal(closeCalls, 1);
-  assert.equal(savesAfterPrompt, 1);
+  assert.equal(savesAfterPrompt, 2);
   assert.ok(events.some((event) => event.type === "text_delta"));
 });
 
