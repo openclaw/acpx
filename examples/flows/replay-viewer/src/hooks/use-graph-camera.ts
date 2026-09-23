@@ -1,5 +1,5 @@
 import type { ReactFlowInstance } from "@xyflow/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 type UseGraphCameraOptions = {
   runId: string | undefined;
@@ -25,13 +25,11 @@ export function useGraphCamera({
   viewMode,
 }: UseGraphCameraOptions) {
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
-  const lastFollowTargetRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!flowInstance?.viewportInitialized || !runId || viewMode !== "overview") {
       return undefined;
     }
-    lastFollowTargetRef.current = null;
 
     let cancelled = false;
     const frameId = window.requestAnimationFrame(() => {
@@ -57,11 +55,6 @@ export function useGraphCamera({
     ) {
       return undefined;
     }
-    const followTargetKey = `${runId}:${layoutKey}:${currentNodeId}`;
-    if (lastFollowTargetRef.current === followTargetKey) {
-      return undefined;
-    }
-    lastFollowTargetRef.current = followTargetKey;
 
     let cancelled = false;
     const frameId = window.requestAnimationFrame(() => {

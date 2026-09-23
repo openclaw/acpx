@@ -10,6 +10,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Windows/authentication: preserve inherited credential values when auth aliases use different environment-variable casing.
 - Replay viewer: let arrow keys select previous and next attempts without snapping back on every key release, and keep playback running when tabbing into the scrubber.
+- Replay viewer: reapply follow centering when a graph viewport is replaced, even when its target and layout identifiers are unchanged.
 
 ## 0.19.2 - 2026-09-23
 

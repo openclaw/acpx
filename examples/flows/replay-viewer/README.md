@@ -85,6 +85,8 @@ Unused components, including loops, remain visible even when the run completes
 without reaching them.
 
 Graph nodes remain visible during playback, and their cards resize as content changes.
+Follow mode centers the selected attempt when the graph viewport is replaced,
+including runs with matching graph node IDs and layouts.
 
 Replay follows the saved attempt order, including attempts with matching
 timestamps. Duration labels carry rounded seconds into the next minute.

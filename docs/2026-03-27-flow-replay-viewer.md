@@ -450,6 +450,7 @@ The graph should support two viewing modes:
 - the camera tracks the currently active node
 - the camera transition eases from node to node
 - switching steps should not cause a hard jump
+- a replacement graph viewport follows the selected attempt, including runs with matching node IDs and layouts
 
 `overview` means:
 
