@@ -431,6 +431,11 @@ The transport should behave like a media player.
 - compact icon buttons in the transport surface when space is tight
 - footer placement at the bottom of the graph card
 
+When the scrubber is focused, ordinary arrow presses select the previous or
+next discrete attempt, like the transport buttons, and stop active playback.
+Pointer dragging keeps its continuous preview and nearest-attempt commit.
+Tabbing into the scrubber or releasing an unrelated key should not commit a seek.
+
 ### Camera modes
 
 The graph should support two viewing modes:

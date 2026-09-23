@@ -98,6 +98,12 @@ finishes loading later. A superseded load cannot replace it or show an obsolete 
 Playback advances with elapsed animation time at the selected speed, including
 when the displayed run receives an updated bundle.
 
+With the scrubber focused, ArrowLeft/ArrowDown select the previous attempt and
+ArrowRight/ArrowUp select the next. Each press stops replay at a complete recorded
+attempt. Dragging still previews continuously and snaps to the nearest attempt
+on release; Home and End retain their native range behavior. Tabbing into the
+scrubber leaves playback running until a seek key is used.
+
 ## Included sample
 
 The bundled sample under `public/sample-run/` still exists for development and

@@ -63,7 +63,25 @@ export function StepTimeline({
           onPointerDown={onSeekStart}
           onChange={(event) => onSeek(Number(event.target.value))}
           onPointerUp={(event) => onSeekCommit(Number((event.target as HTMLInputElement).value))}
-          onKeyUp={(event) => onSeekCommit(Number((event.target as HTMLInputElement).value))}
+          onKeyDown={(event) => {
+            if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+              return;
+            }
+            const direction = arrowStepDirection(event.key);
+            if (direction === 0) {
+              return;
+            }
+            event.preventDefault();
+            onSelect(Math.min(Math.max(selectedIndex + direction, 0), steps.length - 1));
+          }}
+          onKeyUp={(event) => {
+            if (
+              arrowStepDirection(event.key) !== 0 ||
+              ["Home", "End", "PageUp", "PageDown"].includes(event.key)
+            ) {
+              onSeekCommit(Number((event.target as HTMLInputElement).value));
+            }
+          }}
           onBlur={(event) => onSeekCommit(Number(event.target.value))}
           aria-label={`Replay position step ${selectedIndex + 1} of ${steps.length}`}
         />
@@ -119,6 +137,13 @@ export function StepTimeline({
       </div>
     </section>
   );
+}
+
+function arrowStepDirection(key: string): -1 | 0 | 1 {
+  if (key === "ArrowLeft" || key === "ArrowDown") {
+    return -1;
+  }
+  return key === "ArrowRight" || key === "ArrowUp" ? 1 : 0;
 }
 
 function formatPlaybackRate(playbackRate: number): string {
