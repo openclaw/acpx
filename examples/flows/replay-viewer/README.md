@@ -94,6 +94,12 @@ When a later step shows an earlier ACP conversation as context, the completed
 text stays visible during replay. Progressive reveal belongs to the attempt
 that produced the conversation.
 
+The conversation pane follows new content during replay and live streaming.
+Scrolling upward detaches it, including keyboard and scrollbar movement. Scroll
+down near the bottom to resume following. Changing the streaming session or
+resuming replay restores follow; updates within the same session preserve a
+reader's detached position.
+
 Selecting the displayed run again keeps it selected even if an earlier choice
 finishes loading later. A superseded load cannot replace it or show an obsolete error.
 

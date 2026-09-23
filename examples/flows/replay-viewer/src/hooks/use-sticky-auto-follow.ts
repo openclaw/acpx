@@ -21,10 +21,9 @@ export function useStickyAutoFollow(options: {
   const { scrollContainerRef, endRef, enabled, resetKey, contentDependency } = options;
   const [pinned, setPinned] = useState(true);
   const lastScrollTopRef = useRef(0);
-  const autoScrollingRef = useRef(false);
   const detachedRef = useRef(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!enabled) {
       return;
     }
@@ -42,7 +41,6 @@ export function useStickyAutoFollow(options: {
 
     const handleWheel = (event: WheelEvent) => {
       if (event.deltaY < -1) {
-        autoScrollingRef.current = false;
         detachedRef.current = true;
         setPinned(false);
       }
@@ -52,14 +50,6 @@ export function useStickyAutoFollow(options: {
       const previousScrollTop = lastScrollTopRef.current;
       const nextScrollTop = scrollContainer.scrollTop;
       const atBottom = isPinnedToBottom(scrollContainer);
-
-      if (autoScrollingRef.current) {
-        autoScrollingRef.current = false;
-        lastScrollTopRef.current = nextScrollTop;
-        detachedRef.current = false;
-        setPinned(atBottom);
-        return;
-      }
 
       if (didUserScrollUp(previousScrollTop, nextScrollTop)) {
         lastScrollTopRef.current = nextScrollTop;
@@ -83,7 +73,6 @@ export function useStickyAutoFollow(options: {
       setPinned(atBottom);
     };
 
-    updatePinned();
     scrollContainer.addEventListener("wheel", handleWheel, { passive: true });
     scrollContainer.addEventListener("scroll", updatePinned, { passive: true });
     return () => {
@@ -98,10 +87,9 @@ export function useStickyAutoFollow(options: {
     if (!enabled || !pinned || !scrollContainer || !endMarker) {
       return;
     }
-    autoScrollingRef.current = true;
     endMarker.scrollIntoView({ block: "end" });
     lastScrollTopRef.current = scrollContainer.scrollTop;
-  }, [enabled, pinned, contentDependency, scrollContainerRef, endRef]);
+  }, [enabled, pinned, resetKey, contentDependency, scrollContainerRef, endRef]);
 
   return { pinnedToBottom: pinned };
 }
