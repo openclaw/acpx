@@ -316,7 +316,6 @@ export async function importSession(
 
   await assertDestinationScopeAvailable(newRecord);
   await assertProviderSessionAvailable(newRecord);
-  await writeSessionRecord(newRecord);
 
   if (parsed.history.length > 0) {
     const history = parsed.history as AcpJsonRpcMessage[];
@@ -326,5 +325,7 @@ export async function importSession(
     );
   }
 
+  // A discoverable record must already have all of its imported history.
+  await writeSessionRecord(newRecord);
   return { record_id: newRecordId, cwd };
 }

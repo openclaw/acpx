@@ -13,6 +13,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: reapply follow centering when a graph viewport is replaced, even when its target and layout identifiers are unchanged.
 - Replay viewer: restore conversation auto-follow on session changes and replay resume, and preserve upward keyboard or scrollbar scrolling after content updates that do not move the pane.
 - Sessions/filesystem: update fs-safe to 0.18.1 so lock waits use elapsed time across system-clock adjustments and temporary output storage uses verified directory ownership.
+- Sessions/import: publish imported history before making its session discoverable, so a failed history write does not leave a partial session that blocks retrying the archive.
 
 ## 0.19.2 - 2026-09-23
 
