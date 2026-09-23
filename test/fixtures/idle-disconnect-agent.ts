@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
 import readline from "node:readline";
 
 const [mode, terminalPidFile, triggerFile] = process.argv.slice(2);
@@ -8,11 +7,12 @@ if (!mode || !terminalPidFile || !triggerFile) {
 }
 const sessionId = `idle-${process.pid}`;
 const send = (message: unknown) => process.stdout.write(`${JSON.stringify(message)}\n`);
-const watcher = fs.watch(path.dirname(triggerFile), () => {
+// File-watch delivery can miss this short-lived directory's trigger on macOS.
+const triggerPoll = setInterval(() => {
   if (!fs.existsSync(triggerFile)) {
     return;
   }
-  watcher.close();
+  clearInterval(triggerPoll);
   if (mode === "idle-exit") {
     process.exit(0);
   }
@@ -31,7 +31,7 @@ const watcher = fs.watch(path.dirname(triggerFile), () => {
       },
     },
   });
-});
+}, 20);
 const lines = readline.createInterface({ input: process.stdin });
 lines.on("line", (line) => {
   const message = JSON.parse(line) as { id?: string | number; method?: string };

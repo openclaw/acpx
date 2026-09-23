@@ -94,7 +94,10 @@ for (const mode of ["idle-eof", "idle-limit-error", "idle-exit"]) {
     await fs.writeFile(triggerFile, "disconnect");
 
     // No turn or explicit close runs here: transport failure owns retirement.
-    await waitFor(() => exits.includes(launches[0]), "idle agent survived its transport failure");
+    await waitFor(
+      () => exits.includes(launches[0]),
+      "idle agent exit was not observed after trigger",
+    );
     await waitFor(() => !isRunning(terminalPid), "delegated terminal survived its agent");
     assert.equal(isRunning(launches[0]), false);
     assert.deepEqual(exits, [launches[0]]);
