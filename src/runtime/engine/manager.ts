@@ -386,14 +386,24 @@ export class AcpRuntimeManager {
       ...this.runtimeOperationLocks.values(),
       ...this.pendingTasks,
     ]);
-    await Promise.all(
-      [...this.retainedSessionOwners.values()].map(async (owner) => {
+    const owners = new Set([...this.retainedSessionOwners.values(), ...this.retiringSessionOwners]);
+    const stopped = await Promise.allSettled(
+      [...owners].map(async (owner) => {
         this.removeRetainedSessionOwner(owner);
-        await this.stopSessionOwner(owner);
+        const retirement = owner.retirement;
+        if (retirement) {
+          await retirement;
+        } else {
+          const failure = await this.stopSessionOwner(owner);
+          if (failure) {
+            throw failure.error;
+          }
+        }
+        this.retiringSessionOwners.delete(owner);
       }),
     );
     const errors: unknown[] = [];
-    for (const result of closed) {
+    for (const result of [...closed, ...stopped]) {
       if (result.status === "rejected") {
         errors.push(result.reason);
       }
@@ -401,7 +411,6 @@ export class AcpRuntimeManager {
     if (errors.length) {
       throw new AggregateError(errors, "ACP runtime shutdown failed.");
     }
-    this.retiringSessionOwners.clear();
   }
 
   private trackTask<T>(task: Promise<T>): Promise<T> {
@@ -619,15 +628,16 @@ export class AcpRuntimeManager {
     await this.stopSessionOwner(owner);
   }
 
-  private async stopSessionOwner(owner: RuntimeSessionOwner): Promise<void> {
-    await this.flushSessionOwner(owner).catch(() => {});
-    await this.closeClient(owner.client).catch(() => {
+  private async stopSessionOwner(owner: RuntimeSessionOwner): Promise<FailedAttempt | undefined> {
+    const flushAttempt = await settleAttempt(async () => this.flushSessionOwner(owner));
+    const closeAttempt = await settleAttempt(async () => this.closeClient(owner.client));
+    if (!closeAttempt.ok) {
       this.retiringSessionOwners.add(owner);
-    });
-    await owner.checkpoint.flush().catch(() => {});
-    try {
-      owner.client.clearEventHandlers();
-    } catch {}
+    }
+    const finalFlushAttempt = await settleAttempt(async () => owner.checkpoint.flush());
+    const clearAttempt = await settleAttempt(() => owner.client.clearEventHandlers());
+    // Shutdown reports failures; predecessor stops must not fail after publishing a successor.
+    return firstFailedAttempt([flushAttempt, closeAttempt, finalFlushAttempt, clearAttempt]);
   }
 
   private async retrySessionCleanup(recordId: string): Promise<void> {

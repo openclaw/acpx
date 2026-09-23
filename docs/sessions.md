@@ -321,6 +321,12 @@ turns, controls and probes then reject. Stored sessions remain available for a
 new runtime to resume. Hosts must still settle their own pending lifecycle
 admission callbacks; shutdown cannot complete an external host operation.
 
+Shutdown reports connection and checkpoint cleanup failures after all owned cleanup
+has finished. A later cleanup save can recover data while an earlier failure in
+that shutdown attempt still causes rejection. Earlier admitted operations keep
+their own results; shutdown can recover a previously failed retirement in its
+final cleanup pass. Repeated calls share the same shutdown result.
+
 For temporary model inspection, use `ensureSession({ mode: "oneshot", ... })`,
 `getStatus({ handle })`, and `close({ handle, discardPersistentState: true, ... })`.
 Close requests ACP `session/close` and marks the host record closed for reset on

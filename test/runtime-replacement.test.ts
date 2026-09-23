@@ -661,3 +661,148 @@ test(
     assert.equal(record?.acpx?.desired_mode_id, "plan");
   },
 );
+
+test(
+  "shutdown recovers pending state after an admitted prepare-fresh retirement fails",
+  { timeout: 10_000 },
+  async (t) => {
+    const f = await fixture(t);
+    const retirementRetryEntered = f.barrier();
+    const releaseRetirementRetry = f.barrier();
+    const shutdownSaveEntered = f.barrier();
+    const releaseShutdownSave = f.barrier();
+    const firstFailure = new Error("admitted retirement first save failed");
+    const retryFailure = new Error("admitted retirement final save failed");
+    const marker = "temporal-retirement-update";
+    const receipts: string[] = [];
+    const save = f.store.save.bind(f.store);
+    let idleFlushes = 0;
+    let markerSaves = 0;
+    let prepareSettled = false;
+    let shutdownSettled = false;
+
+    f.hooks.flush = async (owner) => {
+      assert.equal(owner.id, 1);
+      idleFlushes += 1;
+      receipts.push(`idle-flush:${idleFlushes}`);
+      if (idleFlushes === 2) {
+        receipts.push("notification:admitted");
+        f.emit({
+          sessionUpdate: "available_commands_update",
+          availableCommands: [{ name: marker, description: "Synthetic retirement marker" }],
+        });
+      }
+    };
+    f.store.save = async (record) => {
+      const snapshot = structuredClone(record);
+      if (!snapshot.acpx?.available_commands?.some((command) => command.name === marker)) {
+        await save(snapshot);
+        return;
+      }
+      const attempt = ++markerSaves;
+      receipts.push(`save:${attempt}:entered`);
+      if (attempt === 1) {
+        receipts.push("save:1:rejected");
+        throw firstFailure;
+      }
+      if (attempt === 2) {
+        retirementRetryEntered.resolve();
+        await releaseRetirementRetry.promise;
+        receipts.push("save:2:rejected");
+        throw retryFailure;
+      }
+      assert.equal(attempt, 3, "shutdown must not start another full checkpoint transaction");
+      shutdownSaveEntered.resolve();
+      await releaseShutdownSave.promise;
+      await save(snapshot);
+      receipts.push("save:3:persisted");
+    };
+
+    const preparing = f.runtime.prepareFreshSession({ handle: f.handle });
+    const prepareOutcome = preparing.then(
+      () => {
+        prepareSettled = true;
+        receipts.push("prepare:fulfilled");
+        return { kind: "fulfilled" as const };
+      },
+      (error: unknown) => {
+        prepareSettled = true;
+        receipts.push("prepare:rejected");
+        return { kind: "rejected" as const, error };
+      },
+    );
+    await retirementRetryEntered.promise;
+    assert.equal(idleFlushes, 2);
+    assert.equal(markerSaves, 2);
+    assert.equal(prepareSettled, false);
+    assert.equal(f.owners.length, 1);
+    assert.equal(f.owners[0]?.closed, true);
+    assert.deepEqual(f.owners[0]?.handlers, {});
+    assert.deepEqual(receipts, [
+      "idle-flush:1",
+      "idle-flush:2",
+      "notification:admitted",
+      "save:1:entered",
+      "save:1:rejected",
+      "save:2:entered",
+    ]);
+
+    const stopping = f.runtime.shutdown();
+    const shutdownOutcome = stopping.then(
+      () => {
+        shutdownSettled = true;
+        receipts.push("shutdown:fulfilled");
+        return { kind: "fulfilled" as const };
+      },
+      (error: unknown) => {
+        shutdownSettled = true;
+        receipts.push("shutdown:rejected");
+        return { kind: "rejected" as const, error };
+      },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(shutdownSettled, false, "shutdown must join the admitted preparation");
+    assert.equal(prepareSettled, false);
+    assert.equal(markerSaves, 2, "shutdown must not race the admitted retirement save");
+
+    releaseRetirementRetry.resolve();
+    const prepared = await prepareOutcome;
+    if (prepared.kind !== "rejected") {
+      assert.fail("the admitted prepare-fresh call must retain its own failure");
+    }
+    assert.equal(prepared.error, firstFailure);
+
+    // Fail promptly on the old shutdown path instead of hanging on an unentered save.
+    const nextBoundary = await Promise.race([
+      shutdownSaveEntered.promise.then(() => "save" as const),
+      shutdownOutcome.then(() => "shutdown" as const),
+    ]);
+    assert.equal(nextBoundary, "save", "the final shutdown pass must revisit the retiring owner");
+    assert.equal(shutdownSettled, false, "shutdown must wait for final persistence");
+    assert.equal(markerSaves, 3);
+    assert.equal(idleFlushes, 3);
+    const beforeFinalSave = await f.store.load("session");
+    assert.equal(
+      beforeFinalSave?.acpx?.available_commands?.some((command) => command.name === marker) ??
+        false,
+      false,
+    );
+
+    releaseShutdownSave.resolve();
+    assert.deepEqual(await shutdownOutcome, { kind: "fulfilled" });
+    const persisted = await f.store.load("session");
+    assert.ok(persisted);
+    assert.deepEqual(
+      persisted.acpx?.available_commands?.map((command) => command.name),
+      [marker],
+    );
+    assert.equal(persisted.acpSessionId, f.handle.backendSessionId);
+    assert.equal(persisted.acpx?.reset_on_next_ensure, undefined);
+    assert.equal(markerSaves, 3);
+    assert.equal(f.owners.length, 1);
+    assert.equal(f.owners[0]?.closed, true);
+    assert.deepEqual(f.owners[0]?.handlers, {});
+    assert.ok(receipts.indexOf("save:2:rejected") < receipts.indexOf("save:3:entered"));
+    assert.ok(receipts.indexOf("save:3:persisted") < receipts.indexOf("shutdown:fulfilled"));
+  },
+);

@@ -16,6 +16,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/import: publish imported history before making its session discoverable, so a failed history write does not leave a partial session that blocks retrying the archive.
 - Sessions/journal: retry captures changed by rotation without skipping retained events or reporting false corruption, and preserve reader progress when a page fails or is cancelled.
 - Sessions/checkpoints: keep failed saves pending so later flushes retry current state without losing updates or allowing replacement to bypass persistent storage failures.
+- Runtime/shutdown: drain retained and retiring session checkpoints, wait for every owner's cleanup, and report failures instead of silently succeeding after persistence errors.
 
 ## 0.19.2 - 2026-09-23
 
