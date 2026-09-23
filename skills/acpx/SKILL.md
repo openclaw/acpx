@@ -36,6 +36,7 @@ Core capabilities:
 - Structured streaming output (`text`, `json`, `quiet`) with optional `--suppress-reads`
 - Prompt-response `_meta` preservation across direct, queued, compare, and embedded-runtime results
 - Built-in agent registry plus raw `--agent` escape hatch
+- Optional [Hermes launcher](https://github.com/openclaw/acpx/blob/main/agents/Hermes.md#optional-active-turn-guidance) for active-turn guidance through a separate local channel; normal acpx prompts remain queued
 - Claude system prompt override via `--system-prompt` / `--append-system-prompt`
 - Optional ACP filesystem and terminal capability opt-outs via `--no-fs` and `--no-terminal`
 - Tool whitelist (`--allowed-tools`), turn cap (`--max-turns`), retry on transient failures (`--prompt-retries`)

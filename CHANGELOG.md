@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Examples: add an optional Hermes ACP launcher for active-turn guidance without changing normal prompt queueing.
+
 ### Fixes
 
 - Windows/authentication: preserve inherited credential values when auth aliases use different environment-variable casing.
