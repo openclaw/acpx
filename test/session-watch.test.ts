@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { constants } from "node:fs";
-import fs from "node:fs/promises";
+import fsSync, { constants, type BigIntStats, type Stats } from "node:fs";
+import fs, { type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import {
@@ -342,6 +342,190 @@ test("watch reads concurrent rotations without duplicate events or silent gaps",
       watched.abort.abort();
       await watched.iterator.return?.();
       await writer.close();
+    }
+  });
+});
+
+test("journal offsets stay with exact files when numeric identities alias", async (t) => {
+  await withTempHome("acpx-watch-identity-", async (home) => {
+    const session = record(home);
+    session.eventLog.max_segment_bytes = 1;
+    session.eventLog.max_segments = 4;
+    await writeSessionRecord(session);
+    const writer = await SessionEventWriter.open(session);
+    const restoreMocks: Array<() => void> = [];
+    try {
+      await writer.beginTurn("request");
+      const firstMessage = message("a".repeat(512));
+      await writer.appendMessage(firstMessage);
+      const activePath = sessionEventActivePath(session.acpxRecordId);
+      const previousPath = sessionEventSegmentPath(session.acpxRecordId, 1);
+      const firstBytes = await fs.readFile(activePath);
+      const originalFstat = fsSync.fstatSync;
+      const originalLstat = fsSync.lstatSync;
+      const firstIdentity = originalLstat(activePath, { bigint: true });
+      const exactId = (stat: BigIntStats) => `${stat.dev}:${stat.ino}`;
+      const numericId = (stat: Stats) => `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
+      const selected = new Set([exactId(firstIdentity)]);
+      const roundedIno = 2 ** 53;
+      const firstNumeric = originalLstat(activePath);
+      const sharedBirthtime = firstNumeric.birthtimeMs;
+      const aliasedKey = `${firstNumeric.dev}:${roundedIno}:${sharedBirthtime}`;
+      assert.equal(Number.isSafeInteger(roundedIno), false);
+      assert.notEqual(numericId(originalLstat(previousPath)), aliasedKey);
+
+      // Only public numeric receipts collide. Exact descriptor/path admission still
+      // observes the real files, including after their names change during rotation.
+      function project<T extends Stats | BigIntStats | undefined>(
+        stat: T,
+        identity: BigIntStats,
+      ): T {
+        if (stat && typeof stat.ino === "number" && selected.has(exactId(identity))) {
+          stat.ino = roundedIno;
+          stat.birthtimeMs = sharedBirthtime;
+        }
+        return stat;
+      }
+      const fstat = t.mock.method(
+        fsSync,
+        "fstatSync",
+        (...args: Parameters<typeof originalFstat>) => {
+          const stat = originalFstat(...args);
+          return args[1]?.bigint ? stat : project(stat, originalFstat(args[0], { bigint: true }));
+        },
+      );
+      restoreMocks.push(() => fstat.mock.restore());
+      const lstat = t.mock.method(
+        fsSync,
+        "lstatSync",
+        (...args: Parameters<typeof originalLstat>) => {
+          const stat = originalLstat(...args);
+          return !stat || args[1]?.bigint
+            ? stat
+            : project(stat, originalLstat(args[0], { bigint: true }));
+        },
+      );
+      restoreMocks.push(() => lstat.mock.restore());
+
+      const reader = new SessionJournalReader(session);
+      const first = await reader.read();
+      assert.deepEqual(
+        first.events.map((event) => [event.type, event.sequence]),
+        [
+          ["turn_started", 1],
+          ["message", 2],
+        ],
+      );
+      assert.deepEqual(
+        first.events.filter((event) => event.type === "message").map((event) => event.message),
+        [firstMessage],
+      );
+      assert.equal(first.activeSize, firstBytes.length);
+      const secondText = "b".repeat(2 * firstBytes.length);
+      const secondMessage = message(secondText);
+      await writer.appendMessage(secondMessage);
+      const secondBytes = await fs.readFile(activePath);
+      const secondIdentity = originalLstat(activePath, { bigint: true });
+      assert.equal(exactId(originalLstat(previousPath, { bigint: true })), exactId(firstIdentity));
+      assert.equal(secondIdentity.dev, firstIdentity.dev);
+      assert.notEqual(exactId(secondIdentity), exactId(firstIdentity));
+      selected.add(exactId(secondIdentity));
+      assert.equal(numericId(fsSync.lstatSync(previousPath)), aliasedKey);
+      assert.equal(numericId(fsSync.lstatSync(activePath)), aliasedKey);
+      assert.deepEqual(await fs.readFile(previousPath), firstBytes);
+      for (const bytes of [firstBytes, secondBytes]) {
+        assert.equal(bytes.at(-1), 10);
+        for (const line of bytes.toString("utf8").trimEnd().split("\n")) {
+          assert.doesNotThrow(() => JSON.parse(line));
+        }
+      }
+      const textStart = secondBytes.indexOf(secondText);
+      assert(textStart >= 0);
+      assert(firstBytes.length > textStart && firstBytes.length < textStart + secondText.length);
+      assert(secondBytes.length > firstBytes.length);
+      assert.equal(secondBytes[firstBytes.length], "b".charCodeAt(0));
+
+      const second = await reader.read();
+      assert.deepEqual(
+        second.events.map((event) => [event.type, event.sequence]),
+        [["message", 3]],
+      );
+      assert.equal(second.requestId, "request");
+      assert.deepEqual(
+        second.events.filter((event) => event.type === "message").map((event) => event.message),
+        [secondMessage],
+      );
+      assert.deepEqual((await reader.read()).events, []);
+    } finally {
+      for (const restore of restoreMocks) {
+        restore();
+      }
+      await writer.close();
+    }
+  });
+});
+
+test("journal identity stat failure closes its descriptor and fulfilled siblings", async (t) => {
+  await withTempHome("acpx-watch-identity-stat-", async (home) => {
+    const session = record(home);
+    session.eventLog.max_segment_bytes = 1;
+    await writeSessionRecord(session);
+    const writer = await SessionEventWriter.open(session);
+    await writer.beginTurn("request");
+    await writer.appendMessage(message("first"));
+    await writer.close();
+
+    const activePath = sessionEventActivePath(session.acpxRecordId);
+    const previousPath = sessionEventSegmentPath(session.acpxRecordId, 1);
+    const activePaths = new Set([activePath, await fs.realpath(activePath)]);
+    const journalPaths = new Set([...activePaths, previousPath, await fs.realpath(previousPath)]);
+    const failure = Object.assign(new Error("journal identity stat failed"), { code: "EIO" });
+    const handles: FileHandle[] = [];
+    const fulfilled = new Set<FileHandle>();
+    const restoreStats: Array<() => void> = [];
+    let failedStatCalls = 0;
+    const open = fs.open;
+    const mocked = t.mock.method(fs, "open", async (...args: Parameters<typeof fs.open>) => {
+      const handle = await open(...args);
+      if (journalPaths.has(String(args[0]))) {
+        handles.push(handle);
+        const stat = handle.stat.bind(handle);
+        const mockedStat = t.mock.method(
+          handle,
+          "stat",
+          async (...options: Parameters<typeof stat>) => {
+            assert.deepEqual(options, [{ bigint: true }]);
+            if (activePaths.has(String(args[0]))) {
+              failedStatCalls += 1;
+              throw failure;
+            }
+            const identity = await stat({ bigint: true });
+            fulfilled.add(handle);
+            return identity;
+          },
+        );
+        restoreStats.push(() => mockedStat.mock.restore());
+      }
+      return handle;
+    });
+    try {
+      await assert.rejects(
+        new SessionJournalReader(session).read(),
+        (error: unknown) => error === failure,
+      );
+      assert.equal(failedStatCalls, 1);
+      assert.equal(handles.length, 2);
+      assert.equal(fulfilled.size, 1, "the other admitted segment must finish its identity stat");
+      assert.ok(
+        handles.every((handle) => handle.fd === -1),
+        "all admitted descriptors must close before rejection",
+      );
+    } finally {
+      mocked.mock.restore();
+      for (const restore of restoreStats) {
+        restore();
+      }
+      await Promise.all(handles.map((handle) => handle.close()));
     }
   });
 });
