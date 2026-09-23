@@ -151,16 +151,20 @@ async function withTimeline(count, run) {
     );
     if (!prevented) {
       const current = input();
-      if (nativeValue !== undefined) await change(nativeValue);
-      else if (isArrow(key))
+      if (nativeValue !== undefined) {
+        await change(nativeValue);
+      } else if (isArrow(key)) {
         await change(
           Math.min(
             current.max,
             Math.max(current.min, current.value + arrowDirection(key) * current.step),
           ),
         );
-      else if (key === "Home") await change(current.min);
-      else if (key === "End") await change(current.max);
+      } else if (key === "Home") {
+        await change(current.min);
+      } else if (key === "End") {
+        await change(current.max);
+      }
     }
     return prevented;
   }
@@ -193,7 +197,13 @@ async function withTimeline(count, run) {
       },
       async frame(timestamp) {
         await act(async () => {
-          for (const [id, callback] of [...frames]) if (frames.delete(id)) callback(timestamp);
+          // A callback can schedule its next frame while this batch runs.
+          const pendingFrames = [...frames];
+          for (const [id, callback] of pendingFrames) {
+            if (frames.delete(id)) {
+              callback(timestamp);
+            }
+          }
         });
       },
       async pointerDown() {
@@ -212,10 +222,16 @@ async function withTimeline(count, run) {
       await act(async () => renderer?.unmount());
       assert.equal(frames.size, 0);
     } finally {
-      if (oldWindow === undefined) delete globalThis.window;
-      else globalThis.window = oldWindow;
-      if (oldAct === undefined) delete globalThis.IS_REACT_ACT_ENVIRONMENT;
-      else globalThis.IS_REACT_ACT_ENVIRONMENT = oldAct;
+      if (oldWindow === undefined) {
+        delete globalThis.window;
+      } else {
+        globalThis.window = oldWindow;
+      }
+      if (oldAct === undefined) {
+        delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+      } else {
+        globalThis.IS_REACT_ACT_ENVIRONMENT = oldAct;
+      }
     }
   }
 }
