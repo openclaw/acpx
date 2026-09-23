@@ -426,6 +426,7 @@ test("FlowRunStore writes artifacts with stable hashes and optional trace emissi
 test("FlowRunStore uses unique temp paths for concurrent live writes", async () => {
   const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-race-"));
   const originalDateNow = Date.now;
+  const failures: { phase: string; error: unknown }[] = [];
   Date.now = () => 1_700_000_000_000;
 
   try {
@@ -463,7 +464,8 @@ test("FlowRunStore uses unique temp paths for concurrent live writes", async () 
       state: baseState,
     });
 
-    await Promise.all([
+    // Join both writes before cleanup so one rejection cannot race a sibling publication.
+    const writeResults = await Promise.allSettled([
       store.writeLive(runDir, structuredClone(baseState), {
         scope: "node",
         type: "node_heartbeat",
@@ -489,22 +491,38 @@ test("FlowRunStore uses unique temp paths for concurrent live writes", async () 
       ),
     ]);
 
-    const live = JSON.parse(
-      await fs.readFile(path.join(runDir, "projections", "live.json"), "utf8"),
-    ) as {
-      runId?: string;
-    };
-    const events = (await fs.readFile(path.join(runDir, "trace.ndjson"), "utf8"))
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line) as { type?: string });
+    for (const [index, result] of writeResults.entries()) {
+      if (result.status === "rejected") {
+        failures.push({ phase: `write ${index + 1}`, error: result.reason });
+      }
+    }
 
-    assert.equal(live.runId, "run-race");
-    assert.equal(events.length, 3);
+    if (failures.length === 0) {
+      const live = JSON.parse(
+        await fs.readFile(path.join(runDir, "projections", "live.json"), "utf8"),
+      ) as {
+        runId?: string;
+      };
+      const events = (await fs.readFile(path.join(runDir, "trace.ndjson"), "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { type?: string });
+
+      assert.equal(live.runId, "run-race");
+      assert.equal(events.length, 3);
+    }
+  } catch (error) {
+    failures.push({ phase: "test body", error });
   } finally {
     Date.now = originalDateNow;
-    await fs.rm(outputRoot, { recursive: true, force: true });
+    try {
+      await fs.rm(outputRoot, { recursive: true, force: true });
+    } catch (error) {
+      failures.push({ phase: "cleanup", error });
+    }
   }
+  // Keep cleanup errors alongside the original failures instead of replacing them.
+  assert.deepEqual(failures, []);
 });
 
 test("FlowRunStore preserves bundled session event order across concurrent appends", async () => {
