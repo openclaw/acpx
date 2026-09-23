@@ -1,5 +1,5 @@
 ---
-description: Land a PR (merge with proper workflow)
+description: Land a PR targeting main (merge with proper workflow)
 ---
 
 Input
@@ -9,21 +9,24 @@ Input
   - If ambiguous: ask.
 
 Do (end-to-end)
-Goal: PR must end in GitHub state = MERGED (never CLOSED). Prefer `gh pr merge --squash`; use `--rebase` only when preserving commit history is required.
+Goal: Land PRs targeting `main` in GitHub state = MERGED (never CLOSED). Refuse other or unknown bases before making changes. Prefer `gh pr merge --squash`; use `--rebase` only when preserving commit history is required.
 
-1. Assign PR to self:
-   - `gh pr edit <PR> --add-assignee @me`
-2. Repo clean:
-   - `git status`
-3. Identify PR meta:
+1. Repo clean:
+   - `git status -sb`
+2. Identify PR meta:
 
    ```sh
    gh pr view <PR> --json number,title,author,headRefName,baseRefName,headRepository,maintainerCanModify --jq '{number,title,author:.author.login,head:.headRefName,base:.baseRefName,headRepo:.headRepository.nameWithOwner,maintainerCanModify}'
    contrib=$(gh pr view <PR> --json author --jq .author.login)
+   base=$(OCTOPOOL_FRESH=1 gh pr view <PR> --json baseRefName --jq .baseRefName)
    head=$(gh pr view <PR> --json headRefName --jq .headRefName)
    head_repo_url=$(gh pr view <PR> --json headRepository --jq .headRepository.url)
    ```
 
+3. Require a main-targeting PR, then assign:
+   - The base lookup must succeed and `base` must be exactly `main`. Otherwise stop before assignment, checkout, branch creation, rebase, commit, push, or merge; report the actual base or lookup failure.
+   - Do not retarget the PR or fall back to `main` when the base is missing or different.
+   - Only after this guard passes: `gh pr edit <PR> --add-assignee @me`
 4. Fast-forward base:
    - `git checkout main`
    - `git pull --ff-only`
@@ -49,6 +52,8 @@ Goal: PR must end in GitHub state = MERGED (never CLOSED). Prefer `gh pr merge -
 
 11. Push updated PR branch:
 
+- Refresh `base` with step 2's fresh `baseRefName` query and require the same successful `main` result before changing the remote or pushing. Stop on lookup failure or a changed base, preserving prepared local work.
+
 ```sh
 git remote add prhead "$head_repo_url.git" 2>/dev/null || git remote set-url prhead "$head_repo_url.git"
 git push --force-with-lease prhead HEAD:$head
@@ -56,6 +61,7 @@ git push --force-with-lease prhead HEAD:$head
 
 12. Merge PR:
 
+- Refresh and check the base again as in step 11 before merging.
 - Squash (preferred): `gh pr merge <PR> --squash`
 - Rebase (history-preserving fallback): `gh pr merge <PR> --rebase`
 - Never `gh pr close`
