@@ -105,6 +105,7 @@ export function buildTerminalSpawnOptions(
     options,
     platform,
     resolvedEnv ?? process.env,
+    cwd,
   ) as TerminalSpawnOptions;
 }
 

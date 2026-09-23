@@ -18,6 +18,10 @@ Set `ACPX_CLAUDE_INCLUDE_USER_SETTINGS=1` only when the spawned session needs
 the user's global Claude settings and no such plugin conflict exists. Ambient
 credentials and other environment variables are still inherited normally.
 
+On Windows, native Claude executable discovery resolves relative `PATH` entries
+from the selected session cwd. An explicit `CLAUDE_CODE_EXECUTABLE` still takes
+precedence.
+
 ## System prompt overrides
 
 Choose the system prompt when creating a named session, then select that session for later prompts:

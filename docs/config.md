@@ -111,6 +111,7 @@ Rules:
 - Keys are friendly names you would type at `acpx <name> …`.
 - Names such as `constructor` and `__proto__` work like any other custom name and remain visible in `config show`.
 - `argv` is the preferred form and is required for custom agent launches on Windows. Its first item is the executable and every remaining item is passed literally as one argument.
+- Windows batch wrappers, including extensionless commands, resolve from the selected `--cwd`; relative `PATH` directories use that same cwd.
 - Legacy `{ "command": "…", "args": […] }` entries migrate when `command` is an unquoted executable with no whitespace. Quoted executables and inline arguments are rejected as ambiguous; move the complete launch to `argv`.
 - A legacy `command` without `args` remains a raw command string for Unix compatibility. Windows rejects it with migration guidance because inferring argv would corrupt paths and quoting.
 - The raw `--agent <command>` escape hatch is likewise Unix-only.

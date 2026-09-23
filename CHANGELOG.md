@@ -17,6 +17,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/journal: retry captures changed by rotation without skipping retained events or reporting false corruption, and preserve reader progress when a page fails or is cancelled.
 - Sessions/checkpoints: keep failed saves pending so later flushes retry current state without losing updates or allowing replacement to bypass persistent storage failures.
 - Runtime/shutdown: drain retained and retiring session checkpoints, wait for every owner's cleanup, and report failures instead of silently succeeding after persistence errors.
+- Windows/processes: resolve relative batch commands and PATH entries from the selected child cwd for adapter launches, terminal commands, and native Claude executable discovery.
 
 ## 0.19.2 - 2026-09-23
 

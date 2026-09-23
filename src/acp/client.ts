@@ -793,7 +793,11 @@ export class AcpClient {
     if (!plan.claudeAcp) {
       return;
     }
-    const claudeExe = resolveClaudeCodeExecutable(process.platform, plan.spawnOptions.env);
+    const claudeExe = resolveClaudeCodeExecutable(
+      process.platform,
+      plan.spawnOptions.env,
+      plan.spawnOptions.cwd,
+    );
     if (claudeExe) {
       plan.spawnOptions.env.CLAUDE_CODE_EXECUTABLE = claudeExe;
       this.log(`resolved system Claude Code executable: ${claudeExe}`);
@@ -805,7 +809,13 @@ export class AcpClient {
     args: readonly string[],
     options: Pick<ReturnType<typeof buildAgentSpawnOptions>, "cwd" | "env">,
   ): { launch: AcpProcessLaunch; windowsVerbatimArguments?: boolean } {
-    const resolved = buildAgentSpawnCommand(command, args, process.platform, options.env);
+    const resolved = buildAgentSpawnCommand(
+      command,
+      args,
+      process.platform,
+      options.env,
+      options.cwd,
+    );
     return {
       launch: Object.freeze({
         launchId: randomUUID(),

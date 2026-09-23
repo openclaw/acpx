@@ -335,6 +335,7 @@ function isAppendSystemPrompt(
 export function resolveClaudeCodeExecutable(
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
+  cwd?: string,
 ): string | undefined {
   if (platform !== "win32") {
     return undefined;
@@ -342,5 +343,5 @@ export function resolveClaudeCodeExecutable(
   if (readWindowsEnvValue(env, "CLAUDE_CODE_EXECUTABLE")) {
     return undefined;
   }
-  return resolveWindowsExecutablePath("claude", env);
+  return resolveWindowsExecutablePath("claude", env, cwd);
 }

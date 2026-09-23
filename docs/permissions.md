@@ -156,6 +156,9 @@ Paths preserve filesystem component order: `alias/../file.txt` follows `alias`
 before selecting its parent, rather than collapsing the spelling to a different
 file. This also works when cwd itself is a symlink or OS-provided path alias.
 
+On Windows, terminal batch wrappers and relative `PATH` directories are resolved
+from the terminal request’s cwd, or the session cwd when no override is supplied.
+
 These filesystem checks are best-effort guardrails within acpx's trusted-user
 model, not an OS sandbox. They do not isolate a hostile same-user process or
 confine arbitrary shell commands launched through terminal capabilities.
