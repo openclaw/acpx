@@ -326,31 +326,53 @@ function createLeaseHeartbeat(lease: QueueOwnerLease, shutdown: QueueOwnerShutdo
 }
 
 export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): Promise<void> {
-  const lease = await tryAcquireQueueOwnerLease(options.sessionId, {
-    path: options.mcpConfigPath,
-    fingerprint: options.mcpConfigFingerprint,
-  });
-  if (!lease) {
-    return;
-  }
-  let runtimeFailure: { error: unknown } | undefined;
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  let stopRequested = false;
+  let requestRuntimeStop: (() => void) | undefined;
+  const onSignal = (): void => {
+    stopRequested = true;
+    requestRuntimeStop?.();
+  };
   try {
-    await runQueueOwnerRuntime(options, lease);
-  } catch (error) {
-    runtimeFailure = { error };
-  }
-  try {
-    await releaseQueueOwnerLease(lease);
-  } catch (error) {
-    if (runtimeFailure) {
-      throw new AggregateError([runtimeFailure.error, error], "Queue owner shutdown failed", {
-        cause: error,
-      });
+    // A published lease can receive stop requests until its release has settled.
+    for (const signal of signals) {
+      process.on(signal, onSignal);
     }
-    throw error;
-  }
-  if (runtimeFailure) {
-    throw runtimeFailure.error;
+    const lease = await tryAcquireQueueOwnerLease(options.sessionId, {
+      path: options.mcpConfigPath,
+      fingerprint: options.mcpConfigFingerprint,
+    });
+    if (!lease) {
+      return;
+    }
+    let runtimeFailure: { error: unknown } | undefined;
+    try {
+      await runQueueOwnerRuntime(options, lease, (requestStop) => {
+        requestRuntimeStop = requestStop;
+        if (stopRequested) {
+          requestStop();
+        }
+      });
+    } catch (error) {
+      runtimeFailure = { error };
+    }
+    try {
+      await releaseQueueOwnerLease(lease);
+    } catch (error) {
+      if (runtimeFailure) {
+        throw new AggregateError([runtimeFailure.error, error], "Queue owner shutdown failed", {
+          cause: error,
+        });
+      }
+      throw error;
+    }
+    if (runtimeFailure) {
+      throw runtimeFailure.error;
+    }
+  } finally {
+    for (const signal of signals) {
+      process.off(signal, onSignal);
+    }
   }
 }
 
@@ -368,6 +390,7 @@ async function keepOwnerForPendingControls(
 async function runQueueOwnerRuntime(
   options: QueueOwnerRuntimeOptions,
   lease: QueueOwnerLease,
+  bindStopRequest: (requestStop: () => void) => void,
 ): Promise<void> {
   const sessionRecord = await resolveSessionRecord(options.sessionId);
   let owner: SessionQueueOwner | undefined;
@@ -463,15 +486,8 @@ async function runQueueOwnerRuntime(
     verbose: options.verbose,
   });
 
-  const onSignal = (): void => {
-    shutdown.request();
-  };
-
+  bindStopRequest(shutdown.request);
   const heartbeat = createLeaseHeartbeat(lease, shutdown);
-
-  process.once("SIGINT", onSignal);
-  process.once("SIGTERM", onSignal);
-  process.once("SIGHUP", onSignal);
 
   try {
     owner = await SessionQueueOwner.start(
@@ -580,9 +596,6 @@ async function runQueueOwnerRuntime(
       }
     }
   } finally {
-    process.off("SIGINT", onSignal);
-    process.off("SIGTERM", onSignal);
-    process.off("SIGHUP", onSignal);
     await shutdown.shutdown();
     await lease.updates;
   }

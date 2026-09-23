@@ -558,6 +558,8 @@ readers within the storage limits because partial write progress is opaque.
 
 Queue-owner records remain private across heartbeat updates. Shutdown finishes
 pending record updates and closes the IPC server before releasing ownership.
+On macOS and Linux, repeated stop signals keep the same graceful shutdown in
+progress until cleanup and lease release finish.
 Current clients serialize lease publication, heartbeat updates, and cleanup across
 processes, so stale recovery cannot remove a replacement owner's files. Recovery
 rechecks the owner's generation and recorded OS birth identity before each
