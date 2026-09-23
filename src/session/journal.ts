@@ -182,7 +182,7 @@ function retryableSnapshotError(error: unknown): boolean {
 }
 
 export class SessionJournalReader {
-  private readonly states = new Map<string, SegmentState>();
+  private states = new Map<string, SegmentState>();
 
   constructor(
     private readonly record: { acpxRecordId: string; eventLog: { max_segments: number } },
@@ -204,9 +204,7 @@ export class SessionJournalReader {
       try {
         const paths = await this.openPresentSegments(segments);
         // Pin all files before reading: path renumbering must not skip or duplicate a segment.
-        const current = await Promise.all(paths.map(pathIdentity));
-        const identities = new Map(segments.map((entry) => [entry.filePath, entry.identity]));
-        if (paths.every((filePath, index) => current[index] === identities.get(filePath))) {
+        if (await this.matchesSnapshot(paths, segments)) {
           return segments;
         }
       } catch (error) {
@@ -263,10 +261,47 @@ export class SessionJournalReader {
     await Promise.all(segments.map(({ opened }) => opened[Symbol.asyncDispose]()));
   }
 
+  private async matchesSnapshot(paths: string[], segments: OpenSegment[]): Promise<boolean> {
+    const current = await Promise.all(paths.map(pathIdentity));
+    const identities = new Map(segments.map((entry) => [entry.filePath, entry.identity]));
+    return paths.every((filePath, index) => current[index] === identities.get(filePath));
+  }
+
+  private async withSnapshot<T>(
+    read: (segments: OpenSegment[]) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    for (;;) {
+      const segments = await this.openSnapshot(signal);
+      try {
+        const outcome = await read(segments).then(
+          (value) => ({ value }),
+          (error: unknown) => {
+            if (!(error instanceof SessionWatchError) || error.code !== "WATCH_JOURNAL_CORRUPT") {
+              throw error;
+            }
+            return { error };
+          },
+        );
+        // Rotation can straddle the first path scan and mimic a corrupt gap.
+        // Retry changed captures without publishing their events or cached offsets.
+        if (await this.matchesSnapshot(this.paths(), segments)) {
+          signal?.throwIfAborted();
+          if ("error" in outcome) {
+            throw outcome.error;
+          }
+          return outcome.value;
+        }
+      } finally {
+        await this.closeSnapshot(segments);
+      }
+      await delay(5, undefined, { signal });
+    }
+  }
+
   async readAcpMessages(): Promise<AcpJsonRpcMessage[]> {
-    const segments = await this.openSnapshot();
-    const messages: AcpJsonRpcMessage[] = [];
-    try {
+    return await this.withSnapshot(async (segments) => {
+      const messages: AcpJsonRpcMessage[] = [];
       for (const { opened } of segments) {
         const payload = await opened.handle.readFile("utf8");
         for (const line of payload.split("\n")) {
@@ -281,9 +316,7 @@ export class SessionJournalReader {
         }
       }
       return messages;
-    } finally {
-      await this.closeSnapshot(segments);
-    }
+    });
   }
 
   async readTail(): Promise<{
@@ -294,10 +327,9 @@ export class SessionJournalReader {
     activeAnchored: boolean;
     activePartial: boolean;
   }> {
-    const segments = await this.openSnapshot();
-    let tail = emptySegment();
-    let active = emptySegment();
-    try {
+    return await this.withSnapshot(async (segments) => {
+      let tail = emptySegment();
+      let active = emptySegment();
       // A segment anchor makes recovery independent of the rest of retained history.
       for (const segment of segments.toReversed()) {
         const state = emptySegment();
@@ -318,9 +350,7 @@ export class SessionJournalReader {
         activeAnchored: active.firstSequence !== undefined,
         activePartial: active.pending.length > 0,
       };
-    } finally {
-      await this.closeSnapshot(segments);
-    }
+    });
   }
 
   async read(
@@ -337,15 +367,16 @@ export class SessionJournalReader {
     activeAnchored: boolean;
     activePartial: boolean;
   }> {
-    const page = createJournalPage(options);
-    const segments = await this.openSnapshot(signal);
-    let hasMore = false;
-    let firstSequence: number | undefined;
-    let tail = emptySegment();
-    let active = emptySegment();
-    try {
+    const { result, states } = await this.withSnapshot(async (segments) => {
+      const page = createJournalPage(options);
+      const states = new Map(this.states);
+      let hasMore = false;
+      let firstSequence: number | undefined;
+      let tail = emptySegment();
+      let active = emptySegment();
       for (const segment of segments) {
-        const state = this.states.get(segment.identity) ?? emptySegment();
+        // Pending buffers are replaced, never mutated, by readSegment.
+        const state = { ...(states.get(segment.identity) ?? emptySegment()) };
         await this.readSegment(
           segment.opened.handle,
           segment.opened.stat.size,
@@ -353,7 +384,7 @@ export class SessionJournalReader {
           page,
           signal,
         );
-        this.states.set(segment.identity, state);
+        states.set(segment.identity, state);
         if (state.firstSequence !== undefined) {
           if (firstSequence === undefined) {
             firstSequence = state.firstSequence;
@@ -370,28 +401,32 @@ export class SessionJournalReader {
           break;
         }
       }
-      this.pruneStates(segments);
+      this.pruneStates(states, segments);
       return {
-        events: page.events,
-        hasMore,
-        firstSequence,
-        sequence: tail.sequence,
-        messageSequence: tail.messageSequence,
-        requestId: tail.requestId,
-        activeSize: active.offset,
-        activeAnchored: active.firstSequence !== undefined,
-        activePartial: active.pending.length > 0,
+        states,
+        result: {
+          events: page.events,
+          hasMore,
+          firstSequence,
+          sequence: tail.sequence,
+          messageSequence: tail.messageSequence,
+          requestId: tail.requestId,
+          activeSize: active.offset,
+          activeAnchored: active.firstSequence !== undefined,
+          activePartial: active.pending.length > 0,
+        },
       };
-    } finally {
-      await this.closeSnapshot(segments);
-    }
+    }, signal);
+    signal?.throwIfAborted();
+    this.states = states;
+    return result;
   }
 
-  private pruneStates(segments: OpenSegment[]): void {
+  private pruneStates(states: Map<string, SegmentState>, segments: OpenSegment[]): void {
     const retained = new Set(segments.map((entry) => entry.identity));
-    for (const identity of this.states.keys()) {
+    for (const identity of states.keys()) {
       if (!retained.has(identity)) {
-        this.states.delete(identity);
+        states.delete(identity);
       }
     }
   }

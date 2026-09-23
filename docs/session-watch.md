@@ -75,6 +75,8 @@ Older running owners lack watch support and produce `WATCH_OWNER_UNSUPPORTED`. L
 
 History retention remains the existing rotating journal policy. Replay reads bounded pages, approximately 1 MiB plus one larger event. A slow observer whose unread history has been rotated away receives a cursor-expired error rather than silently skipping events.
 
+Journal reads retry when segment paths change during capture. A rejected page does not advance the reader's delivered position; stable corruption and filesystem errors still fail explicitly.
+
 Watching can replay only events recorded after watch support is enabled. Earlier history remains available through `sessions read` and export. Portable imports start a fresh watch history; historical request IDs and local results are not invented.
 
 The existing journal now includes local segment and lifecycle records alongside unchanged ACP messages. Direct `.stream.ndjson` consumers must distinguish these local records from entries with `jsonrpc: "2.0"`. Built-in history readers, prompt JSON output, and portable archives continue to expose ACP data without local journal markers. See the [session model](https://github.com/openclaw/acpx/blob/main/docs/2026-02-27-acpx-session-model.md) for the storage contract.
