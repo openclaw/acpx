@@ -544,6 +544,13 @@ chunk is still buffered by the socket. Consumed disk space is reused.
 These are backlog limits, not limits on the total output of a progressing turn.
 The current serialized message still requires memory proportional to its size.
 
+Waiting clients assemble each owner response as a complete JSON line without an
+additional response-size ceiling. Client memory grows with the current response
+and its parsed data, including an unfinished line from a broken owner. Older
+clients retain their previous receive-buffer limit. Owner backlog limits still
+apply: even one large response can disconnect its observer if its remaining
+bytes cannot fit the available spool capacity.
+
 Spill and replay use bounded synchronous file operations. A full spool, exhausted
 owner budget, or storage failure disconnects that observer with a nonretryable
 unknown-outcome error. The admitted prompt continues and is not automatically
@@ -785,7 +792,7 @@ existing unlimited request size. Positive values must be safe integers.
 Clients with the same setting reject oversized submissions with
 `QUEUE_REQUEST_TOO_LARGE` before opening a socket. Owners disconnect a raw peer
 that exceeds the cap, including incomplete lines, while continuing to serve
-other clients. The existing owner-response limit is unchanged.
+other clients. Responses use the separate [queue output policy](#prompt-queueing).
 
 An owner keeps the setting with which it starts; setting the variable does not
 reconfigure an already-running owner. Request JSON can be larger than the prompt

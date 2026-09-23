@@ -77,6 +77,8 @@ A timed-out turn with no final ACP response fails even if it produced partial te
 
 After a submission loses its connection, acpx cannot always know whether the agent ran it. Such uncertain failures are not automatically retried, and the owner is not killed to retry the prompt. Inspect the session before deciding whether to submit new work.
 
+Updated clients accept complete owner responses without a fixed receive-buffer ceiling, including large events and accumulated session histories from older owners. Each response is assembled and parsed in memory; unfinished responses also have no application-level size bound. The owner's [output backlog limits](CLI.md#prompt-queueing) still apply, and older clients retain their previous receive limit.
+
 On macOS and Linux, the owner disconnects an output observer whose buffered writes stop progressing, while the admitted turn continues and remains observable through session watching; Windows retains stalled output because named pipes do not report partial write progress reliably enough to disconnect without truncating a reader that is still consuming output.
 
 ## Configuration and compatibility

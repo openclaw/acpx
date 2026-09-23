@@ -19,6 +19,7 @@ Repo: https://github.com/openclaw/acpx
 - Runtime/shutdown: drain retained and retiring session checkpoints, wait for every owner's cleanup, and report failures instead of silently succeeding after persistence errors.
 - Windows/processes: resolve relative batch commands and PATH entries from the selected child cwd for adapter launches, terminal commands, and native Claude executable discovery.
 - Sessions/shutdown: keep graceful queue-owner cleanup and lease release protected on macOS and Linux when another stop signal arrives, including while startup is still acquiring ownership.
+- Sessions/queue: receive complete large events and accumulated session records without failing at the old client buffer ceiling, while preserving owner output-backlog limits and unknown-outcome errors after disconnection.
 
 ## 0.19.2 - 2026-09-23
 

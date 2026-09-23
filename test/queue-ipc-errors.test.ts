@@ -8,7 +8,6 @@ import { QueueConnectionError, QueueProtocolError } from "../src/errors.js";
 import { sendSession } from "../src/session/execution/queue-owner-runtime.js";
 import { resolveSessionRecord } from "../src/session/persistence.js";
 import {
-  MAX_MESSAGE_BUFFER_SIZE,
   SessionQueueOwner,
   releaseQueueOwnerLease,
   tryAcquireQueueOwnerLease,
@@ -760,7 +759,7 @@ test("trySubmitToRunningOwner surfaces disconnect-before-ack detail code", async
   });
 });
 
-test("trySubmitToRunningOwner rejects oversized queue messages", async () => {
+test("trySubmitToRunningOwner rejects malformed JSON above the former response ceiling", async () => {
   await withTempHome(async (homeDir) => {
     const sessionId = "submit-oversized-message";
     const keeper = await startKeeperProcess();
@@ -780,7 +779,7 @@ test("trySubmitToRunningOwner rejects oversized queue messages", async () => {
           requestId: request.requestId,
         })}\n`,
       );
-      socket.write(`${"x".repeat(MAX_MESSAGE_BUFFER_SIZE + 1)}\n`);
+      socket.write(`${"x".repeat(11 * 1024 * 1024)}\n`);
     });
 
     await listenServer(server, socketPath);
@@ -796,8 +795,9 @@ test("trySubmitToRunningOwner rejects oversized queue messages", async () => {
             waitForCompletion: true,
           }),
         (error: unknown) => {
-          assert(error instanceof Error);
-          assert.match(error.message, /Message buffer exceeded/);
+          assert(error instanceof QueueProtocolError);
+          assert.equal(error.detailCode, "QUEUE_PROTOCOL_INVALID_JSON");
+          assert.equal(error.retryable, false);
           return true;
         },
       );

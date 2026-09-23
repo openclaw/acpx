@@ -39,7 +39,6 @@ import {
 import { assertQueueRequestSize } from "./request-limit.js";
 
 export { QUEUE_CONNECT_RETRY_MS } from "./ipc-transport.js";
-export const MAX_MESSAGE_BUFFER_SIZE = 10 * 1024 * 1024;
 export {
   isProcessAlive,
   releaseQueueOwnerLease,
@@ -212,7 +211,7 @@ async function runQueueOwnerRequest<TResult>(options: {
 
   return await new Promise<TResult>((resolve, reject) => {
     let settled = false;
-    let buffer = "";
+    const responseFragments: string[] = [];
     const state: QueueOwnerRequestState = {
       acknowledged: false,
     };
@@ -274,31 +273,28 @@ async function runQueueOwnerRequest<TResult>(options: {
     };
 
     socket.on("data", (chunk: string) => {
-      buffer += chunk;
-
-      if (buffer.length > MAX_MESSAGE_BUFFER_SIZE) {
-        socket.destroy();
-        finishReject(
-          uncertainQueueOutcome(
-            new Error(`Message buffer exceeded ${MAX_MESSAGE_BUFFER_SIZE} bytes`),
-          ),
-        );
-        return;
-      }
-
-      let index = buffer.indexOf("\n");
-      while (index >= 0) {
-        if (settled) {
-          return;
+      try {
+        let offset = 0;
+        // Scan only new text; repeatedly scanning an unfinished response is quadratic.
+        let newline = chunk.indexOf("\n");
+        while (newline >= 0) {
+          if (settled) {
+            return;
+          }
+          responseFragments.push(chunk.slice(offset, newline));
+          const line = responseFragments.join("").trim();
+          responseFragments.length = 0;
+          if (line.length > 0) {
+            processLine(line);
+          }
+          offset = newline + 1;
+          newline = chunk.indexOf("\n", offset);
         }
-        const line = buffer.slice(0, index).trim();
-        buffer = buffer.slice(index + 1);
-
-        if (line.length > 0) {
-          processLine(line);
+        if (!settled && offset < chunk.length) {
+          responseFragments.push(chunk.slice(offset));
         }
-
-        index = buffer.indexOf("\n");
+      } catch (error) {
+        finishReject(uncertainQueueOutcome(error));
       }
     });
 
