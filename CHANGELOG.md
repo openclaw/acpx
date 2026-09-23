@@ -12,6 +12,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: let arrow keys select previous and next attempts without snapping back on every key release, and keep playback running when tabbing into the scrubber.
 - Replay viewer: reapply follow centering when a graph viewport is replaced, even when its target and layout identifiers are unchanged.
 - Replay viewer: restore conversation auto-follow on session changes and replay resume, and preserve upward keyboard or scrollbar scrolling after content updates that do not move the pane.
+- Sessions/filesystem: update fs-safe to 0.18.1 so lock waits use elapsed time across system-clock adjustments and temporary output storage uses verified directory ownership.
 
 ## 0.19.2 - 2026-09-23
 
@@ -42,7 +43,6 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: render complete flow definitions containing unreachable loops without crashing.
 - Replay viewer: advance replay at the selected speed without losing animation intervals after renders or updates to the same run.
 - Sessions/watch: keep journal read offsets tied to exact file identities so rounded filesystem metadata cannot mix distinct segments during rotation.
-- Sessions/filesystem: update fs-safe to 0.18.1 so lock waits use elapsed time across system-clock adjustments and temporary output storage uses verified directory ownership.
 
 ## 0.19.1 - 2026-09-22
 
