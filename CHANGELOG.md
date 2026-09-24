@@ -23,6 +23,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: keep earlier attempt timing stable when later output grows in the same session by weighting only the selected attempt's recorded messages.
 - Replay viewer: mark the selected ACP conversation slice while paused without hiding surrounding messages or moving them when selection changes.
 - Replay viewer: keep forward branch merges solid and correctly ranked, and style return edges from their final layout direction while preserving loops and unused graph components.
+- Flow shell actions no longer keep a completed CLI alive when a surviving descendant inherits stdout or stderr.
 
 ## 0.19.2 - 2026-09-23
 

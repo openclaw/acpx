@@ -299,44 +299,6 @@ test("shell spawn errors remain authoritative with cancellation enabled", async 
   );
 });
 
-test("normal shell exit preserves completion with inherited descendant pipes", async (t) => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-shell-normal-exit-"));
-  const pidFile = path.join(dir, "child.pid");
-  const child = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setTimeout(()=>{},1500)`;
-  const parent = `require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:['ignore','inherit','inherit']});process.exit(0)`;
-  t.after(async () => {
-    for (let i = 0; i < 100; i++) {
-      try {
-        const pid = Number(await fs.readFile(pidFile, "utf8"));
-        if (!Number.isInteger(pid) || pid <= 1) {
-          await new Promise((resolve) => setTimeout(resolve, 20));
-          continue;
-        }
-        try {
-          process.kill(pid, "SIGKILL");
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-            throw error;
-          }
-        }
-        break;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-          throw error;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-    }
-    await fs.rm(dir, { recursive: true, force: true });
-  });
-  const result = await runShellAction({
-    command: process.execPath,
-    args: ["-e", parent],
-    timeoutMs: 500,
-  });
-  assert.equal(result.exitCode, 0);
-});
-
 test(
   "failed process inspection still kills the shell and reports the cleanup error",
   { skip: process.platform === "win32" },

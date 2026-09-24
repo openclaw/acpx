@@ -147,6 +147,11 @@ function waitForShellResult(
     child.once("error", fail);
     child.once(mode === "node" ? "exit" : "close", (exitCode, signal) => {
       settled = true;
+      if (mode === "node" && !termination.cancelled()) {
+        // Keep inherited pipes draining without holding a completed host alive.
+        (stdoutStream as typeof stdoutStream & { unref: () => void }).unref();
+        (stderrStream as typeof stderrStream & { unref: () => void }).unref();
+      }
       const { stdout, stderr } = capture.output;
       const result: FlowShellResult = {
         command: spec.command,
