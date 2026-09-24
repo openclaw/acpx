@@ -5217,6 +5217,80 @@ for (const order of ["before", "after"]) {
   });
 }
 
+for (const connection of ["load", "resume"]) {
+  for (const override of [false, true]) {
+    test(`integration: warm-owner ${connection} metadata follows the current model after agent restart (override: ${override})`, async () => {
+      await withTempHome(async (homeDir) => {
+        const base = [
+          "--agent",
+          `${MOCK_AGENT_COMMAND} --supports-${connection}-session --advertise-models`,
+          "--cwd",
+          homeDir,
+          "--ttl",
+          "60",
+          "--format",
+          "json",
+        ];
+        const created = await runCli(
+          [...base, "--model", "fast-model", "sessions", "new"],
+          homeDir,
+        );
+        assert.equal(created.code, 0, JSON.stringify(created));
+        const { acpxRecordId } = JSON.parse(created.stdout) as { acpxRecordId: string };
+        try {
+          const first = await runCli(
+            [...base, "--model", "fast-model", "prompt", "echo first"],
+            homeDir,
+          );
+          assert.equal(first.code, 0, JSON.stringify(first));
+          const selected = await runCli([...base, "set", "model", "smart-model"], homeDir);
+          assert.equal(selected.code, 0, JSON.stringify(selected));
+          const { lockPath } = queuePaths(homeDir, acpxRecordId);
+          const ownerBefore = JSON.parse(await fs.readFile(lockPath, "utf8")) as { pid: number };
+          const record = parseSessionRecord(
+            JSON.parse(
+              await fs.readFile(
+                path.join(homeDir, ".acpx", "sessions", `${acpxRecordId}.json`),
+                "utf8",
+              ),
+            ),
+          );
+          assert.ok(record?.pid);
+          process.kill(record.pid, "SIGKILL");
+          assert.equal(await waitForPidExit(record.pid, 5_000), true);
+          const next = await runCli(
+            [
+              ...base,
+              ...(override ? ["--model", "default-model"] : []),
+              "prompt",
+              "echo reconnected",
+            ],
+            homeDir,
+          );
+          assert.equal(next.code, 0, JSON.stringify(next));
+          const reconnect = parseJsonRpcOutputLines(next.stdout).find(
+            (message) => message.method === `session/${connection}`,
+          );
+          assert.ok(reconnect, next.stdout);
+          assert.partialDeepStrictEqual(reconnect.params, {
+            _meta: {
+              claudeCode: { options: { model: override ? "default-model" : "smart-model" } },
+            },
+          });
+          const ownerAfter = JSON.parse(await fs.readFile(lockPath, "utf8")) as { pid: number };
+          assert.equal(
+            ownerAfter.pid,
+            ownerBefore.pid,
+            "the queue owner must survive the adapter restart",
+          );
+        } finally {
+          await runCli([...base, "sessions", "close"], homeDir);
+        }
+      });
+    });
+  }
+}
+
 function baseAgentArgs(cwd: string): string[] {
   return ["--agent", MOCK_AGENT_COMMAND, "--approve-all", "--cwd", cwd];
 }

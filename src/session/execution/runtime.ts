@@ -910,6 +910,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
           client,
           record,
           resumePolicy: options.resumePolicy,
+          sessionOptions: options.sessionOptions,
           replacingConfigOption: requestedModelId(options.sessionOptions?.model)
             ? { key: "model" }
             : undefined,

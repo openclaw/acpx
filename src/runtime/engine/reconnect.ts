@@ -46,6 +46,11 @@ import {
   reconcileAgentSessionId,
   sessionHasAgentMessages,
 } from "./lifecycle.js";
+import {
+  mergeSessionOptions,
+  sessionOptionsFromRecord,
+  type SessionAgentOptions,
+} from "./session-options.js";
 
 export type ConnectedSessionController = {
   hasActivePrompt: () => boolean;
@@ -62,6 +67,7 @@ export type ConnectAndLoadSessionOptions = {
   client: AcpClient;
   record: SessionRecord;
   resumePolicy?: SessionResumePolicy;
+  sessionOptions?: SessionAgentOptions;
   replacingMode?: true;
   replacingConfigOption?: {
     key: string;
@@ -408,7 +414,15 @@ export async function connectAndLoadSession(
   if (reusingLoadedSession) {
     incrementPerfCounter("runtime.connect_and_load.reused_session");
   } else {
-    await withTimeout(client.start(options.authority), options.timeoutMs);
+    await withTimeout(
+      client.start(options.authority, {
+        sessionOptions: mergeSessionOptions(
+          options.sessionOptions,
+          sessionOptionsFromRecord(record),
+        ),
+      }),
+      options.timeoutMs,
+    );
   }
   assertControlAuthority(options.authority);
   options.onClientAvailable?.(options.activeController);

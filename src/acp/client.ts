@@ -611,8 +611,14 @@ export class AcpClient {
     fallback?.abort();
   }
 
-  async start(authority?: AcpControlAuthority): Promise<void> {
+  async start(
+    authority?: AcpControlAuthority,
+    options?: Pick<AcpClientOptions, "sessionOptions">,
+  ): Promise<void> {
     assertControlAuthority(authority);
+    if (options) {
+      this.options.sessionOptions = structuredClone(options.sessionOptions);
+    }
     if (this.hasLiveConnection()) {
       return;
     }
