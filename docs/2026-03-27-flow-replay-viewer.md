@@ -536,6 +536,10 @@ minimum playback duration for presentation only.
 That synthetic duration must remain viewer-local and must not be written back to
 the bundle.
 
+Conversation-based replay timing should count only the selected attempt's
+recorded message range. Earlier and later conversation context should remain
+available without changing that attempt's duration as more output arrives.
+
 ### ACP message reveal
 
 When replay is actively playing, ACP text should reveal progressively rather

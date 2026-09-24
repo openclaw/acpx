@@ -93,6 +93,8 @@ timestamps. Duration labels carry rounded seconds into the next minute.
 When a later step shows an earlier ACP conversation as context, the completed
 text stays visible during replay. Progressive reveal belongs to the attempt
 that produced the conversation.
+Replay timing weights only that attempt's recorded messages, so later output in
+the same session does not stretch earlier steps.
 
 The conversation pane follows new content during replay and live streaming.
 Scrolling upward detaches it, including keyboard and scrollbar movement. Scroll

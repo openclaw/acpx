@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { synthesizeLiveRunState } from "../examples/flows/replay-viewer/server/live-run-state.js";
 import {
   advancePlaybackPlayhead,
   resolvePlaybackResumeMs,
@@ -1021,3 +1022,307 @@ test("an unrelated session remains fully visible without becoming the reveal sou
   assert.deepEqual(rendered.renderedSessionSlice, other.sessionSlice);
   assert.equal(rendered.animateConversation, false);
 });
+
+test("later persistent-session output does not retime an earlier completed attempt", () => {
+  const first = attemptDurationStep("first", 0, 1);
+  const second = attemptDurationStep("second", 2, 3);
+  const bundle = attemptDurationBundle(
+    [first, second],
+    [
+      { User: { content: [{ Text: "First prompt" }] } },
+      { Agent: { content: [{ Text: "FIRST-REPLY" }], tool_results: {} } },
+      { User: { content: [{ Text: "Second prompt" }] } },
+      { Agent: { content: [{ Text: "x" }], tool_results: {} } },
+    ],
+  );
+  const before = buildPlaybackTimeline(bundle);
+  assert.deepEqual(
+    before.segments.map((segment) => segment.durationMs),
+    [700, 700],
+  );
+  assert.equal(derivePlaybackPreview(before, 1_000)?.activeStepIndex, 1);
+
+  const grown = structuredClone(bundle);
+  grown.sessions["main-bundle"].record.messages![3] = {
+    Agent: { content: [{ Text: "x".repeat(1_000) }], tool_results: {} },
+  };
+  const after = buildPlaybackTimeline(grown);
+  assert.deepEqual(
+    after.segments.map((segment) => segment.durationMs),
+    [700, 3_420],
+  );
+  assert.deepEqual(after.segments[0], before.segments[0]);
+  assert.equal(playbackAnchorMs(after, 1), playbackAnchorMs(before, 1));
+  assert.equal(derivePlaybackPreview(after, 1_000)?.activeStepIndex, 1);
+  const selected = selectAttemptView(grown, 0);
+  assert.ok(selected);
+  assert.equal(selected.sessionSlice.length, 4);
+  assert.equal(selected.sessionSlice[3]?.textBlocks[0], "x".repeat(1_000));
+});
+
+for (const fixture of [
+  {
+    name: "includes a single agent message at the zero start and end index",
+    start: 0,
+    end: 0,
+    messages: [
+      { Agent: { content: [{ Text: "a".repeat(100) }], tool_results: {} } },
+      { Agent: { content: [{ Text: "later".repeat(200) }], tool_results: {} } },
+    ],
+    expected: 720,
+  },
+  {
+    name: "excludes prior and later context and does not weight the selected user prompt",
+    start: 2,
+    end: 3,
+    messages: [
+      { User: { content: [{ Text: "Earlier prompt" }] } },
+      { Agent: { content: [{ Text: "before".repeat(200) }], tool_results: {} } },
+      { User: { content: [{ Text: "prompt".repeat(1_000) }] } },
+      { Agent: { content: [{ Text: "a".repeat(100) }], tool_results: {} } },
+      { Agent: { content: [{ Text: "later".repeat(200) }], tool_results: {} } },
+    ],
+    expected: 720,
+  },
+  {
+    name: "does not weight context for an empty recorded range",
+    start: 1,
+    end: 0,
+    messages: [{ Agent: { content: [{ Text: "x".repeat(1_000) }], tool_results: {} } }],
+    expected: 700,
+  },
+  {
+    name: "does not weight context when the recorded range has no available messages",
+    start: 9,
+    end: 9,
+    messages: [{ Agent: { content: [{ Text: "x".repeat(1_000) }], tool_results: {} } }],
+    expected: 700,
+  },
+]) {
+  test(`attempt replay duration ${fixture.name}`, () => {
+    const step = attemptDurationStep("selected", fixture.start, fixture.end);
+    const bundle = attemptDurationBundle([step], fixture.messages);
+    assert.equal(buildPlaybackTimeline(bundle).segments[0]?.durationMs, fixture.expected);
+    assert.equal(selectAttemptView(bundle, 0)?.sessionSlice.length, fixture.messages.length);
+  });
+}
+
+test("a direct session without a recorded range has no progressive-reveal duration", () => {
+  const step = attemptDurationStep("unranged", 0, 0);
+  step.trace = { sessionId: "main-bundle" };
+  const bundle = attemptDurationBundle(
+    [step],
+    [{ Agent: { content: [{ Text: "x".repeat(1_000) }], tool_results: {} } }],
+  );
+  const selected = selectAttemptView(bundle, 0);
+  assert.ok(selected);
+  assert.equal(selected.sessionFromFallback, false);
+  assert.equal(selected.sessionSlice[0]?.highlighted, false);
+  assert.deepEqual(
+    revealConversationTranscript(selected.sessionSlice, 0.25),
+    selected.sessionSlice,
+  );
+  assert.equal(buildPlaybackTimeline(bundle).segments[0]?.durationMs, 700);
+});
+
+test("a missing session record retains the normal minimum replay duration", () => {
+  const step = attemptDurationStep("missing", 0, 1);
+  const bundle = makeBundle(step, { sessions: {} });
+  assert.equal(buildPlaybackTimeline(bundle).segments[0]?.durationMs, 700);
+});
+
+test("an ACP attempt using earlier session context retains its own text duration", () => {
+  const first = attemptDurationStep("first", 0, 1);
+  const fallback = attemptDurationStep("fallback", 0, 1);
+  fallback.trace = undefined;
+  fallback.session = null;
+  fallback.promptText = "p".repeat(100);
+  fallback.rawText = "r".repeat(100);
+  const bundle = attemptDurationBundle(
+    [first, fallback],
+    [
+      { User: { content: [{ Text: "First prompt" }] } },
+      { Agent: { content: [{ Text: "context".repeat(1_000) }], tool_results: {} } },
+    ],
+  );
+  assert.equal(selectAttemptView(bundle, 1)?.sessionFromFallback, true);
+  assert.equal(buildPlaybackTimeline(bundle).segments[1]?.durationMs, 1_020);
+});
+
+test("attempt-scoped replay weighting retains elapsed-time floors and duration caps", () => {
+  for (const [elapsedMs, answer, expected] of [
+    [16_000, "short", 2_000],
+    [40_000, "short", 3_800],
+    [0, "x".repeat(2_000), 3_800],
+  ] as const) {
+    const step = attemptDurationStep("timing", 0, 1);
+    step.finishedAt = new Date(Date.parse(step.startedAt) + elapsedMs).toISOString();
+    const bundle = attemptDurationBundle(
+      [step],
+      [
+        { User: { content: [{ Text: "prompt" }] } },
+        { Agent: { content: [{ Text: answer }], tool_results: {} } },
+      ],
+    );
+    assert.equal(buildPlaybackTimeline(bundle).segments[0]?.durationMs, expected);
+  }
+});
+
+test("live ACP range growth changes only the current attempt's replay duration", () => {
+  const completed = attemptDurationStep("completed", 0, 1);
+  assert.ok(completed.session);
+  assert.ok(completed.trace?.conversation);
+  const acpSessionId = completed.session.acpSessionId;
+  completed.trace.conversation.eventStartSeq = 1;
+  completed.trace.conversation.eventEndSeq = 3;
+  const bundle = attemptDurationBundle(
+    [completed],
+    [
+      { User: { id: "earlier-user", content: [{ Text: "Earlier prompt" }] } },
+      { Agent: { content: [{ Text: "FIRST-REPLY" }], tool_results: {} } },
+    ],
+  );
+  const timestamp = completed.startedAt;
+  Object.assign(bundle.run, {
+    status: "running",
+    currentNode: "streaming",
+    currentAttemptId: "streaming#1",
+    currentNodeType: "acp",
+    currentNodeStartedAt: timestamp,
+    updatedAt: timestamp,
+  });
+  bundle.live = { ...bundle.run };
+  bundle.sessions["main-bundle"].record.lastSeq = 3;
+  bundle.trace = [
+    {
+      seq: 1,
+      at: timestamp,
+      scope: "acp",
+      type: "acp_prompt_prepared",
+      runId: bundle.run.runId,
+      nodeId: "streaming",
+      attemptId: "streaming#1",
+      sessionId: "main-bundle",
+      payload: { sessionId: "main-bundle" },
+    },
+  ];
+  const events = [
+    {
+      seq: 4,
+      at: timestamp,
+      direction: "outbound" as const,
+      message: {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "session/prompt",
+        params: { sessionId: acpSessionId, prompt: [{ type: "text", text: "Current prompt" }] },
+      },
+    },
+    ...[5, 6].map((seq) => ({
+      seq,
+      at: timestamp,
+      direction: "inbound" as const,
+      message: {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: acpSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "x".repeat(100) },
+          },
+        },
+      },
+    })),
+  ];
+  for (const [eventCount, currentDuration, messageEnd] of [
+    [1, 700, 2],
+    [2, 720, 3],
+    [3, 1_020, 3],
+  ] as const) {
+    bundle.sessions["main-bundle"].events = events.slice(0, eventCount);
+    const state = synthesizeLiveRunState({ ...bundle, schema: "acpx.viewer-run-live.v1" });
+    assert.equal(state.steps[1]?.trace?.conversation?.messageStart, 2);
+    assert.equal(state.steps[1]?.trace?.conversation?.messageEnd, messageEnd);
+    const timeline = buildPlaybackTimeline(state);
+    assert.deepEqual(
+      timeline.segments.map((segment) => segment.durationMs),
+      [700, currentDuration],
+    );
+    assert.equal(playbackAnchorMs(timeline, 1), 700);
+    assert.equal(derivePlaybackPreview(timeline, 1_000)?.activeStepIndex, 1);
+  }
+  assert.equal(bundle.sessions["main-bundle"].record.messages?.length, 2);
+});
+
+test("a selected user-only range retains zero reveal weight without falling back to prompt text", () => {
+  const step = attemptDurationStep("user_only", 0, 0);
+  const prompt = "q".repeat(2_000);
+  step.promptText = prompt;
+  const bundle = attemptDurationBundle(
+    [step],
+    [{ User: { id: "user-only", content: [{ Text: prompt }] } }],
+  );
+  assert.equal(selectAttemptView(bundle, 0)?.sessionSlice[0]?.role, "user");
+  assert.equal(buildPlaybackTimeline(bundle).segments[0]?.durationMs, 700);
+});
+
+test("selected mixed content retains tool weights alongside text", () => {
+  const step = attemptDurationStep("mixed", 0, 1);
+  const input = { command: ["echo", "ok"] };
+  const bundle = attemptDurationBundle(
+    [step],
+    [
+      { User: { id: "mixed-user", content: [{ Text: "q".repeat(1_000) }] } },
+      {
+        Agent: {
+          content: [
+            { Text: "a".repeat(80) },
+            {
+              ToolUse: {
+                id: "mixed-tool",
+                name: "Echo",
+                raw_input: JSON.stringify(input),
+                input,
+                is_input_complete: true,
+              },
+            },
+          ],
+          tool_results: {
+            "mixed-tool": {
+              tool_use_id: "mixed-tool",
+              tool_name: "Echo",
+              is_error: false,
+              content: { Text: "done" },
+            },
+          },
+        },
+      },
+    ],
+  );
+  const selected = selectAttemptView(bundle, 0);
+  assert.ok(selected);
+  assert.equal(selected.sessionSlice[1]?.toolUses[0]?.summary, "echo ok");
+  assert.equal(selected.sessionSlice[1]?.toolResults[0]?.preview, "done");
+  // User text has zero weight; 80 text characters plus two 16-character tool floors.
+  assert.equal(buildPlaybackTimeline(bundle).segments[0]?.durationMs, 756);
+});
+
+function attemptDurationStep(nodeId: string, start: number, end: number): FlowStepRecord {
+  const step = baseStep(nodeId, "acp", "ok");
+  step.finishedAt = step.startedAt;
+  step.promptText = null;
+  step.rawText = null;
+  assert.ok(step.trace?.conversation);
+  step.trace.conversation.messageStart = start;
+  step.trace.conversation.messageEnd = end;
+  return step;
+}
+
+function attemptDurationBundle(steps: FlowStepRecord[], messages: unknown[]): LoadedRunBundle {
+  const first = steps[0];
+  assert.ok(first);
+  const bundle = makeBundle(first, { steps });
+  bundle.sessions["main-bundle"].record.messages = messages;
+  return bundle;
+}

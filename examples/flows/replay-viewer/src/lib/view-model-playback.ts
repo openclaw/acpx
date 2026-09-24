@@ -85,7 +85,9 @@ function estimatePlaybackDuration(bundle: LoadedRunBundle, stepIndex: number): n
     const selected = selectAttemptView(bundle, stepIndex);
     const isDirectSession = selected?.sessionSourceStep?.attemptId === step.attemptId;
     const visibleChars = isDirectSession
-      ? countStreamedConversationChars(selected.sessionSlice)
+      ? countStreamedConversationChars(
+          selected.sessionSlice.filter((message) => message.highlighted),
+        )
       : [step.promptText, step.rawText].reduce(
           (sum, value) => sum + (typeof value === "string" ? value.length : 0),
           0,

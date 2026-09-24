@@ -325,3 +325,133 @@ function makeBundle(stepCount = 4, runId = "clock-run"): LoadedRunBundle {
     sessions: {},
   };
 }
+
+test("later same-session answer growth preserves the active replay attempt and playhead", async () => {
+  const bundle = makeAttemptGrowthBundle();
+  const grown = structuredClone(bundle);
+  const messages = grown.sessions["main-bundle"].record.messages;
+  assert.ok(messages);
+  messages[3] = { Agent: { content: [{ Text: "x".repeat(1_000) }], tool_results: {} } };
+
+  await withPlayback(bundle, async (harness) => {
+    await harness.change((playback) => playback.selectStep(0));
+    await harness.change((playback) => playback.play());
+    await harness.frame(0);
+    await harness.frame(1_000);
+    assert.equal(harness.current().playbackPreview?.playheadMs, 1_000);
+    assert.equal(harness.current().effectiveStepIndex, 1);
+    assert.equal(harness.current().isPlaying, true);
+    assert.deepEqual(
+      harness.current().playbackTimeline?.segments.map((segment) => segment.durationMs),
+      [700, 700],
+    );
+    const completedSegment = structuredClone(harness.current().playbackTimeline?.segments[0]);
+    assert.ok(completedSegment);
+
+    await harness.update(grown);
+    assert.equal(harness.current().playbackPreview?.playheadMs, 1_000);
+    assert.equal(harness.current().effectiveStepIndex, 1);
+    assert.equal(harness.current().isPlaying, true);
+    assert.deepEqual(harness.current().playbackTimeline?.segments[0], completedSegment);
+    assert.deepEqual(
+      harness.current().playbackTimeline?.segments.map((segment) => segment.durationMs),
+      [700, 3_420],
+    );
+    assert.equal(harness.current().playbackTimeline?.segments[1]?.startMs, 700);
+    assert.equal(harness.pendingFrames(), 1);
+
+    await harness.frame(1_040);
+    assert.equal(harness.current().playbackPreview?.playheadMs, 1_040);
+    assert.equal(harness.current().effectiveStepIndex, 1);
+    assert.equal(harness.current().isPlaying, true);
+    assert.equal(harness.pendingFrames(), 1);
+  });
+});
+
+function makeAttemptGrowthBundle(): LoadedRunBundle {
+  const bundle = makeBundle(0, "attempt-growth-run");
+  const at = bundle.run.startedAt;
+  const binding: NonNullable<FlowStepRecord["session"]> = {
+    key: "attempt-growth:main",
+    handle: "main",
+    bundleId: "main-bundle",
+    name: "main",
+    agentName: "fixture",
+    agentCommand: "fixture-agent",
+    cwd: "/synthetic/attempt-growth",
+    acpxRecordId: "attempt-growth-record",
+    acpSessionId: "attempt-growth-native",
+  };
+  const steps = ["first_answer", "second_answer"].map((nodeId, index): FlowStepRecord => ({
+    attemptId: `${nodeId}#1`,
+    nodeId,
+    nodeType: "acp",
+    outcome: "ok",
+    startedAt: at,
+    finishedAt: at,
+    promptText: index === 0 ? "First prompt" : "Second prompt",
+    rawText: null,
+    output: null,
+    session: binding,
+    agent: { agentName: binding.agentName, agentCommand: binding.agentCommand, cwd: binding.cwd },
+    trace: {
+      sessionId: binding.bundleId,
+      conversation: {
+        sessionId: binding.bundleId,
+        messageStart: index * 2,
+        messageEnd: index * 2 + 1,
+        eventStartSeq: index * 3 + 1,
+        eventEndSeq: index * 3 + 3,
+      },
+    },
+  }));
+  bundle.steps = steps;
+  bundle.run.steps = steps;
+  bundle.run.sessionBindings = { main: binding };
+  bundle.flow.startAt = "first_answer";
+  bundle.flow.nodes = {
+    first_answer: {
+      nodeType: "acp",
+      hasPrompt: true,
+      session: { handle: "main" },
+      cwd: { mode: "default" },
+    },
+    second_answer: {
+      nodeType: "acp",
+      hasPrompt: true,
+      session: { handle: "main" },
+      cwd: { mode: "default" },
+    },
+  };
+  bundle.flow.edges = [{ from: "first_answer", to: "second_answer" }];
+  bundle.manifest.sessions = [
+    {
+      id: binding.bundleId,
+      handle: binding.handle,
+      bindingPath: "sessions/main/binding.json",
+      recordPath: "sessions/main/record.json",
+      eventsPath: "sessions/main/events.ndjson",
+    },
+  ];
+  bundle.sessions = {
+    [binding.bundleId]: {
+      id: binding.bundleId,
+      binding,
+      record: {
+        acpxRecordId: binding.acpxRecordId,
+        acpSessionId: binding.acpSessionId,
+        cwd: binding.cwd,
+        agentCommand: binding.agentCommand,
+        name: binding.name,
+        messages: [
+          { User: { id: "first-user", content: [{ Text: "First prompt" }] } },
+          { Agent: { content: [{ Text: "FIRST-REPLY" }], tool_results: {} } },
+          { User: { id: "second-user", content: [{ Text: "Second prompt" }] } },
+          { Agent: { content: [{ Text: "x" }], tool_results: {} } },
+        ],
+      },
+      events: [],
+    },
+  };
+  return bundle;
+}
