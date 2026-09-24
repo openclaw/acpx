@@ -14,6 +14,7 @@ export type Mode =
   | "init-error"
   | "init-wait"
   | "cooperative"
+  | "eof"
   | "prompt-timeout"
   | "wrapper-exited"
   | "direct";
@@ -36,6 +37,7 @@ assert.ok(
     "init-error",
     "init-wait",
     "cooperative",
+    "eof",
     "prompt-timeout",
     "wrapper-exited",
     "direct",
@@ -217,6 +219,12 @@ async function run(): Promise<void> {
         error: { code: -32601, message: "Unexpected fixture operation" },
       });
     }
+  }
+  if (mode === "eof") {
+    record("ordinary-eof-complete");
+    clearTimeout(emergency);
+    clearInterval(stopWatcher);
+    return;
   }
   if (mode === "cooperative") {
     await delay(200);

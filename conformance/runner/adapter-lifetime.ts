@@ -131,11 +131,20 @@ export class AdapterLifetime {
   }
 
   private async waitForRetirement(waitMs: number, deadline: number): Promise<boolean> {
-    const remaining = Math.max(0, Math.min(waitMs, deadline - performance.now()));
-    const [, descendantsExited] = await Promise.all([
-      waitForChildExit(this.child, remaining),
-      this.descendants.waitForExit(remaining),
-    ]);
-    return !isChildProcessRunning(this.child) && descendantsExited;
+    const phaseDeadline = Math.min(deadline, performance.now() + waitMs);
+    await waitForChildExit(this.child, Math.max(0, phaseDeadline - performance.now()));
+    if (isChildProcessRunning(this.child)) {
+      return false;
+    }
+    // The first post-exit snapshot establishes custody; do not spend its query
+    // budget on the remainder of a short cooperative grace period.
+    if (!(await this.descendants.capture(this.queryBudget(deadline)))) {
+      return false;
+    }
+    if (!this.descendants.hasTrackedProcesses()) {
+      return true;
+    }
+    const descendantWait = Math.max(0, phaseDeadline - performance.now());
+    return descendantWait > 0 && (await this.descendants.waitForExit(descendantWait));
   }
 }

@@ -48,7 +48,9 @@ export async function writeInterruptWitness(root: string, nonce: string): Promis
   const file = path.join(root, "interrupt-witness.mjs");
   const trace = path.join(root, "interrupt-witness.ndjson");
   const runner = path.join(REPO_ROOT, "conformance/runner/run.ts");
-  const descendants = pathToFileURL(path.join(REPO_ROOT, "src/acp/process-descendants.ts")).href;
+  const lifetime = pathToFileURL(
+    path.join(REPO_ROOT, "conformance/runner/adapter-lifetime.ts"),
+  ).href;
   await fs.writeFile(
     file,
     `
@@ -97,10 +99,10 @@ if (isMainThread) {
 
   const { register } = await import(${JSON.stringify(import.meta.resolve("tsx/esm/api"))});
   register({ tsconfig: ${JSON.stringify(path.join(REPO_ROOT, "tsconfig.json"))} });
-  const { ProcessDescendants } = await import(${JSON.stringify(descendants)});
-  const realWait = ProcessDescendants.prototype.waitForExit;
+  const { AdapterLifetime } = await import(${JSON.stringify(lifetime)});
+  const realWait = AdapterLifetime.prototype.waitForRetirement;
   let call = 0;
-  ProcessDescendants.prototype.waitForExit = function (...args) {
+  AdapterLifetime.prototype.waitForRetirement = function (...args) {
     const id = ++call;
     const pending = Reflect.apply(realWait, this, args);
     record({ kind: "cleanup-wait-enter", call: id, timeoutMs: args[0] });

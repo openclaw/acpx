@@ -23,6 +23,10 @@ import {
   stopped,
   until,
 } from "./conformance-retirement-test-helpers.js";
+import {
+  verifySlowTableBudget,
+  writeSlowTablePreload,
+} from "./conformance-snapshot-test-helpers.js";
 import { parseReport, REPO_ROOT } from "./conformance-test-helpers.js";
 import type { Mode, Ready } from "./fixtures/conformance-retirement.js";
 
@@ -33,7 +37,9 @@ async function writeRetirementFailurePreload(root: string, nonce: string): Promi
   const preloadPath = path.join(root, "retirement-failure-preload.mjs");
   const tracePath = path.join(root, "retirement-failure.ndjson");
   const runnerPath = path.join(REPO_ROOT, "conformance/runner/run.ts");
-  const descendantsUrl = pathToFileURL(path.join(REPO_ROOT, "src/acp/process-descendants.ts")).href;
+  const lifetimeUrl = pathToFileURL(
+    path.join(REPO_ROOT, "conformance/runner/adapter-lifetime.ts"),
+  ).href;
   // Resolve from the real test module, never relative to a tempfile outside node_modules.
   const tsxApiUrl = import.meta.resolve("tsx/esm/api");
   await fs.writeFile(
@@ -54,19 +60,20 @@ if (isMainThread) {
   const { register } = await import(${JSON.stringify(tsxApiUrl)});
   // No tsImport(), namespace, alternate build tree or second tsx registration.
   register({ tsconfig: ${JSON.stringify(path.join(REPO_ROOT, "tsconfig.json"))} });
-  const { ProcessDescendants } = await import(${JSON.stringify(descendantsUrl)});
-  const realWaitForExit = ProcessDescendants.prototype.waitForExit;
+  const { AdapterLifetime } = await import(${JSON.stringify(lifetimeUrl)});
+  const realWaitForRetirement = AdapterLifetime.prototype.waitForRetirement;
   const owners = new WeakMap();
   let nextOwner = 0;
   let nextCall = 0;
-  ProcessDescendants.prototype.waitForExit = async function (timeoutMs) {
+  AdapterLifetime.prototype.waitForRetirement = async function (...args) {
+    const timeoutMs = args[0];
     let owner = owners.get(this);
     if (owner === undefined) { owner = ++nextOwner; owners.set(this, owner); }
     const call = ++nextCall;
     let actual;
     try {
       // Do not bypass native snapshots, waits, TERM/KILL or their actual outcome.
-      actual = await realWaitForExit.call(this, timeoutMs);
+      actual = await Reflect.apply(realWaitForRetirement, this, args);
     } catch (error) {
       record({ kind: "wait-threw", owner, call, timeoutMs, error: String(error) });
       throw error;
@@ -74,7 +81,7 @@ if (isMainThread) {
     record({ kind: "wait-return", owner, call, timeoutMs, actual, returned: false });
     return false;
   };
-  record({ kind: "installed", module: ${JSON.stringify(descendantsUrl)} });
+  record({ kind: "installed", module: ${JSON.stringify(lifetimeUrl)} });
 }
 `,
     "utf8",
@@ -90,6 +97,7 @@ async function retirementCase(
 ): Promise<void> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-conformance-retirement-"));
   const nonce = randomUUID();
+  const direct = mode === "direct" || mode === "eof";
   const casesDir = path.join(root, "cases");
   const profile = path.join(root, "profile.json");
   const reportPath = path.join(root, "report.json");
@@ -146,14 +154,7 @@ async function retirementCase(
     NODE_V8_COVERAGE: "",
     NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=DEP0205`.trim(),
   };
-  const command = [
-    process.execPath,
-    fixture,
-    root,
-    nonce,
-    mode === "direct" ? "peer" : "wrapper",
-    mode,
-  ]
+  const command = [process.execPath, fixture, root, nonce, direct ? "peer" : "wrapper", mode]
     .map((arg) => JSON.stringify(arg))
     .join(" ");
   const runner = spawn(
@@ -164,7 +165,9 @@ async function retirementCase(
         ? await writeRetirementFailurePreload(root, nonce)
         : interrupt
           ? await writeInterruptWitness(root, nonce)
-          : "tsx",
+          : mode === "eof"
+            ? await writeSlowTablePreload(root, nonce)
+            : "tsx",
       path.join(REPO_ROOT, "conformance/runner/run.ts"),
       "--profile",
       profile,
@@ -236,7 +239,7 @@ async function retirementCase(
   });
   const joined = () =>
     Boolean(observed.exit && observed.close && observed.stdoutEof && observed.stderrEof);
-  const roles = mode === "direct" ? ["peer", "sibling"] : ["wrapper", "peer", "sibling"];
+  const roles = direct ? ["peer", "sibling"] : ["wrapper", "peer", "sibling"];
   const owned = new Map<string, Ready>();
   const notes: Array<{ name: string; at: number; detail?: unknown }> = [];
   const note = (name: string, detail?: unknown) => notes.push({ name, at: Date.now(), detail });
@@ -455,6 +458,12 @@ async function retirementCase(
         (await receipts(root, "wrapper", nonce)).some((row) => row.kind === "planned-wrapper-exit"),
       );
     }
+    if (mode === "eof") {
+      note(
+        "slow-table-budget-witness",
+        await verifySlowTableBudget(root, nonce, runner.pid, peerRows),
+      );
+    }
     for (const role of roles) {
       const rows = await receipts(root, role, nonce);
       assert.equal(
@@ -532,7 +541,7 @@ async function retirementCase(
       const value = await remember(role);
       if (value) {
         await rescue(value);
-      } else if (role !== "wrapper" || mode !== "direct") {
+      } else if (role !== "wrapper" || !direct) {
         const peerSpawned = (await receipts(root, "wrapper", nonce)).some(
           (row) => row.kind === "peer-spawned",
         );
@@ -621,6 +630,7 @@ for (const mode of [
   "prompt-timeout",
   "wrapper-exited",
   "cooperative",
+  "eof",
   "direct",
 ] as const) {
   test(
@@ -628,7 +638,9 @@ for (const mode of [
     {
       timeout: 75_000,
       // TERM handlers and owned POSIX group admission are distinct platform claims.
-      skip: process.platform === "win32" && (mode === "ignore-term" || mode === "wrapper-exited"),
+      skip:
+        (process.platform === "win32" && (mode === "ignore-term" || mode === "wrapper-exited")) ||
+        (mode === "eof" && process.platform !== "darwin" && process.platform !== "linux"),
     },
     async (t) => {
       await retirementCase(t, mode);
