@@ -135,6 +135,8 @@ An imported session becomes discoverable after its complete history has been wri
 
 Concurrent imports into the same local store wait for one another and recheck scope and provider session id collisions before publishing. Only one of two conflicting imports can succeed; independent destinations still retain their own complete histories.
 
+Imports also coordinate with CLI and shared-runtime ensures for the same exact scope. If import publishes first, ensure returns that imported session. If ensure creates first, import reports the existing scope instead of publishing a second active record. This does not make explicit `sessions new` replacement atomic.
+
 ## Prune
 
 `sessions prune` removes closed records once you actually want them gone:

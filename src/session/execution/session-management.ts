@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { normalizeAgentSessionId } from "../../acp/agent-session-id.js";
 import { AcpClient } from "../../acp/client.js";
 import { formatErrorMessage } from "../../acp/error-normalization.js";
@@ -18,7 +17,7 @@ import {
   normalizeName,
   writeSessionRecord,
 } from "../persistence.js";
-import { acquireSessionTurn } from "../turn-ownership.js";
+import { acquireSessionScope } from "../turn-ownership.js";
 import { DEFAULT_QUEUE_OWNER_TTL_MS } from "./contracts.js";
 import type {
   SessionCreateOptions,
@@ -276,10 +275,10 @@ export async function listAgentSessions(options: SessionListOptions): Promise<Se
 
 export async function ensureSession(options: SessionEnsureOptions): Promise<SessionEnsureResult> {
   const cwd = absolutePath(options.cwd);
-  const scope = createHash("sha256")
-    .update(JSON.stringify([options.agentCommand, cwd, normalizeName(options.name)]))
-    .digest("hex");
-  const ownership = await acquireSessionTurn(`ensure:${scope}`, options.signal);
+  const ownership = await acquireSessionScope(
+    { agentCommand: options.agentCommand, cwd, name: normalizeName(options.name) },
+    options.signal,
+  );
   try {
     return await ensureSessionWithOwnership(options, cwd);
   } finally {

@@ -47,6 +47,8 @@ acpx pi sessions show reviewer
 
 `sessionKey` maps to the CLI's session name. An empty key selects the unnamed default session. Shared lookup uses the exact working directory; it does not walk into parent directories. The scope is the existing `(agentCommand, cwd, name)` tuple. Concurrent `ensureSession()` and CLI `sessions ensure` calls for the same scope select one record.
 
+Imports participate in that same exact-scope admission. An ensure waiting behind an import reuses its completed record; an import waiting behind a newly created shared session reports the occupied scope.
+
 `findSession({ sessionKey, agent, cwd? })` looks up an open local session without launching an agent. Handles contain the canonical local record and provider session IDs. Keep shared handles with the shared runtime; the in-process runtime has a different ownership contract.
 
 New sessions are created using the normal CLI path. Prompt submission starts or joins the existing queue owner, which keeps the live connection for its idle TTL. Shared turns require the saved provider session to resume successfully; an unavailable session produces an error instead of silently creating a different conversation. The agent must support loading or resuming sessions.

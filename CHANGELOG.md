@@ -32,6 +32,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI/history: make `help` display usage and preserve Unicode when trimming saved conversation text. Thanks @odrobnik.
 - Sessions/import: serialize concurrent imports so overlapping collision checks cannot create duplicate scopes or provider session identities.
 - Sessions/resume: retire the previous local owner before reusing the same session record and keep the resumed record open for subsequent prompts.
+- Sessions/import: coordinate imports with CLI and shared session ensures in the same scope, so ensure reuses an imported session or import reports the existing session instead of publishing a duplicate.
 
 ## 0.19.2 - 2026-09-23
 

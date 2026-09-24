@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
+import { normalizeAgentCommandInput } from "../src/acp/client-process.js";
 import { withTimeout } from "../src/async-control.js";
 import { listSessionEvents } from "../src/session/events.js";
+import { ensureSession } from "../src/session/execution/session-management.js";
 import { exportSession } from "../src/session/export.js";
 import { importSession } from "../src/session/import.js";
 import { listSessions } from "../src/session/persistence.js";
@@ -565,3 +569,202 @@ for (const failBody of [false, true]) {
     });
   });
 }
+
+function ensureFixtureAgent(home: string) {
+  const pidFile = path.join(home, "ensure-agent.pid");
+  const invocation = normalizeAgentCommandInput([
+    process.execPath,
+    fileURLToPath(new URL("./mock-agent.js", import.meta.url)),
+    "--pid-file",
+    pidFile,
+  ]);
+  return { ...invocation, pidFile };
+}
+
+for (const normalized of [false, true]) {
+  test(`ensure selects the concurrently imported record (normalized=${normalized})`, async (t) => {
+    await withTempHome("acpx-ensure-import-", async (home) => {
+      const agent = ensureFixtureAgent(home);
+      const fixture = await importFixture(home, { command: agent.agentCommand });
+      const atCommit = admissionGate();
+      const releaseCommit = admissionGate();
+      const emptySnapshot = admissionGate();
+      const ensureRouted = admissionGate();
+      const rename = fs.rename;
+      let held = false;
+      const renameMock = t.mock.method(fs, "rename", async (...args: Parameters<typeof rename>) => {
+        if (!held && finalRecord(String(args[1]), fixture.directory)) {
+          held = true;
+          atCommit.resolve();
+          await releaseCommit.promise;
+        }
+        return await rename(...args);
+      });
+      const importing = importSession(fixture.archive);
+      void importing.catch(() => {});
+      let ensuring: ReturnType<typeof ensureSession> | undefined;
+      let restoreObservation: (() => void) | undefined;
+      let restoreRouting: (() => void) | undefined;
+      try {
+        await withTimeout(
+          Promise.race([
+            atCommit.promise,
+            importing.then(() => {
+              throw new Error("Import bypassed the final canonical-record gate");
+            }),
+          ]),
+          5_000,
+        );
+        // This is the existing mixed-version ensure marker contract, not a
+        // new test-only owner. Both implementations hold A at its real commit.
+        // Baseline permits B's empty discovery snapshot; the candidate prevents
+        // B from reaching that snapshot, so use its scope-routing receipt there.
+        // Routing is not proof of actual contention; native proof supplies that.
+        const key = createHash("sha256")
+          .update(JSON.stringify([agent.agentCommand, home, "import-target"]))
+          .digest("hex");
+        const scopePath = path.join(
+          fixture.directory,
+          `${encodeURIComponent(`ensure:${key}`)}.stream.lock`,
+        );
+        const ownsScope = await fs.stat(scopePath).then(
+          () => true,
+          (error: unknown) => {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+              return false;
+            }
+            throw error;
+          },
+        );
+        const realpath = fs.realpath;
+        const routing = t.mock.method(
+          fs,
+          "realpath",
+          async (...args: Parameters<typeof realpath>) => {
+            const result = await realpath(...args);
+            if (result === fixture.directory) {
+              ensureRouted.resolve();
+            }
+            return result;
+          },
+        );
+        restoreRouting = () => routing.mock.restore();
+        const readdir = fs.readdir;
+        const observation = t.mock.method(
+          fs,
+          "readdir",
+          async (...args: Parameters<typeof readdir>) => {
+            // The actual directory result is returned unchanged. This receipt
+            // binds ensure's first snapshot to the pre-import state; no sleep
+            // or inferred process start is used to claim an empty lookup.
+            const result = await readdir(...args);
+            if (
+              [fixture.directory, path.join(home, ".acpx", "sessions")].includes(
+                path.resolve(String(args[0])),
+              )
+            ) {
+              const names = result.map((entry) =>
+                typeof entry === "string"
+                  ? entry
+                  : Buffer.isBuffer(entry)
+                    ? entry.toString("utf8")
+                    : entry.name.toString(),
+              );
+              if (!names.some((name) => name.endsWith(".json") && name !== "index.json")) {
+                emptySnapshot.resolve();
+              }
+            }
+            return result;
+          },
+        );
+        restoreObservation = () => observation.mock.restore();
+        ensuring = ensureSession({
+          agentCommand: agent.agentCommand,
+          agentArgv: agent.agentArgv,
+          cwd: normalized ? `${home}${path.sep}child${path.sep}..` : home,
+          name: normalized ? " import-target " : "import-target",
+          walkBoundary: home,
+          permissionMode: "deny-all",
+          handleProcessInterrupts: false,
+          timeoutMs: 2_000,
+        });
+        void ensuring.catch(() => {});
+        await withTimeout(
+          Promise.race([
+            ownsScope ? ensureRouted.promise : emptySnapshot.promise,
+            ensuring.then(() => {
+              throw new Error("Ensure bypassed its scheduled overlap receipt");
+            }),
+          ]),
+          5_000,
+        );
+        releaseCommit.resolve();
+        const [imported, ensured] = await Promise.all([importing, ensuring]);
+        assert.equal(ensured.created, false);
+        assert.equal(ensured.record.acpxRecordId, imported.record_id);
+        assert.equal(ensured.record.acpSessionId, fixture.source.acpSessionId);
+        assert.deepEqual(
+          (await listSessions()).map((record) => record.acpxRecordId),
+          [imported.record_id],
+        );
+        assert.deepEqual(await listSessionEvents(imported.record_id), fixture.history);
+        await assert.rejects(fs.stat(agent.pidFile), { code: "ENOENT" });
+      } finally {
+        releaseCommit.resolve();
+        await Promise.allSettled(ensuring ? [importing, ensuring] : [importing]);
+        restoreRouting?.();
+        restoreObservation?.();
+        renameMock.mock.restore();
+      }
+    });
+  });
+}
+
+test("ensure of an existing session does not wait behind unrelated import admission", async () => {
+  await withTempHome("acpx-ensure-import-existing-", async (home) => {
+    const agent = ensureFixtureAgent(home);
+    const fixture = await importFixture(home, { command: agent.agentCommand });
+    const imported = await importSession(fixture.archive);
+    await using admission = await acquireSessionImport();
+    void admission;
+    const ensured = await ensureSession({
+      agentCommand: agent.agentCommand,
+      agentArgv: agent.agentArgv,
+      cwd: home,
+      name: "import-target",
+      walkBoundary: home,
+      permissionMode: "deny-all",
+      handleProcessInterrupts: false,
+      signal: AbortSignal.timeout(2_000),
+      timeoutMs: 2_000,
+    });
+    assert.equal(ensured.created, false);
+    assert.equal(ensured.record.acpxRecordId, imported.record_id);
+    await assert.rejects(fs.stat(agent.pidFile), { code: "ENOENT" });
+  });
+});
+
+test("failed native ensure releases its scope without blocking import", async () => {
+  await withTempHome("acpx-ensure-import-failure-", async (home) => {
+    const agent = normalizeAgentCommandInput([process.execPath, "-e", "process.exit(23)"]);
+    const fixture = await importFixture(home, { command: agent.agentCommand });
+    await assert.rejects(
+      ensureSession({
+        ...agent,
+        cwd: home,
+        name: "import-target",
+        walkBoundary: home,
+        permissionMode: "deny-all",
+        handleProcessInterrupts: false,
+        timeoutMs: 2_000,
+      }),
+    );
+    assert.deepEqual(await listSessions(), []);
+    const imported = await importSession(fixture.archive);
+    assert.deepEqual(
+      (await listSessions()).map((record) => record.acpxRecordId),
+      [imported.record_id],
+    );
+    assert.deepEqual(await listSessionEvents(imported.record_id), fixture.history);
+  });
+});

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { BigIntStats } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -331,6 +332,18 @@ export async function acquireSessionTurn(
   signal?: AbortSignal,
 ): Promise<AsyncDisposable> {
   return await acquireSessionOwnership(sessionEventLockPath(recordId), signal);
+}
+
+// Keep the established ensure marker so imports also coordinate with older ensures.
+// Callers supply the same resolved cwd and normalized name used by discovery.
+export async function acquireSessionScope(
+  scope: { agentCommand: string; cwd: string; name?: string },
+  signal?: AbortSignal,
+): Promise<AsyncDisposable> {
+  const key = createHash("sha256")
+    .update(JSON.stringify([scope.agentCommand, scope.cwd, scope.name]))
+    .digest("hex");
+  return await acquireSessionTurn(`ensure:${key}`, signal);
 }
 
 export async function acquireSessionImport(signal?: AbortSignal): Promise<AsyncDisposable> {
