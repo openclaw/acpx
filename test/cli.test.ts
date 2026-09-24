@@ -657,6 +657,39 @@ test("flow run command is present in help output", async () => {
   });
 });
 
+for (const capability of ["--supports-load-session", "--supports-resume-session"]) {
+  test(`sessions new keeps the same resumed record open via ${capability}`, async () => {
+    await withTempHome(async (homeDir) => {
+      const resumeId = "same-resume";
+      const base = [
+        "--agent",
+        `${MOCK_AGENT_COMMAND} ${capability}`,
+        "--cwd",
+        homeDir,
+        "--format",
+        "json",
+      ];
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const result = await runCli(
+          [...base, "sessions", "new", "--resume-session", resumeId],
+          homeDir,
+          { timeoutMs: 10_000 },
+        );
+        assert.equal(result.code, 0, result.stderr);
+        const stored = JSON.parse(
+          await fs.readFile(path.join(homeDir, ".acpx", "sessions", `${resumeId}.json`), "utf8"),
+        ) as { closed: boolean };
+        assert.equal(stored.closed, false, `resume attempt ${attempt + 1}`);
+      }
+      const prompted = await runCli([...base, "--ttl", "0", "prompt", "hello"], homeDir, {
+        timeoutMs: 10_000,
+      });
+      assert.equal(prompted.code, 0, prompted.stderr);
+      assert.match(prompted.stdout, /hello/);
+    });
+  });
+}
+
 test("sessions new --resume-session loads ACP session and stores resumed ids", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");

@@ -674,6 +674,12 @@ export async function handleSessionsNew(
     name: flags.name,
   });
 
+  const resumesSameRecord = replaced != null && replaced.acpxRecordId === flags.resumeSession;
+  if (resumesSameRecord) {
+    // The old owner must finish before resume overwrites this same record path.
+    await closeSession(replaced.acpxRecordId);
+  }
+
   const created = await createSession(
     buildSessionStartOptions({
       agent,
@@ -686,7 +692,9 @@ export async function handleSessionsNew(
   );
 
   if (replaced) {
-    await closeSession(replaced.acpxRecordId);
+    if (!resumesSameRecord) {
+      await closeSession(replaced.acpxRecordId);
+    }
     if (globalFlags.verbose) {
       process.stderr.write(`[acpx] soft-closed prior session: ${replaced.acpxRecordId}\n`);
     }

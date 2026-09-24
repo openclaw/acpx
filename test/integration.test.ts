@@ -4997,6 +4997,91 @@ for (const format of ["text", "quiet", "json"]) {
   });
 }
 
+for (const connection of ["load", "resume"]) {
+  for (const fails of [false, true]) {
+    test(`integration: same-ID ${connection} retires its warm owner before replacement (fails: ${fails})`, async () => {
+      await withTempHome(async (homeDir) => {
+        const recordId = "same-resume-warm";
+        const base = [
+          "--agent",
+          `${MOCK_AGENT_COMMAND} --supports-${connection}-session --advertise-models`,
+          "--cwd",
+          homeDir,
+          "--ttl",
+          "60",
+          "--format",
+          "json",
+        ];
+        const recordPath = path.join(homeDir, ".acpx", "sessions", `${recordId}.json`);
+        const readRecord = async () => {
+          const record = parseSessionRecord(JSON.parse(await fs.readFile(recordPath, "utf8")));
+          assert.ok(record);
+          return record;
+        };
+        const ownedPids = new Set<number>();
+        const rememberOwner = async () => {
+          const owner = await readQueueOwnerLock(homeDir, recordId);
+          const record = await readRecord();
+          assert.ok(record.pid);
+          ownedPids.add(owner.pid);
+          ownedPids.add(record.pid);
+          return record;
+        };
+        const body = await observeTestOutcome(async () => {
+          const created = await runCli(
+            [...base, "sessions", "new", "--resume-session", recordId],
+            homeDir,
+          );
+          assert.equal(created.code, 0, JSON.stringify(created));
+          const warm = await runCli([...base, "prompt", "echo warm-owner"], homeDir);
+          assert.equal(warm.code, 0, JSON.stringify(warm));
+          const before = await rememberOwner();
+          const replacement = await runCli(
+            [
+              ...base,
+              ...(fails ? ["--model", "missing-model"] : []),
+              "sessions",
+              "new",
+              "--resume-session",
+              recordId,
+            ],
+            homeDir,
+          );
+          assert.equal(replacement.code, fails ? 1 : 0, JSON.stringify(replacement));
+          for (const pid of ownedPids) {
+            assert.equal(await waitForPidExit(pid, 5_000), true, `prior process ${pid} survived`);
+          }
+          const after = await readRecord();
+          assert.equal(after.acpxRecordId, recordId);
+          assert.equal(after.acpSessionId, recordId);
+          assert.equal(after.closed, fails);
+          assert.equal(after.pid, undefined);
+          if (fails) {
+            assert.match(replacement.stdout, /did not advertise that model/);
+            assert.deepEqual(after.messages, before.messages);
+          }
+          const prompt = await runCli([...base, "prompt", "echo replacement-owner"], homeDir);
+          assert.equal(prompt.code, fails ? 4 : 0, JSON.stringify(prompt));
+          if (!fails) {
+            await rememberOwner();
+            assert.match(prompt.stdout, /replacement-owner/);
+          }
+        });
+        const cleanup = await observeTestOutcome(async () => {
+          await runCli([...base, "sessions", "close"], homeDir);
+          for (const pid of ownedPids) {
+            assert.equal(await waitForPidExit(pid, 5_000), true, `cleanup left process ${pid}`);
+          }
+        });
+        if (!cleanup.ok) {
+          retainedCliHomes.add(homeDir);
+        }
+        unwrapTestOutcomes(body, cleanup);
+      });
+    });
+  }
+}
+
 test("integration: a failed replacement keeps the previous session open", async () => {
   await withTempHome(async (homeDir) => {
     const base = [

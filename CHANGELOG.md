@@ -31,6 +31,7 @@ Repo: https://github.com/openclaw/acpx
 - ACP/CLI: retain reconnect metadata and Claude settings isolation, correlate recovered load errors by direction, and report agent disconnects after partial exec output. Thanks @odrobnik.
 - CLI/history: make `help` display usage and preserve Unicode when trimming saved conversation text. Thanks @odrobnik.
 - Sessions/import: serialize concurrent imports so overlapping collision checks cannot create duplicate scopes or provider session identities.
+- Sessions/resume: retire the previous local owner before reusing the same session record and keep the resumed record open for subsequent prompts.
 
 ## 0.19.2 - 2026-09-23
 

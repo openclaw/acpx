@@ -1,19 +1,30 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import childProcess, { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { resolveClaudeCodeExecutable } from "../src/acp/agent-command.js";
-import { resolveAgentSessionCwd, runTimedExecFile } from "../src/acp/client-process.js";
+import {
+  PROCESS_HELPER_MAX_BUFFER_BYTES,
+  resolveAgentSessionCwd,
+  runTimedExecFile,
+} from "../src/acp/client-process.js";
 import { buildAgentSpawnOptions, buildSpawnCommandOptions } from "../src/acp/client.js";
 import { buildTerminalSpawnOptions } from "../src/acp/terminal-manager.js";
+import { withTimeout } from "../src/async-control.js";
+import { observeProcessIncarnation, parseProcessBirthIdentity } from "../src/process-identity.js";
 import {
   buildAgentSpawnCommand,
   buildTerminalShellSpawnCommand,
   buildTerminalSpawnCommand,
   resolveWindowsExecutablePath,
 } from "../src/spawn-command-options.js";
+import type { ReadyRecord } from "./fixtures/flow-shell-retirement.js";
 
 function withPlatform<T>(platform: NodeJS.Platform, callback: () => T): T {
   const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
@@ -534,60 +545,203 @@ test("runTimedExecFile keeps stdout beyond execFile default maxBuffer", async ()
   assert.equal(stdout.length, size);
 });
 
-test("runTimedExecFile kills a hung helper instead of waiting forever", async () => {
+test("runTimedExecFile kills a ready helper while its descendant retains the pipes", async (t) => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-timed-exec-"));
-  const helperPidPath = path.join(tmp, "helper.pid");
-  const descendantPidPath = path.join(tmp, "descendant.pid");
-  try {
-    await assert.rejects(
-      runTimedExecFile(
-        process.execPath,
-        [
-          "-e",
-          [
-            `const fs = require("node:fs")`,
-            `const { spawn } = require("node:child_process")`,
-            `fs.writeFileSync(${JSON.stringify(helperPidPath)}, String(process.pid))`,
-            `const descendant = spawn(process.execPath, ["-e", "setTimeout(() => process.exit(0), 5000)"], { stdio: "inherit" })`,
-            `fs.writeFileSync(${JSON.stringify(descendantPidPath)}, String(descendant.pid))`,
-            `setInterval(() => {}, 1000)`,
-          ].join(";"),
-        ],
-        { timeoutMs: 200 },
-      ),
-      (error: unknown) =>
-        error instanceof Error && (error as NodeJS.ErrnoException).code === "ETIMEDOUT",
-    );
-
-    const helperPid = Number(await fs.readFile(helperPidPath, "utf8"));
-    assert.ok(Number.isInteger(helperPid) && helperPid > 0);
-    const deadline = Date.now() + 2_000;
-    while (Date.now() < deadline) {
-      try {
-        process.kill(helperPid, 0);
-      } catch {
-        return;
-      }
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 20);
-      });
+  const nonce = randomUUID();
+  const fixture = fileURLToPath(new URL("./fixtures/flow-shell-retirement.js", import.meta.url));
+  const args = [fixture, tmp, nonce, "wrapper", "standalone"];
+  const options: childProcess.ExecFileOptionsWithStringEncoding = {
+    encoding: "utf8",
+    maxBuffer: PROCESS_HELPER_MAX_BUFFER_BYTES,
+    killSignal: "SIGKILL",
+    windowsHide: undefined,
+    env: undefined,
+  };
+  type Callback = (
+    error: childProcess.ExecFileException | null,
+    stdout: string,
+    stderr: string,
+  ) => void;
+  const nativeExecFile = childProcess.execFile;
+  let forward: Callback | undefined;
+  let callbackCalls = 0;
+  let forwardedCalls = 0;
+  let callbackDone!: () => void;
+  const done = new Promise<void>((resolve) => {
+    callbackDone = resolve;
+  });
+  const child = nativeExecFile(process.execPath, args, options, (error, stdout, stderr) => {
+    callbackCalls += 1;
+    if (forward) {
+      forwardedCalls += 1;
+      forward(error, stdout, stderr);
     }
+    callbackDone();
+  });
+  const observed = {
+    exit: false,
+    signal: null as NodeJS.Signals | null,
+    close: false,
+    stdoutClose: false,
+    stderrClose: false,
+  };
+  child.once("exit", (_code, signal) => {
+    observed.exit = true;
+    observed.signal = signal;
+  });
+  child.once("close", () => {
+    observed.close = true;
+  });
+  child.stdout!.once("close", () => {
+    observed.stdoutClose = true;
+  });
+  child.stderr!.once("close", () => {
+    observed.stderrClose = true;
+  });
+  const until = async (label: string, timeoutMs: number, check: () => Promise<boolean>) => {
+    const deadline = performance.now() + timeoutMs;
+    while (!(await check())) {
+      assert.ok(performance.now() < deadline, `${label}: ${JSON.stringify(observed)}`);
+      await delay(20);
+    }
+  };
+  const ready = async (role: string): Promise<ReadyRecord | undefined> => {
     try {
-      process.kill(helperPid, "SIGKILL");
-    } catch {
-      // best-effort cleanup
+      const value = JSON.parse(
+        await fs.readFile(path.join(tmp, `${role}.ready.json`), "utf8"),
+      ) as ReadyRecord;
+      assert.equal(value.nonce, nonce);
+      assert.ok(Number.isSafeInteger(value.pid) && value.pid > 1);
+      assert.ok(parseProcessBirthIdentity(value.birth));
+      return value;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return undefined;
+      }
+      throw error;
     }
-    assert.fail(`hung helper process still alive: ${helperPid}`);
+  };
+  let descendant: ReadyRecord | undefined;
+  const failures: unknown[] = [];
+  try {
+    await until("helper and descendant readiness", 8_000, async () => {
+      assert.equal(callbackCalls, 0, "helper exited during fixture setup");
+      assert.equal(observed.exit, false);
+      const wrapper = await ready("wrapper");
+      descendant = await ready("descendant");
+      if (!wrapper || !descendant) {
+        return false;
+      }
+      assert.equal(wrapper.pid, child.pid);
+      assert.equal(await observeProcessIncarnation(wrapper.pid, wrapper.birth, 1_000), "matching");
+      assert.equal(
+        await observeProcessIncarnation(descendant.pid, descendant.birth, 1_000),
+        "matching",
+      );
+      return true;
+    });
+    // Admit the real, ready child; preserve its native callback after restoring
+    // the dependency. The production deadline still uses an actual 200 ms timer.
+    const handoff = t.mock.method(childProcess, "execFile", ((
+      command,
+      actualArgs,
+      actualOptions,
+      callback: Callback,
+    ) => {
+      assert.equal(command, process.execPath);
+      assert.deepEqual(actualArgs, args);
+      assert.deepEqual(actualOptions, options);
+      assert.equal(callbackCalls, 0);
+      assert.equal(forward, undefined);
+      forward = callback;
+      return child;
+    }) as typeof childProcess.execFile);
+    syncBuiltinESMExports();
+    let timed: Promise<string>;
+    try {
+      timed = runTimedExecFile(process.execPath, args, { timeoutMs: 200 });
+    } finally {
+      handoff.mock.restore();
+      syncBuiltinESMExports();
+    }
+    await assert.rejects(withTimeout(timed, 2_000), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal((error as NodeJS.ErrnoException).code, "ETIMEDOUT");
+      assert.ok("killed" in error && error.killed === true);
+      assert.ok("signal" in error && error.signal === "SIGKILL");
+      assert.match(error.message, /timed out after 200ms/);
+      return true;
+    });
+    await until(
+      "native helper and stream closure",
+      2_000,
+      async () => observed.exit && observed.close && observed.stdoutClose && observed.stderrClose,
+    );
+    await withTimeout(done, 2_000);
+    assert.equal(observed.signal, "SIGKILL");
+    assert.equal(child.stdout!.destroyed, true);
+    assert.equal(child.stderr!.destroyed, true);
+    assert.equal(callbackCalls, 1);
+    assert.equal(forwardedCalls, 1);
+    assert.ok(descendant);
+    assert.equal(
+      await observeProcessIncarnation(descendant.pid, descendant.birth, 1_000),
+      "matching",
+    );
+    await fs.writeFile(path.join(tmp, "ping"), nonce);
+    await until(
+      "live descendant pong",
+      2_000,
+      async () => (await fs.readFile(path.join(tmp, "pong"), "utf8").catch(() => "")) === nonce,
+    );
+  } catch (error) {
+    failures.push(error);
   } finally {
     try {
-      const descendantPid = Number(await fs.readFile(descendantPidPath, "utf8"));
-      if (Number.isInteger(descendantPid) && descendantPid > 0) {
-        process.kill(descendantPid, "SIGKILL");
+      await fs.writeFile(path.join(tmp, "stop"), nonce);
+      await until("cooperative fixture cleanup", 8_000, async () => {
+        descendant ??= await ready("descendant");
+        if (!observed.close || !observed.exit) {
+          return false;
+        }
+        if (!descendant) {
+          return true;
+        }
+        const state = await observeProcessIncarnation(descendant.pid, descendant.birth, 1_000);
+        if (state === "gone") {
+          return true;
+        }
+        if (state !== "matching" || process.platform === "win32") {
+          return false;
+        }
+        return await new Promise<boolean>((resolve) => {
+          nativeExecFile(
+            "ps",
+            ["-p", String(descendant!.pid), "-o", "stat="],
+            { encoding: "utf8", timeout: 1_000 },
+            (error, stdout) => {
+              resolve(error?.code === 1 || (!error && stdout.trim().startsWith("Z")));
+            },
+          );
+        });
+      });
+      for (const role of ["wrapper", "descendant"]) {
+        await assert.rejects(fs.access(path.join(tmp, `${role}.emergency`)), { code: "ENOENT" });
       }
-    } catch {
-      // best-effort cleanup of the helper's pipe-inheriting descendant
+      await fs.rm(tmp, { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+      }
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.unref();
+      t.diagnostic(`Retained timed-helper fixture for cleanup: ${tmp}`);
     }
-    await fs.rm(tmp, { recursive: true, force: true });
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "Timed helper proof or cleanup failed");
   }
 });
 
