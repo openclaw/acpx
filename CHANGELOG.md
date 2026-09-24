@@ -21,6 +21,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/shutdown: keep graceful queue-owner cleanup and lease release protected on macOS and Linux when another stop signal arrives, including while startup is still acquiring ownership.
 - Sessions/queue: receive complete large events and accumulated session records without failing at the old client buffer ceiling, while preserving owner output-backlog limits and unknown-outcome errors after disconnection.
 - Replay viewer: keep earlier attempt timing stable when later output grows in the same session by weighting only the selected attempt's recorded messages.
+- Replay viewer: mark the selected ACP conversation slice while paused without hiding surrounding messages or moving them when selection changes.
 
 ## 0.19.2 - 2026-09-23
 

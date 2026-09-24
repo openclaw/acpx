@@ -27,7 +27,8 @@ export function ConversationMessage({
 
   return (
     <article
-      className={`conversation__message conversation__message--${message.role}${entered ? " conversation__message--entered" : ""}`}
+      className={`conversation__message conversation__message--${message.role}${entered ? " conversation__message--entered" : ""}${message.highlighted ? " conversation__message--highlighted" : ""}`}
+      aria-label={message.highlighted ? `${message.title} — selected ACP slice` : undefined}
     >
       {message.parts.length > 0 ? (
         message.parts.map((part, index) => {

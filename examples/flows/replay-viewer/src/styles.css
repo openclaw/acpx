@@ -1109,7 +1109,8 @@ code {
 }
 
 .conversation__message {
-  padding: 0;
+  padding: 0 0 0 8px;
+  border-inline-start: 2px solid transparent;
   display: grid;
   gap: 8px;
   scroll-margin-top: 8px;
@@ -1124,6 +1125,11 @@ code {
 .conversation__message--entered {
   opacity: 1;
   transform: translateY(0);
+}
+
+.conversation__message--highlighted {
+  border-inline-start-color: var(--accent);
+  background: var(--panel-selected);
 }
 
 .conversation__message--user {

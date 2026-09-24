@@ -96,6 +96,9 @@ that produced the conversation.
 Replay timing weights only that attempt's recorded messages, so later output in
 the same session does not stretch earlier steps.
 
+The conversation marks the selected ACP slice with a colored rail and background,
+while keeping surrounding messages readable when replay is paused.
+
 The conversation pane follows new content during replay and live streaming.
 Scrolling upward detaches it, including keyboard and scrollbar movement. Scroll
 down near the bottom to resume following. Changing the streaming session or
