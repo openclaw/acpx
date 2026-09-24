@@ -268,20 +268,37 @@ test(
   async () => {
     await withOwner(async (owner, connect) => {
       const { client, serverSocket } = await connect();
+      let receivedFrames = 0;
+      const received = new Promise<void>((resolve) => {
+        client.on("data", (chunk: Buffer) => {
+          receivedFrames += chunk.toString().split("\n").length - 1;
+          if (receivedFrames === 17) {
+            resolve();
+          }
+        });
+      });
       client.resume();
       submit(client, "rearmed");
       const task = await owner.nextTask(1000);
       assert.ok(task);
-      const drained = once(serverSocket, "drain", { signal: AbortSignal.timeout(3000) });
-      sendEvents(task, 16);
-      await drained;
-      client.pause();
-      const closed = once(serverSocket, "close", { signal: AbortSignal.timeout(4000) });
-      sendEvents(task, 128);
-      await closed;
-      assert.equal(serverSocket.writableLength, 0);
-      task.close();
-      owner.completeTask(task);
+      try {
+        sendEvents(task, 16);
+        // One drain only releases a spool chunk; receive the accepted frame and
+        // every event before testing a new transition from idle to blocked.
+        await withTimeout(received, 3000);
+        assert.equal(serverSocket.timeout, 0, "first burst must drain before rearming");
+        assert.equal(serverSocket.writableLength, 0);
+        client.pause();
+        const closed = once(serverSocket, "close", { signal: AbortSignal.timeout(4000) });
+        sendEvents(task, 16);
+        assert.ok(serverSocket.writableLength > 0, "second burst must block the socket");
+        assert.equal(serverSocket.timeout, 1000, "blocked output must rearm the timeout");
+        await closed;
+        assert.equal(serverSocket.writableLength, 0);
+      } finally {
+        task.close();
+        owner.completeTask(task);
+      }
     });
   },
 );
