@@ -401,6 +401,7 @@ Behavior:
 - `sessions import <archive>` writes a fresh local record from a portable archive, reopens it as idle, keeps the provider session id, and clears source-machine process metadata
 - Imported sessions must resume that provider session; if the destination agent cannot load it, prompts fail clearly instead of starting an empty conversation
 - `sessions import --name <name>` and `--cwd <dir>` override the imported destination scope; import fails instead of creating a duplicate when an active session already exists for that `(agent, cwd, name)` scope or when another local record already uses the same provider session id
+- Concurrent imports into the same local store wait for one another and recheck these collisions before publishing
 - `sessions prune --dry-run` previews closed sessions that can be deleted
 - `sessions prune` verifies the saved closed status and selected agent before deleting a record; add `--include-history` to delete only that session's active and rotated event files
 - `sessions prune --before <date>` and `--older-than <days>` filter by close time, falling back to last-used time for older records

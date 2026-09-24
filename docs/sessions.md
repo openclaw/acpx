@@ -133,6 +133,8 @@ Imports keep the archive's provider session id, reopen the copied session as an 
 
 An imported session becomes discoverable after its complete history has been written. If writing the history fails, the import leaves no local session that blocks retrying the archive.
 
+Concurrent imports into the same local store wait for one another and recheck scope and provider session id collisions before publishing. Only one of two conflicting imports can succeed; independent destinations still retain their own complete histories.
+
 ## Prune
 
 `sessions prune` removes closed records once you actually want them gone:

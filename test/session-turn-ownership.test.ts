@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { sessionEventLockPath } from "../src/session/event-log.js";
-import { acquireSessionTurn } from "../src/session/turn-ownership.js";
+import { listSessions } from "../src/session/persistence.js";
+import { acquireSessionImport, acquireSessionTurn } from "../src/session/turn-ownership.js";
 import { startKeeperProcess, withTempHome } from "./queue-test-helpers.js";
 
 test("session turn ownership serializes same-process callers and survives a canceled waiter", async (t) => {
@@ -131,6 +134,76 @@ test("session turn admission cleans its reservation after observation fails", as
     await assert.rejects(acquireSessionTurn("observation-failure"), (error) => error === failure);
     await assert.rejects(fs.access(sessionEventLockPath("observation-failure")), {
       code: "ENOENT",
+    });
+  });
+});
+
+test("import admission and opaque record turns keep independent ownership", async () => {
+  await withTempHome(async (home) => {
+    await using admission = await acquireSessionImport(AbortSignal.timeout(2_000));
+    const marker = path.join(home, ".acpx", "sessions", ".import-admission.lock");
+    const admissionPayload = await fs.readFile(marker, "utf8");
+    await fs.access(`${marker}.guard`);
+    for (const id of [".import-admission", ".import-admission.lock", "import:admission"]) {
+      const turn = await acquireSessionTurn(id, AbortSignal.timeout(2_000));
+      const turnMarker = sessionEventLockPath(id);
+      try {
+        assert.notEqual(turnMarker, marker);
+        assert.notEqual(`${turnMarker}.guard`, `${marker}.guard`);
+        await fs.access(turnMarker);
+      } finally {
+        await turn[Symbol.asyncDispose]();
+      }
+      assert.equal(await fs.readFile(marker, "utf8"), admissionPayload);
+      await fs.access(`${marker}.guard`);
+    }
+    assert.deepEqual(await listSessions(), []);
+
+    const id = ".import-admission.lock";
+    const turn = await acquireSessionTurn(id, AbortSignal.timeout(2_000));
+    const turnMarker = sessionEventLockPath(id);
+    try {
+      const turnPayload = await fs.readFile(turnMarker, "utf8");
+      await admission[Symbol.asyncDispose]();
+      await assert.rejects(fs.access(marker), { code: "ENOENT" });
+      await assert.rejects(fs.access(`${marker}.guard`), { code: "ENOENT" });
+      assert.equal(await fs.readFile(turnMarker, "utf8"), turnPayload);
+      await fs.access(`${turnMarker}.guard`);
+      await assert.rejects(acquireSessionTurn(id, AbortSignal.timeout(60)));
+    } finally {
+      await turn[Symbol.asyncDispose]();
+    }
+  });
+});
+
+test("import admission shares canonical store aliases and separates independent stores", async (t) => {
+  await withTempHome(async (home) => {
+    await using admission = await acquireSessionImport(AbortSignal.timeout(2_000));
+    void admission;
+    const directory = path.join(home, ".acpx", "sessions");
+    const marker = path.join(directory, ".import-admission.lock");
+    const payload = await fs.readFile(marker, "utf8");
+    const homeAlias = path.join(home, "alias");
+    await fs.symlink(home, homeAlias, "junction");
+    const storeAliasHome = path.join(home, "store-alias");
+    await fs.mkdir(path.join(storeAliasHome, ".acpx"), { recursive: true });
+    await fs.symlink(directory, path.join(storeAliasHome, ".acpx", "sessions"), "junction");
+    for (const alias of [homeAlias, storeAliasHome]) {
+      const homedir = t.mock.method(os, "homedir", () => alias);
+      try {
+        const waiting = AbortSignal.timeout(60);
+        await assert.rejects(acquireSessionImport(waiting));
+        assert.equal(waiting.aborted, true);
+        assert.equal(await fs.readFile(marker, "utf8"), payload);
+      } finally {
+        homedir.mock.restore();
+      }
+    }
+    await withTempHome(async (otherHome) => {
+      await using independent = await acquireSessionImport(AbortSignal.timeout(2_000));
+      void independent;
+      await fs.access(path.join(otherHome, ".acpx", "sessions", ".import-admission.lock"));
+      assert.equal(await fs.readFile(marker, "utf8"), payload);
     });
   });
 });

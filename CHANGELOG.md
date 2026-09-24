@@ -30,6 +30,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions: preserve the previous session when replacement fails, keep model choices and permission results scoped to each turn, and retain config catalogs when an accepted control omits them. Thanks @odrobnik.
 - ACP/CLI: retain reconnect metadata and Claude settings isolation, correlate recovered load errors by direction, and report agent disconnects after partial exec output. Thanks @odrobnik.
 - CLI/history: make `help` display usage and preserve Unicode when trimming saved conversation text. Thanks @odrobnik.
+- Sessions/import: serialize concurrent imports so overlapping collision checks cannot create duplicate scopes or provider session identities.
 
 ## 0.19.2 - 2026-09-23
 

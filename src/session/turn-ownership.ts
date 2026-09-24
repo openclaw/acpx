@@ -6,7 +6,7 @@ import { withTempFile } from "@openclaw/fs-safe/advanced";
 import { isHardlinkFallbackError } from "@openclaw/fs-safe/durability";
 import { acquireFileLock, type FileLockHandle } from "@openclaw/fs-safe/file-lock";
 import { incrementPerfCounter } from "../perf-metrics.js";
-import { sessionEventLockPath } from "./event-log.js";
+import { sessionBaseDir, sessionEventLockPath } from "./event-log.js";
 import { createLockOwner, lockOwnerPid, type LockOwner } from "./lock-owner.js";
 
 const LOCK_RETRY_MS = 15;
@@ -330,7 +330,20 @@ export async function acquireSessionTurn(
   recordId: string,
   signal?: AbortSignal,
 ): Promise<AsyncDisposable> {
-  const requestedPath = sessionEventLockPath(recordId);
+  return await acquireSessionOwnership(sessionEventLockPath(recordId), signal);
+}
+
+export async function acquireSessionImport(signal?: AbortSignal): Promise<AsyncDisposable> {
+  return await acquireSessionOwnership(
+    path.join(sessionBaseDir(), ".import-admission.lock"),
+    signal,
+  );
+}
+
+async function acquireSessionOwnership(
+  requestedPath: string,
+  signal?: AbortSignal,
+): Promise<AsyncDisposable> {
   await fs.mkdir(path.dirname(requestedPath), { recursive: true, mode: 0o700 });
   const filePath = path.join(
     await fs.realpath(path.dirname(requestedPath)),

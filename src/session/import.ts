@@ -13,6 +13,7 @@ import {
   parseSessionRecord,
   writeSessionRecord,
 } from "./persistence.js";
+import { acquireSessionImport } from "./turn-ownership.js";
 
 const SUPPORTED_FORMAT_VERSION = 1;
 
@@ -314,6 +315,8 @@ export async function importSession(
     name: options.name,
   });
 
+  await using admission = await acquireSessionImport();
+  void admission;
   await assertDestinationScopeAvailable(newRecord);
   await assertProviderSessionAvailable(newRecord);
 
