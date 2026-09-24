@@ -105,6 +105,17 @@ pnpm run conformance:run -- \
 - Run write cases in a disposable workspace: existing files can be overwritten.
   Newly created files receive best-effort cleanup within the same filesystem
   root. These callback checks do not sandbox the adapter process itself.
+- Each case retires its adapter, witnessed descendants, and transport before
+  reporting its result. Cleanup has an eight-second budget and escalates from
+  stdin EOF to TERM and KILL. If retirement cannot be verified, the case fails
+  with a cleanup diagnostic and later cases are not launched; an original case
+  error remains in the report too.
+- SIGINT, SIGTERM, and SIGHUP stop new work and interrupt pending requests,
+  sleeps, and settle waits. The runner completes owned cleanup and writes the
+  partial report before exiting with the first signal (or its conventional
+  numeric exit status on Windows). Repeated signals do not skip cleanup.
+  Descendants that escape observation and abrupt, uncatchable termination are
+  outside this cleanup guarantee.
 
 ## Data-Driven Model
 
@@ -129,8 +140,9 @@ Each case file can define:
   - `updates_session_update_includes`
 
 When a step declares `expect_error`, its operation must fail. Optional `codes`
-and `message_any` fields filter the failure; `{}` accepts any error. A successful
-operation always fails the case.
+and `message_any` fields filter the failure; `{}` accepts any operation error.
+Runner interruption is never an expected operation error. A successful operation
+always fails the case.
 
 The runner validates the profile and every JSON file in the cases directory
 before launching an adapter, including files outside a `--case` selection.

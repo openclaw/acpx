@@ -48,6 +48,8 @@ export class ProcessDescendants {
   private rootBirth: ProcessBirthIdentity | undefined;
   private pending: Promise<boolean> | undefined;
   private retired = false;
+  private failedRootObservation = false;
+  private unresolvedOwnership = false;
   private readonly ownProcessGroup: boolean;
   private captureGroupAfterExit: boolean;
   private groupExitedAt: number | LinuxExitClock | null | undefined;
@@ -102,11 +104,20 @@ export class ProcessDescendants {
       }
       return true;
     } catch {
-      if (!isChildProcessRunning(this.child)) {
-        this.captureGroupAfterExit = false;
-      }
+      this.recordSnapshotFailure(captureRootGroup);
       return false;
     }
+  }
+
+  private recordSnapshotFailure(captureRootGroup: boolean): void {
+    if (isChildProcessRunning(this.child)) {
+      this.failedRootObservation = true;
+      return;
+    }
+    if (captureRootGroup) {
+      this.unresolvedOwnership = true;
+    }
+    this.captureGroupAfterExit = false;
   }
 
   private requiredSnapshotPids(rootWasRunning: boolean): number[] {
@@ -128,6 +139,10 @@ export class ProcessDescendants {
       }
     }
     this.includeRoot(table, owned);
+    if (owned.has(this.child.pid ?? 0)) {
+      this.failedRootObservation = false;
+      this.unresolvedOwnership = false;
+    }
     if (this.ownProcessGroup) {
       this.includeProcessGroup(table, owned, rootWasRunning);
     }
@@ -167,32 +182,52 @@ export class ProcessDescendants {
     const root = this.child.pid;
     // A shell can exit while its first snapshot is in flight. Its recorded exit
     // bounds the final snapshot; subsequent discovery requires a witnessed member.
-    if (root && (rootWasRunning || [...owned].some((pid) => table.get(pid)?.groupPid === root))) {
-      for (const identity of table.values()) {
-        if (identity.groupPid === root && this.startedBeforeRootExit(identity)) {
-          owned.add(identity.pid);
-        }
-      }
+    if (!root || !(rootWasRunning || [...owned].some((pid) => table.get(pid)?.groupPid === root))) {
+      return;
+    }
+    this.unresolvedOwnership = !this.admitGroupMembers(table, owned, root);
+    if (!this.unresolvedOwnership) {
+      this.failedRootObservation = false;
     }
   }
 
-  private startedBeforeRootExit(identity: ProcessTableEntry): boolean {
+  private admitGroupMembers(
+    table: Map<number, ProcessTableEntry>,
+    owned: Set<number>,
+    groupPid: number,
+  ): boolean {
+    let verified = true;
+    for (const identity of table.values()) {
+      if (identity.groupPid !== groupPid) {
+        continue;
+      }
+      const beforeExit = this.startedBeforeRootExit(identity);
+      if (beforeExit === undefined) {
+        verified = false;
+      } else if (beforeExit) {
+        owned.add(identity.pid);
+      }
+    }
+    return verified;
+  }
+
+  private startedBeforeRootExit(identity: ProcessTableEntry): boolean | undefined {
     const cutoff = this.groupExitedAt;
     if (cutoff === undefined) {
       return true;
     }
     if (cutoff === null) {
-      return false;
+      return undefined;
     }
     if (identity.birth.kind !== "linux-proc") {
-      return typeof cutoff === "number" && Date.parse(identity.birth.value) <= cutoff;
+      return typeof cutoff === "number" ? Date.parse(identity.birth.value) <= cutoff : undefined;
     }
     if (
       typeof cutoff === "number" ||
       identity.birth.timeNamespace !== cutoff.timeNamespace ||
       !identity.clockTicksPerSecond
     ) {
-      return false;
+      return undefined;
     }
     // /proc/uptime floors to centiseconds and stat floors to USER_HZ ticks.
     // Compare the recorded exit's 10ms interval, without wall-clock conversion.
@@ -211,13 +246,20 @@ export class ProcessDescendants {
       try {
         process.kill(pid, signal);
       } catch {
-        this.identities.delete(pid);
+        // A denied signal is not an exit receipt; only a fresh snapshot can retire custody.
       }
     }
   }
 
   hasTrackedProcesses(): boolean {
     return this.identities.size > 0;
+  }
+
+  hasUnresolvedOwnership(): boolean {
+    return (
+      this.unresolvedOwnership ||
+      (!this.ownProcessGroup && this.failedRootObservation && !isChildProcessRunning(this.child))
+    );
   }
 
   async waitForExit(timeoutMs: number): Promise<boolean> {

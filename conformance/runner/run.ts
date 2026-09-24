@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   ClientSideConnection,
   PROTOCOL_VERSION,
@@ -23,6 +24,7 @@ import {
 import { FsSafeError } from "@openclaw/fs-safe/errors";
 import { root, type Root } from "@openclaw/fs-safe/root";
 import { sliceReadWindow } from "../../src/file-read-window.js";
+import { AdapterLifetime, AdapterRetirementError } from "./adapter-lifetime.js";
 import {
   parseCaseDefinition,
   parseProfileDefinition,
@@ -310,23 +312,51 @@ function readArgValue(argv: string[], index: number, flag: string): string {
   return value.trim();
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+  signal: AbortSignal,
+): Promise<T> {
   return await new Promise<T>((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(signal.reason);
+    };
     const timer = setTimeout(() => {
+      cleanup();
       reject(new Error(`${label} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
-
+    signal.addEventListener("abort", onAbort, { once: true });
     promise.then(
       (value) => {
-        clearTimeout(timer);
+        cleanup();
         resolve(value);
       },
       (error) => {
-        clearTimeout(timer);
+        cleanup();
         reject(error);
       },
     );
+    if (signal.aborted) {
+      onAbort();
+    }
   });
+}
+
+async function waitForDelay(ms: number, signal: AbortSignal): Promise<void> {
+  try {
+    await delay(ms, undefined, { signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError" && error.cause === signal.reason) {
+      throw signal.reason;
+    }
+    throw error;
+  }
 }
 
 function resolveTimeoutMs(
@@ -478,16 +508,19 @@ async function loadProfileAndCases(options: CliOptions): Promise<{
   };
 }
 
-async function createHarness(options: CliOptions): Promise<Harness> {
+async function createHarness(options: CliOptions, signal: AbortSignal): Promise<Harness> {
   const parsed = splitCommandLine(options.agentCommand);
+  signal.throwIfAborted();
   const child = spawn(parsed.command, parsed.args, {
     cwd: options.agentCommandCwd,
     stdio: ["pipe", "pipe", "pipe"],
     env: process.env,
+    detached: process.platform !== "win32",
   });
+  const lifetime = new AdapterLifetime(child);
 
   if (!child.stdin || !child.stdout) {
-    child.kill();
+    await lifetime.shutdown(Promise.resolve());
     throw new Error("Failed to create stdio pipes for agent process");
   }
 
@@ -505,7 +538,7 @@ async function createHarness(options: CliOptions): Promise<Harness> {
   });
   const connection = new ClientSideConnection(() => client, stream);
   let initializeResult: InitializeResponse;
-  let cleanedUp = false;
+  let shutdownPromise: Promise<void> | undefined;
   const waitForSpawn = new Promise<void>((resolve, reject) => {
     const onSpawn = () => {
       child.off("error", onError);
@@ -521,38 +554,32 @@ async function createHarness(options: CliOptions): Promise<Harness> {
     child.once("error", onError);
   });
 
-  const cleanupClientState = async (): Promise<void> => {
-    if (cleanedUp) {
-      return;
-    }
-    cleanedUp = true;
-    await client.cleanup();
-  };
-
-  const shutdown = async (): Promise<void> => {
-    if (child.killed || child.exitCode !== null) {
-      await cleanupClientState();
-      return;
-    }
-    child.kill("SIGTERM");
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        if (child.exitCode === null) {
-          child.kill("SIGKILL");
-        }
-      }, 1500);
-      const completionTimeout = setTimeout(resolve, 2500);
-      child.once("exit", () => {
-        clearTimeout(timer);
-        clearTimeout(completionTimeout);
-        resolve();
-      });
-    });
-    await cleanupClientState();
+  const shutdown = (): Promise<void> => {
+    shutdownPromise ??= (async () => {
+      const failures: unknown[] = [];
+      try {
+        await lifetime.shutdown(connection.closed);
+      } catch (error) {
+        failures.push(new AdapterRetirementError(toErrorMessage(error), { cause: error }));
+      }
+      try {
+        await client.cleanup();
+      } catch (error) {
+        failures.push(error);
+      }
+      if (failures.length > 0) {
+        throw new AdapterRetirementError(failures.map(toErrorMessage).join("\n"), {
+          cause: new AggregateError(failures),
+        });
+      }
+    })();
+    return shutdownPromise;
   };
 
   try {
-    await waitForSpawn;
+    await withTimeout(waitForSpawn, DEFAULT_INITIALIZE_TIMEOUT_MS, "agent spawn", signal);
+    await lifetime.capture();
+    signal.throwIfAborted();
     initializeResult = await withTimeout(
       connection.initialize({
         protocolVersion: PROTOCOL_VERSION,
@@ -569,6 +596,7 @@ async function createHarness(options: CliOptions): Promise<Harness> {
       }),
       DEFAULT_INITIALIZE_TIMEOUT_MS,
       "initialize",
+      signal,
     );
     const capabilities: unknown = initializeResult.agentCapabilities;
     if (
@@ -577,11 +605,21 @@ async function createHarness(options: CliOptions): Promise<Harness> {
     ) {
       throw new Error("initialize response agentCapabilities must be an object when present");
     }
+    await lifetime.capture();
+    signal.throwIfAborted();
   } catch (error) {
-    await shutdown();
+    let cleanupFailure: { error: unknown } | undefined;
+    try {
+      await shutdown();
+    } catch (cleanupError) {
+      cleanupFailure = { error: cleanupError };
+    }
     const detail = stderrBuffer.trim();
     const suffix = detail.length > 0 ? `\nagent stderr:\n${detail}` : "";
-    throw new Error(`initialize failed: ${toErrorMessage(error)}${suffix}`, { cause: error });
+    const failure = new Error(`initialize failed: ${toErrorMessage(error)}${suffix}`, {
+      cause: error,
+    });
+    throw cleanupFailure ? withCleanupFailure(failure, cleanupFailure.error) : failure;
   }
 
   return {
@@ -609,6 +647,13 @@ function toErrorMessage(error: unknown): string {
   } catch {
     return String(error);
   }
+}
+
+function withCleanupFailure(error: unknown, cleanupError: unknown): Error {
+  const ErrorType = cleanupError instanceof AdapterRetirementError ? AdapterRetirementError : Error;
+  return new ErrorType(`${toErrorMessage(error)}\nCleanup: ${toErrorMessage(cleanupError)}`, {
+    cause: new AggregateError([error, cleanupError]),
+  });
 }
 
 async function withSuppressedConsoleError<T>(fn: () => Promise<T>): Promise<T> {
@@ -680,11 +725,14 @@ async function executeWithExpectation<T>(params: {
   timeoutMs: number;
   expectError?: ErrorExpectation;
   operation: () => Promise<T>;
+  signal: AbortSignal;
 }): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
   let value: T;
   try {
-    value = await withTimeout(params.operation(), params.timeoutMs, params.label);
+    params.signal.throwIfAborted();
+    value = await withTimeout(params.operation(), params.timeoutMs, params.label, params.signal);
   } catch (error) {
+    params.signal.throwIfAborted();
     if (!params.expectError) {
       throw error;
     }
@@ -704,8 +752,10 @@ async function executeCaseStep(params: {
   options: CliOptions;
   requestTimeoutMs: number;
   updateTimeoutMs: number;
+  signal: AbortSignal;
 }): Promise<void> {
-  const { step, harness, context, options, requestTimeoutMs, updateTimeoutMs } = params;
+  const { step, harness, context, options, requestTimeoutMs, updateTimeoutMs, signal } = params;
+  signal.throwIfAborted();
 
   switch (step.action) {
     case "sleep": {
@@ -714,7 +764,7 @@ async function executeCaseStep(params: {
         true,
         `Invalid sleep.ms: ${String(step.ms)}`,
       );
-      await new Promise((resolve) => setTimeout(resolve, Math.round(step.ms)));
+      await waitForDelay(Math.round(step.ms), signal);
       return;
     }
 
@@ -722,6 +772,7 @@ async function executeCaseStep(params: {
       const cwdCandidate = step.cwd === undefined ? options.cwd : step.cwd;
       const result = await executeWithExpectation({
         label: "session/new",
+        signal,
         timeoutMs: requestTimeoutMs,
         expectError: step.expect_error,
         operation: async () => {
@@ -762,6 +813,7 @@ async function executeCaseStep(params: {
 
       const result = await executeWithExpectation({
         label: "session/prompt",
+        signal,
         timeoutMs: updateTimeoutMs,
         expectError: step.expect_error,
         operation: async () => {
@@ -798,6 +850,7 @@ async function executeCaseStep(params: {
 
       const result = await executeWithExpectation({
         label: `await_background:${step.from}`,
+        signal,
         timeoutMs: updateTimeoutMs,
         expectError: step.expect_error,
         operation: async () => await pending,
@@ -813,6 +866,7 @@ async function executeCaseStep(params: {
       const sessionId = resolveMaybeSavedRef(step.session, context.saved);
       await executeWithExpectation({
         label: "session/cancel",
+        signal,
         timeoutMs: requestTimeoutMs,
         expectError: step.expect_error,
         operation: async () => {
@@ -911,7 +965,8 @@ function evaluateCaseChecks(params: {
 async function runCase(
   caseDefinition: CaseDefinition,
   options: CliOptions,
-): Promise<{ passed: true } | { passed: false; error: string }> {
+  signal: AbortSignal,
+): Promise<{ passed: true } | { passed: false; error: string; retirementFailed?: boolean }> {
   const requestTimeoutMs = resolveTimeoutMs(caseDefinition, "request", DEFAULT_REQUEST_TIMEOUT_MS);
   const updateTimeoutMs = resolveTimeoutMs(caseDefinition, "update", DEFAULT_UPDATE_TIMEOUT_MS);
   const settleTimeoutMs = resolveSettleTimeoutMs(caseDefinition);
@@ -924,8 +979,9 @@ async function runCase(
     saved: Object.create(null) as Record<string, unknown>,
     background: new Map(),
   };
+  let failure: { error: unknown } | undefined;
   try {
-    harness = await createHarness(effectiveOptions);
+    harness = await createHarness(effectiveOptions, signal);
     const activeHarness = harness;
     for (const step of caseDefinition.steps ?? []) {
       await executeCaseStep({
@@ -935,26 +991,38 @@ async function runCase(
         options: effectiveOptions,
         requestTimeoutMs,
         updateTimeoutMs,
+        signal,
       });
     }
 
     if (settleTimeoutMs > 0) {
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, settleTimeoutMs);
-      });
+      await waitForDelay(settleTimeoutMs, signal);
     }
 
+    signal.throwIfAborted();
     evaluateCaseChecks({
       caseDefinition,
       harness: activeHarness,
       context,
     });
-    return { passed: true };
   } catch (error) {
-    return { passed: false, error: toErrorMessage(error) };
-  } finally {
-    await harness?.shutdown();
+    failure = { error };
   }
+  try {
+    await harness?.shutdown();
+  } catch (error) {
+    failure = { error: failure ? withCleanupFailure(failure.error, error) : error };
+  }
+  if (signal.aborted && !failure) {
+    failure = { error: signal.reason };
+  }
+  return failure
+    ? {
+        passed: false,
+        error: toErrorMessage(failure.error),
+        retirementFailed: failure.error instanceof AdapterRetirementError,
+      }
+    : { passed: true };
 }
 
 function extractErrorCode(error: unknown): number | undefined {
@@ -975,7 +1043,7 @@ function extractErrorCode(error: unknown): number | undefined {
   return undefined;
 }
 
-function printTextSummary(report: RunReport): void {
+function formatTextSummary(report: RunReport): string {
   const passed = report.totals.passed;
   const failed = report.totals.failed;
   const lines = [
@@ -991,63 +1059,106 @@ function printTextSummary(report: RunReport): void {
     lines.push(result.error ? `${base} -> ${result.error}` : base);
   }
 
-  process.stdout.write(`${lines.join("\n")}\n`);
+  return `${lines.join("\n")}\n`;
+}
+
+async function runSelectedCases(
+  definitions: CaseDefinition[],
+  options: CliOptions,
+  signal: AbortSignal,
+): Promise<CaseResult[]> {
+  const results: CaseResult[] = [];
+  for (const definition of definitions) {
+    if (signal.aborted) {
+      break;
+    }
+    const startedAt = Date.now();
+    const result = await runCase(definition, options, signal);
+    results.push({
+      id: definition.id,
+      title: definition.title ?? definition.id,
+      passed: result.passed,
+      durationMs: Date.now() - startedAt,
+      error: result.passed ? undefined : result.error,
+    });
+    if (!result.passed && result.retirementFailed) {
+      break;
+    }
+  }
+  return results;
+}
+
+async function writeOutput(stream: Writable, text: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    stream.write(text, (error) => (error ? reject(error) : resolve()));
+  });
+}
+
+async function reportFatalError(error: unknown): Promise<void> {
+  process.exitCode = 1;
+  await writeOutput(process.stderr, `conformance runner failed: ${toErrorMessage(error)}\n`);
 }
 
 async function main(): Promise<void> {
   const startedAtMs = Date.now();
   const options = parseArgs(process.argv.slice(2));
   const { profile, casesById, selectedCaseIds } = await loadProfileAndCases(options);
-
-  const results: CaseResult[] = [];
-
-  for (const caseId of selectedCaseIds) {
-    const definition = casesById.get(caseId);
-    assert(definition, `missing case definition: ${caseId}`);
-    const startedAt = Date.now();
-    const result = await runCase(definition, options);
-    results.push({
-      id: caseId,
-      title: definition.title ?? caseId,
-      passed: result.passed,
-      durationMs: Date.now() - startedAt,
-      error: result.passed ? undefined : result.error,
-    });
-  }
-
-  const passed = results.filter((result) => result.passed).length;
-  const report: RunReport = {
-    profileId: profile.id,
-    startedAt: new Date(startedAtMs).toISOString(),
-    completedAt: new Date().toISOString(),
-    agentCommand: options.agentCommand,
-    cwd: options.cwd,
-    permissionMode: options.permissionMode,
-    totals: {
-      cases: results.length,
-      passed,
-      failed: results.length - passed,
-    },
-    results,
-  };
-
-  if (options.reportPath) {
-    await fs.mkdir(path.dirname(options.reportPath), { recursive: true });
-    await fs.writeFile(options.reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
-  }
-
-  if (options.format === "json") {
-    process.stdout.write(`${JSON.stringify(report)}\n`);
-  } else {
-    printTextSummary(report);
-  }
-
-  if (report.totals.failed > 0) {
-    process.exitCode = 1;
+  const definitions = selectedCaseIds.map((id) => {
+    const definition = casesById.get(id);
+    assert(definition, `missing case definition: ${id}`);
+    return definition;
+  });
+  const controller = new AbortController();
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  const interruption: { signal?: (typeof signals)[number] } = {};
+  const handlers = signals.map((signal) => {
+    const handler = () => {
+      if (!interruption.signal) {
+        interruption.signal = signal;
+        controller.abort(new Error(`Conformance runner interrupted by ${signal}`));
+      }
+    };
+    process.on(signal, handler);
+    return { signal, handler };
+  });
+  try {
+    const results = await runSelectedCases(definitions, options, controller.signal);
+    const passed = results.filter((result) => result.passed).length;
+    const report: RunReport = {
+      profileId: profile.id,
+      startedAt: new Date(startedAtMs).toISOString(),
+      completedAt: new Date().toISOString(),
+      agentCommand: options.agentCommand,
+      cwd: options.cwd,
+      permissionMode: options.permissionMode,
+      totals: { cases: results.length, passed, failed: results.length - passed },
+      results,
+    };
+    if (options.reportPath) {
+      await fs.mkdir(path.dirname(options.reportPath), { recursive: true });
+      await fs.writeFile(options.reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+    }
+    await writeOutput(
+      process.stdout,
+      options.format === "json" ? `${JSON.stringify(report)}\n` : formatTextSummary(report),
+    );
+    if (report.totals.failed > 0) {
+      process.exitCode = 1;
+    }
+  } catch (error) {
+    await reportFatalError(error);
+  } finally {
+    for (const { signal, handler } of handlers) {
+      process.off(signal, handler);
+    }
+    if (interruption.signal) {
+      process.exitCode = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 }[interruption.signal];
+      if (process.platform !== "win32") {
+        // Preserve native signal termination only after the report and owned cleanup settle.
+        process.kill(process.pid, interruption.signal);
+      }
+    }
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`conformance runner failed: ${toErrorMessage(error)}\n`);
-  process.exitCode = 1;
-});
+void main().catch(reportFatalError);
