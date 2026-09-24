@@ -41,11 +41,16 @@ import type {
   OutputFormatter,
   PermissionEscalationEvent,
   PermissionPolicy,
+  PermissionStats,
   RunPromptResult,
   SessionRecord,
   SessionSendResult,
 } from "../../types.js";
-import { applyConfigOptionsToState, applyModelSelection } from "../config-options.js";
+import {
+  applyConfigOptionSelection,
+  applyConfigOptionsToState,
+  applyModelSelection,
+} from "../config-options.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,
@@ -151,10 +156,10 @@ class QueueTaskOutputFormatter implements OutputFormatter {
 }
 
 function markOutputAlreadyEmitted(error: unknown, outputAlreadyEmitted: boolean): void {
-  if (!outputAlreadyEmitted || !error || typeof error !== "object") {
+  if (!error || typeof error !== "object") {
     return;
   }
-  (error as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted = true;
+  (error as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted = outputAlreadyEmitted;
 }
 
 async function runWithOptionalInterrupt<T>(options: {
@@ -229,12 +234,19 @@ function toPromptResult(
   stopReason: RunPromptResult["stopReason"],
   sessionId: string,
   client: AcpClient,
+  before: PermissionStats,
   meta?: Record<string, unknown> | null,
 ): RunPromptResult {
+  const after = client.getPermissionStats();
   return {
     stopReason,
     sessionId,
-    permissionStats: client.getPermissionStats(),
+    permissionStats: {
+      requested: after.requested - before.requested,
+      approved: after.approved - before.approved,
+      denied: after.denied - before.denied,
+      cancelled: after.cancelled - before.cancelled,
+    },
     ...(meta === undefined ? {} : { _meta: meta }),
   };
 }
@@ -274,7 +286,11 @@ async function applyPromptModelIfAdvertised(params: {
   }
 }
 
-function jsonRpcIdKey(value: unknown): string | undefined {
+function jsonRpcIdKey(message: AcpJsonRpcMessage): string | undefined {
+  if (!("id" in message)) {
+    return undefined;
+  }
+  const value = message.id;
   if (typeof value === "string") {
     return `s:${value}`;
   }
@@ -284,87 +300,19 @@ function jsonRpcIdKey(value: unknown): string | undefined {
   return undefined;
 }
 
-function extractJsonRpcRequestInfo(
-  message: AcpJsonRpcMessage,
-): { idKey: string; method: string } | undefined {
-  const candidate = message as { method?: unknown; id?: unknown };
-  if (typeof candidate.method !== "string") {
-    return undefined;
-  }
-  const idKey = jsonRpcIdKey(candidate.id);
-  if (!idKey) {
-    return undefined;
-  }
-  return {
-    idKey,
-    method: candidate.method,
-  };
-}
-
-function extractJsonRpcResponseInfo(
-  message: AcpJsonRpcMessage,
-): { idKey: string; hasError: boolean } | undefined {
-  const candidate = message as { id?: unknown; error?: unknown; result?: unknown };
-  const idKey = jsonRpcIdKey(candidate.id);
-  if (!idKey) {
-    return undefined;
-  }
-  const hasError = Object.hasOwn(candidate, "error");
-  const hasResult = Object.hasOwn(candidate, "result");
-  if (!hasError && !hasResult) {
-    return undefined;
-  }
-  return {
-    idKey,
-    hasError,
-  };
-}
-
 const SESSION_RECONNECT_METHODS = new Set(["session/load", "session/resume"]);
 
-function filterRecoverableLoadFallbackOutput(messages: AcpJsonRpcMessage[]): AcpJsonRpcMessage[] {
-  const requestMethodById = new Map<string, string>();
-  const failedLoadRequestIds = new Set<string>();
+function isReconnectRequest(direction: AcpMessageDirection, message: AcpJsonRpcMessage): boolean {
+  return (
+    direction === "outbound" &&
+    "method" in message &&
+    typeof message.method === "string" &&
+    SESSION_RECONNECT_METHODS.has(message.method)
+  );
+}
 
-  for (const message of messages) {
-    const request = extractJsonRpcRequestInfo(message);
-    if (request) {
-      requestMethodById.set(request.idKey, request.method);
-      continue;
-    }
-
-    const response = extractJsonRpcResponseInfo(message);
-    if (!response || !response.hasError) {
-      continue;
-    }
-
-    const requestMethod = requestMethodById.get(response.idKey);
-    if (requestMethod && SESSION_RECONNECT_METHODS.has(requestMethod)) {
-      failedLoadRequestIds.add(response.idKey);
-    }
-  }
-
-  if (failedLoadRequestIds.size === 0) {
-    return messages;
-  }
-
-  return messages.filter((message) => {
-    const request = extractJsonRpcRequestInfo(message);
-    if (
-      request &&
-      SESSION_RECONNECT_METHODS.has(request.method) &&
-      failedLoadRequestIds.has(request.idKey)
-    ) {
-      return false;
-    }
-
-    const response = extractJsonRpcResponseInfo(message);
-    if (response && failedLoadRequestIds.has(response.idKey)) {
-      return false;
-    }
-
-    return true;
-  });
+function isInboundResponse(direction: AcpMessageDirection, message: AcpJsonRpcMessage): boolean {
+  return direction === "inbound" && ("result" in message || "error" in message);
 }
 
 function filterBufferedConnectOutput(
@@ -374,10 +322,25 @@ function filterBufferedConnectOutput(
   if (loadError == null) {
     return messages;
   }
-  const filteredMessages = new Set(
-    filterRecoverableLoadFallbackOutput(messages.map(({ message }) => message)),
-  );
-  return messages.filter(({ message }) => filteredMessages.has(message));
+  const pending = new Map<string, number>();
+  const suppressed = new Set<number>();
+  for (const [index, { direction, message }] of messages.entries()) {
+    const id = jsonRpcIdKey(message);
+    if (!id) {
+      continue;
+    }
+    if (isReconnectRequest(direction, message)) {
+      pending.set(id, index);
+    } else if (isInboundResponse(direction, message)) {
+      const requestIndex = pending.get(id);
+      if (requestIndex !== undefined && "error" in message) {
+        suppressed.add(requestIndex);
+        suppressed.add(index);
+      }
+      pending.delete(id);
+    }
+  }
+  return messages.filter((_message, index) => !suppressed.has(index));
 }
 
 function emitPromptRetryNotice(params: {
@@ -498,7 +461,7 @@ function buildQueuedTaskRunOptions(
     suppressSdkConsoleErrors: task.suppressSdkConsoleErrors ?? options.suppressSdkConsoleErrors,
     verbose: options.verbose,
     promptRetries: task.promptRetries ?? options.promptRetries ?? 0,
-    sessionOptions: mergeSessionOptions(task.sessionOptions, options.sessionOptions),
+    sessionOptions: task.sessionOptions,
     onClientAvailable: options.onClientAvailable,
     onClientClosed: options.onClientClosed,
     onClientCloseFailure: options.onClientCloseFailure,
@@ -862,6 +825,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
       verbose: options.verbose,
       sessionOptions,
     });
+  const permissionStatsBefore = client.getPermissionStats();
   client.updateRuntimeOptions({
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
@@ -1051,8 +1015,10 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     applyConversation(record, conversation);
     const propagated = error instanceof Error ? error : new Error(formatErrorMessage(error));
     attachAcpErrorPayload(propagated, normalizedError.acp);
-    (propagated as { outputAlreadyEmitted?: boolean }).outputAlreadyEmitted =
-      matchedAcpError !== undefined && shouldMarkAcpErrorsEmitted;
+    markOutputAlreadyEmitted(
+      propagated,
+      matchedAcpError !== undefined && shouldMarkAcpErrorsEmitted,
+    );
     (propagated as { normalizedOutputError?: unknown }).normalizedOutputError = normalizedError;
     throw propagated;
   };
@@ -1116,7 +1082,13 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     promptTurnActive = false;
 
     return {
-      ...toPromptResult(response.stopReason, record.acpxRecordId, client, response._meta),
+      ...toPromptResult(
+        response.stopReason,
+        record.acpxRecordId,
+        client,
+        permissionStatsBefore,
+        response._meta,
+      ),
       record,
       resumed,
       loadError,
@@ -1281,6 +1253,7 @@ export async function runOnce(
     },
     sessionOptions: options.sessionOptions,
   });
+  const permissionStatsBefore = client.getPermissionStats();
 
   const closeOwnedClient = ownDirectClient(client, control?.signal);
 
@@ -1355,10 +1328,11 @@ export async function runOnce(
             ? undefined
             : (message) => process.stderr.write(`[acpx] warning: ${message}\n`),
         });
-        if (modelApplication.response) {
-          controlState = applyConfigOptionsToState(
+        if (modelApplication.applied) {
+          controlState = applyModelSelection(
             controlState,
-            modelApplication.response.configOptions,
+            modelApplication.modelId,
+            modelApplication.response,
           );
         }
         for (const configOption of options.configOptions ?? []) {
@@ -1373,7 +1347,12 @@ export async function runOnce(
             ),
             options.timeoutMs,
           );
-          controlState = applyConfigOptionsToState(controlState, response.configOptions);
+          controlState = applyConfigOptionSelection(
+            controlState,
+            configOption.configId,
+            configOption.value,
+            response,
+          );
         }
 
         assertControlAuthority(authority);
@@ -1383,7 +1362,13 @@ export async function runOnce(
 
         const response = await runExecPromptWithRetries(sessionId);
         promptTurnActive = false;
-        return toPromptResult(response.stopReason, sessionId, client, response._meta);
+        return toPromptResult(
+          response.stopReason,
+          sessionId,
+          client,
+          permissionStatsBefore,
+          response._meta,
+        );
       },
       handleInterrupt: async () => {
         await client.cancelActivePrompt(INTERRUPT_CANCEL_WAIT_MS);

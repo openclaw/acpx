@@ -1046,6 +1046,39 @@ for (const scenario of [
   });
 }
 
+for (const method of ["load", "resume"] as const) {
+  test(`AcpClient ${method} preserves Claude setting isolation and session metadata`, async (t) => {
+    const fixture = createClientFixture(t, {
+      client: {
+        agentCommand: "npx -y @agentclientprotocol/claude-agent-acp",
+        sessionOptions: { allowedTools: ["Read"], maxTurns: 5, systemPrompt: "synthetic" },
+      },
+    });
+    const cwd = path.resolve("/tmp/acpx-client-meta");
+    const pending = fixture.track(
+      method === "load"
+        ? fixture.client.loadSession("session-meta", cwd)
+        : fixture.client.resumeSession("session-meta", cwd),
+    );
+    const request = await fixture.message(0);
+    assert("method" in request);
+    assert.equal(request.method, `session/${method}`);
+    assert.deepEqual(request.params, {
+      sessionId: "session-meta",
+      cwd,
+      mcpServers: [],
+      _meta: {
+        claudeCode: {
+          options: { settingSources: ["project", "local"], allowedTools: ["Read"], maxTurns: 5 },
+        },
+        systemPrompt: "synthetic",
+      },
+    });
+    await fixture.reply(request, {});
+    await pending;
+  });
+}
+
 test("resolveClaudeCodeSettingSources includes user settings only when explicitly enabled", () => {
   assert.deepEqual(resolveClaudeCodeSettingSources({}), ["project", "local"]);
   assert.deepEqual(resolveClaudeCodeSettingSources({ ACPX_CLAUDE_INCLUDE_USER_SETTINGS: "1" }), [

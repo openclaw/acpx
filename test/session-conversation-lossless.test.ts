@@ -88,6 +88,40 @@ for (const sessionUpdate of ["agent_message_chunk", "agent_thought_chunk"] as co
   });
 }
 
+for (const sessionUpdate of ["agent_message_chunk", "agent_thought_chunk"] as const) {
+  test(`${sessionUpdate} truncates emoji without splitting a surrogate pair`, () => {
+    const record = createRecord();
+    update(record, { sessionUpdate, content: { type: "text", text: "😀".repeat(5_000) } });
+    const serialized = JSON.stringify(serializeSessionRecordForDisk(record));
+    assert.doesNotMatch(serialized, /\\u[dD][89aAbB][0-9a-fA-F]{2}/);
+    const entry = agentMessage(roundTrip(record)).content[0];
+    const text = "Text" in entry ? entry.Text : "Thinking" in entry ? entry.Thinking.text : "";
+    assert.ok(text.endsWith("😀..."), text.slice(-10));
+    assert.ok(text.length <= (sessionUpdate === "agent_message_chunk" ? 8_000 : 4_000));
+  });
+}
+
+test("tool input and output truncation preserve Unicode through serialization", () => {
+  const record = createRecord();
+  update(record, {
+    sessionUpdate: "tool_call",
+    toolCallId: "emoji-tool",
+    title: "Synthetic",
+    status: "completed",
+    rawInput: "😀".repeat(3_000),
+    rawOutput: "😀".repeat(3_000),
+  });
+  const serialized = JSON.stringify(serializeSessionRecordForDisk(record));
+  assert.doesNotMatch(serialized, /\\u[dD][89aAbB][0-9a-fA-F]{2}/);
+  const agent = agentMessage(roundTrip(record));
+  const tool = agent.content.find((entry) => "ToolUse" in entry);
+  assert.ok(tool && "ToolUse" in tool);
+  assert.ok(tool.ToolUse.raw_input.endsWith("😀..."));
+  const output = agent.tool_results["emoji-tool"].output;
+  assert.equal(typeof output, "string");
+  assert.ok(typeof output === "string" && output.endsWith("😀..."));
+});
+
 function assertToolResult(
   record: SessionRecord,
   toolCallId: string,

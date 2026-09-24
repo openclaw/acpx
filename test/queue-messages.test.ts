@@ -668,7 +668,7 @@ test("parseQueueOwnerMessage rejects invalid structured owner message payloads",
     parseQueueOwnerMessage({
       type: "set_config_option_result",
       requestId: "req-config",
-      response: {},
+      response: { configOptions: null },
     }),
     null,
   );
@@ -713,5 +713,17 @@ for (const direction of [null, "incoming", "outgoing", 7, true]) {
       }),
       null,
     );
+  });
+}
+
+for (const type of ["set_model_result", "set_config_option_result"] as const) {
+  test(`queue accepts ${type} acknowledgements that omit the option catalog`, () => {
+    const input = {
+      type,
+      requestId: "empty-catalog",
+      response: {},
+      ...(type === "set_model_result" ? { modelId: "chosen" } : {}),
+    };
+    assert.deepEqual(parseQueueOwnerMessage(input), { ...input, ownerGeneration: undefined });
   });
 }

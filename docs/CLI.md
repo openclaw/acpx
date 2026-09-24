@@ -105,6 +105,8 @@ acpx --approve-all flow run examples/flows/pr-triage/pr-triage.flow.ts \
 The PR-triage example is only an example workflow. It can post GitHub comments
 or close a PR if you run it against a live repository.
 
+`acpx help` and `acpx help <command>` display command help without sending an agent prompt.
+
 ## Global options
 
 All global options:
@@ -340,8 +342,8 @@ Behavior:
 - Falls back to a direct client reconnect when no owner is running.
 - **`set model <id>`**: Uses the advertised model config option through `session/set_config_option`; adapters that explicitly advertise legacy `models` metadata use `session/set_model`.
 - A config key named `mode` keeps config-option transport; use `set-mode` for the separate legacy mode control.
-- Saves accepted values for existing config selections, including reasoning effort adjusted or removed by a model switch; does not pin unselected defaults.
-- Restores saved model and config selections after reconnect, before the next prompt; already loaded sessions are reused without replay.
+- Saves accepted values for existing config selections, including reasoning effort adjusted or removed by a model switch; does not pin unselected defaults. An acknowledgement that omits the option catalog retains the advertised options and the accepted value; an explicit empty catalog removes those options.
+- Restores saved model and config selections after reconnect, before the next prompt; already loaded sessions are reused without replay. Prompts without `--model` retain the current selection, including changes made through `set model`.
 
 ## `sessions` subcommand
 
@@ -382,7 +384,7 @@ Behavior:
   instead of contacting the agent
 - when the agent does not support `session/list`, list falls back to local saved
   records unless agent-side list filters were requested
-- `sessions new` creates a fresh cwd-scoped default session
+- `sessions new` creates a fresh cwd-scoped default session; a failed creation leaves the previous session open
 - `sessions new --name <name>` creates a fresh named session for cwd
 - creating a fresh session soft-closes the previous open session in that scope (if present)
 - text and quiet output print the local `acpxRecordId`; JSON output also includes
@@ -710,15 +712,15 @@ Per-tool policy:
 
 ## Exit codes
 
-| Code  | Meaning                                                                                    |
-| ----- | ------------------------------------------------------------------------------------------ |
-| `0`   | Success                                                                                    |
-| `1`   | Agent/protocol/runtime error                                                               |
-| `2`   | CLI usage error                                                                            |
-| `3`   | Timeout                                                                                    |
-| `4`   | No session found (prompt requires an explicit `sessions new`)                              |
-| `5`   | Permission denied (permission requested, none approved, and at least one denied/cancelled) |
-| `130` | Interrupted (`SIGINT`/`SIGTERM`)                                                           |
+| Code  | Meaning                                                                                                 |
+| ----- | ------------------------------------------------------------------------------------------------------- |
+| `0`   | Success                                                                                                 |
+| `1`   | Agent/protocol/runtime error                                                                            |
+| `2`   | CLI usage error                                                                                         |
+| `3`   | Timeout                                                                                                 |
+| `4`   | No session found (prompt requires an explicit `sessions new`)                                           |
+| `5`   | Permission denied in this turn (permission requested, none approved, and at least one denied/cancelled) |
+| `130` | Interrupted (`SIGINT`/`SIGTERM`)                                                                        |
 
 ## Environment variables
 

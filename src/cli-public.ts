@@ -39,6 +39,8 @@ export function configurePublicCli(options: ConfigurePublicCliOptions): void {
     options.registerAgentCommand(options.program, scan.token, options.config);
   }
 
+  options.program.helpCommand(true);
+
   options.program.argument("[prompt...]", "Prompt text").action(async function (
     this: Command,
     promptParts: string[],

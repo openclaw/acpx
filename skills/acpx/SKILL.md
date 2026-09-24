@@ -335,12 +335,13 @@ acpx claude -s impl 'implement the requested change'
 
 Run the creation command once, then select the session with `-s` for later prompts. Running `sessions new` again in the same scope closes the prior local record and creates a fresh session.
 
-The override is forwarded via ACP `_meta.systemPrompt` (or `_meta.systemPrompt.append`) on `session/new` and stored in `session_options.system_prompt`. Subsequent `prompt`/`ensure` calls in the same scope keep the override unless you explicitly create a new session. Non-Claude adapters ignore the field, so the same flag is safe inside cross-agent scripts.
+The override is forwarded via ACP `_meta.systemPrompt` (or `_meta.systemPrompt.append`) on `session/new`, `session/load`, and `session/resume` and stored in `session_options.system_prompt`. Subsequent `prompt`/`ensure` calls in the same scope keep the override unless you explicitly create a new session. Non-Claude adapters ignore the field, so the same flag is safe inside cross-agent scripts.
 
 ## Claude settings isolation
 
 Built-in `acpx claude` sessions load Claude project and local settings, but not
-user settings. This prevents globally enabled channel and daemon plugins from
+user settings. The same isolation and saved session options apply on creation,
+load, and resume. This prevents globally enabled channel and daemon plugins from
 claiming singleton external resources in an ACP-spawned session.
 
 Set `ACPX_CLAUDE_INCLUDE_USER_SETTINGS=1` only when the spawned session needs

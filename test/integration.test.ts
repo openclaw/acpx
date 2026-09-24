@@ -27,7 +27,9 @@ import {
 } from "./jsonrpc-test-helpers.js";
 import { queuePaths } from "./queue-test-helpers.js";
 
-const CLI_PATH = fileURLToPath(new URL("../src/cli.js", import.meta.url));
+const CLI_PATH = fileURLToPath(
+  new URL(`../src/cli${path.extname(fileURLToPath(import.meta.url))}`, import.meta.url),
+);
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
 const FLOW_FIXTURE_PATH = fileURLToPath(new URL("./fixtures/flow-branch.flow.js", import.meta.url));
 const FLOW_SHELL_FIXTURE_PATH = fileURLToPath(
@@ -4975,6 +4977,245 @@ test("integration: session remains resumable after queue owner exits and agent h
     }
   });
 });
+
+for (const format of ["text", "quiet", "json"]) {
+  test(`integration: exec reports an agent disconnect in ${format} output`, async () => {
+    await withTempHome(async (homeDir) => {
+      const result = await runCli(
+        [...baseAgentArgs(homeDir), "--format", format, "exec", "disconnect-after-output"],
+        homeDir,
+      );
+      assert.equal(result.code, 1);
+      assert.match(result.stdout, /partial /);
+      assert.match(`${result.stdout}\n${result.stderr}`, /ACP agent disconnected during request/);
+      assert.equal(
+        (`${result.stdout}\n${result.stderr}`.match(/ACP agent disconnected during request/g) ?? [])
+          .length,
+        1,
+      );
+    });
+  });
+}
+
+test("integration: a failed replacement keeps the previous session open", async () => {
+  await withTempHome(async (homeDir) => {
+    const base = [
+      "--agent",
+      `${LOAD_CAPABLE_MOCK_AGENT_COMMAND} --advertise-models`,
+      "--cwd",
+      homeDir,
+    ];
+    const created = await runCli([...base, "--format", "json", "sessions", "new"], homeDir);
+    assert.equal(created.code, 0, JSON.stringify(created));
+    const { acpxRecordId } = JSON.parse(created.stdout) as { acpxRecordId: string };
+    try {
+      const failed = await runCli(
+        [...base, "--model", "missing-model", "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(failed.code, 1);
+      assert.match(failed.stderr, /did not advertise that model/);
+      const stored = parseSessionRecord(
+        JSON.parse(
+          await fs.readFile(
+            path.join(homeDir, ".acpx", "sessions", `${acpxRecordId}.json`),
+            "utf8",
+          ),
+        ),
+      );
+      assert.ok(stored);
+      assert.equal(stored.closed, false);
+      const prompt = await runCli(
+        [...base, "--format", "quiet", "prompt", "echo retained"],
+        homeDir,
+      );
+      assert.equal(prompt.code, 0, prompt.stderr);
+      assert.equal(prompt.stdout.trim(), "retained");
+    } finally {
+      await runCli([...base, "sessions", "close"], homeDir);
+    }
+  });
+});
+
+test("integration: a warm owner does not reapply its startup model to later turns", async () => {
+  await withTempHome(async (homeDir) => {
+    const base = [
+      "--agent",
+      `${LOAD_CAPABLE_MOCK_AGENT_COMMAND} --advertise-models`,
+      "--cwd",
+      homeDir,
+      "--ttl",
+      "60",
+    ];
+    const created = await runCli([...base, "sessions", "new"], homeDir);
+    assert.equal(created.code, 0, JSON.stringify(created));
+    try {
+      const first = await runCli(
+        [...base, "--model", "fast-model", "prompt", "echo first"],
+        homeDir,
+      );
+      assert.equal(first.code, 0, first.stderr);
+      const selected = await runCli([...base, "set", "model", "smart-model"], homeDir);
+      assert.equal(selected.code, 0, selected.stderr);
+      const next = await runCli([...base, "--format", "json", "prompt", "echo second"], homeDir);
+      assert.equal(next.code, 0, next.stderr);
+      assert.equal(
+        parseJsonRpcOutputLines(next.stdout).filter(
+          (message) => message.method === "session/set_config_option",
+        ).length,
+        0,
+      );
+      const current = await runCli([...base, "--format", "json", "status"], homeDir);
+      assert.equal((JSON.parse(current.stdout) as { model: string }).model, "smart-model");
+    } finally {
+      await runCli([...base, "sessions", "close"], homeDir);
+    }
+  });
+});
+
+for (const [firstApproved, operation] of [
+  [false, "permission"],
+  [true, "permission"],
+  [false, "write"],
+] as const) {
+  test(`integration: warm-owner permission accounting is per turn (${operation}, first approved: ${firstApproved})`, async () => {
+    await withTempHome(async (homeDir) => {
+      const base = [
+        "--agent",
+        LOAD_CAPABLE_MOCK_AGENT_COMMAND,
+        "--cwd",
+        homeDir,
+        "--ttl",
+        "60",
+        "--format",
+        "quiet",
+      ];
+      const created = await runCli([...base, "sessions", "new"], homeDir);
+      assert.equal(created.code, 0, JSON.stringify(created));
+      try {
+        for (const approved of [firstApproved, !firstApproved, firstApproved]) {
+          const result = await runCli(
+            [
+              ...base,
+              approved ? "--approve-all" : "--deny-all",
+              "prompt",
+              operation === "write"
+                ? `write ${path.join(homeDir, "write.txt")} synthetic`
+                : "permission edit synthetic",
+            ],
+            homeDir,
+          );
+          assert.equal(result.code, approved ? 0 : 5, JSON.stringify(result));
+        }
+      } finally {
+        await runCli([...base, "sessions", "close"], homeDir);
+      }
+    });
+  });
+}
+
+test("integration: empty accepted config replies preserve controls across set, prompt, and reconnect", async () => {
+  await withTempHome(async (homeDir) => {
+    const base = [
+      "--agent",
+      `${LOAD_CAPABLE_MOCK_AGENT_COMMAND} --advertise-models --omit-set-config-options`,
+      "--cwd",
+      homeDir,
+      "--ttl",
+      "60",
+      "--format",
+      "json",
+    ];
+    const created = await runCli([...base, "--model", "fast-model", "sessions", "new"], homeDir);
+    assert.equal(created.code, 0, JSON.stringify(created));
+    const { acpxRecordId } = JSON.parse(created.stdout) as { acpxRecordId: string };
+    try {
+      const selected = await runCli([...base, "set", "reasoning_effort", "high"], homeDir);
+      assert.equal(selected.code, 0, JSON.stringify(selected));
+      const resumed = await runCli([...base, "prompt", "echo reconnected"], homeDir);
+      assert.equal(resumed.code, 0, JSON.stringify(resumed));
+      const warmSet = await runCli([...base, "set", "reasoning_effort", "high"], homeDir);
+      assert.equal(warmSet.code, 0, JSON.stringify(warmSet));
+      for (const model of ["smart-model", "fast-model"]) {
+        const prompt = await runCli(
+          [...base, "--model", model, "prompt", "echo retained"],
+          homeDir,
+        );
+        assert.equal(prompt.code, 0, prompt.stderr);
+      }
+      const stored = parseSessionRecord(
+        JSON.parse(
+          await fs.readFile(
+            path.join(homeDir, ".acpx", "sessions", `${acpxRecordId}.json`),
+            "utf8",
+          ),
+        ),
+      );
+      assert.ok(stored);
+      assert.equal(stored.acpx?.current_model_id, "fast-model");
+      assert.equal(stored.acpx?.model_control, "config_option");
+      assert.equal(
+        stored.acpx?.config_options?.find((option) => option.id === "model")?.currentValue,
+        "fast-model",
+      );
+      assert.equal(
+        stored.acpx?.config_options?.find((option) => option.id === "reasoning_effort")
+          ?.currentValue,
+        "high",
+      );
+    } finally {
+      await runCli([...base, "sessions", "close"], homeDir);
+    }
+  });
+});
+
+for (const order of ["before", "after"]) {
+  test(`integration: fallback preserves opposite-direction RPC IDs (${order})`, async () => {
+    await withTempHome(async (homeDir) => {
+      const peer = fileURLToPath(new URL("./fixtures/load-id-collision-agent.js", import.meta.url));
+      const base = [
+        "--agent",
+        `node ${JSON.stringify(peer)} ${order}`,
+        "--cwd",
+        homeDir,
+        "--approve-all",
+        "--format",
+        "json",
+      ];
+      await fs.writeFile(path.join(homeDir, "collision.txt"), "synthetic collision content");
+      const created = await runCli([...base, "sessions", "new"], homeDir);
+      assert.equal(created.code, 0, JSON.stringify(created));
+      try {
+        const result = await runCli([...base, "prompt", "synthetic"], homeDir);
+        assert.equal(result.code, 0, result.stderr);
+        const messages = parseJsonRpcOutputLines(result.stdout);
+        assert.equal(
+          messages.some((message) => message.method === "session/load"),
+          false,
+        );
+        assert.equal(
+          messages.some(
+            (message) =>
+              (message.error as { message?: string } | undefined)?.message === "Resource not found",
+          ),
+          false,
+        );
+        const request = messages.find((message) => message.method === "fs/read_text_file");
+        assert.ok(request);
+        assert.ok(
+          messages.some(
+            (message) =>
+              message.id === request.id &&
+              (message.result as { content?: string } | undefined)?.content ===
+                "synthetic collision content",
+          ),
+        );
+      } finally {
+        await runCli([...base, "sessions", "close"], homeDir);
+      }
+    });
+  });
+}
 
 function baseAgentArgs(cwd: string): string[] {
   return ["--agent", MOCK_AGENT_COMMAND, "--approve-all", "--cwd", cwd];

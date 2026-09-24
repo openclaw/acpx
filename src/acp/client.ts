@@ -1144,6 +1144,17 @@ export class AcpClient {
     });
   }
 
+  private sessionMeta(): Record<string, unknown> | undefined {
+    const { command, args } = resolveAgentCommandParts(
+      this.options.agentCommand,
+      this.options.agentArgv,
+    );
+    return buildClaudeCodeOptionsMeta(
+      this.options.sessionOptions,
+      isClaudeAcpCommand(command, args),
+    );
+  }
+
   async createSession(
     cwd = this.options.cwd,
     authority?: AcpControlAuthority,
@@ -1164,7 +1175,7 @@ export class AcpClient {
           connection.agent.request(methods.agent.session.new, {
             cwd: sessionCwd,
             mcpServers: this.options.mcpServers ?? [],
-            _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions, claudeAcp),
+            _meta: this.sessionMeta(),
           }),
         authority,
       );
@@ -1222,6 +1233,7 @@ export class AcpClient {
             sessionId,
             cwd: sessionCwd,
             mcpServers: this.options.mcpServers ?? [],
+            _meta: this.sessionMeta(),
           }),
         options.authority,
       );
@@ -1254,6 +1266,7 @@ export class AcpClient {
           sessionId,
           cwd: sessionCwd,
           mcpServers: this.options.mcpServers ?? [],
+          _meta: this.sessionMeta(),
         }),
       authority,
     );

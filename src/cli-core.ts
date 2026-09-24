@@ -468,7 +468,11 @@ async function handleProgramParseError(
   requestedOutputPolicy: OutputPolicy,
 ): Promise<never> {
   if (error instanceof CommanderError) {
-    if (error.code === "commander.helpDisplayed" || error.code === "commander.version") {
+    if (
+      error.code === "commander.helpDisplayed" ||
+      error.code === "commander.version" ||
+      (error.code === "commander.help" && error.exitCode === 0)
+    ) {
       process.exit(EXIT_CODES.SUCCESS);
     }
 

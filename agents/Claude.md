@@ -11,7 +11,8 @@
 ## Settings isolation
 
 Built-in `acpx claude` sessions load Claude project and local settings, but not
-user settings. This prevents globally enabled channel and daemon plugins from
+user settings. The same isolation and saved session options apply on creation,
+load, and resume. This prevents globally enabled channel and daemon plugins from
 claiming singleton external resources in an ACP-spawned session.
 
 Set `ACPX_CLAUDE_INCLUDE_USER_SETTINGS=1` only when the spawned session needs

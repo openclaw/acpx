@@ -73,7 +73,6 @@ async function createSessionRecordWithClient(
   applyInitialModelSelection(
     record,
     createdState.sessionResult.models,
-    options.sessionOptions?.model,
     createdState.modelApplication,
   );
 

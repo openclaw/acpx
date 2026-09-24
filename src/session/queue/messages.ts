@@ -782,7 +782,10 @@ function parseSetModelOwnerMessage(
     return null;
   }
   const response = asRecord(message.response);
-  if (message.response !== undefined && (!response || !Array.isArray(response.configOptions))) {
+  if (
+    message.response !== undefined &&
+    (!response || (response.configOptions !== undefined && !Array.isArray(response.configOptions)))
+  ) {
     return null;
   }
   return {
@@ -798,7 +801,10 @@ function parseSetConfigOptionOwnerMessage(
   context: QueueOwnerMessageContext,
 ): QueueOwnerSetConfigOptionResultMessage | null {
   const response = asRecord(message.response);
-  if (!response || !Array.isArray(response.configOptions)) {
+  if (
+    !response ||
+    (response.configOptions !== undefined && !Array.isArray(response.configOptions))
+  ) {
     return null;
   }
   return {

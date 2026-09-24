@@ -22,10 +22,10 @@ export async function applyRequestedModelIfAdvertised(params: {
   timeoutMs?: number;
   authority?: AcpControlAuthority;
   onWarning?: (message: string) => void;
-}): Promise<{
-  applied: boolean;
-  response?: SetSessionConfigOptionResponse;
-}> {
+}): Promise<
+  | { applied: false; response?: undefined }
+  | { applied: true; modelId: string; response?: SetSessionConfigOptionResponse }
+> {
   const requestedModel =
     typeof params.requestedModel === "string" ? params.requestedModel.trim() : "";
   if (!requestedModel) {
@@ -44,7 +44,7 @@ export async function applyRequestedModelIfAdvertised(params: {
     return { applied: false };
   }
   if (params.models.currentModelId === requestedModel) {
-    return { applied: true };
+    return { applied: true, modelId: requestedModel };
   }
 
   const response = await withTimeout(
@@ -56,5 +56,5 @@ export async function applyRequestedModelIfAdvertised(params: {
     ),
     params.timeoutMs,
   );
-  return { applied: true, response };
+  return { applied: true, modelId: requestedModel, response };
 }

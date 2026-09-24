@@ -68,6 +68,7 @@ type MockAgentOptions = {
   setSessionModeFails: boolean;
   setSessionModeInvalidParams: boolean;
   setSessionConfigInvalidParams: boolean;
+  omitSetConfigOptions: boolean;
   setSessionModelFails: boolean;
   setSessionModelInvalidParams: boolean;
   advertiseConfigOptions: boolean;
@@ -475,6 +476,9 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
       continue;
     }
 
+    if (token === "--omit-set-config-options") {
+      continue;
+    }
     if (token === "--set-session-config-invalid-params") {
       setSessionConfigInvalidParams = true;
       continue;
@@ -653,6 +657,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     setSessionModeFails,
     setSessionModeInvalidParams,
     setSessionConfigInvalidParams,
+    omitSetConfigOptions: argv.includes("--omit-set-config-options"),
     setSessionModelFails,
     setSessionModelInvalidParams,
     advertiseConfigOptions,
@@ -1182,6 +1187,11 @@ class MockAgent implements Agent {
       session.configValues[params.configId] = params.value;
     }
 
+    if (this.options.omitSetConfigOptions) {
+      // Exercise a nonconforming acknowledgement without an option catalog.
+      return {} as SetSessionConfigOptionResponse;
+    }
+
     return {
       configOptions: buildConfigOptions(
         session,
@@ -1572,6 +1582,11 @@ class MockAgent implements Agent {
       await this.sendAssistantMessage(sessionId, liveText);
       await sleepWithCancel(Math.round(ms), signal);
       return `stream-sleep done: ${liveText}`;
+    }
+
+    if (text === "disconnect-after-output") {
+      await this.sendAssistantMessage(sessionId, "partial ");
+      process.exit(91);
     }
 
     if (text.startsWith("disconnect ")) {

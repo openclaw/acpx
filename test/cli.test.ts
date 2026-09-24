@@ -28,7 +28,9 @@ import {
   writeQueueOwnerLock,
 } from "./queue-test-helpers.js";
 
-const CLI_PATH = fileURLToPath(new URL("../src/cli.js", import.meta.url));
+const CLI_PATH = fileURLToPath(
+  new URL(`../src/cli${path.extname(fileURLToPath(import.meta.url))}`, import.meta.url),
+);
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
 function readPackageVersionForTest(): string {
   const candidates = [
@@ -565,6 +567,17 @@ test(
     });
   },
 );
+
+test("help commands render usage without submitting a prompt", async () => {
+  await withTempHome(async (homeDir) => {
+    for (const args of [["help"], ["help", "sessions"], ["help", "codex"]]) {
+      const result = await runCli(args, homeDir);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /Usage: acpx/);
+      assert.equal(result.stderr, "");
+    }
+  });
+});
 
 test("global passthrough flags are present in help output", async () => {
   await withTempHome(async (homeDir) => {

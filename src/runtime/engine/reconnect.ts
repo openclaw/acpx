@@ -6,11 +6,7 @@ import {
   isAcpQueryClosedBeforeResponseError,
   isAcpResourceNotFoundError,
 } from "../../acp/error-normalization.js";
-import {
-  assertRequestedModelSupported,
-  modelStateFromConfigOptions,
-  type SessionModelState,
-} from "../../acp/model-support.js";
+import { assertRequestedModelSupported, type SessionModelState } from "../../acp/model-support.js";
 import {
   assertControlAuthority,
   InterruptedError,
@@ -258,9 +254,7 @@ async function replayDesiredModel(params: {
     );
     params.replay.acknowledged = true;
     params.record.acpx = applyModelSelection(params.record.acpx, params.desiredModelId, response);
-    const models = response
-      ? modelStateFromConfigOptions(response.configOptions)
-      : { ...params.models, currentModelId: params.desiredModelId };
+    const models = advertisedModelState(params.record.acpx);
     if (params.verbose) {
       process.stderr.write(
         `[acpx] replayed desired model ${params.desiredModelId} on ACP session ${params.sessionId} (previous ${params.previousSessionId})\n`,
@@ -359,10 +353,10 @@ async function replayDesiredConfigOptions(params: {
         value,
         response,
       );
-      acceptedConfigOptions = response.configOptions;
+      acceptedConfigOptions = params.record.acpx.config_options;
       result = {
         replayed: true,
-        models: modelStateFromConfigOptions(response.configOptions),
+        models: advertisedModelState(params.record.acpx),
       };
       if (params.verbose) {
         process.stderr.write(

@@ -411,13 +411,14 @@ function printSetConfigOptionResultByFormat(
   },
   format: OutputFormat,
 ): void {
+  const configOptions = result.response.configOptions ?? result.record.acpx?.config_options ?? [];
   if (
     emitJsonResult(format, {
       action: "config_set",
       configId,
       value,
       resumed: result.resumed,
-      configOptions: result.response.configOptions,
+      configOptions,
       acpxRecordId: result.record.acpxRecordId,
       acpxSessionId: result.record.acpSessionId,
       agentSessionId: result.record.agentSessionId,
@@ -428,7 +429,7 @@ function printSetConfigOptionResultByFormat(
   process.stdout.write(
     format === "quiet"
       ? `${value}\n`
-      : `config set: ${configId}=${value} (${result.response.configOptions.length} options)\n`,
+      : `config set: ${configId}=${value} (${configOptions.length} options)\n`,
   );
 }
 
@@ -673,13 +674,6 @@ export async function handleSessionsNew(
     name: flags.name,
   });
 
-  if (replaced) {
-    await closeSession(replaced.acpxRecordId);
-    if (globalFlags.verbose) {
-      process.stderr.write(`[acpx] soft-closed prior session: ${replaced.acpxRecordId}\n`);
-    }
-  }
-
   const created = await createSession(
     buildSessionStartOptions({
       agent,
@@ -690,6 +684,13 @@ export async function handleSessionsNew(
       permissionPolicy,
     }),
   );
+
+  if (replaced) {
+    await closeSession(replaced.acpxRecordId);
+    if (globalFlags.verbose) {
+      process.stderr.write(`[acpx] soft-closed prior session: ${replaced.acpxRecordId}\n`);
+    }
+  }
 
   printCreatedSessionBanner(created, agent.agentName, globalFlags.format, globalFlags.jsonStrict);
 

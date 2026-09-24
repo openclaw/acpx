@@ -246,7 +246,12 @@ function trimRuntimeText(value: string, maxChars: number): string {
   if (value.length <= maxChars) {
     return value;
   }
-  return `${value.slice(0, Math.max(0, maxChars - 3))}...`;
+  let end = Math.max(0, maxChars - 3);
+  const last = value.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) {
+    end -= 1;
+  }
+  return `${value.slice(0, end)}...`;
 }
 
 function statusIndicatesComplete(status: unknown): boolean {

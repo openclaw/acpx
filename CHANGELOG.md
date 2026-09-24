@@ -27,6 +27,10 @@ Repo: https://github.com/openclaw/acpx
 
 - CLI/sessions: show compact image labels in history instead of raw base64, preserving MIME types and older image records. Thanks @rome-xi and @odrobnik.
 
+- Sessions: preserve the previous session when replacement fails, keep model choices and permission results scoped to each turn, and retain config catalogs when an accepted control omits them. Thanks @odrobnik.
+- ACP/CLI: retain reconnect metadata and Claude settings isolation, correlate recovered load errors by direction, and report agent disconnects after partial exec output. Thanks @odrobnik.
+- CLI/history: make `help` display usage and preserve Unicode when trimming saved conversation text. Thanks @odrobnik.
+
 ## 0.19.2 - 2026-09-23
 
 ### Highlights

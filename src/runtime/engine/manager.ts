@@ -1134,12 +1134,7 @@ export class AcpRuntimeManager {
       agentCommand,
       timeoutMs: this.options.timeoutMs,
     });
-    applyInitialModelSelection(
-      record,
-      session.sessionResult.models,
-      input.sessionOptions?.model,
-      modelApplication,
-    );
+    applyInitialModelSelection(record, session.sessionResult.models, modelApplication);
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     persistSessionOptions(record, input.sessionOptions);
     return record;

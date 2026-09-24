@@ -112,19 +112,6 @@ export function setDesiredModelId(
   record.acpx = acpx;
 }
 
-export function setCurrentModelId(record: SessionRecord, modelId: string | undefined): void {
-  const acpx = ensureAcpxState(record.acpx);
-  const normalized = normalizeModelId(modelId);
-
-  if (normalized) {
-    acpx.current_model_id = normalized;
-  } else {
-    delete acpx.current_model_id;
-  }
-
-  record.acpx = acpx;
-}
-
 export function syncAdvertisedModelState(
   record: SessionRecord,
   models: SessionModelState | undefined,
