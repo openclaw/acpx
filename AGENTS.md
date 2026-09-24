@@ -23,9 +23,9 @@ instead of expanding this file into a full technical spec.
 - Default branch: `main`
 - Runtime: Node.js `>=22.13.0`
 - Source builds: Node.js `^22.22.1 || ^24.11.0 || >=26.0.0` (lint-staged sets the Node 22 minimum; tsdown excludes Node 25).
-- Package manager: `pnpm@11.26.0` (CI reads the pin from `package.json`).
+- Package manager: `pnpm@11.27.1` (CI reads the pin from `package.json`).
 - Clean Node 22 setups can have stale Corepack signing keys; install pnpm
-  with `npm install -g pnpm@11.26.0` if `corepack prepare` fails.
+  with `npm install -g pnpm@11.27.1` if `corepack prepare` fails.
 
 ## Product Direction
 

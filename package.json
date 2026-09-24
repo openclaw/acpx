@@ -81,16 +81,16 @@
     "viewer:typecheck": "tsc -p examples/flows/replay-viewer/tsconfig.json --noEmit && tsc -p examples/flows/replay-viewer/tsconfig.server.json --noEmit"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^1.4.0",
+    "@agentclientprotocol/sdk": "^1.5.0",
     "@openclaw/fs-safe": "^0.18.1",
     "commander": "^15.0.0",
     "skillflag": "^0.2.1",
-    "tsx": "^4.23.13",
-    "zod": "^4.6.2"
+    "tsx": "^4.23.15",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^10.0.0",
-    "@types/node": "^26.5.1",
+    "@types/node": "^26.6.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/react-test-renderer": "^19.3.0",
@@ -103,10 +103,10 @@
     "fast-json-patch": "^3.1.1",
     "husky": "^9.1.7",
     "lint-staged": "^17.5.1",
-    "markdownlint-cli2": "^0.23.2",
-    "oxfmt": "^0.68.0",
-    "oxlint": "^1.82.0",
-    "oxlint-tsgolint": "^7.0.2001",
+    "markdownlint-cli2": "^0.23.3",
+    "oxfmt": "^0.70.0",
+    "oxlint": "^1.85.0",
+    "oxlint-tsgolint": "^7.0.2002",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-test-renderer": "^19.3.0",
@@ -127,5 +127,5 @@
   "engines": {
     "node": ">=22.13.0"
   },
-  "packageManager": "pnpm@11.26.0"
+  "packageManager": "pnpm@11.27.1"
 }
