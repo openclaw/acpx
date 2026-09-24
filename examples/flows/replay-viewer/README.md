@@ -83,6 +83,8 @@ The full flow definition remains the main graph. The run is shown as an overlay
 on that graph rather than replacing it with an execution-only path.
 Unused components, including loops, remain visible even when the run completes
 without reaching them.
+Dashed return edges follow their final layout direction. A downward branch merge
+stays solid even when another path reaches its target sooner.
 
 Graph nodes remain visible during playback, and their cards resize as content changes.
 Follow mode centers the selected attempt when the graph viewport is replaced,

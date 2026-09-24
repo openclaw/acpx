@@ -202,6 +202,11 @@ the graph.
 
 That should be inferred after ranking nodes.
 
+Use the final node positions to distinguish rendered return edges from forward
+merges. Internal cycle breaking for fallback ranking must be definition-owned
+and independent of recorded attempt order; its feedback edges need not match
+the return direction chosen by the layout engine.
+
 Back edges must not be routed through the middle of the graph. They should be
 sent out to side rails when possible.
 

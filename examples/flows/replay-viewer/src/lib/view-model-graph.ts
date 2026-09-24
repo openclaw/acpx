@@ -55,13 +55,12 @@ export function buildGraph(
   const actualTransitions = new Set<string>();
   const semantics = inferNodeSemantics(bundle.flow);
   const expandedEdges = expandFlowEdges(bundle.flow);
-  const provisionalLevels = computeShortestLevels(bundle.flow, expandedEdges, orderedNodeIds);
-  const backEdgeIds = findBackEdgeIds(expandedEdges, provisionalLevels);
+  const feedbackEdgeIds = findFeedbackEdgeIds(bundle.flow, expandedEdges);
   const levelByNode = computeLevels(
     bundle.flow,
     orderedNodeIds,
     expandedEdges,
-    backEdgeIds,
+    feedbackEdgeIds,
     semantics.terminalNodeIds,
   );
   const runOutcome = deriveRunOutcomeView(bundle);
@@ -76,7 +75,7 @@ export function buildGraph(
     orderedNodeIds,
     expandedEdges,
     levelByNode,
-    backEdgeIds,
+    feedbackEdgeIds,
   );
 
   for (let index = 1; index < visibleSteps.length; index += 1) {
@@ -137,6 +136,7 @@ export function buildGraph(
     } satisfies Node<ViewerNodeData>;
   });
 
+  const nodePositions = Object.fromEntries(graphNodes.map((node) => [node.id, node.position]));
   const graphEdges = expandedEdges.map((edge) => {
     const isTraversed = actualTransitions.has(`${edge.source}->${edge.target}`);
     const isSelected =
@@ -144,7 +144,7 @@ export function buildGraph(
       selectedStep != null &&
       visibleSteps.at(-2)?.nodeId === edge.source &&
       selectedStep.nodeId === edge.target;
-    const isBackEdge = backEdgeIds.has(edge.edgeId);
+    const isBackEdge = isRenderedBackEdge(edge.source, edge.target, nodePositions);
     const stroke = isSelected
       ? "var(--edge-active)"
       : isTraversed
@@ -276,8 +276,7 @@ export async function buildGraphLayout(
   const orderedNodeIds = layoutNodeIds(flow, []);
   const semantics = inferNodeSemantics(flow);
   const expandedEdges = expandFlowEdges(flow);
-  const shortestLevels = computeShortestLevels(flow, expandedEdges, orderedNodeIds);
-  const backEdgeIds = findBackEdgeIds(expandedEdges, shortestLevels);
+  const feedbackEdgeIds = findFeedbackEdgeIds(flow, expandedEdges);
   const elkGraph: ElkNode = {
     id: "root",
     layoutOptions: {
@@ -313,7 +312,7 @@ export async function buildGraphLayout(
       } satisfies ElkNode;
     }),
     edges: expandedEdges.map((edge, index) => {
-      const layoutOptions: Record<string, string> = backEdgeIds.has(edge.edgeId)
+      const layoutOptions: Record<string, string> = feedbackEdgeIds.has(edge.edgeId)
         ? {
             "elk.layered.priority.direction": "1",
           }
@@ -349,7 +348,7 @@ export async function buildGraphLayout(
       }
       edgeRoutes[edge.id] = {
         points,
-        isBackEdge: backEdgeIds.has(edge.id),
+        isBackEdge: isRenderedBackEdge(edge.sources[0], edge.targets[0], nodePositions),
       };
     }
 
@@ -619,10 +618,10 @@ function computeLevels(
   flow: FlowDefinitionSnapshot,
   orderedNodeIds: string[],
   expandedEdges: ExpandedFlowEdge[],
-  backEdgeIds: Set<string>,
+  feedbackEdgeIds: Set<string>,
   terminalNodeIds: Set<string>,
 ): Map<string, number> {
-  const forwardEdges = expandedEdges.filter((edge) => !backEdgeIds.has(edge.edgeId));
+  const forwardEdges = expandedEdges.filter((edge) => !feedbackEdgeIds.has(edge.edgeId));
   const topologicalOrder = computeTopologicalOrder(orderedNodeIds, forwardEdges);
   const longestFromStart = computeLongestLevels(flow.startAt, topologicalOrder, forwardEdges);
   const tailDepths = computeTailDepths(orderedNodeIds, forwardEdges, terminalNodeIds);
@@ -769,62 +768,71 @@ function computeTailDepths(
   );
 }
 
-function computeShortestLevels(
-  flow: FlowDefinitionSnapshot,
-  expandedEdges: ExpandedFlowEdge[],
-  orderedNodeIds: string[],
-): Map<string, number> {
-  const levels = new Map<string, number>();
-  levels.set(flow.startAt, 0);
-
-  for (const nodeId of orderedNodeIds) {
-    const sourceLevel = levels.get(nodeId);
-    if (sourceLevel == null) {
-      continue;
-    }
-
-    for (const edge of expandedEdges) {
-      if (edge.source !== nodeId) {
-        continue;
-      }
-      const nextLevel = sourceLevel + 1;
-      const current = levels.get(edge.target);
-      if (current == null || nextLevel < current) {
-        levels.set(edge.target, nextLevel);
-      }
-    }
+function outgoingEdgeMap(expandedEdges: ExpandedFlowEdge[]): Map<string, ExpandedFlowEdge[]> {
+  const outgoing = new Map<string, ExpandedFlowEdge[]>();
+  for (const edge of expandedEdges) {
+    const edges = outgoing.get(edge.source) ?? [];
+    edges.push(edge);
+    outgoing.set(edge.source, edges);
   }
-
-  return levels;
+  return outgoing;
 }
 
-function findBackEdgeIds(
+function findFeedbackEdgeIds(
+  flow: FlowDefinitionSnapshot,
   expandedEdges: ExpandedFlowEdge[],
-  shortestLevels: Map<string, number>,
 ): Set<string> {
-  const backEdgeIds = new Set<string>();
+  const outgoing = outgoingEdgeMap(expandedEdges);
+  const state = new Map<string, "active" | "done">();
+  const feedbackEdgeIds = new Set<string>();
 
-  for (const edge of expandedEdges) {
-    const sourceLevel = shortestLevels.get(edge.source);
-    const targetLevel = shortestLevels.get(edge.target);
-    if (sourceLevel == null || targetLevel == null) {
+  // Definition order keeps cycle breaking independent of recorded attempt order.
+  for (const root of [flow.startAt, ...Object.keys(flow.nodes).toSorted()]) {
+    if (state.has(root)) {
       continue;
     }
-    if (targetLevel <= sourceLevel) {
-      backEdgeIds.add(edge.edgeId);
+    state.set(root, "active");
+    const stack = [{ nodeId: root, nextEdge: 0 }];
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const edge = outgoing.get(frame.nodeId)?.[frame.nextEdge];
+      if (!edge) {
+        state.set(frame.nodeId, "done");
+        stack.pop();
+        continue;
+      }
+      frame.nextEdge += 1;
+      if (state.get(edge.target) === "active") {
+        feedbackEdgeIds.add(edge.edgeId);
+      } else if (!state.has(edge.target)) {
+        state.set(edge.target, "active");
+        stack.push({ nodeId: edge.target, nextEdge: 0 });
+      }
     }
   }
+  return feedbackEdgeIds;
+}
 
-  return backEdgeIds;
+function isRenderedBackEdge(
+  sourceId: string,
+  targetId: string,
+  positions: Partial<ViewerGraphLayout["nodePositions"]>,
+): boolean {
+  if (sourceId === targetId) {
+    return true;
+  }
+  const source = positions[sourceId];
+  const target = positions[targetId];
+  return Boolean(source && target && target.y < source.y);
 }
 
 function orderNodesWithinRanks(
   orderedNodeIds: string[],
   expandedEdges: ExpandedFlowEdge[],
   levelByNode: Map<string, number>,
-  backEdgeIds: Set<string>,
+  feedbackEdgeIds: Set<string>,
 ): Map<number, string[]> {
-  const forwardEdges = expandedEdges.filter((edge) => !backEdgeIds.has(edge.edgeId));
+  const forwardEdges = expandedEdges.filter((edge) => !feedbackEdgeIds.has(edge.edgeId));
   const ranks = new Map<number, string[]>();
   const orderIndex = new Map(orderedNodeIds.map((nodeId, index) => [nodeId, index]));
 

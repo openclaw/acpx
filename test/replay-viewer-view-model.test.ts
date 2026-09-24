@@ -1326,3 +1326,308 @@ function attemptDurationBundle(steps: FlowStepRecord[], messages: unknown[]): Lo
   bundle.sessions["main-bundle"].record.messages = messages;
   return bundle;
 }
+
+type MergeEdgeGraph = ReturnType<typeof buildGraph>;
+type MergeEdgeLayout = NonNullable<Awaited<ReturnType<typeof buildGraphLayout>>>;
+
+function mergeEdgeFlow(
+  name: string,
+  nodeIds: string[],
+  edges: FlowDefinitionSnapshot["edges"],
+): FlowDefinitionSnapshot {
+  const flow: FlowDefinitionSnapshot = {
+    schema: "acpx.flow-definition-snapshot.v1",
+    name,
+    startAt: "s",
+    nodes: Object.fromEntries(nodeIds.map((nodeId) => [nodeId, { nodeType: "compute" as const }])),
+    edges,
+  };
+  validateFlowDefinition({
+    name: flow.name,
+    startAt: flow.startAt,
+    nodes: Object.fromEntries(
+      nodeIds.map((nodeId) => [nodeId, { nodeType: "compute" as const, run: () => ({}) }]),
+    ),
+    edges,
+  });
+  return flow;
+}
+
+function mergeEdgeBundle(flow: FlowDefinitionSnapshot, recordedNodes = ["s"]): LoadedRunBundle {
+  const steps: FlowStepRecord[] = recordedNodes.map((nodeId, index) => ({
+    ...baseStep(nodeId, "compute", "ok"),
+    attemptId: `${nodeId}#${index + 1}`,
+    startedAt: new Date(Date.UTC(2026, 8, 24, 0, 0, index * 2)).toISOString(),
+    finishedAt: new Date(Date.UTC(2026, 8, 24, 0, 0, index * 2 + 1)).toISOString(),
+    promptText: null,
+    rawText: null,
+    session: null,
+    agent: null,
+    trace: undefined,
+  }));
+  const bundle = makeBundle(baseStep("s", "compute", "ok"), {
+    flow,
+    steps,
+    sessions: {},
+    trace: [],
+  });
+  bundle.manifest.sessions = [];
+  bundle.run.sessionBindings = {};
+  return bundle;
+}
+
+function mergeEdgeNode(graph: MergeEdgeGraph, nodeId: string) {
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+  assert.ok(node, `expected graph node ${nodeId}`);
+  return node;
+}
+
+function mergeEdgeBetween(graph: MergeEdgeGraph, source: string, target: string) {
+  const edges = graph.edges.filter((edge) => edge.source === source && edge.target === target);
+  assert.equal(edges.length, 1, `expected exactly one ${source}->${target} edge`);
+  const edge = edges[0];
+  assert.ok(edge);
+  return edge;
+}
+
+function assertMergeEdgeStyle(
+  graph: MergeEdgeGraph,
+  source: string,
+  target: string,
+  expectedBack: boolean,
+) {
+  const edge = mergeEdgeBetween(graph, source, target);
+  assert.equal(edge.data?.isBackEdge, expectedBack, edge.id);
+  assert.equal(edge.style?.strokeDasharray, expectedBack ? "6 5" : undefined, edge.id);
+  assert.equal(edge.zIndex, expectedBack ? 0 : 1, edge.id);
+}
+
+function assertMergeEdgeGeometryAgreement(graph: MergeEdgeGraph, layout: MergeEdgeLayout | null) {
+  for (const node of graph.nodes) {
+    assert.ok(Number.isFinite(node.position.x), node.id);
+    assert.ok(Number.isFinite(node.position.y), node.id);
+    if (layout) {
+      assert.deepEqual(node.position, layout.nodePositions[node.id]);
+    }
+  }
+  for (const edge of graph.edges) {
+    const source = mergeEdgeNode(graph, edge.source);
+    const target = mergeEdgeNode(graph, edge.target);
+    const expectedBack = edge.source === edge.target || target.position.y < source.position.y;
+    assertMergeEdgeStyle(graph, edge.source, edge.target, expectedBack);
+    if (layout) {
+      const route = layout.edgeRoutes[edge.id];
+      assert.ok(route, `expected ELK route for ${edge.id}`);
+      assert.ok(route.points.length >= 2, edge.id);
+      assert.ok(
+        route.points.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y)),
+      );
+      assert.equal(route.isBackEdge, expectedBack, `ELK metadata for ${edge.id}`);
+      assert.deepEqual(edge.data?.points, route.points);
+    }
+  }
+}
+
+for (const fixture of [
+  {
+    name: "the original equal-distance forward merge",
+    flow: mergeEdgeFlow(
+      "equal-distance-merge",
+      ["s", "a", "b", "end"],
+      [
+        { from: "s", switch: { on: "$.route", cases: { long: "a", short: "b" } } },
+        { from: "a", to: "b" },
+        { from: "b", to: "end" },
+      ],
+    ),
+    source: "a",
+    target: "b",
+  },
+  {
+    name: "a forward merge whose shortest distance decreases",
+    flow: mergeEdgeFlow(
+      "decreasing-distance-merge",
+      ["s", "a", "b", "c", "end"],
+      [
+        { from: "s", switch: { on: "$.route", cases: { long: "a", short: "c" } } },
+        { from: "a", to: "b" },
+        { from: "b", to: "c" },
+        { from: "c", to: "end" },
+      ],
+    ),
+    source: "b",
+    target: "c",
+  },
+]) {
+  for (const layoutMode of ["fallback", "elk"] as const) {
+    test(`buildGraph keeps ${fixture.name} downward and solid with ${layoutMode} layout`, async () => {
+      const bundle = mergeEdgeBundle(fixture.flow);
+      const layout = layoutMode === "elk" ? await buildGraphLayout(fixture.flow) : null;
+      if (layoutMode === "elk") {
+        assert.ok(layout, "real ELK layout must succeed");
+      }
+      const graph = buildGraph(bundle, 0, null, layout);
+      assert.equal(graph.nodes.length, Object.keys(fixture.flow.nodes).length);
+      assert.ok(
+        mergeEdgeNode(graph, fixture.target).position.y >
+          mergeEdgeNode(graph, fixture.source).position.y,
+        "the longer route must retain its forward rank constraint",
+      );
+      assertMergeEdgeStyle(graph, fixture.source, fixture.target, false);
+      assert.ok(graph.edges.every((edge) => edge.data?.isBackEdge === false));
+      assertMergeEdgeGeometryAgreement(graph, layout);
+    });
+  }
+}
+
+for (const fixture of [
+  {
+    name: "a reachable repeat loop",
+    flow: mergeEdgeFlow(
+      "repeat-loop",
+      ["s", "a", "b", "end"],
+      [
+        { from: "s", to: "a" },
+        { from: "a", to: "b" },
+        { from: "b", switch: { on: "$.route", cases: { again: "a", done: "end" } } },
+      ],
+    ),
+    edgeCount: 4,
+  },
+  {
+    name: "a cycle at equal shortest distance",
+    flow: mergeEdgeFlow(
+      "equal-depth-cycle",
+      ["s", "a", "b", "end"],
+      [
+        { from: "s", switch: { on: "$.route", cases: { long: "a", short: "b" } } },
+        { from: "a", to: "b" },
+        { from: "b", switch: { on: "$.route", cases: { again: "a", done: "end" } } },
+      ],
+    ),
+    edgeCount: 5,
+  },
+]) {
+  for (const layoutMode of ["fallback", "elk"] as const) {
+    test(`buildGraph retains a real return in ${fixture.name} with ${layoutMode} layout`, async () => {
+      const layout = layoutMode === "elk" ? await buildGraphLayout(fixture.flow) : null;
+      if (layoutMode === "elk") {
+        assert.ok(layout, "real ELK layout must succeed");
+      }
+      const graph = buildGraph(mergeEdgeBundle(fixture.flow), 0, null, layout);
+      assert.equal(graph.nodes.length, 4);
+      assert.equal(graph.edges.length, fixture.edgeCount);
+      const a = mergeEdgeNode(graph, "a");
+      const b = mergeEdgeNode(graph, "b");
+      assert.notEqual(a.position.y, b.position.y, "the reciprocal pair spans two ranks");
+      const returnEdge: [string, string] = a.position.y > b.position.y ? ["a", "b"] : ["b", "a"];
+      assertMergeEdgeStyle(graph, returnEdge[0], returnEdge[1], true);
+      assertMergeEdgeStyle(graph, returnEdge[1], returnEdge[0], false);
+      assert.ok(mergeEdgeNode(graph, "end").position.y >= Math.max(a.position.y, b.position.y));
+      assertMergeEdgeGeometryAgreement(graph, layout);
+    });
+  }
+}
+
+for (const layoutMode of ["fallback", "elk"] as const) {
+  test(`buildGraph retains unused cycle and self-loop direction with ${layoutMode} layout`, async () => {
+    const flow = mergeEdgeFlow(
+      "unused-loops",
+      ["s", "a", "b", "self"],
+      [
+        { from: "a", to: "b" },
+        { from: "b", to: "a" },
+        { from: "self", to: "self" },
+      ],
+    );
+    const layout = layoutMode === "elk" ? await buildGraphLayout(flow) : null;
+    if (layoutMode === "elk") {
+      assert.ok(layout, "real ELK layout must succeed");
+    }
+    const graph = buildGraph(mergeEdgeBundle(flow), 0, null, layout);
+    assert.deepEqual(graph.nodes.map((node) => node.id).toSorted(), ["a", "b", "s", "self"]);
+    assert.equal(graph.edges.length, 3);
+    for (const node of graph.nodes) {
+      assert.equal(node.data.status, node.id === "s" ? "completed" : "queued");
+      assert.equal(node.data.attempts, node.id === "s" ? 1 : 0);
+    }
+    assert.notEqual(mergeEdgeNode(graph, "a").position.y, mergeEdgeNode(graph, "b").position.y);
+    assertMergeEdgeStyle(graph, "self", "self", true);
+    assertMergeEdgeGeometryAgreement(graph, layout);
+  });
+}
+
+for (const fixture of [
+  { name: "upward", targetY: -236, expectedBack: true },
+  { name: "tied", targetY: 0, expectedBack: false },
+  { name: "downward", targetY: 236, expectedBack: false },
+]) {
+  test(`buildGraph uses final ${fixture.name} geometry over conflicting route metadata`, () => {
+    const flow = mergeEdgeFlow(
+      "supplied-layout-direction",
+      ["s", "end"],
+      [{ from: "s", to: "end" }],
+    );
+    const layout: MergeEdgeLayout = {
+      nodePositions: { s: { x: 0, y: 0 }, end: { x: 332, y: fixture.targetY } },
+      edgeRoutes: {
+        "s->end-0-0": {
+          points: [
+            { x: 0, y: 0 },
+            { x: 332, y: fixture.targetY },
+          ],
+          isBackEdge: !fixture.expectedBack,
+        },
+      },
+    };
+    const graph = buildGraph(mergeEdgeBundle(flow), 0, null, layout);
+    assertMergeEdgeStyle(graph, "s", "end", fixture.expectedBack);
+    assert.deepEqual(mergeEdgeNode(graph, "end").position, layout.nodePositions.end);
+    assert.deepEqual(
+      mergeEdgeBetween(graph, "s", "end").data?.points,
+      layout.edgeRoutes["s->end-0-0"].points,
+    );
+  });
+}
+
+test("buildGraph keeps unused feedback ownership independent of recorded-node order", async () => {
+  // Deliberately synthetic model histories; genuine FlowRunner runs cannot visit
+  // these off-start nodes. Terminal anchors expose the private feedback choice
+  // without fixing unrelated unused-node positions or exporting that helper.
+  const flow = mergeEdgeFlow(
+    "definition-owned-feedback",
+    ["s", "a", "b", "end", "x", "y"],
+    [
+      { from: "a", to: "b" },
+      { from: "b", switch: { on: "$.route", cases: { again: "a", done: "end" } } },
+    ],
+  );
+  const first = mergeEdgeBundle(flow, ["s", "a", "b"]);
+  const second = mergeEdgeBundle(flow, ["s", "b", "a"]);
+  const firstFallback = buildGraph(first, 2);
+  const secondFallback = buildGraph(second, 2);
+  for (const nodeId of ["a", "b"]) {
+    assert.equal(
+      mergeEdgeNode(firstFallback, nodeId).position.y,
+      mergeEdgeNode(secondFallback, nodeId).position.y,
+      `the anchored terminal tail for ${nodeId} must remain definition-owned`,
+    );
+  }
+  assert.ok(
+    mergeEdgeNode(firstFallback, "b").position.y > mergeEdgeNode(firstFallback, "a").position.y,
+  );
+  assertMergeEdgeStyle(firstFallback, "a", "b", false);
+  assertMergeEdgeStyle(firstFallback, "b", "a", true);
+  assertMergeEdgeGeometryAgreement(firstFallback, null);
+  assertMergeEdgeGeometryAgreement(secondFallback, null);
+
+  const layout = await buildGraphLayout(flow);
+  assert.ok(layout, "real ELK layout must succeed");
+  for (const bundle of [first, second]) {
+    const graph = buildGraph(bundle, 2, null, layout);
+    assertMergeEdgeGeometryAgreement(graph, layout);
+    for (const node of graph.nodes) {
+      assert.deepEqual(node.position, layout.nodePositions[node.id]);
+    }
+  }
+});
