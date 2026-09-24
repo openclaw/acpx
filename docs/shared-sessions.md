@@ -87,7 +87,7 @@ Shared runtime options are `cwd`, optional `agentRegistry`, required `permission
 
 Each submitting client supplies its static permission policy. Authentication and the child environment belong to the owner started for that session. Joining a session does not replace the existing owner's credentials. This is local, same-user IPC; it is not a network service or an isolation boundary between mutually untrusted clients.
 
-Custom session stores, process lifecycle callbacks, child environment overlays, MCP resolvers, and per-turn permission or elicitation callbacks belong to `createAcpRuntime()`. They are not serialized or silently ignored by the shared runtime. Shared sessions currently support persistent prompt turns; use the in-process runtime for oneshot sessions and steering. `startTurn()` still rejects a per-turn `assertActive`, because a shared turn runs inside the owner and cannot consult the submitting client again after admission.
+Custom session stores, process lifecycle callbacks, child environment overlays, MCP resolvers, and per-turn permission or elicitation callbacks belong to `createAcpRuntime()`. They are not serialized or silently ignored by the shared runtime. Shared sessions currently support persistent prompt turns; use the in-process runtime for oneshot sessions and `mode: "steer"` turns. In-process steer turns queue like prompts; see [Steer turns](prompting.md#steer-turns). `startTurn()` still rejects a per-turn `assertActive`, because a shared turn runs inside the owner and cannot consult the submitting client again after admission.
 
 ## Session controls
 

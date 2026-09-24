@@ -41,6 +41,11 @@ export type {
   PermissionPolicy,
 } from "../../types.js";
 
+/**
+ * ACP has no mid-turn steering request. In-process runtimes admit a "steer"
+ * turn like "prompt": it waits behind any active turn on the same session and
+ * does not change that turn. Shared runtimes reject "steer".
+ */
 export type AcpRuntimePromptMode = "prompt" | "steer";
 
 export type AcpRuntimeSessionMode = "persistent" | "oneshot";

@@ -150,6 +150,16 @@ cancel the prompt or discard its result. Use `turn.cancel()` or abort the signal
 to request cancellation. Callers without `assertActive` retain their existing
 behavior. [Shared runtimes](shared-sessions.md) reject this in-process callback.
 
+### Steer turns
+
+ACP has no request that adds input to a prompt that is already running, so
+`mode: "steer"` does not interrupt or extend the active turn. In-process
+`createAcpRuntime()` admits a steer turn like a prompt turn: it waits behind any
+active turn on the same session, its `promptStarted` resolves only after that
+turn settles, and it runs as the next prompt. To redirect work in progress,
+cancel the active turn first, then start the new one.
+[Shared runtimes](shared-sessions.md) reject steer turns.
+
 ## Timeouts
 
 `--timeout <seconds>` caps how long `acpx` will wait for an agent response. It applies to:
