@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import childProcess, { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isAcpJsonRpcMessage } from "../src/acp/jsonrpc.js";
 import type { PromptInput } from "../src/prompt-content.js";
@@ -67,7 +71,37 @@ type CliRunOptions = {
   cwd?: string;
   stdin?: string;
   env?: NodeJS.ProcessEnv;
+  promptGate?: { directory: string; startupTimeoutMs: number };
 };
+
+const CLI_RETIREMENT_TIMEOUT_MS = 5_000;
+// Only withTempHome consumes a marker; individual children must never clear it.
+const retainedCliHomes = new Set<string>();
+
+type TestOutcome<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+async function observeTestOutcome<T>(run: () => Promise<T>): Promise<TestOutcome<T>> {
+  try {
+    return { ok: true, value: await run() };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+function unwrapTestOutcomes<T>(body: TestOutcome<T>, cleanup: TestOutcome<void>): T {
+  if (!body.ok && !cleanup.ok) {
+    throw new AggregateError([body.error, cleanup.error], "Test body and cleanup failed", {
+      cause: body.error,
+    });
+  }
+  if (!body.ok) {
+    throw body.error;
+  }
+  if (!cleanup.ok) {
+    throw cleanup.error;
+  }
+  return body.value;
+}
 
 test("integration: exec echo baseline", async () => {
   await withTempHome(async (homeDir) => {
@@ -547,46 +581,47 @@ test("integration: flow run finalizes interrupted bundles on SIGHUP", async () =
 
 test("integration: flow run fails ACP nodes promptly when the agent disconnects mid-prompt", async () => {
   await withTempHome(async (homeDir) => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    // One deletion owner covers the CLI's cwd and every gate/run file.
+    const cwd = await fs.mkdtemp(path.join(homeDir, "cwd-"));
+    const directory = await fs.mkdtemp(path.join(homeDir, "disconnect-gate-"));
+    const result = await runCli(
+      [
+        ...baseLoadCapableAgentArgs(cwd),
+        "--format",
+        "json",
+        "flow",
+        "run",
+        FLOW_ACP_DISCONNECT_FIXTURE_PATH,
+      ],
+      homeDir,
+      {
+        cwd,
+        timeoutMs: 5_000,
+        promptGate: { directory, startupTimeoutMs: 15_000 },
+      },
+    );
 
-    try {
-      const result = await runCli(
-        [
-          ...baseLoadCapableAgentArgs(cwd),
-          "--format",
-          "json",
-          "flow",
-          "run",
-          FLOW_ACP_DISCONNECT_FIXTURE_PATH,
-        ],
-        homeDir,
-        {
-          cwd,
-          timeoutMs: 5_000,
-        },
-      );
-
-      const outputRoot = path.join(homeDir, ".acpx", "flows", "runs");
-      const runDir = await waitForFlowRunDir(outputRoot, "fixture-acp-disconnect");
-      assert.notEqual(result.code, 0, result.stdout);
-
-      const finalState = await waitFor(async () => {
-        const state = await readFlowRunJson(runDir).catch(() => null);
-        return state && state.status === "failed" ? state : null;
-      }, 5_000);
-
-      assert.equal(finalState.status, "failed");
-      assert.equal(
-        (finalState.results as Record<string, { outcome?: string }>).slow?.outcome,
-        "failed",
-      );
-      assert.match(
-        (finalState.results as Record<string, { error?: string }>).slow?.error ?? result.stderr,
-        /agent disconnected/i,
-      );
-    } finally {
-      await fs.rm(cwd, { recursive: true, force: true });
-    }
+    assert.equal(result.signal, null, result.stderr);
+    assert.notEqual(result.code, null, result.stderr);
+    assert.notEqual(result.code, 0, result.stdout);
+    // runCli validates the intended-exit witness inside its owned gated body before returning.
+    // The safety guard's exit 92 cannot satisfy this test through a generic disconnect alone.
+    const outputRoot = path.join(homeDir, ".acpx", "flows", "runs");
+    // After native CLI close, failure publication must already be complete.
+    const runName = (await fs.readdir(outputRoot)).find((entry) =>
+      entry.includes("fixture-acp-disconnect"),
+    );
+    assert.ok(runName, "the closed CLI must already have published its run directory");
+    const finalState = await readFlowRunJson(path.join(outputRoot, runName));
+    assert.equal(finalState.status, "failed");
+    assert.equal(
+      (finalState.results as Record<string, { outcome?: string }>).slow?.outcome,
+      "failed",
+    );
+    assert.match(
+      (finalState.results as Record<string, { error?: string }>).slow?.error ?? result.stderr,
+      /agent disconnected/i,
+    );
   });
 });
 
@@ -5273,10 +5308,54 @@ async function writeFakeQoderAgent(binDir: string, argLogPath?: string): Promise
 
 async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {
   const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-home-"));
-  try {
-    await run(tempHome);
-  } finally {
+  const body = await observeTestOutcome(() => run(tempHome));
+  const cleanup = await observeTestOutcome(async () => {
+    if (retainedCliHomes.delete(tempHome)) {
+      throw new Error(
+        `Retained test HOME because owned CLI or fixture cleanup was not proved: ${tempHome}`,
+      );
+    }
     await fs.rm(tempHome, { recursive: true, force: true });
+  });
+  unwrapTestOutcomes(body, cleanup);
+}
+
+// A timer is a failure boundary, never a substitute for joining close.
+async function withinCliDeadline<T>(
+  timeoutMs: number,
+  timeoutError: () => Error,
+  run: () => Promise<T>,
+): Promise<T> {
+  const deadline = performance.now() + timeoutMs;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(timeoutError()), timeoutMs);
+  });
+  try {
+    const value = await Promise.race([run(), expired]);
+    if (performance.now() >= deadline) {
+      throw timeoutError();
+    }
+    return value;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function waitForDisconnectPrompt(directory: string, signal: AbortSignal): Promise<void> {
+  const readyPath = path.join(directory, "ready");
+  for (;;) {
+    signal.throwIfAborted();
+    try {
+      if (fsSync.readFileSync(readyPath, "utf8") === "ready\n") {
+        return;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+    await delay(20, undefined, { signal });
   }
 }
 
@@ -5326,56 +5405,155 @@ async function runCliWithEntry(
   homeDir: string,
   options: CliRunOptions = {},
 ): Promise<CliRunResult> {
-  return await new Promise<CliRunResult>((resolve, reject) => {
-    const child = spawn(process.execPath, [entryPath, ...args], {
-      env: {
-        ...process.env,
-        HOME: homeDir,
-        ...options.env,
-      },
-      cwd: options.cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+  let stdout = "";
+  let stderr = "";
+  let didClose = false;
+  let gateReady = false;
+  const childErrors: unknown[] = [];
+  const gate = options.promptGate;
+  const child = childProcess.spawn(process.execPath, [entryPath, ...args], {
+    env: {
+      ...process.env,
+      HOME: homeDir,
+      ...options.env,
+      ...(gate ? { ACPX_TEST_DISCONNECT_GATE: gate.directory } : {}),
+    },
+    cwd: options.cwd,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
 
-    let stdout = "";
-    let stderr = "";
-    const timeoutMs = options.timeoutMs ?? 15_000;
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new Error(`CLI timed out after ${timeoutMs}ms: acpx ${args.join(" ")}`));
-    }, timeoutMs);
-
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-
-    if (options.stdin != null) {
-      child.stdin.end(options.stdin);
-    } else {
-      child.stdin.end();
-    }
-
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-
+  // Observe once, before stdin work, readiness waits, timers, or kill requests.
+  const closed = new Promise<CliRunResult>((resolve) => {
     child.once("close", (code, signal) => {
-      clearTimeout(timer);
-      resolve({
-        code,
-        signal,
-        stdout,
-        stderr,
-      });
+      didClose = true;
+      resolve({ code, signal, stdout, stderr });
     });
   });
+  const failed = new Promise<{ ok: false; error: unknown }>((resolve) => {
+    child.on("error", (error: unknown) => {
+      childErrors.push(error);
+      resolve({ ok: false, error });
+    });
+  });
+  const outcome = Promise.race([closed.then((value) => ({ ok: true as const, value })), failed]);
+  const result = async (): Promise<CliRunResult> => {
+    const settled = await outcome;
+    if (!settled.ok) {
+      throw settled.error;
+    }
+    return settled.value;
+  };
+  const diagnostic = (message: string): Error =>
+    new Error(`${message}: acpx ${args.join(" ")}\nstdout:\n${stdout}\nstderr:\n${stderr}`);
+
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+
+  const body = await observeTestOutcome(async () => {
+    child.stdin.end(options.stdin);
+    if (gate) {
+      const readiness = new AbortController();
+      try {
+        await withinCliDeadline(
+          gate.startupTimeoutMs,
+          () => diagnostic(`CLI prompt readiness timed out after ${gate.startupTimeoutMs}ms`),
+          async () => {
+            await Promise.race([
+              waitForDisconnectPrompt(gate.directory, readiness.signal),
+              result().then((early) => {
+                throw diagnostic(
+                  `CLI closed before prompt readiness (code=${early.code}, signal=${early.signal})`,
+                );
+              }),
+            ]);
+          },
+        );
+        gateReady = true;
+      } finally {
+        readiness.abort();
+      }
+    }
+
+    const timeoutMs = options.timeoutMs ?? 15_000;
+    return await withinCliDeadline(
+      timeoutMs,
+      () => diagnostic(`CLI timed out after ${timeoutMs}ms`),
+      async () => {
+        // The outcome timer is already armed; there is no asynchronous marker writer to leak.
+        if (gate) {
+          if (childErrors.length > 0) {
+            throw childErrors[0];
+          }
+          if (didClose) {
+            throw diagnostic("CLI closed before disconnect release");
+          }
+          fsSync.writeFileSync(path.join(gate.directory, "release"), "release\n", { flag: "wx" });
+        }
+        const completed = await result();
+        if (gate) {
+          // Validate inside the owned body: absence can mean this fixture writer is still live.
+          const witness = fsSync.readFileSync(path.join(gate.directory, "disconnect-exit"), "utf8");
+          if (witness !== "91\n") {
+            throw diagnostic("CLI closed without the fixture's intended disconnect witness");
+          }
+        }
+        return completed;
+      },
+    );
+  });
+
+  const cleanup = await observeTestOutcome(async () => {
+    const failures: unknown[] = [];
+    if (gate && (!gateReady || !body.ok)) {
+      // On rescue, the fixture could still publish readiness or its intended-exit witness.
+      retainedCliHomes.add(homeDir);
+    }
+    if (gate && !body.ok) {
+      try {
+        fsSync.writeFileSync(path.join(gate.directory, "release"), "release\n");
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (!didClose) {
+      if (child.exitCode === null && child.signalCode === null) {
+        try {
+          child.kill("SIGKILL");
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+      try {
+        // Native exit fields only avoid a redundant signal; they never skip this close join.
+        await withinCliDeadline(
+          CLI_RETIREMENT_TIMEOUT_MS,
+          () => diagnostic(`CLI close was not observed within ${CLI_RETIREMENT_TIMEOUT_MS}ms`),
+          () => closed,
+        );
+      } catch (error) {
+        retainedCliHomes.add(homeDir);
+        failures.push(error);
+      }
+    }
+    for (const error of childErrors) {
+      // An emitted kill/spawn error is independent cleanup evidence unless already primary.
+      if ((body.ok || error !== body.error) && !failures.includes(error)) {
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, `CLI cleanup failed; HOME: ${homeDir}`, {
+        cause: failures[0],
+      });
+    }
+  });
+  return unwrapTestOutcomes(body, cleanup);
 }
 
 async function awaitChildClose(child: ReturnType<typeof spawn>): Promise<CliRunResult> {
@@ -6140,4 +6318,191 @@ test("runPromptTurn: existing agent reply still allows post-success drain", asyn
   assert.equal(result.source, "rpc");
   assert.equal(result.stopReason, "end_turn");
   assert.deepEqual(calls, ["prompt", "drain"]);
+});
+
+type NativeProofOutcome<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+async function nativeProofOutcome<T>(run: () => Promise<T>): Promise<NativeProofOutcome<T>> {
+  try {
+    return { ok: true, value: await run() };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+function finishNativeProof(failures: unknown[]): void {
+  if (failures.length === 1) {
+    throw failures[0];
+  }
+  if (failures.length > 1) {
+    throw new AggregateError(failures, "Native proof and cleanup failures", { cause: failures[0] });
+  }
+}
+
+test("integration helper native: timeout rejection follows the spawned child's close", async (t) => {
+  await withTempHome(async (homeDir) => {
+    const entry = path.join(homeDir, "held-native-entry.mjs");
+    // No descendants, provider, shell, or filesystem writer. The helper must time out first.
+    await fs.writeFile(entry, "setTimeout(() => process.exit(0), 10_000);\n", "utf8");
+    const launches: Array<{
+      child: ChildProcess;
+      matches: boolean;
+      closed: Promise<void>;
+      didClose: () => boolean;
+      errors: unknown[];
+    }> = [];
+    const events: string[] = [];
+    const failures: unknown[] = [];
+    const originalSpawn = childProcess.spawn;
+
+    try {
+      const hook = t.mock.method(childProcess, "spawn", ((
+        ...args: Parameters<typeof childProcess.spawn>
+      ) => {
+        const child = originalSpawn(...args);
+        let sawClose = false;
+        const errors: unknown[] = [];
+        // This observer is installed before the wrapper returns the real child to runCli.
+        const closed = new Promise<void>((resolve) => {
+          child.once("close", () => {
+            sawClose = true;
+            events.push("close");
+            resolve();
+          });
+        });
+        child.on("error", (error: unknown) => errors.push(error));
+        const argv = args[1];
+        launches.push({
+          child,
+          matches:
+            args[0] === process.execPath &&
+            Array.isArray(argv) &&
+            argv[0] === entry &&
+            args[2]?.env?.HOME === homeDir,
+          closed,
+          didClose: () => sawClose,
+          errors,
+        });
+        events.push("spawn");
+        return child;
+      }) as typeof childProcess.spawn);
+
+      let running: Promise<CliRunResult>;
+      try {
+        // Baseline runCli uses named ESM spawn; the candidate may use the default export.
+        syncBuiltinESMExports();
+        running = runCliWithEntry(entry, [], homeDir, { timeoutMs: 100, cwd: homeDir });
+      } finally {
+        // Both inspected helpers spawn before their first await. Restore before waiting.
+        hook.mock.restore();
+        syncBuiltinESMExports();
+      }
+
+      const result = await running.then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => {
+          // Sample in the rejection observer, not after the proof's rescue cleanup.
+          const closedAtRejection = launches.map((launch) => launch.didClose());
+          events.push("helper-rejected");
+          return { ok: false as const, error, closedAtRejection };
+        },
+      );
+      assert.equal(launches.length, 1, "the synchronous seam must capture exactly one child");
+      assert.equal(launches[0]?.matches, true, "captured launch must match this entry and HOME");
+      assert.equal(result.ok, false, "the finite held entry must hit the helper's short timeout");
+      if (result.ok) {
+        throw new Error("Expected the actual helper timeout rejection");
+      }
+      assert.ok(result.error instanceof Error);
+      assert.match(result.error.message, /CLI timed out after 100ms/);
+      assert.deepEqual(
+        result.closedAtRejection,
+        [true],
+        `helper rejected before native child/PIPE close: ${events.join(" -> ")}`,
+      );
+    } catch (error) {
+      failures.push(error);
+    } finally {
+      // This is INSIDE withTempHome's callback, including the expected baseline failure.
+      // Never race this join against a timeout that can return to baseline's unconditional rm.
+      for (const launch of launches) {
+        try {
+          launch.child.stdout?.resume();
+          launch.child.stderr?.resume();
+          if (
+            !launch.didClose() &&
+            launch.child.exitCode === null &&
+            launch.child.signalCode === null &&
+            !launch.child.killed
+          ) {
+            launch.child.kill("SIGKILL");
+          }
+        } catch (error) {
+          failures.push(error);
+        }
+        // Resolve-only close includes stdio completion. Exit fields/kill state only avoid
+        // redundant signaling above; they never bypass this original launch-time promise.
+        await launch.closed;
+        for (const error of launch.errors) {
+          if (!failures.includes(error)) {
+            failures.push(error);
+          }
+        }
+      }
+    }
+    finishNativeProof(failures);
+  });
+});
+
+test("integration helper native: HOME removal preserves body and EIO failures", async (t) => {
+  const failures: unknown[] = [];
+  for (const bodyError of [Object.freeze(new Error("synthetic body failure")), undefined]) {
+    const originalRm = fs.rm;
+    const cleanupError = Object.assign(new Error("synthetic HOME removal failure"), {
+      code: "EIO",
+    });
+    let ownedHome: string | undefined;
+    let restoreRm = () => {};
+    let intercepted = 0;
+
+    try {
+      const outcome = await nativeProofOutcome(() =>
+        withTempHome(async (homeDir) => {
+          ownedHome = homeDir;
+          const hook = t.mock.method(fs, "rm", async (...args: Parameters<typeof fs.rm>) => {
+            if (args[0] === homeDir) {
+              intercepted += 1;
+              throw cleanupError;
+            }
+            return await originalRm(...args);
+          });
+          restoreRm = () => hook.mock.restore();
+          throw bodyError;
+        }),
+      );
+      assert.equal(intercepted, 1, "inject EIO only at this real temporary HOME's removal");
+      assert.equal(outcome.ok, false);
+      if (outcome.ok) {
+        throw new Error("Body and HOME cleanup must both fail");
+      }
+      assert.ok(outcome.error instanceof AggregateError);
+      assert.equal(outcome.error.errors.length, 2);
+      assert.equal(outcome.error.errors[0], bodyError);
+      assert.equal(outcome.error.errors[1], cleanupError);
+    } catch (error) {
+      failures.push(error);
+    } finally {
+      restoreRm();
+      if (ownedHome !== undefined) {
+        // Restore first, then remove only the exact directory returned to this test.
+        const cleanup = await nativeProofOutcome(() =>
+          originalRm(ownedHome!, { recursive: true, force: true }),
+        );
+        if (!cleanup.ok) {
+          failures.push(cleanup.error);
+        }
+      }
+    }
+  }
+  finishNativeProof(failures);
 });

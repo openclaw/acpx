@@ -1585,7 +1585,18 @@ class MockAgent implements Agent {
         throw new Error("Usage: disconnect <milliseconds>");
       }
 
+      if (disconnectGateDirectory) {
+        writeFileSync(path.join(disconnectGateDirectory, "ready"), "ready\n", { flag: "wx" });
+        while (!existsSync(path.join(disconnectGateDirectory, "release"))) {
+          await sleepWithCancel(10, signal);
+        }
+      }
       await sleepWithCancel(Math.round(ms), signal);
+      if (disconnectGateDirectory) {
+        writeFileSync(path.join(disconnectGateDirectory, "disconnect-exit"), "91\n", {
+          flag: "wx",
+        });
+      }
       process.exit(91);
     }
 
@@ -1796,6 +1807,14 @@ if (mockAgentOptions.ignoreSigterm) {
   process.on("SIGTERM", () => {
     // Intentionally ignore to exercise ACP client SIGKILL fallback behavior.
   });
+}
+
+const disconnectGateDirectory = process.env.ACPX_TEST_DISCONNECT_GATE;
+if (disconnectGateDirectory) {
+  setTimeout(() => {
+    process.stderr.write("Synthetic disconnect gate exceeded its 30-second safety bound\n");
+    process.exit(92);
+  }, 30_000);
 }
 
 const connection = new AgentSideConnection(
