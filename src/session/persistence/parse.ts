@@ -206,18 +206,20 @@ function parseRequestTokenUsage(
   return usage;
 }
 
-function isSessionMessageImage(raw: unknown): boolean {
-  const record = asRecord(raw);
-  if (!record || typeof record.source !== "string") {
-    return false;
-  }
-
-  if (record.size === undefined || record.size === null) {
+function isValidImageSize(size: unknown): boolean {
+  if (size === undefined || size === null) {
     return true;
   }
+  const record = asRecord(size);
+  return !!record && isFiniteNumber(record.width) && isFiniteNumber(record.height);
+}
 
-  const size = asRecord(record.size);
-  return !!size && isFiniteNumber(size.width) && isFiniteNumber(size.height);
+function isSessionMessageImage(raw: unknown): boolean {
+  const record = asRecord(raw);
+  if (!record || typeof record.source !== "string" || !isOptionalString(record.mime_type)) {
+    return false;
+  }
+  return isValidImageSize(record.size);
 }
 
 function isSessionMessageAudio(raw: unknown): boolean {

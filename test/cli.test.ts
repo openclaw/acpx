@@ -2619,6 +2619,56 @@ test("sessions history prints stored history entries", async () => {
   });
 });
 
+test("sessions history previews image content compactly without dumping base64", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const largeBase64 = "A".repeat(4096);
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: "image-history-session",
+      acpSessionId: "image-history-session",
+      agentCommand: AGENT_REGISTRY.codex,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:10:00.000Z",
+      closed: false,
+      title: null,
+      messages: [
+        {
+          User: {
+            id: "user-image-prompt",
+            content: [
+              { Text: "inspect screenshot" },
+              {
+                Image: {
+                  source: largeBase64,
+                },
+              },
+              { Image: { source: largeBase64, mime_type: "image/png" } },
+            ],
+          },
+        },
+        {
+          Agent: {
+            content: [{ Text: "received image" }],
+            tool_results: {},
+          },
+        },
+      ],
+      updated_at: "2026-01-01T00:02:00.000Z",
+      cumulative_token_usage: {},
+      request_token_usage: {},
+    });
+
+    const result = await runCli(["--cwd", cwd, "codex", "sessions", "history"], homeDir);
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, new RegExp(largeBase64));
+    assert.match(result.stdout, /\[image\] image \[image\] image\/png/);
+  });
+});
+
 test("sessions import --cwd overrides the destination cwd without replacing global cwd", async () => {
   await withTempHome(async (homeDir) => {
     const sourceCwd = path.join(homeDir, "source");

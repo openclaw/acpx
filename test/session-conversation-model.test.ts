@@ -338,6 +338,38 @@ test("model config parsing ignores malformed raw and persisted snapshots", () =>
   );
 });
 
+test("recordPromptSubmission preserves image prompt content", () => {
+  const conversation = createSessionConversation("2026-02-27T10:00:00.000Z");
+
+  const messageId = recordPromptSubmission(
+    conversation,
+    [
+      { type: "text", text: "inspect" },
+      { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" },
+    ],
+    "2026-02-27T10:00:01.000Z",
+  );
+
+  assert.equal(typeof messageId, "string");
+  assert.deepEqual(conversation.messages, [
+    {
+      User: {
+        id: messageId,
+        content: [
+          { Text: "inspect" },
+          {
+            Image: {
+              source: "iVBORw0KGgo=",
+              mime_type: "image/png",
+              size: null,
+            },
+          },
+        ],
+      },
+    },
+  ]);
+});
+
 test("recordPromptSubmission preserves audio prompt content", () => {
   const conversation = createSessionConversation("2026-02-27T10:00:00.000Z");
 

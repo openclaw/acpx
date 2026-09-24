@@ -321,6 +321,7 @@ export type AcpClientOptions = {
 export const SESSION_RECORD_SCHEMA = "acpx.session.v1" as const;
 export type SessionMessageImage = {
   source: string;
+  mime_type?: string;
   size?: {
     width: number;
     height: number;

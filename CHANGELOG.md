@@ -25,6 +25,8 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: keep forward branch merges solid and correctly ranked, and style return edges from their final layout direction while preserving loops and unused graph components.
 - Flow shell actions no longer keep a completed CLI alive when a surviving descendant inherits stdout or stderr.
 
+- CLI/sessions: show compact image labels in history instead of raw base64, preserving MIME types and older image records. Thanks @rome-xi and @odrobnik.
+
 ## 0.19.2 - 2026-09-23
 
 ### Highlights

@@ -123,6 +123,7 @@ function contentToUserContent(content: ContentBlock): SessionUserContent | undef
     return {
       Image: {
         source: content.data,
+        mime_type: content.mimeType,
         size: null,
       },
     };
