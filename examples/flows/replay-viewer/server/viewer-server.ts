@@ -45,9 +45,18 @@ export async function createReplayViewerServer(
     appType: "spa",
     ...(options.disableDependencyOptimization
       ? {
-          optimizeDeps: {
-            noDiscovery: true,
-          },
+          plugins: [
+            {
+              name: "acpx-replay-disable-dependency-optimization",
+              enforce: "post",
+              configEnvironment(_name, config) {
+                // React adds explicit includes; noDiscovery alone leaves those active.
+                config.optimizeDeps ??= {};
+                config.optimizeDeps.noDiscovery = true;
+                config.optimizeDeps.include = [];
+              },
+            },
+          ],
         }
       : {}),
     server: {
