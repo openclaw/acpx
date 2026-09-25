@@ -18,6 +18,30 @@ const peer = fileURLToPath(
   ),
 );
 
+async function withinDeadline<T>(t: TestContext, promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), 10_000);
+        onAbort = () =>
+          reject(t.signal.reason ?? new Error(`Test cancelled while waiting for ${label}`));
+        t.signal.addEventListener("abort", onAbort, { once: true });
+        if (t.signal.aborted) {
+          onAbort();
+        }
+      }),
+      promise,
+    ]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) {
+      t.signal.removeEventListener("abort", onAbort);
+    }
+  }
+}
+
 async function fixture(
   t: TestContext,
   agent = "cursor-agent",
@@ -169,6 +193,7 @@ for (const change of ["ambiguous-models", "remove-model-control"]) {
       mode: "prompt",
       requestId: "model-update",
     });
+    let notificationSeen = false;
     let updated!: () => void;
     const notification = new Promise<void>((resolve) => {
       updated = resolve;
@@ -176,11 +201,27 @@ for (const change of ["ambiguous-models", "remove-model-control"]) {
     const events = (async () => {
       for await (const event of turn.events) {
         if (event.type === "status" && event.tag === "config_option_update") {
+          notificationSeen = true;
           updated();
         }
       }
     })();
-    await notification;
+    const completed = events.then(async () => {
+      const result = await turn.result;
+      if (result.status === "failed") {
+        throw Object.assign(new Error(result.error.message), result.error);
+      }
+      assert.ok(
+        notificationSeen,
+        `Turn ${result.status} without a config_option_update notification`,
+      );
+      assert.equal(result.status, "completed");
+    });
+    await withinDeadline(
+      t,
+      Promise.race([notification, completed]),
+      `the ${change} config_option_update notification`,
+    );
     const before = await context.read("received.jsonl");
     await assert.rejects(runtime.setModel({ handle, model: "selected" }), (error: unknown) => {
       assert.ok(isRequestedModelUnsupportedError(error));
@@ -193,8 +234,7 @@ for (const change of ["ambiguous-models", "remove-model-control"]) {
     });
     assert.equal(await context.read("received.jsonl"), before);
     await context.mark("release-prompt");
-    await events;
-    assert.equal((await turn.result).status, "completed");
+    await withinDeadline(t, completed, `the ${change} turn to finish after release`);
   });
 }
 
