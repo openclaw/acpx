@@ -7,3 +7,5 @@ examples/flows/replay-viewer/dist/
 *.tgz
 .worktrees/
 coverage/
+.venv/
+__pycache__/

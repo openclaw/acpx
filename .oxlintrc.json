@@ -107,6 +107,7 @@
     "unicorn/throw-new-error": "error"
   },
   "ignorePatterns": [
+    ".agents/skills/autoreview/**",
     "dist/",
     "dist-test/",
     "examples/flows/replay-viewer/dist/",

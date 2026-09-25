@@ -8,5 +8,12 @@
   },
   "tabWidth": 2,
   "useTabs": false,
-  "ignorePatterns": ["dist/", "dist-test/", "node_modules/", "package-lock.json", "*.tgz"],
+  "ignorePatterns": [
+    "dist/",
+    "dist-test/",
+    "node_modules/",
+    "package-lock.json",
+    "*.tgz",
+    ".agents/skills/autoreview/**",
+  ],
 }
