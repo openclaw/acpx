@@ -3846,9 +3846,54 @@ test("integration: fs/write_text_file through mock agent", async () => {
 
 test("integration: fs/read_text_file outside cwd is denied", async () => {
   await withTempHome(async (homeDir) => {
-    const result = await runCli([...baseExecArgs("/tmp"), "read /etc/hostname"], homeDir);
-    assert.equal(result.code, 0, result.stderr);
-    assert.match(result.stdout.toLowerCase(), /error:/);
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-fs-boundary-"));
+    const cwd = path.join(root, "workspace");
+    const insidePath = path.join(cwd, "inside.txt");
+    const outsidePath = path.join(root, "outside.txt");
+    const insideSentinel = "allowed inside read sentinel";
+    const outsideSentinel = "forbidden outside read sentinel";
+
+    try {
+      await fs.mkdir(cwd);
+      await fs.writeFile(insidePath, insideSentinel, "utf8");
+      await fs.writeFile(outsidePath, outsideSentinel, "utf8");
+      assert.equal(await fs.readFile(outsidePath, "utf8"), outsideSentinel);
+
+      for (const readPath of [insidePath, outsidePath]) {
+        const result = await runCli(
+          [...baseAgentArgs(cwd), "--format", "json", "--json-strict", "exec", `read ${readPath}`],
+          homeDir,
+        );
+        assert.equal(result.code, 0, result.stderr);
+        const messages = parseJsonRpcOutputLines(result.stdout);
+        const requestIndex = messages.findIndex(
+          (message) => message.method === "fs/read_text_file",
+        );
+        const request = messages[requestIndex];
+        assert.ok(request);
+        assert.equal((request.params as { path?: unknown })?.path, readPath);
+        const requestId = extractJsonRpcId(request);
+        assert.notEqual(requestId, undefined);
+        // Client and agent request IDs can overlap before this read request.
+        const response = messages
+          .slice(requestIndex + 1)
+          .find(
+            (message) => message.id === requestId && ("result" in message || "error" in message),
+          );
+        if (readPath === insidePath) {
+          assert.deepEqual(response?.result, { content: insideSentinel });
+        } else {
+          assert.ok(!result.stdout.includes(outsideSentinel), result.stdout);
+          assert.deepEqual(response?.error, {
+            code: -32603,
+            message: "Internal error",
+            data: { details: `Path is outside allowed cwd subtree: ${path.resolve(outsidePath)}` },
+          });
+        }
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });
 
