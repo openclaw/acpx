@@ -267,6 +267,7 @@ Behavior:
 
 - Creates temporary ACP session
 - Applies `--model`, then each repeatable `--config-option <key=value>`, before prompting
+- Uses the temporary session's latest catalog update received during creation for startup selections, including removal of model support
 - Sends prompt once
 - Does not write/use a saved session record
 - Supports prompt text from args, stdin, `--file <path>`, and `--file -`

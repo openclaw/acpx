@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { AcpClient } from "../../acp/client.js";
+import { AcpClient, type SessionCreateResult } from "../../acp/client.js";
 import {
   extractAcpError,
   formatErrorMessage,
@@ -1214,6 +1214,7 @@ export async function runOnce(
   let promptTurnActive = false;
   let promptTurnHadSideEffects = false;
   let controlState: NonNullable<SessionRecord["acpx"]> = {};
+  let sawOwnedModelConfig = false;
   const acpErrors = new AcpErrorTracker();
   const client = new AcpClient({
     agentCommand: options.agentCommand,
@@ -1234,8 +1235,12 @@ export async function runOnce(
       acpErrors.observe(output, direction, message);
     },
     onSessionUpdate: (notification) => {
-      if (notification.update.sessionUpdate === "config_option_update") {
+      if (
+        notification.update.sessionUpdate === "config_option_update" &&
+        client.hasReusableSession(notification.sessionId)
+      ) {
         controlState = applyConfigOptionsToState(controlState, notification.update.configOptions);
+        sawOwnedModelConfig ||= controlState.model_control === "config_option";
       }
       if (promptTurnActive) {
         promptTurnHadSideEffects = true;
@@ -1257,6 +1262,15 @@ export async function runOnce(
   const permissionStatsBefore = client.getPermissionStats();
 
   const closeOwnedClient = ownDirectClient(client, control?.signal);
+
+  const initializeControlState = (createdSession: SessionCreateResult) => {
+    const configOptions = controlState.config_options ?? createdSession.configOptions ?? [];
+    // A later config update may already have withdrawn the creation-time model control.
+    if (createdSession.models && !sawOwnedModelConfig) {
+      applyAdvertisedModelState(controlState, createdSession.models);
+    }
+    controlState = applyConfigOptionsToState(controlState, configOptions);
+  };
 
   const runExecPromptAttempt = async (sessionId: string) => {
     assertControlAuthority(authority);
@@ -1313,15 +1327,12 @@ export async function runOnce(
         });
         assertControlAuthority(authority);
         const sessionId = createdSession.sessionId;
-        if (createdSession.models) {
-          applyAdvertisedModelState(controlState, createdSession.models);
-        }
-        controlState = applyConfigOptionsToState(controlState, createdSession.configOptions ?? []);
+        initializeControlState(createdSession);
         const modelApplication = await applyRequestedModelIfAdvertised({
           client,
           sessionId,
           requestedModel: options.sessionOptions?.model,
-          models: createdSession.models,
+          models: advertisedModelState(controlState),
           agentCommand: options.agentCommand,
           timeoutMs: options.timeoutMs,
           authority: authority,
