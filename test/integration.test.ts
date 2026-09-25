@@ -1889,62 +1889,115 @@ test("integration: exec --model rejects models not advertised by the agent", asy
   });
 });
 
-test("integration: Claude ACP prompt forwards saved model missing from reconnect advertisement", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
-    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-claude-"));
-
-    try {
+for (const reconnect of ["load", "resume"] as const) {
+  test(`integration: Claude ACP prompt forwards saved model missing from session/${reconnect} advertisement`, async () => {
+    await withTempHome(async (homeDir) => {
+      const fakeBinDir = path.join(homeDir, "bin");
+      await fs.mkdir(fakeBinDir);
       const fakeClaude = await writeFakeClaudeAgent(fakeBinDir);
-      const modelAgentCommand = `${JSON.stringify(fakeClaude)} --supports-load-session --advertise-models --omit-reconnect-model gpt-5.4`;
-      const created = await runCli(
-        [
-          "--agent",
-          modelAgentCommand,
-          "--approve-all",
-          "--cwd",
-          cwd,
-          "--model",
-          "gpt-5.4",
-          "sessions",
-          "new",
-        ],
-        homeDir,
-      );
-      assert.equal(created.code, 0, created.stderr);
+      const modelAgentCommand = `${JSON.stringify(fakeClaude)} --supports-${reconnect}-session --advertise-models --omit-reconnect-model gpt-5.4`;
+      const base = ["--agent", modelAgentCommand, "--approve-all", "--cwd", homeDir];
+      let sessionCreated = false;
 
-      const result = await runCli(
-        [
-          "--agent",
-          modelAgentCommand,
-          "--approve-all",
-          "--cwd",
-          cwd,
-          "--format",
-          "json",
-          "--model",
-          "gpt-5.4",
-          "prompt",
-          "echo hello",
-        ],
-        homeDir,
-      );
-      assert.equal(result.code, 0, result.stderr);
+      const body = await observeTestOutcome(async () => {
+        const created = await runCli(
+          [...base, "--format", "json", "--model", "gpt-5.4", "sessions", "new"],
+          homeDir,
+        );
+        assert.equal(created.code, 0, created.stderr);
+        sessionCreated = true;
+        const { acpxSessionId } = JSON.parse(created.stdout.trim()) as { acpxSessionId: string };
+        assert.equal(typeof acpxSessionId, "string");
 
-      const payloads = parseJsonRpcOutputLines(result.stdout);
-      const setModelRequest = payloads.find(
-        (payload) =>
-          payload.method === "session/set_config_option" &&
-          (payload.params as { configId?: unknown } | undefined)?.configId === "model",
-      ) as { params?: { configId?: string; value?: string } } | undefined;
-      assert(setModelRequest, "expected model session config despite stale advertisement");
-      assert.equal(setModelRequest.params?.value, "gpt-5.4");
-    } finally {
-      await fs.rm(fakeBinDir, { recursive: true, force: true });
-      await fs.rm(cwd, { recursive: true, force: true });
-    }
+        const result = await runCli([...base, "--format", "json", "prompt", "echo hello"], homeDir);
+        assert.equal(result.code, 0, result.stderr);
+        const payloads = parseJsonRpcOutputLines(result.stdout);
+        const reconnectRequests = payloads.filter(
+          (payload) =>
+            payload.method === `session/${reconnect}` && extractJsonRpcId(payload) !== undefined,
+        );
+        assert.equal(reconnectRequests.length, 1, "expected the saved session to reconnect once");
+        const reconnectRequest = reconnectRequests[0];
+        assert.equal(
+          (reconnectRequest.params as { sessionId?: string } | undefined)?.sessionId,
+          acpxSessionId,
+        );
+        assert.equal(
+          payloads.some((payload) => payload.method === "session/new"),
+          false,
+        );
+
+        const reconnectResponseIndex = payloads.findIndex(
+          (payload) =>
+            extractJsonRpcId(payload) === extractJsonRpcId(reconnectRequest) &&
+            !Object.hasOwn(payload, "method") &&
+            !Object.hasOwn(payload, "error") &&
+            Object.hasOwn(payload, "result"),
+        );
+        assert(reconnectResponseIndex >= 0, `expected a successful session/${reconnect} response`);
+        const reconnectResult = payloads[reconnectResponseIndex].result as {
+          configOptions?: Array<{
+            id?: string;
+            type?: string;
+            options?: Array<{ value?: string }>;
+          }>;
+        };
+        const modelConfig = reconnectResult.configOptions?.find((option) => option.id === "model");
+        assert.equal(modelConfig?.type, "select");
+        assert.deepEqual(
+          modelConfig?.options?.map((option) => option.value),
+          ["default-model", "fast-model", "smart-model", "gpt-5.2"],
+          `session/${reconnect} advertisement must omit the saved gpt-5.4 model`,
+        );
+
+        const setModelIndex = payloads.findIndex(
+          (payload) =>
+            payload.method === "session/set_config_option" &&
+            (payload.params as { configId?: unknown } | undefined)?.configId === "model",
+        );
+        assert(setModelIndex > reconnectResponseIndex, "expected model replay after reconnect");
+        const setModelRequest = payloads[setModelIndex];
+        assert.deepEqual(setModelRequest.params, {
+          sessionId: acpxSessionId,
+          configId: "model",
+          value: "gpt-5.4",
+        });
+        const setModelRequestId = extractJsonRpcId(setModelRequest);
+        assert.notEqual(setModelRequestId, undefined);
+        const setModelResponseIndex = payloads.findIndex(
+          (payload) =>
+            extractJsonRpcId(payload) === setModelRequestId &&
+            !Object.hasOwn(payload, "method") &&
+            !Object.hasOwn(payload, "error") &&
+            Object.hasOwn(payload, "result"),
+        );
+        assert(
+          setModelResponseIndex > setModelIndex,
+          "expected the adapter to accept model replay",
+        );
+        const promptIndex = payloads.findIndex((payload) => payload.method === "session/prompt");
+        assert(promptIndex > setModelResponseIndex, "expected prompt after accepted model replay");
+        assert.equal(
+          payloads.some((payload) => extractAgentMessageChunkText(payload) === "hello"),
+          true,
+        );
+      });
+
+      const cleanup = await observeTestOutcome(async () => {
+        if (sessionCreated) {
+          const closed = await runCli([...base, "sessions", "close"], homeDir, {
+            timeoutMs: 10_000,
+          });
+          assert.equal(closed.code, 0, closed.stderr);
+        }
+      });
+      if (!cleanup.ok) {
+        retainedCliHomes.add(homeDir);
+      }
+      unwrapTestOutcomes(body, cleanup);
+    });
   });
-});
+}
 
 test("integration: prompt --model updates existing session model before prompt", async () => {
   await withTempHome(async (homeDir) => {

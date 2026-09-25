@@ -993,7 +993,7 @@ class MockAgent implements Agent {
       response.configOptions = buildConfigOptions(
         this.sessions.get(sessionId) ?? createSessionState(false),
         this.options.modelConfigId,
-        undefined,
+        this.options.omitReconnectModelId,
         undefined,
         this.options.advertiseModelProvider,
       );
