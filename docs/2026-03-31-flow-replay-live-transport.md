@@ -64,6 +64,16 @@ re-decided during coding:
 - The server computes patches from **semantic viewer state**, not by patching
   storage files directly.
 - The on-disk bundle format stays unchanged in this work.
+- Direct bundle loading and live snapshots share one conversation projection.
+  Display ranges come from the attempt's captured event interval; the original
+  event bounds and raw trace remain unchanged.
+- The projection retains recoverable event history independently of the bounded
+  runtime checkpoint. Saved message identities require demonstrated checkpoint
+  correspondence. Missing or contradictory history keeps known checkpoint data
+  and raw events without inventing message ownership.
+- A viewer-local range with `messageEnd < messageStart` highlights no message.
+  This covers metadata-only intervals and prepared steps without captured
+  conversation; it does not fall back to a previous turn's highlight.
 - Replaying an unchanged bundle preserves message identities. Projected user
   messages derive their identity from the session bundle and event sequence;
   message identities already present in a persisted checkpoint stay unchanged.

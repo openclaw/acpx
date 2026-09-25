@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { synthesizeLiveRunState } from "../examples/flows/replay-viewer/server/live-run-state.js";
 import {
   advancePlaybackPlayhead,
   resolvePlaybackResumeMs,
   resolveSelectedStepIndexAfterBundleUpdate,
 } from "../examples/flows/replay-viewer/src/hooks/use-playback-controller.js";
+import { projectRunBundle } from "../examples/flows/replay-viewer/src/lib/run-projection.js";
 import { resolveSessionRenderState } from "../examples/flows/replay-viewer/src/lib/session-render-state.js";
 import {
   buildGraph,
@@ -1241,7 +1241,7 @@ test("live ACP range growth changes only the current attempt's replay duration",
     [3, 1_020, 3],
   ] as const) {
     bundle.sessions["main-bundle"].events = events.slice(0, eventCount);
-    const state = synthesizeLiveRunState({ ...bundle, schema: "acpx.viewer-run-live.v1" });
+    const state = projectRunBundle({ ...bundle, schema: "acpx.viewer-run-live.v1" });
     assert.equal(state.steps[1]?.trace?.conversation?.messageStart, 2);
     assert.equal(state.steps[1]?.trace?.conversation?.messageEnd, messageEnd);
     const timeline = buildPlaybackTimeline(state);

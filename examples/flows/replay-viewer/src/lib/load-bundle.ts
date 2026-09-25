@@ -10,6 +10,7 @@ import type {
   SessionRecord,
 } from "../types.js";
 import type { BundleReader } from "./bundle-reader.js";
+import { projectRunBundle } from "./run-projection.js";
 import { mergeLiveRunState } from "./run-state.js";
 
 export async function loadRunBundle(reader: BundleReader): Promise<LoadedRunBundle> {
@@ -44,7 +45,7 @@ export async function loadRunBundle(reader: BundleReader): Promise<LoadedRunBund
     ),
   );
 
-  return {
+  return projectRunBundle({
     sourceType: reader.sourceType,
     sourceLabel: reader.label,
     manifest,
@@ -54,7 +55,7 @@ export async function loadRunBundle(reader: BundleReader): Promise<LoadedRunBund
     steps,
     trace: trace.toSorted((left, right) => left.seq - right.seq),
     sessions,
-  };
+  });
 }
 
 async function readJson<T>(reader: BundleReader, relativePath: string): Promise<T> {

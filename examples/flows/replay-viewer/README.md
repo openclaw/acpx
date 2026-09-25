@@ -79,6 +79,19 @@ history locally, so you can still rewind while new steps continue to arrive.
 - the ACP conversation slice for the selected ACP step
 - the raw bundled ACP event slice for that step
 
+Direct loads and live updates reconstruct conversation history from the bundled
+session events. Earlier attempts keep their own messages when the runtime's
+bounded checkpoint advances, and captured long responses remain readable.
+Saved message identities are reused only when the reconstructed history matches
+the checkpoint.
+
+Recovery is limited to the data in the bundle. Checkpoint-only bundles retain
+their saved content. Incomplete or contradictory history keeps the checkpoint
+and raw events without highlighting an unrelated message as the selected turn.
+A prepared step with no captured conversation has no highlighted message yet.
+Pending setup output stays in raw events until its turn's message boundary is known.
+The viewer does not change runtime retention limits or rewrite saved bundles.
+
 The full flow definition remains the main graph. The run is shown as an overlay
 on that graph rather than replacing it with an execution-only path.
 Unused components, including loops, remain visible even when the run completes

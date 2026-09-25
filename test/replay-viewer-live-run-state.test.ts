@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { synthesizeLiveRunState } from "../examples/flows/replay-viewer/server/live-run-state.js";
+import { projectRunBundle } from "../examples/flows/replay-viewer/src/lib/run-projection.js";
 import { resolveSessionRenderState } from "../examples/flows/replay-viewer/src/lib/session-render-state.js";
 import {
   listSessionViews,
@@ -16,9 +16,9 @@ import type {
   ViewerRunLiveState,
 } from "../examples/flows/replay-viewer/src/types.js";
 
-test("synthesizeLiveRunState replays bundled ACP events into a live current ACP attempt", () => {
+test("projectRunBundle replays bundled ACP events into a live current ACP attempt", () => {
   const sessionId = "main-bundle";
-  const state = synthesizeLiveRunState(
+  const state = projectRunBundle(
     makeLiveBundle({
       sessionId,
       record: {
@@ -68,9 +68,9 @@ test("synthesizeLiveRunState replays bundled ACP events into a live current ACP 
   assert.equal(agent.Agent?.content?.[0]?.Text, "hel");
 });
 
-test("synthesizeLiveRunState replays only new session events beyond record.lastSeq", () => {
+test("projectRunBundle does not duplicate content represented by a checkpoint", () => {
   const sessionId = "main-bundle";
-  const state = synthesizeLiveRunState(
+  const state = projectRunBundle(
     makeLiveBundle({
       sessionId,
       record: {
@@ -249,6 +249,53 @@ function makeFlow(): FlowDefinitionSnapshot {
   };
 }
 
+for (const checkpointed of [false, true]) {
+  test(`logical prompt precedes captured setup content (checkpoint: ${checkpointed})`, () => {
+    const sessionId = "main-bundle";
+    const record = liveToolBaseRecord();
+    const user = {
+      User: {
+        id: checkpointed ? "saved-setup-user" : `replay:${sessionId}:2`,
+        content: [{ Text: "hello" }],
+      },
+    };
+    if (checkpointed) {
+      record.lastSeq = 3;
+      record.messages = [
+        user,
+        { Agent: { content: [{ Text: "setup answer" }], tool_results: {} } },
+      ];
+    }
+    const input = makeLiveBundle({
+      sessionId,
+      record,
+      events: [
+        // Runtime normalization admits the captured client stream, including
+        // notifications whose session ID differs from the current binding.
+        makeChunkEvent("another-session", 1, "setup "),
+        makePromptEvent("agent-session", 2, "hello"),
+        makeChunkEvent("agent-session", 3, "answer"),
+        makeChunkEvent("agent-session", 4, " tail"),
+      ],
+    });
+    const before = structuredClone(input);
+    const projected = projectRunBundle(input);
+    assert.deepEqual(projected.sessions[sessionId].record.messages, [
+      user,
+      { Agent: { content: [{ Text: "setup answer tail" }], tool_results: {} } },
+    ]);
+    assert.deepEqual(projected.steps[0].trace?.conversation, {
+      sessionId,
+      messageStart: 0,
+      messageEnd: 1,
+      eventStartSeq: 1,
+      eventEndSeq: 4,
+    });
+    assert.equal(projected.steps[0].promptText, "hello");
+    assert.deepEqual(input, before);
+  });
+}
+
 function makePromptEvent(sessionId: string, seq: number, text: string): FlowBundledSessionEvent {
   return {
     seq,
@@ -360,7 +407,7 @@ for (const terminal of ["completed", "failed"] as const) {
         // event log still contains its prefix; only events beyond lastSeq apply.
         const input = makeLiveBundle({ sessionId, record, events });
         const original = structuredClone(input);
-        const live = synthesizeLiveRunState(input);
+        const live = projectRunBundle(input);
         assert.deepEqual(input, original, "live synthesis must preserve its input");
         const selected = selectAttemptView(live, 0);
         assert.ok(selected);

@@ -1,5 +1,5 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
-import { modelStateFromConfigOptions, type SessionModelState } from "../acp/model-support.js";
+import { modelStateFromConfigOptions, type SessionModelState } from "../acp/model-config-state.js";
 import type { SessionAcpxState } from "../types.js";
 
 function configOptionsAreAuthoritative(state: SessionAcpxState): boolean {

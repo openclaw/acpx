@@ -11,6 +11,8 @@ Repo: https://github.com/openclaw/acpx
 - Fix nested documentation builds without a custom domain and keep their canonical URLs within the deployment path.
 - Temporary sessions: preserve model catalogs updated during session creation before applying startup model and config selections, including removed model support.
 - Windows/terminals: preserve stdout and stderr from commands launched through the shell fallback.
+- Replay viewer: retain recoverable conversation history and long responses past checkpoint limits, keeping earlier attempt selections and saved message identities aligned across reloads.
+- Session metadata: keep token usage serializable for opaque message IDs such as `__proto__`.
 
 ## 0.19.3 - 2026-09-25
 

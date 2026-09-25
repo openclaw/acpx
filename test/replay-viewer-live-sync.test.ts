@@ -678,6 +678,7 @@ for (const sourceType of ["prompt", "user_message_chunk"] as const) {
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as FlowBundledSessionEvent);
+      events[0].direction = "inbound";
       events[0].message = {
         jsonrpc: "2.0",
         method: "session/update",
