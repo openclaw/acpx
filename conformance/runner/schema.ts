@@ -59,6 +59,7 @@ const check = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("updates_count_at_least"),
     min: z.number().int().nonnegative(),
+    from: nonempty.optional(),
   }),
   z.strictObject({ type: z.literal("updates_all_session"), session: nonempty }),
   z.strictObject({ type: z.literal("updates_text_includes"), text: nonempty }),

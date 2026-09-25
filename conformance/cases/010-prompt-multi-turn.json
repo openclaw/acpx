@@ -44,7 +44,13 @@
     },
     {
       "type": "updates_count_at_least",
-      "min": 2
+      "from": "turn1",
+      "min": 1
+    },
+    {
+      "type": "updates_count_at_least",
+      "from": "turn2",
+      "min": 1
     },
     {
       "type": "updates_all_session",

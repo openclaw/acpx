@@ -140,6 +140,29 @@ Each case file can define:
   - `updates_session_update_includes`
   - `filesystem_operation`
 
+`updates_count_at_least` accepts an optional literal `from` name, for example
+`{ "type": "updates_count_at_least", "from": "turn2", "min": 1 }`.
+It selects the prompt named by `prompt.save_as` or `prompt_background.save_as`.
+An `await_background.save_as` name aliases the same original prompt; awaiting it
+does not restart its observation. Names are literal, without saved-value
+interpolation. Reusing a name selects its latest naming operation; saving a
+`new_session` result there removes the old prompt link. Existing aliases retain
+their original prompt.
+
+A scoped count includes matching-session, SDK-normalized callbacks from the
+prompt's handoff to the SDK message writable until the immediately registered
+observer of its original request Promise runs, on success or rejection. This
+measures callback delivery, not raw frame timing, completed byte delivery or
+causal origin. A delayed earlier-turn callback arriving inside a later scope can
+still count because notifications have no prompt-origin ID.
+
+The source must have an observed handoff and completion and must be unambiguous,
+even when `min` is zero. Overlapping dispatched prompts in the same session make
+their scopes ambiguous, including prompts without a saved name. Different
+sessions are counted independently. Checks do not wait for unfinished background
+requests. Without `from`, counts and the other update checks stay case-wide,
+including intentional post-success drain checks.
+
 `filesystem_operation` requires a completed local filesystem callback somewhere
 in the case, before checks run after the optional settle wait. It matches
 `method` (`read_text_file` or `write_text_file`), `session` (a literal ID or saved

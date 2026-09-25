@@ -40,6 +40,8 @@ Repo: https://github.com/openclaw/acpx
 - Conformance: require completed filesystem callbacks with matching parameters and outcomes in the mock permission/read/write cases, so agent prose alone cannot make them pass.
 - Replay viewer: keep the graph, playback controls, inspector, and run selector accessible when panels stack on narrower screens.
 
+- Conformance: require per-prompt update evidence for single- and multi-turn checks instead of borrowing setup output or accumulated earlier updates.
+
 ## 0.19.2 - 2026-09-23
 
 ### Highlights

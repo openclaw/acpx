@@ -28,6 +28,7 @@
     },
     {
       "type": "updates_count_at_least",
+      "from": "prompt_result",
       "min": 1
     }
   ],

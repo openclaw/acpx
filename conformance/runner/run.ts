@@ -9,7 +9,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   ClientSideConnection,
   PROTOCOL_VERSION,
-  type PromptResponse,
   type ReadTextFileRequest,
   type ReadTextFileResponse,
   RequestError,
@@ -25,6 +24,11 @@ import { FsSafeError } from "@openclaw/fs-safe/errors";
 import { root, type Root } from "@openclaw/fs-safe/root";
 import { sliceReadWindow } from "../../src/file-read-window.js";
 import { AdapterLifetime, AdapterRetirementError } from "./adapter-lifetime.js";
+import {
+  PromptObservations,
+  type ObservedPrompt,
+  type PromptObservation,
+} from "./prompt-observations.js";
 import {
   parseCaseDefinition,
   parseProfileDefinition,
@@ -84,6 +88,7 @@ type RunReport = {
 type Harness = {
   connection: ClientSideConnection;
   client: RunnerClient;
+  prompts: PromptObservations;
   initializeResult: InitializeResponse;
   shutdown: () => Promise<void>;
 };
@@ -95,8 +100,23 @@ type ParsedCommand = {
 
 type ExecutionContext = {
   saved: Record<string, unknown>;
-  background: Map<string, Promise<PromptResponse>>;
+  background: Map<string, ObservedPrompt>;
+  promptSources: Map<string, PromptObservation>;
 };
+
+function saveStepValue(
+  context: ExecutionContext,
+  name: string,
+  value: unknown,
+  observation?: PromptObservation,
+): void {
+  context.saved[name] = value;
+  if (observation) {
+    context.promptSources.set(name, observation);
+  } else {
+    context.promptSources.delete(name);
+  }
+}
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_UPDATE_TIMEOUT_MS = 30_000;
@@ -581,7 +601,8 @@ async function createHarness(options: CliOptions, signal: AbortSignal): Promise<
     permissionMode: options.permissionMode,
     defaultSessionCwd: options.cwd,
   });
-  const connection = new ClientSideConnection(() => client, stream);
+  const prompts = new PromptObservations(client.updates);
+  const connection = new ClientSideConnection(() => client, prompts.observeStream(stream));
   let initializeResult: InitializeResponse;
   let shutdownPromise: Promise<void> | undefined;
   const waitForSpawn = new Promise<void>((resolve, reject) => {
@@ -670,6 +691,7 @@ async function createHarness(options: CliOptions, signal: AbortSignal): Promise<
   return {
     connection,
     client,
+    prompts,
     initializeResult: initializeResult!,
     shutdown,
   };
@@ -837,23 +859,29 @@ async function executeCaseStep(params: {
       }
 
       if (step.save_as) {
-        context.saved[step.save_as] =
+        saveStepValue(
+          context,
+          step.save_as,
           result.ok && typeof result.value.sessionId === "string"
             ? result.value.sessionId
             : result.ok
               ? result.value
-              : result.error;
+              : result.error,
+        );
       }
       return;
     }
 
     case "prompt": {
       const sessionId = resolveMaybeSavedRef(step.session, context.saved);
-      const runPrompt = async () => {
-        return await harness.connection.prompt({
+      let observation: PromptObservation | undefined;
+      const runPrompt = () => {
+        const dispatched = harness.prompts.dispatch(harness.connection, {
           sessionId: sessionId as SessionId,
           prompt: step.prompt,
         });
+        observation = dispatched.observation;
+        return dispatched.pending;
       };
 
       const result = await executeWithExpectation({
@@ -870,26 +898,25 @@ async function executeCaseStep(params: {
       });
 
       if (step.save_as) {
-        context.saved[step.save_as] = result.ok ? result.value : result.error;
+        saveStepValue(context, step.save_as, result.ok ? result.value : result.error, observation);
       }
       return;
     }
 
     case "prompt_background": {
       const sessionId = resolveMaybeSavedRef(step.session, context.saved);
-      context.background.set(
-        step.save_as,
-        harness.connection.prompt({
-          sessionId: sessionId as SessionId,
-          prompt: step.prompt,
-        }),
-      );
+      const dispatched = harness.prompts.dispatch(harness.connection, {
+        sessionId: sessionId as SessionId,
+        prompt: step.prompt,
+      });
+      context.background.set(step.save_as, dispatched);
+      context.promptSources.set(step.save_as, dispatched.observation);
       return;
     }
 
     case "await_background": {
-      const pending = context.background.get(step.from);
-      if (!pending) {
+      const background = context.background.get(step.from);
+      if (!background) {
         throw new Error(`Unknown background prompt reference: ${step.from}`);
       }
 
@@ -898,11 +925,16 @@ async function executeCaseStep(params: {
         signal,
         timeoutMs: updateTimeoutMs,
         expectError: step.expect_error,
-        operation: async () => await pending,
+        operation: async () => await background.pending,
       });
 
       if (step.save_as) {
-        context.saved[step.save_as] = result.ok ? result.value : result.error;
+        saveStepValue(
+          context,
+          step.save_as,
+          result.ok ? result.value : result.error,
+          background.observation,
+        );
       }
       return;
     }
@@ -958,10 +990,19 @@ function evaluateCaseChecks(params: {
         break;
       }
       case "updates_count_at_least": {
+        const count =
+          check.from === undefined
+            ? params.harness.client.updates.length
+            : params.harness.prompts.count(
+                params.context.promptSources.get(check.from),
+                check.from,
+              );
         assert.equal(
-          params.harness.client.updates.length >= check.min,
+          count >= check.min,
           true,
-          `expected at least ${check.min} updates`,
+          check.from === undefined
+            ? `expected at least ${check.min} updates`
+            : `expected at least ${check.min} updates from ${JSON.stringify(check.from)}; observed ${count}`,
         );
         break;
       }
@@ -1054,6 +1095,7 @@ async function runCase(
   const context: ExecutionContext = {
     saved: Object.create(null) as Record<string, unknown>,
     background: new Map(),
+    promptSources: new Map(),
   };
   let failure: { error: unknown } | undefined;
   try {
