@@ -41,6 +41,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: keep the graph, playback controls, inspector, and run selector accessible when panels stack on narrower screens.
 
 - Conformance: require per-prompt update evidence for single- and multi-turn checks instead of borrowing setup output or accumulated earlier updates.
+- Terminals: wait for admitted terminal creation and its cleanup before reporting session or runtime shutdown complete, including children still awaiting spawn adoption.
 
 ## 0.19.2 - 2026-09-23
 

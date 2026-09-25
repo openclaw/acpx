@@ -47,6 +47,10 @@ type ManagedTerminal = {
   resolveExit: (response: WaitForTerminalExitResponse) => void;
 };
 
+type TerminalCreation = {
+  cleanupFailure?: { error: unknown };
+};
+
 export type TerminalManagerOptions = {
   cwd: string;
   permissionMode: PermissionMode;
@@ -194,6 +198,7 @@ export class TerminalManager {
   private readonly processHelperTimeoutMs: number;
   private readonly outputCeilingBytes: number | undefined;
   private readonly terminals = new Map<string, ManagedTerminal>();
+  private readonly creations = new Map<Promise<CreateTerminalResponse>, TerminalCreation>();
 
   constructor(options: TerminalManagerOptions) {
     this.outputCeilingBytes = readTerminalOutputCeiling();
@@ -221,9 +226,23 @@ export class TerminalManager {
     this.nonInteractivePermissions = nonInteractivePermissions ?? "deny";
   }
 
-  async createTerminal(
+  createTerminal(
     params: CreateTerminalRequest,
     authority?: AcpControlAuthority,
+  ): Promise<CreateTerminalResponse> {
+    const creation: TerminalCreation = {};
+    // Publish admission before authority or operation callbacks can reenter shutdown.
+    const pending = Promise.resolve().then(() => this.create(params, authority, creation));
+    this.creations.set(pending, creation);
+    const remove = () => this.creations.delete(pending);
+    void pending.then(remove, remove);
+    return pending;
+  }
+
+  private async create(
+    params: CreateTerminalRequest,
+    authority: AcpControlAuthority | undefined,
+    creation: TerminalCreation,
   ): Promise<CreateTerminalResponse> {
     assertControlAuthority(authority);
     const commandLine = toCommandLine(params.command, params.args);
@@ -309,7 +328,12 @@ export class TerminalManager {
         await terminal.descendants?.capture(terminal.processHelperTimeoutMs);
         assertControlAuthority(authority);
       } catch (error) {
-        await this.releaseTerminal({ terminalId, sessionId: params.sessionId });
+        try {
+          await this.releaseTerminal({ terminalId, sessionId: params.sessionId });
+        } catch (cleanupError) {
+          creation.cleanupFailure = { error: cleanupError };
+          throw cleanupError;
+        }
         throw error;
       }
 
@@ -469,12 +493,18 @@ export class TerminalManager {
   }
 
   async shutdown(): Promise<void> {
+    const creations = [...this.creations];
+    await Promise.allSettled(creations.map(([pending]) => pending));
     const results = await Promise.allSettled(
       Array.from(this.terminals.keys(), (terminalId) =>
         this.releaseTerminal({ terminalId, sessionId: "shutdown" }),
       ),
     );
-    const failures: unknown[] = [];
+    // Creation failures retain their own results; failed adoption cleanup also
+    // belongs to this shutdown, even if the following release retry succeeds.
+    const failures: unknown[] = creations.flatMap(([, creation]) =>
+      creation.cleanupFailure ? [creation.cleanupFailure.error] : [],
+    );
     for (const result of results) {
       if (result.status === "rejected") {
         failures.push(result.reason);

@@ -322,7 +322,8 @@ after storage recovers. Checkpoint retry saves current state without replaying t
 agent request.
 
 Call `shutdown()` when retiring a runtime. It cancels active prompts, closes owned
-connections, and waits for admitted work and probes to finish. New sessions,
+connections, and waits for admitted work and probes to finish. This includes
+terminal requests that have started a child process but have not yet returned. New sessions,
 turns, controls and probes then reject. Stored sessions remain available for a
 new runtime to resume. Hosts must still settle their own pending lifecycle
 admission callbacks; shutdown cannot complete an external host operation.

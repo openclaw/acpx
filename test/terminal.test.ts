@@ -127,6 +127,181 @@ async function withObservedSpawns(
   }
 }
 
+test("terminal creation is admitted before operation callbacks can start shutdown", async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-reentrant-shutdown-"));
+  let closing: Promise<void> | undefined;
+  const manager = new TerminalManager({
+    cwd,
+    permissionMode: "approve-all",
+    onOperation: (operation) => {
+      if (operation.method === "terminal/create" && operation.status === "running") {
+        closing = manager.shutdown();
+      }
+    },
+  });
+  try {
+    const created = await manager.createTerminal({
+      sessionId: "synthetic",
+      command: process.execPath,
+      args: ["-e", "process.exit(0)"],
+    });
+    assert(closing);
+    await closing;
+    await assert.rejects(
+      manager.terminalOutput({ sessionId: "synthetic", ...created }),
+      /Unknown terminal/u,
+    );
+  } finally {
+    await manager.shutdown();
+    await fs.rm(cwd, { recursive: true, force: true });
+  }
+});
+
+for (const failure of [new Error("synthetic adoption cleanup failure"), undefined]) {
+  test(
+    `shutdown retains adoption cleanup failure ${String(failure)} after successful retry`,
+    { timeout: 10_000 },
+    async () => {
+      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-adoption-failure-"));
+      const manager = new TerminalManager({ cwd, permissionMode: "approve-all", killGraceMs: 10 });
+      const controller = new AbortController();
+      const release = manager.releaseTerminal.bind(manager);
+      let firstRelease = true;
+      let closing: Promise<unknown> | undefined;
+      const closed: Promise<void>[] = [];
+      manager.releaseTerminal = async (params) => {
+        if (firstRelease) {
+          firstRelease = false;
+          throw failure;
+        }
+        return await release(params);
+      };
+      try {
+        await withObservedSpawns(
+          (child) => {
+            closed.push(new Promise<void>((resolve) => child.once("close", () => resolve())));
+            child.once("spawn", () => {
+              controller.abort();
+              closing = manager.shutdown().then(
+                () => undefined,
+                (error: unknown) => error,
+              );
+            });
+          },
+          async () => {
+            await assert.rejects(
+              manager.createTerminal(
+                {
+                  sessionId: "synthetic",
+                  command: process.execPath,
+                  args: ["-e", "setInterval(() => {}, 1000)"],
+                },
+                { signal: controller.signal },
+              ),
+              (error: unknown) => error === failure,
+            );
+            assert(closing);
+            const error = await closing;
+            assert(error instanceof AggregateError);
+            assert.deepEqual(error.errors, [failure]);
+            await Promise.all(closed);
+          },
+        );
+        // A completed shutdown does not permanently close the reusable terminal owner.
+        const fresh = await manager.createTerminal({
+          sessionId: "fresh",
+          command: process.execPath,
+          args: ["-e", "process.exit(0)"],
+        });
+        assert.equal(
+          (await manager.waitForTerminalExit({ sessionId: "fresh", ...fresh })).exitCode,
+          0,
+        );
+        await manager.releaseTerminal({ sessionId: "fresh", ...fresh });
+      } finally {
+        manager.releaseTerminal = release;
+        await closing;
+        await manager.shutdown();
+        await Promise.all(closed);
+        await fs.rm(cwd, { recursive: true, force: true });
+      }
+    },
+  );
+}
+
+for (const outcome of ["denied", "spawn-error", "cancelled"] as const) {
+  test(`ordinary ${outcome} terminal creation does not fail shutdown`, async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-create-error-"));
+    const manager = new TerminalManager({
+      cwd,
+      permissionMode: outcome === "denied" ? "deny-all" : "approve-all",
+    });
+    const controller = new AbortController();
+    if (outcome === "cancelled") {
+      controller.abort();
+    }
+    try {
+      const pending = manager.createTerminal(
+        { sessionId: "synthetic", command: path.join(cwd, "missing-native-executable"), args: [] },
+        { signal: controller.signal },
+      );
+      await Promise.all([assert.rejects(pending), manager.shutdown()]);
+    } finally {
+      await manager.shutdown();
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+}
+
+test("shutdown joins another admitted creation after one creation fails", async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-create-cohort-"));
+  let approve = (_approved: boolean) => {};
+  const approval = new Promise<boolean>((resolve) => {
+    approve = resolve;
+  });
+  let entered = () => {};
+  const question = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const manager = new TerminalManager({
+    cwd,
+    permissionMode: "approve-reads",
+    confirmExecute: async (command) => {
+      if (command.includes("denied-first")) {
+        return false;
+      }
+      entered();
+      return await approval;
+    },
+  });
+  const denied = manager.createTerminal({ sessionId: "first", command: "denied-first", args: [] });
+  const pending = manager.createTerminal({
+    sessionId: "second",
+    command: process.execPath,
+    args: ["-e", "process.exit(0)"],
+  });
+  let settled = false;
+  const closing = manager.shutdown().then(() => {
+    settled = true;
+  });
+  try {
+    await Promise.all([assert.rejects(denied), question]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(settled, false, "an earlier failure must not abandon the other creation");
+    approve(true);
+    const [created] = await Promise.all([pending, closing]);
+    await assert.rejects(
+      manager.terminalOutput({ sessionId: "second", ...created }),
+      /Unknown terminal/u,
+    );
+  } finally {
+    approve(false);
+    await Promise.allSettled([denied, pending, closing]);
+    await manager.shutdown();
+    await fs.rm(cwd, { recursive: true, force: true });
+  }
+});
+
 function getManagedStdio(
   manager: TerminalManager,
   terminalId: string,
