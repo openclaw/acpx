@@ -28,8 +28,14 @@
       "values": ["end_turn", "completed", "done"]
     },
     {
-      "type": "updates_text_includes",
-      "text": "acpx"
+      "type": "filesystem_operation",
+      "method": "read_text_file",
+      "session": "$session_id",
+      "path": "README.md",
+      "outcome": {
+        "type": "success",
+        "content_includes": "acpx"
+      }
     }
   ],
   "timeouts": {

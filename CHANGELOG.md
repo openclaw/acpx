@@ -37,6 +37,8 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/resume: retire the original session owner before resuming the same local record from another cwd or name, including `sessions ensure`, so subsequent prompts use the requested workspace.
 - Replay viewer: show pending tools as running when status-only updates contain no raw output, while preserving completed and failed results.
 
+- Conformance: require completed filesystem callbacks with matching parameters and outcomes in the mock permission/read/write cases, so agent prose alone cannot make them pass.
+
 ## 0.19.2 - 2026-09-23
 
 ### Highlights

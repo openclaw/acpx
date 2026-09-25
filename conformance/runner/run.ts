@@ -38,6 +38,14 @@ type PermissionMode = "approve-all" | "deny-all";
 type OutputFormat = "text" | "json";
 type TimeoutKind = "request" | "update";
 
+type FilesystemOperation = {
+  method: "read_text_file" | "write_text_file";
+  sessionId: string;
+  path: string;
+  content?: string;
+  outcome: { type: "success"; content?: string } | { type: "error"; code?: number };
+};
+
 type CliOptions = {
   profilePath: string;
   casesDir: string;
@@ -96,6 +104,7 @@ const DEFAULT_INITIALIZE_TIMEOUT_MS = 10_000;
 
 class RunnerClient implements Client {
   readonly updates: SessionNotification[] = [];
+  readonly filesystemOperations: FilesystemOperation[] = [];
   private readonly permissionMode: PermissionMode;
   private readonly defaultSessionCwd: string;
   private readonly sessionCwds = new Map<SessionId, string>();
@@ -143,21 +152,57 @@ class RunnerClient implements Client {
   }
 
   async readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
-    return await this.withSessionFile(params, async (workspace, filePath) => ({
-      content: sliceReadWindow(await workspace.readText(filePath), params.line, params.limit),
-    }));
+    return await this.observeFileOperation("read_text_file", params, () =>
+      this.withSessionFile(params, async (workspace, filePath) => ({
+        content: sliceReadWindow(await workspace.readText(filePath), params.line, params.limit),
+      })),
+    );
   }
 
   async writeTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
-    return await this.withSessionFile(params, async (workspace, filePath) => {
-      const target = await workspace.resolve(filePath);
-      await using file = await workspace.openWritable(target, { mode: 0o666 });
-      if (file.createdForWrite) {
-        this.createdFiles.set(file.realPath, workspace);
-      }
-      await file.handle.writeFile(params.content, "utf8");
-      return {};
-    });
+    return await this.observeFileOperation("write_text_file", params, () =>
+      this.withSessionFile(params, async (workspace, filePath) => {
+        const target = await workspace.resolve(filePath);
+        await using file = await workspace.openWritable(target, { mode: 0o666 });
+        if (file.createdForWrite) {
+          this.createdFiles.set(file.realPath, workspace);
+        }
+        await file.handle.writeFile(params.content, "utf8");
+        return {};
+      }),
+    );
+  }
+
+  private async observeFileOperation<T extends ReadTextFileResponse | WriteTextFileResponse>(
+    method: FilesystemOperation["method"],
+    params: ReadTextFileRequest | WriteTextFileRequest,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const request = {
+      method,
+      sessionId: params.sessionId,
+      path: params.path,
+      content: "content" in params ? params.content : undefined,
+    };
+    try {
+      const result = await operation();
+      // This records local completion, not response delivery or prompt attribution.
+      this.filesystemOperations.push({
+        ...request,
+        outcome: {
+          type: "success",
+          content:
+            "content" in result && typeof result.content === "string" ? result.content : undefined,
+        },
+      });
+      return result;
+    } catch (error) {
+      this.filesystemOperations.push({
+        ...request,
+        outcome: { type: "error", code: error instanceof RequestError ? error.code : undefined },
+      });
+      throw error;
+    }
   }
 
   async cleanup(): Promise<void> {
@@ -954,6 +999,37 @@ function evaluateCaseChecks(params: {
             `expected at least one update with sessionUpdate="${value}"`,
           );
         }
+        break;
+      }
+      case "filesystem_operation": {
+        const session = resolveMaybeSavedRef(check.session, params.context.saved);
+        const matched = params.harness.client.filesystemOperations.some((operation) => {
+          if (
+            operation.method !== check.method ||
+            operation.sessionId !== session ||
+            operation.path !== check.path ||
+            operation.content !== check.content
+          ) {
+            return false;
+          }
+          if (check.outcome.type === "error") {
+            return (
+              operation.outcome.type === "error" && operation.outcome.code === check.outcome.code
+            );
+          }
+          return (
+            operation.outcome.type === "success" &&
+            (check.outcome.content_includes === undefined ||
+              operation.outcome.content
+                ?.toLowerCase()
+                .includes(check.outcome.content_includes.toLowerCase()) === true)
+          );
+        });
+        assert.equal(
+          matched,
+          true,
+          `expected completed filesystem operation: ${JSON.stringify(check)}`,
+        );
         break;
       }
       default:

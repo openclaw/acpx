@@ -30,6 +30,16 @@
     {
       "type": "updates_text_includes",
       "text": "wrote .acpx-conformance-write.txt"
+    },
+    {
+      "type": "filesystem_operation",
+      "method": "write_text_file",
+      "session": "$session_id",
+      "path": ".acpx-conformance-write.txt",
+      "content": "hello",
+      "outcome": {
+        "type": "success"
+      }
     }
   ],
   "timeouts": {

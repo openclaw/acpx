@@ -31,6 +31,16 @@
       "type": "saved_stop_reason_in",
       "key": "permission_prompt_result",
       "values": ["end_turn", "cancelled", "failed"]
+    },
+    {
+      "type": "filesystem_operation",
+      "method": "read_text_file",
+      "session": "$session_id",
+      "path": "README.md",
+      "outcome": {
+        "type": "error",
+        "code": -32001
+      }
     }
   ],
   "timeouts": {

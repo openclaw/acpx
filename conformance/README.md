@@ -138,6 +138,24 @@ Each case file can define:
   - `updates_all_session`
   - `updates_text_includes`
   - `updates_session_update_includes`
+  - `filesystem_operation`
+
+`filesystem_operation` requires a completed local filesystem callback somewhere
+in the case, before checks run after the optional settle wait. It matches
+`method` (`read_text_file` or `write_text_file`), `session` (a literal ID or saved
+reference), and the exact literal request `path`. Writes also require exact
+`content`, including an empty string when that is the intended write.
+`outcome` is either `{ "type": "success" }` or
+`{ "type": "error", "code": -32001 }` with the expected numeric error code.
+Successful reads may add `content_includes` inside `outcome` to match a
+case-insensitive substring of the actual returned file content.
+
+This check proves local callback completion, not prompt attribution, response
+delivery or peer receipt. A completed callback during session creation or an
+earlier prompt can satisfy it; an unfinished callback cannot. The mock
+permission/read/write cases require these operation checks in addition to their
+prompt completion expectations. Agent prose and a separate permission request
+cannot substitute for the actual filesystem operation.
 
 When a step declares `expect_error`, its operation must fail. Optional `codes`
 and `message_any` fields filter the failure; `{}` accepts any operation error.

@@ -66,6 +66,29 @@ const check = z.discriminatedUnion("type", [
     type: z.literal("updates_session_update_includes"),
     values: z.array(nonempty).nonempty(),
   }),
+  z
+    .strictObject({
+      type: z.literal("filesystem_operation"),
+      method: z.enum(["read_text_file", "write_text_file"]),
+      session: nonempty,
+      path: nonempty,
+      content: z.string().optional(),
+      outcome: z.discriminatedUnion("type", [
+        z.strictObject({ type: z.literal("success"), content_includes: nonempty.optional() }),
+        z.strictObject({ type: z.literal("error"), code: z.number().int() }),
+      ]),
+    })
+    .refine(
+      (value) => (value.method === "write_text_file") === (value.content !== undefined),
+      "content is required only for write_text_file",
+    )
+    .refine(
+      (value) =>
+        value.method === "read_text_file" ||
+        value.outcome.type === "error" ||
+        value.outcome.content_includes === undefined,
+      "content_includes is only supported for successful reads",
+    ),
 ]);
 
 const caseDefinition = z.strictObject({
