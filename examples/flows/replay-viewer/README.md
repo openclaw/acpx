@@ -87,6 +87,8 @@ Dashed return edges follow their final layout direction. A downward branch merge
 stays solid even when another path reaches its target sooner.
 
 Graph nodes remain visible during playback, and their cards resize as content changes.
+At narrower widths, the graph controls and inspector stack within the viewport;
+the run selector becomes a bounded top section. Each section scrolls independently.
 Follow mode centers the selected attempt when the graph viewport is replaced,
 including runs with matching graph node IDs and layouts.
 

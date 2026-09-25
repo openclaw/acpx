@@ -154,7 +154,7 @@ export function App() {
           <section className="stage">
             {bundle ? (
               <section className="canvas-card">
-                <div className="canvas-card__flow" style={{ minHeight: "360px" }}>
+                <div className="canvas-card__flow">
                   <MeasuredFlow
                     key={bundle.run.runId}
                     nodes={graph.nodes}

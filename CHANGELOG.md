@@ -38,6 +38,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: show pending tools as running when status-only updates contain no raw output, while preserving completed and failed results.
 
 - Conformance: require completed filesystem callbacks with matching parameters and outcomes in the mock permission/read/write cases, so agent prose alone cannot make them pass.
+- Replay viewer: keep the graph, playback controls, inspector, and run selector accessible when panels stack on narrower screens.
 
 ## 0.19.2 - 2026-09-23
 

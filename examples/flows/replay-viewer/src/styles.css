@@ -1353,12 +1353,9 @@ code {
 
 @media (max-width: 1160px) {
   .viewer-layout {
-    flex-direction: column;
-  }
-
-  .inspector {
-    flex: 0 0 auto;
-    min-height: 320px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   }
 }
 
@@ -1366,6 +1363,7 @@ code {
   .app-shell,
   .app-shell--rail-collapsed {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .app-main {
@@ -1374,6 +1372,7 @@ code {
 
   .run-browser {
     height: auto;
+    max-height: 30dvh;
     border-left: 1px solid var(--panel-border);
     border-radius: 14px;
   }
