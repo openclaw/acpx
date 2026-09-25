@@ -88,6 +88,8 @@ the checkpoint.
 Recovery is limited to the data in the bundle. Checkpoint-only bundles retain
 their saved content. Incomplete or contradictory history keeps the checkpoint
 and raw events without highlighting an unrelated message as the selected turn.
+Without a valid checkpoint cursor, captured events are not appended to saved messages.
+With a valid cursor, replay stops before the first gap in the following event sequence.
 A prepared step with no captured conversation has no highlighted message yet.
 Pending setup output stays in raw events until its turn's message boundary is known.
 The viewer does not change runtime retention limits or rewrite saved bundles.

@@ -16,6 +16,111 @@ const SESSION_ID = "projection-session";
 const TIMESTAMP = "2026-09-25T12:00:00.000Z";
 const LAST_ANSWER = `${"long answer ".repeat(750)}recoverable final marker`;
 
+test("a nonempty checkpoint without a cursor preserves saved content without claiming events", () => {
+  const fixture = completedTurnFixture();
+  delete fixture.record.lastSeq;
+  const events = [
+    ...fixture.events,
+    promptEvent(3, "unpositioned question"),
+    chunkEvent(4, "unpositioned answer"),
+    updateEvent(5, { sessionUpdate: "usage_update", outputTokens: 99 }),
+  ];
+  const intervals = [...fixture.intervals, { eventStartSeq: 3, eventEndSeq: 5 }];
+  const untouched = structuredClone({ record: fixture.record, events, intervals });
+  const projected = projectSession(SESSION_ID, fixture.record, events, intervals, TIMESTAMP);
+
+  assert.deepEqual(projected.record.messages, fixture.record.messages);
+  assert.deepEqual(projected.record.request_token_usage, fixture.record.request_token_usage);
+  assert.deepEqual(projected.record.cumulative_token_usage, fixture.record.cumulative_token_usage);
+  assert.equal(projected.record.lastSeq, undefined);
+  assert.equal(projected.eventMessages.size, 0);
+  assert.equal(
+    projectConversationRange(projected, { ...trace(1, 2), messageStart: 0, messageEnd: 1 })
+      .messageEnd,
+    -1,
+  );
+  assert.equal(projectConversationRange(projected, trace(3, 5)).messageEnd, -1);
+  assert.deepEqual({ record: fixture.record, events, intervals }, untouched);
+});
+
+for (const includeHistory of [false, true]) {
+  for (const includeAcceptedPrefix of [false, true]) {
+    test(`a tail gap ${includeAcceptedPrefix ? "after an accepted prefix" : "at the checkpoint boundary"} stops replay with ${includeHistory ? "captured" : "no captured"} history`, () => {
+      const fixture = completedTurnFixture();
+      const history = includeHistory ? fixture.events : [];
+      const accepted = includeAcceptedPrefix ? [chunkEvent(3, " accepted tail")] : [];
+      const nextPromptSeq = includeAcceptedPrefix ? 5 : 4;
+      const events = [
+        ...history,
+        ...accepted,
+        promptEvent(nextPromptSeq, "unaccepted question"),
+        chunkEvent(nextPromptSeq + 1, "unaccepted answer"),
+      ];
+      const intervals = [
+        ...fixture.intervals,
+        { eventStartSeq: 3, eventEndSeq: 3 },
+        { eventStartSeq: nextPromptSeq, eventEndSeq: nextPromptSeq + 1 },
+      ];
+      const untouched = structuredClone({ record: fixture.record, events, intervals });
+      const projected = projectSession(SESSION_ID, fixture.record, events, intervals, TIMESTAMP);
+      const acceptedOnly = projectSession(
+        SESSION_ID,
+        fixture.record,
+        [...history, ...accepted],
+        intervals,
+        TIMESTAMP,
+      );
+
+      assert.deepEqual(projected, acceptedOnly);
+      assert.equal(projected.record.lastSeq, includeAcceptedPrefix ? 3 : 2);
+      assert.equal(
+        agentText(projected.record, 1),
+        includeAcceptedPrefix ? "previous answer accepted tail" : "previous answer",
+      );
+      assert.equal(projected.eventMessages.has(3), includeAcceptedPrefix);
+      assert.equal(projected.eventMessages.has(nextPromptSeq), false);
+      assert.equal(projected.eventMessages.has(nextPromptSeq + 1), false);
+      assert.equal(
+        projectConversationRange(projected, trace(nextPromptSeq, nextPromptSeq + 1)).messageEnd,
+        -1,
+      );
+      assert.deepEqual({ record: fixture.record, events, intervals }, untouched);
+    });
+  }
+}
+
+test("a prompt beyond a gap cannot claim earlier pending setup through lookahead", () => {
+  const fixture = completedTurnFixture();
+  const accepted = chunkEvent(3, " unowned setup");
+  const events = [
+    ...fixture.events,
+    accepted,
+    promptEvent(5, "unaccepted question"),
+    chunkEvent(6, "unaccepted answer"),
+  ];
+  const pending: ProjectionInterval = { eventStartSeq: 3, eventEndSeq: 6, pending: true };
+  const intervals = [...fixture.intervals, pending];
+  const untouched = structuredClone({ record: fixture.record, events, intervals });
+  const projected = projectSession(SESSION_ID, fixture.record, events, intervals, TIMESTAMP);
+  const acceptedOnly = projectSession(
+    SESSION_ID,
+    fixture.record,
+    [...fixture.events, accepted],
+    intervals,
+    TIMESTAMP,
+  );
+
+  assert.deepEqual(projected, acceptedOnly);
+  assert.deepEqual(projected.record.messages, fixture.record.messages);
+  assert.deepEqual(projected.record.request_token_usage, fixture.record.request_token_usage);
+  assert.equal(projected.record.lastSeq, 3);
+  assert.equal(projected.eventMessages.has(3), false);
+  assert.equal(projected.eventMessages.has(5), false);
+  assert.equal(projected.eventMessages.has(6), false);
+  assert.equal(projectConversationRange(projected, trace(3, 6)).messageEnd, -1);
+  assert.deepEqual({ record: fixture.record, events, intervals }, untouched);
+});
+
 test("a malformed tail preserves reconstructed history and the accepted tail prefix", () => {
   const fixture = historicalFixture();
   const accepted = acceptedTail();

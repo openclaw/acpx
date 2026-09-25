@@ -97,7 +97,7 @@ export function projectSession(
 ): SessionProjection {
   const checkpoint = structuredClone(baseRecord);
   const baseLastSeq = validSequence(checkpoint.lastSeq, true) ? checkpoint.lastSeq : 0;
-  const orderedEvents = orderedEventPrefix(events);
+  const orderedEvents = orderedEventPrefix(events, baseLastSeq);
   const history = orderedEvents.filter((event) => event.seq <= baseLastSeq);
   const schedule = createPromptSchedule(orderedEvents, intervals, baseLastSeq);
   const establishCheckpoint = () =>
@@ -111,7 +111,7 @@ export function projectSession(
   }
 
   let lastSeq = baseLastSeq;
-  if (checkpoint.lastSeq !== undefined && !validSequence(checkpoint.lastSeq, true)) {
+  if (!validSequence(checkpoint.lastSeq, true)) {
     checkpointMode = "unmatched";
   } else {
     const acceptedOperations: ReplayOperation[] = [];
@@ -143,7 +143,11 @@ export function projectSession(
   }
 
   return {
-    record: projectedRecord(checkpoint, state, lastSeq),
+    record: projectedRecord(
+      checkpoint,
+      state,
+      validSequence(checkpoint.lastSeq, true) ? lastSeq : undefined,
+    ),
     eventMessages: state.eventMessages,
     checkpointMode,
     baseLastSeq,
@@ -243,7 +247,7 @@ function checkpointState(record: SessionRecord, fallbackTimestamp: string): Repl
 function projectedRecord(
   checkpoint: SessionRecord,
   state: ReplayState,
-  lastSeq: number,
+  lastSeq: number | undefined,
 ): SessionRecord {
   const conversation = state.conversation;
   return {
@@ -578,11 +582,18 @@ function completePrefix(events: readonly FlowBundledSessionEvent[], lastSeq: num
   return events.length === lastSeq && events.every((event, index) => event.seq === index + 1);
 }
 
-function orderedEventPrefix(events: readonly FlowBundledSessionEvent[]): FlowBundledSessionEvent[] {
+function orderedEventPrefix(
+  events: readonly FlowBundledSessionEvent[],
+  baseLastSeq: number,
+): FlowBundledSessionEvent[] {
   let previousSeq = 0;
   let length = 0;
   for (const event of events) {
     if (!validSequence(event.seq) || event.seq <= previousSeq) {
+      break;
+    }
+    // Stop before planning prompts too: a later prompt cannot own setup across a gap.
+    if (event.seq > baseLastSeq && event.seq !== Math.max(previousSeq, baseLastSeq) + 1) {
       break;
     }
     previousSeq = event.seq;
