@@ -27,6 +27,7 @@ export function useNodeMeasurements<NodeType extends Node>(nodes: NodeType[]) {
   }, []);
 
   return {
+    measurements: measurements as ReadonlyMap<string, Dimensions>,
     nodes: nodes.map((node) => {
       const measured = measurements.get(node.id);
       return measured ? { ...node, measured } : node;

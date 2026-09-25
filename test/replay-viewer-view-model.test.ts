@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { Dimensions } from "@xyflow/react";
 import {
   advancePlaybackPlayhead,
   resolvePlaybackResumeMs,
@@ -105,6 +106,8 @@ test("buildGraph infers start terminal and branch semantics across the full defi
   assert.equal(nodeMap.get("escalate")?.status, "queued");
   assert.equal(nodeMap.get("escalate")?.isTerminal, true);
   assert.ok(graph.edges.every((edge) => edge.label == null));
+  assert.ok(graph.edges.every((edge) => edge.sourceHandle === "out-bottom"));
+  assert.ok(graph.edges.every((edge) => edge.targetHandle === "in-top"));
 });
 
 for (const fixture of [
@@ -161,7 +164,8 @@ for (const fixture of [
         edges: flow.edges,
       });
       const bundle = makeBundle(baseStep("s", "compute", "ok"), { flow, sessions: {} });
-      const layout = layoutMode === "elk" ? await buildGraphLayout(flow) : null;
+      const layout =
+        layoutMode === "elk" ? await buildGraphLayout(flow, graphMeasurements(flow)) : null;
       if (layoutMode === "elk") {
         assert.ok(layout, "the real layout engine must succeed before testing its projection");
       }
@@ -350,7 +354,7 @@ test("buildGraphLayout uses layered routing and sinks terminal chains", async ()
     },
   });
 
-  const layout = await buildGraphLayout(bundle.flow);
+  const layout = await buildGraphLayout(bundle.flow, graphMeasurements(bundle.flow));
 
   assert.ok(layout);
   assert.ok(layout.nodePositions.finalize);
@@ -696,6 +700,15 @@ test("deriveRunOutcomeView reports completed runs independently of replay positi
   assert.equal(outcome.isTerminal, true);
   assert.match(outcome.headline, /Run completed/);
 });
+
+function graphMeasurements(flow: FlowDefinitionSnapshot): ReadonlyMap<string, Dimensions> {
+  return new Map(
+    Object.keys(flow.nodes).map((nodeId, index) => [
+      nodeId,
+      { width: 264, height: 130 + index * 7 },
+    ]),
+  );
+}
 
 function makeBundle(
   step: FlowStepRecord,
@@ -1411,6 +1424,8 @@ function assertMergeEdgeGeometryAgreement(graph: MergeEdgeGraph, layout: MergeEd
     }
   }
   for (const edge of graph.edges) {
+    assert.equal(edge.sourceHandle, "out-bottom");
+    assert.equal(edge.targetHandle, "in-top");
     const source = mergeEdgeNode(graph, edge.source);
     const target = mergeEdgeNode(graph, edge.target);
     const expectedBack = edge.source === edge.target || target.position.y < source.position.y;
@@ -1462,7 +1477,10 @@ for (const fixture of [
   for (const layoutMode of ["fallback", "elk"] as const) {
     test(`buildGraph keeps ${fixture.name} downward and solid with ${layoutMode} layout`, async () => {
       const bundle = mergeEdgeBundle(fixture.flow);
-      const layout = layoutMode === "elk" ? await buildGraphLayout(fixture.flow) : null;
+      const layout =
+        layoutMode === "elk"
+          ? await buildGraphLayout(fixture.flow, graphMeasurements(fixture.flow))
+          : null;
       if (layoutMode === "elk") {
         assert.ok(layout, "real ELK layout must succeed");
       }
@@ -1510,7 +1528,10 @@ for (const fixture of [
 ]) {
   for (const layoutMode of ["fallback", "elk"] as const) {
     test(`buildGraph retains a real return in ${fixture.name} with ${layoutMode} layout`, async () => {
-      const layout = layoutMode === "elk" ? await buildGraphLayout(fixture.flow) : null;
+      const layout =
+        layoutMode === "elk"
+          ? await buildGraphLayout(fixture.flow, graphMeasurements(fixture.flow))
+          : null;
       if (layoutMode === "elk") {
         assert.ok(layout, "real ELK layout must succeed");
       }
@@ -1540,7 +1561,8 @@ for (const layoutMode of ["fallback", "elk"] as const) {
         { from: "self", to: "self" },
       ],
     );
-    const layout = layoutMode === "elk" ? await buildGraphLayout(flow) : null;
+    const layout =
+      layoutMode === "elk" ? await buildGraphLayout(flow, graphMeasurements(flow)) : null;
     if (layoutMode === "elk") {
       assert.ok(layout, "real ELK layout must succeed");
     }
@@ -1621,7 +1643,7 @@ test("buildGraph keeps unused feedback ownership independent of recorded-node or
   assertMergeEdgeGeometryAgreement(firstFallback, null);
   assertMergeEdgeGeometryAgreement(secondFallback, null);
 
-  const layout = await buildGraphLayout(flow);
+  const layout = await buildGraphLayout(flow, graphMeasurements(flow));
   assert.ok(layout, "real ELK layout must succeed");
   for (const bundle of [first, second]) {
     const graph = buildGraph(bundle, 2, null, layout);

@@ -13,6 +13,7 @@ Repo: https://github.com/openclaw/acpx
 - Windows/terminals: preserve stdout and stderr from commands launched through the shell fallback.
 - Replay viewer: retain recoverable conversation history and long responses past checkpoint limits, keeping earlier attempt selections and saved message identities aligned across reloads.
 - Session metadata: preserve token usage across saving and reloading for opaque message IDs such as `__proto__`.
+- Replay viewer: keep graph edges attached to naturally sized cards and route branches around wrapped labels and changing outcome rows.
 
 ## 0.19.3 - 2026-09-25
 

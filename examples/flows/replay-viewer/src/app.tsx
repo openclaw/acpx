@@ -31,7 +31,7 @@ export function App() {
   const { bundle, recentRuns, activeRunId, loadingState, errorMessage, bootstrap, loadRecentRun } =
     useRunBundleLoader();
   const playback = usePlaybackController(bundle);
-  const graphLayout = useGraphLayout(bundle);
+  const { layout: graphLayout, routesReady, onMeasurements } = useGraphLayout(bundle);
   const [activeTab, setActiveTab] = useState<"attempt" | "session" | "events">("session");
   const [runsCollapsed, setRunsCollapsed] = useState(true);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -157,8 +157,10 @@ export function App() {
                 <div className="canvas-card__flow">
                   <MeasuredFlow
                     key={bundle.run.runId}
+                    runId={bundle.run.runId}
+                    onMeasurements={onMeasurements}
                     nodes={graph.nodes}
-                    edges={graph.edges}
+                    edges={routesReady ? graph.edges : []}
                     nodeTypes={nodeTypes}
                     edgeTypes={edgeTypes}
                     defaultViewport={{ x: 0, y: 0, zoom: 0.84 }}

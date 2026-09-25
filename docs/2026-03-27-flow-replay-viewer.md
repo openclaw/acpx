@@ -408,6 +408,22 @@ That means:
 - the viewer should not depend on default edge generation from rough node
   placement if the result causes avoidable crossings
 
+### Measured geometry
+
+Cards keep their natural dimensions. React Flow's measurements supply the layout
+rectangles, including wrapped labels and outcome rows. ELK uses fixed card-border
+ports corresponding to the named bottom source and top target handles.
+
+Layout waits for every definition node to be measured. Changes to those dimensions
+produce a new layout; ordinary playback or live data updates with unchanged
+dimensions do not. Measurements belong to one run, even when another run reuses
+the same node IDs.
+
+Node positions and routes are adopted together. While a replacement is pending,
+cards retain their previous positions and stale routes are withheld. Superseded
+asynchronous results cannot replace the current generation. If ELK fails, the
+existing provisional layout remains the fallback.
+
 ### Long-term architecture
 
 The durable architecture is:

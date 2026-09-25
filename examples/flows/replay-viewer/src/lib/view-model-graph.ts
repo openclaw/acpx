@@ -1,4 +1,4 @@
-import { Position, type Edge, type Node } from "@xyflow/react";
+import { Position, type Dimensions, type Edge, type Node } from "@xyflow/react";
 import type {
   ELK as ElkEngine,
   ElkExtendedEdge,
@@ -35,9 +35,6 @@ type NodeSemantics = {
   outgoingLabels: Map<string, string[]>;
 };
 
-const ELK_NODE_WIDTH = 264;
-const ELK_NODE_BASE_HEIGHT = 132;
-const ELK_BRANCH_ROW_HEIGHT = 26;
 let elkPromise: Promise<ElkEngine> | null = null;
 
 export function buildGraph(
@@ -145,6 +142,8 @@ export function buildGraph(
       id: edge.edgeId,
       source: edge.source,
       target: edge.target,
+      sourceHandle: "out-bottom",
+      targetHandle: "in-top",
       type: "routedFlow",
       animated: isSelected,
       data: {
@@ -261,11 +260,86 @@ export function deriveRunOutcomeView(bundle: LoadedRunBundle): RunOutcomeView {
 
 export async function buildGraphLayout(
   flow: FlowDefinitionSnapshot,
+  measurements: ReadonlyMap<string, Dimensions>,
 ): Promise<ViewerGraphLayout | null> {
   const orderedNodeIds = layoutNodeIds(flow, []);
   const semantics = inferNodeSemantics(flow);
   const expandedEdges = expandFlowEdges(flow);
   const feedbackEdgeIds = findFeedbackEdgeIds(flow, expandedEdges);
+  const elkNodeIds = new Map<string, string>();
+  const nodeIdsByElkId = new Map<string, string>();
+  const edgesByElkId = new Map<string, ExpandedFlowEdge>();
+  const children: ElkNode[] = [];
+  const edges: ElkExtendedEdge[] = [];
+
+  for (const [index, nodeId] of orderedNodeIds.entries()) {
+    const dimensions = measurements.get(nodeId);
+    if (
+      !dimensions ||
+      !Number.isFinite(dimensions.width) ||
+      !Number.isFinite(dimensions.height) ||
+      dimensions.width <= 0 ||
+      dimensions.height <= 0
+    ) {
+      return null;
+    }
+    // ELK shares one ID namespace across nodes and ports; public IDs are opaque.
+    const id = `node-${index}`;
+    elkNodeIds.set(nodeId, id);
+    nodeIdsByElkId.set(id, nodeId);
+    const layoutOptions: Record<string, string> = {
+      "elk.priority": `${1000 - index}`,
+      "elk.portConstraints": "FIXED_POS",
+    };
+    if (semantics.terminalNodeIds.has(nodeId)) {
+      layoutOptions["elk.layered.layering.layerConstraint"] = "LAST";
+    } else if (nodeId === flow.startAt) {
+      layoutOptions["elk.layered.layering.layerConstraint"] = "FIRST";
+    }
+    children.push({
+      id,
+      width: dimensions.width,
+      height: dimensions.height,
+      layoutOptions,
+      ports: [
+        {
+          id: `${id}-in`,
+          x: dimensions.width / 2,
+          y: 0,
+          width: 0,
+          height: 0,
+          layoutOptions: { "elk.port.side": "NORTH" },
+        },
+        {
+          id: `${id}-out`,
+          x: dimensions.width / 2,
+          y: dimensions.height,
+          width: 0,
+          height: 0,
+          layoutOptions: { "elk.port.side": "SOUTH" },
+        },
+      ],
+    });
+  }
+
+  for (const [index, edge] of expandedEdges.entries()) {
+    const source = elkNodeIds.get(edge.source);
+    const target = elkNodeIds.get(edge.target);
+    if (source === undefined || target === undefined) {
+      return null;
+    }
+    const id = `edge-${index}`;
+    edgesByElkId.set(id, edge);
+    edges.push({
+      id,
+      sources: [`${source}-out`],
+      targets: [`${target}-in`],
+      layoutOptions: feedbackEdgeIds.has(edge.edgeId)
+        ? { "elk.layered.priority.direction": "1" }
+        : { "elk.priority": `${1000 - index}` },
+    });
+  }
+
   const elkGraph: ElkNode = {
     id: "root",
     layoutOptions: {
@@ -283,63 +357,38 @@ export async function buildGraphLayout(
       "elk.spacing.edgeNode": "42",
       "elk.spacing.edgeEdge": "24",
     },
-    children: orderedNodeIds.map((nodeId, index) => {
-      const branchLabels = semantics.outgoingLabels.get(nodeId) ?? [];
-      const layoutOptions: Record<string, string> = {
-        "elk.priority": `${1000 - index}`,
-      };
-      if (semantics.terminalNodeIds.has(nodeId)) {
-        layoutOptions["elk.layered.layering.layerConstraint"] = "LAST";
-      } else if (nodeId === flow.startAt) {
-        layoutOptions["elk.layered.layering.layerConstraint"] = "FIRST";
-      }
-      return {
-        id: nodeId,
-        width: ELK_NODE_WIDTH,
-        height: estimateElkNodeHeight(branchLabels.length),
-        layoutOptions,
-      } satisfies ElkNode;
-    }),
-    edges: expandedEdges.map((edge, index) => {
-      const layoutOptions: Record<string, string> = feedbackEdgeIds.has(edge.edgeId)
-        ? {
-            "elk.layered.priority.direction": "1",
-          }
-        : {
-            "elk.priority": `${1000 - index}`,
-          };
-      return {
-        id: edge.edgeId,
-        sources: [edge.source],
-        targets: [edge.target],
-        layoutOptions,
-      };
-    }) satisfies ElkExtendedEdge[],
+    children,
+    edges,
   };
 
   try {
     const elk = await getElk();
     const layout = await elk.layout(elkGraph);
-    const nodePositions: ViewerGraphLayout["nodePositions"] = {};
-    const edgeRoutes: ViewerGraphLayout["edgeRoutes"] = {};
-
-    for (const child of layout.children ?? []) {
-      nodePositions[child.id] = {
-        x: child.x ?? 0,
-        y: child.y ?? 0,
-      };
-    }
-
-    for (const edge of layout.edges ?? []) {
-      const points = extractElkEdgePoints(edge);
-      if (points.length === 0) {
-        continue;
-      }
-      edgeRoutes[edge.id] = {
-        points,
-        isBackEdge: isRenderedBackEdge(edge.sources[0], edge.targets[0], nodePositions),
-      };
-    }
+    const nodePositions: ViewerGraphLayout["nodePositions"] = Object.fromEntries(
+      (layout.children ?? []).flatMap((child) => {
+        const nodeId = nodeIdsByElkId.get(child.id);
+        return nodeId === undefined
+          ? []
+          : [[nodeId, { x: child.x ?? 0, y: child.y ?? 0 }] as const];
+      }),
+    );
+    const edgeRoutes: ViewerGraphLayout["edgeRoutes"] = Object.fromEntries(
+      (layout.edges ?? []).flatMap((edge) => {
+        const original = edgesByElkId.get(edge.id);
+        const points = extractElkEdgePoints(edge);
+        return !original || points.length === 0
+          ? []
+          : [
+              [
+                original.edgeId,
+                {
+                  points,
+                  isBackEdge: isRenderedBackEdge(original.source, original.target, nodePositions),
+                },
+              ] as const,
+            ];
+      }),
+    );
 
     return {
       nodePositions,
@@ -501,11 +550,6 @@ function deriveFallbackNodePosition(
     x: (column - (laneNodes.length - 1) / 2) * laneWidth,
     y: level * 236,
   };
-}
-
-function estimateElkNodeHeight(branchLabelCount: number): number {
-  const branchRows = branchLabelCount > 0 ? Math.ceil(Math.min(branchLabelCount, 4) / 3) : 0;
-  return ELK_NODE_BASE_HEIGHT + branchRows * ELK_BRANCH_ROW_HEIGHT;
 }
 
 function extractElkEdgePoints(edge: ElkExtendedEdge): ElkPoint[] {
