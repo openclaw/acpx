@@ -55,13 +55,12 @@ export function buildGraph(
   const actualTransitions = new Set<string>();
   const semantics = inferNodeSemantics(bundle.flow);
   const expandedEdges = expandFlowEdges(bundle.flow);
-  const feedbackEdgeIds = findFeedbackEdgeIds(bundle.flow, expandedEdges);
-  const levelByNode = computeLevels(
+  const resolveNodePosition = createNodePositionResolver(
     bundle.flow,
     orderedNodeIds,
     expandedEdges,
-    feedbackEdgeIds,
     semantics.terminalNodeIds,
+    layout,
   );
   const runOutcome = deriveRunOutcomeView(bundle);
   const terminalSelectionSettled = isSettledTerminalSelection(
@@ -70,12 +69,6 @@ export function buildGraph(
     runOutcome,
     semantics.terminalNodeIds,
     playback,
-  );
-  const fallbackRankOrder = orderNodesWithinRanks(
-    orderedNodeIds,
-    expandedEdges,
-    levelByNode,
-    feedbackEdgeIds,
   );
 
   for (let index = 1; index < visibleSteps.length; index += 1) {
@@ -87,10 +80,6 @@ export function buildGraph(
     const attemptsForNode = bundle.steps.filter((step) => step.nodeId === nodeId);
     const visibleAttempt = findLatestVisibleAttempt(visibleSteps, nodeId);
     const status = deriveNodeStatus(nodeId, visibleAttempt, selectedStep, terminalSelectionSettled);
-    const fallbackPosition = deriveFallbackNodePosition(nodeId, levelByNode, fallbackRankOrder);
-    const layoutPosition = layout?.nodePositions[nodeId];
-    const x = layoutPosition?.x ?? fallbackPosition.x;
-    const y = layoutPosition?.y ?? fallbackPosition.y;
     const isStart = nodeId === semantics.startNodeId;
     const isTerminal = semantics.terminalNodeIds.has(nodeId);
     const isDecision = semantics.decisionNodeIds.has(nodeId);
@@ -128,7 +117,7 @@ export function buildGraph(
             ? clamp01(playback.stepProgress)
             : undefined,
       },
-      position: { x, y },
+      position: resolveNodePosition(nodeId),
       sourcePosition: Position.Bottom,
       targetPosition: Position.Top,
       draggable: false,
@@ -463,6 +452,40 @@ function findLatestVisibleAttempt(
 ): FlowStepRecord | undefined {
   const matching = steps.filter((step) => step.nodeId === nodeId);
   return matching.at(-1);
+}
+
+function createNodePositionResolver(
+  flow: FlowDefinitionSnapshot,
+  orderedNodeIds: string[],
+  expandedEdges: ExpandedFlowEdge[],
+  terminalNodeIds: Set<string>,
+  layout: ViewerGraphLayout | null,
+): (nodeId: string) => { x: number; y: number } {
+  let fallback: { levels: Map<string, number>; rankOrder: Map<number, string[]> } | undefined;
+  return (nodeId) => {
+    const supplied = layout?.nodePositions[nodeId];
+    const x = supplied?.x;
+    const y = supplied?.y;
+    if (x != null && y != null) {
+      return { x, y };
+    }
+    if (!fallback) {
+      const feedbackEdgeIds = findFeedbackEdgeIds(flow, expandedEdges);
+      const levels = computeLevels(
+        flow,
+        orderedNodeIds,
+        expandedEdges,
+        feedbackEdgeIds,
+        terminalNodeIds,
+      );
+      fallback = {
+        levels,
+        rankOrder: orderNodesWithinRanks(orderedNodeIds, expandedEdges, levels, feedbackEdgeIds),
+      };
+    }
+    const position = deriveFallbackNodePosition(nodeId, fallback.levels, fallback.rankOrder);
+    return { x: x ?? position.x, y: y ?? position.y };
+  };
 }
 
 function deriveFallbackNodePosition(
