@@ -106,6 +106,8 @@ jobs:
           - name: Mutation
             node_version: 22
             command: pnpm run mutate
+          - name: Autoreview
+            command: pnpm run test:autoreview
           - name: Slophammer
             command: |
               pnpm dlx slophammer-ts@latest rules --format text
@@ -132,6 +134,18 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Setup Python for Autoreview tests
+        if: matrix.name == 'Autoreview'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements-autoreview.txt
+
+      - name: Install Autoreview test dependencies
+        if: matrix.name == 'Autoreview'
+        run: python -m pip install -r requirements-autoreview.txt
 
       - name: Run ${{ matrix.name }}
         run: ${{ matrix.command }}

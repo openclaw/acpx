@@ -1,4 +1,5 @@
 {
+  "ignores": [".agents/skills/autoreview/**"],
   // Keep docs checks useful without forcing a full historical docs rewrite.
   "config": {
     "MD013": false,
