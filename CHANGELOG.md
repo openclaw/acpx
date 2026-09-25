@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Fix nested documentation builds without a custom domain and keep their canonical URLs within the deployment path.
+
 ## 0.19.3 - 2026-09-25
 
 ### Highlights

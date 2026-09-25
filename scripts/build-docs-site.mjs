@@ -696,7 +696,7 @@ function layout({ page, html, toc, prev, next, sectionName }) {
 
 function pageCanonicalUrl(page) {
   if (!siteBase) {
-    return page.outRel;
+    return hrefToOutRel(page.outRel, page.outRel);
   }
   if (page.outRel === "index.html") {
     return `${siteBase}/`;

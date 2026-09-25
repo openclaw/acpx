@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -107,3 +115,104 @@ test("docs site preserves link destinations, inline formatting, and page rewrite
     examples.map(({ html }) => html),
   );
 });
+
+const canonicalPages = [
+  ["index.md", "index.html", "Home", "", "./"],
+  ["install.md", "install.html", "Install", "install.html", "install.html"],
+  ["quickstart.md", "quickstart.html", "Quickstart", "quickstart.html", "quickstart.html"],
+  [
+    "guide/deep/page.md",
+    "guide/deep/page.html",
+    "Nested page",
+    "guide/deep/page.html",
+    "page.html",
+  ],
+  ["guide/deep/README.md", "guide/deep/index.html", "Nested index", "guide/deep/", "./"],
+  ["relocated.md", "reference/deep/topic/index.html", "Permalink", "reference/deep/topic/", "./"],
+] as const;
+
+const canonicalSites = [
+  { name: "without a CNAME", origin: "" },
+  {
+    name: "with a root CNAME",
+    rootCname: "root.example.invalid",
+    origin: "https://root.example.invalid/",
+  },
+  {
+    name: "with a docs CNAME overriding the root CNAME",
+    rootCname: "root.example.invalid",
+    docsCname: "docs.example.invalid",
+    origin: "https://docs.example.invalid/",
+  },
+];
+
+for (const site of canonicalSites) {
+  test(`docs metadata resolves to its own page ${site.name}`, (t) => {
+    const repositoryRoot = process.cwd();
+    const directory = mkdtempSync(path.join(os.tmpdir(), "acpx-docs-canonical-"));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const docsDirectory = path.join(directory, "docs");
+    mkdirSync(docsDirectory);
+
+    for (const [source, , title] of canonicalPages) {
+      const file = path.join(docsDirectory, source);
+      mkdirSync(path.dirname(file), { recursive: true });
+      const frontmatter =
+        source === "relocated.md" ? "---\npermalink: /reference/deep/topic/\n---\n" : "";
+      writeFileSync(file, `${frontmatter}# ${title}\n`);
+    }
+    if (site.rootCname) {
+      writeFileSync(path.join(directory, "CNAME"), `${site.rootCname}\n`);
+    }
+    if (site.docsCname) {
+      writeFileSync(path.join(docsDirectory, "CNAME"), `${site.docsCname}\n`);
+    }
+
+    const result = spawnSync(
+      process.execPath,
+      [path.join(repositoryRoot, "scripts", "build-docs-site.mjs")],
+      { cwd: directory, encoding: "utf8", timeout: 30_000 },
+    );
+    assert.equal(result.error, undefined, "documentation builder must finish before the timeout");
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+
+    const outputDirectory = path.join(directory, "dist", "docs-site");
+    const llmsLines = readFileSync(path.join(outputDirectory, "llms.txt"), "utf8").split("\n");
+    const mounts = [
+      "https://preview.example.invalid/",
+      "https://preview.example.invalid/acpx/",
+      "https://preview.example.invalid/projects/acpx/docs/",
+    ];
+
+    for (const [, output, title, canonicalPath, samePage] of canonicalPages) {
+      const html = readFileSync(path.join(outputDirectory, output), "utf8");
+      const canonical = html.match(/<link rel="canonical" href="([^"]+)">/)?.[1];
+      const openGraph = html.match(/<meta property="og:url" content="([^"]+)">/)?.[1];
+      assert.equal(canonical, site.origin ? `${site.origin}${canonicalPath}` : samePage);
+      assert.equal(openGraph, canonical, `${output}: canonical and Open Graph URLs must agree`);
+      assert.ok(canonical, `${output}: canonical metadata must be present`);
+
+      const llmsHref = site.origin
+        ? `${site.origin}${canonicalPath}`
+        : canonicalPath || "index.html";
+      assert.ok(llmsLines.includes(`- ${title}: ${llmsHref}`), `${output}: llms page link`);
+
+      for (const mount of mounts) {
+        const documentUrl = new URL(output, mount);
+        const expectedCanonical = new URL(canonicalPath, site.origin || mount).href;
+        assert.equal(new URL(canonical, documentUrl).href, expectedCanonical);
+        const expectedLlms = site.origin
+          ? expectedCanonical
+          : new URL(canonicalPath || "index.html", mount).href;
+        assert.equal(new URL(llmsHref, new URL("llms.txt", mount)).href, expectedLlms);
+      }
+    }
+
+    const copiedCname = path.join(outputDirectory, "CNAME");
+    if (site.docsCname || site.rootCname) {
+      assert.equal(readFileSync(copiedCname, "utf8"), site.docsCname || site.rootCname);
+    } else {
+      assert.equal(existsSync(copiedCname), false);
+    }
+  });
+}
