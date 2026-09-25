@@ -390,6 +390,7 @@ function describeStructuredMessage(
 > {
   const textBlocks: string[] = [];
   const toolUses: SelectedAttemptView["sessionSlice"][number]["toolUses"] = [];
+  const toolCompletion = new Map<string, boolean | undefined>();
   const hiddenPayloads: SelectedAttemptView["sessionSlice"][number]["hiddenPayloads"] = [];
   const contentParts: SelectedAttemptView["sessionSlice"][number]["parts"] = [];
 
@@ -429,6 +430,14 @@ function describeStructuredMessage(
             typeof toolUse.id === "string" || typeof toolUse.id === "number"
               ? String(toolUse.id)
               : `tool-use-${index}`;
+          if (!toolCompletion.has(toolUseId)) {
+            toolCompletion.set(
+              toolUseId,
+              typeof toolUse.is_input_complete === "boolean"
+                ? toolUse.is_input_complete
+                : undefined,
+            );
+          }
           const toolUseView = {
             id: toolUseId,
             name: typeof toolUse.name === "string" ? toolUse.name : "Tool call",
@@ -457,7 +466,7 @@ function describeStructuredMessage(
     contentParts.push({ type: "hidden_payload", payload });
   }
 
-  const resolvedToolResults = describeToolResults(toolResults);
+  const resolvedToolResults = describeToolResults(toolResults, toolCompletion);
   const orderedParts = buildOrderedMessageParts(contentParts, resolvedToolResults);
 
   return {
@@ -471,6 +480,7 @@ function describeStructuredMessage(
 
 function describeToolResults(
   toolResults: unknown,
+  toolCompletion: ReadonlyMap<string, boolean | undefined>,
 ): SelectedAttemptView["sessionSlice"][number]["toolResults"] {
   if (!toolResults || typeof toolResults !== "object") {
     return [];
@@ -489,12 +499,15 @@ function describeToolResults(
         ? result.tool_name
         : "Tool result";
     const preview = summarizeToolResult(result);
+    const toolUseId = toolUseIdForResult(id, result);
     const status =
       typeof result.output?.status === "string"
         ? result.output.status
         : result.is_error
           ? "error"
-          : "completed";
+          : toolUseId !== "" && toolCompletion.get(toolUseId) === false
+            ? "running"
+            : "completed";
 
     return {
       id,
@@ -505,6 +518,15 @@ function describeToolResults(
       raw: result,
     };
   });
+}
+
+function toolUseIdForResult(id: string, raw: unknown): string {
+  return typeof raw === "object" &&
+    raw !== null &&
+    "tool_use_id" in raw &&
+    typeof (raw as { tool_use_id?: unknown }).tool_use_id === "string"
+    ? (raw as { tool_use_id: string }).tool_use_id
+    : id;
 }
 
 function buildOrderedMessageParts(
@@ -522,13 +544,7 @@ function buildOrderedMessageParts(
   const unmatched: SelectedAttemptView["sessionSlice"][number]["toolResults"] = [];
 
   for (const toolResult of toolResults) {
-    const toolUseId =
-      typeof toolResult.raw === "object" &&
-      toolResult.raw !== null &&
-      "tool_use_id" in toolResult.raw &&
-      typeof (toolResult.raw as { tool_use_id?: unknown }).tool_use_id === "string"
-        ? (toolResult.raw as { tool_use_id: string }).tool_use_id
-        : toolResult.id;
+    const toolUseId = toolUseIdForResult(toolResult.id, toolResult.raw);
 
     if (!toolUseId) {
       unmatched.push(toolResult);

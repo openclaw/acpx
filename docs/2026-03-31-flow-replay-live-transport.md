@@ -267,6 +267,10 @@ The rule is:
 - the active live ACP turn should render directly from live session events
 - reconstructed session records remain the fallback once the turn is settled
 
+A tool result without an explicit adapter status stays running while its paired tool
+call is known to be incomplete. Older results without completion metadata keep
+their completed fallback.
+
 ## Message schema
 
 ### Client to server

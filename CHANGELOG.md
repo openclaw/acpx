@@ -35,6 +35,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/import: coordinate imports with CLI and shared session ensures in the same scope, so ensure reuses an imported session or import reports the existing session instead of publishing a duplicate.
 - Conformance: join adapter, descendant, and transport cleanup before reporting; retain original errors alongside cleanup failures, stop later cases after incomplete retirement, and clean up before exiting on catchable interruption.
 - Sessions/resume: retire the original session owner before resuming the same local record from another cwd or name, including `sessions ensure`, so subsequent prompts use the requested workspace.
+- Replay viewer: show pending tools as running when status-only updates contain no raw output, while preserving completed and failed results.
 
 ## 0.19.2 - 2026-09-23
 

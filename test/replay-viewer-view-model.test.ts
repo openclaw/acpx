@@ -1631,3 +1631,163 @@ test("buildGraph keeps unused feedback ownership independent of recorded-node or
     }
   }
 });
+
+type ToolStatusCase = {
+  name: string;
+  uses: Array<{ id: string; complete?: boolean }>;
+  resultId: string;
+  toolUseId?: string;
+  explicitStatus?: string;
+  isError?: boolean;
+  expected: string;
+};
+
+const toolStatusCases: ToolStatusCase[] = [
+  {
+    name: "known incomplete pair",
+    uses: [{ id: "tool", complete: false }],
+    resultId: "tool",
+    expected: "running",
+  },
+  {
+    name: "known completed legacy result",
+    uses: [{ id: "tool", complete: true }],
+    resultId: "tool",
+    expected: "completed",
+  },
+  {
+    name: "legacy pair without completion metadata",
+    uses: [{ id: "tool" }],
+    resultId: "tool",
+    expected: "completed",
+  },
+  { name: "unpaired legacy completed result", uses: [], resultId: "legacy", expected: "completed" },
+  {
+    name: "incomplete pair preserves explicit completed status",
+    uses: [{ id: "tool", complete: false }],
+    resultId: "tool",
+    explicitStatus: "completed",
+    expected: "completed",
+  },
+  {
+    name: "complete pair preserves explicit running status",
+    uses: [{ id: "tool", complete: true }],
+    resultId: "tool",
+    explicitStatus: "running",
+    expected: "running",
+  },
+  {
+    name: "incomplete pair preserves error",
+    uses: [{ id: "tool", complete: false }],
+    resultId: "tool",
+    isError: true,
+    expected: "error",
+  },
+  {
+    name: "explicit pair overrides complete result map key",
+    uses: [
+      { id: "key", complete: true },
+      { id: "actual", complete: false },
+    ],
+    resultId: "key",
+    toolUseId: "actual",
+    expected: "running",
+  },
+  {
+    name: "explicit complete pair overrides incomplete map key",
+    uses: [
+      { id: "key", complete: false },
+      { id: "actual", complete: true },
+    ],
+    resultId: "key",
+    toolUseId: "actual",
+    expected: "completed",
+  },
+  {
+    name: "empty explicit link stays unmatched",
+    uses: [{ id: "key", complete: false }],
+    resultId: "key",
+    toolUseId: "",
+    expected: "completed",
+  },
+  {
+    name: "opaque own ID",
+    uses: [{ id: "__proto__", complete: false }],
+    resultId: "__proto__",
+    expected: "running",
+  },
+  {
+    name: "first duplicate use owns result ordering",
+    uses: [
+      { id: "tool", complete: true },
+      { id: "tool", complete: false },
+    ],
+    resultId: "tool",
+    expected: "completed",
+  },
+  {
+    name: "another incomplete tool is not this result",
+    uses: [{ id: "other", complete: false }],
+    resultId: "legacy",
+    expected: "completed",
+  },
+];
+
+for (const scenario of toolStatusCases) {
+  test(`viewer tool status: ${scenario.name}`, () => {
+    const step = baseStep("tool_status", "acp", "ok");
+    const bundle = makeBundle(step, {});
+    const rawResult = {
+      tool_name: "Synthetic result",
+      is_error: scenario.isError ?? false,
+      content: { Text: "Legacy result content" },
+      ...(scenario.toolUseId === undefined ? {} : { tool_use_id: scenario.toolUseId }),
+      ...(scenario.explicitStatus === undefined
+        ? {}
+        : { output: { status: scenario.explicitStatus } }),
+    };
+    const record = bundle.sessions["main-bundle"].record;
+    record.messages = [
+      {
+        Agent: {
+          content: scenario.uses.map((tool) => ({
+            ToolUse: {
+              id: tool.id,
+              name: "Synthetic call",
+              input: {},
+              raw_input: "{}",
+              ...(tool.complete === undefined ? {} : { is_input_complete: tool.complete }),
+            },
+          })),
+          tool_results: Object.fromEntries([[scenario.resultId, rawResult]]),
+        },
+      },
+    ];
+    const before = structuredClone(record.messages);
+    const selected = selectAttemptView(bundle, 0);
+    assert.ok(selected);
+    const message = selected.sessionSlice[0];
+    assert.ok(message);
+    const result = message.toolResults[0];
+    assert.ok(result);
+    assert.equal(result.status, scenario.expected);
+    assert.equal(result.isError, scenario.isError ?? false);
+    assert.equal(result.raw, rawResult);
+    assert.deepEqual(record.messages, before);
+    assert.equal(message.parts.filter((part) => part.type === "tool_result").length, 1);
+    const pairedId = scenario.toolUseId ?? scenario.resultId;
+    const usePosition =
+      pairedId === ""
+        ? -1
+        : message.parts.findIndex(
+            (part) => part.type === "tool_use" && part.toolUse.id === pairedId,
+          );
+    if (usePosition >= 0) {
+      const next = message.parts[usePosition + 1];
+      assert.equal(next?.type, "tool_result");
+      if (next?.type === "tool_result") {
+        assert.equal(next.toolResult, result);
+      }
+    }
+  });
+}
