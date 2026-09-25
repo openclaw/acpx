@@ -1,412 +1,388 @@
 ---
 name: autoreview
-description: "Pre-commit/ship code review: Codex default; optional Claude or Pi."
+description: "Structured code review when explicitly requested, preferring OpenAI/Codex before Claude."
 ---
 
 # Auto Review
 
-Run the bundled structured review helper as a closeout check. This is code review, not Guardian `auto_review` approval routing.
+Run an independent review when the user or an owning workflow asks for one.
+This is code review, not Guardian approval routing. Let the reviewer choose how
+to analyze the change; provide the target, relevant context, and desired severity.
+Findings are advice to verify, not instructions to apply blindly.
 
-Codex review is the default when no engine is set. It uses `gpt-5.6-sol` with `high` reasoning by default, then retries once with `gpt-5.6-terra` only when the account cannot access Sol. Claude review is optional and uses `claude-fable-5` by default.
+## Run
 
-For user-visible behavior, pair autoreview with `behavior-validator`. Autoreview is source-aware and judges the change bundle; behavior validation is source-blind and judges the running product or tool against a behavior contract. A clean autoreview is not proof that a UI, CLI, API, or generated artifact works from the user's perspective.
-
-Use when:
-
-- user asks for Codex review / Claude review / Pi review / autoreview / second-model review
-- after non-trivial code edits, before final/commit/ship
-- reviewing a local branch or PR branch after fixes
-
-## Contract
-
-- Treat review output as advisory. Never blindly apply it.
-- Verify every finding by reading the real code path and adjacent files.
-- Read dependency docs/source/types when the finding depends on external behavior.
-- Reject unrealistic edge cases, speculative risks, broad rewrites, and fixes that over-complicate the codebase.
-- Prefer small fixes at the right ownership boundary; no refactor unless it clearly improves the bug class.
-- When an accepted finding shows a bug class or repeated pattern, inspect the current PR scope for sibling instances before fixing.
-- Fix the scoped bug class at once when practical; stop at touched surfaces, owner boundaries, and clear follow-up territory.
-- Keep going until structured review returns no accepted/actionable findings only while the work remains inside the original task scope.
-- If a review-triggered fix changes code, rerun focused tests and rerun the structured review helper.
-- For security-audit suppression changes, verify accepted findings remain auditable: suppressed findings stay in structured output, active output keeps an unsuppressible suppression notice, and aggregate findings cannot hide unrelated active risk.
-- Never switch or override the requested review engine/model except for the documented Codex Sol-to-Terra account-access fallback. Capacity, rate-limit, and unrelated failures keep the same engine/model.
-- Be patient with large bundles. Structured review can take up to 30 minutes while the model call is active, especially with Codex tools or web search.
-- Treat heartbeat lines like `review still running: ... elapsed=... pid=...` as healthy progress, not a hang. Let the helper continue while heartbeats are advancing. Pass `--stream-engine-output` when live engine text is useful; Codex and Claude filter tool/file chatter, other runnable engines pass raw output through.
-- Do not kill a review just because it has been quiet for 2-5 minutes, or because it is still running under the 30-minute window. Inspect the process only after missing multiple expected heartbeats, after 30 minutes, or after an obviously failed subprocess; prefer letting the same helper command finish.
-- Tools are useful in review mode. Codex receives the validated bundle in an empty workspace so ignored files and linked-worktree metadata remain unreadable; web search stays available for dependency contracts and upstream docs.
-- Security perspective is always included, but it should not cripple legitimate functionality. Report security findings only when the change creates a concrete, actionable risk or removes an important safety check.
-- Reviewer subprocesses preserve engine authentication and non-credentialed proxy variables needed by headless or restricted-network environments while stripping process-injection, Git override, and credentialed proxy values.
-- Review bundles fail closed before engine invocation when tracked or untracked paths look sensitive, patch text looks secret-like, or a Git diff exceeds the bundle limit. Redact/split the change; never accept a truncated patch as complete review proof.
-- For regression provenance, keep roles separate: blamed code author, blamed PR author, PR merger/committer, current PR author, and PR/date. If no blamed PR is traceable, use the blamed commit as the provenance: commit SHA, date, and author username. Do not guess a merger or frame missing PR metadata as a separate finding.
-- If the blamed PR was merged by `clawsweeper[bot]` or another automation, identify the human trigger when practical. Check timeline/comments first; if rate-limited, use gitcrawl/cache or public PR HTML. Look for maintainer commands such as `@clawsweeper automerge`, `/landpr`, or labels/status comments that armed automerge. Report `automerge triggered by @login`; if not found, say trigger unknown.
-- Do not invoke built-in `codex review`, nested reviewers, or reviewer panels from inside the review. The helper builds one bundle, calls one selected engine, validates one structured result, and stops.
-- Stop as soon as the helper exits 0 with no accepted/actionable findings. Do not run an extra review just to get a nicer "clean" line, a second opinion, or clearer closeout wording.
-- Treat the helper's successful exit plus absence of actionable findings as the clean review result, even if the underlying Codex CLI output is terse.
-- Multi-reviewer panels are opt-in only. Use them when explicitly requested or when risk justifies the extra spend; the main agent still verifies every accepted finding before fixing.
-- If rejecting a finding as intentional/not worth fixing, add a brief inline code comment only when it explains a real invariant or ownership decision that future reviewers should know.
-- If `gh`/Gitcrawl reports `database disk image is malformed`, run `gitcrawl doctor --json` once to let the portable cache repair before retrying review; do not bypass the shim unless repair fails and freshness requires live GitHub.
-- If Gitcrawl reports a portable manifest mismatch, source/runtime DB health error, or stale portable-store checkout, run `gitcrawl doctor --json` and inspect `source_db_health`, `runtime_db_health`, and `portable_store_status` before falling back to live GitHub.
-- Do not push just to review. Push only when the user requested push/ship/PR update.
-
-## Scope Governor
-
-Autoreview is a closeout gate, not permission to rewrite the task.
-
-Before the first review, freeze a scope baseline: original request or issue, target branch, intended behavior, owner boundary, changed files, and non-test LOC. For inherited or already-bloated branches, use the intended PR diff as the baseline rather than accepting all existing branch drift.
-
-Before patching a finding, classify it:
-
-- **In-scope blocker**: the finding is introduced by the current diff, affects the same owner boundary, and can be fixed without changing the task's contract.
-- **Follow-up**: the finding is real but belongs to an adjacent bug class, sibling surface, cleanup, or broader hardening track.
-- **Stop-and-escalate**: the finding requires a new protocol/config/storage/public API contract, a different owner boundary, a release-process change, or a design choice outside the original request.
-
-Stop patching and report the scope break instead of continuing when:
-
-- a narrow PR turns into an architecture change, protocol change, migration, or release-process change;
-- the diff grows past 2x the original files or non-test LOC without explicit approval to expand scope;
-- two review-triggered patch cycles have not converged; pause and reclassify every remaining finding before another edit;
-- the best fix is "define the canonical contract first" rather than another local inference layer;
-- fixing the accepted finding would make the PR no longer describe the same behavior, issue, or owner boundary.
-
-After the two-cycle pause, continue only when every remaining accepted finding is still an in-scope blocker. Otherwise preserve the useful analysis, identify the smallest safe landed subset if one exists, and open or request a follow-up for the larger fix. Do not keep committing speculative fixes just to satisfy the reviewer.
-
-Do not stack or push review-triggered fix commits while scope classification or focused proof is unresolved. Keep exploratory edits local until the cycle is proven in scope; if scope breaks, remove them from the landing lane instead of preserving them as branch history.
-
-Critical exceptions must be explicit: active data loss, crash, broken install/upgrade, release blocker, or concrete security exposure. If the exception is not one of those, it is not critical enough to blow up scope.
-
-## Release Branches And Release Process
-
-On release, beta, stable, hotfix, signing, notarization, appcast, package-publish, or release-check work, use freeze discipline even when the branch name is not release-like:
-
-- Fix only release blockers, failed release infrastructure, exact backports, install/upgrade breakage, data loss, crashes, or concrete security exposure.
-- Treat non-blocking autoreview findings as follow-ups for `main`, not reasons to broaden the release branch.
-- Do not introduce new product behavior, config surface, protocol shape, migration, plugin ownership, docs narrative, or process policy unless it directly unblocks the release.
-- Keep proof tied to the release target: exact branch/ref, failing check or shipped-risk reason, smallest command/proof, and whether the fix must also forward-port to `main`.
-- If review discovers a real but non-critical design problem during release closeout, stop with a follow-up issue/PR plan; do not use the release branch as the refactor lane.
-
-## Skill Path (set once)
-
-Set the skill script paths once, then use `"$AUTOREVIEW"` and `"$AUTOREVIEW_HARNESS"` in the examples below.
-
-Choose one:
+Use `scripts/autoreview` beside this skill. Keep its custom `codex exec` path:
+native `codex review` cannot combine explicit Git target flags with custom instructions.
+The helper combines those with evidence, severity filtering, and validated JSON;
+it leaves review judgment to Codex. For an OpenClaw checkout:
 
 ```bash
-# Project-local skill in the current repo for Codex and other agents:
-export AUTOREVIEW=".agents/skills/autoreview/scripts/autoreview"
-export AUTOREVIEW_HARNESS=".agents/skills/autoreview/scripts/test-review-harness"
-```
-
-```bash
-# Claude Code project-local skill in the current repo:
-export AUTOREVIEW=".claude/skills/autoreview/scripts/autoreview"
-export AUTOREVIEW_HARNESS=".claude/skills/autoreview/scripts/test-review-harness"
-```
-
-```bash
-# Source checkout of openclaw/agent-skills:
-export AUTOREVIEW="skills/autoreview/scripts/autoreview"
-export AUTOREVIEW_HARNESS="skills/autoreview/scripts/test-review-harness"
-```
-
-```bash
-# Global skill:
-export AGENTS_HOME="${AGENTS_HOME:-$HOME/.agents}"
-export AUTOREVIEW="$AGENTS_HOME/skills/autoreview/scripts/autoreview"
-export AUTOREVIEW_HARNESS="$AGENTS_HOME/skills/autoreview/scripts/test-review-harness"
-```
-
-When using Claude Code, set `AGENTS_HOME="$HOME/.claude"` for global skills.
-
-On native Windows, choose the matching pair:
-
-```powershell
-# Project-local skill in the current repo for Codex and other agents:
-$AUTOREVIEW = ".agents\skills\autoreview\scripts\autoreview"
-$AUTOREVIEW_HARNESS = ".agents\skills\autoreview\scripts\test-review-harness.ps1"
-```
-
-```powershell
-# Claude Code project-local skill in the current repo:
-$AUTOREVIEW = ".claude\skills\autoreview\scripts\autoreview"
-$AUTOREVIEW_HARNESS = ".claude\skills\autoreview\scripts\test-review-harness.ps1"
-```
-
-```powershell
-# Source checkout of openclaw/agent-skills:
-$AUTOREVIEW = "skills\autoreview\scripts\autoreview"
-$AUTOREVIEW_HARNESS = "skills\autoreview\scripts\test-review-harness.ps1"
-```
-
-```powershell
-# Global skill:
-$AgentsHome = if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { Join-Path $HOME ".agents" }
-$AUTOREVIEW = Join-Path $AgentsHome "skills\autoreview\scripts\autoreview"
-$AUTOREVIEW_HARNESS = Join-Path $AgentsHome "skills\autoreview\scripts\test-review-harness.ps1"
-```
-
-## Pick Target
-
-Dirty local work:
-
-```bash
+AUTOREVIEW=".agents/skills/autoreview/scripts/autoreview"
 "$AUTOREVIEW" --mode local
 ```
 
-Use this only when the patch is actually unstaged/staged/untracked in the
-current checkout. `--mode uncommitted` is accepted as an alias for `--mode local`.
-For committed, pushed, or PR work, point the helper at the commit
-or branch diff instead; do not force dirty modes just
-because the helper docs mention dirty work first. A clean local review
-only proves there is no local patch.
+In the canonical agent-skills repo, the path is
+`skills/autoreview/scripts/autoreview`. On Windows, invoke the helper with Python.
+Use `--help` for the complete flags and environment overrides.
 
-Branch/PR work:
+Choose the Git target explicitly when the default is ambiguous:
 
-```bash
-"$AUTOREVIEW" --mode branch --base origin/main
-```
+| Target                         | Arguments                      | Scope                                                       |
+| ------------------------------ | ------------------------------ | ----------------------------------------------------------- |
+| Local work                     | `--mode local`                 | HEAD → index → working tree, plus untracked files           |
+| Local candidate against a base | `--mode local --base <ref>`    | Pinned base → index → working tree, plus untracked files    |
+| Committed branch/PR            | `--mode branch --base <ref>`   | Merge-base → HEAD; excludes dirty work                      |
+| One commit                     | `--mode commit --commit <ref>` | Raw parent → commit; a root compares against the empty tree |
 
-Optional review context is first-class. Prompt files and datasets must be repo-relative so review bundles cannot pull arbitrary host files:
+`--mode auto` selects local work when dirty, otherwise a branch review using the
+PR base or `origin/main`. Clean main has no implicit review target.
+`--mode uncommitted` is an alias for local. The helper does not fetch refs.
 
-```bash
-"$AUTOREVIEW" --mode branch --base origin/main --prompt-file review-notes.md --dataset evidence.json
-```
+Registered nested linked checkouts from the same repository are outside the
+current review scope. Their presence or edits do not make the parent dirty;
+ordinary adjacent files remain included in the review. Worktree boundaries are
+revalidated without changing Git ignore rules.
 
-If an open PR exists, use its actual base:
-
-```bash
-base=$(gh pr view --json baseRefName --jq .baseRefName)
-"$AUTOREVIEW" --mode branch --base "origin/$base"
-```
-
-Committed single change:
+For a complete PR candidate **including dirty rewrites**, use local mode with
+its pinned merge base—not branch mode:
 
 ```bash
-"$AUTOREVIEW" --mode commit --commit HEAD
+pr_base=$(gh pr view --json baseRefName --jq .baseRefName)
+merge_base=$(git merge-base HEAD "origin/$pr_base")
+"$AUTOREVIEW" --mode local --base "$merge_base"
 ```
 
-Use commit review for already-landed or already-pushed work on `main`. Reviewing
-clean `main` against `origin/main` is usually an empty diff after push. For a
-small stack, review each commit explicitly or review the branch before merging
-with `--base`.
+When a file has both staged and unstaged changes, both states are reviewed.
+A defect in the index remains actionable even if the working tree fixes it;
+the report labels it `INDEX-only`.
+Git display settings cannot suppress context markers or add patch colors;
+repository configuration is not changed. Source paths and text retain literal
+whitespace. An empty present
+source uses line 1, column 1, and an empty excerpt; empty physical lines also
+use an empty excerpt at column 1. Source identity remains mandatory.
 
-## Parallel Closeout
+Local selection honors `core.autocrlf` from external operator Git configuration,
+with repository-local values and attributes retaining precedence. Only its
+validated scalar value reaches diff/status; other global and system Git
+configuration stays disabled. Repository-owned or relative global-config
+overrides are not imported, and reviewed source bytes are not rewritten.
 
-Format first if formatting can change line locations. Then it is OK to run tests and review in parallel:
+Local collection disables effective Git clean/process commands and requires
+conversion to succeed. Unused drivers, unchanged filtered neighbors, staged-only
+changes, and deletions can still be reviewed without executing converters.
+If Git needs executable conversion to assemble the diff, collection fails before
+any reviewer starts. This can include an unchanged filtered file whose stat cache
+needs refreshing. Use explicit branch or commit mode for committed content in
+that case. Built-in line-ending normalization remains enabled; raw bytes never
+stand in for a required executable conversion.
+PR-base discovery uses trusted external Git and a scoped GitHub CLI environment,
+preserving external authentication/configuration and proxy settings while excluding
+inherited Git routing, `GH_REPO` redirection, and checkout-owned executables.
+A differently named `AUTOREVIEW_GIT` override that cannot also be selected as `git`
+by the child requires an explicit `--base`; rejected GitHub configuration paths
+also require one.
+
+## Context and severity
+
+Use `--prompt` for task-specific guidance, or `--prompt-file` and `--dataset` for
+repository-relative context files. Context does not expand the selected Git
+target. The reviewer cannot read unchanged repository files from its empty
+sandbox; supply relevant source or dependency evidence when the diff is insufficient.
+`--prompt-file` also accepts an absolute path inside the repository; the same
+sensitive-path, symlink, and mutation checks apply. `--dataset` stays repo-relative.
+Repeated paths in the same evidence role share one validated capture. Equal
+content at different paths and prompt-file versus dataset roles stay distinct.
+
+For unchanged committed source, use repeatable `--source-context <repo-relative-path>`
+with branch or commit mode. Use `--source-context-file <repo-relative-path>` when
+that source must stay intact in every review pass. Both read the exact regular-file
+blob from the frozen reviewed commit (branch HEAD or `--commit`), including executable source files.
+Local mode, including an auto-selected local target, is unsupported. No separate
+context revision or working-copy substitution is accepted. The checkout path must
+remain a regular file; its bytes and path topology are revalidated throughout review.
+Repeated normalized source-context paths share one capture after every argument
+is validated; different paths and evidence roles remain distinct.
+
+Both roles use tracked-source filename classification, so source names such as
+`src/token_count.py` are accepted. Credential directories, stores and keyfiles
+remain forbidden. Existing prompt-file and dataset restrictions are unchanged.
+Every source block carries path, commit, blob and mode provenance. `--source-context`
+bytes are partitioned with the change when needed. `--source-context-file` blocks
+stay complete in every pass and must fit with the instructions and change framing;
+the helper refuses an over-capacity plan without dropping required evidence.
+Context never adds finding targets or instruction authority. This is a
+source-provenance contract, not secret-content scanning.
 
 ```bash
-"$AUTOREVIEW" --parallel-tests "<focused test command>"
+"$AUTOREVIEW" --mode branch --base origin/main --source-context src/token_count.py
+"$AUTOREVIEW" --mode branch --base origin/main --source-context-file src/token_count.py
 ```
 
-On Windows, the default `--parallel-tests` shell preserves the platform `cmd.exe`
-semantics used by Python `shell=True`. Use `--parallel-tests-shell powershell`
-or `--parallel-tests-shell pwsh` when the focused test command is PowerShell-specific.
-Parallel tests inherit only a small allowlist of ordinary OS, CI, and toolchain
-variables. Put additional non-secret project controls directly in the test command.
-Home and standard config directories point to a temporary isolated root that is
-removed after the command exits. Do not put secrets in the command because it is
-printed before execution. Set `OPENCLAW_TESTBOX=1` on the autoreview process, not
-inside the test command, because the environment snapshot and credential staging
-happen before the test shell starts:
+The default threshold is **P0 only**: material blockers to normal operation or
+safety. Use `--max-priority P1`, `P2`, or `P3` when the caller requests a wider
+review. Do not add unrelated redesign goals or prescribe file counts, reading
+sequences, or ritual extra passes. Historical blame requires a verified
+parent-relative patch; otherwise leave the attribution unknown.
 
 ```bash
-OPENCLAW_TESTBOX=1 "$AUTOREVIEW" --parallel-tests "pnpm check:changed"
+"$AUTOREVIEW" --mode local --prompt-file review-notes.md --dataset evidence.json
 ```
 
-This is the narrow trusted-maintainer-code exception: it stages only the Blacksmith
-credential file into the temporary home so the command can delegate remotely. Never
-use this credential-hydrated path for untrusted contributor or fork code. Run other
-secret-bearing or credentialed tests separately in an appropriately isolated remote
-runner.
+## Engines
 
-Tradeoff: tests may force code changes that stale the review. If tests or review lead to code edits, rerun the affected tests and rerun review until no accepted/actionable findings remain. Once that rerun exits cleanly, stop; do not spend another long review cycle on redundant confirmation.
+For automatic reviewer selection, try OpenAI models through Codex before Claude.
+Start with `--engine codex` even when the invoking agent uses Codex or asks for
+an independent second opinion. Use Claude only when the user explicitly selects
+it or Codex is unavailable for the review; report the concrete availability failure
+before switching. Do not switch because a review is slow, rate-limited, or returns
+findings, or to bypass a safety refusal or isolation failure.
 
-## Review Panels
+Codex defaults to `gpt-6-sol`, high reasoning, with a `gpt-6-luna` retry
+only for an account-access failure. Explicit `gpt-6-sol` selections use the same
+retry; other explicit models, including Luna and Astra, have no model fallback.
+Explicit `gpt-5.6-sol` selections retain their access-only `gpt-5.6-terra` retry.
+GPT-6 Sol and Luna reject unsupported `minimal` effort before review preparation;
+an effort-only override no longer selects an older model.
+Honor explicit user engine/model choices.
+The helper does not automatically fall back between engines.
 
-Run multiple reviewers against one frozen bundle:
+Use `--engine`, `--model`, and `--thinking` to override the defaults.
+`--codex-speed fast` selects priority service when supported. Only Claude accepts
+`--fallback-model`. Per-engine environment overrides use `AUTOREVIEW_<ENGINE>_*`.
+
+If your account cannot access Sol or Luna, pin an available model. To require
+GPT-6 Astra without a model fallback, select it explicitly:
 
 ```bash
-"$AUTOREVIEW" --reviewers codex,claude,pi
+"$AUTOREVIEW" --mode local --model gpt-6-astra --thinking high
 ```
 
-`--panel` is shorthand for Codex plus Claude unless `--engine` changes the first reviewer:
+GPT-6 Sol and Luna support `none`, `low`, `medium`, `high`, `xhigh`, and `max`;
+neither supports `minimal`. Astra also excludes `none`. AutoReview defaults to
+`high` and does not fall back from an explicit Luna or Astra selection.
+Codex's `ultra` mode uses automatic
+delegation and is outside this helper's supported effort levels. Use `max`
+for its deepest supported review. For EU data residency, use
+`--codex-speed default`; GPT-6 fast mode is unavailable there.
+See the [GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol) and
+[GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna) model docs
+and [Codex reasoning modes](https://learn.chatgpt.com/docs/models#know-when-to-use-max-or-ultra).
+
+By default, Codex preserves only authentication settings from user configuration;
+provider, profile, context and catalogue settings remain ignored. To project a
+named route, select it explicitly through the existing config override:
 
 ```bash
-"$AUTOREVIEW" --panel
+"$AUTOREVIEW" --mode local --codex-config 'model_provider="review_api"'
 ```
 
-Set reviewer models and thinking/effort explicitly:
+The selector must match `model_provider` in the operator's external
+`CODEX_HOME/config.toml`. It accepts one bare or simply quoted identifier;
+provider definitions and other capabilities cannot be supplied through overrides.
+Projection requires Python 3.11 or `tomli`; default auth-only operation retains
+its existing fallback parser.
 
-```bash
-"$AUTOREVIEW" --reviewers codex,claude --model codex=gpt-5.6-sol --thinking codex=high --model claude=claude-fable-5 --thinking claude=max
+The selected route must use `https://api.openai.com/v1` and command authentication
+with an absolute external executable. Fixed arguments belong in that executable's
+wrapper; omitted or empty `auth.args` are accepted. Omitted `wire_api` and
+`requires_openai_auth` retain Codex's `responses` and `false` defaults. Optional
+auth timing and context settings keep native defaults and semantics.
+
+On POSIX, a private launcher restores the validated caller `HOME` only for the
+selected authentication executable; the engine and reviewer tools retain their
+isolated environment and filesystem access. Caller `HOME` must be an available
+absolute directory with no repository-owned path or symlink provenance. Windows
+keeps the native executable route. Command-auth runs suppress raw provider
+diagnostics and report fixed failure categories, while retaining compact progress,
+usage and assistant report streaming. An empty final report fails without exposing
+captured stdout.
+
+Catalogue and authentication working-directory paths resolve relative to the
+operator config directory and must remain outside the reviewed repository.
+A supplied catalogue is copied byte-for-byte into the private client runtime;
+retries use the same route and catalogue snapshot. Dry runs check the same
+ownership and route shape without executing authentication. Codex owns catalogue
+validation, model access and context clamping. Other custom provider forms and
+split context overrides are unsupported when projection is selected.
+
+| Optional engine | Prerequisites                                                                                         |
+| --------------- | ----------------------------------------------------------------------------------------------------- |
+| Claude          | CLI 2.1.169+; safe mode with web-only tools                                                           |
+| Amp             | `AMP_API_KEY` for a plugin-free account; local POSIX execution, no custom endpoint or cloud/orb agent |
+| Pi              | CLI 0.79.0+; configured model; no tools or project resources                                          |
+| Kimi            | CLI 0.30.0+; configured model; Python 3.11+ or `tomli` for TOML config                                |
+
+## Image review
+
+Branch mode with Codex supports **added, single-frame PNG, JPEG and WebP** files.
+Install Pillow in the Python environment running the helper (`python -m pip install Pillow`).
+Use a vision-capable Codex model and a CLI supporting `codex exec --image`.
+No new bypass flag is required. Full decoding rejects corrupt and animated files.
+Images must have at most 16,777,216 pixels and no dimension above 16,384 pixels;
+decoder bomb warnings fail closed before pixel loading. Added image paths are
+limited to 20 MiB of encoded bytes each and 100 MiB total, checked against Git
+object sizes before capture. Exceeding a limit fails the entire review.
+
+The helper captures exact bytes from the pinned HEAD, stages only those images
+in its isolated workspace, and attaches them through Codex's native image input.
+Every pass receives the path, media type, byte count and SHA-256 manifest alongside
+the image attachments and text diff. Image findings use the original path and line 1.
+Text-only review does not require Pillow.
+
+Other binaries, modified/deleted images, local/commit image changes and image review
+with other engines remain unsupported and fail closed. Missing Pillow or provider
+image limits fail the review rather than silently dropping assets. Sensitive-path,
+source-mutation, authentication and sandbox controls remain enabled.
+
+For partial clones, materialize required Git objects **before** review. The isolated
+Git reader intentionally disables lazy network fetching; do not weaken that boundary.
+
+## Runtime boundaries
+
+The helper owns reviewer isolation, sanitized authentication, process cleanup,
+Git scope, and structured result validation. Keep those controls enabled.
+Before repository detection or target selection, Git must pass `--version`
+within 10 seconds. Failure exits `2` with an `incomplete` diagnostic and the
+resolved executable (or the unresolved selection); it never means `scoped-clean`.
+Set `AUTOREVIEW_GIT` to a trusted external Git executable to override every
+helper-owned Git invocation. On macOS with a broken selected Xcode, use
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` for the invocation.
+Only an absolute, external `DEVELOPER_DIR` is additionally retained in Git's
+sanitized environment;
+neither override is forwarded to the isolated reviewer environment.
+
+Every reviewer pass must inspect its bundle for real credentials and report
+suspected credentials as P0 findings without reproducing their values. Harmless
+placeholders and test fixtures are not credentials. Autoreview does not require
+or invoke an external secret scanner. Never work around an isolation failure.
+
+### Intentional scanner-free policy
+
+Keep approved secret scanning outside autoreview; reviewer findings happen after
+transmission. Reintroducing a scanner requires an explicit maintainer decision.
+See [#240](https://github.com/openclaw/agent-skills/pull/240) for rationale and history.
+
+### Reviewer isolation
+
+On macOS, reviewer tools cannot access the shared `/tmp` and `/var/tmp` trees
+(including their `/private` aliases). Codex preflight rejects those temporary
+roots before workspace, runtime, or authentication setup; unset a shared
+`TMPDIR`/`TMP`/`TEMP` override to use macOS's private
+temporary directory. Other engines and platforms retain their normal isolation.
+Tools installed in shared scratch or requiring writes there will be denied too.
+
+Text review files have no size/count cap and are never truncated; image inputs
+use the explicit safety limits above. Large diffs and
+datasets are partitioned automatically. Change partitions retain complete
+datasets when they fit with sufficient change space. This preference may use more
+passes or prompt bytes than evidence batching; the explicit pass budget still applies.
+Terminal fallbacks preserve a feasible complete-evidence plan when batch framing cannot fit.
+Intact instructions, source-context files and required mixed source context must
+fit the per-pass prompt budget. A failed pass does not produce a partial clean verdict.
+Otherwise, the planner compares a bounded set of evidence allocations and keeps the existing
+plan unless total prompt bytes improve without more passes, or equal bytes need
+fewer passes. Every change is still reviewed against every evidence batch.
+
+Each pass is an independent assignment, not a continuing conversation. Its
+private completion field must confirm a finished assessment; deferring to
+another pass leaves the overall review incomplete.
+
+Do not edit inputs during a review: the helper verifies captured sources before
+sending and publishing results. Long reviews are normal; advancing heartbeats
+mean progress. Use `--stream-engine-output` for visibility, not extra reviewer
+runs. `--dry-run` checks preparation and startup without contacting a reviewer.
+Both dry runs and execution print planned pass count and total prompt bytes.
+Use `--max-review-passes N` (or `AUTOREVIEW_MAX_REVIEW_PASSES`) to reject the whole
+plan before any reviewer starts when it exceeds an explicit campaign budget.
+There is no default pass ceiling. `--engine-timeout-seconds` remains an optional
+deadline per process attempt. Pass counts, prompt bytes, and deadlines are not
+token hard caps; they do not bound model reasoning or tool use.
+
+## Results
+
+`--output`, `--json-output`, and `--status-output` paths must be outside the
+reviewed repository, both for the final directory entry after resolving parent
+symlinks and for the resolved referent. When using `--status-output`, all output
+paths must differ; case-only and Unicode normalization aliases are conservatively
+refused on every platform, even when the filesystem would permit distinct files.
+Tilde and relative destinations are expanded once before validation and remain
+anchored to the invocation directory. Atomic report writes replace a final
+symlink instead of modifying its target.
+
+For event-stream results, the last terminal event is authoritative. An invalid
+final result fails the review, even if an earlier event or review pass contained
+a valid report; earlier reports are never published as a partial clean result.
+A non-null `structured_output` must contain the report object; only an absent
+or null field permits using the event's `result` instead.
+
+| Exit | Meaning                                                                            |
+| ---- | ---------------------------------------------------------------------------------- |
+| `0`  | `scoped-clean`, or a correct verdict with only filtered lower-priority findings    |
+| `1`  | Accepted findings, an incorrect provider verdict, or a failed review attempt       |
+| `2`  | Unfinished assessment, incomplete scope/attribution, or a missing required finding |
+
+Treat `scoped-clean` as clean only for the selected target and requested priority.
+`filtered` is not clean; resolve `incomplete` before claiming completion.
+Verify findings against the actual code and task before changing anything.
+No extra review rounds for a nicer verdict; follow the owning workflow after fixes.
+
+Use `--status-output /outside/repo/status.json` for a separate, versioned
+machine-readable outcome. It preserves the existing exit codes and
+`--json-output` validated-report format. Completed reviews report `scoped-clean`,
+`findings`, `filtered`, `incorrect`, or `incomplete`; a launched reviewer that
+fails or returns an invalid report reports `reviewer_unavailable` with exit 1.
+A failed later pass never publishes a partial review report.
+
+Codex runs collect usage with live display on or off. The final report, status
+sidecar, and terminal summary include `usage`: process attempts, reported,
+unknown and partial attempt counts, `complete`, and observed token totals.
+Each fresh attempt contributes its last valid cumulative snapshot once, including
+access retries and failed passes. Cached input and reasoning output are subsets
+of input and output, not extra totals to add. These are observed tokens, not a
+billing estimate or a cache-hit promise. Missing telemetry, including Codex's
+all-zero defaults when no sample exists, is unknown, never measured zero;
+`tokens: null` means no attempt supplied usable totals. When `complete` is false,
+available totals are a lower bound. Interrupted runs print retained usage but
+still publish no status or review report. Other engines do not yet aggregate usage.
+
+```json
+{
+  "schema_version": 1,
+  "status": "reviewer_unavailable",
+  "exit_code": 1,
+  "engine": "codex",
+  "report_produced": false,
+  "reason": "engine_failed",
+  "reviewer_exit_code": 124,
+  "timed_out": true
+}
 ```
 
-Inline syntax is also supported for simple model IDs:
+`reason` is `engine_failed`, `invalid_report`, or `runtime_validation_failed`
+for unavailable reviewers and null for completed reviews. The last reason means
+Amp's post-launch isolation attestation or private-result validation refused
+the result; it is not a transient-provider classification. These guards still
+run before report acceptance and retain their existing failure diagnostics.
+`reviewer_exit_code` is the last reviewer process's exit code when retained,
+including zero for rejected output, otherwise null. `timed_out` identifies the
+helper's deadline, not a reviewer that happens to exit 124. Completed envelopes
+have `report_produced: true`; this means a validated final report exists, not
+that its verdict is clean. `--expect-findings` changes exit codes as before;
+inspect `status` independently of `exit_code`.
 
-```bash
-"$AUTOREVIEW" --reviewers codex:gpt-5.6-sol:high,claude:claude-fable-5:max
-```
+An unfinished assessment retains its validated provider observations with
+`incomplete`, exit 2, and `report_produced: true`, even when findings exist.
+The private completion field is not copied into public reports. Missing or
+invalid completion is an invalid report, not an unfinished assessment.
 
-For models with slashes or extra colons, prefer keyed form:
+The sidecar contains no provider logs, prompts, findings, or model identifiers.
+Existing bounded, display-safe diagnostics remain on stderr; command-auth
+diagnostic suppression remains in force. Use a fresh status path per invocation:
+after argument and output-path validation, a previous sidecar is removed before
+target selection. Dry runs, preflight refusals, pre-launch isolation failures, source mutations,
+interruptions, and output failures produce no new status. Absence means no
+outcome was published, never a clean review. No retry policy is added.
 
-```bash
-"$AUTOREVIEW" --engine pi --model anthropic/claude-sonnet-4 --thinking high
-"$AUTOREVIEW" --reviewers codex,pi --model codex=gpt-5.6-sol --model pi=anthropic/claude-sonnet-4
-```
-
-`--reviewers all` covers Codex, Claude, and Pi. Droid, Copilot, Cursor, and OpenCode selections fail closed because their current CLI contracts cannot confine project instructions, filesystem reads, or network fetches to the review boundary.
-
-## Models and thinking
-
-The helper accepts `--model` globally or per engine (`engine=model`) and `--thinking` globally or per engine (`engine=level`). Repeat either flag for multiple reviewers.
-
-Recommended model defaults:
-
-| Engine              | Default model                                      | Source note                                           |
-| ------------------- | -------------------------------------------------- | ----------------------------------------------------- |
-| **codex** (default) | `gpt-5.6-sol` -> `gpt-5.6-terra` on access failure | OpenClaw org review default                           |
-| **claude**          | `claude-fable-5`                                   | Anthropic's most capable widely released Claude model |
-
-CLI flags and environment variables override these defaults. Pi does not get a built-in model default because its provider catalog may vary by installation. Droid, Copilot, Cursor, and OpenCode are currently refused.
-
-| Engine              | Model flag                 | Example model IDs                                                            | Thinking flag                 | Accepted levels                                            |
-| ------------------- | -------------------------- | ---------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------- |
-| **codex** (default) | `codex --model X exec ...` | `gpt-5.6-sol`, then `gpt-5.6-terra` on Sol access failure                    | `-c model_reasoning_effort=Y` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
-| **claude**          | `claude --model X`         | `claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5` | `--effort Y`                  | `low`, `medium`, `high`, `xhigh`, `max`                    |
-| **droid**           | currently refused          | Factory model IDs                                                            | `-r, --reasoning-effort Y`    | `off`, `none`, `low`, `medium`, `high`, `xhigh`, `max`     |
-| **copilot**         | currently refused          | Copilot model aliases                                                        | not supported                 | n/a                                                        |
-| **pi**              | `pi --model X`             | `anthropic/claude-sonnet-4`, `openai/gpt-4o`                                 | `--thinking Y`                | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`         |
-| **cursor**          | currently refused          | Cursor model aliases                                                         | not supported                 | n/a                                                        |
-| **opencode**        | currently refused          | OpenCode provider/model IDs                                                  | not supported                 | n/a                                                        |
-
-Claude also supports `--fallback-model a,b` for availability-based fallback chains ([model-config](https://code.claude.com/docs/en/model-config)). Current Claude docs note that auth, billing, rate-limit, request-size, and transport errors do not trigger fallback, and the changelog documents interactive-session support in `v2.1.166`.
-
-[OpenAI's model guidance](https://developers.openai.com/api/docs/guides/latest-model) identifies Sol as the GPT-5.6 frontier-capability route and documents `max` support. Autoreview keeps `high` as its default; use `max` only for the hardest quality-first reviews after comparing its latency and cost with `xhigh` on representative changes.
-
-Examples matching current `main` behavior:
-
-```bash
-# Codex with explicit model and reasoning
-"$AUTOREVIEW" --engine codex --model gpt-5.6-sol --thinking high
-
-# Codex fast mode (priority service tier); needs a model whose catalog lists the tier, silently standard otherwise
-"$AUTOREVIEW" --engine codex --codex-speed fast
-
-# Safe Codex model/response tuning overrides (--codex-speed wins over a service_tier here)
-"$AUTOREVIEW" --engine codex --codex-config 'service_tier="fast"'
-
-# Claude Code aliases or full model names, with optional availability fallback
-"$AUTOREVIEW" --engine claude --model claude-fable-5 --thinking max
-"$AUTOREVIEW" --engine claude --model claude-fable-5 --fallback-model claude-opus-4-8,claude-sonnet-4-6
-
-# Pi with explicit model and thinking level
-"$AUTOREVIEW" --engine pi --model anthropic/claude-sonnet-4 --thinking high --pi-bin pi
-
-```
-
-`--cursor-agent-bin` and `CURSOR_AGENT_BIN` remain compatibility aliases for
-`--cursor-bin` and `CURSOR_BIN`.
-
-### Environment defaults
-
-CLI flags take precedence over environment variables.
-
-Store persistent personal defaults in your shell startup file or launcher
-environment. For repository-local defaults, use an existing local environment
-loader such as an untracked `.envrc`; the helper does not write a config file.
-
-| Variable                           | Purpose                                                                                                                          |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `AUTOREVIEW_MODEL`                 | Override the built-in default `--model` for all engines                                                                          |
-| `AUTOREVIEW_THINKING`              | Default `--thinking` for all engines                                                                                             |
-| `AUTOREVIEW_FALLBACK_MODEL`        | Default Claude `--fallback-model` chain                                                                                          |
-| `AUTOREVIEW_<ENGINE>_MODEL`        | Per-engine model override, for example `AUTOREVIEW_CODEX_MODEL=gpt-5.6-sol`                                                      |
-| `AUTOREVIEW_<ENGINE>_THINKING`     | Per-engine thinking override                                                                                                     |
-| `AUTOREVIEW_CODEX_CONFIG`          | Safe Codex model/response tuning overrides, semicolon-separated, e.g. `service_tier="fast"`; capability-bearing keys fail closed |
-| `AUTOREVIEW_CODEX_SPEED`           | Codex service tier override: `fast` (priority), `flex`, or `default`; silently standard when the model does not list the tier    |
-| `AUTOREVIEW_CLAUDE_FALLBACK_MODEL` | Claude-only fallback chain                                                                                                       |
-| `AUTOREVIEW_PROVIDER_ENV_ALLOW`    | Comma-separated custom Pi/OpenCode credential variable names; names must end in a recognized credential suffix                   |
-
-Codex maps thinking to `model_reasoning_effort`. Claude maps thinking to `--effort`. Pi maps thinking to `--thinking`. Only Claude accepts `--fallback-model`; global CLI/env fallback requires at least one Claude reviewer, and engine-specific fallback overrides require that reviewer to be selected. Non-Claude fallback overrides, including `AUTOREVIEW_<NONCLAUDE>_FALLBACK_MODEL`, fail closed instead of being silently ignored.
-
-## Review engine isolation
-
-When autoreview runs inside the repository under review, external reviewer CLIs must not load project-local trust or configuration that the branch controls.
-
-| Engine       | Isolation flags                                                                                                                                                                                  | Reference                                                                   |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| **codex**    | Auth-only config overrides, isolated workspace, `exec --ignore-user-config --ignore-rules --skip-git-repo-check`, plus read-only sandbox                                                         | Codex CLI `exec --help`                                                     |
-| **claude**   | `--safe-mode --setting-sources user --strict-mcp-config --disallowedTools mcp__*`; auto-memory and filesystem/shell tools disabled; empty external workspace; WebSearch by default (`v2.1.169+`) | Claude Code [CLI reference](https://code.claude.com/docs/en/cli-reference)  |
-| **droid**    | Fails closed: current CLI cannot disable both project instructions and all tools                                                                                                                 | Droid CLI `exec --help` and `--list-tools`                                  |
-| **copilot**  | Fails closed: repository read tools also expose ignored files outside the reviewed bundle                                                                                                        | GitHub Copilot CLI command reference                                        |
-| **pi**       | `--no-approve --no-session --no-context-files --no-extensions --no-skills --no-prompt-templates --no-themes --no-tools`                                                                          | Pi CLI `--help`; requires Pi `v0.79.0+`                                     |
-| **opencode** | Fails closed: project/global config isolation and private-network fetch denial are not both proven                                                                                               | OpenCode CLI contract                                                       |
-| **cursor**   | Fails closed: documented read permissions can target absolute host paths and no proven repository-only filesystem sandbox is exposed                                                             | Cursor CLI [permissions](https://cursor.com/docs/cli/reference/permissions) |
-
-Codex `--ignore-user-config` skips config loading for the exec run. Autoreview reconstructs only the documented `cli_auth_credentials_store`, `forced_login_method`, and `forced_chatgpt_workspace_id` settings from `CODEX_HOME/config.toml`, keeping authentication usable without forwarding unrelated user configuration. Codex runs in an empty temporary workspace: the validated bundle is its sole repository input, ignored files and linked-worktree metadata remain unreadable, and the zero project-doc budget keeps workspace instructions out of the prompt. `--ignore-rules` skips user/project execpolicy rules. Claude `--safe-mode` disables project hooks, skills, plugins, MCP servers, and CLAUDE.md; autoreview supplies WebSearch by default, permits only explicitly domain-constrained WebFetch rules, and exposes no filesystem or shell tools. Pi runs from a neutral temporary directory with project resources disabled and `--no-tools`. Droid, Copilot, Cursor, and OpenCode fail closed because their current CLI contracts cannot isolate untrusted review input from host, project, or private-network trust surfaces.
-
-Codex uses a named permission profile that grants read access only to an empty temporary workspace. This is narrower than repository-root access, which would expose ignored credentials, and narrower than the legacy `read-only` sandbox, which permits reads across the host filesystem.
-
-## Context Efficiency
-
-Run the helper directly so target selection, engine choice, structured validation, and exit status all stay in one path. If output is noisy, summarize the completed helper output after it returns; do not ask another agent or reviewer to rerun the review.
-
-## Helper
-
-After setting `AUTOREVIEW` and `AUTOREVIEW_HARNESS` above:
-
-```bash
-"$AUTOREVIEW" --help
-```
-
-The smoke harness has thin shell wrappers over a shared Python implementation:
-
-```bash
-"$AUTOREVIEW_HARNESS" --fixture benign --engine codex
-```
-
-On native Windows, invoke the extensionless Python helper through Python:
-
-```powershell
-python $AUTOREVIEW --help
-```
-
-and the smoke harness:
-
-```powershell
-& $AUTOREVIEW_HARNESS -Fixture benign -Engine codex
-```
-
-The helper:
-
-- chooses dirty local changes first
-- accepts `--mode uncommitted` as an alias for `--mode local`
-- otherwise uses current PR base if `gh pr view` works
-- otherwise uses `origin/main` for non-main branches
-- does not fetch automatically during branch review; the selected base ref must already resolve locally
-- recognizes `--engine droid`, `copilot`, `cursor`, and `opencode` only to fail closed with isolation errors; runnable engines are `codex`, `claude`, and `pi`; default is `AUTOREVIEW_ENGINE` or `codex`
-- resolves bare `git`, `gh`, reviewer, and PowerShell shell commands from absolute `PATH` entries only, never from the reviewed checkout; explicit `--*-bin` paths are interpreted from the reviewed repository root when relative and accepted only when both the supplied path and resolved target stay outside the reviewed repository
-- use `--mode commit --commit <ref>` for already-committed work, especially clean `main` after landing
-- should be left in `--mode auto` or forced to `--mode branch` for PR/branch work; do not force `--mode local` after committing
-- writes only to stdout unless `--output`, `--json-output`, or live streamed engine stderr is set
-- supports `--dry-run`, `--parallel-tests`, `--parallel-tests-shell`, `--prompt`, repo-relative `--prompt-file`, repo-relative `--dataset`, `--no-tools`, `--no-web-search`, repeatable Codex-only safe model/response tuning with `--codex-config key=value`, Codex-only `--codex-speed fast|flex|default`, and commit refs
-- supports `--stream-engine-output` or `AUTOREVIEW_STREAM_ENGINE_OUTPUT=1` for live engine text while preserving structured validation; Codex and Claude hide tool/file event details, emit compact activity summaries, and report usage at turn completion
-- supports opt-in review panels with `--panel` / `--reviewers`, plus per-engine `--model`, `--thinking`, and Claude `--fallback-model`
-- uses built-in defaults `codex=gpt-5.6-sol` with `high` reasoning and an access-only `gpt-5.6-terra` retry, plus `claude=claude-fable-5`; honors `AUTOREVIEW_MODEL`, `AUTOREVIEW_THINKING`, `AUTOREVIEW_FALLBACK_MODEL`, and per-engine `AUTOREVIEW_<ENGINE>_MODEL` / `AUTOREVIEW_<ENGINE>_THINKING` environment overrides when CLI flags are omitted
-- gives Codex the bundle in an empty workspace with web search available; Claude receives the bundle plus WebSearch by default and optional domain-constrained WebFetch, and Pi receives the bundle with no tools
-- runs Claude with `--safe-mode` (`v2.1.169+`), `--setting-sources user`, MCP and auto-memory disabled, no filesystem/shell tools, an empty external workspace, and `--fallback-model` when set
-- refuses Droid, Copilot, Cursor, and OpenCode reviews until their CLIs expose the required project, filesystem, and network isolation
-- runs Pi `v0.79.0+` from neutral temporary directories with `--no-approve`, `--no-session`, disabled Pi context/resource loading, and `--no-tools` because its built-in read tools are not repository-confined
-- prints `review still running: <engine> elapsed=<seconds>s pid=<pid>` to stderr at long-running intervals while waiting for the selected review engine, unless streamed output or compact Codex activity has been visible recently
-- prints `autoreview clean: no accepted/actionable findings reported` when the selected review command exits 0
-- exits nonzero when accepted/actionable findings are present
-
-## Final Report
-
-Include:
-
-- review command used
-- tests/proof run
-- findings accepted/rejected, briefly why
-- the clean review result from the final helper/review run, or why a remaining finding was consciously rejected
-
-Do not run another review solely to improve the final report wording. If the final helper run exited 0 and produced no accepted/actionable findings, report that exact run as clean.
+Report material findings and status plainly. Do not add transcripts, proof
+ledgers, commits, pushes, or a new workstream unless requested.

@@ -15,6 +15,19 @@ pnpm install --frozen-lockfile
 pnpm run dev -- --help
 ```
 
+Full validation also runs the vendored Autoreview tests. Use an activated Python
+3.14 virtual environment with the locked test dependency:
+
+```bash
+python3.14 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-autoreview.txt
+```
+
+On Windows, create the environment with `py -3.14 -m venv .venv` and activate it
+using your shell's activation script under `.venv\Scripts`. The
+`pnpm run test:autoreview` command uses that environment's `python`.
+
 The source is in `src/`, the Node test suite is in `test/`, and protocol
 conformance cases are in `conformance/`. The replay viewer and sample workflows
 live in `examples/flows/`. See [AGENTS.md](AGENTS.md) for commands, dependency
@@ -39,7 +52,7 @@ Start with the smallest relevant test while iterating. Before requesting review:
 - Exercise the built CLI or public runtime on the affected path and record the
   commands and results in the PR. Bug fixes should include a regression test.
 - For non-trivial code changes, run the repository's isolated autoreview helper:
-  `.agents/skills/autoreview/scripts/autoreview`. Verify its findings and address
+  `.agents/skills/autoreview/scripts/autoreview --max-priority P2`. Verify its findings and address
   actionable problems before requesting review.
 - Ensure CI passes. For visual changes, include before/after screenshots using
   synthetic data and check that the captures contain no secrets or private data.
