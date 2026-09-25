@@ -15,6 +15,7 @@ import {
   findGitRepositoryRoot,
   findSessionByDirectoryWalk,
   normalizeName,
+  readSessionRecord,
   writeSessionRecord,
 } from "../persistence.js";
 import { acquireSessionScope } from "../turn-ownership.js";
@@ -27,7 +28,7 @@ import type {
   SessionListResult,
 } from "./contracts.js";
 import { directExecutionError, ownDirectClient } from "./direct-lifetime.js";
-import { setSessionModel } from "./session-control.js";
+import { closeSession, setSessionModel } from "./session-control.js";
 
 type CreatedSessionState = {
   sessionId: string;
@@ -168,6 +169,19 @@ export async function createSessionWithClient(
   options: SessionCreateOptions,
 ): Promise<SessionCreateWithClientResult> {
   assertControlAuthority({ signal: options.signal });
+  if (options.resumeSessionId) {
+    const resumedRecord = await readSessionRecord(options.resumeSessionId);
+    assertControlAuthority({ signal: options.signal });
+    if (
+      resumedRecord &&
+      !resumedRecord.closed &&
+      resumedRecord.agentCommand === options.agentCommand
+    ) {
+      // Resume overwrites this canonical record even when its scope changes.
+      await closeSession(resumedRecord.acpxRecordId);
+      assertControlAuthority({ signal: options.signal });
+    }
+  }
   const client = new AcpClient({
     agentCommand: options.agentCommand,
     agentArgv: options.agentArgv,

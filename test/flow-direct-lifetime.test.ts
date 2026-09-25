@@ -8,14 +8,17 @@ import { setImmediate as nextTurn } from "node:timers/promises";
 import { normalizeAgentCommandInput } from "../src/acp/client-process.js";
 import { AcpClient } from "../src/acp/client.js";
 import { TerminalManager } from "../src/acp/terminal-manager.js";
-import { TimeoutError } from "../src/async-control.js";
+import { TimeoutError, withTimeout } from "../src/async-control.js";
 import { acp, defineFlow, FlowRunner } from "../src/flows/runtime.js";
 import { sessionEventLockPath } from "../src/session/event-log.js";
 import type { RunOnceOptions } from "../src/session/execution/contracts.js";
 import { DISCARD_OUTPUT_FORMATTER } from "../src/session/execution/discard-output.js";
 import { runOnce, sendSessionDirect } from "../src/session/execution/runtime.js";
-import { createSessionWithClient } from "../src/session/execution/session-management.js";
-import { writeSessionRecord } from "../src/session/persistence.js";
+import {
+  createSessionWithClient,
+  ensureSession,
+} from "../src/session/execution/session-management.js";
+import { readSessionRecord, writeSessionRecord } from "../src/session/persistence.js";
 import type { AcpClientOptions } from "../src/types.js";
 import { makeSessionRecord, withTempHome } from "./runtime-test-helpers.js";
 
@@ -529,3 +532,259 @@ for (const phase of ["retry", "cleanup"] as const) {
     });
   });
 }
+
+for (const timing of ["before", "after-read", "read-error"] as const) {
+  test(`direct resume preflight preserves the prior record on ${timing}`, async (t) => {
+    await withTempHome("acpx-resume-admission-", async (home) => {
+      const record = makeSessionRecord({
+        acpxRecordId: "resume-admission",
+        acpSessionId: "resume-admission",
+        agentCommand: "unused-synthetic-resume-agent",
+        cwd: home,
+        name: "before",
+      });
+      await writeSessionRecord(record);
+      const file = path.join(home, ".acpx", "sessions", "resume-admission.json");
+      const before = await fs.readFile(file);
+      const controller = new AbortController();
+      const reason = new Error(`synthetic ${timing}`);
+      let starts = 0;
+      t.mock.method(AcpClient.prototype, "start", async () => {
+        starts += 1;
+        throw new Error("unexpected start before preflight authority/storage settled");
+      });
+      let reads = 0;
+      const readFile = fs.readFile;
+      const observation = t.mock.method(
+        fs,
+        "readFile",
+        async (...args: Parameters<typeof readFile>) => {
+          if (args[0] === file) {
+            reads += 1;
+            if (timing === "read-error") {
+              throw reason;
+            }
+            const value = await readFile(...args);
+            if (timing === "after-read") {
+              controller.abort(reason);
+            }
+            return value;
+          }
+          return await readFile(...args);
+        },
+      );
+      if (timing === "before") {
+        controller.abort(reason);
+      }
+      try {
+        await assert.rejects(
+          createSessionWithClient({
+            agentCommand: record.agentCommand,
+            cwd: home,
+            name: "after",
+            resumeSessionId: record.acpxRecordId,
+            permissionMode: "deny-all",
+            signal: controller.signal,
+            handleProcessInterrupts: false,
+          }),
+          (error: unknown) => error === reason,
+        );
+        assert.equal(starts, 0);
+        assert.equal(reads, timing === "before" ? 0 : 1);
+      } finally {
+        observation.mock.restore();
+      }
+      assert.deepEqual(await fs.readFile(file), before);
+    });
+  });
+}
+
+for (const disposition of ["abort-after-close-admission", "close-write-failure"] as const) {
+  test(`direct resume joins preflight retirement before ${disposition}`, async (t) => {
+    await withTempHome("acpx-resume-retirement-", async (home) => {
+      const record = makeSessionRecord({
+        acpxRecordId: "resume-retirement",
+        acpSessionId: "resume-retirement",
+        agentCommand: "unused-synthetic-resume-agent",
+        cwd: home,
+        name: "before",
+        messages: [{ Agent: { content: [{ Text: "prior synthetic reply" }], tool_results: {} } }],
+      });
+      await writeSessionRecord(record);
+      const file = path.join(home, ".acpx", "sessions", "resume-retirement.json");
+      const before = await fs.readFile(file);
+      const controller = new AbortController();
+      const reason = new Error(disposition);
+      const reached = gate();
+      const release = gate();
+      let starts = 0;
+      t.mock.method(AcpClient.prototype, "start", async () => {
+        starts += 1;
+        throw new Error("unexpected start before prior-record retirement");
+      });
+      const publicationPath = await fs.realpath(file);
+      const rename = fs.rename;
+      const publication = t.mock.method(
+        fs,
+        "rename",
+        async (...args: Parameters<typeof rename>) => {
+          if (String(args[1]) === publicationPath) {
+            const staged = JSON.parse(await fs.readFile(String(args[0]), "utf8")) as {
+              closed?: unknown;
+            };
+            assert.equal(staged.closed, true);
+            if (disposition === "close-write-failure") {
+              reached.release();
+              throw reason;
+            }
+            const value = await rename(...args);
+            controller.abort(reason);
+            reached.release();
+            await release.promise;
+            return value;
+          }
+          return await rename(...args);
+        },
+      );
+      const run = observe(
+        createSessionWithClient({
+          agentCommand: record.agentCommand,
+          cwd: home,
+          name: "after",
+          resumeSessionId: record.acpxRecordId,
+          permissionMode: "deny-all",
+          signal: controller.signal,
+          handleProcessInterrupts: false,
+        }),
+      );
+      try {
+        await withTimeout(
+          Promise.race([
+            reached.promise,
+            run.outcome.then(() => {
+              throw new Error("Resume bypassed its retirement publication");
+            }),
+          ]),
+          5_000,
+        );
+        if (disposition === "abort-after-close-admission") {
+          await nextTurn();
+          assert.equal(run.settled(), false, "abort must still join the admitted close");
+        }
+        assert.equal(starts, 0);
+      } finally {
+        release.release();
+        await run.outcome;
+        publication.mock.restore();
+      }
+      const outcome = await run.outcome;
+      if (outcome.ok) {
+        throw new Error("Expected preflight rejection");
+      }
+      assert.equal(outcome.error, reason);
+      assert.equal(starts, 0);
+      const saved = await readSessionRecord(record.acpxRecordId);
+      assert.ok(saved);
+      assert.equal(saved.closed, disposition === "abort-after-close-admission");
+      assert.deepEqual(saved.messages, record.messages);
+      assert.equal(saved.cwd, record.cwd);
+      assert.equal(saved.name, record.name);
+      if (disposition === "close-write-failure") {
+        assert.deepEqual(await fs.readFile(file), before);
+      }
+      await assert.rejects(fs.access(sessionEventLockPath(record.acpxRecordId)), {
+        code: "ENOENT",
+      });
+    });
+  });
+}
+
+for (const exclusion of ["closed", "foreign-command", "provider-alias", "suffix-alias"] as const) {
+  test(`direct resume preflight does not retire ${exclusion}`, async (t) => {
+    await withTempHome("acpx-resume-exclusion-", async (home) => {
+      const requestedId = "requested-resume";
+      const command = "unused-synthetic-resume-agent";
+      const record = makeSessionRecord({
+        acpxRecordId:
+          exclusion === "provider-alias"
+            ? "imported-local-uuid"
+            : exclusion === "suffix-alias"
+              ? "prefix-requested-resume"
+              : requestedId,
+        acpSessionId: requestedId,
+        agentCommand: exclusion === "foreign-command" ? "other-synthetic-agent" : command,
+        cwd: home,
+        name: "existing",
+        closed: exclusion === "closed",
+      });
+      await writeSessionRecord(record);
+      const file = path.join(
+        home,
+        ".acpx",
+        "sessions",
+        `${encodeURIComponent(record.acpxRecordId)}.json`,
+      );
+      const before = await fs.readFile(file);
+      const boundary = new Error("intentional stop before backend startup/publication");
+      let starts = 0;
+      t.mock.method(AcpClient.prototype, "start", async () => {
+        starts += 1;
+        throw boundary;
+      });
+      await assert.rejects(
+        createSessionWithClient({
+          agentCommand: command,
+          cwd: home,
+          name: "requested",
+          resumeSessionId: requestedId,
+          permissionMode: "deny-all",
+          handleProcessInterrupts: false,
+        }),
+        (error: unknown) => error === boundary,
+      );
+      assert.equal(starts, 1);
+      assert.deepEqual(await fs.readFile(file), before);
+    });
+  });
+}
+
+test("direct ensure reuses its scope without retiring another requested resume record", async (t) => {
+  await withTempHome("acpx-resume-reuse-", async (home) => {
+    const command = "unused-synthetic-resume-agent";
+    const existing = makeSessionRecord({
+      acpxRecordId: "existing-destination",
+      acpSessionId: "existing-destination",
+      agentCommand: command,
+      cwd: home,
+      name: "destination",
+    });
+    const requested = makeSessionRecord({
+      acpxRecordId: "requested-resume",
+      acpSessionId: "requested-resume",
+      agentCommand: command,
+      cwd: home,
+      name: "source",
+    });
+    await writeSessionRecord(existing);
+    await writeSessionRecord(requested);
+    const paths = [existing, requested].map((record) =>
+      path.join(home, ".acpx", "sessions", `${record.acpxRecordId}.json`),
+    );
+    const before = await Promise.all(paths.map((file) => fs.readFile(file)));
+    const start = t.mock.method(AcpClient.prototype, "start", async () => {
+      throw new Error("Existing ensure must not start a replacement client");
+    });
+    const result = await ensureSession({
+      agentCommand: command,
+      cwd: home,
+      name: existing.name,
+      resumeSessionId: requested.acpxRecordId,
+      permissionMode: "deny-all",
+      handleProcessInterrupts: false,
+    });
+    assert.equal(result.created, false);
+    assert.equal(result.record.acpxRecordId, existing.acpxRecordId);
+    assert.equal(start.mock.callCount(), 0);
+    assert.deepEqual(await Promise.all(paths.map((file) => fs.readFile(file))), before);
+  });
+});

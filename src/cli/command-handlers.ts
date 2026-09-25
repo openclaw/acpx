@@ -675,10 +675,6 @@ export async function handleSessionsNew(
   });
 
   const resumesSameRecord = replaced != null && replaced.acpxRecordId === flags.resumeSession;
-  if (resumesSameRecord) {
-    // The old owner must finish before resume overwrites this same record path.
-    await closeSession(replaced.acpxRecordId);
-  }
 
   const created = await createSession(
     buildSessionStartOptions({

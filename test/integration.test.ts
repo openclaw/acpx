@@ -4998,87 +4998,115 @@ for (const format of ["text", "quiet", "json"]) {
 }
 
 for (const connection of ["load", "resume"]) {
-  for (const fails of [false, true]) {
-    test(`integration: same-ID ${connection} retires its warm owner before replacement (fails: ${fails})`, async () => {
-      await withTempHome(async (homeDir) => {
-        const recordId = "same-resume-warm";
-        const base = [
-          "--agent",
-          `${MOCK_AGENT_COMMAND} --supports-${connection}-session --advertise-models`,
-          "--cwd",
-          homeDir,
-          "--ttl",
-          "60",
-          "--format",
-          "json",
-        ];
-        const recordPath = path.join(homeDir, ".acpx", "sessions", `${recordId}.json`);
-        const readRecord = async () => {
-          const record = parseSessionRecord(JSON.parse(await fs.readFile(recordPath, "utf8")));
-          assert.ok(record);
-          return record;
-        };
-        const ownedPids = new Set<number>();
-        const rememberOwner = async () => {
-          const owner = await readQueueOwnerLock(homeDir, recordId);
-          const record = await readRecord();
-          assert.ok(record.pid);
-          ownedPids.add(owner.pid);
-          ownedPids.add(record.pid);
-          return record;
-        };
-        const body = await observeTestOutcome(async () => {
-          const created = await runCli(
-            [...base, "sessions", "new", "--resume-session", recordId],
-            homeDir,
-          );
-          assert.equal(created.code, 0, JSON.stringify(created));
-          const warm = await runCli([...base, "prompt", "echo warm-owner"], homeDir);
-          assert.equal(warm.code, 0, JSON.stringify(warm));
-          const before = await rememberOwner();
-          const replacement = await runCli(
-            [
-              ...base,
-              ...(fails ? ["--model", "missing-model"] : []),
-              "sessions",
-              "new",
-              "--resume-session",
-              recordId,
-            ],
-            homeDir,
-          );
-          assert.equal(replacement.code, fails ? 1 : 0, JSON.stringify(replacement));
-          for (const pid of ownedPids) {
-            assert.equal(await waitForPidExit(pid, 5_000), true, `prior process ${pid} survived`);
+  for (const scenario of [
+    { operation: "new", scope: "same" },
+    { operation: "new", scope: "other" },
+    { operation: "ensure", scope: "other" },
+  ]) {
+    for (const fails of [false, true]) {
+      test(`integration: ${scenario.operation} same-ID ${connection} retires its ${scenario.scope}-scope warm owner (fails: ${fails})`, async () => {
+        await withTempHome(async (homeDir) => {
+          const recordId = "same-resume-warm";
+          const destination = scenario.scope === "same" ? homeDir : path.join(homeDir, "other");
+          await fs.mkdir(destination, { recursive: true });
+          const name = scenario.scope === "same" ? undefined : "moved";
+          const creationName = name === undefined ? [] : ["--name", name];
+          const promptName = name === undefined ? [] : ["-s", name];
+          const base = (cwd: string) => [
+            "--agent",
+            `${MOCK_AGENT_COMMAND} --supports-${connection}-session --advertise-models`,
+            "--cwd",
+            cwd,
+            "--ttl",
+            "60",
+            "--format",
+            "json",
+          ];
+          const recordPath = path.join(homeDir, ".acpx", "sessions", `${recordId}.json`);
+          const readRecord = async () => {
+            const record = parseSessionRecord(JSON.parse(await fs.readFile(recordPath, "utf8")));
+            assert.ok(record);
+            return record;
+          };
+          const ownedPids = new Set<number>();
+          const rememberOwner = async () => {
+            const owner = await readQueueOwnerLock(homeDir, recordId);
+            const record = await readRecord();
+            assert.ok(record.pid);
+            ownedPids.add(owner.pid);
+            ownedPids.add(record.pid);
+            return record;
+          };
+          const body = await observeTestOutcome(async () => {
+            const created = await runCli(
+              [...base(homeDir), "sessions", "new", "--resume-session", recordId],
+              homeDir,
+            );
+            assert.equal(created.code, 0, JSON.stringify(created));
+            const warm = await runCli([...base(homeDir), "prompt", "echo warm-owner"], homeDir);
+            assert.equal(warm.code, 0, JSON.stringify(warm));
+            const before = await rememberOwner();
+            const replacement = await runCli(
+              [
+                ...base(destination),
+                ...(fails ? ["--model", "missing-model"] : []),
+                "sessions",
+                scenario.operation,
+                ...creationName,
+                "--resume-session",
+                recordId,
+              ],
+              homeDir,
+            );
+            assert.equal(replacement.code, fails ? 1 : 0, JSON.stringify(replacement));
+            for (const pid of ownedPids) {
+              assert.equal(await waitForPidExit(pid, 5_000), true, `prior process ${pid} survived`);
+            }
+            const after = await readRecord();
+            assert.equal(after.acpxRecordId, recordId);
+            assert.equal(after.acpSessionId, recordId);
+            assert.equal(after.closed, fails);
+            assert.equal(after.pid, undefined);
+            assert.equal(after.cwd, fails ? before.cwd : destination);
+            assert.equal(after.name, fails ? before.name : name);
+            if (fails) {
+              assert.match(replacement.stdout, /did not advertise that model/);
+              assert.deepEqual(after.messages, before.messages);
+            }
+            const prompt = await runCli(
+              [...base(destination), "prompt", ...promptName, "echo replacement-owner"],
+              homeDir,
+            );
+            assert.equal(prompt.code, fails ? 4 : 0, JSON.stringify(prompt));
+            if (!fails) {
+              await rememberOwner();
+              assert.match(prompt.stdout, /replacement-owner/);
+            }
+          });
+          const cleanup = await observeTestOutcome(async () => {
+            // Failure can leave the old scope closed; success moves the same ID.
+            // Read the actual current scope instead of assuming the requested one.
+            const current = await readRecord();
+            await runCli(
+              [
+                ...base(current.cwd),
+                "sessions",
+                "close",
+                ...(current.name === undefined ? [] : [current.name]),
+              ],
+              homeDir,
+            );
+            for (const pid of ownedPids) {
+              assert.equal(await waitForPidExit(pid, 5_000), true, `cleanup left process ${pid}`);
+            }
+          });
+          if (!cleanup.ok) {
+            retainedCliHomes.add(homeDir);
           }
-          const after = await readRecord();
-          assert.equal(after.acpxRecordId, recordId);
-          assert.equal(after.acpSessionId, recordId);
-          assert.equal(after.closed, fails);
-          assert.equal(after.pid, undefined);
-          if (fails) {
-            assert.match(replacement.stdout, /did not advertise that model/);
-            assert.deepEqual(after.messages, before.messages);
-          }
-          const prompt = await runCli([...base, "prompt", "echo replacement-owner"], homeDir);
-          assert.equal(prompt.code, fails ? 4 : 0, JSON.stringify(prompt));
-          if (!fails) {
-            await rememberOwner();
-            assert.match(prompt.stdout, /replacement-owner/);
-          }
+          unwrapTestOutcomes(body, cleanup);
         });
-        const cleanup = await observeTestOutcome(async () => {
-          await runCli([...base, "sessions", "close"], homeDir);
-          for (const pid of ownedPids) {
-            assert.equal(await waitForPidExit(pid, 5_000), true, `cleanup left process ${pid}`);
-          }
-        });
-        if (!cleanup.ok) {
-          retainedCliHomes.add(homeDir);
-        }
-        unwrapTestOutcomes(body, cleanup);
       });
-    });
+    }
   }
 }
 

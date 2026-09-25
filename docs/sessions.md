@@ -93,6 +93,8 @@ Named sessions are independent. They do not share state, queue owners, or histor
 
 `new` is the explicit "I want to start over" verb. `ensure` is the idempotent "give me a session" verb for scripts. Bare prompt is conservative: it never auto-creates so you do not accidentally fork a session by running from the wrong directory.
 
+Explicitly resuming a saved local ID for the same agent command retires its current owner before loading that ID, even when you choose another cwd or name. This applies to `sessions new --resume-session` and to `sessions ensure --resume-session` when ensure needs to create the destination. If resuming fails, the prior record stays closed with its saved history. Ensuring an already-matching session still returns it normally.
+
 ## Soft-close
 
 `sessions close` does not delete anything. It marks the record `closed: true` with `closedAt`, asks any active queue owner to send ACP `session/close`, and tears down adapter processes.
