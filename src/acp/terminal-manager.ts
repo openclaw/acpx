@@ -679,7 +679,8 @@ async function spawnAndWait(
     params.cwd ?? defaultCwd,
     params.env,
   );
-  if (spawnCommand.killProcessGroup || process.platform !== "win32") {
+  // A detached Windows shell redirects its children's output to a new console.
+  if (process.platform !== "win32") {
     spawnOptions.detached = true;
   }
   // ACP terminal/create is a permission-gated command-execution surface.
