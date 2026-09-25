@@ -200,7 +200,12 @@ function parseRequestTokenUsage(
     if (parsed == null) {
       return null;
     }
-    usage[key] = parsed;
+    Object.defineProperty(usage, key, {
+      value: parsed,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
   }
 
   return usage;

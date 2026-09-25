@@ -25,6 +25,43 @@ type SessionModule = typeof import("../src/session/session.js");
 
 const SESSION_MODULE_URL = new URL("../src/session/session.js", import.meta.url);
 
+for (const messageId of ["__proto__", "constructor", "toString"]) {
+  const identity = {
+    acpxRecordId: "opaque-usage",
+    acpSessionId: "opaque-usage",
+    agentCommand: "agent",
+    cwd: "/tmp/opaque-usage",
+  };
+  test(`request usage preserves opaque ${messageId} across disk serialization and parsing`, () => {
+    const expectedUsage = Object.fromEntries([
+      ["neighbor", { output_tokens: 3 }],
+      [messageId, { input_tokens: 2, output_tokens: 7 }],
+    ]);
+    const record = makeSessionRecord({ ...identity, request_token_usage: expectedUsage });
+    const serialized = JSON.stringify(serializeSessionRecordForDisk(record));
+    const parsed = parseSessionRecord(JSON.parse(serialized));
+
+    assert.ok(parsed);
+    assert.equal(Object.hasOwn(parsed.request_token_usage, messageId), true);
+    assert.equal(Object.getPrototypeOf(parsed.request_token_usage), Object.prototype);
+    assert.deepEqual(parsed.request_token_usage, expectedUsage);
+    assert.equal(JSON.stringify(parsed.request_token_usage), JSON.stringify(expectedUsage));
+    const reloaded = parseSessionRecord(
+      JSON.parse(JSON.stringify(serializeSessionRecordForDisk(parsed))),
+    );
+    assert.deepEqual(reloaded?.request_token_usage, expectedUsage);
+  });
+
+  test(`request usage rejects invalid counters under opaque ${messageId}`, () => {
+    const record = makeSessionRecord({
+      ...identity,
+      request_token_usage: Object.fromEntries([[messageId, { output_tokens: -1 }]]),
+    });
+    const serialized = JSON.stringify(serializeSessionRecordForDisk(record));
+    assert.equal(parseSessionRecord(JSON.parse(serialized)), null);
+  });
+}
+
 test("parseSessionRecord preserves structured agent argv", () => {
   const serialized = serializeSessionRecordForDisk(
     makeSessionRecord({
