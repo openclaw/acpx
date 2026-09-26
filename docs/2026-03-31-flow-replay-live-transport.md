@@ -129,6 +129,16 @@ semantic view from storage-level fragments.
 The browser should instead hold one semantic viewer state object and patch that
 object directly.
 
+The Vite middleware watches viewer assets separately from run-bundle observation.
+On macOS it polls assets, avoiding native watcher stalls while continuing to
+observe files after editors replace them atomically. Asset edits still invalidate
+Vite's cached transforms; run subscriptions and their polling intervals are
+unchanged.
+
+Closing the viewer also settles pending dependency warmups, including immediately
+after the first entry-module request. Callers do not need to wait for optimization
+or request every dependency before closing the server.
+
 ## State model
 
 The browser should keep one canonical state object per subscribed run.

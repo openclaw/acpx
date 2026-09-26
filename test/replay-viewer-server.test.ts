@@ -16,7 +16,6 @@ import {
   createReplayViewerServer,
   fetchViewerServerHealth,
   isServerAlreadyRunning,
-  requestViewerServerShutdown,
 } from "../examples/flows/replay-viewer/server/viewer-server.js";
 
 const execFileAsync = promisify(execFile);
@@ -89,7 +88,7 @@ test("replay viewer CLI prints help without starting a server", async () => {
   assert.match(stdout, /--runs-dir <path>/);
 });
 
-test("replay viewer status and stop helpers report and stop a running server", async () => {
+test("replay viewer status and CLI stop report and stop a running server", async () => {
   const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-replay-status-"));
   const viewerServer = await createReplayViewerServer({
     host: "127.0.0.1",
@@ -105,7 +104,17 @@ test("replay viewer status and stop helpers report and stop a running server", a
       runsDir,
     });
     assert.equal(await isServerAlreadyRunning(viewerServer.baseUrl), true);
-    assert.equal(await requestViewerServerShutdown(viewerServer.baseUrl), true);
+    const { stdout } = await execFileAsync(process.execPath, [
+      viewerCliPath,
+      "stop",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(viewerServer.port),
+      "--runs-dir",
+      runsDir,
+    ]);
+    assert.equal(stdout, `Stopped viewer at ${viewerServer.baseUrl}/\n`);
     await waitFor(async () => !(await isServerAlreadyRunning(viewerServer.baseUrl)));
   } finally {
     await viewerServer.close().catch(() => {});

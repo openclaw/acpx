@@ -66,6 +66,8 @@ export async function createReplayViewerServer(
       host,
       port,
       strictPort: false,
+      // Polling avoids native watcher stalls and follows atomic replacements on macOS.
+      ...(process.platform === "darwin" ? { watch: { useFsEvents: false, usePolling: true } } : {}),
     },
   });
   const liveSyncServer = createReplayLiveSyncServer({
