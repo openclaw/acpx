@@ -78,6 +78,8 @@ try {
 
   // Repeated replacements expose watchers that remain attached to the old inode.
   for (const marker of ["watch-first-atomic-value", "watch-atomic-value"]) {
+    // Keep independent replacements outside Chokidar's 50 ms change-coalescing window.
+    await new Promise((resolve) => setTimeout(resolve, 75));
     const replacement = path.join(frontendRoot, "replacement.ts");
     await fs.writeFile(replacement, assetSource(marker));
     await fs.rename(replacement, replacedAssetPath);
