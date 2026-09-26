@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Examples: add an optional Hermes ACP launcher for active-turn guidance without changing normal prompt queueing.
+
 ### Fixes
 
 - Fix nested documentation builds without a custom domain and keep their canonical URLs within the deployment path.
