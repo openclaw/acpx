@@ -124,8 +124,7 @@ test("host outcome timeout remains a failure after cooperative native close", as
       `
       process.on('message', message => {
         if (message === ${JSON.stringify(HOST_STOP)}) {
-          process.stdout.write('stopped');
-          process.exit(0);
+          process.stdout.write('stopped', error => process.exit(error ? 1 : 0));
         }
       });
       setInterval(() => {}, 1000);
@@ -558,7 +557,7 @@ test(
       import {runFlowHostCase} from ${JSON.stringify(flowHostModule)};
       const bodyError = new Error('synthetic body failure');
       try {
-        await runFlowHostCase('wrapper-exit', 'publication', bodyError);
+        await runFlowHostCase('interrupt', 'publication', bodyError);
       } catch (error) {
         const entries = error instanceof AggregateError ? error.errors : null;
         process.stderr.write(JSON.stringify({
@@ -587,8 +586,8 @@ test(
     assert.equal(host.stdoutEof, true);
     assert.equal(host.stderrEof, true);
     const report = JSON.parse(host.stdout) as FlowHostReport;
-    assert.equal(report.primaryError, "synthetic body failure");
-    assert.equal(report.actors.length, 2);
+    assert.equal(report.primaryError, "synthetic body failure", host.stdout);
+    assert.equal(report.actors.length, 1);
     for (const actor of report.actors) {
       assert.ok(await actorStopped(actor), `${actor.role} must retire through FlowRunner`);
     }
