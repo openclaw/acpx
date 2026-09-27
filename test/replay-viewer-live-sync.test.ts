@@ -1530,11 +1530,23 @@ test("selected-run missing files recover on the same socket with deduplicated wa
       currentNode: "judge_solution",
       steps: [],
     });
-    const later = await inbox.next((message) => message.type === "run_patch", 3_000);
+    const later = await inbox.next(
+      (message) => message.type === "run_patch" || message.type === "run_snapshot",
+      3_000,
+    );
     assert.equal(later.runId, runId);
-    assert.equal(later.fromVersion, recovered.version);
-    assert(later.toVersion > recovered.version);
-    assert.deepEqual(applyReplayPatch(recovered.state, later.ops), await source.getRunState(runId));
+    if (later.type === "run_patch") {
+      assert.equal(later.fromVersion, recovered.version);
+      assert.equal(later.toVersion, recovered.version + 1);
+      assert.deepEqual(
+        applyReplayPatch(recovered.state, later.ops),
+        await source.getRunState(runId),
+      );
+    } else {
+      // The atomic update can race a read and use the existing recovery snapshot.
+      assert.equal(later.version, recovered.version + 1);
+      assert.deepEqual(later.state, await source.getRunState(runId));
+    }
     assert.equal(socket.readyState, WebSocket.OPEN);
     // No reconnect, resubscribe, or resync was used to recover either failure.
   } finally {

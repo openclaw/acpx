@@ -18,6 +18,7 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: complete shutdown while dependencies are still warming after the first page request.
 - Runtime/embedding: preserve literal environment keys such as `__proto__` in saved sessions and spawned agent processes.
 - Runtime/embedding: retain raw nonempty system-prompt replacement and append text across persistence and reconnects, including whitespace-only values.
+- Replay viewer: preserve the last readable recent-run and selected-run state during atomic live-projection replacement until polling recovers.
 
 ## 0.19.3 - 2026-09-25
 

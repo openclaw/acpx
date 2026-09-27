@@ -4,6 +4,7 @@ import path from "node:path";
 import { FsSafeError } from "@openclaw/fs-safe";
 import { hasNodeErrorCode, isPathInside } from "@openclaw/fs-safe/path";
 import { root, type Root } from "@openclaw/fs-safe/root";
+import { isPathMismatchError } from "../src/lib/read-errors.js";
 import { mergeLiveRunState } from "../src/lib/run-state.js";
 import type { FlowRunManifest, FlowRunState, RunBundleSummary } from "../src/types.js";
 
@@ -48,7 +49,15 @@ export async function listRunBundles(
     );
     offset += batchIds.length;
     const batch = await Promise.all(
-      batchIds.map((runId) => readRunBundleSummary(runsDir, runId).catch(() => null)),
+      batchIds.map((runId) =>
+        readRunBundleSummary(runsDir, runId).catch((error: unknown) => {
+          // A replacement race must not make an existing run disappear.
+          if (isPathMismatchError(error)) {
+            throw error;
+          }
+          return null;
+        }),
+      ),
     );
     runs.push(...batch.filter((run): run is RunBundleSummary => run != null));
   }
@@ -157,7 +166,12 @@ async function readRunBundleSummary(runsDir: string, runId: string): Promise<Run
   ) as FlowRunState;
   const live = await readRunBundleTextFile(runsDir, runId, manifest.paths.liveProjection)
     .then((text) => JSON.parse(text) as Partial<FlowRunState>)
-    .catch(() => null);
+    .catch((error: unknown) => {
+      if (isPathMismatchError(error)) {
+        throw error;
+      }
+      return null;
+    });
   const mergedRun = mergeLiveRunState(run, live);
 
   return {

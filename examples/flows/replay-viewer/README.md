@@ -72,6 +72,11 @@ When a recent run is still active, the sidebar and the selected run view update
 live over the viewer WebSocket transport. The viewer keeps the accumulated
 history locally, so you can still rewind while new steps continue to arrive.
 
+If polling overlaps an atomic replacement of a live projection, both the recent
+runs list and the selected run keep their last readable state until polling
+succeeds. A missing optional live projection still falls back to the saved run
+projection.
+
 ## What it shows
 
 - the flow graph, with replay progression over the saved step attempts

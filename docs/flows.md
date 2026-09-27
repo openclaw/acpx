@@ -234,6 +234,10 @@ Corrupt bundle metadata is skipped, and transient read failures do not prevent
 subsequent live updates. Opening or reconnecting another viewer preserves updates
 for clients that are already subscribed.
 
+If polling overlaps an atomic replacement of a live projection, the recent-runs
+list and selected run retain their last readable state until polling succeeds.
+A missing optional live projection still falls back to the saved run projection.
+
 ## Example flows in the source tree
 
 Under `examples/flows/`:

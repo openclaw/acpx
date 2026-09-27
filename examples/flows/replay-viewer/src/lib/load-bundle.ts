@@ -10,6 +10,7 @@ import type {
   SessionRecord,
 } from "../types.js";
 import type { BundleReader } from "./bundle-reader.js";
+import { isPathMismatchError } from "./read-errors.js";
 import { projectRunBundle } from "./run-projection.js";
 import { mergeLiveRunState } from "./run-state.js";
 
@@ -18,7 +19,14 @@ export async function loadRunBundle(reader: BundleReader): Promise<LoadedRunBund
   const [flow, run, live, steps, trace] = await Promise.all([
     readJson<FlowDefinitionSnapshot>(reader, manifest.paths.flow),
     readJson<FlowRunState>(reader, manifest.paths.runProjection),
-    readJson<Partial<FlowRunState>>(reader, manifest.paths.liveProjection).catch(() => null),
+    readJson<Partial<FlowRunState>>(reader, manifest.paths.liveProjection).catch(
+      (error: unknown) => {
+        if (isPathMismatchError(error)) {
+          throw error;
+        }
+        return null;
+      },
+    ),
     readJson<FlowStepRecord[]>(reader, manifest.paths.stepsProjection),
     readNdjson<FlowTraceEvent>(reader, manifest.paths.trace),
   ]);
