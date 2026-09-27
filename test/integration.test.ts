@@ -3914,7 +3914,6 @@ test("integration: terminal lifecycle create/output/wait/release", async () => {
 
 test("integration: terminal kill leaves no orphan sleep process", async (t) => {
   await withTempHome(async (homeDir) => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const sleepSeconds = 4137;
     let before: Set<number>;
     try {
@@ -3927,7 +3926,8 @@ test("integration: terminal kill leaves no orphan sleep process", async (t) => {
       throw error;
     }
 
-    try {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const body = await observeTestOutcome(async () => {
       const result = await runCli(
         [...baseExecArgs(cwd), `kill-terminal sleep ${sleepSeconds}`],
         homeDir,
@@ -3936,17 +3936,37 @@ test("integration: terminal kill leaves no orphan sleep process", async (t) => {
         },
       );
       assert.equal(result.code, 0, result.stderr);
-      try {
-        await assertNoNewSleepProcesses(before, sleepSeconds);
-      } catch (error) {
-        if (isProcessListUnavailable(error)) {
-          t.skip("process listing unavailable");
-          return;
+      assert.match(result.stdout, /^killed terminal\r?$/m);
+      const exitStatus = result.stdout.match(
+        /^exit: (null|-?\d+) signal: (null|SIG[A-Z0-9]+)\r?$/m,
+      );
+      assert.ok(exitStatus, result.stdout);
+      assert.ok(
+        exitStatus[1] !== "null" || exitStatus[2] !== "null",
+        "terminal kill must report a completed exit status",
+      );
+    });
+    let processListUnavailable = false;
+    const cleanup = await observeTestOutcome(async () => {
+      const processes = await observeTestOutcome(async () => {
+        try {
+          await assertNoNewSleepProcesses(before, sleepSeconds);
+        } catch (error) {
+          if (body.ok && isProcessListUnavailable(error)) {
+            processListUnavailable = true;
+            return;
+          }
+          throw error;
         }
-        throw error;
-      }
-    } finally {
-      await fs.rm(cwd, { recursive: true, force: true });
+      });
+      const directory = await observeTestOutcome(async () => {
+        await fs.rm(cwd, { recursive: true, force: true });
+      });
+      unwrapTestOutcomes(processes, directory);
+    });
+    unwrapTestOutcomes(body, cleanup);
+    if (processListUnavailable) {
+      t.skip("process listing unavailable");
     }
   });
 });
