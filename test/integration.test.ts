@@ -2719,77 +2719,72 @@ test("integration: perf report tolerates malformed lines and keeps role and gaug
 });
 
 test("integration: perf metrics capture preserves SIGTERM termination semantics", async () => {
-  const metricsPath = path.join(os.tmpdir(), `acpx-perf-signal-${Date.now()}.ndjson`);
-  const readyMessage = "perf-metrics-ready\n";
-  let readinessTimedOut = false;
-
-  try {
-    const result = await new Promise<CliRunResult>((resolve, reject) => {
-      const child = spawn(
-        process.execPath,
+  await withTempHome(async (homeDir) => {
+    const metricsPath = path.join(homeDir, "metrics.ndjson");
+    const readyMessage = "perf-metrics-ready\n";
+    const child = spawn(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
         [
-          "--input-type=module",
-          "--eval",
-          [
-            "import { installPerfMetricsCapture } from './dist-test/src/perf-metrics-capture.js';",
-            "import { recordPerfDuration } from './dist-test/src/perf-metrics.js';",
-            `installPerfMetricsCapture({ filePath: ${JSON.stringify(metricsPath)} });`,
-            "recordPerfDuration('signal.test', 1);",
-            "setInterval(() => {}, 1000);",
-            `process.stdout.write(${JSON.stringify(readyMessage)});`,
-          ].join(" "),
-        ],
-        {
-          cwd: process.cwd(),
-          env: process.env,
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
+          "import { installPerfMetricsCapture } from './dist-test/src/perf-metrics-capture.js';",
+          "import { recordPerfDuration } from './dist-test/src/perf-metrics.js';",
+          `installPerfMetricsCapture({ filePath: ${JSON.stringify(metricsPath)} });`,
+          "recordPerfDuration('signal.test', 1);",
+          "setInterval(() => {}, 1000);",
+          `process.stdout.write(${JSON.stringify(readyMessage)});`,
+        ].join(" "),
+      ],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, HOME: homeDir },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
 
-      let stdout = "";
-      let stderr = "";
-      let ready = false;
-      const readinessTimeout = setTimeout(() => {
-        readinessTimedOut = true;
-        child.kill("SIGTERM");
-      }, 10_000);
-      child.stdout.setEncoding("utf8");
-      child.stderr.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        stdout += chunk;
-        if (!ready && stdout.includes(readyMessage)) {
-          ready = true;
-          clearTimeout(readinessTimeout);
-          child.kill("SIGTERM");
-        }
+    await withObservedChild(child, homeDir, async (waitForClose) => {
+      let removeReadinessListeners = () => {};
+      const ready = new Promise<void>((resolve, reject) => {
+        let stdout = "";
+        const onData = (chunk: string) => {
+          stdout += chunk;
+          if (stdout.includes(readyMessage)) {
+            resolve();
+          }
+        };
+        const onError = (error: unknown) => reject(error);
+        const onClose = (code: number | null, signal: NodeJS.Signals | null) =>
+          reject(
+            new Error(`Metrics fixture closed before readiness (code=${code}, signal=${signal})`),
+          );
+        child.stdout.on("data", onData);
+        child.once("error", onError);
+        child.once("close", onClose);
+        removeReadinessListeners = () => {
+          child.stdout.off("data", onData);
+          child.off("error", onError);
+          child.off("close", onClose);
+        };
       });
-      child.stderr.on("data", (chunk: string) => {
-        stderr += chunk;
-      });
+      try {
+        await withinCliDeadline(
+          10_000,
+          () => new Error("Metrics fixture readiness timed out after 10000ms"),
+          () => ready,
+        );
+      } finally {
+        removeReadinessListeners();
+      }
 
-      child.once("error", (error) => {
-        clearTimeout(readinessTimeout);
-        reject(error);
-      });
-      child.once("close", (code, signal) => {
-        clearTimeout(readinessTimeout);
-        resolve({
-          code,
-          signal,
-          stdout,
-          stderr,
-        });
-      });
+      child.kill("SIGTERM");
+      const result = await waitForClose();
+      assert.ok(result.stdout.includes(readyMessage), "fixture must be ready before signaling");
+      assert.equal(result.code === 143 || result.signal === "SIGTERM", true);
+      const records = await readPerfRecords(metricsPath);
+      assert.equal(records.length >= 1, true);
     });
-
-    assert.equal(readinessTimedOut, false, "fixture readiness timed out");
-    assert.ok(result.stdout.includes(readyMessage), "fixture must be ready before signaling");
-    assert.equal(result.code === 143 || result.signal === "SIGTERM", true);
-    const records = await readPerfRecords(metricsPath);
-    assert.equal(records.length >= 1, true);
-  } finally {
-    await fs.rm(metricsPath, { force: true });
-  }
+  });
 });
 
 test("integration: configured mcpServers are sent to session/new and session/load", async () => {
