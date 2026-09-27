@@ -80,7 +80,7 @@ Object.assign(globalThis, {
           return (error as NodeJS.ErrnoException).code === "ESRCH" ? "gone" : "unknown";
         }
       }
-      queryTimes.push(Date.now());
+      queryTimes.push(performance.now());
       if (scenario === "abort-probe") {
         controller.abort(cancelled);
         await delay(10);
@@ -304,7 +304,13 @@ if (leaseScenario) {
   assert.equal(await fs.readFile(fixturePath, "utf8"), fixturePayload);
   assert.equal(payloadAtExit, fixturePayload, "unknown scope preserves the unchanged lock");
   assert.ok(queryTimes.length > 0, "raw ESRCH cannot bypass canonical scope validation");
-  assert.ok(queryTimes.length <= 3, "cache unknown scope only for the bounded wait");
+  // Real snapshot retries can span several cache lifetimes under slow scheduling.
+  for (let index = 1; index < queryTimes.length; index += 1) {
+    assert.ok(
+      queryTimes[index] - queryTimes[index - 1] >= 1_000,
+      "reuse the unknown scope observation for the full cache interval",
+    );
+  }
 } else if (scenario === "abort-probe") {
   await assert.rejects(acquire, (error) => error === cancelled);
   assert.equal(admitted, false);
@@ -342,7 +348,7 @@ if (leaseScenario) {
       assert.equal(queryTimes.length, 0);
     } else {
       assert.ok(queryTimes.length > 0);
-      const elapsed = Date.now() - queryTimes[0];
+      const elapsed = performance.now() - queryTimes[0];
       assert.ok(
         queryTimes.length <= Math.ceil(elapsed / 1_000) + 3,
         "bound OS queries during retries",
