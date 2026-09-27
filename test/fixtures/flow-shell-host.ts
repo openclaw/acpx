@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { InterruptedError } from "../../src/async-control.js";
 import {
   getOwnProcessIdentity,
@@ -82,10 +83,6 @@ export async function runActor(dir: string, role: string, body: () => void): Pro
   body();
 }
 
-function actorScript(dir: string, role: string, body: string): string {
-  return `import(${JSON.stringify(import.meta.url)}).then(({runActor})=>runActor(${JSON.stringify(dir)},${JSON.stringify(role)},()=>{${body}}))`;
-}
-
 async function readActors(dir: string): Promise<ActorRecord[]> {
   const files = (await fs.readdir(dir)).filter((name) => name.endsWith(".actor.json"));
   return await Promise.all(
@@ -112,44 +109,6 @@ async function waitForPid(file: string): Promise<number> {
   throw new Error("descendant did not start");
 }
 
-function scripts(dir: string, mode: FlowHostMode, failure?: FixtureFailure) {
-  const pidFile = path.join(dir, "pid");
-  const marker = path.join(dir, "signal");
-  const publish =
-    failure === "readiness"
-      ? ""
-      : `require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));`;
-  const mark = (value: string) =>
-    `require('node:fs').writeFileSync(${JSON.stringify(marker)},${value});`;
-  let body: string;
-  if (mode === "wrapper-exit") {
-    const descendant = actorScript(
-      dir,
-      "descendant",
-      `process.on('SIGINT',()=>{});process.on('SIGTERM',()=>{});${publish}setInterval(()=>{},1000)`,
-    );
-    body = `process.on('SIGINT',()=>{${mark("'SIGINT'")}process.exit(0)});require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{stdio:'ignore',detached:true});setInterval(()=>{},1000)`;
-  } else if (mode === "background") {
-    const descendant = actorScript(
-      dir,
-      "descendant",
-      `process.on('SIGINT',()=>{${mark("'SIGINT'")}process.exit(0)});${publish}setInterval(()=>{},1000)`,
-    );
-    body = `require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{stdio:'ignore'});process.exit(0)`;
-  } else if (mode === "one-interrupt") {
-    body = `let count=0;process.on('SIGINT',()=>{if(++count>1)process.exit(2);setTimeout(()=>{${mark("String(count)")}process.exit(0)},200)});${publish}setInterval(()=>{},1000)`;
-  } else if (mode === "late-executor") {
-    body = `${mark("'launched'")}process.exit(0)`;
-  } else {
-    body = `process.on('SIGINT',()=>{${mark("'SIGINT'")}process.exit(0)});process.on('SIGTERM',()=>{});${publish}setInterval(()=>{},1000)`;
-  }
-  return {
-    script: mode === "late-executor" ? body : actorScript(dir, "wrapper", body),
-    pidFile,
-    marker,
-  };
-}
-
 export async function runFlowHostCase(
   mode: FlowHostMode,
   failure?: FixtureFailure,
@@ -157,7 +116,9 @@ export async function runFlowHostCase(
 ): Promise<void> {
   const { FlowRunner, compute, defineFlow, shell } = await import("../../src/flows/runtime.js");
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-host-"));
-  const { script, pidFile, marker } = scripts(dir, mode, failure);
+  const pidFile = path.join(dir, "pid");
+  const marker = path.join(dir, "signal");
+  const actorPath = fileURLToPath(new URL("./flow-shell-actor.js", import.meta.url));
   const report: FlowHostReport = { dir, actors: [], cleaned: false };
   let entered!: () => void;
   let release!: () => void;
@@ -181,7 +142,11 @@ export async function runFlowHostCase(
         entered();
         await gate;
       }
-      return { command: process.execPath, args: ["-e", script], timeoutMs: 0 };
+      return {
+        command: process.execPath,
+        args: [actorPath, dir, mode, "wrapper", failure ?? ""],
+        timeoutMs: 0,
+      };
     },
   });
   const flow = defineFlow({
