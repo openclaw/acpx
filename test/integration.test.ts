@@ -325,15 +325,15 @@ for (const launcher of [
       const received: string[][] = [];
       const invoke = async (args: readonly string[]) => {
         received.push([...args]);
+        const invocation = await configuredHarnessInvocation(homeDir, [launcher.name, ...args]);
         return await runCli(
           [
             "--verbose",
-            "--agent",
-            [launcher.name, ...args.map((arg) => `"${arg}"`)].join(" "),
             "--cwd",
             homeDir,
             "--format",
             "quiet",
+            ...invocation,
             "exec",
             "echo launcher-ready",
           ],
@@ -1327,13 +1327,18 @@ test("integration: qoder session reuse preserves persisted startup flags", async
       const { createSession } = await import("../src/session/session.js");
       const { runSessionSetModeDirect } = await import("../src/session/execution/prompt-runner.js");
       const previousHome = process.env.HOME;
+      const previousUserProfile = process.env.USERPROFILE;
       const previousPath = process.env.PATH;
       process.env.HOME = homeDir;
+      if (process.platform === "win32") {
+        process.env.USERPROFILE = homeDir;
+      }
       process.env.PATH = `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`;
 
       try {
         const record = await createSession({
           agentCommand: "qodercli --acp",
+          agentArgv: ["qodercli", "--acp"],
           cwd,
           permissionMode: "approve-reads",
           timeoutMs: 10_000,
@@ -1349,11 +1354,26 @@ test("integration: qoder session reuse preserves persisted startup flags", async
           timeoutMs: 10_000,
         });
         assert.equal(result.record.acpxRecordId, record.acpxRecordId);
+        await fs.access(
+          path.join(
+            homeDir,
+            ".acpx",
+            "sessions",
+            `${encodeURIComponent(record.acpxRecordId)}.json`,
+          ),
+        );
       } finally {
         if (previousHome === undefined) {
           delete process.env.HOME;
         } else {
           process.env.HOME = previousHome;
+        }
+        if (process.platform === "win32") {
+          if (previousUserProfile === undefined) {
+            delete process.env.USERPROFILE;
+          } else {
+            process.env.USERPROFILE = previousUserProfile;
+          }
         }
         process.env.PATH = previousPath;
       }
@@ -1622,16 +1642,19 @@ test("integration: exec answers Devin diagnostics extension requests", async () 
 
     try {
       await writeFakeHarnessAgent(fakeBinDir, "devin");
+      const invocation =
+        process.platform === "win32"
+          ? await configuredHarnessInvocation(homeDir, ["devin", "--model", "swe-1-6", "acp"])
+          : ["--agent", "devin --model swe-1-6 acp"];
 
       const result = await runCli(
         [
-          "--agent",
-          "devin --model swe-1-6 acp",
           "--approve-all",
           "--cwd",
           cwd,
           "--format",
           "quiet",
+          ...invocation,
           "exec",
           "extension-request _cognition.ai/request_diagnostics hello",
         ],
@@ -1657,7 +1680,11 @@ test("integration: exec answers Devin diagnostics extension requests", async () 
 });
 
 for (const invocation of [
-  { name: "raw command", args: ["--agent", "devin --model swe-1-6 --acp"] },
+  {
+    name: process.platform === "win32" ? "configured argv" : "raw command",
+    args: ["--agent", "devin --model swe-1-6 --acp"],
+    argv: ["devin", "--model", "swe-1-6", "--acp"],
+  },
   { name: "built-in shortcut", args: ["devin"] },
 ]) {
   test(`integration: Devin ${invocation.name} advertises scoped Windsurf client info`, async () => {
@@ -1667,18 +1694,13 @@ for (const invocation of [
 
       try {
         await writeFakeHarnessAgent(fakeBinDir, "devin");
+        const args =
+          process.platform === "win32" && invocation.argv
+            ? await configuredHarnessInvocation(homeDir, invocation.argv)
+            : invocation.args;
 
         const result = await runCli(
-          [
-            "--approve-all",
-            "--cwd",
-            cwd,
-            "--format",
-            "json",
-            ...invocation.args,
-            "exec",
-            "echo hello",
-          ],
+          ["--approve-all", "--cwd", cwd, "--format", "json", ...args, "exec", "echo hello"],
           homeDir,
           {
             env: {
@@ -5573,6 +5595,20 @@ function baseExecArgs(cwd: string): string[] {
   return [...baseAgentArgs(cwd), "--format", "quiet", "exec"];
 }
 
+async function configuredHarnessInvocation(
+  homeDir: string,
+  argv: readonly string[],
+): Promise<string[]> {
+  const configDir = path.join(homeDir, ".acpx");
+  await fs.mkdir(configDir, { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "config.json"),
+    JSON.stringify({ agents: { "launcher-fixture": { argv } } }),
+    "utf8",
+  );
+  return ["launcher-fixture"];
+}
+
 async function writeFakeHarnessAgent(
   binDir: string,
   name: "cursor-agent" | "droid" | "devin" | "uvx" | "iflow" | "qodercli",
@@ -5803,6 +5839,7 @@ async function runCliWithEntry(
     env: {
       ...process.env,
       HOME: homeDir,
+      ...(process.platform === "win32" ? { USERPROFILE: homeDir } : {}),
       ...options.env,
       ...(gate ? { ACPX_TEST_DISCONNECT_GATE: gate.directory } : {}),
     },
