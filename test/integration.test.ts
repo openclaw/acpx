@@ -287,13 +287,106 @@ for (const completion of ["complete", "timeout", "cancel"] as const) {
   });
 }
 
+for (const launcher of [
+  { name: "cursor-agent", prefix: ["acp"], invalid: [[], ["ACP"]] },
+  {
+    name: "droid",
+    prefix: ["exec", "--output-format", "acp"],
+    invalid: [[], ["exec", "acp"], ["--output-format", "exec", "acp"]],
+  },
+  { name: "uvx", prefix: ["fast-agent-mcp", "acp"], invalid: [[], ["acp", "fast-agent-mcp"]] },
+  { name: "iflow", prefix: ["--experimental-acp"], invalid: [[], ["--acp"]] },
+  {
+    name: "devin",
+    prefix: ["--model", "swe-1-6", "acp"],
+    invalid: [[], ["--model"], ["--acp", "--model"]],
+  },
+  {
+    name: "qodercli",
+    prefix: [
+      "--acp",
+      "--max-turns",
+      "4",
+      "--allowed-tools",
+      "Read,Grep",
+      "--disallowed-tools",
+      "Bash",
+    ],
+    invalid: [[], ["--max-turns", "4"], ["--acp", "--max-turns"], ["--acp", "--allowed-tools="]],
+  },
+] as const) {
+  test(`integration: ${launcher.name} launcher validates and preserves argv`, async () => {
+    await withTempHome(async (homeDir) => {
+      const binDir = path.join(homeDir, "launcher bin");
+      await fs.mkdir(binDir);
+      const argLogPath = path.join(homeDir, "launcher args.jsonl");
+      await writeFakeHarnessAgent(binDir, launcher.name, argLogPath);
+      const env = { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}` };
+      const received: string[][] = [];
+      const invoke = async (args: readonly string[]) => {
+        received.push([...args]);
+        return await runCli(
+          [
+            "--verbose",
+            "--agent",
+            [launcher.name, ...args.map((arg) => `"${arg}"`)].join(" "),
+            "--cwd",
+            homeDir,
+            "--format",
+            "quiet",
+            "exec",
+            "echo launcher-ready",
+          ],
+          homeDir,
+          { env },
+        );
+      };
+
+      const prefixes: readonly string[][] = [
+        [...launcher.prefix],
+        ...(launcher.name === "devin" ? [["--model", "swe-1-6", "--experimental-acp"]] : []),
+        ...(launcher.name === "qodercli"
+          ? [["--acp", "--max-turns=4", "--allowed-tools=Read,Grep", "--disallowed-tools=Bash"]]
+          : []),
+      ];
+      for (const [index, prefix] of prefixes.entries()) {
+        const pidPath = path.join(homeDir, `mock pid with spaces! ${index}.txt`);
+        const result = await invoke([...prefix, "--pid-file", pidPath, "--supports-load-session"]);
+        assert.equal(result.code, 0, result.stderr);
+        assert.equal(result.signal, null);
+        assert.equal(result.stdout.trim(), "launcher-ready");
+        assert.match(await fs.readFile(pidPath, "utf8"), /^\d+\n$/u);
+      }
+
+      for (const invalid of launcher.invalid) {
+        const rejected = await invoke(invalid);
+        assert.equal(rejected.code, 1, JSON.stringify(invalid));
+        assert.equal(rejected.signal, null);
+        assert.equal(rejected.stdout, "");
+        assert.match(rejected.stderr, /(?:Invalid|Missing) .* (?:launcher|ACP)/u);
+      }
+
+      const unknown = await invoke([...launcher.prefix, "--unknown-launcher-option"]);
+      assert.equal(unknown.code, 1);
+      assert.equal(unknown.signal, null);
+      assert.equal(unknown.stdout, "");
+      assert.match(unknown.stderr, /Unknown mock-agent option: --unknown-launcher-option/u);
+      const logged: unknown[] = (await fs.readFile(argLogPath, "utf8"))
+        .trimEnd()
+        .split(/\r?\n/u)
+        .map((line) => JSON.parse(line) as unknown);
+      assert.deepEqual(logged, received, "launcher must preserve each original argument token");
+    });
+  });
+}
+
 test("integration: built-in cursor agent resolves to cursor-agent acp", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
     const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-cursor-"));
 
     try {
-      await writeFakeCursorAgent(fakeBinDir);
+      await writeFakeHarnessAgent(fakeBinDir, "cursor-agent");
 
       const result = await runCli(
         ["--approve-all", "--cwd", cwd, "--format", "quiet", "cursor", "exec", "echo hello"],
@@ -1039,7 +1132,7 @@ test("integration: built-in droid agent resolves to droid exec --output-format a
     const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-droid-"));
 
     try {
-      await writeFakeDroidAgent(fakeBinDir);
+      await writeFakeHarnessAgent(fakeBinDir, "droid");
 
       const result = await runCli(
         ["--approve-all", "--cwd", cwd, "--format", "quiet", "droid", "exec", "echo hello"],
@@ -1066,7 +1159,7 @@ test("integration: factory-droid alias resolves to droid exec --output-format ac
     const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-droid-"));
 
     try {
-      await writeFakeDroidAgent(fakeBinDir);
+      await writeFakeHarnessAgent(fakeBinDir, "droid");
 
       const result = await runCli(
         ["--approve-all", "--cwd", cwd, "--format", "quiet", "factory-droid", "exec", "echo hello"],
@@ -1093,7 +1186,7 @@ test("integration: built-in fast-agent resolves to uvx fast-agent-mcp acp", asyn
     const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-fast-agent-"));
 
     try {
-      await writeFakeUvxFastAgentAcp(fakeBinDir);
+      await writeFakeHarnessAgent(fakeBinDir, "uvx");
 
       const result = await runCli(
         ["--approve-all", "--cwd", cwd, "--format", "quiet", "fast-agent", "exec", "echo hello"],
@@ -1175,7 +1268,7 @@ test("integration: built-in iflow agent resolves to iflow --experimental-acp", a
     const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-iflow-"));
 
     try {
-      await writeFakeIflowAgent(fakeBinDir);
+      await writeFakeHarnessAgent(fakeBinDir, "iflow");
 
       const result = await runCli(
         ["--approve-all", "--cwd", cwd, "--format", "quiet", "iflow", "exec", "echo hello"],
@@ -1202,7 +1295,7 @@ test("integration: built-in qoder agent resolves to qodercli --acp", async () =>
     const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-qoder-"));
 
     try {
-      await writeFakeQoderAgent(fakeBinDir);
+      await writeFakeHarnessAgent(fakeBinDir, "qodercli");
 
       const result = await runCli(
         ["--approve-all", "--cwd", cwd, "--format", "quiet", "qoder", "exec", "echo hello"],
@@ -1230,7 +1323,7 @@ test("integration: qoder session reuse preserves persisted startup flags", async
     const argLogPath = path.join(fakeBinDir, "qoder-args.log");
 
     try {
-      await writeFakeQoderAgent(fakeBinDir, argLogPath);
+      await writeFakeHarnessAgent(fakeBinDir, "qodercli", argLogPath);
       const { createSession } = await import("../src/session/session.js");
       const { runSessionSetModeDirect } = await import("../src/session/execution/prompt-runner.js");
       const previousHome = process.env.HOME;
@@ -1265,35 +1358,14 @@ test("integration: qoder session reuse preserves persisted startup flags", async
         process.env.PATH = previousPath;
       }
 
-      const argLines = (await fs.readFile(argLogPath, "utf8"))
+      const invocations: unknown[] = (await fs.readFile(argLogPath, "utf8"))
+        .trimEnd()
         .split(/\r?\n/u)
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-      assert.equal(
-        argLines.length >= 2,
-        true,
-        `expected at least two qoder invocations:\n${argLines.join("\n")}`,
-      );
-      assert.equal(
-        argLines.some(
-          (line) =>
-            line.includes("--acp") &&
-            line.includes("--max-turns=4") &&
-            line.includes("--allowed-tools=READ,GREP"),
-        ),
-        true,
-        `expected persisted qoder flags in logged invocations:\n${argLines.join("\n")}`,
-      );
-      assert.equal(
-        argLines.slice(-1)[0]?.includes("--allowed-tools=READ,GREP") ?? false,
-        true,
-        `expected reused prompt spawn to preserve allowed-tools:\n${argLines.join("\n")}`,
-      );
-      assert.equal(
-        argLines.slice(-1)[0]?.includes("--max-turns=4") ?? false,
-        true,
-        `expected reused prompt spawn to preserve max-turns:\n${argLines.join("\n")}`,
-      );
+        .map((line) => JSON.parse(line) as unknown);
+      assert.ok(invocations.length >= 2, "expected initial and reused qoder invocations");
+      const expected = ["--acp", "--max-turns=4", "--allowed-tools=READ,GREP"];
+      assert.deepEqual(invocations[0], expected, "initial qoder startup flags");
+      assert.deepEqual(invocations.at(-1), expected, "reused qoder startup flags");
     } finally {
       await fs.rm(fakeBinDir, { recursive: true, force: true });
       await fs.rm(cwd, { recursive: true, force: true });
@@ -1549,7 +1621,7 @@ test("integration: exec answers Devin diagnostics extension requests", async () 
     const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-devin-"));
 
     try {
-      await writeFakeDevinAgent(fakeBinDir);
+      await writeFakeHarnessAgent(fakeBinDir, "devin");
 
       const result = await runCli(
         [
@@ -1594,7 +1666,7 @@ for (const invocation of [
       const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-devin-"));
 
       try {
-        await writeFakeDevinAgent(fakeBinDir);
+        await writeFakeHarnessAgent(fakeBinDir, "devin");
 
         const result = await runCli(
           [
@@ -5501,68 +5573,30 @@ function baseExecArgs(cwd: string): string[] {
   return [...baseAgentArgs(cwd), "--format", "quiet", "exec"];
 }
 
-async function writeFakeCursorAgent(binDir: string): Promise<void> {
+async function writeFakeHarnessAgent(
+  binDir: string,
+  name: "cursor-agent" | "droid" | "devin" | "uvx" | "iflow" | "qodercli",
+  argLogPath = "",
+): Promise<void> {
+  const launcher = fileURLToPath(new URL("./fixtures/harness-launcher.js", import.meta.url));
   if (process.platform === "win32") {
     await fs.writeFile(
-      path.join(binDir, "cursor-agent.cmd"),
+      path.join(binDir, `${name}.cmd`),
       [
         "@echo off",
-        "setlocal",
-        'if "%~1"=="acp" shift',
-        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
+        "setlocal DisableDelayedExpansion",
+        `"${process.execPath}" "${launcher}" "${name}" "${argLogPath}" %*`,
         "",
       ].join("\r\n"),
-      { encoding: "utf8" },
+      "utf8",
     );
     return;
   }
-
   await fs.writeFile(
-    path.join(binDir, "cursor-agent"),
+    path.join(binDir, name),
     [
       "#!/bin/sh",
-      'if [ "$1" = "acp" ]; then',
-      "  shift",
-      "fi",
-      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
-      "",
-    ].join("\n"),
-    { encoding: "utf8", mode: 0o755 },
-  );
-}
-
-async function writeFakeDroidAgent(binDir: string): Promise<void> {
-  if (process.platform === "win32") {
-    await fs.writeFile(
-      path.join(binDir, "droid.cmd"),
-      [
-        "@echo off",
-        "setlocal",
-        'if /I "%~1"=="exec" shift',
-        'if /I "%~1"=="--output-format" shift',
-        'if /I "%~1"=="acp" shift',
-        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
-        "",
-      ].join("\r\n"),
-      { encoding: "utf8" },
-    );
-    return;
-  }
-
-  await fs.writeFile(
-    path.join(binDir, "droid"),
-    [
-      "#!/bin/sh",
-      'if [ "$1" = "exec" ]; then',
-      "  shift",
-      "fi",
-      'if [ "$1" = "--output-format" ]; then',
-      "  shift",
-      "fi",
-      'if [ "$1" = "acp" ]; then',
-      "  shift",
-      "fi",
-      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
+      `exec "${process.execPath}" "${launcher}" "${name}" "${argLogPath}" "$@"`,
       "",
     ].join("\n"),
     { encoding: "utf8", mode: 0o755 },
@@ -5587,115 +5621,6 @@ async function writeFakeClaudeAgent(binDir: string): Promise<string> {
     { encoding: "utf8", mode: 0o755 },
   );
   return binPath;
-}
-
-async function writeFakeDevinAgent(binDir: string): Promise<void> {
-  if (process.platform === "win32") {
-    await fs.writeFile(
-      path.join(binDir, "devin.cmd"),
-      [
-        "@echo off",
-        "setlocal",
-        ":shift_known",
-        'if "%~1"=="--model" shift & shift & goto shift_known',
-        'if "%~1"=="acp" shift & goto shift_known',
-        'if "%~1"=="--acp" shift & goto shift_known',
-        'if "%~1"=="--experimental-acp" shift & goto shift_known',
-        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
-        "",
-      ].join("\r\n"),
-      { encoding: "utf8" },
-    );
-    return;
-  }
-
-  await fs.writeFile(
-    path.join(binDir, "devin"),
-    [
-      "#!/bin/sh",
-      'while [ "$#" -gt 0 ]; do',
-      '  case "$1" in',
-      "    --model)",
-      "      shift",
-      '      [ "$#" -gt 0 ] && shift',
-      "      ;;",
-      "    acp|--acp|--experimental-acp)",
-      "      shift",
-      "      ;;",
-      "    *)",
-      "      break",
-      "      ;;",
-      "  esac",
-      "done",
-      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
-      "",
-    ].join("\n"),
-    { encoding: "utf8", mode: 0o755 },
-  );
-}
-
-async function writeFakeUvxFastAgentAcp(binDir: string): Promise<void> {
-  if (process.platform === "win32") {
-    await fs.writeFile(
-      path.join(binDir, "uvx.cmd"),
-      [
-        "@echo off",
-        "setlocal",
-        'if "%~1"=="fast-agent-mcp" shift',
-        'if "%~1"=="acp" shift',
-        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
-        "",
-      ].join("\r\n"),
-      { encoding: "utf8" },
-    );
-    return;
-  }
-
-  await fs.writeFile(
-    path.join(binDir, "uvx"),
-    [
-      "#!/bin/sh",
-      'if [ "$1" = "fast-agent-mcp" ]; then',
-      "  shift",
-      "fi",
-      'if [ "$1" = "acp" ]; then',
-      "  shift",
-      "fi",
-      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
-      "",
-    ].join("\n"),
-    { encoding: "utf8", mode: 0o755 },
-  );
-}
-
-async function writeFakeIflowAgent(binDir: string): Promise<void> {
-  if (process.platform === "win32") {
-    await fs.writeFile(
-      path.join(binDir, "iflow.cmd"),
-      [
-        "@echo off",
-        "setlocal",
-        'if "%~1"=="--experimental-acp" shift',
-        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
-        "",
-      ].join("\r\n"),
-      { encoding: "utf8" },
-    );
-    return;
-  }
-
-  await fs.writeFile(
-    path.join(binDir, "iflow"),
-    [
-      "#!/bin/sh",
-      'if [ "$1" = "--experimental-acp" ]; then',
-      "  shift",
-      "fi",
-      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
-      "",
-    ].join("\n"),
-    { encoding: "utf8", mode: 0o755 },
-  );
 }
 
 async function writeFakeGrokBuildAgent(binDir: string): Promise<void> {
@@ -5762,56 +5687,6 @@ async function writeFakeNativeAcpAgent(
       `  echo "unexpected ${agent} command: $*" 1>&2`,
       "  exit 2",
       "fi",
-      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
-      "",
-    ].join("\n"),
-    { encoding: "utf8", mode: 0o755 },
-  );
-}
-
-async function writeFakeQoderAgent(binDir: string, argLogPath?: string): Promise<void> {
-  if (process.platform === "win32") {
-    await fs.writeFile(
-      path.join(binDir, "qodercli.cmd"),
-      [
-        "@echo off",
-        "setlocal",
-        ...(argLogPath ? [`echo %*>> "${argLogPath}"`] : []),
-        ":shift_known",
-        'if "%~1"=="--acp" shift & goto shift_known',
-        'if /I "%~1"=="--max-turns" shift & shift & goto shift_known',
-        'if /I "%~1"=="--allowed-tools" shift & shift & goto shift_known',
-        'if /I "%~1"=="--disallowed-tools" shift & shift & goto shift_known',
-        'echo %~1 | findstr /B /C:"--max-turns=" >nul && shift & goto shift_known',
-        'echo %~1 | findstr /B /C:"--allowed-tools=" >nul && shift & goto shift_known',
-        'echo %~1 | findstr /B /C:"--disallowed-tools=" >nul && shift & goto shift_known',
-        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
-        "",
-      ].join("\r\n"),
-      { encoding: "utf8" },
-    );
-    return;
-  }
-
-  await fs.writeFile(
-    path.join(binDir, "qodercli"),
-    [
-      "#!/bin/sh",
-      ...(argLogPath ? [`printf '%s\\n' "$*" >> ${JSON.stringify(argLogPath)}`] : []),
-      'while [ "$#" -gt 0 ]; do',
-      '  case "$1" in',
-      "    --acp|--max-turns=*|--allowed-tools=*|--disallowed-tools=*)",
-      "      shift",
-      "      ;;",
-      "    --max-turns|--allowed-tools|--disallowed-tools)",
-      "      shift",
-      '      [ "$#" -gt 0 ] && shift',
-      "      ;;",
-      "    *)",
-      "      break",
-      "      ;;",
-      "  esac",
-      "done",
       `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
       "",
     ].join("\n"),
