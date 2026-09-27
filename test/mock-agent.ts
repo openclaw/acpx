@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
@@ -46,6 +46,40 @@ type ParsedCommand = {
   args: string[];
 };
 
+type QueueLifecycleControl = {
+  nonce: string;
+  stopPath: string;
+  cancelReceiptPath: string;
+  leasePath: string;
+};
+
+function readQueueLifecycleControl(filePath: string): QueueLifecycleControl {
+  const value: unknown = JSON.parse(readFileSync(filePath, "utf8"));
+  assertQueueLifecycleControl(value);
+  return value;
+}
+
+function assertQueueLifecycleControl(value: unknown): asserts value is QueueLifecycleControl {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("nonce" in value) ||
+    typeof value.nonce !== "string" ||
+    !value.nonce ||
+    !("stopPath" in value) ||
+    typeof value.stopPath !== "string" ||
+    !value.stopPath ||
+    !("cancelReceiptPath" in value) ||
+    typeof value.cancelReceiptPath !== "string" ||
+    !value.cancelReceiptPath ||
+    !("leasePath" in value) ||
+    typeof value.leasePath !== "string" ||
+    !value.leasePath
+  ) {
+    throw new Error("Invalid queue lifecycle control");
+  }
+}
+
 let activePromptRequestId: JsonRpcId | undefined;
 
 type MockAgentOptions = {
@@ -84,6 +118,7 @@ type MockAgentOptions = {
   loadReplayText: string;
   ignoreSigterm: boolean;
   cancelDelayMs: number;
+  queueLifecycleControl?: QueueLifecycleControl;
   elicitOnNewSession: boolean;
   /** If set, the agent writes its PID to this path at startup (before ACP handshake). */
   pidFile?: string;
@@ -412,6 +447,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let loadReplayText = "replayed load session update";
   let ignoreSigterm = false;
   let cancelDelayMs = 0;
+  let queueLifecycleControl: QueueLifecycleControl | undefined;
   let hangOnNewSession = false;
   let elicitOnNewSession = false;
   let pidFile: string | undefined;
@@ -585,6 +621,12 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
       continue;
     }
 
+    if (token === "--queue-lifecycle-control") {
+      queueLifecycleControl = readQueueLifecycleControl(parseOptionValue(argv, index + 1, token));
+      index += 1;
+      continue;
+    }
+
     if (token === "--hang-on-new-session") {
       hangOnNewSession = true;
       continue;
@@ -675,6 +717,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     loadReplayText,
     ignoreSigterm,
     cancelDelayMs,
+    queueLifecycleControl,
     elicitOnNewSession,
     pidFile,
   };
@@ -834,6 +877,7 @@ class MockAgent implements Agent {
   private readonly connection: AgentConnection;
   private readonly sessions = new Map<SessionId, SessionState>();
   private readonly options: MockAgentOptions;
+  private readonly queueCancellationPhases = new Set<"entry" | "before-result">();
   private clientCapabilities?: InitializeRequest["clientCapabilities"];
 
   constructor(connection: AgentConnection, options: MockAgentOptions) {
@@ -1109,6 +1153,7 @@ class MockAgent implements Agent {
       return { stopReason: "end_turn" };
     } catch (error) {
       if (promptAbort.signal.aborted || error instanceof CancelledError) {
+        this.recordQueueCancellation(params.sessionId, "before-result");
         return { stopReason: "cancelled" };
       }
 
@@ -1121,7 +1166,38 @@ class MockAgent implements Agent {
     }
   }
 
+  private recordQueueCancellation(sessionId: SessionId, phase: "entry" | "before-result"): void {
+    const control = this.options.queueLifecycleControl;
+    if (!control || this.queueCancellationPhases.has(phase)) {
+      return;
+    }
+    let lease: { pid: unknown; ownerGeneration: unknown } | null = null;
+    try {
+      const value: unknown = JSON.parse(readFileSync(control.leasePath, "utf8"));
+      if (value && typeof value === "object" && "pid" in value && "ownerGeneration" in value) {
+        lease = { pid: value.pid, ownerGeneration: value.ownerGeneration };
+      }
+    } catch {
+      // Missing or unreadable lease evidence must fail the test without holding cancellation.
+    }
+    const pending = this.sessions.get(sessionId)?.pendingPrompt;
+    writeFileSync(
+      control.cancelReceiptPath,
+      `${JSON.stringify({
+        nonce: control.nonce,
+        pid: process.pid,
+        phase,
+        lease,
+        promptPending: pending !== undefined,
+        promptAborted: pending?.signal.aborted ?? false,
+      })}\n`,
+      { flag: "a" },
+    );
+    this.queueCancellationPhases.add(phase);
+  }
+
   async cancel(params: { sessionId: SessionId }): Promise<void> {
+    this.recordQueueCancellation(params.sessionId, "entry");
     if (this.options.cancelDelayMs > 0) {
       await new Promise<void>((resolve) => setTimeout(resolve, this.options.cancelDelayMs));
     }
@@ -1812,8 +1888,31 @@ const stream = {
 };
 const mockAgentOptions = parseMockAgentOptions(process.argv.slice(2));
 
-// Write PID to a file before doing anything else so that the parent can track
-// this bridge process and verify it is dead after queue-owner shutdown.
+const queueLifecycleControl = mockAgentOptions.queueLifecycleControl;
+if (queueLifecycleControl) {
+  const retireIfRequested = () => {
+    let request: string;
+    try {
+      request = readFileSync(queueLifecycleControl.stopPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
+    if (request === queueLifecycleControl.nonce) {
+      writeFileSync(
+        `${queueLifecycleControl.stopPath}.ack`,
+        JSON.stringify({ nonce: request, pid: process.pid }),
+      );
+      process.exit(94);
+    }
+  };
+  setInterval(retireIfRequested, 20).unref();
+  retireIfRequested();
+}
+
+// Publish only after the optional fixture-owned retirement channel is installed.
 if (mockAgentOptions.pidFile) {
   writeFileSync(mockAgentOptions.pidFile, `${process.pid}\n`, "utf8");
 }
