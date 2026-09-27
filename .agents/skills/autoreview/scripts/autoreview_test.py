@@ -22,6 +22,7 @@ from unittest import mock
 
 
 SCRIPT_PATH = Path(__file__).with_name("autoreview")
+fixture_git = runpy.run_path(str(SCRIPT_PATH.with_name("test-review-harness.py")))["fixture_git"]
 LOADER = SourceFileLoader("autoreview_module", str(SCRIPT_PATH))
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
 assert SPEC is not None
@@ -261,13 +262,15 @@ class AutoreviewImageGitTests(unittest.TestCase):
         self.git("init", "-q")
         self.git("config", "user.email", "test@example.invalid")
         self.git("config", "user.name", "Test")
-        (self.repo / "text.txt").write_text("old\n")
+        (self.repo / "text.txt").write_bytes(b"old\n")
         self.git("add", ".")
         self.git("commit", "-qm", "base")
         self.base = self.git("rev-parse", "HEAD").strip()
 
     def git(self, *args):
-        return subprocess.check_output(["git", *args], cwd=self.repo, text=True)
+        return fixture_git(
+            self.repo, *args, check=True, stdout=subprocess.PIPE, text=True,
+        ).stdout
 
     def commit(self, path, content):
         file = self.repo / path
@@ -411,9 +414,61 @@ class AutoreviewImageGitTests(unittest.TestCase):
 
 class AutoreviewPriorityTests(unittest.TestCase):
     def test_default_priority_is_p0(self) -> None:
-        with mock.patch.object(sys, "argv", ["autoreview"]):
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(sys, "argv", ["autoreview"]):
             args = AUTOREVIEW.parse_args()
         self.assertEqual(args.max_priority, "P0")
+
+    def test_priority_environment_values_and_explicit_overrides(self) -> None:
+        for priority in ("P0", "P1", "P2", "P3"):
+            for env_priority, options in (
+                (priority, []),
+                ("P4", ["--max-priority", priority]),
+                ("", ["--max-priority", priority]),
+            ):
+                with self.subTest(priority=priority, env=env_priority), mock.patch.dict(
+                    os.environ, {"AUTOREVIEW_MAX_PRIORITY": env_priority}, clear=True,
+                ), mock.patch.object(sys, "argv", ["autoreview", *options]):
+                    self.assertEqual(AUTOREVIEW.parse_args().max_priority, priority)
+
+    def test_invalid_priority_defaults_refuse_before_preparation(self) -> None:
+        for priority in ("P4", "", " ", "p2"):
+            for dry_run in (False, True):
+                with self.subTest(priority=priority, dry_run=dry_run), tempfile.TemporaryDirectory() as tmp:
+                    status = Path(tmp) / "status.json"
+                    status.write_text("existing status\n")
+                    activity = {
+                        name: mock.Mock(side_effect=AssertionError(f"unexpected {name}"))
+                        for name in (
+                            "EngineStage", "persist_engine_stage", "reviewer_args", "preflight_git",
+                            "prepare_output_paths", "run_engine",
+                        )
+                    }
+                    argv = [
+                        "autoreview", "--status-output", str(status), "--stream-engine-output",
+                        "--engine-stage-dir", str(Path(tmp) / "stage"),
+                        *(["--dry-run"] if dry_run else []),
+                    ]
+                    stderr = io.StringIO()
+                    with mock.patch.dict(os.environ, {"AUTOREVIEW_MAX_PRIORITY": priority}, clear=True), \
+                            mock.patch.object(sys, "argv", argv), \
+                            mock.patch.multiple(AUTOREVIEW, **activity), contextlib.redirect_stderr(stderr):
+                        with self.assertRaises(SystemExit) as caught:
+                            AUTOREVIEW.main_impl()
+                    self.assertEqual(caught.exception.code, 2)
+                    self.assertIn("invalid --max-priority/AUTOREVIEW_MAX_PRIORITY", stderr.getvalue())
+                    for call in activity.values():
+                        call.assert_not_called()
+                    self.assertEqual(status.read_text(), "existing status\n")
+                    self.assertEqual(sorted(item.name for item in Path(tmp).iterdir()), ["status.json"])
+
+    def test_priority_help_ignores_invalid_environment_default(self) -> None:
+        with mock.patch.dict(os.environ, {"AUTOREVIEW_MAX_PRIORITY": "P4"}, clear=True), \
+                mock.patch.object(sys, "argv", ["autoreview", "--help"]), \
+                contextlib.redirect_stdout(io.StringIO()) as stdout:
+            with self.assertRaises(SystemExit) as caught:
+                AUTOREVIEW.parse_args()
+        self.assertEqual(caught.exception.code, 0)
+        self.assertIn("--max-priority {P0,P1,P2,P3}", stdout.getvalue())
 
     def test_priority_filter_preserves_lower_findings_and_provider_verdict(self) -> None:
         report = copy.deepcopy(DRAFT_REPORT)
@@ -676,7 +731,7 @@ class AutoreviewTargetResultTests(unittest.TestCase):
         outside = self.finding(code_location={"file_path": "outside.py", "line": 1})
         provider = {**FINAL_REPORT, "findings": [valid, stale, outside],
                     "overall_correctness": "patch is incorrect", "overall_confidence": 0.43}
-        for engine in AUTOREVIEW.ENGINES:
+        for engine in ("codex", "claude", "amp", "pi"):
             with self.subTest(engine=engine), mock.patch.object(
                     AUTOREVIEW, "run_engine", return_value=json.dumps({**provider, "review_completion": "complete"})), \
                     mock.patch.object(AUTOREVIEW, "verify_mixed_sources"), contextlib.redirect_stderr(io.StringIO()):
@@ -1398,7 +1453,7 @@ class AutoreviewInputTests(unittest.TestCase):
 
 
     def test_every_provider_reviews_each_pack_without_a_scanner(self) -> None:
-        for engine in ("codex", "claude", "amp", "pi", "kimi"):
+        for engine in ("codex", "claude", "amp", "pi"):
             with self.subTest(engine=engine), tempfile.TemporaryDirectory() as tempdir:
                 args = argparse.Namespace(engine=engine, max_priority="P0")
                 prompts = [f"complete pack {index}: unicode π\r\n-context\n+change\n" for index in range(2)]
@@ -1555,6 +1610,71 @@ class AutoreviewEfficiencyTests(unittest.TestCase):
                     contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit):
                     AUTOREVIEW.parse_args()
+
+
+class AutoreviewKimiRefusalTests(unittest.TestCase):
+    @contextlib.contextmanager
+    def no_engine_activity(self):
+        names = (
+            "find_command", "resolve_command", "run", "run_with_heartbeat", "run_with_stream",
+            "safe_temp_root", "run_codex", "run_claude", "run_amp", "run_pi",
+        )
+        guards = {name: mock.Mock(side_effect=AssertionError(f"refused engine reached {name}"))
+                  for name in names}
+        with contextlib.ExitStack() as stack:
+            for name, guard in guards.items():
+                stack.enter_context(mock.patch.object(AUTOREVIEW, name, guard))
+            for name in ("open", "read_text", "read_bytes"):
+                guard = mock.Mock(side_effect=AssertionError("refused engine read configuration/auth"))
+                guards[f"Path.{name}"] = guard
+                stack.enter_context(mock.patch.object(Path, name, guard))
+            guard = mock.Mock(side_effect=AssertionError("refused engine staged a runtime"))
+            guards["TemporaryDirectory"] = guard
+            stack.enter_context(mock.patch.object(AUTOREVIEW.tempfile, "TemporaryDirectory", guard))
+            yield guards
+
+    def assert_private_input_diagnostic(self, message):
+        self.assertIn("kimi review is unavailable", str(message).lower())
+        self.assertIn("private input channel", str(message).lower())
+
+    def test_kimi_explicit_and_environment_selection_refuse_private_input(self):
+        for environment in (False, True):
+            for dry_run in (False, True):
+                with self.subTest(environment=environment, dry_run=dry_run):
+                    env = {"AUTOREVIEW_ENGINE": "kimi"} if environment else {}
+                    argv = ["autoreview", "--kimi-bin", "synthetic-kimi"]
+                    if not environment:
+                        argv += ["--engine", "kimi"]
+                    if dry_run:
+                        argv += ["--dry-run"]
+                    with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(sys, "argv", argv):
+                        args = AUTOREVIEW.parse_args()
+                        self.assertEqual((args.engine, args.kimi_bin), ("kimi", "synthetic-kimi"))
+                        with self.no_engine_activity() as guards:
+                            with self.assertRaises(SystemExit) as caught:
+                                AUTOREVIEW.reviewer_args(args)
+                    self.assert_private_input_diagnostic(caught.exception.code)
+                    for guard in guards.values():
+                        guard.assert_not_called()
+
+    def test_kimi_direct_dispatch_refuses_before_engine_activity(self):
+        args = argparse.Namespace(engine="kimi", kimi_bin="synthetic-kimi", model=None,
+                                  thinking=None, stream_engine_output=False)
+        with self.no_engine_activity() as guards:
+            with self.assertRaises(SystemExit) as caught:
+                AUTOREVIEW.run_engine(args, Path.cwd(), "synthetic private review text")
+        self.assert_private_input_diagnostic(caught.exception.code)
+        for guard in guards.values():
+            guard.assert_not_called()
+
+    def test_kimi_preflight_refuses_before_engine_activity(self):
+        args = argparse.Namespace(engine="kimi", kimi_bin="synthetic-kimi")
+        with self.no_engine_activity() as guards:
+            available, reason = AUTOREVIEW.resolve_engine_binary(args, Path.cwd())
+        self.assertFalse(available)
+        self.assert_private_input_diagnostic(reason)
+        for guard in guards.values():
+            guard.assert_not_called()
 
 
 class AutoreviewCompatibilityTests(unittest.TestCase):
@@ -1715,157 +1835,6 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
         ):
             args = AUTOREVIEW.parse_args()
         self.assertEqual(args.kimi_bin, "/tmp/trusted-kimi")
-
-    def test_kimi_reviewer_disables_tools(self) -> None:
-        args = argparse.Namespace(
-            engine="kimi",
-            model=None,
-            thinking=["on"],
-            fallback_model=None,
-            codex_config=None,
-            codex_speed=None,
-            tools=True,
-        )
-
-        reviewer = AUTOREVIEW.reviewer_args(args)[0]
-
-        self.assertEqual(reviewer.engine, "kimi")
-        self.assertEqual(reviewer.thinking, "on")
-        self.assertFalse(reviewer.tools)
-
-    def test_kimi_isolation_requires_current_cli_contract(self) -> None:
-        args = argparse.Namespace(kimi_bin="kimi")
-        required_flags = " ".join(
-            [
-                "--agent-file",
-                "--skills-dir",
-                "--prompt",
-                "--output-format",
-                "--model",
-            ]
-        )
-
-        def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-            if "--version" in command:
-                return subprocess.CompletedProcess(command, 0, "0.31.1", "")
-            return subprocess.CompletedProcess(command, 0, required_flags, "")
-
-        with tempfile.TemporaryDirectory(prefix="autoreview-kimi-probe-test.") as tmpdir, mock.patch.object(
-            AUTOREVIEW,
-            "resolve_command",
-            return_value="/usr/bin/kimi",
-        ), mock.patch.object(
-            AUTOREVIEW,
-            "safe_engine_env",
-            return_value={},
-        ), mock.patch.object(
-            AUTOREVIEW,
-            "safe_temp_root",
-            return_value=Path(tmpdir),
-        ), mock.patch.object(
-            AUTOREVIEW,
-            "run",
-            side_effect=fake_run,
-        ):
-            self.assertEqual(
-                AUTOREVIEW.ensure_kimi_isolation_supported(args, Path(tmpdir)),
-                "/usr/bin/kimi",
-            )
-
-    def test_kimi_invalid_streams_are_unavailable_after_launch(self) -> None:
-        args = argparse.Namespace(engine="kimi", kimi_bin="kimi", model="kimi-model",
-                                  stream_engine_output=False, thinking="on", max_priority="P2")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo = Path(tmpdir) / "repo"
-            repo.mkdir()
-            for stream in ("malformed JSON", '{"role":"meta"}\n', '{"role":"assistant","content":"{}"}'):
-                with self.subTest(stream=stream), mock.patch.object(
-                    AUTOREVIEW, "ensure_kimi_isolation_supported", return_value="/usr/bin/kimi",
-                ), mock.patch.object(
-                    AUTOREVIEW, "load_kimi_review_config", return_value=({"telemetry": False}, None),
-                ), mock.patch.object(
-                    AUTOREVIEW, "run_with_heartbeat", return_value=subprocess.CompletedProcess([], 0, stream, ""),
-                ):
-                    with self.assertRaises(AUTOREVIEW.ReviewerUnavailable) as caught:
-                        AUTOREVIEW.run_reviewer(args, repo, "synthetic pack", set(), [])
-                    self.assertEqual(caught.exception.reason, "invalid_report")
-
-    def test_kimi_runs_with_empty_tools_skills_and_mcp(self) -> None:
-        args = argparse.Namespace(
-            kimi_bin="kimi",
-            model="kimi-model",
-            stream_engine_output=False,
-            thinking="on",
-        )
-        observed: dict[str, object] = {}
-
-        def fake_run(
-            command: list[str],
-            cwd: Path,
-            **kwargs: object,
-        ) -> subprocess.CompletedProcess[str]:
-            observed["command"] = command
-            observed["cwd"] = cwd
-            observed["env"] = kwargs["env"]
-            env = kwargs["env"]
-            assert isinstance(env, dict)
-            home = Path(str(env["KIMI_CODE_HOME"]))
-            observed["agent"] = (home / "reviewer.md").read_text(encoding="utf-8")
-            observed["config"] = (home / "config.toml").read_text(encoding="utf-8")
-            observed["skills"] = list((home / "skills").iterdir())
-            observed["workspace"] = list(cwd.iterdir())
-            stream = (
-                json.dumps({"role": "meta", "type": "system.version", "version": "0.31.1"})
-                + "\n"
-                + json.dumps({"role": "assistant", "content": json.dumps(FINAL_REPORT)})
-                + "\n"
-            )
-            return subprocess.CompletedProcess(command, 0, stream, "")
-
-        with tempfile.TemporaryDirectory(prefix="autoreview-kimi-run-test.") as tmpdir:
-            repo = Path(tmpdir) / "repo"
-            repo.mkdir()
-            with mock.patch.object(
-                AUTOREVIEW,
-                "ensure_kimi_isolation_supported",
-                return_value="/usr/bin/kimi",
-            ), mock.patch.object(
-                AUTOREVIEW,
-                "load_kimi_review_config",
-                return_value=({"telemetry": False}, None),
-            ), mock.patch.object(
-                AUTOREVIEW,
-                "run_with_heartbeat",
-                side_effect=fake_run,
-            ):
-                output = AUTOREVIEW.run_kimi(args, repo, "review prompt")
-
-        self.assertEqual(json.loads(output), FINAL_REPORT)
-        command = observed["command"]
-        self.assertIsInstance(command, list)
-        assert isinstance(command, list)
-        self.assertEqual(command[command.index("--prompt") + 1], "review prompt")
-        self.assertEqual(command[command.index("--output-format") + 1], "stream-json")
-        self.assertEqual(command[command.index("--model") + 1], "kimi-model")
-        self.assertNotIn("--thinking", command)
-        agent = observed["agent"]
-        self.assertIsInstance(agent, str)
-        assert isinstance(agent, str)
-        self.assertIn("tools: []", agent)
-        self.assertIn("subagents: []", agent)
-        config = observed["config"]
-        self.assertIsInstance(config, str)
-        assert isinstance(config, str)
-        self.assertIn("[thinking]", config)
-        self.assertIn("enabled = true", config)
-        self.assertEqual(observed["skills"], [])
-        self.assertEqual(observed["workspace"], [])
-        env = observed["env"]
-        self.assertIsInstance(env, dict)
-        assert isinstance(env, dict)
-        self.assertEqual(env["KIMI_DISABLE_TELEMETRY"], "1")
-        self.assertEqual(env["KIMI_CODE_NO_AUTO_UPDATE"], "1")
-        self.assertNotEqual(Path(str(env["KIMI_CODE_HOME"])), repo)
 
     def test_codex_config_status_exposes_keys_only(self) -> None:
         args = argparse.Namespace(codex_config=['model_verbosity="low"'])

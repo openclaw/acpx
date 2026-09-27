@@ -156,34 +156,6 @@ print(json.dumps(report))
 	'''
 
 
-def fake_kimi_script() -> str:
-    return r'''#!/usr/bin/env python3
-import json
-import os
-from pathlib import Path
-import sys
-
-args = sys.argv[1:]
-if "--version" in args or "-v" in args:
-    print(os.environ.get("AUTOREVIEW_FAKE_KIMI_VERSION", "0.30.0"))
-    raise SystemExit(0)
-if "--help" in args or "-h" in args:
-    print(os.environ.get("AUTOREVIEW_FAKE_KIMI_HELP", "--agent-file\n--skills-dir\n--prompt\n--output-format\n--model"))
-    raise SystemExit(0)
-record = os.environ.get("AUTOREVIEW_FAKE_RECORD")
-if record:
-    Path(record).write_text(json.dumps({"argv": args, "cwd": os.getcwd(), "stdin": sys.stdin.read()}))
-report = {
-    "findings": [],
-    "overall_correctness": "patch is correct",
-    "overall_explanation": "fake kimi clean",
-    "overall_confidence": 0.99,
-    "review_completion": "complete",
-}
-print(json.dumps(report))
-'''
-
-
 def load_helper() -> dict[str, object]:
     return runpy.run_path(str(SCRIPT), run_name="autoreview_under_test")
 
@@ -1707,7 +1679,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 record.raw_path, content.decode(), provenance=(record.commit, oid, mode),
             )])
             with mock.patch.dict(self.helper["main_impl"].__globals__, {
-                "max_prompt_bytes_for_reviewers": lambda _reviewers: 30_000,
+                "MAX_REVIEW_PROMPT_BYTES": 30_000,
             }):
                 self.assertEqual(self.helper["main_impl"](), 0)
             self.assertGreater(len(sends), 1)
@@ -1738,7 +1710,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 self.helper["check_review_plan"](argparse.Namespace(max_review_passes=1), prompts)
             self.assertFalse(sends)
             with mock.patch.dict(self.helper["main_impl"].__globals__, {
-                "max_prompt_bytes_for_reviewers": lambda _reviewers: len(content),
+                "MAX_REVIEW_PROMPT_BYTES": len(content),
             }), self.assertRaisesRegex(SystemExit, "intact context leave too little room"):
                 self.helper["main_impl"]()
             self.assertFalse(sends)
@@ -2284,7 +2256,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
 
             self.assertIn(self.helper["REVIEW_SECURITY_OMISSION"], bundle)
 
-    def test_powershell_harness_exposes_runnable_engines_only(self) -> None:
+    def test_powershell_harness_exposes_recognized_engines(self) -> None:
         harness = SCRIPT.with_name("test-review-harness.ps1").read_text(encoding="utf-8")
 
         self.assertIn("[ValidateSet('codex', 'claude', 'amp', 'pi', 'kimi')]", harness)
@@ -2725,7 +2697,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 ("branch", base, {e2e}, 2),
                 ("local", base, {source, e2e}, 1),
             )
-            for engine in ("codex", "claude", "amp", "pi", "kimi"):
+            for engine in ("codex", "claude", "amp", "pi"):
                 for mode, ref, accepted, expected_exit in cases:
                     with self.subTest(engine=engine, mode=mode, ref=bool(ref)):
                         sends = []
@@ -3860,27 +3832,6 @@ class AutoreviewHardeningTests(unittest.TestCase):
                         )
                         self.assertIn(f"Oversized review bundle chunk: {index}/{len(prompts)}", prompt)
 
-    def test_kimi_prompt_budget_partitions_before_argv_limits(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            repo = init_repo(Path(tempdir))
-            prompts = self.helper["build_review_prompts"](
-                repo,
-                "commit",
-                "HEAD",
-                "# Commit Diff\n" + "safe review content\n" * 35_000,
-                "",
-                [],
-                self.helper["KIMI_MAX_PROMPT_BYTES"],
-            )
-
-        self.assertGreater(len(prompts), 1)
-        self.assertTrue(
-            all(
-                len(prompt.encode("utf-8")) <= self.helper["KIMI_MAX_PROMPT_BYTES"]
-                for prompt in prompts
-            )
-        )
-
     def test_change_partitions_keep_complete_datasets_when_context_fits(self) -> None:
         def sized_content(size: int) -> str:
             line = "synthetic owner \U0001f99e\r\n"
@@ -4868,120 +4819,19 @@ class AutoreviewHardeningTests(unittest.TestCase):
 
             self.assertIn('-const request = { token: "test-token" };', bundle)
 
-    def test_kimi_config_is_sanitized_without_losing_model_auth(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            share = root / "kimi-home"
-            share.mkdir()
-            (share / "config.toml").write_text(
-                "\n".join(
-                    [
-                        'default_model = "review-model"',
-                        'extra_skill_dirs = ["/tmp/unsafe-skills"]',
-                        "",
-                        "[models.review-model]",
-                        'provider = "review-provider"',
-                        'model = "kimi-k2"',
-                        "max_context_size = 100000",
-                        "",
-                        "[providers.review-provider]",
-                        'type = "kimi"',
-                        'base_url = "https://api.example.invalid"',
-                        'api_key = "test-token"',
-                        "",
-                        "[services.moonshot_search]",
-                        'base_url = "http://localhost"',
-                        "",
-                        "[thinking]",
-                        "enabled = false",
-                        "",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-            with mock.patch.dict(
-                os.environ,
-                {"KIMI_CODE_HOME": str(share)},
-                clear=False,
-            ):
-                config, source_share = self.helper["load_kimi_review_config"](repo)
-
-        self.assertEqual(source_share, share.resolve())
-        self.assertEqual(config["default_model"], "review-model")
-        self.assertEqual(
-            config["providers"]["review-provider"]["api_key"],
-            "test-token",
-        )
-        self.assertNotIn("services", config)
-        self.assertNotIn("extra_skill_dirs", config)
-        self.assertNotIn("thinking", config)
-        self.assertNotIn("hooks", config)
-
-    def test_kimi_written_config_round_trips_unicode_and_scalar_types(self) -> None:
-        config = {
-            "default_model": "review-🦞",
-            "models": {"review-🦞": {"provider": "provider-🦞", "max_context_size": 100000}},
-            "providers": {"provider-🦞": {
-                "label.🦞\x7f": 'Unicode 🦞 with "quotes", backslash \\, newline\n and DEL\x7f',
-                "values": [True, False, 42, 1.5, "🦞"],
-            }},
+    def test_toml_keys_and_values_round_trip_unicode_and_scalar_types(self) -> None:
+        values = {
+            "model": "review-🦞",
+            "label.🦞\x7f": 'Unicode 🦞 with "quotes", backslash \\, newline\n and DEL\x7f',
+            "values": [True, False, 42, 1.5, "🦞"],
         }
-        with tempfile.TemporaryDirectory() as tempdir:
-            config_path, _ = self.helper["write_kimi_review_files"](Path(tempdir), config)
-            self.assertEqual(tomllib.loads(config_path.read_text(encoding="utf-8")), config)
+        encoded = "\n".join(
+            f'{self.helper["toml_key"](key)} = {self.helper["toml_value"](value)}'
+            for key, value in values.items()
+        )
+        self.assertEqual(tomllib.loads(encoded), values)
 
-    def test_kimi_oauth_credentials_are_linked_outside_runtime_state(self) -> None:
-        if os.name == "nt":
-            self.skipTest("directory symlink privileges vary on Windows")
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source_share = root / "source-kimi"
-            credentials = source_share / "credentials"
-            credentials.mkdir(parents=True)
-            device_id = "0123456789abcdef0123456789abcdef"
-            (source_share / "device_id").write_text(device_id, encoding="utf-8")
-            runtime_share = root / "runtime-kimi"
-            runtime_share.mkdir()
-
-            self.helper["prepare_kimi_runtime_auth"](
-                repo,
-                source_share,
-                runtime_share,
-            )
-
-            linked = runtime_share / "credentials"
-            self.assertTrue(linked.is_symlink())
-            self.assertEqual(linked.resolve(), credentials.resolve())
-            self.assertEqual(
-                (runtime_share / "device_id").read_text(encoding="utf-8"),
-                device_id,
-            )
-
-    def test_kimi_rejects_repo_controlled_config_symlink(self) -> None:
-        if os.name == "nt":
-            self.skipTest("directory symlink privileges vary on Windows")
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            hostile_config = repo / "kimi-config.toml"
-            hostile_config.write_text("default_model = \"x\"\n", encoding="utf-8")
-            share = root / "kimi-home"
-            share.mkdir()
-            (share / "config.toml").symlink_to(hostile_config)
-
-            with mock.patch.dict(
-                os.environ,
-                {"KIMI_CODE_HOME": str(share)},
-                clear=False,
-            ), self.assertRaisesRegex(
-                SystemExit,
-                "must resolve outside",
-            ):
-                self.helper["load_kimi_review_config"](repo)
-
-    def test_kimi_engine_env_preserves_only_supported_runtime_overrides(self) -> None:
+    def test_pi_preserves_kimi_provider_key_without_kimi_runtime_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo = init_repo(Path(tempdir))
             with mock.patch.dict(
@@ -4995,11 +4845,11 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 },
                 clear=False,
             ):
-                env = self.helper["safe_engine_env"](repo, engine="kimi")
+                env = self.helper["safe_engine_env"](repo, engine="pi")
 
         self.assertEqual(env["KIMI_API_KEY"], "test-token")
-        self.assertEqual(env["KIMI_BASE_URL"], "https://api.example.invalid")
-        self.assertEqual(env["KIMI_MODEL_NAME"], "kimi-model")
+        self.assertNotIn("KIMI_BASE_URL", env)
+        self.assertNotIn("KIMI_MODEL_NAME", env)
         self.assertNotIn("KIMI_CODE_HOME", env)
         self.assertNotIn("PYTHONPATH", env)
 
@@ -6996,6 +6846,30 @@ else:
             self.assertIn(r"\x07", displayed)
             self.assertTrue(displayed.endswith("\n"))
 
+    def test_kimi_review_and_dry_run_refuse_before_preparation(self) -> None:
+        names = ("preflight_git", "repo_root", "capture_evidence_inputs", "source_tree_snapshot",
+                 "build_bundle", "prepare_review_prompts", "resolve_engine_binary", "run_engine")
+        for environment in (False, True):
+            for dry_run in (False, True):
+                with self.subTest(environment=environment, dry_run=dry_run):
+                    argv = [str(SCRIPT), "--kimi-bin", "synthetic-kimi"]
+                    if not environment:
+                        argv += ["--engine", "kimi"]
+                    if dry_run:
+                        argv += ["--dry-run"]
+                    env = {"AUTOREVIEW_ENGINE": "kimi"} if environment else {}
+                    guards = {name: mock.Mock(side_effect=AssertionError(f"refused engine reached {name}"))
+                              for name in names}
+                    with mock.patch.dict(self.helper["main_impl"].__globals__, guards), \
+                            mock.patch.dict(os.environ, env, clear=True), mock.patch.object(sys, "argv", argv), \
+                            contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        with self.assertRaises(SystemExit) as caught:
+                            self.helper["main_impl"]()
+                    self.assertIn("kimi review is unavailable", str(caught.exception.code).lower())
+                    self.assertIn("private input channel", str(caught.exception.code).lower())
+                    for guard in guards.values():
+                        guard.assert_not_called()
+
     def test_resolve_engine_binary_rejects_codex_no_tools(self) -> None:
         # run_codex() unconditionally refuses --no-tools (see line ~10318);
         # the preflight must report that same rejection instead of reporting
@@ -7602,287 +7476,6 @@ os.execv(target, [str(target), *sys.argv[1:]])
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertRegex(result.stdout, r"engine check: pi[^\n]* OK\b")
 
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_nonzero_when_kimi_version_unsupported(self) -> None:
-        # run_kimi() calls ensure_kimi_isolation_supported(), which requires
-        # Kimi Code CLI >= 0.30.0 before the CLI is ever invoked for a
-        # review; --dry-run must reuse that same local --version probe
-        # rather than reporting kimi available just because the binary
-        # resolves on PATH.
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
-            )
-            env = os.environ.copy()
-            env["AUTOREVIEW_FAKE_KIMI_VERSION"] = "0.10.0"
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* UNAVAILABLE")
-            self.assertIn("0.30.0", result.stdout)
-
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_zero_when_kimi_version_supported(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source = repo / "source.txt"
-            source.write_text("staged\n", encoding="utf-8")
-            git(repo, "add", "source.txt")
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
-            )
-            env = os.environ.copy()
-            # Isolate KIMI_CODE_HOME to an empty, hermetic directory instead
-            # of leaking the host's real ~/.kimi-code (which may or may not
-            # exist) into this test; an empty source share has no
-            # device_id/credentials to validate and must still report OK.
-            env["KIMI_CODE_HOME"] = str(root / "kimi-empty-home")
-            (root / "kimi-empty-home").mkdir()
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* OK\b")
-
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_nonzero_when_kimi_config_repo_controlled(self) -> None:
-        # run_kimi() calls load_kimi_review_config() before the CLI is ever
-        # invoked for a review, and that rejects a KIMI_CODE_HOME pointed
-        # inside the reviewed repository (see kimi_source_share); --dry-run
-        # must reuse that same local config load rather than reporting kimi
-        # available just because the CLI binary and version resolved.
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source = repo / "source.txt"
-            source.write_text("staged\n", encoding="utf-8")
-            git(repo, "add", "source.txt")
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
-            )
-            env = os.environ.copy()
-            env["KIMI_CODE_HOME"] = str(repo / ".kimi-code")
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* UNAVAILABLE")
-            self.assertIn(
-                "Kimi configuration must be outside the reviewed repository",
-                result.stdout,
-            )
-            # The bundle, inputs, and prompt assembly still resolve; only the
-            # Kimi-specific config load fails.
-            self.assertIn("prompt: OK", result.stdout)
-
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_nonzero_when_kimi_device_id_invalid(self) -> None:
-        # run_kimi() calls prepare_kimi_runtime_auth() after
-        # load_kimi_review_config() and before the CLI is ever invoked for
-        # a review; that raises on a device_id that fails the safe-to-stage
-        # format check (see validate_kimi_runtime_auth_sources). --dry-run
-        # must reuse that same non-mutating check rather than reporting
-        # kimi available just because the CLI binary, version, and config
-        # load resolved.
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source = repo / "source.txt"
-            source.write_text("staged\n", encoding="utf-8")
-            git(repo, "add", "source.txt")
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
-            )
-            source_share = root / "kimi-home"
-            source_share.mkdir()
-            (source_share / "device_id").write_text("not-a-valid-id!!", encoding="utf-8")
-            env = os.environ.copy()
-            env["KIMI_CODE_HOME"] = str(source_share)
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* UNAVAILABLE")
-            self.assertIn(
-                "Kimi device identity is not safe to stage for review",
-                result.stdout,
-            )
-            # The bundle, inputs, and prompt assembly still resolve; only the
-            # Kimi-specific auth source check fails.
-            self.assertIn("prompt: OK", result.stdout)
-
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_nonzero_when_kimi_credentials_not_a_directory(self) -> None:
-        # Same raising check as above (see
-        # validate_kimi_runtime_auth_sources), triggered instead by a
-        # credentials path that resolves to a file rather than a directory
-        # -- the same shape of error a real run's prepare_kimi_runtime_auth()
-        # would raise on before ever invoking the CLI.
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source = repo / "source.txt"
-            source.write_text("staged\n", encoding="utf-8")
-            git(repo, "add", "source.txt")
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
-            )
-            source_share = root / "kimi-home"
-            source_share.mkdir()
-            (source_share / "credentials").write_text("not-a-directory", encoding="utf-8")
-            env = os.environ.copy()
-            env["KIMI_CODE_HOME"] = str(source_share)
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* UNAVAILABLE")
-            self.assertIn(
-                "Kimi OAuth credentials must be an external directory outside the reviewed repository",
-                result.stdout,
-            )
-            self.assertIn("prompt: OK", result.stdout)
-
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_zero_when_kimi_auth_sources_valid(self) -> None:
-        # A validly staged device_id and OAuth credentials directory (the
-        # shape prepare_kimi_runtime_auth() accepts and stages for a real
-        # run) must still report kimi OK under --dry-run.
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source = repo / "source.txt"
-            source.write_text("staged\n", encoding="utf-8")
-            git(repo, "add", "source.txt")
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
-            )
-            source_share = root / "kimi-home"
-            source_share.mkdir()
-            (source_share / "device_id").write_text(
-                "0123456789abcdef0123456789abcdef", encoding="utf-8"
-            )
-            (source_share / "credentials").mkdir()
-            env = os.environ.copy()
-            env["KIMI_CODE_HOME"] = str(source_share)
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* OK\b")
-
     def test_dry_run_flag_exits_nonzero_when_claude_tool_not_read_only(self) -> None:
         # run_claude() computes its --tools inventory via
         # claude_allowed_tools()/claude_tool_inventory() before the CLI is
@@ -7930,59 +7523,22 @@ os.execv(target, [str(target), *sys.argv[1:]])
             self.assertIn("Claude review tool is not read-only: Bash", result.stdout)
             self.assertIn("prompt: OK", result.stdout)
 
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
     def test_dry_run_flag_exits_nonzero_when_prompt_unpartitionable(self) -> None:
         # Instructions remain whole in each pass. Dry-run must enforce the
-        # engine's aggregate prompt budget just like a real review.
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source = repo / "source.txt"
-            source.write_text("staged\n", encoding="utf-8")
-            git(repo, "add", "source.txt")
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
-            )
-            env = os.environ.copy()
-            # Prompt limits must not depend on the host's Kimi configuration.
-            env["KIMI_CODE_HOME"] = str(root / "kimi-empty-home")
-            (root / "kimi-empty-home").mkdir()
-            prompt_file = repo / "big-prompt.md"
-            prompt_file.write_text(
-                "context line filler text here\n" * 5_000,
-                encoding="utf-8",
-            )
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
-                    "--prompt-file",
-                    "big-prompt.md",
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertIn("prompt: FAILED", result.stdout)
-            self.assertIn("too little room", result.stdout)
+        # per-pass prompt budget just like a real review.
+        with self.preparation_fixture(
+            "--engine", "pi", "--dry-run", "--prompt-file", "evidence/big-prompt.md",
+        ) as (repo, sends, stdout, _stderr):
+            (repo / "evidence/big-prompt.md").write_text("context line filler text here\n" * 20_000)
+            self.assertEqual(self.helper["main_impl"](), 1)
+            self.assertFalse(sends)
+            self.assertIn("prompt: FAILED", stdout.getvalue())
+            self.assertIn("too little room", stdout.getvalue())
             # The bundle, inputs, and engine still resolve; only the
             # assembled-prompt aggregate check fails.
-            self.assertIn("bundle: constructible", result.stdout)
-            self.assertIn("inputs: OK", result.stdout)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* OK\b")
+            self.assertIn("bundle: constructible", stdout.getvalue())
+            self.assertIn("inputs: OK", stdout.getvalue())
+            self.assertRegex(stdout.getvalue(), r"engine check: pi[^\n]* OK\b")
 
     @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
     def test_dry_run_flag_exits_nonzero_when_prompt_file_missing(self) -> None:

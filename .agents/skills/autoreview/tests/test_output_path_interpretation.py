@@ -73,7 +73,7 @@ class OutputPathInterpretationTests(unittest.TestCase):
         # Native Git may refresh index stat data; staged entries must not change.
         return files, git(self.repo, "ls-files", "--stage", "-z")
 
-    def invoke(self, engine, *, overrides=None):
+    def invoke(self, engine, *, overrides=None, with_status=True):
         # Literal argv values model quoted shell arguments and programmatic use.
         destinations = {flag: f"~/{name}" for flag, name in self.names.items()}
         destinations.update(overrides or {})
@@ -81,7 +81,8 @@ class OutputPathInterpretationTests(unittest.TestCase):
         # Parsing order must not permit status deletion before validating a
         # later human/JSON destination.
         for flag in ("--status-output", "--output", "--json-output"):
-            argv.extend((flag, destinations[flag]))
+            if flag != "--status-output" or with_status:
+                argv.extend((flag, destinations[flag]))
         stdout, stderr = io.StringIO(), io.StringIO()
         main = self.helper["main_impl"]
         with mock.patch.dict(main.__globals__, {"run_engine": engine}), \
@@ -101,7 +102,7 @@ class OutputPathInterpretationTests(unittest.TestCase):
 
         return mock.Mock(side_effect=reply)
 
-    def assert_clean_outputs(self, directory):
+    def assert_clean_outputs(self, directory, *, with_status=True):
         result = json.loads((directory / "report.json").read_text(encoding="utf-8"))
         self.assertEqual(result["findings"], [])
         self.assertEqual(result["review_status"], "scoped-clean")
@@ -109,11 +110,12 @@ class OutputPathInterpretationTests(unittest.TestCase):
         self.assertNotIn("review_completion", result["provider_report"])
         for field in ("overall_correctness", "overall_explanation", "overall_confidence"):
             self.assertEqual(result[field], self.clean_report[field])
-        self.assertEqual(json.loads((directory / "status.json").read_text(encoding="utf-8")), {
-            "schema_version": 1, "status": "scoped-clean", "exit_code": 0,
-            "engine": "codex", "report_produced": True, "reason": None,
-            "reviewer_exit_code": None, "timed_out": False,
-        })
+        if with_status:
+            self.assertEqual(json.loads((directory / "status.json").read_text(encoding="utf-8")), {
+                "schema_version": 1, "status": "scoped-clean", "exit_code": 0,
+                "engine": "codex", "report_produced": True, "reason": None,
+                "reviewer_exit_code": None, "timed_out": False,
+            })
         human = (directory / "human.txt").read_text(encoding="utf-8")
         self.assertIn("scoped-clean:", human)
         self.assertIn(self.clean_report["overall_explanation"], human)
@@ -183,6 +185,142 @@ class OutputPathInterpretationTests(unittest.TestCase):
                 self.assertEqual(self.snapshot(), before)
                 self.assertEqual(status.read_bytes(), stale, "validation failure removed stale status")
                 self.assertEqual({path.name for path in self.home.iterdir()}, {"status.json"})
+
+    def test_report_entry_aliases_are_refused_with_and_without_status(self):
+        stale = b"unrequested status must remain unchanged\n"
+        status = self.home / "status.json"
+        status.write_bytes(stale)
+        cases = (
+            ("identical", "~/report.json", "~/report.json"),
+            ("expanded", "~/report.json", str(self.home / "report.json")),
+            ("relative", "../operator/report.json", str(self.home / "report.json")),
+            ("case", str(self.home / "report.json"), str(self.home / "REPORT.json")),
+            ("unicode", str(self.home / "caf\u00e9.json"), str(self.home / "cafe\u0301.json")),
+        )
+        for label, human, structured in cases:
+            for with_status in (False, True):
+                with self.subTest(alias=label, with_status=with_status):
+                    destination = Path(human).expanduser()
+                    destination.write_bytes(b"existing report must remain unchanged\n")
+                    outputs = {path.name: path.read_bytes() for path in self.home.iterdir()}
+                    before = self.snapshot()
+                    engine = mock.Mock(side_effect=AssertionError("colliding report entries reached reviewer"))
+                    try:
+                        with self.assertRaisesRegex(SystemExit, "must use a different path"):
+                            self.invoke(engine, overrides={"--output": human, "--json-output": structured},
+                                        with_status=with_status)
+                    finally:
+                        self.assertEqual(self.snapshot(), before)
+                        self.assertEqual({path.name: path.read_bytes() for path in self.home.iterdir()}, outputs)
+                        self.assertEqual(status.read_bytes(), stale)
+                    engine.assert_not_called()
+
+    def test_no_status_parent_symlink_alias_to_same_report_entry_is_refused(self):
+        outputs = self.home / "reports"
+        outputs.mkdir()
+        alias = self.home / "reports-link"
+        try:
+            alias.symlink_to(outputs, target_is_directory=True)
+        except OSError as error:
+            if os.name == "nt" and getattr(error, "winerror", None) == 1314:
+                self.skipTest("Windows symlink privilege is unavailable")
+            raise
+        self.assertTrue(os.path.samefile(alias, outputs))
+        original_target = os.readlink(alias)
+        destination = outputs / "report.json"
+        original = b"existing report must remain unchanged\n"
+        destination.write_bytes(original)
+        inode = destination.stat().st_ino
+        status = self.home / "status.json"
+        stale = b"unrequested status must remain unchanged\n"
+        status.write_bytes(stale)
+        before = self.snapshot()
+        engine = mock.Mock(side_effect=AssertionError("parent alias collision reached reviewer"))
+        try:
+            with self.assertRaisesRegex(SystemExit, "must use a different path"):
+                self.invoke(engine, overrides={
+                    "--output": str(alias / "report.json"), "--json-output": str(destination),
+                }, with_status=False)
+        finally:
+            self.assertEqual(self.snapshot(), before)
+            self.assertEqual(destination.read_bytes(), original)
+            self.assertEqual(destination.stat().st_ino, inode)
+            self.assertEqual(status.read_bytes(), stale)
+            self.assertTrue(alias.is_symlink())
+            self.assertEqual(os.readlink(alias), original_target)
+        engine.assert_not_called()
+
+    def test_distinct_report_entries_publish_without_status_even_when_hardlinked(self):
+        status = self.home / "status.json"
+        stale = b"unrequested status must remain unchanged\n"
+        status.write_bytes(stale)
+        for hardlinked in (False, True):
+            with self.subTest(hardlinked=hardlinked):
+                outputs = self.home / str(hardlinked)
+                outputs.mkdir()
+                referent = self.root / f"original-{hardlinked}.txt"
+                original = b"original inode must remain unchanged\n"
+                referent.write_bytes(original)
+                for name in ("human.txt", "report.json"):
+                    if hardlinked:
+                        os.link(referent, outputs / name)
+                    else:
+                        (outputs / name).write_bytes(original)
+                overrides = {"--output": str(outputs / "human.txt"),
+                             "--json-output": str(outputs / "report.json")}
+                before = self.snapshot()
+                if hardlinked:
+                    blocked = mock.Mock(side_effect=AssertionError("status aliases reached reviewer"))
+                    with self.assertRaisesRegex(SystemExit, "must use a different path"):
+                        self.invoke(blocked, overrides=overrides)
+                    blocked.assert_not_called()
+                    self.assertTrue(os.path.samefile(outputs / "human.txt", outputs / "report.json"))
+                    self.assertEqual(status.read_bytes(), stale)
+                engine = mock.Mock(return_value=json.dumps({**self.clean_report, "review_completion": "complete"}))
+                try:
+                    self.assertEqual(self.invoke(engine, overrides=overrides, with_status=False), 0)
+                finally:
+                    self.assertEqual(self.snapshot(), before)
+                    self.assertEqual(referent.read_bytes(), original)
+                    self.assertEqual(status.read_bytes(), stale)
+                engine.assert_called_once()
+                self.assert_clean_outputs(outputs, with_status=False)
+                self.assertFalse(os.path.samefile(outputs / "human.txt", outputs / "report.json"))
+
+    def test_distinct_final_symlinks_publish_without_status_without_writing_shared_referent(self):
+        referent = self.root / "shared-referent.txt"
+        original = b"shared referent must remain unchanged\n"
+        referent.write_bytes(original)
+        for name in ("human.txt", "report.json"):
+            try:
+                (self.home / name).symlink_to(referent)
+            except OSError as error:
+                if os.name == "nt" and getattr(error, "winerror", None) == 1314:
+                    self.skipTest("Windows symlink privilege is unavailable")
+                raise
+        status = self.home / "status.json"
+        stale = b"unrequested status must remain unchanged\n"
+        status.write_bytes(stale)
+        before = self.snapshot()
+        blocked = mock.Mock(side_effect=AssertionError("status aliases reached reviewer"))
+        with self.assertRaisesRegex(SystemExit, "must use a different path"):
+            self.invoke(blocked)
+        blocked.assert_not_called()
+        for name in ("human.txt", "report.json"):
+            self.assertTrue((self.home / name).is_symlink())
+        self.assertEqual(referent.read_bytes(), original)
+        self.assertEqual(status.read_bytes(), stale)
+        engine = mock.Mock(return_value=json.dumps({**self.clean_report, "review_completion": "complete"}))
+        try:
+            self.assertEqual(self.invoke(engine, with_status=False), 0)
+        finally:
+            self.assertEqual(self.snapshot(), before)
+            self.assertEqual(referent.read_bytes(), original)
+            self.assertEqual(status.read_bytes(), stale)
+        engine.assert_called_once()
+        self.assert_clean_outputs(self.home, with_status=False)
+        for name in ("human.txt", "report.json"):
+            self.assertFalse((self.home / name).is_symlink())
 
     @unittest.skipIf(os.name == "nt", "final symlink creation requires Windows developer mode")
     def test_inside_final_symlinks_are_refused_before_any_mutation(self):

@@ -10,6 +10,9 @@ This is code review, not Guardian approval routing. Let the reviewer choose how
 to analyze the change; provide the target, relevant context, and desired severity.
 Findings are advice to verify, not instructions to apply blindly.
 
+Before starting a review, read the complete [diagnostic and result guidance](references/diagnostics-and-results.md). It is part of this skill; follow its
+output-path, status, failure, usage, and diagnostic rules.
+
 ## Run
 
 Use `scripts/autoreview` beside this skill. Keep its custom `codex exec` path:
@@ -121,7 +124,10 @@ source-provenance contract, not secret-content scanning.
 
 The default threshold is **P0 only**: material blockers to normal operation or
 safety. Use `--max-priority P1`, `P2`, or `P3` when the caller requests a wider
-review. Do not add unrelated redesign goals or prescribe file counts, reading
+review. `AUTOREVIEW_MAX_PRIORITY` accepts the same `P0`–`P3` values; an explicit
+flag overrides it. Invalid resolved priorities fail during argument parsing,
+before preparation or reviewer startup.
+Do not add unrelated redesign goals or prescribe file counts, reading
 sequences, or ritual extra passes. Historical blame requires a verified
 parent-relative patch; otherwise leave the attribution unknown.
 
@@ -211,7 +217,15 @@ split context overrides are unsupported when projection is selected.
 | Claude          | CLI 2.1.169+; safe mode with web-only tools                                                           |
 | Amp             | `AMP_API_KEY` for a plugin-free account; local POSIX execution, no custom endpoint or cloud/orb agent |
 | Pi              | CLI 0.79.0+; configured model; no tools or project resources                                          |
-| Kimi            | CLI 0.30.0+; configured model; Python 3.11+ or `tomli` for TOML config                                |
+
+`--engine kimi` remains recognized but is refused for reviews and `--dry-run`
+before any Kimi process, configuration read or authentication setup. The supported
+Kimi Code prompt mode accepts review content only as a command-line argument;
+the helper has no supported private prompt input channel for it. This intentionally
+retires the previous Kimi execution path rather than exposing the bundle in process
+arguments. Existing `--kimi-bin` arguments remain accepted for the same clear refusal;
+the helper never silently selects another engine. A custom agent file is not an
+equivalent replacement because it changes the input into a templated system prompt.
 
 ## Image review
 
@@ -299,90 +313,7 @@ There is no default pass ceiling. `--engine-timeout-seconds` remains an optional
 deadline per process attempt. Pass counts, prompt bytes, and deadlines are not
 token hard caps; they do not bound model reasoning or tool use.
 
-## Results
+## Diagnostics and results
 
-`--output`, `--json-output`, and `--status-output` paths must be outside the
-reviewed repository, both for the final directory entry after resolving parent
-symlinks and for the resolved referent. When using `--status-output`, all output
-paths must differ; case-only and Unicode normalization aliases are conservatively
-refused on every platform, even when the filesystem would permit distinct files.
-Tilde and relative destinations are expanded once before validation and remain
-anchored to the invocation directory. Atomic report writes replace a final
-symlink instead of modifying its target.
-
-For event-stream results, the last terminal event is authoritative. An invalid
-final result fails the review, even if an earlier event or review pass contained
-a valid report; earlier reports are never published as a partial clean result.
-A non-null `structured_output` must contain the report object; only an absent
-or null field permits using the event's `result` instead.
-
-| Exit | Meaning                                                                            |
-| ---- | ---------------------------------------------------------------------------------- |
-| `0`  | `scoped-clean`, or a correct verdict with only filtered lower-priority findings    |
-| `1`  | Accepted findings, an incorrect provider verdict, or a failed review attempt       |
-| `2`  | Unfinished assessment, incomplete scope/attribution, or a missing required finding |
-
-Treat `scoped-clean` as clean only for the selected target and requested priority.
-`filtered` is not clean; resolve `incomplete` before claiming completion.
-Verify findings against the actual code and task before changing anything.
-No extra review rounds for a nicer verdict; follow the owning workflow after fixes.
-
-Use `--status-output /outside/repo/status.json` for a separate, versioned
-machine-readable outcome. It preserves the existing exit codes and
-`--json-output` validated-report format. Completed reviews report `scoped-clean`,
-`findings`, `filtered`, `incorrect`, or `incomplete`; a launched reviewer that
-fails or returns an invalid report reports `reviewer_unavailable` with exit 1.
-A failed later pass never publishes a partial review report.
-
-Codex runs collect usage with live display on or off. The final report, status
-sidecar, and terminal summary include `usage`: process attempts, reported,
-unknown and partial attempt counts, `complete`, and observed token totals.
-Each fresh attempt contributes its last valid cumulative snapshot once, including
-access retries and failed passes. Cached input and reasoning output are subsets
-of input and output, not extra totals to add. These are observed tokens, not a
-billing estimate or a cache-hit promise. Missing telemetry, including Codex's
-all-zero defaults when no sample exists, is unknown, never measured zero;
-`tokens: null` means no attempt supplied usable totals. When `complete` is false,
-available totals are a lower bound. Interrupted runs print retained usage but
-still publish no status or review report. Other engines do not yet aggregate usage.
-
-```json
-{
-  "schema_version": 1,
-  "status": "reviewer_unavailable",
-  "exit_code": 1,
-  "engine": "codex",
-  "report_produced": false,
-  "reason": "engine_failed",
-  "reviewer_exit_code": 124,
-  "timed_out": true
-}
-```
-
-`reason` is `engine_failed`, `invalid_report`, or `runtime_validation_failed`
-for unavailable reviewers and null for completed reviews. The last reason means
-Amp's post-launch isolation attestation or private-result validation refused
-the result; it is not a transient-provider classification. These guards still
-run before report acceptance and retain their existing failure diagnostics.
-`reviewer_exit_code` is the last reviewer process's exit code when retained,
-including zero for rejected output, otherwise null. `timed_out` identifies the
-helper's deadline, not a reviewer that happens to exit 124. Completed envelopes
-have `report_produced: true`; this means a validated final report exists, not
-that its verdict is clean. `--expect-findings` changes exit codes as before;
-inspect `status` independently of `exit_code`.
-
-An unfinished assessment retains its validated provider observations with
-`incomplete`, exit 2, and `report_produced: true`, even when findings exist.
-The private completion field is not copied into public reports. Missing or
-invalid completion is an invalid report, not an unfinished assessment.
-
-The sidecar contains no provider logs, prompts, findings, or model identifiers.
-Existing bounded, display-safe diagnostics remain on stderr; command-auth
-diagnostic suppression remains in force. Use a fresh status path per invocation:
-after argument and output-path validation, a previous sidecar is removed before
-target selection. Dry runs, preflight refusals, pre-launch isolation failures, source mutations,
-interruptions, and output failures produce no new status. Absence means no
-outcome was published, never a clean review. No retry policy is added.
-
-Report material findings and status plainly. Do not add transcripts, proof
-ledgers, commits, pushes, or a new workstream unless requested.
+Follow the [diagnostic and result guidance](references/diagnostics-and-results.md)
+for local stage observation, output paths, exit codes, status, and usage.

@@ -16,6 +16,7 @@ from . import test_git_line_endings
 
 
 ORACLE_TOOLS = runpy.run_path(str(SCRIPT.with_name("test-review-harness.py")))
+IMAGE_TESTS = runpy.run_path(str(SCRIPT.with_name("autoreview_test.py")))
 
 
 def write_python_fixture(path: Path, source: str) -> None:
@@ -93,6 +94,11 @@ class GitFixtureIsolationTests(unittest.TestCase):
             (repo / "fixture.txt").write_bytes(b"fixture\n")
             git(repo, "add", ".")
             git(repo, "commit", "-qm", "fixture")
+        elif owner == "image":
+            case = IMAGE_TESTS["AutoreviewImageGitTests"]("runTest")
+            self.addCleanup(case.doCleanups)
+            case.setUp()
+            repo = case.repo
         else:
             repo = parent / "repo"
             repo.mkdir()
@@ -154,12 +160,14 @@ class GitFixtureIsolationTests(unittest.TestCase):
         contaminations = {
             "repository": {"GIT_DIR": str(dotgit), "GIT_WORK_TREE": str(self.sentinel),
                            "GIT_INDEX_FILE": str(dotgit / "index")},
+            "directory": {"GIT_DIR": str(dotgit)},
+            "worktree": {"GIT_WORK_TREE": str(self.sentinel)},
             "index": {"GIT_INDEX_FILE": str(dotgit / "index")},
             "objects": {"GIT_OBJECT_DIRECTORY": str(dotgit / "objects")},
             "config": {"GIT_CONFIG": str(dotgit / "config")},
             "common": {"GIT_COMMON_DIR": str(dotgit)},
         }
-        for owner in ("hardening", "harness"):
+        for owner in ("hardening", "harness", "image"):
             for label, contamination in contaminations.items():
                 with self.subTest(owner=owner, routing=label):
                     parent = self.root / f"{owner}-{label}"
@@ -198,7 +206,7 @@ class GitFixtureIsolationTests(unittest.TestCase):
             {"GIT_CONFIG_COUNT": "invalid"},
         )
         before = config.read_bytes()
-        for owner in ("hardening", "harness"):
+        for owner in ("hardening", "harness", "image"):
             for index, contamination in enumerate(variants):
                 with self.subTest(owner=owner, variant=index):
                     parent = self.root / f"{owner}-{index}"
@@ -223,17 +231,54 @@ class GitFixtureIsolationTests(unittest.TestCase):
                               ("attributes", "*.js working-tree-encoding=UTF-16\n*.txt working-tree-encoding=UTF-16\n")):
             config = settings / kind
             config.write_text(content)
-            for owner in ("hardening", "harness"):
+            for owner in ("hardening", "harness", "image"):
                 with self.subTest(owner=owner, kind=kind):
                     parent = self.root / f"home-{owner}-{kind}"
                     parent.mkdir()
                     with mock.patch.dict(os.environ, {"HOME": str(home), "USERPROFILE": str(home)}):
                         repo = self.fixture(owner, parent)
-                    path = "fixture.txt" if owner == "hardening" else "app.js"
-                    expected = "fixture\n" if owner == "hardening" else self.harness["BENIGN_INITIAL"]
+                    path, expected = {
+                        "hardening": ("fixture.txt", "fixture\n"),
+                        "harness": ("app.js", self.harness["BENIGN_INITIAL"]),
+                        "image": ("text.txt", "old\n"),
+                    }[owner]
                     self.assertEqual(self.native(repo, "show", f"HEAD:{path}"), expected)
                     self.assertEqual(config.read_text(), content)
             config.unlink()
+
+    def test_image_fixture_is_independent_of_native_text_newlines(self):
+        original = Path.write_text
+        def windows_newlines(path, data, *args, **kwargs):
+            if path.name == "text.txt" and data == "old\n":
+                return path.write_bytes(data.replace("\n", "\r\n").encode("utf-8"))
+            return original(path, data, *args, **kwargs)
+        case = IMAGE_TESTS["AutoreviewImageGitTests"]("runTest")
+        self.addCleanup(case.doCleanups)
+        with mock.patch.object(Path, "write_text", windows_newlines):
+            case.setUp()
+        self.assertEqual(self.native(case.repo, "show", "HEAD:text.txt"), "old\n")
+
+    def test_image_fixture_preserves_text_output_and_nonzero_failure(self):
+        case = IMAGE_TESTS["AutoreviewImageGitTests"]("runTest")
+        self.addCleanup(case.doCleanups)
+        case.setUp()
+        self.assertEqual(case.git("show", "HEAD:text.txt"), "old\n")
+        case.commit("next.txt", b"next\n")
+        self.assertEqual(case.git("show", "HEAD:next.txt"), "next\n")
+        self.assertEqual(case.git("rev-list", "--count", "HEAD"), "2\n")
+        with self.assertRaises(subprocess.CalledProcessError) as caught:
+            case.git("config", "--get", "fixture.absent")
+        self.assertEqual(caught.exception.returncode, 1)
+        self.assertEqual(caught.exception.output, "")
+
+    def test_image_fixture_refuses_when_no_external_git_is_available(self):
+        case = IMAGE_TESTS["AutoreviewImageGitTests"]("runTest")
+        case.repo = self.root
+        with mock.patch.dict(os.environ, {"PATH": str(self.root)}), \
+                mock.patch("subprocess.run") as launch:
+            with self.assertRaisesRegex(FileNotFoundError, "trusted external fixture Git"):
+                case.git("init", "-q")
+        launch.assert_not_called()
 
     @unittest.skipIf(os.name == "nt", "POSIX executable and symlink fixtures")
     def test_fixture_git_lookup_rejects_caller_checkout_and_external_symlink(self):
@@ -260,7 +305,7 @@ class GitFixtureIsolationTests(unittest.TestCase):
         original_cwd = Path.cwd()
         try:
             os.chdir(caller)
-            for owner in ("hardening", "harness"):
+            for owner in ("hardening", "harness", "image"):
                 for prefix in (repo_bin, external):
                     with self.subTest(owner=owner, path=prefix.name):
                         parent = self.root / f"path-{owner}-{prefix.name}"
