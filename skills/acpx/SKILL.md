@@ -337,6 +337,8 @@ Run the creation command once, then select the session with `-s` for later promp
 
 The override is forwarded via ACP `_meta.systemPrompt` (or `_meta.systemPrompt.append`) on `session/new`, `session/load`, and `session/resume` and stored in `session_options.system_prompt`. Subsequent `prompt`/`ensure` calls in the same scope keep the override unless you explicitly create a new session. Non-Claude adapters ignore the field, so the same flag is safe inside cross-agent scripts.
 
+Embedded `SessionAgentOptions.systemPrompt` preserves raw nonempty replacement or append text through saving and reconnecting, including whitespace-only text. CLI prompt flags trim surrounding whitespace and reject whitespace-only values.
+
 ## Claude settings isolation
 
 Built-in `acpx claude` sessions load Claude project and local settings, but not

@@ -137,13 +137,18 @@ function storedEnvRecord(value: unknown): Record<string, string> | undefined {
     if (typeof raw !== "string") {
       continue;
     }
-    result[key] = raw;
+    Object.defineProperty(result, key, {
+      value: raw,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
   }
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function normalizeSystemPromptOption(value: unknown): SystemPromptOption | undefined {
-  const prompt = nonEmptyString(value);
+  const prompt = nonEmptyPromptText(value);
   if (prompt !== undefined) {
     return prompt;
   }
@@ -155,7 +160,11 @@ function appendedSystemPrompt(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
-  return nonEmptyString((value as { append?: unknown }).append);
+  return nonEmptyPromptText((value as { append?: unknown }).append);
+}
+
+function nonEmptyPromptText(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function storedAllowedTools(value: unknown): string[] | undefined {

@@ -11,6 +11,9 @@ persisted `sessionOptions.env`, then the inherited process environment. Windows
 uses the same case-insensitive collision handling as session environment values.
 The overlay does not change the parent process environment.
 
+Per-session `SessionAgentOptions.env` is saved for reconnects. Its own string
+keys and values are preserved exactly, including names such as `__proto__`.
+
 This is trusted embedding-host configuration: executable, loader and other
 process settings can change what the child runs. ACPX does not sanitize arbitrary
 environment variables. Existing credential protection remains in effect.

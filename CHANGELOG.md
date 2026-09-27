@@ -16,6 +16,8 @@ Repo: https://github.com/openclaw/acpx
 - Replay viewer: keep graph edges attached to naturally sized cards and route branches around wrapped labels and changing outcome rows.
 - Replay viewer: avoid macOS file-watcher startup stalls that can time out requests, status checks, and live connections while preserving asset updates.
 - Replay viewer: complete shutdown while dependencies are still warming after the first page request.
+- Runtime/embedding: preserve literal environment keys such as `__proto__` in saved sessions and spawned agent processes.
+- Runtime/embedding: retain raw nonempty system-prompt replacement and append text across persistence and reconnects, including whitespace-only values.
 
 ## 0.19.3 - 2026-09-25
 

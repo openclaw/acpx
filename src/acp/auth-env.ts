@@ -126,7 +126,12 @@ function assignSessionEnv(env: NodeJS.ProcessEnv, key: string, value: string): v
       delete env[existingKey];
     }
   }
-  env[key] = value;
+  Object.defineProperty(env, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
 }
 
 function addAuthCredentialEnvKeys(

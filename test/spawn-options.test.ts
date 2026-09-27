@@ -163,6 +163,111 @@ test("spawned agent child process receives session env with parent-override prec
   );
 });
 
+test("spawned agent children preserve literal own session env keys and parent precedence", async () => {
+  const literalKey = "__proto__";
+  const keys = [literalKey, "ACPX_TEST_LITERAL_ORDINARY"];
+  const previous = keys.map(
+    (key) => [key, Object.hasOwn(process.env, key) ? process.env[key] : undefined] as const,
+  );
+  const explicit = Object.fromEntries([
+    ["__proto__", "session-literal"],
+    ["ACPX_TEST_LITERAL_ORDINARY", "session-ordinary"],
+  ]);
+  const cases = [
+    {
+      parent: undefined,
+      session: explicit,
+      literal: "session-literal",
+      ordinary: "session-ordinary",
+    },
+    {
+      parent: "parent-literal",
+      session: undefined,
+      literal: "parent-literal",
+      ordinary: "parent-ordinary",
+    },
+    {
+      parent: "parent-literal",
+      session: { ACPX_TEST_LITERAL_ORDINARY: "session-ordinary" },
+      literal: "parent-literal",
+      ordinary: "session-ordinary",
+    },
+    {
+      parent: "parent-literal",
+      session: explicit,
+      literal: "session-literal",
+      ordinary: "session-ordinary",
+    },
+  ];
+  const script = `
+    const keys = ["__proto__", "ACPX_TEST_LITERAL_ORDINARY"];
+    process.stdout.write(JSON.stringify(Object.fromEntries(keys.map((key) => {
+      const own = Object.hasOwn(process.env, key);
+      return [key, { own, value: own ? process.env[key] : null }];
+    }))));
+  `;
+
+  try {
+    for (const scenario of cases) {
+      if (scenario.parent === undefined) {
+        delete process.env[literalKey];
+      } else {
+        process.env[literalKey] = scenario.parent;
+      }
+      process.env.ACPX_TEST_LITERAL_ORDINARY = "parent-ordinary";
+      const options = buildAgentSpawnOptions(os.tmpdir(), undefined, scenario.session);
+      const child = spawn(process.execPath, ["-e", script], {
+        ...options,
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5_000,
+        killSignal: "SIGKILL",
+      });
+      let stdout = "";
+      let stderr = "";
+      let spawnError: Error | undefined;
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+      child.stderr.on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+      child.once("error", (error) => {
+        spawnError = error;
+      });
+      const outcome = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+        (resolve) => {
+          child.once("close", (code, signal) => resolve({ code, signal }));
+        },
+      );
+      assert.equal(spawnError, undefined);
+      assert.equal(outcome.signal, null);
+      assert.equal(outcome.code, 0, stderr);
+      assert.equal(Object.getPrototypeOf(options.env), Object.prototype);
+      assert.equal(Object.getOwnPropertyDescriptor(options.env, "__proto__")?.enumerable, true);
+      assert.equal(options.env[literalKey], scenario.literal);
+      assert.deepEqual(
+        JSON.parse(stdout),
+        Object.fromEntries([
+          ["__proto__", { own: true, value: scenario.literal }],
+          ["ACPX_TEST_LITERAL_ORDINARY", { own: true, value: scenario.ordinary }],
+        ]),
+      );
+      assert.equal(child.stdout.readableEnded, true);
+      assert.equal(child.stderr.readableEnded, true);
+    }
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
+
 test("buildAgentSpawnOptions hides Windows console windows and preserves auth env", () => {
   const options = buildAgentSpawnOptions("/tmp/acpx-agent", {
     ACPX_AUTH_TOKEN: "secret-token",

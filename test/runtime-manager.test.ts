@@ -7,6 +7,7 @@ import type { SessionModelState } from "../src/acp/model-support.js";
 import { AcpxOperationalError } from "../src/errors.js";
 import { AcpRuntimeManager } from "../src/runtime/engine/manager.js";
 import {
+  type SystemPromptOption,
   mergeSessionOptions,
   persistSessionOptions,
   sessionOptionsFromRecord,
@@ -5122,26 +5123,32 @@ test("persistSessionOptions preserves session env as a serialized record", () =>
     cwd: "/workspace",
   });
 
-  persistSessionOptions(record, {
-    env: {
-      GIT_AUTHOR_EMAIL: "agent-pm@example.local",
-      GIT_COMMITTER_NAME: "Agent PM",
-    },
-  });
+  const env = Object.fromEntries([
+    ["__proto__", "session-literal-value"],
+    ["GIT_AUTHOR_EMAIL", "agent-pm@example.local"],
+    ["GIT_COMMITTER_NAME", "Agent PM"],
+  ]);
+  persistSessionOptions(record, { env });
 
   assert.deepEqual(record.acpx?.session_options, {
     model: undefined,
     allowed_tools: undefined,
     max_turns: undefined,
     system_prompt: undefined,
-    env: {
-      GIT_AUTHOR_EMAIL: "agent-pm@example.local",
-      GIT_COMMITTER_NAME: "Agent PM",
-    },
+    env,
   });
+  const persistedEnv = record.acpx?.session_options?.env;
+  assert.ok(persistedEnv);
+  assert.equal(Object.hasOwn(persistedEnv, "__proto__"), true);
+  assert.equal(Object.getPrototypeOf(persistedEnv), Object.prototype);
+  assert.equal(JSON.stringify(persistedEnv), JSON.stringify(env));
 });
 
 test("sessionOptionsFromRecord restores session env from a persisted record", () => {
+  const env = Object.fromEntries([
+    ["__proto__", "restored-literal-value"],
+    ["GIT_AUTHOR_EMAIL", "restored-pm@example.local"],
+  ]);
   const record = makeSessionRecord({
     acpxRecordId: "env-restore-session",
     acpSessionId: "env-restore-sid",
@@ -5149,15 +5156,84 @@ test("sessionOptionsFromRecord restores session env from a persisted record", ()
     cwd: "/workspace",
     acpx: {
       session_options: {
-        env: {
-          GIT_AUTHOR_EMAIL: "restored-pm@example.local",
-        },
+        env,
       },
     },
   });
 
   const restored = sessionOptionsFromRecord(record);
-  assert.deepEqual(restored?.env, { GIT_AUTHOR_EMAIL: "restored-pm@example.local" });
+  assert.deepEqual(restored?.env, env);
+  assert.ok(restored?.env);
+  assert.equal(Object.hasOwn(restored.env, "__proto__"), true);
+  assert.equal(Object.getPrototypeOf(restored.env), Object.prototype);
+});
+
+const literalSystemPromptCases: Array<{
+  label: string;
+  input: SystemPromptOption;
+  expected: SystemPromptOption | undefined;
+}> = [
+  { label: "whitespace replacement", input: " \t\n", expected: " \t\n" },
+  {
+    label: "whitespace append",
+    input: { append: " \t\n" },
+    expected: { append: " \t\n" },
+  },
+  { label: "padded replacement", input: "  guidance\t ", expected: "  guidance\t " },
+  {
+    label: "padded append",
+    input: { append: "  guidance\t " },
+    expected: { append: "  guidance\t " },
+  },
+  { label: "empty replacement", input: "", expected: undefined },
+  { label: "empty append", input: { append: "" }, expected: undefined },
+];
+
+test("persistSessionOptions preserves raw nonempty system prompts and omits empty prompts", () => {
+  for (const scenario of literalSystemPromptCases) {
+    const record = makeSessionRecord({
+      acpxRecordId: "literal-prompt-session",
+      acpSessionId: "literal-prompt-sid",
+      agentCommand: "codex --acp",
+      cwd: "/workspace",
+    });
+
+    persistSessionOptions(record, { systemPrompt: scenario.input });
+
+    assert.deepEqual(
+      record.acpx?.session_options?.system_prompt,
+      scenario.expected,
+      scenario.label,
+    );
+    if (scenario.expected === undefined) {
+      assert.equal(record.acpx?.session_options, undefined, scenario.label);
+    } else {
+      assert.equal(
+        JSON.stringify(record.acpx?.session_options?.system_prompt),
+        JSON.stringify(scenario.expected),
+        scenario.label,
+      );
+    }
+  }
+});
+
+test("sessionOptionsFromRecord restores raw nonempty prompts from independently seeded records", () => {
+  for (const scenario of literalSystemPromptCases) {
+    const record = makeSessionRecord({
+      acpxRecordId: "literal-prompt-restore-session",
+      acpSessionId: "literal-prompt-restore-sid",
+      agentCommand: "codex --acp",
+      cwd: "/workspace",
+      acpx: { session_options: { system_prompt: scenario.input } },
+    });
+
+    const restored = sessionOptionsFromRecord(record);
+
+    assert.deepEqual(restored?.systemPrompt, scenario.expected, scenario.label);
+    if (scenario.expected === undefined) {
+      assert.equal(restored, undefined, scenario.label);
+    }
+  }
 });
 
 test("mergeSessionOptions merges session env per key with preferred overriding fallback", () => {
