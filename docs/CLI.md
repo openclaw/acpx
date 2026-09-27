@@ -423,9 +423,14 @@ Shows local process status for the cwd-scoped session:
 
 - `running`, `idle`, `dead`, or `no-session`
 - session id, agent command, live queue-owner pid when available
-- uptime when running
+- time since the most recent agent process launch, when the queue owner is running
 - last prompt timestamp
 - last known exit code/signal when dead
+
+The displayed `pid` identifies the queue owner, while `uptime` uses the most
+recent agent process start time. Uptime can keep advancing after that agent
+exits and resets when a replacement starts, even if the queue-owner PID stays
+the same. It uses wall-clock time, rounded down to whole seconds.
 
 `idle` means the persistent session is saved and resumable, but no queue owner is
 currently running. The next prompt starts a queue owner and reconnects the

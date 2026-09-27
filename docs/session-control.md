@@ -134,6 +134,8 @@ Reports local queue-owner health for the cwd-scoped session. A healthy warm owne
 
 When available, output also includes the queue-owner PID, model, mode, uptime, and last prompt time. Dead status can include the recorded exit code or signal. The JSON result is a status summary, not a full session record; `no-session` has no local session identity.
 
+Uptime measures wall-clock time since the most recently launched agent process, rounded down to whole seconds. It can keep advancing after that process exits and resets when a replacement starts. The queue-owner PID can stay the same across this reset.
+
 Status checks use local lease, process, and socket information and do not send an ACP request to the agent. Use session watch events to observe prompt progress or settlement; owner liveness alone is not a prompt-completion signal.
 
 ### Output
