@@ -62,6 +62,38 @@ formats are compatibility surfaces. Preserve existing behavior during refactors;
 explain intentional behavior changes and update the relevant documentation.
 Maintainers add user-facing changelog entries when landing contributions.
 
+## Updating review tooling
+
+The canonical Autoreview sync adopts one reviewer per invocation. Previously
+bundled `--panel`, `--reviewers`, `--allow-partial-panel`, `--parallel-tests`, and
+`--parallel-tests-shell` options are no longer accepted. Update saved closeout
+commands when upgrading this checkout.
+
+Run repository validation with `pnpm run check`; existing Node-only setups must
+first complete the Python setup above. Run review separately, and keep both the
+test result and review findings visible. When multiple reviewers are explicitly
+requested, invoke each separately and assess every result:
+
+```bash
+reviewer=".agents/skills/autoreview/scripts/autoreview"
+"$reviewer" --engine codex --max-priority P2
+"$reviewer" --engine claude --max-priority P2
+```
+
+Keep `--max-priority P2` for repository closeout; the canonical helper defaults to
+P0 without that flag. Its Codex model default is now GPT-6 Sol with an access-only
+Luna fallback. To retain the previous model selection, or when the new defaults
+are unavailable to your account, use an explicit model:
+
+```bash
+"$reviewer" --engine codex --model gpt-5.6-sol --thinking high --max-priority P2
+```
+
+Explicit `gpt-5.6-sol` retains its access-only `gpt-5.6-terra` fallback. See the
+[canonical skill](.agents/skills/autoreview/SKILL.md) for current engine,
+isolation, and result contracts. A clean result from one review does not erase a
+failure or finding from another.
+
 ## Agent documentation
 
 Keep built-in agent documentation and examples consistent with
