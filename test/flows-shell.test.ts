@@ -11,36 +11,150 @@ import {
   resolveShellActionTimeoutMs,
   runShellAction,
 } from "../src/flows/executors/shell.js";
+import {
+  actorStopped,
+  bounded,
+  HOST_STOP,
+  type FlowHostMode,
+  type FlowHostReport,
+} from "./fixtures/flow-shell-host.js";
 
-function runHostScript(
-  script: string,
-  detached = false,
-): Promise<{
+type HostResult = {
+  pid: number | undefined;
   exitCode: number | null;
+  signal: NodeJS.Signals | null;
   stdout: string;
   stderr: string;
-}> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
-      stdio: ["ignore", "pipe", "pipe"],
-      detached,
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.once("error", reject);
-    child.once("close", (exitCode) => {
-      resolve({ exitCode, stdout, stderr });
+  stdoutEof: boolean;
+  stderrEof: boolean;
+};
+
+class HostDeadlineError extends Error {
+  constructor(
+    message: string,
+    options: ErrorOptions,
+    readonly receipt: HostResult,
+  ) {
+    super(message, options);
+  }
+}
+
+async function runHostScript(
+  script: string,
+  options: { detached?: boolean; timeoutMs?: number; cleanupMs?: number } = {},
+): Promise<HostResult> {
+  const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
+    detached: options.detached,
+  });
+  assert.ok(child.stdout && child.stderr);
+  let stdout = "";
+  let stderr = "";
+  let stdoutEof = false;
+  let stderrEof = false;
+  let exited = false;
+  let childError: Error | undefined;
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+  child.stdout.once("end", () => {
+    stdoutEof = true;
+  });
+  child.stderr.once("end", () => {
+    stderrEof = true;
+  });
+  child.once("exit", () => {
+    exited = true;
+  });
+  child.on("error", (error) => {
+    childError = error;
+  });
+  const closed = new Promise<HostResult>((resolve) => {
+    child.once("close", (exitCode, signal) => {
+      resolve({ pid: child.pid, exitCode, signal, stdout, stderr, stdoutEof, stderrEof });
     });
   });
+  let result: HostResult;
+  try {
+    result = await bounded(closed, "host result", options.timeoutMs ?? 20_000);
+  } catch (primary) {
+    // Ask the live host to cancel through FlowRunner before disposing our handle.
+    if (child.connected) {
+      child.send(HOST_STOP, () => {});
+    }
+    try {
+      result = await bounded(closed, "host cooperative cleanup", options.cleanupMs ?? 15_000);
+    } catch (cleanupError) {
+      if (!exited) {
+        child.kill("SIGKILL");
+      }
+      try {
+        result = await bounded(closed, "host native close", 5_000);
+      } catch (closeError) {
+        child.stdout.destroy();
+        child.stderr.destroy();
+        child.channel?.unref();
+        child.unref();
+        throw new AggregateError(
+          [primary, cleanupError, closeError],
+          "Host did not close after cleanup",
+          { cause: closeError },
+        );
+      }
+    }
+    throw new HostDeadlineError(
+      primary instanceof Error ? primary.message : String(primary),
+      { cause: primary },
+      result,
+    );
+  }
+  assert.ifError(childError);
+  assert.ok(result.stdoutEof && result.stderrEof, "host must close both inherited output streams");
+  return result;
 }
+
+test("host outcome timeout remains a failure after cooperative native close", async () => {
+  await assert.rejects(
+    runHostScript(
+      `
+      process.on('message', message => {
+        if (message === ${JSON.stringify(HOST_STOP)}) {
+          process.stdout.write('stopped');
+          process.exit(0);
+        }
+      });
+      setInterval(() => {}, 1000);
+    `,
+      { timeoutMs: 150 },
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof HostDeadlineError);
+      assert.match(error.message, /host result did not finish within 150ms/);
+      assert.equal(error.receipt.exitCode, 0);
+      assert.equal(error.receipt.signal, null);
+      assert.equal(error.receipt.stdout, "stopped");
+      assert.equal(error.receipt.stdoutEof, true);
+      assert.equal(error.receipt.stderrEof, true);
+      return true;
+    },
+  );
+});
+
+test("host observation joins inherited output after the original host exits", async () => {
+  const host = await runHostScript(`
+    import {spawn} from 'node:child_process';
+    spawn(process.execPath, ['-e', "setTimeout(()=>{process.stdout.write('late stdout');process.stderr.write('late stderr');},150)"], {stdio:['ignore','inherit','inherit']});
+    process.exit(0);
+  `);
+  assert.equal(host.exitCode, 0);
+  assert.equal(host.stdout, "late stdout");
+  assert.equal(host.stderr, "late stderr");
+});
 
 test("renderShellCommand quotes arguments consistently", () => {
   assert.equal(renderShellCommand("echo", ["hello", "two words"]), 'echo "hello" "two words"');
@@ -339,191 +453,187 @@ test(
   },
 );
 
-test(
-  "POSIX flow interruption forwards SIGINT and waits for shell cleanup",
-  { skip: process.platform === "win32" },
-  async () => {
-    const moduleUrl = new URL("../src/flows/runtime.js", import.meta.url).href;
-    const host = await runHostScript(`
-    import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
-    import {FlowRunner,defineFlow,shell} from ${JSON.stringify(moduleUrl)};
-    const dir=await fs.mkdtemp(path.join(os.tmpdir(),'acpx-flow-interrupt-'));const pidFile=path.join(dir,'pid');const marker=path.join(dir,'sigint');
-    const runner=new FlowRunner({resolveAgent:()=>({agentName:'unused',agentCommand:'unused',cwd:dir}),permissionMode:'deny-all',outputRoot:dir});
-    const script="process.on('SIGINT',()=>{require('node:fs').writeFileSync("+JSON.stringify(marker)+",'SIGINT');process.exit(0)});process.on('SIGTERM',()=>{});require('node:fs').writeFileSync("+JSON.stringify(pidFile)+",String(process.pid));setInterval(()=>{},1000)";
-    const flow=defineFlow({name:'interrupt',startAt:'work',nodes:{work:shell({timeoutMs:0,exec:()=>({command:process.execPath,args:['-e',script],timeoutMs:0})})},edges:[]});
-    const pending=runner.run(flow,{}).catch(error=>error);let pid;
-    try {
-      for(let i=0;i<250;i++){
-        try{const value=Number(await fs.readFile(pidFile,'utf8'));if(Number.isInteger(value)&&value>1){pid=value;break;}}
-        catch(error){if(error.code!=='ENOENT')throw error;}
-        await new Promise(resolve=>setTimeout(resolve,20));
-      }
-      if(!pid)throw new Error('child did not start');
-      process.kill(process.pid,'SIGINT');
-      const error=await pending;
-      let alive=true;try{process.kill(pid,0);}catch(error){if(error.code!=='ESRCH')throw error;alive=false;}
-      const sigintReceived=await fs.readFile(marker,'utf8');
-      process.stdout.write(JSON.stringify({error:error.name,alive,sigintReceived}));
-    }finally{
-      if(pid){try{process.kill(pid,'SIGKILL');}catch(error){if(error.code!=='ESRCH')throw error;}}
-      await pending;
-      await fs.rm(dir,{recursive:true,force:true});
-    }
-  `);
-    assert.equal(host.exitCode, 0, host.stderr);
-    assert.deepEqual(JSON.parse(host.stdout), {
-      error: "InterruptedError",
-      alive: false,
-      sigintReceived: "SIGINT",
-    });
-  },
-);
+const signalCases: Array<{ name: string; mode: FlowHostMode; expected: Record<string, unknown> }> =
+  [
+    {
+      name: "POSIX flow interruption forwards SIGINT and waits for shell cleanup",
+      mode: "interrupt",
+      expected: { error: "InterruptedError", alive: false, sigintReceived: "SIGINT" },
+    },
+    {
+      name: "an interrupted pending shell executor cannot launch later",
+      mode: "late-executor",
+      expected: { error: "InterruptedError", launched: false },
+    },
+    {
+      name: "foreground interruption reaches descendants after normal shell completion",
+      mode: "background",
+      expected: { error: "InterruptedError", received: true },
+    },
+    {
+      name: "foreground Ctrl-C retains detached descendants when the wrapper exits on SIGINT",
+      mode: "wrapper-exit",
+      expected: { error: "InterruptedError", alive: false, handled: "SIGINT" },
+    },
+    {
+      name: "one foreground Ctrl-C delivers one graceful interrupt to the shell",
+      mode: "one-interrupt",
+      expected: { error: "InterruptedError", count: "1" },
+    },
+  ];
 
-test(
-  "an interrupted pending shell executor cannot launch later",
-  { skip: process.platform === "win32" },
-  async () => {
-    const moduleUrl = new URL("../src/flows/runtime.js", import.meta.url).href;
-    const host = await runHostScript(`
-    import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
-    import {FlowRunner,defineFlow,shell} from ${JSON.stringify(moduleUrl)};
-    const dir=await fs.mkdtemp(path.join(os.tmpdir(),'acpx-flow-interrupt-late-'));const marker=path.join(dir,'must-not-exist');
-    let entered,release;const ready=new Promise(resolve=>entered=resolve);const gate=new Promise(resolve=>release=resolve);
-    const runner=new FlowRunner({resolveAgent:()=>({agentName:'unused',agentCommand:'unused',cwd:dir}),permissionMode:'deny-all',outputRoot:dir});
-    const script="require('node:fs').writeFileSync("+JSON.stringify(marker)+",'launched')";
-    const flow=defineFlow({name:'interrupt-late',startAt:'work',nodes:{work:shell({timeoutMs:0,exec:async()=>{entered();await gate;return{command:process.execPath,args:['-e',script],timeoutMs:0};}})},edges:[]});
-    const pending=runner.run(flow,{}).catch(error=>error);
-    await ready;process.kill(process.pid,'SIGINT');const error=await pending;release();
-    await new Promise(resolve=>setTimeout(resolve,100));
-    let launched=true;try{await fs.access(marker);}catch(error){if(error.code!=='ENOENT')throw error;launched=false;}
-    process.stdout.write(JSON.stringify({error:error.name,launched}));
-    await fs.rm(dir,{recursive:true,force:true});
-  `);
-    assert.equal(host.exitCode, 0, host.stderr);
-    assert.deepEqual(JSON.parse(host.stdout), { error: "InterruptedError", launched: false });
-  },
-);
+const flowHostModule = new URL("./fixtures/flow-shell-host.js", import.meta.url).href;
 
-test(
-  "foreground interruption reaches descendants after normal shell completion",
-  { skip: process.platform === "win32" },
-  async () => {
-    const moduleUrl = new URL("../src/flows/runtime.js", import.meta.url).href;
+async function assertHostCleaned(host: HostResult): Promise<FlowHostReport> {
+  const report = JSON.parse(host.stdout) as FlowHostReport;
+  assert.equal(report.cleaned, true, host.stderr);
+  await assert.rejects(fs.access(report.dir), { code: "ENOENT" });
+  for (const actor of report.actors) {
+    assert.ok(
+      await actorStopped(actor),
+      `${actor.role} must remain stopped after native host close`,
+    );
+  }
+  assert.equal(host.signal, null);
+  assert.equal(host.stdoutEof, true);
+  assert.equal(host.stderrEof, true);
+  return report;
+}
+
+for (const { name, mode, expected } of signalCases) {
+  test(name, { skip: process.platform === "win32" }, async () => {
     const host = await runHostScript(
       `
-    import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
-    import {FlowRunner,defineFlow,shell,compute} from ${JSON.stringify(moduleUrl)};
-    const dir=await fs.mkdtemp(path.join(os.tmpdir(),'acpx-flow-background-signal-'));const pidFile=path.join(dir,'pid');const marker=path.join(dir,'signal');
-    const child="process.on('SIGINT',()=>{require('node:fs').writeFileSync("+JSON.stringify(marker)+",'SIGINT');process.exit(0)});require('node:fs').writeFileSync("+JSON.stringify(pidFile)+",String(process.pid));setInterval(()=>{},1000)";
-    const wrapper="require('node:child_process').spawn(process.execPath,['-e',"+JSON.stringify(child)+"],{stdio:'ignore'});process.exit(0)";
-    let entered;const ready=new Promise(resolve=>entered=resolve);
-    const runner=new FlowRunner({resolveAgent:()=>({agentName:'unused',agentCommand:'unused',cwd:dir}),permissionMode:'deny-all',outputRoot:dir});
-    const flow=defineFlow({name:'background-signal',startAt:'launch',nodes:{launch:shell({timeoutMs:0,exec:()=>({command:process.execPath,args:['-e',wrapper],timeoutMs:0})}),waiting:compute({timeoutMs:0,run:()=>{entered();return new Promise(()=>{});}})},edges:[{from:'launch',to:'waiting'}]});
-    const pending=runner.run(flow,{}).catch(error=>error);let pid;
-    try {
-      await ready;
-      for(let i=0;i<250;i++){
-        try{const value=Number(await fs.readFile(pidFile,'utf8'));if(Number.isInteger(value)&&value>1){pid=value;break;}}
-        catch(error){if(error.code!=='ENOENT')throw error;}
-        await new Promise(resolve=>setTimeout(resolve,20));
-      }
-      if(!pid)throw new Error('descendant did not start');
-      process.kill(-process.pid,'SIGINT');
-      const error=await pending;let received=false;
-      for(let i=0;i<100;i++){
-        try{received=(await fs.readFile(marker,'utf8'))==='SIGINT';break;}
-        catch(error){if(error.code!=='ENOENT')throw error;}
-        await new Promise(resolve=>setTimeout(resolve,20));
-      }
-      process.stdout.write(JSON.stringify({error:error.name,received}));
-    }finally{
-      if(pid){try{process.kill(pid,'SIGKILL');}catch(error){if(error.code!=='ESRCH')throw error;}}
-      await fs.rm(dir,{recursive:true,force:true});
-    }
-    process.exit(0);
-  `,
-      true,
+      import {runFlowHostCase} from ${JSON.stringify(flowHostModule)};
+      await runFlowHostCase(${JSON.stringify(mode)});
+    `,
+      { detached: true },
     );
     assert.equal(host.exitCode, 0, host.stderr);
-    assert.deepEqual(JSON.parse(host.stdout), { error: "InterruptedError", received: true });
-  },
-);
+    const report = await assertHostCleaned(host);
+    assert.deepEqual(report.result, expected);
+    assert.equal(
+      report.actors.length,
+      mode === "late-executor" ? 0 : mode === "background" || mode === "wrapper-exit" ? 2 : 1,
+    );
+  });
+}
+
+for (const failure of ["readiness", "body"] as const) {
+  test(
+    `flow host preserves ${failure} failure after cancelling owned detached actors`,
+    { skip: process.platform === "win32" },
+    async () => {
+      const host = await runHostScript(
+        `
+      import {runFlowHostCase} from ${JSON.stringify(flowHostModule)};
+      await runFlowHostCase('wrapper-exit', ${JSON.stringify(failure)});
+    `,
+        { detached: true },
+      );
+      assert.equal(host.exitCode, 1, host.stderr);
+      const report = await assertHostCleaned(host);
+      assert.equal(
+        report.primaryError,
+        failure === "readiness" ? "descendant did not start" : "synthetic body failure",
+      );
+      assert.equal(report.result, undefined);
+      assert.equal(
+        report.actors.length,
+        2,
+        "failure must occur with a real wrapper and detached descendant",
+      );
+      assert.match(host.stderr, new RegExp(`Error: ${report.primaryError}`));
+      assert.doesNotMatch(host.stderr, /AggregateError|cleanup failed|did not finish within/);
+    },
+  );
+}
 
 test(
-  "foreground Ctrl-C retains detached descendants when the wrapper exits on SIGINT",
+  "flow host retains body and publication failures after native actor retirement",
   { skip: process.platform === "win32" },
   async () => {
-    const moduleUrl = new URL("../src/flows/runtime.js", import.meta.url).href;
     const host = await runHostScript(
       `
-    import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
-    import {FlowRunner,defineFlow,shell} from ${JSON.stringify(moduleUrl)};
-    const dir=await fs.mkdtemp(path.join(os.tmpdir(),'acpx-shell-wrapper-race-'));const pidFile=path.join(dir,'pid');const marker=path.join(dir,'wrapper-signal');
-    const descendant="process.on('SIGINT',()=>{});process.on('SIGTERM',()=>{});require('node:fs').writeFileSync("+JSON.stringify(pidFile)+",String(process.pid));setInterval(()=>{},1000)";
-    const wrapper="process.on('SIGINT',()=>{require('node:fs').writeFileSync("+JSON.stringify(marker)+",'SIGINT');process.exit(0)});require('node:child_process').spawn(process.execPath,['-e',"+JSON.stringify(descendant)+"],{stdio:'ignore',detached:true});setInterval(()=>{},1000)";
-    const runner=new FlowRunner({resolveAgent:()=>({agentName:'unused',agentCommand:'unused',cwd:dir}),permissionMode:'deny-all',outputRoot:dir});
-    const flow=defineFlow({name:'wrapper-race',startAt:'work',nodes:{work:shell({timeoutMs:0,exec:()=>({command:process.execPath,args:['-e',wrapper],timeoutMs:0})})},edges:[]});
-    const pending=runner.run(flow,{}).catch(error=>error);let pid;
+      import {runFlowHostCase} from ${JSON.stringify(flowHostModule)};
+      const bodyError = new Error('synthetic body failure');
+      try {
+        await runFlowHostCase('wrapper-exit', 'publication', bodyError);
+      } catch (error) {
+        const entries = error instanceof AggregateError ? error.errors : null;
+        process.stderr.write(JSON.stringify({
+          isAggregateError: error instanceof AggregateError,
+          name: error instanceof Error ? error.name : null,
+          message: error instanceof Error ? error.message : null,
+          bodyIsFirst: entries?.[0] === bodyError,
+          causeIsSecond: entries !== null && error.cause === entries[1],
+          errors: entries?.map(entry => ({
+            isError: entry instanceof Error,
+            name: entry instanceof Error ? entry.name : null,
+            message: entry instanceof Error ? entry.message : null,
+            hasCode: entry instanceof Object && 'code' in entry,
+            code: entry instanceof Object && 'code' in entry ? entry.code : null,
+            hasCause: entry instanceof Object && 'cause' in entry,
+            hasErrors: entry instanceof Object && 'errors' in entry,
+          })) ?? null,
+        }));
+        process.exitCode = 1;
+      }
+    `,
+      { detached: true },
+    );
+    assert.equal(host.exitCode, 1, host.stderr);
+    assert.equal(host.signal, null);
+    assert.equal(host.stdoutEof, true);
+    assert.equal(host.stderrEof, true);
+    const report = JSON.parse(host.stdout) as FlowHostReport;
+    assert.equal(report.primaryError, "synthetic body failure");
+    assert.equal(report.actors.length, 2);
+    for (const actor of report.actors) {
+      assert.ok(await actorStopped(actor), `${actor.role} must retire through FlowRunner`);
+    }
+    assert.equal(report.cleaned, false, "an unexpected runner rejection must retain the fixture");
     try {
-      for(let i=0;i<250;i++){
-        try{const value=Number(await fs.readFile(pidFile,'utf8'));if(Number.isInteger(value)&&value>1){pid=value;break;}}
-        catch(error){if(error.code!=='ENOENT')throw error;}
-        await new Promise(resolve=>setTimeout(resolve,20));
-      }
-      if(!pid)throw new Error('descendant did not start');
-      process.kill(-process.pid,'SIGINT');const error=await pending;
-      let alive=true;try{process.kill(pid,0);}catch(error){if(error.code!=='ESRCH')throw error;alive=false;}
-      const handled=await fs.readFile(marker,'utf8');
-      process.stdout.write(JSON.stringify({error:error.name,alive,handled}));
-    }finally{
-      if(pid){try{process.kill(pid,'SIGKILL');}catch(error){if(error.code!=='ESRCH')throw error;}}
-      await pending;await fs.rm(dir,{recursive:true,force:true});
+      assert.equal((await fs.stat(report.dir)).isDirectory(), true);
+      const captured = JSON.parse(host.stderr) as { errors?: Array<{ message?: unknown }> };
+      const lifecycleMessage = captured.errors?.[1]?.message;
+      assert.ok(typeof lifecycleMessage === "string");
+      assert.match(lifecycleMessage, /^EISDIR:.*rename /);
+      assert.deepEqual(captured, {
+        isAggregateError: true,
+        name: "AggregateError",
+        message: `Flow fixture cleanup failed; retained ${report.dir}`,
+        bodyIsFirst: true,
+        causeIsSecond: true,
+        errors: [
+          {
+            isError: true,
+            name: "Error",
+            message: "synthetic body failure",
+            hasCode: false,
+            code: null,
+            hasCause: false,
+            hasErrors: false,
+          },
+          {
+            isError: true,
+            name: "Error",
+            message: lifecycleMessage,
+            hasCode: true,
+            code: "EISDIR",
+            hasCause: false,
+            hasErrors: false,
+          },
+        ],
+      });
+      await assert.rejects(fs.access(path.join(report.dir, "rescue")), { code: "ENOENT" });
+      assert.ok(
+        !(await fs.readdir(report.dir)).some((name) => /\.(?:expired|rescued)$/.test(name)),
+        "the filesystem fault must preserve native actor retirement",
+      );
+    } finally {
+      await fs.rm(report.dir, { recursive: true, force: true });
     }
-  `,
-      true,
-    );
-    assert.equal(host.exitCode, 0, host.stderr);
-    assert.deepEqual(JSON.parse(host.stdout), {
-      error: "InterruptedError",
-      alive: false,
-      handled: "SIGINT",
-    });
-  },
-);
-
-test(
-  "one foreground Ctrl-C delivers one graceful interrupt to the shell",
-  { skip: process.platform === "win32" },
-  async () => {
-    const moduleUrl = new URL("../src/flows/runtime.js", import.meta.url).href;
-    const host = await runHostScript(
-      `
-    import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
-    import {FlowRunner,defineFlow,shell} from ${JSON.stringify(moduleUrl)};
-    const dir=await fs.mkdtemp(path.join(os.tmpdir(),'acpx-shell-one-interrupt-'));const pidFile=path.join(dir,'pid');const marker=path.join(dir,'cleaned');
-    const script="let count=0;process.on('SIGINT',()=>{if(++count>1)process.exit(2);setTimeout(()=>{require('node:fs').writeFileSync("+JSON.stringify(marker)+",String(count));process.exit(0)},200)});require('node:fs').writeFileSync("+JSON.stringify(pidFile)+",String(process.pid));setInterval(()=>{},1000)";
-    const runner=new FlowRunner({resolveAgent:()=>({agentName:'unused',agentCommand:'unused',cwd:dir}),permissionMode:'deny-all',outputRoot:dir});
-    const flow=defineFlow({name:'one-interrupt',startAt:'work',nodes:{work:shell({timeoutMs:0,exec:()=>({command:process.execPath,args:['-e',script],timeoutMs:0})})},edges:[]});
-    const pending=runner.run(flow,{}).catch(error=>error);let pid;
-    try{
-      for(let i=0;i<250;i++){
-        try{const value=Number(await fs.readFile(pidFile,'utf8'));if(Number.isInteger(value)&&value>1){pid=value;break;}}
-        catch(error){if(error.code!=='ENOENT')throw error;}
-        await new Promise(resolve=>setTimeout(resolve,20));
-      }
-      if(!pid)throw new Error('child did not start');
-      process.kill(-process.pid,'SIGINT');const error=await pending;
-      const count=await fs.readFile(marker,'utf8');
-      process.stdout.write(JSON.stringify({error:error.name,count}));
-    }finally{
-      if(pid){try{process.kill(pid,'SIGKILL');}catch(error){if(error.code!=='ESRCH')throw error;}}
-      await pending;await fs.rm(dir,{recursive:true,force:true});
-    }
-  `,
-      true,
-    );
-    assert.equal(host.exitCode, 0, host.stderr);
-    assert.deepEqual(JSON.parse(host.stdout), { error: "InterruptedError", count: "1" });
   },
 );
 
