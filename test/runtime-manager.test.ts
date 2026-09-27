@@ -3218,90 +3218,212 @@ test("AcpRuntimeManager waits for active load refresh before resolving generic c
   assert.deepEqual(events, []);
 });
 
-test("AcpRuntimeManager waits for oneshot load fallback to resolve before sending controls", async () => {
-  const record = makeSessionRecord({
-    acpxRecordId: "fallback-session",
-    acpSessionId: "stale-session",
-    agentCommand: "codex --acp",
-    cwd: "/workspace",
-  });
-  const store = new InMemorySessionStore([record]);
-  let promptActive = false;
-  let promptSessionId: string | undefined;
-  let setModeSessionId: string | undefined;
-  let resolveLoadFailure!: () => void;
-  const loadFailure = new Promise<void>((resolve) => {
-    resolveLoadFailure = resolve;
-  });
-  let resolvePromptStarted!: () => void;
-  const promptStarted = new Promise<void>((resolve) => {
-    resolvePromptStarted = resolve;
-  });
-  let resolvePrompt!: (value: { stopReason: string }) => void;
-  const promptResult = new Promise<{ stopReason: string }>((resolve) => {
-    resolvePrompt = resolve;
-  });
-  const client: FakeClient = {
-    start: async () => {},
-    close: async () => {},
-    createSession: async () => ({ sessionId: "fresh-session", agentSessionId: "fresh-agent" }),
-    loadSession: async () => ({ agentSessionId: "unused" }),
-    hasReusableSession: () => false,
-    supportsLoadSession: () => true,
-    supportsResumeSession: () => false,
-    loadSessionWithOptions: async () => {
-      await loadFailure;
-      throw { error: { code: -32002, message: "session not found" } };
-    },
-    getAgentLifecycleSnapshot: () => ({ running: true }),
-    prompt: async (sessionId) => {
-      promptActive = true;
-      promptSessionId = sessionId;
-      resolvePromptStarted();
-      return await promptResult;
-    },
-    requestCancelActivePrompt: async () => {
-      promptActive = false;
-      resolvePrompt({ stopReason: "cancelled" });
-      return true;
-    },
-    hasActivePrompt: () => promptActive,
-    setSessionMode: async (sessionId, modeId) => {
-      assert.equal(modeId, "plan");
-      setModeSessionId = sessionId;
-    },
-    setSessionConfigOption: async () => {},
-    clearEventHandlers: () => {},
-    setEventHandlers: () => {},
-  };
-  const manager = new AcpRuntimeManager(
-    createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
-    {
-      clientFactory: () => client as never,
-    },
-  );
+test(
+  "AcpRuntimeManager waits for oneshot load fallback to resolve before sending controls",
+  { timeout: 5_000 },
+  async (t) => {
+    const record = makeSessionRecord({
+      acpxRecordId: "fallback-session",
+      acpSessionId: "stale-session",
+      agentCommand: "codex --acp",
+      cwd: "/workspace",
+    });
+    const store = new InMemorySessionStore([record]);
+    const loadEntered = createDeferred<void>();
+    const releaseLoad = createDeferred<void>();
+    const promptEntered = createDeferred<void>();
+    const promptResult = createDeferred<{ stopReason: string }>();
+    const calls: {
+      method:
+        | "factory"
+        | "start"
+        | "load"
+        | "release-load"
+        | "create"
+        | "mode"
+        | "prompt"
+        | "cancel"
+        | "close";
+      client?: number;
+      sessionId?: string;
+      modeId?: string;
+    }[] = [];
+    let factoryCalls = 0;
+    const manager = new AcpRuntimeManager(
+      createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+      {
+        clientFactory: () => {
+          const clientId = ++factoryCalls;
+          let createdSessions = 0;
+          let promptActive = false;
+          calls.push({ method: "factory", client: clientId });
+          const client: FakeClient = {
+            start: async () => {
+              calls.push({ method: "start", client: clientId });
+            },
+            close: async () => {
+              calls.push({ method: "close", client: clientId });
+            },
+            createSession: async (cwd) => {
+              assert.equal(cwd, record.cwd);
+              const sessionId = `fresh-client-${clientId}-session-${++createdSessions}`;
+              calls.push({ method: "create", client: clientId, sessionId });
+              return { sessionId, agentSessionId: `agent-${sessionId}` };
+            },
+            loadSession: async () => ({ agentSessionId: "unused" }),
+            hasReusableSession: () => false,
+            supportsLoadSession: () => true,
+            supportsResumeSession: () => false,
+            loadSessionWithOptions: async (sessionId, cwd, options) => {
+              calls.push({ method: "load", client: clientId, sessionId });
+              assert.equal(sessionId, record.acpSessionId);
+              assert.equal(cwd, record.cwd);
+              assert.equal(options.suppressReplayUpdates, true);
+              loadEntered.resolve();
+              await releaseLoad.promise;
+              throw { error: { code: -32002, message: "session not found" } };
+            },
+            getAgentLifecycleSnapshot: () => ({ running: true }),
+            prompt: async (sessionId) => {
+              promptActive = true;
+              calls.push({ method: "prompt", client: clientId, sessionId });
+              promptEntered.resolve();
+              return await promptResult.promise;
+            },
+            requestCancelActivePrompt: async () => {
+              calls.push({ method: "cancel", client: clientId });
+              promptActive = false;
+              promptResult.resolve({ stopReason: "cancelled" });
+              return true;
+            },
+            hasActivePrompt: () => promptActive,
+            setSessionMode: async (sessionId, modeId) => {
+              calls.push({ method: "mode", client: clientId, sessionId, modeId });
+            },
+            setSessionConfigOption: async () => {},
+            clearEventHandlers: () => {},
+            setEventHandlers: () => {},
+          };
+          return client as never;
+        },
+      },
+    );
 
-  const turn = manager.startTurn({
-    handle: createHandle("fallback-session"),
-    text: "hello",
-    mode: "prompt",
-    sessionMode: "oneshot",
-    requestId: "req-fallback",
-  });
-  const eventsPromise = collectEvents(turn.events);
-  const setModePromise = manager.setMode(createHandle("fallback-session"), "plan", "oneshot");
-  resolveLoadFailure();
-  await setModePromise;
-  await promptStarted;
-  await turn.cancel();
-  const events = await eventsPromise;
-  const result = await turn.result;
+    const handle = createHandle("fallback-session");
+    const turn = manager.startTurn({
+      handle,
+      text: "hello",
+      mode: "prompt",
+      sessionMode: "oneshot",
+      requestId: "req-fallback",
+    });
+    const eventsPromise = collectEvents(turn.events);
+    const pending: Promise<unknown>[] = [eventsPromise, turn.result];
+    void Promise.allSettled(pending);
+    const aborted = createDeferred<never>();
+    const releaseGates = () => {
+      releaseLoad.resolve();
+      promptResult.resolve({ stopReason: "cancelled" });
+    };
+    const onAbort = () => {
+      releaseGates();
+      aborted.reject(t.signal.reason);
+    };
+    t.signal.addEventListener("abort", onAbort, { once: true });
+    const waitFor = <T>(promise: Promise<T>): Promise<T> =>
+      Promise.race([promise, aborted.promise]);
+    const failures: unknown[] = [];
 
-  assert.equal(setModeSessionId, "fresh-session");
-  assert.equal(promptSessionId, "fresh-session");
-  assert.deepEqual(events, []);
-  assert.deepEqual(result, { status: "cancelled", stopReason: "cancelled" });
-});
+    try {
+      await waitFor(loadEntered.promise);
+      let controlSettled = false;
+      const setModePromise = manager.setMode(handle, "plan", "oneshot");
+      pending.push(setModePromise);
+      void setModePromise.then(
+        () => {
+          controlSettled = true;
+        },
+        () => {
+          controlSettled = true;
+        },
+      );
+      // Load entry is the prerequisite; drain runnable work with that load still held.
+      await waitFor(nextTurn());
+      assert.deepEqual(calls, [
+        { method: "factory", client: 1 },
+        { method: "start", client: 1 },
+        { method: "load", client: 1, sessionId: "stale-session" },
+      ]);
+      assert.equal(controlSettled, false, "the control must wait for the held load");
+
+      calls.push({ method: "release-load" });
+      releaseLoad.resolve();
+      await waitFor(setModePromise);
+      await waitFor(promptEntered.promise);
+      const cancelPromise = turn.cancel();
+      pending.push(cancelPromise);
+      await waitFor(cancelPromise);
+      const events = await waitFor(eventsPromise);
+      const result = await waitFor(turn.result);
+      const sessionId = "fresh-client-1-session-1";
+      assert.deepEqual(
+        calls.filter((call) => call.method !== "prompt"),
+        [
+          { method: "factory", client: 1 },
+          { method: "start", client: 1 },
+          { method: "load", client: 1, sessionId: "stale-session" },
+          { method: "release-load" },
+          { method: "create", client: 1, sessionId },
+          { method: "mode", client: 1, sessionId, modeId: "plan" },
+          { method: "cancel", client: 1 },
+          { method: "close", client: 1 },
+        ],
+      );
+      assert.deepEqual(
+        calls.filter((call) => call.method === "prompt"),
+        [{ method: "prompt", client: 1, sessionId }],
+      );
+      assert.ok(
+        calls.findIndex((call) => call.method === "create") <
+          calls.findIndex((call) => call.method === "prompt"),
+      );
+      assert.deepEqual(events, []);
+      assert.deepEqual(result, { status: "cancelled", stopReason: "cancelled" });
+    } catch (error) {
+      failures.push(error);
+    } finally {
+      releaseGates();
+      let cleanupTimer: NodeJS.Timeout | undefined;
+      try {
+        const outcomes = await Promise.race([
+          Promise.allSettled(pending),
+          new Promise<never>((_resolve, reject) => {
+            cleanupTimer = setTimeout(
+              () => reject(new Error("fallback/control test cleanup did not settle")),
+              1_000,
+            );
+          }),
+        ]);
+        for (const outcome of outcomes) {
+          if (outcome.status === "rejected" && !failures.includes(outcome.reason)) {
+            failures.push(outcome.reason);
+          }
+        }
+      } catch (error) {
+        failures.push(error);
+      } finally {
+        clearTimeout(cleanupTimer);
+        t.signal.removeEventListener("abort", onAbort);
+      }
+    }
+    if (failures.length === 1) {
+      throw failures[0];
+    }
+    if (failures.length > 1) {
+      throw new AggregateError(failures, "fallback/control test and cleanup failed");
+    }
+  },
+);
 
 test("AcpRuntimeManager honors aborts requested before prompt starts after oneshot load fallback", async () => {
   const record = makeSessionRecord({
