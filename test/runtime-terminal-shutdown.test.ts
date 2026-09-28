@@ -12,7 +12,7 @@ import { InMemorySessionStore } from "./runtime-test-helpers.js";
 test(
   "public runtime shutdown joins a terminal awaiting native spawn adoption",
   { timeout: 15_000 },
-  async () => {
+  async (t) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-runtime-terminal-shutdown-"));
     const pidFile = path.join(cwd, "terminal.pid");
     const peer = path.resolve("dist-test/test/fixtures/idle-disconnect-agent.js");
@@ -34,6 +34,20 @@ test(
     const adoption = { held: false };
     let release = () => {};
     let closing: Promise<void> | undefined;
+    const readFile = fs.readFile.bind(fs);
+    let returnedEmptyPid = false;
+    const pidRead = t.mock.method(
+      fs,
+      "readFile",
+      async (...args: Parameters<typeof fs.readFile>) => {
+        // A created PID file can be observed before its contents are published.
+        if (args[0] === pidFile && args[1] === "utf8" && !returnedEmptyPid) {
+          returnedEmptyPid = true;
+          return "";
+        }
+        return await readFile(...args);
+      },
+    );
     childProcess.spawn = ((command: string, args: readonly string[], options: SpawnOptions) => {
       const child = originalSpawn(command, args, options);
       const isTerminal = command === process.execPath && args.some((arg) => arg.includes(pidFile));
@@ -63,12 +77,16 @@ test(
     try {
       await runtime.ensureSession({ sessionKey: "shutdown", agent: "fixture", mode: "persistent" });
       const deadline = performance.now() + 5_000;
-      while (!adoption.held || !(await fs.stat(pidFile).catch(() => undefined))) {
+      while (
+        !adoption.held ||
+        (await fs.readFile(pidFile, "utf8").catch(() => "")) !== String(terminal?.pid)
+      ) {
         assert.ok(performance.now() < deadline, "the real terminal did not reach held adoption");
         await delay(10);
       }
       assert(terminal);
       assert.equal(Number(await fs.readFile(pidFile, "utf8")), terminal.pid);
+      assert.equal(returnedEmptyPid, true);
       assert.equal(terminal.exitCode, null);
       assert.equal(terminal.signalCode, null);
       closing = runtime.shutdown();
@@ -95,6 +113,7 @@ test(
     } finally {
       release();
       childProcess.spawn = originalSpawn;
+      pidRead.mock.restore();
       syncBuiltinESMExports();
       try {
         await (closing ?? runtime.shutdown());

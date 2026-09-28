@@ -5,10 +5,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
+import { setImmediate as nextTurn, setTimeout as delay } from "node:timers/promises";
 import { AcpClient } from "../src/acp/client.js";
 import { ProcessDescendants } from "../src/acp/process-descendants.js";
-import { TimeoutError } from "../src/async-control.js";
+import { TimeoutError, withTimeout } from "../src/async-control.js";
 import { inspectAgentModels } from "../src/runtime/public/probe.js";
 
 type FixturePids = { bridge: number; descendant: number };
@@ -56,6 +56,64 @@ async function assertStopped(pid: number, label: string): Promise<void> {
   assert.equal(isRunning(pid), false, `${label} survived teardown`);
 }
 
+function startCleanupSibling() {
+  const child = spawn(process.execPath, ["--eval", "setInterval(() => {}, 1000)"], {
+    stdio: "ignore",
+  });
+  let processFailure: Error | undefined;
+  child.on("error", (error) => {
+    processFailure ??= error;
+  });
+  const closed = new Promise<void>((resolve, reject) => {
+    child.once("close", () => {
+      if (processFailure) {
+        reject(processFailure);
+      } else {
+        resolve();
+      }
+    });
+  });
+  void closed.catch(() => {});
+  return { child, closed };
+}
+
+function throwFixtureFailures(failures: unknown[]): void {
+  if (failures.length === 1) {
+    throw failures[0];
+  }
+  if (failures.length > 1) {
+    throw new AggregateError(failures, "Cleanup fixture teardown failed", { cause: failures[0] });
+  }
+}
+
+async function cleanupFixture(
+  sibling: ReturnType<typeof startCleanupSibling>,
+  cleanupAgent: () => Promise<void>,
+): Promise<void> {
+  const signalFailures: unknown[] = [];
+  try {
+    if (sibling.child.pid && sibling.child.exitCode === null && sibling.child.signalCode === null) {
+      sibling.child.kill("SIGKILL");
+    }
+  } catch (error) {
+    signalFailures.push(error);
+  }
+  // The unrelated fixture must retire even when agent cleanup rejects or waits.
+  const [agentResult, siblingResult] = await Promise.allSettled([
+    Promise.resolve().then(cleanupAgent),
+    withTimeout(sibling.closed, 3_000),
+  ]);
+  const failures: unknown[] = [];
+  if (agentResult.status === "rejected") {
+    failures.push(agentResult.reason);
+  }
+  failures.push(...signalFailures);
+  if (siblingResult.status === "rejected") {
+    failures.push(siblingResult.reason);
+  }
+  throwFixtureFailures(failures);
+}
+
 for (const mode of [
   "close",
   "init-fail",
@@ -67,9 +125,6 @@ for (const mode of [
   test(`AcpClient cleans descendants after ${mode}`, {}, async (t) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-cleanup-"));
     const pidFile = path.join(cwd, "pids.json");
-    const sibling = spawn(process.execPath, ["--eval", "setInterval(() => {}, 1000)"], {
-      stdio: "ignore",
-    });
     const admissionError = new Error("synthetic admission failure");
     const client = new AcpClient({
       agentCommand: process.execPath,
@@ -91,13 +146,15 @@ for (const mode of [
             }
           : undefined,
     });
+    const sibling = startCleanupSibling();
     t.after(async () => {
-      await client.close();
-      const pids = await readPids(pidFile);
-      if (isRunning(pids.descendant)) {
-        process.kill(pids.descendant, "SIGKILL");
-      }
-      sibling.kill("SIGKILL");
+      await cleanupFixture(sibling, async () => {
+        await client.close();
+        const pids = await readPids(pidFile);
+        if (isRunning(pids.descendant)) {
+          process.kill(pids.descendant, "SIGKILL");
+        }
+      });
       await fs.rm(cwd, { recursive: true, force: true });
     });
 
@@ -119,8 +176,58 @@ for (const mode of [
     }
     await assertStopped(pids.bridge, "bridge");
     await assertStopped(pids.descendant, "descendant");
-    assert.equal(sibling.exitCode, null, "unrelated sibling was terminated");
-    assert(sibling.pid && isRunning(sibling.pid));
+    assert.equal(sibling.child.exitCode, null, "unrelated sibling was terminated");
+    assert(sibling.child.pid && isRunning(sibling.child.pid));
+  });
+}
+
+for (const failure of ["agent close rejected", "PID file missing"]) {
+  test(`cleanup fixture retires its sibling when ${failure}`, { timeout: 15_000 }, async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-cleanup-failure-"));
+    const sibling = startCleanupSibling();
+    let siblingClosed = false;
+    sibling.child.once("close", () => {
+      siblingClosed = true;
+    });
+    const closeError = new Error("synthetic close failure");
+    const failures: unknown[] = [];
+    try {
+      await withTimeout(once(sibling.child, "spawn"), 3_000);
+      await assert.rejects(
+        cleanupFixture(sibling, async () => {
+          if (failure === "agent close rejected") {
+            throw closeError;
+          }
+          await readPids(path.join(cwd, "absent-pids.json"));
+        }),
+        (error) =>
+          failure === "agent close rejected"
+            ? error === closeError
+            : error instanceof Error && error.message === "Cleanup fixture did not start",
+      );
+      assert.equal(siblingClosed, true, "cleanup returned before its sibling closed");
+    } catch (error) {
+      failures.push(error);
+    }
+    // Keep the regression bounded even when the old teardown skips its sibling.
+    try {
+      if (
+        sibling.child.pid &&
+        sibling.child.exitCode === null &&
+        sibling.child.signalCode === null
+      ) {
+        sibling.child.kill("SIGKILL");
+      }
+      await withTimeout(sibling.closed, 3_000);
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      await fs.rm(cwd, { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
+    }
+    throwFixtureFailures(failures);
   });
 }
 
@@ -249,6 +356,108 @@ async function inspectionMessages(pidFile: string) {
   );
 }
 
+async function withInspectionAssertion(
+  controller: AbortController,
+  reason: Error,
+  rejected: Promise<void>,
+  body: () => Promise<void>,
+): Promise<void> {
+  const assertionFailures: unknown[] = [];
+  const settled = rejected.catch((error: unknown) => {
+    assertionFailures.push(error);
+  });
+  const failures: unknown[] = [];
+  try {
+    await body();
+  } catch (error) {
+    failures.push(error);
+  } finally {
+    // A readiness error still owns the inspection and its rejection assertion.
+    try {
+      controller.abort(reason);
+    } catch (error) {
+      failures.push(error);
+    }
+    await settled;
+  }
+  for (const error of assertionFailures) {
+    if (!failures.includes(error)) {
+      failures.push(error);
+    }
+  }
+  throwFixtureFailures(failures);
+}
+
+for (const assertionMatches of [true, false]) {
+  test(`model inspection owns readiness failure ${assertionMatches ? "without" : "with"} assertion failure`, async () => {
+    const controller = new AbortController();
+    const reason = new Error("catalog retired");
+    const readinessError = new Error("synthetic inspection readiness failure");
+    let releaseCleanup!: () => void;
+    const cleanup = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    const aborted = new Promise<void>((resolve) => {
+      controller.signal.addEventListener("abort", () => resolve(), { once: true });
+    });
+    let inspectionSettled = false;
+    const pending = (async () => {
+      await aborted;
+      await cleanup;
+      inspectionSettled = true;
+      throw reason;
+    })();
+    const rejected = assert.rejects(pending, (error) => assertionMatches && error === reason);
+    // The driver also owns broken controls, including a failing assertion.
+    const assertionOutcome = rejected.then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    let scopeSettled = false;
+    const outcome = withInspectionAssertion(controller, reason, rejected, async () => {
+      throw readinessError;
+    }).then(
+      () => {
+        scopeSettled = true;
+        return { ok: true as const };
+      },
+      (error: unknown) => {
+        scopeSettled = true;
+        return { ok: false as const, error };
+      },
+    );
+    const failures: unknown[] = [];
+    try {
+      await nextTurn();
+      assert.equal(controller.signal.aborted, true, "readiness failure did not abort inspection");
+      assert.equal(inspectionSettled, false, "inspection ignored its cleanup gate");
+      assert.equal(scopeSettled, false, "readiness failure returned before inspection settled");
+      releaseCleanup();
+      const result = await outcome;
+      const assertion = await assertionOutcome;
+      assert.equal(inspectionSettled, true);
+      assert.ok(!result.ok);
+      if (assertionMatches) {
+        assert.equal(assertion.ok, true);
+        assert.equal(result.error, readinessError);
+      } else {
+        assert.ok(!assertion.ok);
+        assert.ok(result.error instanceof AggregateError);
+        assert.equal(result.error.errors.length, 2);
+        assert.equal(result.error.errors[0], readinessError);
+        assert.equal(result.error.errors[1], assertion.error);
+      }
+    } catch (error) {
+      failures.push(error);
+    } finally {
+      controller.abort(reason);
+      releaseCleanup();
+      await Promise.all([outcome, assertionOutcome]);
+    }
+    throwFixtureFailures(failures);
+  });
+}
+
 test("model inspection log polling waits for complete records", async () => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-inspection-log-"));
   const pidFile = path.join(cwd, "pids.json");
@@ -363,29 +572,35 @@ for (const mode of ["init-hang", "session-hang"]) {
         const rejected = assert.rejects(pending, (error) =>
           interruption === "timeout" ? error instanceof TimeoutError : error === reason,
         );
-        const pids = await readPids(fixture.pidFile);
-        if (interruption === "abort") {
-          const method = mode === "init-hang" ? "initialize" : "session/new";
-          for (let attempt = 0; ; attempt += 1) {
-            const messages = await inspectionMessages(fixture.pidFile).catch(
-              (error: NodeJS.ErrnoException) => {
-                if (error.code !== "ENOENT") {
-                  throw error;
-                }
-                return [];
-              },
-            );
-            if (messages.some((message) => message.method === method)) {
-              break;
+        await withInspectionAssertion(controller, reason, rejected, async () => {
+          const pids = await readPids(fixture.pidFile);
+          if (interruption === "abort") {
+            const method = mode === "init-hang" ? "initialize" : "session/new";
+            for (let attempt = 0; ; attempt += 1) {
+              const messages = await inspectionMessages(fixture.pidFile).catch(
+                (error: NodeJS.ErrnoException) => {
+                  if (error.code !== "ENOENT") {
+                    throw error;
+                  }
+                  return [];
+                },
+              );
+              if (messages.some((message) => message.method === method)) {
+                break;
+              }
+              assert.ok(attempt < 200, `inspection did not reach ${method}`);
+              await delay(10);
             }
-            assert.ok(attempt < 200, `inspection did not reach ${method}`);
-            await delay(10);
+            controller.abort(reason);
           }
-          controller.abort(reason);
-        }
-        await rejected;
-        assert.equal(isRunning(pids.bridge), false, "abort returned before bridge cleanup");
-        assert.equal(isRunning(pids.descendant), false, "abort returned before descendant cleanup");
+          await rejected;
+          assert.equal(isRunning(pids.bridge), false, "abort returned before bridge cleanup");
+          assert.equal(
+            isRunning(pids.descendant),
+            false,
+            "abort returned before descendant cleanup",
+          );
+        });
       },
     );
   }

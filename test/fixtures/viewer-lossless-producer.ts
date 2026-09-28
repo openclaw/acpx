@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { FlowRunner, acp, defineFlow, type FlowDefinition } from "../../src/flows.js";
 import {
   CHECKPOINT_COUNTS,
+  PRODUCER_TIMEOUT_MS,
   TURN_COUNT,
   nodeForTurn,
   promptForTurn,
@@ -33,7 +34,8 @@ const runner = new FlowRunner({
     cwd,
   }),
   permissionMode: "deny-all",
-  defaultNodeTimeoutMs: 5_000,
+  // Keep this persistence fixture bounded by the existing whole-capture deadline.
+  defaultNodeTimeoutMs: PRODUCER_TIMEOUT_MS,
   outputRoot,
 });
 const nodes: FlowDefinition["nodes"] = {};
