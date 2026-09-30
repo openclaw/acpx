@@ -7150,3 +7150,59 @@ test("integration helper native: direct child preserves body and kill failures",
     unwrapTestOutcomes(body, cleanup);
   });
 });
+
+test("integration: flow run applies repeatable run configuration defaults", async () => {
+  await withTempHome(async (homeDir) => {
+    const flowPath = path.join(homeDir, "config-defaults.flow.mjs");
+    await fs.writeFile(
+      flowPath,
+      `import { acp, defineFlow } from "acpx/flows";
+export default defineFlow({ name: "config-defaults", startAt: "ask", nodes: {
+  ask: acp({ session: { isolated: true }, prompt: () => "echo PONG" })
+}, edges: [] });`,
+    );
+    const result = await runCli(
+      [
+        "--agent",
+        `${MOCK_AGENT_COMMAND} --advertise-config-options`,
+        "--cwd",
+        homeDir,
+        "--format",
+        "json",
+        "--model",
+        "fast-model",
+        "flow",
+        "run",
+        flowPath,
+        "--config-option",
+        "reasoning_effort=high",
+        "--config-option",
+        "reasoning_effort=xhigh",
+      ],
+      homeDir,
+    );
+    assert.equal(result.code, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim()) as {
+      runDir: string;
+      outputs: { ask: string };
+    };
+    assert.equal(payload.outputs.ask, "PONG");
+    const steps = JSON.parse(
+      await fs.readFile(path.join(payload.runDir, "projections", "steps.json"), "utf8"),
+    ) as {
+      session: {
+        requestedSettings: {
+          model: string;
+          configOptions: Array<{ configId: string; value: string }>;
+        };
+      };
+    }[];
+    assert.deepEqual(steps[0].session.requestedSettings, {
+      model: "fast-model",
+      configOptions: [
+        { configId: "reasoning_effort", value: "high" },
+        { configId: "reasoning_effort", value: "xhigh" },
+      ],
+    });
+  });
+});

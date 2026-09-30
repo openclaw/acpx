@@ -10,6 +10,7 @@ import {
 import { persistSessionOptions } from "../../runtime/engine/session-options.js";
 import type { SessionEnsureResult, SessionRecord } from "../../types.js";
 import { applyConfigOptionsToRecord, applyInitialModelSelection } from "../config-options.js";
+import { applySessionConfigOptions, describeSessionConfiguration } from "../configuration.js";
 import { applyRequestedModelIfAdvertised } from "../model-application.js";
 import {
   absolutePath,
@@ -78,6 +79,28 @@ async function createSessionRecordWithClient(
     createdState.modelApplication,
   );
 
+  const configured = await applySessionConfigOptions({
+    client,
+    sessionId,
+    agentCommand: options.agentCommand,
+    getState: () => record.acpx,
+    setState: (state) => {
+      record.acpx = state;
+    },
+    configOptions: options.configOptions,
+    timeoutMs: options.timeoutMs,
+    authority: { signal: options.signal },
+  });
+  record.acpx = configured.state;
+  options.onSessionConfigured?.(
+    describeSessionConfiguration({
+      requestedModel: options.sessionOptions?.model,
+      modelApplied: createdState.modelApplication.applied,
+      state: record.acpx,
+      selections: configured.selections,
+    }),
+  );
+  assertControlAuthority({ signal: options.signal });
   await writeSessionRecord(record);
   assertControlAuthority({ signal: options.signal });
   return record;

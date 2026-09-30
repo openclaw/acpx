@@ -7,6 +7,7 @@
 - Runtime controls exposed by current codex-acp releases include ACP modes plus separate `model` and `reasoning_effort` session config options.
 - Use the advertised base model id with `acpx --model <id> codex ...` or `acpx codex set model <id>`, then set reasoning effort separately with `acpx codex set reasoning_effort <value>`.
 - For a one-shot run, use `acpx --model <id> codex exec --config-option reasoning_effort=<value> 'prompt'`; the effort is applied after the model and before the prompt.
+- In flows, an `acp` node can declare `model` and `configOptions: [{ configId: "reasoning_effort", value: "medium" }]` to apply both before its first prompt. `flow run --config-option reasoning_effort=medium` supplies a run default. Persistent handles retain their initial settings; use another handle for different selections. Check the bundle settings and the adapter turn receipt.
 - Switching models can adjust reasoning effort. ACPX saves the accepted effort for an existing selection, or removes that selection if the new model has no effort control.
 - Reconnecting restores the saved model and effort before prompting, even when the adapter resumes the conversation with different defaults.
 - Legacy `models` metadata may encode both values in a combined id such as `gpt-5.6-sol[max]`; ACPX uses that form only when the adapter does not advertise the newer model config option.

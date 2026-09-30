@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
@@ -1875,6 +1875,10 @@ const stream = {
           }
           if ("method" in value && value.method === methods.agent.session.prompt && "id" in value) {
             activePromptRequestId = value.id;
+          }
+          const requestLog = process.env.ACPX_TEST_REQUEST_LOG;
+          if (requestLog) {
+            appendFileSync(requestLog, `${JSON.stringify({ pid: process.pid, ...value })}\n`);
           }
           controller.enqueue(value);
         }

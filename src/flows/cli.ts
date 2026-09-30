@@ -11,6 +11,7 @@ import {
   resolveOutputPolicy,
   resolvePermissionMode,
   type GlobalFlags,
+  type SessionConfigOptionAssignment,
 } from "../cli/flags.js";
 import {
   resolvePermissionPolicyFromFlags,
@@ -27,6 +28,7 @@ type FlowRunFlags = {
   inputJson?: string;
   inputFile?: string;
   defaultAgent?: string;
+  configOption?: SessionConfigOptionAssignment[];
 };
 
 export async function handleFlowRun(
@@ -60,6 +62,7 @@ export async function handleFlowRun(
     verbose: globalFlags.verbose,
     suppressSdkConsoleErrors: outputPolicy.suppressSdkConsoleErrors,
     sessionOptions: sessionOptionsFromGlobalFlags(globalFlags),
+    configOptions: flags.configOption,
   });
 
   const result = await runner.run(flow, input, {

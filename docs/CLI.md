@@ -25,7 +25,7 @@ acpx [global_options] prompt [prompt_options] [prompt_text...]
 acpx [global_options] exec [prompt_options] [prompt_text...]
 acpx [global_options] compare <agent>... '<prompt_text>'
 acpx [global_options] compare <agent>... --file <path>
-acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>] [--default-agent <name>]
+acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>] [--default-agent <name>] [--config-option <key=value>]
 acpx [global_options] cancel [-s <name>]
 acpx [global_options] set-mode <mode> [-s <name>]
 acpx [global_options] set <key> <value> [-s <name>]
@@ -75,7 +75,7 @@ Notes:
 ## `flow run` subcommand
 
 ```bash
-acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>] [--default-agent <name>]
+acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>] [--default-agent <name>] [--config-option <key=value>]
 ```
 
 - Runs a user-authored workflow module step by step through the `acpx/flows` runtime.
@@ -87,6 +87,7 @@ acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>
 - `--input-json` passes flow input inline as JSON.
 - `--input-file` reads flow input JSON from disk.
 - `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.
+- Repeatable `--config-option <key=value>` provides ordered ACP configuration defaults before prompting. Node options run after these defaults, and node `model` overrides global `--model`. Persistent handles pin their first settings; later omissions inherit and conflicting explicit selections fail. See [flow configuration](flows.md#model-and-session-configuration) for evidence and model-catalog limits.
 - The file is always provided by the caller at runtime. `acpx` does not require any built-in flow registry.
 - The source repo includes example flow files under `examples/flows/`, including a larger PR-triage example under `examples/flows/pr-triage/`.
 

@@ -37,6 +37,10 @@ Repo: https://github.com/openclaw/acpx
 - Flow timers: reject non-finite or overflowing node and shell deadlines before they become immediate timeouts. Thanks @odrobnik.
 - Windows: preserve complete backslash runs before quotes and at the end of batch-wrapper arguments. Thanks @odrobnik.
 
+### Changes
+
+- Flows: select per-node models and ordered ACP configuration options before the first prompt, with run defaults, persistent-handle conflict checks, same-session replay, and requested/accepted settings in run bundles.
+
 ## 0.19.3 - 2026-09-25
 
 ### Highlights
