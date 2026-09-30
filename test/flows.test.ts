@@ -2641,6 +2641,7 @@ for (const isolated of [false, true]) {
         accepted: "fast-model",
       });
       assert.equal(binding.acceptedSettings?.configOptions.at(-1)?.acceptedValue, "xhigh");
+      assert.equal(binding.acceptedSettings?.configOptions.at(-1)?.reported, true);
       const saved = JSON.parse(
         await fs.readFile(
           path.join(result.runDir, "sessions", binding.bundleId, "binding.json"),
@@ -2728,7 +2729,9 @@ for (const isolated of [false, true]) {
       );
       assert.deepEqual(result.state.steps[0].session?.acceptedSettings, {
         model: { requested: "unadvertised", applied: false },
-        configOptions: [{ configId, value: " raw=value ", acceptedValue: " raw=value " }],
+        configOptions: [
+          { configId, value: " raw=value ", acceptedValue: " raw=value ", reported: false },
+        ],
       });
       assert.ok(
         (await readFlowRequests(log)).some(
@@ -2996,3 +2999,194 @@ test("flow settings: reconnect cannot silently drop the pinned model", async (t)
     assert.equal(requests.filter((entry) => entry.method === "session/load").length, 1);
   });
 });
+
+for (const drift of ["option", "model"] as const) {
+  test(`flow settings: reconnect rejects a different accepted ${drift} before prompting`, async (t) => {
+    await withTempHome(async (home) => {
+      const log = path.join(home, "requests.ndjson");
+      let reconnecting = false;
+      const originalLoad = AcpClient.prototype.loadSessionWithOptions;
+      t.mock.method(
+        AcpClient.prototype,
+        "loadSessionWithOptions",
+        async function (this: AcpClient, ...args: Parameters<AcpClient["loadSessionWithOptions"]>) {
+          const loaded = await originalLoad.apply(this, args);
+          reconnecting = true;
+          return loaded;
+        },
+      );
+      const originalSet = AcpClient.prototype.setSessionConfigOption;
+      t.mock.method(
+        AcpClient.prototype,
+        "setSessionConfigOption",
+        async function (this: AcpClient, ...args: Parameters<AcpClient["setSessionConfigOption"]>) {
+          const response = await originalSet.apply(this, args);
+          if (!reconnecting) {
+            return response;
+          }
+          return {
+            ...response,
+            configOptions: response.configOptions?.map((option) =>
+              option.id === (drift === "model" ? "model" : "reasoning_effort")
+                ? Object.assign({}, option, {
+                    currentValue: drift === "model" ? "smart-model" : "low",
+                  })
+                : option,
+            ),
+          };
+        },
+      );
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: `${MOCK_AGENT_COMMAND} --advertise-config-options --supports-load-session`,
+          cwd: home,
+        }),
+        permissionMode: "deny-all",
+        outputRoot: path.join(home, "runs"),
+        sessionOptions: { env: { ACPX_TEST_REQUEST_LOG: log } },
+      });
+      await assert.rejects(
+        runner.run(
+          defineFlow({
+            name: "replay-acceptance-drift",
+            startAt: "first",
+            nodes: {
+              first: acp({
+                model: "fast-model",
+                configOptions: [{ configId: "reasoning_effort", value: "high" }],
+                prompt: () => "echo one",
+              }),
+              second: acp({ prompt: () => "echo never" }),
+            },
+            edges: [{ from: "first", to: "second" }],
+          }),
+          {},
+        ),
+        drift === "model"
+          ? /Cannot replay pinned model for persistent session handle "main"/
+          : /Cannot replay pinned config option "reasoning_effort" for persistent session handle "main"/,
+      );
+      const requests = await readFlowRequests(log);
+      assert.equal(requests.filter((entry) => entry.method === "session/prompt").length, 1);
+      assert.equal(requests.filter((entry) => entry.method === "session/new").length, 1);
+      assert.equal(requests.filter((entry) => entry.method === "session/load").length, 1);
+    });
+  });
+}
+
+test("flow settings: unconfigured persistent and isolated bundles omit settings evidence", async () => {
+  await withTempHome(async (home) => {
+    const log = path.join(home, "requests.ndjson");
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "mock",
+        agentCommand: `${MOCK_AGENT_COMMAND} --advertise-config-options --supports-load-session`,
+        cwd: home,
+      }),
+      permissionMode: "deny-all",
+      outputRoot: path.join(home, "runs"),
+      sessionOptions: { env: { ACPX_TEST_REQUEST_LOG: log } },
+    });
+    const result = await runner.run(
+      defineFlow({
+        name: "no-settings",
+        startAt: "first",
+        nodes: {
+          first: acp({ prompt: () => "echo one" }),
+          second: acp({ prompt: () => "echo two" }),
+          isolated: acp({ session: { isolated: true }, prompt: () => "echo three" }),
+        },
+        edges: [
+          { from: "first", to: "second" },
+          { from: "second", to: "isolated" },
+        ],
+      }),
+      {},
+    );
+    for (const step of result.state.steps) {
+      const binding = step.session;
+      assert.ok(binding);
+      assert.equal(Object.hasOwn(binding, "requestedSettings"), false);
+      assert.equal(Object.hasOwn(binding, "acceptedSettings"), false);
+      const saved = JSON.parse(
+        await fs.readFile(
+          path.join(result.runDir, "sessions", binding.bundleId, "binding.json"),
+          "utf8",
+        ),
+      ) as typeof binding;
+      assert.equal(Object.hasOwn(saved, "requestedSettings"), false);
+      assert.equal(Object.hasOwn(saved, "acceptedSettings"), false);
+    }
+    const savedSteps = JSON.parse(
+      await fs.readFile(path.join(result.runDir, "projections", "steps.json"), "utf8"),
+    ) as typeof result.state.steps;
+    for (const step of savedSteps) {
+      assert.ok(step.session);
+      assert.equal(Object.hasOwn(step.session, "requestedSettings"), false);
+      assert.equal(Object.hasOwn(step.session, "acceptedSettings"), false);
+    }
+    const requests = await readFlowRequests(log);
+    assert.equal(requests.filter((entry) => entry.method === "session/prompt").length, 3);
+    assert.equal(
+      requests.some((entry) => entry.method === "session/set_config_option"),
+      false,
+    );
+    assert.equal(requests.filter((entry) => entry.method === "session/load").length, 1);
+  });
+});
+
+for (const omitted of ["catalog", "option", "non-list catalog"] as const) {
+  test(`flow settings: accepted option is unreported when reply omits ${omitted}`, async (t) => {
+    await withTempHome(async (home) => {
+      const original = AcpClient.prototype.setSessionConfigOption;
+      t.mock.method(
+        AcpClient.prototype,
+        "setSessionConfigOption",
+        async function (this: AcpClient, ...args: Parameters<AcpClient["setSessionConfigOption"]>) {
+          const response = await original.apply(this, args);
+          return {
+            ...response,
+            configOptions:
+              omitted === "catalog"
+                ? undefined
+                : omitted === "non-list catalog"
+                  ? ({} as unknown as typeof response.configOptions)
+                  : response.configOptions?.filter((option) => option.id !== "reasoning_effort"),
+          };
+        },
+      );
+      const runner = new FlowRunner({
+        resolveAgent: () => ({
+          agentName: "mock",
+          agentCommand: `${MOCK_AGENT_COMMAND} --advertise-config-options`,
+          cwd: home,
+        }),
+        permissionMode: "deny-all",
+        outputRoot: path.join(home, "runs"),
+      });
+      const result = await runner.run(
+        defineFlow({
+          name: "unreported-option",
+          startAt: "ask",
+          nodes: {
+            ask: acp({
+              configOptions: [{ configId: "reasoning_effort", value: "high" }],
+              prompt: () => "echo one",
+            }),
+          },
+          edges: [],
+        }),
+        {},
+      );
+      assert.deepEqual(result.state.steps[0].session?.acceptedSettings?.configOptions, [
+        {
+          configId: "reasoning_effort",
+          value: "high",
+          acceptedValue: "high",
+          reported: false,
+        },
+      ]);
+    });
+  });
+}

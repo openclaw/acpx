@@ -876,7 +876,10 @@ export class FlowRunner {
       node.profile,
       prepared.agentInfo,
     );
-    binding.requestedSettings = this.resolveSessionSettings(node);
+    const requestedSettings = this.resolveSessionSettings(node);
+    if (requestedSettings.model !== undefined || requestedSettings.configOptions.length > 0) {
+      binding.requestedSettings = requestedSettings;
+    }
     prepared.result.sessionInfo = binding;
     await prepared.attempt.own(() =>
       this.initializeIsolatedSessionBundle(runDir, state, binding, prepared.attempt),
@@ -1145,8 +1148,9 @@ export class FlowRunner {
     attempt.assertActive();
 
     const binding: FlowSessionBinding = {
-      requestedSettings,
-      acceptedSettings,
+      ...(requestedSettings.model !== undefined || requestedSettings.configOptions.length > 0
+        ? { requestedSettings, acceptedSettings }
+        : {}),
       key,
       handle,
       bundleId: createSessionBundleId(handle, key),
@@ -1283,7 +1287,9 @@ export class FlowRunner {
                   configOptions: binding.requestedSettings?.configOptions,
                   onSessionConfigured: (configuration: SessionConfiguration) => {
                     assertReplayedSessionSettings(binding, configuration);
-                    binding.acceptedSettings = configuration;
+                    if (binding.requestedSettings) {
+                      binding.acceptedSettings = configuration;
+                    }
                   },
                 }),
           },
@@ -1363,7 +1369,9 @@ export class FlowRunner {
             sessionOptions: { ...this.sessionOptions, model: binding.requestedSettings?.model },
             configOptions: binding.requestedSettings?.configOptions,
             onSessionConfigured: (configuration) => {
-              binding.acceptedSettings = configuration;
+              if (binding.requestedSettings) {
+                binding.acceptedSettings = configuration;
+              }
             },
           },
           { signal: attempt.signal, handleProcessInterrupts: false },

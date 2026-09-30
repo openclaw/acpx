@@ -9,7 +9,7 @@ export type SessionConfigSelection = { configId: string; value: string };
 
 export type SessionConfiguration = {
   model?: { requested: string; applied: boolean; accepted?: string };
-  configOptions: Array<SessionConfigSelection & { acceptedValue: string }>;
+  configOptions: Array<SessionConfigSelection & { acceptedValue: string; reported: boolean }>;
 };
 
 export type SessionConfigurationOptions = {
@@ -60,12 +60,13 @@ export async function applySessionConfigOptions(params: {
       resolvedValue,
     );
     params.setState(state);
-    const acceptedValue = state.config_options?.find(
-      (option) => option.id === selection.configId,
-    )?.currentValue;
+    const acceptedValue = Array.isArray(response?.configOptions)
+      ? response.configOptions.find((option) => option.id === selection.configId)?.currentValue
+      : undefined;
     selections.push({
       ...selection,
       acceptedValue: typeof acceptedValue === "string" ? acceptedValue : resolvedValue,
+      reported: typeof acceptedValue === "string",
     });
   }
   return { state, selections };
