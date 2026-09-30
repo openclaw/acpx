@@ -20,6 +20,8 @@ Repo: https://github.com/openclaw/acpx
 - Runtime/embedding: retain raw nonempty system-prompt replacement and append text across persistence and reconnects, including whitespace-only values.
 - Replay viewer: preserve the last readable recent-run and selected-run state during atomic live-projection replacement until polling recovers.
 
+- Filesystem/dependencies: update fs-safe for older Linux compatibility and guarded path handling, and refresh development tools and replay-viewer dependencies.
+
 ## 0.19.3 - 2026-09-25
 
 ### Highlights
