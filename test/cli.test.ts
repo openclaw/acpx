@@ -485,6 +485,76 @@ test("CLI resolves unknown subcommand names as raw agent commands", async () => 
   });
 });
 
+test("CLI finds claude sessions saved under the previous built-in command", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    const previousCommand = "npx -y @agentclientprotocol/claude-agent-acp@^0.76.0";
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: "saved-before-upgrade",
+      acpSessionId: "saved-before-upgrade",
+      agentCommand: previousCommand,
+      agentArgv: ["npx", "-y", "@agentclientprotocol/claude-agent-acp@^0.76.0"],
+      cwd,
+      closed: false,
+    });
+
+    for (const agentArgs of [["claude"], ["--agent", previousCommand]]) {
+      const result = await runCli(
+        ["--cwd", cwd, "--format", "json", ...agentArgs, "sessions", "show"],
+        homeDir,
+      );
+
+      assert.equal(result.code, 0, `${agentArgs.join(" ")}\n${result.stderr}`);
+      const shown = JSON.parse(result.stdout) as { acpxRecordId?: string; agentCommand?: string };
+      assert.equal(shown.acpxRecordId, "saved-before-upgrade");
+      assert.equal(shown.agentCommand, AGENT_REGISTRY.claude);
+    }
+  });
+});
+
+test("CLI selects the most recently used of colliding upgraded and current claude sessions", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    const previousCommand = "npx -y @agentclientprotocol/claude-agent-acp@^0.60.0";
+    const records = [
+      ["older-upgraded", previousCommand, "2026-01-01T00:00:00.000Z"],
+      ["newer-current", AGENT_REGISTRY.claude, "2026-01-02T00:00:00.000Z"],
+    ] as const;
+    for (const [id, agentCommand, lastUsedAt] of records) {
+      await writeSessionRecord(homeDir, {
+        acpxRecordId: id,
+        acpSessionId: id,
+        agentCommand,
+        cwd,
+        lastUsedAt,
+        closed: false,
+      });
+    }
+
+    for (const agentArgs of [["claude"], ["--agent", previousCommand]]) {
+      const shown = await runCli(
+        ["--cwd", cwd, "--format", "json", ...agentArgs, "sessions", "show"],
+        homeDir,
+      );
+      assert.equal(shown.code, 0, shown.stderr);
+      assert.equal(
+        (JSON.parse(shown.stdout) as { acpxRecordId?: string }).acpxRecordId,
+        "newer-current",
+      );
+
+      const listed = await runCli(
+        ["--cwd", cwd, "--format", "quiet", ...agentArgs, "sessions", "list", "--local"],
+        homeDir,
+      );
+      assert.equal(listed.code, 0, listed.stderr);
+      assert.match(listed.stdout, /older-upgraded/);
+      assert.match(listed.stdout, /newer-current/);
+    }
+  });
+});
+
 test("CLI resolves unknown raw agent commands after newer global flags", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");

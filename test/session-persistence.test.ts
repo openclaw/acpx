@@ -4,7 +4,8 @@ import { once } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { normalizeAgentCommandInput } from "../src/acp/client-process.js";
+import { LEGACY_AGENT_COMMANDS } from "../src/acp/builtin-command-migration.js";
+import { normalizeAgentCommandInput, splitCommandLine } from "../src/acp/client-process.js";
 import { AGENT_ARGV_REGISTRY, AGENT_REGISTRY } from "../src/agent-registry.js";
 import { withTimeout } from "../src/async-control.js";
 import {
@@ -124,6 +125,209 @@ test("parseSessionRecord backfills argv for historical built-in commands", () =>
     assert.ok(parsed);
     assert.deepEqual(parsed.agentArgv, expectedArgv);
   }
+});
+
+const PREVIOUS_CLAUDE_COMMAND = "npx -y @agentclientprotocol/claude-agent-acp@^0.76.0";
+
+function serializeWithAgent(
+  id: string,
+  agentCommand: string,
+  agentArgv: string[] | undefined,
+): Record<string, unknown> {
+  const serialized = serializeSessionRecordForDisk(
+    makeSessionRecord({
+      acpxRecordId: id,
+      acpSessionId: id,
+      agentCommand,
+      agentArgv,
+      cwd: "/tmp/built-in-identity-migration",
+    }),
+  );
+  if (agentArgv === undefined) {
+    delete serialized.agent_argv;
+  }
+  return serialized;
+}
+
+test("parseSessionRecord migrates records saved under earlier built-in commands", () => {
+  for (const [agentCommand, agentArgv, name] of [
+    [
+      PREVIOUS_CLAUDE_COMMAND,
+      ["npx", "-y", "@agentclientprotocol/claude-agent-acp@^0.76.0"],
+      "claude",
+    ],
+    ["npx -y @agentclientprotocol/claude-agent-acp@^0.60.0", undefined, "claude"],
+    ["npm exec @agentclientprotocol/claude-agent-acp@^0.76.0", undefined, "claude"],
+    [PREVIOUS_CLAUDE_COMMAND, AGENT_ARGV_REGISTRY.claude, "claude"],
+    ["npx pi-acp@^0.0.31", ["npx", "pi-acp@^0.0.31"], "pi"],
+  ] as const) {
+    const parsed = parseSessionRecord(
+      serializeWithAgent(agentCommand, agentCommand, agentArgv ? [...agentArgv] : undefined),
+    );
+
+    assert.ok(parsed, agentCommand);
+    assert.equal(parsed.agentCommand, AGENT_REGISTRY[name], agentCommand);
+    assert.deepEqual(parsed.agentArgv, AGENT_ARGV_REGISTRY[name], agentCommand);
+  }
+});
+
+test("parseSessionRecord keeps custom launchers that are not earlier built-in defaults", () => {
+  for (const [agentCommand, agentArgv] of [
+    [PREVIOUS_CLAUDE_COMMAND, ["/opt/claude-agent-acp/bin/claude-agent-acp", "--debug"]],
+    [
+      "npx -y @agentclientprotocol/claude-agent-acp@0.76.0",
+      ["npx", "-y", "@agentclientprotocol/claude-agent-acp@0.76.0"],
+    ],
+    ["custom-agent --acp", ["custom-agent", "--acp"]],
+  ] as const) {
+    const parsed = parseSessionRecord(
+      serializeWithAgent(agentCommand, agentCommand, [...agentArgv]),
+    );
+
+    assert.ok(parsed, agentCommand);
+    assert.equal(parsed.agentCommand, agentCommand);
+    assert.deepEqual(parsed.agentArgv, agentArgv);
+  }
+});
+
+test("agent-scoped lookup finds sessions saved under the previous Claude command", async () => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await writeSessionRecord(
+      homeDir,
+      makeSessionRecord({
+        acpxRecordId: "saved-before-upgrade",
+        acpSessionId: "saved-before-upgrade",
+        agentCommand: PREVIOUS_CLAUDE_COMMAND,
+        agentArgv: ["npx", "-y", "@agentclientprotocol/claude-agent-acp@^0.76.0"],
+        cwd,
+      }),
+    );
+    await writeSessionRecord(
+      homeDir,
+      makeSessionRecord({
+        acpxRecordId: "closed-before-upgrade",
+        acpSessionId: "closed-before-upgrade",
+        agentCommand: PREVIOUS_CLAUDE_COMMAND,
+        cwd,
+        name: "old",
+        closed: true,
+        closedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    for (const agentCommand of [AGENT_REGISTRY.claude, PREVIOUS_CLAUDE_COMMAND]) {
+      const found = await session.findSession({ agentCommand, cwd });
+      assert.equal(found?.acpxRecordId, "saved-before-upgrade", agentCommand);
+      assert.equal(found?.agentCommand, AGENT_REGISTRY.claude);
+      assert.deepEqual(found?.agentArgv, AGENT_ARGV_REGISTRY.claude);
+
+      const walked = await session.findSessionByDirectoryWalk({ agentCommand, cwd });
+      assert.equal(walked?.acpxRecordId, "saved-before-upgrade", agentCommand);
+
+      const listed = await session.listSessionsForAgent(agentCommand);
+      assert.deepEqual(
+        listed.map((record) => record.acpxRecordId).toSorted(),
+        ["closed-before-upgrade", "saved-before-upgrade"],
+        agentCommand,
+      );
+    }
+
+    const pruned = await session.pruneSessions({
+      agentCommand: AGENT_REGISTRY.claude,
+      dryRun: true,
+    });
+    assert.deepEqual(
+      pruned.pruned.map((record) => record.acpxRecordId),
+      ["closed-before-upgrade"],
+    );
+    assert.equal(await session.findSession({ agentCommand: AGENT_REGISTRY.codex, cwd }), undefined);
+  });
+});
+
+test("every earlier built-in default stays in its agent's scope after migration", async () => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const entries = Object.entries(LEGACY_AGENT_COMMANDS).flatMap(([name, commands]) =>
+      commands.map((agentCommand, index) => ({ name, agentCommand, index })),
+    );
+    assert.ok(entries.length > 30);
+    for (const { name, agentCommand, index } of entries) {
+      const cwd = path.join(homeDir, name, String(index));
+      await fs.mkdir(cwd, { recursive: true });
+      const { command, args } = splitCommandLine(agentCommand);
+      await writeSessionRecord(
+        homeDir,
+        makeSessionRecord({
+          acpxRecordId: `${name}-${index}`,
+          acpSessionId: `${name}-${index}`,
+          agentCommand,
+          agentArgv: [command, ...args],
+          cwd,
+        }),
+      );
+    }
+
+    for (const { name, agentCommand, index } of entries) {
+      const cwd = path.join(homeDir, name, String(index));
+      for (const query of [AGENT_REGISTRY[name], agentCommand]) {
+        const found = await session.findSession({ agentCommand: query, cwd });
+        assert.equal(found?.acpxRecordId, `${name}-${index}`, `${agentCommand} via ${query}`);
+        assert.equal(found?.agentCommand, AGENT_REGISTRY[name], agentCommand);
+        assert.deepEqual(found?.agentArgv, AGENT_ARGV_REGISTRY[name], agentCommand);
+      }
+    }
+  });
+});
+
+test("exact-command lookup still finds custom launchers saved under an earlier built-in command", async () => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    const customArgv = ["/opt/claude-agent-acp/bin/claude-agent-acp", "--debug"];
+    await writeSessionRecord(
+      homeDir,
+      makeSessionRecord({
+        acpxRecordId: "custom-launcher",
+        acpSessionId: "custom-launcher",
+        agentCommand: PREVIOUS_CLAUDE_COMMAND,
+        agentArgv: customArgv,
+        cwd,
+      }),
+    );
+
+    const found = await session.findSession({ agentCommand: PREVIOUS_CLAUDE_COMMAND, cwd });
+    assert.equal(found?.acpxRecordId, "custom-launcher");
+    assert.equal(found?.agentCommand, PREVIOUS_CLAUDE_COMMAND);
+    assert.deepEqual(found?.agentArgv, customArgv);
+    assert.equal(
+      await session.findSession({ agentCommand: AGENT_REGISTRY.claude, cwd }),
+      undefined,
+    );
+  });
+});
+
+test("agent-scoped lookup prefers the most recently used of migrated and current records", async () => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    for (const [id, agentCommand, lastUsedAt] of [
+      ["previous-scope", PREVIOUS_CLAUDE_COMMAND, "2026-01-02T00:00:00.000Z"],
+      ["current-scope", AGENT_REGISTRY.claude, "2026-01-03T00:00:00.000Z"],
+    ] as const) {
+      await writeSessionRecord(
+        homeDir,
+        makeSessionRecord({ acpxRecordId: id, acpSessionId: id, agentCommand, cwd, lastUsedAt }),
+      );
+    }
+
+    const found = await session.findSession({ agentCommand: AGENT_REGISTRY.claude, cwd });
+    assert.equal(found?.acpxRecordId, "current-scope");
+  });
 });
 
 test("parseSessionRecord preserves persisted session env", () => {

@@ -419,6 +419,7 @@ Persistence:
 - Session records are stored in `~/.acpx/sessions/*.json`.
 - `-s/--session` selects a named conversation; create it with `sessions new --name <name>` or `sessions ensure --name <name>` before prompting.
 - Changing `--cwd` changes scope and therefore session lookup.
+- Records saved under an earlier default command of a built-in agent, such as a previous ACPX-owned adapter range, are read as that agent's current command, so they stay in scope after an ACPX upgrade. Records with a custom launcher keep it. When both an upgraded and a current record match a scope, the most recently used one wins.
 - closed sessions are retained on disk with `closed: true` and `closedAt` until pruned.
 - auto-resume by scope skips closed sessions.
 

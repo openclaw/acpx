@@ -1,5 +1,9 @@
 import { normalizeAgentSessionId } from "../../acp/agent-session-id.js";
-import { resolveAgentArgvForCommand } from "../../acp/builtin-command-migration.js";
+import {
+  migrateBuiltInAgentIdentity,
+  resolveAgentArgvForCommand,
+  type AgentLaunchIdentity,
+} from "../../acp/builtin-command-migration.js";
 import type {
   SessionAcpxState,
   SessionEventLog,
@@ -28,13 +32,12 @@ function parseOptionalAgentArgv(value: unknown): string[] | undefined {
   return isStringArray(value) && value.length > 0 && value[0]?.length > 0 ? value : undefined;
 }
 
-function parsePersistedAgentArgv(record: Record<string, unknown>): string[] | undefined {
-  return (
-    parseOptionalAgentArgv(record.agent_argv) ??
-    (typeof record.agent_command === "string"
-      ? resolveAgentArgvForCommand(record.agent_command)
-      : undefined)
-  );
+function parsePersistedAgentIdentity(agentCommand: string, rawArgv: unknown): AgentLaunchIdentity {
+  const identity = migrateBuiltInAgentIdentity(agentCommand, parseOptionalAgentArgv(rawArgv));
+  return {
+    agentCommand: identity.agentCommand,
+    agentArgv: identity.agentArgv ?? resolveAgentArgvForCommand(identity.agentCommand),
+  };
 }
 
 function hasModelConfigOption(options: unknown): boolean {
@@ -736,14 +739,15 @@ export function parseSessionRecord(raw: unknown): SessionRecord | null {
   if (!metadata) {
     return null;
   }
+  const agent = parsePersistedAgentIdentity(record.agent_command, record.agent_argv);
 
   return {
     schema: SESSION_RECORD_SCHEMA,
     acpxRecordId: record.acpx_record_id,
     acpSessionId: record.acp_session_id,
     agentSessionId: normalizeAgentSessionId(record.agent_session_id),
-    agentCommand: record.agent_command,
-    agentArgv: parsePersistedAgentArgv(record),
+    agentCommand: agent.agentCommand,
+    agentArgv: agent.agentArgv,
     cwd: record.cwd,
     name: optionals.name,
     createdAt: record.created_at,

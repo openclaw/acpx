@@ -4,10 +4,12 @@ import { fileURLToPath } from "node:url";
 import { splitCommandLine } from "./acp/client-process.js";
 import { resolveInstalledExecutable } from "./spawn-command-options.js";
 
+// Changing a range changes the built-in command saved in session records: add the
+// previous command to LEGACY_AGENT_COMMANDS in src/acp/builtin-command-migration.ts.
 const ACP_ADAPTER_PACKAGE_RANGES = {
   pi: "^0.0.33",
   codex: "^1.1.5",
-  claude: "^0.76.0",
+  claude: "^0.81.2",
   mux: "^0.28.0",
 } as const;
 

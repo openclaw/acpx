@@ -22,6 +22,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Filesystem/dependencies: update fs-safe for older Linux compatibility and guarded path handling, and refresh development tools and replay-viewer dependencies.
 
+- Claude: update the built-in adapter for current models and keep sessions saved under earlier built-in commands discoverable after upgrades, while preserving custom launchers. Thanks @idvorkin-ai-tools.
+
 ## 0.19.3 - 2026-09-25
 
 ### Highlights

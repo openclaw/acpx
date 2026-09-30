@@ -18,6 +18,8 @@ That is what makes `acpx codex` in `~/repos/api` and `acpx codex` in `~/repos/we
 
 `agentCommand` comes from either the built-in registry, an unknown positional name (treated as a raw command), or `--agent <command>`. Two sessions with different commands are different sessions even if everything else matches.
 
+One exception keeps saved sessions reachable across acpx upgrades. When a built-in agent's default command changes, for example because acpx moves the adapter package range, a record saved under an earlier default of that built-in is read as the current default. The record keeps its conversation, is found by the built-in name, and saves the current command the next time it is written. Only exact earlier defaults qualify, and only when the record's saved arguments are absent, match that earlier command, or match the current default; a record with any other launcher keeps its saved command and arguments. Passing an earlier default with `--agent` matches both records still saved under that string and records read as the current default. When more than one record matches a scope this way, the most recently used one is selected, the same rule used for any other match.
+
 Local discovery reads the saved session records and uses their current scope, closed state, IDs, and last-used times. A legacy `index.json` is ignored. In the local store, a record's filename must match its encoded local ID; mismatched copies are ignored. Lookup by an exact local record ID reads that file directly; other lookups scan the saved records. Concurrent writes are observed per record, rather than as one atomic snapshot of the entire store.
 
 ## Lifecycle commands

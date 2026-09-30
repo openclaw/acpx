@@ -5,6 +5,7 @@
 - Upstream: https://github.com/agentclientprotocol/claude-agent-acp
 - ACPX pins the built-in package range so fresh installs pick up Claude model and ACP adapter fixes without depending on a global adapter binary.
 - Update ACPX to pick up changes to the supported adapter range in `src/agent-registry.ts`.
+- Sessions saved under an earlier ACPX-owned adapter range stay in the `claude` scope after an upgrade and resume on the current adapter. Records saved with a custom launcher keep it.
 - Model switches can change the available effort controls. ACPX updates existing saved effort selections from the accepted response and removes selections whose controls disappear.
 - Saved model and config selections are restored after reconnect, without replacing the conversation.
 
