@@ -36,6 +36,8 @@ acpx claude -s review 'review the current diff'
 
 Use `--append-system-prompt` instead to append instructions to Claude's default system prompt. The override is saved with the session. `-s` selects an existing session; running `sessions new` again in the same scope closes the prior local record and creates a fresh session.
 
+Both system-prompt flags also apply to `flow run`, including persistent and isolated ACP nodes using Claude.
+
 Embedded callers can supply raw nonempty replacement or append text through `SessionAgentOptions.systemPrompt`. ACPX preserves that text exactly in saved options and `session/new`, `session/load`, and `session/resume` metadata, including whitespace-only text. CLI prompt flags trim surrounding whitespace and reject whitespace-only values.
 
 ## Embedded inspection

@@ -3,6 +3,7 @@ import type { AcpClient, SessionCreateResult } from "../acp/client.js";
 import {
   assertRequestedModelSupported,
   modelStateFromConfigOptions,
+  resolveRequestedModelId,
 } from "../acp/model-support.js";
 import { withTimeout, type AcpControlAuthority } from "../async-control.js";
 
@@ -24,7 +25,12 @@ export async function applyRequestedModelIfAdvertised(params: {
   onWarning?: (message: string) => void;
 }): Promise<
   | { applied: false; response?: undefined }
-  | { applied: true; modelId: string; response?: SetSessionConfigOptionResponse }
+  | {
+      applied: true;
+      modelId: string;
+      resolvedModelId: string;
+      response?: SetSessionConfigOptionResponse;
+    }
 > {
   const requestedModel =
     typeof params.requestedModel === "string" ? params.requestedModel.trim() : "";
@@ -43,8 +49,9 @@ export async function applyRequestedModelIfAdvertised(params: {
   if (!params.models) {
     return { applied: false };
   }
-  if (params.models.currentModelId === requestedModel) {
-    return { applied: true, modelId: requestedModel };
+  const resolvedModelId = resolveRequestedModelId({ ...params, requestedModel });
+  if (params.models.currentModelId === resolvedModelId) {
+    return { applied: true, modelId: requestedModel, resolvedModelId };
   }
 
   const response = await withTimeout(
@@ -56,5 +63,5 @@ export async function applyRequestedModelIfAdvertised(params: {
     ),
     params.timeoutMs,
   );
-  return { applied: true, modelId: requestedModel, response };
+  return { applied: true, modelId: requestedModel, resolvedModelId, response };
 }

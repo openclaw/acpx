@@ -730,7 +730,7 @@ test("flow run command is present in help output", async () => {
 for (const capability of ["--supports-load-session", "--supports-resume-session"]) {
   test(`sessions new keeps the same resumed record open via ${capability}`, async () => {
     await withTempHome(async (homeDir) => {
-      const resumeId = "same-resume";
+      let resumeId = "same-resume";
       const base = [
         "--agent",
         `${MOCK_AGENT_COMMAND} ${capability}`,
@@ -746,10 +746,16 @@ for (const capability of ["--supports-load-session", "--supports-resume-session"
           { timeoutMs: 10_000 },
         );
         assert.equal(result.code, 0, result.stderr);
+        const createdId = (JSON.parse(result.stdout) as { acpxRecordId: string }).acpxRecordId;
+        if (attempt > 0) {
+          assert.equal(createdId, resumeId);
+        }
+        resumeId = createdId;
         const stored = JSON.parse(
           await fs.readFile(path.join(homeDir, ".acpx", "sessions", `${resumeId}.json`), "utf8"),
-        ) as { closed: boolean };
+        ) as { closed: boolean; acp_session_id: string };
         assert.equal(stored.closed, false, `resume attempt ${attempt + 1}`);
+        assert.equal(stored.acp_session_id, "same-resume");
       }
       const prompted = await runCli([...base, "--ttl", "0", "prompt", "hello"], homeDir, {
         timeoutMs: 10_000,
@@ -807,7 +813,8 @@ test("sessions new --resume-session loads ACP session and stores resumed ids", a
     };
     assert.equal(payload.action, "session_ensured");
     assert.equal(payload.created, true);
-    assert.equal(payload.acpxRecordId, resumeSessionId);
+    assert.ok(typeof payload.acpxRecordId === "string");
+    assert.notEqual(payload.acpxRecordId, resumeSessionId);
     assert.equal(payload.acpxSessionId, resumeSessionId);
     assert.equal(payload.agentSessionId, "resumed-runtime-session");
 
@@ -815,7 +822,7 @@ test("sessions new --resume-session loads ACP session and stores resumed ids", a
       homeDir,
       ".acpx",
       "sessions",
-      `${encodeURIComponent(resumeSessionId)}.json`,
+      `${encodeURIComponent(payload.acpxRecordId)}.json`,
     );
     const storedRecord = JSON.parse(await fs.readFile(storedRecordPath, "utf8")) as {
       acp_session_id?: unknown;
@@ -1021,7 +1028,8 @@ test("sessions ensure --resume-session loads ACP session when creating missing s
       agentSessionId?: unknown;
     };
     assert.equal(payload.created, true);
-    assert.equal(payload.acpxRecordId, resumeSessionId);
+    assert.ok(typeof payload.acpxRecordId === "string");
+    assert.notEqual(payload.acpxRecordId, resumeSessionId);
     assert.equal(payload.acpxSessionId, resumeSessionId);
     assert.equal(payload.agentSessionId, "resumed-runtime-session");
   });

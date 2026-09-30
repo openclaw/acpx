@@ -40,6 +40,43 @@ function context() {
   return { record, client, sessionId: () => record.acpSessionId };
 }
 
+for (const configControl of [false, true]) {
+  test(`acknowledged model alias retains the resolved ID for ${configControl ? "config" : "model"} control`, async (t) => {
+    const base = context();
+    base.record.agentCommand = "cursor-agent --acp";
+    base.record.acpx = {
+      config_options: [
+        {
+          id: "model",
+          name: "Model",
+          type: "select",
+          category: "model",
+          currentValue: "m1",
+          options: [
+            { value: "m1", name: "One" },
+            { value: "gpt-5[thinking]", name: "Thinking" },
+          ],
+        },
+      ],
+    };
+    t.mock.method(base.client, "setSessionModel", async () => ({}));
+    t.mock.method(base.client, "setSessionConfigOption", async () => ({}));
+    const controls = createOwnedSessionControls({
+      ...base,
+      checkpoint: async () => {},
+      retire: async () => {},
+    });
+    if (configControl) {
+      await controls.setSessionConfigOption("model", "gpt-5");
+    } else {
+      await controls.setSessionModel("gpt-5");
+    }
+    assert.equal(base.record.acpx.current_model_id, "gpt-5[thinking]");
+    assert.equal(base.record.acpx.config_options?.[0].currentValue, "gpt-5[thinking]");
+    assert.equal(base.record.acpx.session_options?.model, "gpt-5");
+  });
+}
+
 test("native void response clears the deadline before its checkpoint completes", async (t) => {
   const base = context(),
     checkpoint = deferred<void>();

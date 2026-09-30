@@ -6,6 +6,7 @@
     "command": "node --import tsx --test test/cli-flags.test.ts"
   },
   "concurrency": 1,
+  "ignorePatterns": [".venv/**"],
   "mutate": ["src/cli/flags.ts"],
   "coverageAnalysis": "off",
   "reporters": ["clear-text", "progress"],

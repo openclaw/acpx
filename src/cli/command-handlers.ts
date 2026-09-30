@@ -411,7 +411,10 @@ function printSetConfigOptionResultByFormat(
   },
   format: OutputFormat,
 ): void {
-  const configOptions = result.response.configOptions ?? result.record.acpx?.config_options ?? [];
+  const options = result.response?.configOptions;
+  const configOptions = Array.isArray(options)
+    ? options
+    : (result.record.acpx?.config_options ?? []);
   if (
     emitJsonResult(format, {
       action: "config_set",

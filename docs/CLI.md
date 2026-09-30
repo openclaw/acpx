@@ -388,7 +388,7 @@ Behavior:
 - `sessions new` creates a fresh cwd-scoped default session; a failed creation leaves the previous session open
 - `sessions new --name <name>` creates a fresh named session for cwd
 - creating a fresh session soft-closes the previous open session in that scope (if present)
-- When a requested ACP session ID is also the local ID of an open record for the same resolved command, `sessions new --resume-session <id>` and a creating `sessions ensure --resume-session <id>` retire that record's owner before resuming it, including changes to cwd or name. A successful resume reopens the same record; a failed resume leaves it closed.
+- When `--resume-session <id>` selects an existing local record for the same resolved command, `sessions new` and a creating `sessions ensure` retire that record's owner before loading its associated ACP session, including changes to cwd or name. A successful resume reopens the same record; a failed resume leaves it closed. Resuming a provider session without a matching local record creates a new independent local ID.
 - text and quiet output print the local `acpxRecordId`; JSON output also includes
   `acpxSessionId` and, when the adapter exposes one, `agentSessionId`
 - `sessions ensure` returns the nearest matching active session or creates one for cwd

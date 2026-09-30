@@ -6,7 +6,12 @@ import {
   isAcpQueryClosedBeforeResponseError,
   isAcpResourceNotFoundError,
 } from "../../acp/error-normalization.js";
-import { assertRequestedModelSupported, type SessionModelState } from "../../acp/model-support.js";
+import {
+  assertRequestedModelSupported,
+  resolveRequestedModelId,
+  resolveRequestedConfigOption,
+  type SessionModelState,
+} from "../../acp/model-support.js";
 import {
   assertControlAuthority,
   InterruptedError,
@@ -249,6 +254,11 @@ async function replayDesiredModel(params: {
     }
     // Reassert even an unchanged model: its acknowledgement reconciles saved
     // sibling selections left invalid by earlier model switches.
+    const resolvedModelId = resolveRequestedModelId({
+      requestedModel: params.desiredModelId,
+      models: params.models,
+      agentCommand: params.record.agentCommand,
+    });
     const response = await withTimeout(
       params.client.setSessionModel(
         params.sessionId,
@@ -259,7 +269,12 @@ async function replayDesiredModel(params: {
       params.timeoutMs,
     );
     params.replay.acknowledged = true;
-    params.record.acpx = applyModelSelection(params.record.acpx, params.desiredModelId, response);
+    params.record.acpx = applyModelSelection(
+      params.record.acpx,
+      params.desiredModelId,
+      response,
+      resolvedModelId,
+    );
     const models = advertisedModelState(params.record.acpx);
     if (params.verbose) {
       process.stderr.write(
@@ -342,12 +357,19 @@ async function replayDesiredConfigOptions(params: {
       continue;
     }
     try {
+      const models = advertisedModelState(params.record.acpx);
+      const { modelConfigId, resolvedValue } = resolveRequestedConfigOption({
+        configId,
+        value,
+        models,
+        agentCommand: params.record.agentCommand,
+      });
       const response = await withTimeout(
         params.client.setSessionConfigOption(
           params.sessionId,
           configId,
           value,
-          advertisedModelState(params.record.acpx),
+          models,
           params.replay.authority,
         ),
         params.timeoutMs,
@@ -358,6 +380,8 @@ async function replayDesiredConfigOptions(params: {
         configId,
         value,
         response,
+        modelConfigId,
+        resolvedValue,
       );
       acceptedConfigOptions = params.record.acpx.config_options;
       result = {

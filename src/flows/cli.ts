@@ -12,22 +12,22 @@ import {
   resolvePermissionMode,
   type GlobalFlags,
 } from "../cli/flags.js";
-import { resolvePermissionPolicyFromFlags } from "../cli/invocation-options.js";
+import {
+  resolvePermissionPolicyFromFlags,
+  sessionOptionsFromGlobalFlags,
+} from "../cli/invocation-options.js";
 import { type FlowDefinition, FlowRunner } from "../flows.js";
 import { permissionModeSatisfies } from "../permissions.js";
-import { writePrivateFile } from "../state-files.js";
 import type { PermissionMode } from "../types.js";
 import { isDefinedFlow } from "./authoring.js";
 import { validateFlowDefinition } from "./graph.js";
+import { installFlowRuntimeResolution } from "./module-resolution.js";
 
 type FlowRunFlags = {
   inputJson?: string;
   inputFile?: string;
   defaultAgent?: string;
 };
-
-const FLOW_RUNTIME_SPECIFIER = "acpx/flows";
-const TEXT_MODULE_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"]);
 
 export async function handleFlowRun(
   flowFile: string,
@@ -59,11 +59,7 @@ export async function handleFlowRun(
     ttlMs: globalFlags.ttl,
     verbose: globalFlags.verbose,
     suppressSdkConsoleErrors: outputPolicy.suppressSdkConsoleErrors,
-    sessionOptions: {
-      model: globalFlags.model,
-      allowedTools: globalFlags.allowedTools,
-      maxTurns: globalFlags.maxTurns,
-    },
+    sessionOptions: sessionOptionsFromGlobalFlags(globalFlags),
   });
 
   const result = await runner.run(flow, input, {
@@ -131,57 +127,16 @@ async function readFlowInput(flags: FlowRunFlags): Promise<unknown> {
 
 async function loadFlowModule(flowPath: string): Promise<FlowDefinition> {
   const extension = path.extname(flowPath).toLowerCase();
-  const prepared = await prepareFlowModuleImport(flowPath, extension);
-  try {
-    const module = await loadFlowRuntimeModule(prepared.flowUrl, extension);
-
-    const candidate = findFlowDefinition(module);
-    if (!candidate) {
-      throw new Error(
-        `Flow module must export default defineFlow({...}) from "acpx/flows": ${flowPath}`,
-      );
-    }
-    validateFlowDefinition(candidate);
-    return candidate;
-  } finally {
-    await prepared.cleanup?.();
+  installFlowRuntimeResolution(pathToFileURL(resolveFlowRuntimeImportSpecifier()).href);
+  const module = await loadFlowRuntimeModule(pathToFileURL(flowPath).href, extension);
+  const candidate = findFlowDefinition(module);
+  if (!candidate) {
+    throw new Error(
+      `Flow module must export default defineFlow({...}) from "acpx/flows": ${flowPath}`,
+    );
   }
-}
-
-async function prepareFlowModuleImport(
-  flowPath: string,
-  extension: string,
-): Promise<{
-  flowUrl: string;
-  cleanup?: () => Promise<void>;
-}> {
-  const flowUrl = pathToFileURL(flowPath).href;
-  if (!TEXT_MODULE_EXTENSIONS.has(extension)) {
-    return { flowUrl };
-  }
-
-  const source = await fs.readFile(flowPath, "utf8");
-  if (!source.includes(FLOW_RUNTIME_SPECIFIER)) {
-    return { flowUrl };
-  }
-
-  const runtimeSpecifier = resolveFlowRuntimeImportSpecifier();
-  const rewritten = source.replaceAll(
-    /(["'])acpx\/flows\1/g,
-    (_match, quote: string) => `${quote}${runtimeSpecifier}${quote}`,
-  );
-  if (rewritten === source) {
-    return { flowUrl };
-  }
-
-  const tempPath = path.join(path.dirname(flowPath), `.acpx-flow-load-${randomUUID()}${extension}`);
-  await writePrivateFile(tempPath, rewritten, { privateDirectory: false });
-  return {
-    flowUrl: pathToFileURL(tempPath).href,
-    cleanup: async () => {
-      await fs.rm(tempPath, { force: true });
-    },
-  };
+  validateFlowDefinition(candidate);
+  return candidate;
 }
 
 function resolveFlowRuntimeImportSpecifier(): string {
@@ -229,6 +184,7 @@ async function loadFlowRuntimeModule(flowUrl: string, extension: string): Promis
 
 function findFlowDefinition(module: FlowModule): FlowDefinition | null {
   const candidates = [
+    module,
     module.default,
     module["module.exports"],
     getNestedDefault(module.default),

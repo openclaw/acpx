@@ -149,6 +149,22 @@ export function resolveRequestedModelId(params: {
   return candidates.length === 1 ? candidates[0] : params.requestedModel;
 }
 
+export function resolveRequestedConfigOption(params: {
+  configId: string;
+  value: string;
+  models: SessionModelState | undefined;
+  agentCommand?: string;
+}): { modelConfigId: string | undefined; resolvedValue: string } {
+  const modelConfigId = params.models?.configId;
+  return {
+    modelConfigId,
+    resolvedValue:
+      modelConfigId === params.configId
+        ? resolveRequestedModelId({ ...params, requestedModel: params.value })
+        : params.value,
+  };
+}
+
 function isCursorAcpCommandForModelAlias(agentCommand: string | undefined): boolean {
   if (!agentCommand) {
     return false;

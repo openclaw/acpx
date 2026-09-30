@@ -1,3 +1,4 @@
+import { resolveRequestedConfigOption, resolveRequestedModelId } from "../../acp/model-support.js";
 import { TimeoutError, withTimeout } from "../../async-control.js";
 import {
   withConnectedSession,
@@ -141,11 +142,16 @@ export async function runSessionSetModelDirect(
       { ...options, replacingConfigOption: { key: "model" } },
       async ({ client, sessionId, record }) => {
         const models = advertisedModelState(record.acpx);
+        const resolvedModelId = resolveRequestedModelId({
+          requestedModel: options.modelId,
+          models,
+          agentCommand: record.agentCommand,
+        });
         const response = await withTimeout(
           client.setSessionModel(sessionId, options.modelId, models),
           options.timeoutMs,
         );
-        record.acpx = applyModelSelection(record.acpx, options.modelId, response);
+        record.acpx = applyModelSelection(record.acpx, options.modelId, response, resolvedModelId);
         return response;
       },
     ),
@@ -162,6 +168,12 @@ export async function runSessionSetConfigOptionDirect(
       { ...options, replacingConfigOption: { key: options.configId } },
       async ({ client, sessionId, record }) => {
         const models = advertisedModelState(record.acpx);
+        const { modelConfigId, resolvedValue } = resolveRequestedConfigOption({
+          configId: options.configId,
+          value: options.value,
+          models,
+          agentCommand: record.agentCommand,
+        });
         const response = await withTimeout(
           client.setSessionConfigOption(sessionId, options.configId, options.value, models),
           options.timeoutMs,
@@ -171,7 +183,8 @@ export async function runSessionSetConfigOptionDirect(
           options.configId,
           options.value,
           response,
-          models?.configId,
+          modelConfigId,
+          resolvedValue,
         );
         return response;
       },

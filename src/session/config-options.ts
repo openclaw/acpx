@@ -26,7 +26,7 @@ export function applyConfigOptionsToRecord(
   result: ConfigOptionsResult | undefined,
 ): void {
   const configOptions = result?.configOptions;
-  if (!configOptions) {
+  if (!Array.isArray(configOptions)) {
     return;
   }
 
@@ -39,17 +39,17 @@ export function applyInitialModelSelection(
   modelApplication: Awaited<ReturnType<typeof applyRequestedModelIfAdvertised>>,
 ): void {
   applyConfigOptionsToRecord(record, modelApplication.response);
+  const configOptions = modelApplication.response?.configOptions;
   syncAdvertisedModelState(
     record,
-    modelApplication.response?.configOptions !== undefined
-      ? modelStateFromConfigOptions(modelApplication.response.configOptions)
-      : originalModels,
+    Array.isArray(configOptions) ? modelStateFromConfigOptions(configOptions) : originalModels,
   );
   if (modelApplication.applied) {
     record.acpx = applyModelSelection(
       record.acpx,
       modelApplication.modelId,
       modelApplication.response,
+      modelApplication.resolvedModelId,
     );
   }
 }
@@ -60,8 +60,8 @@ function applyAcceptedConfigOptions(
   selection: { configId: string | undefined; value: string },
 ): SessionAcpxState {
   const next = cloneSessionAcpxState(state) ?? {};
-  if (response?.configOptions === undefined) {
-    // Omission is an acknowledgement, not an explicit withdrawal of the catalog.
+  if (!Array.isArray(response?.configOptions)) {
+    // Only a list can replace the catalog; other replies acknowledge the selection.
     const option = next.config_options?.find((entry) => entry.id === selection.configId);
     if (option) {
       option.currentValue = selection.value;
@@ -102,16 +102,28 @@ export function applyModelSelection(
   state: SessionAcpxState | undefined,
   modelId: string,
   response: SetSessionConfigOptionResponse | undefined,
+  resolvedModelId = modelId,
 ): SessionAcpxState {
   const modelConfigId = advertisedModelState(state)?.configId;
   const next = applyAcceptedConfigOptions(state, response, {
     configId: modelConfigId,
-    value: modelId,
+    value: resolvedModelId,
   });
   next.session_options = { ...next.session_options, model: modelId };
-  next.current_model_id = currentModelIdFromSetModelResponse(response, modelId);
+  next.current_model_id = currentModelIdFromSetModelResponse(response, resolvedModelId);
   clearDesiredConfigOption(next, modelConfigId ?? advertisedModelState(next)?.configId);
   return next;
+}
+
+function isModelConfigSelection(
+  configId: string,
+  response: SetSessionConfigOptionResponse,
+  modelConfigId: string | undefined,
+): boolean {
+  return (
+    configId === modelConfigId ||
+    configId === modelStateFromConfigOptions(response?.configOptions)?.configId
+  );
 }
 
 export function applyConfigOptionSelection(
@@ -120,12 +132,10 @@ export function applyConfigOptionSelection(
   value: string,
   response: SetSessionConfigOptionResponse,
   modelConfigId = advertisedModelState(state)?.configId,
+  resolvedValue = value,
 ): SessionAcpxState {
-  if (
-    configId === modelConfigId ||
-    configId === modelStateFromConfigOptions(response.configOptions)?.configId
-  ) {
-    return applyModelSelection(state, value, response);
+  if (isModelConfigSelection(configId, response, modelConfigId)) {
+    return applyModelSelection(state, value, response, resolvedValue);
   }
   const next = cloneSessionAcpxState(state) ?? {};
   next.desired_config_options = { ...next.desired_config_options, [configId]: value };

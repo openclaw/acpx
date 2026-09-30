@@ -250,7 +250,21 @@ function normalizeResponseConfigOptions(
   if (!response || !("configOptions" in response)) {
     return undefined;
   }
-  return response.configOptions ?? [];
+  return Array.isArray(response.configOptions) ? response.configOptions : undefined;
+}
+
+function normalizeConfigOptionAcknowledgement(
+  response: SetSessionConfigOptionResponse | undefined,
+): SetSessionConfigOptionResponse {
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    return {} as SetSessionConfigOptionResponse;
+  }
+  if (Array.isArray(response.configOptions)) {
+    return response;
+  }
+  const acknowledgement: Partial<SetSessionConfigOptionResponse> = { ...response };
+  delete acknowledgement.configOptions;
+  return acknowledgement as SetSessionConfigOptionResponse;
 }
 
 function toReconnectedSessionResult(
@@ -261,7 +275,7 @@ function toReconnectedSessionResult(
     agentSessionId: extractAgentSessionId(response?._meta),
     configOptions,
     models: modelStateFromSessionResponse({ configOptions, response }),
-    configOptionsPresent: hasResponseField(response, "configOptions"),
+    configOptionsPresent: configOptions !== undefined,
     legacyModelMetadataPresent: hasResponseField(response, "models"),
   };
 }
@@ -1208,7 +1222,7 @@ export class AcpClient {
       agentSessionId: extractAgentSessionId(result._meta),
       configOptions,
       models,
-      configOptionsPresent: hasResponseField(result, "configOptions"),
+      configOptionsPresent: configOptions !== undefined,
       legacyModelMetadataPresent: hasResponseField(result, "models"),
     };
   }
@@ -1487,7 +1501,7 @@ export class AcpClient {
     const resolvedValue =
       models?.configId === configId ? this.resolveSessionModelId(value, models) : value;
     const connection = this.getConnection();
-    return await this.runConnectionRequest(
+    const response = await this.runConnectionRequest(
       () =>
         connection.agent.request(methods.agent.session.setConfigOption, {
           sessionId,
@@ -1502,6 +1516,7 @@ export class AcpClient {
           `for "${configId}"="${value}"`,
         ),
     );
+    return normalizeConfigOptionAcknowledgement(response);
   }
 
   async setSessionModel(
@@ -1555,7 +1570,7 @@ export class AcpClient {
       authority,
       (error) => this.throwSessionModelError("session/set_config_option", modelId, error),
     );
-    return response;
+    return normalizeConfigOptionAcknowledgement(response);
   }
 
   private async setSessionModelThroughLegacyMethod(

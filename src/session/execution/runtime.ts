@@ -6,6 +6,7 @@ import {
   isRetryablePromptError,
   normalizeOutputError,
 } from "../../acp/error-normalization.js";
+import { resolveRequestedConfigOption } from "../../acp/model-support.js";
 import {
   assertControlAuthority,
   InterruptedError,
@@ -282,7 +283,12 @@ async function applyPromptModelIfAdvertised(params: {
       : (message) => process.stderr.write(`[acpx] warning: ${message}\n`),
   });
   if (result.applied) {
-    params.record.acpx = applyModelSelection(params.record.acpx, requestedModel, result.response);
+    params.record.acpx = applyModelSelection(
+      params.record.acpx,
+      requestedModel,
+      result.response,
+      result.resolvedModelId,
+    );
   }
 }
 
@@ -1050,8 +1056,10 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     record.lastUsedAt = now;
     record.closed = false;
     record.closedAt = undefined;
-    record.protocolVersion = client.initializeResult?.protocolVersion;
-    record.agentCapabilities = client.initializeResult?.agentCapabilities;
+    if (client.initializeResult) {
+      record.protocolVersion = client.initializeResult.protocolVersion;
+      record.agentCapabilities = client.initializeResult.agentCapabilities;
+    }
     applyConversation(record, conversation);
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
     stopTotalTimer();
@@ -1063,15 +1071,23 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     const { sessionId: activeSessionId, resumed, loadError } = await connectForPrompt();
     options.ownedSignal?.throwIfAborted();
 
-    await applyPromptModelIfAdvertised({
-      client,
-      sessionId: activeSessionId,
-      requestedModel: options.sessionOptions?.model,
-      record,
-      timeoutMs: options.timeoutMs,
-      suppressWarnings: options.suppressSdkConsoleErrors,
-      signal: options.ownedSignal,
-    });
+    try {
+      await applyPromptModelIfAdvertised({
+        client,
+        sessionId: activeSessionId,
+        requestedModel: options.sessionOptions?.model,
+        record,
+        timeoutMs: options.timeoutMs,
+        suppressWarnings: options.suppressSdkConsoleErrors,
+        signal: options.ownedSignal,
+      });
+    } catch (error) {
+      if (error instanceof TimeoutError) {
+        // A late model acknowledgement can change the adapter after this turn fails.
+        closeClientOnExit = true;
+      }
+      throw error;
+    }
     options.ownedSignal?.throwIfAborted();
 
     output.setContext({
@@ -1345,16 +1361,23 @@ export async function runOnce(
             controlState,
             modelApplication.modelId,
             modelApplication.response,
+            modelApplication.resolvedModelId,
           );
         }
         for (const configOption of options.configOptions ?? []) {
           assertControlAuthority(authority);
+          const models = advertisedModelState(controlState);
+          const { modelConfigId, resolvedValue } = resolveRequestedConfigOption({
+            ...configOption,
+            models,
+            agentCommand: options.agentCommand,
+          });
           const response = await withTimeout(
             client.setSessionConfigOption(
               sessionId,
               configOption.configId,
               configOption.value,
-              advertisedModelState(controlState),
+              models,
               authority,
             ),
             options.timeoutMs,
@@ -1364,6 +1387,8 @@ export async function runOnce(
             configOption.configId,
             configOption.value,
             response,
+            modelConfigId,
+            resolvedValue,
           );
         }
 

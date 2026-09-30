@@ -448,6 +448,18 @@ test("buildAgentSpawnCommand normalizes forward-slash batch paths for cmd.exe", 
   });
 });
 
+test("batch arguments preserve complete backslash runs before quotes and at the end", () => {
+  const cases = [
+    [String.raw`t\\`, String.raw`^"t\\\\^"`],
+    [String.raw`a\\"b`, String.raw`^"a\\\\\^"b^"`],
+    [String.raw`a\\\"b`, String.raw`^"a\\\\\\\^"b^"`],
+  ];
+  for (const [input, escaped] of cases) {
+    const result = buildAgentSpawnCommand("agent.cmd", [input, "next"], "win32", {});
+    assert.equal(result.args[3], `"agent.cmd ${escaped} ^"next^""`);
+  }
+});
+
 test("buildSpawnCommandOptions enables shell for PATH-resolved .cmd wrappers on Windows", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-windows-spawn-"));
   const env = {

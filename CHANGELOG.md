@@ -26,6 +26,17 @@ Repo: https://github.com/openclaw/acpx
 
 - Development dependencies: patch the brace-expansion denial-of-service and fast-uri header-injection advisories in the pinned toolchain overrides.
 
+- Sessions: keep local records and flow histories separate when adapters reuse session IDs, including concurrent provider-session resumes, while preserving existing local handles. Thanks @odrobnik.
+- Session controls: retain the resolved model ID after an acknowledgement while preserving the requested alias for reconnect. Thanks @odrobnik.
+- Session controls: tolerate omitted or non-list option catalogs without losing accepted selections or failing with a TypeError. Thanks @odrobnik.
+- Sessions: retire an adapter when a prompt's model-selection request times out, so later turns reconnect to known state. Thanks @odrobnik.
+- Flows: preserve initialized protocol and capability metadata when a persistent prompt times out or is cancelled. Thanks @odrobnik.
+- Flows: forward system-prompt replacement and append flags to persistent and isolated ACP nodes. Thanks @odrobnik.
+- Flows: resolve runtime imports throughout helper modules without rewriting string data or requiring a writable flow directory. Thanks @odrobnik.
+- Flow shells: collect final output after process exit with a bounded drain for inherited pipes, and reject invalid stdin before spawning. Thanks @odrobnik.
+- Flow timers: reject non-finite or overflowing node and shell deadlines before they become immediate timeouts. Thanks @odrobnik.
+- Windows: preserve complete backslash runs before quotes and at the end of batch-wrapper arguments. Thanks @odrobnik.
+
 ## 0.19.3 - 2026-09-25
 
 ### Highlights

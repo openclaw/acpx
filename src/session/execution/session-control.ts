@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { runTimedExecFile, splitCommandLine } from "../../acp/client-process.js";
+import { resolveRequestedConfigOption, resolveRequestedModelId } from "../../acp/model-support.js";
 import type {
   SessionRecord,
   SessionSetConfigOptionResult,
@@ -9,6 +10,7 @@ import type {
 } from "../../types.js";
 import { applyConfigOptionSelection, applyModelSelection } from "../config-options.js";
 import { setDesiredModeId } from "../mode-preference.js";
+import { advertisedModelState } from "../model-state.js";
 import { resolveSessionRecord, writeSessionRecord, isoNow } from "../persistence.js";
 import {
   isProcessAlive,
@@ -123,6 +125,11 @@ export async function setSessionModelOnOwner(
       record.acpx,
       options.modelId,
       submittedToOwner.value.response,
+      resolveRequestedModelId({
+        requestedModel: options.modelId,
+        models: advertisedModelState(record.acpx),
+        agentCommand: record.agentCommand,
+      }),
     );
     await writeSessionRecord(record);
   }
@@ -172,11 +179,20 @@ export async function setSessionConfigOptionOnOwner(
   }
   const record = await resolveSessionRecord(options.sessionId);
   if (!ownerResponse.persistsControlState) {
+    const models = advertisedModelState(record.acpx);
+    const { modelConfigId, resolvedValue } = resolveRequestedConfigOption({
+      configId: options.configId,
+      value: options.value,
+      models,
+      agentCommand: record.agentCommand,
+    });
     record.acpx = applyConfigOptionSelection(
       record.acpx,
       options.configId,
       options.value,
       ownerResponse.value,
+      modelConfigId,
+      resolvedValue,
     );
     await writeSessionRecord(record);
   }

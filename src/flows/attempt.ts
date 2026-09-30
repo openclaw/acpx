@@ -1,5 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { TimeoutError } from "../async-control.js";
+import { resolveFlowTimeoutMs } from "./timeout.js";
 
 type OwnedOutcome = { ok: true } | { ok: false; error: unknown };
 
@@ -31,13 +32,11 @@ export class FlowAttempt {
     this.attemptId = options.attemptId;
     this.startedAt = options.startedAt;
     this.signal = this.controller.signal;
-    if (options.timeoutMs != null && options.timeoutMs > 0) {
-      this.timeoutMs = options.timeoutMs;
-      this.deadlineAt = performance.now() + options.timeoutMs;
-      this.timer = setTimeout(
-        () => this.cancel(new TimeoutError(options.timeoutMs!)),
-        options.timeoutMs,
-      );
+    const timeoutMs = resolveFlowTimeoutMs(options.timeoutMs);
+    if (timeoutMs !== undefined) {
+      this.timeoutMs = timeoutMs;
+      this.deadlineAt = performance.now() + timeoutMs;
+      this.timer = setTimeout(() => this.cancel(new TimeoutError(timeoutMs)), timeoutMs);
     }
   }
 

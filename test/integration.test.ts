@@ -3098,8 +3098,11 @@ test("integration: prompt reconnect uses session/resume when advertised", async 
       assert.equal(created.code, 0, created.stderr);
       const createdPayload = JSON.parse(created.stdout.trim()) as {
         acpxRecordId?: string;
+        acpxSessionId?: string;
       };
       assert.equal(typeof createdPayload.acpxRecordId, "string");
+      assert.equal(typeof createdPayload.acpxSessionId, "string");
+      assert.notEqual(createdPayload.acpxRecordId, createdPayload.acpxSessionId);
 
       const prompt = await runCli(
         [...resumeAgentArgs, "--format", "json", "prompt", "echo resume-method"],
@@ -3114,7 +3117,7 @@ test("integration: prompt reconnect uses session/resume when advertised", async 
       assert(resumeRequest, `expected session/resume request in output:\n${prompt.stdout}`);
       assert.equal(
         (resumeRequest.params as { sessionId?: unknown } | undefined)?.sessionId,
-        createdPayload.acpxRecordId,
+        createdPayload.acpxSessionId,
       );
       assert.equal(
         messages.some(
@@ -4249,9 +4252,12 @@ test("integration: prompt recovers when loadSession fails on empty session witho
       assert.equal(created.code, 0, created.stderr);
       const createdEvent = JSON.parse(created.stdout.trim()) as {
         acpxRecordId?: string;
+        acpxSessionId?: string;
       };
       const originalSessionId = createdEvent.acpxRecordId;
+      const originalAcpSessionId = createdEvent.acpxSessionId;
       assert.equal(typeof originalSessionId, "string");
+      assert.equal(typeof originalAcpSessionId, "string");
 
       const prompt = await runCli(
         [
@@ -4296,7 +4302,7 @@ test("integration: prompt recovers when loadSession fails on empty session witho
         messages?: unknown[];
       };
 
-      assert.notEqual(storedRecord.acp_session_id, originalSessionId);
+      assert.notEqual(storedRecord.acp_session_id, originalAcpSessionId);
       const messages = Array.isArray(storedRecord.messages) ? storedRecord.messages : [];
       assert.equal(
         messages.some(
@@ -4448,9 +4454,12 @@ test("integration: prompt recovers when loadSession returns not found without em
       assert.equal(created.code, 0, created.stderr);
       const createdEvent = JSON.parse(created.stdout.trim()) as {
         acpxRecordId?: string;
+        acpxSessionId?: string;
       };
       const originalSessionId = createdEvent.acpxRecordId;
+      const originalAcpSessionId = createdEvent.acpxSessionId;
       assert.equal(typeof originalSessionId, "string");
+      assert.equal(typeof originalAcpSessionId, "string");
 
       const prompt = await runCli(
         [
@@ -4494,7 +4503,7 @@ test("integration: prompt recovers when loadSession returns not found without em
       const storedRecord = JSON.parse(await fs.readFile(storedRecordPath, "utf8")) as {
         acp_session_id?: string;
       };
-      assert.notEqual(storedRecord.acp_session_id, originalSessionId);
+      assert.notEqual(storedRecord.acp_session_id, originalAcpSessionId);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -5185,7 +5194,8 @@ for (const connection of ["load", "resume"]) {
     for (const fails of [false, true]) {
       test(`integration: ${scenario.operation} same-ID ${connection} retires its ${scenario.scope}-scope warm owner (fails: ${fails})`, async () => {
         await withTempHome(async (homeDir) => {
-          const recordId = "same-resume-warm";
+          const nativeId = "same-resume-warm";
+          let recordId = nativeId;
           const destination = scenario.scope === "same" ? homeDir : path.join(homeDir, "other");
           await fs.mkdir(destination, { recursive: true });
           const name = scenario.scope === "same" ? undefined : "moved";
@@ -5201,7 +5211,7 @@ for (const connection of ["load", "resume"]) {
             "--format",
             "json",
           ];
-          const recordPath = path.join(homeDir, ".acpx", "sessions", `${recordId}.json`);
+          let recordPath = path.join(homeDir, ".acpx", "sessions", `${recordId}.json`);
           const readRecord = async () => {
             const record = parseSessionRecord(JSON.parse(await fs.readFile(recordPath, "utf8")));
             assert.ok(record);
@@ -5222,6 +5232,8 @@ for (const connection of ["load", "resume"]) {
               homeDir,
             );
             assert.equal(created.code, 0, JSON.stringify(created));
+            recordId = (JSON.parse(created.stdout) as { acpxRecordId: string }).acpxRecordId;
+            recordPath = path.join(homeDir, ".acpx", "sessions", `${recordId}.json`);
             const warm = await runCli([...base(homeDir), "prompt", "echo warm-owner"], homeDir);
             assert.equal(warm.code, 0, JSON.stringify(warm));
             const before = await rememberOwner();
@@ -5243,7 +5255,7 @@ for (const connection of ["load", "resume"]) {
             }
             const after = await readRecord();
             assert.equal(after.acpxRecordId, recordId);
-            assert.equal(after.acpSessionId, recordId);
+            assert.equal(after.acpSessionId, nativeId);
             assert.equal(after.closed, fails);
             assert.equal(after.pid, undefined);
             assert.equal(after.cwd, fails ? before.cwd : destination);

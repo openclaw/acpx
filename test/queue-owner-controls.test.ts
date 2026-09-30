@@ -24,7 +24,7 @@ const [logPath, releasePath] = process.argv.slice(2);
 let mode = 'auto', model = 'default-model', effort = 'medium';
 const send = value => process.stdout.write(JSON.stringify({jsonrpc:'2.0',...value})+'\\n');
 const options = () => [
-  {id:'model', name:'Model', category:'model', type:'select', currentValue:model, options:['default-model','smart-model'].map(value=>({value,name:value}))},
+  {id:'model', name:'Model', category:'model', type:'select', currentValue:model, options:['default-model','smart-model','slow-model'].map(value=>({value,name:value}))},
   {id:'effort', name:'Effort', type:'select', currentValue:effort, options:['medium','high'].map(value=>({value,name:value}))},
 ];
 readline.createInterface({input:process.stdin}).on('line', line => {
@@ -36,6 +36,7 @@ readline.createInterface({input:process.stdin}).on('line', line => {
   else if(method==='session/new') send({id,error:{code:-32603,message:'Unexpected fresh session'}});
   else if(method==='session/set_mode'){mode=params.modeId;reply({});}
   else if(method==='session/set_config_option'){
+    if(params.value==='slow-model') return;
     if(params.configId==='model')model=params.value;
     else if(params.configId==='effort')effort=params.value;
     reply({configOptions:options()});
@@ -49,6 +50,60 @@ readline.createInterface({input:process.stdin}).on('line', line => {
 `;
 
 type BackendState = { pid: number; mode: string; model: string; effort: string };
+
+test(
+  "a timed-out prompt model request retires the adapter before the next turn",
+  { timeout: 20_000 },
+  async () => {
+    await withTempHome("acpx-model-timeout-", async (home) => {
+      const agent = path.join(home, "agent.mjs");
+      await fs.writeFile(agent, AGENT);
+      const record = makeSessionRecord({
+        acpxRecordId: "model-timeout-record",
+        acpSessionId: "saved-provider",
+        cwd: home,
+        ...normalizeAgentCommandInput([
+          process.execPath,
+          agent,
+          path.join(home, "wire.jsonl"),
+          path.join(home, "release"),
+        ]),
+      });
+      await writeSessionRecordFile(home, record);
+      const messages: AcpJsonRpcMessage[] = [];
+      const options = {
+        sessionId: record.acpxRecordId,
+        prompt: [{ type: "text" as const, text: "state" }],
+        permissionMode: "deny-all" as const,
+        ttlMs: 60_000,
+        timeoutMs: 5_000,
+        queueOwnerArgs: [fileURLToPath(new URL("../src/cli.js", import.meta.url)), "__queue-owner"],
+        outputFormatter: capture(messages),
+      };
+      try {
+        await sendSession(options);
+        const first = backendState(messages);
+        messages.length = 0;
+        await assert.rejects(
+          sendSession({ ...options, timeoutMs: 500, sessionOptions: { model: "slow-model" } }),
+          /Timed out/,
+        );
+        assert.equal(
+          isProcessAlive(first.pid),
+          false,
+          "unresolved model request must not retain its adapter",
+        );
+        messages.length = 0;
+        await sendSession(options);
+        const after = backendState(messages);
+        assert.notEqual(after.pid, first.pid);
+        assert.equal(after.model, "default-model");
+      } finally {
+        await closeSession(record.acpxRecordId);
+      }
+    });
+  },
+);
 
 type DirectionalDelivery = {
   message: AcpJsonRpcMessage;

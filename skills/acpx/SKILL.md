@@ -301,7 +301,7 @@ Behavior:
 - `--ttl <seconds>`: queue owner idle TTL before shutdown (default `300`, `0` disables TTL)
 - `--model <id>`: request an agent model during session creation; non-Claude agents must advertise a model config option or legacy `models` metadata
 - `--system-prompt <text>`: replace the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt`; persisted in `session_options.system_prompt` so reuse keeps the override. Other agents ignore the field.
-- `--append-system-prompt <text>`: append text to the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt.append`; same persistence rules as `--system-prompt`.
+- `--append-system-prompt <text>`: append text to the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt.append`; same persistence rules as `--system-prompt`. Both system-prompt flags also apply to persistent and isolated ACP nodes in `flow run`.
 - `--allowed-tools <list>`: comma-separated tool whitelist (use `""` for no tools)
 - `--max-turns <count>`: cap session turn count
 - `--prompt-retries <count>`: retry failed prompt turns on transient errors (default `0`); cancelling a queued turn stops remaining attempts, while already-received final responses keep their outcome
@@ -314,6 +314,8 @@ advertised ID always wins. Only Cursor accepts a bare model name through a uniqu
 advertised bracketed variant; unknown or ambiguous names are rejected before the
 model change. This rule uses the current connected catalog for `set model`, embedded
 `setModel`, and model selections through `setConfigOption`, including after reconnect.
+
+An acknowledged model alias is saved as the resolved current model ID; its original spelling remains the preference replayed on reconnect. Non-list config catalogs are treated as acknowledgements, while an explicit empty list withdraws the catalog.
 
 Permission flags are mutually exclusive.
 

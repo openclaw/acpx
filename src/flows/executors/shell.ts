@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { InterruptedError, TimeoutError } from "../../async-control.js";
 import type { ShellActionExecution, ShellActionResult } from "../runtime.js";
+import { resolveFlowTimeoutMs } from "../timeout.js";
 import type { FlowShellExecution, FlowShellResult } from "../types.js";
 import { createShellOutputCapture, validateShellActionMaxBufferBytes } from "./shell-output.js";
 import { hasShellProcesses, stopShellProcess } from "./shell-process.js";
@@ -50,10 +51,7 @@ function createShellFailureError(
  * Positive values arm SIGTERM/SIGKILL after that many ms.
  */
 export function resolveShellActionTimeoutMs(timeoutMs: number | undefined): number | undefined {
-  if (timeoutMs == null || !(timeoutMs > 0)) {
-    return undefined;
-  }
-  return timeoutMs;
+  return resolveFlowTimeoutMs(timeoutMs);
 }
 
 export type ShellProcessOwner = {
@@ -120,7 +118,9 @@ function waitForShellResult(
 
   return new Promise<FlowShellResult>((resolve, reject) => {
     let settled = false;
+    let drainDeadline: NodeJS.Timeout | undefined;
     const fail = (error: unknown) => {
+      clearTimeout(drainDeadline);
       settled = true;
       reject(error);
     };
@@ -145,7 +145,11 @@ function waitForShellResult(
     });
 
     child.once("error", fail);
-    child.once(mode === "node" ? "exit" : "close", (exitCode, signal) => {
+    const finish = (exitCode: number | null, signal: NodeJS.Signals | null) => {
+      clearTimeout(drainDeadline);
+      if (settled) {
+        return;
+      }
       settled = true;
       if (mode === "node" && !termination.cancelled()) {
         // Keep inherited pipes draining without holding a completed host alive.
@@ -166,7 +170,17 @@ function waitForShellResult(
         timedOut: mode === "node" ? termination.cancelled() : termination.timedOut(),
       };
       resolve(result);
-    });
+    };
+    child.once("close", finish);
+    if (mode === "node") {
+      child.once("exit", (exitCode, signal) => {
+        if (settled) {
+          return;
+        }
+        // Drain the wrapper's last writes, but bound inherited descendant pipes.
+        drainDeadline = setTimeout(() => finish(exitCode, signal), 100);
+      });
+    }
   });
 }
 
@@ -297,6 +311,9 @@ async function runShellProcess(
   const startMs = Date.now();
   const timeoutMs = resolveShellActionTimeoutMs(spec.timeoutMs);
   validateShellActionMaxBufferBytes(spec.maxBufferBytes);
+  if (spec.stdin !== undefined && typeof spec.stdin !== "string") {
+    throw new TypeError("stdin must be a string");
+  }
   const child = spawn(spec.command, args, {
     cwd,
     env: {
@@ -311,11 +328,14 @@ async function runShellProcess(
 
   const termination = createShellTermination(child, timeoutMs, options);
   const finish = waitForShellResult(child, spec, args, cwd, startMs, termination, mode);
-  writeShellStdin(child, spec.stdin);
   try {
+    writeShellStdin(child, spec.stdin);
     const result = await Promise.race([finish, termination.cleanupFailure]);
     throwIfShellCancelled(options.signal, mode);
     return result;
+  } catch (error) {
+    await termination.cancel("SIGTERM");
+    throw error;
   } finally {
     await termination.dispose();
   }

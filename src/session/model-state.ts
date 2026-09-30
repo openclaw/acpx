@@ -70,6 +70,9 @@ export function applyConfigOptionsModelState(
   state: SessionAcpxState,
   configOptions: SessionConfigOption[],
 ): void {
+  if (!Array.isArray(configOptions)) {
+    return;
+  }
   const previousConfigModels = modelStateFromConfigOptions(state.config_options);
   const preservesLegacyControl =
     state.model_control === "legacy_set_model" ||

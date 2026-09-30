@@ -220,8 +220,8 @@ test("resolveShellActionTimeoutMs treats non-positive as no deadline", () => {
   assert.equal(resolveShellActionTimeoutMs(0), undefined);
   assert.equal(resolveShellActionTimeoutMs(-1), undefined);
   assert.equal(resolveShellActionTimeoutMs(50), 50);
-  assert.equal(resolveShellActionTimeoutMs(Number.NaN), undefined);
-  assert.equal(resolveShellActionTimeoutMs(Infinity), Infinity);
+  assert.throws(() => resolveShellActionTimeoutMs(Number.NaN), /timeoutMs/);
+  assert.throws(() => resolveShellActionTimeoutMs(Infinity), /timeoutMs/);
 });
 
 test("runShellAction treats timeoutMs 0 as no deadline", async () => {

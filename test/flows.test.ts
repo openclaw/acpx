@@ -27,6 +27,7 @@ import type {
   ShellActionNodeDefinition,
 } from "../src/flows/runtime.js";
 import { type FlowRunStore, flowRunsBaseDir } from "../src/flows/store.js";
+import { listSessions } from "../src/session/persistence.js";
 import type { PromptInput } from "../src/types.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
@@ -37,6 +38,33 @@ const FLOW_AUTHORING_TEST_ROOTS = [
   path.resolve(process.cwd(), "examples/flows"),
   path.resolve(process.cwd(), "test/fixtures"),
 ];
+
+test("timed-out persistent flow sessions retain their initialized protocol capabilities", async () => {
+  await withTempHome(async () => {
+    const runner = new FlowRunner({
+      resolveAgent: () => ({
+        agentName: "mock",
+        agentCommand: `${MOCK_AGENT_COMMAND} --supports-load-session`,
+        cwd: process.cwd(),
+      }),
+      permissionMode: "deny-all",
+      outputRoot: path.join(os.homedir(), "runs"),
+    });
+    const flow = defineFlow({
+      name: "capability-timeout",
+      startAt: "ask",
+      nodes: {
+        ask: acp({ timeoutMs: 2_000, prompt: () => "sleep 9000" }),
+      },
+      edges: [],
+    });
+    await assert.rejects(runner.run(flow, {}), TimeoutError);
+    const [record] = await listSessions();
+    assert.ok(record);
+    assert.equal(record.protocolVersion, 1);
+    assert.equal(record.agentCapabilities?.loadSession, true);
+  });
+});
 
 async function collectFlowFiles(root: string): Promise<string[]> {
   const entries = await fs.readdir(root, { withFileTypes: true });

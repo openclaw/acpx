@@ -6,6 +6,7 @@ import { normalizeAgentCommandInput } from "../../acp/client-process.js";
 import { AcpClient } from "../../acp/client.js";
 import { normalizeOutputError } from "../../acp/error-normalization.js";
 import { extractAcpError, isAcpResourceNotFoundError } from "../../acp/error-shapes.js";
+import { resolveRequestedConfigOption, resolveRequestedModelId } from "../../acp/model-support.js";
 import {
   assertControlAuthority,
   TimeoutError,
@@ -1505,13 +1506,18 @@ export class AcpRuntimeManager {
       setSessionModel: async (modelId: string, authority) => {
         await this.waitForRuntimeControlSession(task, turn);
         const models = advertisedModelState(turn.acpxState);
+        const resolvedModelId = resolveRequestedModelId({
+          requestedModel: modelId,
+          models,
+          agentCommand: turn.record.agentCommand,
+        });
         const response = await turn.client.setSessionModel(
           turn.activeSessionId,
           modelId,
           models,
           authority,
         );
-        turn.acpxState = applyModelSelection(turn.acpxState, modelId, response);
+        turn.acpxState = applyModelSelection(turn.acpxState, modelId, response, resolvedModelId);
         await turn.owner.checkpoint.checkpoint();
         return response;
       },
@@ -1572,6 +1578,12 @@ export class AcpRuntimeManager {
     );
     // Notifications can remove the model control before the setter resolves.
     const models = advertisedModelState(turn.acpxState);
+    const { modelConfigId, resolvedValue } = resolveRequestedConfigOption({
+      configId: resolvedConfigId,
+      value,
+      models,
+      agentCommand: turn.record.agentCommand,
+    });
     const response = await turn.client.setSessionConfigOption(
       turn.activeSessionId,
       resolvedConfigId,
@@ -1584,7 +1596,8 @@ export class AcpRuntimeManager {
       resolvedConfigId,
       value,
       response,
-      models?.configId,
+      modelConfigId,
+      resolvedValue,
     );
     await turn.owner.checkpoint.checkpoint();
     return { configId: resolvedConfigId, response };
@@ -1866,13 +1879,19 @@ export class AcpRuntimeManager {
       record,
       sessionMode,
       async ({ client, sessionId, record: connectedRecord }) => {
-        const response = await client.setSessionModel(
-          sessionId,
+        const models = advertisedModelState(connectedRecord.acpx);
+        const resolvedModelId = resolveRequestedModelId({
+          requestedModel: model,
+          models,
+          agentCommand: connectedRecord.agentCommand,
+        });
+        const response = await client.setSessionModel(sessionId, model, models, authority);
+        connectedRecord.acpx = applyModelSelection(
+          connectedRecord.acpx,
           model,
-          advertisedModelState(connectedRecord.acpx),
-          authority,
+          response,
+          resolvedModelId,
         );
-        connectedRecord.acpx = applyModelSelection(connectedRecord.acpx, model, response);
       },
       { replacingConfigOption: { key: "model" } },
       authority,
@@ -1916,6 +1935,12 @@ export class AcpRuntimeManager {
       async ({ client, sessionId, record: connectedRecord }) => {
         const configId = resolveSupportedConfigOptionId(connectedRecord, key);
         const models = advertisedModelState(connectedRecord.acpx);
+        const { modelConfigId, resolvedValue } = resolveRequestedConfigOption({
+          configId,
+          value,
+          models,
+          agentCommand: connectedRecord.agentCommand,
+        });
         const response = await client.setSessionConfigOption(
           sessionId,
           configId,
@@ -1928,7 +1953,8 @@ export class AcpRuntimeManager {
           configId,
           value,
           response,
-          models?.configId,
+          modelConfigId,
+          resolvedValue,
         );
         return response;
       },

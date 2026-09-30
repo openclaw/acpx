@@ -1,4 +1,5 @@
 import { ZodError, z } from "zod";
+import { MAX_TIMER_DELAY_MS } from "../cli/timer-duration.js";
 import { PERMISSION_MODES } from "../types.js";
 import type {
   AcpNodeDefinition,
@@ -29,7 +30,7 @@ function functionSchema<T extends Function>(label: string): z.ZodType<T> {
 }
 
 const flowNodeCommonShape = {
-  timeoutMs: finiteNonNegativeNumberSchema.optional(),
+  timeoutMs: finiteNonNegativeNumberSchema.max(MAX_TIMER_DELAY_MS).optional(),
   heartbeatMs: finiteNonNegativeNumberSchema.optional(),
   statusDetail: z.string().optional(),
 } satisfies z.ZodRawShape;

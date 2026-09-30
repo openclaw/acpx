@@ -11,6 +11,8 @@ advertised ID always wins. This Cursor-specific matching also applies to
 `acpx cursor set model`, embedded `setModel`, and `setConfigOption` targeting the
 advertised model option.
 
+When the adapter acknowledges a selection without returning its catalog, saved current-model state uses the exact resolved ID. The saved model preference keeps your original alias so it can be resolved against the catalog on reconnect.
+
 Model changes use the connected session's current catalog, including after
 reconnect. If a session previously advertised only `composer-2.5[fast=false]` but
 now also advertises `composer-2.5[fast=true]`, a request for `composer-2.5` is

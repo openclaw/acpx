@@ -95,7 +95,7 @@ Named sessions are independent. They do not share state, queue owners, or histor
 
 `new` is the explicit "I want to start over" verb. `ensure` is the idempotent "give me a session" verb for scripts. Bare prompt is conservative: it never auto-creates so you do not accidentally fork a session by running from the wrong directory.
 
-Explicitly resuming a saved local ID for the same agent command retires its current owner before loading that ID, even when you choose another cwd or name. This applies to `sessions new --resume-session` and to `sessions ensure --resume-session` when ensure needs to create the destination. If resuming fails, the prior record stays closed with its saved history. Ensuring an already-matching session still returns it normally.
+Explicitly resuming a saved local ID for the same agent command retires its current owner before loading the record's associated ACP session, even when you choose another cwd or name. This applies to `sessions new --resume-session` and to `sessions ensure --resume-session` when ensure needs to create the destination. If resuming fails, the prior record stays closed with its saved history. Ensuring an already-matching session still returns it normally.
 
 ## Soft-close
 
@@ -288,6 +288,8 @@ to saved content.
 | `agentSessionId` | Provider-native session id, **only when** the adapter exposes one |
 
 Do not pass an `acpx` session id to a native provider CLI unless `agentSessionId` is also present.
+
+New local records use an independently generated ID, including when resuming a provider session for the first time. If an adapter reuses its ACP session ID, each new session and flow run still retains its own local history. Existing records keep their IDs, and explicitly resuming a saved local ID for the same agent loads its associated ACP session.
 
 ## Embedded session lifecycle
 

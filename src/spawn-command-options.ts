@@ -165,8 +165,6 @@ export type AgentSpawnCommand = {
 };
 
 const CMD_META_CHAR_RE = /([()\][%!^"`<>&|;, *?])/gu;
-const CMD_BACKSLASH_QUOTE_RE = /(?=(\\+?)?)\1"/gu;
-const CMD_TRAILING_BACKSLASH_RE = /(?=(\\+?)?)\1$/gu;
 const CMD_SHIM_RE = /node_modules[\\/].bin[\\/][^\\/]+\.cmd$/iu;
 
 function escapeCmdCommand(value: string): string {
@@ -174,11 +172,23 @@ function escapeCmdCommand(value: string): string {
 }
 
 function escapeCmdArgument(value: string, doubleEscapeMeta: boolean): string {
-  const quoted = `"${value
-    .replace(CMD_BACKSLASH_QUOTE_RE, '$1$1\\"')
-    .replace(CMD_TRAILING_BACKSLASH_RE, "$1$1")}"`;
+  const quoted = `"${escapeBackslashesForQuoting(value)}"`;
   const escaped = quoted.replace(CMD_META_CHAR_RE, "^$1");
   return doubleEscapeMeta ? escaped.replace(CMD_META_CHAR_RE, "^$1") : escaped;
+}
+
+function escapeBackslashesForQuoting(value: string): string {
+  let result = "";
+  let backslashes = 0;
+  for (const char of value) {
+    if (char === "\\") {
+      backslashes += 1;
+      continue;
+    }
+    result += "\\".repeat(char === '"' ? backslashes * 2 + 1 : backslashes) + char;
+    backslashes = 0;
+  }
+  return result + "\\".repeat(backslashes * 2);
 }
 
 export function buildAgentSpawnCommand(

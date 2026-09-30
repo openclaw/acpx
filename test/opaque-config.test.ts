@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+import type { SessionConfigOption, SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import { assertPersistedKeyPolicy } from "../src/persisted-key-policy.js";
 import {
   applyConfigOptionSelection,
@@ -47,6 +47,33 @@ function roundTrip(state: SessionAcpxState): SessionAcpxState {
   const parsed = parseSessionRecord(JSON.parse(JSON.stringify(serialized)));
   assert.ok(parsed?.acpx);
   return parsed.acpx;
+}
+
+for (const reply of [
+  null,
+  {},
+  { configOptions: null },
+  { configOptions: 5 },
+  { configOptions: "oops" },
+  { configOptions: {} },
+]) {
+  test(`malformed option catalogs acknowledge selections without replacing the catalog: ${JSON.stringify(reply)}`, () => {
+    const state: SessionAcpxState = {
+      config_options: [select("model", "m1", "model"), select("effort", "low")],
+      desired_config_options: { effort: "low" },
+    };
+    const response = reply as SetSessionConfigOptionResponse;
+    const selected = applyConfigOptionSelection(state, "effort", "high", response);
+    assert.equal(
+      selected.config_options?.find((option) => option.id === "effort")?.currentValue,
+      "high",
+    );
+    assert.deepEqual(selected.desired_config_options, { effort: "high" });
+    const model = applyModelSelection(selected, "m2", response);
+    assert.equal(model.current_model_id, "m2");
+    assert.equal(model.config_options?.length, 2);
+    assert.deepEqual(model.desired_config_options, { effort: "high" });
+  });
 }
 
 for (const configId of ["ordinary", "__proto__", " custom ", "mode"]) {

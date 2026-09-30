@@ -1217,7 +1217,7 @@ test("AcpClient setSessionModel preserves explicitly advertised legacy model con
   await changed;
 });
 
-test("AcpClient treats explicit null config options as an empty snapshot", async (t) => {
+test("AcpClient ignores malformed config snapshots instead of withdrawing the catalog", async (t) => {
   const fixture = createClientFixture(t);
   const pending = fixture.track(
     fixture.client.loadSession("session-null-config", "/tmp/acpx-null-config"),
@@ -1227,10 +1227,28 @@ test("AcpClient treats explicit null config options as an empty snapshot", async
   assert.equal(request.method, "session/load");
   await fixture.reply(request, { configOptions: null });
   const result = await pending;
-  assert.equal(result.configOptionsPresent, true);
-  assert.deepEqual(result.configOptions, []);
+  assert.equal(result.configOptionsPresent, false);
+  assert.equal(result.configOptions, undefined);
   assert.equal(result.models, undefined);
 });
+
+for (const response of [
+  null,
+  { configOptions: null },
+  { configOptions: 5 },
+  { configOptions: "oops" },
+  { configOptions: {} },
+]) {
+  test(`AcpClient normalizes a malformed config acknowledgement for queue transport: ${JSON.stringify(response)}`, async (t) => {
+    const fixture = createClientFixture(t);
+    const pending = fixture.track(
+      fixture.client.setSessionConfigOption("session-config", "effort", "high", undefined),
+    );
+    const request = await fixture.message(0);
+    await fixture.reply(request, response as unknown as Record<string, unknown>);
+    assert.deepEqual(await pending, {});
+  });
+}
 
 test("AcpClient closes sessions through session/close and clears the loaded session id", async (t) => {
   const fixture = createClientFixture(t);

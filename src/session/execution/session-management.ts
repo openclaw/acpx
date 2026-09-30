@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { normalizeAgentSessionId } from "../../acp/agent-session-id.js";
 import { AcpClient } from "../../acp/client.js";
 import { formatErrorMessage } from "../../acp/error-normalization.js";
@@ -40,6 +41,7 @@ type CreatedSessionState = {
 async function createSessionRecordWithClient(
   client: AcpClient,
   options: SessionCreateOptions,
+  resumedRecordId?: string,
 ): Promise<SessionRecord> {
   const cwd = absolutePath(options.cwd);
   await withTimeout(client.start({ signal: options.signal }), options.timeoutMs);
@@ -53,7 +55,7 @@ async function createSessionRecordWithClient(
   const lifecycle = client.getAgentLifecycleSnapshot();
   const record: SessionRecord = {
     ...createInitialSessionRecord({
-      recordId: sessionId,
+      recordId: resumedRecordId ?? randomUUID(),
       sessionId,
       agentSessionId,
       agentCommand: options.agentCommand,
@@ -169,16 +171,16 @@ export async function createSessionWithClient(
   options: SessionCreateOptions,
 ): Promise<SessionCreateWithClientResult> {
   assertControlAuthority({ signal: options.signal });
+  let resumedRecordId: string | undefined;
   if (options.resumeSessionId) {
     const resumedRecord = await readSessionRecord(options.resumeSessionId);
     assertControlAuthority({ signal: options.signal });
-    if (
-      resumedRecord &&
-      !resumedRecord.closed &&
-      resumedRecord.agentCommand === options.agentCommand
-    ) {
-      // Resume overwrites this canonical record even when its scope changes.
-      await closeSession(resumedRecord.acpxRecordId);
+    if (resumedRecord && resumedRecord.agentCommand === options.agentCommand) {
+      resumedRecordId = resumedRecord.acpxRecordId;
+      if (!resumedRecord.closed) {
+        await closeSession(resumedRecord.acpxRecordId);
+      }
+      options = { ...options, resumeSessionId: resumedRecord.acpSessionId };
       assertControlAuthority({ signal: options.signal });
     }
   }
@@ -202,7 +204,7 @@ export async function createSessionWithClient(
   try {
     const create = async () => {
       assertControlAuthority({ signal: options.signal });
-      const record = await createSessionRecordWithClient(client, options);
+      const record = await createSessionRecordWithClient(client, options, resumedRecordId);
       assertControlAuthority({ signal: options.signal });
       return record;
     };
