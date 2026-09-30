@@ -1,3 +1,4 @@
+import type { SessionConfigSelection, SessionConfiguration } from "../session/configuration.js";
 import type { SessionAgentOptions } from "../session/session.js";
 import type {
   AcpJsonRpcMessage,
@@ -57,6 +58,8 @@ export type FlowEdge =
 export type AcpNodeDefinition = FlowNodeCommon & {
   nodeType: "acp";
   profile?: string;
+  model?: string;
+  configOptions?: SessionConfigSelection[];
   cwd?: string | ((context: FlowNodeContext) => MaybePromise<string | undefined>);
   session?: {
     handle?: string;
@@ -146,6 +149,8 @@ export type FlowDefinition = {
 export type FlowNodeSnapshot = FlowNodeCommon & {
   nodeType: FlowNodeDefinition["nodeType"];
   profile?: string;
+  model?: string;
+  configOptions?: SessionConfigSelection[];
   session?: {
     handle?: string;
     isolated?: boolean;
@@ -246,6 +251,8 @@ export type FlowStepRecord = {
 };
 
 export type FlowSessionBinding = {
+  requestedSettings?: { model?: string; configOptions: SessionConfigSelection[] };
+  acceptedSettings?: SessionConfiguration;
   key: string;
   handle: string;
   bundleId: string;
@@ -368,6 +375,7 @@ export type FlowRunnerOptions = {
   verbose?: boolean;
   suppressSdkConsoleErrors?: boolean;
   sessionOptions?: SessionAgentOptions;
+  configOptions?: SessionConfigSelection[];
   services?: Record<string, unknown>;
   outputRoot?: string;
 };

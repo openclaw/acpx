@@ -113,6 +113,8 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
         }),
         prompt: acp({
           profile: "mock",
+          model: "selected-model",
+          configOptions: [{ configId: "Opaque.Id", value: "chosen" }],
           session: {
             handle: "review",
             isolated: true,
@@ -166,6 +168,8 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
         string,
         {
           nodeType: string;
+          model?: string;
+          configOptions?: Array<{ configId: string; value: string }>;
           timeoutMs?: number;
           heartbeatMs?: number;
           statusDetail?: string;
@@ -185,6 +189,10 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
         }
       >;
     };
+    assert.equal(flowSnapshot.nodes.prompt.model, "selected-model");
+    assert.deepEqual(flowSnapshot.nodes.prompt.configOptions, [
+      { configId: "Opaque.Id", value: "chosen" },
+    ]);
     const snapshot = JSON.parse(
       await fs.readFile(path.join(runDir, "projections", "run.json"), "utf8"),
     ) as {

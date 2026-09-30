@@ -1,6 +1,7 @@
 import type { AcpClient } from "../acp/client.js";
 import { InterruptedError, withInterrupt } from "../async-control.js";
 import { promptToDisplayText } from "../prompt-content.js";
+import type { SessionConfiguration } from "../session/configuration.js";
 import {
   cloneSessionAcpxState,
   createSessionConversation,
@@ -55,6 +56,10 @@ import {
   summarizePrompt,
   updateStatusDetail,
 } from "./runtime-support.js";
+import {
+  assertCompatibleSessionSettings,
+  assertReplayedSessionSettings,
+} from "./session-settings.js";
 import { FlowRunStore } from "./store.js";
 import type {
   AcpNodeDefinition,
@@ -174,6 +179,7 @@ export class FlowRunner {
   private readonly defaultNodeTimeoutMs;
   private readonly suppressSdkConsoleErrors?;
   private readonly sessionOptions?;
+  private readonly configOptions;
   private readonly services;
   private readonly store;
   private readonly pendingPersistentSessionClients = new Map<string, Map<string, AcpClient>>();
@@ -199,6 +205,7 @@ export class FlowRunner {
       options.defaultNodeTimeoutMs ?? options.timeoutMs ?? DEFAULT_FLOW_STEP_TIMEOUT_MS;
     this.suppressSdkConsoleErrors = options.suppressSdkConsoleErrors;
     this.sessionOptions = options.sessionOptions;
+    this.configOptions = options.configOptions ?? [];
     this.services = options.services ?? {};
     this.store = new FlowRunStore(options.outputRoot);
   }
@@ -869,6 +876,10 @@ export class FlowRunner {
       node.profile,
       prepared.agentInfo,
     );
+    const requestedSettings = this.resolveSessionSettings(node);
+    if (requestedSettings.model !== undefined || requestedSettings.configOptions.length > 0) {
+      binding.requestedSettings = requestedSettings;
+    }
     prepared.result.sessionInfo = binding;
     await prepared.attempt.own(() =>
       this.initializeIsolatedSessionBundle(runDir, state, binding, prepared.attempt),
@@ -1078,6 +1089,15 @@ export class FlowRunner {
     return () => clearInterval(timer);
   }
 
+  private resolveSessionSettings(node: AcpNodeDefinition) {
+    return {
+      model: node.model ?? this.sessionOptions?.model,
+      configOptions: [...this.configOptions, ...(node.configOptions ?? [])].map(
+        ({ configId, value }) => ({ configId, value }),
+      ),
+    };
+  }
+
   private async ensureSessionBinding(
     runDir: string,
     state: FlowRunState,
@@ -1090,10 +1110,13 @@ export class FlowRunner {
     const key = createSessionBindingKey(agent.agentCommand, agent.cwd, handle, agent.agentArgv);
     const existing = state.sessionBindings[key];
     if (existing) {
+      assertCompatibleSessionSettings(node, existing);
       await attempt.own(() => this.store.ensureSessionBundle(runDir, state, existing));
       return existing;
     }
 
+    const requestedSettings = this.resolveSessionSettings(node);
+    let acceptedSettings: SessionConfiguration | undefined;
     const name = createSessionName(flow.name, handle, agent.cwd, state.runId);
     const created = await attempt.own(async () => {
       const acquired = await createSessionWithClient({
@@ -1104,7 +1127,11 @@ export class FlowRunner {
         ...this.connectionOptions,
         signal: attempt.signal,
         handleProcessInterrupts: false,
-        sessionOptions: this.sessionOptions,
+        sessionOptions: { ...this.sessionOptions, model: requestedSettings.model },
+        configOptions: requestedSettings.configOptions,
+        onSessionConfigured: (configuration) => {
+          acceptedSettings = configuration;
+        },
       });
       this.pendingClientReleases.set(
         acquired.client,
@@ -1121,6 +1148,9 @@ export class FlowRunner {
     attempt.assertActive();
 
     const binding: FlowSessionBinding = {
+      ...(requestedSettings.model !== undefined || requestedSettings.configOptions.length > 0
+        ? { requestedSettings, acceptedSettings }
+        : {}),
       key,
       handle,
       bundleId: createSessionBundleId(handle, key),
@@ -1247,6 +1277,21 @@ export class FlowRunner {
             onAcpMessage: events.onAcpMessage,
             suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
             client: initialClient,
+            ...(initialClient
+              ? {}
+              : {
+                  sessionOptions: {
+                    ...this.sessionOptions,
+                    model: binding.requestedSettings?.model,
+                  },
+                  configOptions: binding.requestedSettings?.configOptions,
+                  onSessionConfigured: (configuration: SessionConfiguration) => {
+                    assertReplayedSessionSettings(binding, configuration);
+                    if (binding.requestedSettings) {
+                      binding.acceptedSettings = configuration;
+                    }
+                  },
+                }),
           },
           { signal: attempt.signal, handleProcessInterrupts: false },
         ),
@@ -1321,7 +1366,13 @@ export class FlowRunner {
               acpxState = recordConversationClientOperation(conversation, acpxState, operation);
             },
             suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
-            sessionOptions: this.sessionOptions,
+            sessionOptions: { ...this.sessionOptions, model: binding.requestedSettings?.model },
+            configOptions: binding.requestedSettings?.configOptions,
+            onSessionConfigured: (configuration) => {
+              if (binding.requestedSettings) {
+                binding.acceptedSettings = configuration;
+              }
+            },
           },
           { signal: attempt.signal, handleProcessInterrupts: false },
         ),

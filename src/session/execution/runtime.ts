@@ -6,7 +6,6 @@ import {
   isRetryablePromptError,
   normalizeOutputError,
 } from "../../acp/error-normalization.js";
-import { resolveRequestedConfigOption } from "../../acp/model-support.js";
 import {
   assertControlAuthority,
   InterruptedError,
@@ -47,11 +46,12 @@ import type {
   SessionRecord,
   SessionSendResult,
 } from "../../types.js";
+import { applyConfigOptionsToState, applyModelSelection } from "../config-options.js";
 import {
-  applyConfigOptionSelection,
-  applyConfigOptionsToState,
-  applyModelSelection,
-} from "../config-options.js";
+  applySessionConfigOptions,
+  describeSessionConfiguration,
+  type SessionConfigurationOptions,
+} from "../configuration.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,
@@ -83,19 +83,20 @@ const INTERRUPT_CANCEL_WAIT_MS = 2_500;
 type RunSessionPromptOptions = Omit<
   SessionSendOptions,
   "maxQueueDepth" | "sessionId" | "ttlMs" | "waitForCompletion"
-> & {
-  sessionRecordId: string;
-  waitSignal?: AbortSignal;
-  ownedSignal?: AbortSignal;
-  closeProvidedClient?: () => Promise<void>;
-  handleProcessInterrupts?: boolean;
-  onClientAvailable?: (controller: ActiveSessionController) => void;
-  onClientClosed?: () => void;
-  onClientCloseFailure?: () => void;
-  onPromptActive?: () => Promise<void> | void;
-  onPromptFinalizing?: () => Promise<void>;
-  onPromptRequestWritten?: () => Promise<void> | void;
-};
+> &
+  SessionConfigurationOptions & {
+    sessionRecordId: string;
+    waitSignal?: AbortSignal;
+    ownedSignal?: AbortSignal;
+    closeProvidedClient?: () => Promise<void>;
+    handleProcessInterrupts?: boolean;
+    onClientAvailable?: (controller: ActiveSessionController) => void;
+    onClientClosed?: () => void;
+    onClientCloseFailure?: () => void;
+    onPromptActive?: () => Promise<void> | void;
+    onPromptFinalizing?: () => Promise<void>;
+    onPromptRequestWritten?: () => Promise<void> | void;
+  };
 
 type ActiveSessionController = QueueOwnerActiveSessionController;
 
@@ -264,10 +265,10 @@ async function applyPromptModelIfAdvertised(params: {
   timeoutMs?: number;
   suppressWarnings?: boolean;
   signal?: AbortSignal;
-}): Promise<void> {
+}): Promise<boolean> {
   const requestedModel = requestedModelId(params.requestedModel);
   if (!requestedModel) {
-    return;
+    return false;
   }
 
   const result = await applyRequestedModelIfAdvertised({
@@ -290,6 +291,45 @@ async function applyPromptModelIfAdvertised(params: {
       result.resolvedModelId,
     );
   }
+  return result.applied;
+}
+
+async function applyPromptConfiguration(
+  client: AcpClient,
+  activeSessionId: string,
+  record: SessionRecord,
+  options: RunSessionPromptOptions,
+): Promise<void> {
+  const modelApplied = await applyPromptModelIfAdvertised({
+    client,
+    sessionId: activeSessionId,
+    requestedModel: options.sessionOptions?.model,
+    record,
+    timeoutMs: options.timeoutMs,
+    suppressWarnings: options.suppressSdkConsoleErrors,
+    signal: options.ownedSignal,
+  });
+  const configured = await applySessionConfigOptions({
+    client,
+    sessionId: activeSessionId,
+    agentCommand: record.agentCommand,
+    getState: () => record.acpx,
+    setState: (state) => {
+      record.acpx = state;
+    },
+    configOptions: options.configOptions,
+    timeoutMs: options.timeoutMs,
+    authority: { signal: options.ownedSignal },
+  });
+  record.acpx = configured.state;
+  options.onSessionConfigured?.(
+    describeSessionConfiguration({
+      requestedModel: options.sessionOptions?.model,
+      modelApplied,
+      state: record.acpx,
+      selections: configured.selections,
+    }),
+  );
 }
 
 function jsonRpcIdKey(message: AcpJsonRpcMessage): string | undefined {
@@ -1072,15 +1112,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
     options.ownedSignal?.throwIfAborted();
 
     try {
-      await applyPromptModelIfAdvertised({
-        client,
-        sessionId: activeSessionId,
-        requestedModel: options.sessionOptions?.model,
-        record,
-        timeoutMs: options.timeoutMs,
-        suppressWarnings: options.suppressSdkConsoleErrors,
-        signal: options.ownedSignal,
-      });
+      await applyPromptConfiguration(client, activeSessionId, record, options);
     } catch (error) {
       if (error instanceof TimeoutError) {
         // A late model acknowledgement can change the adapter after this turn fails.
@@ -1364,35 +1396,29 @@ export async function runOnce(
             modelApplication.resolvedModelId,
           );
         }
-        for (const configOption of options.configOptions ?? []) {
-          assertControlAuthority(authority);
-          const models = advertisedModelState(controlState);
-          const { modelConfigId, resolvedValue } = resolveRequestedConfigOption({
-            ...configOption,
-            models,
-            agentCommand: options.agentCommand,
-          });
-          const response = await withTimeout(
-            client.setSessionConfigOption(
-              sessionId,
-              configOption.configId,
-              configOption.value,
-              models,
-              authority,
-            ),
-            options.timeoutMs,
-          );
-          controlState = applyConfigOptionSelection(
-            controlState,
-            configOption.configId,
-            configOption.value,
-            response,
-            modelConfigId,
-            resolvedValue,
-          );
-        }
-
+        const configured = await applySessionConfigOptions({
+          client,
+          sessionId,
+          agentCommand: options.agentCommand,
+          getState: () => controlState,
+          setState: (state) => {
+            controlState = state ?? {};
+          },
+          configOptions: options.configOptions,
+          timeoutMs: options.timeoutMs,
+          authority,
+        });
+        controlState = configured.state ?? {};
+        options.onSessionConfigured?.(
+          describeSessionConfiguration({
+            requestedModel: options.sessionOptions?.model,
+            modelApplied: modelApplication.applied,
+            state: controlState,
+            selections: configured.selections,
+          }),
+        );
         assertControlAuthority(authority);
+
         output.setContext({
           sessionId,
         });
@@ -1433,7 +1459,7 @@ export async function runOnce(
 }
 
 export async function sendSessionDirect(
-  options: SessionSendOptions,
+  options: SessionSendOptions & SessionConfigurationOptions,
   control?: DirectExecutionControl,
 ): Promise<SessionSendResult> {
   const closeProvidedClient =
@@ -1466,6 +1492,9 @@ export async function sendSessionDirect(
       suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
       verbose: options.verbose,
       client: options.client,
+      sessionOptions: options.sessionOptions,
+      configOptions: options.configOptions,
+      onSessionConfigured: options.onSessionConfigured,
     });
   } finally {
     // A provided initial client is owned even if cancellation wins before turn admission.
