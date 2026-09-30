@@ -24,6 +24,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Claude: update the built-in adapter for current models and keep sessions saved under earlier built-in commands discoverable after upgrades, while preserving custom launchers. Thanks @idvorkin-ai-tools.
 
+- Development dependencies: patch the brace-expansion denial-of-service and fast-uri header-injection advisories in the pinned toolchain overrides.
+
 ## 0.19.3 - 2026-09-25
 
 ### Highlights
