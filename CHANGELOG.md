@@ -37,6 +37,8 @@ Repo: https://github.com/openclaw/acpx
 - Flow timers: reject non-finite or overflowing node and shell deadlines before they become immediate timeouts. Thanks @odrobnik.
 - Windows: preserve complete backslash runs before quotes and at the end of batch-wrapper arguments. Thanks @odrobnik.
 
+- Dependencies: refresh the ACP SDK, guarded filesystem runtime, formatter, and linter with compatible updates.
+
 ## 0.19.3 - 2026-09-25
 
 ### Highlights
