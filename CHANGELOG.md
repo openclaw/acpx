@@ -6,39 +6,38 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+## 0.19.4 - 2026-09-30
+
+**Highlights:** Safer permission prompts, reliable session continuity, and complete replay history.
+
 ### Fixes
 
-- Fix nested documentation builds without a custom domain and keep their canonical URLs within the deployment path.
-- Temporary sessions: preserve model catalogs updated during session creation before applying startup model and config selections, including removed model support.
-- Windows/terminals: preserve stdout and stderr from commands launched through the shell fallback.
-- Replay viewer: retain recoverable conversation history and long responses past checkpoint limits, keeping earlier attempt selections and saved message identities aligned across reloads.
-- Session metadata: preserve token usage across saving and reloading for opaque message IDs such as `__proto__`.
-- Replay viewer: keep graph edges attached to naturally sized cards and route branches around wrapped labels and changing outcome rows.
-- Replay viewer: avoid macOS file-watcher startup stalls that can time out requests, status checks, and live connections while preserving asset updates.
-- Replay viewer: complete shutdown while dependencies are still warming after the first page request.
-- Runtime/embedding: preserve literal environment keys such as `__proto__` in saved sessions and spawned agent processes.
-- Runtime/embedding: retain raw nonempty system-prompt replacement and append text across persistence and reconnects, including whitespace-only values.
-- Replay viewer: preserve the last readable recent-run and selected-run state during atomic live-projection replacement until polling recovers.
-
-- Filesystem/dependencies: update fs-safe for older Linux compatibility and guarded path handling, and refresh development tools and replay-viewer dependencies.
-
-- Claude: update the built-in adapter for current models and keep sessions saved under earlier built-in commands discoverable after upgrades, while preserving custom launchers. Thanks @idvorkin-ai-tools.
-
-- Development dependencies: patch the brace-expansion denial-of-service and fast-uri header-injection advisories in the pinned toolchain overrides.
-
+- Permissions: display terminal controls visibly in approval prompts so commands, paths, and write previews cannot erase or overwrite the question. Thanks @SebTardif.
 - Sessions: keep local records and flow histories separate when adapters reuse session IDs, including concurrent provider-session resumes, while preserving existing local handles. Thanks @odrobnik.
+- Sessions: retire an adapter when a prompt's model-selection request times out, so later turns reconnect to known state. Thanks @odrobnik.
 - Session controls: retain the resolved model ID after an acknowledgement while preserving the requested alias for reconnect. Thanks @odrobnik.
 - Session controls: tolerate omitted or non-list option catalogs without losing accepted selections or failing with a TypeError. Thanks @odrobnik.
-- Sessions: retire an adapter when a prompt's model-selection request times out, so later turns reconnect to known state. Thanks @odrobnik.
+- Claude: update the built-in adapter for current models and keep sessions saved under earlier built-in commands discoverable after upgrades, while preserving custom launchers. Thanks @idvorkin-ai-tools.
+- Temporary sessions: preserve model catalogs updated during session creation before applying startup model and config selections, including removed model support.
+- Runtime/embedding: preserve literal environment keys such as `__proto__` in saved sessions and spawned agent processes.
+- Runtime/embedding: retain raw nonempty system-prompt replacement and append text across persistence and reconnects, including whitespace-only values.
 - Flows: preserve initialized protocol and capability metadata when a persistent prompt times out or is cancelled. Thanks @odrobnik.
 - Flows: forward system-prompt replacement and append flags to persistent and isolated ACP nodes. Thanks @odrobnik.
 - Flows: resolve runtime imports throughout helper modules without rewriting string data or requiring a writable flow directory. Thanks @odrobnik.
 - Flow shells: collect final output after process exit with a bounded drain for inherited pipes, and reject invalid stdin before spawning. Thanks @odrobnik.
 - Flow timers: reject non-finite or overflowing node and shell deadlines before they become immediate timeouts. Thanks @odrobnik.
+- Replay viewer: retain recoverable conversation history and long responses past checkpoint limits, keeping earlier attempt selections and saved message identities aligned across reloads.
+- Replay viewer: keep graph edges attached to naturally sized cards and route branches around wrapped labels and changing outcome rows.
+- Replay viewer: avoid macOS file-watcher startup stalls that can time out requests, status checks, and live connections while preserving asset updates.
+- Replay viewer: complete shutdown while dependencies are still warming after the first page request.
+- Replay viewer: preserve the last readable recent-run and selected-run state during atomic live-projection replacement until polling recovers.
+- Session metadata: preserve token usage across saving and reloading for opaque message IDs such as `__proto__`.
+- Windows/terminals: preserve stdout and stderr from commands launched through the shell fallback.
 - Windows: preserve complete backslash runs before quotes and at the end of batch-wrapper arguments. Thanks @odrobnik.
-
+- Filesystem/dependencies: update fs-safe for older Linux compatibility and guarded path handling, and refresh development tools and replay-viewer dependencies.
 - Dependencies: refresh the ACP SDK, guarded filesystem runtime, formatter, and linter with compatible updates.
-- Permissions: display terminal controls visibly in approval prompts so commands, paths, and write previews cannot erase or overwrite the question. Thanks @SebTardif.
+- Development dependencies: patch the brace-expansion denial-of-service and fast-uri header-injection advisories in the pinned toolchain overrides.
+- Fix nested documentation builds without a custom domain and keep their canonical URLs within the deployment path.
 
 ## 0.19.3 - 2026-09-25
 
