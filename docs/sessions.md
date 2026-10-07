@@ -139,6 +139,8 @@ Imports keep the archive's provider session id, reopen the copied session as an 
 
 An imported session becomes discoverable after its complete history has been written. If writing the history fails, the import leaves no local session that blocks retrying the archive.
 
+New imports cap the saved journal retention setting at 1,024 segments. Existing local journals keep higher saved retention settings: export, watch, and rotation continue to include their retained segments without scanning every possible segment number.
+
 Concurrent imports into the same local store wait for one another and recheck scope and provider session id collisions before publishing. Only one of two conflicting imports can succeed; independent destinations still retain their own complete histories.
 
 Imports also coordinate with CLI and shared-runtime ensures for the same exact scope. If import publishes first, ensure returns that imported session. If ensure creates first, import reports the existing scope instead of publishing a second active record. This does not make explicit `sessions new` replacement atomic.

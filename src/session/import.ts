@@ -6,7 +6,11 @@ import { z, ZodError } from "zod";
 import { AcpxOperationalError } from "../errors.js";
 import { writePrivateFile } from "../state-files.js";
 import type { AcpJsonRpcMessage, SessionRecord } from "../types.js";
-import { defaultSessionEventLog, sessionEventActivePath } from "./event-log.js";
+import {
+  boundedEventMaxSegments,
+  defaultSessionEventLog,
+  sessionEventActivePath,
+} from "./event-log.js";
 import {
   absolutePath,
   findSession,
@@ -265,7 +269,7 @@ function buildImportedRecord(
   const eventLog = {
     ...defaultSessionEventLog(options.newRecordId),
     max_segment_bytes: sourceRecord.eventLog.max_segment_bytes,
-    max_segments: sourceRecord.eventLog.max_segments,
+    max_segments: boundedEventMaxSegments(sourceRecord.eventLog.max_segments),
     segment_count: parsed.history.length > 0 ? 1 : sourceRecord.eventLog.segment_count,
   };
 

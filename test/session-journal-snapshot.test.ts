@@ -56,7 +56,7 @@ function statReceipt(stat: Stats | BigIntStats): Receipt {
   };
 }
 
-async function fixture(home: string, id: string): Promise<SessionRecord> {
+async function fixture(home: string, id: string, maxSegments = 2): Promise<SessionRecord> {
   const record = makeSessionRecord({
     acpxRecordId: id,
     acpSessionId: "persist11-provider",
@@ -67,12 +67,14 @@ async function fixture(home: string, id: string): Promise<SessionRecord> {
       active_path: sessionEventActivePath(id),
       segment_count: 2,
       max_segment_bytes: 1000,
-      max_segments: 2,
+      max_segments: maxSegments,
     },
   });
   await writeSessionRecord(record);
   // R1 is between .1 -> .2 and active -> .1. Retained C has not disappeared.
-  await fs.writeFile(sessionEventSegmentPath(id, 2), segment(id, 1, "B"), { mode: 0o600 });
+  await fs.writeFile(sessionEventSegmentPath(id, maxSegments), segment(id, 1, "B"), {
+    mode: 0o600,
+  });
   await fs.writeFile(sessionEventActivePath(id), segment(id, 2, "C"), { mode: 0o600 });
   return record;
 }
@@ -118,20 +120,23 @@ function scheduleTwoRotations(
   recordId: string,
   timing: InventoryTiming,
   trailingMessage?: AcpJsonRpcMessage,
+  maxSegments = 2,
 ) {
   const active = sessionEventActivePath(recordId);
   const one = sessionEventSegmentPath(recordId, 1);
-  const two = sessionEventSegmentPath(recordId, 2);
-  const paths = [two, one, active];
-  const selected = new Set(paths);
+  const overflow = sessionEventSegmentPath(recordId, maxSegments);
+  // The writer renames slot 1 onto slot 2. That is the overflow file only when retention is 2.
+  const adjacent = sessionEventSegmentPath(recordId, 2);
+  const paths = [overflow, one, active];
+  const selected = new Set([overflow, one, active, adjacent]);
   const originalSync = fsSync.lstatSync;
   const originalAsync = fs.lstat;
   const receipts: Receipt[] = [
     {
       phase: "fixture",
       label: "B",
-      path: two,
-      ...statReceipt(originalSync(two, { bigint: true })),
+      path: overflow,
+      ...statReceipt(originalSync(overflow, { bigint: true })),
     },
     {
       phase: "fixture",
@@ -218,7 +223,7 @@ function scheduleTwoRotations(
         "unexpected asynchronous stat before the captured inventory",
       );
       if (!secondStarted) {
-        assert.equal(target, two, "baseline verification order changed");
+        assert.equal(target, overflow, "baseline verification order changed");
         secondStarted = true;
         try {
           // Real B identity is retained as the return value; other verification
@@ -226,14 +231,14 @@ function scheduleTwoRotations(
           const stat = await originalAsync(...args);
           assert(stat);
           receipts.push({ phase: "verification-before-R2", path: target, ...statReceipt(stat) });
-          fsSync.unlinkSync(two);
-          fsSync.renameSync(one, two);
+          fsSync.unlinkSync(overflow);
+          fsSync.renameSync(one, adjacent);
           secondFinished = true;
           receipts.push({
             phase: "R2-partial",
             retained: "C",
-            path: two,
-            ...statReceipt(originalSync(two, { bigint: true })),
+            path: adjacent,
+            ...statReceipt(originalSync(adjacent, { bigint: true })),
           });
           return stat;
         } finally {
@@ -317,6 +322,47 @@ for (const [timing, mode] of [
         ["C", "D"],
         "C remained retained throughout the captured race",
       );
+      if ("error" in outcome) {
+        throw outcome.error;
+      }
+      assert.deepEqual(outcome.labels, ["C", "D"]);
+    });
+  });
+}
+
+for (const mode of ["acp", "anchored", "public-watch"] as const) {
+  test(`retained C survives after-active rotation above the import cap during ${mode} capture`, async (t) => {
+    await withTempHome("acpx-journal-high-rotation-", async (home) => {
+      const record = await fixture(home, `persist11-high-${mode}`, 1025);
+      const schedule = scheduleTwoRotations(
+        t,
+        record.acpxRecordId,
+        "after-active",
+        undefined,
+        1025,
+      );
+      let outcome: { labels: unknown[] } | { error: unknown };
+      try {
+        outcome = await readLabels(mode, record).then(
+          (labels) => ({ labels }),
+          (error: unknown) => ({ error }),
+        );
+      } finally {
+        schedule.restore();
+      }
+      const stable = await new SessionJournalReader(record).readAcpMessages();
+      schedule.assertAdmitted();
+      const slot2 = sessionEventSegmentPath(record.acpxRecordId, 2);
+      const moved = schedule.receipts.find((receipt) => receipt.phase === "R2-partial");
+      assert.equal(moved?.path, slot2);
+      assert.equal(moved?.retained, "C");
+      assert.ok(
+        schedule.receipts.some(
+          (receipt) =>
+            receipt.phase === "verification-after-R2" && receipt.path === slot2 && !receipt.error,
+        ),
+      );
+      assert.deepEqual(stable.map(labelOf), ["C", "D"]);
       if ("error" in outcome) {
         throw outcome.error;
       }

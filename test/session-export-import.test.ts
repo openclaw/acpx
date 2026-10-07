@@ -858,3 +858,48 @@ test("importSession rejects provider session collisions across built-in command 
     );
   });
 });
+
+test("importSession caps event_log.max_segments", async () => {
+  await withTempHome("acpx-import-max-segments-", async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    const archivePath = path.join(homeDir, "archive.json");
+    await fs.mkdir(cwd, { recursive: true });
+    const source = makeSessionRecord({
+      acpxRecordId: "source-record",
+      acpSessionId: "provider-session",
+      agentCommand: AGENT_REGISTRY.codex,
+      cwd,
+      name: "debug",
+      eventLog: {
+        active_path: ".stream.ndjson",
+        segment_count: 1,
+        max_segment_bytes: 1024,
+        max_segments: 100_000_000,
+      },
+    });
+    await fs.writeFile(
+      archivePath,
+      JSON.stringify({
+        format_version: 1,
+        exported_at: "2026-01-01T00:00:00.000Z",
+        exported_by: "acpx",
+        session: {
+          record_id: source.acpxRecordId,
+          name: "debug",
+          agent: source.agentCommand,
+          cwd_relative: "workspace",
+          cwd_original: "workspace",
+          created_at: source.createdAt,
+          updated_at: source.updated_at,
+          state: serializeSessionRecordForDisk(source),
+        },
+        history: [{ jsonrpc: "2.0", method: "session/update", params: { text: "one" } }],
+      }),
+      "utf8",
+    );
+
+    const imported = await importSession(archivePath);
+    const record = await resolveSessionRecord(imported.record_id);
+    assert.equal(record.eventLog.max_segments, 1024);
+  });
+});

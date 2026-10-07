@@ -6,6 +6,8 @@ import type { AcpJsonRpcMessage, SessionRecord } from "../types.js";
 import {
   DEFAULT_EVENT_MAX_SEGMENTS,
   DEFAULT_EVENT_SEGMENT_MAX_BYTES,
+  existingEventSegmentIndices,
+  retainedEventMaxSegments,
   sessionBaseDir,
   sessionEventActivePath as activeEventPath,
   sessionEventSegmentPath as segmentEventPath,
@@ -32,13 +34,9 @@ async function pathExists(filePath: string): Promise<boolean> {
 }
 
 async function countExistingSegments(sessionId: string, maxSegments: number): Promise<number> {
-  let count = 0;
-
-  for (let segment = 1; segment <= maxSegments; segment += 1) {
-    if (await pathExists(segmentEventPath(sessionId, segment))) {
-      count += 1;
-    }
-  }
+  const limit = retainedEventMaxSegments(maxSegments);
+  const existing = await existingEventSegmentIndices(sessionId);
+  let count = existing.filter((index) => index <= limit).length;
 
   if (await pathExists(activeEventPath(sessionId))) {
     count += 1;
@@ -61,8 +59,9 @@ async function resolveSessionMaxSegments(sessionId: string): Promise<number> {
   try {
     const record = await resolveSessionRecord(sessionId);
     const configured = record.eventLog.max_segments;
-    if (Number.isInteger(configured) && configured > 0) {
-      return configured;
+    const retained = retainedEventMaxSegments(configured);
+    if (retained > 0) {
+      return retained;
     }
   } catch {
     // Fall back to defaults when metadata is unavailable.
@@ -72,24 +71,45 @@ async function resolveSessionMaxSegments(sessionId: string): Promise<number> {
 }
 
 async function rotateSegments(sessionId: string, maxSegments: number): Promise<void> {
-  const active = activeEventPath(sessionId);
+  const limit = retainedEventMaxSegments(maxSegments);
+  if (limit < 1) {
+    return;
+  }
+  await discardOverflowSegment(sessionId, limit);
+  await shiftRetainedSegments(sessionId, limit);
+  await promoteActiveSegment(sessionId);
+}
 
-  const overflow = segmentEventPath(sessionId, maxSegments);
-  await fs.unlink(overflow).catch((error) => {
+async function discardOverflowSegment(sessionId: string, limit: number): Promise<void> {
+  const existing = await existingEventSegmentIndices(sessionId);
+  if (!existing.includes(limit)) {
+    return;
+  }
+  await fs.unlink(segmentEventPath(sessionId, limit)).catch((error) => {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
   });
+}
 
-  for (let segment = maxSegments - 1; segment >= 1; segment -= 1) {
+async function shiftRetainedSegments(sessionId: string, limit: number): Promise<void> {
+  const existing = await existingEventSegmentIndices(sessionId);
+  const movable = existing.filter((index) => index < limit).toSorted((left, right) => right - left);
+  for (const segment of movable) {
     const from = segmentEventPath(sessionId, segment);
-    const to = segmentEventPath(sessionId, segment + 1);
     if (!(await pathExists(from))) {
       continue;
     }
-    await fs.rename(from, to);
+    const next = segment + 1;
+    if (!Number.isSafeInteger(next)) {
+      throw new Error("Session journal segment index exceeds its supported range");
+    }
+    await fs.rename(from, segmentEventPath(sessionId, next));
   }
+}
 
+async function promoteActiveSegment(sessionId: string): Promise<void> {
+  const active = activeEventPath(sessionId);
   if (await pathExists(active)) {
     await fs.rename(active, segmentEventPath(sessionId, 1));
   }
@@ -156,8 +176,9 @@ export class SessionEventWriter {
       options.maxSegmentBytes ??
       record.eventLog.max_segment_bytes ??
       DEFAULT_EVENT_SEGMENT_MAX_BYTES;
-    const maxSegments =
-      options.maxSegments ?? record.eventLog.max_segments ?? DEFAULT_EVENT_MAX_SEGMENTS;
+    const maxSegments = retainedEventMaxSegments(
+      options.maxSegments ?? record.eventLog.max_segments ?? DEFAULT_EVENT_MAX_SEGMENTS,
+    );
     const activePath = activeEventPath(record.acpxRecordId);
     const tail = await new SessionJournalReader({
       ...record,
@@ -361,7 +382,9 @@ export async function listSessionEvents(
   sessionId: string,
   maxSegments?: number,
 ): Promise<AcpJsonRpcMessage[]> {
-  maxSegments ??= await resolveSessionMaxSegments(sessionId);
+  maxSegments = retainedEventMaxSegments(
+    maxSegments ?? (await resolveSessionMaxSegments(sessionId)),
+  );
   return await new SessionJournalReader({
     acpxRecordId: sessionId,
     eventLog: { max_segments: maxSegments },

@@ -12,6 +12,7 @@ Repo: https://github.com/openclaw/acpx
 - Development dependencies: patch source-map-js and smol-toml denial-of-service advisories and KaTeX's trust-restriction bypass in the pinned toolchain overrides.
 - Sessions: serialize ensures and imports across current and earlier built-in commands so concurrent callers cannot create duplicate records for the same scope. Thanks @odrobnik.
 - Output: report malformed tool locations and content without disconnecting text-mode prompts, preserving later assistant output and completion. Thanks @SebTardif.
+- Sessions: cap imported journal retention and scan existing segments efficiently while preserving higher retention settings and history already saved locally. Thanks @SebTardif.
 
 ## 0.19.4 - 2026-09-30
 

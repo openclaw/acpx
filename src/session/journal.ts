@@ -8,7 +8,13 @@ import { z } from "zod";
 import { isAcpJsonRpcMessage } from "../acp/jsonrpc.js";
 import { AcpxOperationalError } from "../errors.js";
 import type { AcpJsonRpcMessage, SessionRecord } from "../types.js";
-import { sessionEventActivePath, sessionEventSegmentPath } from "./event-log.js";
+import {
+  MAX_EVENT_SEGMENTS,
+  retainedEventMaxSegments,
+  sessionEventActivePath,
+  sessionEventFiles,
+  sessionEventSegmentPath,
+} from "./event-log.js";
 
 export type SessionWatchResult =
   | {
@@ -144,6 +150,7 @@ function parseCursor(recordId: string, cursor: string): number {
 }
 
 type OpenSegment = { filePath: string; opened: OpenResult; identity: string };
+type JournalScan = { paths: string[]; holes?: ReadonlySet<string> };
 type SegmentState = {
   offset: number;
   pending: Buffer;
@@ -169,6 +176,29 @@ async function pathIdentity(filePath: string): Promise<string | undefined> {
   }
 }
 
+function boundedJournalPaths(sessionId: string, saved: number): string[] {
+  const paths: string[] = [];
+  for (let index = saved; index > 0; index -= 1) {
+    paths.push(sessionEventSegmentPath(sessionId, index));
+  }
+  paths.push(sessionEventActivePath(sessionId));
+  return paths;
+}
+
+function sparseRotationHoles(indices: number[], present: Set<number>, saved: number): number[] {
+  const holes: number[] = [];
+  if (!present.has(1)) {
+    holes.push(1);
+  }
+  for (const index of indices) {
+    const next = index + 1;
+    if (index < saved && next <= saved && !present.has(next)) {
+      holes.push(next);
+    }
+  }
+  return holes;
+}
+
 function emptySegment(): SegmentState {
   return { offset: 0, pending: Buffer.alloc(0), sequence: 0, messageSequence: 0, requestId: null };
 }
@@ -188,13 +218,31 @@ export class SessionJournalReader {
     private readonly record: { acpxRecordId: string; eventLog: { max_segments: number } },
   ) {}
 
-  private paths(): string[] {
-    const paths: string[] = [];
-    for (let index = this.record.eventLog.max_segments; index > 0; index -= 1) {
-      paths.push(sessionEventSegmentPath(this.record.acpxRecordId, index));
+  private async discoverPaths(): Promise<JournalScan> {
+    const saved = retainedEventMaxSegments(this.record.eventLog.max_segments);
+    if (saved > MAX_EVENT_SEGMENTS) {
+      return await this.discoverSparsePaths(saved);
     }
-    paths.push(sessionEventActivePath(this.record.acpxRecordId));
-    return paths;
+    return { paths: boundedJournalPaths(this.record.acpxRecordId, saved) };
+  }
+
+  private async discoverSparsePaths(saved: number): Promise<JournalScan> {
+    const id = this.record.acpxRecordId;
+    const files = await sessionEventFiles(id);
+    const indices = files.indices.filter((index) => index <= saved);
+    const present = new Set(indices);
+    const holeIndices = sparseRotationHoles(indices, present, saved);
+    const ordered = [...new Set([...indices, ...holeIndices])].toSorted(
+      (left, right) => right - left,
+    );
+    const paths = ordered.map((index) => sessionEventSegmentPath(id, index));
+    const active = sessionEventActivePath(id);
+    paths.push(active);
+    const holes = new Set(holeIndices.map((index) => sessionEventSegmentPath(id, index)));
+    if (!files.active) {
+      holes.add(active);
+    }
+    return { paths, holes };
   }
 
   private async openSnapshot(signal?: AbortSignal): Promise<OpenSegment[]> {
@@ -202,9 +250,10 @@ export class SessionJournalReader {
       signal?.throwIfAborted();
       const segments: OpenSegment[] = [];
       try {
-        const paths = await this.openPresentSegments(segments);
+        const scan = await this.discoverPaths();
+        const paths = await this.openPresentSegments(segments, scan.paths);
         // Pin all files before reading: path renumbering must not skip or duplicate a segment.
-        if (await this.matchesSnapshot(paths, segments)) {
+        if (await this.matchesSnapshot(paths, segments, scan.holes)) {
           return segments;
         }
       } catch (error) {
@@ -218,8 +267,7 @@ export class SessionJournalReader {
     }
   }
 
-  private async openPresentSegments(segments: OpenSegment[]): Promise<string[]> {
-    const paths = this.paths();
+  private async openPresentSegments(segments: OpenSegment[], paths: string[]): Promise<string[]> {
     const present = await Promise.all(paths.map((filePath) => statRegularFile(filePath)));
     if (present.every((entry) => entry.missing)) {
       return paths;
@@ -261,10 +309,20 @@ export class SessionJournalReader {
     await Promise.all(segments.map(({ opened }) => opened[Symbol.asyncDispose]()));
   }
 
-  private async matchesSnapshot(paths: string[], segments: OpenSegment[]): Promise<boolean> {
+  private async matchesSnapshot(
+    paths: string[],
+    segments: OpenSegment[],
+    holes?: ReadonlySet<string>,
+  ): Promise<boolean> {
     const current = await Promise.all(paths.map(pathIdentity));
     const identities = new Map(segments.map((entry) => [entry.filePath, entry.identity]));
-    return paths.every((filePath, index) => current[index] === identities.get(filePath));
+    return paths.every((filePath, index) => {
+      const expected = identities.get(filePath);
+      if (current[index] !== expected) {
+        return false;
+      }
+      return holes === undefined || expected !== undefined || holes.has(filePath);
+    });
   }
 
   private async withSnapshot<T>(
@@ -285,7 +343,8 @@ export class SessionJournalReader {
         );
         // Rotation can straddle the first path scan and mimic a corrupt gap.
         // Retry changed captures without publishing their events or cached offsets.
-        if (await this.matchesSnapshot(this.paths(), segments)) {
+        const scan = await this.discoverPaths();
+        if (await this.matchesSnapshot(scan.paths, segments, scan.holes)) {
           signal?.throwIfAborted();
           if ("error" in outcome) {
             throw outcome.error;
