@@ -1633,6 +1633,7 @@ export class AcpRuntimeManager {
       record: turn.record,
       resumePolicy: resumePolicyForSessionMode(task.input.sessionMode),
       timeoutMs: this.options.timeoutMs,
+      promptRecorded: true,
       activeController: task.state.activeController!,
       onClientAvailable: () => this.publishRuntimeTurnController(task, turn),
       onConnectedRecord: (connectedRecord) => {

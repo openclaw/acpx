@@ -79,6 +79,29 @@ export function sessionHasAgentMessages(
   );
 }
 
+export function sessionHasAtMostOneUserMessage(
+  recordOrConversation: Pick<SessionRecord, "messages"> | SessionConversation,
+): boolean {
+  let userMessageCount = 0;
+  for (const message of recordOrConversation.messages) {
+    if (typeof message === "object" && message !== null && "User" in message) {
+      userMessageCount += 1;
+      if (userMessageCount > 1) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+export function sessionHasUserMessages(
+  recordOrConversation: Pick<SessionRecord, "messages"> | SessionConversation,
+): boolean {
+  return recordOrConversation.messages.some(
+    (message) => typeof message === "object" && message !== null && "User" in message,
+  );
+}
+
 export function applyConversation(record: SessionRecord, conversation: SessionConversation): void {
   record.title = conversation.title;
   record.updated_at = conversation.updated_at;

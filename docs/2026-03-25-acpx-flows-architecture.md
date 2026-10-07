@@ -442,6 +442,12 @@ Persistent session recovery rule:
   the meaning of later steps
 - if reconnect-and-load fails, fail the node or flow clearly instead of creating
   a fresh persistent session behind the author's back
+- on a same-session-only reconnect whose load fails with an ACP internal load/resume
+  error (-32603), the runtime replaces the session with a fresh one only when it holds no
+  earlier prompt history the agent may have retained: a prompt turn holding only the prompt
+  it just recorded, or a control holding no prompt; the -32603 error does not prove the
+  agent kept nothing, so an agent message, earlier prompt history, a saved resume marker, or imported provenance
+  keeps the original session
 
 Implementation guidance:
 
