@@ -312,6 +312,7 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
     mode: "persistent",
   });
   assert.equal(created.acpSessionId, "new-session");
+  assert.equal(created.acpx?.session_origin, "new");
   assert.equal(created.agentSessionId, "agent-session");
   assert.equal(created.protocolVersion, 1);
   assert.deepEqual(
@@ -328,6 +329,7 @@ test("AcpRuntimeManager creates and resumes sessions through the client", async 
     resumeSessionId: "resume-session",
   });
   assert.equal(resumed.acpSessionId, "resume-session");
+  assert.equal(resumed.acpx?.session_origin, "resume");
   assert.equal(resumed.agentSessionId, "resumed-agent");
   assert.deepEqual(
     resumed.acpx?.config_options?.map((option) => option.id),

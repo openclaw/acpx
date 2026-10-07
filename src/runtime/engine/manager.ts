@@ -1102,6 +1102,7 @@ export class AcpRuntimeManager {
       sessionKey: string;
       mode: "persistent" | "oneshot";
       sessionOptions?: SessionAgentOptions;
+      resumeSessionId?: string;
     };
     client: AcpClient;
     owner: RuntimeSessionOwner;
@@ -1115,6 +1116,7 @@ export class AcpRuntimeManager {
       recordId: createRecordId(input.sessionKey, input.mode),
       name: input.sessionKey,
       sessionId: session.sessionId,
+      sessionOrigin: input.resumeSessionId ? "resume" : "new",
       agentCommand,
       agentArgv,
       cwd,

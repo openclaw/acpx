@@ -527,7 +527,7 @@ test("connectAndLoadSession requires the same provider session for imported reco
   });
 });
 
-for (const history of ["prompt", "resume"] as const) {
+for (const history of ["prompt", "resume", "unknown-origin", "resumed-origin"] as const) {
   test(`connectAndLoadSession refuses a same-session prompt turn with prior ${history} history`, async () => {
     await withTempHome(async (homeDir) => {
       const cwd = path.join(homeDir, "workspace");
@@ -538,10 +538,16 @@ for (const history of ["prompt", "resume"] as const) {
         acpSessionId: "earlier-prompt-session",
         agentCommand: "agent",
         cwd,
+        acpx:
+          history === "unknown-origin"
+            ? {}
+            : { session_origin: history === "resumed-origin" ? "resume" : "new" },
         messages: [
-          history === "resume"
-            ? "Resume"
-            : { User: { id: "earlier-prompt", content: [{ Text: "earlier prompt" }] } },
+          ...(history === "resume"
+            ? (["Resume"] as const)
+            : history === "prompt"
+              ? [{ User: { id: "earlier-prompt", content: [{ Text: "earlier prompt" }] } }]
+              : []),
           { User: { id: "current-prompt", content: [{ Text: "current prompt" }] } },
         ],
       });
@@ -592,6 +598,7 @@ test("connectAndLoadSession refuses a fresh session for an imported record witho
 
     const record = makeSessionRecord({
       acpxRecordId: "imported-no-history-record",
+      acpx: { session_origin: "new" },
       acpSessionId: "imported-no-history-session",
       agentCommand: "agent",
       cwd,
@@ -647,6 +654,7 @@ test("connectAndLoadSession recovers a control connection on a truly new session
 
     const record = makeSessionRecord({
       acpxRecordId: "control-new-record",
+      acpx: { session_origin: "new" },
       acpSessionId: "control-new-session",
       agentCommand: "agent",
       cwd,
@@ -690,7 +698,7 @@ test("connectAndLoadSession recovers a control connection on a truly new session
   });
 });
 
-for (const history of ["prompt", "resume"] as const) {
+for (const history of ["prompt", "resume", "unknown-origin", "resumed-origin"] as const) {
   test(`connectAndLoadSession refuses a same-session control with prior ${history} history`, async () => {
     await withTempHome(async (homeDir) => {
       const cwd = path.join(homeDir, "workspace");
@@ -701,10 +709,16 @@ for (const history of ["prompt", "resume"] as const) {
         acpSessionId: "control-prior-prompt-session",
         agentCommand: "agent",
         cwd,
+        acpx:
+          history === "unknown-origin"
+            ? {}
+            : { session_origin: history === "resumed-origin" ? "resume" : "new" },
         messages:
           history === "resume"
             ? ["Resume"]
-            : [{ User: { id: "prior-prompt", content: [{ Text: "prior prompt" }] } }],
+            : history === "prompt"
+              ? [{ User: { id: "prior-prompt", content: [{ Text: "prior prompt" }] } }]
+              : [],
       });
 
       const client: FakeClient = {
@@ -752,6 +766,7 @@ test("connectAndLoadSession recovers a same-session prompt turn that recorded on
 
     const record = makeSessionRecord({
       acpxRecordId: "prompt-recorded-record",
+      acpx: { session_origin: "new" },
       acpSessionId: "prompt-recorded-session",
       agentCommand: "agent",
       cwd,

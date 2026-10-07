@@ -12,6 +12,7 @@ export function createInitialSessionRecord(params: {
   agentArgv?: string[];
   cwd: string;
   agentSessionId?: string;
+  sessionOrigin?: "new" | "resume";
 }): SessionRecord {
   const now = new Date().toISOString();
   return {
@@ -30,7 +31,7 @@ export function createInitialSessionRecord(params: {
     closed: false,
     closedAt: undefined,
     ...createSessionConversation(now),
-    acpx: {},
+    acpx: params.sessionOrigin ? { session_origin: params.sessionOrigin } : {},
   };
 }
 

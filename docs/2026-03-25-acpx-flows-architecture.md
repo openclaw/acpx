@@ -448,6 +448,8 @@ Persistent session recovery rule:
   it just recorded, or a control holding no prompt; the -32603 error does not prove the
   agent kept nothing, so an agent message, earlier prompt history, a saved resume marker, or imported provenance
   keeps the original session
+- fresh recovery additionally requires persisted `session/new` provenance; explicit native
+  resumes and older records with unknown origin keep requiring their original backend
 
 Implementation guidance:
 

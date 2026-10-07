@@ -917,6 +917,7 @@ function canRecoverLoadWithFreshSession(
   // Prompt turns record their current User message before connecting; controls do not.
   // An internal load error alone cannot prove that earlier remote context is empty.
   return (
+    params.record.acpx?.session_origin === "new" &&
     !params.record.importedFrom &&
     !sessionHasAgentMessages(params.record) &&
     !params.record.messages.includes("Resume") &&
@@ -934,6 +935,7 @@ async function createFreshRuntimeSession(
   authority?: AcpControlAuthority,
 ): Promise<RuntimeSessionLoadState> {
   const createdSession = await withTimeout(client.createSession(record.cwd, authority), timeoutMs);
+  record.acpx = { ...record.acpx, session_origin: "new" };
   applyConfigOptionsToRecord(record, createdSession);
   return {
     sessionId: createdSession.sessionId,

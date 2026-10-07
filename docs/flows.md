@@ -187,6 +187,8 @@ Every node uses the global `--timeout` value as its default per-step timeout. If
 
 Callbacks receive `context.signal`, which aborts on timeout or interruption. After cancellation, the runtime denies new adapter launches, ACP requests, and managed shell commands, and waits for already owned work and cleanup before recording the outcome. Persistent ACP reconnection loads the same backend session; a failed load fails the step without creating a replacement session, except that on a same-session-only reconnect whose load fails with an ACP internal load/resume error (-32603), a session holding no earlier prompt history the agent may have retained — a prompt turn holding only the prompt it just recorded, or a control holding no prompt — is replaced by a fresh one; the -32603 error does not prove the agent kept nothing, so an agent message, earlier prompt history, a saved resume marker, or imported provenance keeps the original session. Unsupported or missing-session load failures still fail the step.
 
+This recovery requires a saved record confirming creation through `session/new`. Explicit native resumes and older records without creation provenance keep requiring the original backend, even with empty local history.
+
 Function actions also receive `context.runShell` for native commands:
 
 ```ts
