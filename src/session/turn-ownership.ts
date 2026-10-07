@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { withTempFile } from "@openclaw/fs-safe/advanced";
 import { isHardlinkFallbackError } from "@openclaw/fs-safe/durability";
 import { acquireFileLock, type FileLockHandle } from "@openclaw/fs-safe/file-lock";
+import { canonicalAgentCommand } from "../acp/builtin-command-migration.js";
 import { incrementPerfCounter } from "../perf-metrics.js";
 import { sessionBaseDir, sessionEventLockPath } from "./event-log.js";
 import { createLockOwner, lockOwnerPid, type LockOwner } from "./lock-owner.js";
@@ -341,7 +342,7 @@ export async function acquireSessionScope(
   signal?: AbortSignal,
 ): Promise<AsyncDisposable> {
   const key = createHash("sha256")
-    .update(JSON.stringify([scope.agentCommand, scope.cwd, scope.name]))
+    .update(JSON.stringify([canonicalAgentCommand(scope.agentCommand), scope.cwd, scope.name]))
     .digest("hex");
   return await acquireSessionTurn(`ensure:${key}`, signal);
 }

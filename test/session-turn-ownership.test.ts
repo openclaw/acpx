@@ -4,10 +4,60 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { LEGACY_AGENT_COMMANDS } from "../src/acp/builtin-command-migration.js";
+import { AGENT_REGISTRY } from "../src/agent-registry.js";
 import { sessionEventLockPath } from "../src/session/event-log.js";
 import { listSessions } from "../src/session/persistence.js";
-import { acquireSessionImport, acquireSessionTurn } from "../src/session/turn-ownership.js";
+import {
+  acquireSessionImport,
+  acquireSessionScope,
+  acquireSessionTurn,
+} from "../src/session/turn-ownership.js";
 import { startKeeperProcess, withTempHome } from "./queue-test-helpers.js";
+
+test("session scope ownership serializes current and historical built-in commands", async () => {
+  await withTempHome(async (cwd) => {
+    const current = { agentCommand: AGENT_REGISTRY.claude, cwd, name: "shared" };
+    const historical = { ...current, agentCommand: LEGACY_AGENT_COMMANDS.claude[0] };
+    const first = await acquireSessionScope(current);
+    const signal = AbortSignal.timeout(500);
+    try {
+      await assert.rejects(
+        async () => {
+          const second = await acquireSessionScope(historical, signal);
+          await second[Symbol.asyncDispose]();
+        },
+        (error: unknown) =>
+          signal.aborted &&
+          error instanceof Error &&
+          (error.name === "AbortError" || error.name === "TimeoutError"),
+      );
+    } finally {
+      await first[Symbol.asyncDispose]();
+    }
+    const next = await acquireSessionScope(historical, AbortSignal.timeout(5_000));
+    await next[Symbol.asyncDispose]();
+  });
+});
+
+test("session scope ownership keeps custom commands, directories, and names independent", async () => {
+  await withTempHome(async (cwd) => {
+    const scope = { agentCommand: AGENT_REGISTRY.claude, cwd, name: "shared" };
+    const first = await acquireSessionScope(scope);
+    try {
+      for (const separate of [
+        { ...scope, agentCommand: "custom-agent --acp" },
+        { ...scope, cwd: path.join(cwd, "other") },
+        { ...scope, name: "other" },
+      ]) {
+        const independent = await acquireSessionScope(separate, AbortSignal.timeout(5_000));
+        await independent[Symbol.asyncDispose]();
+      }
+    } finally {
+      await first[Symbol.asyncDispose]();
+    }
+  });
+});
 
 test("session turn ownership serializes same-process callers and survives a canceled waiter", async (t) => {
   await withTempHome(async () => {
