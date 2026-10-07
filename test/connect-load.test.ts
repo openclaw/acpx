@@ -527,6 +527,290 @@ test("connectAndLoadSession requires the same provider session for imported reco
   });
 });
 
+for (const history of ["prompt", "resume", "unknown-origin", "resumed-origin"] as const) {
+  test(`connectAndLoadSession refuses a same-session prompt turn with prior ${history} history`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      await fs.mkdir(cwd, { recursive: true });
+
+      const record = makeSessionRecord({
+        acpxRecordId: "earlier-prompt-record",
+        acpSessionId: "earlier-prompt-session",
+        agentCommand: "agent",
+        cwd,
+        acpx:
+          history === "unknown-origin"
+            ? {}
+            : { session_origin: history === "resumed-origin" ? "resume" : "new" },
+        messages: [
+          ...(history === "resume"
+            ? (["Resume"] as const)
+            : history === "prompt"
+              ? [{ User: { id: "earlier-prompt", content: [{ Text: "earlier prompt" }] } }]
+              : []),
+          { User: { id: "current-prompt", content: [{ Text: "current prompt" }] } },
+        ],
+      });
+
+      const client: FakeClient = {
+        hasReusableSession: () => false,
+        start: async () => {},
+        getAgentLifecycleSnapshot: () => ({ running: true }),
+        supportsLoadSession: () => true,
+        supportsResumeSession: () => false,
+        loadSessionWithOptions: async () => {
+          throw {
+            error: {
+              code: -32603,
+              message: "backend temporarily unavailable",
+            },
+          };
+        },
+        createSession: async () => {
+          throw new Error("createSession should not be called");
+        },
+        setSessionMode: async () => {},
+        setSessionModel: async () => {},
+      };
+
+      await assert.rejects(
+        async () =>
+          await connectAndLoadSession({
+            client: client as never,
+            record,
+            resumePolicy: "same-session-only",
+            promptRecorded: true,
+            timeoutMs: 1_000,
+            activeController: ACTIVE_CONTROLLER,
+          }),
+        /Persistent ACP session earlier-prompt-session could not be resumed: .*backend temporarily unavailable/i,
+      );
+
+      assert.equal(record.acpSessionId, "earlier-prompt-session");
+    });
+  });
+}
+
+test("connectAndLoadSession refuses a fresh session for an imported record without history", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "imported-no-history-record",
+      acpx: { session_origin: "new" },
+      acpSessionId: "imported-no-history-session",
+      agentCommand: "agent",
+      cwd,
+      messages: [],
+      importedFrom: {
+        recordId: "source-record",
+        cwdOriginal: "/source/workspace",
+        exportedBy: "source-user",
+        exportedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({ running: true }),
+      supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
+      loadSessionWithOptions: async () => {
+        throw {
+          error: {
+            code: -32603,
+            message: "internal error",
+          },
+        };
+      },
+      createSession: async () => {
+        throw new Error("createSession should not be called");
+      },
+      setSessionMode: async () => {},
+      setSessionModel: async () => {},
+    };
+
+    await assert.rejects(
+      async () =>
+        await connectAndLoadSession({
+          client: client as never,
+          record,
+          timeoutMs: 1_000,
+          activeController: ACTIVE_CONTROLLER,
+        }),
+      /Persistent ACP session imported-no-history-session could not be resumed: .*internal error/i,
+    );
+
+    assert.equal(record.acpSessionId, "imported-no-history-session");
+  });
+});
+
+test("connectAndLoadSession recovers a control connection on a truly new session", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "control-new-record",
+      acpx: { session_origin: "new" },
+      acpSessionId: "control-new-session",
+      agentCommand: "agent",
+      cwd,
+      messages: [],
+    });
+
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({ running: true }),
+      supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
+      loadSessionWithOptions: async () => {
+        throw {
+          error: {
+            code: -32603,
+            message: "internal error",
+          },
+        };
+      },
+      createSession: async () => ({
+        sessionId: "control-created-session",
+        agentSessionId: "control-created-runtime",
+      }),
+      setSessionMode: async () => {},
+      setSessionModel: async () => {},
+    };
+
+    const result = await connectAndLoadSession({
+      client: client as never,
+      record,
+      resumePolicy: "same-session-only",
+      timeoutMs: 1_000,
+      activeController: ACTIVE_CONTROLLER,
+    });
+
+    assert.equal(result.sessionId, "control-created-session");
+    assert.equal(result.resumed, false);
+    assert.equal(record.acpSessionId, "control-created-session");
+    assert.equal(record.agentSessionId, "control-created-runtime");
+  });
+});
+
+for (const history of ["prompt", "resume", "unknown-origin", "resumed-origin"] as const) {
+  test(`connectAndLoadSession refuses a same-session control with prior ${history} history`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      await fs.mkdir(cwd, { recursive: true });
+
+      const record = makeSessionRecord({
+        acpxRecordId: "control-prior-prompt-record",
+        acpSessionId: "control-prior-prompt-session",
+        agentCommand: "agent",
+        cwd,
+        acpx:
+          history === "unknown-origin"
+            ? {}
+            : { session_origin: history === "resumed-origin" ? "resume" : "new" },
+        messages:
+          history === "resume"
+            ? ["Resume"]
+            : history === "prompt"
+              ? [{ User: { id: "prior-prompt", content: [{ Text: "prior prompt" }] } }]
+              : [],
+      });
+
+      const client: FakeClient = {
+        hasReusableSession: () => false,
+        start: async () => {},
+        getAgentLifecycleSnapshot: () => ({ running: true }),
+        supportsLoadSession: () => true,
+        supportsResumeSession: () => false,
+        loadSessionWithOptions: async () => {
+          throw {
+            error: {
+              code: -32603,
+              message: "backend temporarily unavailable",
+            },
+          };
+        },
+        createSession: async () => {
+          throw new Error("createSession should not be called");
+        },
+        setSessionMode: async () => {},
+        setSessionModel: async () => {},
+      };
+
+      await assert.rejects(
+        async () =>
+          await connectAndLoadSession({
+            client: client as never,
+            record,
+            resumePolicy: "same-session-only",
+            timeoutMs: 1_000,
+            activeController: ACTIVE_CONTROLLER,
+          }),
+        /Persistent ACP session control-prior-prompt-session could not be resumed: .*backend temporarily unavailable/i,
+      );
+
+      assert.equal(record.acpSessionId, "control-prior-prompt-session");
+    });
+  });
+}
+
+test("connectAndLoadSession recovers a same-session prompt turn that recorded only its own prompt", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const record = makeSessionRecord({
+      acpxRecordId: "prompt-recorded-record",
+      acpx: { session_origin: "new" },
+      acpSessionId: "prompt-recorded-session",
+      agentCommand: "agent",
+      cwd,
+      messages: [{ User: { id: "current-prompt", content: [{ Text: "current prompt" }] } }],
+    });
+
+    const client: FakeClient = {
+      hasReusableSession: () => false,
+      start: async () => {},
+      getAgentLifecycleSnapshot: () => ({ running: true }),
+      supportsLoadSession: () => true,
+      supportsResumeSession: () => false,
+      loadSessionWithOptions: async () => {
+        throw {
+          error: {
+            code: -32603,
+            message: "internal error",
+          },
+        };
+      },
+      createSession: async () => ({
+        sessionId: "prompt-recorded-created-session",
+        agentSessionId: "prompt-recorded-created-runtime",
+      }),
+      setSessionMode: async () => {},
+      setSessionModel: async () => {},
+    };
+
+    const result = await connectAndLoadSession({
+      client: client as never,
+      record,
+      resumePolicy: "same-session-only",
+      promptRecorded: true,
+      timeoutMs: 1_000,
+      activeController: ACTIVE_CONTROLLER,
+    });
+
+    assert.equal(result.sessionId, "prompt-recorded-created-session");
+    assert.equal(result.resumed, false);
+    assert.equal(record.acpSessionId, "prompt-recorded-created-session");
+    assert.equal(record.agentSessionId, "prompt-recorded-created-runtime");
+  });
+});
+
 test("connectAndLoadSession falls back to createSession for empty sessions on adapter internal errors", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");

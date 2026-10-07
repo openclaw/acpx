@@ -974,3 +974,116 @@ test("shared controls settle accepted state after dispatch authority is revoked"
     ["--advertise-config-options"],
   );
 });
+
+test(
+  "a never-prompted shared session replaces an agent session that cannot be resumed",
+  { timeout: 20_000 },
+  async () => {
+    await withSharedSession(
+      async ({ runtime, handle, command, home }) => {
+        const turn = runtime.startTurn({
+          handle,
+          text: "echo first-turn",
+          requestId: "first-turn",
+          mode: "prompt",
+        });
+        assert.equal(await output(turn.events), "first-turn");
+        assert.equal((await turn.result).status, "completed");
+        const record = await findSession({ agentCommand: command, cwd: home, name: "shared" });
+        assert.ok(record);
+        assert.notEqual(record.acpSessionId, handle.backendSessionId);
+      },
+      "deny-all",
+      ["--load-session-fails-on-empty"],
+    );
+  },
+);
+
+test(
+  "a shared session with history still refuses to replace an agent session that cannot be resumed",
+  { timeout: 20_000 },
+  async () => {
+    await withSharedSession(
+      async ({ runtime, handle, cli, command, home }) => {
+        await cli("prompt", "-s", "shared", "echo history");
+        const before = await findSession({ agentCommand: command, cwd: home, name: "shared" });
+        assert.ok(before);
+        const owner = await readQueueOwnerRecord(handle.acpxRecordId ?? handle.runtimeSessionName);
+        assert.ok(owner);
+        process.kill(owner.pid, "SIGKILL");
+        while (isAlive(owner.pid)) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const turn = runtime.startTurn({
+          handle,
+          text: "echo after-owner-loss",
+          requestId: "after-owner-loss",
+          mode: "prompt",
+        });
+        const result = await turn.result;
+        assert.equal(result.status, "failed");
+        assert.equal(
+          result.status === "failed" ? result.error.detailCode : undefined,
+          "SESSION_RESUME_REQUIRED",
+        );
+        const after = await findSession({ agentCommand: command, cwd: home, name: "shared" });
+        assert.equal(after?.acpSessionId, before.acpSessionId);
+      },
+      "deny-all",
+      ["--load-session-fails-on-empty"],
+    );
+  },
+);
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test(
+  "a shared session whose earlier prompt was cancelled before any agent output still refuses replacement",
+  { timeout: 30_000 },
+  async () => {
+    await withSharedSession(
+      async ({ runtime, handle, command, home }) => {
+        const first = runtime.startTurn({
+          handle,
+          text: "sleep 10000",
+          requestId: "cancelled-before-output",
+          mode: "prompt",
+        });
+        await first.promptStarted;
+        await runtime.cancel({ handle, reason: "test cancellation before agent output" });
+        assert.equal((await first.result).status, "cancelled");
+        const before = await findSession({ agentCommand: command, cwd: home, name: "shared" });
+        assert.ok(before);
+        const owner = await readQueueOwnerRecord(handle.acpxRecordId ?? handle.runtimeSessionName);
+        assert.ok(owner);
+        process.kill(owner.pid, "SIGKILL");
+        while (isAlive(owner.pid)) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const second = runtime.startTurn({
+          handle,
+          text: "echo after-cancel",
+          requestId: "after-cancel",
+          mode: "prompt",
+        });
+        const result = await second.result;
+        assert.equal(result.status, "failed");
+        assert.equal(
+          result.status === "failed" ? result.error.detailCode : undefined,
+          "SESSION_RESUME_REQUIRED",
+        );
+        const after = await findSession({ agentCommand: command, cwd: home, name: "shared" });
+        assert.equal(after?.acpSessionId, before.acpSessionId);
+      },
+      "deny-all",
+      ["--load-session-fails-on-empty"],
+    );
+  },
+);

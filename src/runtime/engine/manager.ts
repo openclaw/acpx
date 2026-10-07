@@ -1102,6 +1102,7 @@ export class AcpRuntimeManager {
       sessionKey: string;
       mode: "persistent" | "oneshot";
       sessionOptions?: SessionAgentOptions;
+      resumeSessionId?: string;
     };
     client: AcpClient;
     owner: RuntimeSessionOwner;
@@ -1115,6 +1116,7 @@ export class AcpRuntimeManager {
       recordId: createRecordId(input.sessionKey, input.mode),
       name: input.sessionKey,
       sessionId: session.sessionId,
+      sessionOrigin: input.resumeSessionId ? "resume" : "new",
       agentCommand,
       agentArgv,
       cwd,
@@ -1633,6 +1635,7 @@ export class AcpRuntimeManager {
       record: turn.record,
       resumePolicy: resumePolicyForSessionMode(task.input.sessionMode),
       timeoutMs: this.options.timeoutMs,
+      promptRecorded: true,
       activeController: task.state.activeController!,
       onClientAvailable: () => this.publishRuntimeTurnController(task, turn),
       onConnectedRecord: (connectedRecord) => {

@@ -9,6 +9,7 @@
 - For a one-shot run, use `acpx --model <id> codex exec --config-option reasoning_effort=<value> 'prompt'`; the effort is applied after the model and before the prompt.
 - Switching models can adjust reasoning effort. ACPX saves the accepted effort for an existing selection, or removes that selection if the new model has no effort control.
 - Reconnecting restores the saved model and effort before prompting, even when the adapter resumes the conversation with different defaults.
+- In persistent embedded or flow sessions, if an unprompted session recorded as created through `session/new` fails to load with an ACP internal error, its first prompt or control can recover on a fresh backend session with saved preferences restored. Explicit native resumes, older records without creation provenance, earlier prompts, agent output, legacy resume markers, and imported provenance keep the original session; missing-session and unsupported-load errors still fail clearly.
 - Legacy `models` metadata may encode both values in a combined id such as `gpt-5.6-sol[max]`; ACPX uses that form only when the adapter does not advertise the newer model config option.
 - When the adapter returns `_meta.codex.turnConfiguration`, ACPX preserves the opaque metadata in direct, queued, compare, and embedded-runtime results. Structured CLI output also retains the raw ACP prompt response.
 

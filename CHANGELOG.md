@@ -13,6 +13,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions: serialize ensures and imports across current and earlier built-in commands so concurrent callers cannot create duplicate records for the same scope. Thanks @odrobnik.
 - Output: report malformed tool locations and content without disconnecting text-mode prompts, preserving later assistant output and completion. Thanks @SebTardif.
 - Sessions: cap imported journal retention and scan existing segments efficiently while preserving higher retention settings and history already saved locally. Thanks @SebTardif.
+- Sessions: recover the first prompt or control of a confirmed newly created persistent session after an internal load error; preserve explicitly resumed sessions, legacy records without creation provenance, imports, and existing history. Thanks @superbiche.
 
 ## 0.19.4 - 2026-09-30
 

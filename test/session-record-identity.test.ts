@@ -5,11 +5,59 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { AcpClient } from "../src/acp/client.js";
 import { FlowRunner, acp, action, defineFlow } from "../src/flows/runtime.js";
+import { connectAndLoadSession } from "../src/runtime/engine/reconnect.js";
 import { createSession } from "../src/session/execution/session-management.js";
 import { readSessionRecord } from "../src/session/persistence.js";
 import { withTempHome } from "./runtime-test-helpers.js";
 
 const AGENT = fileURLToPath(new URL("./fixtures/reused-session-agent.js", import.meta.url));
+
+test("explicit native resume without replay never becomes eligible for fresh recovery", async (t) => {
+  await withTempHome("acpx-explicit-resume-", async (home) => {
+    t.mock.method(AcpClient.prototype, "start", async () => {});
+    t.mock.method(AcpClient.prototype, "supportsLoadSession", () => true);
+    t.mock.method(AcpClient.prototype, "supportsResumeSession", () => false);
+    t.mock.method(AcpClient.prototype, "loadSessionWithOptions", async () => ({}));
+    t.mock.method(AcpClient.prototype, "createSession", async () => {
+      throw new Error("must not replace an explicitly resumed session");
+    });
+    const options = {
+      agentCommand: "synthetic-agent",
+      cwd: home,
+      permissionMode: "deny-all" as const,
+      handleProcessInterrupts: false,
+    };
+    const resumed = await createSession({ ...options, resumeSessionId: "existing-native-session" });
+    const record = await readSessionRecord(resumed.acpxRecordId);
+    assert.ok(record);
+    assert.equal(record.acpx?.session_origin, "resume");
+    assert.deepEqual(record.messages, []);
+    t.mock.method(AcpClient.prototype, "loadSessionWithOptions", async () => {
+      throw { error: { code: -32603, message: "backend temporarily unavailable" } };
+    });
+    const client = new AcpClient(options);
+    try {
+      await assert.rejects(
+        connectAndLoadSession({
+          client,
+          record,
+          resumePolicy: "same-session-only",
+          activeController: {
+            hasActivePrompt: () => false,
+            requestCancelActivePrompt: async () => false,
+            setSessionMode: async () => {},
+            setSessionModel: async () => {},
+            setSessionConfigOption: async () => ({ configOptions: [] }),
+          },
+        }),
+        /Persistent ACP session existing-native-session could not be resumed/,
+      );
+      assert.equal(record.acpSessionId, "existing-native-session");
+    } finally {
+      await client.close();
+    }
+  });
+});
 
 test("new sessions receive distinct local records when an adapter reuses its session ID", async (t) => {
   await withTempHome("acpx-session-collision-", async (home) => {
@@ -25,6 +73,8 @@ test("new sessions receive distinct local records when an adapter reuses its ses
     };
     const first = await createSession({ ...options, name: "flow-a" });
     const second = await createSession({ ...options, name: "flow-b" });
+    assert.equal(first.acpx?.session_origin, "new");
+    assert.equal((await readSessionRecord(first.acpxRecordId))?.acpx?.session_origin, "new");
     assert.equal(first.acpSessionId, second.acpSessionId);
     assert.notEqual(first.acpxRecordId, second.acpxRecordId);
     assert.equal((await readSessionRecord(first.acpxRecordId))?.name, "flow-a");

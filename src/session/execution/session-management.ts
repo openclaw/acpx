@@ -58,6 +58,7 @@ async function createSessionRecordWithClient(
       recordId: resumedRecordId ?? randomUUID(),
       sessionId,
       agentSessionId,
+      sessionOrigin: options.resumeSessionId ? "resume" : "new",
       agentCommand: options.agentCommand,
       agentArgv: options.agentArgv,
       cwd,

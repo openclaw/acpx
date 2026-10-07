@@ -923,6 +923,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
           timeoutMs: options.timeoutMs,
           verbose: options.verbose,
           suppressWarnings: options.suppressSdkConsoleErrors,
+          promptRecorded: true,
           activeController,
           authority: { signal: options.ownedSignal },
           onClientAvailable: (controller) => {
