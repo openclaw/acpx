@@ -16,6 +16,8 @@ overrides:
   brace-expansion: 5.0.12
   fast-uri: 4.1.5
   js-yaml: 5.4.1
+  katex: 0.18.2
   markdown-it: 15.0.2
   qs: 6.16.0
-  smol-toml: 1.8.0
+  smol-toml: 1.9.0
+  source-map-js: 1.2.2

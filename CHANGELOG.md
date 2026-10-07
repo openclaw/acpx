@@ -9,6 +9,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Dependencies: refresh the ACP SDK, Node.js types, and replay-viewer tooling; update guarded filesystem operations for Windows path admission and watcher reliability while retaining existing native-mode settings.
+- Development dependencies: patch source-map-js and smol-toml denial-of-service advisories and KaTeX's trust-restriction bypass in the pinned toolchain overrides.
 
 ## 0.19.4 - 2026-09-30
 
