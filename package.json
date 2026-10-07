@@ -82,7 +82,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.5.0",
-    "@openclaw/fs-safe": "^0.21.1",
+    "@openclaw/fs-safe": "^0.22.0",
     "commander": "^15.0.0",
     "skillflag": "^0.2.1",
     "tsx": "^4.23.15",

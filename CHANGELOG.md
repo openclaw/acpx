@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Dependencies: refresh the ACP SDK, Node.js types, and replay-viewer tooling; update guarded filesystem operations for Windows path admission and watcher reliability while retaining existing native-mode settings.
+
 ## 0.19.4 - 2026-09-30
 
 **Highlights:** Safer permission prompts, reliable session continuity, and complete replay history.
