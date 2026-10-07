@@ -914,17 +914,21 @@ function canRecoverLoadWithFreshSession(
   if (!params.sameSessionOnly) {
     return shouldFallbackToNewSession(error, params.record);
   }
-  // Prompt turns record their current User message before connecting; controls do not.
   // An internal load error alone cannot prove that earlier remote context is empty.
   return (
-    params.record.acpx?.session_origin === "new" &&
-    !params.record.importedFrom &&
-    !sessionHasAgentMessages(params.record) &&
-    !params.record.messages.includes("Resume") &&
-    (params.promptRecorded
-      ? sessionHasAtMostOneUserMessage(params.record)
-      : !sessionHasUserMessages(params.record)) &&
+    isUnpromptedNewSession(params.record, params.promptRecorded) &&
     extractAcpError(error)?.code === -32603
+  );
+}
+
+function isUnpromptedNewSession(record: SessionRecord, promptRecorded = false): boolean {
+  // Prompt turns record their current User message before connecting; controls do not.
+  return (
+    record.acpx?.session_origin === "new" &&
+    !record.importedFrom &&
+    !sessionHasAgentMessages(record) &&
+    !record.messages.includes("Resume") &&
+    (promptRecorded ? sessionHasAtMostOneUserMessage(record) : !sessionHasUserMessages(record))
   );
 }
 

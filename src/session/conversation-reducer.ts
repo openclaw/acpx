@@ -546,6 +546,7 @@ export function cloneSessionAcpxState(
   }
 
   return {
+    ...(state.session_origin ? { session_origin: state.session_origin } : {}),
     current_mode_id: state.current_mode_id,
     desired_mode_id: state.desired_mode_id,
     desired_config_options: state.desired_config_options
