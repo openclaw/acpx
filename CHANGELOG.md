@@ -14,7 +14,7 @@ Repo: https://github.com/openclaw/acpx
 - Output: report malformed tool locations and content without disconnecting text-mode prompts, preserving later assistant output and completion. Thanks @SebTardif.
 - Sessions: cap imported journal retention and scan existing segments efficiently while preserving higher retention settings and history already saved locally. Thanks @SebTardif.
 - Sessions: recover the first prompt or control of a confirmed newly created persistent session after an internal load error; preserve explicitly resumed sessions, legacy records without creation provenance, imports, and existing history. Thanks @superbiche.
-- Dependencies: update guarded filesystem operations for safer exclusive creation and platform fallbacks, adopt automatic nonblocking journal reads, and refresh replay-viewer tooling and pinned CI actions.
+- Development dependencies: refresh replay-viewer tooling and the formatter and linter.
 
 ## 0.19.4 - 2026-09-30
 
