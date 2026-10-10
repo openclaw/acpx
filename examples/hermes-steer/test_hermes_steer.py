@@ -1,5 +1,6 @@
 """No Hermes install, model credentials, or network beyond loopback required."""
 
+import builtins
 import http.client
 import importlib.util
 import json
@@ -38,19 +39,29 @@ class Runtime:
 
 
 class StartupTest(unittest.TestCase):
-    def startup_events(self, platform, has_warmup):
+    def startup_events(self, platform, has_warmup, has_truststore=False):
         events = []
         entry = SimpleNamespace(__file__=str(SCRIPT), _setup_logging=lambda: None,
                                 _load_env=lambda: events.append("env"))
         if has_warmup:
             entry._warm_memory_provider_import = lambda _logger: events.append("warmup")
+        ssl_verify = SimpleNamespace()
+        if has_truststore:
+            ssl_verify.install_truststore = lambda: events.append("truststore")
         modules = {
+            "agent": SimpleNamespace(ssl_verify=ssl_verify),
             "acp_adapter": SimpleNamespace(entry=entry),
             "acp_adapter.server": SimpleNamespace(HermesACPAgent=lambda: object()),
             "acp": SimpleNamespace(run_agent=lambda *_a, **_kw: events.append("acp-reader")),
             "hermes_cli.mcp_startup": SimpleNamespace(
                 start_background_mcp_discovery=lambda **_kw: events.append("mcp")),
         }
+        original_import = builtins.__import__
+
+        def track_import(name, *args, **kwargs):
+            if name == "acp_adapter.server":
+                events.append("provider-import")
+            return original_import(name, *args, **kwargs)
 
         @contextmanager
         def control(*_args):
@@ -58,6 +69,7 @@ class StartupTest(unittest.TestCase):
             yield
 
         with (patch.dict(sys.modules, modules), patch.object(sys, "platform", platform),
+              patch.object(builtins, "__import__", track_import),
               patch.object(sys, "path", list(sys.path)),
               patch.dict(os.environ, {"HERMES_ACP_SKIP_CONFIGURED_MCP": "0"}),
               patch.object(bridge, "start_control_server", control),
@@ -67,13 +79,20 @@ class StartupTest(unittest.TestCase):
 
     def test_windows_warms_provider_before_background_threads(self):
         self.assertEqual(self.startup_events("win32", True),
-                         ["env", "warmup", "mcp", "control", "acp-reader"])
+                         ["env", "provider-import", "warmup", "mcp", "control", "acp-reader"])
 
     def test_older_windows_and_posix_start_without_warmup(self):
         for platform, has_warmup in (("win32", False), ("linux", True)):
             with self.subTest(platform=platform):
                 self.assertEqual(self.startup_events(platform, has_warmup),
-                                 ["env", "mcp", "control", "acp-reader"])
+                                 ["env", "provider-import", "mcp", "control", "acp-reader"])
+
+    def test_truststore_is_installed_before_provider_imports(self):
+        for platform in ("win32", "linux"):
+            with self.subTest(platform=platform):
+                self.assertEqual(self.startup_events(platform, False, True),
+                                 ["env", "truststore", "provider-import", "mcp",
+                                  "control", "acp-reader"])
 
 
 class SteeringTest(unittest.TestCase):

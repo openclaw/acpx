@@ -97,6 +97,8 @@ On Windows it preserves the optional memory-provider warm-up added in newer
 [Hermes startup code](https://github.com/NousResearch/hermes-agent/commit/80f4c6d6bfe5714964d01db2b71b0894a16a50d2),
 before starting background threads. Older Hermes revisions without that hook
 continue to work.
+When available, Hermes' system certificate trust-store initializer also runs
+before importing provider SDKs; older revisions without that hook are supported.
 
 ## Test the example
 

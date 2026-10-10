@@ -259,6 +259,11 @@ def run_agent(control_dir):
     project_root = str(Path(entry.__file__).resolve().parent.parent)
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
+    # Match newer Hermes' TLS bootstrap before any provider SDK imports.
+    from agent import ssl_verify
+    install_truststore = getattr(ssl_verify, "install_truststore", None)
+    if callable(install_truststore):
+        install_truststore()
     try:
         import acp
         from acp_adapter.server import HermesACPAgent
