@@ -8,7 +8,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
-- Examples: add an optional Hermes ACP launcher for active-turn guidance without changing normal prompt queueing.
+- Examples: add an optional Hermes ACP launcher for active-turn guidance without changing normal prompt queueing. Thanks @EvanZhu0721.
 
 ### Fixes
 

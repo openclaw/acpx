@@ -15,6 +15,36 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 MAX_BODY = 64 * 1024
+MAX_CONNECTIONS = 16
+
+
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """Thread-per-connection server capped at MAX_CONNECTIONS live handlers.
+
+    Admission is taken before any handler thread exists, so slow unauthorized
+    sockets cannot exhaust the process: without a free slot the socket is
+    closed at once and never reaches the request handler.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self._slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            request.close()
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
 
 class ControlError(Exception):
@@ -129,7 +159,7 @@ class ControlServer:
                 else:
                     self.reply(200, result)
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server = BoundedThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.descriptor = {"owner": self.owner, "port": self.server.server_port,
                            "token": self.token}
         temporary = self.descriptor_path.with_suffix(".tmp")

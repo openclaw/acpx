@@ -7,6 +7,7 @@ import os
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
@@ -101,6 +102,22 @@ class SteeringTest(unittest.TestCase):
             self.request(**kwargs)
         self.assertEqual(caught.exception.code, code)
         self.assertEqual(self.runtime.messages, [])
+
+    def slow_unauthorized_connection(self):
+        # A partial unauthorized request parks its handler thread in a blocking read.
+        connection = socket.create_connection(
+            ("127.0.0.1", self.server.descriptor["port"]), timeout=5)
+        self.addCleanup(connection.close)
+        connection.sendall(b"GET /sessions HTTP/1.1\r\nHost: loopback\r\n")
+        return connection
+
+    def assert_refused_without_response(self, connection):
+        connection.settimeout(5)
+        try:
+            data = connection.recv(1)
+        except (ConnectionResetError, ConnectionAbortedError):
+            data = b""  # a reset instead of a FIN still proves no reply was sent
+        self.assertEqual(data, b"", "connection was admitted instead of refused")
 
     def test_cli_list_and_steer_keep_original_turn(self):
         listed = self.cli("list")
@@ -232,6 +249,77 @@ class SteeringTest(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(outcome, ["cancelled"])
         self.assertEqual(self.runtime.messages, [])
+
+    def test_saturated_slow_connections_are_capped_then_recover(self):
+        limit = bridge.MAX_CONNECTIONS
+        server = self.server.server
+        active, peak, started = 0, 0, 0
+        condition = threading.Condition()
+        original = server.process_request_thread
+
+        def counting(request, address):
+            nonlocal active, peak, started
+            with condition:
+                active += 1
+                started += 1
+                peak = max(peak, active)
+                condition.notify_all()
+            try:
+                original(request, address)
+            finally:
+                with condition:
+                    active -= 1
+                    condition.notify_all()
+
+        server.process_request_thread = counting
+        # Client aborts while replying 401 are expected here; keep stderr readable.
+        server.handle_error = lambda *_args: None
+        slow, excess = [], []
+        try:
+            slow = [self.slow_unauthorized_connection() for _ in range(limit)]
+            with condition:
+                self.assertTrue(condition.wait_for(lambda: active == limit, 4),
+                                f"only {active} handlers reached the admission cap")
+            excess = [self.slow_unauthorized_connection() for _ in range(3)]
+            for connection in excess:
+                self.assert_refused_without_response(connection)
+            self.assertLessEqual(peak, limit)
+        finally:
+            for connection in slow + excess:
+                connection.close()
+        with condition:
+            self.assertTrue(condition.wait_for(lambda: active == 0, 10),
+                            "handler threads never released their admission slots")
+        self.assertEqual(started, limit, "excess connections must spawn no handlers")
+        self.assertEqual(peak, limit)
+        self.assertEqual(self.runtime.messages, [])
+        self.assertEqual(self.request("after saturation"),
+                         {"accepted": True, "session_id": "session-a"})
+        self.assertTrue(self.state.is_running)
+        self.assertFalse(self.state.cancel_event.is_set())
+        self.assertEqual(self.runtime.messages, ["after saturation"])
+
+    def test_thread_start_failure_releases_admission_slot(self):
+        server = self.server.server
+        server.handle_error = lambda *_args: None
+        with patch.object(threading.Thread, "start",
+                          side_effect=RuntimeError("cannot start thread")):
+            connection = socket.create_connection(
+                ("127.0.0.1", self.server.descriptor["port"]), timeout=5)
+            try:
+                connection.sendall(b"GET /sessions HTTP/1.1\r\nHost: loopback\r\n\r\n")
+                self.assert_refused_without_response(connection)
+            finally:
+                connection.close()
+        acquired = []
+        while server._slots.acquire(blocking=False):
+            acquired.append(None)
+        self.assertEqual(len(acquired), bridge.MAX_CONNECTIONS)
+        for _ in acquired:
+            server._slots.release()
+        self.assertEqual(self.request("after failed start"),
+                         {"accepted": True, "session_id": "session-a"})
+        self.assertTrue(self.state.is_running)
 
     def test_auth_and_body_validation(self):
         for token, body, expected in (("wrong", b"{}", 401),

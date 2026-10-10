@@ -48,6 +48,10 @@ Use a private directory owned by your user; on Windows its inherited ACL must
 restrict access to your account. Descriptors contain authentication tokens. Do
 not commit, share, or include them in logs. The server binds only to `127.0.0.1`
 and requires a random bearer token. Each launcher has an independent descriptor.
+At most 16 control connections can be handled concurrently; excess connections
+are closed before creating a handler thread. Slow clients have a five-second
+socket timeout. Saturation can temporarily prevent control requests, but it does
+not cancel the active ACP turn. Retry after capacity is available.
 
 Start a task normally:
 
