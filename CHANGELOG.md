@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Examples: add an optional Hermes ACP launcher for active-turn guidance without changing normal prompt queueing. Thanks @EvanZhu0721.
+
 ### Fixes
 
 - Dependencies: refresh the ACP SDK, Node.js types, and replay-viewer tooling; update guarded filesystem operations for Windows path admission and watcher reliability while retaining existing native-mode settings.
