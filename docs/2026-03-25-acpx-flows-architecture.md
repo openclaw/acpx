@@ -296,6 +296,20 @@ Keep the primitive set small:
 
 ### `acp`
 
+ACP nodes may declare `model` and ordered `configOptions: { configId, value }[]`.
+The runtime applies the node model over the run model, then run configuration
+selections followed by node selections, before sending the first prompt.
+Other run session options remain intact. Creation and the first prompt use the
+same ACP client. Failed or timed-out selections prevent prompt submission.
+
+The first persistent binding pins effective settings. Omitted node fields
+inherit; conflicting explicit fields fail without changing the conversation.
+A different handle permits different settings. Reconnect loads the same session
+and replays pinned selections or fails before prompting. Bundle evidence records
+requests, acknowledgements and whether model application was possible; no model
+catalog means no claim of applied model selection. Adapters without supported
+startup-model behavior reject such a request.
+
 Use `acp` for model-shaped work:
 
 - extract intent

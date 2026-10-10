@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Flows: select per-node models and ordered ACP configuration options before the first prompt, with run defaults, persistent-handle conflict checks, same-session replay, and requested/accepted settings in run bundles. Thanks @superbiche.
+
 ### Fixes
 
 - Dependencies: refresh the ACP SDK, Node.js types, and replay-viewer tooling; update guarded filesystem operations for Windows path admission and watcher reliability while retaining existing native-mode settings.

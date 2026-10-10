@@ -470,6 +470,10 @@ function snapshotAcpNode(
   return {
     ...common,
     ...(node.profile ? { profile: node.profile } : {}),
+    ...(node.model === undefined ? {} : { model: node.model }),
+    ...(node.configOptions === undefined
+      ? {}
+      : { configOptions: node.configOptions.map((selection) => ({ ...selection })) }),
     session: {
       ...(node.session?.handle ? { handle: node.session.handle } : {}),
       ...(node.session?.isolated ? { isolated: true } : {}),

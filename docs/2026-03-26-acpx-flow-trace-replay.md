@@ -109,7 +109,26 @@ access to `~/.acpx/sessions/*.json` outside the bundle.
 - `projections/run.json`: latest full run snapshot
 - `projections/live.json`: latest liveness snapshot
 - `projections/steps.json`: ordered node-attempt receipts
-- `sessions/*/binding.json`: session binding metadata for the run
+- `sessions/*/binding.json`: session binding metadata for the run, including optional `requestedSettings` and `acceptedSettings` for ACP configuration
+
+ACP node snapshots in `flow.json` retain optional `model` and ordered
+`configOptions` declarations. Binding requests retain the effective run defaults
+followed by node options; each step's session snapshot records its accepted
+configuration. Model evidence includes `requested`, `applied`, and optional
+`accepted` (the final adapter model ID). Option evidence includes `configId`,
+`value`, `acceptedValue`, and `reported` for each acknowledged selection in order.
+`reported: true` means the adapter reply catalog supplied the accepted value;
+`reported: false` marks a fallback to the resolved request. Omitted
+catalogs acknowledge the requested value without proving a provider used it.
+Use raw prompt-response metadata in `events.ndjson` for adapter usage receipts.
+These optional fields are additive under the existing v1 schemas; older bundles
+may omit them. Bundles with no requested model or options omit both settings fields.
+
+Persistent session creation-time controls are not captured in `sessions/*/events.ndjson`.
+Read `sessions/*/binding.json` and step session snapshots for initial model and
+option evidence. Reconnect controls and isolated-session creation controls are
+captured in the event stream.
+
 - `sessions/*/record.json`: normalized session record snapshot for replay
 - `sessions/*/events.ndjson`: raw ACP event stream for that bound session
 - `artifacts/*`: referenced payloads too large or awkward to inline

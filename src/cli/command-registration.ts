@@ -328,7 +328,7 @@ export function registerFlowCommand(program: Command, config: ResolvedAcpxConfig
     .command("flow")
     .description("Run multi-step ACP workflows from flow files");
 
-  flowCommand
+  const runCommand = flowCommand
     .command("run")
     .description("Run a flow file")
     .argument("<file>", "Flow module path")
@@ -343,6 +343,7 @@ export function registerFlowCommand(program: Command, config: ResolvedAcpxConfig
       const { handleFlowRun } = await import("../flows/cli.js");
       await handleFlowRun(file, flags, this, config);
     });
+  addExecConfigOption(runCommand, "Default ACP session config option for flow nodes (repeatable)");
 }
 
 export function registerDefaultCommands(program: Command, config: ResolvedAcpxConfig): void {

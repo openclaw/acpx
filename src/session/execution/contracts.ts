@@ -19,6 +19,7 @@ import type {
   SessionResumePolicy,
   SessionRecord,
 } from "../../types.js";
+import type { SessionConfigurationOptions } from "../configuration.js";
 
 export type SessionConnectionOptions = {
   mcpServers?: McpServer[];
@@ -62,9 +63,9 @@ export type RunOnceOptions = {
   onPermissionStats?: (stats: PermissionStats) => void;
   suppressSdkConsoleErrors?: boolean;
   sessionOptions?: SessionAgentOptions;
-  configOptions?: Array<{ configId: string; value: string }>;
   promptRetries?: number;
-} & SessionConnectionOptions;
+} & SessionConnectionOptions &
+  SessionConfigurationOptions;
 
 export type SessionCreateOptions = {
   signal?: AbortSignal;
@@ -78,7 +79,8 @@ export type SessionCreateOptions = {
   sessionOptions?: SessionAgentOptions;
   onModelWarning?: (message: string) => void;
   handleProcessInterrupts?: boolean;
-} & SessionConnectionOptions;
+} & SessionConnectionOptions &
+  SessionConfigurationOptions;
 
 export type SessionSendOptions = {
   sessionId: string;
@@ -111,7 +113,7 @@ export type SessionSendOptions = {
   sessionOptions?: SessionAgentOptions;
 } & SessionConnectionOptions;
 
-export type SessionEnsureOptions = SessionCreateOptions & {
+export type SessionEnsureOptions = Omit<SessionCreateOptions, keyof SessionConfigurationOptions> & {
   walkBoundary?: string;
 };
 

@@ -150,6 +150,26 @@ This fragment assumes an earlier `prepare_workspace` node returns `{ workdir: st
 
 Persistent ACP steps reuse a session when their resolved command, explicit argument vector (when supplied), working directory, and session handle match. Different profile names may share a session when those values match. Argument boundaries and empty arguments are significant. Each step snapshots its resolved arguments, so a custom resolver reusing an array cannot change earlier step metadata.
 
+## Model and session configuration
+
+ACP nodes can select a model and ordered adapter configuration options before their first prompt:
+
+```ts
+acp({
+  model: "selected-model",
+  configOptions: [{ configId: "adapter_option", value: "selected-value" }],
+  prompt: () => "Summarize the findings",
+});
+```
+
+Global `--model` and repeatable `flow run --config-option <key=value>` provide run defaults. Library callers use `FlowRunnerOptions.sessionOptions.model` and `FlowRunnerOptions.configOptions`. A node's `model` overrides the default; other global session options still apply. Run config options execute first, then node options in array order, including repeated IDs. Option IDs and values in flow definitions are opaque strings and are not normalized. A model-related config option executes after model selection and may change the final model.
+
+For persistent sessions, the first binding pins the effective settings. Later omitted fields inherit that binding; explicit fields must match its requested model or final option values. Use a distinct `session.handle` for different settings. Reconnecting loads the same ACP session, reapplies the pinned selections, and fails before prompting if they cannot be restored. Isolated sessions apply their own settings independently. Selection rejection or timeout prevents the prompt.
+
+When a model or config option was requested, bindings in the run bundle include `requestedSettings` and `acceptedSettings`; step session snapshots carry the same evidence. The `flow run --format json` result prints session bindings without these fields; read them from the run bundle. Model evidence distinguishes the requested ID, whether ACP model selection was applied, and the accepted final ID. Without an advertised model catalog, adapters with supported startup-model behavior retain that behavior and report `applied: false`; other adapters reject the model request. Option evidence records each acknowledged `acceptedValue` and a `reported` boolean: `true` means the value came from the adapter reply catalog; `false` means the reply acknowledged the request without reporting a value, so `acceptedValue` echoes the resolved request. These acknowledgements are configuration evidence; inspect adapter prompt-response metadata for provider usage attestation.
+
+Persistent creation-time controls (`session/new` and initial model/config selections) are not captured in `sessions/*/events.ndjson`. Their evidence lives in `sessions/*/binding.json` and step session snapshots. Later reconnect controls are captured in the event stream; isolated sessions also capture creation controls.
+
 ## Permissions
 
 Flows can declare an explicit permission requirement. If a flow needs `approve-all` and you forget the flag, `acpx` fails fast before the first step runs and prints the flag to add:
