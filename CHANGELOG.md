@@ -15,6 +15,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions: cap imported journal retention and scan existing segments efficiently while preserving higher retention settings and history already saved locally. Thanks @SebTardif.
 - Sessions: recover the first prompt or control of a confirmed newly created persistent session after an internal load error; preserve explicitly resumed sessions, legacy records without creation provenance, imports, and existing history. Thanks @superbiche.
 - Development dependencies: refresh replay-viewer tooling and the formatter and linter.
+- Development dependencies: update Vite and its bundler dependencies for replay-viewer build and development-server fixes.
 
 ## 0.19.4 - 2026-09-30
 
