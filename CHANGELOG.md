@@ -6,16 +6,20 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+## 0.19.5 - 2026-10-11
+
+**Highlights:** More reliable session creation and recovery, preserved session history, and dependency security fixes for denial-of-service and trust-restriction bypass vulnerabilities.
+
 ### Fixes
 
-- Dependencies: refresh the ACP SDK, Node.js types, and replay-viewer tooling; update guarded filesystem operations for Windows path admission and watcher reliability while retaining existing native-mode settings.
-- Development dependencies: patch source-map-js and smol-toml denial-of-service advisories and KaTeX's trust-restriction bypass in the pinned toolchain overrides.
-- Sessions: serialize ensures and imports across current and earlier built-in commands so concurrent callers cannot create duplicate records for the same scope. Thanks @odrobnik.
-- Output: report malformed tool locations and content without disconnecting text-mode prompts, preserving later assistant output and completion. Thanks @SebTardif.
-- Sessions: cap imported journal retention and scan existing segments efficiently while preserving higher retention settings and history already saved locally. Thanks @SebTardif.
 - Sessions: recover the first prompt or control of a confirmed newly created persistent session after an internal load error; preserve explicitly resumed sessions, legacy records without creation provenance, imports, and existing history. Thanks @superbiche.
-- Development dependencies: refresh replay-viewer tooling and the formatter and linter.
+- Sessions: serialize ensures and imports across current and earlier built-in commands so concurrent callers cannot create duplicate records for the same scope. Thanks @odrobnik.
+- Sessions: cap imported journal retention and scan existing segments efficiently while preserving higher retention settings and history already saved locally. Thanks @SebTardif.
+- Output: report malformed tool locations and content without disconnecting text-mode prompts, preserving later assistant output and completion. Thanks @SebTardif.
+- Development dependencies: patch source-map-js and smol-toml denial-of-service advisories and KaTeX's trust-restriction bypass in the pinned toolchain overrides.
+- Dependencies: refresh the ACP SDK, Node.js types, and replay-viewer tooling; update guarded filesystem operations for Windows path admission and watcher reliability while retaining existing native-mode settings.
 - Development dependencies: update Vite and its bundler dependencies for replay-viewer build and development-server fixes.
+- Development dependencies: refresh replay-viewer tooling and the formatter and linter.
 
 ## 0.19.4 - 2026-09-30
 
