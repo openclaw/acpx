@@ -436,6 +436,48 @@ test("text formatter prints auth remediation hints", () => {
   assert.match(output, /`auth\.openai-api-key`/);
 });
 
+test("text formatter surfaces structured provider messages and quota remediation", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("text", { stdout: writer });
+
+  formatter.onError({
+    code: "RUNTIME",
+    message: "Internal error",
+    origin: "acp",
+    acp: {
+      code: -32603,
+      message: "Internal error",
+      data: {
+        message: "You've hit your usage limit. Try again later.",
+        codexErrorInfo: "usageLimitExceeded",
+      },
+    },
+  });
+
+  assert.match(writer.toString(), /\[error\] RUNTIME: You've hit your usage limit/);
+  assert.match(writer.toString(), /hint: the provider appears rate-limited/);
+});
+
+test("text and quiet formatters prefer nonempty ACP details then provider messages", () => {
+  for (const format of ["text", "quiet"] as const) {
+    for (const [data, expected] of [
+      [{ details: "Specific failure", message: "Provider failure" }, "Specific failure"],
+      [{ details: "  ", message: "  Provider failure  " }, "Provider failure"],
+      [{ message: { nested: "not text" } }, "Internal error"],
+      [{ message: "  " }, "Internal error"],
+    ] as const) {
+      const writer = new CaptureWriter();
+      const formatter = createOutputFormatter(format, { stdout: writer, stderr: writer });
+      formatter.onError({
+        code: "RUNTIME",
+        message: "Internal error",
+        acp: { code: -32603, message: "Internal error", data },
+      });
+      assert.ok(writer.toString().includes(`RUNTIME${format === "text" ? ":" : ""} ${expected}`));
+    }
+  }
+});
+
 test("text remediation hints cover missing session and ACP runtime failures", () => {
   assert.deepEqual(getTextErrorRemediationHints({ code: "NO_SESSION", message: "No session" }), [
     "hint: the saved ACP session is missing or stale; start a fresh session with `acpx <agent> sessions new`, then retry.",

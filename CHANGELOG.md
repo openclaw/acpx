@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Output: show structured provider error messages in text and quiet modes and suggest quota recovery for usage-limit errors. Thanks @odrobnik.
+
 ## 0.19.5 - 2026-10-11
 
 **Highlights:** More reliable session creation and recovery, preserved session history, and dependency security fixes for denial-of-service and trust-restriction bypass vulnerabilities.

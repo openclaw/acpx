@@ -114,8 +114,7 @@ function parseJsonRpcErrorSummary(message: AcpJsonRpcMessage): string | undefine
   }
 
   const error = asRecord((message as { error?: unknown }).error);
-  const details = asRecord(error?.data)?.details;
-  return typeof details === "string" && details.trim().length > 0 ? details.trim() : fallback;
+  return preferredAcpErrorDetails(error?.data) ?? fallback;
 }
 
 function extractJsonRpcMethod(message: AnyMessage): string | undefined {
@@ -311,7 +310,7 @@ function renderAuthRequiredHint(params: RenderableOutputError): string {
 }
 
 export function getTextErrorRemediationHints(params: RenderableOutputError): string[] {
-  const lowerMessage = params.message.toLowerCase();
+  const lowerMessage = (preferredAcpErrorDetails(params.acp?.data) ?? params.message).toLowerCase();
 
   if (params.detailCode === "AUTH_REQUIRED") {
     return [renderAuthRequiredHint(params)];
@@ -350,7 +349,7 @@ const TEXT_ERROR_HINT_RULES: TextErrorHintRule[] = [
     ],
   },
   {
-    matches: (params, lowerMessage) => isRateLimitError(params.message, lowerMessage),
+    matches: (_params, lowerMessage) => isRateLimitError(lowerMessage),
     hints: [
       "hint: the provider appears rate-limited; retry later, switch model, or check provider quota/billing.",
     ],
@@ -404,10 +403,10 @@ function isSessionLoadError(lowerMessage: string): boolean {
   );
 }
 
-function isRateLimitError(message: string, lowerMessage: string): boolean {
+function isRateLimitError(lowerMessage: string): boolean {
   return (
-    /\b429\b/u.test(message) ||
-    ["rate limit", "quota exceeded"].some((text) => lowerMessage.includes(text))
+    /\b429\b/u.test(lowerMessage) ||
+    ["rate limit", "quota exceeded", "usage limit"].some((text) => lowerMessage.includes(text))
   );
 }
 
@@ -967,7 +966,8 @@ class TextOutputFormatter implements OutputFormatter {
   onError(params: RenderableOutputError): void {
     this.flushThoughtBuffer();
     this.beginSection();
-    this.writeLine(this.formatAnsi(`[error] ${params.code}: ${params.message}`, "31"));
+    const message = preferredAcpErrorDetails(params.acp?.data) ?? params.message;
+    this.writeLine(this.formatAnsi(`[error] ${params.code}: ${message}`, "31"));
     for (const hint of getTextErrorRemediationHints(params)) {
       this.writeLine(this.dim(hint));
     }
@@ -1247,7 +1247,7 @@ class QuietOutputFormatter implements OutputFormatter {
   }): void {
     this.flush();
     const qualifier = params.detailCode ? `${params.code} ${params.detailCode}` : params.code;
-    const message = preferredAcpErrorDetails(params.acp) ?? params.message;
+    const message = preferredAcpErrorDetails(params.acp?.data) ?? params.message;
     this.stderr.write(`[acpx] error: ${qualifier} ${message.replace(/\r\n?|\n/g, " ")}\n`);
   }
 
@@ -1353,9 +1353,14 @@ class QuietOutputFormatter implements OutputFormatter {
   }
 }
 
-function preferredAcpErrorDetails(acp: OutputErrorAcpPayload | undefined): string | undefined {
-  const details = asRecord(acp?.data)?.details;
-  return typeof details === "string" && details.trim().length > 0 ? details.trim() : undefined;
+function preferredAcpErrorDetails(data: unknown): string | undefined {
+  const record = asRecord(data);
+  for (const value of [record?.details, record?.message]) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
 }
 
 export function createOutputFormatter(

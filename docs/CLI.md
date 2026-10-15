@@ -648,6 +648,11 @@ cleanup is safe; if exclusive access cannot be established, preserve the files.
 - `json`: one raw ACP JSON-RPC message per line
 - `quiet`: concatenated assistant text on stdout; failed prompts emit one structured `[acpx] error:` line on stderr
 
+For failed prompts, text and quiet output prefer the adapter's nonempty error
+`data.details` or `data.message` over the generic protocol error message. Text
+output also suggests checking provider quota when the error reports a usage limit.
+JSON output preserves the original ACP error payload.
+
 When `--suppress-reads` is enabled:
 
 - `text`: read-like tool outputs render as `[read output suppressed]`
