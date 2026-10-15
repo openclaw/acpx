@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Dependencies: update guarded filesystem operations to fs-safe 0.26.3 and refresh the formatter and linter.
+
 ## 0.19.5 - 2026-10-11
 
 **Highlights:** More reliable session creation and recovery, preserved session history, and dependency security fixes for denial-of-service and trust-restriction bypass vulnerabilities.
