@@ -279,6 +279,7 @@ export class SessionJournalReader {
         .map(async (filePath) => {
           const opened = await directory.open(path.basename(filePath), {
             symlinks: "reject",
+            nonBlockingRead: true,
           });
           try {
             const identity = fileIdentity(await opened.handle.stat({ bigint: true }));
