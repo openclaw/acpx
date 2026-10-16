@@ -35,6 +35,7 @@ configuration or publish a locally built package.
    default key. Repository administrators have a bypass for tag creation only;
    separate rules prohibit tag updates and deletion. Never move or delete an
    existing release tag.
+
 6. Push that tag. The workflow checks main ancestry and package metadata,
    publishes the immutable verified tarball to npm through the `stable-release`
    environment using OIDC provenance, then creates the GitHub Release from the
