@@ -458,10 +458,13 @@ export function addPromptInputOption(command: Command): Command {
   return command.option("-f, --file <path>", "Read prompt text from file path (use - for stdin)");
 }
 
-export function addExecConfigOption(command: Command): Command {
+export function addExecConfigOption(
+  command: Command,
+  description = "Set an ACP session config option before the one-shot prompt (repeatable)",
+): Command {
   return command.option(
     "--config-option <key=value>",
-    "Set an ACP session config option before the one-shot prompt (repeatable)",
+    description,
     collectSessionConfigOptionAssignment,
   );
 }

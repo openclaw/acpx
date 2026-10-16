@@ -10,6 +10,7 @@ import {
 import { persistSessionOptions } from "../../runtime/engine/session-options.js";
 import type { SessionEnsureResult, SessionRecord } from "../../types.js";
 import { applyConfigOptionsToRecord, applyInitialModelSelection } from "../config-options.js";
+import { applySessionConfigOptions, describeSessionConfiguration } from "../configuration.js";
 import { applyRequestedModelIfAdvertised } from "../model-application.js";
 import {
   absolutePath,
@@ -79,9 +80,40 @@ async function createSessionRecordWithClient(
     createdState.modelApplication,
   );
 
+  await configureCreatedSession(client, options, record, createdState.modelApplication.applied);
+  assertControlAuthority({ signal: options.signal });
   await writeSessionRecord(record);
   assertControlAuthority({ signal: options.signal });
   return record;
+}
+
+async function configureCreatedSession(
+  client: AcpClient,
+  options: SessionCreateOptions,
+  record: SessionRecord,
+  modelApplied: boolean,
+): Promise<void> {
+  const configured = await applySessionConfigOptions({
+    client,
+    sessionId: record.acpSessionId,
+    agentCommand: options.agentCommand,
+    getState: () => record.acpx,
+    setState: (state) => {
+      record.acpx = state;
+    },
+    configOptions: options.configOptions,
+    timeoutMs: options.timeoutMs,
+    authority: { signal: options.signal },
+  });
+  record.acpx = configured.state;
+  options.onSessionConfigured?.(
+    describeSessionConfiguration({
+      requestedModel: options.sessionOptions?.model,
+      modelApplied,
+      state: record.acpx,
+      selections: configured.selections,
+    }),
+  );
 }
 
 async function createFreshSessionState(
