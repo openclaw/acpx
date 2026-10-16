@@ -24,6 +24,34 @@ On Windows, native Claude executable discovery resolves relative `PATH` entries
 from the selected session cwd. An explicit `CLAUDE_CODE_EXECUTABLE` still takes
 precedence.
 
+## Permission approval boundary
+
+ACPX permission modes and per-tool policies govern the ACP permission requests
+the adapter sends. `--deny-all` denies remaining requests after per-tool policy
+evaluation; it does not intercept every native Claude tool call.
+
+Claude evaluates native hooks, rules, modes, and automatic approvals before the
+SDK's fallback `canUseTool` callback. Calls resolved earlier, including some
+read-only operations, need no callback or ACP permission request. See the
+[SDK permission evaluation order](https://code.claude.com/docs/en/agent-sdk/permissions#how-permissions-are-evaluated).
+
+Built-in Claude sessions retain project and local setting sources. The SDK
+documents that project skills can pre-approve tools through
+`allowed-tools`; such approvals can resolve a call before ACPX sees a request.
+See [skill tool grants](https://code.claude.com/docs/en/agent-sdk/skills#pre-approve-tools-for-skills).
+
+For built-in Claude sessions, `--allowed-tools` and embedded
+`sessionOptions.allowedTools` are forwarded as native allow rules, not an
+exclusive tool list. They can pre-approve calls before ACPX's policies or
+permission mode are consulted.
+
+For checks that must cover every native tool call, the SDK recommends a trusted
+`PreToolUse` hook; a hook denial applies before automatic approvals. Configure
+that in the native Claude environment. ACPX's typed session options do not
+expose SDK hooks. Changing an ACPX permission mode alone does not establish that
+boundary. See [SDK permission controls](https://code.claude.com/docs/en/agent-sdk/permissions#allow-and-deny-rules)
+and [ACPX filesystem guardrails](../docs/permissions.md#working-directory-and-filesystem-guardrails).
+
 ## System prompt overrides
 
 Choose the system prompt when creating a named session, then select that session for later prompts:
