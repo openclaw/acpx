@@ -23,6 +23,7 @@ export type AcpPermissionRequest = {
 };
 
 export type AcpPermissionDecision =
+  | { outcome: "selected"; optionId: string }
   | { outcome: "allow_once" }
   | { outcome: "allow_always" }
   | { outcome: "reject_once" }

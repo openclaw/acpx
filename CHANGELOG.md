@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Runtime/embedding: let permission callbacks select an exact offered `optionId`, preserving existing kind-based decisions and cancelling unknown IDs.
+
 ## 0.19.6 - 2026-10-16
 
 **Highlights:** Clearer provider errors in text and quiet output, with recovery guidance for quota limits.

@@ -331,6 +331,34 @@ test("classifyPermissionDecision maps selected outcomes to approved, denied, or 
   );
 });
 
+for (const kind of ["allow_once", "allow_always", "reject_once", "reject_always"] as const) {
+  test(`decisionToResponse selects the exact optionId among duplicate ${kind} options`, () => {
+    const request = makeRequestWithTitle("tool", "execute", [
+      { optionId: "first", kind },
+      { optionId: "second", kind },
+    ]);
+    assert.deepEqual(decisionToResponse(request, { outcome: "selected", optionId: "second" }), {
+      outcome: { outcome: "selected", optionId: "second" },
+    });
+    assert.deepEqual(decisionToResponse(request, { outcome: kind }), {
+      outcome: { outcome: "selected", optionId: "first" },
+    });
+  });
+}
+
+test("decisionToResponse cancels an unknown optionId without falling back", () => {
+  const request = makeRequest("execute");
+  for (const optionId of ["missing", "ALLOW", ""]) {
+    assert.deepEqual(decisionToResponse(request, { outcome: "selected", optionId }), {
+      outcome: { outcome: "cancelled" },
+    });
+  }
+  request.options = [];
+  assert.deepEqual(decisionToResponse(request, { outcome: "selected", optionId: "allow" }), {
+    outcome: { outcome: "cancelled" },
+  });
+});
+
 test("decisionToResponse allow_once prefers allow_once over allow_always", () => {
   const request = makeRequestWithTitle("tool", "edit", [
     { optionId: "always", kind: "allow_always" },
