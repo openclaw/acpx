@@ -486,6 +486,8 @@ For ACP tool permission requests, per-tool policy takes precedence over the perm
 
 An `autoApprove` rule can approve a tool request under `--deny-all`. An `escalate` rule can prompt under `--approve-all` when stdin and stderr are TTYs. Without both TTYs, escalation denies or cancels the current request and adds `_meta.acpx.permissionEscalation` to the ACP response, even when `--non-interactive-permissions fail` is selected.
 
+For Claude, these controls govern received ACP permission requests. Native approvals, including skill `allowed-tools` grants, can resolve calls before the SDK fallback callback or ACPX is consulted. Use trusted native `PreToolUse` checks when every tool call must be covered; ACPX's typed session options do not expose SDK hooks. See the [Claude approval boundary](../../agents/Claude.md#permission-approval-boundary).
+
 Per-tool policies govern `session/request_permission`. ACP filesystem and terminal operations use the client's permission mode separately; a tool approval does not bypass those operation checks.
 
 If every permission request is denied/cancelled and none approved, `acpx` exits with permission-denied status.
