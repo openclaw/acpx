@@ -136,6 +136,12 @@ test("mux built-in runs the coder/mux ACP stdio bridge through npx", () => {
   assert.equal(resolveAgentCommand("mux"), "npx -y mux@^0.28.0 acp");
 });
 
+test("octomind built-in launches the coding specialist over ACP", () => {
+  assert.equal(AGENT_REGISTRY.octomind, "octomind acp developer:general");
+  assert.deepEqual(AGENT_ARGV_REGISTRY.octomind, ["octomind", "acp", "developer:general"]);
+  assert.equal(resolveAgentCommand("octomind"), "octomind acp developer:general");
+});
+
 test("pool built-in runs the Poolside ACP entrypoint", () => {
   assert.equal(AGENT_REGISTRY.pool, "pool acp");
   assert.deepEqual(AGENT_ARGV_REGISTRY.pool, ["pool", "acp"]);
@@ -174,6 +180,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "kiro",
     "mcode",
     "mux",
+    "octomind",
     "opencode",
     "pool",
     "qoder",

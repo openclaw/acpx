@@ -31,6 +31,7 @@ The default agent for top-level commands like `acpx exec â€¦` and `acpx prompt â
 | `kiro`        | `kiro-cli-chat acp`                            | [Kiro CLI](https://kiro.dev)                                                                                    |
 | `mcode`       | `mcode acp`                                    | [MiniMax Code](https://www.npmjs.com/package/@minimax-ai/code)                                                  |
 | `mux`         | `mux acp` via an ACPX-owned npm range          | [Mux](https://mux.coder.com)                                                                                    |
+| `octomind`    | `octomind acp developer:general`               | [Octomind](https://octomind.run)                                                                                |
 | `opencode`    | `npx -y opencode-ai acp`                       | [OpenCode](https://opencode.ai)                                                                                 |
 | `pool`        | `pool acp`                                     | [Poolside](https://poolside.ai)                                                                                 |
 | `qoder`       | `qodercli --acp`                               | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |

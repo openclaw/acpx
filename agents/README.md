@@ -22,6 +22,7 @@ Built-in agents:
 - `kiro -> kiro-cli-chat acp`
 - `mcode -> mcode acp`
 - `mux -> mux acp` via an ACPX-owned npm range
+- `octomind -> octomind acp developer:general`
 - `opencode -> npx -y opencode-ai acp`
 - `pool -> pool acp`
 - `qoder -> qodercli --acp`
@@ -51,6 +52,7 @@ Harness-specific docs in this directory:
 - [Kiro](Kiro.md): built-in `kiro -> kiro-cli-chat acp`
 - [MCode](MCode.md): built-in `mcode -> mcode acp`
 - [Mux](Mux.md): built-in `mux -> mux acp` via an ACPX-owned npm range
+- [Octomind](Octomind.md): built-in `octomind -> octomind acp developer:general`
 - [OpenCode](OpenCode.md): built-in `opencode -> npx -y opencode-ai acp`
 - [Pool](Pool.md): built-in `pool -> pool acp`
 - [Qoder](Qoder.md): built-in `qoder -> qodercli --acp`
