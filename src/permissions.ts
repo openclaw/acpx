@@ -444,7 +444,7 @@ async function resolvePermissionByPolicy(
 }
 
 const DECISION_FALLBACK_ORDER: Record<
-  Exclude<AcpPermissionDecision["outcome"], "cancel">,
+  Exclude<AcpPermissionDecision["outcome"], "cancel" | "selected">,
   PermissionOption["kind"][]
 > = {
   allow_once: ["allow_once", "allow_always"],
@@ -459,6 +459,11 @@ export function decisionToResponse(
 ): RequestPermissionResponse {
   if (decision.outcome === "cancel") {
     return cancelled();
+  }
+  if (decision.outcome === "selected") {
+    return params.options.some((option) => option.optionId === decision.optionId)
+      ? selected(decision.optionId)
+      : cancelled();
   }
   const matched = pickOption(params.options ?? [], DECISION_FALLBACK_ORDER[decision.outcome]);
   return matched ? selected(matched.optionId) : cancelled();
