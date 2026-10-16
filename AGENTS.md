@@ -311,8 +311,10 @@ Release automation lives in [`.github/workflows/release.yml`](.github/workflows/
 - The build job packages the release without publishing authority
 - The publish job requires the `stable-release` environment gate and publishes
   the verified build artifact to npm with trusted publishing and provenance
-- Release requests go through Stable; maintainers with permission to merge to
-  `main` can authorize the exact version and commit
+- Maintainers release directly through this repository's GitHub Actions workflow;
+  no external release service is required
+- Repository administrators can create signed release tags; the separate tag
+  immutability rules still prevent updating or deleting published tags
 
 The release workflow currently requires these `package.json` values:
 

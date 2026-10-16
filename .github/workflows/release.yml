@@ -207,7 +207,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           check-latest: true
-          registry-url: https://registry.npmjs.org
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11.19.1 --ignore-scripts --registry=https://registry.npmjs.org
 
       - name: Require one immutable artifact ID
         env:
