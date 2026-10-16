@@ -40,6 +40,11 @@ documents that project skills can pre-approve tools through
 `allowed-tools`; such approvals can resolve a call before ACPX sees a request.
 See [skill tool grants](https://code.claude.com/docs/en/agent-sdk/skills#pre-approve-tools-for-skills).
 
+For built-in Claude sessions, `--allowed-tools` and embedded
+`sessionOptions.allowedTools` are forwarded as native allow rules, not an
+exclusive tool list. They can pre-approve calls before ACPX's policies or
+permission mode are consulted.
+
 For checks that must cover every native tool call, the SDK recommends a trusted
 `PreToolUse` hook; a hook denial applies before automatic approvals. Configure
 that in the native Claude environment. ACPX's typed session options do not
