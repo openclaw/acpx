@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+## 0.19.6 - 2026-10-16
+
+**Highlights:** Clearer provider errors in text and quiet output, with recovery guidance for quota limits.
+
 ### Fixes
 
 - Output: show structured provider error messages in text and quiet modes and suggest quota recovery for usage-limit errors. Thanks @odrobnik.

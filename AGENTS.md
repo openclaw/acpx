@@ -301,7 +301,9 @@ CI lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 Release automation lives in [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
-- Releases run when Stable creates an authorized `vX.Y.Z` tag
+- Releases run when an authorized, signed `vX.Y.Z` tag is pushed
+- Run the workflow with `dry_run: true` on the release-prep merge commit first; dispatch cannot publish
+- Follow [`docs/releasing.md`](docs/releasing.md) for release preparation and verification
 - The workflow installs dependencies with `pnpm install --frozen-lockfile`
 - It validates `package.json` release metadata before publishing
 - It validates that the tag matches `package.json` version and that the tagged commit is on `main`

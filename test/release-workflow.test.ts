@@ -17,7 +17,7 @@ import { pathToFileURL } from "node:url";
 
 const RELEASE_TAG = "v1.2.3";
 const STEP_HEADER = "      - name: Validate release tag";
-const NEXT_STEP_HEADER = "      - name: Ensure version is not already published";
+const NEXT_STEP_HEADER = "      - name: Verify release tag signature";
 
 function releaseValidationScript(workflow: string): string {
   const lines = workflow.split(/\r?\n/u);
@@ -31,7 +31,7 @@ function releaseValidationScript(workflow: string): string {
     STEP_HEADER,
     "        env:",
     "          RELEASE_SHA: ${{ github.sha }}",
-    "          RELEASE_TAG: ${{ github.ref_name }}",
+    "          RELEASE_TAG: ${{ steps.version.outputs.tag }}",
     "        run: |",
   ]);
 
@@ -239,4 +239,45 @@ for (const scenario of scenarios) {
       }
     },
   );
+}
+
+for (const scenario of [
+  { event: "workflow_dispatch", dryRun: "true", expectedExit: 0 },
+  { event: "workflow_dispatch", dryRun: "false", expectedExit: 1 },
+  { event: "push", dryRun: "", expectedExit: 0 },
+]) {
+  test(`release version resolution: ${scenario.event}, dry_run=${scenario.dryRun}`, (t) => {
+    const workflow = readFileSync(".github/workflows/release.yml", "utf8");
+    const step = workflow
+      .split("      - name: Resolve release version\n")[1]
+      ?.split("      - name:")[0];
+    assert.ok(step, "Missing version resolution step");
+    const script = step
+      .split("        run: |\n")[1]
+      ?.split("\n")
+      .map((line) => line.slice(10))
+      .join("\n");
+    assert.ok(script);
+    const fixture = createFixture(t);
+    const output = path.join(fixture.directory, "output");
+    const result = fixture.run(
+      "/bin/bash",
+      ["--noprofile", "--norc", "-c", script],
+      fixture.origin,
+      {
+        EVENT_NAME: scenario.event,
+        DRY_RUN: scenario.dryRun,
+        REF_NAME: scenario.event === "push" ? RELEASE_TAG : "main",
+        GITHUB_OUTPUT: output,
+      },
+    );
+    assert.equal(result.status, scenario.expectedExit, result.stderr);
+    if (scenario.expectedExit === 0) {
+      assert.equal(readFileSync(output, "utf8"), `tag=${RELEASE_TAG}\n`);
+    } else {
+      assert.match(result.stderr, /Publishing requires a signed release tag push/u);
+    }
+    assert.match(workflow, /publish:\n {4}if: github.event_name == 'push'/u);
+    assert.match(workflow, /release:\n {4}needs: \[build, publish\]/u);
+  });
 }
