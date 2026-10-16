@@ -26,6 +26,28 @@ type SessionModule = typeof import("../src/session/session.js");
 
 const SESSION_MODULE_URL = new URL("../src/session/session.js", import.meta.url);
 
+for (const origin of ["new", "resume", "unknown", undefined] as const) {
+  test(`session creation provenance roundtrips conservatively: ${origin}`, () => {
+    const record = makeSessionRecord({
+      acpxRecordId: "session-origin",
+      acpSessionId: "provider-session-origin",
+      agentCommand: "agent",
+      cwd: "/tmp/session-origin",
+    });
+    const parsed = parseSessionRecord({
+      ...serializeSessionRecordForDisk(record),
+      acpx: { session_origin: origin },
+    });
+    assert.ok(parsed);
+    const expected = origin === "new" || origin === "resume" ? origin : undefined;
+    assert.equal(parsed.acpx?.session_origin, expected);
+    const reloaded = parseSessionRecord(
+      JSON.parse(JSON.stringify(serializeSessionRecordForDisk(parsed))),
+    );
+    assert.equal(reloaded?.acpx?.session_origin, expected);
+  });
+}
+
 for (const messageId of ["__proto__", "constructor", "toString"]) {
   const identity = {
     acpxRecordId: "opaque-usage",

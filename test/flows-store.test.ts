@@ -113,7 +113,7 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
         }),
         prompt: acp({
           profile: "mock",
-          model: "selected-model",
+          modelId: "selected-model",
           configOptions: [{ configId: "Opaque.Id", value: "chosen" }],
           session: {
             handle: "review",
@@ -168,7 +168,7 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
         string,
         {
           nodeType: string;
-          model?: string;
+          modelId?: string;
           configOptions?: Array<{ configId: string; value: string }>;
           timeoutMs?: number;
           heartbeatMs?: number;
@@ -189,7 +189,7 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
         }
       >;
     };
-    assert.equal(flowSnapshot.nodes.prompt.model, "selected-model");
+    assert.equal(flowSnapshot.nodes.prompt.modelId, "selected-model");
     assert.deepEqual(flowSnapshot.nodes.prompt.configOptions, [
       { configId: "Opaque.Id", value: "chosen" },
     ]);

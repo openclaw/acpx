@@ -253,6 +253,64 @@ test("text formatter renders tool call lifecycle from ACP updates", () => {
   assert.equal((output.match(/\(completed\)/g) ?? []).length, 2);
 });
 
+test("text formatter reports malformed tool call fields instead of throwing", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("text", { stdout: writer });
+  const updates = [
+    {
+      sessionUpdate: "tool_call",
+      toolCallId: "bad-location",
+      title: "read",
+      locations: [{ path: 5 }],
+    },
+    {
+      sessionUpdate: "tool_call",
+      toolCallId: "bad-locations",
+      title: "read",
+      locations: { path: "README.md" },
+    },
+    {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "bad-content",
+      status: "completed",
+      content: [null],
+    },
+    {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "bad-diff",
+      status: "completed",
+      content: [{ type: "diff", path: "README.md" }],
+    },
+  ];
+  for (const update of updates) {
+    assert.doesNotThrow(() => {
+      formatter.onAcpMessage(sessionUpdate(update) as never);
+    });
+  }
+  const output = writer.toString();
+  assert.match(output, /Malformed tool call locations/);
+  assert.match(output, /Malformed tool call content/);
+  assert.match(output, /Malformed tool call diff/);
+  formatter.onAcpMessage(messageChunk("kept") as never);
+  assert.match(writer.toString(), /kept/);
+
+  const valid = new CaptureWriter();
+  const validFormatter = createOutputFormatter("text", { stdout: valid });
+  validFormatter.onAcpMessage(
+    sessionUpdate({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "good-diff",
+      title: "edit",
+      status: "completed",
+      locations: [{ path: "README.md", line: 4 }],
+      content: [{ type: "diff", path: "README.md", oldText: "a", newText: "a\nb" }],
+    }) as never,
+  );
+  assert.match(valid.toString(), /files: README.md:4/);
+  assert.match(valid.toString(), /diff README.md \(\+1 lines\)/);
+  assert.doesNotMatch(valid.toString(), /\[error\]/);
+});
+
 test("json formatter passes through ACP messages", () => {
   const writer = new CaptureWriter();
   const formatter = createOutputFormatter("json", {
@@ -376,6 +434,48 @@ test("text formatter prints auth remediation hints", () => {
   assert.match(output, /\[error\] RUNTIME: missing credentials/);
   assert.match(output, /hint: run `acpx config show`/);
   assert.match(output, /`auth\.openai-api-key`/);
+});
+
+test("text formatter surfaces structured provider messages and quota remediation", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("text", { stdout: writer });
+
+  formatter.onError({
+    code: "RUNTIME",
+    message: "Internal error",
+    origin: "acp",
+    acp: {
+      code: -32603,
+      message: "Internal error",
+      data: {
+        message: "You've hit your usage limit. Try again later.",
+        codexErrorInfo: "usageLimitExceeded",
+      },
+    },
+  });
+
+  assert.match(writer.toString(), /\[error\] RUNTIME: You've hit your usage limit/);
+  assert.match(writer.toString(), /hint: the provider appears rate-limited/);
+});
+
+test("text and quiet formatters prefer nonempty ACP details then provider messages", () => {
+  for (const format of ["text", "quiet"] as const) {
+    for (const [data, expected] of [
+      [{ details: "Specific failure", message: "Provider failure" }, "Specific failure"],
+      [{ details: "  ", message: "  Provider failure  " }, "Provider failure"],
+      [{ message: { nested: "not text" } }, "Internal error"],
+      [{ message: "  " }, "Internal error"],
+    ] as const) {
+      const writer = new CaptureWriter();
+      const formatter = createOutputFormatter(format, { stdout: writer, stderr: writer });
+      formatter.onError({
+        code: "RUNTIME",
+        message: "Internal error",
+        acp: { code: -32603, message: "Internal error", data },
+      });
+      assert.ok(writer.toString().includes(`RUNTIME${format === "text" ? ":" : ""} ${expected}`));
+    }
+  }
 });
 
 test("text remediation hints cover missing session and ACP runtime failures", () => {

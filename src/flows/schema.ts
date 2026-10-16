@@ -59,7 +59,7 @@ const acpNodeSchema = extensibleObject({
   ...flowNodeCommonShape,
   nodeType: z.literal("acp"),
   profile: z.string().optional(),
-  model: nonEmptyTrimmedStringSchema.optional(),
+  modelId: nonEmptyTrimmedStringSchema.optional(),
   configOptions: z
     .array(
       extensibleObject({

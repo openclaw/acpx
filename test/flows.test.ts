@@ -2566,6 +2566,92 @@ async function readFlowRequests(log: string): Promise<LoggedFlowRequest[]> {
 }
 
 for (const isolated of [false, true]) {
+  for (const selection of ["none", "run", "node"] as const) {
+    test(`flow settings: legacy model metadata stays inert (${isolated ? "isolated" : "persistent"}, ${selection})`, async () => {
+      await withTempHome(async (home) => {
+        const log = path.join(home, "requests.ndjson");
+        const runner = new FlowRunner({
+          resolveAgent: () => ({
+            agentName: "mock",
+            agentCommand: `${MOCK_AGENT_COMMAND} --advertise-config-options --supports-load-session`,
+            cwd: home,
+          }),
+          permissionMode: "deny-all",
+          outputRoot: path.join(home, "runs"),
+          sessionOptions: {
+            ...(selection === "none" ? {} : { model: "smart-model" }),
+            env: { ACPX_TEST_REQUEST_LOG: log },
+          },
+        });
+        const metadata = [42, "legacy-routing-note", { label: "legacy" }];
+        const nodes = Object.fromEntries(
+          metadata.map((model, index) => {
+            const definition = {
+              model,
+              ...(selection === "node" && (isolated || index === 0)
+                ? { modelId: "fast-model" }
+                : {}),
+              session: { isolated },
+              prompt: () => `echo step-${index}`,
+            };
+            const node = acp(definition);
+            assert.deepEqual((node as typeof node & { model: unknown }).model, model);
+            return [`step-${index}`, node];
+          }),
+        );
+        const result = await runner.run(
+          defineFlow({
+            name: "legacy-model-metadata",
+            startAt: "step-0",
+            nodes,
+            edges: [
+              { from: "step-0", to: "step-1" },
+              { from: "step-1", to: "step-2" },
+            ],
+          }),
+          {},
+        );
+        assert.equal(result.state.status, "completed");
+        const requests = await readFlowRequests(log);
+        assert.equal(requests.filter((entry) => entry.method === "session/prompt").length, 3);
+        const modelSelections = requests.filter(
+          (entry) =>
+            entry.method === "session/set_config_option" && entry.params?.configId === "model",
+        );
+        if (selection === "none") {
+          assert.deepEqual(modelSelections, []);
+          assert.ok(
+            result.state.steps.every((step) => step.session?.requestedSettings === undefined),
+          );
+        } else {
+          const expectedModel = selection === "node" ? "fast-model" : "smart-model";
+          assert.ok(modelSelections.length >= 3);
+          assert.ok(modelSelections.every((entry) => entry.params?.value === expectedModel));
+          assert.ok(
+            result.state.steps.every(
+              (step) => step.session?.requestedSettings?.model === expectedModel,
+            ),
+          );
+        }
+        const snapshot = JSON.parse(
+          await fs.readFile(path.join(result.runDir, "flow.json"), "utf8"),
+        ) as { nodes: Record<string, { modelId?: string }> };
+        for (const [id, node] of Object.entries(snapshot.nodes)) {
+          assert.equal(Object.hasOwn(node, "model"), false);
+          assert.equal(node.modelId, nodes[id].modelId);
+        }
+        if (!isolated) {
+          assert.equal(
+            new Set(result.state.steps.map((step) => step.session?.acpSessionId)).size,
+            1,
+          );
+        }
+      });
+    });
+  }
+}
+
+for (const isolated of [false, true]) {
   test(`flow settings: ${isolated ? "isolated" : "persistent"} first-turn ordering and bundle evidence`, async () => {
     await withTempHome(async (home) => {
       const log = path.join(home, "requests.ndjson");
@@ -2593,7 +2679,7 @@ for (const isolated of [false, true]) {
         startAt: "ask",
         nodes: {
           ask: acp({
-            model: "fast-model",
+            modelId: "fast-model",
             configOptions: selections,
             session: { isolated },
             prompt: () => "echo PONG",
@@ -2651,8 +2737,8 @@ for (const isolated of [false, true]) {
       assert.deepEqual(saved.acceptedSettings, binding.acceptedSettings);
       const snapshot = JSON.parse(
         await fs.readFile(path.join(result.runDir, "flow.json"), "utf8"),
-      ) as { nodes: { ask: { model: string; configOptions: typeof selections } } };
-      assert.equal(snapshot.nodes.ask.model, "fast-model");
+      ) as { nodes: { ask: { modelId: string; configOptions: typeof selections } } };
+      assert.equal(snapshot.nodes.ask.modelId, "fast-model");
       assert.deepEqual(snapshot.nodes.ask.configOptions, selections);
     });
   });
@@ -2717,7 +2803,7 @@ for (const isolated of [false, true]) {
           startAt: "ask",
           nodes: {
             ask: acp({
-              model: "unadvertised",
+              modelId: "unadvertised",
               configOptions: [{ configId, value: " raw=value " }],
               session: { isolated },
               prompt: () => "echo PONG",
@@ -2757,7 +2843,7 @@ test("flow settings: shared handles inherit, compare final repeated selections, 
       configOptions: [{ configId: "reasoning_effort", value: "low" }],
     });
     const settings = {
-      model: "fast-model",
+      modelId: "fast-model",
       configOptions: [
         { configId: "reasoning_effort", value: "high" },
         { configId: "reasoning_effort", value: "xhigh" },
@@ -2771,12 +2857,12 @@ test("flow settings: shared handles inherit, compare final repeated selections, 
           first: acp({ ...settings, prompt: () => "echo one" }),
           second: acp({ prompt: () => "echo two" }),
           third: acp({
-            model: "fast-model",
+            modelId: "fast-model",
             configOptions: [{ configId: "reasoning_effort", value: "xhigh" }],
             prompt: () => "echo three",
           }),
           fourth: acp({
-            model: "smart-model",
+            modelId: "smart-model",
             configOptions: [{ configId: "reasoning_effort", value: "low" }],
             session: { handle: "other" },
             prompt: () => "echo four",
@@ -2820,7 +2906,7 @@ test("flow settings: shared handles inherit, compare final repeated selections, 
 });
 
 for (const conflict of [
-  { model: "smart-model" },
+  { modelId: "smart-model" },
   { configOptions: [{ configId: "reasoning_effort", value: "low" }] },
 ]) {
   test(`flow settings: conflicting shared handle fails before another prompt (${JSON.stringify(conflict)})`, async () => {
@@ -2843,7 +2929,7 @@ for (const conflict of [
             startAt: "first",
             nodes: {
               first: acp({
-                model: "fast-model",
+                modelId: "fast-model",
                 configOptions: [{ configId: "reasoning_effort", value: "high" }],
                 prompt: () => "echo one",
               }),
@@ -2865,7 +2951,8 @@ for (const conflict of [
 
 test("flow settings schema rejects empty or malformed selections", () => {
   for (const settings of [
-    { model: " " },
+    { modelId: " " },
+    { modelId: 42 },
     { configOptions: [{ configId: "", value: "high" }] },
     { configOptions: [{ configId: "effort", value: " " }] },
     { configOptions: {} },
@@ -2981,7 +3068,7 @@ test("flow settings: reconnect cannot silently drop the pinned model", async (t)
           startAt: "first",
           nodes: {
             first: acp({
-              model: "fast-model",
+              modelId: "fast-model",
               configOptions: [{ configId: "reasoning_effort", value: "high" }],
               prompt: () => "echo one",
             }),
@@ -3053,7 +3140,7 @@ for (const drift of ["option", "model"] as const) {
             startAt: "first",
             nodes: {
               first: acp({
-                model: "fast-model",
+                modelId: "fast-model",
                 configOptions: [{ configId: "reasoning_effort", value: "high" }],
                 prompt: () => "echo one",
               }),

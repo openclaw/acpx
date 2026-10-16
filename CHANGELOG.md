@@ -10,36 +10,61 @@ Repo: https://github.com/openclaw/acpx
 
 - Flows: select per-node models and ordered ACP configuration options before the first prompt, with run defaults, persistent-handle conflict checks, same-session replay, and requested/accepted settings in run bundles. Thanks @superbiche.
 
+## 0.19.6 - 2026-10-16
+
+**Highlights:** Clearer provider errors in text and quiet output, with recovery guidance for quota limits.
+
 ### Fixes
 
-- Fix nested documentation builds without a custom domain and keep their canonical URLs within the deployment path.
-- Temporary sessions: preserve model catalogs updated during session creation before applying startup model and config selections, including removed model support.
-- Windows/terminals: preserve stdout and stderr from commands launched through the shell fallback.
-- Replay viewer: retain recoverable conversation history and long responses past checkpoint limits, keeping earlier attempt selections and saved message identities aligned across reloads.
-- Session metadata: preserve token usage across saving and reloading for opaque message IDs such as `__proto__`.
-- Replay viewer: keep graph edges attached to naturally sized cards and route branches around wrapped labels and changing outcome rows.
-- Replay viewer: avoid macOS file-watcher startup stalls that can time out requests, status checks, and live connections while preserving asset updates.
-- Replay viewer: complete shutdown while dependencies are still warming after the first page request.
-- Runtime/embedding: preserve literal environment keys such as `__proto__` in saved sessions and spawned agent processes.
-- Runtime/embedding: retain raw nonempty system-prompt replacement and append text across persistence and reconnects, including whitespace-only values.
-- Replay viewer: preserve the last readable recent-run and selected-run state during atomic live-projection replacement until polling recovers.
+- Output: show structured provider error messages in text and quiet modes and suggest quota recovery for usage-limit errors. Thanks @odrobnik.
 
-- Filesystem/dependencies: update fs-safe for older Linux compatibility and guarded path handling, and refresh development tools and replay-viewer dependencies.
+## 0.19.5 - 2026-10-11
 
-- Claude: update the built-in adapter for current models and keep sessions saved under earlier built-in commands discoverable after upgrades, while preserving custom launchers. Thanks @idvorkin-ai-tools.
+**Highlights:** More reliable session creation and recovery, preserved session history, and dependency security fixes for denial-of-service and trust-restriction bypass vulnerabilities.
 
-- Development dependencies: patch the brace-expansion denial-of-service and fast-uri header-injection advisories in the pinned toolchain overrides.
+### Fixes
 
+- Sessions: recover the first prompt or control of a confirmed newly created persistent session after an internal load error; preserve explicitly resumed sessions, legacy records without creation provenance, imports, and existing history. Thanks @superbiche.
+- Sessions: serialize ensures and imports across current and earlier built-in commands so concurrent callers cannot create duplicate records for the same scope. Thanks @odrobnik.
+- Sessions: cap imported journal retention and scan existing segments efficiently while preserving higher retention settings and history already saved locally. Thanks @SebTardif.
+- Output: report malformed tool locations and content without disconnecting text-mode prompts, preserving later assistant output and completion. Thanks @SebTardif.
+- Development dependencies: patch source-map-js and smol-toml denial-of-service advisories and KaTeX's trust-restriction bypass in the pinned toolchain overrides.
+- Dependencies: refresh the ACP SDK, Node.js types, and replay-viewer tooling; update guarded filesystem operations for Windows path admission and watcher reliability while retaining existing native-mode settings.
+- Development dependencies: update Vite and its bundler dependencies for replay-viewer build and development-server fixes.
+- Development dependencies: refresh replay-viewer tooling and the formatter and linter.
+
+## 0.19.4 - 2026-09-30
+
+**Highlights:** Safer permission prompts, reliable session continuity, and complete replay history.
+
+### Fixes
+
+- Permissions: display terminal controls visibly in approval prompts so commands, paths, and write previews cannot erase or overwrite the question. Thanks @SebTardif.
 - Sessions: keep local records and flow histories separate when adapters reuse session IDs, including concurrent provider-session resumes, while preserving existing local handles. Thanks @odrobnik.
+- Sessions: retire an adapter when a prompt's model-selection request times out, so later turns reconnect to known state. Thanks @odrobnik.
 - Session controls: retain the resolved model ID after an acknowledgement while preserving the requested alias for reconnect. Thanks @odrobnik.
 - Session controls: tolerate omitted or non-list option catalogs without losing accepted selections or failing with a TypeError. Thanks @odrobnik.
-- Sessions: retire an adapter when a prompt's model-selection request times out, so later turns reconnect to known state. Thanks @odrobnik.
+- Claude: update the built-in adapter for current models and keep sessions saved under earlier built-in commands discoverable after upgrades, while preserving custom launchers. Thanks @idvorkin-ai-tools.
+- Temporary sessions: preserve model catalogs updated during session creation before applying startup model and config selections, including removed model support.
+- Runtime/embedding: preserve literal environment keys such as `__proto__` in saved sessions and spawned agent processes.
+- Runtime/embedding: retain raw nonempty system-prompt replacement and append text across persistence and reconnects, including whitespace-only values.
 - Flows: preserve initialized protocol and capability metadata when a persistent prompt times out or is cancelled. Thanks @odrobnik.
 - Flows: forward system-prompt replacement and append flags to persistent and isolated ACP nodes. Thanks @odrobnik.
 - Flows: resolve runtime imports throughout helper modules without rewriting string data or requiring a writable flow directory. Thanks @odrobnik.
 - Flow shells: collect final output after process exit with a bounded drain for inherited pipes, and reject invalid stdin before spawning. Thanks @odrobnik.
 - Flow timers: reject non-finite or overflowing node and shell deadlines before they become immediate timeouts. Thanks @odrobnik.
+- Replay viewer: retain recoverable conversation history and long responses past checkpoint limits, keeping earlier attempt selections and saved message identities aligned across reloads.
+- Replay viewer: keep graph edges attached to naturally sized cards and route branches around wrapped labels and changing outcome rows.
+- Replay viewer: avoid macOS file-watcher startup stalls that can time out requests, status checks, and live connections while preserving asset updates.
+- Replay viewer: complete shutdown while dependencies are still warming after the first page request.
+- Replay viewer: preserve the last readable recent-run and selected-run state during atomic live-projection replacement until polling recovers.
+- Session metadata: preserve token usage across saving and reloading for opaque message IDs such as `__proto__`.
+- Windows/terminals: preserve stdout and stderr from commands launched through the shell fallback.
 - Windows: preserve complete backslash runs before quotes and at the end of batch-wrapper arguments. Thanks @odrobnik.
+- Filesystem/dependencies: update fs-safe for older Linux compatibility and guarded path handling, and refresh development tools and replay-viewer dependencies.
+- Dependencies: refresh the ACP SDK, guarded filesystem runtime, formatter, and linter with compatible updates.
+- Development dependencies: patch the brace-expansion denial-of-service and fast-uri header-injection advisories in the pinned toolchain overrides.
+- Fix nested documentation builds without a custom domain and keep their canonical URLs within the deployment path.
 
 ## 0.19.3 - 2026-09-25
 

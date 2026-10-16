@@ -32,6 +32,8 @@ The auth module is structured as …
 
 `text` is best for interactive use. It is **not** stable for parsing — error messages, prompts, and progress updates can change between releases.
 
+Malformed tool locations or content produce a diagnostic and skip that tool update. The text stream continues to receive subsequent updates, assistant text, and prompt completion.
+
 ## `json`
 
 NDJSON stream of raw ACP JSON-RPC messages on stdout:

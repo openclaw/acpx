@@ -7,6 +7,22 @@ export type PermissionPromptOptions = {
   signal?: AbortSignal;
 };
 
+function visiblePromptText(value: string): string {
+  let rendered = "";
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (
+      codePoint !== undefined &&
+      (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f))
+    ) {
+      rendered += `\\x${codePoint.toString(16).padStart(2, "0")}`;
+      continue;
+    }
+    rendered += character;
+  }
+  return rendered;
+}
+
 let promptQueue: Promise<void> = Promise.resolve();
 
 export async function promptForPermission(options: PermissionPromptOptions): Promise<boolean> {
@@ -33,6 +49,14 @@ export async function promptForPermission(options: PermissionPromptOptions): Pro
   }
 }
 
+function promptForDisplay(prompt: string): string {
+  // Templates start with a newline. Escape every control in the text after it.
+  if (prompt.startsWith("\n")) {
+    return `\n${visiblePromptText(prompt.slice(1))}`;
+  }
+  return visiblePromptText(prompt);
+}
+
 async function askPermission(options: PermissionPromptOptions): Promise<boolean> {
   options.signal?.throwIfAborted();
   if (!canPrompt()) {
@@ -54,7 +78,10 @@ async function askPermission(options: PermissionPromptOptions): Promise<boolean>
     rl.once("close", onClose);
   });
   try {
-    const answer = await Promise.race([rl.question(options.prompt, { signal }), closed]);
+    const answer = await Promise.race([
+      rl.question(promptForDisplay(options.prompt), { signal }),
+      closed,
+    ]);
     options.signal?.throwIfAborted();
     const normalized = answer?.trim().toLowerCase();
     return normalized === "y" || normalized === "yes";
@@ -76,9 +103,9 @@ function canPrompt(): boolean {
 
 function writePromptDetails(options: PermissionPromptOptions): void {
   if (options.header) {
-    process.stderr.write(`\n${options.header}\n`);
+    process.stderr.write(`\n${visiblePromptText(options.header)}\n`);
   }
   if (options.details && options.details.trim().length > 0) {
-    process.stderr.write(`${options.details}\n`);
+    process.stderr.write(`${options.details.split("\n").map(visiblePromptText).join("\n")}\n`);
   }
 }

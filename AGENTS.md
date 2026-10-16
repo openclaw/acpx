@@ -84,9 +84,8 @@ npx acpx@latest --help
 3. Run the smallest relevant validation command while iterating.
 4. Before opening or updating a PR, run the full checks for the scope you changed.
 
-Full checks include the vendored Autoreview Python tests. Activate a Python 3.14
-virtual environment and install `requirements-autoreview.txt` as described in
-[`CONTRIBUTING.md`](CONTRIBUTING.md#development).
+For independent review, follow [the shared skill setup](.agents/skills/autoreview/SKILL.md).
+Autoreview implementation tests run in `openclaw/agent-skills`.
 
 ## Slophammer Policy
 
@@ -170,12 +169,11 @@ Harness documentation synchronization policy:
 - `pnpm run build` — build the distributable CLI
 - `pnpm run test` — local test run without coverage gate
 - `pnpm run test:coverage` — CI-equivalent test run with coverage thresholds
-- `pnpm run test:autoreview` — vendored Autoreview unit tests with Python 3.14
 - `pnpm run typecheck` — TypeScript typecheck
 - `pnpm run lint` — source linting plus persisted-key casing checks
 - `pnpm run format:check` — formatting check
 - `pnpm run mutate` — Stryker mutation check for the configured target
-- `pnpm run check` — format, typecheck, lint, build, coverage, and Autoreview tests
+- `pnpm run check` — format, typecheck, lint, build, and coverage
 - `pnpm run check:docs` — docs format and markdown lint
 - `pnpm run perf:report` — performance reporting helper
 
@@ -204,7 +202,7 @@ Harness documentation synchronization policy:
   other AI-assistance tags. If AI assistance should be disclosed, put that in
   the PR description instead.
 - For non-trivial local code changes, run
-  `.agents/skills/autoreview/scripts/autoreview --max-priority P2` until no accepted/actionable
+  `python3 "$HOME/.agents/skills/autoreview/scripts/autoreview" --max-priority P2` until no accepted/actionable
   findings remain before final handoff or merge. Use commit mode for already
   landed main commits and branch mode for branch or PR work.
 - Local `codex review --base ...` runs in this repo can legitimately take up to
@@ -294,18 +292,18 @@ CI lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
   - `pnpm run build`
   - `pnpm run mutate`
   - `pnpm run test:coverage`
-  - `pnpm run test:autoreview`
 - CI installs dependencies with `pnpm install --frozen-lockfile`
 - CI uses Node 24 by default; tests run on Node 22, 24, and 26, with coverage on Node 22.
 - The build job also typechecks and builds the replay viewer.
-- The Autoreview job uses Python 3.14 and `requirements-autoreview.txt`.
 - Mutation tests run the existing CLI flag suite directly through `tsx`, without rebuilding the test tree for each mutant.
 
 ## Release / CD
 
 Release automation lives in [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
-- Releases run when Stable creates an authorized `vX.Y.Z` tag
+- Releases run when an authorized, signed `vX.Y.Z` tag is pushed
+- Run the workflow with `dry_run: true` on the release-prep merge commit first; dispatch cannot publish
+- Follow [`docs/releasing.md`](docs/releasing.md) for release preparation and verification
 - The workflow installs dependencies with `pnpm install --frozen-lockfile`
 - It validates `package.json` release metadata before publishing
 - It validates that the tag matches `package.json` version and that the tagged commit is on `main`
@@ -313,8 +311,10 @@ Release automation lives in [`.github/workflows/release.yml`](.github/workflows/
 - The build job packages the release without publishing authority
 - The publish job requires the `stable-release` environment gate and publishes
   the verified build artifact to npm with trusted publishing and provenance
-- Release requests go through Stable; maintainers with permission to merge to
-  `main` can authorize the exact version and commit
+- Maintainers release directly through this repository's GitHub Actions workflow;
+  no external release service is required
+- Repository administrators can create signed release tags; the separate tag
+  immutability rules still prevent updating or deleting published tags
 
 The release workflow currently requires these `package.json` values:
 

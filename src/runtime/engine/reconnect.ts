@@ -50,6 +50,8 @@ import {
   applyLifecycleSnapshotToRecord,
   reconcileAgentSessionId,
   sessionHasAgentMessages,
+  sessionHasAtMostOneUserMessage,
+  sessionHasUserMessages,
 } from "./lifecycle.js";
 import {
   mergeSessionOptions,
@@ -82,6 +84,12 @@ export type ConnectAndLoadSessionOptions = {
   authority?: AcpControlAuthority;
   verbose?: boolean;
   suppressWarnings?: boolean;
+  /**
+   * The caller recorded the current turn's User message on this record before connecting.
+   * Set by prompt turns (which record their prompt first); absent for control turns, which
+   * record no prompt and so must show no user history to be eligible for a fresh session.
+   */
+  promptRecorded?: boolean;
   activeController: ConnectedSessionController;
   onClientAvailable?: (controller: ConnectedSessionController) => void;
   onConnectedRecord?: (record: SessionRecord) => void;
@@ -462,6 +470,7 @@ export async function connectAndLoadSession(
     sameSessionOnly,
     timeoutMs: options.timeoutMs,
     authority: options.authority,
+    promptRecorded: options.promptRecorded,
   });
   const {
     resumed,
@@ -779,6 +788,7 @@ async function loadOrCreateRuntimeSession(params: {
   sameSessionOnly: boolean;
   timeoutMs?: number;
   authority?: AcpControlAuthority;
+  promptRecorded?: boolean;
 }): Promise<RuntimeSessionLoadState> {
   if (params.reusingLoadedSession) {
     return {
@@ -822,6 +832,7 @@ async function loadRuntimeSession(
     sameSessionOnly: boolean;
     timeoutMs?: number;
     authority?: AcpControlAuthority;
+    promptRecorded?: boolean;
   },
   resume: boolean,
 ): Promise<RuntimeSessionLoadState> {
@@ -870,18 +881,19 @@ async function recoverRuntimeSessionLoadFailure(
     sameSessionOnly: boolean;
     timeoutMs?: number;
     authority?: AcpControlAuthority;
+    promptRecorded?: boolean;
   },
   error: unknown,
 ): Promise<RuntimeSessionLoadState> {
   const loadError = formatErrorMessage(error);
-  if (params.sameSessionOnly) {
-    throw makeSessionResumeRequiredError({
-      record: params.record,
-      reason: loadError,
-      cause: error,
-    });
-  }
-  if (!shouldFallbackToNewSession(error, params.record)) {
+  if (!canRecoverLoadWithFreshSession(params, error)) {
+    if (params.sameSessionOnly) {
+      throw makeSessionResumeRequiredError({
+        record: params.record,
+        reason: loadError,
+        cause: error,
+      });
+    }
     throw error;
   }
   return {
@@ -895,6 +907,31 @@ async function recoverRuntimeSessionLoadFailure(
   };
 }
 
+function canRecoverLoadWithFreshSession(
+  params: { record: SessionRecord; sameSessionOnly: boolean; promptRecorded?: boolean },
+  error: unknown,
+): boolean {
+  if (!params.sameSessionOnly) {
+    return shouldFallbackToNewSession(error, params.record);
+  }
+  // An internal load error alone cannot prove that earlier remote context is empty.
+  return (
+    isUnpromptedNewSession(params.record, params.promptRecorded) &&
+    extractAcpError(error)?.code === -32603
+  );
+}
+
+function isUnpromptedNewSession(record: SessionRecord, promptRecorded = false): boolean {
+  // Prompt turns record their current User message before connecting; controls do not.
+  return (
+    record.acpx?.session_origin === "new" &&
+    !record.importedFrom &&
+    !sessionHasAgentMessages(record) &&
+    !record.messages.includes("Resume") &&
+    (promptRecorded ? sessionHasAtMostOneUserMessage(record) : !sessionHasUserMessages(record))
+  );
+}
+
 async function createFreshRuntimeSession(
   client: AcpClient,
   record: SessionRecord,
@@ -902,6 +939,7 @@ async function createFreshRuntimeSession(
   authority?: AcpControlAuthority,
 ): Promise<RuntimeSessionLoadState> {
   const createdSession = await withTimeout(client.createSession(record.cwd, authority), timeoutMs);
+  record.acpx = { ...record.acpx, session_origin: "new" };
   applyConfigOptionsToRecord(record, createdSession);
   return {
     sessionId: createdSession.sessionId,

@@ -95,6 +95,8 @@ Named sessions are independent. They do not share state, queue owners, or histor
 
 `new` is the explicit "I want to start over" verb. `ensure` is the idempotent "give me a session" verb for scripts. Bare prompt is conservative: it never auto-creates so you do not accidentally fork a session by running from the wrong directory.
 
+Concurrent ensures for the same directory and name share one scope lock, including when callers use current and earlier built-in agent commands. Custom commands, other directories, and other session names retain separate scopes.
+
 Explicitly resuming a saved local ID for the same agent command retires its current owner before loading the record's associated ACP session, even when you choose another cwd or name. This applies to `sessions new --resume-session` and to `sessions ensure --resume-session` when ensure needs to create the destination. If resuming fails, the prior record stays closed with its saved history. Ensuring an already-matching session still returns it normally.
 
 ## Soft-close
@@ -136,6 +138,8 @@ The archive is plain JSON. Paths are stored relative to home, so an imported ses
 Imports keep the archive's provider session id, reopen the copied session as an idle local record, and clear source-machine process metadata. Imported sessions must resume that provider session; if the destination agent cannot load it, prompts fail clearly instead of starting an empty conversation. If the destination already has an active session for the same `(agent, cwd, name)` scope, import fails; pass `--name` or `--cwd` to choose a different scope. If a local record already uses the same provider session id, prune or remove that record before importing.
 
 An imported session becomes discoverable after its complete history has been written. If writing the history fails, the import leaves no local session that blocks retrying the archive.
+
+New imports cap the saved journal retention setting at 1,024 segments. Existing local journals keep higher saved retention settings: export, watch, and rotation continue to include their retained segments without scanning every possible segment number.
 
 Concurrent imports into the same local store wait for one another and recheck scope and provider session id collisions before publishing. Only one of two conflicting imports can succeed; independent destinations still retain their own complete histories.
 

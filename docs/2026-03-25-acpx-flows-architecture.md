@@ -296,7 +296,8 @@ Keep the primitive set small:
 
 ### `acp`
 
-ACP nodes may declare `model` and ordered `configOptions: { configId, value }[]`.
+ACP nodes may declare `modelId` and ordered `configOptions: { configId, value }[]`.
+The legacy passthrough `model` field remains inert extension metadata.
 The runtime applies the node model over the run model, then run configuration
 selections followed by node selections, before sending the first prompt.
 Other run session options remain intact. Creation and the first prompt use the
@@ -456,6 +457,14 @@ Persistent session recovery rule:
   the meaning of later steps
 - if reconnect-and-load fails, fail the node or flow clearly instead of creating
   a fresh persistent session behind the author's back
+- on a same-session-only reconnect whose load fails with an ACP internal load/resume
+  error (-32603), the runtime replaces the session with a fresh one only when it holds no
+  earlier prompt history the agent may have retained: a prompt turn holding only the prompt
+  it just recorded, or a control holding no prompt; the -32603 error does not prove the
+  agent kept nothing, so an agent message, earlier prompt history, a saved resume marker, or imported provenance
+  keeps the original session
+- fresh recovery additionally requires persisted `session/new` provenance; explicit native
+  resumes and older records with unknown origin keep requiring their original backend
 
 Implementation guidance:
 

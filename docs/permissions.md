@@ -114,6 +114,8 @@ Allow <tool>? (y/N)
 
 For the identified Codex ACP adapter, acpx prefers its offered one-time refusal that lets the turn continue. When cancellation is selected instead, a notice explains that it can end the turn; acpx never approves an operation to avoid cancellation. JSON consumers receive the notice in the permission response's `_meta.acpx.permissionNotice`; quiet output uses stderr and embedded runtimes emit a status event. See [Codex permission refusals](https://github.com/openclaw/acpx/blob/main/agents/Codex.md#permission-refusals).
 
+Interactive prompts display terminal control characters in tool titles, commands, paths, and write previews as visible `\xNN` escapes. Write previews keep their line breaks. Rendering leaves the requested command arguments and file bytes unchanged.
+
 There is no per-session "approve next 3" option. Each request that reaches interactive prompting requires its own answer.
 
 Interactive tool, file-write, and terminal questions share one input queue per acpx process. Only one question is shown at a time, and each requires its own answer. Closing stdin denies the current question and any waiting questions.

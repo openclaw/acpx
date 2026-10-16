@@ -6,7 +6,7 @@ export function assertCompatibleSessionSettings(
   binding: FlowSessionBinding,
 ): void {
   const pinned = binding.requestedSettings ?? { configOptions: [] };
-  if (node.model !== undefined && node.model.trim() !== normalizedModel(pinned.model)) {
+  if (node.modelId !== undefined && node.modelId.trim() !== normalizedModel(pinned.model)) {
     throw new Error(`Conflicting model for persistent session handle "${binding.handle}"`);
   }
   const pinnedOptions = finalSelections(pinned.configOptions);

@@ -87,7 +87,7 @@ acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>
 - `--input-json` passes flow input inline as JSON.
 - `--input-file` reads flow input JSON from disk.
 - `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.
-- Repeatable `--config-option <key=value>` provides ordered ACP configuration defaults before prompting. Node options run after these defaults, and node `model` overrides global `--model`. Persistent handles pin their first settings; later omissions inherit and conflicting explicit selections fail. See [flow configuration](flows.md#model-and-session-configuration) for evidence and model-catalog limits.
+- Repeatable `--config-option <key=value>` provides ordered ACP configuration defaults before prompting. Node options run after these defaults, and node `modelId` overrides global `--model`. Persistent handles pin their first settings; later omissions inherit and conflicting explicit selections fail. See [flow configuration](flows.md#model-and-session-configuration) for evidence and model-catalog limits.
 - The file is always provided by the caller at runtime. `acpx` does not require any built-in flow registry.
 - The source repo includes example flow files under `examples/flows/`, including a larger PR-triage example under `examples/flows/pr-triage/`.
 
@@ -648,6 +648,11 @@ cleanup is safe; if exclusive access cannot be established, preserve the files.
 - `text`: assistant text, tool status blocks, client-operation logs, plan updates, and `[done] <reason>`
 - `json`: one raw ACP JSON-RPC message per line
 - `quiet`: concatenated assistant text on stdout; failed prompts emit one structured `[acpx] error:` line on stderr
+
+For failed prompts, text and quiet output prefer the adapter's nonempty error
+`data.details` or `data.message` over the generic protocol error message. Text
+output also suggests checking provider quota when the error reports a usage limit.
+JSON output preserves the original ACP error payload.
 
 When `--suppress-reads` is enabled:
 

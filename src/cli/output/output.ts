@@ -114,8 +114,7 @@ function parseJsonRpcErrorSummary(message: AcpJsonRpcMessage): string | undefine
   }
 
   const error = asRecord((message as { error?: unknown }).error);
-  const details = asRecord(error?.data)?.details;
-  return typeof details === "string" && details.trim().length > 0 ? details.trim() : fallback;
+  return preferredAcpErrorDetails(error?.data) ?? fallback;
 }
 
 function extractJsonRpcMethod(message: AnyMessage): string | undefined {
@@ -311,7 +310,7 @@ function renderAuthRequiredHint(params: RenderableOutputError): string {
 }
 
 export function getTextErrorRemediationHints(params: RenderableOutputError): string[] {
-  const lowerMessage = params.message.toLowerCase();
+  const lowerMessage = (preferredAcpErrorDetails(params.acp?.data) ?? params.message).toLowerCase();
 
   if (params.detailCode === "AUTH_REQUIRED") {
     return [renderAuthRequiredHint(params)];
@@ -350,7 +349,7 @@ const TEXT_ERROR_HINT_RULES: TextErrorHintRule[] = [
     ],
   },
   {
-    matches: (params, lowerMessage) => isRateLimitError(params.message, lowerMessage),
+    matches: (_params, lowerMessage) => isRateLimitError(lowerMessage),
     hints: [
       "hint: the provider appears rate-limited; retry later, switch model, or check provider quota/billing.",
     ],
@@ -404,10 +403,10 @@ function isSessionLoadError(lowerMessage: string): boolean {
   );
 }
 
-function isRateLimitError(message: string, lowerMessage: string): boolean {
+function isRateLimitError(lowerMessage: string): boolean {
   return (
-    /\b429\b/u.test(message) ||
-    ["rate limit", "quota exceeded"].some((text) => lowerMessage.includes(text))
+    /\b429\b/u.test(lowerMessage) ||
+    ["rate limit", "quota exceeded", "usage limit"].some((text) => lowerMessage.includes(text))
   );
 }
 
@@ -479,10 +478,94 @@ function summarizeToolInputJson(rawInput: unknown): string | undefined {
   return json ? toInline(json) : undefined;
 }
 
+function malformedToolUpdateMessage(update: {
+  locations?: unknown;
+  content?: unknown;
+}): string | undefined {
+  if (update.locations != null && !validToolLocations(update.locations)) {
+    return "Malformed tool call locations";
+  }
+  const contentError = malformedToolContentMessage(update.content);
+  return contentError;
+}
+
+function validToolLocations(locations: unknown): boolean {
+  return Array.isArray(locations) && locations.every(validToolLocation);
+}
+
+function validToolLocation(location: unknown): boolean {
+  const record = asRecord(location);
+  if (!record) {
+    return false;
+  }
+  if (record.path != null && typeof record.path !== "string") {
+    return false;
+  }
+  return record.line == null || (typeof record.line === "number" && Number.isFinite(record.line));
+}
+
+function malformedToolContentMessage(content: unknown): string | undefined {
+  if (content == null) {
+    return undefined;
+  }
+  if (!Array.isArray(content)) {
+    return "Malformed tool call content";
+  }
+  for (const entry of content) {
+    const error = malformedToolContentEntry(entry);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
+
+function malformedToolContentEntry(entry: unknown): string | undefined {
+  const record = asRecord(entry);
+  if (!record) {
+    return "Malformed tool call content";
+  }
+  if (record.type === "diff") {
+    return malformedDiffMessage(record);
+  }
+  if (record.type === "content" && !validToolContentBlock(record.content)) {
+    return "Malformed tool call content";
+  }
+  if (record.type === "terminal" && typeof record.terminalId !== "string") {
+    return "Malformed tool call content";
+  }
+  return undefined;
+}
+
+function malformedDiffMessage(record: Record<string, unknown>): string | undefined {
+  if (
+    typeof record.path === "string" &&
+    typeof record.newText === "string" &&
+    (record.oldText == null || typeof record.oldText === "string")
+  ) {
+    return undefined;
+  }
+  return "Malformed tool call diff";
+}
+
+function validToolContentBlock(content: unknown): boolean {
+  const block = asRecord(content);
+  if (!block || typeof block.type !== "string") {
+    return false;
+  }
+  if (block.type === "text") {
+    return typeof block.text === "string";
+  }
+  if (block.type === "resource") {
+    return asRecord(block.resource) !== undefined;
+  }
+  return true;
+}
+
 function formatLocations(
   locations: Array<ToolCallLocation> | null | undefined,
 ): string | undefined {
-  if (!locations || locations.length === 0) {
+  if (!Array.isArray(locations) || locations.length === 0) {
     return undefined;
   }
 
@@ -509,7 +592,14 @@ function formatLocations(
 }
 
 function formatLocation(location: ToolCallLocation): string | undefined {
-  const path = location.path?.trim();
+  if (!location || typeof location !== "object") {
+    return undefined;
+  }
+  const rawPath = location.path;
+  if (typeof rawPath !== "string") {
+    return undefined;
+  }
+  const path = rawPath.trim();
   if (!path) {
     return undefined;
   }
@@ -553,6 +643,9 @@ function textFromContentBlock(content: ContentBlock): string | undefined {
 }
 
 function textFromResourceBlock(content: Extract<ContentBlock, { type: "resource" }>): string {
+  if (!content.resource || typeof content.resource !== "object") {
+    return "[resource]";
+  }
   if ("text" in content.resource && typeof content.resource.text === "string") {
     return content.resource.text;
   }
@@ -564,7 +657,7 @@ function textFromResourceBlock(content: Extract<ContentBlock, { type: "resource"
 function summarizeToolContent(
   content: Array<ToolCallContent> | null | undefined,
 ): string | undefined {
-  if (!content || content.length === 0) {
+  if (!Array.isArray(content) || content.length === 0) {
     return undefined;
   }
 
@@ -588,17 +681,37 @@ function summarizeToolContent(
 }
 
 function summarizeToolContentEntry(entry: ToolCallContent): string | undefined {
+  if (!entry || typeof entry !== "object") {
+    return undefined;
+  }
   if (entry.type === "content") {
-    const text = textFromContentBlock(entry.content);
-    return text && text.trim() ? text.trimEnd() : undefined;
+    return summarizeContentEntry(entry);
   }
   if (entry.type === "diff") {
-    return summarizeDiff(entry.path, entry.oldText, entry.newText);
+    return summarizeDiffEntry(entry);
   }
   if (entry.type === "terminal") {
     return `[terminal] ${entry.terminalId}`;
   }
   return undefined;
+}
+
+function summarizeContentEntry(
+  entry: Extract<ToolCallContent, { type: "content" }>,
+): string | undefined {
+  if (!entry.content || typeof entry.content !== "object") {
+    return undefined;
+  }
+  const text = textFromContentBlock(entry.content);
+  return typeof text === "string" && text.trim() ? text.trimEnd() : undefined;
+}
+
+function summarizeDiffEntry(entry: Extract<ToolCallContent, { type: "diff" }>): string | undefined {
+  if (typeof entry.path !== "string" || typeof entry.newText !== "string") {
+    return undefined;
+  }
+  const oldText = typeof entry.oldText === "string" ? entry.oldText : undefined;
+  return summarizeDiff(entry.path, oldText, entry.newText);
 }
 
 function extractOutputText(
@@ -853,7 +966,8 @@ class TextOutputFormatter implements OutputFormatter {
   onError(params: RenderableOutputError): void {
     this.flushThoughtBuffer();
     this.beginSection();
-    this.writeLine(this.formatAnsi(`[error] ${params.code}: ${params.message}`, "31"));
+    const message = preferredAcpErrorDetails(params.acp?.data) ?? params.message;
+    this.writeLine(this.formatAnsi(`[error] ${params.code}: ${message}`, "31"));
     for (const hint of getTextErrorRemediationHints(params)) {
       this.writeLine(this.dim(hint));
     }
@@ -940,6 +1054,15 @@ class TextOutputFormatter implements OutputFormatter {
   }
 
   private renderToolUpdate(update: ToolCall | ToolCallUpdate): void {
+    const shapeError = malformedToolUpdateMessage(update);
+    if (shapeError) {
+      this.onError({
+        code: "RUNTIME",
+        origin: "acp",
+        message: shapeError,
+      });
+      return;
+    }
     const state = this.getOrCreateToolState(update.toolCallId);
     this.mergeToolState(state, update);
 
@@ -1124,7 +1247,7 @@ class QuietOutputFormatter implements OutputFormatter {
   }): void {
     this.flush();
     const qualifier = params.detailCode ? `${params.code} ${params.detailCode}` : params.code;
-    const message = preferredAcpErrorDetails(params.acp) ?? params.message;
+    const message = preferredAcpErrorDetails(params.acp?.data) ?? params.message;
     this.stderr.write(`[acpx] error: ${qualifier} ${message.replace(/\r\n?|\n/g, " ")}\n`);
   }
 
@@ -1230,9 +1353,14 @@ class QuietOutputFormatter implements OutputFormatter {
   }
 }
 
-function preferredAcpErrorDetails(acp: OutputErrorAcpPayload | undefined): string | undefined {
-  const details = asRecord(acp?.data)?.details;
-  return typeof details === "string" && details.trim().length > 0 ? details.trim() : undefined;
+function preferredAcpErrorDetails(data: unknown): string | undefined {
+  const record = asRecord(data);
+  for (const value of [record?.details, record?.message]) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
 }
 
 export function createOutputFormatter(

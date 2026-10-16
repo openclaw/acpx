@@ -1091,7 +1091,7 @@ export class FlowRunner {
 
   private resolveSessionSettings(node: AcpNodeDefinition) {
     return {
-      model: node.model ?? this.sessionOptions?.model,
+      model: node.modelId ?? this.sessionOptions?.model,
       configOptions: [...this.configOptions, ...(node.configOptions ?? [])].map(
         ({ configId, value }) => ({ configId, value }),
       ),

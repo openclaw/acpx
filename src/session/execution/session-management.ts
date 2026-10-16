@@ -59,6 +59,7 @@ async function createSessionRecordWithClient(
       recordId: resumedRecordId ?? randomUUID(),
       sessionId,
       agentSessionId,
+      sessionOrigin: options.resumeSessionId ? "resume" : "new",
       agentCommand: options.agentCommand,
       agentArgv: options.agentArgv,
       cwd,
@@ -79,9 +80,22 @@ async function createSessionRecordWithClient(
     createdState.modelApplication,
   );
 
+  await configureCreatedSession(client, options, record, createdState.modelApplication.applied);
+  assertControlAuthority({ signal: options.signal });
+  await writeSessionRecord(record);
+  assertControlAuthority({ signal: options.signal });
+  return record;
+}
+
+async function configureCreatedSession(
+  client: AcpClient,
+  options: SessionCreateOptions,
+  record: SessionRecord,
+  modelApplied: boolean,
+): Promise<void> {
   const configured = await applySessionConfigOptions({
     client,
-    sessionId,
+    sessionId: record.acpSessionId,
     agentCommand: options.agentCommand,
     getState: () => record.acpx,
     setState: (state) => {
@@ -95,15 +109,11 @@ async function createSessionRecordWithClient(
   options.onSessionConfigured?.(
     describeSessionConfiguration({
       requestedModel: options.sessionOptions?.model,
-      modelApplied: createdState.modelApplication.applied,
+      modelApplied,
       state: record.acpx,
       selections: configured.selections,
     }),
   );
-  assertControlAuthority({ signal: options.signal });
-  await writeSessionRecord(record);
-  assertControlAuthority({ signal: options.signal });
-  return record;
 }
 
 async function createFreshSessionState(

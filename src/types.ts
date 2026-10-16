@@ -442,6 +442,7 @@ export type SessionConversation = {
 };
 
 export type SessionAcpxState = {
+  session_origin?: "new" | "resume";
   reset_on_next_ensure?: boolean;
   current_mode_id?: string;
   desired_mode_id?: string;

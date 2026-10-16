@@ -1,6 +1,13 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and validate without publishing
+        type: boolean
+        required: true
+        default: true
   push:
     tags:
       - "v*.*.*"
@@ -22,6 +29,7 @@ jobs:
     outputs:
       artifact_id: ${{ steps.artifact.outputs.artifact-id }}
       package_sha256: ${{ steps.package.outputs.sha256 }}
+      release_tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,7 +38,7 @@ jobs:
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           check-latest: true
@@ -60,10 +68,28 @@ jobs:
           console.log("Package metadata validated.");
           NODE
 
+      - name: Resolve release version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == workflow_dispatch && "$DRY_RUN" != true ]]; then
+            echo "Publishing requires a signed release tag push." >&2
+            exit 1
+          fi
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            echo "tag=v$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Validate release tag
         env:
           RELEASE_SHA: ${{ github.sha }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin main
@@ -111,9 +137,15 @@ jobs:
           );
           NODE
 
+      - name: Verify release tag signature
+        if: github.event_name == 'push'
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: git -c gpg.ssh.allowedSignersFile=.github/release-signers verify-tag "$RELEASE_TAG"
+
       - name: Ensure version is not already published
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
           error_log="$(mktemp)"
@@ -152,7 +184,7 @@ jobs:
           appendFileSync(process.env.GITHUB_OUTPUT, `sha256=${digest}\n`);
           NODE
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         id: artifact
         with:
           name: npm-package-attempt-${{ github.run_attempt }}
@@ -162,6 +194,7 @@ jobs:
           retention-days: 7
 
   publish:
+    if: github.event_name == 'push'
     needs: build
     # npm trusted publishing with provenance requires a GitHub-hosted runner.
     runs-on: ubuntu-latest
@@ -170,11 +203,13 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           check-latest: true
-          registry-url: https://registry.npmjs.org
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11.19.1 --ignore-scripts --registry=https://registry.npmjs.org
 
       - name: Require one immutable artifact ID
         env:
@@ -186,7 +221,7 @@ jobs:
           }
           NODE
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           artifact-ids: ${{ needs.build.outputs.artifact_id }}
           path: ${{ runner.temp }}/npm-package
@@ -194,7 +229,7 @@ jobs:
 
       - name: Verify the exact package before exposing it to npm
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
           RELEASE_REPOSITORY: ${{ github.repository }}
           PACKAGE_SHA256: ${{ needs.build.outputs.package_sha256 }}
         run: |
@@ -259,7 +294,7 @@ jobs:
 
       - name: Ensure version is still unpublished
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
         run: |
           set -euo pipefail
           error_log="$(mktemp)"
@@ -278,3 +313,56 @@ jobs:
           mkdir "${RUNNER_TEMP}/npm-publish"
           cd "${RUNNER_TEMP}/npm-publish"
           npm publish "${RUNNER_TEMP}/npm-package/package.tgz" --ignore-scripts --access public --tag latest --registry=https://registry.npmjs.org --provenance
+
+  release:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: ${{ runner.temp }}/npm-package
+          merge-multiple: true
+
+      - name: Prepare release notes and checksummed npm artifact
+        env:
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+          PACKAGE_SHA256: ${{ needs.build.outputs.package_sha256 }}
+        run: |
+          python3 -I - <<'PYTHON'
+          import hashlib
+          import os
+          from pathlib import Path
+          import re
+
+          tag = os.environ["RELEASE_TAG"]
+          changelog = Path("CHANGELOG.md").read_text()
+          section = re.search(r"^## " + re.escape(tag[1:]) + r" - [^\n]+\n(.*?)(?=^## |\Z)", changelog, re.M | re.S)
+          if section is None or "**Highlights:**" not in section[1]:
+              raise SystemExit("Missing release notes or highlights")
+          directory = Path(os.environ["RUNNER_TEMP"]) / "npm-package"
+          archive = directory / "package.tgz"
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          if digest != os.environ["PACKAGE_SHA256"]:
+              raise SystemExit("Package digest mismatch")
+          archive = archive.rename(directory / f"acpx-{tag[1:]}.tgz")
+          (directory / "SHA256SUMS").write_text(f"{digest}  {archive.name}\n")
+          (directory / "release-notes.md").write_text(section[1].strip() + "\n")
+          PYTHON
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+        run: |
+          gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" \
+            --notes-file "$RUNNER_TEMP/npm-package/release-notes.md" \
+            "$RUNNER_TEMP/npm-package/acpx-${RELEASE_TAG#v}.tgz" \
+            "$RUNNER_TEMP/npm-package/SHA256SUMS"

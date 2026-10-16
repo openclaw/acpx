@@ -111,7 +111,7 @@ access to `~/.acpx/sessions/*.json` outside the bundle.
 - `projections/steps.json`: ordered node-attempt receipts
 - `sessions/*/binding.json`: session binding metadata for the run, including optional `requestedSettings` and `acceptedSettings` for ACP configuration
 
-ACP node snapshots in `flow.json` retain optional `model` and ordered
+ACP node snapshots in `flow.json` retain optional `modelId` and ordered
 `configOptions` declarations. Binding requests retain the effective run defaults
 followed by node options; each step's session snapshot records its accepted
 configuration. Model evidence includes `requested`, `applied`, and optional

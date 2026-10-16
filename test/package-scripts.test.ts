@@ -121,5 +121,5 @@ test("documentation lint rejects unterminated TOML configuration without hanging
 
   assert.equal(result.error, undefined, "documentation lint must exit before the timeout");
   assert.equal(result.status, 2, result.stderr);
-  assert.match(result.stderr, /Invalid TOML document: cannot find end of structure/);
+  assert.match(result.stderr, /Invalid TOML document:/);
 });

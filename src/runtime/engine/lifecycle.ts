@@ -12,6 +12,7 @@ export function createInitialSessionRecord(params: {
   agentArgv?: string[];
   cwd: string;
   agentSessionId?: string;
+  sessionOrigin?: "new" | "resume";
 }): SessionRecord {
   const now = new Date().toISOString();
   return {
@@ -30,7 +31,7 @@ export function createInitialSessionRecord(params: {
     closed: false,
     closedAt: undefined,
     ...createSessionConversation(now),
-    acpx: {},
+    acpx: params.sessionOrigin ? { session_origin: params.sessionOrigin } : {},
   };
 }
 
@@ -76,6 +77,29 @@ export function sessionHasAgentMessages(
 ): boolean {
   return recordOrConversation.messages.some(
     (message) => typeof message === "object" && message !== null && "Agent" in message,
+  );
+}
+
+export function sessionHasAtMostOneUserMessage(
+  recordOrConversation: Pick<SessionRecord, "messages"> | SessionConversation,
+): boolean {
+  let userMessageCount = 0;
+  for (const message of recordOrConversation.messages) {
+    if (typeof message === "object" && message !== null && "User" in message) {
+      userMessageCount += 1;
+      if (userMessageCount > 1) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+export function sessionHasUserMessages(
+  recordOrConversation: Pick<SessionRecord, "messages"> | SessionConversation,
+): boolean {
+  return recordOrConversation.messages.some(
+    (message) => typeof message === "object" && message !== null && "User" in message,
   );
 }
 

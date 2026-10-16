@@ -438,6 +438,10 @@ function parseAcpxState(raw: unknown): SessionAcpxState | undefined {
 
   const state: SessionAcpxState = {};
 
+  if (record.session_origin === "new" || record.session_origin === "resume") {
+    state.session_origin = record.session_origin;
+  }
+
   if (record.reset_on_next_ensure === true) {
     state.reset_on_next_ensure = true;
   }

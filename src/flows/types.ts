@@ -58,7 +58,7 @@ export type FlowEdge =
 export type AcpNodeDefinition = FlowNodeCommon & {
   nodeType: "acp";
   profile?: string;
-  model?: string;
+  modelId?: string;
   configOptions?: SessionConfigSelection[];
   cwd?: string | ((context: FlowNodeContext) => MaybePromise<string | undefined>);
   session?: {
@@ -149,7 +149,7 @@ export type FlowDefinition = {
 export type FlowNodeSnapshot = FlowNodeCommon & {
   nodeType: FlowNodeDefinition["nodeType"];
   profile?: string;
-  model?: string;
+  modelId?: string;
   configOptions?: SessionConfigSelection[];
   session?: {
     handle?: string;
