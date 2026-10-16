@@ -3,7 +3,7 @@
 Releases publish the Node.js package to npm and attach the same tarball and its
 SHA-256 checksum to a GitHub Release. There are no native binaries or appcasts.
 Publication runs entirely in this repository's
-[`release.yml`](../.github/workflows/release.yml) GitHub Actions workflow. An
+[`release.yml`](https://github.com/openclaw/acpx/blob/main/.github/workflows/release.yml) GitHub Actions workflow. An
 external release service is not required. Do not use the legacy local release-it
 configuration or publish a locally built package.
 
