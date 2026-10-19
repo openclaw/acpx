@@ -38,7 +38,7 @@ Core capabilities:
 - Built-in agent registry plus raw `--agent` escape hatch
 - Claude system prompt override via `--system-prompt` / `--append-system-prompt`
 - Optional ACP filesystem and terminal capability opt-outs via `--no-fs` and `--no-terminal`
-- Tool whitelist (`--allowed-tools`), turn cap (`--max-turns`), retry on transient failures (`--prompt-retries`)
+- Adapter-specific tool approval controls (`--allowed-tools`), turn cap (`--max-turns`), retry on transient failures (`--prompt-retries`)
 - Multi-agent flows via `acpx flow run` and the `acpx/flows` authoring API (`defineFlow`, `decision`, `decisionEdge`, `acp`, `action`, `compute`, `checkpoint`)
 
 ## Install
@@ -304,7 +304,7 @@ Behavior:
 - `--model <id>`: request an agent model during session creation; non-Claude agents must advertise a model config option or legacy `models` metadata
 - `--system-prompt <text>`: replace the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt`; persisted in `session_options.system_prompt` so reuse keeps the override. Other agents ignore the field.
 - `--append-system-prompt <text>`: append text to the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt.append`; same persistence rules as `--system-prompt`. Both system-prompt flags also apply to persistent and isolated ACP nodes in `flow run`.
-- `--allowed-tools <list>`: comma-separated tool whitelist (use `""` for no tools)
+- `--allowed-tools <list>`: comma-separated tool list forwarded to the adapter; for Claude it pre-approves listed tools (`""` adds no approvals, rather than disabling tools)
 - `--max-turns <count>`: cap session turn count
 - `--prompt-retries <count>`: retry failed prompt turns on transient errors (default `0`); cancelling a queued turn stops remaining attempts, while already-received final responses keep their outcome
 - `--no-fs`: disable ACP filesystem callbacks so compatible agents use their native file operations. This is a protocol callback policy, not an OS sandbox for the agent's own filesystem access.
@@ -485,6 +485,8 @@ For ACP tool permission requests, per-tool policy takes precedence over the perm
 - `--policy <json-or-file>`: match ACP tool permission requests by kind, title, title head, or raw input tool name
 
 An `autoApprove` rule can approve a tool request under `--deny-all`. An `escalate` rule can prompt under `--approve-all` when stdin and stderr are TTYs. Without both TTYs, escalation denies or cancels the current request and adds `_meta.acpx.permissionEscalation` to the ACP response, even when `--non-interactive-permissions fail` is selected.
+
+For Claude, native approvals from `sessionOptions.allowedTools`, skill `allowed-tools`, and other settings can resolve calls before these ACP permission controls; see the [Claude approval boundary](../../agents/Claude.md#permission-approval-boundary) for native enforcement guidance.
 
 Per-tool policies govern `session/request_permission`. ACP filesystem and terminal operations use the client's permission mode separately; a tool approval does not bypass those operation checks.
 

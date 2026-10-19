@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Documentation: clarify which native Claude tool approvals reach ACP permission policies. Thanks @superbiche.
+
 ## 0.19.6 - 2026-10-16
 
 **Highlights:** Clearer provider errors in text and quiet output, with recovery guidance for quota limits.
