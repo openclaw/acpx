@@ -1575,8 +1575,10 @@ class MockAgent implements Agent {
       return `wrote ${filePath}`;
     }
 
-    if (text.startsWith("permission ")) {
-      const rest = text.slice("permission ".length).trim();
+    if (text.startsWith("permission ") || text.startsWith("permission-options ")) {
+      const duplicateOptions = text.startsWith("permission-options ");
+      const prefix = duplicateOptions ? "permission-options " : "permission ";
+      const rest = text.slice(prefix.length).trim();
       const firstSpace = rest.search(/\s/);
 
       if (firstSpace <= 0) {
@@ -1595,6 +1597,15 @@ class MockAgent implements Agent {
         },
         options: [
           { optionId: "allow", name: "Allow", kind: "allow_once" },
+          ...(duplicateOptions
+            ? [
+                {
+                  optionId: "allow-alternative",
+                  name: "Allow alternative",
+                  kind: "allow_once" as const,
+                },
+              ]
+            : []),
           { optionId: "reject", name: "Reject", kind: "reject_once" },
         ],
       });

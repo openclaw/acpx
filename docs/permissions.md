@@ -47,6 +47,25 @@ Embedding clients that use `acpx/runtime` can apply the same policy through
 policy and permission mode. The embedded runtime does not currently expose
 structured permission-escalation notifications to the host.
 
+The callback receives the agent's original options in `request.raw.options`.
+Return `{ outcome: "selected", optionId }` to select an exact offered option,
+including when multiple options share the same permission kind:
+
+```ts
+onPermissionRequest: async (request) => {
+  const optionId = await showPermissionOptions(request.raw.options);
+  return optionId === undefined
+    ? { outcome: "cancel" }
+    : { outcome: "selected", optionId };
+},
+```
+
+`showPermissionOptions` represents the host's own approval UI. An unknown
+`optionId` cancels the request without falling back to policy or another option.
+Existing `allow_once`, `allow_always`, `reject_once`, `reject_always`, and `cancel`
+outcomes keep their behavior. Kind-based decisions still choose the first option
+of that kind, falling back between once and always within allow or reject.
+
 Pass `onPermissionRequest` to `startTurn()` or `runTurn()` to override the runtime
 callback for one prompt. Each turn owns its handler, including when one runtime
 serves concurrent sessions. Returning `undefined` or throwing falls back to the

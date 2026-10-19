@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Runtime/embedding: let permission callbacks select an exact offered `optionId`, preserving existing kind-based decisions and cancelling unknown IDs. Thanks @xuanda0201.
+
 ### Fixes
 
 - Documentation: clarify which native Claude tool approvals reach ACP permission policies. Thanks @superbiche.
