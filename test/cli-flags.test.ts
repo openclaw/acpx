@@ -728,3 +728,19 @@ test("resolveAgentInvocation applies canonical config overrides through aliases"
     },
   );
 });
+
+test("flow config option defaults use the exec parser and accurate help", () => {
+  const description = "Default ACP session config option for flow nodes (repeatable)";
+  const command = parseCommand(addExecConfigOption(new Command(), description), [
+    "--config-option",
+    "reasoning_effort=low",
+    "--config-option",
+    "reasoning_effort=medium",
+  ]);
+  assert.deepEqual(command.opts().configOption, [
+    { configId: "reasoning_effort", value: "low" },
+    { configId: "reasoning_effort", value: "medium" },
+  ]);
+  assert.equal(command.options[0].description, description);
+  assert.ok(addExecConfigOption(new Command()).options[0].description.includes("one-shot prompt"));
+});

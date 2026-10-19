@@ -7150,3 +7150,184 @@ test("integration helper native: direct child preserves body and kill failures",
     unwrapTestOutcomes(body, cleanup);
   });
 });
+
+test("integration: flow run applies repeatable run configuration defaults", async () => {
+  await withTempHome(async (homeDir) => {
+    const flowPath = path.join(homeDir, "config-defaults.flow.mjs");
+    await fs.writeFile(
+      flowPath,
+      `import { acp, defineFlow } from "acpx/flows";
+export default defineFlow({ name: "config-defaults", startAt: "ask", nodes: {
+  ask: acp({ session: { isolated: true }, prompt: () => "echo PONG" })
+}, edges: [] });`,
+    );
+    const result = await runCli(
+      [
+        "--agent",
+        `${MOCK_AGENT_COMMAND} --advertise-config-options`,
+        "--cwd",
+        homeDir,
+        "--format",
+        "json",
+        "--model",
+        "fast-model",
+        "flow",
+        "run",
+        flowPath,
+        "--config-option",
+        "reasoning_effort=high",
+        "--config-option",
+        "reasoning_effort=xhigh",
+      ],
+      homeDir,
+    );
+    assert.equal(result.code, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim()) as {
+      runDir: string;
+      outputs: { ask: string };
+    };
+    assert.equal(payload.outputs.ask, "PONG");
+    const steps = JSON.parse(
+      await fs.readFile(path.join(payload.runDir, "projections", "steps.json"), "utf8"),
+    ) as {
+      session: {
+        requestedSettings: {
+          model: string;
+          configOptions: Array<{ configId: string; value: string }>;
+        };
+      };
+    }[];
+    assert.deepEqual(steps[0].session.requestedSettings, {
+      model: "fast-model",
+      configOptions: [
+        { configId: "reasoning_effort", value: "high" },
+        { configId: "reasoning_effort", value: "xhigh" },
+      ],
+    });
+  });
+});
+
+test("integration: flow run keeps global model evidence in the bundle for shared handles", async () => {
+  await withTempHome(async (homeDir) => {
+    const flowPath = path.join(homeDir, "global-model.flow.mjs");
+    await fs.writeFile(
+      flowPath,
+      `import { acp, defineFlow } from "acpx/flows";
+export default defineFlow({ name: "global-model", startAt: "first", nodes: {
+  first: acp({ prompt: () => "echo ONE" }),
+  second: acp({ prompt: () => "echo TWO" })
+}, edges: [{ from: "first", to: "second" }] });`,
+    );
+    const result = await runCli(
+      [
+        "--agent",
+        `${LOAD_CAPABLE_MOCK_AGENT_COMMAND} --advertise-config-options`,
+        "--cwd",
+        homeDir,
+        "--format",
+        "json",
+        "--model",
+        "fast-model",
+        "flow",
+        "run",
+        flowPath,
+      ],
+      homeDir,
+    );
+    assert.equal(result.code, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim()) as {
+      runDir: string;
+      outputs: { first: string; second: string };
+      sessionBindings: Record<string, Record<string, unknown>>;
+    };
+    assert.deepEqual(payload.outputs, { first: "ONE", second: "TWO" });
+    const [stdoutBinding] = Object.values(payload.sessionBindings);
+    assert.equal(Object.keys(payload.sessionBindings).length, 1);
+    assert.equal("requestedSettings" in stdoutBinding, false);
+    assert.equal("acceptedSettings" in stdoutBinding, false);
+
+    const binding = JSON.parse(
+      await fs.readFile(
+        path.join(payload.runDir, "sessions", String(stdoutBinding.bundleId), "binding.json"),
+        "utf8",
+      ),
+    ) as {
+      acpSessionId: string;
+      requestedSettings: unknown;
+      acceptedSettings: { model: unknown };
+    };
+    assert.equal(binding.acpSessionId, stdoutBinding.acpSessionId);
+    assert.deepEqual(binding.requestedSettings, { model: "fast-model", configOptions: [] });
+    assert.deepEqual(binding.acceptedSettings.model, {
+      requested: "fast-model",
+      applied: true,
+      accepted: "fast-model",
+    });
+    const steps = JSON.parse(
+      await fs.readFile(path.join(payload.runDir, "projections", "steps.json"), "utf8"),
+    ) as { session: { acpSessionId: string; requestedSettings: unknown } }[];
+    assert.equal(steps.length, 2);
+    for (const step of steps) {
+      assert.equal(step.session.acpSessionId, binding.acpSessionId);
+      assert.deepEqual(step.session.requestedSettings, binding.requestedSettings);
+    }
+  });
+});
+
+test("integration: flow run json output omits configuration option values", async () => {
+  await withTempHome(async (homeDir) => {
+    const flowPath = path.join(homeDir, "option-output.flow.mjs");
+    await fs.writeFile(
+      flowPath,
+      `import { acp, defineFlow } from "acpx/flows";
+export default defineFlow({ name: "option-output", startAt: "ask", nodes: {
+  ask: acp({
+    configOptions: [{ configId: "reasoning_effort", value: "xhigh" }],
+    prompt: () => "echo PONG"
+  })
+}, edges: [] });`,
+    );
+    const result = await runCli(
+      [
+        "--agent",
+        `${MOCK_AGENT_COMMAND} --advertise-config-options`,
+        "--cwd",
+        homeDir,
+        "--format",
+        "json",
+        "flow",
+        "run",
+        flowPath,
+        "--config-option",
+        "reasoning_effort=high",
+      ],
+      homeDir,
+    );
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout.includes("reasoning_effort"), false, result.stdout);
+    const payload = JSON.parse(result.stdout.trim()) as {
+      runDir: string;
+      outputs: { ask: string };
+      sessionBindings: Record<string, { bundleId: string }>;
+    };
+    assert.equal(payload.outputs.ask, "PONG");
+    const [stdoutBinding] = Object.values(payload.sessionBindings);
+    const binding = JSON.parse(
+      await fs.readFile(
+        path.join(payload.runDir, "sessions", stdoutBinding.bundleId, "binding.json"),
+        "utf8",
+      ),
+    ) as {
+      requestedSettings: { configOptions: Array<{ configId: string; value: string }> };
+      acceptedSettings: { configOptions: Array<{ acceptedValue: string }> };
+    };
+    assert.deepEqual(binding.requestedSettings.configOptions, [
+      { configId: "reasoning_effort", value: "high" },
+      { configId: "reasoning_effort", value: "xhigh" },
+    ]);
+    assert.deepEqual(
+      binding.acceptedSettings.configOptions.map((option) => option.acceptedValue),
+      ["high", "xhigh"],
+    );
+  });
+});

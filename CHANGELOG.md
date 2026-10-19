@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Flows: select per-node models and ordered ACP configuration options before the first prompt, with run defaults, persistent-handle conflict checks, same-session replay, and requested/accepted settings in run bundles. Thanks @superbiche.
+
 ## 0.19.6 - 2026-10-16
 
 **Highlights:** Clearer provider errors in text and quiet output, with recovery guidance for quota limits.
