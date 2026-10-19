@@ -17,6 +17,9 @@ configuration or publish a locally built package.
 4. Dispatch `.github/workflows/release.yml` at the merge commit with
    `dry_run: true`. Require the exact run to finish successfully. This builds and
    packages the release without publishing; non-dry dispatches are rejected.
+   Dry runs also accept an already published version so dependency and packaging
+   checks can run on current `main` without a version bump. Tag-triggered releases
+   still require an unpublished version.
 5. Create an annotated `vX.Y.Z` tag on that commit, signed with the fleet release
    SSH key. Verify it against the trusted release-key allowlist before pushing.
    Use `.github/release-signers` as the allowed-signers file; the workflow checks

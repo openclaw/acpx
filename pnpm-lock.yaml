@@ -20,10 +20,10 @@ importers:
     dependencies:
       '@agentclientprotocol/sdk':
         specifier: ^1.5.0
-        version: 1.8.0(zod@4.6.7)
+        version: 1.9.0(zod@4.6.7)
       '@openclaw/fs-safe':
-        specifier: ^0.22.0
-        version: 0.22.0
+        specifier: ^0.26.7
+        version: 0.26.7
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -63,7 +63,7 @@ importers:
         version: 6.1.2(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
       '@xyflow/react':
         specifier: ^12.11.6
-        version: 12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        version: 12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       c8:
         specifier: ^12.0.0
         version: 12.0.0
@@ -93,13 +93,13 @@ importers:
         version: 7.0.2004
       react:
         specifier: ^19.3.0
-        version: 19.3.0
+        version: 19.3.1
       react-dom:
         specifier: ^19.3.0
-        version: 19.3.0(react@19.3.0)
+        version: 19.3.1(react@19.3.1)
       react-test-renderer:
         specifier: ^19.3.0
-        version: 19.3.0(react@19.3.0)
+        version: 19.3.1(react@19.3.1)
       tsdown:
         specifier: ^0.23.0
         version: 0.23.1(@typescript/typescript6@6.0.2)(tsx@4.23.15)(unrun@0.2.37)
@@ -115,8 +115,8 @@ importers:
 
 packages:
 
-  '@agentclientprotocol/sdk@1.8.0':
-    resolution: {integrity: sha512-fbP7qHZsFyTJVT0/RPrcWJ8An26qLXHEuGCHHEKDyxD1xpXV+Ejyh2LAE6vBAFePkpVjZeeohnbgvuEhZ7wLMg==}
+  '@agentclientprotocol/sdk@1.9.0':
+    resolution: {integrity: sha512-saCOTPYBK1iqWqJFAYHXbg3+zCoFXyZZFoqQAwdTWkbrZZPpAETr80QOnYr2l+dzPwL0jpNhn3eDY8MoEIDbUA==}
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
@@ -652,54 +652,72 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@openclaw/fs-safe-darwin-arm64@0.22.0':
-    resolution: {integrity: sha512-u7HSbjJAIiWZ0iFJzoXymMJUn0EMzJGMFtX7aIbQk2W6Sz+UxTuXszJk79yYNF46kxKXjlu9Vkx3oazT/6mE5g==}
+  '@openclaw/fs-safe-darwin-arm64@0.26.7':
+    resolution: {integrity: sha512-yCypltt55C3heV+eTWna7qSy9BAKOzj5FfMm/2WEp1ycPEAACGCCc7KlB1S9ltec6+HvbjjnMOm/vXtmQJCxww==}
     engines: {node: '>=22'}
     cpu: [arm64]
     os: [darwin]
 
-  '@openclaw/fs-safe-darwin-x64@0.22.0':
-    resolution: {integrity: sha512-rkcMsgbQQzNFcEjq74J0hbwMoHlVXtQzC5owdAU6QG1O2UTGIPROpwNXmo1Phmz4tSTXwCKlH5vxxSgSHMv8Mw==}
+  '@openclaw/fs-safe-darwin-x64@0.26.7':
+    resolution: {integrity: sha512-kQ70MAhO6nnv4VbBltL3vzxuGKjf0Qj/6z8Ks5fI5DR37x43muKBvb6jEwCYTO9xHlP60Muso2VbJCCAu42m9g==}
     engines: {node: '>=22'}
     cpu: [x64]
     os: [darwin]
 
-  '@openclaw/fs-safe-linux-arm64-gnu@0.22.0':
-    resolution: {integrity: sha512-nwZl03/waPnBh7lKFnDiF7RfT85D9Ngbw23LL7jb2ilXu32zge4gqufYYIoLXk0EGL3bLkwssgnpxy7ErRQWow==}
+  '@openclaw/fs-safe-freebsd-arm64@0.26.7':
+    resolution: {integrity: sha512-ZFuulQJnNoDq+5hRsT01h21KvsIkfhYuHz6va7wmrAvljBvPzNvoLgxeuG1eTnJnlZRw2rxDWB7eMhW/NJNlXg==}
+    engines: {node: '>=22'}
+    cpu: [arm64]
+    os: [freebsd]
+
+  '@openclaw/fs-safe-freebsd-x64@0.26.7':
+    resolution: {integrity: sha512-jh8bLawOTSbGnkLO19ll8Smj3Kot76DRQxjJlSLfaAsPDvt7L9nk5EuBqAemWs/n+gYfJEaQpLPPFOfiJ5eDrw==}
+    engines: {node: '>=22'}
+    cpu: [x64]
+    os: [freebsd]
+
+  '@openclaw/fs-safe-linux-arm64-gnu@0.26.7':
+    resolution: {integrity: sha512-3ALRGuZZBi+y3kVHEFNLOoOkY7Z5KfWDsJMVGRgARedxgJCugxW9IoFIyI722CIwISdQ9yV/AT23gaVxul3JJQ==}
     engines: {node: '>=22'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@openclaw/fs-safe-linux-arm64-musl@0.22.0':
-    resolution: {integrity: sha512-2Gvr1vUvSpbdkAeUuYU8DmgzRGPx88V4quX1AWNZdFuip9SsGkbaBLx3kZlR4OFlEo6HxgGPS7KZanaG17nKSg==}
+  '@openclaw/fs-safe-linux-arm64-musl@0.26.7':
+    resolution: {integrity: sha512-zXJiZrHZXFMB7VWnDZPP5fa7EeTU+ZihvLxl8xU4HcWtoBDJXG9jGz9CdXuyGlzegq22gXRFRDy+HNyHuQCKZw==}
     engines: {node: '>=22'}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  '@openclaw/fs-safe-linux-x64-gnu@0.22.0':
-    resolution: {integrity: sha512-xTb3icn5X+SREL30NNXy1ZgjkGGWanRm9Wsk5pGm96Iy1DWY18HRyjnhDHCthZ402JiVBXCJR/8nsdHI0loaRg==}
+  '@openclaw/fs-safe-linux-x64-gnu@0.26.7':
+    resolution: {integrity: sha512-cbUPK7YFbNmnLDGvxbzYevb+QXV474dtCTm78J6wvq3uPiQOOnWpeR70ejdLqz4xjhwc3K5sIe0aMMFWG1GQiQ==}
     engines: {node: '>=22'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@openclaw/fs-safe-linux-x64-musl@0.22.0':
-    resolution: {integrity: sha512-oOxSQNtPxEJRDUsydXX4TVw/vGXKxUR1bW8wieEsxlhJob+fbRcSZb6YyznPkGiirhcpCwwXgQwQbaD+9Ho9Hg==}
+  '@openclaw/fs-safe-linux-x64-musl@0.26.7':
+    resolution: {integrity: sha512-fjiseF32MDmElHaBbQqBERI5B6dwIy23KnJ0wh0FQ3sw9E71DCpiy0a9qcRvEnHSbtMZdYVLu7cIISY02MrIkw==}
     engines: {node: '>=22'}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  '@openclaw/fs-safe-win32-x64-msvc@0.22.0':
-    resolution: {integrity: sha512-V0MR0A3nYbvJofxdcKfgp8sU46UDAESV2wxh4w4+coxPkfEFfedJa2tz0L1Fc1wFEcZPXIbywXNhOy2qF6QZug==}
+  '@openclaw/fs-safe-win32-arm64-msvc@0.26.7':
+    resolution: {integrity: sha512-7O33Uyc7DHhHNJ9nJBshlB+ZRBIdmfJw0NhjodDmj6TMfmBPnRFlIKuKLxHJn9qzN+twozL7IgiydXrLgWlqRQ==}
+    engines: {node: '>=22'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@openclaw/fs-safe-win32-x64-msvc@0.26.7':
+    resolution: {integrity: sha512-p+Wa3BaEJaXPkxEUAJ4VOJdXGicjUVa3EjRGjVslLSdzu2ZOsani22/QyXGy9GwsPrbODSXyUe46V6AOsgLZow==}
     engines: {node: '>=22'}
     cpu: [x64]
     os: [win32]
 
-  '@openclaw/fs-safe@0.22.0':
-    resolution: {integrity: sha512-CW/T0NUcdn8PLVBgyXUbIn90a16uhP3YtKdd+eqJjmg0FR01KCCjCI3PxrvK1ygrUb/BfQsJJe+hXA9+/0rqKQ==}
+  '@openclaw/fs-safe@0.26.7':
+    resolution: {integrity: sha512-DVdVaDsuwC1Cs+mzSgc8RAjDOo0Na54JchgiR9gaOJwvyjLKav5O142U80pQwl3ryV/uoWwSX6eL+CiEBhmD7Q==}
     engines: {node: '>=22'}
 
   '@oxc-project/types@0.127.0':
@@ -2408,21 +2426,21 @@ packages:
   queue-microtask@1.2.3:
     resolution: {integrity: sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A==}
 
-  react-dom@19.3.0:
-    resolution: {integrity: sha512-JDk8dgif51OjFoDE70+OT9ICyYr+69HlmihNwp1+Nsfbna3t5sIiCa9ZJktDmQ4/1b/rn26hIAR2uYXDMr5r0Q==}
+  react-dom@19.3.1:
+    resolution: {integrity: sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ==}
     peerDependencies:
-      react: ^19.3.0
+      react: ^19.3.1
 
-  react-is@19.3.0:
-    resolution: {integrity: sha512-UpMYezM4v5/18F28aC66AEsjXIgE02kyEMH6yLdgLXu/UTfa1Ntwck/nNLrbqJsEXW7gPb0coNO9FQse9WTovA==}
+  react-is@19.3.1:
+    resolution: {integrity: sha512-RRieF6IyxQBkcK6pP8xOHprLTPW6QjRkbGdImtqNme+/hYVwCZkLQLdlZGOhUqXwkS9IEynaGvPJtv6XB/cz0Q==}
 
-  react-test-renderer@19.3.0:
-    resolution: {integrity: sha512-AUxgv+hRbqjRgx4xVwiWL6cvDDKPAva1VWLXQIMoevqQn9us//C5TX9LEnBGH47D0zvJpjwjxb1umzgOMvE8Wg==}
+  react-test-renderer@19.3.1:
+    resolution: {integrity: sha512-YcNewwmnZMd0wTb2nkb4hQ58NmX/u1hW2OJsNpen8CnV+jNkmEjYd1R6wJrOMSgb8bIF5HAJv4iL+S3PwNptOA==}
     peerDependencies:
-      react: ^19.3.0
+      react: ^19.3.1
 
-  react@19.3.0:
-    resolution: {integrity: sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog==}
+  react@19.3.1:
+    resolution: {integrity: sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw==}
     engines: {node: '>=0.10.0'}
 
   readable-stream@2.3.8:
@@ -2865,7 +2883,7 @@ packages:
 
 snapshots:
 
-  '@agentclientprotocol/sdk@1.8.0(zod@4.6.7)':
+  '@agentclientprotocol/sdk@1.9.0(zod@4.6.7)':
     dependencies:
       zod: 4.6.7
 
@@ -3355,36 +3373,48 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.3
 
-  '@openclaw/fs-safe-darwin-arm64@0.22.0':
+  '@openclaw/fs-safe-darwin-arm64@0.26.7':
     optional: true
 
-  '@openclaw/fs-safe-darwin-x64@0.22.0':
+  '@openclaw/fs-safe-darwin-x64@0.26.7':
     optional: true
 
-  '@openclaw/fs-safe-linux-arm64-gnu@0.22.0':
+  '@openclaw/fs-safe-freebsd-arm64@0.26.7':
     optional: true
 
-  '@openclaw/fs-safe-linux-arm64-musl@0.22.0':
+  '@openclaw/fs-safe-freebsd-x64@0.26.7':
     optional: true
 
-  '@openclaw/fs-safe-linux-x64-gnu@0.22.0':
+  '@openclaw/fs-safe-linux-arm64-gnu@0.26.7':
     optional: true
 
-  '@openclaw/fs-safe-linux-x64-musl@0.22.0':
+  '@openclaw/fs-safe-linux-arm64-musl@0.26.7':
     optional: true
 
-  '@openclaw/fs-safe-win32-x64-msvc@0.22.0':
+  '@openclaw/fs-safe-linux-x64-gnu@0.26.7':
     optional: true
 
-  '@openclaw/fs-safe@0.22.0':
+  '@openclaw/fs-safe-linux-x64-musl@0.26.7':
+    optional: true
+
+  '@openclaw/fs-safe-win32-arm64-msvc@0.26.7':
+    optional: true
+
+  '@openclaw/fs-safe-win32-x64-msvc@0.26.7':
+    optional: true
+
+  '@openclaw/fs-safe@0.26.7':
     optionalDependencies:
-      '@openclaw/fs-safe-darwin-arm64': 0.22.0
-      '@openclaw/fs-safe-darwin-x64': 0.22.0
-      '@openclaw/fs-safe-linux-arm64-gnu': 0.22.0
-      '@openclaw/fs-safe-linux-arm64-musl': 0.22.0
-      '@openclaw/fs-safe-linux-x64-gnu': 0.22.0
-      '@openclaw/fs-safe-linux-x64-musl': 0.22.0
-      '@openclaw/fs-safe-win32-x64-msvc': 0.22.0
+      '@openclaw/fs-safe-darwin-arm64': 0.26.7
+      '@openclaw/fs-safe-darwin-x64': 0.26.7
+      '@openclaw/fs-safe-freebsd-arm64': 0.26.7
+      '@openclaw/fs-safe-freebsd-x64': 0.26.7
+      '@openclaw/fs-safe-linux-arm64-gnu': 0.26.7
+      '@openclaw/fs-safe-linux-arm64-musl': 0.26.7
+      '@openclaw/fs-safe-linux-x64-gnu': 0.26.7
+      '@openclaw/fs-safe-linux-x64-musl': 0.26.7
+      '@openclaw/fs-safe-win32-arm64-msvc': 0.26.7
+      '@openclaw/fs-safe-win32-x64-msvc': 0.26.7
       jszip: 3.10.2
 
   '@oxc-project/types@0.127.0':
@@ -3819,13 +3849,13 @@ snapshots:
       '@rolldown/pluginutils': 1.0.1
       vite: 8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1)
 
-  '@xyflow/react@12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@xyflow/react@12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       '@xyflow/system': 0.0.83
       classcat: 5.0.5
-      react: 19.3.0
-      react-dom: 19.3.0(react@19.3.0)
-      zustand: 4.5.7(@types/react@19.3.0)(react@19.3.0)
+      react: 19.3.1
+      react-dom: 19.3.1(react@19.3.1)
+      zustand: 4.5.7(@types/react@19.3.0)(react@19.3.1)
     optionalDependencies:
       '@types/react': 19.3.0
       '@types/react-dom': 19.3.0(@types/react@19.3.0)
@@ -4843,20 +4873,20 @@ snapshots:
 
   queue-microtask@1.2.3: {}
 
-  react-dom@19.3.0(react@19.3.0):
+  react-dom@19.3.1(react@19.3.1):
     dependencies:
-      react: 19.3.0
+      react: 19.3.1
       scheduler: 0.28.0
 
-  react-is@19.3.0: {}
+  react-is@19.3.1: {}
 
-  react-test-renderer@19.3.0(react@19.3.0):
+  react-test-renderer@19.3.1(react@19.3.1):
     dependencies:
-      react: 19.3.0
-      react-is: 19.3.0
+      react: 19.3.1
+      react-is: 19.3.1
       scheduler: 0.28.0
 
-  react@19.3.0: {}
+  react@19.3.1: {}
 
   readable-stream@2.3.8:
     dependencies:
@@ -5192,9 +5222,9 @@ snapshots:
       escalade: 3.2.0
       picocolors: 1.1.1
 
-  use-sync-external-store@1.7.0(react@19.3.0):
+  use-sync-external-store@1.7.0(react@19.3.1):
     dependencies:
-      react: 19.3.0
+      react: 19.3.1
 
   util-deprecate@1.0.2:
     optional: true
@@ -5291,9 +5321,9 @@ snapshots:
 
   zod@4.6.7: {}
 
-  zustand@4.5.7(@types/react@19.3.0)(react@19.3.0):
+  zustand@4.5.7(@types/react@19.3.0)(react@19.3.1):
     dependencies:
-      use-sync-external-store: 1.7.0(react@19.3.0)
+      use-sync-external-store: 1.7.0(react@19.3.1)
     optionalDependencies:
       '@types/react': 19.3.0
-      react: 19.3.0
+      react: 19.3.1

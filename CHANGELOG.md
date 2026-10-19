@@ -15,6 +15,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Documentation: clarify which native Claude tool approvals reach ACP permission policies. Thanks @superbiche.
+- Dependencies: update the ACP SDK and guarded filesystem runtime, plus React patch releases for the replay viewer.
 
 ## 0.19.6 - 2026-10-16
 

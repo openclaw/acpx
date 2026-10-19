@@ -144,6 +144,7 @@ jobs:
         run: git -c gpg.ssh.allowedSignersFile=.github/release-signers verify-tag "$RELEASE_TAG"
 
       - name: Ensure version is not already published
+        if: github.event_name == 'push'
         env:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
