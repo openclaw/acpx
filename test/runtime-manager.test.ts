@@ -4058,6 +4058,7 @@ for (const retained of [false, true]) {
           throw expectedError;
         }
       };
+      oldClient.hasReusableSession = () => true;
       oldClient.supportsCloseSession = () => true;
       oldClient.closeSession = async () => {
         backendCloseCalls += 1;
