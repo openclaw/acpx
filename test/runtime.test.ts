@@ -1136,10 +1136,9 @@ for (const turnCount of [0, 1, 2]) {
       runtime.close({ handle: resumed, reason: "discard", discardPersistentState: true }),
       /does not support session\/close/,
     );
-    assert.equal(
-      (await options.sessionStore.load(input.sessionKey))?.acpx?.reset_on_next_ensure,
-      undefined,
-    );
+    const settled = await options.sessionStore.load(input.sessionKey);
+    assert.equal(settled?.closed, true);
+    assert.equal(settled?.acpx?.reset_on_next_ensure, true);
     let turnsSettled = 0;
     for (let index = 0; index < turnCount; index += 1) {
       const retiring = runtime.startTurn({

@@ -16,6 +16,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Documentation: clarify which native Claude tool approvals reach ACP permission policies. Thanks @superbiche.
 - Dependencies: update the ACP SDK and guarded filesystem runtime, plus React patch releases for the replay viewer.
+- Runtime/embedding: settle session records as closed when a launch fails after its record was saved or a discard close fails at the backend, so embedders are not left with open records they can no longer close.
 
 ## 0.19.6 - 2026-10-16
 
