@@ -3942,6 +3942,151 @@ test(
   },
 );
 
+for (const retryPath of ["shutdown", "ensure"] as const) {
+  test(`AcpRuntimeManager settles an abandoned launch after cleanup succeeds on ${retryPath}`, async (t) => {
+    const saveEntered = createDeferred<void>();
+    const releaseSave = createDeferred<void>();
+    const saveError = new Error("initial save failed");
+    class FailedInitialSaveStore extends InMemorySessionStore {
+      override async save(record: AcpSessionRecord): Promise<void> {
+        await super.save(record);
+        if (this.savedRecordIds.length === 1) {
+          saveEntered.resolve();
+          await releaseSave.promise;
+          if (retryPath === "ensure") {
+            throw saveError;
+          }
+        }
+      }
+    }
+    const store = new FailedInitialSaveStore();
+    const closeError = new Error("transient cleanup failure");
+    let closeCalls = 0;
+    let running = true;
+    const client = createModelsClientFactory({})();
+    client.close = async () => {
+      closeCalls += 1;
+      if (closeCalls <= (retryPath === "shutdown" ? 2 : 1)) {
+        throw closeError;
+      }
+      running = false;
+    };
+    client.getAgentLifecycleSnapshot = () => ({ running, pid: 77_003 });
+    let createCalls = 0;
+    const freshClient = createModelsClientFactory({})();
+    freshClient.createSession = async () => {
+      createCalls += 1;
+      return { sessionId: "fresh-after-cleanup-retry" };
+    };
+    freshClient.loadSession = async () => assert.fail("must not reuse abandoned session");
+    let clientCalls = 0;
+    const manager = new AcpRuntimeManager(
+      createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+      { clientFactory: () => (++clientCalls === 1 ? client : freshClient) as never },
+    );
+    t.after(async () => {
+      releaseSave.resolve();
+      await manager.shutdown().catch(() => {});
+    });
+    const input = { sessionKey: `retry-${retryPath}`, agent: "codex", mode: "persistent" as const };
+    const rejected = assert.rejects(
+      manager.ensureSession(input),
+      retryPath === "shutdown"
+        ? {
+            code: "ACP_BACKEND_UNAVAILABLE",
+          }
+        : saveError,
+    );
+    await saveEntered.promise;
+    const shutdown =
+      retryPath === "shutdown" ? assert.rejects(manager.shutdown(), AggregateError) : undefined;
+    releaseSave.resolve();
+    await rejected;
+    if (shutdown) {
+      await shutdown;
+      const record = await store.load(input.sessionKey);
+      assert.equal(record?.closed, true);
+      assert.equal(record?.acpx?.reset_on_next_ensure, true);
+      assert.equal(record?.pid, undefined);
+    } else {
+      assert.equal((await store.load(input.sessionKey))?.closed, false);
+      const fresh = await manager.ensureSession(input);
+      assert.equal(fresh.acpSessionId, "fresh-after-cleanup-retry");
+      assert.equal(createCalls, 1);
+    }
+    assert.equal(closeCalls, retryPath === "shutdown" ? 3 : 2);
+  });
+}
+
+for (const retained of [false, true]) {
+  for (const failure of ["cleanup", "save"] as const) {
+    test(`AcpRuntimeManager retries discarded ${retained ? "retained" : "detached"} state after ${failure} failure`, async (t) => {
+      const expectedError = new Error(`discard ${failure} failed`);
+      let failSave = failure === "save";
+      class FailingCloseStore extends InMemorySessionStore {
+        override async save(record: AcpSessionRecord): Promise<void> {
+          if (record.closed && failSave) {
+            failSave = false;
+            throw expectedError;
+          }
+          await super.save(record);
+        }
+      }
+      const input = {
+        sessionKey: `discard-${retained}-${failure}`,
+        agent: "codex",
+        mode: "persistent" as const,
+      };
+      const store = new FailingCloseStore(
+        retained
+          ? []
+          : [
+              makeSessionRecord({
+                acpxRecordId: input.sessionKey,
+                acpSessionId: "old-discard-session",
+                agentCommand: "codex --acp",
+                cwd: "/workspace",
+              }),
+            ],
+      );
+      let closeCalls = 0;
+      let backendCloseCalls = 0;
+      const oldClient = createModelsClientFactory({})();
+      oldClient.close = async () => {
+        closeCalls += 1;
+        if (failure === "cleanup" && closeCalls === 1) {
+          throw expectedError;
+        }
+      };
+      oldClient.supportsCloseSession = () => true;
+      oldClient.closeSession = async () => {
+        backendCloseCalls += 1;
+      };
+      const freshClient = createModelsClientFactory({})();
+      freshClient.createSession = async () => ({ sessionId: "fresh-after-discard-retry" });
+      freshClient.loadSession = async () => assert.fail("must not load discarded backend identity");
+      let clientCalls = 0;
+      const manager = new AcpRuntimeManager(
+        createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+        { clientFactory: () => (++clientCalls === 1 ? oldClient : freshClient) as never },
+      );
+      t.after(() => manager.shutdown());
+      if (retained) {
+        await manager.ensureSession(input);
+      }
+      await assert.rejects(
+        manager.close(createHandle(input.sessionKey), { discardPersistentState: true }),
+        expectedError,
+      );
+      assert.equal((await store.load(input.sessionKey))?.closed, false);
+      const fresh = await manager.ensureSession(input);
+      assert.equal(fresh.acpSessionId, "fresh-after-discard-retry");
+      assert.equal(backendCloseCalls, 1);
+      assert.equal(closeCalls, 2);
+    });
+  }
+}
+
 for (const failure of ["unsupported", "request-error"] as const) {
   test(`AcpRuntimeManager settles a failed discard after ${failure} and retries the backend`, async (t) => {
     const record = makeSessionRecord({
