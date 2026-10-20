@@ -3883,6 +3883,65 @@ test(
   },
 );
 
+test(
+  "AcpRuntimeManager keeps a published launch open when shutdown and client cleanup fail",
+  { timeout: 5_000 },
+  async (t) => {
+    const saveEntered = createDeferred<void>();
+    const releaseSave = createDeferred<void>();
+    class GatedInitialSaveStore extends InMemorySessionStore {
+      override async save(record: AcpSessionRecord): Promise<void> {
+        await super.save(record);
+        if (this.savedRecordIds.length === 1) {
+          saveEntered.resolve();
+          await releaseSave.promise;
+        }
+      }
+    }
+    const store = new GatedInitialSaveStore();
+    const closeError = new Error("client cleanup failed");
+    let closeCalls = 0;
+    const client = createModelsClientFactory({})();
+    client.close = async () => {
+      closeCalls += 1;
+      throw closeError;
+    };
+    const manager = new AcpRuntimeManager(
+      createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+      { clientFactory: () => client as never },
+    );
+    t.after(async () => {
+      releaseSave.resolve();
+      await assert.rejects(manager.shutdown(), AggregateError);
+    });
+    const input = {
+      sessionKey: "failed-launch-cleanup",
+      agent: "codex",
+      mode: "persistent" as const,
+    };
+    const rejected = assert.rejects(manager.ensureSession(input), {
+      code: "ACP_BACKEND_UNAVAILABLE",
+      message: "ACP runtime is shut down.",
+    });
+    await saveEntered.promise;
+    const shutdown = assert.rejects(manager.shutdown(), (error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      assert.equal(error.message, "ACP runtime shutdown failed.");
+      assert.equal(error.errors[0], closeError);
+      return true;
+    });
+    assert.equal(closeCalls, 1);
+    releaseSave.resolve();
+    await rejected;
+    await shutdown;
+
+    const record = await store.load(input.sessionKey);
+    assert.equal(record?.closed, false);
+    assert.equal(record?.acpx?.reset_on_next_ensure, undefined);
+    assert.equal(closeCalls, 3);
+  },
+);
+
 for (const failure of ["unsupported", "request-error"] as const) {
   test(`AcpRuntimeManager settles a failed discard after ${failure} and retries the backend`, async (t) => {
     const record = makeSessionRecord({

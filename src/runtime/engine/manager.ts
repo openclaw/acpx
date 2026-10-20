@@ -1095,12 +1095,19 @@ export class AcpRuntimeManager {
     const record = owner.recordId ? owner.projection?.record : undefined;
     owner.recordId = undefined;
     await settleAttempt(() => owner.client.clearEventHandlers());
-    await settleAttempt(async () => this.closeClient(owner.client));
-    // The caller never received this saved record; settle it so the next ensure starts fresh.
-    if (record) {
-      applyLifecycleSnapshotToRecord(record, owner.client.getAgentLifecycleSnapshot());
-      await this.saveClosedRuntimeRecord(record, true);
+    const closeAttempt = await settleAttempt(async () => this.closeClient(owner.client));
+    if (!record) {
+      return;
     }
+    if (!closeAttempt.ok) {
+      // Keep the record open until the connection can be finalized on retry.
+      owner.recordId = record.acpxRecordId;
+      this.retiringSessionOwners.add(owner);
+      return;
+    }
+    // The caller never received this saved record; settle it so the next ensure starts fresh.
+    applyLifecycleSnapshotToRecord(record, owner.client.getAgentLifecycleSnapshot());
+    await this.saveClosedRuntimeRecord(record, true);
   }
 
   private async prepareInitialRuntimeRecord(params: {
