@@ -6,17 +6,20 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+## 0.20.0 - 2026-10-20
+
+**Highlights:** Add Octomind support, select exact permission options, and recover cleanly from failed session launches and discards.
+
 ### Changes
 
-- Runtime/embedding: let permission callbacks select an exact offered `optionId`, preserving existing kind-based decisions and cancelling unknown IDs. Thanks @xuanda0201.
-
 - Agents: add Octomind as a built-in native ACP agent. Thanks @donk8r.
+- Runtime/embedding: let permission callbacks select an exact offered `optionId`, preserving existing kind-based decisions and cancelling unknown IDs. Thanks @xuanda0201.
 
 ### Fixes
 
-- Documentation: clarify which native Claude tool approvals reach ACP permission policies. Thanks @superbiche.
-- Dependencies: update the ACP SDK and guarded filesystem runtime, plus React patch releases for the replay viewer.
 - Runtime/embedding: settle session records as closed when a launch fails after its record was saved or a discard close fails at the backend, so embedders are not left with open records they can no longer close.
+- Dependencies: update the ACP SDK and guarded filesystem runtime, plus React patch releases for the replay viewer.
+- Documentation: clarify which native Claude tool approvals reach ACP permission policies. Thanks @superbiche.
 
 ## 0.19.6 - 2026-10-16
 
