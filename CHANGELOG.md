@@ -13,6 +13,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - CLI: report a malformed `--agent` command (an unterminated quote or a quoted empty command) as a usage error with exit code 2 and `acpxCode: "USAGE"` instead of a runtime error. Thanks @KrasimirKralev.
+- Dependencies: update the guarded filesystem runtime and development tools, and patch denial-of-service vulnerabilities in the docs Markdown renderer.
 
 ## 0.20.0 - 2026-10-20
 
