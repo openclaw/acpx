@@ -9,7 +9,7 @@ import { resolveInstalledExecutable } from "./spawn-command-options.js";
 const ACP_ADAPTER_PACKAGE_RANGES = {
   pi: "^0.0.33",
   codex: "^1.1.5",
-  claude: "^0.81.2",
+  claude: "^0.95.0",
   mux: "^0.28.0",
 } as const;
 

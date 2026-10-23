@@ -149,7 +149,7 @@ test("parseSessionRecord backfills argv for historical built-in commands", () =>
   }
 });
 
-const PREVIOUS_CLAUDE_COMMAND = "npx -y @agentclientprotocol/claude-agent-acp@^0.76.0";
+const PREVIOUS_CLAUDE_COMMAND = "npx -y @agentclientprotocol/claude-agent-acp@^0.81.2";
 
 function serializeWithAgent(
   id: string,
@@ -175,11 +175,11 @@ test("parseSessionRecord migrates records saved under earlier built-in commands"
   for (const [agentCommand, agentArgv, name] of [
     [
       PREVIOUS_CLAUDE_COMMAND,
-      ["npx", "-y", "@agentclientprotocol/claude-agent-acp@^0.76.0"],
+      ["npx", "-y", "@agentclientprotocol/claude-agent-acp@^0.81.2"],
       "claude",
     ],
     ["npx -y @agentclientprotocol/claude-agent-acp@^0.60.0", undefined, "claude"],
-    ["npm exec @agentclientprotocol/claude-agent-acp@^0.76.0", undefined, "claude"],
+    ["npm exec @agentclientprotocol/claude-agent-acp@^0.81.2", undefined, "claude"],
     [PREVIOUS_CLAUDE_COMMAND, AGENT_ARGV_REGISTRY.claude, "claude"],
     ["npx pi-acp@^0.0.31", ["npx", "pi-acp@^0.0.31"], "pi"],
   ] as const) {
@@ -223,7 +223,7 @@ test("agent-scoped lookup finds sessions saved under the previous Claude command
         acpxRecordId: "saved-before-upgrade",
         acpSessionId: "saved-before-upgrade",
         agentCommand: PREVIOUS_CLAUDE_COMMAND,
-        agentArgv: ["npx", "-y", "@agentclientprotocol/claude-agent-acp@^0.76.0"],
+        agentArgv: ["npx", "-y", "@agentclientprotocol/claude-agent-acp@^0.81.2"],
         cwd,
       }),
     );

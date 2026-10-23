@@ -117,6 +117,7 @@ Rules:
 - Default agent is `codex` for top-level `prompt`, `exec`, and `sessions`.
 - Unknown positional agent tokens are treated as raw agent commands.
 - `--agent <command>` explicitly sets a raw ACP adapter command.
+- Claude package fallback uses the ACPX-owned adapter range. An adapter installed alongside ACPX takes precedence; update it and any explicitly selected native Claude executable separately. Existing custom launchers stay operator-controlled.
 - Do not combine a positional agent and `--agent` in the same command.
 - Gemini version checks, Copilot ACP support checks, and their startup diagnostics use the selected agent's working directory and child environment, including session environment and embedded runtime overrides.
 - Embedded host lifecycle admission also covers compatibility and diagnostic invocations. Correlate their events by `launchId`; one session can produce several adapter processes. Checks retire their owned processes and output pipes before settling.
