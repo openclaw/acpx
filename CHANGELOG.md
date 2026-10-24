@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+## 0.21.0 - 2026-10-23
+
+**Highlights:** Add opt-in environment controls for embedded agents, clarify malformed agent command errors, and patch denial-of-service vulnerabilities in documentation dependencies.
+
 ### Changes
 
 - Runtime/embedding: add opt-in `agentProcessEnvBlock` and `agentProcessEnvAllow` so embedders can keep their own credentials out of the environment inherited by agents, command probes and ACP terminals. Both are off by default; explicit grants and overlays still apply. Thanks @VACInc.
