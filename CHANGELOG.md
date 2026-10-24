@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Docs/prompting: describe what a prompt command does with no prompt text: it exits with code 2 and `Prompt is required` (or `Prompt from stdin is empty`) instead of printing help. Thanks @KrasimirKralev.
+
 ## 0.21.0 - 2026-10-23
 
 **Highlights:** Add opt-in environment controls for embedded agents, clarify malformed agent command errors, and patch denial-of-service vulnerabilities in documentation dependencies.
