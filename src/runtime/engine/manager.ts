@@ -245,6 +245,13 @@ type RuntimeControlSession = {
   checkpoint: LiveSessionCheckpoint;
 };
 
+type RuntimeControlConnection = {
+  createClient: (options: ConstructorParameters<typeof AcpClient>[0]) => AcpClient;
+  retainClient: (params: { record: SessionRecord }) => boolean;
+  retain: (record: SessionRecord) => Promise<void>;
+  release: () => Promise<void>;
+};
+
 type RuntimeSessionOwner = {
   client: AcpClient;
   checkpoint: LiveSessionCheckpoint;
@@ -786,8 +793,12 @@ export class AcpRuntimeManager {
       }
     }
 
-    let controlClient: AcpClient | undefined;
     let controlledRecord = record;
+    const connection = this.createRuntimeControlConnection(
+      record,
+      sessionMode,
+      () => controlledRecord,
+    );
     // Callback-driven ensure can reopen this record before the control replies.
     // Serialize that save with the accepted response and cleanup.
     const checkpoint = new LiveSessionCheckpoint({
@@ -806,15 +817,8 @@ export class AcpRuntimeManager {
             return controlledRecord;
           },
           saveRecord: async () => checkpoint.checkpoint(),
-          createClient: (options) =>
-            (controlClient = this.createClient({
-              ...options,
-              processLifecycle: this.options.processLifecycle,
-              processLaunchScope: {
-                kind: "runtime-session",
-                sessionKey: record.name ?? record.acpxRecordId,
-              },
-            })),
+          createClient: connection.createClient,
+          retainClient: connection.retainClient,
           mcpServers: this.resolveMcpServers({
             ...record,
             sessionKey: record.name ?? record.acpxRecordId,
@@ -842,11 +846,81 @@ export class AcpRuntimeManager {
       if (!flushed.ok) {
         throw flushed.error;
       }
+      await connection.retain(result.value.record);
       return result.value.value;
     } finally {
       this.controlSessionRecords.delete(record.acpxRecordId);
-      if (controlClient) {
-        this.liveClients.delete(controlClient);
+      await connection.release();
+    }
+  }
+
+  // A persistent control keeps its connection as the session owner, so the next
+  // turn runs in the agent process that accepted the control.
+  private createRuntimeControlConnection(
+    record: SessionRecord,
+    sessionMode: "persistent" | "oneshot",
+    controlledRecord: () => SessionRecord,
+  ): RuntimeControlConnection {
+    const sessionKey = record.name ?? record.acpxRecordId;
+    let client: AcpClient | undefined;
+    let owner: RuntimeSessionOwner | undefined;
+    let retained = false;
+    return {
+      createClient: (options) => {
+        client = this.createClient({
+          ...options,
+          processLifecycle: this.options.processLifecycle,
+          processLaunchScope: { kind: "runtime-session", sessionKey },
+        });
+        if (sessionMode === "persistent") {
+          owner = this.createSessionOwner({ client, sessionKey, mode: sessionMode });
+          // Reconnect setters and notifications share the record in wire order.
+          this.attachIdleProjection(owner, controlledRecord());
+        }
+        return client;
+      },
+      retainClient: ({ record: connectedRecord }) => {
+        retained =
+          owner !== undefined && this.canRetainPersistentSessionOwner(owner, connectedRecord);
+        return retained;
+      },
+      retain: async (connectedRecord) => {
+        const retainedOwner = retained ? owner : undefined;
+        if (retainedOwner) {
+          owner = undefined;
+          await this.retainControlSessionOwner(retainedOwner, connectedRecord);
+        }
+      },
+      release: async () => {
+        if (owner && retained) {
+          await this.stopSessionOwner(owner);
+        } else {
+          owner?.client.clearEventHandlers();
+        }
+        if (client && !retained) {
+          this.liveClients.delete(client);
+        }
+      },
+    };
+  }
+
+  private async retainControlSessionOwner(
+    owner: RuntimeSessionOwner,
+    record: SessionRecord,
+  ): Promise<void> {
+    owner.recordId = record.acpxRecordId;
+    const retained = await settleAttempt(async () => {
+      await owner.checkpoint.checkpoint();
+      return await this.retainPersistentSessionOwnerAfterTurn({ record, owner });
+    });
+    if (!retained.ok || !retained.value) {
+      this.removeRetainedSessionOwner(owner);
+      const failure = await this.stopSessionOwner(owner);
+      if (!retained.ok) {
+        throw retained.error;
+      }
+      if (failure) {
+        throw failure.error;
       }
     }
   }

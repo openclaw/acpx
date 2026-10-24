@@ -108,3 +108,60 @@ test(
     );
   },
 );
+
+async function turnText(turn: ReturnType<ReturnType<typeof createAcpRuntime>["startTurn"]>) {
+  let text = "";
+  for await (const event of turn.events) {
+    if (event.type === "text_delta") {
+      text += event.text;
+    }
+  }
+  const result = await turn.result;
+  assert.equal(result.status, "completed", JSON.stringify(result));
+  return text;
+}
+
+test(
+  "offline setMode on a loaded session reaches the agent process that runs the next prompt",
+  { timeout: 20_000 },
+  async () => {
+    await withTempHome("acpx-offline-mode-", async (home) => {
+      const store = createFileSessionStore({ stateDir: `${home}/.acpx` });
+      const options = {
+        cwd: home,
+        sessionStore: store,
+        agentRegistry: createAgentRegistry({
+          overrides: {
+            mock: [process.execPath, AGENT, "--supports-load-session"],
+          },
+        }),
+        permissionMode: "deny-all" as const,
+      };
+      const runtime = createAcpRuntime(options);
+      const handle = await runtime.ensureSession({
+        sessionKey: "offline-mode",
+        agent: "mock",
+        mode: "persistent",
+      });
+      const prompt = { handle, requestId: "offline-mode", mode: "prompt" } as const;
+      assert.equal(await turnText(runtime.startTurn({ ...prompt, text: "echo hi" })), "hi");
+      await runtime.shutdown();
+
+      // A restarted runtime has the session record but no live agent process.
+      const restarted = createAcpRuntime(options);
+      try {
+        await restarted.setMode({ handle, mode: "plan" });
+        assert.equal(
+          await turnText(restarted.startTurn({ ...prompt, text: "session-mode" })),
+          "plan",
+        );
+        assert.equal(
+          (await store.load(handle.acpxRecordId ?? handle.sessionKey))?.acpx?.desired_mode_id,
+          "plan",
+        );
+      } finally {
+        await restarted.shutdown();
+      }
+    });
+  },
+);

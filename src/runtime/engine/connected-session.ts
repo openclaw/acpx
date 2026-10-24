@@ -69,6 +69,8 @@ export type WithConnectedSessionOptions<T> = {
   onClientClosed?: () => void;
   onConnectedRecord?: (record: SessionRecord) => void;
   onInterrupt?: (params: { client: AcpClient; record: SessionRecord }) => Promise<void>;
+  // Returning true after a successful run hands the open client to the caller, which then owns closing it.
+  retainClient?: (params: { client: AcpClient; record: SessionRecord }) => boolean;
   run: (context: ConnectedSessionContext) => Promise<T>;
 };
 
@@ -133,6 +135,7 @@ export async function withConnectedSession<T>(
   const client = options.createClient?.(clientOptions) ?? new AcpClient(clientOptions);
   let activeSessionIdForControl = record.acpSessionId;
   let notifiedClientAvailable = false;
+  let clientRetained = false;
   const activeController = createActiveSessionController({
     client,
     record,
@@ -180,6 +183,7 @@ export async function withConnectedSession<T>(
         record.agentCapabilities = client.initializeResult?.agentCapabilities;
         applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
         await options.saveRecord(record);
+        clientRetained = options.retainClient?.({ client, record }) === true;
 
         return {
           value,
@@ -203,13 +207,15 @@ export async function withConnectedSession<T>(
       },
     );
   } finally {
-    if (notifiedClientAvailable) {
-      options.onClientClosed?.();
+    if (!clientRetained) {
+      if (notifiedClientAvailable) {
+        options.onClientClosed?.();
+      }
+      await client.close();
+      applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
+      await options.saveRecord(record).catch(() => {
+        // best effort on close
+      });
     }
-    await client.close();
-    applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
-    await options.saveRecord(record).catch(() => {
-      // best effort on close
-    });
   }
 }

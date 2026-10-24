@@ -1427,6 +1427,10 @@ class MockAgent implements Agent {
       return JSON.stringify(this.clientCapabilities);
     }
 
+    if (text === "session-mode") {
+      return this.ensureSession(sessionId).modeId;
+    }
+
     if (text.startsWith("elicitation ")) {
       return await this.handleElicitation(sessionId, text.slice("elicitation ".length), signal);
     }

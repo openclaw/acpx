@@ -285,11 +285,14 @@ test("control and turn reconnects resolve session permissions without borrowing 
       await runtime.setConfigOption({ handle, key: "model", value: "fast-model" });
       await assert.rejects(fs.readFile(effect), { code: "ENOENT" });
 
+      // A control keeps its connection for the next turn; release it so each step reconnects.
+      await runtime.close({ handle, reason: "release control client" });
       allowWithoutTurn = true;
       await runtime.setConfigOption({ handle, key: "model", value: "smart-model" });
       assert.equal(await fs.readFile(effect, "utf8"), "loaded");
       await fs.unlink(effect);
 
+      await runtime.close({ handle, reason: "release control client" });
       allowWithoutTurn = false;
       let contentAtApproval: string | null | undefined;
       const turn = runtime.startTurn({
