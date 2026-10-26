@@ -226,7 +226,7 @@ acpx --deny-all    codex 'analyze without using any tools'
 
 Whichever way you supply prompt text, `acpx` concatenates the file (or stdin) with positional args, separated by a blank line. That is what makes `--file -` plus appended args work.
 
-Bare `acpx` with no arguments prints help. A prompt command (`acpx <agent>`, `prompt`, `exec`) with no positional args, no `--file`, and a terminal on stdin exits with code 2 and `Prompt is required (pass as argument, --file, or pipe via stdin)`; piped stdin that is empty exits with code 2 and `Prompt from stdin is empty`.
+Bare `acpx` with no arguments and a terminal on stdin prints help. A prompt command (`acpx <agent>`, `prompt`, `exec`) with no positional args, no `--file`, and a terminal on stdin exits with code 2 and `Prompt is required (pass as argument, --file, or pipe via stdin)`; piped stdin that is empty exits with code 2 and `Prompt from stdin is empty`.
 
 ## Examples
 

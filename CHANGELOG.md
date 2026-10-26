@@ -9,6 +9,7 @@ Repo: https://github.com/openclaw/acpx
 ### Fixes
 
 - Docs/prompting: describe what a prompt command does with no prompt text: it exits with code 2 and `Prompt is required` (or `Prompt from stdin is empty`) instead of printing help. Thanks @KrasimirKralev.
+- Dependencies: update the guarded filesystem runtime and development tools; patch four URI normalization and scheme/host confusion vulnerabilities in the development dependency `fast-uri`.
 
 ## 0.21.0 - 2026-10-23
 
