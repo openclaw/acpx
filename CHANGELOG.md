@@ -6,10 +6,14 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+## 0.21.1 - 2026-10-26
+
+**Highlights:** Patch four URI security vulnerabilities in development dependencies, update the guarded filesystem runtime, and clarify missing-prompt errors.
+
 ### Fixes
 
-- Docs/prompting: describe what a prompt command does with no prompt text: it exits with code 2 and `Prompt is required` (or `Prompt from stdin is empty`) instead of printing help. Thanks @KrasimirKralev.
 - Dependencies: update the guarded filesystem runtime and development tools; patch four URI normalization and scheme/host confusion vulnerabilities in the development dependency `fast-uri`.
+- Docs/prompting: describe what a prompt command does with no prompt text: it exits with code 2 and `Prompt is required` (or `Prompt from stdin is empty`) instead of printing help. Thanks @KrasimirKralev.
 
 ## 0.21.0 - 2026-10-23
 
