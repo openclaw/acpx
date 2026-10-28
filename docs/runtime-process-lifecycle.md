@@ -26,12 +26,14 @@ returns that error. An exit during admission is delivered after the admission
 callback settles, so a late successful write cannot overwrite an earlier exit
 observation.
 
-For embedded runtime session creation, a positive `timeoutMs` bounds ACP
-initialization. If the agent never completes the handshake, `ensureSession()`
+For embedded runtime session creation, a positive `timeoutMs` separately bounds ACP
+initialization and the following `session/new`, `session/load` or `session/resume`
+request. Each phase receives the full timeout; time spent initializing does not
+consume the session request's budget. If either phase stalls, `ensureSession()`
 rejects with `ACP_SESSION_INIT_FAILED` after closing the client and cleaning up
-its observed processes. Cleanup can extend beyond the initialization deadline.
-Omitting the timeout preserves unlimited initialization. This deadline does not
-bound the later `session/new` or `session/load` request.
+its observed processes. The error identifies the stalled phase. Cleanup can
+extend beyond the deadline. Omitting the timeout or setting it to zero preserves
+unlimited setup. A failed explicit resume does not create a replacement session.
 
 The host owns admission timeouts, cancellation and recovery. A callback that never
 settles can hold startup indefinitely; `close()` is not an admission-cancellation
