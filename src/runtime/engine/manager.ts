@@ -474,6 +474,13 @@ export class AcpRuntimeManager {
       pendingSessionUpdates: [],
     };
     input.client.setEventHandlers({
+      onAcpMessage: (direction, message) => {
+        try {
+          void Promise.resolve(this.options.onAcpMessage?.(direction, message)).catch(() => {});
+        } catch {
+          // Observations must not interrupt protocol processing or transport writes.
+        }
+      },
       onSessionUpdate: (notification) => this.routeOwnedSessionUpdate(owner, notification),
       onClientOperation: (operation) => this.routeOwnedClientOperation(owner, operation),
     });

@@ -50,6 +50,8 @@ export {
 } from "./runtime/public/handle-state.js";
 export type {
   AcpAgentRegistry,
+  AcpJsonRpcMessage,
+  AcpMessageDirection,
   AcpElicitationContext,
   AcpElicitationHandler,
   AcpElicitationMode,
