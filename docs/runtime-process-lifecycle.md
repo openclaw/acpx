@@ -93,8 +93,12 @@ Shared runtimes reject this option because their connection belongs to another
 process.
 
 Observations are best-effort: callback failures are ignored and asynchronous work
-is not awaited. Treat messages as read-only. Outbound callbacks run before the
-transport write, so they do not prove delivery or agent acceptance.
+is not awaited. Synchronous callback work runs on the protocol processing path
+and can delay it; move slow processing off that path. Treat messages as read-only.
+Outbound callbacks run before the transport write, so they do not prove delivery
+or agent acceptance. The callback is runtime-wide and has no separate session
+context; hosts must use the session identity present in protocol messages when
+available, and cannot assume every message has one.
 
 The existing client filters still apply: elicitation requests and their responses
 are omitted, as are session updates suppressed during history replay. Other
