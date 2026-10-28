@@ -283,7 +283,7 @@ async function withSessionSetupTimeout<T>(
     }
     throw new AcpRuntimeError(
       "ACP_SESSION_INIT_FAILED",
-      `ACP ${method} did not complete within ${timeoutMs}ms.`,
+      `ACP ${method} did not complete within ${timeoutMs}ms. Retry session setup and check that the configured ACP agent is responding.`,
       { cause: error },
     );
   }
