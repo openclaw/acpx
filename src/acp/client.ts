@@ -134,6 +134,7 @@ import {
 } from "./ndjson-stream.js";
 import { observeAcpStream } from "./observed-stream.js";
 import { ProcessDescendants } from "./process-descendants.js";
+import { unavailableResponseSent } from "./response-writes.js";
 import {
   formatSessionControlAcpSummary,
   maybeWrapSessionControlError,
@@ -1015,10 +1016,7 @@ export class AcpClient {
   }
 
   private createConnection(
-    stream: {
-      readable: ReadableStream<AnyMessage>;
-      writable: WritableStream<AnyMessage>;
-    },
+    stream: ReturnType<typeof observeAcpStream>,
     launch: Pick<AgentLaunchPlan, "devinAcp">,
     capabilities: ClientCapabilities,
   ): ClientConnection {
@@ -1027,11 +1025,18 @@ export class AcpClient {
         await this.handleSessionUpdate(params);
       })
       .onNotification(methods.client.elicitation.complete, async () => {})
-      .onRequest(methods.client.session.requestPermission, async ({ params, signal }) => {
-        return await this.handlePermissionRequest(params, signal);
-      })
+      .onRequest(
+        methods.client.session.requestPermission,
+        async ({ params, requestId, signal }) => {
+          return await this.handlePermissionRequest(params, signal, (ownerSignal) =>
+            stream.responseWrites.track(requestId, ownerSignal),
+          );
+        },
+      )
       .onRequest(methods.client.elicitation.create, async ({ params, requestId, signal }) => {
-        return await this.handleElicitationRequest(params, requestId, signal);
+        return await this.handleElicitationRequest(params, requestId, signal, (ownerSignal) =>
+          stream.responseWrites.track(requestId, ownerSignal),
+        );
       });
 
     if (capabilities.fs?.readTextFile) {
@@ -1075,7 +1080,15 @@ export class AcpClient {
       );
     }
 
-    return app.connect(stream);
+    const connection = app.connect(stream);
+    connection.signal.addEventListener(
+      "abort",
+      () => {
+        stream.responseWrites.close(connection.signal.reason);
+      },
+      { once: true },
+    );
+    return connection;
   }
 
   private async initializeAgentConnection(params: {
@@ -2186,6 +2199,7 @@ export class AcpClient {
   private async handlePermissionRequest(
     params: RequestPermissionRequest,
     requestSignal?: AbortSignal,
+    responseReceipt?: (signal: AbortSignal) => Promise<void>,
   ): Promise<RequestPermissionResponse> {
     const owner = this.captureDelegatedRequestOwner(params.sessionId, requestSignal);
     if (!this.isDelegatedRequestActive(owner)) {
@@ -2211,7 +2225,7 @@ export class AcpClient {
     }
 
     const response =
-      (await this.tryHandlePermissionRequestWithHost(params, owner)) ??
+      (await this.tryHandlePermissionRequestWithHost(params, owner, responseReceipt)) ??
       (await this.resolvePermissionRequestFromMode(params, owner));
     return this.finishPermissionRequest(params, owner, response);
   }
@@ -2238,6 +2252,7 @@ export class AcpClient {
     request: CreateElicitationRequest,
     requestId: JsonRpcId,
     requestSignal: AbortSignal,
+    responseReceipt: (signal: AbortSignal) => Promise<void>,
   ): Promise<CreateElicitationResponse> {
     const resolved = this.resolveElicitationOwner(request);
     if ("response" in resolved) {
@@ -2250,10 +2265,11 @@ export class AcpClient {
         (candidate): candidate is AbortSignal => candidate !== undefined,
       ),
     );
+    const responseSent = responseReceipt(signal);
     const handlerAttempt = Promise.resolve()
       .then(async () => {
         signal.throwIfAborted();
-        return await handler(request, { requestId, signal });
+        return await handler(request, { requestId, signal, responseSent });
       })
       .then(
         (response) => ({ kind: "response" as const, response }),
@@ -2357,6 +2373,7 @@ export class AcpClient {
   private async tryHandlePermissionRequestWithHost(
     params: RequestPermissionRequest,
     owner: DelegatedRequestOwner,
+    responseReceipt: (signal: AbortSignal) => Promise<void> = unavailableResponseSent,
   ): Promise<RequestPermissionResponse | undefined> {
     const handler = owner.permissionHandler;
     if (!handler) {
@@ -2375,7 +2392,7 @@ export class AcpClient {
             raw: params,
             inferredKind: inferToolKind(params),
           },
-          { signal },
+          { signal, responseSent: responseReceipt(signal) },
         ),
       );
       return this.hostPermissionDecisionResponse(params, owner, decision);

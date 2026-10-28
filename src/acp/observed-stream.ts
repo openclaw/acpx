@@ -1,6 +1,7 @@
 import { methods, type AnyMessage, type JsonRpcId } from "@agentclientprotocol/sdk";
 import type { AcpMessageDirection } from "../types.js";
 import { isSessionUpdateNotification } from "./jsonrpc.js";
+import { ResponseWrites } from "./response-writes.js";
 
 type MessageStream = {
   readable: ReadableStream<AnyMessage>;
@@ -20,7 +21,8 @@ type ObservedStreamOptions<T> = {
 export function observeAcpStream<T>(
   base: MessageStream,
   options: ObservedStreamOptions<T>,
-): MessageStream {
+): MessageStream & { responseWrites: ResponseWrites } {
+  const responseWrites = new ResponseWrites();
   const elicitationRequestIds = new Set<JsonRpcId>();
   const shouldSuppressInboundReplaySessionUpdate = (message: AnyMessage): boolean => {
     return options.suppressReplaySessionUpdates() && isSessionUpdateNotification(message);
@@ -79,13 +81,14 @@ export function observeAcpStream<T>(
       } finally {
         writer.releaseLock();
       }
+      responseWrites.written(message);
       if (activePrompt && promptOwner) {
         options.onPromptRequestWritten(activePrompt, promptOwner);
       }
     },
   });
 
-  return { readable, writable };
+  return { readable, writable, responseWrites };
 }
 
 function isExtensionNotification(message: AnyMessage): boolean {
