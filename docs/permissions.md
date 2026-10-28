@@ -106,6 +106,11 @@ uses the normal permission fallback policy. Receipts do not retry responses or
 change native permissions. Elicitation request/response bodies remain excluded
 from protocol observation.
 
+A rejected receipt does not prove non-delivery. Cancellation cannot retract a
+response already queued in the transport: it may still be written if the pipe
+later drains. Treat rejection as an unconfirmed write and do not automatically
+resend a permission decision or elicitation answer.
+
 ### Session-specific embedded policies
 
 Use `AcpRuntimeOptions.sessionPermissions(context)` when one embedded runtime
