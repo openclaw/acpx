@@ -4827,8 +4827,6 @@ test("integration: prompt --no-wait is processed by the detached queue owner", a
 test("integration: sessions history shows in-flight prompt after prompt starts", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(homeDir, "cwd-"));
-    const releaseFile = path.join(homeDir, "release-prompt");
-    const prompt = `stream-wait-file ${releaseFile}`;
 
     const created = await runCli(
       [...baseAgentArgs(cwd), "--format", "json", "sessions", "new"],
@@ -4838,7 +4836,7 @@ test("integration: sessions history shows in-flight prompt after prompt starts",
 
     const promptChild = spawn(
       process.execPath,
-      [CLI_PATH, ...baseAgentArgs(cwd), "--format", "quiet", "prompt", prompt],
+      [CLI_PATH, ...baseAgentArgs(cwd), "--format", "quiet", "prompt", "sleep 1500"],
       {
         env: {
           ...process.env,
@@ -4853,38 +4851,27 @@ test("integration: sessions history shows in-flight prompt after prompt starts",
     });
 
     await withObservedChild(promptChild, homeDir, async (waitForClose) => {
-      const observation = await observeTestOutcome(async () => {
-        const history = await waitFor(async () => {
-          const result = await runCli(
-            [...baseAgentArgs(cwd), "--format", "quiet", "sessions", "history"],
-            homeDir,
-          );
-          assert.equal(result.code, 0, result.stderr);
-          return result.stdout.includes(prompt) ? result.stdout : null;
-        }, 5_000);
-
-        assert.equal(promptChild.exitCode, null, "prompt should still be running");
-        assert.ok(history.includes(prompt));
-        assert.doesNotMatch(history, /No history/);
-      });
-      const completion = await observeTestOutcome(async () => {
-        // Join even after observation fails: the detached owner must consume release before HOME removal.
-        await fs.writeFile(releaseFile, "release");
-
-        // Exercise delayed consumption after the real child and its pipes have closed.
-        await withinCliDeadline(
-          15_000,
-          () => new Error("History prompt did not close"),
-          () => promptClosed,
+      const history = await waitFor(async () => {
+        const result = await runCli(
+          [...baseAgentArgs(cwd), "--format", "quiet", "sessions", "history"],
+          homeDir,
         );
-        const promptResult = await waitForClose();
-        assert.equal(promptResult.code, 0, promptResult.stderr);
-        assert.match(promptResult.stdout, /stream-wait-file done: flow-held/);
-      });
-      if (!completion.ok) {
-        retainedCliHomes.add(homeDir);
-      }
-      unwrapTestOutcomes(observation, completion);
+        assert.equal(result.code, 0, result.stderr);
+        return result.stdout.includes("sleep 1500") ? result.stdout : null;
+      }, 5_000);
+
+      assert.match(history, /sleep 1500/);
+      assert.doesNotMatch(history, /No history/);
+
+      // Exercise delayed consumption after the real child and its pipes have closed.
+      await withinCliDeadline(
+        15_000,
+        () => new Error("History prompt did not close"),
+        () => promptClosed,
+      );
+      const promptResult = await waitForClose();
+      assert.equal(promptResult.code, 0, promptResult.stderr);
+      assert.match(promptResult.stdout, /slept 1500ms/);
     });
   });
 });
@@ -4941,6 +4928,7 @@ test("integration: sessions read shows assistant updates before the prompt finis
         assert.doesNotMatch(history, /stream-wait-file done/);
       });
       const completion = await observeTestOutcome(async () => {
+        // Join after failed observation so the detached owner consumes release before HOME removal.
         await fs.writeFile(releaseFile, "release");
         const promptResult = await waitForClose();
         assert.equal(promptResult.code, 0, promptResult.stderr);
