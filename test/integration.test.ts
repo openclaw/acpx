@@ -4853,7 +4853,7 @@ test("integration: sessions history shows in-flight prompt after prompt starts",
     });
 
     await withObservedChild(promptChild, homeDir, async (waitForClose) => {
-      try {
+      const observation = await observeTestOutcome(async () => {
         const history = await waitFor(async () => {
           const result = await runCli(
             [...baseAgentArgs(cwd), "--format", "quiet", "sessions", "history"],
@@ -4866,20 +4866,25 @@ test("integration: sessions history shows in-flight prompt after prompt starts",
         assert.equal(promptChild.exitCode, null, "prompt should still be running");
         assert.ok(history.includes(prompt));
         assert.doesNotMatch(history, /No history/);
-      } finally {
-        // Hold the prompt through observation, and release it even if an assertion fails.
+      });
+      const completion = await observeTestOutcome(async () => {
+        // Join even after observation fails: the detached owner must consume release before HOME removal.
         await fs.writeFile(releaseFile, "release");
-      }
 
-      // Exercise delayed consumption after the real child and its pipes have closed.
-      await withinCliDeadline(
-        15_000,
-        () => new Error("History prompt did not close"),
-        () => promptClosed,
-      );
-      const promptResult = await waitForClose();
-      assert.equal(promptResult.code, 0, promptResult.stderr);
-      assert.match(promptResult.stdout, /stream-wait-file done: flow-held/);
+        // Exercise delayed consumption after the real child and its pipes have closed.
+        await withinCliDeadline(
+          15_000,
+          () => new Error("History prompt did not close"),
+          () => promptClosed,
+        );
+        const promptResult = await waitForClose();
+        assert.equal(promptResult.code, 0, promptResult.stderr);
+        assert.match(promptResult.stdout, /stream-wait-file done: flow-held/);
+      });
+      if (!completion.ok) {
+        retainedCliHomes.add(homeDir);
+      }
+      unwrapTestOutcomes(observation, completion);
     });
   });
 });
@@ -4915,7 +4920,7 @@ test("integration: sessions read shows assistant updates before the prompt finis
     );
 
     await withObservedChild(promptChild, homeDir, async (waitForClose) => {
-      try {
+      const observation = await observeTestOutcome(async () => {
         const history = await waitFor(async () => {
           const result = await runCli(
             [...baseAgentArgs(cwd), "--format", "json", "sessions", "read"],
@@ -4934,13 +4939,17 @@ test("integration: sessions read shows assistant updates before the prompt finis
         assert.equal(promptChild.exitCode, null, "prompt should still be running");
         assert.match(history, /flow-held/);
         assert.doesNotMatch(history, /stream-wait-file done/);
-      } finally {
+      });
+      const completion = await observeTestOutcome(async () => {
         await fs.writeFile(releaseFile, "release");
+        const promptResult = await waitForClose();
+        assert.equal(promptResult.code, 0, promptResult.stderr);
+        assert.match(promptResult.stdout, /stream-wait-file done: flow-held/);
+      });
+      if (!completion.ok) {
+        retainedCliHomes.add(homeDir);
       }
-
-      const promptResult = await waitForClose();
-      assert.equal(promptResult.code, 0, promptResult.stderr);
-      assert.match(promptResult.stdout, /stream-wait-file done: flow-held/);
+      unwrapTestOutcomes(observation, completion);
     });
   });
 });
