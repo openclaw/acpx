@@ -10,6 +10,7 @@ import type {
   PermissionPolicy,
   PermissionStats,
   PromptInput,
+  RunPromptResult,
   SessionNotification,
   SessionTokenUsage,
 } from "../types.js";
@@ -155,35 +156,12 @@ function captureSessionUpdate(notification: SessionNotification, capture: RunCap
   }
 }
 
-function rowStatusFromPermissionStats(stats: PermissionStats): CompareRow["status"] {
-  const deniedOrCancelled = stats.denied + stats.cancelled;
+function rowStatusFromResult(result: RunPromptResult): CompareRow["status"] {
+  if (result.stopReason === "cancelled") {
+    return "cancelled";
+  }
+  const deniedOrCancelled = result.permissionStats.denied + result.permissionStats.cancelled;
   return deniedOrCancelled > 0 ? "permission_denied" : "ok";
-}
-
-function buildSuccessRow(
-  agentName: string,
-  result: Awaited<ReturnType<typeof runOnce>>,
-  capture: RunCapture,
-  startedAt: number,
-): CompareRow {
-  const permissionStats = result.permissionStats;
-  return {
-    agent: agentName,
-    status:
-      result.stopReason === "cancelled"
-        ? "cancelled"
-        : rowStatusFromPermissionStats(permissionStats),
-    stop_reason: result.stopReason,
-    wall_ms: Math.round(performance.now() - startedAt),
-    input_tokens: capture.usage.input_tokens ?? null,
-    output_tokens: capture.usage.output_tokens ?? null,
-    total_tokens: capture.usage.total_tokens ?? null,
-    final_message: truncate(collapseWhitespace(capture.finalMessage), FINAL_MESSAGE_PREVIEW_CHARS),
-    error: null,
-    permission_requests: permissionStats.requested,
-    permission_denied: permissionStats.denied + permissionStats.cancelled,
-    ...(result._meta === undefined ? {} : { _meta: result._meta }),
-  };
 }
 
 function rowStatusFromError(error: unknown): CompareRow["status"] {
@@ -194,30 +172,6 @@ function rowStatusFromError(error: unknown): CompareRow["status"] {
   return code === "PERMISSION_PROMPT_UNAVAILABLE" || code === "PERMISSION_DENIED"
     ? "permission_denied"
     : "error";
-}
-
-function buildErrorRow(
-  agentName: string,
-  caught: unknown,
-  capture: RunCapture,
-  startedAt: number,
-): CompareRow {
-  return {
-    agent: agentName,
-    status: rowStatusFromError(caught),
-    stop_reason: null,
-    wall_ms: Math.round(performance.now() - startedAt),
-    input_tokens: capture.usage.input_tokens ?? null,
-    output_tokens: capture.usage.output_tokens ?? null,
-    total_tokens: capture.usage.total_tokens ?? null,
-    final_message: truncate(collapseWhitespace(capture.finalMessage), FINAL_MESSAGE_PREVIEW_CHARS),
-    error: truncate(
-      collapseWhitespace(caught instanceof Error ? caught.message : String(caught)),
-      FINAL_MESSAGE_PREVIEW_CHARS,
-    ),
-    permission_requests: capture.permissionStats.requested,
-    permission_denied: capture.permissionStats.denied + capture.permissionStats.cancelled,
-  };
 }
 
 async function runAgentForCompare(params: {
@@ -234,6 +188,11 @@ async function runAgentForCompare(params: {
     permissionStats: { requested: 0, approved: 0, denied: 0, cancelled: 0 },
   };
   const t0 = performance.now();
+  let status: CompareRow["status"];
+  let stopReason: CompareRow["stop_reason"] = null;
+  let error: CompareRow["error"] = null;
+  let permissionStats: PermissionStats;
+  let meta: CompareRow["_meta"];
 
   try {
     const agent = resolveAgentInvocation(params.agentName, params.globalFlags, params.config);
@@ -255,10 +214,33 @@ async function runAgentForCompare(params: {
         capture.permissionStats = stats;
       },
     });
-    return buildSuccessRow(params.agentName, result, capture, t0);
+    permissionStats = result.permissionStats;
+    status = rowStatusFromResult(result);
+    stopReason = result.stopReason;
+    meta = result._meta;
   } catch (caught) {
-    return buildErrorRow(params.agentName, caught, capture, t0);
+    permissionStats = capture.permissionStats;
+    status = rowStatusFromError(caught);
+    error = truncate(
+      collapseWhitespace(caught instanceof Error ? caught.message : String(caught)),
+      FINAL_MESSAGE_PREVIEW_CHARS,
+    );
   }
+
+  return {
+    agent: params.agentName,
+    status,
+    stop_reason: stopReason,
+    wall_ms: Math.round(performance.now() - t0),
+    input_tokens: capture.usage.input_tokens ?? null,
+    output_tokens: capture.usage.output_tokens ?? null,
+    total_tokens: capture.usage.total_tokens ?? null,
+    final_message: truncate(collapseWhitespace(capture.finalMessage), FINAL_MESSAGE_PREVIEW_CHARS),
+    error,
+    permission_requests: permissionStats.requested,
+    permission_denied: permissionStats.denied + permissionStats.cancelled,
+    ...(meta === undefined ? {} : { _meta: meta }),
+  };
 }
 
 function formatCell(value: unknown): string {
