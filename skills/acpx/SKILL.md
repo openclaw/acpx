@@ -97,7 +97,7 @@ Friendly agent names resolve to commands:
 - `droid` -> `droid exec --output-format acp` (`factory-droid` and `factorydroid` also resolve to `droid`)
 - `fast-agent` -> `uvx fast-agent-mcp acp`
 - `fx` -> `fx acp` (install and authenticate a provider first; see the [fx guide](https://github.com/openclaw/acpx/blob/main/agents/Fx.md))
-- `grok-build` -> `grok agent stdio`
+- `grok-build` -> `grok agent stdio` (Grok Build CLI, distinct from Grok Bot cloud routines and their webhook triggers; see the [Grok Build guide](https://github.com/openclaw/acpx/blob/main/agents/GrokBuild.md)).
 - `goose` -> `goose acp` (install Goose and configure its provider first; see the [Goose guide](https://github.com/openclaw/acpx/blob/main/agents/Goose.md))
 - `iflow` -> `iflow --experimental-acp`
 - `junie` -> `junie --acp=true` (install and authenticate Junie first; see the [Junie guide](https://github.com/openclaw/acpx/blob/main/agents/Junie.md))

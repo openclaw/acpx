@@ -14,6 +14,8 @@ Repo: https://github.com/openclaw/acpx
 - Runtime/embedding: expose an optional best-effort ACP message observer for owned session clients, including setup, reconnects, cold controls, and session discard, while retaining elicitation and replay filtering.
 - Flows: select per-node models and ordered ACP configuration options before the first prompt, with run defaults, persistent-handle conflict checks, same-session replay, and requested/accepted settings in run bundles. Thanks @superbiche.
 
+- Docs/Grok Build: distinguish the local ACP profile from Grok Bot cloud routines and explain webhook acceptance versus results.
+
 ### Fixes
 
 - Docs/prompting: list `-s, --session` and `--no-wait` as options of `prompt` and the bare form only; `exec` rejects them with `unknown option`. Thanks @KrasimirKralev.
