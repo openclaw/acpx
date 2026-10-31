@@ -21,6 +21,8 @@ Repo: https://github.com/openclaw/acpx
 - Agents/launch: add best-effort executable and working-directory hints to missing-path errors using the actual child launch context, while retaining the ambiguous-case checklist. Thanks @odrobnik.
 - Docs/site: label the homepage badges as curated examples and use the primary Pi, OpenClaw, Codex, and Claude order.
 
+- Qoder: preserve native startup options, shutdown grace, and cleanup-message filtering when a custom command uses `qoder --acp` instead of `qodercli --acp`.
+
 ## 0.21.1 - 2026-10-26
 
 **Highlights:** Patch four URI security vulnerabilities in development dependencies, update the guarded filesystem runtime, and clarify missing-prompt errors.

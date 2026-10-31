@@ -202,36 +202,31 @@ test("buildAgentSpawnOptions normalizes auth env keys and preserves existing val
   );
 });
 
-test("resolveAgentCloseAfterStdinEndMs gives qodercli extra EOF shutdown grace", () => {
-  assert.equal(resolveAgentCloseAfterStdinEndMs("qodercli --acp"), 750);
-  assert.equal(resolveAgentCloseAfterStdinEndMs("/Users/me/bin/qodercli --acp"), 750);
-  assert.equal(resolveAgentCloseAfterStdinEndMs("node ./test/mock-agent.js"), 100);
-});
+for (const command of [
+  "qoder",
+  "qodercli",
+  "/opt/test/bin/Qoder.cmd",
+  "/opt/test/bin/Qodercli.exe",
+]) {
+  test(`resolveAgentCloseAfterStdinEndMs gives ${command} extra EOF shutdown grace`, () => {
+    assert.equal(resolveAgentCloseAfterStdinEndMs(`${command} --acp`), 750);
+    assert.equal(resolveAgentCloseAfterStdinEndMs("node ./test/mock-agent.js"), 100);
+  });
 
-test("shouldIgnoreNonJsonAgentOutputLine ignores qoder shutdown chatter only", () => {
-  assert.equal(
-    shouldIgnoreNonJsonAgentOutputLine(
-      "qodercli --acp",
+  test(`shouldIgnoreNonJsonAgentOutputLine filters only known ${command} shutdown chatter`, () => {
+    for (const line of [
       "Received interrupt signal. Cleaning up resources...",
-    ),
-    true,
-  );
-  assert.equal(
-    shouldIgnoreNonJsonAgentOutputLine("qodercli --acp", "Cleanup completed. Exiting..."),
-    true,
-  );
-  assert.equal(
-    shouldIgnoreNonJsonAgentOutputLine(
-      "node ./test/mock-agent.js",
       "Cleanup completed. Exiting...",
-    ),
-    false,
-  );
-  assert.equal(
-    shouldIgnoreNonJsonAgentOutputLine("qodercli --acp", "unexpected non-json output"),
-    false,
-  );
-});
+    ]) {
+      assert.equal(shouldIgnoreNonJsonAgentOutputLine(`${command} --acp`, line), true);
+      assert.equal(shouldIgnoreNonJsonAgentOutputLine("node ./test/mock-agent.js", line), false);
+    }
+    assert.equal(
+      shouldIgnoreNonJsonAgentOutputLine(`${command} --acp`, "unexpected non-json output"),
+      false,
+    );
+  });
+}
 
 test("buildQoderAcpCommandArgs forwards allowed-tools and max-turns", () => {
   assert.deepEqual(

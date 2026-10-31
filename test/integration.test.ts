@@ -1391,82 +1391,85 @@ test("integration: built-in qoder agent resolves to qodercli --acp", async () =>
   });
 });
 
-test("integration: qoder session reuse preserves persisted startup flags", async () => {
-  await withTempHome(async (homeDir) => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
-    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-qoder-"));
-    const argLogPath = path.join(fakeBinDir, "qoder-args.log");
-
-    try {
-      await writeFakeHarnessAgent(fakeBinDir, "qodercli", argLogPath);
-      const { createSession } = await import("../src/session/session.js");
-      const { runSessionSetModeDirect } = await import("../src/session/execution/prompt-runner.js");
-      const previousHome = process.env.HOME;
-      const previousUserProfile = process.env.USERPROFILE;
-      const previousPath = process.env.PATH;
-      process.env.HOME = homeDir;
-      if (process.platform === "win32") {
-        process.env.USERPROFILE = homeDir;
-      }
-      process.env.PATH = `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`;
+for (const command of ["qodercli", "qoder"] as const) {
+  test(`integration: ${command} session reuse preserves persisted startup flags`, async () => {
+    await withTempHome(async (homeDir) => {
+      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+      const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-qoder-"));
+      const argLogPath = path.join(fakeBinDir, "qoder-args.log");
 
       try {
-        const record = await createSession({
-          agentCommand: "qodercli --acp",
-          agentArgv: ["qodercli", "--acp"],
-          cwd,
-          permissionMode: "approve-reads",
-          timeoutMs: 10_000,
-          sessionOptions: {
-            allowedTools: ["Read", "Grep"],
-            maxTurns: 4,
-          },
-        });
-
-        const result = await runSessionSetModeDirect({
-          sessionRecordId: record.acpxRecordId,
-          modeId: "plan",
-          timeoutMs: 10_000,
-        });
-        assert.equal(result.record.acpxRecordId, record.acpxRecordId);
-        await fs.access(
-          path.join(
-            homeDir,
-            ".acpx",
-            "sessions",
-            `${encodeURIComponent(record.acpxRecordId)}.json`,
-          ),
-        );
-      } finally {
-        if (previousHome === undefined) {
-          delete process.env.HOME;
-        } else {
-          process.env.HOME = previousHome;
-        }
+        await writeFakeHarnessAgent(fakeBinDir, command, argLogPath);
+        const { createSession } = await import("../src/session/session.js");
+        const { runSessionSetModeDirect } =
+          await import("../src/session/execution/prompt-runner.js");
+        const previousHome = process.env.HOME;
+        const previousUserProfile = process.env.USERPROFILE;
+        const previousPath = process.env.PATH;
+        process.env.HOME = homeDir;
         if (process.platform === "win32") {
-          if (previousUserProfile === undefined) {
-            delete process.env.USERPROFILE;
-          } else {
-            process.env.USERPROFILE = previousUserProfile;
-          }
+          process.env.USERPROFILE = homeDir;
         }
-        process.env.PATH = previousPath;
-      }
+        process.env.PATH = `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`;
 
-      const invocations: unknown[] = (await fs.readFile(argLogPath, "utf8"))
-        .trimEnd()
-        .split(/\r?\n/u)
-        .map((line) => JSON.parse(line) as unknown);
-      assert.ok(invocations.length >= 2, "expected initial and reused qoder invocations");
-      const expected = ["--acp", "--max-turns=4", "--allowed-tools=READ,GREP"];
-      assert.deepEqual(invocations[0], expected, "initial qoder startup flags");
-      assert.deepEqual(invocations.at(-1), expected, "reused qoder startup flags");
-    } finally {
-      await fs.rm(fakeBinDir, { recursive: true, force: true });
-      await fs.rm(cwd, { recursive: true, force: true });
-    }
+        try {
+          const record = await createSession({
+            agentCommand: `${command} --acp`,
+            agentArgv: [command, "--acp"],
+            cwd,
+            permissionMode: "approve-reads",
+            timeoutMs: 10_000,
+            sessionOptions: {
+              allowedTools: ["Read", "Grep"],
+              maxTurns: 4,
+            },
+          });
+
+          const result = await runSessionSetModeDirect({
+            sessionRecordId: record.acpxRecordId,
+            modeId: "plan",
+            timeoutMs: 10_000,
+          });
+          assert.equal(result.record.acpxRecordId, record.acpxRecordId);
+          await fs.access(
+            path.join(
+              homeDir,
+              ".acpx",
+              "sessions",
+              `${encodeURIComponent(record.acpxRecordId)}.json`,
+            ),
+          );
+        } finally {
+          if (previousHome === undefined) {
+            delete process.env.HOME;
+          } else {
+            process.env.HOME = previousHome;
+          }
+          if (process.platform === "win32") {
+            if (previousUserProfile === undefined) {
+              delete process.env.USERPROFILE;
+            } else {
+              process.env.USERPROFILE = previousUserProfile;
+            }
+          }
+          process.env.PATH = previousPath;
+        }
+
+        const invocations: unknown[] = (await fs.readFile(argLogPath, "utf8"))
+          .trimEnd()
+          .split(/\r?\n/u)
+          .map((line) => JSON.parse(line) as unknown);
+        assert.ok(invocations.length >= 2, "expected initial and reused qoder invocations");
+        const expected = ["--acp", "--max-turns=4", "--allowed-tools=READ,GREP"];
+        assert.deepEqual(invocations[0], expected, "initial qoder startup flags");
+        assert.deepEqual(invocations.at(-1), expected, "reused qoder startup flags");
+      } finally {
+        await fs.rm(fakeBinDir, { recursive: true, force: true });
+        await fs.rm(cwd, { recursive: true, force: true });
+      }
+    });
   });
-});
+}
 
 test("integration: exec forwards model, allowed-tools, and max-turns in session/new _meta", async () => {
   await withTempHome(async (homeDir) => {
@@ -5716,7 +5719,8 @@ async function writeFakeHarnessAgent(
     | "uvx"
     | "iflow"
     | "qodercli"
-    | "goose",
+    | "goose"
+    | "qoder",
   argLogPath = "",
 ): Promise<void> {
   const launcher = fileURLToPath(new URL("./fixtures/harness-launcher.js", import.meta.url));

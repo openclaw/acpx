@@ -70,6 +70,7 @@ function mockArguments(): string[] {
       return consumePrefix(["--experimental-acp"]);
     case "devin":
       return consumeStartupOptions(["acp", "--acp", "--experimental-acp"], ["--model"], false);
+    case "qoder":
     case "qodercli":
       return consumeStartupOptions(
         ["--acp"],
