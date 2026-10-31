@@ -4268,13 +4268,24 @@ for (const fails of [false, true]) {
       });
       hook.mock.restore();
       const cleanup = await observeTestOutcome(async () => {
-        if (fixtureHome && fsSync.existsSync(fixtureHome)) {
-          const result = await runCliWithEntry(QUEUE_CLEANUP_PATH, [], fixtureHome, {
+        const fixtureCleanup = await observeTestOutcome(async () => {
+          if (fixtureHome && fsSync.existsSync(fixtureHome)) {
+            const result = await runCliWithEntry(QUEUE_CLEANUP_PATH, [], fixtureHome, {
+              timeoutMs: 30_000,
+            });
+            assert.equal(result.code, 0, result.stderr);
+            await fs.rm(fixtureHome, { recursive: true, force: true });
+          }
+        });
+        // Rescue both homes independently of the helper under test, including
+        // when the fixture rescue fails on the unchanged teardown.
+        const sentinelCleanup = await observeTestOutcome(async () => {
+          const result = await runCliWithEntry(QUEUE_CLEANUP_PATH, [], sentinelHome, {
             timeoutMs: 30_000,
           });
           assert.equal(result.code, 0, result.stderr);
-          await fs.rm(fixtureHome, { recursive: true, force: true });
-        }
+        });
+        unwrapTestOutcomes(fixtureCleanup, sentinelCleanup);
       });
       unwrapTestOutcomes(body, cleanup);
     });
