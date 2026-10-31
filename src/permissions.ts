@@ -364,23 +364,6 @@ export async function resolvePermissionRequest(
   nonInteractivePolicy: NonInteractivePermissionPolicy = "deny",
   policy?: PermissionPolicy,
   signal?: AbortSignal,
-): Promise<RequestPermissionResponse> {
-  const result = await resolvePermissionRequestWithDetails(
-    params,
-    mode,
-    nonInteractivePolicy,
-    policy,
-    signal,
-  );
-  return result.response;
-}
-
-export async function resolvePermissionRequestWithDetails(
-  params: RequestPermissionRequest,
-  mode: PermissionMode,
-  nonInteractivePolicy: NonInteractivePermissionPolicy = "deny",
-  policy?: PermissionPolicy,
-  signal?: AbortSignal,
 ): Promise<ResolvedPermissionRequest> {
   try {
     signal?.throwIfAborted();
