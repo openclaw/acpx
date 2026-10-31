@@ -18,6 +18,7 @@ Repo: https://github.com/openclaw/acpx
 - Agents/launch: start npm-backed built-in adapters (pi, codex, claude, kilocode, mux, opencode) when acpx itself runs under `npx` and the Node-relative npm bridge is unavailable, instead of exiting with code 127 before initialize. Thanks @kanzaki-chiya.
 - Docs/Qwen Code: clarify text filesystem delegation, native file discovery, and that `--no-fs` does not sandbox native file access; distinguish the CLI from QwenWork.
 - Agents/launch: add best-effort executable and working-directory hints to missing-path errors using the actual child launch context, while retaining the ambiguous-case checklist. Thanks @odrobnik.
+- Docs/site: label the homepage badges as curated examples and use the primary Pi, OpenClaw, Codex, and Claude order.
 
 ## 0.21.1 - 2026-10-26
 

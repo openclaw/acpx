@@ -70,7 +70,7 @@ const examples = [
   },
 ];
 
-test("docs site preserves link destinations, inline formatting, and page rewrites", (t) => {
+test("docs site orders agent examples and preserves links, formatting, and page rewrites", (t) => {
   const repositoryRoot = process.cwd();
   const directory = mkdtempSync(path.join(os.tmpdir(), "acpx-docs-links-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -102,6 +102,16 @@ test("docs site preserves link destinations, inline formatting, and page rewrite
   );
   assert.equal(result.error, undefined, "documentation builder must finish before the timeout");
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+
+  const home = readFileSync(path.join(directory, "dist", "docs-site", "index.html"), "utf8");
+  const agentExamples = home.match(
+    /<div class="home-services" aria-label="Built-in agent examples">([\s\S]*?)<\/div>/,
+  );
+  assert.ok(agentExamples, "home page must label the agent badges as examples");
+  assert.deepEqual(
+    [...agentExamples[1].matchAll(/<span>([^<]+)<\/span>/g)].map(([, agent]) => agent),
+    ["pi", "openclaw", "codex", "claude"],
+  );
 
   const output = readFileSync(
     path.join(directory, "dist", "docs-site", "link-fixtures", "source.html"),
