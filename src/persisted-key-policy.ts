@@ -31,29 +31,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function joinPath(path: string[]): string {
-  return path.join(".");
-}
-
-function shouldSkipKeyRule(path: string[]): boolean {
-  return MAP_OBJECT_PATHS.has(joinPath(path));
-}
-
-function shouldSkipDescend(path: string[]): boolean {
-  return OPAQUE_VALUE_PATHS.has(joinPath(path)) || isToolResultOutputPath(path);
-}
-
-function isToolResultOutputTail(path: string[], toolResultsIndex: number): boolean {
-  return toolResultsIndex !== -1 && toolResultsIndex + 2 === path.length - 1;
-}
-
 function isToolResultOutputPath(path: string[]): boolean {
   if (path.length < 5 || path[path.length - 1] !== "output") {
     return false;
   }
 
   const toolResultsIndex = path.lastIndexOf("tool_results");
-  if (!isToolResultOutputTail(path, toolResultsIndex)) {
+  if (toolResultsIndex === -1 || toolResultsIndex + 2 !== path.length - 1) {
     return false;
   }
 
@@ -73,7 +57,7 @@ function collectViolations(value: unknown, path: string[], violations: string[])
     return;
   }
 
-  const skipKeyRule = shouldSkipKeyRule(path);
+  const skipKeyRule = MAP_OBJECT_PATHS.has(path.join("."));
   for (const [key, child] of Object.entries(value)) {
     collectKeyViolation(child, key, path, skipKeyRule, violations);
   }
@@ -87,11 +71,11 @@ function collectKeyViolation(
   violations: string[],
 ): void {
   if (!skipKeyRule && !SNAKE_CASE_KEY.test(key) && !ZED_TAG_KEYS.has(key)) {
-    violations.push(`${joinPath(path)}.${key}`.replace(/^\./, ""));
+    violations.push(`${path.join(".")}.${key}`.replace(/^\./, ""));
   }
 
   const childPath = [...path, key];
-  if (!shouldSkipDescend(childPath)) {
+  if (!OPAQUE_VALUE_PATHS.has(childPath.join(".")) && !isToolResultOutputPath(childPath)) {
     collectViolations(child, childPath, violations);
   }
 }
