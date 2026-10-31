@@ -66,7 +66,7 @@ for (const method of [
     } else if (method === "session/set_config_option") {
       await runtime.setConfigOption({ handle, key: "reasoning_effort", value: "high" });
     } else if (method === "session/set_model") {
-      await runtime.setModel({ handle, model: "fast-model" });
+      await runtime.setModel({ handle, model: "alternate-model" });
     } else {
       await runtime.close({ handle, reason: "discard", discardPersistentState: true });
     }
