@@ -269,14 +269,38 @@ type PreparedRuntimeTurnState = {
   promptMessageId: string | undefined;
 };
 
+async function withSessionSetupTimeout<T>(
+  method: string,
+  request: Promise<T>,
+  timeoutMs: number | undefined,
+): Promise<T> {
+  try {
+    return await withTimeout(request, timeoutMs);
+  } catch (error) {
+    if (!(error instanceof TimeoutError)) {
+      throw error;
+    }
+    throw new AcpRuntimeError(
+      "ACP_SESSION_INIT_FAILED",
+      `ACP ${method} did not complete within ${timeoutMs}ms. Retry session setup and check that the configured ACP agent is responding.`,
+      { cause: error },
+    );
+  }
+}
+
 async function createOrLoadRuntimeSession(
   client: AcpClient,
   resumeSessionId: string | undefined,
   cwd: string,
+  timeoutMs: number | undefined,
 ): Promise<CreatedRuntimeSession> {
   if (resumeSessionId) {
     if (client.supportsResumeSession()) {
-      const resumed = await client.resumeSession(resumeSessionId, cwd);
+      const resumed = await withSessionSetupTimeout(
+        "session/resume",
+        client.resumeSession(resumeSessionId, cwd),
+        timeoutMs,
+      );
       return {
         sessionId: resumeSessionId,
         agentSessionId: resumed.agentSessionId,
@@ -288,7 +312,11 @@ async function createOrLoadRuntimeSession(
         `Agent does not support session/resume or session/load; cannot resume session ${resumeSessionId}`,
       );
     }
-    const loaded = await client.loadSession(resumeSessionId, cwd);
+    const loaded = await withSessionSetupTimeout(
+      "session/load",
+      client.loadSession(resumeSessionId, cwd),
+      timeoutMs,
+    );
     return {
       sessionId: resumeSessionId,
       agentSessionId: loaded.agentSessionId,
@@ -296,7 +324,11 @@ async function createOrLoadRuntimeSession(
     };
   }
 
-  const created = await client.createSession(cwd);
+  const created = await withSessionSetupTimeout(
+    "session/new",
+    client.createSession(cwd),
+    timeoutMs,
+  );
   return {
     sessionId: created.sessionId,
     agentSessionId: created.agentSessionId,
@@ -1088,7 +1120,12 @@ export class AcpRuntimeManager {
     try {
       await startRuntimeClient(client, agent, this.options.timeoutMs);
       this.assertOpen();
-      const session = await createOrLoadRuntimeSession(client, input.resumeSessionId, cwd);
+      const session = await createOrLoadRuntimeSession(
+        client,
+        input.resumeSessionId,
+        cwd,
+        this.options.timeoutMs,
+      );
       const record = await this.prepareInitialRuntimeRecord({
         input,
         client,

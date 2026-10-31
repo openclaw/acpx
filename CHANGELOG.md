@@ -23,6 +23,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Qoder: preserve native startup options, shutdown grace, and cleanup-message filtering when a custom command uses `qoder --acp` instead of `qodercli --acp`.
 
+- Runtime/embedding: apply independent setup deadlines to session creation, load and resume requests, cleaning up stalled clients without replacing explicitly resumed sessions.
+
 ## 0.21.1 - 2026-10-26
 
 **Highlights:** Patch four URI security vulnerabilities in development dependencies, update the guarded filesystem runtime, and clarify missing-prompt errors.
