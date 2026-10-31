@@ -779,25 +779,39 @@ export class FlowRunner {
   ): Promise<FlowNodeExecutionResult> {
     const attempt = context.attempt;
     const prepared = await this.prepareAcpPrompt(runDir, state, node, context);
-    if (node.session?.isolated) {
-      return await this.executeIsolatedAcpPrompt(runDir, state, flow, node, context, prepared);
+    const isolated = node.session?.isolated;
+    const binding = isolated
+      ? createIsolatedSessionBinding(
+          flow.name,
+          state.runId,
+          attempt.attemptId,
+          node.profile,
+          prepared.agentInfo,
+        )
+      : await this.ensureSessionBinding(runDir, state, flow, node, prepared.agentInfo, attempt);
+    if (isolated) {
+      const requestedSettings = this.resolveSessionSettings(node);
+      if (requestedSettings.model !== undefined || requestedSettings.configOptions.length > 0) {
+        binding.requestedSettings = requestedSettings;
+      }
     }
-    const boundSession = await this.ensureSessionBinding(
-      runDir,
-      state,
-      flow,
-      node,
-      prepared.agentInfo,
-      attempt,
+    prepared.result.sessionInfo = binding;
+    if (isolated) {
+      await attempt.own(() =>
+        this.initializeIsolatedSessionBundle(runDir, state, binding, attempt),
+      );
+    }
+    await attempt.own(() =>
+      this.appendAcpPromptPreparedTrace(runDir, state, binding, prepared.promptArtifact, attempt),
     );
-    return await this.executePersistentAcpPrompt(
-      runDir,
-      state,
-      node,
-      context,
-      prepared,
-      boundSession,
+    const prompt = await attempt.own(() =>
+      isolated
+        ? this.runIsolatedPrompt(runDir, state, binding, prepared)
+        : this.runPersistentPrompt(runDir, state, binding, prepared),
     );
+    await attempt.own(() => this.appendAcpResponseParsedTrace(runDir, state, prompt, attempt));
+    const output = await this.parseAcpOutput(node, context, prompt.rawText);
+    return { ...prepared.result, output };
   }
 
   private async prepareAcpPrompt(
@@ -861,44 +875,6 @@ export class FlowRunner {
     });
   }
 
-  private async executeIsolatedAcpPrompt(
-    runDir: string,
-    state: FlowRunState,
-    flow: FlowDefinition,
-    node: AcpNodeDefinition,
-    context: FlowAttemptContext,
-    prepared: PreparedAcpPrompt,
-  ): Promise<FlowNodeExecutionResult> {
-    const binding = createIsolatedSessionBinding(
-      flow.name,
-      state.runId,
-      prepared.attempt.attemptId,
-      node.profile,
-      prepared.agentInfo,
-    );
-    const requestedSettings = this.resolveSessionSettings(node);
-    if (requestedSettings.model !== undefined || requestedSettings.configOptions.length > 0) {
-      binding.requestedSettings = requestedSettings;
-    }
-    prepared.result.sessionInfo = binding;
-    await prepared.attempt.own(() =>
-      this.initializeIsolatedSessionBundle(runDir, state, binding, prepared.attempt),
-    );
-    await prepared.attempt.own(() =>
-      this.appendAcpPromptPreparedTrace(
-        runDir,
-        state,
-        binding,
-        prepared.promptArtifact,
-        prepared.attempt,
-      ),
-    );
-    const prompt = await prepared.attempt.own(() =>
-      this.runIsolatedPrompt(runDir, state, binding, prepared),
-    );
-    return await this.finishAcpPrompt(runDir, state, node, context, prepared, prompt);
-  }
-
   private async initializeIsolatedSessionBundle(
     runDir: string,
     state: FlowRunState,
@@ -915,30 +891,6 @@ export class FlowRunner {
       lastSeq: 0,
     });
     await this.store.ensureSessionBundle(runDir, state, binding, initialRecord);
-  }
-
-  private async executePersistentAcpPrompt(
-    runDir: string,
-    state: FlowRunState,
-    node: AcpNodeDefinition,
-    context: FlowAttemptContext,
-    prepared: PreparedAcpPrompt,
-    binding: FlowSessionBinding,
-  ): Promise<FlowNodeExecutionResult> {
-    prepared.result.sessionInfo = binding;
-    await prepared.attempt.own(() =>
-      this.appendAcpPromptPreparedTrace(
-        runDir,
-        state,
-        binding,
-        prepared.promptArtifact,
-        prepared.attempt,
-      ),
-    );
-    const prompt = await prepared.attempt.own(() =>
-      this.runPersistentPrompt(runDir, state, binding, prepared),
-    );
-    return await this.finishAcpPrompt(runDir, state, node, context, prepared, prompt);
   }
 
   private async appendAcpPromptPreparedTrace(
@@ -959,21 +911,6 @@ export class FlowRunner {
         promptArtifact,
       },
     });
-  }
-
-  private async finishAcpPrompt(
-    runDir: string,
-    state: FlowRunState,
-    node: AcpNodeDefinition,
-    context: FlowAttemptContext,
-    prepared: PreparedAcpPrompt,
-    prompt: TracedPromptResult,
-  ): Promise<FlowNodeExecutionResult> {
-    await prepared.attempt.own(() =>
-      this.appendAcpResponseParsedTrace(runDir, state, prompt, prepared.attempt),
-    );
-    const output = await this.parseAcpOutput(node, context, prompt.rawText);
-    return { ...prepared.result, output };
   }
 
   private async publishAcpCapture(
