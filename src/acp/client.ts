@@ -362,11 +362,6 @@ type StartupFailureWatcher = {
   getError: () => AgentStartupError | undefined;
 };
 
-type SessionUpdateSuppressionState = {
-  suppressSessionUpdates: boolean;
-  suppressReplaySessionUpdateMessages: boolean;
-};
-
 export type AgentExitInfo = {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
@@ -428,7 +423,6 @@ export class AcpClient {
   private observedSessionUpdates = 0;
   private processedSessionUpdates = 0;
   private suppressSessionUpdates = false;
-  private suppressReplaySessionUpdateMessages = false;
   private activePrompt?: ActivePromptState;
   private readonly pendingPromptOwners: ActivePromptState[] = [];
   private readonly cancellingSessionIds = new Set<string>();
@@ -1180,7 +1174,7 @@ export class AcpClient {
         this.eventHandlers.onAcpOutputMessage?.(direction, message);
         this.eventHandlers.onAcpMessage?.(direction, message);
       },
-      suppressReplaySessionUpdates: () => this.suppressReplaySessionUpdateMessages,
+      suppressReplaySessionUpdates: () => this.suppressSessionUpdates,
       bindPromptOwner: (owner) => this.bindPromptOwner(owner),
       assertPromptActive: (active) => this.assertPromptActive(active),
       onPromptRequestWritten: (active, owner) => this.onPromptRequestWritten(active, owner),
@@ -1263,9 +1257,8 @@ export class AcpClient {
     const connection = this.getConnection();
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
     assertControlAuthority(options.authority);
-    const previousSuppression = this.applySessionUpdateSuppression(
-      Boolean(options.suppressReplayUpdates),
-    );
+    const previousSuppression = this.suppressSessionUpdates;
+    this.suppressSessionUpdates = previousSuppression || Boolean(options.suppressReplayUpdates);
 
     let response: LoadSessionResponse | undefined;
 
@@ -1286,7 +1279,7 @@ export class AcpClient {
         options.replayDrainTimeoutMs ?? REPLAY_DRAIN_TIMEOUT_MS,
       );
     } finally {
-      this.restoreSessionUpdateSuppression(previousSuppression);
+      this.suppressSessionUpdates = previousSuppression;
     }
 
     this.loadedSessionId = sessionId;
@@ -1318,22 +1311,6 @@ export class AcpClient {
     const result = toReconnectedSessionResult(response);
     await this.captureAgentDescendants(this.agent);
     return result;
-  }
-
-  private applySessionUpdateSuppression(enabled: boolean): SessionUpdateSuppressionState {
-    const previous = {
-      suppressSessionUpdates: this.suppressSessionUpdates,
-      suppressReplaySessionUpdateMessages: this.suppressReplaySessionUpdateMessages,
-    };
-    this.suppressSessionUpdates = previous.suppressSessionUpdates || enabled;
-    this.suppressReplaySessionUpdateMessages =
-      previous.suppressReplaySessionUpdateMessages || enabled;
-    return previous;
-  }
-
-  private restoreSessionUpdateSuppression(previous: SessionUpdateSuppressionState): void {
-    this.suppressSessionUpdates = previous.suppressSessionUpdates;
-    this.suppressReplaySessionUpdateMessages = previous.suppressReplaySessionUpdateMessages;
   }
 
   async prompt(
@@ -1772,7 +1749,6 @@ export class AcpClient {
     this.observedSessionUpdates = 0;
     this.processedSessionUpdates = 0;
     this.suppressSessionUpdates = false;
-    this.suppressReplaySessionUpdateMessages = false;
     this.activePrompt = undefined;
     this.pendingPromptOwners.length = 0;
     this.cancellingSessionIds.clear();

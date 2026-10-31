@@ -171,7 +171,6 @@ type ClientInternals = {
   observedSessionUpdates: number;
   processedSessionUpdates: number;
   suppressSessionUpdates: boolean;
-  suppressReplaySessionUpdateMessages: boolean;
 };
 
 test("buildAgentSpawnOptions normalizes auth env keys and preserves existing values", () => {
@@ -2762,7 +2761,6 @@ test("AcpClient close resets in-memory state and shuts down terminal manager", a
   internals.observedSessionUpdates = 5;
   internals.processedSessionUpdates = 4;
   internals.suppressSessionUpdates = true;
-  internals.suppressReplaySessionUpdateMessages = true;
 
   await client.close();
 
@@ -2777,7 +2775,6 @@ test("AcpClient close resets in-memory state and shuts down terminal manager", a
   assert.equal(internals.observedSessionUpdates, 0);
   assert.equal(internals.processedSessionUpdates, 0);
   assert.equal(internals.suppressSessionUpdates, false);
-  assert.equal(internals.suppressReplaySessionUpdateMessages, false);
   assert.equal(internals.closing, true);
 });
 
