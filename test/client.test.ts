@@ -2413,6 +2413,50 @@ test("AcpClient correlates spawn failures with the prepared launch", async () =>
   assert.equal(exited, false);
 });
 
+test(
+  "AcpClient diagnoses the prepared command using its child PATH and cwd",
+  { skip: process.platform === "win32" },
+  async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-spawn-diagnostic-"));
+    const bin = path.join(cwd, "bin");
+    await fs.mkdir(bin);
+    const command = path.basename(process.execPath);
+    const options = {
+      agentCommand: "display-command",
+      agentArgv: [command],
+      cwd,
+      agentProcessEnv: { PATH: "bin" },
+    };
+    try {
+      await assert.rejects(makeClient(options).start(), (error: unknown) => {
+        assert(error instanceof AgentSpawnError);
+        assert(
+          error.message.includes(
+            `No runnable executable named ${JSON.stringify(command)} was found on the child PATH.`,
+          ),
+        );
+        assert.equal(error.agentCommand, "display-command");
+        return true;
+      });
+
+      await fs.writeFile(path.join(bin, command), "#!/acpx-missing-test-interpreter\n", {
+        mode: 0o755,
+      });
+      await assert.rejects(makeClient(options).start(), (error: unknown) => {
+        assert(error instanceof AgentSpawnError);
+        assert.match(error.message, /required executable, interpreter, working directory/i);
+        assert.doesNotMatch(
+          error.message,
+          /No runnable executable|Executable path could not be resolved/,
+        );
+        return true;
+      });
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  },
+);
+
 test("AcpClient does not await non-settling spawn failure observers", async () => {
   let observerCalled = false;
   const client = makeClient({

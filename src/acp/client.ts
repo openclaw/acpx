@@ -877,7 +877,11 @@ export class AcpClient {
       });
       await waitForSpawn(spawnedChild);
     } catch (error) {
-      const spawnError = new AgentSpawnError(this.options.agentCommand, error);
+      const spawnError = new AgentSpawnError(this.options.agentCommand, error, {
+        command: launch.command,
+        cwd: launch.cwd,
+        env: plan.spawnOptions.env,
+      });
       this.notifyProcessSpawnFailure(launch, spawnError);
       throw spawnError;
     }
@@ -936,7 +940,14 @@ export class AcpClient {
         detached: process.platform !== "win32",
       });
     } catch (error) {
-      this.notifyProcessSpawnFailure(launch, new AgentSpawnError(command, error));
+      this.notifyProcessSpawnFailure(
+        launch,
+        new AgentSpawnError(command, error, {
+          command: launch.command,
+          cwd: launch.cwd,
+          env: options.env,
+        }),
+      );
       return undefined;
     }
     this.commandProbes.add(child);
@@ -948,7 +959,14 @@ export class AcpClient {
       try {
         await waitForSpawn(child);
       } catch (error) {
-        this.notifyProcessSpawnFailure(launch, new AgentSpawnError(command, error));
+        this.notifyProcessSpawnFailure(
+          launch,
+          new AgentSpawnError(command, error, {
+            command: launch.command,
+            cwd: launch.cwd,
+            env: options.env,
+          }),
+        );
         return undefined;
       }
       if (child.pid === undefined) {

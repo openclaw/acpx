@@ -158,6 +158,26 @@ test("packaged bin runs a mock-agent exec command through package executable map
   });
 });
 
+test(
+  "packaged bin identifies a missing executable in its spawn error",
+  { skip: process.platform === "win32" },
+  async () => {
+    assert(existsSync(DIST_CLI_PATH), "run pnpm build before packaged-bin smoke tests");
+    await withTempHome(async (homeDir) => {
+      const cwd = path.join(homeDir, "workspace");
+      await fs.mkdir(cwd);
+      const missingAgent = path.join(homeDir, "missing-agent");
+      const result = await runPackageBin(
+        ["--cwd", cwd, "--agent", missingAgent, "exec", "ping"],
+        homeDir,
+      );
+      assert.equal(result.code, 1);
+      assert(result.stderr.includes(`Executable path could not be resolved: ${missingAgent}.`));
+      assert.match(result.stderr, /required executable, interpreter, working directory/i);
+    });
+  },
+);
+
 test("packaged registry imports without runtime dependencies or agent execution", async () => {
   const packageDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-registry-package-"));
   try {
