@@ -18,7 +18,6 @@ import {
 import { shouldReuseExistingRecord } from "../src/runtime/engine/reuse-policy.js";
 import { encodeAcpxRuntimeHandleState } from "../src/runtime/public/handle-state.js";
 import {
-  asOptionalBoolean,
   asOptionalString,
   asString,
   asTrimmedString,
@@ -74,8 +73,6 @@ test("runtime shared helpers normalize structured values", () => {
   assert.equal(asString(17), undefined);
   assert.equal(asOptionalString("  value  "), "value");
   assert.equal(asOptionalString("   "), undefined);
-  assert.equal(asOptionalBoolean(true), true);
-  assert.equal(asOptionalBoolean("true"), undefined);
   assert.equal(deriveAgentFromSessionKey("agent:claude:acp:test", "codex"), "claude");
   assert.equal(deriveAgentFromSessionKey("plain-session", "codex"), "codex");
 });
