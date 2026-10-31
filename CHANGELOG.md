@@ -10,6 +10,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Agents: add Goose as a built-in native ACP agent through `goose acp`.
 - Agents: add the native `deepseek-harness` profile using `dsh --profile acp`.
+- Agents: add experimental `ante` support through `ante acp`; requires Ante and the separate `ante-acp` adapter, with no session reopening after disconnect.
 - Runtime/embedding: expose an optional best-effort ACP message observer for owned session clients, including setup, reconnects, cold controls, and session discard, while retaining elicitation and replay filtering.
 
 ### Fixes
@@ -19,6 +20,7 @@ Repo: https://github.com/openclaw/acpx
 - Agents/launch: start npm-backed built-in adapters (pi, codex, claude, kilocode, mux, opencode) when acpx itself runs under `npx` and the Node-relative npm bridge is unavailable, instead of exiting with code 127 before initialize. Thanks @kanzaki-chiya.
 - Docs/Qwen Code: clarify text filesystem delegation, native file discovery, and that `--no-fs` does not sandbox native file access; distinguish the CLI from QwenWork.
 - Agents/launch: add best-effort executable and working-directory hints to missing-path errors using the actual child launch context, while retaining the ambiguous-case checklist. Thanks @odrobnik.
+- Docs/site: label the homepage badges as curated examples and use the primary Pi, OpenClaw, Codex, and Claude order.
 
 ## 0.21.1 - 2026-10-26
 

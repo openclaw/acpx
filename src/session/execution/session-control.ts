@@ -92,16 +92,8 @@ export async function setSessionMode(
   }
 
   return await runSessionSetModeDirect({
+    ...options,
     sessionRecordId: options.sessionId,
-    modeId: options.modeId,
-    mcpServers: options.mcpServers,
-    nonInteractivePermissions: options.nonInteractivePermissions,
-    authCredentials: options.authCredentials,
-    authPolicy: options.authPolicy,
-    fs: options.fs,
-    terminal: options.terminal,
-    timeoutMs: options.timeoutMs,
-    verbose: options.verbose,
   });
 }
 
@@ -149,16 +141,8 @@ export async function setSessionModel(
   }
 
   return await runSessionSetModelDirect({
+    ...options,
     sessionRecordId: options.sessionId,
-    modelId: options.modelId,
-    mcpServers: options.mcpServers,
-    nonInteractivePermissions: options.nonInteractivePermissions,
-    authCredentials: options.authCredentials,
-    authPolicy: options.authPolicy,
-    fs: options.fs,
-    terminal: options.terminal,
-    timeoutMs: options.timeoutMs,
-    verbose: options.verbose,
   });
 }
 
@@ -212,17 +196,8 @@ export async function setSessionConfigOption(
   }
 
   return await runSessionSetConfigOptionDirect({
+    ...options,
     sessionRecordId: options.sessionId,
-    configId: options.configId,
-    value: options.value,
-    mcpServers: options.mcpServers,
-    nonInteractivePermissions: options.nonInteractivePermissions,
-    authCredentials: options.authCredentials,
-    authPolicy: options.authPolicy,
-    fs: options.fs,
-    terminal: options.terminal,
-    timeoutMs: options.timeoutMs,
-    verbose: options.verbose,
   });
 }
 

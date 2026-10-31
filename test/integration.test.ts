@@ -1309,6 +1309,34 @@ for (const [agent, acpArg] of [
   });
 }
 
+test("integration: built-in ante agent resolves to ante acp", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-ante-"));
+    const argLogPath = path.join(homeDir, "ante-args.jsonl");
+
+    try {
+      await writeFakeHarnessAgent(fakeBinDir, "ante", argLogPath);
+      const result = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "quiet", "ante", "exec", "echo hello"],
+        homeDir,
+        { env: { PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}` } },
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /hello/);
+      const launches = (await fs.readFile(argLogPath, "utf8"))
+        .trimEnd()
+        .split(/\r?\n/u)
+        .map((line) => JSON.parse(line) as unknown);
+      assert.deepEqual(launches, [["acp"]]);
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: built-in iflow agent resolves to iflow --experimental-acp", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -5679,7 +5707,16 @@ async function configuredHarnessInvocation(
 
 async function writeFakeHarnessAgent(
   binDir: string,
-  name: "cursor-agent" | "dsh" | "droid" | "devin" | "uvx" | "iflow" | "qodercli" | "goose",
+  name:
+    | "ante"
+    | "cursor-agent"
+    | "dsh"
+    | "droid"
+    | "devin"
+    | "uvx"
+    | "iflow"
+    | "qodercli"
+    | "goose",
   argLogPath = "",
 ): Promise<void> {
   const launcher = fileURLToPath(new URL("./fixtures/harness-launcher.js", import.meta.url));

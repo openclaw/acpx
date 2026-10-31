@@ -2,14 +2,10 @@ import { resolveRequestedConfigOption, resolveRequestedModelId } from "../../acp
 import { TimeoutError, withTimeout } from "../../async-control.js";
 import {
   withConnectedSession,
-  type FullConnectedSessionController,
   type WithConnectedSessionOptions,
   type WithConnectedSessionResult,
 } from "../../runtime/engine/connected-session.js";
 import type {
-  AuthPolicy,
-  McpServer,
-  NonInteractivePermissionPolicy,
   SessionSetConfigOptionResult,
   SessionSetModelResult,
   SessionSetModeResult,
@@ -20,19 +16,12 @@ import { advertisedModelState } from "../model-state.js";
 import { resolveSessionRecord, writeSessionRecord } from "../persistence.js";
 import type { QueueOwnerActiveSessionController } from "../queue/owner-turn-controller.js";
 import { acquireSessionTurn } from "../turn-ownership.js";
+import type { SessionConnectionOptions } from "./contracts.js";
 
 export type ActiveSessionController = QueueOwnerActiveSessionController;
 
-type SessionControlConnectionOptions = {
+type SessionControlConnectionOptions = SessionConnectionOptions & {
   sessionRecordId: string;
-  mcpServers?: McpServer[];
-  nonInteractivePermissions?: NonInteractivePermissionPolicy;
-  authCredentials?: Record<string, string>;
-  authPolicy?: AuthPolicy;
-  fs?: boolean;
-  terminal?: boolean;
-  timeoutMs?: number;
-  verbose?: boolean;
   onClientAvailable?: (controller: ActiveSessionController) => void;
   onClientClosed?: () => void;
 };
@@ -73,9 +62,7 @@ function buildDirectConnectedSessionOptions<T>(
     terminal: options.terminal,
     timeoutMs: options.timeoutMs,
     verbose: options.verbose,
-    onClientAvailable: (controller: FullConnectedSessionController) => {
-      options.onClientAvailable?.(controller);
-    },
+    onClientAvailable: options.onClientAvailable,
     onClientClosed: options.onClientClosed,
     run,
   };

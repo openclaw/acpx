@@ -7,7 +7,6 @@ import {
   decisionToResponse,
   inferToolKind,
   resolvePermissionRequest,
-  resolvePermissionRequestWithDetails,
 } from "../src/permissions.js";
 import { withMockedReadline, withTtyState } from "./tty-test-helpers.js";
 
@@ -57,24 +56,30 @@ function withNonTty<T>(run: () => Promise<T>): Promise<T> {
 
 test("approve-all approves everything", async () => {
   const request = makeRequest("execute");
-  const response = await resolvePermissionRequest(request, "approve-all");
+  const { response } = await resolvePermissionRequest(request, "approve-all");
   assert.deepEqual(response, { outcome: { outcome: "selected", optionId: "allow" } });
 });
 
 test("deny-all denies everything", async () => {
   const request = makeRequest("execute");
-  const response = await resolvePermissionRequest(request, "deny-all");
+  const { response } = await resolvePermissionRequest(request, "deny-all");
   assert.deepEqual(response, { outcome: { outcome: "selected", optionId: "reject" } });
 });
 
 test("approve-reads approves reads and denies writes", async () => {
   await withNonTty(async () => {
-    const readResponse = await resolvePermissionRequest(makeRequest("read"), "approve-reads");
+    const { response: readResponse } = await resolvePermissionRequest(
+      makeRequest("read"),
+      "approve-reads",
+    );
     assert.deepEqual(readResponse, {
       outcome: { outcome: "selected", optionId: "allow" },
     });
 
-    const writeResponse = await resolvePermissionRequest(makeRequest("edit"), "approve-reads");
+    const { response: writeResponse } = await resolvePermissionRequest(
+      makeRequest("edit"),
+      "approve-reads",
+    );
     assert.deepEqual(writeResponse, {
       outcome: { outcome: "selected", optionId: "reject" },
     });
@@ -91,7 +96,7 @@ test("non-interactive policy fail throws when prompt is required", async () => {
 });
 
 test("approve-all falls back to the first option when no allow option exists", async () => {
-  const response = await resolvePermissionRequest(
+  const { response } = await resolvePermissionRequest(
     makeRequestWithTitle("tool", "execute", [{ optionId: "custom", kind: "reject_once" }]),
     "approve-all",
   );
@@ -100,7 +105,7 @@ test("approve-all falls back to the first option when no allow option exists", a
 });
 
 test("deny-all cancels when no reject option exists", async () => {
-  const response = await resolvePermissionRequest(
+  const { response } = await resolvePermissionRequest(
     makeRequestWithTitle("tool", "execute", [{ optionId: "allow", kind: "allow_once" }]),
     "deny-all",
   );
@@ -111,7 +116,7 @@ test("deny-all cancels when no reject option exists", async () => {
 test("approve-reads infers read-like titles without an explicit tool kind", async () => {
   await withNonTty(async () => {
     for (const title of ["cat: README.md", "grep: TODO", "search: prompts", "Read README.md"]) {
-      const response = await resolvePermissionRequest(
+      const { response } = await resolvePermissionRequest(
         makeRequestWithTitle(title, undefined),
         "approve-reads",
       );
@@ -136,7 +141,7 @@ test("read approval does not match substrings or filenames in non-read titles", 
         undefined,
         { autoApprove: ["read", "search"], defaultAction: "deny" as const },
       ]) {
-        const response = await resolvePermissionRequest(
+        const { response } = await resolvePermissionRequest(
           makeRequestWithTitle(title),
           "approve-reads",
           "deny",
@@ -167,7 +172,7 @@ test("approve-reads rejects non-read title inference when prompting is unavailab
       "think: plan",
       undefined,
     ]) {
-      const response = await resolvePermissionRequest(
+      const { response } = await resolvePermissionRequest(
         makeRequestWithTitle(title, undefined),
         "approve-reads",
       );
@@ -190,7 +195,7 @@ test("approve-reads prompts interactively for non-read tools", async () => {
         },
       }),
       async () => {
-        const response = await resolvePermissionRequest(
+        const { response } = await resolvePermissionRequest(
           makeRequestWithTitle("run: pnpm test", undefined),
           "approve-reads",
         );
@@ -207,7 +212,7 @@ test("approve-reads prompts interactively for non-read tools", async () => {
 
 test("permission policy auto-approves and auto-denies matched tools", async () => {
   await withNonTty(async () => {
-    const executeResponse = await resolvePermissionRequest(
+    const { response: executeResponse } = await resolvePermissionRequest(
       makeRequestWithTitle("Bash: pnpm test", "execute"),
       "deny-all",
       "deny",
@@ -217,7 +222,7 @@ test("permission policy auto-approves and auto-denies matched tools", async () =
       outcome: { outcome: "selected", optionId: "allow" },
     });
 
-    const readResponse = await resolvePermissionRequest(
+    const { response: readResponse } = await resolvePermissionRequest(
       makeRequestWithTitle("Read", "read"),
       "approve-all",
       "deny",
@@ -231,7 +236,7 @@ test("permission policy auto-approves and auto-denies matched tools", async () =
 
 test("permission policy escalation emits a structured event in non-TTY", async () => {
   await withNonTty(async () => {
-    const result = await resolvePermissionRequestWithDetails(
+    const result = await resolvePermissionRequest(
       makeRequestWithTitle("Bash: pnpm test", "execute", undefined, {
         command: "pnpm",
         args: ["test"],
@@ -261,7 +266,7 @@ test("permission policy escalation emits a structured event in non-TTY", async (
 
 test("permission policy matches raw tool names but not raw command arguments", async () => {
   await withNonTty(async () => {
-    const byToolName = await resolvePermissionRequest(
+    const { response: byToolName } = await resolvePermissionRequest(
       makeRequestWithTitle("Run task", "execute", undefined, {
         toolName: "Bash",
         command: "pnpm test",
@@ -274,7 +279,7 @@ test("permission policy matches raw tool names but not raw command arguments", a
       outcome: { outcome: "selected", optionId: "allow" },
     });
 
-    const byCommand = await resolvePermissionRequest(
+    const { response: byCommand } = await resolvePermissionRequest(
       makeRequestWithTitle("Run task", "execute", undefined, {
         command: "pnpm test",
       }),
@@ -290,7 +295,7 @@ test("permission policy matches raw tool names but not raw command arguments", a
 
 test("permission policy defaultAction falls back only when no rule matches", async () => {
   await withNonTty(async () => {
-    const response = await resolvePermissionRequest(
+    const { response } = await resolvePermissionRequest(
       makeRequestWithTitle("Write", "edit"),
       "approve-all",
       "deny",

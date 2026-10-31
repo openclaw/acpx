@@ -9,6 +9,7 @@ Built-in agents:
 - `gemini -> gemini --acp`
 - `cursor -> cursor-agent acp`
 - `copilot -> copilot --acp --stdio`
+- `ante -> ante acp` (experimental)
 - `antigravity -> agy_acp_server.par` (`--uid=` on Linux; `.exe` on Windows)
 - `deepseek-harness -> dsh --profile acp`
 - `devin -> devin acp`
@@ -41,6 +42,7 @@ Harness-specific docs in this directory:
 - [Gemini](Gemini.md): built-in `gemini -> gemini --acp`
 - [Cursor](Cursor.md): built-in `cursor -> cursor-agent acp`
 - [Copilot](Copilot.md): built-in `copilot -> copilot --acp --stdio`
+- [Ante](Ante.md): experimental built-in `ante -> ante acp`, fresh sessions only
 - [Antigravity](Antigravity.md): Google's official ACP runtime, setup and limitations
 - [DeepSeek Harness](DeepSeekHarness.md): built-in `deepseek-harness -> dsh --profile acp`
 - [Devin](Devin.md): built-in `devin -> devin acp`

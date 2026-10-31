@@ -58,7 +58,7 @@ import {
   classifyPermissionDecision,
   decisionToResponse,
   inferToolKind,
-  resolvePermissionRequestWithDetails,
+  resolvePermissionRequest,
   withPermissionMetadata,
 } from "../permissions.js";
 import { getUnsupportedPromptContentMessage, textPrompt } from "../prompt-content.js";
@@ -2445,7 +2445,7 @@ export class AcpClient {
   ): Promise<RequestPermissionResponse> {
     try {
       assertControlAuthority(owner);
-      const result = await resolvePermissionRequestWithDetails(
+      const result = await resolvePermissionRequest(
         preferCodexPermissionRefusal(params, this.initResult?.agentInfo?.name),
         this.options.permissionMode,
         this.options.nonInteractivePermissions ?? "deny",
