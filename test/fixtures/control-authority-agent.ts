@@ -28,7 +28,7 @@ function modelIds(): string[] {
         "provider/selected[fast=true]",
         ...(existsSync(path.join(directory, "ambiguous-models")) ? ["selected[fast=false]"] : []),
       ]
-    : ["default-model", "first-model", "second-model"];
+    : ["default-model", "first-model", "second-model", "gpt-5.6-luna"];
 }
 
 function configOptions(): SessionConfigOption[] {
@@ -53,7 +53,7 @@ function configOptions(): SessionConfigOption[] {
       name: "Effort",
       type: "select",
       currentValue: effort,
-      options: ["low", "high"].map((value) => ({ value, name: value })),
+      options: ["low", "high", "xhigh"].map((value) => ({ value, name: value })),
     },
   ];
 }
@@ -133,6 +133,9 @@ const agent: Agent = {
       while (!existsSync(path.join(directory, "release-load"))) {
         await setTimeout(5);
       }
+    }
+    if (existsSync(path.join(directory, "fail-load"))) {
+      throw RequestError.internalError(undefined, "Controlled cold load failure");
     }
     return sessionState();
   },

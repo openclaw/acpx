@@ -123,13 +123,3 @@ export function installPerfMetricsCapture(
     process.once(signal, handler);
   }
 }
-
-export function perfMetricsCaptureFileFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): string | undefined {
-  const value = env[PERF_METRICS_FILE_ENV];
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return undefined;
-  }
-  return value;
-}

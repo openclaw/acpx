@@ -10,7 +10,6 @@ import {
 } from "../src/session/queue/lease-mutation.js";
 import {
   readQueueOwnerRecord,
-  readQueueOwnerStatus,
   refreshQueueOwnerLease,
   releaseQueueOwnerLease,
   resolveUsableQueueOwner,
@@ -80,7 +79,7 @@ test("status waits for acquisition settlement before reporting a usable owner", 
     const acquiring = assert.rejects(tryAcquireQueueOwnerLease(id), QueueLeaseGuardSettlementError);
     await entering.promise;
     let reported = false;
-    const observing = readQueueOwnerStatus(id).then((value) => {
+    const observing = probeQueueOwnerHealth(id).then((value) => {
       reported = true;
       return value;
     });
@@ -92,7 +91,7 @@ test("status waits for acquisition settlement before reporting a usable owner", 
       await acquiring;
       await settlePendingQueueLeaseGuard(id);
     }
-    assert.equal(await observing, undefined);
+    assert.equal((await observing).hasLease, false);
     assert.equal(await readQueueOwnerRecord(id), undefined);
   });
 });
@@ -268,28 +267,26 @@ test("heartbeat settlement retains the published state and settles once for loca
   });
 });
 
-for (const readStatus of [readQueueOwnerStatus, probeQueueOwnerHealth]) {
-  test(`${readStatus.name} settles failed cleanup even when the lease is missing`, async (t) => {
-    await withTempHome(async () => {
-      const lease = await tryAcquireQueueOwnerLease("missing-settlement");
-      assert.ok(lease);
-      const rm = fs.rm;
-      let fail = true;
-      t.mock.method(fs, "rm", async (...args: Parameters<typeof fs.rm>) => {
-        if (String(args[0]).endsWith(`${path.basename(lease.lockPath)}.guard`) && fail) {
-          fail = false;
-          throw new Error("cleanup release failed");
-        }
-        return await rm(...args);
-      });
-      await assert.rejects(releaseQueueOwnerLease(lease), QueueLeaseGuardSettlementError);
-      assert.equal(await readQueueOwnerRecord(lease.sessionId), undefined);
-      await fs.access(`${lease.lockPath}.guard`);
-      await readStatus(lease.sessionId);
-      await assert.rejects(fs.access(`${lease.lockPath}.guard`), { code: "ENOENT" });
+test("health probe settles failed cleanup even when the lease is missing", async (t) => {
+  await withTempHome(async () => {
+    const lease = await tryAcquireQueueOwnerLease("missing-settlement");
+    assert.ok(lease);
+    const rm = fs.rm;
+    let fail = true;
+    t.mock.method(fs, "rm", async (...args: Parameters<typeof fs.rm>) => {
+      if (String(args[0]).endsWith(`${path.basename(lease.lockPath)}.guard`) && fail) {
+        fail = false;
+        throw new Error("cleanup release failed");
+      }
+      return await rm(...args);
     });
+    await assert.rejects(releaseQueueOwnerLease(lease), QueueLeaseGuardSettlementError);
+    assert.equal(await readQueueOwnerRecord(lease.sessionId), undefined);
+    await fs.access(`${lease.lockPath}.guard`);
+    await probeQueueOwnerHealth(lease.sessionId);
+    await assert.rejects(fs.access(`${lease.lockPath}.guard`), { code: "ENOENT" });
   });
-}
+});
 
 test("mutation and repeated settlement failures preserve causes without replaying work", async (t) => {
   await withTempHome(async () => {

@@ -66,21 +66,6 @@ export type RunShellActionOptions = {
   registerOwner?: (owner: ShellProcessOwner) => () => void;
 };
 
-export async function withShellAbort<T>(run: () => Promise<T>, signal: AbortSignal): Promise<T> {
-  signal.throwIfAborted();
-  let rejectAbort: (reason: unknown) => void = () => {};
-  const aborted = new Promise<never>((_resolve, reject) => {
-    rejectAbort = reject;
-  });
-  const onAbort = () => rejectAbort(signal.reason);
-  signal.addEventListener("abort", onAbort, { once: true });
-  try {
-    return await Promise.race([run(), aborted]);
-  } finally {
-    signal.removeEventListener("abort", onAbort);
-  }
-}
-
 function rejectIfShellFailed(
   spec: ShellActionExecution,
   args: string[],

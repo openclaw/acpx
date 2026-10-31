@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionNotification, ToolKind } from "@agentclientprotocol/sdk";
-import { parsePromptEventLine } from "../src/runtime/public/events.js";
+import { runtimeEventFromMessage } from "../src/runtime/public/events.js";
 
 const sdk = (await import(
   new URL("./schema/zod.gen.js", import.meta.resolve("@agentclientprotocol/sdk")).href
@@ -22,9 +22,11 @@ const legalKinds: Record<ToolKind, true> = {
 };
 
 function project(notification: unknown) {
-  return parsePromptEventLine(
-    JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: notification }),
-  );
+  return runtimeEventFromMessage({
+    jsonrpc: "2.0",
+    method: "session/update",
+    params: notification,
+  });
 }
 
 for (const sessionUpdate of ["tool_call", "tool_call_update"] as const) {

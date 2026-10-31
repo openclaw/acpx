@@ -19,7 +19,6 @@ import {
 } from "./error-shapes.js";
 
 const AUTH_REQUIRED_ACP_CODES = new Set([-32000]);
-const QUERY_CLOSED_BEFORE_RESPONSE_DETAIL = "query closed before response received";
 
 type ErrorMeta = {
   outputCode?: OutputErrorCode;
@@ -158,21 +157,6 @@ export function formatErrorMessage(error: unknown): string {
 }
 
 export { extractAcpError, isAcpResourceNotFoundError };
-
-export function isAcpQueryClosedBeforeResponseError(error: unknown): boolean {
-  const acp = extractAcpError(error);
-  if (!acp || acp.code !== -32603) {
-    return false;
-  }
-
-  const data = asRecord(acp.data);
-  const details = data?.details;
-  if (typeof details !== "string") {
-    return false;
-  }
-
-  return details.toLowerCase().includes(QUERY_CLOSED_BEFORE_RESPONSE_DETAIL);
-}
 
 function mapErrorCode(error: unknown): OutputErrorCode | undefined {
   if (error instanceof PermissionPromptUnavailableError) {

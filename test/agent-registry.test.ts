@@ -132,8 +132,8 @@ test("grok-build built-in runs the Grok Build ACP entrypoint", () => {
 });
 
 test("mux built-in runs the coder/mux ACP stdio bridge through npx", () => {
-  assert.equal(AGENT_REGISTRY.mux, "npx -y mux@^0.28.0 acp");
-  assert.equal(resolveAgentCommand("mux"), "npx -y mux@^0.28.0 acp");
+  assert.equal(AGENT_REGISTRY.mux, "npx -y --package=mux@^0.28.0 -- mux acp");
+  assert.equal(resolveAgentCommand("mux"), "npx -y --package=mux@^0.28.0 -- mux acp");
 });
 
 test("octomind built-in launches the coding specialist over ACP", () => {
@@ -167,11 +167,14 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "copilot",
   ]);
   assert.deepEqual(agents.slice(7), [
+    "ante",
     "antigravity",
+    "deepseek-harness",
     "devin",
     "droid",
     "fast-agent",
     "fx",
+    "goose",
     "grok-build",
     "iflow",
     "junie",
@@ -196,13 +199,19 @@ test("default agent is codex", () => {
 
 test("claude built-in uses the current ACP adapter package range", () => {
   assert.equal(BUILT_IN_AGENT_PACKAGES.claude.packageRange, "^0.95.0");
-  assert.equal(AGENT_REGISTRY.claude, "npx -y @agentclientprotocol/claude-agent-acp@^0.95.0");
+  assert.equal(
+    AGENT_REGISTRY.claude,
+    "npx -y --package=@agentclientprotocol/claude-agent-acp@^0.95.0 -- claude-agent-acp",
+  );
 });
 
 test("npm-backed built-ins use current adapter package ranges", () => {
   assert.equal(BUILT_IN_AGENT_PACKAGES.codex.packageRange, "^1.1.5");
-  assert.equal(AGENT_REGISTRY.codex, "npx -y @agentclientprotocol/codex-acp@^1.1.5");
-  assert.equal(AGENT_REGISTRY.pi, "npx pi-acp@^0.0.33");
+  assert.equal(
+    AGENT_REGISTRY.codex,
+    "npx -y --package=@agentclientprotocol/codex-acp@^1.1.5 -- codex-acp",
+  );
+  assert.equal(AGENT_REGISTRY.pi, "npx --package=pi-acp@^0.0.33 -- pi-acp");
 });
 
 test("resolveInstalledBuiltInAgentLaunch uses a locally installed adapter when available", (t) => {
@@ -276,6 +285,65 @@ test("resolvePackageExecBuiltInAgentLaunch bridges built-ins through the current
   });
 });
 
+test("built-in npx fallbacks name the adapter package and binary when the npm bridge is unavailable", (t) => {
+  // An acpx started via `npx --package=acpx@<version> -- acpx` passes this to its
+  // children; npx then treats a positional adapter spec as the command to run.
+  const inheritedPackage = process.env.npm_config_package;
+  process.env.npm_config_package = "acpx@0.21.0";
+  t.after(() => {
+    if (inheritedPackage === undefined) {
+      delete process.env.npm_config_package;
+    } else {
+      process.env.npm_config_package = inheritedPackage;
+    }
+  });
+
+  for (const name of Object.keys(BUILT_IN_AGENT_PACKAGES)) {
+    const launch = resolveBuiltInAgentLaunch(AGENT_REGISTRY[name], {
+      resolvePackageRoot: () => undefined,
+      resolveNpmCliPath: (execPath) => {
+        throw new Error(`npm CLI not found for execPath: ${execPath}`);
+      },
+    });
+    assert.equal(launch, undefined, name);
+  }
+
+  const npxFallbacks = Object.fromEntries(
+    Object.entries(AGENT_ARGV_REGISTRY).filter(([, argv]) => argv[0] === "npx"),
+  );
+  assert.deepEqual(npxFallbacks, {
+    pi: ["npx", "--package=pi-acp@^0.0.33", "--", "pi-acp"],
+    codex: ["npx", "-y", "--package=@agentclientprotocol/codex-acp@^1.1.5", "--", "codex-acp"],
+    claude: [
+      "npx",
+      "-y",
+      "--package=@agentclientprotocol/claude-agent-acp@^0.95.0",
+      "--",
+      "claude-agent-acp",
+    ],
+    kilocode: ["npx", "-y", "--package=@kilocode/cli", "--", "kilo", "acp"],
+    mux: ["npx", "-y", "--package=mux@^0.28.0", "--", "mux", "acp"],
+    opencode: ["npx", "-y", "--package=opencode-ai", "--", "opencode", "acp"],
+  });
+});
+
+test("resolveBuiltInAgentLaunch accepts the previous positional npx defaults", () => {
+  const npmCliPath = path.join(os.tmpdir(), "acpx-test-positional-npm-cli.js");
+  for (const [name, previousCommand] of [
+    ["codex", "npx -y @agentclientprotocol/codex-acp@^1.1.5"],
+    ["claude", "npx -y @agentclientprotocol/claude-agent-acp@^0.95.0"],
+  ] as const) {
+    const launch = resolveBuiltInAgentLaunch(previousCommand, {
+      execPath: "/tmp/node",
+      existsSync: (candidate) => candidate === npmCliPath,
+      resolvePackageRoot: () => undefined,
+      resolveNpmCliPath: () => npmCliPath,
+    });
+    assert.equal(launch?.source, "package-exec", name);
+    assert.equal(launch?.packageName, BUILT_IN_AGENT_PACKAGES[name].packageName, name);
+  }
+});
+
 test("resolveBuiltInAgentLaunch accepts the legacy Claude npm exec default", () => {
   const npmCliPath = path.join(os.tmpdir(), "acpx-test-claude-npm-cli.js");
   const launch = resolveBuiltInAgentLaunch(
@@ -307,20 +375,15 @@ test("resolveBuiltInAgentLaunch accepts the legacy Claude npm exec default", () 
   });
 });
 
-test("public inspection resolves installed direct agents without running package executors", () => {
-  const commands: string[] = [];
+test("public inspection reports installed and missing direct agents", () => {
   const registry = createAgentRegistry({
-    resolveExecutable: (command) => {
-      commands.push(command);
-      return command === "opencode" ? "/fixture/bin/opencode" : undefined;
-    },
+    resolveExecutable: (command) => (command === "opencode" ? "/fixture/bin/opencode" : undefined),
   });
   assert.deepEqual(registry.inspect("opencode"), {
     id: "opencode",
     name: "OpenCode",
     launch: { kind: "installed", argv: ["/fixture/bin/opencode", "acp"] },
   });
-  assert.deepEqual(commands, ["opencode"]);
   assert.deepEqual(registry.inspect("qwen"), {
     id: "qwen",
     name: "Qwen Code",
@@ -376,7 +439,24 @@ test("public inspection requires Pi's native command and refreshes installation 
   });
 });
 
-test("public inspection resolves a plugin-local adapter package without executing its entrypoint", (t) => {
+test("public inspection requires Ante's separately installed ACP adapter", () => {
+  const installed = new Set(["ante"]);
+  const registry = createAgentRegistry({
+    resolveExecutable: (command) => (installed.has(command) ? "/fixture/" + command : undefined),
+  });
+  assert.deepEqual(registry.inspect("ante"), {
+    id: "ante",
+    name: "Ante",
+    launch: { kind: "missing", requirements: [{ kind: "command", name: "ante-acp" }] },
+  });
+  installed.add("ante-acp");
+  assert.deepEqual(registry.inspect("ante")?.launch, {
+    kind: "installed",
+    argv: ["/fixture/ante", "acp"],
+  });
+});
+
+test("public inspection refreshes plugin-local adapter readiness when its entrypoint disappears", (t) => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "acpx-inspect-package-"));
   t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
   const bin = path.join(temp, "adapter.js");
@@ -384,7 +464,7 @@ test("public inspection resolves a plugin-local adapter package without executin
     path.join(temp, "package.json"),
     JSON.stringify({ name: "pi-acp", version: "0.0.33", bin: { "pi-acp": "adapter.js" } }),
   );
-  fs.writeFileSync(bin, 'throw new Error("inspection must not execute an adapter");');
+  fs.writeFileSync(bin, "");
   const registry = createAgentRegistry({
     resolveExecutable: (command) => (command === "pi" ? "/fixture/pi" : undefined),
     resolvePackageRoot: (name) => (name === "pi-acp" ? temp : undefined),

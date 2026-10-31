@@ -32,9 +32,14 @@ const QODER_BENIGN_STDOUT_LINES = new Set([
   "Cleanup completed. Exiting...",
 ]);
 
+function isQoderCommand(command: string): boolean {
+  const name = basenameToken(command);
+  return name === "qoder" || name === "qodercli";
+}
+
 export function resolveAgentCloseAfterStdinEndMs(agentCommand: string): number {
   const { command } = splitCommandLine(agentCommand);
-  return basenameToken(command) === "qodercli"
+  return isQoderCommand(command)
     ? QODER_AGENT_CLOSE_AFTER_STDIN_END_MS
     : DEFAULT_AGENT_CLOSE_AFTER_STDIN_END_MS;
 }
@@ -44,7 +49,7 @@ export function shouldIgnoreNonJsonAgentOutputLine(
   trimmedLine: string,
 ): boolean {
   const { command } = splitCommandLine(agentCommand);
-  return basenameToken(command) === "qodercli" && QODER_BENIGN_STDOUT_LINES.has(trimmedLine);
+  return isQoderCommand(command) && QODER_BENIGN_STDOUT_LINES.has(trimmedLine);
 }
 
 export function isGeminiAcpCommand(command: string, args: readonly string[]): boolean {
@@ -67,7 +72,7 @@ export function isCopilotAcpCommand(command: string, args: readonly string[]): b
 }
 
 export function isQoderAcpCommand(command: string, args: readonly string[]): boolean {
-  return basenameToken(command) === "qodercli" && args.includes("--acp");
+  return isQoderCommand(command) && args.includes("--acp");
 }
 
 export function isCursorAcpCommand(command: string, args: readonly string[]): boolean {

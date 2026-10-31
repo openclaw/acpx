@@ -9,6 +9,8 @@ import type {
 } from "@agentclientprotocol/sdk";
 import type { SessionWatchEvent } from "../../session/journal.js";
 import type {
+  AcpJsonRpcMessage,
+  AcpMessageDirection,
   AcpElicitationHandler,
   AcpElicitationMode,
   AcpPermissionHandler,
@@ -24,6 +26,8 @@ import type { SessionAgentOptions } from "../engine/session-options.js";
 export type { SessionAgentOptions, SystemPromptOption } from "../engine/session-options.js";
 
 export type {
+  AcpJsonRpcMessage,
+  AcpMessageDirection,
   AcpElicitationHandler,
   AcpElicitationMode,
   AcpElicitationContext,
@@ -83,6 +87,14 @@ export type AcpRuntimeEnsureInput = {
   sessionKey: string;
   agent: string;
   mode: AcpRuntimeSessionMode;
+  /**
+   * Resume this exact ACP session. The in-process runtime keeps matching local
+   * history and saved configuration, and later prompt/control reconnects refuse
+   * replacement if this target cannot load. Same-record aliases cannot relax
+   * this constraint. Adding the constraint requires an idle arrangement;
+   * explicit lifecycle reset remains separate. Supply the
+   * target again when attaching through another runtime instance.
+   */
   resumeSessionId?: string;
   cwd?: string;
   /**
@@ -471,6 +483,13 @@ export type AcpRuntimeOptions = {
   verbose?: boolean;
   /** ACP elicitation modes the embedding host can render for prompt turns. */
   elicitationModes?: readonly AcpElicitationMode[];
+  /**
+   * Best-effort wire observation for owned session clients, including setup and
+   * reconnects. Elicitation payloads and suppressed replay updates are omitted.
+   * Outbound observations precede transport writes; they are not delivery receipts.
+   * Callback failures are ignored. Treat observed messages as read-only.
+   */
+  onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   /** Optional lifecycle observer for ACP agent processes owned by this runtime. */
   processLifecycle?: AcpProcessLifecycle;
   onPermissionRequest?: AcpPermissionHandler;

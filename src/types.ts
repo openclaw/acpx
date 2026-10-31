@@ -114,8 +114,6 @@ export type PermissionEscalationEvent = {
 export const SESSION_RESUME_POLICIES = ["allow-new", "same-session-only"] as const;
 export type SessionResumePolicy = (typeof SESSION_RESUME_POLICIES)[number];
 
-export const OUTPUT_STREAMS = ["prompt", "control"] as const;
-export type OutputStream = (typeof OUTPUT_STREAMS)[number];
 export type AcpJsonRpcMessage = AnyMessage;
 export type AcpMessageDirection = "outbound" | "inbound";
 
@@ -132,25 +130,6 @@ export type OutputErrorCode = (typeof OUTPUT_ERROR_CODES)[number];
 
 export const OUTPUT_ERROR_ORIGINS = ["cli", "runtime", "queue", "acp"] as const;
 export type OutputErrorOrigin = (typeof OUTPUT_ERROR_ORIGINS)[number];
-
-export const QUEUE_ERROR_DETAIL_CODES = [
-  "QUEUE_OWNER_CLOSED",
-  "QUEUE_OWNER_SHUTTING_DOWN",
-  "QUEUE_OWNER_OVERLOADED",
-  "QUEUE_OWNER_GENERATION_MISMATCH",
-  "QUEUE_REQUEST_INVALID",
-  "QUEUE_REQUEST_PAYLOAD_INVALID_JSON",
-  "QUEUE_ACK_MISSING",
-  "QUEUE_DISCONNECTED_BEFORE_ACK",
-  "QUEUE_DISCONNECTED_BEFORE_COMPLETION",
-  "QUEUE_PROTOCOL_INVALID_JSON",
-  "QUEUE_PROTOCOL_MALFORMED_MESSAGE",
-  "QUEUE_PROTOCOL_UNEXPECTED_RESPONSE",
-  "QUEUE_NOT_ACCEPTING_REQUESTS",
-  "QUEUE_CONTROL_REQUEST_FAILED",
-  "QUEUE_RUNTIME_PROMPT_FAILED",
-] as const;
-export type QueueErrorDetailCode = (typeof QUEUE_ERROR_DETAIL_CODES)[number];
 
 export type OutputErrorAcpPayload = {
   code: number;

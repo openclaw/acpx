@@ -1,7 +1,7 @@
 # Kilocode
 
 - Built-in name: `kilocode`
-- Default command: `npx -y @kilocode/cli acp`
+- Default command: `npx -y --package=@kilocode/cli -- kilo acp`
 - Upstream: https://kilocode.ai
 
 ## Embedded inspection
