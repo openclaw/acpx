@@ -61,16 +61,6 @@ export type LoadResolvedConfigOptions = {
   mcpConfigPath?: string;
 };
 
-type ConfigFileLoadResult = {
-  config?: ConfigFileShape;
-  exists: boolean;
-};
-
-type ExplicitMcpConfig = {
-  path?: string;
-  config?: ConfigFileShape;
-};
-
 const DEFAULT_TIMEOUT_MS = undefined;
 const DEFAULT_TTL_MS = 300_000;
 const DEFAULT_PERMISSION_MODE: PermissionMode = "approve-reads";
@@ -351,7 +341,7 @@ function parseDisableExec(value: unknown, sourcePath: string): boolean | undefin
   return value;
 }
 
-async function readConfigFile(filePath: string): Promise<ConfigFileLoadResult> {
+async function readConfigFile(filePath: string): Promise<ConfigFileShape | undefined> {
   try {
     const payload = await fs.readFile(filePath, "utf8");
     let parsed: unknown;
@@ -367,35 +357,27 @@ async function readConfigFile(filePath: string): Promise<ConfigFileLoadResult> {
     if (!isObject(parsed)) {
       throw new Error(`Invalid config in ${filePath}: expected top-level JSON object`);
     }
-    return {
-      config: parsed,
-      exists: true,
-    };
+    return parsed;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { exists: false };
+      return undefined;
     }
     throw error;
   }
 }
 
 async function loadExplicitMcpConfig(
-  cwd: string,
   configuredPath: string | undefined,
-): Promise<ExplicitMcpConfig> {
+): Promise<ConfigFileShape | undefined> {
   if (!configuredPath) {
-    return {};
+    return undefined;
   }
 
-  const resolvedPath = path.resolve(cwd, configuredPath);
-  const result = await readConfigFile(resolvedPath);
-  if (!result.exists) {
-    throw new Error(`MCP config file not found: ${resolvedPath}`);
+  const config = await readConfigFile(configuredPath);
+  if (config === undefined) {
+    throw new Error(`MCP config file not found: ${configuredPath}`);
   }
-  return {
-    path: resolvedPath,
-    config: result.config,
-  };
+  return config;
 }
 
 export async function loadResolvedConfig(
@@ -404,15 +386,15 @@ export async function loadResolvedConfig(
 ): Promise<ResolvedAcpxConfig> {
   const globalPath = defaultGlobalConfigPath();
   const projectPath = projectConfigPath(cwd);
+  const mcpConfigPath = options.mcpConfigPath
+    ? path.resolve(cwd, options.mcpConfigPath)
+    : undefined;
 
-  const [globalResult, projectResult, explicitMcp] = await Promise.all([
+  const [globalConfig, projectConfig, mcpConfig] = await Promise.all([
     readConfigFile(globalPath),
     readConfigFile(projectPath),
-    loadExplicitMcpConfig(cwd, options.mcpConfigPath),
+    loadExplicitMcpConfig(mcpConfigPath),
   ]);
-
-  const globalConfig = globalResult.config;
-  const projectConfig = projectResult.config;
 
   function resolveScalar<T>(
     key: keyof ConfigFileShape,
@@ -457,8 +439,8 @@ export async function loadResolvedConfig(
     projectPath,
     globalConfig,
     globalPath,
-    explicitMcp.config,
-    explicitMcp.path,
+    mcpConfig,
+    mcpConfigPath,
   );
   const disableExec = resolveScalar("disableExec", parseDisableExec, DEFAULT_DISABLE_EXEC);
 
@@ -470,12 +452,12 @@ export async function loadResolvedConfig(
     mcpServers,
     globalPath,
     projectPath,
-    mcpConfigPath: explicitMcp.path,
-    mcpConfigFingerprint: explicitMcp.path
+    mcpConfigPath,
+    mcpConfigFingerprint: mcpConfigPath
       ? createHash("sha256").update(JSON.stringify(mcpServers)).digest("hex")
       : undefined,
-    hasGlobalConfig: globalResult.exists,
-    hasProjectConfig: projectResult.exists,
+    hasGlobalConfig: globalConfig !== undefined,
+    hasProjectConfig: projectConfig !== undefined,
   };
 }
 
