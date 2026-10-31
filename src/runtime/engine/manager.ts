@@ -249,6 +249,7 @@ type RuntimeSessionOwner = {
   client: AcpClient;
   checkpoint: LiveSessionCheckpoint;
   retirement?: Promise<void>;
+  pendingResetRecord?: SessionRecord;
   sessionKey: string;
   mode: "persistent" | "oneshot";
   recordId?: string;
@@ -329,6 +330,8 @@ export class AcpRuntimeManager {
     const clientOptions: ConstructorParameters<typeof AcpClient>[0] = {
       ...options,
       agentProcessEnv: this.options.agentProcessEnv,
+      agentProcessEnvAllow: this.options.agentProcessEnvAllow,
+      agentProcessEnvBlock: this.options.agentProcessEnvBlock,
       processLifecycle: {
         ...options.processLifecycle,
         onBeforeSpawn: async (launch) => {
@@ -479,7 +482,7 @@ export class AcpRuntimeManager {
 
   private async saveSessionOwner(owner: RuntimeSessionOwner): Promise<void> {
     // Initialization owns publication until the record has been admitted.
-    if (!owner.recordId) {
+    if (!owner.recordId || owner.pendingResetRecord) {
       return;
     }
     const active = owner.activeTurn?.turn;
@@ -637,15 +640,30 @@ export class AcpRuntimeManager {
     }
     const finalFlushAttempt = await settleAttempt(async () => owner.checkpoint.flush());
     const clearAttempt = await settleAttempt(() => owner.client.clearEventHandlers());
+    const settleRecordAttempt = await settleAttempt(async () => {
+      if (closeAttempt.ok) {
+        await this.settleRetiredSessionRecord(owner);
+      }
+    });
+    if (!settleRecordAttempt.ok) {
+      this.retiringSessionOwners.add(owner);
+    }
     // Shutdown reports failures; predecessor stops must not fail after publishing a successor.
-    return firstFailedAttempt([flushAttempt, closeAttempt, finalFlushAttempt, clearAttempt]);
+    return firstFailedAttempt([
+      flushAttempt,
+      closeAttempt,
+      finalFlushAttempt,
+      clearAttempt,
+      settleRecordAttempt,
+    ]);
   }
 
   private async retrySessionCleanup(recordId: string): Promise<void> {
     for (const owner of this.retiringSessionOwners) {
       if (owner.recordId === recordId) {
         owner.retirement ??= this.finalizeSessionConnection({ client: owner.client, owner })
-          .then(() => {
+          .then(async () => {
+            await this.settleRetiredSessionRecord(owner);
             this.retiringSessionOwners.delete(owner);
           })
           .finally(() => {
@@ -917,6 +935,7 @@ export class AcpRuntimeManager {
     input: RuntimeEnsureInput,
     agent: ResolvedRuntimeAgent,
   ): Promise<SessionRecord | undefined> {
+    await this.retrySessionCleanup(input.sessionKey);
     const controlled = this.controlSessionRecords.get(input.sessionKey);
     const record = controlled ? controlled.record : await this.findSession(input.sessionKey);
     if (
@@ -1070,8 +1089,6 @@ export class AcpRuntimeManager {
       sessionKey: input.sessionKey,
       mode: input.mode,
     });
-    let retained = false;
-
     try {
       await startRuntimeClient(client, agent, this.options.timeoutMs);
       this.assertOpen();
@@ -1086,15 +1103,38 @@ export class AcpRuntimeManager {
         session,
       });
       await this.retainInitializedSessionOwner(owner, record);
-      retained = true;
       return record;
-    } finally {
-      if (!retained) {
-        owner.recordId = undefined;
-        client.clearEventHandlers();
-        await this.closeClient(client);
-      }
+    } catch (error) {
+      await settleAttempt(async () => this.abandonInitializingSessionOwner(owner));
+      throw error;
     }
+  }
+
+  private async abandonInitializingSessionOwner(owner: RuntimeSessionOwner): Promise<void> {
+    const record = owner.recordId ? owner.projection?.record : undefined;
+    owner.pendingResetRecord = record;
+    await settleAttempt(() => owner.client.clearEventHandlers());
+    const closeAttempt = await settleAttempt(async () => this.closeClient(owner.client));
+    if (!record) {
+      return;
+    }
+    this.retiringSessionOwners.add(owner);
+    if (closeAttempt.ok) {
+      await this.settleRetiredSessionRecord(owner);
+      this.retiringSessionOwners.delete(owner);
+    }
+  }
+
+  private async settleRetiredSessionRecord(owner: RuntimeSessionOwner): Promise<void> {
+    const record = owner.pendingResetRecord;
+    if (!record) {
+      return;
+    }
+    // Only successful connection cleanup permits publishing a pending reset.
+    applyLifecycleSnapshotToRecord(record, owner.client.getAgentLifecycleSnapshot());
+    await this.saveClosedRuntimeRecord(record, true);
+    owner.pendingResetRecord = undefined;
+    owner.recordId = undefined;
   }
 
   private async prepareInitialRuntimeRecord(params: {
@@ -2017,9 +2057,28 @@ export class AcpRuntimeManager {
     if (intent !== "prepare-fresh") {
       await this.cancelSessionTasks(recordId);
     }
-    await this.closeRuntimeRecordOwnership(record, intent);
+    const closeFailure = await this.closeRuntimeRecordOwnership(record, intent);
+    if (intent === "discard") {
+      if (closeFailure) {
+        throw closeFailure.error;
+      }
+      return;
+    }
+    const saveAttempt = await settleAttempt(async () =>
+      this.saveClosedRuntimeRecord(record, intent !== "release"),
+    );
+    const failure = closeFailure ?? firstFailedAttempt([saveAttempt]);
+    if (failure) {
+      throw failure.error;
+    }
+  }
+
+  private async saveClosedRuntimeRecord(record: SessionRecord, reset: boolean): Promise<void> {
     record.closed = true;
     record.closedAt = isoNow();
+    if (reset) {
+      record.acpx = { ...record.acpx, reset_on_next_ensure: true };
+    }
     await this.options.sessionStore.save(record);
   }
 
@@ -2040,9 +2099,9 @@ export class AcpRuntimeManager {
   private async closeRuntimeRecordOwnership(
     record: SessionRecord,
     intent: "release" | "prepare-fresh" | "discard",
-  ): Promise<void> {
+  ): Promise<FailedAttempt | undefined> {
     if (intent === "discard") {
-      await this.closeBackendSession(record);
+      return await this.closeBackendSession(record);
     } else if (intent === "prepare-fresh") {
       const owner = this.retainedSessionOwners.get(record.acpxRecordId);
       if (owner) {
@@ -2053,24 +2112,39 @@ export class AcpRuntimeManager {
     } else {
       await this.closeRetainedSessionOwner(record.acpxRecordId);
     }
-    if (intent !== "release") {
-      record.acpx = {
-        ...record.acpx,
-        reset_on_next_ensure: true,
-      };
-    }
+    return undefined;
   }
 
-  private async closeBackendSession(record: SessionRecord): Promise<void> {
+  private async closeBackendSession(record: SessionRecord): Promise<FailedAttempt | undefined> {
     const connection = await this.acquireBackendCloseConnection(record);
-
-    try {
-      await this.requestBackendSessionClose(record, connection);
-    } catch (error) {
-      this.handleBackendSessionCloseError(record, error);
-    } finally {
-      await this.finalizeSessionConnection(connection);
+    const requestAttempt = await settleAttempt(async () => {
+      try {
+        await this.requestBackendSessionClose(record, connection);
+      } catch (error) {
+        this.handleBackendSessionCloseError(record, error);
+      }
+    });
+    const owner =
+      connection.owner ??
+      this.createSessionOwner({
+        client: connection.client,
+        sessionKey: record.acpxRecordId,
+        mode: "persistent",
+      });
+    owner.recordId = record.acpxRecordId;
+    const finalizeAttempt = await settleAttempt(async () =>
+      this.finalizeSessionConnection(connection),
+    );
+    owner.pendingResetRecord = record;
+    this.retiringSessionOwners.add(owner);
+    if (!finalizeAttempt.ok) {
+      throw finalizeAttempt.error;
     }
+    const saveAttempt = await settleAttempt(async () => this.settleRetiredSessionRecord(owner));
+    if (saveAttempt.ok) {
+      this.retiringSessionOwners.delete(owner);
+    }
+    return firstFailedAttempt([requestAttempt, saveAttempt]);
   }
 
   private async finalizeSessionConnection(connection: {

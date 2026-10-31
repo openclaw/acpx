@@ -126,6 +126,8 @@ export class SharedAcpRuntime {
     for (const name of [
       "sessionStore",
       "agentProcessEnv",
+      "agentProcessEnvAllow",
+      "agentProcessEnvBlock",
       "mcpServers",
       "sessionPermissions",
       "processLifecycle",

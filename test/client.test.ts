@@ -35,7 +35,7 @@ import {
 } from "../src/errors.js";
 import { runPromptTurn } from "../src/runtime/engine/prompt-turn.js";
 import { createSessionConversation } from "../src/session/conversation-model.js";
-import type { AcpProcessStarted } from "../src/types.js";
+import type { AcpPermissionDecision, AcpProcessStarted } from "../src/types.js";
 import { withMockedReadline, withTtyState } from "./tty-test-helpers.js";
 
 test("parseAcpJsonMessageLine ignores non-object JSON values", () => {
@@ -366,6 +366,52 @@ test("AcpClient uses XAI_API_KEY for Grok Build xai.api_key auth", async () => {
       assert.equal(authenticatedMethod, "xai.api_key");
     },
   );
+});
+
+test("AcpClient does not authenticate with env credentials the host withholds", async () => {
+  await withEnv(
+    {
+      XAI_API_KEY: "xai-ambient",
+      ACPX_AUTH_XAI_API_KEY: undefined,
+      ACPX_AUTH_API_TOKEN: "granted-token",
+    },
+    async () => {
+      const methods = [{ id: "xai.api_key" }, { id: "cached_token" }];
+      const agentManaged = { methodId: "cached_token", source: "agent" };
+      for (const inherit of [
+        { agentProcessEnvBlock: ["XAI_API_KEY"] },
+        { agentProcessEnvAllow: [] },
+        { agentProcessEnvAllow: ["XAI_API_KEY"], agentProcessEnvBlock: ["XAI_API_KEY"] },
+      ]) {
+        const grok = asInternals(makeClient({ agentCommand: "grok agent stdio", ...inherit }));
+        assert.deepEqual(grok.selectAuthMethod?.(methods), agentManaged);
+      }
+      const allowed = asInternals(
+        makeClient({ agentCommand: "grok agent stdio", agentProcessEnvAllow: ["XAI_API_KEY"] }),
+      );
+      assert.equal(allowed.selectAuthMethod?.(methods)?.source, "env");
+      for (const inherit of [
+        { agentProcessEnvBlock: ["ACPX_AUTH_API_TOKEN"] },
+        { agentProcessEnvAllow: [] },
+      ]) {
+        const generic = asInternals(makeClient(inherit));
+        assert.deepEqual(generic.selectAuthMethod?.([{ id: "api-token" }]), {
+          methodId: "api-token",
+          credential: "granted-token",
+          source: "env",
+        });
+      }
+    },
+  );
+});
+
+test("AcpClient rejects allow and block lists that are not arrays of names", () => {
+  for (const option of ["agentProcessEnvAllow", "agentProcessEnvBlock"]) {
+    assert.throws(
+      () => makeClient({ [option]: "XAI_API_KEY" as unknown as string[] }),
+      new RegExp(`Invalid ${option}`),
+    );
+  }
 });
 
 test("AcpClient keeps XAI_API_KEY scoped to Grok Build auth", async () => {
@@ -850,53 +896,58 @@ test("AcpClient onPermissionRequest receives an AbortSignal that fires on sessio
   assert.equal(observedSignal?.aborted, true);
 });
 
-test("AcpClient onPermissionRequest cancels a late decision after session cancel", async (t) => {
-  let resolveDecision!: (decision: { outcome: "allow_once" }) => void;
-  const decisionPromise = new Promise<{ outcome: "allow_once" }>((resolve) => {
-    resolveDecision = resolve;
-  });
-  let callbackStarted!: () => void;
-  const callbackStartedPromise = new Promise<void>((resolve) => {
-    callbackStarted = resolve;
-  });
-  let observedSignal: AbortSignal | undefined;
+for (const decision of [
+  { outcome: "allow_once" },
+  { outcome: "selected", optionId: "allow" },
+] satisfies AcpPermissionDecision[]) {
+  test(`AcpClient cancels a late ${decision.outcome} host decision after session cancel`, async (t) => {
+    let resolveDecision!: (decision: AcpPermissionDecision) => void;
+    const decisionPromise = new Promise<AcpPermissionDecision>((resolve) => {
+      resolveDecision = resolve;
+    });
+    let callbackStarted!: () => void;
+    const callbackStartedPromise = new Promise<void>((resolve) => {
+      callbackStarted = resolve;
+    });
+    let observedSignal: AbortSignal | undefined;
 
-  const fixture = createClientFixture(t, {
-    client: {
-      permissionMode: "approve-all",
-      onPermissionRequest: async (_req, ctx) => {
-        observedSignal = ctx.signal;
-        callbackStarted();
-        return await decisionPromise;
+    const fixture = createClientFixture(t, {
+      client: {
+        permissionMode: "approve-all",
+        onPermissionRequest: async (_req, ctx) => {
+          observedSignal = ctx.signal;
+          callbackStarted();
+          return await decisionPromise;
+        },
       },
-    },
+    });
+    const { client } = fixture;
+    const internals = asInternals(client);
+
+    const responsePromise = internals.handlePermissionRequest?.(
+      makePermissionRequest("session-cb-5", "edit"),
+    );
+    await callbackStartedPromise;
+
+    await client.cancel("session-cb-5");
+    assert.equal(observedSignal?.aborted, true);
+
+    resolveDecision(decision);
+    const response = await responsePromise;
+
+    assert.deepEqual(response, {
+      outcome: {
+        outcome: "cancelled",
+      },
+    });
+    assert.deepEqual(client.getPermissionStats(), {
+      requested: 1,
+      approved: 0,
+      denied: 0,
+      cancelled: 1,
+    });
   });
-  const { client } = fixture;
-  const internals = asInternals(client);
-
-  const responsePromise = internals.handlePermissionRequest?.(
-    makePermissionRequest("session-cb-5", "edit"),
-  );
-  await callbackStartedPromise;
-
-  await client.cancel("session-cb-5");
-  assert.equal(observedSignal?.aborted, true);
-
-  resolveDecision({ outcome: "allow_once" });
-  const response = await responsePromise;
-
-  assert.deepEqual(response, {
-    outcome: {
-      outcome: "cancelled",
-    },
-  });
-  assert.deepEqual(client.getPermissionStats(), {
-    requested: 1,
-    approved: 0,
-    denied: 0,
-    cancelled: 1,
-  });
-});
+}
 
 test("AcpClient onPermissionRequest treats abort rejections as cancelled", async (t) => {
   let callbackStarted!: () => void;

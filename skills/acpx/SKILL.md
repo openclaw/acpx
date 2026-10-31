@@ -38,7 +38,7 @@ Core capabilities:
 - Built-in agent registry plus raw `--agent` escape hatch
 - Claude system prompt override via `--system-prompt` / `--append-system-prompt`
 - Optional ACP filesystem and terminal capability opt-outs via `--no-fs` and `--no-terminal`
-- Tool whitelist (`--allowed-tools`), turn cap (`--max-turns`), retry on transient failures (`--prompt-retries`)
+- Adapter-specific tool approval controls (`--allowed-tools`), turn cap (`--max-turns`), retry on transient failures (`--prompt-retries`)
 - Multi-agent flows via `acpx flow run` and the `acpx/flows` authoring API (`defineFlow`, `decision`, `decisionEdge`, `acp`, `action`, `compute`, `checkpoint`)
 
 ## Install
@@ -83,10 +83,10 @@ If prompt text is omitted and stdin is piped, `acpx` reads prompt text from stdi
 
 Friendly agent names resolve to commands:
 
-- `pi` -> `npx pi-acp` (ACPX-owned package range; see `agents/Pi.md`)
+- `pi` -> `npx --package=pi-acp -- pi-acp` (ACPX-owned package range; see `agents/Pi.md`)
 - `openclaw` -> `openclaw acp` (see the [OpenClaw guide](https://github.com/openclaw/acpx/blob/main/agents/OpenClaw.md))
-- `codex` -> `npx -y @agentclientprotocol/codex-acp` (ACPX-owned package range)
-- `claude` -> `npx -y @agentclientprotocol/claude-agent-acp` (ACPX-owned package range; see `agents/Claude.md`)
+- `codex` -> `npx -y --package=@agentclientprotocol/codex-acp -- codex-acp` (ACPX-owned package range)
+- `claude` -> `npx -y --package=@agentclientprotocol/claude-agent-acp -- claude-agent-acp` (ACPX-owned package range; see `agents/Claude.md`)
 - `gemini` -> `gemini --acp`
 - `cursor` -> `cursor-agent acp`
 - `copilot` -> `copilot --acp --stdio`
@@ -98,12 +98,13 @@ Friendly agent names resolve to commands:
 - `grok-build` -> `grok agent stdio`
 - `iflow` -> `iflow --experimental-acp`
 - `junie` -> `junie --acp=true` (install and authenticate Junie first; see the [Junie guide](https://github.com/openclaw/acpx/blob/main/agents/Junie.md))
-- `kilocode` -> `npx -y @kilocode/cli acp`
+- `kilocode` -> `npx -y --package=@kilocode/cli -- kilo acp`
 - `kimi` -> `kimi acp`
 - `kiro` -> `kiro-cli-chat acp`
 - `mcode` -> `mcode acp` (install/authenticate MCode first; prefer `exec` for one-shot work, and require advertised ACP reload support for cross-invocation continuity)
-- `mux` -> `mux acp` via an ACPX-owned npm range
-- `opencode` -> `npx -y opencode-ai acp`
+- `mux` -> `npx -y --package=mux -- mux acp` via an ACPX-owned npm range
+- `octomind` -> `octomind acp developer:general` (install Octomind and sign in with `octomind login` or provider keys first; see the [Octomind guide](https://github.com/openclaw/acpx/blob/main/agents/Octomind.md))
+- `opencode` -> `npx -y --package=opencode-ai -- opencode acp`
 - `pool` -> `pool acp`
 - `qoder` -> `qodercli --acp`
   Forwards Qoder-native `--allowed-tools` and `--max-turns` startup flags from `acpx` session options.
@@ -116,6 +117,7 @@ Rules:
 - Default agent is `codex` for top-level `prompt`, `exec`, and `sessions`.
 - Unknown positional agent tokens are treated as raw agent commands.
 - `--agent <command>` explicitly sets a raw ACP adapter command.
+- Claude package fallback uses the ACPX-owned adapter range. An adapter installed alongside ACPX takes precedence; update it and any explicitly selected native Claude executable separately. Existing custom launchers stay operator-controlled.
 - Do not combine a positional agent and `--agent` in the same command.
 - Gemini version checks, Copilot ACP support checks, and their startup diagnostics use the selected agent's working directory and child environment, including session environment and embedded runtime overrides.
 - Embedded host lifecycle admission also covers compatibility and diagnostic invocations. Correlate their events by `launchId`; one session can produce several adapter processes. Checks retire their owned processes and output pipes before settling.
@@ -304,7 +306,7 @@ Behavior:
 - `--model <id>`: request an agent model during session creation; non-Claude agents must advertise a model config option or legacy `models` metadata
 - `--system-prompt <text>`: replace the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt`; persisted in `session_options.system_prompt` so reuse keeps the override. Other agents ignore the field.
 - `--append-system-prompt <text>`: append text to the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt.append`; same persistence rules as `--system-prompt`. Both system-prompt flags also apply to persistent and isolated ACP nodes in `flow run`.
-- `--allowed-tools <list>`: comma-separated tool whitelist (use `""` for no tools)
+- `--allowed-tools <list>`: comma-separated tool list forwarded to the adapter; for Claude it pre-approves listed tools (`""` adds no approvals, rather than disabling tools)
 - `--max-turns <count>`: cap session turn count
 - `--prompt-retries <count>`: retry failed prompt turns on transient errors (default `0`); cancelling a queued turn stops remaining attempts, while already-received final responses keep their outcome
 - `--no-fs`: disable ACP filesystem callbacks so compatible agents use their native file operations. This is a protocol callback policy, not an OS sandbox for the agent's own filesystem access.
@@ -398,7 +400,32 @@ Use `acpx config show` to inspect the resolved config and `acpx config init` to 
 For ACP `authenticate` handshakes, use either config `auth` entries or explicit
 `ACPX_AUTH_<METHOD_ID>` environment variables such as `ACPX_AUTH_OPENAI_API_KEY`.
 Ambient provider env vars such as `OPENAI_API_KEY` are still passed through to
-child agents, but they do not trigger ACP auth-method selection on their own.
+child agents by default, but they do not trigger ACP auth-method selection on
+their own.
+
+## Embedded environment inheritance
+
+Embedding hosts can set `agentProcessEnvAllow` or `agentProcessEnvBlock` on
+`createAcpRuntime()` to keep parent variables, such as the host's own service
+credentials, out of agents, command probes, and ACP terminals. Both are off by
+default and the CLI does not set them, so without them children inherit the
+whole environment as before.
+
+- `agentProcessEnvAllow` keeps only process essentials (`PATH`, `HOME`, locale,
+  temp and similar names) plus the listed names. An empty list keeps only the
+  essentials and explicit grants.
+- `agentProcessEnvBlock` removes the listed names, applied after the allowlist.
+- Explicit grants still apply: `ACPX_AUTH_<METHOD_ID>` variables pass through
+  both lists, and `agentProcessEnv`, saved session `env`, and a terminal
+  request's own `env` are layered on top.
+
+A filtered provider key does not reach the agent. Agent-specific environment
+authentication that ACPX selects itself, such as Grok Build's `XAI_API_KEY` for
+`xai.api_key`, is skipped as well when the key is filtered. Keep such a key by
+listing it in the allowlist and leaving it off the blocklist, or pass it as an
+`ACPX_AUTH_*` grant (for Grok Build, `ACPX_AUTH_XAI_API_KEY`). See
+[`docs/runtime-environment.md`](https://github.com/openclaw/acpx/blob/main/docs/runtime-environment.md)
+and [`agents/GrokBuild.md`](https://github.com/openclaw/acpx/blob/main/agents/GrokBuild.md).
 
 ## Devin ACP compatibility
 
@@ -485,6 +512,8 @@ For ACP tool permission requests, per-tool policy takes precedence over the perm
 - `--policy <json-or-file>`: match ACP tool permission requests by kind, title, title head, or raw input tool name
 
 An `autoApprove` rule can approve a tool request under `--deny-all`. An `escalate` rule can prompt under `--approve-all` when stdin and stderr are TTYs. Without both TTYs, escalation denies or cancels the current request and adds `_meta.acpx.permissionEscalation` to the ACP response, even when `--non-interactive-permissions fail` is selected.
+
+For Claude, native approvals from `sessionOptions.allowedTools`, skill `allowed-tools`, and other settings can resolve calls before these ACP permission controls; see the [Claude approval boundary](../../agents/Claude.md#permission-approval-boundary) for native enforcement guidance.
 
 Per-tool policies govern `session/request_permission`. ACP filesystem and terminal operations use the client's permission mode separately; a tool approval does not bypass those operation checks.
 

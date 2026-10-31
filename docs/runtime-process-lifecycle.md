@@ -96,8 +96,10 @@ capabilities. Runtime health probes disable their ACP filesystem and terminal
 callbacks while retaining the host permission policy; they ignore host
 `fs`/`terminal` options. Disabling those ACP callbacks is a protocol callback
 policy, not an OS sandbox for the agent's own filesystem or process access. Inspection inherits
-the process environment, with an optional trusted `agentProcessEnv` overlay; it
-does not isolate the agent process itself.
+the process environment, with an optional trusted `agentProcessEnv` overlay and
+the optional `agentProcessEnvAllow` and `agentProcessEnvBlock` inheritance lists
+described in [runtime-environment.md](runtime-environment.md); it does not
+isolate the agent process itself.
 
 Pass an optional `signal` to cancel. `timeoutMs` is a positive discovery deadline
 of at most 2,147,483,647 milliseconds and defaults to 120 seconds. Success,

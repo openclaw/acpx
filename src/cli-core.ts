@@ -531,6 +531,11 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     const program = createProgram(requestedJsonStrict);
 
     addGlobalFlags(program);
+    // Subcommands copy this override when they are created, so set it before
+    // registering them: their usage errors must reach handleProgramParseError.
+    program.exitOverride((error) => {
+      throw error;
+    });
 
     configurePublicCli({
       program,
@@ -545,10 +550,6 @@ export async function main(argv: string[] = process.argv): Promise<void> {
       handlePromptAction: async (command, promptParts) => {
         await handlePrompt(undefined, promptParts, {}, command, config);
       },
-    });
-
-    program.exitOverride((error) => {
-      throw error;
     });
 
     await program.parseAsync(normalizedArgv);

@@ -23,6 +23,7 @@ export type AcpPermissionRequest = {
 };
 
 export type AcpPermissionDecision =
+  | { outcome: "selected"; optionId: string }
   | { outcome: "allow_once" }
   | { outcome: "allow_always" }
   | { outcome: "reject_once" }
@@ -289,6 +290,13 @@ export type AcpClientOptions = {
   agentArgv?: string[];
   /** Trusted child-only environment overlay; never persisted as session options. */
   agentProcessEnv?: Record<string, string>;
+  /**
+   * Opt-in allowlist: agent children, probes and terminals inherit only process essentials,
+   * these parent names and `ACPX_AUTH_*` grants.
+   */
+  agentProcessEnvAllow?: readonly string[];
+  /** Parent environment names that agent children, probes and terminals do not inherit. */
+  agentProcessEnvBlock?: readonly string[];
   cwd: string;
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;

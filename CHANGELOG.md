@@ -10,6 +10,49 @@ Repo: https://github.com/openclaw/acpx
 
 - Flows: select per-node models and ordered ACP configuration options before the first prompt, with run defaults, persistent-handle conflict checks, same-session replay, and requested/accepted settings in run bundles. Thanks @superbiche.
 
+### Fixes
+
+- Docs/prompting: list `-s, --session` and `--no-wait` as options of `prompt` and the bare form only; `exec` rejects them with `unknown option`. Thanks @KrasimirKralev.
+- CLI: unknown options and other usage errors on subcommands (`acpx codex exec --bogus`, `acpx sessions list --bogus`) now exit with code 2 as documented, and `--format json` reports them as a JSON-RPC error instead of plain text only; they used to exit 1. Thanks @KrasimirKralev.
+- Agents/launch: start npm-backed built-in adapters (pi, codex, claude, kilocode, mux, opencode) when acpx itself runs under `npx` and the Node-relative npm bridge is unavailable, instead of exiting with code 127 before initialize. Thanks @kanzaki-chiya.
+
+## 0.21.1 - 2026-10-26
+
+**Highlights:** Patch four URI security vulnerabilities in development dependencies, update the guarded filesystem runtime, and clarify missing-prompt errors.
+
+### Fixes
+
+- Dependencies: update the guarded filesystem runtime and development tools; patch four URI normalization and scheme/host confusion vulnerabilities in the development dependency `fast-uri`.
+- Docs/prompting: describe what a prompt command does with no prompt text: it exits with code 2 and `Prompt is required` (or `Prompt from stdin is empty`) instead of printing help. Thanks @KrasimirKralev.
+
+## 0.21.0 - 2026-10-23
+
+**Highlights:** Add opt-in environment controls for embedded agents, clarify malformed agent command errors, and patch denial-of-service vulnerabilities in documentation dependencies.
+
+### Changes
+
+- Runtime/embedding: add opt-in `agentProcessEnvBlock` and `agentProcessEnvAllow` so embedders can keep their own credentials out of the environment inherited by agents, command probes and ACP terminals. Both are off by default; explicit grants and overlays still apply. Thanks @VACInc.
+
+### Fixes
+
+- CLI: report a malformed `--agent` command (an unterminated quote or a quoted empty command) as a usage error with exit code 2 and `acpxCode: "USAGE"` instead of a runtime error. Thanks @KrasimirKralev.
+- Dependencies: update the guarded filesystem runtime and development tools, and patch denial-of-service vulnerabilities in the docs Markdown renderer.
+
+## 0.20.0 - 2026-10-20
+
+**Highlights:** Add Octomind support, select exact permission options, and recover cleanly from failed session launches and discards.
+
+### Changes
+
+- Agents: add Octomind as a built-in native ACP agent. Thanks @donk8r.
+- Runtime/embedding: let permission callbacks select an exact offered `optionId`, preserving existing kind-based decisions and cancelling unknown IDs. Thanks @xuanda0201.
+
+### Fixes
+
+- Runtime/embedding: settle session records as closed when a launch fails after its record was saved or a discard close fails at the backend, so embedders are not left with open records they can no longer close.
+- Dependencies: update the ACP SDK and guarded filesystem runtime, plus React patch releases for the replay viewer.
+- Documentation: clarify which native Claude tool approvals reach ACP permission policies. Thanks @superbiche.
+
 ## 0.19.6 - 2026-10-16
 
 **Highlights:** Clearer provider errors in text and quiet output, with recovery guidance for quota limits.

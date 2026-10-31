@@ -119,6 +119,7 @@ import {
   CommandProbeAdmissionError,
 } from "./command-probe.js";
 import { extractAcpError } from "./error-shapes.js";
+import { isInheritedEnvName, snapshotEnvNames, type InheritedEnvPolicy } from "./inherited-env.js";
 import {
   assertRequestedModelSupported,
   modelStateFromSessionResponse,
@@ -447,6 +448,8 @@ export class AcpClient {
       ...options,
       cwd: asAbsoluteCwd(options.cwd),
       agentProcessEnv: options.agentProcessEnv ? { ...options.agentProcessEnv } : undefined,
+      agentProcessEnvAllow: snapshotEnvNames("agentProcessEnvAllow", options.agentProcessEnvAllow),
+      agentProcessEnvBlock: snapshotEnvNames("agentProcessEnvBlock", options.agentProcessEnvBlock),
       authPolicy: options.authPolicy ?? "skip",
       permissionPolicy: snapshotPermissionPolicy(options.permissionPolicy),
       elicitationModes: normalizeElicitationModes(options.elicitationModes),
@@ -469,6 +472,7 @@ export class AcpClient {
     });
     this.terminalManager = new TerminalManager({
       cwd: this.options.cwd,
+      inheritedEnv: this.inheritedEnvPolicy(),
       permissionMode: this.options.permissionMode,
       nonInteractivePermissions: this.options.nonInteractivePermissions,
       onOperation: (operation) => {
@@ -744,6 +748,7 @@ export class AcpClient {
       this.options.authCredentials,
       this.options.sessionOptions?.env,
       this.options.agentProcessEnv,
+      this.inheritedEnvPolicy(),
     );
     const commandContext: AgentLaunchPlan["commandContext"] = {
       env: spawnOptions.env,
@@ -2109,8 +2114,16 @@ export class AcpClient {
     return undefined;
   }
 
+  private inheritedEnvPolicy(): InheritedEnvPolicy {
+    return { allow: this.options.agentProcessEnvAllow, block: this.options.agentProcessEnvBlock };
+  }
+
   private readAgentSpecificEnvCredential(methodId: string): string | undefined {
-    if (!this.isGrokBuildAcpCommand() || methodId !== "xai.api_key") {
+    if (
+      !this.isGrokBuildAcpCommand() ||
+      methodId !== "xai.api_key" ||
+      !isInheritedEnvName(this.inheritedEnvPolicy(), "XAI_API_KEY")
+    ) {
       return undefined;
     }
     const value = process.env.XAI_API_KEY;

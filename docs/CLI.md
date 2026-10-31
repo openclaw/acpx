@@ -171,7 +171,7 @@ acpx [global_options] pi exec [prompt_text...]
 acpx [global_options] pi sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
-Built-in command mapping: `pi -> npx pi-acp`
+Built-in command mapping: `pi -> npx --package=pi-acp -- pi-acp`
 
 ### `openclaw`
 
@@ -205,7 +205,7 @@ acpx [global_options] codex exec [prompt_text...]
 acpx [global_options] codex sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
-Built-in command mapping: `codex -> npx -y @agentclientprotocol/codex-acp`
+Built-in command mapping: `codex -> npx -y --package=@agentclientprotocol/codex-acp -- codex-acp`
 
 ### `claude`
 
@@ -216,7 +216,7 @@ acpx [global_options] claude exec [prompt_text...]
 acpx [global_options] claude sessions [list | new [--name <name>] | ensure [--name <name>] | close [name]]
 ```
 
-Built-in command mapping: `claude -> npx -y @agentclientprotocol/claude-agent-acp`
+Built-in command mapping: `claude -> npx -y --package=@agentclientprotocol/claude-agent-acp -- claude-agent-acp`
 
 Additional built-in agent docs live in [the Agents page](agents.md).
 

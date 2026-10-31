@@ -22,6 +22,10 @@ export type InspectAgentModelsOptions = {
   timeoutMs?: number;
   /** Trusted child-only environment overlay; never persisted. */
   agentProcessEnv?: Record<string, string>;
+  /** Opt-in allowlist of parent environment names the inspected agent inherits. */
+  agentProcessEnvAllow?: readonly string[];
+  /** Parent environment names the inspected agent does not inherit. */
+  agentProcessEnvBlock?: readonly string[];
 };
 
 /**
@@ -45,6 +49,8 @@ export async function inspectAgentModels(
     ...normalizeAgentCommandInput(options.agentCommand),
     cwd: options.cwd,
     agentProcessEnv: options.agentProcessEnv,
+    agentProcessEnvAllow: options.agentProcessEnvAllow,
+    agentProcessEnvBlock: options.agentProcessEnvBlock,
     permissionMode: "deny-all",
     nonInteractivePermissions: "deny",
     fs: false,
@@ -198,6 +204,8 @@ function createProbeClient(
     ...agentCommand,
     cwd: options.cwd,
     agentProcessEnv: options.agentProcessEnv,
+    agentProcessEnvAllow: options.agentProcessEnvAllow,
+    agentProcessEnvBlock: options.agentProcessEnvBlock,
     mcpServers: typeof options.mcpServers === "function" ? [] : [...(options.mcpServers ?? [])],
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,

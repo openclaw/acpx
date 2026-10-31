@@ -132,8 +132,14 @@ test("grok-build built-in runs the Grok Build ACP entrypoint", () => {
 });
 
 test("mux built-in runs the coder/mux ACP stdio bridge through npx", () => {
-  assert.equal(AGENT_REGISTRY.mux, "npx -y mux@^0.28.0 acp");
-  assert.equal(resolveAgentCommand("mux"), "npx -y mux@^0.28.0 acp");
+  assert.equal(AGENT_REGISTRY.mux, "npx -y --package=mux@^0.28.0 -- mux acp");
+  assert.equal(resolveAgentCommand("mux"), "npx -y --package=mux@^0.28.0 -- mux acp");
+});
+
+test("octomind built-in launches the coding specialist over ACP", () => {
+  assert.equal(AGENT_REGISTRY.octomind, "octomind acp developer:general");
+  assert.deepEqual(AGENT_ARGV_REGISTRY.octomind, ["octomind", "acp", "developer:general"]);
+  assert.equal(resolveAgentCommand("octomind"), "octomind acp developer:general");
 });
 
 test("pool built-in runs the Poolside ACP entrypoint", () => {
@@ -174,6 +180,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "kiro",
     "mcode",
     "mux",
+    "octomind",
     "opencode",
     "pool",
     "qoder",
@@ -188,14 +195,20 @@ test("default agent is codex", () => {
 });
 
 test("claude built-in uses the current ACP adapter package range", () => {
-  assert.equal(BUILT_IN_AGENT_PACKAGES.claude.packageRange, "^0.81.2");
-  assert.equal(AGENT_REGISTRY.claude, "npx -y @agentclientprotocol/claude-agent-acp@^0.81.2");
+  assert.equal(BUILT_IN_AGENT_PACKAGES.claude.packageRange, "^0.95.0");
+  assert.equal(
+    AGENT_REGISTRY.claude,
+    "npx -y --package=@agentclientprotocol/claude-agent-acp@^0.95.0 -- claude-agent-acp",
+  );
 });
 
 test("npm-backed built-ins use current adapter package ranges", () => {
   assert.equal(BUILT_IN_AGENT_PACKAGES.codex.packageRange, "^1.1.5");
-  assert.equal(AGENT_REGISTRY.codex, "npx -y @agentclientprotocol/codex-acp@^1.1.5");
-  assert.equal(AGENT_REGISTRY.pi, "npx pi-acp@^0.0.33");
+  assert.equal(
+    AGENT_REGISTRY.codex,
+    "npx -y --package=@agentclientprotocol/codex-acp@^1.1.5 -- codex-acp",
+  );
+  assert.equal(AGENT_REGISTRY.pi, "npx --package=pi-acp@^0.0.33 -- pi-acp");
 });
 
 test("resolveInstalledBuiltInAgentLaunch uses a locally installed adapter when available", (t) => {
@@ -267,6 +280,65 @@ test("resolvePackageExecBuiltInAgentLaunch bridges built-ins through the current
     packageRange: BUILT_IN_AGENT_PACKAGES.codex.packageRange,
     npmCliPath,
   });
+});
+
+test("built-in npx fallbacks name the adapter package and binary when the npm bridge is unavailable", (t) => {
+  // An acpx started via `npx --package=acpx@<version> -- acpx` passes this to its
+  // children; npx then treats a positional adapter spec as the command to run.
+  const inheritedPackage = process.env.npm_config_package;
+  process.env.npm_config_package = "acpx@0.21.0";
+  t.after(() => {
+    if (inheritedPackage === undefined) {
+      delete process.env.npm_config_package;
+    } else {
+      process.env.npm_config_package = inheritedPackage;
+    }
+  });
+
+  for (const name of Object.keys(BUILT_IN_AGENT_PACKAGES)) {
+    const launch = resolveBuiltInAgentLaunch(AGENT_REGISTRY[name], {
+      resolvePackageRoot: () => undefined,
+      resolveNpmCliPath: (execPath) => {
+        throw new Error(`npm CLI not found for execPath: ${execPath}`);
+      },
+    });
+    assert.equal(launch, undefined, name);
+  }
+
+  const npxFallbacks = Object.fromEntries(
+    Object.entries(AGENT_ARGV_REGISTRY).filter(([, argv]) => argv[0] === "npx"),
+  );
+  assert.deepEqual(npxFallbacks, {
+    pi: ["npx", "--package=pi-acp@^0.0.33", "--", "pi-acp"],
+    codex: ["npx", "-y", "--package=@agentclientprotocol/codex-acp@^1.1.5", "--", "codex-acp"],
+    claude: [
+      "npx",
+      "-y",
+      "--package=@agentclientprotocol/claude-agent-acp@^0.95.0",
+      "--",
+      "claude-agent-acp",
+    ],
+    kilocode: ["npx", "-y", "--package=@kilocode/cli", "--", "kilo", "acp"],
+    mux: ["npx", "-y", "--package=mux@^0.28.0", "--", "mux", "acp"],
+    opencode: ["npx", "-y", "--package=opencode-ai", "--", "opencode", "acp"],
+  });
+});
+
+test("resolveBuiltInAgentLaunch accepts the previous positional npx defaults", () => {
+  const npmCliPath = path.join(os.tmpdir(), "acpx-test-positional-npm-cli.js");
+  for (const [name, previousCommand] of [
+    ["codex", "npx -y @agentclientprotocol/codex-acp@^1.1.5"],
+    ["claude", "npx -y @agentclientprotocol/claude-agent-acp@^0.95.0"],
+  ] as const) {
+    const launch = resolveBuiltInAgentLaunch(previousCommand, {
+      execPath: "/tmp/node",
+      existsSync: (candidate) => candidate === npmCliPath,
+      resolvePackageRoot: () => undefined,
+      resolveNpmCliPath: () => npmCliPath,
+    });
+    assert.equal(launch?.source, "package-exec", name);
+    assert.equal(launch?.packageName, BUILT_IN_AGENT_PACKAGES[name].packageName, name);
+  }
 });
 
 test("resolveBuiltInAgentLaunch accepts the legacy Claude npm exec default", () => {

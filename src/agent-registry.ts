@@ -9,7 +9,7 @@ import { resolveInstalledExecutable } from "./spawn-command-options.js";
 const ACP_ADAPTER_PACKAGE_RANGES = {
   pi: "^0.0.33",
   codex: "^1.1.5",
-  claude: "^0.81.2",
+  claude: "^0.95.0",
   mux: "^0.28.0",
 } as const;
 
@@ -52,7 +52,7 @@ type AgentDefinition = {
 const AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
   pi: {
     name: "Pi",
-    argv: ["npx", `pi-acp@${ACP_ADAPTER_PACKAGE_RANGES.pi}`],
+    argv: ["npx", `--package=pi-acp@${ACP_ADAPTER_PACKAGE_RANGES.pi}`, "--", "pi-acp"],
     installedArgv: ["pi-acp"],
     requiredCommands: ["pi"],
     package: {
@@ -64,13 +64,21 @@ const AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
   openclaw: { name: "OpenClaw", argv: ["openclaw", "acp"] },
   codex: {
     name: "Codex",
-    argv: ["npx", "-y", `@agentclientprotocol/codex-acp@${ACP_ADAPTER_PACKAGE_RANGES.codex}`],
+    argv: [
+      "npx",
+      "-y",
+      `--package=@agentclientprotocol/codex-acp@${ACP_ADAPTER_PACKAGE_RANGES.codex}`,
+      "--",
+      "codex-acp",
+    ],
     installedArgv: ["codex-acp"],
     package: {
       packageName: "@agentclientprotocol/codex-acp",
       packageRange: ACP_ADAPTER_PACKAGE_RANGES.codex,
       preferredBinName: "codex-acp",
-      legacyFallbackCommands: [],
+      legacyFallbackCommands: [
+        `npx -y @agentclientprotocol/codex-acp@${ACP_ADAPTER_PACKAGE_RANGES.codex}`,
+      ],
     },
     packageExecFallback: true,
   },
@@ -79,7 +87,9 @@ const AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
     argv: [
       "npx",
       "-y",
-      `@agentclientprotocol/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
+      `--package=@agentclientprotocol/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
+      "--",
+      "claude-agent-acp",
     ],
     installedArgv: ["claude-agent-acp"],
     package: {
@@ -87,6 +97,7 @@ const AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
       packageRange: ACP_ADAPTER_PACKAGE_RANGES.claude,
       preferredBinName: "claude-agent-acp",
       legacyFallbackCommands: [
+        `npx -y @agentclientprotocol/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
         `npm exec @agentclientprotocol/claude-agent-acp@${ACP_ADAPTER_PACKAGE_RANGES.claude}`,
       ],
     },
@@ -111,16 +122,20 @@ const AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
   junie: { name: "Junie", argv: ["junie", "--acp=true"] },
   kilocode: {
     name: "Kilo Code",
-    argv: ["npx", "-y", "@kilocode/cli", "acp"],
+    argv: ["npx", "-y", "--package=@kilocode/cli", "--", "kilo", "acp"],
     installedArgv: ["kilo", "acp"],
   },
   kimi: { name: "Kimi Code", argv: ["kimi", "acp"] },
   kiro: { name: "Kiro", argv: ["kiro-cli-chat", "acp"] },
   mcode: { name: "MCode", argv: ["mcode", "acp"] },
-  mux: { name: "Mux", argv: ["npx", "-y", `mux@${ACP_ADAPTER_PACKAGE_RANGES.mux}`, "acp"] },
+  mux: {
+    name: "Mux",
+    argv: ["npx", "-y", `--package=mux@${ACP_ADAPTER_PACKAGE_RANGES.mux}`, "--", "mux", "acp"],
+  },
+  octomind: { name: "Octomind", argv: ["octomind", "acp", "developer:general"] },
   opencode: {
     name: "OpenCode",
-    argv: ["npx", "-y", "opencode-ai", "acp"],
+    argv: ["npx", "-y", "--package=opencode-ai", "--", "opencode", "acp"],
     installedArgv: ["opencode", "acp"],
   },
   pool: { name: "Poolside", argv: ["pool", "acp"] },

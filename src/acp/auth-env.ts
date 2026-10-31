@@ -1,4 +1,5 @@
 import type { AcpClientOptions } from "../types.js";
+import { inheritParentEnvironment, type InheritedEnvPolicy } from "./inherited-env.js";
 
 const AUTH_ENV_PREFIX = "ACPX_AUTH_";
 
@@ -96,9 +97,11 @@ function buildAgentEnvironment(
   authCredentials: Record<string, string> | undefined,
   sessionEnv: Record<string, string> | undefined,
   agentProcessEnv: Record<string, string> | undefined,
+  inheritedEnv: InheritedEnvPolicy | undefined,
 ): NodeJS.ProcessEnv {
   validateAgentProcessEnv(agentProcessEnv);
-  const env: NodeJS.ProcessEnv = { ...process.env };
+  // Allow and block shape inheritance only; explicit grants and overlays below still apply.
+  const env = inheritParentEnvironment(inheritedEnv);
   const protectedAuthEnvKeys = promotePrefixedAuthEnvironment(env);
   if (authCredentials) {
     for (const [methodId, credential] of Object.entries(authCredentials)) {
@@ -205,6 +208,7 @@ export function buildAgentSpawnOptions(
   authCredentials: Record<string, string> | undefined,
   sessionEnv?: Record<string, string>,
   agentProcessEnv?: Record<string, string>,
+  inheritedEnv?: InheritedEnvPolicy,
 ): {
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -213,7 +217,7 @@ export function buildAgentSpawnOptions(
 } {
   return {
     cwd,
-    env: buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv),
+    env: buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv, inheritedEnv),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   };

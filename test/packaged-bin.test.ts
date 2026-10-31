@@ -185,7 +185,7 @@ test("packaged registry imports without runtime dependencies or agent execution"
       const registry = createAgentRegistry({ resolveExecutable: () => undefined, resolvePackageRoot: () => undefined });
       assert.equal(registry.inspect('qwen').launch.kind, 'missing');
       assert.ok(registry.list().includes('pi'));
-      assert.deepEqual(registry.resolve('opencode'), ['npx', '-y', 'opencode-ai', 'acp']);
+      assert.deepEqual(registry.resolve('opencode'), ['npx', '-y', '--package=opencode-ai', '--', 'opencode', 'acp']);
     `,
       ],
       { cwd: packageDir, encoding: "utf8" },

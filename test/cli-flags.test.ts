@@ -617,6 +617,19 @@ test("raw-agent resolution distinguishes omission from an explicitly blank comma
   }
 });
 
+test("raw-agent resolution rejects a malformed command as a usage error", () => {
+  for (const [agent, message] of [
+    ["'x", /unterminated quote/],
+    ['node "./agent dir/server.mjs', /unterminated quote/],
+    ["''", /empty command/],
+  ] as const) {
+    assert.throws(
+      () => resolveGlobalFlags(commandWithOptions({ agent }), config()),
+      (error: unknown) => error instanceof InvalidArgumentError && message.test(error.message),
+    );
+  }
+});
+
 test("raw-agent resolution preserves quoting and spaces inside a valid command", () => {
   const agent = '  node "./agent dir/server.mjs" --label "  two words  "  ';
   const flags = resolveGlobalFlags(commandWithOptions({ agent }), config());

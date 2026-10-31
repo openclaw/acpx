@@ -4879,6 +4879,7 @@ test("integration: sessions history shows in-flight prompt after prompt starts",
 test("integration: sessions read shows assistant updates before the prompt finishes", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(homeDir, "cwd-"));
+    const releaseFile = path.join(homeDir, "release-prompt");
 
     const created = await runCli(
       [...baseAgentArgs(cwd), "--format", "json", "sessions", "new"],
@@ -4894,7 +4895,7 @@ test("integration: sessions read shows assistant updates before the prompt finis
         "--format",
         "quiet",
         "prompt",
-        "stream-sleep 2500 foreground-live-update",
+        `stream-wait-file ${releaseFile}`,
       ],
       {
         env: {
@@ -4906,29 +4907,37 @@ test("integration: sessions read shows assistant updates before the prompt finis
     );
 
     await withObservedChild(promptChild, homeDir, async (waitForClose) => {
-      const history = await waitFor(async () => {
-        const result = await runCli(
-          [...baseAgentArgs(cwd), "--format", "json", "sessions", "read"],
-          homeDir,
-        );
-        assert.equal(result.code, 0, result.stderr);
-        const payload = JSON.parse(result.stdout.trim()) as {
-          entries?: Array<{ role?: string; textPreview?: string }>;
-        };
-        const assistantEntry = payload.entries?.find(
-          (entry) =>
-            entry.role === "assistant" && entry.textPreview?.includes("foreground-live-update"),
-        );
-        return assistantEntry ? result.stdout : null;
-      }, 5_000);
+      const observation = await observeTestOutcome(async () => {
+        const history = await waitFor(async () => {
+          const result = await runCli(
+            [...baseAgentArgs(cwd), "--format", "json", "sessions", "read"],
+            homeDir,
+          );
+          assert.equal(result.code, 0, result.stderr);
+          const payload = JSON.parse(result.stdout.trim()) as {
+            entries?: Array<{ role?: string; textPreview?: string }>;
+          };
+          const assistantEntry = payload.entries?.find(
+            (entry) => entry.role === "assistant" && entry.textPreview?.includes("flow-held"),
+          );
+          return assistantEntry ? result.stdout : null;
+        }, 5_000);
 
-      assert.equal(promptChild.exitCode, null, "prompt should still be running");
-      assert.match(history, /foreground-live-update/);
-      assert.doesNotMatch(history, /stream-sleep done/);
-
-      const promptResult = await waitForClose();
-      assert.equal(promptResult.code, 0, promptResult.stderr);
-      assert.match(promptResult.stdout, /stream-sleep done: foreground-live-update/);
+        assert.equal(promptChild.exitCode, null, "prompt should still be running");
+        assert.match(history, /flow-held/);
+        assert.doesNotMatch(history, /stream-wait-file done/);
+      });
+      const completion = await observeTestOutcome(async () => {
+        // Join after failed observation so the detached owner consumes release before HOME removal.
+        await fs.writeFile(releaseFile, "release");
+        const promptResult = await waitForClose();
+        assert.equal(promptResult.code, 0, promptResult.stderr);
+        assert.match(promptResult.stdout, /stream-wait-file done: flow-held/);
+      });
+      if (!completion.ok) {
+        retainedCliHomes.add(homeDir);
+      }
+      unwrapTestOutcomes(observation, completion);
     });
   });
 });

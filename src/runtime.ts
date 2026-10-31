@@ -1,4 +1,5 @@
 import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
+import { snapshotEnvNames } from "./acp/inherited-env.js";
 import { DEFAULT_AGENT_NAME } from "./agent-registry.js";
 import type { AcpControlAuthority } from "./async-control.js";
 import { capabilitiesFromRecord } from "./runtime/engine/controls.js";
@@ -126,8 +127,23 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       }>;
     },
   ) {
-    if (options.agentProcessEnv) {
-      this.options = { ...options, agentProcessEnv: { ...options.agentProcessEnv } };
+    if (
+      options.agentProcessEnv ||
+      options.agentProcessEnvAllow !== undefined ||
+      options.agentProcessEnvBlock !== undefined
+    ) {
+      this.options = {
+        ...options,
+        agentProcessEnv: options.agentProcessEnv ? { ...options.agentProcessEnv } : undefined,
+        agentProcessEnvAllow: snapshotEnvNames(
+          "agentProcessEnvAllow",
+          options.agentProcessEnvAllow,
+        ),
+        agentProcessEnvBlock: snapshotEnvNames(
+          "agentProcessEnvBlock",
+          options.agentProcessEnvBlock,
+        ),
+      };
     }
   }
 

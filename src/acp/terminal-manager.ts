@@ -26,6 +26,11 @@ import {
 } from "../spawn-command-options.js";
 import type { ClientOperation, NonInteractivePermissionPolicy, PermissionMode } from "../types.js";
 import { PROCESS_HELPER_TIMEOUT_MS, runTimedExecFile, waitForSpawn } from "./client-process.js";
+import {
+  hasInheritedEnvPolicy,
+  inheritParentEnvironment,
+  type InheritedEnvPolicy,
+} from "./inherited-env.js";
 import { ProcessDescendants } from "./process-descendants.js";
 
 const DEFAULT_TERMINAL_OUTPUT_LIMIT_BYTES = 64 * 1024;
@@ -53,6 +58,8 @@ type TerminalCreation = {
 
 export type TerminalManagerOptions = {
   cwd: string;
+  /** Which parent environment names terminal commands inherit, as for agent children. */
+  inheritedEnv?: InheritedEnvPolicy;
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   onOperation?: (operation: ClientOperation) => void;
@@ -79,13 +86,16 @@ function toCommandLine(command: string, args: string[] | undefined): string {
   return renderedArgs.length > 0 ? `${command} ${renderedArgs}` : command;
 }
 
-function toEnvObject(env: CreateTerminalRequest["env"]): NodeJS.ProcessEnv | undefined {
-  if (!env || env.length === 0) {
+function toEnvObject(
+  env: CreateTerminalRequest["env"],
+  inheritedEnv: InheritedEnvPolicy | undefined,
+): NodeJS.ProcessEnv | undefined {
+  if (!env?.length && !hasInheritedEnvPolicy(inheritedEnv)) {
     return undefined;
   }
 
-  const merged: NodeJS.ProcessEnv = { ...process.env };
-  for (const entry of env) {
+  const merged = inheritParentEnvironment(inheritedEnv);
+  for (const entry of env ?? []) {
     merged[entry.name] = entry.value;
   }
   return merged;
@@ -96,8 +106,9 @@ export function buildTerminalSpawnOptions(
   cwd: string,
   env: CreateTerminalRequest["env"],
   platform: NodeJS.Platform = process.platform,
+  inheritedEnv?: InheritedEnvPolicy,
 ): TerminalSpawnOptions {
-  const resolvedEnv = toEnvObject(env);
+  const resolvedEnv = toEnvObject(env, inheritedEnv);
   const options: TerminalSpawnOptions = {
     cwd,
     env: resolvedEnv,
@@ -189,6 +200,7 @@ function onStreamError(): void {
 
 export class TerminalManager {
   private readonly cwd: string;
+  private readonly inheritedEnv: InheritedEnvPolicy | undefined;
   private permissionMode: PermissionMode;
   private nonInteractivePermissions: NonInteractivePermissionPolicy;
   private readonly onOperation?: (operation: ClientOperation) => void;
@@ -203,6 +215,7 @@ export class TerminalManager {
   constructor(options: TerminalManagerOptions) {
     this.outputCeilingBytes = readTerminalOutputCeiling();
     this.cwd = options.cwd;
+    this.inheritedEnv = options.inheritedEnv;
     this.permissionMode = options.permissionMode;
     this.nonInteractivePermissions = options.nonInteractivePermissions ?? "deny";
     this.onOperation = options.onOperation;
@@ -266,7 +279,11 @@ export class TerminalManager {
         params.outputByteLimit,
         this.outputCeilingBytes,
       );
-      const { proc, spawnCommand } = await spawnTerminalProcess(params, this.cwd, authority);
+      const { proc, spawnCommand } = await spawnTerminalProcess(
+        params,
+        { cwd: this.cwd, inheritedEnv: this.inheritedEnv },
+        authority,
+      );
 
       let resolveExit: (response: WaitForTerminalExitResponse) => void = () => {};
       const exitPromise = new Promise<WaitForTerminalExitResponse>((resolve) => {
@@ -639,9 +656,14 @@ export class TerminalManager {
   }
 }
 
+type TerminalSpawnContext = {
+  cwd: string;
+  inheritedEnv: InheritedEnvPolicy | undefined;
+};
+
 async function spawnTerminalProcess(
   params: CreateTerminalRequest,
-  defaultCwd: string,
+  context: TerminalSpawnContext,
   authority?: AcpControlAuthority,
 ): Promise<{
   proc: ChildProcessByStdio<null, Readable, Readable>;
@@ -650,19 +672,19 @@ async function spawnTerminalProcess(
   const directCommand = buildTerminalSpawnCommand(params.command, params.args);
   try {
     return {
-      proc: await spawnAndWait(directCommand, params, defaultCwd, authority),
+      proc: await spawnAndWait(directCommand, params, context, authority),
       spawnCommand: directCommand,
     };
   } catch (error) {
     const fallbackCommand =
       params.args === undefined && isNotFoundSpawnError(error)
-        ? buildTerminalFallbackSpawnCommand(params.command, params.cwd ?? defaultCwd)
+        ? buildTerminalFallbackSpawnCommand(params.command, params.cwd ?? context.cwd)
         : undefined;
     if (!fallbackCommand) {
       throw error;
     }
     return {
-      proc: await spawnAndWait(fallbackCommand, params, defaultCwd, authority),
+      proc: await spawnAndWait(fallbackCommand, params, context, authority),
       spawnCommand: fallbackCommand,
     };
   }
@@ -671,13 +693,15 @@ async function spawnTerminalProcess(
 async function spawnAndWait(
   spawnCommand: TerminalSpawnCommand,
   params: CreateTerminalRequest,
-  defaultCwd: string,
+  context: TerminalSpawnContext,
   authority?: AcpControlAuthority,
 ): Promise<ChildProcessByStdio<null, Readable, Readable>> {
   const spawnOptions = buildTerminalSpawnOptions(
     spawnCommand.command,
-    params.cwd ?? defaultCwd,
+    params.cwd ?? context.cwd,
     params.env,
+    process.platform,
+    context.inheritedEnv,
   );
   // A detached Windows shell redirects its children's output to a new console.
   if (process.platform !== "win32") {

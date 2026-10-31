@@ -327,6 +327,36 @@ function getManagedStdio(
   return terminal.process;
 }
 
+test("terminal commands do not inherit names the client blocks", async () => {
+  const previous = process.env.ACPX_TEST_TERMINAL_HOST_TOKEN;
+  process.env.ACPX_TEST_TERMINAL_HOST_TOKEN = "synthetic-host-token";
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-env-block-"));
+  const manager = new TerminalManager({
+    cwd,
+    permissionMode: "approve-all",
+    inheritedEnv: { block: ["ACPX_TEST_TERMINAL_HOST_TOKEN"] },
+  });
+  try {
+    const created = await manager.createTerminal({
+      sessionId: "synthetic",
+      command: process.execPath,
+      args: ["-e", "process.stdout.write(String(process.env.ACPX_TEST_TERMINAL_HOST_TOKEN))"],
+    });
+    await manager.waitForTerminalExit({ sessionId: "synthetic", ...created });
+    const output = await manager.terminalOutput({ sessionId: "synthetic", ...created });
+    assert.equal(output.output, "undefined");
+    await manager.releaseTerminal({ sessionId: "synthetic", ...created });
+  } finally {
+    await manager.shutdown();
+    await fs.rm(cwd, { recursive: true, force: true });
+    if (previous === undefined) {
+      delete process.env.ACPX_TEST_TERMINAL_HOST_TOKEN;
+    } else {
+      process.env.ACPX_TEST_TERMINAL_HOST_TOKEN = previous;
+    }
+  }
+});
+
 test("terminal manager create/output/wait/release lifecycle", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
   try {

@@ -40,6 +40,7 @@ import {
   type SessionInfo,
   methods,
 } from "@agentclientprotocol/sdk";
+import { assertNotCancelled, CancelledError, sleepWithCancel } from "./mock-agent-cancellation.js";
 
 type ParsedCommand = {
   command: string;
@@ -134,13 +135,6 @@ type SessionState = {
   lastElicitationResponse?: CreateElicitationResponse;
   mcpServers?: NewSessionRequest["mcpServers"];
 };
-
-class CancelledError extends Error {
-  constructor() {
-    super("cancelled");
-    this.name = "CancelledError";
-  }
-}
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -282,50 +276,6 @@ function splitCommandLine(value: string): ParsedCommand {
     command: parts[0],
     args: parts.slice(1),
   };
-}
-
-function assertNotCancelled(signal: AbortSignal): void {
-  if (signal.aborted) {
-    throw new CancelledError();
-  }
-}
-
-async function sleepWithCancel(ms: number, signal: AbortSignal): Promise<void> {
-  if (ms <= 0) {
-    return;
-  }
-
-  assertNotCancelled(signal);
-
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-
-    const finish = (run: () => void) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      signal.removeEventListener("abort", onAbort);
-      run();
-    };
-
-    const onAbort = () => {
-      finish(() => reject(new CancelledError()));
-    };
-
-    const timer = setTimeout(() => {
-      finish(() => resolve());
-    }, ms);
-
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        onAbort();
-      },
-      { once: true },
-    );
-  });
 }
 
 function parseOptionValue(args: string[], index: number, flag: string): string {
@@ -1575,8 +1525,10 @@ class MockAgent implements Agent {
       return `wrote ${filePath}`;
     }
 
-    if (text.startsWith("permission ")) {
-      const rest = text.slice("permission ".length).trim();
+    if (text.startsWith("permission ") || text.startsWith("permission-options ")) {
+      const duplicateOptions = text.startsWith("permission-options ");
+      const prefix = duplicateOptions ? "permission-options " : "permission ";
+      const rest = text.slice(prefix.length).trim();
       const firstSpace = rest.search(/\s/);
 
       if (firstSpace <= 0) {
@@ -1595,6 +1547,15 @@ class MockAgent implements Agent {
         },
         options: [
           { optionId: "allow", name: "Allow", kind: "allow_once" },
+          ...(duplicateOptions
+            ? [
+                {
+                  optionId: "allow-alternative",
+                  name: "Allow alternative",
+                  kind: "allow_once" as const,
+                },
+              ]
+            : []),
           { optionId: "reject", name: "Reject", kind: "reject_once" },
         ],
       });
