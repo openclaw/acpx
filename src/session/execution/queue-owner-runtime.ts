@@ -577,7 +577,6 @@ async function runQueueOwnerRuntime(
               if (activeControls) {
                 controls.publish(ticket, activeControls);
               }
-              turnController.markPromptActive();
               await applyPendingCancel();
             },
             handleProcessInterrupts: false,
