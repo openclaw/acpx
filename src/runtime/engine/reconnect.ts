@@ -74,6 +74,7 @@ export type ConnectAndLoadSessionOptions = {
   client: AcpClient;
   record: SessionRecord;
   resumePolicy?: SessionResumePolicy;
+  strictResume?: boolean;
   sessionOptions?: SessionAgentOptions;
   replacingMode?: true;
   replacingConfigOption?: {
@@ -164,8 +165,12 @@ function isFallbackSafeEmptySessionError(
   return isAcpQueryClosedBeforeResponseError(error) || acp?.code === -32603;
 }
 
-function requiresSameSession(resumePolicy: SessionResumePolicy | undefined): boolean {
-  return resumePolicy === "same-session-only";
+function requiresSameSession(options: ConnectAndLoadSessionOptions): boolean {
+  return (
+    options.resumePolicy === "same-session-only" ||
+    Boolean(options.record.importedFrom) ||
+    options.strictResume === true
+  );
 }
 
 function makeSessionResumeRequiredError(params: {
@@ -430,7 +435,7 @@ export async function connectAndLoadSession(
   const record = options.record;
   const client = options.client;
   assertControlAuthority(options.authority);
-  const sameSessionOnly = requiresSameSession(options.resumePolicy) || Boolean(record.importedFrom);
+  const sameSessionOnly = requiresSameSession(options);
   const originalSessionId = record.acpSessionId;
   const originalAgentSessionId = record.agentSessionId;
   const originalAcpx = cloneSessionAcpxState(record.acpx);
@@ -471,6 +476,7 @@ export async function connectAndLoadSession(
     timeoutMs: options.timeoutMs,
     authority: options.authority,
     promptRecorded: options.promptRecorded,
+    strictResume: options.strictResume,
   });
   const {
     resumed,
@@ -786,6 +792,7 @@ async function loadOrCreateRuntimeSession(params: {
   record: SessionRecord;
   reusingLoadedSession: boolean;
   sameSessionOnly: boolean;
+  strictResume?: boolean;
   timeoutMs?: number;
   authority?: AcpControlAuthority;
   promptRecorded?: boolean;
@@ -830,6 +837,7 @@ async function loadRuntimeSession(
     client: AcpClient;
     record: SessionRecord;
     sameSessionOnly: boolean;
+    strictResume?: boolean;
     timeoutMs?: number;
     authority?: AcpControlAuthority;
     promptRecorded?: boolean;
@@ -879,6 +887,7 @@ async function recoverRuntimeSessionLoadFailure(
     client: AcpClient;
     record: SessionRecord;
     sameSessionOnly: boolean;
+    strictResume?: boolean;
     timeoutMs?: number;
     authority?: AcpControlAuthority;
     promptRecorded?: boolean;
@@ -908,9 +917,17 @@ async function recoverRuntimeSessionLoadFailure(
 }
 
 function canRecoverLoadWithFreshSession(
-  params: { record: SessionRecord; sameSessionOnly: boolean; promptRecorded?: boolean },
+  params: {
+    record: SessionRecord;
+    sameSessionOnly: boolean;
+    promptRecorded?: boolean;
+    strictResume?: boolean;
+  },
   error: unknown,
 ): boolean {
+  if (params.strictResume) {
+    return false;
+  }
   if (!params.sameSessionOnly) {
     return shouldFallbackToNewSession(error, params.record);
   }

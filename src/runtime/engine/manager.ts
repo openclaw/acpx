@@ -306,6 +306,7 @@ async function createOrLoadRuntimeSession(
 }
 
 export class AcpRuntimeManager {
+  private readonly exactSessionRecordIds = new Set<string>();
   private readonly activeControllers = new Map<string, ActiveSessionController>();
   private readonly controlSessionRecords = new Map<string, RuntimeControlSession>();
   private readonly retainedSessionOwners = new Map<string, RuntimeSessionOwner>();
@@ -828,6 +829,7 @@ export class AcpRuntimeManager {
           verbose: this.options.verbose,
           timeoutMs: this.options.timeoutMs,
           resumePolicy: resumePolicyForSessionMode(sessionMode),
+          strictResume: this.exactSessionRecordIds.has(record.acpxRecordId),
           replacingMode: replayOptions?.replacingMode,
           replacingConfigOption: replayOptions?.replacingConfigOption,
           authority,
@@ -861,9 +863,16 @@ export class AcpRuntimeManager {
   }
 
   async ensureSession(input: RuntimeEnsureInput): Promise<SessionRecord> {
-    return await this.withEnsureSessionLock(input, async () =>
-      this.ensureSessionWithOwnership(input),
-    );
+    return await this.withEnsureSessionLock(input, async () => {
+      const record = await this.ensureSessionWithOwnership(input);
+      if (input.resumeSessionId && !this.exactSessionRecordIds.has(record.acpxRecordId)) {
+        // Compatible ensures bypass operation locks; an earlier alias may
+        // already have committed to fresh fallback while awaiting its reply.
+        this.assertRuntimeSessionIdle(record.acpxRecordId);
+        this.exactSessionRecordIds.add(record.acpxRecordId);
+      }
+      return record;
+    });
   }
 
   private async withEnsureSessionLock<T>(
@@ -1103,6 +1112,9 @@ export class AcpRuntimeManager {
         session,
       });
       await this.retainInitializedSessionOwner(owner, record);
+      if (!input.resumeSessionId) {
+        this.exactSessionRecordIds.delete(record.acpxRecordId);
+      }
       return record;
     } catch (error) {
       await settleAttempt(async () => this.abandonInitializingSessionOwner(owner));
@@ -1674,6 +1686,7 @@ export class AcpRuntimeManager {
       client: turn.client,
       record: turn.record,
       resumePolicy: resumePolicyForSessionMode(task.input.sessionMode),
+      strictResume: this.exactSessionRecordIds.has(turn.record.acpxRecordId),
       timeoutMs: this.options.timeoutMs,
       promptRecorded: true,
       activeController: task.state.activeController!,
