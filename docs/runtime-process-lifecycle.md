@@ -83,6 +83,29 @@ every witnessed ancestor exits before the next one. Unavailable OS process
 information leaves unverified descendants untouched. Abrupt acpx death still
 requires separate host supervision.
 
+## Observe session protocol messages
+
+In-process runtimes can set `AcpRuntimeOptions.onAcpMessage` to observe inbound and
+outbound ACP messages on their owned session clients. The observer is installed
+before initialization and remains available during session setup, prompts, idle
+updates, reconnects, cold controls, and session discard. Health probes use separate
+clients and do not invoke it.
+Shared runtimes reject this option because their connection belongs to another
+process.
+
+Observations are best-effort: callback failures are ignored and asynchronous work
+is not awaited. Synchronous callback work runs on the protocol processing path
+and can delay it; move slow processing off that path. Treat messages as read-only.
+Outbound callbacks run before the transport write, so they do not prove delivery
+or agent acceptance. The callback is runtime-wide and has no separate session
+context; hosts must use the session identity present in protocol messages when
+available, and cannot assume every message has one.
+
+The existing client filters still apply: elicitation requests and their responses
+are omitted, as are session updates suppressed during history replay. Other
+messages can contain prompts, tool input and private data. The callback does not
+persist anything; the embedding host owns redaction, access and retention.
+
 ## Inspect models without a runtime store
 
 `inspectAgentModels()` from `acpx/runtime` launches an explicit `agentCommand`
