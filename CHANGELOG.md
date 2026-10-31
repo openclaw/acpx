@@ -27,6 +27,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Runtime/embedding: apply independent setup deadlines to session creation, load and resume requests, cleaning up stalled clients without replacing explicitly resumed sessions.
 
+- Docs/Grok Build: distinguish the local ACP profile from Grok Bot cloud routines and explain webhook acceptance versus results.
+
 ## 0.21.1 - 2026-10-26
 
 **Highlights:** Patch four URI security vulnerabilities in development dependencies, update the guarded filesystem runtime, and clarify missing-prompt errors.
