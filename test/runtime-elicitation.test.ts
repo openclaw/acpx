@@ -130,10 +130,12 @@ test("runtime routes form elicitation context and known responses", async (t) =>
     ] satisfies AcpElicitationResponse[]) {
       await t.test(response.action, async () => {
         let seenRequestId: JsonRpcId | undefined;
+        let responseSent: Promise<void> | undefined;
         const result = await runTurn(
           runtime,
           turnInput(handle, "elicitation form", async (request, context) => {
             seenRequestId = context.requestId;
+            responseSent = context.responseSent;
             assert.equal(context.signal.aborted, false);
             assert.equal(request.mode, "form");
             assert.equal(
@@ -147,6 +149,8 @@ test("runtime routes form elicitation context and known responses", async (t) =>
         assert.equal(result.status, "completed");
         assert.deepEqual(JSON.parse(result.text), response);
         assert.notEqual(seenRequestId, undefined);
+        assert(responseSent);
+        await responseSent;
       });
     }
   });

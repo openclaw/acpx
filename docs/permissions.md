@@ -75,6 +75,42 @@ The callback's signal aborts when the turn finishes, times out, is cancelled,
 or its connection closes. Pending permission requests then return cancellation;
 a late host response cannot approve the action.
 
+### Observe response writes in an embedding host
+
+Permission and elicitation handlers receive `context.responseSent`, a
+`Promise<void>` for the corresponding final JSON-RPC response. It resolves only
+after the local transport writer completes. Request/turn cancellation, connection
+closure and write failure reject it if it has not already resolved. The promise
+has an internal rejection handler, so hosts can ignore it.
+
+Return the decision or answer before awaiting this promise: ACPX cannot write the
+response until the handler returns. For example:
+
+```ts
+onPermissionRequest: async (request, { responseSent }) => {
+  const decision = await showPermissionOptions(request.raw.options);
+  void responseSent.then(
+    () => markResponseWritten(),
+    () => markResponseUnconfirmed(),
+  );
+  return decision === undefined
+    ? { outcome: "cancel" }
+    : { outcome: "selected", optionId: decision };
+},
+```
+
+The UI callbacks above are host-owned. A successful write does not establish that
+the agent received, accepted or executed the decision. It also does not guarantee
+that a particular host decision was used: returning `undefined` or throwing still
+uses the normal permission fallback policy. Receipts do not retry responses or
+change native permissions. Elicitation request/response bodies remain excluded
+from protocol observation.
+
+A rejected receipt does not prove non-delivery. Cancellation cannot retract a
+response already queued in the transport: it may still be written if the pipe
+later drains. Treat rejection as an unconfirmed write and do not automatically
+resend a permission decision or elicitation answer.
+
 ### Session-specific embedded policies
 
 Use `AcpRuntimeOptions.sessionPermissions(context)` when one embedded runtime

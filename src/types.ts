@@ -32,7 +32,13 @@ export type AcpPermissionDecision =
 
 export type AcpPermissionHandler = (
   request: AcpPermissionRequest,
-  context: { signal: AbortSignal },
+  context: {
+    signal: AbortSignal;
+    /** Resolves after the final response is written locally; rejects on abort/transport loss.
+     * Return the decision before awaiting this promise. It does not prove agent acceptance.
+     */
+    responseSent: Promise<void>;
+  },
 ) => Promise<AcpPermissionDecision | undefined>;
 
 export const ACP_ELICITATION_MODES = ["form", "url"] as const;
@@ -44,6 +50,10 @@ export type AcpElicitationContext = {
   requestId: JsonRpcId;
   /** Aborts with the request itself or its owning prompt turn/session. */
   signal: AbortSignal;
+  /** Resolves after the final response is written locally; rejects on abort/transport loss.
+   * Return the answer before awaiting this promise. It does not prove agent acceptance.
+   */
+  responseSent: Promise<void>;
 };
 
 type AcpElicitationResponseMeta = {

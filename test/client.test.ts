@@ -3309,6 +3309,110 @@ function createDeferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
+for (const kind of ["permission", "elicitation"] as const) {
+  for (const finish of ["write", "failure", "cancel", "close"] as const) {
+    test(
+      `${kind} responseSent observes ${finish} after the host callback returns`,
+      { timeout: 10_000 },
+      async (t) => {
+        const gate = createDeferred<void>();
+        const writing = createDeferred<void>();
+        const captured = createDeferred<{ responseSent: Promise<void> }>();
+        const failure = new Error("response transport write failed");
+        const fixture = createClientFixture(t, {
+          client: {
+            elicitationModes: ["form"],
+            suppressSdkConsoleErrors: true,
+            onPermissionRequest: async (_request, context) => {
+              captured.resolve(context);
+              return { outcome: "selected", optionId: "allow" };
+            },
+          },
+          write: async (message) => {
+            if ("id" in message && message.id === "receipt" && !("method" in message)) {
+              writing.resolve();
+              await gate.promise;
+            }
+          },
+          release: () => gate.resolve(),
+        });
+        const prompt = fixture.track(
+          fixture.client.prompt(
+            "receipt-session",
+            "hello",
+            undefined,
+            async (_request, context) => {
+              captured.resolve(context);
+              return { action: "accept", content: { answer: "yes" } };
+            },
+          ),
+        );
+        const request = await fixture.message(0);
+        await fixture.send({
+          jsonrpc: "2.0",
+          id: "receipt",
+          method:
+            kind === "permission"
+              ? methods.client.session.requestPermission
+              : methods.client.elicitation.create,
+          params:
+            kind === "permission"
+              ? makePermissionRequest("receipt-session", "edit")
+              : {
+                  sessionId: "receipt-session",
+                  mode: "form",
+                  message: "Question",
+                  requestedSchema: { type: "object", properties: { answer: { type: "string" } } },
+                },
+        });
+        const { responseSent } = await captured.promise;
+        let settled = false;
+        void responseSent.then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          },
+        );
+        await writing.promise;
+        assert.equal(settled, false, "a queued response is not a successful write");
+        if (finish === "write") {
+          gate.resolve();
+          await responseSent;
+          const response = await fixture.response("receipt");
+          assert("result" in response);
+          assert.deepEqual(
+            response.result,
+            kind === "permission"
+              ? { outcome: { outcome: "selected", optionId: "allow" } }
+              : { action: "accept", content: { answer: "yes" } },
+          );
+          await fixture.reply(request);
+          await prompt;
+        } else if (finish === "failure") {
+          const rejected = assert.rejects(responseSent, (error) => error === failure);
+          gate.reject(failure);
+          await rejected;
+          await assert.rejects(prompt);
+        } else {
+          const rejected = assert.rejects(responseSent);
+          const stopping = fixture.track(
+            finish === "close" ? fixture.client.close() : fixture.client.cancel("receipt-session"),
+          );
+          await rejected;
+          gate.resolve();
+          if (finish === "cancel") {
+            await fixture.reply(request, { stopReason: "cancelled" });
+          }
+          await stopping;
+          await Promise.allSettled([prompt]);
+        }
+      },
+    );
+  }
+}
+
 function createClientFixture(
   t: TestContext,
   options: {
