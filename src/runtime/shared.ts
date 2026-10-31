@@ -132,6 +132,7 @@ export class SharedAcpRuntime {
       "sessionPermissions",
       "processLifecycle",
       "onPermissionRequest",
+      "onAcpMessage",
       "elicitationModes",
       "fs",
       "terminal",

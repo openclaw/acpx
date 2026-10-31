@@ -350,6 +350,16 @@ export class AcpRuntimeManager {
   private readonly pendingTasks = new Set<Promise<unknown>>();
   private shuttingDown = false;
   private shutdownTask?: Promise<void>;
+  private readonly observeAcpMessage: NonNullable<AcpRuntimeOptions["onAcpMessage"]> = (
+    direction,
+    message,
+  ) => {
+    try {
+      void Promise.resolve(this.options.onAcpMessage?.(direction, message)).catch(() => {});
+    } catch {
+      // Observations must not interrupt protocol processing or transport writes.
+    }
+  };
 
   constructor(
     private readonly options: AcpRuntimeOptions,
@@ -360,6 +370,8 @@ export class AcpRuntimeManager {
     this.assertOpen();
     const clientOptions: ConstructorParameters<typeof AcpClient>[0] = {
       ...options,
+      onAcpMessage:
+        options.processLaunchScope?.kind === "runtime-session" ? this.observeAcpMessage : undefined,
       agentProcessEnv: this.options.agentProcessEnv,
       agentProcessEnvAllow: this.options.agentProcessEnvAllow,
       agentProcessEnvBlock: this.options.agentProcessEnvBlock,
@@ -505,6 +517,7 @@ export class AcpRuntimeManager {
       pendingSessionUpdates: [],
     };
     input.client.setEventHandlers({
+      onAcpMessage: this.observeAcpMessage,
       onSessionUpdate: (notification) => this.routeOwnedSessionUpdate(owner, notification),
       onClientOperation: (operation) => this.routeOwnedClientOperation(owner, operation),
     });
