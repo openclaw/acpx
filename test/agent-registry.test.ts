@@ -372,20 +372,15 @@ test("resolveBuiltInAgentLaunch accepts the legacy Claude npm exec default", () 
   });
 });
 
-test("public inspection resolves installed direct agents without running package executors", () => {
-  const commands: string[] = [];
+test("public inspection reports installed and missing direct agents", () => {
   const registry = createAgentRegistry({
-    resolveExecutable: (command) => {
-      commands.push(command);
-      return command === "opencode" ? "/fixture/bin/opencode" : undefined;
-    },
+    resolveExecutable: (command) => (command === "opencode" ? "/fixture/bin/opencode" : undefined),
   });
   assert.deepEqual(registry.inspect("opencode"), {
     id: "opencode",
     name: "OpenCode",
     launch: { kind: "installed", argv: ["/fixture/bin/opencode", "acp"] },
   });
-  assert.deepEqual(commands, ["opencode"]);
   assert.deepEqual(registry.inspect("qwen"), {
     id: "qwen",
     name: "Qwen Code",
@@ -441,7 +436,7 @@ test("public inspection requires Pi's native command and refreshes installation 
   });
 });
 
-test("public inspection resolves a plugin-local adapter package without executing its entrypoint", (t) => {
+test("public inspection refreshes plugin-local adapter readiness when its entrypoint disappears", (t) => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "acpx-inspect-package-"));
   t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
   const bin = path.join(temp, "adapter.js");
@@ -449,7 +444,7 @@ test("public inspection resolves a plugin-local adapter package without executin
     path.join(temp, "package.json"),
     JSON.stringify({ name: "pi-acp", version: "0.0.33", bin: { "pi-acp": "adapter.js" } }),
   );
-  fs.writeFileSync(bin, 'throw new Error("inspection must not execute an adapter");');
+  fs.writeFileSync(bin, "");
   const registry = createAgentRegistry({
     resolveExecutable: (command) => (command === "pi" ? "/fixture/pi" : undefined),
     resolvePackageRoot: (name) => (name === "pi-acp" ? temp : undefined),

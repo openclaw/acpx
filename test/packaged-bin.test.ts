@@ -168,6 +168,13 @@ test("packaged registry imports without runtime dependencies or agent execution"
       path.join(process.cwd(), "package.json"),
       path.join(packageDir, "package.json"),
     );
+    const adapterDir = path.join(packageDir, "node_modules", "pi-acp");
+    await fs.mkdir(adapterDir, { recursive: true });
+    await fs.writeFile(
+      path.join(adapterDir, "package.json"),
+      JSON.stringify({ name: "pi-acp", bin: { "pi-acp": "adapter.js" } }),
+    );
+    await fs.writeFile(path.join(adapterDir, "adapter.js"), "");
     const result = spawnSync(
       process.execPath,
       [
@@ -177,15 +184,29 @@ test("packaged registry imports without runtime dependencies or agent execution"
       import assert from 'node:assert/strict';
       import childProcess from 'node:child_process';
       import { syncBuiltinESMExports } from 'node:module';
+      import path from 'node:path';
+      const executions = [];
       for (const name of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']) {
-        childProcess[name] = () => { throw new Error('Unexpected process execution'); };
+        childProcess[name] = () => {
+          executions.push(name);
+          throw new Error('Unexpected process execution');
+        };
       }
       syncBuiltinESMExports();
       const { createAgentRegistry } = await import('acpx/agent-registry');
-      const registry = createAgentRegistry({ resolveExecutable: () => undefined, resolvePackageRoot: () => undefined });
+      const registry = createAgentRegistry({
+        resolveExecutable: command => ['opencode', 'pi'].includes(command) ? path.resolve('bin', command) : undefined,
+      });
       assert.equal(registry.inspect('qwen').launch.kind, 'missing');
+      assert.deepEqual(registry.inspect('opencode').launch, {
+        kind: 'installed', argv: [path.resolve('bin', 'opencode'), 'acp'],
+      });
+      assert.deepEqual(registry.inspect('pi').launch, {
+        kind: 'installed', argv: [process.execPath, path.resolve('node_modules/pi-acp/adapter.js')],
+      });
       assert.ok(registry.list().includes('pi'));
       assert.deepEqual(registry.resolve('opencode'), ['npx', '-y', '--package=opencode-ai', '--', 'opencode', 'acp']);
+      assert.deepEqual(executions, []);
     `,
       ],
       { cwd: packageDir, encoding: "utf8" },
