@@ -1126,6 +1126,21 @@ test("integration: flow run reports waiting checkpoints in json mode", async () 
   });
 });
 
+test("integration: built-in goose agent launches its native ACP server", async () => {
+  await withTempHome(async (homeDir) => {
+    const binDir = path.join(homeDir, "goose bin");
+    await fs.mkdir(binDir);
+    await writeFakeHarnessAgent(binDir, "goose");
+    const result = await runCli(
+      ["--approve-all", "--cwd", homeDir, "--format", "quiet", "goose", "exec", "echo hello"],
+      homeDir,
+      { env: { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}` } },
+    );
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout.trim(), "hello");
+  });
+});
+
 test("integration: built-in droid agent resolves to droid exec --output-format acp", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -5632,7 +5647,7 @@ async function configuredHarnessInvocation(
 
 async function writeFakeHarnessAgent(
   binDir: string,
-  name: "cursor-agent" | "droid" | "devin" | "uvx" | "iflow" | "qodercli",
+  name: "cursor-agent" | "droid" | "devin" | "uvx" | "iflow" | "qodercli" | "goose",
   argLogPath = "",
 ): Promise<void> {
   const launcher = fileURLToPath(new URL("./fixtures/harness-launcher.js", import.meta.url));

@@ -117,6 +117,7 @@ const AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
   droid: { name: "Factory Droid", argv: ["droid", "exec", "--output-format", "acp"] },
   "fast-agent": { name: "Fast Agent", argv: ["uvx", "fast-agent-mcp", "acp"] },
   fx: { name: "fx", argv: ["fx", "acp"] },
+  goose: { name: "Goose", argv: ["goose", "acp"] },
   "grok-build": { name: "Grok Build", argv: ["grok", "agent", "stdio"] },
   iflow: { name: "iFlow", argv: ["iflow", "--experimental-acp"] },
   junie: { name: "Junie", argv: ["junie", "--acp=true"] },

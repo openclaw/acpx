@@ -24,6 +24,7 @@ The default agent for top-level commands like `acpx exec â€¦` and `acpx prompt â
 | `fast-agent`  | `uvx fast-agent-mcp acp`                                                     | [fast-agent](https://fast-agent.ai/)                                                                            |
 | `fx`          | `fx acp`                                                                     | [fx](https://fx.sh)                                                                                             |
 | `grok-build`  | `grok agent stdio`                                                           | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
+| `goose`       | `goose acp`                                                                  | [Goose](https://github.com/aaif-goose/goose)                                                                    |
 | `iflow`       | `iflow --experimental-acp`                                                   | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
 | `junie`       | `junie --acp=true`                                                           | [JetBrains Junie](https://junie.jetbrains.com)                                                                  |
 | `kilocode`    | `npx -y --package=@kilocode/cli -- kilo acp`                                 | [Kilocode](https://kilocode.ai)                                                                                 |

@@ -172,6 +172,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "droid",
     "fast-agent",
     "fx",
+    "goose",
     "grok-build",
     "iflow",
     "junie",

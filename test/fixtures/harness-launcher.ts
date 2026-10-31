@@ -57,6 +57,7 @@ function mockArguments(): string[] {
   // These literals are independent of the production registry under test.
   switch (harness) {
     case "cursor-agent":
+    case "goose":
       return consumePrefix(["acp"]);
     case "droid":
       return consumePrefix(["exec", "--output-format", "acp"]);
