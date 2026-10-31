@@ -106,6 +106,7 @@ const AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
   gemini: { name: "Gemini CLI", argv: ["gemini", "--acp"] },
   cursor: { name: "Cursor", argv: ["cursor-agent", "acp"] },
   copilot: { name: "GitHub Copilot", argv: ["copilot", "--acp", "--stdio"] },
+  ante: { name: "Ante", argv: ["ante", "acp"], requiredCommands: ["ante-acp"] },
   antigravity: {
     name: "Google Antigravity",
     argv:

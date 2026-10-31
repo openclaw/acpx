@@ -167,6 +167,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
     "copilot",
   ]);
   assert.deepEqual(agents.slice(7), [
+    "ante",
     "antigravity",
     "deepseek-harness",
     "devin",
@@ -435,6 +436,23 @@ test("public inspection requires Pi's native command and refreshes installation 
   assert.deepEqual(registry.inspect("pi")?.launch, {
     kind: "missing",
     requirements: [{ kind: "package", name: "pi-acp" }],
+  });
+});
+
+test("public inspection requires Ante's separately installed ACP adapter", () => {
+  const installed = new Set(["ante"]);
+  const registry = createAgentRegistry({
+    resolveExecutable: (command) => (installed.has(command) ? "/fixture/" + command : undefined),
+  });
+  assert.deepEqual(registry.inspect("ante"), {
+    id: "ante",
+    name: "Ante",
+    launch: { kind: "missing", requirements: [{ kind: "command", name: "ante-acp" }] },
+  });
+  installed.add("ante-acp");
+  assert.deepEqual(registry.inspect("ante")?.launch, {
+    kind: "installed",
+    argv: ["/fixture/ante", "acp"],
   });
 });
 

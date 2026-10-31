@@ -90,6 +90,7 @@ Friendly agent names resolve to commands:
 - `gemini` -> `gemini --acp`
 - `cursor` -> `cursor-agent acp`
 - `copilot` -> `copilot --acp --stdio`
+- `ante` -> `ante acp` (experimental). Requires Ante 0.2.1 or newer and a separately installed `ante-acp` on `PATH`. Prefer `exec` for fresh work; context is limited to the live ACP connection, with no reopening after disconnect. AskUser is excluded, and client-supplied MCP servers and extra directories are ignored. See [Ante](https://github.com/openclaw/acpx/blob/main/agents/Ante.md).
 - `antigravity` -> `agy_acp_server.par` (`--uid=` on Linux; `agy_acp_server.exe` on Windows). Install the official runtime/helper pair and configure its own sign-in first; see [Antigravity](https://github.com/openclaw/acpx/blob/main/agents/Antigravity.md). Fixed-choice interaction questions are cancelled, including with `--approve-all`, host permission callbacks, and existing custom launchers; acpx cannot supply user answers through permission approval.
 - `deepseek-harness` -> `dsh --profile acp` (DeepSeek Harness, separate from DeepSeek models; configure the provider in dsh first. Uses advertised `session/resume` without transcript replay, not `session/load`; see the [DeepSeek Harness guide](https://github.com/openclaw/acpx/blob/main/agents/DeepSeekHarness.md))
 - `devin` -> `devin acp`
