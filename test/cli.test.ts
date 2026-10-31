@@ -16,7 +16,6 @@ import {
   parseTtlSeconds,
 } from "../src/cli.js";
 import { classifySessionConnectionStatus } from "../src/cli/output/render.js";
-import { serializeSessionRecordForDisk } from "../src/session/persistence.js";
 import type { SessionRecord } from "../src/types.js";
 import {
   cleanupOwnerArtifacts,
@@ -27,6 +26,12 @@ import {
   stopProcess,
   writeQueueOwnerLock,
 } from "./queue-test-helpers.js";
+import {
+  fileExists,
+  makeSessionRecord as makeSessionRecordFixture,
+  sessionFilePath,
+  writeSessionRecordFile,
+} from "./runtime-test-helpers.js";
 
 const CLI_PATH = fileURLToPath(
   new URL(`../src/cli${path.extname(fileURLToPath(import.meta.url))}`, import.meta.url),
@@ -3539,87 +3544,19 @@ async function runCli(
   });
 }
 
-function makeSessionRecord(
-  record: Partial<SessionRecord> & {
-    acpxRecordId: string;
-    acpSessionId: string;
-    agentCommand: string;
-    cwd: string;
-    createdAt?: string;
-    lastUsedAt?: string;
-  },
-): SessionRecord {
-  const timestamp = "2026-01-01T00:00:00.000Z";
-  return {
-    schema: "acpx.session.v1",
-    acpxRecordId: record.acpxRecordId,
-    acpSessionId: record.acpSessionId,
-    agentSessionId: record.agentSessionId,
-    agentCommand: record.agentCommand,
-    cwd: record.cwd,
-    name: record.name,
-    createdAt: record.createdAt ?? timestamp,
-    lastUsedAt: record.lastUsedAt ?? timestamp,
-    lastSeq: record.lastSeq ?? 0,
-    lastRequestId: record.lastRequestId,
-    eventLog: record.eventLog ?? {
-      active_path: `.stream.ndjson`,
-      segment_count: 1,
-      max_segment_bytes: 1024,
-      max_segments: 1,
-      last_write_at: record.lastUsedAt ?? timestamp,
-      last_write_error: null,
-    },
-    closed: record.closed ?? false,
-    closedAt: record.closedAt,
-    pid: record.pid,
-    agentStartedAt: record.agentStartedAt,
-    lastPromptAt: record.lastPromptAt,
-    lastAgentExitCode: record.lastAgentExitCode,
-    lastAgentExitSignal: record.lastAgentExitSignal,
-    lastAgentExitAt: record.lastAgentExitAt,
-    lastAgentDisconnectReason: record.lastAgentDisconnectReason,
-    protocolVersion: record.protocolVersion,
-    agentCapabilities: record.agentCapabilities,
-    title: record.title ?? null,
-    messages: record.messages ?? [],
-    updated_at: record.updated_at ?? record.lastUsedAt ?? timestamp,
-    cumulative_token_usage: record.cumulative_token_usage ?? {},
-    request_token_usage: record.request_token_usage ?? {},
-    acpx: record.acpx,
-  };
+function makeSessionRecord(record: Parameters<typeof makeSessionRecordFixture>[0]): SessionRecord {
+  return makeSessionRecordFixture(record, {
+    defaultName: false,
+    defaultAcpx: false,
+    resolveCwd: false,
+  });
 }
 
 async function writeSessionRecord(
   homeDir: string,
-  record: Partial<SessionRecord> & {
-    acpxRecordId: string;
-    acpSessionId: string;
-    agentCommand: string;
-    cwd: string;
-  },
+  record: Parameters<typeof makeSessionRecord>[0],
 ): Promise<void> {
-  const sessionDir = path.join(homeDir, ".acpx", "sessions");
-  await fs.mkdir(sessionDir, { recursive: true });
-  const file = path.join(sessionDir, `${encodeURIComponent(record.acpxRecordId)}.json`);
-  await fs.writeFile(
-    file,
-    `${JSON.stringify(serializeSessionRecordForDisk(makeSessionRecord(record)), null, 2)}\n`,
-    "utf8",
-  );
-}
-
-function sessionFilePath(homeDir: string, acpxRecordId: string): string {
-  return path.join(homeDir, ".acpx", "sessions", `${encodeURIComponent(acpxRecordId)}.json`);
-}
-
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
+  await writeSessionRecordFile(homeDir, makeSessionRecord(record));
 }
 
 function escapeRegex(value: string): string {
