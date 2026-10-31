@@ -59,7 +59,7 @@ for (const method of [
     await first.shutdown();
     observed.length = 0;
     assert.equal((await runtime.doctor()).ok, true);
-    assert.deepEqual(observed, []);
+    assert.equal(observed.length, 0);
 
     if (method === "session/set_mode") {
       await runtime.setMode({ handle, mode: "plan" });
