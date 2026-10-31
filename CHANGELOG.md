@@ -28,6 +28,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Runtime/embedding: apply independent setup deadlines to session creation, load and resume requests, cleaning up stalled clients without replacing explicitly resumed sessions.
 
+- Runtime/embedding: keep explicit `resumeSessionId` attachments strict across matching local-record reuse and later prompt/control reconnects without resetting history or saved configuration. Same-record aliases retain the constraint; adding it to unfinished untargeted work refuses until that work settles.
+
 ## 0.21.1 - 2026-10-26
 
 **Highlights:** Patch four URI security vulnerabilities in development dependencies, update the guarded filesystem runtime, and clarify missing-prompt errors.

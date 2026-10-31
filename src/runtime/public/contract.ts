@@ -87,6 +87,14 @@ export type AcpRuntimeEnsureInput = {
   sessionKey: string;
   agent: string;
   mode: AcpRuntimeSessionMode;
+  /**
+   * Resume this exact ACP session. The in-process runtime keeps matching local
+   * history and saved configuration, and later prompt/control reconnects refuse
+   * replacement if this target cannot load. Same-record aliases cannot relax
+   * this constraint. Adding the constraint requires an idle arrangement;
+   * explicit lifecycle reset remains separate. Supply the
+   * target again when attaching through another runtime instance.
+   */
   resumeSessionId?: string;
   cwd?: string;
   /**
