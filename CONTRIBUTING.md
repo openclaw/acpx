@@ -52,6 +52,31 @@ formats are compatibility surfaces. Preserve existing behavior during refactors;
 explain intentional behavior changes and update the relevant documentation.
 Maintainers add user-facing changelog entries when landing contributions.
 
+## Live provider validation
+
+`pnpm run test:live` builds the distributable CLI and runs a real prompt through
+all built-in agent mappings, one at a time. Each agent must return a fresh nonce;
+a missing executable, authentication failure, timeout, or wrong response fails
+its test. The Cursor selection also retains the structured image check.
+
+To run a subset on a prepared host:
+
+```bash
+ACPX_LIVE_AGENTS=pi,codex,claude pnpm run test:live
+```
+
+Install the selected agents and provide their credentials through the environment
+before running. Tests use disposable home and workspace directories, so existing
+home-based logins are unavailable; use the adapter's supported environment
+credentials or credential-directory variable. Do not copy personal profiles into
+test fixtures. Agents are real processes; permission denial and disabled client
+filesystem/terminal tools do not sandbox them. Run on an isolated host when needed.
+Live turns can consume provider quota. This suite stays outside ordinary CI.
+
+This proves built CLI launch, ACP setup, prompt delivery, streamed response, and
+one-shot completion. It does not qualify persistent reconnects or every provider
+feature. The nightly conformance handshake remains separate protocol smoke proof.
+
 ## Updating review tooling
 
 Shared review behavior is maintained in `openclaw/agent-skills`. Follow the
