@@ -24,6 +24,7 @@ Repo: https://github.com/openclaw/acpx
 - Docs/site: label the homepage badges as curated examples and use the primary Pi, OpenClaw, Codex, and Claude order.
 
 - Qoder: preserve native startup options, shutdown grace, and cleanup-message filtering when a custom command uses `qoder --acp` instead of `qodercli --acp`.
+- Sessions/controls: `set model`, `set-mode` and other session-control failures now show the adapter's `data.message` reason in text output (`pro-model requires a Pro plan` instead of `Internal error (ACP -32603)`), preferring `data.details` as before. Thanks @KrasimirKralev.
 
 - Runtime/embedding: apply independent setup deadlines to session creation, load and resume requests, cleaning up stalled clients without replacing explicitly resumed sessions.
 
