@@ -11,6 +11,7 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isAcpJsonRpcMessage } from "../src/acp/jsonrpc.js";
+import { observeProcessIncarnation, probeProcessIdentity } from "../src/process-identity.js";
 import type { PromptInput } from "../src/prompt-content.js";
 import { runPromptTurn } from "../src/runtime/engine/prompt-turn.js";
 import {
@@ -31,6 +32,9 @@ const CLI_PATH = fileURLToPath(
   new URL(`../src/cli${path.extname(fileURLToPath(import.meta.url))}`, import.meta.url),
 );
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
+const QUEUE_CLEANUP_PATH = fileURLToPath(
+  new URL("./fixtures/retire-integration-queue-owners.js", import.meta.url),
+);
 const FLOW_FIXTURE_PATH = fileURLToPath(new URL("./fixtures/flow-branch.flow.js", import.meta.url));
 const FLOW_SHELL_FIXTURE_PATH = fileURLToPath(
   new URL("./fixtures/flow-shell.flow.js", import.meta.url),
@@ -4125,6 +4129,108 @@ test("integration: prompt reuses warm queue owner and agent pid across turns", a
   });
 });
 
+for (const fails of [false, true]) {
+  test(`integration helper native: HOME cleanup retires warm processes after ${fails ? "failure" : "success"}`, async (t) => {
+    await withTempHome(async (sentinelHome) => {
+      const sentinel = await startWarmFixtureSession(sentinelHome);
+      let fixtureHome: string | undefined;
+      let fixture: Awaited<ReturnType<typeof startWarmFixtureSession>> | undefined;
+      let checkedRemoval = false;
+      const bodyError = new Error("synthetic fixture body failure");
+      const originalRm = fs.rm;
+      const hook = t.mock.method(fs, "rm", async (...args: Parameters<typeof fs.rm>) => {
+        if (args[0] === fixtureHome && fixture) {
+          // Check at the deletion boundary. On the unchanged fixture this throws
+          // before rm, preserving the exact lease for the proof's rescue cleanup.
+          for (const witness of [fixture.owner, fixture.agent]) {
+            assert.equal(await observeProcessIncarnation(witness.pid, witness.identity), "gone");
+          }
+          checkedRemoval = true;
+        }
+        await originalRm(...args);
+      });
+      const body = await observeTestOutcome(async () => {
+        const result = await observeTestOutcome(() =>
+          withTempHome(async (homeDir) => {
+            fixtureHome = homeDir;
+            fixture = await startWarmFixtureSession(homeDir);
+            const second = await runCli(
+              [...baseAgentArgs(homeDir), "prompt", "echo second"],
+              homeDir,
+            );
+            assert.equal(second.code, 0, second.stderr);
+            assert.equal(
+              (await readQueueOwnerLock(homeDir, fixture.sessionId)).pid,
+              fixture.owner.pid,
+            );
+            const record = JSON.parse(
+              await fs.readFile(
+                path.join(homeDir, ".acpx", "sessions", `${fixture.sessionId}.json`),
+                "utf8",
+              ),
+            ) as { pid: number };
+            assert.equal(record.pid, fixture.agent.pid, "the body must retain the warm agent");
+            if (fails) {
+              throw bodyError;
+            }
+          }),
+        );
+        if (fails) {
+          assert.equal(result.ok, false);
+          if (!result.ok) {
+            assert.equal(result.error, bodyError);
+          }
+        } else if (!result.ok) {
+          throw result.error;
+        }
+        assert.equal(checkedRemoval, true);
+        for (const witness of [sentinel.owner, sentinel.agent]) {
+          assert.equal(await observeProcessIncarnation(witness.pid, witness.identity), "matching");
+        }
+      });
+      hook.mock.restore();
+      const cleanup = await observeTestOutcome(async () => {
+        if (fixtureHome && fsSync.existsSync(fixtureHome)) {
+          const result = await runCliWithEntry(QUEUE_CLEANUP_PATH, [], fixtureHome, {
+            timeoutMs: 30_000,
+          });
+          assert.equal(result.code, 0, result.stderr);
+          await fs.rm(fixtureHome, { recursive: true, force: true });
+        }
+      });
+      unwrapTestOutcomes(body, cleanup);
+    });
+  });
+}
+
+test("integration helper native: failed queue retirement retains HOME and body failure", async () => {
+  let fixtureHome: string | undefined;
+  const bodyError = new Error("synthetic fixture body failure");
+  try {
+    await assert.rejects(
+      withTempHome(async (homeDir) => {
+        fixtureHome = homeDir;
+        const { lockPath } = queuePaths(homeDir, "invalid-fixture-owner");
+        await fs.mkdir(path.dirname(lockPath), { recursive: true });
+        await fs.writeFile(lockPath, JSON.stringify({ sessionId: "invalid-fixture-owner" }));
+        throw bodyError;
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof AggregateError);
+        assert.equal(error.errors[0], bodyError);
+        assert.match(String(error.errors[1]), /Queue cleanup failed; retained HOME/);
+        assert.ok(fixtureHome && fsSync.existsSync(fixtureHome));
+        return true;
+      },
+    );
+  } finally {
+    if (fixtureHome) {
+      // This fixture contains an invalid synthetic lease and never starts a process.
+      await fs.rm(fixtureHome, { recursive: true, force: true });
+    }
+  }
+});
+
 test("integration: warm queue owner does not retain per-request permission policy", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -5760,9 +5866,52 @@ async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<vo
         `Retained test HOME because owned CLI or fixture cleanup was not proved: ${tempHome}`,
       );
     }
+    const queueFiles = await fs
+      .readdir(path.join(tempHome, ".acpx", "queues"))
+      .catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") {
+          return [];
+        }
+        throw error;
+      });
+    const owners = queueFiles.filter((file) => file.endsWith(".lock")).length;
+    if (owners > 0) {
+      // Foreground close leaves warm owners alive. Keep HOME until canonical
+      // retirement and passive owner/agent birth checks have both completed.
+      const retired = await runCliWithEntry(QUEUE_CLEANUP_PATH, [], tempHome, {
+        // Each owner has a 13.5s TERM/KILL budget plus bounded identity probes.
+        timeoutMs: 5_000 + owners * 25_000,
+      });
+      assert.equal(
+        retired.code,
+        0,
+        `Queue cleanup failed; retained HOME: ${tempHome}\n${retired.stderr}`,
+      );
+    }
     await fs.rm(tempHome, { recursive: true, force: true });
   });
   unwrapTestOutcomes(body, cleanup);
+}
+
+async function startWarmFixtureSession(homeDir: string) {
+  const created = await runCli(
+    [...baseAgentArgs(homeDir), "--format", "json", "sessions", "new"],
+    homeDir,
+  );
+  assert.equal(created.code, 0, created.stderr);
+  const { acpxRecordId: sessionId } = JSON.parse(created.stdout.trim()) as { acpxRecordId: string };
+  const prompt = await runCli([...baseAgentArgs(homeDir), "prompt", "echo first"], homeDir);
+  assert.equal(prompt.code, 0, prompt.stderr);
+  const owner = await readQueueOwnerLock(homeDir, sessionId);
+  const record = JSON.parse(
+    await fs.readFile(path.join(homeDir, ".acpx", "sessions", `${sessionId}.json`), "utf8"),
+  ) as { pid: number };
+  const capture = async (pid: number) => {
+    const probe = await probeProcessIdentity(pid);
+    assert.ok(probe.state === "alive");
+    return { pid, identity: probe.identity };
+  };
+  return { sessionId, owner: await capture(owner.pid), agent: await capture(record.pid) };
 }
 
 // A timer is a failure boundary, never a substitute for joining close.
