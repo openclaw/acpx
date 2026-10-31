@@ -12,6 +12,7 @@ Repo: https://github.com/openclaw/acpx
 - Agents: add the native `deepseek-harness` profile using `dsh --profile acp`.
 - Agents: add experimental `ante` support through `ante acp`; requires Ante and the separate `ante-acp` adapter, with no session reopening after disconnect.
 - Runtime/embedding: expose an optional best-effort ACP message observer for owned session clients, including setup, reconnects, cold controls, and session discard, while retaining elicitation and replay filtering.
+- Flows: select per-node models and ordered ACP configuration options before the first prompt, with run defaults, persistent-handle conflict checks, same-session replay, and requested/accepted settings in run bundles. Thanks @superbiche.
 
 ### Fixes
 
