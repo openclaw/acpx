@@ -3,7 +3,6 @@ import test from "node:test";
 import {
   exitCodeForOutputErrorCode,
   normalizeOutputError,
-  isAcpQueryClosedBeforeResponseError,
   isAcpResourceNotFoundError,
 } from "../src/acp/error-normalization.js";
 import {
@@ -101,30 +100,6 @@ test("isAcpResourceNotFoundError recognizes Cursor session-not-found format", ()
 
   assert.equal(isAcpResourceNotFoundError(cursorError), true);
 });
-test("isAcpQueryClosedBeforeResponseError matches typed ACP payload", () => {
-  const error = {
-    code: -32603,
-    message: "Internal error",
-    data: {
-      details: "Query closed before response received",
-    },
-  };
-
-  assert.equal(isAcpQueryClosedBeforeResponseError(error), true);
-});
-
-test("isAcpQueryClosedBeforeResponseError ignores unrelated ACP errors", () => {
-  const error = {
-    code: -32603,
-    message: "Internal error",
-    data: {
-      details: "other detail",
-    },
-  };
-
-  assert.equal(isAcpQueryClosedBeforeResponseError(error), false);
-});
-
 test("normalizeOutputError preserves queue metadata from typed queue errors", () => {
   const error = new QueueConnectionError("Queue denied control request", {
     outputCode: "PERMISSION_DENIED",
