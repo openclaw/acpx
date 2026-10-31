@@ -26,7 +26,6 @@ import {
   recordClientOperation,
   recordPromptSubmission,
   recordSessionUpdate,
-  trimConversationForRuntime,
 } from "../../session/conversation-model.js";
 import { LiveSessionCheckpoint } from "../../session/live-checkpoint.js";
 import { setDesiredModeId } from "../../session/mode-preference.js";
@@ -516,7 +515,6 @@ export class AcpRuntimeManager {
         // notification cannot overwrite a later acknowledgement after replay.
         turn.record.acpx = recordSessionUpdate(turn.conversation, turn.record.acpx, notification);
       }
-      trimConversationForRuntime(turn.conversation);
       this.emitRuntimeTurnEvent(task, {
         jsonrpc: "2.0",
         method: "session/update",
@@ -540,7 +538,6 @@ export class AcpRuntimeManager {
       projection.record.acpx,
       notification,
     );
-    trimConversationForRuntime(projection.conversation);
     owner.checkpoint.request();
   }
 
@@ -556,7 +553,6 @@ export class AcpRuntimeManager {
     } else {
       turn.record.acpx = recordClientOperation(turn.conversation, turn.record.acpx, operation);
     }
-    trimConversationForRuntime(turn.conversation);
     this.emitRuntimeTurnEvent(task, {
       type: "client_operation",
       ...operation,
@@ -1409,7 +1405,6 @@ export class AcpRuntimeManager {
         task.promptInput,
         promptStartedAt,
       );
-      trimConversationForRuntime(conversation);
       record.lastPromptAt = promptStartedAt;
       record.lastUsedAt = promptStartedAt;
       record.acpx = acpxState;

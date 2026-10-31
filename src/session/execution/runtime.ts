@@ -58,7 +58,6 @@ import {
   recordClientOperation as recordConversationClientOperation,
   recordPromptSubmission,
   recordSessionUpdate as recordConversationSessionUpdate,
-  trimConversationForRuntime,
 } from "../conversation-model.js";
 import { SessionEventWriter } from "../events.js";
 import type { SessionWatchResult } from "../journal.js";
@@ -860,7 +859,6 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
         promptTurnHadSideEffects = true;
       }
       record.acpx = recordConversationSessionUpdate(conversation, record.acpx, notification);
-      trimConversationForRuntime(conversation);
       liveCheckpoint.request();
       options.onSessionUpdate?.(notification);
     },
@@ -869,7 +867,6 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
         promptTurnHadSideEffects = true;
       }
       record.acpx = recordConversationClientOperation(conversation, record.acpx, operation);
-      trimConversationForRuntime(conversation);
       liveCheckpoint.request();
       options.onClientOperation?.(operation);
     },
