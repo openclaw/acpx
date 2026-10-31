@@ -1126,6 +1126,38 @@ test("integration: flow run reports waiting checkpoints in json mode", async () 
   });
 });
 
+test("integration: built-in deepseek-harness resolves to dsh --profile acp", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-dsh-"));
+
+    try {
+      await writeFakeHarnessAgent(fakeBinDir, "dsh");
+
+      const result = await runCli(
+        [
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "quiet",
+          "deepseek-harness",
+          "exec",
+          "echo hello",
+        ],
+        homeDir,
+        { env: { PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}` } },
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stdout.trim(), "hello");
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: built-in goose agent launches its native ACP server", async () => {
   await withTempHome(async (homeDir) => {
     const binDir = path.join(homeDir, "goose bin");
@@ -5647,7 +5679,7 @@ async function configuredHarnessInvocation(
 
 async function writeFakeHarnessAgent(
   binDir: string,
-  name: "cursor-agent" | "droid" | "devin" | "uvx" | "iflow" | "qodercli" | "goose",
+  name: "cursor-agent" | "dsh" | "droid" | "devin" | "uvx" | "iflow" | "qodercli" | "goose",
   argLogPath = "",
 ): Promise<void> {
   const launcher = fileURLToPath(new URL("./fixtures/harness-launcher.js", import.meta.url));
