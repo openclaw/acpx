@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Flows: select per-node models and ordered ACP configuration options before the first prompt, with run defaults, persistent-handle conflict checks, same-session replay, and requested/accepted settings in run bundles. Thanks @superbiche.
+
 ### Fixes
 
 - Docs/prompting: list `-s, --session` and `--no-wait` as options of `prompt` and the bare form only; `exec` rejects them with `unknown option`. Thanks @KrasimirKralev.
