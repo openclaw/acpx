@@ -10,7 +10,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Agents: add Goose as a built-in native ACP agent through `goose acp`.
 - Agents: add the native `deepseek-harness` profile using `dsh --profile acp`.
-- Runtime/embedding: expose an optional best-effort ACP message observer for owned session clients, including setup and reconnects, while retaining elicitation and replay filtering.
+- Runtime/embedding: expose an optional best-effort ACP message observer for owned session clients, including setup, reconnects, cold controls, and session discard, while retaining elicitation and replay filtering.
 
 ### Fixes
 

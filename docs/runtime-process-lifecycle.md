@@ -88,7 +88,8 @@ requires separate host supervision.
 In-process runtimes can set `AcpRuntimeOptions.onAcpMessage` to observe inbound and
 outbound ACP messages on their owned session clients. The observer is installed
 before initialization and remains available during session setup, prompts, idle
-updates and reconnects. Health probes use separate clients and do not invoke it.
+updates, reconnects, cold controls, and session discard. Health probes use separate
+clients and do not invoke it.
 Shared runtimes reject this option because their connection belongs to another
 process.
 
