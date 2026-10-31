@@ -11,6 +11,8 @@ Repo: https://github.com/openclaw/acpx
 - Docs/prompting: list `-s, --session` and `--no-wait` as options of `prompt` and the bare form only; `exec` rejects them with `unknown option`. Thanks @KrasimirKralev.
 - CLI: unknown options and other usage errors on subcommands (`acpx codex exec --bogus`, `acpx sessions list --bogus`) now exit with code 2 as documented, and `--format json` reports them as a JSON-RPC error instead of plain text only; they used to exit 1. Thanks @KrasimirKralev.
 
+- Runtime/embedding: apply independent setup deadlines to session creation, load and resume requests, cleaning up stalled clients without replacing explicitly resumed sessions.
+
 ## 0.21.1 - 2026-10-26
 
 **Highlights:** Patch four URI security vulnerabilities in development dependencies, update the guarded filesystem runtime, and clarify missing-prompt errors.
