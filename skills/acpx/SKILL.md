@@ -108,7 +108,7 @@ Friendly agent names resolve to commands:
 - `pool` -> `pool acp`
 - `qoder` -> `qodercli --acp`
   Forwards Qoder-native `--allowed-tools` and `--max-turns` startup flags from `acpx` session options.
-- `qwen` -> `qwen --acp`
+- `qwen` -> `qwen --acp` (Qwen Code, distinct from QwenWork; see the [Qwen Code guide](https://github.com/openclaw/acpx/blob/main/agents/Qwen.md) for text filesystem delegation and native file discovery)
 - `trae` -> `traecli acp serve`
 - `zeroclaw` -> `zeroclaw acp`
 
