@@ -16,7 +16,6 @@ import {
 } from "../../acp/jsonrpc.js";
 import type {
   AcpJsonRpcMessage,
-  ClientOperation,
   OutputErrorAcpPayload,
   OutputErrorCode,
   OutputFormatterContext,
@@ -883,12 +882,11 @@ class TextOutputFormatter implements OutputFormatter {
 
     const method = extractJsonRpcMethod(message);
     if (method && !["session/prompt", "session/cancel", "session/update"].includes(method)) {
-      this.onClientOperation({
-        method: method as ClientOperation["method"],
-        status: "running",
-        summary: method,
-        timestamp: new Date().toISOString(),
-      });
+      this.flushThoughtBuffer();
+      this.beginSection();
+      this.writeLine(
+        `${this.bold("[client]")} ${method} (${this.colorStatus("running", "in_progress")})`,
+      );
       return;
     }
 
@@ -970,24 +968,6 @@ class TextOutputFormatter implements OutputFormatter {
     this.writeLine(this.formatAnsi(`[error] ${params.code}: ${message}`, "31"));
     for (const hint of getTextErrorRemediationHints(params)) {
       this.writeLine(this.dim(hint));
-    }
-  }
-
-  onClientOperation(operation: ClientOperation): void {
-    this.flushThoughtBuffer();
-    this.beginSection();
-
-    const normalizedStatus: NormalizedToolStatus =
-      operation.status === "completed"
-        ? "completed"
-        : operation.status === "failed"
-          ? "failed"
-          : "in_progress";
-    const statusText = this.colorStatus(operation.status, normalizedStatus);
-    this.writeLine(`${this.bold("[client]")} ${operation.summary} (${statusText})`);
-    if (operation.details && operation.details.trim().length > 0) {
-      this.writeLine("  details:");
-      this.writeLine(indentBlock(operation.details, "    "));
     }
   }
 

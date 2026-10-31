@@ -58,7 +58,7 @@ import {
   classifyPermissionDecision,
   decisionToResponse,
   inferToolKind,
-  resolvePermissionRequestWithDetails,
+  resolvePermissionRequest,
   withPermissionMetadata,
 } from "../permissions.js";
 import { getUnsupportedPromptContentMessage, textPrompt } from "../prompt-content.js";
@@ -362,11 +362,6 @@ type StartupFailureWatcher = {
   getError: () => AgentStartupError | undefined;
 };
 
-type SessionUpdateSuppressionState = {
-  suppressSessionUpdates: boolean;
-  suppressReplaySessionUpdateMessages: boolean;
-};
-
 export type AgentExitInfo = {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
@@ -428,7 +423,6 @@ export class AcpClient {
   private observedSessionUpdates = 0;
   private processedSessionUpdates = 0;
   private suppressSessionUpdates = false;
-  private suppressReplaySessionUpdateMessages = false;
   private activePrompt?: ActivePromptState;
   private readonly pendingPromptOwners: ActivePromptState[] = [];
   private readonly cancellingSessionIds = new Set<string>();
@@ -877,7 +871,11 @@ export class AcpClient {
       });
       await waitForSpawn(spawnedChild);
     } catch (error) {
-      const spawnError = new AgentSpawnError(this.options.agentCommand, error);
+      const spawnError = new AgentSpawnError(this.options.agentCommand, error, {
+        command: launch.command,
+        cwd: launch.cwd,
+        env: plan.spawnOptions.env,
+      });
       this.notifyProcessSpawnFailure(launch, spawnError);
       throw spawnError;
     }
@@ -936,7 +934,14 @@ export class AcpClient {
         detached: process.platform !== "win32",
       });
     } catch (error) {
-      this.notifyProcessSpawnFailure(launch, new AgentSpawnError(command, error));
+      this.notifyProcessSpawnFailure(
+        launch,
+        new AgentSpawnError(command, error, {
+          command: launch.command,
+          cwd: launch.cwd,
+          env: options.env,
+        }),
+      );
       return undefined;
     }
     this.commandProbes.add(child);
@@ -948,7 +953,14 @@ export class AcpClient {
       try {
         await waitForSpawn(child);
       } catch (error) {
-        this.notifyProcessSpawnFailure(launch, new AgentSpawnError(command, error));
+        this.notifyProcessSpawnFailure(
+          launch,
+          new AgentSpawnError(command, error, {
+            command: launch.command,
+            cwd: launch.cwd,
+            env: options.env,
+          }),
+        );
         return undefined;
       }
       if (child.pid === undefined) {
@@ -1162,7 +1174,7 @@ export class AcpClient {
         this.eventHandlers.onAcpOutputMessage?.(direction, message);
         this.eventHandlers.onAcpMessage?.(direction, message);
       },
-      suppressReplaySessionUpdates: () => this.suppressReplaySessionUpdateMessages,
+      suppressReplaySessionUpdates: () => this.suppressSessionUpdates,
       bindPromptOwner: (owner) => this.bindPromptOwner(owner),
       assertPromptActive: (active) => this.assertPromptActive(active),
       onPromptRequestWritten: (active, owner) => this.onPromptRequestWritten(active, owner),
@@ -1245,9 +1257,8 @@ export class AcpClient {
     const connection = this.getConnection();
     const sessionCwd = await resolveAgentSessionCwd(cwd, this.options.agentCommand);
     assertControlAuthority(options.authority);
-    const previousSuppression = this.applySessionUpdateSuppression(
-      Boolean(options.suppressReplayUpdates),
-    );
+    const previousSuppression = this.suppressSessionUpdates;
+    this.suppressSessionUpdates = previousSuppression || Boolean(options.suppressReplayUpdates);
 
     let response: LoadSessionResponse | undefined;
 
@@ -1268,7 +1279,7 @@ export class AcpClient {
         options.replayDrainTimeoutMs ?? REPLAY_DRAIN_TIMEOUT_MS,
       );
     } finally {
-      this.restoreSessionUpdateSuppression(previousSuppression);
+      this.suppressSessionUpdates = previousSuppression;
     }
 
     this.loadedSessionId = sessionId;
@@ -1300,22 +1311,6 @@ export class AcpClient {
     const result = toReconnectedSessionResult(response);
     await this.captureAgentDescendants(this.agent);
     return result;
-  }
-
-  private applySessionUpdateSuppression(enabled: boolean): SessionUpdateSuppressionState {
-    const previous = {
-      suppressSessionUpdates: this.suppressSessionUpdates,
-      suppressReplaySessionUpdateMessages: this.suppressReplaySessionUpdateMessages,
-    };
-    this.suppressSessionUpdates = previous.suppressSessionUpdates || enabled;
-    this.suppressReplaySessionUpdateMessages =
-      previous.suppressReplaySessionUpdateMessages || enabled;
-    return previous;
-  }
-
-  private restoreSessionUpdateSuppression(previous: SessionUpdateSuppressionState): void {
-    this.suppressSessionUpdates = previous.suppressSessionUpdates;
-    this.suppressReplaySessionUpdateMessages = previous.suppressReplaySessionUpdateMessages;
   }
 
   async prompt(
@@ -1754,7 +1749,6 @@ export class AcpClient {
     this.observedSessionUpdates = 0;
     this.processedSessionUpdates = 0;
     this.suppressSessionUpdates = false;
-    this.suppressReplaySessionUpdateMessages = false;
     this.activePrompt = undefined;
     this.pendingPromptOwners.length = 0;
     this.cancellingSessionIds.clear();
@@ -2427,7 +2421,7 @@ export class AcpClient {
   ): Promise<RequestPermissionResponse> {
     try {
       assertControlAuthority(owner);
-      const result = await resolvePermissionRequestWithDetails(
+      const result = await resolvePermissionRequest(
         preferCodexPermissionRefusal(params, this.initResult?.agentInfo?.name),
         this.options.permissionMode,
         this.options.nonInteractivePermissions ?? "deny",

@@ -148,10 +148,6 @@ function resolveTerminalOutputLimit(
   );
 }
 
-function tracksTerminalDescendants(terminal: ManagedTerminal): boolean {
-  return terminal.killProcessGroup || terminal.descendants !== undefined;
-}
-
 function createTerminalDescendants(
   proc: ManagedTerminal["process"],
   killProcessGroup: boolean,
@@ -562,10 +558,6 @@ export class TerminalManager {
   }
 
   private async killProcess(terminal: ManagedTerminal): Promise<void> {
-    if (!this.isRunning(terminal) && !tracksTerminalDescendants(terminal)) {
-      return;
-    }
-
     try {
       await this.signalProcess(terminal, "SIGTERM");
     } catch {

@@ -11,6 +11,7 @@ import {
   resolveOutputPolicy,
   resolvePermissionMode,
   type GlobalFlags,
+  type SessionConfigOptionAssignment,
 } from "../cli/flags.js";
 import {
   resolvePermissionPolicyFromFlags,
@@ -22,11 +23,13 @@ import type { PermissionMode } from "../types.js";
 import { isDefinedFlow } from "./authoring.js";
 import { validateFlowDefinition } from "./graph.js";
 import { installFlowRuntimeResolution } from "./module-resolution.js";
+import type { FlowSessionBinding } from "./types.js";
 
 type FlowRunFlags = {
   inputJson?: string;
   inputFile?: string;
   defaultAgent?: string;
+  configOption?: SessionConfigOptionAssignment[];
 };
 
 export async function handleFlowRun(
@@ -60,6 +63,7 @@ export async function handleFlowRun(
     verbose: globalFlags.verbose,
     suppressSdkConsoleErrors: outputPolicy.suppressSdkConsoleErrors,
     sessionOptions: sessionOptionsFromGlobalFlags(globalFlags),
+    configOptions: flags.configOption,
   });
 
   const result = await runner.run(flow, input, {
@@ -217,6 +221,21 @@ function parseJsonInput(raw: string, label: string): unknown {
   }
 }
 
+// Settings evidence carries option values; it stays in the run bundle, not stdout.
+function omitSessionSettings(
+  bindings: Record<string, FlowSessionBinding>,
+): Record<string, Omit<FlowSessionBinding, "requestedSettings" | "acceptedSettings">> {
+  const output: Record<
+    string,
+    Omit<FlowSessionBinding, "requestedSettings" | "acceptedSettings">
+  > = {};
+  for (const [key, binding] of Object.entries(bindings)) {
+    const { requestedSettings: _requested, acceptedSettings: _accepted, ...rest } = binding;
+    output[key] = rest;
+  }
+  return output;
+}
+
 function printFlowRunResult(
   result: Awaited<ReturnType<FlowRunner["run"]>>,
   globalFlags: GlobalFlags,
@@ -236,7 +255,7 @@ function printFlowRunResult(
     waitingOn: result.state.waitingOn,
     runDir: result.runDir,
     outputs: result.state.outputs,
-    sessionBindings: result.state.sessionBindings,
+    sessionBindings: omitSessionSettings(result.state.sessionBindings),
   };
 
   if (globalFlags.format === "json") {

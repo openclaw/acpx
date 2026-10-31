@@ -12,54 +12,8 @@ import { asOptionalString, asString, asTrimmedString, isRecord } from "./shared.
 
 const TOOL_OUTPUT_SUMMARY_MAX_CHARS = 500;
 
-function safeParseJsonObject(line: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(line) as unknown;
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
 function asOptionalFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function resolveStructuredPromptPayload(parsed: Record<string, unknown>): {
-  type: string;
-  payload: Record<string, unknown>;
-  tag?: AcpSessionUpdateTag;
-} {
-  const method = asTrimmedString(parsed.method);
-  if (method === "session/update") {
-    const params = parsed.params;
-    if (isRecord(params) && isRecord(params.update)) {
-      const update = params.update;
-      const tag = asOptionalString(update.sessionUpdate);
-      return {
-        type: tag ?? "",
-        payload: update,
-        ...(tag ? { tag } : {}),
-      };
-    }
-  }
-
-  const sessionUpdate = asOptionalString(parsed.sessionUpdate);
-  if (sessionUpdate) {
-    return {
-      type: sessionUpdate,
-      payload: parsed,
-      tag: sessionUpdate,
-    };
-  }
-
-  const type = asTrimmedString(parsed.type);
-  const tag = asOptionalString(parsed.tag);
-  return {
-    type,
-    payload: parsed,
-    ...(tag ? { tag } : {}),
-  };
 }
 
 function resolveStatusTextForTag(params: {
@@ -263,22 +217,6 @@ function resolveTextChunk(params: {
   };
 }
 
-function createTextDeltaEvent(params: {
-  content: string | null | undefined;
-  stream: "output" | "thought";
-  tag?: AcpSessionUpdateTag;
-}): AcpRuntimeEvent | null {
-  if (params.content == null || params.content.length === 0) {
-    return null;
-  }
-  return {
-    type: "text_delta",
-    text: params.content,
-    stream: params.stream,
-    ...(params.tag ? { tag: params.tag } : {}),
-  };
-}
-
 function readFirstString(
   record: Record<string, unknown>,
   keys: readonly string[],
@@ -425,10 +363,6 @@ function isScalarToolOutput(value: unknown): value is string | number | boolean 
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
-function shouldForwardArray(value: unknown): boolean {
-  return Array.isArray(value);
-}
-
 function readToolKind(value: unknown): ToolKind | undefined {
   const kind = asOptionalString(value);
   return kind && TOOL_KINDS.has(kind) ? (kind as ToolKind) : undefined;
@@ -497,54 +431,43 @@ function assignForwardedToolPayload(
   event: Extract<AcpRuntimeEvent, { type: "tool_call" }>,
   payload: Record<string, unknown>,
 ): void {
-  if (shouldForwardArray(payload.locations)) {
-    event.locations = payload.locations as ToolCallLocation[];
+  // Tool payloads remain detached JSON snapshots, including omission of undefined fields.
+  const snapshot = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+  if (Array.isArray(snapshot.locations)) {
+    event.locations = snapshot.locations as ToolCallLocation[];
   }
-  if (Object.prototype.hasOwnProperty.call(payload, "rawInput")) {
-    event.rawInput = payload.rawInput;
+  if (Object.prototype.hasOwnProperty.call(snapshot, "rawInput")) {
+    event.rawInput = snapshot.rawInput;
   }
-  if (Object.prototype.hasOwnProperty.call(payload, "rawOutput")) {
-    event.rawOutput = payload.rawOutput;
+  if (Object.prototype.hasOwnProperty.call(snapshot, "rawOutput")) {
+    event.rawOutput = snapshot.rawOutput;
   }
-  if (shouldForwardArray(payload.content)) {
-    event.content = payload.content as ToolCallContent[];
+  if (Array.isArray(snapshot.content)) {
+    event.content = snapshot.content as ToolCallContent[];
   }
 }
 
-export function parsePromptEventLine(line: string): AcpRuntimeEvent | null {
-  const trimmed = line.trim();
-  if (!trimmed) {
+export function runtimeEventFromMessage(message: unknown): AcpRuntimeEvent | null {
+  if (!isRecord(message)) {
     return null;
   }
-  const parsed = safeParseJsonObject(trimmed);
-  if (!parsed) {
-    return {
-      type: "status",
-      text: trimmed,
-    };
+  if (asTrimmedString(message.method) !== "session/update") {
+    return message.type === "client_operation" ? clientOperationEvent(message) : null;
   }
-
-  const structured = resolveStructuredPromptPayload(parsed);
-  const type = structured.type;
-  const payload = structured.payload;
-  const tag = structured.tag;
-  const parser = promptEventParser(type);
-  return parser ? parser(payload, tag) : null;
+  const params = message.params;
+  if (!isRecord(params) || !isRecord(params.update)) {
+    return null;
+  }
+  const payload = params.update;
+  const parser = promptEventParser(asTrimmedString(payload.sessionUpdate));
+  return parser ? parser(payload) : null;
 }
 
-type PromptEventParser = (
-  payload: Record<string, unknown>,
-  tag: AcpSessionUpdateTag | undefined,
-) => AcpRuntimeEvent | null;
+type PromptEventParser = (payload: Record<string, unknown>) => AcpRuntimeEvent | null;
 
 const PROMPT_EVENT_PARSERS: Record<string, PromptEventParser> = {
-  text: (payload, tag) =>
-    createTextDeltaEvent({ content: asString(payload.content), stream: "output", tag }),
-  thought: (payload, tag) =>
-    createTextDeltaEvent({ content: asString(payload.content), stream: "thought", tag }),
-  tool_call: (payload, tag) => createToolCallEvent({ payload, tag: tag ?? "tool_call" }),
-  tool_call_update: (payload, tag) =>
-    createToolCallEvent({ payload, tag: tag ?? "tool_call_update" }),
+  tool_call: (payload) => createToolCallEvent({ payload, tag: "tool_call" }),
+  tool_call_update: (payload) => createToolCallEvent({ payload, tag: "tool_call_update" }),
   agent_message_chunk: (payload) =>
     resolveTextChunk({ payload, stream: "output", tag: "agent_message_chunk" }),
   agent_thought_chunk: (payload) =>
@@ -555,10 +478,6 @@ const PROMPT_EVENT_PARSERS: Record<string, PromptEventParser> = {
   config_option_update: (payload) => statusUpdateEvent("config_option_update", payload),
   session_info_update: (payload) => statusUpdateEvent("session_info_update", payload),
   plan: planUpdateEvent,
-  client_operation: clientOperationEvent,
-  update: updateStatusEvent,
-  done: () => null,
-  error: () => null,
 };
 
 function promptEventParser(type: string): PromptEventParser | undefined {
@@ -691,21 +610,9 @@ function statusUpdateEvent(
   return { type: "status", text, tag };
 }
 
-function clientOperationEvent(
-  payload: Record<string, unknown>,
-  tag: AcpSessionUpdateTag | undefined,
-): AcpRuntimeEvent | null {
+function clientOperationEvent(payload: Record<string, unknown>): AcpRuntimeEvent {
   const method = asTrimmedString(payload.method) || "operation";
   const status = asTrimmedString(payload.status);
   const summary = asTrimmedString(payload.summary);
-  const text = [method, status, summary].filter(Boolean).join(" ");
-  return text ? { type: "status", text, ...(tag ? { tag } : {}) } : null;
-}
-
-function updateStatusEvent(
-  payload: Record<string, unknown>,
-  tag: AcpSessionUpdateTag | undefined,
-): AcpRuntimeEvent | null {
-  const update = asTrimmedString(payload.update);
-  return update ? { type: "status", text: update, ...(tag ? { tag } : {}) } : null;
+  return { type: "status", text: [method, status, summary].filter(Boolean).join(" ") };
 }

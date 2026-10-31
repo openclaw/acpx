@@ -72,16 +72,6 @@ export type QueueOwnerLease = QueueOwnerIdentity & {
   released: boolean;
 };
 
-export type QueueOwnerStatus = {
-  pid: number;
-  socketPath: string;
-  heartbeatAt: string;
-  ownerGeneration: number;
-  queueDepth: number;
-  alive: boolean;
-  stale: boolean;
-};
-
 function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
   if (!raw || typeof raw !== "object") {
     return null;
@@ -401,31 +391,6 @@ export async function resolveUsableQueueOwner(
   await terminateQueueOwnerForSession(sessionId, observed, true);
   const current = await readQueueOwnerRecord(sessionId);
   return matchesQueueOwner(current, observed) && ownerAcceptsWork(current) ? current : undefined;
-}
-
-export async function readQueueOwnerStatus(
-  sessionId: string,
-): Promise<QueueOwnerStatus | undefined> {
-  await settlePendingQueueLeaseGuard(sessionId);
-  const observed = await readQueueOwnerRecord(sessionId);
-  if (!observed) {
-    return undefined;
-  }
-
-  const owner = await resolveUsableQueueOwner(sessionId, observed);
-  if (!owner) {
-    return undefined;
-  }
-
-  return {
-    pid: owner.pid,
-    socketPath: owner.socketPath,
-    heartbeatAt: owner.heartbeatAt,
-    ownerGeneration: owner.ownerGeneration,
-    queueDepth: owner.queueDepth,
-    alive: true,
-    stale: isQueueOwnerHeartbeatStale(owner),
-  };
 }
 
 export async function tryAcquireQueueOwnerLease(

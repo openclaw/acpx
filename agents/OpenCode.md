@@ -1,7 +1,7 @@
 # OpenCode
 
 - Built-in name: `opencode`
-- Default command: `npx -y opencode-ai acp`
+- Default command: `npx -y --package=opencode-ai -- opencode acp`
 - Upstream: https://opencode.ai
 
 ## Embedded inspection

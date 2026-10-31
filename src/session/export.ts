@@ -30,7 +30,7 @@ export type ExportedSession = {
 
 export type SessionExportLookup = {
   agentName?: string;
-  agentCommand?: string;
+  agentCommand: string;
   cwd?: string;
   name?: string;
 };
@@ -59,29 +59,17 @@ async function loadSessionRecord(
   const cwd = path.resolve(sessionLookup.cwd ?? process.cwd());
   const name = normalizeName(sessionLookup.name);
 
-  if (sessionLookup.agentCommand) {
-    const active = await findSession({
-      agentCommand: sessionLookup.agentCommand,
-      cwd,
-      name,
-    });
-    if (active) {
-      return active;
-    }
-
-    return (await listSessions()).find((session) => {
-      if (session.agentCommand !== sessionLookup.agentCommand || session.cwd !== cwd) {
-        return false;
-      }
-      if (name == null) {
-        return session.name == null;
-      }
-      return session.name === name;
-    });
+  const active = await findSession({
+    agentCommand: sessionLookup.agentCommand,
+    cwd,
+    name,
+  });
+  if (active) {
+    return active;
   }
 
-  const matches = (await listSessions()).filter((session) => {
-    if (session.cwd !== cwd) {
+  return (await listSessions()).find((session) => {
+    if (session.agentCommand !== sessionLookup.agentCommand || session.cwd !== cwd) {
       return false;
     }
     if (name == null) {
@@ -89,12 +77,6 @@ async function loadSessionRecord(
     }
     return session.name === name;
   });
-
-  if (matches.length > 1) {
-    throw sessionLookupError("multiple sessions match export lookup", "ambiguous-session");
-  }
-
-  return matches[0];
 }
 
 type EventLockPayload = {

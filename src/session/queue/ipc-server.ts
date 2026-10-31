@@ -306,21 +306,6 @@ export class SessionQueueOwner {
   }
 
   private enqueue(task: QueueTask): boolean {
-    if (this.closed) {
-      task.send(
-        makeQueueOwnerError(
-          task.requestId,
-          "Queue owner is shutting down",
-          "QUEUE_OWNER_SHUTTING_DOWN",
-          {
-            retryable: true,
-          },
-        ),
-      );
-      task.close();
-      return false;
-    }
-
     if (
       this.activeTask?.requestId === task.requestId ||
       this.pending.some((queued) => queued.requestId === task.requestId)

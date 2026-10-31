@@ -56,8 +56,12 @@ function consumeStartupOptions(
 function mockArguments(): string[] {
   // These literals are independent of the production registry under test.
   switch (harness) {
+    case "ante":
     case "cursor-agent":
+    case "goose":
       return consumePrefix(["acp"]);
+    case "dsh":
+      return consumePrefix(["--profile", "acp"]);
     case "droid":
       return consumePrefix(["exec", "--output-format", "acp"]);
     case "uvx":
@@ -66,6 +70,7 @@ function mockArguments(): string[] {
       return consumePrefix(["--experimental-acp"]);
     case "devin":
       return consumeStartupOptions(["acp", "--acp", "--experimental-acp"], ["--model"], false);
+    case "qoder":
     case "qodercli":
       return consumeStartupOptions(
         ["--acp"],

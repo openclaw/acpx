@@ -1,7 +1,7 @@
 # Pi
 
 - Built-in name: `pi`
-- Default command: `npx pi-acp`
+- Default command: `npx --package=pi-acp -- pi-acp`
 - ACPX maintains the supported adapter package range in `src/agent-registry.ts`.
 - Update ACPX to pick up changes to that range. The adapter starts through npm on demand.
 
