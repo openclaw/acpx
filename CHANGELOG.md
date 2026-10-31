@@ -10,6 +10,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Docs/prompting: list `-s, --session` and `--no-wait` as options of `prompt` and the bare form only; `exec` rejects them with `unknown option`. Thanks @KrasimirKralev.
 
+- Runtime/embedding: keep explicit `resumeSessionId` attachments strict across matching local-record reuse and later prompt/control reconnects without resetting history or saved configuration. Same-record aliases retain the constraint; adding it to unfinished untargeted work refuses until that work settles.
+
 ## 0.21.1 - 2026-10-26
 
 **Highlights:** Patch four URI security vulnerabilities in development dependencies, update the guarded filesystem runtime, and clarify missing-prompt errors.
