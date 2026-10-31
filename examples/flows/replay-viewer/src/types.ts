@@ -7,6 +7,10 @@ import type {
   FlowStepRecord,
   FlowTraceEvent,
 } from "../../../../src/flows/types.js";
+import type {
+  SessionAcpxState,
+  SessionRecord as PersistedSessionRecord,
+} from "../../../../src/types.js";
 
 export type {
   FlowArtifactRef,
@@ -41,77 +45,15 @@ export type RunBundleSummary = {
   path: string;
 };
 
-export type SessionRecord = {
+// Historical bundles accept partial records and opaque adapter payloads.
+export type SessionRecord = Partial<
+  Omit<PersistedSessionRecord, "schema" | "messages" | "lastAgentExitSignal" | "acpx">
+> & {
   schema?: string;
-  acpxRecordId?: string;
-  acpSessionId?: string;
-  agentCommand?: string;
-  cwd?: string;
-  name?: string;
-  title?: string | null;
   messages?: unknown[];
-  updated_at?: string;
-  createdAt?: string;
-  lastUsedAt?: string;
-  lastSeq?: number;
-  lastRequestId?: string;
-  eventLog?: {
-    active_path: string;
-    segment_count: number;
-    max_segment_bytes: number;
-    max_segments: number;
-    last_write_at?: string;
-    last_write_error?: string | null;
-  };
-  pid?: number;
-  agentStartedAt?: string;
-  lastPromptAt?: string;
-  lastAgentExitCode?: number | null;
   lastAgentExitSignal?: string | null;
-  lastAgentExitAt?: string;
-  lastAgentDisconnectReason?: string;
-  protocolVersion?: number;
-  closed?: boolean;
-  closedAt?: string;
-  cumulative_token_usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-    thought_tokens?: number;
-    total_tokens?: number;
-  };
-  cumulative_cost?: {
-    amount?: number;
-    currency?: string;
-  };
-  request_token_usage?: Record<
-    string,
-    {
-      input_tokens?: number;
-      output_tokens?: number;
-      cache_creation_input_tokens?: number;
-      cache_read_input_tokens?: number;
-      thought_tokens?: number;
-      total_tokens?: number;
-    }
-  >;
-  acpx?: {
-    current_mode_id?: string;
-    desired_mode_id?: string;
-    current_model_id?: string;
-    available_models?: string[];
-    available_commands?: Array<{
-      name: string;
-      description?: string;
-      has_input?: boolean;
-    }>;
+  acpx?: Omit<SessionAcpxState, "config_options"> & {
     config_options?: unknown[];
-    session_options?: {
-      model?: string;
-      allowed_tools?: string[];
-      max_turns?: number;
-    };
   };
 };
 
