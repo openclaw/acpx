@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { AdapterLifetime } from "../conformance/runner/adapter-lifetime.js";
 import { listBuiltInAgents } from "../src/agent-registry.js";
 import { withInterrupt, withTimeout } from "../src/async-control.js";
@@ -46,64 +47,90 @@ if (agents.includes("cursor")) {
 }
 
 async function runLivePrompt(agent: string, prompt: unknown[]): Promise<string> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-live-"));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "acpx-live-")));
   const home = path.join(root, "home");
   const cwd = path.join(root, "workspace");
-  await fs.mkdir(home);
-  await fs.mkdir(cwd);
-  const child = spawn(
-    process.execPath,
-    [
-      CLI_PATH,
-      "--deny-all",
-      "--no-fs",
-      "--no-terminal",
-      "--cwd",
-      cwd,
-      "--timeout",
-      "120",
-      "--format",
-      "quiet",
-      agent,
-      "exec",
-    ],
-    {
-      cwd,
-      env: {
-        ...process.env,
-        HOME: home,
-        ...(process.platform === "win32" ? { USERPROFILE: home } : {}),
-      },
-      detached: process.platform !== "win32",
-      stdio: ["pipe", "pipe", "pipe"],
-    },
-  );
-  const lifetime = new AdapterLifetime(child);
-  let stdout = "";
-  let stderr = "";
-  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-    stdout += chunk;
-  });
-  child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
-    stderr += chunk;
-  });
-  const result = new Promise<number | null>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", resolve);
-    child.stdin.once("error", reject);
-  });
-  child.stdin.end(JSON.stringify(prompt));
+  const env = {
+    ...process.env,
+    HOME: home,
+    ...(process.platform === "win32" ? { USERPROFILE: home } : {}),
+  };
+  let lifetime: AdapterLifetime | undefined;
   try {
+    await fs.mkdir(home);
+    await fs.mkdir(cwd);
+    await promisify(execFile)("git", ["init", "--quiet", "--initial-branch=main", cwd], {
+      env,
+      timeout: 10_000,
+    });
+    await promisify(execFile)(
+      "git",
+      [
+        "-c",
+        "user.name=acpx live fixture",
+        "-c",
+        "user.email=acpx@example.invalid",
+        "-c",
+        "commit.gpgSign=false",
+        "-c",
+        "core.hooksPath=",
+        "commit",
+        "--quiet",
+        "--allow-empty",
+        "-m",
+        "Live provider fixture",
+      ],
+      { cwd, env, timeout: 10_000 },
+    );
+    const child = spawn(
+      process.execPath,
+      [
+        CLI_PATH,
+        "--deny-all",
+        "--no-fs",
+        "--no-terminal",
+        "--cwd",
+        cwd,
+        "--timeout",
+        "120",
+        "--format",
+        "quiet",
+        agent,
+        "exec",
+      ],
+      {
+        cwd,
+        env,
+        detached: process.platform !== "win32",
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    const owner = new AdapterLifetime(child);
+    lifetime = owner;
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    const result = new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+      child.stdin.once("error", reject);
+    });
+    child.stdin.end(JSON.stringify(prompt));
     const code = await withInterrupt(
       () => withTimeout(result, 150_000),
-      () => lifetime.shutdown(Promise.resolve()),
+      () => owner.shutdown(Promise.resolve()),
     );
     assert.equal(code, 0, `${agent} CLI failed: ${stderr}`);
     return stdout;
   } finally {
     // Join the CLI and witnessed descendants before deleting their workspace.
     // A failed retirement deliberately retains the directory for diagnosis.
-    await lifetime.shutdown(Promise.resolve());
+    await lifetime?.shutdown(Promise.resolve());
     await fs.rm(root, { recursive: true, force: true });
   }
 }

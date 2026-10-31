@@ -218,12 +218,12 @@ function posixRow(pid: number, parentPid: number, groupPid: number, birth: strin
   return `${pid} ${parentPid} ${groupPid} S ${birth}\n`;
 }
 
-function posixOwnership(t: TestContext) {
+function posixOwnership(t: TestContext, options = { ownProcessGroup: true }) {
   const platform = Object.getOwnPropertyDescriptor(process, "platform");
   Object.defineProperty(process, "platform", { value: "darwin" });
   t.mock.method(Date, "now", () => Date.UTC(2026, 8, 24, 10, 0, 10));
   const root = Object.assign(new ChildProcess(), { pid: rootPid });
-  const descendants = new ProcessDescendants(root, { ownProcessGroup: true });
+  const descendants = new ProcessDescendants(root, options);
   const snapshot = { output: "", error: null as Error | null, hold: false };
   const signals: Array<{ pid: number; signal?: string | number }> = [];
   const queries: Array<{ command: string; args: readonly string[] }> = [];
@@ -295,6 +295,31 @@ function posixOwnership(t: TestContext) {
 function failedSnapshot(): Error {
   return Object.assign(new Error("synthetic process-table timeout"), { code: "ETIMEDOUT" });
 }
+
+test("POSIX descendants permanently retire reused identities after root exit", async (t) => {
+  const fixture = posixOwnership(t, { ownProcessGroup: false });
+  fixture.snapshot.output =
+    posixRow(rootPid, process.pid, rootPid, posixRootBirth) +
+    posixRow(childPid, rootPid, rootPid, posixChildBirth) +
+    posixRow(grandchildPid, 1, 1, posixSiblingBirth);
+  await fixture.descendants.signal("SIGTERM", 1_000);
+  assert.deepEqual(fixture.signals, [{ pid: childPid, signal: "SIGTERM" }]);
+  fixture.signals.length = 0;
+
+  fixture.exitRoot();
+  fixture.snapshot.output = posixRow(childPid, 1, rootPid, posixReusedBirth);
+  await fixture.descendants.signal("SIGKILL", 1_000);
+  assert.deepEqual(fixture.signals, [], "a reused PID received a signal");
+  assert.equal(fixture.descendants.hasTrackedProcesses(), false);
+
+  fixture.snapshot.output = posixRow(childPid, 1, rootPid, posixChildBirth);
+  await fixture.descendants.signal("SIGKILL", 1_000);
+  assert.deepEqual(
+    fixture.signals,
+    [],
+    "a retired identity was rediscovered without an owned ancestor",
+  );
+});
 
 test("a fresh live-root observation repairs a pending failed observation", async (t) => {
   const fixture = posixOwnership(t);

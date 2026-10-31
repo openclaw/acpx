@@ -254,18 +254,24 @@ export function buildTerminalShellSpawnCommand(
 }
 
 /** Finds an installed entrypoint without executing it. */
-export function resolveInstalledExecutable(command: string): string | undefined {
+export function resolveInstalledExecutable(
+  command: string,
+  { env, cwd }: { env: NodeJS.ProcessEnv; cwd: string } = {
+    env: process.env,
+    cwd: process.cwd(),
+  },
+): string | undefined {
   if (process.platform === "win32") {
-    const resolved = resolveWindowsCommand(command);
+    const resolved = resolveWindowsCommand(command, env, cwd);
     return resolved && fs.statSync(resolved, { throwIfNoEntry: false })?.isFile()
       ? path.resolve(resolved)
       : undefined;
   }
   const candidates = command.includes("/")
-    ? [path.resolve(command)]
-    : (process.env.PATH ?? "")
+    ? [path.resolve(cwd, command)]
+    : (env.PATH ?? "")
         .split(path.delimiter)
-        .map((directory) => path.resolve(directory, command));
+        .map((directory) => path.resolve(cwd, directory, command));
   return candidates.find((candidate) => {
     try {
       fs.accessSync(candidate, fs.constants.X_OK);

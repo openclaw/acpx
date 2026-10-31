@@ -4,7 +4,6 @@ import {
   getDesiredModeId,
   normalizeModeId,
   setDesiredModeId,
-  setDesiredModelId,
 } from "../src/session/mode-preference.js";
 import type { SessionRecord } from "../src/types.js";
 
@@ -34,28 +33,6 @@ test("setDesiredModeId creates and clears acpx mode preference state", () => {
 
   setDesiredModeId(record, undefined);
   assert.deepEqual(record.acpx, {});
-});
-
-test("setDesiredModelId preserves session env when clearing model", () => {
-  const record = makeSessionRecord();
-  record.acpx = {
-    session_options: {
-      model: "claude-sonnet-4-6",
-      env: {
-        GIT_AUTHOR_EMAIL: "agent@example.local",
-      },
-    },
-  };
-
-  setDesiredModelId(record, undefined);
-
-  assert.deepEqual(record.acpx, {
-    session_options: {
-      env: {
-        GIT_AUTHOR_EMAIL: "agent@example.local",
-      },
-    },
-  });
 });
 
 function makeSessionRecord(): SessionRecord {

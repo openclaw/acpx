@@ -21,7 +21,7 @@ const siteBase = cname ? `https://${cname}` : "";
 const productName = "acpx";
 const productTagline = "Talk to agents from the command line";
 const productDescription =
-  "Headless CLI client for the Agent Client Protocol — persistent multi-turn sessions, queue-aware prompts, structured output, and multi-step flows for Codex, Claude, Pi, OpenClaw, and any ACP-capable agent.";
+  "Headless CLI client for the Agent Client Protocol — persistent multi-turn sessions, queue-aware prompts, structured output, and multi-step flows for Pi, OpenClaw, Codex, Claude, and any ACP-capable agent.";
 const installCommand = "npm install -g acpx";
 
 const sections = [
@@ -575,20 +575,7 @@ function homeHero(page) {
   const quickstartRel = pageMap.get("quickstart.md")?.outRel
     ? hrefToOutRel(pageMap.get("quickstart.md").outRel, page.outRel)
     : "quickstart.html";
-  const agents = [
-    "codex",
-    "claude",
-    "pi",
-    "openclaw",
-    "gemini",
-    "cursor",
-    "copilot",
-    "droid",
-    "qwen",
-    "qoder",
-    "opencode",
-    "kimi",
-  ];
+  const agentExamples = ["pi", "openclaw", "codex", "claude"];
   return `<header class="home-hero">
         <p class="eyebrow"><span class="dot" aria-hidden="true"></span> Agent Client Protocol · Headless CLI</p>
         <h1>Talk to agents <span class="accent">from the command line</span></h1>
@@ -601,8 +588,8 @@ function homeHero(page) {
             <code>${escapeHtml(installCommand)}</code>
           </div>
         </div>
-        <div class="home-services" aria-label="Built-in agents">
-          ${agents.map((s) => `<span>${escapeHtml(s)}</span>`).join("")}
+        <div class="home-services" aria-label="Built-in agent examples">
+          ${agentExamples.map((s) => `<span>${escapeHtml(s)}</span>`).join("")}
         </div>
         <p class="muted"><a href="${installRel}">Install options →</a></p>
       </header>`;

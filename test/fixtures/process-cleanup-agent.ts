@@ -58,7 +58,9 @@ lines.on("line", (line) => {
   }
   if (
     (mode === "init-hang" && request.method === "initialize") ||
-    (mode === "session-hang" && request.method === "session/new")
+    (mode === "session-hang" && request.method === "session/new") ||
+    (mode === "session-load-hang" && request.method === "session/load") ||
+    (mode === "session-resume-hang" && request.method === "session/resume")
   ) {
     return;
   }
@@ -89,10 +91,17 @@ lines.on("line", (line) => {
     request.method === "initialize"
       ? {
           protocolVersion: 1,
-          agentCapabilities: {},
+          agentCapabilities: {
+            ...(["session-load-hang", "session-resume-hang", "session-healthy"].includes(mode)
+              ? { loadSession: true }
+              : {}),
+            ...(mode === "session-resume-hang" ? { sessionCapabilities: { resume: {} } } : {}),
+          },
           agentInfo: { name: "cleanup-fixture", version: "1" },
         }
-      : { sessionId: "cleanup-session" };
+      : request.method === "session/prompt" && mode === "session-healthy"
+        ? { stopReason: "end_turn" }
+        : { sessionId: "cleanup-session" };
   const response =
     request.method === "initialize" && mode === "init-fail"
       ? { error: { code: -32603, message: "synthetic initialization failure" } }

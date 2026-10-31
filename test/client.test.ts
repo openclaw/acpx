@@ -171,7 +171,6 @@ type ClientInternals = {
   observedSessionUpdates: number;
   processedSessionUpdates: number;
   suppressSessionUpdates: boolean;
-  suppressReplaySessionUpdateMessages: boolean;
 };
 
 test("buildAgentSpawnOptions normalizes auth env keys and preserves existing values", () => {
@@ -202,36 +201,31 @@ test("buildAgentSpawnOptions normalizes auth env keys and preserves existing val
   );
 });
 
-test("resolveAgentCloseAfterStdinEndMs gives qodercli extra EOF shutdown grace", () => {
-  assert.equal(resolveAgentCloseAfterStdinEndMs("qodercli --acp"), 750);
-  assert.equal(resolveAgentCloseAfterStdinEndMs("/Users/me/bin/qodercli --acp"), 750);
-  assert.equal(resolveAgentCloseAfterStdinEndMs("node ./test/mock-agent.js"), 100);
-});
+for (const command of [
+  "qoder",
+  "qodercli",
+  "/opt/test/bin/Qoder.cmd",
+  "/opt/test/bin/Qodercli.exe",
+]) {
+  test(`resolveAgentCloseAfterStdinEndMs gives ${command} extra EOF shutdown grace`, () => {
+    assert.equal(resolveAgentCloseAfterStdinEndMs(`${command} --acp`), 750);
+    assert.equal(resolveAgentCloseAfterStdinEndMs("node ./test/mock-agent.js"), 100);
+  });
 
-test("shouldIgnoreNonJsonAgentOutputLine ignores qoder shutdown chatter only", () => {
-  assert.equal(
-    shouldIgnoreNonJsonAgentOutputLine(
-      "qodercli --acp",
+  test(`shouldIgnoreNonJsonAgentOutputLine filters only known ${command} shutdown chatter`, () => {
+    for (const line of [
       "Received interrupt signal. Cleaning up resources...",
-    ),
-    true,
-  );
-  assert.equal(
-    shouldIgnoreNonJsonAgentOutputLine("qodercli --acp", "Cleanup completed. Exiting..."),
-    true,
-  );
-  assert.equal(
-    shouldIgnoreNonJsonAgentOutputLine(
-      "node ./test/mock-agent.js",
       "Cleanup completed. Exiting...",
-    ),
-    false,
-  );
-  assert.equal(
-    shouldIgnoreNonJsonAgentOutputLine("qodercli --acp", "unexpected non-json output"),
-    false,
-  );
-});
+    ]) {
+      assert.equal(shouldIgnoreNonJsonAgentOutputLine(`${command} --acp`, line), true);
+      assert.equal(shouldIgnoreNonJsonAgentOutputLine("node ./test/mock-agent.js", line), false);
+    }
+    assert.equal(
+      shouldIgnoreNonJsonAgentOutputLine(`${command} --acp`, "unexpected non-json output"),
+      false,
+    );
+  });
+}
 
 test("buildQoderAcpCommandArgs forwards allowed-tools and max-turns", () => {
   assert.deepEqual(
@@ -2413,6 +2407,50 @@ test("AcpClient correlates spawn failures with the prepared launch", async () =>
   assert.equal(exited, false);
 });
 
+test(
+  "AcpClient diagnoses the prepared command using its child PATH and cwd",
+  { skip: process.platform === "win32" },
+  async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-spawn-diagnostic-"));
+    const bin = path.join(cwd, "bin");
+    await fs.mkdir(bin);
+    const command = path.basename(process.execPath);
+    const options = {
+      agentCommand: "display-command",
+      agentArgv: [command],
+      cwd,
+      agentProcessEnv: { PATH: "bin" },
+    };
+    try {
+      await assert.rejects(makeClient(options).start(), (error: unknown) => {
+        assert(error instanceof AgentSpawnError);
+        assert(
+          error.message.includes(
+            `No runnable executable named ${JSON.stringify(command)} was found on the child PATH.`,
+          ),
+        );
+        assert.equal(error.agentCommand, "display-command");
+        return true;
+      });
+
+      await fs.writeFile(path.join(bin, command), "#!/acpx-missing-test-interpreter\n", {
+        mode: 0o755,
+      });
+      await assert.rejects(makeClient(options).start(), (error: unknown) => {
+        assert(error instanceof AgentSpawnError);
+        assert.match(error.message, /required executable, interpreter, working directory/i);
+        assert.doesNotMatch(
+          error.message,
+          /No runnable executable|Executable path could not be resolved/,
+        );
+        return true;
+      });
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  },
+);
+
 test("AcpClient does not await non-settling spawn failure observers", async () => {
   let observerCalled = false;
   const client = makeClient({
@@ -2723,7 +2761,6 @@ test("AcpClient close resets in-memory state and shuts down terminal manager", a
   internals.observedSessionUpdates = 5;
   internals.processedSessionUpdates = 4;
   internals.suppressSessionUpdates = true;
-  internals.suppressReplaySessionUpdateMessages = true;
 
   await client.close();
 
@@ -2738,7 +2775,6 @@ test("AcpClient close resets in-memory state and shuts down terminal manager", a
   assert.equal(internals.observedSessionUpdates, 0);
   assert.equal(internals.processedSessionUpdates, 0);
   assert.equal(internals.suppressSessionUpdates, false);
-  assert.equal(internals.suppressReplaySessionUpdateMessages, false);
   assert.equal(internals.closing, true);
 });
 

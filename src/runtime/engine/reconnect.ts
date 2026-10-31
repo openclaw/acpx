@@ -3,7 +3,6 @@ import type { AcpClient } from "../../acp/client.js";
 import {
   extractAcpError,
   formatErrorMessage,
-  isAcpQueryClosedBeforeResponseError,
   isAcpResourceNotFoundError,
 } from "../../acp/error-normalization.js";
 import {
@@ -146,7 +145,7 @@ function shouldFallbackToNewSession(error: unknown, record: SessionRecord): bool
     return true;
   }
 
-  return !sessionHasAgentMessages(record) && isFallbackSafeEmptySessionError(error, acp);
+  return !sessionHasAgentMessages(record) && acp?.code === -32603;
 }
 
 function isHardReconnectFailure(error: unknown): boolean {
@@ -155,13 +154,6 @@ function isHardReconnectFailure(error: unknown): boolean {
 
 function isUnsupportedSessionLoadAcpError(acp: ReturnType<typeof extractAcpError>): boolean {
   return !!acp && SESSION_LOAD_UNSUPPORTED_CODES.has(acp.code);
-}
-
-function isFallbackSafeEmptySessionError(
-  error: unknown,
-  acp: ReturnType<typeof extractAcpError>,
-): boolean {
-  return isAcpQueryClosedBeforeResponseError(error) || acp?.code === -32603;
 }
 
 function requiresSameSession(resumePolicy: SessionResumePolicy | undefined): boolean {

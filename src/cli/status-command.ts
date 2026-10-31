@@ -121,10 +121,10 @@ async function printSessionStatus(
   const health = await probeQueueOwnerHealth(record.acpxRecordId);
   const statusState = resolveStatusState(record, health);
   const payload = createStatusPayload(record, health, statusState);
-  const running = isRunningStatus(statusState);
-  const dead = isDeadStatus(statusState);
+  const running = statusState === "running";
+  const dead = statusState === "dead";
 
-  if (emitStatusJson(format, record, payload, statusState, running, dead)) {
+  if (emitJsonResult(format, statusJsonPayload(record, payload, statusState, running, dead))) {
     return;
   }
 
@@ -141,7 +141,7 @@ function createStatusPayload(
   health: Awaited<ReturnType<typeof probeQueueOwnerHealth>>,
   statusState: SessionStatusState,
 ): StatusPayload {
-  const running = isRunningStatus(statusState);
+  const running = statusState === "running";
   const acpx = statusAcpxFields(record);
   return {
     sessionId: record.acpxRecordId,
@@ -151,10 +151,10 @@ function createStatusPayload(
     model: acpx.model,
     mode: acpx.mode,
     availableModels: acpx.availableModels,
-    uptime: running ? optionalStatusString(formatUptime(record.agentStartedAt)) : null,
-    lastPromptTime: optionalStatusString(record.lastPromptAt),
-    exitCode: running ? null : optionalStatusNumber(record.lastAgentExitCode),
-    signal: running ? null : optionalStatusSignal(record.lastAgentExitSignal),
+    uptime: running ? (formatUptime(record.agentStartedAt) ?? null) : null,
+    lastPromptTime: record.lastPromptAt ?? null,
+    exitCode: running ? null : (record.lastAgentExitCode ?? null),
+    signal: running ? null : (record.lastAgentExitSignal ?? null),
     ...agentSessionIdPayload(record.agentSessionId),
   };
 }
@@ -178,26 +178,6 @@ function statusPid(health: Awaited<ReturnType<typeof probeQueueOwnerHealth>>): n
   return null;
 }
 
-function optionalStatusString(value: string | undefined | null): string | null {
-  return value ?? null;
-}
-
-function optionalStatusNumber(value: number | undefined | null): number | null {
-  return value ?? null;
-}
-
-function optionalStatusSignal(value: NodeJS.Signals | undefined | null): NodeJS.Signals | null {
-  return value ?? null;
-}
-
-function isRunningStatus(status: SessionStatusState): boolean {
-  return status === "running";
-}
-
-function isDeadStatus(status: SessionStatusState): boolean {
-  return status === "dead";
-}
-
 type StatusPayload = {
   sessionId: string;
   agentCommand: string;
@@ -212,17 +192,6 @@ type StatusPayload = {
   signal: NodeJS.Signals | null;
   agentSessionId?: string;
 };
-
-function emitStatusJson(
-  format: ResolvedAcpxConfig["format"],
-  record: SessionRecord,
-  payload: StatusPayload,
-  statusState: SessionStatusState,
-  running: boolean,
-  dead: boolean,
-): boolean {
-  return emitJsonResult(format, statusJsonPayload(record, payload, statusState, running, dead));
-}
 
 function statusJsonPayload(
   record: SessionRecord,

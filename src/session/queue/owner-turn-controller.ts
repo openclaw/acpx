@@ -1,48 +1,28 @@
 import type { QueueOwnerControlMethods } from "./control-admission.js";
 
-export type QueueOwnerTurnState = "idle" | "starting" | "active" | "closing";
-
 export type QueueOwnerActiveSessionController = QueueOwnerControlMethods & {
   hasActivePrompt: () => boolean;
   requestCancelActivePrompt: () => Promise<boolean>;
 };
 
 export class QueueOwnerTurnController {
-  private state: QueueOwnerTurnState = "idle";
   private pendingCancel = false;
   private activeController?: QueueOwnerActiveSessionController;
   private waitingTurn?: AbortController;
 
-  get lifecycleState(): QueueOwnerTurnState {
-    return this.state;
-  }
-
-  get hasPendingCancel(): boolean {
-    return this.pendingCancel;
-  }
-
   beginTurn(): AbortSignal {
-    this.state = "starting";
     this.pendingCancel = false;
     this.waitingTurn = new AbortController();
     return this.waitingTurn.signal;
   }
 
-  markPromptActive(): void {
-    if (this.state === "starting" || this.state === "active") {
-      this.state = "active";
-    }
-  }
-
   endTurn(): void {
-    this.state = "idle";
     this.pendingCancel = false;
     this.waitingTurn = undefined;
   }
 
   beginClosing(): void {
-    this.state = "closing";
-    this.pendingCancel = false;
+    this.endTurn();
     this.activeController = undefined;
   }
 
@@ -60,9 +40,9 @@ export class QueueOwnerTurnController {
       return await this.cancelActivePrompt(activeController);
     }
 
-    if (this.state === "starting" || this.state === "active") {
+    if (this.waitingTurn) {
       this.pendingCancel = true;
-      this.waitingTurn?.abort();
+      this.waitingTurn.abort();
       return true;
     }
 

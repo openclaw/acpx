@@ -8,6 +8,10 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
+- Agents: add Goose as a built-in native ACP agent through `goose acp`.
+- Agents: add the native `deepseek-harness` profile using `dsh --profile acp`.
+- Agents: add experimental `ante` support through `ante acp`; requires Ante and the separate `ante-acp` adapter, with no session reopening after disconnect.
+- Runtime/embedding: expose an optional best-effort ACP message observer for owned session clients, including setup, reconnects, cold controls, and session discard, while retaining elicitation and replay filtering.
 - Flows: select per-node models and ordered ACP configuration options before the first prompt, with run defaults, persistent-handle conflict checks, same-session replay, and requested/accepted settings in run bundles. Thanks @superbiche.
 
 ### Fixes
@@ -15,6 +19,13 @@ Repo: https://github.com/openclaw/acpx
 - Docs/prompting: list `-s, --session` and `--no-wait` as options of `prompt` and the bare form only; `exec` rejects them with `unknown option`. Thanks @KrasimirKralev.
 - CLI: unknown options and other usage errors on subcommands (`acpx codex exec --bogus`, `acpx sessions list --bogus`) now exit with code 2 as documented, and `--format json` reports them as a JSON-RPC error instead of plain text only; they used to exit 1. Thanks @KrasimirKralev.
 - Agents/launch: start npm-backed built-in adapters (pi, codex, claude, kilocode, mux, opencode) when acpx itself runs under `npx` and the Node-relative npm bridge is unavailable, instead of exiting with code 127 before initialize. Thanks @kanzaki-chiya.
+- Docs/Qwen Code: clarify text filesystem delegation, native file discovery, and that `--no-fs` does not sandbox native file access; distinguish the CLI from QwenWork.
+- Agents/launch: add best-effort executable and working-directory hints to missing-path errors using the actual child launch context, while retaining the ambiguous-case checklist. Thanks @odrobnik.
+- Docs/site: label the homepage badges as curated examples and use the primary Pi, OpenClaw, Codex, and Claude order.
+
+- Qoder: preserve native startup options, shutdown grace, and cleanup-message filtering when a custom command uses `qoder --acp` instead of `qodercli --acp`.
+
+- Runtime/embedding: apply independent setup deadlines to session creation, load and resume requests, cleaning up stalled clients without replacing explicitly resumed sessions.
 
 ## 0.21.1 - 2026-10-26
 
