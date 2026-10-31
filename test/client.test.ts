@@ -1262,6 +1262,49 @@ test("AcpClient setSessionModel preserves explicitly advertised legacy model con
   await changed;
 });
 
+for (const scenario of [
+  {
+    data: { message: "alternate-model requires a Pro plan" },
+    expected: "alternate-model requires a Pro plan",
+  },
+  {
+    data: { details: "model quota exhausted", message: "alternate-model requires a Pro plan" },
+    expected: "model quota exhausted",
+  },
+]) {
+  test(`AcpClient setSessionModel reports the adapter's ${Object.keys(scenario.data).join(" and ")}`, async (t) => {
+    const fixture = createClientFixture(t);
+    const created = fixture.track(fixture.client.createSession("/tmp/acpx-client-model-error"));
+    const createRequest = await fixture.message(0);
+    assert("method" in createRequest);
+    await fixture.reply(createRequest, {
+      sessionId: "model-error-session",
+      models: {
+        currentModelId: "default-model",
+        availableModels: [
+          { modelId: "default-model", name: "Default Model" },
+          { modelId: "alternate-model", name: "Alternate Model" },
+        ],
+      },
+    });
+    const result = await created;
+    const changed = fixture.track(
+      fixture.client.setSessionModel(result.sessionId, "alternate-model", result.models),
+    );
+    const request = await fixture.message(1);
+    assert("method" in request && "id" in request);
+    assert.equal(request.method, "session/set_model");
+    await fixture.send({
+      jsonrpc: "2.0",
+      id: request.id,
+      error: { code: -32603, message: "Internal error", data: scenario.data },
+    });
+    await assert.rejects(changed, {
+      message: `Failed session/set_model for model "alternate-model": ${scenario.expected} (ACP -32603, adapter reported "Internal error")`,
+    });
+  });
+}
+
 test("AcpClient ignores malformed config snapshots instead of withdrawing the catalog", async (t) => {
   const fixture = createClientFixture(t);
   const pending = fixture.track(

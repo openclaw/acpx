@@ -31,9 +31,11 @@ export function formatSessionControlAcpSummary(acp: {
   message: string;
   data?: unknown;
 }): string {
-  const details = asRecord(acp.data)?.details;
-  if (typeof details === "string" && details.trim().length > 0) {
-    return `${details.trim()} (ACP ${acp.code}, adapter reported "${acp.message}")`;
+  const data = asRecord(acp.data);
+  for (const value of [data?.details, data?.message]) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return `${value.trim()} (ACP ${acp.code}, adapter reported "${acp.message}")`;
+    }
   }
   return `${acp.message} (ACP ${acp.code})`;
 }
