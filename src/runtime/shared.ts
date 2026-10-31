@@ -43,7 +43,7 @@ import type {
   AcpRuntimeTurnResult,
 } from "./public/contract.js";
 import { AcpRuntimeError } from "./public/errors.js";
-import { parsePromptEventLine } from "./public/events.js";
+import { runtimeEventFromMessage } from "./public/events.js";
 
 export type SharedAcpRuntimeOptions = {
   cwd: string;
@@ -284,7 +284,7 @@ export class SharedAcpRuntime {
         outputFormatter: {
           ...DISCARD_OUTPUT_FORMATTER,
           onAcpMessage: (message) => {
-            const event = parsePromptEventLine(JSON.stringify(message));
+            const event = runtimeEventFromMessage(message);
             if (event) {
               events.push(event);
             }

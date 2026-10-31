@@ -44,7 +44,7 @@ import type {
   AcpRuntimeTurnResult,
 } from "../public/contract.js";
 import { AcpRuntimeError } from "../public/errors.js";
-import { parsePromptEventLine } from "../public/events.js";
+import { runtimeEventFromMessage } from "../public/events.js";
 import { probeRuntime, type RuntimeHealthReport } from "../public/probe.js";
 import { withConnectedSession } from "./connected-session.js";
 import { resolveSupportedConfigOptionId } from "./controls.js";
@@ -1646,7 +1646,7 @@ export class AcpRuntimeManager {
   }
 
   private emitRuntimeTurnEvent(task: RuntimeTurnTask, payload: Record<string, unknown>): void {
-    const parsed = parsePromptEventLine(JSON.stringify(payload));
+    const parsed = runtimeEventFromMessage(payload);
     if (!parsed) {
       return;
     }
