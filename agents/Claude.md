@@ -1,7 +1,7 @@
 # Claude
 
 - Built-in name: `claude`
-- Default command: `npx -y @agentclientprotocol/claude-agent-acp`
+- Default command: `npx -y --package=@agentclientprotocol/claude-agent-acp -- claude-agent-acp`
 - Upstream: https://github.com/agentclientprotocol/claude-agent-acp
 - ACPX pins the built-in package range so fresh installs pick up Claude model and ACP adapter fixes without depending on a global adapter binary.
 - Update ACPX to pick up changes to the supported adapter range in `src/agent-registry.ts`.

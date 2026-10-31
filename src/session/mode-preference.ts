@@ -1,4 +1,4 @@
-import { modelStateFromConfigOptions, type SessionModelState } from "../acp/model-support.js";
+import type { SessionModelState } from "../acp/model-support.js";
 import type { SessionAcpxState, SessionRecord } from "../types.js";
 import { applyAdvertisedModelState } from "./model-state.js";
 
@@ -70,46 +70,6 @@ export function clearDesiredConfigOption(
 
 export function getDesiredModelId(state: SessionAcpxState | undefined): string | undefined {
   return normalizeModelId(state?.session_options?.model);
-}
-
-function hasStoredSessionOptions(
-  options: NonNullable<SessionAcpxState["session_options"]>,
-): boolean {
-  return (
-    typeof options.model === "string" ||
-    Array.isArray(options.allowed_tools) ||
-    typeof options.max_turns === "number" ||
-    options.system_prompt !== undefined ||
-    options.env !== undefined
-  );
-}
-
-export function setDesiredModelId(
-  record: SessionRecord,
-  modelId: string | undefined,
-  modelConfigId?: string,
-): void {
-  const acpx = ensureAcpxState(record.acpx);
-  const normalized = normalizeModelId(modelId);
-  const sessionOptions = { ...acpx.session_options };
-
-  if (normalized) {
-    sessionOptions.model = normalized;
-  } else {
-    delete sessionOptions.model;
-  }
-
-  if (hasStoredSessionOptions(sessionOptions)) {
-    acpx.session_options = sessionOptions;
-  } else {
-    delete acpx.session_options;
-  }
-
-  clearDesiredConfigOption(
-    acpx,
-    modelConfigId ?? modelStateFromConfigOptions(acpx.config_options)?.configId,
-  );
-  record.acpx = acpx;
 }
 
 export function syncAdvertisedModelState(

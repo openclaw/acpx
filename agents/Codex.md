@@ -1,7 +1,7 @@
 # Codex
 
 - Built-in name: `codex`
-- Default command: `npx -y @agentclientprotocol/codex-acp`
+- Default command: `npx -y --package=@agentclientprotocol/codex-acp -- codex-acp`
 - Upstream: https://github.com/agentclientprotocol/codex-acp
 - ACPX owns the built-in package range so fresh launches use the repository-selected stable adapter line without requiring a global install.
 - Runtime controls exposed by current codex-acp releases include ACP modes plus separate `model` and `reasoning_effort` session config options.

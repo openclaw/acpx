@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { readWindowsEnvValue, resolveInstalledExecutable } from "./spawn-command-options.js";
 import type { OutputErrorAcpPayload, OutputErrorCode, OutputErrorOrigin } from "./types.js";
 
 type AcpxErrorOptions = ErrorOptions & {
@@ -40,14 +43,43 @@ export class SessionNotFoundError extends AcpxOperationalError {
 
 export class SessionResolutionError extends AcpxOperationalError {}
 
+type AgentSpawnContext = {
+  command: string;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+};
+
+function agentSpawnEnoentHint(context: AgentSpawnContext): string {
+  try {
+    if (!fs.statSync(context.cwd, { throwIfNoEntry: false })?.isDirectory()) {
+      return `Working directory is unavailable: ${context.cwd}. `;
+    }
+    if (resolveInstalledExecutable(context.command, context)) {
+      return "";
+    }
+    if (path.parse(context.command).dir.length > 0) {
+      return `Executable path could not be resolved: ${path.resolve(context.cwd, context.command)}. `;
+    }
+    const childPath =
+      process.platform === "win32" ? readWindowsEnvValue(context.env, "PATH") : context.env.PATH;
+    return childPath === undefined
+      ? ""
+      : `No runnable executable named ${JSON.stringify(context.command)} was found on the child PATH. `;
+  } catch {
+    // Filesystem observations are best effort and must not replace the spawn error.
+    return "";
+  }
+}
+
 export class AgentSpawnError extends AcpxOperationalError {
   readonly agentCommand: string;
 
-  constructor(agentCommand: string, cause?: unknown) {
+  constructor(agentCommand: string, cause?: unknown, context?: AgentSpawnContext) {
     const spawnCode = cause instanceof Error ? (cause as NodeJS.ErrnoException).code : undefined;
     const spawnEnoent = spawnCode === "ENOENT";
+    const hint = spawnEnoent && context ? agentSpawnEnoentHint(context) : "";
     const message = spawnEnoent
-      ? `Failed to spawn agent command: ${agentCommand}. The agent process could not start because a required executable, interpreter, working directory, or other launch path was not found. Check the command, effective PATH, and working directory, or verify the custom agent's configured argv.`
+      ? `Failed to spawn agent command: ${agentCommand}. ${hint}The agent process could not start because a required executable, interpreter, working directory, or other launch path was not found. Check the command, effective PATH, and working directory, or verify the custom agent's configured argv.`
       : `Failed to spawn agent command: ${agentCommand}`;
     super(message, {
       cause: cause instanceof Error ? cause : undefined,

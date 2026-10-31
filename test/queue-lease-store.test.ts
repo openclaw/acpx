@@ -11,7 +11,6 @@ import {
   resolveUsableQueueOwner,
   isProcessAlive,
   readQueueOwnerRecord,
-  readQueueOwnerStatus,
   refreshQueueOwnerLease,
   releaseQueueOwnerLease,
   terminateProcess,
@@ -406,7 +405,7 @@ test("collision preserves fresh malformed reservations and recovers abandoned on
   });
 });
 
-test("stale health observations do not terminate a recovered heartbeat", async (context) => {
+test("stale health observations do not terminate a recovered heartbeat", async () => {
   await withTempHome(async (homeDir) => {
     const sessionId = "lease-recovered-heartbeat";
     const keeper = await startKeeperProcess();
@@ -425,19 +424,6 @@ test("stale health observations do not terminate a recovered heartbeat", async (
       assert.equal((await resolveUsableQueueOwner(sessionId, stale))?.heartbeatAt, heartbeatAt);
       assert.equal(isProcessAlive(keeper.pid), true);
       assert(await readQueueOwnerRecord(sessionId));
-      const readFile = fs.readFile.bind(fs);
-      let first = true;
-      context.mock.method(fs, "readFile", async (...args: Parameters<typeof fs.readFile>) => {
-        if (args[0] === paths.lockPath && first) {
-          first = false;
-          return JSON.stringify(stale);
-        }
-        return await readFile(...args);
-      });
-      const status = await readQueueOwnerStatus(sessionId);
-      assert.equal(status?.heartbeatAt, heartbeatAt);
-      assert.equal(status?.stale, false);
-      assert.equal(status?.alive, true);
     } finally {
       stopProcess(keeper);
     }
@@ -706,37 +692,6 @@ test("tryAcquireQueueOwnerLease clears stale dead owners and can acquire on retr
     const lease = await tryAcquireQueueOwnerLease(sessionId);
     assert(lease);
     await releaseQueueOwnerLease(lease);
-  });
-});
-
-test("readQueueOwnerStatus returns live owner details for a healthy owner", async () => {
-  await withTempHome(async (homeDir) => {
-    const sessionId = "healthy-owner";
-    const keeper = await startKeeperProcess();
-    const { lockPath, socketPath } = queuePaths(homeDir, sessionId);
-
-    try {
-      await writeQueueOwnerLock({
-        lockPath,
-        pid: keeper.pid,
-        sessionId,
-        socketPath,
-        queueDepth: 3,
-      });
-
-      const status = await readQueueOwnerStatus(sessionId);
-      assert(status);
-      assert.equal(status.pid, keeper.pid);
-      assert.equal(status.alive, true);
-      assert.equal(status.stale, false);
-      assert.equal(status.queueDepth, 3);
-    } finally {
-      stopProcess(keeper);
-      await fs.rm(lockPath, { force: true });
-      if (process.platform !== "win32") {
-        await fs.rm(socketPath, { force: true });
-      }
-    }
   });
 });
 

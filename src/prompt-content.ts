@@ -35,68 +35,12 @@ function isAudioMimeType(value: string): boolean {
   return /^audio\/[A-Za-z0-9.+-]+$/i.test(value);
 }
 
-function isTextBlock(value: unknown): value is Extract<ContentBlock, { type: "text" }> {
-  const record = asRecord(value);
-  return record?.type === "text" && typeof record.text === "string";
-}
-
-function isImageBlock(value: unknown): value is Extract<ContentBlock, { type: "image" }> {
-  const record = asRecord(value);
-  return (
-    record?.type === "image" &&
-    isNonEmptyString(record.mimeType) &&
-    isImageMimeType(record.mimeType) &&
-    typeof record.data === "string" &&
-    isBase64Data(record.data)
-  );
-}
-
-function isAudioBlock(value: unknown): value is Extract<ContentBlock, { type: "audio" }> {
-  const record = asRecord(value);
-  return (
-    record?.type === "audio" &&
-    isNonEmptyString(record.mimeType) &&
-    isAudioMimeType(record.mimeType) &&
-    typeof record.data === "string" &&
-    isBase64Data(record.data)
-  );
-}
-
-function isResourceLinkBlock(
-  value: unknown,
-): value is Extract<ContentBlock, { type: "resource_link" }> {
-  const record = asRecord(value);
-  return (
-    record?.type === "resource_link" &&
-    isNonEmptyString(record.uri) &&
-    (record.title == null || typeof record.title === "string") &&
-    typeof record.name === "string"
-  );
-}
-
 function isResourcePayload(value: unknown): boolean {
   const record = asRecord(value);
   if (!record || !isNonEmptyString(record.uri)) {
     return false;
   }
   return typeof record.text === "string" || typeof record.blob === "string";
-}
-
-function isResourceBlock(value: unknown): value is Extract<ContentBlock, { type: "resource" }> {
-  const record = asRecord(value);
-  return record?.type === "resource" && isResourcePayload(record.resource);
-}
-
-const CONTENT_BLOCK_VALIDATORS = [
-  isTextBlock,
-  isImageBlock,
-  isAudioBlock,
-  isResourceLinkBlock,
-  isResourceBlock,
-] as const;
-
-function isContentBlock(value: unknown): value is ContentBlock {
-  return CONTENT_BLOCK_VALIDATORS.some((validator) => validator(value));
 }
 
 type ContentBlockValidation = (
@@ -204,7 +148,10 @@ function getContentBlockValidationError(value: unknown, index: number): string |
 }
 
 export function isPromptInput(value: unknown): value is PromptInput {
-  return Array.isArray(value) && value.every((entry) => isContentBlock(entry));
+  return (
+    Array.isArray(value) &&
+    value.every((entry, index) => getContentBlockValidationError(entry, index) === undefined)
+  );
 }
 
 type PromptCapabilityName = "image" | "audio" | "embeddedContext";

@@ -6,7 +6,13 @@ import { splitCommandLine } from "./client-process.js";
 // agent-registry.ts must add the previous command here or those sessions drop
 // out of agent-scoped lookup.
 export const LEGACY_AGENT_COMMANDS: Readonly<Record<string, readonly string[]>> = {
-  pi: ["npx pi-acp", "npx pi-acp@^0.0.22", "npx pi-acp@^0.0.26", "npx pi-acp@^0.0.31"],
+  pi: [
+    "npx pi-acp",
+    "npx pi-acp@^0.0.22",
+    "npx pi-acp@^0.0.26",
+    "npx pi-acp@^0.0.31",
+    "npx pi-acp@^0.0.33",
+  ],
   codex: [
     "npx @zed-industries/codex-acp",
     "npx @zed-industries/codex-acp@^0.9.5",
@@ -15,6 +21,7 @@ export const LEGACY_AGENT_COMMANDS: Readonly<Record<string, readonly string[]>> 
     "npx @zed-industries/codex-acp@^0.12.0",
     "npx -y @agentclientprotocol/codex-acp@^0.0.44",
     "npx -y @agentclientprotocol/codex-acp@^1.1.4",
+    "npx -y @agentclientprotocol/codex-acp@^1.1.5",
   ],
   claude: [
     "npx @zed-industries/claude-agent-acp",
@@ -32,6 +39,7 @@ export const LEGACY_AGENT_COMMANDS: Readonly<Record<string, readonly string[]>> 
     "npx -y @agentclientprotocol/claude-agent-acp@^0.60.0",
     "npx -y @agentclientprotocol/claude-agent-acp@^0.76.0",
     "npx -y @agentclientprotocol/claude-agent-acp@^0.81.2",
+    "npx -y @agentclientprotocol/claude-agent-acp@^0.95.0",
     "npm exec @agentclientprotocol/claude-agent-acp@^0.25.0",
     "npm exec @agentclientprotocol/claude-agent-acp@^0.31.0",
     "npm exec @agentclientprotocol/claude-agent-acp@^0.36.1",
@@ -41,9 +49,10 @@ export const LEGACY_AGENT_COMMANDS: Readonly<Record<string, readonly string[]>> 
     "npm exec @agentclientprotocol/claude-agent-acp@^0.81.2",
   ],
   gemini: ["gemini", "gemini --experimental-acp"],
+  kilocode: ["npx -y @kilocode/cli acp"],
   kiro: ["kiro-cli acp"],
-  mux: ["npx -y mux@^0.27.0 acp"],
-  opencode: ["npx opencode-ai"],
+  mux: ["npx -y mux@^0.27.0 acp", "npx -y mux@^0.28.0 acp"],
+  opencode: ["npx opencode-ai", "npx -y opencode-ai acp"],
 };
 
 function currentArgv(name: string): string[] | undefined {

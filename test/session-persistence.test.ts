@@ -182,6 +182,16 @@ test("parseSessionRecord migrates records saved under earlier built-in commands"
     ["npm exec @agentclientprotocol/claude-agent-acp@^0.81.2", undefined, "claude"],
     [PREVIOUS_CLAUDE_COMMAND, AGENT_ARGV_REGISTRY.claude, "claude"],
     ["npx pi-acp@^0.0.31", ["npx", "pi-acp@^0.0.31"], "pi"],
+    ["npx pi-acp@^0.0.33", ["npx", "pi-acp@^0.0.33"], "pi"],
+    [
+      "npx -y @agentclientprotocol/codex-acp@^1.1.5",
+      ["npx", "-y", "@agentclientprotocol/codex-acp@^1.1.5"],
+      "codex",
+    ],
+    ["npx -y @agentclientprotocol/claude-agent-acp@^0.95.0", undefined, "claude"],
+    ["npx -y @kilocode/cli acp", ["npx", "-y", "@kilocode/cli", "acp"], "kilocode"],
+    ["npx -y mux@^0.28.0 acp", undefined, "mux"],
+    ["npx -y opencode-ai acp", ["npx", "-y", "opencode-ai", "acp"], "opencode"],
   ] as const) {
     const parsed = parseSessionRecord(
       serializeWithAgent(agentCommand, agentCommand, agentArgv ? [...agentArgv] : undefined),

@@ -316,9 +316,23 @@ test("bootstrap keeps version independent of config and applies loaded output de
 test("top-level output flag detection stops at the first command token", async () => {
   await withTempHome(async (homeDir) => {
     const result = await runCli(["codex", "--json-strict"], homeDir);
-    assert.equal(result.code, 1);
+    assert.equal(result.code, 2);
     assert.equal(result.stdout.trim(), "");
     assert.match(result.stderr, /unknown option '--json-strict'/);
+  });
+});
+
+test("subcommand usage errors exit 2 and honor --format json", async () => {
+  await withTempHome(async (homeDir) => {
+    const text = await runCli(["codex", "exec", "--bogus", "hi"], homeDir);
+    assert.equal(text.code, 2);
+    assert.match(text.stderr, /unknown option '--bogus'/);
+
+    const json = await runCli(["--format", "json", "sessions", "list", "--bogus"], homeDir);
+    assert.equal(json.code, 2);
+    const error = parseSingleAcpErrorLine(json.stdout);
+    assert.equal(error.data?.acpxCode, "USAGE");
+    assert.match(error.message ?? "", /unknown option '--bogus'/);
   });
 });
 
@@ -602,6 +616,7 @@ test(
 
       const text = await runCli(["--cwd", cwd, missingAgent, "exec", "ping"], homeDir);
       assert.equal(text.code, 1);
+      assert(text.stderr.includes(`Executable path could not be resolved: ${missingAgent}.`));
       assert.match(text.stderr, /required executable, interpreter, working directory/i);
       assert.match(text.stderr, /effective PATH/i);
       assert.match(text.stderr, /configured argv/i);
@@ -615,6 +630,7 @@ test(
       assert.equal(error.data?.acpxCode, "RUNTIME");
       assert.equal(error.data?.detailCode, "AGENT_SPAWN_ENOENT");
       assert.equal(error.data?.origin, "cli");
+      assert(error.message?.includes(`Executable path could not be resolved: ${missingAgent}.`));
 
       const missingCwd = await runCli(
         [
@@ -634,6 +650,11 @@ test(
       assert.equal(missingCwdError.data?.acpxCode, "RUNTIME");
       assert.equal(missingCwdError.data?.detailCode, "AGENT_SPAWN_ENOENT");
       assert.match(missingCwdError.message ?? "", /working directory/i);
+      assert(
+        missingCwdError.message?.includes(
+          `Working directory is unavailable: ${path.join(homeDir, "missing-workspace")}.`,
+        ),
+      );
     });
   },
 );

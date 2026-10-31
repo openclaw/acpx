@@ -83,10 +83,10 @@ If prompt text is omitted and stdin is piped, `acpx` reads prompt text from stdi
 
 Friendly agent names resolve to commands:
 
-- `pi` -> `npx pi-acp` (ACPX-owned package range; see `agents/Pi.md`)
+- `pi` -> `npx --package=pi-acp -- pi-acp` (ACPX-owned package range; see `agents/Pi.md`)
 - `openclaw` -> `openclaw acp` (see the [OpenClaw guide](https://github.com/openclaw/acpx/blob/main/agents/OpenClaw.md))
-- `codex` -> `npx -y @agentclientprotocol/codex-acp` (ACPX-owned package range)
-- `claude` -> `npx -y @agentclientprotocol/claude-agent-acp` (ACPX-owned package range; see `agents/Claude.md`)
+- `codex` -> `npx -y --package=@agentclientprotocol/codex-acp -- codex-acp` (ACPX-owned package range)
+- `claude` -> `npx -y --package=@agentclientprotocol/claude-agent-acp -- claude-agent-acp` (ACPX-owned package range; see `agents/Claude.md`)
 - `gemini` -> `gemini --acp`
 - `cursor` -> `cursor-agent acp`
 - `copilot` -> `copilot --acp --stdio`
@@ -96,19 +96,20 @@ Friendly agent names resolve to commands:
 - `fast-agent` -> `uvx fast-agent-mcp acp`
 - `fx` -> `fx acp` (install and authenticate a provider first; see the [fx guide](https://github.com/openclaw/acpx/blob/main/agents/Fx.md))
 - `grok-build` -> `grok agent stdio`
+- `goose` -> `goose acp` (install Goose and configure its provider first; see the [Goose guide](https://github.com/openclaw/acpx/blob/main/agents/Goose.md))
 - `iflow` -> `iflow --experimental-acp`
 - `junie` -> `junie --acp=true` (install and authenticate Junie first; see the [Junie guide](https://github.com/openclaw/acpx/blob/main/agents/Junie.md))
-- `kilocode` -> `npx -y @kilocode/cli acp`
+- `kilocode` -> `npx -y --package=@kilocode/cli -- kilo acp`
 - `kimi` -> `kimi acp`
 - `kiro` -> `kiro-cli-chat acp`
 - `mcode` -> `mcode acp` (install/authenticate MCode first; prefer `exec` for one-shot work, and require advertised ACP reload support for cross-invocation continuity)
-- `mux` -> `mux acp` via an ACPX-owned npm range
+- `mux` -> `npx -y --package=mux -- mux acp` via an ACPX-owned npm range
 - `octomind` -> `octomind acp developer:general` (install Octomind and sign in with `octomind login` or provider keys first; see the [Octomind guide](https://github.com/openclaw/acpx/blob/main/agents/Octomind.md))
-- `opencode` -> `npx -y opencode-ai acp`
+- `opencode` -> `npx -y --package=opencode-ai -- opencode acp`
 - `pool` -> `pool acp`
 - `qoder` -> `qodercli --acp`
   Forwards Qoder-native `--allowed-tools` and `--max-turns` startup flags from `acpx` session options.
-- `qwen` -> `qwen --acp`
+- `qwen` -> `qwen --acp` (Qwen Code, distinct from QwenWork; see the [Qwen Code guide](https://github.com/openclaw/acpx/blob/main/agents/Qwen.md) for text filesystem delegation and native file discovery)
 - `trae` -> `traecli acp serve`
 - `zeroclaw` -> `zeroclaw acp`
 
