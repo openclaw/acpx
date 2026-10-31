@@ -168,6 +168,7 @@ test("listBuiltInAgents preserves the required example prefix and alphabetical t
   ]);
   assert.deepEqual(agents.slice(7), [
     "antigravity",
+    "deepseek-harness",
     "devin",
     "droid",
     "fast-agent",

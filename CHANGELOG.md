@@ -9,6 +9,7 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - Agents: add Goose as a built-in native ACP agent through `goose acp`.
+- Agents: add the native `deepseek-harness` profile using `dsh --profile acp`.
 
 ### Fixes
 

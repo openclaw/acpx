@@ -59,6 +59,8 @@ function mockArguments(): string[] {
     case "cursor-agent":
     case "goose":
       return consumePrefix(["acp"]);
+    case "dsh":
+      return consumePrefix(["--profile", "acp"]);
     case "droid":
       return consumePrefix(["exec", "--output-format", "acp"]);
     case "uvx":
