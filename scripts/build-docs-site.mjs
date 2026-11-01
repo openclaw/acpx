@@ -446,7 +446,9 @@ function markdownToHtml(markdown, currentRel) {
             `<tr>${r.map((c, idx) => `<td${aligns[idx] ? ` style="text-align:${aligns[idx]}"` : ""}>${inline(c, currentRel)}</td>`).join("")}</tr>`,
         )
         .join("");
-      html.push(`<table><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table>`);
+      html.push(
+        `<div class="table-scroll" role="region" aria-label="Scrollable table" tabindex="0"><table><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table></div>`,
+      );
       continue;
     }
     const bullet = line.match(/^\s*-\s+(.+)$/);

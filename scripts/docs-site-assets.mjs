@@ -150,7 +150,8 @@ body:not(.home) .doc>h1:first-child{display:none}
 .doc pre .copy.copied{background:var(--accent);border-color:var(--accent);color:#04121d;opacity:1}
 .doc blockquote{margin:1.4em 0;padding:10px 16px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 8px 8px 0;color:var(--text)}
 .doc blockquote p:last-child{margin-bottom:0}
-.doc table{width:100%;border-collapse:collapse;margin:1.2em 0;font-size:.92em}
+.doc .table-scroll{overflow-x:auto;margin:1.2em 0}
+.doc table{width:100%;border-collapse:collapse;margin:0;font-size:.92em}
 .doc th,.doc td{border-bottom:1px solid var(--line);padding:9px 10px;text-align:left;vertical-align:top}
 .doc th{font-weight:600;color:var(--ink);background:var(--line-soft);border-bottom:1px solid var(--line)}
 .doc hr{border:0;border-top:1px solid var(--line);margin:2.2em 0}
