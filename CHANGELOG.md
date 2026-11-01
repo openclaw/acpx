@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+## 0.22.0 - 2026-11-01
+
+**Highlights:** Add Goose, DeepSeek Harness, and experimental Ante support, expose ACP message observation, configure models per flow node, and improve session reliability and agent setup guidance.
+
 ### Changes
 
 - Agents: add Goose as a built-in native ACP agent through `goose acp`.
