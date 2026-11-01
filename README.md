@@ -49,8 +49,8 @@ The session is scoped to the current repository and persists across invocations.
 
 These 30 built-in launch profiles share one command shape. Each guide covers the required CLI or adapter, authentication, and capability limits. Ante is experimental.
 
-|                                                              | Agent                                                                                    | Command                   |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- | ------------------------- |
+|                                                                                                                   | Agent                                                                                    | Command                   |
+| ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------- |
 | ![Pi](https://raw.githubusercontent.com/openclaw/acpx/main/docs/assets/agents/pi.png)                             | [Pi](https://github.com/openclaw/acpx/blob/main/agents/Pi.md)                            | `acpx pi …`               |
 | ![OpenClaw](https://raw.githubusercontent.com/openclaw/acpx/main/docs/assets/agents/openclaw.png)                 | [OpenClaw](https://github.com/openclaw/acpx/blob/main/agents/OpenClaw.md)                | `acpx openclaw …`         |
 | ![Codex](https://raw.githubusercontent.com/openclaw/acpx/main/docs/assets/agents/codex.png)                       | [Codex](https://github.com/openclaw/acpx/blob/main/agents/Codex.md)                      | `acpx codex …`            |
