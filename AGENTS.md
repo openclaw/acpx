@@ -301,7 +301,7 @@ CI lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 Release automation lives in [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
-- Releases run when an authorized, signed `vX.Y.Z` tag is pushed
+- Releases run when an authorized `vX.Y.Z` tag is pushed
 - Run the workflow with `dry_run: true` on the release-prep merge commit first; dispatch cannot publish
 - Follow [`docs/releasing.md`](docs/releasing.md) for release preparation and verification
 - The workflow installs dependencies with `pnpm install --frozen-lockfile`
@@ -313,7 +313,7 @@ Release automation lives in [`.github/workflows/release.yml`](.github/workflows/
   the verified build artifact to npm with trusted publishing and provenance
 - Maintainers release directly through this repository's GitHub Actions workflow;
   no external release service is required
-- Repository administrators can create signed release tags; the separate tag
+- Repository administrators can create release tags; the separate tag
   immutability rules still prevent updating or deleting published tags
 
 The release workflow currently requires these `package.json` values:
