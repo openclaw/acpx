@@ -243,7 +243,7 @@ Saved sessions may include a cached adapter PID from the last connected helper p
 
 1. `acpx` respawns the agent.
 2. Attempts ACP `session/resume` with the saved provider session id when the agent advertises it, otherwise ACP `session/load`.
-3. Falls back to `session/new` if reconnecting fails, transparently updating the saved record.
+3. Starts a fresh session only when the reconnect policy permits it. Explicit resumes remain strict. Same-session recovery preserves the saved conversation. See [Reconnect and recovery](session-control.md) for the narrow empty-session recovery exception.
 
 This makes long-running scripted sessions resilient to crashes, OS restarts, and adapter upgrades. Metadata updates received while reconnecting, including available commands, remain available after saved settings are replayed.
 
@@ -283,13 +283,16 @@ Retained text and thought chunks keep their whitespace. `sessions history` joins
 and trims content for previews; the existing runtime retention limits still apply
 to saved content.
 
-`sessions show` and the JSON form of `sessions new`/`sessions ensure` and `status` include identity fields:
+`sessions show --format json` returns the stored record. Lifecycle summaries from `sessions new`, `sessions ensure`, and `status` use a different field name for the ACP session ID:
 
-| Field            | Meaning                                                           |
-| ---------------- | ----------------------------------------------------------------- |
-| `acpxRecordId`   | Local record id printed in `text` and `quiet` output              |
-| `acpxSessionId`  | acpx-side session id (always present)                             |
-| `agentSessionId` | Provider-native session id, **only when** the adapter exposes one |
+| Field            | Meaning                                                         |
+| ---------------- | --------------------------------------------------------------- |
+| `acpxRecordId`   | Local record ID printed in text and quiet output                |
+| `acpSessionId`   | ACP session ID in the stored record returned by `sessions show` |
+| `acpxSessionId`  | ACP session ID in lifecycle and status summaries                |
+| `agentSessionId` | Provider-native session ID, only when the adapter exposes one   |
+
+See [Output formats](output-formats.md) for the JSON shapes.
 
 Do not pass an `acpx` session id to a native provider CLI unless `agentSessionId` is also present.
 

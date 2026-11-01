@@ -6,7 +6,7 @@ description: "acpx is a headless CLI client for the Agent Client Protocol (ACP) 
 
 ## Try it
 
-After a one-line install ([Quickstart](quickstart.md) walks through it), every coding agent is one command away.
+Install `acpx`, then set up and authenticate a [supported agent](agents.md). The [Quickstart](quickstart.md) walks through your first session.
 
 ```bash
 # Persistent multi-turn session, scoped per repo.
@@ -35,7 +35,7 @@ acpx flow run examples/flows/branch.flow.ts \
 
 ## What acpx does
 
-- **One CLI, every coding agent.** Built-in adapters for Pi, OpenClaw, Codex, Claude, and more — plus `--agent` for any custom ACP server.
+- **One CLI, many coding agents.** Built-in adapters for Pi, OpenClaw, Codex, Claude, and more — plus `--agent` for any custom ACP server.
 - **Persistent sessions.** Multi-turn conversations survive across invocations, scoped per repo. `-s <name>` runs parallel workstreams (`backend`, `docs`, `pr-842`).
 - **Queue-aware prompts.** Submit while a turn is running; new prompts queue and drain in order. `--no-wait` enqueues and returns. `cancel` aborts cooperatively without tearing the session down.
 - **Crash-resistant.** Dead agent processes are detected and reloaded automatically. `Ctrl+C` sends ACP `session/cancel` before any force-kill.
@@ -46,7 +46,7 @@ acpx flow run examples/flows/branch.flow.ts \
 
 ## Pick your path
 
-- **Trying it.** [Install](install.md) → [Quickstart](quickstart.md). Two minutes from `npm i -g acpx` to your first turn.
+- **Trying it.** [Install](install.md) → [Quickstart](quickstart.md). Set up your chosen agent, then send your first turn.
 - **Talking to a specific agent.** The [Agents](agents.md) page lists every built-in name and the upstream CLI it wraps.
 - **Wiring an automation.** [Output formats](output-formats.md) for the JSON envelope, [Sessions](sessions.md) for scope rules, [Permissions](permissions.md) for policy.
 - **Multi-step orchestration.** [Flows](flows.md) covers `acp` / `action` / `compute` / `decision` / `checkpoint` nodes and replay.

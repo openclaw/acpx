@@ -16,7 +16,7 @@ If you would rather not install globally, every command below works with `npx ac
 
 ## 2. Pick an agent
 
-`acpx` ships with adapters for a dozen coding agents. The two most common starting points:
+`acpx` ships with 30 built-in agent profiles. Two starting points:
 
 ```bash
 # Codex (OpenAI), via @agentclientprotocol/codex-acp
@@ -26,7 +26,7 @@ acpx codex --help
 acpx claude --help
 ```
 
-You only need the underlying agent CLI installed (or, for the npm-packaged adapters, nothing — `npx` fetches them on first use). [Agents](agents.md) lists every built-in.
+Install and authenticate your chosen agent as described in its [agent guide](agents.md). `npx` fetches npm-packaged adapters on first use, but the agent may still need its own CLI, account, or API credentials.
 
 ## 3. Create a session
 

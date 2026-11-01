@@ -16,6 +16,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Docs/Grok Build: distinguish the local ACP profile from Grok Bot cloud routines and explain webhook acceptance versus results.
 
+- Docs: add a complete supported-agent catalog with logos and setup links, render local images on the docs site, and clarify prerequisites, session identity, and reconnect behavior.
+
 ### Fixes
 
 - Docs/prompting: list `-s, --session` and `--no-wait` as options of `prompt` and the bare form only; `exec` rejects them with `unknown option`. Thanks @KrasimirKralev.
