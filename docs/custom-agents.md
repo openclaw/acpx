@@ -74,8 +74,9 @@ Switching from `acpx --agent ./bin/v1` to `acpx --agent ./bin/v2` changes the se
 
 A custom agent must:
 
-- Speak ACP over stdio (or whatever transport the adapter supports — most are stdio).
-- Implement the standard ACP methods (`initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/resume` or `session/load`, `session/close`).
+- Speak ACP over stdio.
+- Implement `initialize`, `session/new`, `session/prompt`, and `session/cancel`.
+- Advertise optional capabilities honestly. Session reopening requires `session/resume` or `session/load`. Closing a remote session requires `session/close`. Fresh-session-only agents can omit these capabilities.
 - Advertise `agentCapabilities` and model controls honestly. Prefer a categorized model config option for ACP 0.25; existing adapters may continue to return legacy `models` metadata and implement `session/set_model`.
 
 `fs/*` and `terminal/*` client methods are routed through acpx's permission
@@ -92,15 +93,8 @@ Some ACP servers require their own project or workspace mapping before they can 
 Local dev server with arguments:
 
 ```bash
-acpx --agent 'node --inspect ./scripts/dev-acp.mjs --port 5555' \
-     codex sessions new
-```
-
-Wait — that runs through `--agent`, so `codex` would be a positional agent and conflict. The right form is one or the other:
-
-```bash
-acpx --agent 'node ./scripts/dev-acp.mjs' sessions new
-acpx --agent 'node ./scripts/dev-acp.mjs' 'run a sanity check'
+acpx --agent 'node --inspect ./scripts/dev-acp.mjs --port 5555' sessions new
+acpx --agent 'node --inspect ./scripts/dev-acp.mjs --port 5555' 'run a sanity check'
 ```
 
 Per-repo override with config:
@@ -126,13 +120,15 @@ acpx internal 'review the latest commit'
 acpx internal exec 'list TODO comments'
 ```
 
-OpenClaw repo-local checkout (the canonical "override a built-in" example):
+### OpenClaw checkout
+
+On Unix, override the built-in profile to run a source checkout directly. Replace both absolute paths below with your checkout and token file. The bridge starts in the selected project directory, so a relative script path would resolve there.
 
 ```json
 {
   "agents": {
     "openclaw": {
-      "command": "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 node scripts/run-node.mjs acp --url ws://127.0.0.1:18789 --token-file ~/.openclaw/gateway.token --session agent:main:main"
+      "command": "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 node /path/to/openclaw/scripts/run-node.mjs acp --url ws://127.0.0.1:18789 --token-file /path/to/gateway.token --session agent:main:main"
     }
   }
 }

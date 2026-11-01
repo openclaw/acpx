@@ -9,44 +9,46 @@ The default agent for top-level commands like `acpx exec …` and `acpx prompt �
 
 ## Built-in registry
 
-| Agent              | Adapter command                                                              | Wraps                                                                                                           |
-| ------------------ | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `pi`               | `npx --package=pi-acp -- pi-acp`                                             | [Pi Coding Agent](https://github.com/mariozechner/pi)                                                           |
-| `openclaw`         | `openclaw acp`                                                               | [OpenClaw ACP bridge](https://github.com/openclaw/openclaw)                                                     |
-| `codex`            | `npx -y --package=@agentclientprotocol/codex-acp -- codex-acp`               | [Codex CLI](https://codex.openai.com)                                                                           |
-| `claude`           | `npx -y --package=@agentclientprotocol/claude-agent-acp -- claude-agent-acp` | [Claude Code](https://claude.ai/code)                                                                           |
-| `gemini`           | `gemini --acp`                                                               | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
-| `cursor`           | `cursor-agent acp`                                                           | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
-| `copilot`          | `copilot --acp --stdio`                                                      | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
-| `ante`             | `ante acp` (experimental)                                                    | [Ante](https://github.com/openclaw/acpx/blob/main/agents/Ante.md)                                               |
-| `antigravity`      | `agy_acp_server.par` (platform arguments)                                    | [Google Antigravity ACP](https://github.com/openclaw/acpx/blob/main/agents/Antigravity.md)                      |
-| `deepseek-harness` | `dsh --profile acp`                                                          | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)                                             |
-| `devin`            | `devin acp`                                                                  | [Devin CLI](https://docs.devin.ai/cli/index)                                                                    |
-| `droid`            | `droid exec --output-format acp`                                             | [Factory Droid](https://www.factory.ai)                                                                         |
-| `fast-agent`       | `uvx fast-agent-mcp acp`                                                     | [fast-agent](https://fast-agent.ai/)                                                                            |
-| `fx`               | `fx acp`                                                                     | [fx](https://fx.sh)                                                                                             |
-| `grok-build`       | `grok agent stdio`                                                           | [Grok Build](https://docs.x.ai/build/overview)                                                                  |
-| `goose`            | `goose acp`                                                                  | [Goose](https://github.com/aaif-goose/goose)                                                                    |
-| `iflow`            | `iflow --experimental-acp`                                                   | [iFlow CLI](https://github.com/iflow-ai/iflow-cli)                                                              |
-| `junie`            | `junie --acp=true`                                                           | [JetBrains Junie](https://junie.jetbrains.com)                                                                  |
-| `kilocode`         | `npx -y --package=@kilocode/cli -- kilo acp`                                 | [Kilocode](https://kilocode.ai)                                                                                 |
-| `kimi`             | `kimi acp`                                                                   | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
-| `kiro`             | `kiro-cli-chat acp`                                                          | [Kiro CLI](https://kiro.dev)                                                                                    |
-| `mcode`            | `mcode acp`                                                                  | [MiniMax Code](https://www.npmjs.com/package/@minimax-ai/code)                                                  |
-| `mux`              | `npx -y --package=mux -- mux acp` via an ACPX-owned npm range                | [Mux](https://mux.coder.com)                                                                                    |
-| `octomind`         | `octomind acp developer:general`                                             | [Octomind](https://octomind.run)                                                                                |
-| `opencode`         | `npx -y --package=opencode-ai -- opencode acp`                               | [OpenCode](https://opencode.ai)                                                                                 |
-| `pool`             | `pool acp`                                                                   | [Poolside](https://poolside.ai)                                                                                 |
-| `qoder`            | `qodercli --acp`                                                             | [Qoder CLI](https://docs.qoder.com/cli/acp)                                                                     |
-| `qwen`             | `qwen --acp`                                                                 | [Qwen Code](https://github.com/QwenLM/qwen-code)                                                                |
-| `trae`             | `traecli acp serve`                                                          | [Trae CLI](https://docs.trae.cn/cli)                                                                            |
-| `zeroclaw`         | `zeroclaw acp`                                                               | [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw)                                                           |
+These 30 launch profiles identify supported ACP entry points. Follow each agent guide for installation, authentication, and capability limits. Ante is experimental and cannot reopen sessions after disconnect.
+
+|                                                         | Agent                                                                                    | Profile            | Adapter command                                                              |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------- |
+| ![Pi](assets/agents/pi.png)                             | [Pi](https://github.com/openclaw/acpx/blob/main/agents/Pi.md)                            | `pi`               | `npx --package=pi-acp -- pi-acp`                                             |
+| ![OpenClaw](assets/agents/openclaw.png)                 | [OpenClaw](https://github.com/openclaw/acpx/blob/main/agents/OpenClaw.md)                | `openclaw`         | `openclaw acp`                                                               |
+| ![Codex](assets/agents/codex.png)                       | [Codex](https://github.com/openclaw/acpx/blob/main/agents/Codex.md)                      | `codex`            | `npx -y --package=@agentclientprotocol/codex-acp -- codex-acp`               |
+| ![Claude Code](assets/agents/claude.png)                | [Claude Code](https://github.com/openclaw/acpx/blob/main/agents/Claude.md)               | `claude`           | `npx -y --package=@agentclientprotocol/claude-agent-acp -- claude-agent-acp` |
+| ![Gemini CLI](assets/agents/gemini.png)                 | [Gemini CLI](https://github.com/openclaw/acpx/blob/main/agents/Gemini.md)                | `gemini`           | `gemini --acp`                                                               |
+| ![Cursor](assets/agents/cursor.png)                     | [Cursor](https://github.com/openclaw/acpx/blob/main/agents/Cursor.md)                    | `cursor`           | `cursor-agent acp`                                                           |
+| ![GitHub Copilot](assets/agents/copilot.png)            | [GitHub Copilot](https://github.com/openclaw/acpx/blob/main/agents/Copilot.md)           | `copilot`          | `copilot --acp --stdio`                                                      |
+| ![Ante](assets/agents/ante.png)                         | [Ante](https://github.com/openclaw/acpx/blob/main/agents/Ante.md)                        | `ante`             | `ante acp` (experimental)                                                    |
+| ![Antigravity](assets/agents/antigravity.png)           | [Antigravity](https://github.com/openclaw/acpx/blob/main/agents/Antigravity.md)          | `antigravity`      | `agy_acp_server.par` (platform arguments)                                    |
+| ![DeepSeek Harness](assets/agents/deepseek-harness.png) | [DeepSeek Harness](https://github.com/openclaw/acpx/blob/main/agents/DeepSeekHarness.md) | `deepseek-harness` | `dsh --profile acp`                                                          |
+| ![Devin](assets/agents/devin.png)                       | [Devin](https://github.com/openclaw/acpx/blob/main/agents/Devin.md)                      | `devin`            | `devin acp`                                                                  |
+| ![Factory Droid](assets/agents/droid.png)               | [Factory Droid](https://github.com/openclaw/acpx/blob/main/agents/Droid.md)              | `droid`            | `droid exec --output-format acp`                                             |
+| ![fast-agent](assets/agents/fast-agent.png)             | [fast-agent](https://github.com/openclaw/acpx/blob/main/agents/FastAgent.md)             | `fast-agent`       | `uvx fast-agent-mcp acp`                                                     |
+| ![fx](assets/agents/fx.png)                             | [fx](https://github.com/openclaw/acpx/blob/main/agents/Fx.md)                            | `fx`               | `fx acp`                                                                     |
+| ![Grok Build](assets/agents/grok-build.png)             | [Grok Build](https://github.com/openclaw/acpx/blob/main/agents/GrokBuild.md)             | `grok-build`       | `grok agent stdio`                                                           |
+| ![Goose](assets/agents/goose.png)                       | [Goose](https://github.com/openclaw/acpx/blob/main/agents/Goose.md)                      | `goose`            | `goose acp`                                                                  |
+| ![iFlow](assets/agents/iflow.png)                       | [iFlow](https://github.com/openclaw/acpx/blob/main/agents/Iflow.md)                      | `iflow`            | `iflow --experimental-acp`                                                   |
+| ![Junie](assets/agents/junie.png)                       | [Junie](https://github.com/openclaw/acpx/blob/main/agents/Junie.md)                      | `junie`            | `junie --acp=true`                                                           |
+| ![Kilocode](assets/agents/kilocode.png)                 | [Kilocode](https://github.com/openclaw/acpx/blob/main/agents/Kilocode.md)                | `kilocode`         | `npx -y --package=@kilocode/cli -- kilo acp`                                 |
+| ![Kimi](assets/agents/kimi.png)                         | [Kimi](https://github.com/openclaw/acpx/blob/main/agents/Kimi.md)                        | `kimi`             | `kimi acp`                                                                   |
+| ![Kiro](assets/agents/kiro.png)                         | [Kiro](https://github.com/openclaw/acpx/blob/main/agents/Kiro.md)                        | `kiro`             | `kiro-cli-chat acp`                                                          |
+| ![MCode](assets/agents/mcode.png)                       | [MCode](https://github.com/openclaw/acpx/blob/main/agents/MCode.md)                      | `mcode`            | `mcode acp`                                                                  |
+| ![Mux](assets/agents/mux.png)                           | [Mux](https://github.com/openclaw/acpx/blob/main/agents/Mux.md)                          | `mux`              | `npx -y --package=mux -- mux acp` via an ACPX-owned npm range                |
+| ![Octomind](assets/agents/octomind.png)                 | [Octomind](https://github.com/openclaw/acpx/blob/main/agents/Octomind.md)                | `octomind`         | `octomind acp developer:general`                                             |
+| ![OpenCode](assets/agents/opencode.png)                 | [OpenCode](https://github.com/openclaw/acpx/blob/main/agents/OpenCode.md)                | `opencode`         | `npx -y --package=opencode-ai -- opencode acp`                               |
+| ![Poolside](assets/agents/pool.png)                     | [Poolside](https://github.com/openclaw/acpx/blob/main/agents/Pool.md)                    | `pool`             | `pool acp`                                                                   |
+| ![Qoder](assets/agents/qoder.png)                       | [Qoder](https://github.com/openclaw/acpx/blob/main/agents/Qoder.md)                      | `qoder`            | `qodercli --acp`                                                             |
+| ![Qwen Code](assets/agents/qwen.png)                    | [Qwen Code](https://github.com/openclaw/acpx/blob/main/agents/Qwen.md)                   | `qwen`             | `qwen --acp`                                                                 |
+| ![Trae](assets/agents/trae.png)                         | [Trae](https://github.com/openclaw/acpx/blob/main/agents/Trae.md)                        | `trae`             | `traecli acp serve`                                                          |
+| ![ZeroClaw](assets/agents/zeroclaw.png)                 | [ZeroClaw](https://github.com/openclaw/acpx/blob/main/agents/ZeroClaw.md)                | `zeroclaw`         | `zeroclaw acp`                                                               |
 
 `factory-droid` and `factorydroid` also resolve to the built-in `droid` adapter.
 
 ## Common shape
 
-Every built-in agent supports the same command surface:
+Built-in profiles share this command surface. Available operations depend on the capabilities advertised by the adapter:
 
 ```bash
 acpx <agent> [prompt_text...]                 # implicit prompt
@@ -78,17 +80,7 @@ Notes that override or extend the cross-agent behavior live below.
 - Upstream: [openclaw/openclaw](https://github.com/openclaw/openclaw)
 - Guide: [OpenClaw](https://github.com/openclaw/acpx/blob/main/agents/OpenClaw.md)
 
-For repo-local OpenClaw checkouts, override the built-in command in `~/.acpx/config.json` so `acpx openclaw …` spawns the ACP bridge directly without the `pnpm` wrapper:
-
-```json
-{
-  "agents": {
-    "openclaw": {
-      "command": "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 node scripts/run-node.mjs acp --url ws://127.0.0.1:18789 --token-file ~/.openclaw/gateway.token --session agent:main:main"
-    }
-  }
-}
-```
+For source builds, see the [OpenClaw checkout override](custom-agents.md#openclaw-checkout).
 
 ### Codex
 

@@ -47,17 +47,42 @@ The session is scoped to the current repository and persists across invocations.
 
 ## Choose an agent
 
-Common launch examples use the same command shape:
+These 30 built-in launch profiles share one command shape. Each guide covers the required CLI or adapter, authentication, and capability limits. Ante is experimental.
 
-| Agent             | Command                      |
-| ----------------- | ---------------------------- |
-| Pi                | `acpx pi …`                  |
-| OpenClaw          | `acpx openclaw …`            |
-| Codex             | `acpx codex …`               |
-| Claude Code       | `acpx claude …`              |
-| Custom ACP server | `acpx --agent '<command>' …` |
+|                                                              | Agent                                                                                    | Command                   |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- | ------------------------- |
+| ![Pi](docs/assets/agents/pi.png)                             | [Pi](https://github.com/openclaw/acpx/blob/main/agents/Pi.md)                            | `acpx pi …`               |
+| ![OpenClaw](docs/assets/agents/openclaw.png)                 | [OpenClaw](https://github.com/openclaw/acpx/blob/main/agents/OpenClaw.md)                | `acpx openclaw …`         |
+| ![Codex](docs/assets/agents/codex.png)                       | [Codex](https://github.com/openclaw/acpx/blob/main/agents/Codex.md)                      | `acpx codex …`            |
+| ![Claude Code](docs/assets/agents/claude.png)                | [Claude Code](https://github.com/openclaw/acpx/blob/main/agents/Claude.md)               | `acpx claude …`           |
+| ![Gemini CLI](docs/assets/agents/gemini.png)                 | [Gemini CLI](https://github.com/openclaw/acpx/blob/main/agents/Gemini.md)                | `acpx gemini …`           |
+| ![Cursor](docs/assets/agents/cursor.png)                     | [Cursor](https://github.com/openclaw/acpx/blob/main/agents/Cursor.md)                    | `acpx cursor …`           |
+| ![GitHub Copilot](docs/assets/agents/copilot.png)            | [GitHub Copilot](https://github.com/openclaw/acpx/blob/main/agents/Copilot.md)           | `acpx copilot …`          |
+| ![Ante](docs/assets/agents/ante.png)                         | [Ante](https://github.com/openclaw/acpx/blob/main/agents/Ante.md)                        | `acpx ante …`             |
+| ![Antigravity](docs/assets/agents/antigravity.png)           | [Antigravity](https://github.com/openclaw/acpx/blob/main/agents/Antigravity.md)          | `acpx antigravity …`      |
+| ![DeepSeek Harness](docs/assets/agents/deepseek-harness.png) | [DeepSeek Harness](https://github.com/openclaw/acpx/blob/main/agents/DeepSeekHarness.md) | `acpx deepseek-harness …` |
+| ![Devin](docs/assets/agents/devin.png)                       | [Devin](https://github.com/openclaw/acpx/blob/main/agents/Devin.md)                      | `acpx devin …`            |
+| ![Factory Droid](docs/assets/agents/droid.png)               | [Factory Droid](https://github.com/openclaw/acpx/blob/main/agents/Droid.md)              | `acpx droid …`            |
+| ![fast-agent](docs/assets/agents/fast-agent.png)             | [fast-agent](https://github.com/openclaw/acpx/blob/main/agents/FastAgent.md)             | `acpx fast-agent …`       |
+| ![fx](docs/assets/agents/fx.png)                             | [fx](https://github.com/openclaw/acpx/blob/main/agents/Fx.md)                            | `acpx fx …`               |
+| ![Grok Build](docs/assets/agents/grok-build.png)             | [Grok Build](https://github.com/openclaw/acpx/blob/main/agents/GrokBuild.md)             | `acpx grok-build …`       |
+| ![Goose](docs/assets/agents/goose.png)                       | [Goose](https://github.com/openclaw/acpx/blob/main/agents/Goose.md)                      | `acpx goose …`            |
+| ![iFlow](docs/assets/agents/iflow.png)                       | [iFlow](https://github.com/openclaw/acpx/blob/main/agents/Iflow.md)                      | `acpx iflow …`            |
+| ![Junie](docs/assets/agents/junie.png)                       | [Junie](https://github.com/openclaw/acpx/blob/main/agents/Junie.md)                      | `acpx junie …`            |
+| ![Kilocode](docs/assets/agents/kilocode.png)                 | [Kilocode](https://github.com/openclaw/acpx/blob/main/agents/Kilocode.md)                | `acpx kilocode …`         |
+| ![Kimi](docs/assets/agents/kimi.png)                         | [Kimi](https://github.com/openclaw/acpx/blob/main/agents/Kimi.md)                        | `acpx kimi …`             |
+| ![Kiro](docs/assets/agents/kiro.png)                         | [Kiro](https://github.com/openclaw/acpx/blob/main/agents/Kiro.md)                        | `acpx kiro …`             |
+| ![MCode](docs/assets/agents/mcode.png)                       | [MCode](https://github.com/openclaw/acpx/blob/main/agents/MCode.md)                      | `acpx mcode …`            |
+| ![Mux](docs/assets/agents/mux.png)                           | [Mux](https://github.com/openclaw/acpx/blob/main/agents/Mux.md)                          | `acpx mux …`              |
+| ![Octomind](docs/assets/agents/octomind.png)                 | [Octomind](https://github.com/openclaw/acpx/blob/main/agents/Octomind.md)                | `acpx octomind …`         |
+| ![OpenCode](docs/assets/agents/opencode.png)                 | [OpenCode](https://github.com/openclaw/acpx/blob/main/agents/OpenCode.md)                | `acpx opencode …`         |
+| ![Poolside](docs/assets/agents/pool.png)                     | [Poolside](https://github.com/openclaw/acpx/blob/main/agents/Pool.md)                    | `acpx pool …`             |
+| ![Qoder](docs/assets/agents/qoder.png)                       | [Qoder](https://github.com/openclaw/acpx/blob/main/agents/Qoder.md)                      | `acpx qoder …`            |
+| ![Qwen Code](docs/assets/agents/qwen.png)                    | [Qwen Code](https://github.com/openclaw/acpx/blob/main/agents/Qwen.md)                   | `acpx qwen …`             |
+| ![Trae](docs/assets/agents/trae.png)                         | [Trae](https://github.com/openclaw/acpx/blob/main/agents/Trae.md)                        | `acpx trae …`             |
+| ![ZeroClaw](docs/assets/agents/zeroclaw.png)                 | [ZeroClaw](https://github.com/openclaw/acpx/blob/main/agents/ZeroClaw.md)                | `acpx zeroclaw …`         |
 
-The upstream agent must be installed and authenticated when its adapter does not provide that itself. See [built-in agents](docs/agents.md) for every supported profile and [custom agents](docs/custom-agents.md) for registry configuration.
+Need another ACP server? Use `acpx --agent '<command>' …` or configure a [custom agent](docs/custom-agents.md). See the [agent registry](docs/agents.md) for adapter commands and aliases. [Logo credits](docs/assets/agents/README.md).
 
 ## Sessions and one-shot runs
 

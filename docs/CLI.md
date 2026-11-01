@@ -130,6 +130,13 @@ All global options:
 | `--ttl <seconds>`                        | Queue owner idle TTL before shutdown                | Default `300`. `0` disables TTL.                                                                                                                      |
 | `--model <id>`                           | Set agent model                                     | Claude-compatible adapters may consume session creation metadata; other agents must advertise a model config option or legacy `models` metadata.      |
 | `--verbose`                              | Enable verbose logs                                 | Prints ACP/debug details to stderr.                                                                                                                   |
+| `--auth-policy <policy>`                 | Missing-auth policy                                 | `skip` or `fail` when authentication is required.                                                                                                     |
+| `--allowed-tools <list>`                 | Allowed tool names                                  | Comma-separated names; `""` allows no tools. Adapter support is required.                                                                             |
+| `--max-turns <count>`                    | Session turn limit                                  | Positive integer. Adapter support is required.                                                                                                        |
+| `--system-prompt <text>`                 | Replace the system prompt                           | Claude Code through ACP `_meta.systemPrompt`.                                                                                                         |
+| `--append-system-prompt <text>`          | Append to the system prompt                         | Claude Code through ACP `_meta.systemPrompt.append`.                                                                                                  |
+| `--prompt-retries <count>`               | Retry transient prompt failures                     | Non-negative integer; default `0`.                                                                                                                    |
+| `--mcp-config <path>`                    | MCP server configuration file                       | Overrides project and global `mcpServers`.                                                                                                            |
 
 Permission flags are mutually exclusive. Using more than one of `--approve-all`, `--approve-reads`, `--deny-all` is a usage error.
 
@@ -184,17 +191,7 @@ acpx [global_options] openclaw sessions [list | new [--name <name>] | ensure [--
 
 Built-in command mapping: `openclaw -> openclaw acp`
 
-For repo-local OpenClaw checkouts, override the built-in command in config:
-
-```json
-{
-  "agents": {
-    "openclaw": {
-      "command": "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 node scripts/run-node.mjs acp --url ws://127.0.0.1:18789 --token-file ~/.openclaw/gateway.token --session agent:main:main"
-    }
-  }
-}
-```
+For source builds, see the [OpenClaw checkout override](custom-agents.md#openclaw-checkout).
 
 ### `codex`
 
@@ -535,7 +532,7 @@ For prompt commands:
 Use `sessions new [--name <name>]` when you explicitly want a fresh scoped session.
 Use `sessions ensure [--name <name>]` when you want idempotent "get-or-create" behavior.
 
-If a saved session PID is dead, `acpx` respawns the agent, tries `session/resume` when advertised or `session/load` otherwise, and transparently falls back to `session/new` when reconnecting fails.
+If a saved session PID is dead, `acpx` respawns the agent, tries `session/resume` when advertised or `session/load` otherwise, and applies the [reconnect policy](session-control.md). Explicit resumes stay strict. A failed reconnect does not always start a new conversation.
 
 ### Prompt queueing
 
