@@ -20,26 +20,20 @@ configuration or publish a locally built package.
    Dry runs also accept an already published version so dependency and packaging
    checks can run on current `main` without a version bump. Tag-triggered releases
    still require an unpublished version.
-5. Create an annotated `vX.Y.Z` tag on that commit, signed with the fleet release
-   SSH key. Verify it against the trusted release-key allowlist before pushing.
-   Use `.github/release-signers` as the allowed-signers file; the workflow checks
-   the same allowlist. Run verification and push in a fail-fast shell so a failed
-   verification cannot fall through to publishing:
+5. Create and push an annotated `vX.Y.Z` tag on that commit using your normal
+   GitHub authentication. Release authorization follows the repository's
+   tag-creation rules:
 
    ```bash
    set -euo pipefail
-   git -c gpg.format=ssh -c user.signingkey="$RELEASE_SIGNING_KEY" \
-     tag -s vX.Y.Z "$RELEASE_COMMIT" -m "acpx X.Y.Z"
-   git -c gpg.ssh.allowedSignersFile=.github/release-signers verify-tag vX.Y.Z
+   git -c tag.gpgsign=false tag -a vX.Y.Z "$RELEASE_COMMIT" -m "acpx X.Y.Z"
    git push origin refs/tags/vX.Y.Z
    ```
 
-   `RELEASE_SIGNING_KEY` must point to the approved fleet key, never a developer's
-   default key. Repository administrators have a bypass for tag creation only;
-   separate rules prohibit tag updates and deletion. Never move or delete an
-   existing release tag.
+   Repository administrators have a bypass for tag creation only; separate rules
+   prohibit tag updates and deletion. Never move or delete an existing release tag.
 
-6. Push that tag. The workflow checks main ancestry and package metadata,
+6. The tag push starts the workflow, which checks main ancestry and package metadata,
    publishes the immutable verified tarball to npm through the `stable-release`
    environment using OIDC provenance, then creates the GitHub Release from the
    changelog section and attaches the tarball and `SHA256SUMS`.
@@ -63,5 +57,5 @@ Immediately before the first OIDC publish, inspect `npm trust list acpx --json`
 using an authenticated maintainer session. If the package has never successfully
 published through OIDC, revoke and recreate the record with the same repository,
 workflow, environment, and permissions. Unused new records expire after two days.
-Refresh the record immediately before pushing the signed tag, then verify npm
+Refresh the record immediately before pushing the release tag, then verify npm
 provenance points back to this repository's release run after publication.

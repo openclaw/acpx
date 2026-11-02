@@ -17,7 +17,7 @@ import { pathToFileURL } from "node:url";
 
 const RELEASE_TAG = "v1.2.3";
 const STEP_HEADER = "      - name: Validate release tag";
-const NEXT_STEP_HEADER = "      - name: Verify release tag signature";
+const NEXT_STEP_HEADER = "      - name: Ensure version is not already published";
 
 function releaseValidationScript(workflow: string): string {
   const lines = workflow.split(/\r?\n/u);
@@ -275,7 +275,7 @@ for (const scenario of [
     if (scenario.expectedExit === 0) {
       assert.equal(readFileSync(output, "utf8"), `tag=${RELEASE_TAG}\n`);
     } else {
-      assert.match(result.stderr, /Publishing requires a signed release tag push/u);
+      assert.match(result.stderr, /Publishing requires a release tag push/u);
     }
     assert.match(workflow, /publish:\n {4}if: github.event_name == 'push'/u);
     assert.match(workflow, /release:\n {4}needs: \[build, publish\]/u);
