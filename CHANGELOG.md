@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Dependencies: patch the `glob` AbortSignal bypass and the `minimatch`, `qs`, and `re2js` denial-of-service advisories in the pinned development toolchain overrides.
+
 ## 0.22.0 - 2026-11-01
 
 **Highlights:** Add Goose, DeepSeek Harness, and experimental Ante support, expose ACP message observation, configure models per flow node, and improve session reliability and agent setup guidance.
