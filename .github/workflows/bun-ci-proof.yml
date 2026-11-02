@@ -1,0 +1,84 @@
+name: Bun CI proof
+
+on:
+  push:
+    branches: [investigate/bun-ci-20261101]
+
+permissions:
+  contents: read
+
+jobs:
+  cold:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PROOF_MODE: cold
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.22.1
+      - name: Install from empty task store
+        run: time pnpm install --frozen-lockfile --store-dir "$RUNNER_TEMP/bun-ci-store"
+      - name: Provision exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e "$RUNNER_TEMP/bun-ci-tools"
+          mkdir "$RUNNER_TEMP/bun-ci-tools"
+          cd "$RUNNER_TEMP/bun-ci-tools"
+          time curl --fail --location --silent --show-error -o bun.zip https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip
+          echo 'bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c  bun.zip' | sha256sum --check
+          time unzip -q bun.zip
+          rm bun.zip
+      - name: Paired correctness and command proof
+        id: proof
+        continue-on-error: true
+        run: node .github/bun-ci-proof.mjs
+      - name: Save task-only cache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ${{ runner.temp }}/bun-ci-store
+            ${{ runner.temp }}/bun-ci-tools
+          key: bun-ci-proof-${{ github.sha }}
+      - name: Report parity outcome
+        if: steps.proof.outcome != 'success'
+        run: exit 1
+  restored:
+    needs: cold
+    if: always() && needs.cold.result != 'cancelled'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PROOF_MODE: restored
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.22.1
+      - name: Restore exact task-only cache
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ${{ runner.temp }}/bun-ci-store
+            ${{ runner.temp }}/bun-ci-tools
+          key: bun-ci-proof-${{ github.sha }}
+          fail-on-cache-miss: true
+      - name: Require actual cache hit
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: test "$CACHE_HIT" = true
+      - name: Install in fresh workspace from restored store
+        run: time pnpm install --frozen-lockfile --offline --store-dir "$RUNNER_TEMP/bun-ci-store"
+      - name: Paired correctness and command proof
+        run: node .github/bun-ci-proof.mjs
