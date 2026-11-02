@@ -1,0 +1,148 @@
+name: Bun CI finalists
+
+on:
+  push:
+    branches: [investigate/bun-ci-20261101]
+
+permissions:
+  contents: read
+
+jobs:
+  cold:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - name: acpx
+            sha: d1248ad5b4fdc21c94f95d1a750c8ece33dfb714
+            node: 24.22.1
+          - name: crabbox
+            sha: 6e19442c44e5a84d5827b7d17d5d38f3c2b98584
+            node: 24.22.1
+          - name: agent-skills
+            sha: 82ed255a43c1bc141f94f0b1053566910d3a32bf
+            node: 26.12.1
+    env:
+      PROOF_MODE: cold
+      PROOF_TARGET: ${{ matrix.name }}
+      PROOF_SOURCE_SHA: ${{ matrix.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: openclaw/${{ matrix.name }}
+          ref: ${{ matrix.sha }}
+          path: source
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        if: matrix.name == 'acpx'
+        with:
+          version: 11.27.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install from empty task store
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$PROOF_TARGET" in
+            acpx) cd source; time pnpm install --frozen-lockfile --store-dir "$RUNNER_TEMP/bun-ci-store" ;;
+            crabbox) time npm ci --prefix source/worker --cache "$RUNNER_TEMP/bun-ci-store" ;;
+            agent-skills) time npm ci --prefix source --ignore-scripts --cache "$RUNNER_TEMP/bun-ci-store" ;;
+          esac
+      - name: Provision exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e "$RUNNER_TEMP/bun-ci-tools"
+          mkdir "$RUNNER_TEMP/bun-ci-tools"
+          cd "$RUNNER_TEMP/bun-ci-tools"
+          time curl --fail --location --silent --show-error -o bun.zip https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip
+          echo 'bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c  bun.zip' | sha256sum --check
+          time unzip -q bun.zip
+          rm bun.zip
+      - name: Paired core and package-script proof
+        id: proof
+        continue-on-error: true
+        run: node harness/.github/bun-ci-finalists.mjs
+      - name: Save task-only cache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ${{ runner.temp }}/bun-ci-store
+            ${{ runner.temp }}/bun-ci-tools
+          key: bun-ci-finalists-${{ github.sha }}-${{ matrix.name }}
+      - name: Report parity outcome
+        if: steps.proof.outcome != 'success'
+        run: exit 1
+  restored:
+    needs: cold
+    if: always() && needs.cold.result != 'cancelled'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - name: acpx
+            sha: d1248ad5b4fdc21c94f95d1a750c8ece33dfb714
+            node: 24.22.1
+          - name: crabbox
+            sha: 6e19442c44e5a84d5827b7d17d5d38f3c2b98584
+            node: 24.22.1
+          - name: agent-skills
+            sha: 82ed255a43c1bc141f94f0b1053566910d3a32bf
+            node: 26.12.1
+    env:
+      PROOF_MODE: restored
+      PROOF_TARGET: ${{ matrix.name }}
+      PROOF_SOURCE_SHA: ${{ matrix.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: openclaw/${{ matrix.name }}
+          ref: ${{ matrix.sha }}
+          path: source
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        if: matrix.name == 'acpx'
+        with:
+          version: 11.27.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Restore exact task-only cache
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ${{ runner.temp }}/bun-ci-store
+            ${{ runner.temp }}/bun-ci-tools
+          key: bun-ci-finalists-${{ github.sha }}-${{ matrix.name }}
+          fail-on-cache-miss: true
+      - name: Require actual cache hit
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: test "$CACHE_HIT" = true
+      - name: Install in fresh workspace from restored store
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$PROOF_TARGET" in
+            acpx) cd source; time pnpm install --frozen-lockfile --store-dir "$RUNNER_TEMP/bun-ci-store" ;;
+            crabbox) time npm ci --prefix source/worker --cache "$RUNNER_TEMP/bun-ci-store" ;;
+            agent-skills) time npm ci --prefix source --ignore-scripts --cache "$RUNNER_TEMP/bun-ci-store" ;;
+          esac
+      - name: Paired core and package-script proof
+        run: node harness/.github/bun-ci-finalists.mjs

@@ -2,7 +2,7 @@ name: Bun CI proof
 
 on:
   push:
-    branches: [investigate/bun-ci-20261101]
+    branches: [investigate/bun-ci-initial-proof]
 
 permissions:
   contents: read
