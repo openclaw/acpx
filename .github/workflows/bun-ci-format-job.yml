@@ -1,0 +1,113 @@
+name: Bun Format job proof
+
+on:
+  push:
+    branches: [investigate/bun-ci-20261101]
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    name: Format proof (${{ matrix.tool }}, ${{ matrix.round }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - tool: baseline
+            round: 1
+            sha: d1248ad5b4fdc21c94f95d1a750c8ece33dfb714
+          - tool: candidate
+            round: 1
+            sha: a78d9c81d0be91a4f090c1b4171c62f3f2b32012
+          - tool: candidate
+            round: 2
+            sha: a78d9c81d0be91a4f090c1b4171c62f3f2b32012
+          - tool: baseline
+            round: 2
+            sha: d1248ad5b4fdc21c94f95d1a750c8ece33dfb714
+          - tool: baseline
+            round: 3
+            sha: d1248ad5b4fdc21c94f95d1a750c8ece33dfb714
+          - tool: candidate
+            round: 3
+            sha: a78d9c81d0be91a4f090c1b4171c62f3f2b32012
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ matrix.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+          submodules: false
+      - name: Setup pnpm
+        if: matrix.tool == 'baseline'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - name: Setup Node.js
+        if: matrix.tool == 'baseline'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.22.1
+          check-latest: true
+          cache: pnpm
+      - name: Install dependencies
+        if: matrix.tool == 'baseline'
+        run: pnpm install --frozen-lockfile
+      - name: Setup Bun
+        if: matrix.tool == 'candidate'
+        id: bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.4
+      - name: Exact source and formatting negative control
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ matrix.sha }}
+          PROOF_TOOL: ${{ matrix.tool }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          fixture=bun-ci-job-negative.ts
+          test ! -e "$fixture"
+          trap 'rm -f "$fixture"' EXIT
+          printf 'export const value={number:1}\n' > "$fixture"
+          if [ "$PROOF_TOOL" = baseline ]; then
+            if pnpm exec oxfmt --check "$fixture"; then exit 1; fi
+          else
+            test "$(bun --version)" = 1.4.4
+            if bun fmt --no-script --check "$fixture"; then exit 1; fi
+          fi
+      - name: Run baseline Format
+        if: matrix.tool == 'baseline'
+        run: time pnpm run format:check
+      - name: Run candidate Format
+        if: matrix.tool == 'candidate'
+        run: time bun fmt --no-script --check
+      - name: Cache state
+        if: matrix.tool == 'candidate'
+        env:
+          BUN_CACHE_HIT: ${{ steps.bun.outputs.cache-hit }}
+        run: printf 'BUN_CACHE_HIT=%s\n' "$BUN_CACHE_HIT"
+  native:
+    name: Exact candidate native check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: a78d9c81d0be91a4f090c1b4171c62f3f2b32012
+          fetch-depth: 1
+          fetch-tags: false
+          submodules: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Native full validation
+        run: pnpm run check
