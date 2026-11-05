@@ -9,6 +9,7 @@
 - Sessions saved under an earlier ACPX-owned adapter range stay in the `claude` scope after an upgrade and resume on the current adapter. Records saved with a custom launcher keep it.
 - Model switches can change the available effort controls. ACPX updates existing saved effort selections from the accepted response and removes selections whose controls disappear.
 - Saved model and config selections are restored after reconnect, without replacing the conversation.
+- Selecting the adapter's `default` model clears the native Claude model override. ACPX keeps the saved ACP selection but omits `model: "default"` from Claude startup options when creating or reconnecting the session.
 
 ## Settings isolation
 
