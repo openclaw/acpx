@@ -413,6 +413,67 @@ test("shell spawn errors remain authoritative with cancellation enabled", async 
 });
 
 test(
+  "shell spawn ENOENT names a command missing from the child PATH",
+  { skip: process.platform === "win32" },
+  async () => {
+    const emptyDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-shell-path-"));
+    try {
+      await assert.rejects(
+        runShellAction({
+          command: "acpx-missing-shell-tool",
+          args: ["check"],
+          env: { PATH: emptyDir },
+        }),
+        (error: NodeJS.ErrnoException) => {
+          assert.equal(error.code, "ENOENT");
+          assert.match(
+            error.message,
+            /^Shell action failed \(acpx-missing-shell-tool "check"\): No runnable executable named "acpx-missing-shell-tool" was found on the child PATH\. spawn acpx-missing-shell-tool ENOENT$/,
+          );
+          return true;
+        },
+      );
+    } finally {
+      await fs.rm(emptyDir, { recursive: true, force: true });
+    }
+  },
+);
+
+test("shell spawn ENOENT identifies the actual missing shell and retains its cause", async () => {
+  const missingShell = path.join(os.tmpdir(), `acpx-missing-shell-${process.pid}-${Date.now()}`);
+  await assert.rejects(
+    runShellAction({ command: "echo hello", shell: missingShell }),
+    (error: NodeJS.ErrnoException) => {
+      assert.equal(error.code, "ENOENT");
+      assert.ok(error.message.includes(`Executable path could not be resolved: ${missingShell}. `));
+      const cause = error.cause as NodeJS.ErrnoException;
+      assert.equal(cause.path, missingShell);
+      assert.equal(error.path, cause.path);
+      assert.equal(error.errno, cause.errno);
+      assert.equal(error.syscall, cause.syscall);
+      return true;
+    },
+  );
+});
+
+test("shell spawn ENOENT names a missing working directory instead of the command", async () => {
+  const missingCwd = path.join(os.tmpdir(), `acpx-missing-cwd-${process.pid}-${Date.now()}`);
+  for (const shell of [undefined, true]) {
+    await assert.rejects(
+      runShellAction({ command: process.execPath, args: ["-v"], cwd: missingCwd, shell }),
+      (error: NodeJS.ErrnoException) => {
+        assert.equal(error.code, "ENOENT");
+        assert.ok(
+          error.message.includes(`Working directory is unavailable: ${missingCwd}. `),
+          error.message,
+        );
+        return true;
+      },
+    );
+  }
+});
+
+test(
   "failed process inspection still kills the shell and reports the cleanup error",
   { skip: process.platform === "win32" },
   async () => {
