@@ -43,13 +43,14 @@ export class SessionNotFoundError extends AcpxOperationalError {
 
 export class SessionResolutionError extends AcpxOperationalError {}
 
-type AgentSpawnContext = {
+export type SpawnPathContext = {
   command: string;
   cwd: string;
   env: NodeJS.ProcessEnv;
 };
 
-function agentSpawnEnoentHint(context: AgentSpawnContext): string {
+/** Best-effort description of which launch path was missing when spawn failed with ENOENT. */
+export function spawnEnoentHint(context: SpawnPathContext): string {
   try {
     if (!fs.statSync(context.cwd, { throwIfNoEntry: false })?.isDirectory()) {
       return `Working directory is unavailable: ${context.cwd}. `;
@@ -74,10 +75,10 @@ function agentSpawnEnoentHint(context: AgentSpawnContext): string {
 export class AgentSpawnError extends AcpxOperationalError {
   readonly agentCommand: string;
 
-  constructor(agentCommand: string, cause?: unknown, context?: AgentSpawnContext) {
+  constructor(agentCommand: string, cause?: unknown, context?: SpawnPathContext) {
     const spawnCode = cause instanceof Error ? (cause as NodeJS.ErrnoException).code : undefined;
     const spawnEnoent = spawnCode === "ENOENT";
-    const hint = spawnEnoent && context ? agentSpawnEnoentHint(context) : "";
+    const hint = spawnEnoent && context ? spawnEnoentHint(context) : "";
     const message = spawnEnoent
       ? `Failed to spawn agent command: ${agentCommand}. ${hint}The agent process could not start because a required executable, interpreter, working directory, or other launch path was not found. Check the command, effective PATH, and working directory, or verify the custom agent's configured argv.`
       : `Failed to spawn agent command: ${agentCommand}`;

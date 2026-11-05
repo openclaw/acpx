@@ -58,6 +58,7 @@ typescript:
         - src/acp
         - src/async-control
         - src/cli
+        - src/errors
         - src/permissions
         - src/permission-policy
         - src/prompt-content

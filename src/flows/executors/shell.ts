@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { InterruptedError, TimeoutError } from "../../async-control.js";
+import { spawnEnoentHint } from "../../errors.js";
 import type { ShellActionExecution, ShellActionResult } from "../runtime.js";
 import { resolveFlowTimeoutMs } from "../timeout.js";
 import type { FlowShellExecution, FlowShellResult } from "../types.js";
@@ -43,6 +44,36 @@ function createShellFailureError(
   return new Error(
     `Shell action failed (${renderShellCommand(spec.command, args)}): ${status}${details}`,
   );
+}
+
+function describeShellSpawnError(
+  spec: ShellActionExecution,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  error: unknown,
+): unknown {
+  const spawnError = error as NodeJS.ErrnoException;
+  if (
+    !(error instanceof Error) ||
+    spawnError.code !== "ENOENT" ||
+    !spawnError.syscall?.startsWith("spawn")
+  ) {
+    return error;
+  }
+  // Node records the executable it actually launched, including an explicit or default shell.
+  const hint = spawnEnoentHint({ command: spawnError.path ?? spec.command, cwd, env });
+  const described = new Error(
+    `Shell action failed (${renderShellCommand(spec.command, args)}): ${hint}${error.message}`,
+    { cause: error },
+  );
+  // Keep the errno fields so callers that branch on `code` see the same failure.
+  return Object.assign(described, {
+    code: spawnError.code,
+    errno: spawnError.errno,
+    syscall: spawnError.syscall,
+    path: spawnError.path,
+  });
 }
 
 /**
@@ -299,12 +330,13 @@ async function runShellProcess(
   if (spec.stdin !== undefined && typeof spec.stdin !== "string") {
     throw new TypeError("stdin must be a string");
   }
+  const env = {
+    ...process.env,
+    ...spec.env,
+  };
   const child = spawn(spec.command, args, {
     cwd,
-    env: {
-      ...process.env,
-      ...spec.env,
-    },
+    env,
     shell: spec.shell,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -320,7 +352,7 @@ async function runShellProcess(
     return result;
   } catch (error) {
     await termination.cancel("SIGTERM");
-    throw error;
+    throw describeShellSpawnError(spec, args, cwd, env, error);
   } finally {
     await termination.dispose();
   }
