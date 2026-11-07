@@ -6,15 +6,9 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
-### Fixes
+## 0.22.0 - 2026-11-06
 
-- Dependencies: patch the `glob` AbortSignal bypass and the `minimatch`, `qs`, and `re2js` denial-of-service advisories in the pinned development toolchain overrides; update the guarded filesystem runtime and development tooling. Thanks @hxy91819.
-
-- Flows/shell: identify missing executable paths and working directories in shell-action startup errors while preserving the original `ENOENT` details. Thanks @KrasimirKralev.
-
-## 0.22.0 - 2026-11-01
-
-**Highlights:** Add Goose, DeepSeek Harness, and experimental Ante support, expose ACP message observation, configure models per flow node, and improve session reliability and agent setup guidance.
+**Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.
 
 ### Changes
 
@@ -29,6 +23,10 @@ Repo: https://github.com/openclaw/acpx
 - Docs: add a complete supported-agent catalog with logos and setup links, render local images on the docs site, and clarify prerequisites, session identity, and reconnect behavior.
 
 ### Fixes
+
+- Dependencies: patch the `glob` AbortSignal bypass and the `minimatch`, `qs`, and `re2js` denial-of-service advisories in the pinned development toolchain overrides; update the guarded filesystem runtime and development tooling. Thanks @hxy91819.
+
+- Flows/shell: identify missing executable paths and working directories in shell-action startup errors while preserving the original `ENOENT` details. Thanks @KrasimirKralev.
 
 - Docs/prompting: list `-s, --session` and `--no-wait` as options of `prompt` and the bare form only; `exec` rejects them with `unknown option`. Thanks @KrasimirKralev.
 - CLI: unknown options and other usage errors on subcommands (`acpx codex exec --bogus`, `acpx sessions list --bogus`) now exit with code 2 as documented, and `--format json` reports them as a JSON-RPC error instead of plain text only; they used to exit 1. Thanks @KrasimirKralev.
