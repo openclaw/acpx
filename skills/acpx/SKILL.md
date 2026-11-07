@@ -95,7 +95,7 @@ Friendly agent names resolve to commands:
 - `deepseek-harness` -> `dsh --profile acp` (DeepSeek Harness, separate from DeepSeek models; configure the provider in dsh first. Uses advertised `session/resume` without transcript replay, not `session/load`; see the [DeepSeek Harness guide](https://github.com/openclaw/acpx/blob/main/agents/DeepSeekHarness.md))
 - `devin` -> `devin acp`
 - `droid` -> `droid exec --output-format acp` (`factory-droid` and `factorydroid` also resolve to `droid`)
-- `fast-agent` -> `uvx fast-agent-mcp acp`
+- `fast-agent` -> `uvx fast-agent-mcp acp` (operator-owned Python/tool environment; see [Fast Agent](https://github.com/openclaw/acpx/blob/main/agents/FastAgent.md) for patched-runtime selection and isolated recovery)
 - `fx` -> `fx acp` (install and authenticate a provider first; see the [fx guide](https://github.com/openclaw/acpx/blob/main/agents/Fx.md))
 - `grok-build` -> `grok agent stdio` (Grok Build CLI, distinct from Grok Bot cloud routines and their webhook triggers; see the [Grok Build guide](https://github.com/openclaw/acpx/blob/main/agents/GrokBuild.md)).
 - `goose` -> `goose acp` (install Goose and configure its provider first; see the [Goose guide](https://github.com/openclaw/acpx/blob/main/agents/Goose.md))
