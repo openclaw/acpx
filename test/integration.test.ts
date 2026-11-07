@@ -5799,6 +5799,63 @@ for (const connection of ["load", "resume"]) {
   }
 }
 
+for (const connection of ["load", "resume"]) {
+  test(`integration: Claude ${connection} omits a saved default model override after reconnect`, async () => {
+    await withTempHome(async (homeDir) => {
+      const sessionIdMarker = path.join(homeDir, "claude-session-id");
+      const base = [
+        "--agent",
+        `${MOCK_AGENT_COMMAND} --claude-agent-acp --supports-${connection}-session --advertise-default-model-sentinel --session-id-marker ${sessionIdMarker}`,
+        "--cwd",
+        homeDir,
+        "--ttl",
+        "60",
+        "--format",
+        "json",
+      ];
+      const created = await runCli([...base, "--model", "fast-model", "sessions", "new"], homeDir);
+      assert.equal(created.code, 0, JSON.stringify(created));
+      const { acpxRecordId } = JSON.parse(created.stdout) as { acpxRecordId: string };
+      try {
+        const first = await runCli(
+          [...base, "--model", "fast-model", "prompt", "echo first"],
+          homeDir,
+        );
+        assert.equal(first.code, 0, JSON.stringify(first));
+        const concrete = await runCli([...base, "set", "model", "smart-model"], homeDir);
+        assert.equal(concrete.code, 0, JSON.stringify(concrete));
+        const restoredDefault = await runCli([...base, "set", "model", "default"], homeDir);
+        assert.equal(restoredDefault.code, 0, JSON.stringify(restoredDefault));
+
+        const recordPath = path.join(homeDir, ".acpx", "sessions", `${acpxRecordId}.json`);
+        const record = parseSessionRecord(JSON.parse(await fs.readFile(recordPath, "utf8")));
+        assert.equal(record?.acpx?.session_options?.model, "default");
+        assert.ok(record?.acpSessionId);
+        assert.ok(record?.pid);
+        process.kill(record.pid, "SIGKILL");
+        assert.equal(await waitForPidExit(record.pid, 5_000), true);
+
+        const next = await runCli([...base, "prompt", "echo reconnected"], homeDir);
+        assert.equal(next.code, 0, JSON.stringify(next));
+        const reconnect = parseJsonRpcOutputLines(next.stdout).find(
+          (message) => message.method === `session/${connection}`,
+        );
+        assert.ok(reconnect, next.stdout);
+        assert.equal(
+          (reconnect.params as { sessionId?: string }).sessionId,
+          record.acpSessionId,
+          "reconnect must target the persisted conversation",
+        );
+        assert.deepStrictEqual((reconnect.params as { _meta?: unknown })._meta, {
+          claudeCode: { options: { settingSources: ["project", "local"] } },
+        });
+      } finally {
+        await runCli([...base, "sessions", "close"], homeDir);
+      }
+    });
+  });
+}
+
 function baseAgentArgs(cwd: string): string[] {
   return ["--agent", MOCK_AGENT_COMMAND, "--approve-all", "--cwd", cwd];
 }
