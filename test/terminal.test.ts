@@ -1026,6 +1026,43 @@ test("terminal manager does not shell fallback executable path spawn errors", as
   }
 });
 
+test(
+  "terminal manager names the missing launch path in spawn ENOENT errors",
+  { skip: process.platform === "win32" },
+  async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
+    try {
+      const manager = new TerminalManager({ cwd: tmp, permissionMode: "approve-all" });
+      const cases = [
+        {
+          request: { command: "acpx-missing-terminal-tool", args: ["--version"] },
+          message:
+            /^No runnable executable named "acpx-missing-terminal-tool" was found on the child PATH\. spawn acpx-missing-terminal-tool ENOENT$/,
+        },
+        {
+          request: { command: path.join(tmp, "bin", "missing-tool"), args: [] },
+          message: /^Executable path could not be resolved: .*missing-tool\. spawn /,
+        },
+        {
+          request: { command: process.execPath, args: ["-e", ""], cwd: path.join(tmp, "gone") },
+          message: /^Working directory is unavailable: .*gone\. spawn /,
+        },
+      ];
+      for (const { request, message } of cases) {
+        await assert.rejects(
+          manager.createTerminal({ sessionId: "session-1", ...request }),
+          (error) =>
+            error instanceof Error &&
+            (error as NodeJS.ErrnoException).code === "ENOENT" &&
+            message.test(error.message),
+        );
+      }
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  },
+);
+
 test("terminal manager does not split existing executable paths after spawn errors", async (t) => {
   if (process.platform === "win32") {
     t.skip("POSIX shebang assertion");
