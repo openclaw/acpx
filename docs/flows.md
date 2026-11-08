@@ -60,7 +60,9 @@ helper throws the usual `Could not parse JSON` error. Prefer direct or fenced
 JSON when recovery must not depend on surrounding prose; those parsing paths
 are unaffected by the compatibility recovery budget. Use
 `parseStrictJsonObject(text)` to require direct JSON, or `mode: "fenced"` to
-accept direct JSON and fenced blocks without embedded recovery.
+accept direct JSON and fenced blocks without embedded recovery. Literal triple
+backticks inside JSON strings do not close the surrounding fence, including
+when those strings contain escaped quotes or backslashes.
 
 ## Node types
 

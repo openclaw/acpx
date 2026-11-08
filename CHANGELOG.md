@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Flows/JSON: preserve literal triple backticks inside JSON strings when parsing fenced output, including escaped quotes and backslashes.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.
