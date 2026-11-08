@@ -278,8 +278,9 @@ function detectConfigOutputFormat(argv: string[]): OutputFormat | undefined {
   }
   const separator = argv.indexOf("--");
   const options = argv.slice(1, separator < 0 ? undefined : separator);
+  // Like root flags, an invalid trailing value must not erase a valid format.
   const index = options.findLastIndex(
-    (token) => token === "--format" || token.startsWith("--format="),
+    (token, index) => readFormatFlagValue(token, options[index + 1]) !== undefined,
   );
   return index < 0 ? undefined : readFormatFlagValue(options[index], options[index + 1]);
 }

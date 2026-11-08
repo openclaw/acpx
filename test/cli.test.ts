@@ -156,6 +156,21 @@ test("config command errors honor command-local output formats", async (t) => {
         });
       });
     }
+    for (const invalidFormat of [["--format", "bogus"], ["--format=bogus"], ["--format"]]) {
+      await t.test(command + " retains JSON before " + invalidFormat.join(" "), async () => {
+        await withTempHome(async (homeDir) => {
+          for (const args of [
+            ["config", command, "--format", "json", ...invalidFormat],
+            ["--format", "json", ...invalidFormat, "config", command],
+          ]) {
+            const result = await runCli(args, homeDir);
+            assert.equal(result.code, 2);
+            assert.equal(parseSingleAcpErrorLine(result.stdout).data?.acpxCode, "USAGE");
+            await assert.rejects(fs.access(path.join(homeDir, ".acpx", "config.json")));
+          }
+        });
+      });
+    }
     await t.test(command + " excess argument before local format", async () => {
       await withTempHome(async (homeDir) => {
         const result = await runCli(["config", command, "unexpected", "--format", "json"], homeDir);
@@ -188,6 +203,9 @@ test("config error formats preserve global precedence and argument boundaries", 
     for (const args of [
       ["--format", "quiet", "config", "show", "--format", "json", "--bogus"],
       ["config", "show", "--format", "json", "--format", "quiet", "--bogus"],
+      ["config", "show", "--format", "json", "--format", "quiet", "--format", "bogus"],
+      ["config", "show", "--format", "bogus"],
+      ["config", "show", "--format"],
       ["config", "show", "--", "--format", "json"],
       ["config", "--format", "json", "show"],
       ["config", "unknown", "--format", "json"],
