@@ -3035,6 +3035,96 @@ for (const isolated of [false, true]) {
   });
 }
 
+for (const drift of ["none", "model", "option"] as const) {
+  test(
+    "flow settings: first-prompt reconnect preserves pinned settings (" + drift + ")",
+    async (t) => {
+      await withTempHome(async (home) => {
+        const log = path.join(home, "requests.ndjson");
+        let reconnecting = false;
+        const originalLoad = AcpClient.prototype.loadSessionWithOptions;
+        t.mock.method(
+          AcpClient.prototype,
+          "loadSessionWithOptions",
+          async function (
+            this: AcpClient,
+            ...args: Parameters<AcpClient["loadSessionWithOptions"]>
+          ) {
+            reconnecting = true;
+            return await originalLoad.apply(this, args);
+          },
+        );
+        const originalSet = AcpClient.prototype.setSessionConfigOption;
+        t.mock.method(
+          AcpClient.prototype,
+          "setSessionConfigOption",
+          async function (
+            this: AcpClient,
+            ...args: Parameters<AcpClient["setSessionConfigOption"]>
+          ) {
+            const response = await originalSet.apply(this, args);
+            if (!reconnecting) {
+              if (args[1] === "reasoning_effort") {
+                // Lose the configured initial connection before its first prompt.
+                await this.close();
+              }
+              return response;
+            }
+            return {
+              ...response,
+              configOptions: response.configOptions?.map((option) =>
+                drift !== "none" && option.id === (drift === "model" ? "model" : "reasoning_effort")
+                  ? Object.assign({}, option, {
+                      currentValue: drift === "model" ? "smart-model" : "low",
+                    })
+                  : option,
+              ),
+            };
+          },
+        );
+        const runner = new FlowRunner({
+          resolveAgent: () => ({
+            agentName: "mock",
+            agentCommand:
+              MOCK_AGENT_COMMAND + " --advertise-config-options --supports-load-session",
+            cwd: home,
+          }),
+          permissionMode: "deny-all",
+          outputRoot: path.join(home, "runs"),
+          sessionOptions: { env: { ACPX_TEST_REQUEST_LOG: log } },
+        });
+        const run = runner.run(
+          defineFlow({
+            name: "first-prompt-reconnect",
+            startAt: "ask",
+            nodes: {
+              ask: acp({
+                modelId: "fast-model",
+                configOptions: [{ configId: "reasoning_effort", value: "high" }],
+                prompt: () => "echo first",
+              }),
+            },
+            edges: [],
+          }),
+          {},
+        );
+        if (drift === "none") {
+          assert.equal((await run).state.status, "completed");
+        } else {
+          await assert.rejects(run, /Cannot replay pinned/);
+        }
+        const requests = await readFlowRequests(log);
+        assert.equal(requests.filter((entry) => entry.method === "session/new").length, 1);
+        assert.equal(requests.filter((entry) => entry.method === "session/load").length, 1);
+        assert.equal(
+          requests.filter((entry) => entry.method === "session/prompt").length,
+          drift === "none" ? 1 : 0,
+        );
+      });
+    },
+  );
+}
+
 test("flow settings: reconnect cannot silently drop the pinned model", async (t) => {
   await withTempHome(async (home) => {
     const log = path.join(home, "requests.ndjson");

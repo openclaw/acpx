@@ -97,6 +97,7 @@ export type ConnectAndLoadSessionOptions = {
 };
 
 export type ConnectAndLoadSessionResult = {
+  reusingLoadedSession: boolean;
   sessionId: string;
   agentSessionId?: string;
   resumed: boolean;
@@ -519,6 +520,7 @@ export async function connectAndLoadSession(
   options.onSessionIdResolved?.(sessionId);
 
   return {
+    reusingLoadedSession,
     sessionId,
     agentSessionId: record.agentSessionId,
     resumed,

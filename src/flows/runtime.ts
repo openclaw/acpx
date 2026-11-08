@@ -1214,21 +1214,18 @@ export class FlowRunner {
             onAcpMessage: events.onAcpMessage,
             suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
             client: initialClient,
-            ...(initialClient
-              ? {}
-              : {
-                  sessionOptions: {
-                    ...this.sessionOptions,
-                    model: binding.requestedSettings?.model,
-                  },
-                  configOptions: binding.requestedSettings?.configOptions,
-                  onSessionConfigured: (configuration: SessionConfiguration) => {
-                    assertReplayedSessionSettings(binding, configuration);
-                    if (binding.requestedSettings) {
-                      binding.acceptedSettings = configuration;
-                    }
-                  },
-                }),
+            skipConfigurationForLoadedSession: initialClient !== undefined,
+            sessionOptions: {
+              ...this.sessionOptions,
+              model: binding.requestedSettings?.model,
+            },
+            configOptions: binding.requestedSettings?.configOptions,
+            onSessionConfigured: (configuration: SessionConfiguration) => {
+              assertReplayedSessionSettings(binding, configuration);
+              if (binding.requestedSettings) {
+                binding.acceptedSettings = configuration;
+              }
+            },
           },
           { signal: attempt.signal, handleProcessInterrupts: false },
         ),

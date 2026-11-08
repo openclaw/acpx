@@ -1715,7 +1715,12 @@ export class AcpRuntimeManager {
     turn: RunningRuntimeTurn,
   ): Promise<ConnectAndLoadSessionResult> {
     if (turn.connected) {
-      return { sessionId: turn.record.acpSessionId, resumed: false, loadError: undefined };
+      return {
+        sessionId: turn.record.acpSessionId,
+        resumed: false,
+        loadError: undefined,
+        reusingLoadedSession: true,
+      };
     }
     const loaded = await this.connectRuntimeTurnClient(task, turn);
     turn.acpxState = cloneSessionAcpxState(turn.record.acpx);
