@@ -398,6 +398,7 @@ Behavior:
 - `sessions watch [-s <name>] [--cursor <cursor>]` replays retained events and follows new ones without affecting the active turn; see [Watching sessions](session-watch.md)
 - Watch inherits the agent's `-s`/`--session` selection unless its own `-s`/`--name` is set. Its journal cursor comes only from `watch --cursor`, independently of the list pagination cursor on `sessions`.
 - `sessions export [name] --output <path>` writes a portable JSON archive with session state and event history; `--cwd <dir>` selects a different source cwd relative to global `--cwd`
+- Export refuses active sessions or a session checkpoint that changes during history capture, leaving any existing output file untouched; close the source session and retry
 - `sessions import <archive>` writes a fresh local record from a portable archive, reopens it as idle, keeps the provider session id, and clears source-machine process metadata
 - Imported sessions must resume that provider session; if the destination agent cannot load it, prompts fail clearly instead of starting an empty conversation
 - `sessions import --name <name>` and `--cwd <dir>` override the imported destination scope; import fails instead of creating a duplicate when an active session already exists for that `(agent, cwd, name)` scope or when another local record already uses the same provider session id
