@@ -1,0 +1,10 @@
+{
+  "base": "af67042fac736e8c1d0cd9dd4b8057fcee85d46d",
+  "runtime": "Node 26.13.0; @agentclientprotocol/sdk 1.9.0",
+  "candidate_registration_sha256": "3e0c073337973f1b71f4f0a55385c906bdba303350edf2d65ef5dcf55850fc30",
+  "capture_transform": "Removed captured CLI stdout; returned token, parsed token, constructed request, schema result, errors and counters unchanged. No output values invented.",
+  "limits": "AcpClient.start/close and connection.agent.request are injected test seams. Actual CLI registration, flag resolution, handler, session-list and AcpClient request construction remain active. No adapter or SDK wire transport.",
+  "executed_witness_sha256": "10e7d1c141f8af0c5ec2b4a1121177807ffe54d6942e04822cc97ab0f3048fbd",
+  "provided_witness_sha256": "34a97214a9277a4d76ef130ba2ffc2ac08f0ff5b19cc38c2b4355b9ceefb4f4a",
+  "witness_copy": "The provided witness is a formatting-only rendition of the identical frozen source executed on both base and candidate; original execution hash retained separately."
+}

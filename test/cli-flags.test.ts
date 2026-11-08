@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ListSessionsRequest } from "@agentclientprotocol/sdk";
 import { Command, InvalidArgumentError } from "commander";
+import { AcpClient } from "../src/acp/client.js";
+import { registerSessionsCommand } from "../src/cli/command-registration.js";
 import { scanCompareArgs } from "../src/cli/compare-args.js";
 import type { ResolvedAcpxConfig } from "../src/cli/config.js";
 import {
@@ -756,4 +759,59 @@ test("flow config option defaults use the exec parser and accurate help", () => 
   ]);
   assert.equal(command.options[0].description, description);
   assert.ok(addExecConfigOption(new Command()).options[0].description.includes("one-shot prompt"));
+});
+
+test("session-list registration preserves opaque cursors through request construction", async (t) => {
+  const requests: ListSessionsRequest[] = [];
+  let starts = 0;
+  t.mock.method(AcpClient.prototype, "start", async function (this: AcpClient) {
+    starts += 1;
+    Object.assign(this, {
+      initResult: { agentCapabilities: { sessionCapabilities: { list: {} } } },
+      connection: {
+        agent: {
+          request: async (method: string, params: ListSessionsRequest) => {
+            assert.equal(method, "session/list");
+            requests.push(structuredClone(params));
+            return { sessions: [] };
+          },
+        },
+      },
+    });
+  });
+  t.mock.method(AcpClient.prototype, "close", async () => {});
+  t.mock.method(process.stdout, "write", () => true);
+  try {
+    for (const placement of ["parent", "child"] as const) {
+      for (const cursor of [undefined, "page-2", " page-2 ", "", " \t "]) {
+        const program = addGlobalFlags(new Command("acpx")).exitOverride();
+        program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+        registerSessionsCommand(
+          program,
+          "fixture",
+          config({ defaultAgent: "fixture", agents: { fixture: { command: "must-not-launch" } } }),
+        );
+        const cursorArgs = cursor === undefined ? [] : ["--cursor", cursor];
+        const args =
+          placement === "parent"
+            ? ["sessions", ...cursorArgs, "list"]
+            : ["sessions", "list", ...cursorArgs];
+        const before = requests.length;
+        const startsBefore = starts;
+        if (cursor !== undefined && !cursor.trim()) {
+          await assert.rejects(program.parseAsync(args, { from: "user" }), {
+            code: "commander.invalidArgument",
+          });
+          assert.equal(requests.length, before);
+          assert.equal(starts, startsBefore);
+        } else {
+          await program.parseAsync(args, { from: "user" });
+          assert.equal(requests.length, before + 1);
+          assert.deepEqual(requests[before], cursor === undefined ? {} : { cursor });
+        }
+      }
+    }
+  } finally {
+    t.mock.restoreAll();
+  }
 });

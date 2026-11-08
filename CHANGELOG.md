@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Sessions: preserve opaque pagination cursor bytes when listing agent sessions, so leading or trailing whitespace does not select a different page. Blank cursor arguments remain rejected.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.

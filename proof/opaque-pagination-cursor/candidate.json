@@ -1,0 +1,99 @@
+{
+  "status": "CONTRACT_PASS",
+  "rows": [
+    {
+      "label": "ordinary",
+      "returnedToken": "page-2",
+      "producerSchemaValid": true,
+      "parsedToken": "page-2",
+      "requests": [
+        {
+          "method": "session/list",
+          "params": {
+            "cursor": "page-2"
+          },
+          "schemaValid": true
+        }
+      ],
+      "startCalls": 1,
+      "closeCalls": 1,
+      "error": null,
+      "childParsedToken": null,
+      "parentParsedToken": "page-2"
+    },
+    {
+      "label": "padded",
+      "returnedToken": " page-2 ",
+      "producerSchemaValid": true,
+      "parsedToken": " page-2 ",
+      "requests": [
+        {
+          "method": "session/list",
+          "params": {
+            "cursor": " page-2 "
+          },
+          "schemaValid": true
+        }
+      ],
+      "startCalls": 1,
+      "closeCalls": 1,
+      "error": null,
+      "childParsedToken": null,
+      "parentParsedToken": " page-2 "
+    },
+    {
+      "label": "omitted",
+      "returnedToken": null,
+      "producerSchemaValid": true,
+      "parsedToken": null,
+      "requests": [
+        {
+          "method": "session/list",
+          "params": {},
+          "schemaValid": true
+        }
+      ],
+      "startCalls": 1,
+      "closeCalls": 1,
+      "error": null,
+      "childParsedToken": null,
+      "parentParsedToken": null
+    },
+    {
+      "label": "empty",
+      "returnedToken": "",
+      "producerSchemaValid": true,
+      "parsedToken": null,
+      "requests": [],
+      "startCalls": 0,
+      "closeCalls": 0,
+      "error": {
+        "name": "CommanderError",
+        "code": "commander.invalidArgument",
+        "message": "error: option '--cursor <cursor>' argument '' is invalid. Cursor must not be empty"
+      }
+    },
+    {
+      "label": "whitespace",
+      "returnedToken": " \t ",
+      "producerSchemaValid": true,
+      "parsedToken": null,
+      "requests": [],
+      "startCalls": 0,
+      "closeCalls": 0,
+      "error": {
+        "name": "CommanderError",
+        "code": "commander.invalidArgument",
+        "message": "error: option '--cursor <cursor>' argument ' \t ' is invalid. Cursor must not be empty"
+      }
+    }
+  ],
+  "seams": [
+    "Only AcpClient.start/close replaced; real registration, Commander parser, handler, session list request construction and AcpClient.listSessions/runConnectionRequest retained.",
+    "Connection agent.request is an injected schema-valid capture sink. No SDK transport, adapter or provider process exists."
+  ],
+  "limits": [
+    "Synthetic producer tokens, no live adapter compatibility claim",
+    "Empty/whitespace-only schema values are CLI-rejected; disposition separate from demonstrated padded nonempty change"
+  ]
+}
