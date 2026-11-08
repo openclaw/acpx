@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Runtime/embedding: reject oversized finite default and per-turn timeouts before session or prompt work instead of failing after immediate native timer overflow.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.
