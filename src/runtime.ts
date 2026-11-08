@@ -115,7 +115,7 @@ function validateRuntimeTimeoutMs(timeoutMs: number | undefined): void {
   if (timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 2_147_483_647) {
     throw new AcpRuntimeError(
       "ACP_INVALID_RUNTIME_OPTION",
-      "timeoutMs exceeds the maximum supported timer delay",
+      "timeoutMs exceeds the maximum supported timer delay. Set timeoutMs to 2147483647 or less.",
     );
   }
 }

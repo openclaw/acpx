@@ -22,6 +22,7 @@ function isInvalidTimeout(error: unknown): boolean {
   assert.ok(error instanceof AcpRuntimeError);
   assert.equal(error.code, "ACP_INVALID_RUNTIME_OPTION");
   assert.match(error.message, /timeoutMs.*maximum supported timer delay/);
+  assert.match(error.message, /Set timeoutMs to 2147483647 or less\./);
   return true;
 }
 
@@ -75,6 +76,7 @@ for (const timeoutMs of [MAX_TIMER_DELAY_MS + 0.4, MAX_TIMER_DELAY_MS + 1, Numbe
         assert.ok(error instanceof AcpRuntimeError);
         assert.equal(error.code, "ACP_INVALID_RUNTIME_OPTION");
         assert.match(error.message, /timeoutMs.*maximum supported timer delay/);
+        assert.match(error.message, /Set timeoutMs to 2147483647 or less\./);
         return true;
       },
     );
