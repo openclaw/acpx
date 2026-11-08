@@ -5,7 +5,6 @@ import { normalizeAgentCommandInput } from "../acp/client-process.js";
 import { normalizeOutputError } from "../acp/error-normalization.js";
 import { createAgentRegistry, type AcpAgentRegistry } from "../agent-registry.js";
 import { assertControlAuthority, type AcpControlAuthority } from "../async-control.js";
-import { MAX_TIMER_DELAY_MS } from "../cli/timer-duration.js";
 import { textPrompt } from "../prompt-content.js";
 import { DISCARD_OUTPUT_FORMATTER } from "../session/execution/discard-output.js";
 import { sendSession } from "../session/execution/queue-owner-runtime.js";
@@ -127,7 +126,7 @@ export class SharedAcpRuntime {
     if (
       options.ttlMs !== undefined &&
       Number.isFinite(options.ttlMs) &&
-      Math.round(options.ttlMs) > MAX_TIMER_DELAY_MS
+      Math.round(options.ttlMs) > 2_147_483_647
     ) {
       invalidOption("ttlMs exceeds the maximum supported timer delay");
     }
