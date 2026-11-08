@@ -556,9 +556,18 @@ function validToolContentBlock(content: unknown): boolean {
     return typeof block.text === "string";
   }
   if (block.type === "resource") {
-    return asRecord(block.resource) !== undefined;
+    return validToolResource(block.resource);
   }
   return true;
+}
+
+function validToolResource(resource: unknown): boolean {
+  const record = asRecord(resource);
+  return (
+    record !== undefined &&
+    typeof record.uri === "string" &&
+    (record.mimeType == null || typeof record.mimeType === "string")
+  );
 }
 
 function formatLocations(
@@ -642,7 +651,7 @@ function textFromContentBlock(content: ContentBlock): string | undefined {
 }
 
 function textFromResourceBlock(content: Extract<ContentBlock, { type: "resource" }>): string {
-  if (!content.resource || typeof content.resource !== "object") {
+  if (!validToolResource(content.resource)) {
     return "[resource]";
   }
   if ("text" in content.resource && typeof content.resource.text === "string") {

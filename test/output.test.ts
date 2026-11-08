@@ -311,6 +311,75 @@ test("text formatter reports malformed tool call fields instead of throwing", ()
   assert.doesNotMatch(valid.toString(), /\[error\]/);
 });
 
+for (const sessionUpdateKind of ["tool_call", "tool_call_update"]) {
+  for (const field of ["uri", "mimeType"]) {
+    test(`text formatter rejects malformed resource metadata ${sessionUpdateKind} ${field}`, () => {
+      const writer = new CaptureWriter();
+      const formatter = createOutputFormatter("text", { stdout: writer });
+      const resource = {
+        uri: "file:///synthetic.txt",
+        mimeType: "text/plain",
+        blob: "c3ludGhldGlj",
+        [field]: { toString: null },
+      };
+      assert.doesNotThrow(() => {
+        formatter.onAcpMessage(
+          sessionUpdate({
+            sessionUpdate: sessionUpdateKind,
+            toolCallId: "resource-call",
+            title: "resource",
+            status: "completed",
+            content: [{ type: "content", content: { type: "resource", resource } }],
+          }) as never,
+        );
+      });
+      assert.match(writer.toString(), /Malformed tool call content/);
+      formatter.onAcpMessage(messageChunk("kept after malformed resource") as never);
+      formatter.onAcpMessage(
+        sessionUpdate({
+          sessionUpdate: "tool_call_update",
+          toolCallId: "resource-call",
+          title: "resource",
+          status: "completed",
+          content: [{ type: "content", content: { type: "text", text: "valid followup" } }],
+        }) as never,
+      );
+      formatter.onAcpMessage(doneResult("end_turn") as never);
+      formatter.flush();
+      assert.match(writer.toString(), /kept after malformed resource/);
+      assert.match(writer.toString(), /valid followup/);
+      assert.match(writer.toString(), /\[done\] end_turn/);
+    });
+  }
+}
+
+test("text formatter preserves valid embedded resource metadata and text", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("text", { stdout: writer });
+  const resources = [
+    { uri: "file:///with-mime.bin", mimeType: "application/octet-stream", blob: "YQ==" },
+    { uri: "file:///without-mime.bin", blob: "Yg==" },
+    { uri: "file:///text.txt", mimeType: "text/plain", text: "embedded resource text" },
+  ];
+  for (const resource of resources) {
+    formatter.onAcpMessage(
+      sessionUpdate({
+        sessionUpdate: "tool_call_update",
+        toolCallId: resource.uri,
+        status: "completed",
+        content: [{ type: "content", content: { type: "resource", resource } }],
+      }) as never,
+    );
+  }
+  formatter.flush();
+  assert.ok(
+    writer.toString().includes("[resource] file:///with-mime.bin (application/octet-stream)"),
+  );
+  assert.ok(writer.toString().includes("[resource] file:///without-mime.bin"));
+  assert.match(writer.toString(), /embedded resource text/);
+  assert.doesNotMatch(writer.toString(), /Malformed/);
+});
+
 test("json formatter passes through ACP messages", () => {
   const writer = new CaptureWriter();
   const formatter = createOutputFormatter("json", {
