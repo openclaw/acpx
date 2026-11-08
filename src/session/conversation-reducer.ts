@@ -400,17 +400,41 @@ function applyToolResultUpdate(
   const output = hasOwn(update, "rawOutput")
     ? deepClone((update as { rawOutput?: unknown }).rawOutput)
     : undefined;
+  // ACP reports tool results in `content`; `rawOutput` is optional.
+  const contentText = output === undefined ? toolCallContentText(update) : undefined;
 
   upsertToolResult(agent, update.toolCallId, {
     tool_name: tool.name,
     is_error: status === undefined ? undefined : statusIndicatesError(status),
-    content: output === undefined ? undefined : toToolResultContent(output),
+    content:
+      output !== undefined
+        ? toToolResultContent(output)
+        : contentText === undefined
+          ? undefined
+          : { Text: contentText },
     output,
   });
 }
 
+function toolCallContentText(update: ToolCall | ToolCallUpdate): string | undefined {
+  const content = (update as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  const texts = content.map(toolCallContentBlockText).filter((text) => text !== undefined);
+  return texts.length > 0 ? texts.join("\n") : undefined;
+}
+
+function toolCallContentBlockText(item: unknown): string | undefined {
+  const entry = item as { type?: unknown; content?: { type?: unknown; text?: unknown } } | null;
+  if (entry?.type !== "content" || entry.content?.type !== "text") {
+    return undefined;
+  }
+  return typeof entry.content.text === "string" ? entry.content.text : undefined;
+}
+
 function hasToolResultPatch(update: ToolCall | ToolCallUpdate): boolean {
-  return ["rawOutput", "status", "title", "kind"].some((key) => hasOwn(update, key));
+  return ["rawOutput", "content", "status", "title", "kind"].some((key) => hasOwn(update, key));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
