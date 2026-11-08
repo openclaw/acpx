@@ -276,13 +276,22 @@ function detectConfigOutputFormat(argv: string[]): OutputFormat | undefined {
   if (argv[0] !== "show" && argv[0] !== "init") {
     return undefined;
   }
-  const separator = argv.indexOf("--");
-  const options = argv.slice(1, separator < 0 ? undefined : separator);
-  // Like root flags, an invalid trailing value must not erase a valid format.
-  const index = options.findLastIndex(
-    (token, index) => readFormatFlagValue(token, options[index + 1]) !== undefined,
-  );
-  return index < 0 ? undefined : readFormatFlagValue(options[index], options[index + 1]);
+  let detectedFormat: OutputFormat | undefined;
+  for (let index = 1; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === "--") {
+      break;
+    }
+    const format = readFormatFlagValue(token, argv[index + 1]);
+    if (format) {
+      detectedFormat = format;
+    }
+    // A required value is consumed even when it looks like another option.
+    if (token === "--format") {
+      index += 1;
+    }
+  }
+  return detectedFormat;
 }
 
 function classifyTopLevelFlagScan(token: string): TopLevelFlagStep {

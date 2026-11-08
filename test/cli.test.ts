@@ -192,6 +192,40 @@ test("config command errors honor command-local output formats", async (t) => {
   }
 });
 
+test("config error formats skip consumed option values", async (t) => {
+  for (const command of ["show", "init"]) {
+    for (const [prior, next] of [
+      ["quiet", "json"],
+      ["json", "quiet"],
+    ]) {
+      for (const [suffix, expected] of [
+        [["--format", `--format=${next}`], prior],
+        [["--format", "--format", next], prior],
+        [["--format", "--", `--format=${next}`], next],
+        [[`--format=${next}`, "--bogus"], next],
+      ] as const) {
+        await t.test(`${command} --format ${prior} ${suffix.join(" ")}`, async () => {
+          await withTempHome(async (homeDir) => {
+            for (const args of [
+              ["config", command, "--format", prior, ...suffix],
+              ["--format", prior, ...suffix, "config", command],
+            ]) {
+              const result = await runCli(args, homeDir);
+              assert.equal(result.code, 2, args.join(" "));
+              if (expected === "json") {
+                assert.equal(parseSingleAcpErrorLine(result.stdout).data?.acpxCode, "USAGE");
+              } else {
+                assert.equal(result.stdout, "", args.join(" "));
+              }
+              await assert.rejects(fs.access(path.join(homeDir, ".acpx", "config.json")));
+            }
+          });
+        });
+      }
+    }
+  }
+});
+
 test("config error formats preserve global precedence and argument boundaries", async () => {
   await withTempHome(async (homeDir) => {
     const json = await runCli(
