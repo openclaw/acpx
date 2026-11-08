@@ -240,7 +240,25 @@ function detectRequestedOutputFormat(argv: string[], fallback: OutputFormat): Ou
     }
   }
 
-  return detectCompareOutputFormat(argv, detectedFormat, fallback);
+  return detectCommandOutputFormat(argv, detectedFormat, fallback);
+}
+
+function detectCommandOutputFormat(
+  argv: string[],
+  rootFormat: OutputFormat | undefined,
+  fallback: OutputFormat,
+): OutputFormat {
+  const command = detectAgentToken(argv);
+  if (command.index === undefined) {
+    return rootFormat ?? fallback;
+  }
+  if (command.token === "config") {
+    return rootFormat ?? detectConfigOutputFormat(argv.slice(command.index + 1)) ?? fallback;
+  }
+  if (command.token !== "compare") {
+    return rootFormat ?? fallback;
+  }
+  return detectCompareOutputFormat(argv.slice(command.index + 1), rootFormat, fallback);
 }
 
 function detectCompareOutputFormat(
@@ -248,14 +266,22 @@ function detectCompareOutputFormat(
   rootFormat: OutputFormat | undefined,
   fallback: OutputFormat,
 ): OutputFormat {
-  const command = detectAgentToken(argv);
-  if (command.token !== "compare" || command.index === undefined) {
-    return rootFormat ?? fallback;
-  }
-  const local = scanCompareArgs(argv.slice(command.index + 1));
+  const local = scanCompareArgs(argv);
   const localFormat = isOutputFormat(local.format) ? local.format : undefined;
   // Match parsed options: the alias wins, otherwise globals overwrite locals.
   return local.json ? "json" : (rootFormat ?? localFormat ?? fallback);
+}
+
+function detectConfigOutputFormat(argv: string[]): OutputFormat | undefined {
+  if (argv[0] !== "show" && argv[0] !== "init") {
+    return undefined;
+  }
+  const separator = argv.indexOf("--");
+  const options = argv.slice(1, separator < 0 ? undefined : separator);
+  const index = options.findLastIndex(
+    (token) => token === "--format" || token.startsWith("--format="),
+  );
+  return index < 0 ? undefined : readFormatFlagValue(options[index], options[index + 1]);
 }
 
 function classifyTopLevelFlagScan(token: string): TopLevelFlagStep {

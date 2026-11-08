@@ -144,6 +144,62 @@ test("config commands accept command-local --format json", async () => {
   });
 });
 
+test("config command errors honor command-local output formats", async (t) => {
+  for (const command of ["show", "init"]) {
+    for (const format of [["--format", "json"], ["--format=json"]]) {
+      await t.test(command + " " + format.join(" "), async () => {
+        await withTempHome(async (homeDir) => {
+          const result = await runCli(["config", command, ...format, "--bogus"], homeDir);
+          assert.equal(result.code, 2);
+          assert.equal(parseSingleAcpErrorLine(result.stdout).data?.acpxCode, "USAGE");
+          await assert.rejects(fs.access(path.join(homeDir, ".acpx", "config.json")));
+        });
+      });
+    }
+    await t.test(command + " excess argument before local format", async () => {
+      await withTempHome(async (homeDir) => {
+        const result = await runCli(["config", command, "unexpected", "--format", "json"], homeDir);
+        assert.equal(result.code, 2);
+        assert.equal(parseSingleAcpErrorLine(result.stdout).data?.acpxCode, "USAGE");
+        await assert.rejects(fs.access(path.join(homeDir, ".acpx", "config.json")));
+      });
+    });
+    await t.test(command + " bootstrap failure", async () => {
+      await withTempHome(async (homeDir) => {
+        await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+        await fs.writeFile(path.join(homeDir, ".acpx", "config.json"), "{broken");
+        const result = await runCli(["config", command, "--format", "json"], homeDir);
+        assert.equal(result.code, 1);
+        assert.equal(parseSingleAcpErrorLine(result.stdout).data?.acpxCode, "RUNTIME");
+        assert.equal(result.stderr, "");
+      });
+    });
+  }
+});
+
+test("config error formats preserve global precedence and argument boundaries", async () => {
+  await withTempHome(async (homeDir) => {
+    const json = await runCli(
+      ["--format", "json", "config", "show", "--format", "quiet", "--bogus"],
+      homeDir,
+    );
+    assert.equal(json.code, 2);
+    assert.equal(parseSingleAcpErrorLine(json.stdout).data?.acpxCode, "USAGE");
+    for (const args of [
+      ["--format", "quiet", "config", "show", "--format", "json", "--bogus"],
+      ["config", "show", "--format", "json", "--format", "quiet", "--bogus"],
+      ["config", "show", "--", "--format", "json"],
+      ["config", "--format", "json", "show"],
+      ["config", "unknown", "--format", "json"],
+      ["sessions", "show", "--format", "json"],
+    ]) {
+      const result = await runCli(args, homeDir);
+      assert.equal(result.code, 2, args.join(" "));
+      assert.equal(result.stdout, "", args.join(" "));
+    }
+  });
+});
+
 test("bootstrap uses the final cwd and MCP config across repeated flag spellings", async (t) => {
   for (const firstInline of [false, true]) {
     for (const lastInline of [false, true]) {
