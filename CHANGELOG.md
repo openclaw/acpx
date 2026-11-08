@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Shared runtime: preserve each turn's request ID when callers reuse or mutate the input object, so submission and cancellation keep targeting that turn.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.

@@ -14,6 +14,7 @@ import {
   type AcpRuntime,
   type AcpRuntimeEvent,
   type AcpRuntimeHandle,
+  type AcpRuntimeTurnInput,
   type SessionWatchEvent,
 } from "../src/runtime.js";
 import { findSession } from "../src/session/persistence.js";
@@ -482,6 +483,68 @@ test("shared turn cancellation never cancels a different active turn", async () 
     });
     assert.equal(await output(next.events), "after-cancel");
     assert.equal((await next.result).status, "completed");
+  });
+});
+
+test("shared turns preserve request IDs when input is mutated before submission", async () => {
+  await withSharedSession(async ({ runtime, handle }) => {
+    const input: AcpRuntimeTurnInput = {
+      handle,
+      text: "echo captured-request",
+      requestId: "captured-request",
+      mode: "prompt",
+    };
+    const turn = runtime.startTurn(input);
+    input.requestId = "mutated-request";
+    assert.equal(turn.requestId, "captured-request");
+    assert.equal(await output(turn.events), "captured-request");
+    assert.equal((await turn.result).status, "completed");
+    assert.equal((await runtime.getStatus({ handle })).lastRequestId, "captured-request");
+  });
+});
+
+test("shared cancel retains its request ID after input reuse", async () => {
+  await withSharedSession(async ({ runtime, handle, home }) => {
+    const releaseFirst = path.join(home, "release-first");
+    const releaseSecond = path.join(home, "release-second");
+    const input: AcpRuntimeTurnInput = {
+      handle,
+      text: `stream-wait-file ${releaseFirst}`,
+      requestId: "retained-first",
+      mode: "prompt",
+    };
+    const first = runtime.startTurn(input);
+    await first.promptStarted;
+    const sessionId = handle.acpxRecordId ?? handle.runtimeSessionName;
+    const owner = await readQueueOwnerRecord(sessionId);
+    assert.ok(owner);
+    input.requestId = "retained-second";
+    input.text = `stream-wait-file ${releaseSecond}`;
+    const second = runtime.startTurn(input);
+    try {
+      // Wait for actual owner admission, not elapsed time alone. Both turns
+      // remain held by explicit release files until cancellation is sent.
+      const deadline = Date.now() + 5_000;
+      for (;;) {
+        const current = await readQueueOwnerRecord(sessionId);
+        assert.equal(current?.pid, owner.pid);
+        assert.equal(current?.ownerGeneration, owner.ownerGeneration);
+        if (current?.queueDepth === 1) {
+          break;
+        }
+        assert.ok(Date.now() < deadline, "second turn was not queued");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(first.requestId, "retained-first");
+      assert.equal(second.requestId, "retained-second");
+      await first.cancel();
+    } finally {
+      await fs.writeFile(releaseFirst, "release");
+      await fs.writeFile(releaseSecond, "release");
+    }
+    assert.equal((await first.result).status, "cancelled");
+    assert.equal((await second.result).status, "completed");
+    await second.promptStarted;
   });
 });
 

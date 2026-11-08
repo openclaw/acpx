@@ -223,7 +223,8 @@ export class SharedAcpRuntime {
         "Shared turns support prompt mode and the client's static permission policy; in-process callbacks and steering are unsupported.",
       );
     }
-    if (!input.requestId.trim()) {
+    const requestId = input.requestId;
+    if (!requestId.trim()) {
       invalidOption("A shared turn requires a requestId.");
     }
     const sessionId = sharedRecordId(input.handle);
@@ -242,7 +243,7 @@ export class SharedAcpRuntime {
       }
       cancellation ??= tryCancelOnRunningOwner({
         sessionId,
-        targetRequestId: input.requestId,
+        targetRequestId: requestId,
       }).then(() => {});
       await cancellation;
     };
@@ -268,7 +269,7 @@ export class SharedAcpRuntime {
       const result = await sendSession({
         ...this.options,
         sessionId,
-        requestId: input.requestId,
+        requestId,
         prompt: typeof prompt === "string" ? textPrompt(prompt) : prompt,
         resumePolicy: "same-session-only",
         requireSharedRuntime: true,
@@ -319,7 +320,7 @@ export class SharedAcpRuntime {
         }),
     );
     return {
-      requestId: input.requestId,
+      requestId,
       promptStarted: promptStarted.promise,
       events: events.iterate(),
       result,
