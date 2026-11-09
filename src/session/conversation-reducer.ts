@@ -397,62 +397,35 @@ function applyToolResultUpdate(
     return;
   }
   const status = (update as { status?: unknown }).status;
-  const raw = hasOwn(update, "rawOutput")
-    ? deepClone((update as { rawOutput?: unknown }).rawOutput)
-    : undefined;
   // ACP treats a null rawOutput as not supplied.
-  const output = raw === null ? undefined : raw;
+  const output = hasOwn(update, "rawOutput")
+    ? (deepClone((update as { rawOutput?: unknown }).rawOutput) ?? undefined)
+    : undefined;
   upsertToolResult(agent, update.toolCallId, {
     tool_name: tool.name,
     is_error: status === undefined ? undefined : statusIndicatesError(status),
-    content: toolResultContentPatch(agent, update, output),
+    content: output === undefined ? toolContentText(agent, update) : toToolResultContent(output),
     output,
   });
 }
 
-// ACP reports tool results in `content`; rawOutput is optional. A content list
-// replaces earlier content, so an empty list clears derived text, but it never
+// ACP's standard tool output is `content`; rawOutput is optional. A content list
+// replaces earlier content text, so an empty list clears it, but it never
 // replaces a result taken from rawOutput.
-function toolResultContentPatch(
+function toolContentText(
   agent: SessionAgentMessage,
   update: ToolCall | ToolCallUpdate,
-  output: unknown,
 ): SessionToolResultContent | undefined {
-  if (output !== undefined) {
-    return toToolResultContent(output);
-  }
-  if (hasRawToolOutput(agent, update.toolCallId)) {
-    return undefined;
-  }
-  const contentText = toolCallContentText(update);
-  return contentText === undefined ? undefined : { Text: contentText };
-}
-
-function hasRawToolOutput(agent: SessionAgentMessage, toolCallId: string): boolean {
-  if (!hasOwn(agent.tool_results, toolCallId)) {
-    return false;
-  }
-  const existing = agent.tool_results[toolCallId]?.output;
-  return existing !== undefined && existing !== null;
-}
-
-function toolCallContentText(update: ToolCall | ToolCallUpdate): string | undefined {
   const content = (update as { content?: unknown }).content;
-  if (!Array.isArray(content)) {
+  if (!Array.isArray(content) || agent.tool_results[update.toolCallId]?.output != null) {
     return undefined;
   }
-  return content
-    .map(toolCallContentBlockText)
-    .filter((text) => text !== undefined)
-    .join("\n");
-}
-
-function toolCallContentBlockText(item: unknown): string | undefined {
-  const entry = item as { type?: unknown; content?: { type?: unknown; text?: unknown } } | null;
-  if (entry?.type !== "content" || entry.content?.type !== "text") {
-    return undefined;
-  }
-  return typeof entry.content.text === "string" ? entry.content.text : undefined;
+  const texts = content.flatMap((item: unknown) => {
+    const block = item as { type?: unknown; content?: { type?: unknown; text?: unknown } } | null;
+    const text = block?.type === "content" && block.content?.type === "text" && block.content.text;
+    return typeof text === "string" ? [text] : [];
+  });
+  return { Text: texts.join("\n") };
 }
 
 function hasToolResultPatch(update: ToolCall | ToolCallUpdate): boolean {

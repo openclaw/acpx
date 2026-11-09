@@ -419,7 +419,7 @@ test("tool results fall back to ACP content text and follow content replacement"
     content: { type: "text" as const, text: value },
   });
   const resultFor = (toolCallId: string) => agentAt(conversation, 0).tool_results[toolCallId];
-  for (const toolCallId of ["null-raw", "cleared", "non-text", "raw-kept"]) {
+  for (const toolCallId of ["null-raw", "content-only", "raw-kept"]) {
     applyUpdate(conversation, {
       sessionUpdate: "tool_call",
       toolCallId,
@@ -439,33 +439,21 @@ test("tool results fall back to ACP content text and follow content replacement"
 
   applyUpdate(conversation, {
     sessionUpdate: "tool_call_update",
-    toolCallId: "cleared",
-    content: [text("Searching...")],
+    toolCallId: "content-only",
+    content: [text("first"), text("second")],
   });
   applyUpdate(conversation, {
     sessionUpdate: "tool_call_update",
-    toolCallId: "cleared",
+    toolCallId: "content-only",
     status: "completed",
   });
-  assert.deepEqual(resultFor("cleared")?.content, { Text: "Searching..." });
+  assert.deepEqual(resultFor("content-only")?.content, { Text: "first\nsecond" });
   applyUpdate(conversation, {
     sessionUpdate: "tool_call_update",
-    toolCallId: "cleared",
-    content: [],
-  });
-  assert.deepEqual(resultFor("cleared")?.content, { Text: "" });
-
-  applyUpdate(conversation, {
-    sessionUpdate: "tool_call_update",
-    toolCallId: "non-text",
-    content: [text("Searching...")],
-  });
-  applyUpdate(conversation, {
-    sessionUpdate: "tool_call_update",
-    toolCallId: "non-text",
+    toolCallId: "content-only",
     content: [{ type: "diff", path: "/tmp/a.txt", oldText: "a", newText: "b" }],
   });
-  assert.deepEqual(resultFor("non-text")?.content, { Text: "" });
+  assert.deepEqual(resultFor("content-only")?.content, { Text: "" });
 
   applyUpdate(conversation, {
     sessionUpdate: "tool_call_update",
