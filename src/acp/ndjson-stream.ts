@@ -62,6 +62,7 @@ function enqueueNdJsonLine(
   agentCommand: string,
   line: string,
   controller: ReadableStreamDefaultController<AnyMessage>,
+  quietInvalidLines?: () => boolean,
 ): void {
   const trimmedLine = line.trim();
   if (!trimmedLine || shouldIgnoreNonJsonAgentOutputLine(agentCommand, trimmedLine)) {
@@ -73,7 +74,9 @@ function enqueueNdJsonLine(
       controller.enqueue(message);
     }
   } catch (err) {
-    console.error("Failed to parse JSON message:", trimmedLine, err);
+    if (!quietInvalidLines?.()) {
+      console.error("Failed to parse JSON message:", trimmedLine, err);
+    }
   }
 }
 
@@ -82,6 +85,7 @@ function enqueueNdJsonChunk(
   chunk: string,
   fragments: string[],
   controller: ReadableStreamDefaultController<AnyMessage>,
+  quietInvalidLines?: () => boolean,
 ): void {
   // Scan each chunk once; rescanning an unfinished line makes large,
   // fragmented messages quadratic. Join retained fragments only at LF.
@@ -92,7 +96,7 @@ function enqueueNdJsonChunk(
     fragments.length = 0;
   }
   for (const line of lines) {
-    enqueueNdJsonLine(agentCommand, line, controller);
+    enqueueNdJsonLine(agentCommand, line, controller, quietInvalidLines);
   }
   if (suffix) {
     fragments.push(suffix);
@@ -105,6 +109,7 @@ export function createNdJsonMessageStream(
   input: ReadableStream<Uint8Array>,
   maxMessageBytes?: number,
   onReadError?: (error: Error) => void,
+  quietInvalidLines?: () => boolean,
 ): {
   readable: ReadableStream<AnyMessage>;
   writable: WritableStream<AnyMessage>;
@@ -131,6 +136,7 @@ export function createNdJsonMessageStream(
             textDecoder.decode(value, { stream: true }),
             fragments,
             controller,
+            quietInvalidLines,
           );
         }
         controller.close();
