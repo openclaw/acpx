@@ -26,6 +26,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Output: keep agent stdout parse diagnostics off stderr in `--format json --json-strict` and `--format quiet`, so strict JSON pipelines and quiet scripts no longer get a stack trace when an adapter prints a non-JSON line. Thanks @saariuslystoned.
 
+- Flows: `flow run` now rejects an empty `--input-json` or `--input-file` argument (for example an unset shell variable) instead of silently running the flow with `{}`. Thanks @saariuslystoned.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.
