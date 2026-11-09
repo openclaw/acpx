@@ -16,7 +16,11 @@ import type {
   WaitForTerminalExitResponse,
 } from "@agentclientprotocol/sdk";
 import { assertControlAuthority, type AcpControlAuthority } from "../async-control.js";
-import { PermissionDeniedError, PermissionPromptUnavailableError } from "../errors.js";
+import {
+  describeSpawnEnoent,
+  PermissionDeniedError,
+  PermissionPromptUnavailableError,
+} from "../errors.js";
 import { promptForPermission } from "../permission-prompt.js";
 import {
   buildSpawnCommandOptions,
@@ -705,7 +709,15 @@ async function spawnAndWait(
   // codeql[js/shell-command-injection-from-environment]
   // lgtm[js/shell-command-injection-from-environment]
   const proc = spawn(spawnCommand.command, spawnCommand.args, spawnOptions);
-  await waitForSpawn(proc);
+  try {
+    await waitForSpawn(proc);
+  } catch (error) {
+    throw describeSpawnEnoent(error, "", {
+      command: spawnCommand.command,
+      cwd: spawnOptions.cwd,
+      env: spawnOptions.env ?? process.env,
+    });
+  }
   return proc;
 }
 
