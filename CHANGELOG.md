@@ -32,6 +32,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Sessions/import: launch an imported session with the destination's configured agent command and arguments instead of the source machine's saved launch arguments when the two commands differ. Thanks @saariuslystoned.
 
+- Shared runtime: `ensureSession()` no longer applies a creation-time `sessionOptions.model` to an existing persistent session, so reuse keeps its model and provider session instead of reconnecting. Thanks @saariuslystoned.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.

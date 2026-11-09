@@ -523,6 +523,34 @@ test("concurrent shared and CLI ensure resolve one named session", async () => {
   });
 });
 
+test("shared ensure reuse ignores creation models; CLI ensure still applies them", async () => {
+  await withSharedSession(
+    async ({ runtime, handle, cli, home, command, pidFile }) => {
+      const before = await findSession({ agentCommand: command, cwd: home, name: "shared" });
+      const pid = await fs.readFile(pidFile, "utf8");
+      // A reconnect here would replace the unloadable provider session.
+      const reused = await runtime.ensureSession({
+        sessionKey: "shared",
+        agent: "mock",
+        mode: "persistent",
+        sessionOptions: { model: "smart-model" },
+      });
+      assert.deepEqual(reused, handle);
+      assert.deepEqual(
+        await findSession({ agentCommand: command, cwd: home, name: "shared" }),
+        before,
+      );
+      assert.equal(await fs.readFile(pidFile, "utf8"), pid);
+
+      await cli("--model", "smart-model", "sessions", "ensure", "--name", "shared");
+      const switched = await findSession({ agentCommand: command, cwd: home, name: "shared" });
+      assert.equal(switched?.acpx?.current_model_id, "smart-model");
+    },
+    "deny-all",
+    ["--advertise-config-options", "--load-session-not-found"],
+  );
+});
+
 test("shared mode rejects in-process callbacks and unsupported session modes", async () => {
   await withSharedSession(async ({ runtime, handle, home }) => {
     for (const callbacks of [
