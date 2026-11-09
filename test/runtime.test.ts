@@ -1025,6 +1025,41 @@ for (const control of [
   });
 }
 
+test("settled turn handle cancel does not cancel a later turn on the reused client", async (t) => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-stale-cancel-"));
+  const runtime = createAcpRuntime({
+    cwd,
+    sessionStore: createFileSessionStore({ stateDir: path.join(cwd, "state") }),
+    agentRegistry: createAgentRegistry({
+      overrides: { fixture: [process.execPath, MOCK_AGENT_PATH] },
+    }),
+    permissionMode: "approve-reads",
+  });
+  t.after(async () => {
+    await runtime.shutdown();
+    await fs.rm(cwd, { recursive: true, force: true });
+  });
+  const handle = await runtime.ensureSession({
+    sessionKey: "stale-cancel",
+    agent: "fixture",
+    mode: "persistent",
+  });
+  const drain = async (turn: { events: AsyncIterable<AcpRuntimeEvent> }) => {
+    for await (const event of turn.events) {
+      void event;
+    }
+  };
+  const first = runtime.startTurn({ handle, text: "echo first", mode: "prompt", requestId: "a" });
+  await drain(first);
+  assert.equal((await first.result).status, "completed");
+  const second = runtime.startTurn({ handle, text: "sleep 300", mode: "prompt", requestId: "b" });
+  const events = drain(second);
+  await second.promptStarted;
+  await first.cancel();
+  await events;
+  assert.equal((await second.result).status, "completed");
+});
+
 test("public model status retains legacy labels through file-store reload", async (t) => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-model-labels-"));
   const options = {
