@@ -684,6 +684,8 @@ export class AcpClient {
           this.rejectPendingConnectionRequests(error);
           connection?.close(error);
         },
+        // Read per line: shared queue clients change this option between turns.
+        () => this.options.suppressSdkConsoleErrors === true,
       ),
     );
 

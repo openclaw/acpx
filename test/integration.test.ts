@@ -3804,6 +3804,38 @@ test("integration: json-strict exec success emits JSON-RPC lines only", async ()
   });
 });
 
+test("integration: non-JSON agent stdout is reported only outside json-strict and quiet", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      // Adapters such as opencode with notification plugins write terminal escapes to stdout.
+      const agentPath = path.join(cwd, "noisy-agent.mjs");
+      await fs.writeFile(
+        agentPath,
+        `process.stdout.write("noisy banner\\n");\nawait import(${JSON.stringify(pathToFileURL(MOCK_AGENT_PATH).href)});\n`,
+      );
+      const agentArgs = ["--agent", `node ${JSON.stringify(agentPath)}`, "--cwd", cwd];
+      for (const [format, reported] of [
+        [["--format", "json", "--json-strict"], false],
+        [["--format", "quiet"], false],
+        [["--format", "text"], true],
+      ] as const) {
+        const result = await runCli([...agentArgs, ...format, "exec", "echo noisy-ok"], homeDir);
+        assert.equal(result.code, 0, result.stderr);
+        assert.match(result.stdout, /noisy-ok/);
+        if (reported) {
+          assert.match(result.stderr, /Failed to parse JSON message: noisy banner/);
+        } else {
+          assert.equal(result.stderr, "");
+        }
+      }
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: json-strict exec retries without emitting stderr notices", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
