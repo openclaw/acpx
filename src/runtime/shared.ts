@@ -201,6 +201,7 @@ export class SharedAcpRuntime {
         ...session,
         walkBoundary: session.cwd,
         sessionOptions: input.sessionOptions,
+        applyModelOnReuse: false,
         resumeSessionId: input.resumeSessionId,
         handleProcessInterrupts: false,
         signal: this.disconnect.signal,

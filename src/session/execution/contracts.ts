@@ -115,6 +115,8 @@ export type SessionSendOptions = {
 
 export type SessionEnsureOptions = Omit<SessionCreateOptions, keyof SessionConfigurationOptions> & {
   walkBoundary?: string;
+  /** Shared runtime creation options must not reconfigure an existing session. */
+  applyModelOnReuse?: boolean;
 };
 
 export type SessionListOptions = {

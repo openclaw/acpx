@@ -350,7 +350,7 @@ async function ensureSessionWithOwnership(
   });
   if (existing) {
     const requestedModel = options.sessionOptions?.model;
-    if (requestedModel) {
+    if (requestedModel && options.applyModelOnReuse !== false) {
       const result = await setSessionModel({
         sessionId: existing.acpxRecordId,
         modelId: requestedModel,
