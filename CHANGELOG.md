@@ -18,6 +18,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Sessions: wait up to 60 seconds for a newly started queue owner instead of about six, so the first prompt on a slow or heavily loaded host no longer fails with "Session queue owner failed to start". Thanks @saariuslystoned.
 
+- CLI: report invalid option values once in text output, and as a single `[acpx] error: USAGE` line in quiet output instead of the full help plus the raw error. Thanks @saariuslystoned.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.

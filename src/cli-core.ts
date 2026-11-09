@@ -440,7 +440,7 @@ async function maybeHandleSkillflag(argv: string[]): Promise<void> {
   });
 }
 
-function createProgram(requestedJsonStrict: boolean): Command {
+function createProgram(requestedOutputPolicy: OutputPolicy): Command {
   const program = new Command();
   program
     .name("acpx")
@@ -449,7 +449,7 @@ function createProgram(requestedJsonStrict: boolean): Command {
     .enablePositionalOptions()
     .showHelpAfterError();
 
-  if (requestedJsonStrict) {
+  if (requestedOutputPolicy.jsonStrict) {
     program.configureOutput({
       writeOut: () => {
         // json-strict intentionally suppresses non-JSON stdout output.
@@ -458,9 +458,30 @@ function createProgram(requestedJsonStrict: boolean): Command {
         // json-strict intentionally suppresses non-JSON stderr output.
       },
     });
+  } else if (requestedOutputPolicy.format === "quiet") {
+    program.configureOutput({
+      writeErr: () => {
+        // Quiet usage errors are reported once by handleProgramParseError.
+      },
+    });
+  } else {
+    program.configureOutput({
+      outputError: (message, write) => {
+        commanderPrintedError = true;
+        write(message);
+      },
+    });
   }
 
   return program;
+}
+
+// Set when Commander printed a parse error (and help) itself. Errors thrown from
+// actions never reach Commander's output, so text mode still reports those.
+let commanderPrintedError = false;
+
+function commanderReportedError(outputPolicy: OutputPolicy): boolean {
+  return outputPolicy.format === "text" && commanderPrintedError;
 }
 
 async function handleProgramParseError(
@@ -480,7 +501,9 @@ async function handleProgramParseError(
       defaultCode: "USAGE",
       origin: "cli",
     });
-    await emitRequestedError(error, normalized, requestedOutputPolicy);
+    if (!commanderReportedError(requestedOutputPolicy)) {
+      await emitRequestedError(error, normalized, requestedOutputPolicy);
+    }
     process.exit(exitCodeForOutputErrorCode(normalized.code));
   }
 
@@ -528,7 +551,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
       ),
       suppressReads: requestedOutputPolicy.suppressReads,
     };
-    const program = createProgram(requestedJsonStrict);
+    const program = createProgram(requestedOutputPolicy);
 
     addGlobalFlags(program);
     // Subcommands copy this override when they are created, so set it before
