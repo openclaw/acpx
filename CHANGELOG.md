@@ -16,6 +16,8 @@ Repo: https://github.com/openclaw/acpx
 
 - CLI: `Ctrl+C` on a foreground session prompt now cancels that prompt (dequeues it or sends `session/cancel`) instead of leaving it running in the queue owner. Thanks @saariuslystoned.
 
+- Sessions: wait up to 60 seconds for a newly started queue owner instead of about six, so the first prompt on a slow or heavily loaded host no longer fails with "Session queue owner failed to start". Thanks @saariuslystoned.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.
