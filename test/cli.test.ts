@@ -783,7 +783,7 @@ for (const capability of ["--supports-load-session", "--supports-resume-session"
         assert.equal(stored.closed, false, `resume attempt ${attempt + 1}`);
         assert.equal(stored.acp_session_id, "same-resume");
       }
-      const prompted = await runCli([...base, "--ttl", "0", "prompt", "hello"], homeDir, {
+      const prompted = await runCli([...base, "--ttl", "0.01", "prompt", "hello"], homeDir, {
         timeoutMs: 10_000,
       });
       assert.equal(prompted.code, 0, prompted.stderr);
