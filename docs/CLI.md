@@ -543,7 +543,7 @@ When a prompt is already in flight for a session, `acpx` uses a per-session queu
 3. owner drains queued prompts one-by-one after each completed turn
 4. after the queue drains, owner waits for new work up to TTL (`--ttl`, default 300s)
 5. submitter either blocks until completion (default) or exits immediately with `--no-wait`
-6. if interrupted (`Ctrl+C`) during an active turn, `acpx` sends `session/cancel` first, waits briefly for cancelled completion, then force-kills only if needed
+6. foreground `Ctrl+C` cancels only that invocation's request: it removes a pending request or sends `session/cancel` for its active turn, without killing the shared owner (see [Session control](session-control.md))
 
 Slow submitters retain ordered live output in a temporary disk spool instead of
 an unbounded socket buffer. Each observer can retain up to 64 MiB of unread spool
