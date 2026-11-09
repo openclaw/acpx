@@ -111,3 +111,35 @@ for (const flag of ["--system-prompt", "--append-system-prompt"]) {
     });
   }
 }
+
+test("flow run rejects empty input arguments instead of running with default input", async () => {
+  await withTempHome("acpx-flow-input-", async (home) => {
+    const entry = path.join(home, "entry.mjs");
+    const inputFile = path.join(home, "input.json");
+    await fs.writeFile(inputFile, "{}");
+    await fs.writeFile(
+      entry,
+      'import {defineFlow, compute} from "acpx/flows"; export default defineFlow({name:"input",startAt:"read",nodes:{read:compute({run: ({input}) => input})},edges:[]});',
+    );
+    for (const flags of [
+      ["--input-json", ""],
+      ["--input-file", ""],
+      ["--input-json", "", "--input-file", inputFile],
+    ]) {
+      const result = spawnSync(
+        process.execPath,
+        [CLI, "--format", "json", "flow", "run", entry, ...flags],
+        {
+          cwd: home,
+          encoding: "utf8",
+          timeout: 15_000,
+          env: { ...process.env, HOME: home, USERPROFILE: home },
+        },
+      );
+      assert.notEqual(result.status, 0, `${flags.join(" ")}: ${result.stdout}`);
+      await assert.rejects(fs.access(path.join(home, ".acpx", "flows", "runs")), {
+        code: "ENOENT",
+      });
+    }
+  });
+});
