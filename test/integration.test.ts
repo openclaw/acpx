@@ -11,6 +11,7 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isAcpJsonRpcMessage } from "../src/acp/jsonrpc.js";
+import { withTimeout } from "../src/async-control.js";
 import { observeProcessIncarnation, probeProcessIdentity } from "../src/process-identity.js";
 import type { PromptInput } from "../src/prompt-content.js";
 import { runPromptTurn } from "../src/runtime/engine/prompt-turn.js";
@@ -4892,6 +4893,122 @@ test("integration: cancel yields cancelled stopReason without queue error", asyn
     }
   });
 });
+
+for (const mode of ["queued-pid", "active-group"] as const) {
+  test(
+    `integration: foreground SIGINT targets only its own request (${mode})`,
+    {
+      skip: process.platform === "win32" ? "POSIX signal delivery" : false,
+    },
+    async () => {
+      await withTempHome(async (homeDir) => {
+        const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-foreground-signal-"));
+        const requestLog = path.join(homeDir, "requests.jsonl");
+        const args = ["--agent", LOAD_CAPABLE_MOCK_AGENT_COMMAND, "--cwd", cwd, "--format", "json"];
+        const env = { ...process.env, HOME: homeDir, ACPX_TEST_REQUEST_LOG: requestLog };
+        const children: ReturnType<typeof spawn>[] = [];
+        let sessionId: string | undefined;
+        const requests = async () =>
+          (await fs.readFile(requestLog, "utf8"))
+            .trim()
+            .split("\n")
+            .map(
+              (line) =>
+                JSON.parse(line) as { method?: string; params?: { prompt?: { text?: string }[] } },
+            );
+        const start = (prompt: string) => {
+          const child = spawn(
+            process.execPath,
+            [CLI_PATH, ...args, "prompt", "-s", "signal", prompt],
+            {
+              env,
+              detached: true,
+              stdio: ["ignore", "pipe", "pipe"],
+            },
+          );
+          children.push(child);
+          let stdout = "";
+          let stderr = "";
+          child.stdout.on("data", (data: Buffer) => {
+            stdout += data.toString();
+          });
+          child.stderr.on("data", (data: Buffer) => {
+            stderr += data.toString();
+          });
+          const done = new Promise<CliRunResult>((resolve, reject) => {
+            child.once("error", reject);
+            child.once("close", (code, signal) => resolve({ code, signal, stdout, stderr }));
+          });
+          void done.catch(() => {});
+          return { child, done, stdout: () => stdout };
+        };
+        try {
+          const created = await runCli([...args, "sessions", "new", "--name", "signal"], homeDir, {
+            env,
+          });
+          assert.equal(created.code, 0, created.stderr);
+          sessionId = (JSON.parse(created.stdout.trim()) as { acpxRecordId: string }).acpxRecordId;
+          const primary = start("stream-sleep 60000 foreground-ready");
+          await waitFor(
+            async () => (primary.stdout().includes("foreground-ready") ? true : null),
+            15_000,
+          );
+          const target = mode === "queued-pid" ? start("echo should-not-run") : primary;
+          if (mode === "queued-pid") {
+            const lockPath = queueOwnerLockPath(homeDir, sessionId);
+            await waitFor(async () => {
+              const lease = JSON.parse(await fs.readFile(lockPath, "utf8")) as {
+                queueDepth: number;
+              };
+              return lease.queueDepth === 1 ? true : null;
+            }, 15_000);
+          }
+          assert.ok(target.child.pid);
+          process.kill(mode === "active-group" ? -target.child.pid : target.child.pid, "SIGINT");
+          const interrupted = await withTimeout(target.done, 10_000);
+          assert.equal(interrupted.code, 130, interrupted.stderr);
+          assert.equal(interrupted.signal, null);
+          const cancels = (await requests()).filter((r) => r.method === "session/cancel");
+          assert.equal(cancels.length, mode === "queued-pid" ? 0 : 1);
+          if (mode === "queued-pid") {
+            assert.equal(primary.child.exitCode, null, "other client's active turn must survive");
+            const cancelled = await runCli([...args, "cancel", "-s", "signal"], homeDir, { env });
+            assert.equal(cancelled.code, 0, cancelled.stderr);
+            assert.equal((await withTimeout(primary.done, 10_000)).code, 0);
+          }
+          const successor = await runCli(
+            [...args, "prompt", "-s", "signal", "echo successor"],
+            homeDir,
+            { env },
+          );
+          assert.equal(successor.code, 0, successor.stderr);
+          assert.match(successor.stdout, /successor/);
+          assert.equal(
+            (await requests()).some(
+              (r) =>
+                r.method === "session/prompt" &&
+                r.params?.prompt?.some((block) => block.text === "echo should-not-run"),
+            ),
+            false,
+          );
+        } finally {
+          for (const child of children) {
+            await stopChildProcess(child, 5_000, "foreground fixture");
+          }
+          if (sessionId) {
+            const lock = await readQueueOwnerLock(homeDir, sessionId).catch(() => undefined);
+            const closed = await runCli([...args, "sessions", "close", "signal"], homeDir, { env });
+            assert.equal(closed.code, 0, closed.stderr);
+            if (lock) {
+              assert.equal(await waitForPidExit(lock.pid, 5_000), true);
+            }
+          }
+          await fs.rm(cwd, { recursive: true, force: true });
+        }
+      });
+    },
+  );
+}
 
 test("integration: prompt exits after done while detached owner stays warm", async () => {
   await withTempHome(async (homeDir) => {

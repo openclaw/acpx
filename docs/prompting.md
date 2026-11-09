@@ -105,7 +105,7 @@ acpx codex --no-wait 'after that, summarize root cause in 3 bullets'
 acpx codex --no-wait 'and propose 1 minimal fix'
 ```
 
-`Ctrl+C` while waiting on a queued or running prompt sends ACP `session/cancel` first, waits briefly for the cancelled completion, and falls back to a force-kill only if the agent does not respond. See [Session control](session-control.md) for the explicit `cancel` command.
+`Ctrl+C` while waiting on a session prompt cancels only that prompt: queued work is removed, an active turn gets ACP `session/cancel`. Other clients' turns and `--no-wait` work are unaffected. See [Session control](session-control.md) for cancellation outcomes and the explicit `cancel` command.
 
 ## Embedded runtime readiness
 

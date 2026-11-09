@@ -224,7 +224,7 @@ acpx codex --no-wait 'after the current turn ends, write the release notes'
 
 ## Cancelling
 
-`Ctrl+C` during an active turn sends ACP `session/cancel` first, waits briefly for `stopReason=cancelled`, and only force-kills if cancellation does not finish in time.
+Foreground `Ctrl+C` cancels only that invocation's queued or active session prompt. It removes pending work or sends ACP `session/cancel` for its active turn, without force-killing the shared owner or cancelling another client's turn. See [Session control](session-control.md) for cancellation outcomes and detach-only observers.
 
 The `cancel` subcommand sends the same cooperative cancel without a terminal signal:
 
