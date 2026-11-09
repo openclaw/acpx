@@ -1449,6 +1449,35 @@ test("AcpClient lifecycle snapshot and cancel helpers reflect active prompt stat
   assert.deepEqual(cancelled, { stopReason: "cancelled" });
 });
 
+test("AcpClient lifecycle snapshot adds a crash exit status reported after the pipe closes", () => {
+  const client = makeClient();
+  const internals = asInternals(client);
+  const current = { pid: 101 } as ClientInternals["agent"];
+  const replaced = { pid: 100 } as ClientInternals["agent"];
+  internals.agent = current;
+  internals.activePrompt = { sessionId: "session-1", promise: new Promise(() => {}) };
+
+  internals.recordAgentExit?.(current, "connection_close", null, null);
+  internals.recordAgentExit?.(replaced, "process_exit", 7, null);
+  assert.equal(client.getAgentLifecycleSnapshot().lastExit?.exitCode, null);
+
+  internals.recordAgentExit?.(current, "process_exit", 91, null);
+  internals.recordAgentExit?.(current, "process_close", 0, "SIGTERM");
+  const lastExit = client.getAgentLifecycleSnapshot().lastExit;
+  assert.equal(lastExit?.reason, "connection_close");
+  assert.equal(lastExit?.exitCode, 91);
+  assert.equal(lastExit?.signal, null);
+
+  // A shutdown acpx started must not save its own SIGTERM as a crash.
+  const retired = makeClient();
+  const retiredInternals = asInternals(retired);
+  retiredInternals.agent = current;
+  retiredInternals.closing = true;
+  retiredInternals.recordAgentExit?.(current, "connection_close", null, null);
+  retiredInternals.recordAgentExit?.(current, "process_exit", null, "SIGTERM");
+  assert.equal(retired.getAgentLifecycleSnapshot().lastExit?.signal, null);
+});
+
 test(
   "AcpClient coalesces cancellation until the active prompt finishes",
   { timeout: 5_000 },
