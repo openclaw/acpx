@@ -278,7 +278,9 @@ export class FlowRunner {
         cancellation ??= this.cancelShellOwners(runDir, signal);
         void cancellation.catch(() => {});
         this.attempts.get(runDir)?.cancel(reason, signal);
-        await execution?.catch(() => {});
+        // The interrupt callback owns the final outcome while execution retires.
+        // Preserve admitted-work and cleanup failures instead of discarding them.
+        await execution;
       },
     ).then(
       (value) => ({ ok: true as const, value }),

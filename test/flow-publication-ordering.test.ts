@@ -326,3 +326,69 @@ test(
     }
   },
 );
+
+test(
+  "FlowRunner preserves a failed admitted publication during interrupt cleanup",
+  { timeout: 10_000 },
+  async (t) => {
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-interrupt-write-"));
+    const runner = makeRunner(outputRoot);
+    const store = runStore(runner);
+    const entered = deferred();
+    const release = deferred();
+    const failure = new Error("synthetic admitted write failure");
+    const originalWrite = store.writeSnapshot.bind(store);
+    let runDir: string | undefined;
+    let settled = false;
+    t.mock.method(
+      store,
+      "writeSnapshot",
+      async (...args: Parameters<FlowRunStore["writeSnapshot"]>) => {
+        if (args[2].type === "node_started") {
+          runDir = args[0];
+          entered.resolve();
+          await release.promise;
+          throw failure;
+        }
+        await originalWrite(...args);
+      },
+    );
+    const running = runner
+      .run(
+        defineFlow({
+          name: "interrupted-admitted-write",
+          startAt: "work",
+          nodes: { work: compute({ heartbeatMs: 0, run: () => null }) },
+          edges: [],
+        }),
+        {},
+      )
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+      .finally(() => {
+        settled = true;
+      });
+    try {
+      await entered.promise;
+      process.emit("SIGINT");
+      await flushRunnableWork();
+      assert.equal(settled, false, "must join the admitted write before returning");
+      release.resolve();
+      const error = await running;
+      assert(error instanceof AggregateError);
+      assert(error.errors.includes(failure), "admitted write failure must not become Interrupted");
+      assert.ok(runDir);
+      const state = JSON.parse(
+        await fs.readFile(path.join(runDir, "projections/run.json"), "utf8"),
+      ) as FlowRunState;
+      assert.equal(state.status, "failed");
+      assert.equal(state.error, error.message);
+    } finally {
+      release.resolve();
+      await running;
+      await fs.rm(outputRoot, { recursive: true, force: true });
+    }
+  },
+);

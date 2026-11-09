@@ -110,6 +110,99 @@ function unwrapTestOutcomes<T>(body: TestOutcome<T>, cleanup: TestOutcome<void>)
   return body.value;
 }
 
+for (const stage of ["initialize", "session/new", "session/prompt"] as const) {
+  test(
+    "integration: interrupted exec exits 130 during " + stage,
+    { skip: process.platform === "win32", timeout: 20_000 },
+    async () => {
+      await withTempHome(async (homeDir) => {
+        const requestLog = path.join(homeDir, "requests.jsonl");
+        const setupOption =
+          stage === "initialize" ? " --initialize-action" : " --new-session-action";
+        const command =
+          stage === "session/prompt"
+            ? MOCK_AGENT_COMMAND
+            : MOCK_AGENT_COMMAND + setupOption + ' "sleep 60000"';
+        const child = spawn(
+          process.execPath,
+          [
+            CLI_PATH,
+            "--cwd",
+            homeDir,
+            "--agent",
+            command,
+            "--format",
+            "json",
+            "exec",
+            "stream-sleep 60000 interrupt-ready",
+          ],
+          {
+            env: { ...process.env, HOME: homeDir, ACPX_TEST_REQUEST_LOG: requestLog },
+            stdio: ["ignore", "pipe", "pipe"],
+          },
+        );
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk: Buffer) => {
+          stdout += chunk.toString();
+        });
+        child.stderr.on("data", (chunk: Buffer) => {
+          stderr += chunk.toString();
+        });
+        const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+          (resolve) => {
+            child.once("close", (code, signal) => resolve({ code, signal }));
+          },
+        );
+        const readRequests = async () =>
+          (await fs.readFile(requestLog, "utf8"))
+            .trim()
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => JSON.parse(line) as { pid: number; method?: string });
+        let peerPid: number | undefined;
+        try {
+          peerPid = await waitFor(async () => {
+            if (child.exitCode !== null || child.signalCode !== null) {
+              throw new Error("exec exited before signal: " + stderr);
+            }
+            const request = (await readRequests()).find((entry) => entry.method === stage);
+            const ready = stage !== "session/prompt" || stdout.includes("interrupt-ready");
+            return request && ready ? request.pid : null;
+          }, 10_000);
+          assert.equal(child.kill("SIGINT"), true);
+          await waitFor(
+            async () => (child.exitCode !== null || child.signalCode !== null ? true : null),
+            5_000,
+          );
+          const result = await exited;
+          assert.equal(result.code, 130, stderr);
+          assert.equal(result.signal, null);
+          const requests = await readRequests();
+          assert.equal(
+            requests.filter((entry) => entry.method === "session/cancel").length,
+            stage === "session/prompt" ? 1 : 0,
+          );
+          if (stage !== "session/prompt") {
+            assert.equal(
+              requests.some((entry) => entry.method === "session/prompt"),
+              false,
+            );
+          }
+          assert.doesNotMatch(stdout, /stream-sleep done/);
+          assert.equal(await waitForPidExit(peerPid, 5_000), true, "owned peer must exit");
+        } finally {
+          await stopChildProcess(child, 5_000, "interrupted exec");
+          if (peerPid !== undefined && isPidAlive(peerPid)) {
+            process.kill(peerPid, "SIGKILL");
+            assert.equal(await waitForPidExit(peerPid, 5_000), true);
+          }
+        }
+      });
+    },
+  );
+}
+
 test("integration: exec echo baseline", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

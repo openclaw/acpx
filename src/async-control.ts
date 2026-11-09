@@ -49,6 +49,7 @@ export async function withInterrupt<T>(
 ): Promise<T> {
   return await new Promise<T>((resolve, reject) => {
     let settled = false;
+    let interrupting = false;
 
     const finish = (cb: () => void) => {
       if (settled) {
@@ -62,6 +63,10 @@ export async function withInterrupt<T>(
     };
 
     const rejectInterrupted = (signal: NodeJS.Signals) => {
+      if (settled || interrupting) {
+        return;
+      }
+      interrupting = true;
       void onInterrupt(signal).then(
         () => finish(() => reject(new InterruptedError())),
         (error: unknown) => finish(() => reject(error)),
@@ -84,9 +89,19 @@ export async function withInterrupt<T>(
     process.once("SIGTERM", onSigterm);
     process.once("SIGHUP", onSighup);
 
+    // Cancellation or connection teardown can settle run before cleanup finishes.
+    // Once interrupted, only cleanup may settle the wrapper.
     void run().then(
-      (result) => finish(() => resolve(result)),
-      (error) => finish(() => reject(error)),
+      (result) => {
+        if (!interrupting) {
+          finish(() => resolve(result));
+        }
+      },
+      (error: unknown) => {
+        if (!interrupting) {
+          finish(() => reject(error));
+        }
+      },
     );
   });
 }
