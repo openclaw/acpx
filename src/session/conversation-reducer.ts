@@ -397,23 +397,43 @@ function applyToolResultUpdate(
     return;
   }
   const status = (update as { status?: unknown }).status;
-  const output = hasOwn(update, "rawOutput")
+  const raw = hasOwn(update, "rawOutput")
     ? deepClone((update as { rawOutput?: unknown }).rawOutput)
     : undefined;
-  // ACP reports tool results in `content`; `rawOutput` is optional.
-  const contentText = output === undefined ? toolCallContentText(update) : undefined;
-
+  // ACP treats a null rawOutput as not supplied.
+  const output = raw === null ? undefined : raw;
   upsertToolResult(agent, update.toolCallId, {
     tool_name: tool.name,
     is_error: status === undefined ? undefined : statusIndicatesError(status),
-    content:
-      output !== undefined
-        ? toToolResultContent(output)
-        : contentText === undefined
-          ? undefined
-          : { Text: contentText },
+    content: toolResultContentPatch(agent, update, output),
     output,
   });
+}
+
+// ACP reports tool results in `content`; rawOutput is optional. A content list
+// replaces earlier content, so an empty list clears derived text, but it never
+// replaces a result taken from rawOutput.
+function toolResultContentPatch(
+  agent: SessionAgentMessage,
+  update: ToolCall | ToolCallUpdate,
+  output: unknown,
+): SessionToolResultContent | undefined {
+  if (output !== undefined) {
+    return toToolResultContent(output);
+  }
+  if (hasRawToolOutput(agent, update.toolCallId)) {
+    return undefined;
+  }
+  const contentText = toolCallContentText(update);
+  return contentText === undefined ? undefined : { Text: contentText };
+}
+
+function hasRawToolOutput(agent: SessionAgentMessage, toolCallId: string): boolean {
+  if (!hasOwn(agent.tool_results, toolCallId)) {
+    return false;
+  }
+  const existing = agent.tool_results[toolCallId]?.output;
+  return existing !== undefined && existing !== null;
 }
 
 function toolCallContentText(update: ToolCall | ToolCallUpdate): string | undefined {
@@ -421,8 +441,10 @@ function toolCallContentText(update: ToolCall | ToolCallUpdate): string | undefi
   if (!Array.isArray(content)) {
     return undefined;
   }
-  const texts = content.map(toolCallContentBlockText).filter((text) => text !== undefined);
-  return texts.length > 0 ? texts.join("\n") : undefined;
+  return content
+    .map(toolCallContentBlockText)
+    .filter((text) => text !== undefined)
+    .join("\n");
 }
 
 function toolCallContentBlockText(item: unknown): string | undefined {

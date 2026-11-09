@@ -411,3 +411,72 @@ test("lossless prompts, messages, and usage exceed runtime caps without changing
   assert.equal(reducePromptResponseUsage(lossless, { totalTokens: -1 }, undefined, "later"), false);
   assert.deepEqual(lossless, unchanged);
 });
+
+test("tool results fall back to ACP content text and follow content replacement", () => {
+  const conversation = createConversation(TIMESTAMP);
+  const text = (value: string) => ({
+    type: "content" as const,
+    content: { type: "text" as const, text: value },
+  });
+  const resultFor = (toolCallId: string) => agentAt(conversation, 0).tool_results[toolCallId];
+  for (const toolCallId of ["null-raw", "cleared", "non-text", "raw-kept"]) {
+    applyUpdate(conversation, {
+      sessionUpdate: "tool_call",
+      toolCallId,
+      title: "Tool",
+      status: "pending",
+    });
+  }
+
+  applyUpdate(conversation, {
+    sessionUpdate: "tool_call_update",
+    toolCallId: "null-raw",
+    status: "completed",
+    rawOutput: null,
+    content: [text("RESULT")],
+  });
+  assert.deepEqual(resultFor("null-raw")?.content, { Text: "RESULT" });
+
+  applyUpdate(conversation, {
+    sessionUpdate: "tool_call_update",
+    toolCallId: "cleared",
+    content: [text("Searching...")],
+  });
+  applyUpdate(conversation, {
+    sessionUpdate: "tool_call_update",
+    toolCallId: "cleared",
+    status: "completed",
+  });
+  assert.deepEqual(resultFor("cleared")?.content, { Text: "Searching..." });
+  applyUpdate(conversation, {
+    sessionUpdate: "tool_call_update",
+    toolCallId: "cleared",
+    content: [],
+  });
+  assert.deepEqual(resultFor("cleared")?.content, { Text: "" });
+
+  applyUpdate(conversation, {
+    sessionUpdate: "tool_call_update",
+    toolCallId: "non-text",
+    content: [text("Searching...")],
+  });
+  applyUpdate(conversation, {
+    sessionUpdate: "tool_call_update",
+    toolCallId: "non-text",
+    content: [{ type: "diff", path: "/tmp/a.txt", oldText: "a", newText: "b" }],
+  });
+  assert.deepEqual(resultFor("non-text")?.content, { Text: "" });
+
+  applyUpdate(conversation, {
+    sessionUpdate: "tool_call_update",
+    toolCallId: "raw-kept",
+    rawOutput: { value: 1 },
+  });
+  applyUpdate(conversation, {
+    sessionUpdate: "tool_call_update",
+    toolCallId: "raw-kept",
+    content: [text("later")],
+  });
+  assert.deepEqual(resultFor("raw-kept")?.content, { Text: JSON.stringify({ value: 1 }) });
+  assert.deepEqual(resultFor("raw-kept")?.output, { value: 1 });
+});
