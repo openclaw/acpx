@@ -1016,6 +1016,7 @@ export async function handleSessionsImport(
     newCwd: flags.destinationCwd ? path.resolve(globalFlags.cwd, flags.destinationCwd) : undefined,
     expectedAgentName: globalFlags.agent ? undefined : agent.agentName,
     expectedAgentCommand: agent.agentCommand,
+    expectedAgentArgv: agent.agentArgv,
   });
 
   if (
