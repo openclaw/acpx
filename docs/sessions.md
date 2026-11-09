@@ -169,6 +169,8 @@ Output:
 - `json` — `{ action, dryRun, count, bytesFreed, pruned }`
 - `quiet` — one pruned session id per line
 
+If a selected file cannot be deleted, pruning fails with the filesystem error instead of printing a success summary. Files already deleted are not restored.
+
 ## Queue ownership
 
 When a prompt is in flight, `acpx` becomes the **queue owner** for that session. Subsequent `acpx codex …` invocations submit through local IPC instead of starting a second adapter:
