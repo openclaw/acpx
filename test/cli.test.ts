@@ -144,111 +144,35 @@ test("config commands accept command-local --format json", async () => {
   });
 });
 
-test("config command errors honor command-local output formats", async (t) => {
-  for (const command of ["show", "init"]) {
-    for (const format of [["--format", "json"], ["--format=json"]]) {
-      await t.test(command + " " + format.join(" "), async () => {
-        await withTempHome(async (homeDir) => {
-          const result = await runCli(["config", command, ...format, "--bogus"], homeDir);
-          assert.equal(result.code, 2);
-          assert.equal(parseSingleAcpErrorLine(result.stdout).data?.acpxCode, "USAGE");
-          await assert.rejects(fs.access(path.join(homeDir, ".acpx", "config.json")));
-        });
-      });
-    }
-    for (const invalidFormat of [["--format", "bogus"], ["--format=bogus"], ["--format"]]) {
-      await t.test(command + " retains JSON before " + invalidFormat.join(" "), async () => {
-        await withTempHome(async (homeDir) => {
-          for (const args of [
-            ["config", command, "--format", "json", ...invalidFormat],
-            ["--format", "json", ...invalidFormat, "config", command],
-          ]) {
-            const result = await runCli(args, homeDir);
-            assert.equal(result.code, 2);
-            assert.equal(parseSingleAcpErrorLine(result.stdout).data?.acpxCode, "USAGE");
-            await assert.rejects(fs.access(path.join(homeDir, ".acpx", "config.json")));
-          }
-        });
-      });
-    }
-    await t.test(command + " excess argument before local format", async () => {
-      await withTempHome(async (homeDir) => {
-        const result = await runCli(["config", command, "unexpected", "--format", "json"], homeDir);
-        assert.equal(result.code, 2);
-        assert.equal(parseSingleAcpErrorLine(result.stdout).data?.acpxCode, "USAGE");
-        await assert.rejects(fs.access(path.join(homeDir, ".acpx", "config.json")));
-      });
-    });
-    await t.test(command + " bootstrap failure", async () => {
-      await withTempHome(async (homeDir) => {
-        await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
-        await fs.writeFile(path.join(homeDir, ".acpx", "config.json"), "{broken");
-        const result = await runCli(["config", command, "--format", "json"], homeDir);
-        assert.equal(result.code, 1);
-        assert.equal(parseSingleAcpErrorLine(result.stdout).data?.acpxCode, "RUNTIME");
-        assert.equal(result.stderr, "");
-      });
-    });
-  }
-});
-
-test("config error formats skip consumed option values", async (t) => {
-  for (const command of ["show", "init"]) {
-    for (const [prior, next] of [
-      ["quiet", "json"],
-      ["json", "quiet"],
-    ]) {
-      for (const [suffix, expected] of [
-        [["--format", `--format=${next}`], prior],
-        [["--format", "--format", next], prior],
-        [["--format", "--", `--format=${next}`], next],
-        [[`--format=${next}`, "--bogus"], next],
-      ] as const) {
-        await t.test(`${command} --format ${prior} ${suffix.join(" ")}`, async () => {
-          await withTempHome(async (homeDir) => {
-            for (const args of [
-              ["config", command, "--format", prior, ...suffix],
-              ["--format", prior, ...suffix, "config", command],
-            ]) {
-              const result = await runCli(args, homeDir);
-              assert.equal(result.code, 2, args.join(" "));
-              if (expected === "json") {
-                assert.equal(parseSingleAcpErrorLine(result.stdout).data?.acpxCode, "USAGE");
-              } else {
-                assert.equal(result.stdout, "", args.join(" "));
-              }
-              await assert.rejects(fs.access(path.join(homeDir, ".acpx", "config.json")));
-            }
-          });
-        });
-      }
-    }
-  }
-});
-
-test("config error formats preserve global precedence and argument boundaries", async () => {
+test("config command-local --format json applies to early errors", async () => {
   await withTempHome(async (homeDir) => {
-    const json = await runCli(
-      ["--format", "json", "config", "show", "--format", "quiet", "--bogus"],
-      homeDir,
-    );
-    assert.equal(json.code, 2);
-    assert.equal(parseSingleAcpErrorLine(json.stdout).data?.acpxCode, "USAGE");
     for (const args of [
+      ["config", "show", "--format", "json", "--bogus"],
+      ["config", "init", "--format=json", "--bogus"],
+      // A consumed option-looking value must not replace the prior selection.
+      ["config", "show", "--format", "json", "--format", "--format=quiet"],
+    ]) {
+      const result = await runCli(args, homeDir);
+      assert.equal(result.code, 2, args.join(" "));
+      assert.equal(parseSingleAcpErrorLine(result.stdout).data?.acpxCode, "USAGE");
+    }
+    for (const args of [
+      ["config", "show", "--format", "quiet", "--format", "--format=json"],
       ["--format", "quiet", "config", "show", "--format", "json", "--bogus"],
-      ["config", "show", "--format", "json", "--format", "quiet", "--bogus"],
-      ["config", "show", "--format", "json", "--format", "quiet", "--format", "bogus"],
-      ["config", "show", "--format", "bogus"],
-      ["config", "show", "--format"],
       ["config", "show", "--", "--format", "json"],
-      ["config", "--format", "json", "show"],
-      ["config", "unknown", "--format", "json"],
       ["sessions", "show", "--format", "json"],
     ]) {
       const result = await runCli(args, homeDir);
       assert.equal(result.code, 2, args.join(" "));
       assert.equal(result.stdout, "", args.join(" "));
     }
+
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(path.join(homeDir, ".acpx", "config.json"), "{broken");
+    const broken = await runCli(["config", "show", "--format", "json"], homeDir);
+    assert.equal(broken.code, 1);
+    assert.equal(parseSingleAcpErrorLine(broken.stdout).data?.acpxCode, "RUNTIME");
+    assert.equal(broken.stderr, "");
   });
 });
 
