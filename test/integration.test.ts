@@ -5389,6 +5389,23 @@ for (const format of ["text", "quiet", "json"]) {
   });
 }
 
+test("integration: status reports a session whose agent crashed mid-turn as dead", async () => {
+  await withTempHome(async (homeDir) => {
+    const base = baseLoadCapableAgentArgs(homeDir);
+    assert.equal((await runCli([...base, "sessions", "new"], homeDir)).code, 0);
+    // The mock writes "partial " and exits 91, so its stdout closes before Node reports the exit.
+    const crashed = await runCli([...base, "--ttl", "1", "disconnect-after-output"], homeDir);
+    assert.equal(crashed.code, 1);
+
+    const status = await waitFor(async () => {
+      const result = await runCli([...base, "--format", "json", "status"], homeDir);
+      const parsed = JSON.parse(result.stdout) as { status?: string; exitCode?: number };
+      return parsed.status === "dead" ? parsed : null;
+    }, 15_000);
+    assert.equal(status.exitCode, 91);
+  });
+});
+
 for (const connection of ["load", "resume"]) {
   for (const scenario of [
     { operation: "new", scope: "same" },
