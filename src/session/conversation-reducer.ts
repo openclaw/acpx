@@ -397,20 +397,39 @@ function applyToolResultUpdate(
     return;
   }
   const status = (update as { status?: unknown }).status;
+  // ACP treats a null rawOutput as not supplied.
   const output = hasOwn(update, "rawOutput")
-    ? deepClone((update as { rawOutput?: unknown }).rawOutput)
+    ? (deepClone((update as { rawOutput?: unknown }).rawOutput) ?? undefined)
     : undefined;
-
   upsertToolResult(agent, update.toolCallId, {
     tool_name: tool.name,
     is_error: status === undefined ? undefined : statusIndicatesError(status),
-    content: output === undefined ? undefined : toToolResultContent(output),
+    content: output === undefined ? toolContentText(agent, update) : toToolResultContent(output),
     output,
   });
 }
 
+// ACP's standard tool output is `content`; rawOutput is optional. A content list
+// replaces earlier content text, so an empty list clears it, but it never
+// replaces a result taken from rawOutput.
+function toolContentText(
+  agent: SessionAgentMessage,
+  update: ToolCall | ToolCallUpdate,
+): SessionToolResultContent | undefined {
+  const content = (update as { content?: unknown }).content;
+  if (!Array.isArray(content) || agent.tool_results[update.toolCallId]?.output != null) {
+    return undefined;
+  }
+  const texts = content.flatMap((item: unknown) => {
+    const block = item as { type?: unknown; content?: { type?: unknown; text?: unknown } } | null;
+    const text = block?.type === "content" && block.content?.type === "text" && block.content.text;
+    return typeof text === "string" ? [text] : [];
+  });
+  return { Text: texts.join("\n") };
+}
+
 function hasToolResultPatch(update: ToolCall | ToolCallUpdate): boolean {
-  return ["rawOutput", "status", "title", "kind"].some((key) => hasOwn(update, key));
+  return ["rawOutput", "content", "status", "title", "kind"].some((key) => hasOwn(update, key));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
