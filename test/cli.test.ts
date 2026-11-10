@@ -144,6 +144,42 @@ test("config commands accept command-local --format json", async () => {
   });
 });
 
+test("config command-local --format json applies to early errors", async () => {
+  await withTempHome(async (homeDir) => {
+    for (const args of [
+      ["config", "show", "--format", "json", "--bogus"],
+      ["config", "init", "--format=json", "--bogus"],
+      // A consumed option-looking value must not replace the prior selection.
+      ["config", "show", "--format", "json", "--format", "--format=quiet"],
+      // A rejected padded inline repeat keeps the earlier valid selection.
+      ["config", "show", "--format", "json", "--format= quiet "],
+    ]) {
+      const result = await runCli(args, homeDir);
+      assert.equal(result.code, 2, args.join(" "));
+      assert.equal(parseSingleAcpErrorLine(result.stdout).data?.acpxCode, "USAGE");
+    }
+    for (const args of [
+      ["config", "show", "--format", "quiet", "--format", "--format=json"],
+      ["--format", "quiet", "config", "show", "--format", "json", "--bogus"],
+      ["config", "show", "--", "--format", "json"],
+      ["sessions", "show", "--format", "json"],
+      // A padded inline value must not invent a JSON selection.
+      ["config", "show", "--format", "quiet", "--format= json "],
+    ]) {
+      const result = await runCli(args, homeDir);
+      assert.equal(result.code, 2, args.join(" "));
+      assert.equal(result.stdout, "", args.join(" "));
+    }
+
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(path.join(homeDir, ".acpx", "config.json"), "{broken");
+    const broken = await runCli(["config", "show", "--format", "json"], homeDir);
+    assert.equal(broken.code, 1);
+    assert.equal(parseSingleAcpErrorLine(broken.stdout).data?.acpxCode, "RUNTIME");
+    assert.equal(broken.stderr, "");
+  });
+});
+
 test("bootstrap uses the final cwd and MCP config across repeated flag spellings", async (t) => {
   for (const firstInline of [false, true]) {
     for (const lastInline of [false, true]) {

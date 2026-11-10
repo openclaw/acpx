@@ -240,7 +240,25 @@ function detectRequestedOutputFormat(argv: string[], fallback: OutputFormat): Ou
     }
   }
 
-  return detectCompareOutputFormat(argv, detectedFormat, fallback);
+  return detectCommandOutputFormat(argv, detectedFormat, fallback);
+}
+
+function detectCommandOutputFormat(
+  argv: string[],
+  rootFormat: OutputFormat | undefined,
+  fallback: OutputFormat,
+): OutputFormat {
+  const command = detectAgentToken(argv);
+  if (command.index === undefined) {
+    return rootFormat ?? fallback;
+  }
+  if (command.token === "config") {
+    return rootFormat ?? detectConfigOutputFormat(argv.slice(command.index + 1)) ?? fallback;
+  }
+  if (command.token !== "compare") {
+    return rootFormat ?? fallback;
+  }
+  return detectCompareOutputFormat(argv.slice(command.index + 1), rootFormat, fallback);
 }
 
 function detectCompareOutputFormat(
@@ -248,14 +266,32 @@ function detectCompareOutputFormat(
   rootFormat: OutputFormat | undefined,
   fallback: OutputFormat,
 ): OutputFormat {
-  const command = detectAgentToken(argv);
-  if (command.token !== "compare" || command.index === undefined) {
-    return rootFormat ?? fallback;
-  }
-  const local = scanCompareArgs(argv.slice(command.index + 1));
+  const local = scanCompareArgs(argv);
   const localFormat = isOutputFormat(local.format) ? local.format : undefined;
   // Match parsed options: the alias wins, otherwise globals overwrite locals.
   return local.json ? "json" : (rootFormat ?? localFormat ?? fallback);
+}
+
+function detectConfigOutputFormat(argv: string[]): OutputFormat | undefined {
+  if (argv[0] !== "show" && argv[0] !== "init") {
+    return undefined;
+  }
+  let detectedFormat: OutputFormat | undefined;
+  for (let index = 1; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === "--") {
+      break;
+    }
+    const format = readFormatFlagValue(token, argv[index + 1]);
+    if (format) {
+      detectedFormat = format;
+    }
+    // A required value is consumed even when it looks like another option.
+    if (token === "--format") {
+      index += 1;
+    }
+  }
+  return detectedFormat;
 }
 
 function classifyTopLevelFlagScan(token: string): TopLevelFlagStep {
@@ -280,7 +316,8 @@ function readInlineFlagValue(token: string, flag: string): string | undefined {
   if (!token.startsWith(`${flag}=`)) {
     return undefined;
   }
-  return token.slice(flag.length + 1).trim();
+  // Commander validates the raw value, so a padded value must not match.
+  return token.slice(flag.length + 1);
 }
 
 function isOutputFormat(value: unknown): value is OutputFormat {
