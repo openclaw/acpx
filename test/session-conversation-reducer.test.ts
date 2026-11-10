@@ -15,7 +15,10 @@ import {
   reducePromptSubmission,
   reduceSessionUpdate,
 } from "../src/session/conversation-reducer.js";
-import { trimConversationForRuntime } from "../src/session/conversation-retention.js";
+import {
+  trimCompactionsForRuntime,
+  trimConversationForRuntime,
+} from "../src/session/conversation-retention.js";
 import type { SessionAcpxState, SessionAgentMessage, SessionConversation } from "../src/types.js";
 
 const TIMESTAMP = "2026-09-25T00:00:00.000Z";
@@ -467,4 +470,342 @@ test("tool results fall back to ACP content text and follow content replacement"
   });
   assert.deepEqual(resultFor("raw-kept")?.content, { Text: JSON.stringify({ value: 1 }) });
   assert.deepEqual(resultFor("raw-kept")?.output, { value: 1 });
+});
+
+test("compaction updates upsert entities with patch semantics", () => {
+  const conversation = createConversation(TIMESTAMP);
+  const { acpx } = applyUpdate(conversation, {
+    sessionUpdate: "compaction_update",
+    compactionId: "c1",
+    status: "in_progress",
+    summary: [{ type: "text", text: "hello" }],
+  });
+  assert.deepEqual(acpx.compactions, [
+    { compaction_id: "c1", status: "in_progress", summary: "hello", after_messages: 0 },
+  ]);
+
+  // Omission keeps the stored summary; status always replaces.
+  const patched = applyUpdate(
+    conversation,
+    { sessionUpdate: "compaction_update", compactionId: "c1", status: "completed" },
+    "explicit-user-id",
+    acpx,
+  );
+  assert.deepEqual(patched.acpx.compactions, [
+    { compaction_id: "c1", status: "completed", summary: "hello", after_messages: 0 },
+  ]);
+
+  // Null and [] clear the summary.
+  const cleared = applyUpdate(
+    conversation,
+    {
+      sessionUpdate: "compaction_update",
+      compactionId: "c1",
+      status: "completed",
+      summary: null,
+    },
+    "explicit-user-id",
+    patched.acpx,
+  );
+  assert.deepEqual(cleared.acpx.compactions, [
+    { compaction_id: "c1", status: "completed", after_messages: 0 },
+  ]);
+
+  const restored = applyUpdate(
+    conversation,
+    {
+      sessionUpdate: "compaction_update",
+      compactionId: "c1",
+      status: "completed",
+      summary: [{ type: "text", text: "again" }],
+    },
+    "explicit-user-id",
+    cleared.acpx,
+  );
+  const clearedEmpty = applyUpdate(
+    conversation,
+    {
+      sessionUpdate: "compaction_update",
+      compactionId: "c1",
+      status: "completed",
+      summary: [],
+    },
+    "explicit-user-id",
+    restored.acpx,
+  );
+  assert.deepEqual(clearedEmpty.acpx.compactions, [
+    { compaction_id: "c1", status: "completed", after_messages: 0 },
+  ]);
+
+  // SDK-coerced undefined (own key, e.g. from a malformed wire field) keeps the stored value.
+  const errored = applyUpdate(
+    conversation,
+    {
+      sessionUpdate: "compaction_update",
+      compactionId: "c1",
+      status: "failed",
+      summary: [{ type: "text", text: "kept" }],
+      error: "kept error",
+    },
+    "explicit-user-id",
+    clearedEmpty.acpx,
+  );
+  const coerced = applyUpdate(
+    conversation,
+    {
+      sessionUpdate: "compaction_update",
+      compactionId: "c1",
+      status: "failed",
+      summary: undefined,
+      error: undefined,
+    },
+    "explicit-user-id",
+    errored.acpx,
+  );
+  assert.deepEqual(coerced.acpx.compactions, [
+    {
+      compaction_id: "c1",
+      status: "failed",
+      summary: "kept",
+      error: "kept error",
+      after_messages: 0,
+    },
+  ]);
+
+  // Null clears the error; omission keeps it.
+  const errorCleared = applyUpdate(
+    conversation,
+    { sessionUpdate: "compaction_update", compactionId: "c1", status: "failed", error: null },
+    "explicit-user-id",
+    coerced.acpx,
+  );
+  assert.deepEqual(errorCleared.acpx.compactions, [
+    { compaction_id: "c1", status: "failed", summary: "kept", after_messages: 0 },
+  ]);
+  const errorRestored = applyUpdate(
+    conversation,
+    {
+      sessionUpdate: "compaction_update",
+      compactionId: "c1",
+      status: "failed",
+      error: "again",
+    },
+    "explicit-user-id",
+    errorCleared.acpx,
+  );
+  const errorKept = applyUpdate(
+    conversation,
+    { sessionUpdate: "compaction_update", compactionId: "c1", status: "completed" },
+    "explicit-user-id",
+    errorRestored.acpx,
+  );
+  assert.deepEqual(errorKept.acpx.compactions, [
+    {
+      compaction_id: "c1",
+      status: "completed",
+      summary: "kept",
+      error: "again",
+      after_messages: 0,
+    },
+  ]);
+});
+
+test("compaction summary chunks append in receive order and create in-progress entities", () => {
+  const conversation = createConversation(TIMESTAMP);
+  const first = applyUpdate(conversation, {
+    sessionUpdate: "compaction_summary_chunk",
+    compactionId: "c1",
+    content: { type: "text", text: "hello " },
+  });
+  assert.deepEqual(first.acpx.compactions, [
+    { compaction_id: "c1", status: "in_progress", summary: "hello ", after_messages: 0 },
+  ]);
+
+  const second = applyUpdate(
+    conversation,
+    {
+      sessionUpdate: "compaction_summary_chunk",
+      compactionId: "c1",
+      content: { type: "text", text: "world" },
+    },
+    "explicit-user-id",
+    first.acpx,
+  );
+  assert.deepEqual(second.acpx.compactions, [
+    { compaction_id: "c1", status: "in_progress", summary: "hello world", after_messages: 0 },
+  ]);
+
+  // A later concrete summary replaces accumulated chunks.
+  const replaced = applyUpdate(
+    conversation,
+    {
+      sessionUpdate: "compaction_update",
+      compactionId: "c1",
+      status: "completed",
+      summary: [{ type: "text", text: "final" }],
+    },
+    "explicit-user-id",
+    second.acpx,
+  );
+  assert.deepEqual(replaced.acpx.compactions, [
+    { compaction_id: "c1", status: "completed", summary: "final", after_messages: 0 },
+  ]);
+});
+
+test("compaction updates preserve unknown statuses and record errors", () => {
+  const conversation = createConversation(TIMESTAMP);
+  const { acpx } = applyUpdate(conversation, {
+    sessionUpdate: "compaction_update",
+    compactionId: "c1",
+    status: "paused_for_review",
+    error: "provider timed out",
+  });
+  assert.deepEqual(acpx.compactions, [
+    {
+      compaction_id: "c1",
+      status: "paused_for_review",
+      error: "provider timed out",
+      after_messages: 0,
+    },
+  ]);
+
+  // Malformed updates are dropped without creating entities.
+  const dropped = applyUpdate(
+    conversation,
+    { sessionUpdate: "compaction_update", compactionId: "  ", status: "completed" },
+    "explicit-user-id",
+    acpx,
+  );
+  assert.deepEqual(dropped.acpx.compactions, [
+    {
+      compaction_id: "c1",
+      status: "paused_for_review",
+      error: "provider timed out",
+      after_messages: 0,
+    },
+  ]);
+});
+
+test("runtime recording bounds compaction history and summary length", () => {
+  const conversation = createConversation(TIMESTAMP);
+  let state: SessionAcpxState | undefined;
+  for (let index = 0; index < 25; index += 1) {
+    state = recordSessionUpdate(
+      conversation,
+      state,
+      {
+        sessionId: "session",
+        update: {
+          sessionUpdate: "compaction_update",
+          compactionId: `c${index}`,
+          status: "completed",
+          summary: [{ type: "text", text: "x".repeat(9_000) }],
+        },
+      },
+      TIMESTAMP,
+      "explicit-user-id",
+    );
+  }
+  const compactions = state?.compactions ?? [];
+  assert.equal(compactions.length, 20);
+  assert.equal(compactions[0]?.compaction_id, "c5");
+  assert.equal(compactions.at(-1)?.compaction_id, "c24");
+  for (const compaction of compactions) {
+    assert.equal(compaction.summary?.length, 8_000);
+    assert.ok(compaction.summary?.endsWith("..."));
+  }
+
+  const direct: SessionAcpxState = {
+    compactions: [
+      { compaction_id: "c1", status: "completed", summary: "short", after_messages: 0 },
+    ],
+  };
+  trimCompactionsForRuntime(direct);
+  assert.deepEqual(direct.compactions, [
+    { compaction_id: "c1", status: "completed", summary: "short", after_messages: 0 },
+  ]);
+  trimCompactionsForRuntime({});
+});
+
+test("compaction IDs are opaque: padded and plain IDs stay distinct", () => {
+  const conversation = createConversation(TIMESTAMP);
+  const first = applyUpdate(conversation, {
+    sessionUpdate: "compaction_update",
+    compactionId: "c1",
+    status: "in_progress",
+  });
+  const second = applyUpdate(
+    conversation,
+    { sessionUpdate: "compaction_update", compactionId: " c1", status: "completed" },
+    "explicit-user-id",
+    first.acpx,
+  );
+  assert.deepEqual(second.acpx.compactions, [
+    { compaction_id: "c1", status: "in_progress", after_messages: 0 },
+    { compaction_id: " c1", status: "completed", after_messages: 0 },
+  ]);
+
+  // Blank IDs are rejected without creating entities.
+  const blank = applyUpdate(
+    conversation,
+    { sessionUpdate: "compaction_update", compactionId: "   ", status: "completed" },
+    "explicit-user-id",
+    second.acpx,
+  );
+  assert.equal(blank.acpx.compactions?.length, 2);
+});
+
+test("non-text first-seen chunks create the entity without a summary", () => {
+  const conversation = createConversation(TIMESTAMP);
+  const { acpx } = applyUpdate(conversation, {
+    sessionUpdate: "compaction_summary_chunk",
+    compactionId: "c1",
+    content: { type: "image", data: "", mimeType: "image/png" },
+  });
+  assert.deepEqual(acpx.compactions, [
+    { compaction_id: "c1", status: "in_progress", after_messages: 0 },
+  ]);
+});
+
+test("first-seen compactions anchor to the received message count", () => {
+  const conversation = createConversation(TIMESTAMP);
+  reducePromptSubmission(conversation, "prompt", TIMESTAMP, "prompt-id");
+  applyUpdate(conversation, {
+    sessionUpdate: "agent_message_chunk",
+    content: { type: "text", text: "before" },
+  });
+  const { acpx } = applyUpdate(conversation, {
+    sessionUpdate: "compaction_update",
+    compactionId: "c1",
+    status: "in_progress",
+  });
+  // One user message + one agent message preceded the compaction.
+  assert.deepEqual(acpx.compactions, [
+    { compaction_id: "c1", status: "in_progress", after_messages: 2 },
+  ]);
+
+  // Later patches never move the anchor.
+  const patched = applyUpdate(
+    conversation,
+    { sessionUpdate: "compaction_update", compactionId: "c1", status: "completed" },
+    "explicit-user-id",
+    acpx,
+  );
+  assert.deepEqual(patched.acpx.compactions, [
+    { compaction_id: "c1", status: "completed", after_messages: 2 },
+  ]);
+});
+
+test("message retention shifts compaction anchors by the dropped count", () => {
+  const state: SessionAcpxState = {
+    compactions: [
+      { compaction_id: "c1", status: "completed", after_messages: 210 },
+      { compaction_id: "c2", status: "completed", after_messages: 3 },
+    ],
+  };
+  trimCompactionsForRuntime(state, 50);
+  assert.deepEqual(state.compactions, [
+    { compaction_id: "c1", status: "completed", after_messages: 160 },
+    { compaction_id: "c2", status: "completed", after_messages: 0 },
+  ]);
 });

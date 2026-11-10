@@ -189,6 +189,30 @@ export type AcpRuntimeAvailableCommand = {
 };
 
 /**
+ * ID-addressed context compaction reported by the agent. Mirrors the
+ * ACP session-compaction contract: `compaction_update` upserts the entity
+ * (omitted fields keep their stored value, null/[] clears) while
+ * `compaction_summary_chunk` appends to its summary. Unknown status values
+ * are preserved for generic display.
+ */
+export type AcpRuntimeCompaction = {
+  compactionId: string;
+  /** Lifecycle status; open-ended per ACP (in_progress/completed/failed/cancelled + future). */
+  status: string;
+  /** Retained summary text when the agent provided or accumulated any. */
+  summary?: string;
+  /** Human-readable error details on failed compactions. */
+  error?: string;
+  /**
+   * Timeline placement: conversation messages received before this
+   * compaction's first notification. Populated on merged `getStatus()`
+   * entities only — wire-mirroring turn events omit it. Adjusted when
+   * message retention trims the head of the conversation.
+   */
+  afterMessages?: number;
+};
+
+/**
  * An entry in an ACP plan snapshot. Each update replaces the previous list.
  * Priority is omitted unless the agent advertises a valid value.
  */
@@ -228,6 +252,12 @@ export type AcpRuntimeStatus = {
    * even when a more recent live event would have carried both.
    */
   availableCommands?: AcpRuntimeAvailableCommand[];
+  /**
+   * Context compactions the agent reported via `compaction_update` /
+   * `compaction_summary_chunk`, merged per the ACP patch semantics and
+   * sourced from the persisted record. Unknown statuses are preserved.
+   */
+  compactions?: AcpRuntimeCompaction[];
   details?: Record<string, unknown>;
 };
 
@@ -301,6 +331,17 @@ export type AcpRuntimeEvent =
        * Replace the displayed plan when present, including clearing it for [].
        */
       entries?: AcpRuntimePlanEntry[];
+      /**
+       * Populated on `compaction_update` and `compaction_summary_chunk`
+       * events. The payload mirrors one wire update: `compaction_update`
+       * carries the agent's status verbatim, while summary chunks (which
+       * carry no status) report `in_progress` per the ACP rule that a
+       * first-seen ID creates an in-progress compaction. Absent fields
+       * mean "not in this update", not "cleared" — events cannot express
+       * clears. Consumers tracking the merged entity across updates key
+       * on `compactionId` and read authoritative state from `getStatus()`.
+       */
+      compaction?: AcpRuntimeCompaction;
     }
   | {
       type: "tool_call";

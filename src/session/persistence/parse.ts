@@ -4,6 +4,7 @@ import {
   resolveAgentArgvForCommand,
   type AgentLaunchIdentity,
 } from "../../acp/builtin-command-migration.js";
+import { opaqueCompactionId } from "../../prompt-content.js";
 import type {
   SessionAcpxState,
   SessionEventLog,
@@ -91,6 +92,54 @@ function parseAvailableCommands(raw: unknown): SessionAcpxState["available_comma
         entry !== undefined,
     );
   return commands.length > 0 ? commands : undefined;
+}
+
+function parseCompaction(
+  raw: unknown,
+): NonNullable<SessionAcpxState["compactions"]>[number] | undefined {
+  const record = asRecord(raw);
+  if (!record) {
+    return undefined;
+  }
+  const compactionId = opaqueCompactionId(record.compaction_id);
+  const status = parseNonEmptyString(record.status);
+  if (!compactionId || !status) {
+    return undefined;
+  }
+  // Summary is display content: keep it verbatim so later chunks append onto the same text.
+  const summary = parseVerbatimString(record.summary);
+  const error = parseNonEmptyString(record.error);
+  const afterMessages = parseAfterMessages(record.after_messages);
+  return {
+    compaction_id: compactionId,
+    status,
+    ...(summary !== undefined ? { summary } : {}),
+    ...(error ? { error } : {}),
+    ...(afterMessages !== undefined ? { after_messages: afterMessages } : {}),
+  };
+}
+
+function parseAfterMessages(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    return undefined;
+  }
+  return value;
+}
+
+function parseVerbatimString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function parseCompactions(raw: unknown): SessionAcpxState["compactions"] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  const compactions = raw
+    .map((entry) => parseCompaction(entry))
+    .filter(
+      (entry): entry is NonNullable<SessionAcpxState["compactions"]>[number] => entry !== undefined,
+    );
+  return compactions.length > 0 ? compactions : undefined;
 }
 
 function parseNonEmptyString(value: unknown): string | undefined {
@@ -459,15 +508,28 @@ function parseAcpxState(raw: unknown): SessionAcpxState | undefined {
   }
 
   assignParsedModelState(state, record);
+  assignParsedAvailableCommands(state, record);
+  assignParsedCompactions(state, record);
+  assignParsedSessionOptions(state, record.session_options);
 
+  return state;
+}
+
+function assignParsedAvailableCommands(
+  state: SessionAcpxState,
+  record: Record<string, unknown>,
+): void {
   const availableCommands = parseAvailableCommands(record.available_commands);
   if (availableCommands) {
     state.available_commands = availableCommands;
   }
+}
 
-  assignParsedSessionOptions(state, record.session_options);
-
-  return state;
+function assignParsedCompactions(state: SessionAcpxState, record: Record<string, unknown>): void {
+  const compactions = parseCompactions(record.compactions);
+  if (compactions) {
+    state.compactions = compactions;
+  }
 }
 
 function assignParsedModelState(state: SessionAcpxState, record: Record<string, unknown>): void {
