@@ -1,4 +1,6 @@
 import type {
+  CompactionSummaryChunk,
+  CompactionUpdate,
   ContentBlock,
   SessionNotification,
   SessionUpdate,
@@ -6,10 +8,11 @@ import type {
   ToolCallUpdate,
   UsageUpdate,
 } from "@agentclientprotocol/sdk";
-import { textPrompt } from "../prompt-content.js";
+import { compactionSummaryText, textPrompt } from "../prompt-content.js";
 import type {
   PromptInput,
   SessionAcpxState,
+  SessionCompactionState,
   SessionConversation,
   SessionAvailableCommand,
   SessionAgentContent,
@@ -577,12 +580,23 @@ export function cloneSessionAcpxState(
       ? { available_model_names: { ...state.available_model_names } }
       : {}),
     model_control: state.model_control,
-    available_commands: state.available_commands
-      ? state.available_commands.map((command) => ({ ...command }))
-      : undefined,
+    available_commands: cloneAvailableCommands(state.available_commands),
+    compactions: cloneCompactions(state.compactions),
     config_options: state.config_options ? deepClone(state.config_options) : undefined,
     session_options: cloneSessionOptions(state.session_options),
   };
+}
+
+function cloneAvailableCommands(
+  commands: SessionAcpxState["available_commands"],
+): SessionAcpxState["available_commands"] {
+  return commands ? commands.map((command) => ({ ...command })) : undefined;
+}
+
+function cloneCompactions(
+  compactions: SessionAcpxState["compactions"],
+): SessionAcpxState["compactions"] {
+  return compactions ? compactions.map((compaction) => ({ ...compaction })) : undefined;
 }
 
 function cloneSessionOptions(
@@ -731,7 +745,95 @@ const SESSION_UPDATE_HANDLERS: Record<string, SessionUpdateHandler> = {
     }
     return undefined;
   },
+  compaction_update: (_conversation, acpx, update) => {
+    if (update.sessionUpdate === "compaction_update") {
+      applyCompactionUpdate(acpx, update);
+    }
+    return undefined;
+  },
+  compaction_summary_chunk: (_conversation, acpx, update) => {
+    if (update.sessionUpdate === "compaction_summary_chunk") {
+      applyCompactionSummaryChunk(acpx, update);
+    }
+    return undefined;
+  },
 };
+
+function applyCompactionUpdate(acpx: SessionAcpxState, update: CompactionUpdate): void {
+  const compactionId = trimmedString(update.compactionId);
+  const status = trimmedString(update.status);
+  if (!compactionId || !status) {
+    return;
+  }
+  const compaction = ensureCompaction(acpx, compactionId, status);
+  compaction.status = status;
+  applyCompactionSummaryPatch(compaction, update);
+  applyCompactionErrorPatch(compaction, update);
+}
+
+function applyCompactionSummaryPatch(
+  compaction: SessionCompactionState,
+  update: CompactionUpdate,
+): void {
+  // Undefined (absent or SDK-coerced from a malformed field) keeps the stored value.
+  if (update.summary === undefined) {
+    return;
+  }
+  if (update.summary === null || update.summary.length === 0) {
+    delete compaction.summary;
+    return;
+  }
+  const summary = compactionSummaryText(update.summary);
+  if (summary === undefined) {
+    delete compaction.summary;
+  } else {
+    compaction.summary = summary;
+  }
+}
+
+function applyCompactionErrorPatch(
+  compaction: SessionCompactionState,
+  update: CompactionUpdate,
+): void {
+  if (update.error === undefined) {
+    return;
+  }
+  const error = trimmedString(update.error);
+  if (error === undefined) {
+    delete compaction.error;
+  } else {
+    compaction.error = error;
+  }
+}
+
+function applyCompactionSummaryChunk(acpx: SessionAcpxState, update: CompactionSummaryChunk): void {
+  const compactionId = trimmedString(update.compactionId);
+  if (!compactionId) {
+    return;
+  }
+  const text = compactionSummaryText([update.content]);
+  if (text === undefined) {
+    return;
+  }
+  // First-seen ID creates an in-progress compaction; chunks append in receive order.
+  const compaction = ensureCompaction(acpx, compactionId, "in_progress");
+  compaction.summary = compaction.summary === undefined ? text : `${compaction.summary}${text}`;
+}
+
+function ensureCompaction(
+  acpx: SessionAcpxState,
+  compactionId: string,
+  status: string,
+): SessionCompactionState {
+  acpx.compactions ??= [];
+  const existing = acpx.compactions.find((entry) => entry.compaction_id === compactionId);
+  if (existing) {
+    return existing;
+  }
+  const created: SessionCompactionState = { compaction_id: compactionId, status };
+  acpx.compactions.push(created);
+  return created;
+}
 
 function applyToolUpdate(
   conversation: SessionConversation,

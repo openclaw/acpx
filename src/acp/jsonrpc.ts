@@ -95,17 +95,44 @@ function sessionUpdateHasRequiredFields(update: Record<string, unknown>): boolea
   if (typeof kind !== "string") {
     return false;
   }
-  if (
-    kind === "agent_message_chunk" ||
-    kind === "agent_thought_chunk" ||
-    kind === "user_message_chunk"
-  ) {
+  if (isMessageChunkKind(kind)) {
     return isChunkContent(update.content);
   }
   if (kind === "plan") {
     return Array.isArray(update.entries) && update.entries.every(isPlanEntry);
   }
+  if (kind === "compaction_update") {
+    return isCompactionUpdate(update);
+  }
+  if (kind === "compaction_summary_chunk") {
+    return hasCompactionId(update) && isChunkContent(update.content);
+  }
   return true;
+}
+
+function isMessageChunkKind(kind: string): boolean {
+  return (
+    kind === "agent_message_chunk" ||
+    kind === "agent_thought_chunk" ||
+    kind === "user_message_chunk"
+  );
+}
+
+function isCompactionUpdate(update: Record<string, unknown>): boolean {
+  return (
+    hasCompactionId(update) &&
+    isNonEmptyString(update.status) &&
+    (update.error === undefined || update.error === null || typeof update.error === "string") &&
+    (update.summary === undefined || update.summary === null || Array.isArray(update.summary))
+  );
+}
+
+function hasCompactionId(update: Record<string, unknown>): boolean {
+  return isNonEmptyString(update.compactionId);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
 }
 
 function isChunkContent(value: unknown): boolean {

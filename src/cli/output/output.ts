@@ -853,6 +853,7 @@ class TextOutputFormatter implements OutputFormatter {
   private readonly useColor: boolean;
   private readonly suppressReads: boolean;
   private readonly toolStates = new Map<string, ToolRenderState>();
+  private readonly renderedCompactions = new Set<string>();
   private thoughtBuffer = "";
   private wroteAny = false;
   private atLineStart = true;
@@ -917,21 +918,18 @@ class TextOutputFormatter implements OutputFormatter {
   private renderSessionUpdateBody(update: SessionNotification["update"]): void {
     switch (update.sessionUpdate) {
       case "agent_message_chunk": {
-        if (update.content.type === "text") {
-          this.write(update.content.text);
-        }
+        this.renderTextContent(update.content);
+        return;
+      }
+      case "compaction_summary_chunk": {
+        this.renderCompactionSummaryChunk(update);
         return;
       }
       case "agent_thought_chunk": {
-        if (update.content.type === "text") {
-          this.thoughtBuffer += update.content.text;
-        }
+        this.renderThoughtContent(update.content);
         return;
       }
-      case "tool_call": {
-        this.renderToolUpdate(update);
-        return;
-      }
+      case "tool_call":
       case "tool_call_update": {
         this.renderToolUpdate(update);
         return;
@@ -940,9 +938,45 @@ class TextOutputFormatter implements OutputFormatter {
         this.renderPlanUpdate(update.entries);
         return;
       }
+      case "compaction_update": {
+        this.renderCompactionUpdate(update);
+        return;
+      }
       default:
         return;
     }
+  }
+
+  private renderTextContent(content: { type: string; text?: string }): void {
+    if (content.type === "text" && content.text !== undefined) {
+      this.write(content.text);
+    }
+  }
+
+  private renderThoughtContent(content: { type: string; text?: string }): void {
+    if (content.type === "text" && content.text !== undefined) {
+      this.thoughtBuffer += content.text;
+    }
+  }
+
+  private renderCompactionUpdate(
+    update: Extract<SessionNotification["update"], { sessionUpdate: "compaction_update" }>,
+  ): void {
+    this.renderedCompactions.add(update.compactionId);
+    this.beginSection();
+    const error = update.error?.trim();
+    this.writeLine(`${this.bold("[compaction]")} ${update.status}${error ? `: ${error}` : ""}`);
+  }
+
+  private renderCompactionSummaryChunk(
+    update: Extract<SessionNotification["update"], { sessionUpdate: "compaction_summary_chunk" }>,
+  ): void {
+    if (!this.renderedCompactions.has(update.compactionId)) {
+      this.renderedCompactions.add(update.compactionId);
+      this.beginSection();
+      this.writeLine(`${this.bold("[compaction]")} in_progress`);
+    }
+    this.renderTextContent(update.content);
   }
 
   private renderPlanUpdate(

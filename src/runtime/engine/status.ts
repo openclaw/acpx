@@ -2,6 +2,7 @@ import { advertisedModelState } from "../../session/model-state.js";
 import type { SessionAcpxState, SessionRecord, SessionTokenUsage } from "../../types.js";
 import type {
   AcpRuntimeAvailableCommand,
+  AcpRuntimeCompaction,
   AcpRuntimeSessionModels,
   AcpRuntimeSessionUsage,
   AcpRuntimeStatus,
@@ -19,6 +20,7 @@ export function runtimeStatusFromRecord(record: SessionRecord): AcpRuntimeStatus
     ...buildModelsField(record),
     ...buildUsageField(record),
     ...buildAvailableCommandsField(record),
+    ...buildCompactionsField(record),
     details: {
       cwd: record.cwd,
       lastUsedAt: record.lastUsedAt,
@@ -152,4 +154,47 @@ function commandRecord(
     return undefined;
   }
   return value;
+}
+
+function buildCompactionsField(record: SessionRecord): {
+  compactions?: AcpRuntimeCompaction[];
+} {
+  const compactions = record.acpx?.compactions;
+  if (!compactions || compactions.length === 0) {
+    return {};
+  }
+  const normalized = compactions
+    .map((compaction) => runtimeCompaction(compaction))
+    .filter((compaction): compaction is AcpRuntimeCompaction => compaction !== undefined);
+  return normalized.length > 0 ? { compactions: normalized } : {};
+}
+
+function runtimeCompaction(compaction: unknown): AcpRuntimeCompaction | undefined {
+  if (!compaction || typeof compaction !== "object" || Array.isArray(compaction)) {
+    return undefined;
+  }
+  const record = compaction as {
+    compaction_id?: unknown;
+    status?: unknown;
+    summary?: unknown;
+    error?: unknown;
+  };
+  const compactionId = asOptionalString(record.compaction_id);
+  const status = asOptionalString(record.status);
+  if (!compactionId || !status) {
+    return undefined;
+  }
+  // Summary is display content: surface it verbatim, matching the persisted state.
+  const summary = asVerbatimString(record.summary);
+  const error = asOptionalString(record.error);
+  return {
+    compactionId,
+    status,
+    ...(summary !== undefined ? { summary } : {}),
+    ...(error ? { error } : {}),
+  };
+}
+
+function asVerbatimString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

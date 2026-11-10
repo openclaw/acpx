@@ -960,6 +960,38 @@ test("normalizeQueueOwnerTtlMs applies default and edge-case normalization", asy
   });
 });
 
+test("compaction state roundtrips through disk serialization and drops malformed entries", () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "session-compactions",
+    acpSessionId: "provider-session-compactions",
+    agentCommand: "agent",
+    cwd: "/tmp/session-compactions",
+  });
+  const parsed = parseSessionRecord({
+    ...serializeSessionRecordForDisk(record),
+    acpx: {
+      compactions: [
+        { compaction_id: "c1", status: "completed", summary: "done" },
+        { compaction_id: "c2", status: "failed", error: "boom" },
+        { compaction_id: "c3", status: "in_progress", summary: "  indented\ntrailing  " },
+        { compaction_id: "", status: "completed" },
+        { compaction_id: "c4" },
+        "not-an-entry",
+      ],
+    },
+  });
+  assert.ok(parsed);
+  assert.deepEqual(parsed.acpx?.compactions, [
+    { compaction_id: "c1", status: "completed", summary: "done" },
+    { compaction_id: "c2", status: "failed", error: "boom" },
+    { compaction_id: "c3", status: "in_progress", summary: "  indented\ntrailing  " },
+  ]);
+  const reloaded = parseSessionRecord(
+    JSON.parse(JSON.stringify(serializeSessionRecordForDisk(parsed))),
+  );
+  assert.deepEqual(reloaded?.acpx?.compactions, parsed.acpx?.compactions);
+});
+
 async function loadSessionModule(): Promise<SessionModule> {
   const cacheBuster = `${Date.now()}-${Math.random()}`;
   return (await import(`${SESSION_MODULE_URL.href}?session_test=${cacheBuster}`)) as SessionModule;

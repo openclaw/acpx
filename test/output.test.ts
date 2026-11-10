@@ -121,6 +121,29 @@ const malformedUpdates = [
     sessionUpdate: "plan",
     entries,
   })),
+  { sessionUpdate: "compaction_update" },
+  { sessionUpdate: "compaction_update", compactionId: "c1" },
+  { sessionUpdate: "compaction_update", compactionId: "", status: "completed" },
+  { sessionUpdate: "compaction_update", compactionId: "c1", status: 1 },
+  { sessionUpdate: "compaction_update", compactionId: "c1", status: "failed", error: 42 },
+  {
+    sessionUpdate: "compaction_update",
+    compactionId: "c1",
+    status: "failed",
+    error: { message: "x" },
+  },
+  { sessionUpdate: "compaction_update", compactionId: "c1", status: "completed", summary: "oops" },
+  {
+    sessionUpdate: "compaction_summary_chunk",
+    compactionId: "c1",
+    content: { type: "text", text: 1 },
+  },
+  { sessionUpdate: "compaction_summary_chunk", compactionId: "c1" },
+  {
+    sessionUpdate: "compaction_summary_chunk",
+    compactionId: "",
+    content: { type: "text", text: "x" },
+  },
 ];
 
 test("extractSessionUpdateNotification rejects malformed chunks and plans", () => {
@@ -139,6 +162,12 @@ test("extractSessionUpdateNotification preserves nontext chunks, empty plans, an
     },
     { sessionUpdate: "plan", entries: [] },
     { sessionUpdate: "vendor_update", value: 1 },
+    { sessionUpdate: "compaction_update", compactionId: "c1", status: "in_progress" },
+    {
+      sessionUpdate: "compaction_summary_chunk",
+      compactionId: "c1",
+      content: { type: "text", text: "x" },
+    },
   ]) {
     assert.deepEqual(
       extractSessionUpdateNotification(sessionUpdate(update) as never)?.update,
@@ -1172,3 +1201,64 @@ for (const readDirection of ["inbound", undefined] as const) {
     );
   });
 }
+
+test("text formatter renders compaction lifecycle from ACP updates", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("text", { stdout: writer });
+
+  formatter.onAcpMessage(
+    sessionUpdate({
+      sessionUpdate: "compaction_update",
+      compactionId: "c1",
+      status: "in_progress",
+    }) as never,
+  );
+  formatter.onAcpMessage(
+    sessionUpdate({
+      sessionUpdate: "compaction_summary_chunk",
+      compactionId: "c1",
+      content: { type: "text", text: "summary text" },
+    }) as never,
+  );
+  formatter.onAcpMessage(
+    sessionUpdate({
+      sessionUpdate: "compaction_update",
+      compactionId: "c1",
+      status: "failed",
+      error: "provider timed out",
+    }) as never,
+  );
+  formatter.onAcpMessage(doneResult("end_turn") as never);
+
+  const output = writer.toString();
+  assert.match(output, /\[compaction\] in_progress/);
+  assert.match(output, /summary text/);
+  assert.match(output, /\[compaction\] failed: provider timed out/);
+});
+
+test("text formatter labels first-seen compaction summary chunks", () => {
+  const writer = new CaptureWriter();
+  const formatter = createOutputFormatter("text", { stdout: writer });
+
+  formatter.onAcpMessage(messageChunk("agent reply") as never);
+  formatter.onAcpMessage(
+    sessionUpdate({
+      sessionUpdate: "compaction_summary_chunk",
+      compactionId: "c2",
+      content: { type: "text", text: "condensed history" },
+    }) as never,
+  );
+  formatter.onAcpMessage(
+    sessionUpdate({
+      sessionUpdate: "compaction_summary_chunk",
+      compactionId: "c2",
+      content: { type: "text", text: " continued" },
+    }) as never,
+  );
+  formatter.onAcpMessage(doneResult("end_turn") as never);
+
+  const output = writer.toString();
+  // The header lands on its own section, not glued to the agent reply.
+  assert.match(output, /agent reply\n\n\[compaction\] in_progress\ncondensed history continued/);
+  assert.equal((output.match(/\[compaction\]/g) ?? []).length, 1);
+});

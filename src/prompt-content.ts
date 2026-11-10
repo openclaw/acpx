@@ -280,3 +280,21 @@ function resourceBlockDisplayText(block: Extract<ContentBlock, { type: "resource
     ? block.resource.text
     : block.resource.uri;
 }
+
+/**
+ * Concatenate the text of compaction summary content blocks. Only `text`
+ * blocks contribute; all other block types are skipped. Returns undefined
+ * when no text remains. Shared by the persisted reducer and runtime events
+ * so both views extract the same summary from one update.
+ */
+export function compactionSummaryText(blocks: readonly unknown[]): string | undefined {
+  let text = "";
+  for (const block of blocks) {
+    const record = asRecord(block);
+    if (!record || record.type !== "text" || typeof record.text !== "string") {
+      continue;
+    }
+    text += record.text;
+  }
+  return text.length > 0 ? text : undefined;
+}

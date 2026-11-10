@@ -419,6 +419,13 @@ export type SessionAvailableCommand = {
   has_input?: boolean;
 };
 
+export type SessionCompactionState = {
+  compaction_id: string;
+  status: string;
+  summary?: string;
+  error?: string;
+};
+
 export type SessionConversation = {
   title?: string | null;
   messages: SessionMessage[];
@@ -439,6 +446,7 @@ export type SessionAcpxState = {
   available_model_names?: Record<string, string>;
   model_control?: "config_option" | "legacy_set_model";
   available_commands?: SessionAvailableCommand[];
+  compactions?: SessionCompactionState[];
   config_options?: SessionConfigOption[];
   session_options?: {
     model?: string;

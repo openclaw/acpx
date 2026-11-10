@@ -1,4 +1,5 @@
 import type {
+  SessionAcpxState,
   SessionAgentContent,
   SessionAgentMessage,
   SessionConversation,
@@ -13,6 +14,8 @@ const MAX_RUNTIME_AGENT_TEXT_CHARS = 8_000;
 const MAX_RUNTIME_THINKING_CHARS = 4_000;
 const MAX_RUNTIME_TOOL_IO_CHARS = 4_000;
 const MAX_RUNTIME_REQUEST_TOKEN_USAGE = 100;
+const MAX_RUNTIME_COMPACTIONS = 20;
+const MAX_RUNTIME_COMPACTION_SUMMARY_CHARS = 8_000;
 
 function trimRuntimeText(value: string, maxChars: number): string {
   if (value.length <= maxChars) {
@@ -40,6 +43,24 @@ export function trimConversationForRuntime(conversation: SessionConversation): v
     conversation.request_token_usage = Object.fromEntries(
       requestUsageEntries.slice(-MAX_RUNTIME_REQUEST_TOKEN_USAGE),
     );
+  }
+}
+
+export function trimCompactionsForRuntime(state: SessionAcpxState): void {
+  const compactions = state.compactions;
+  if (!compactions || compactions.length === 0) {
+    return;
+  }
+  if (compactions.length > MAX_RUNTIME_COMPACTIONS) {
+    state.compactions = compactions.slice(-MAX_RUNTIME_COMPACTIONS);
+  }
+  for (const compaction of state.compactions ?? []) {
+    if (compaction.summary !== undefined) {
+      compaction.summary = trimRuntimeText(
+        compaction.summary,
+        MAX_RUNTIME_COMPACTION_SUMMARY_CHARS,
+      );
+    }
   }
 }
 

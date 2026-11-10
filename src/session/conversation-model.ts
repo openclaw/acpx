@@ -13,10 +13,10 @@ import {
   reducePromptSubmission,
   reduceSessionUpdate,
 } from "./conversation-reducer.js";
-import { trimConversationForRuntime } from "./conversation-retention.js";
+import { trimCompactionsForRuntime, trimConversationForRuntime } from "./conversation-retention.js";
 
 export { cloneSessionAcpxState } from "./conversation-reducer.js";
-export { trimConversationForRuntime } from "./conversation-retention.js";
+export { trimCompactionsForRuntime, trimConversationForRuntime } from "./conversation-retention.js";
 
 function isoNow(): string {
   return new Date().toISOString();
@@ -67,6 +67,7 @@ export function recordSessionUpdate(
     userMessageId ?? randomUUID,
   );
   trimConversationForRuntime(conversation);
+  trimCompactionsForRuntime(acpx);
   return acpx;
 }
 

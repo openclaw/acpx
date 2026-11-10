@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import type { AnyMessage } from "@agentclientprotocol/sdk";
+import { resolveClientCapabilities } from "../src/acp/client-protocol.js";
 import { AcpClient } from "../src/acp/client.js";
 import { withTempDir } from "./runtime-test-helpers.js";
 
@@ -65,3 +66,15 @@ for (const enabled of [false, true]) {
     });
   });
 }
+
+test("client capabilities advertise the session compaction contract", () => {
+  for (const devinAcp of [false, true]) {
+    const capabilities = resolveClientCapabilities({
+      devinAcp,
+      fs: true,
+      terminal: true,
+      elicitationModes: [],
+    });
+    assert.deepEqual(capabilities.session, { compaction: {} });
+  }
+});

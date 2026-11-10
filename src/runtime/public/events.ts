@@ -1,6 +1,8 @@
 import type { ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
+import { compactionSummaryText } from "../../prompt-content.js";
 import type {
   AcpRuntimeAvailableCommand,
+  AcpRuntimeCompaction,
   AcpRuntimeEvent,
   AcpRuntimePlanEntry,
   AcpRuntimeUsageBreakdown,
@@ -31,6 +33,8 @@ const STATUS_TEXT_RESOLVERS: Partial<Record<AcpSessionUpdateTag, StatusTextResol
   current_mode_update: currentModeStatusText,
   config_option_update: configOptionStatusText,
   session_info_update: sessionInfoStatusText,
+  compaction_update: compactionStatusText,
+  compaction_summary_chunk: compactionStatusText,
 };
 
 function availableCommandsStatusText(payload: Record<string, unknown>): string {
@@ -62,6 +66,15 @@ function configOptionStatusText(payload: Record<string, unknown>): string {
 
 function sessionInfoStatusText(payload: Record<string, unknown>): string {
   return asTrimmedString(payload.summary) || asTrimmedString(payload.message) || "session updated";
+}
+
+function compactionStatusText(payload: Record<string, unknown>): string | null {
+  const status = asTrimmedString(payload.status);
+  if (!status) {
+    // Summary chunks carry no status; the persisted entity keeps its last known one.
+    return asTrimmedString(payload.compactionId) ? "compaction updated" : null;
+  }
+  return `compaction ${status}`;
 }
 
 function planStatusText(payload: Record<string, unknown>): string | null {
@@ -478,6 +491,8 @@ const PROMPT_EVENT_PARSERS: Record<string, PromptEventParser> = {
   config_option_update: (payload) => statusUpdateEvent("config_option_update", payload),
   session_info_update: (payload) => statusUpdateEvent("session_info_update", payload),
   plan: planUpdateEvent,
+  compaction_update: (payload) => compactionUpdateEvent("compaction_update", payload),
+  compaction_summary_chunk: (payload) => compactionUpdateEvent("compaction_summary_chunk", payload),
 };
 
 function promptEventParser(type: string): PromptEventParser | undefined {
@@ -608,6 +623,53 @@ function statusUpdateEvent(
     return null;
   }
   return { type: "status", text, tag };
+}
+
+function compactionUpdateEvent(
+  tag: AcpSessionUpdateTag,
+  payload: Record<string, unknown>,
+): AcpRuntimeEvent | null {
+  const compaction = normalizeCompactionPayload(tag, payload);
+  if (!compaction) {
+    return null;
+  }
+  const text = resolveStatusTextForTag({ tag, payload });
+  if (!text) {
+    return null;
+  }
+  return { type: "status", text, tag, compaction };
+}
+
+function normalizeCompactionPayload(
+  tag: AcpSessionUpdateTag,
+  payload: Record<string, unknown>,
+): AcpRuntimeCompaction | undefined {
+  const compactionId = asTrimmedString(payload.compactionId);
+  if (!compactionId) {
+    return undefined;
+  }
+  if (tag === "compaction_summary_chunk") {
+    const summary = compactionSummaryText([payload.content]);
+    return {
+      compactionId,
+      status: "in_progress",
+      ...(summary ? { summary } : {}),
+    };
+  }
+  const status = asTrimmedString(payload.status);
+  if (!status) {
+    return undefined;
+  }
+  const summary = Array.isArray(payload.summary)
+    ? compactionSummaryText(payload.summary)
+    : undefined;
+  const error = asOptionalString(payload.error);
+  return {
+    compactionId,
+    status,
+    ...(summary ? { summary } : {}),
+    ...(error ? { error } : {}),
+  };
 }
 
 function clientOperationEvent(payload: Record<string, unknown>): AcpRuntimeEvent {
