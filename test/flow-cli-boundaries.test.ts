@@ -143,3 +143,31 @@ test("flow run rejects empty input arguments instead of running with default inp
     }
   });
 });
+
+test("flow run names a missing or non-file flow path instead of a module loader error", async () => {
+  await withTempHome("acpx-flow-path-", async (home) => {
+    await fs.mkdir(path.join(home, "dir.ts"));
+    await fs.writeFile(path.join(home, "file.ts"), "");
+    const cwd = await fs.realpath(home);
+    for (const [target, message] of [
+      ["missing.ts", "Flow file not found"],
+      ["missing.mjs", "Flow file not found"],
+      [path.join("file.ts", "nested.ts"), "Flow file not found"],
+      ["dir.ts", "Flow file is not a file"],
+    ]) {
+      const flowPath = path.join(cwd, target);
+      const result = spawnSync(process.execPath, [CLI, "--format", "json", "flow", "run", target], {
+        cwd: home,
+        encoding: "utf8",
+        timeout: 15_000,
+        env: { ...process.env, HOME: home, USERPROFILE: home },
+      });
+      assert.equal(result.status, 1, `${target}: ${result.stderr}`);
+      const envelope = JSON.parse(result.stdout.trim()) as { error: { message: string } };
+      assert.equal(envelope.error.message, `${message}: ${flowPath}`);
+      await assert.rejects(fs.access(path.join(home, ".acpx", "flows", "runs")), {
+        code: "ENOENT",
+      });
+    }
+  });
+});

@@ -129,7 +129,25 @@ async function readFlowInput(flags: FlowRunFlags): Promise<unknown> {
   return {};
 }
 
+async function assertFlowFile(flowPath: string): Promise<void> {
+  let stats: Awaited<ReturnType<typeof fs.stat>>;
+  try {
+    stats = await fs.stat(flowPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      throw new Error(`Flow file not found: ${flowPath}`, { cause: error });
+    }
+    throw error;
+  }
+  if (!stats.isFile()) {
+    throw new Error(`Flow file is not a file: ${flowPath}`);
+  }
+}
+
 async function loadFlowModule(flowPath: string): Promise<FlowDefinition> {
+  // The module loaders report a missing path as an unresolved import with their own require stack.
+  await assertFlowFile(flowPath);
   const extension = path.extname(flowPath).toLowerCase();
   installFlowRuntimeResolution(pathToFileURL(resolveFlowRuntimeImportSpecifier()).href);
   const module = await loadFlowRuntimeModule(pathToFileURL(flowPath).href, extension);

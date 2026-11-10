@@ -30,7 +30,7 @@ acpx --timeout 1800 flow run ./my-flow.ts
 
 What happens:
 
-- The runtime loads the flow module from disk.
+- The runtime loads the flow module from disk. A path that does not exist or is not a file fails with `Flow file not found: <path>` or `Flow file is not a file: <path>` before a run directory is created.
 - A run id is generated and a run directory is created at `~/.acpx/flows/runs/<runId>/`.
 - Steps execute in topological order. ACP steps reuse one implicit main session by default.
 - Run state (graph, ACP transcripts, artifacts, errors) is persisted as the run progresses.

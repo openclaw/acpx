@@ -34,6 +34,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Shared runtime: `ensureSession()` no longer applies a creation-time `sessionOptions.model` to an existing persistent session, so reuse keeps its model and provider session instead of reconnecting. Thanks @saariuslystoned.
 
+- Flows: `flow run` with a missing flow file, or a directory, now fails with `Flow file not found: <path>` or `Flow file is not a file: <path>` instead of the module loader's `Cannot find module` error and require stack. Thanks @KrasimirKralev.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.
