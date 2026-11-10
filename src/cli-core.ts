@@ -316,7 +316,8 @@ function readInlineFlagValue(token: string, flag: string): string | undefined {
   if (!token.startsWith(`${flag}=`)) {
     return undefined;
   }
-  return token.slice(flag.length + 1).trim();
+  // Commander validates the raw value, so a padded value must not match.
+  return token.slice(flag.length + 1);
 }
 
 function isOutputFormat(value: unknown): value is OutputFormat {

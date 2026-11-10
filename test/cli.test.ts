@@ -151,6 +151,8 @@ test("config command-local --format json applies to early errors", async () => {
       ["config", "init", "--format=json", "--bogus"],
       // A consumed option-looking value must not replace the prior selection.
       ["config", "show", "--format", "json", "--format", "--format=quiet"],
+      // A rejected padded inline repeat keeps the earlier valid selection.
+      ["config", "show", "--format", "json", "--format= quiet "],
     ]) {
       const result = await runCli(args, homeDir);
       assert.equal(result.code, 2, args.join(" "));
@@ -161,6 +163,8 @@ test("config command-local --format json applies to early errors", async () => {
       ["--format", "quiet", "config", "show", "--format", "json", "--bogus"],
       ["config", "show", "--", "--format", "json"],
       ["sessions", "show", "--format", "json"],
+      // A padded inline value must not invent a JSON selection.
+      ["config", "show", "--format", "quiet", "--format= json "],
     ]) {
       const result = await runCli(args, homeDir);
       assert.equal(result.code, 2, args.join(" "));
