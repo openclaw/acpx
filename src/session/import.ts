@@ -50,6 +50,7 @@ export type ImportSessionOptions = {
   newCwd?: string;
   expectedAgentName?: string;
   expectedAgentCommand?: string;
+  expectedAgentArgv?: string[];
 };
 
 class SessionImportError extends AcpxOperationalError {
@@ -140,7 +141,10 @@ function resolveImportedName(parsed: ParsedExportedSession, requestedName: strin
 function assertExpectedAgentCommand(
   parsed: ParsedExportedSession,
   sourceRecord: SessionRecord,
-  options: Pick<ImportSessionOptions, "expectedAgentName" | "expectedAgentCommand">,
+  options: Pick<
+    ImportSessionOptions,
+    "expectedAgentName" | "expectedAgentCommand" | "expectedAgentArgv"
+  >,
 ): void {
   const expectedAgentCommand = options.expectedAgentCommand;
   if (!expectedAgentCommand) {
@@ -170,6 +174,12 @@ function assertExpectedAgentCommand(
       expectedAgentCommand,
     })
   ) {
+    if (options.expectedAgentArgv) {
+      sourceRecord.agentArgv = [...options.expectedAgentArgv];
+    } else if (sourceRecord.agentCommand !== expectedAgentCommand) {
+      // Let the destination command resolve its launch rather than retaining stale argv.
+      sourceRecord.agentArgv = undefined;
+    }
     sourceRecord.agentCommand = expectedAgentCommand;
     return;
   }

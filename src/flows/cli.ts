@@ -112,15 +112,15 @@ function buildFlowPermissionFailureMessage(
 }
 
 async function readFlowInput(flags: FlowRunFlags): Promise<unknown> {
-  if (flags.inputJson && flags.inputFile) {
+  if (flags.inputJson !== undefined && flags.inputFile !== undefined) {
     throw new InvalidArgumentError("Use only one of --input-json or --input-file");
   }
 
-  if (flags.inputJson) {
+  if (flags.inputJson !== undefined) {
     return parseJsonInput(flags.inputJson, "--input-json");
   }
 
-  if (flags.inputFile) {
+  if (flags.inputFile !== undefined) {
     const inputPath = path.resolve(flags.inputFile);
     const payload = await fs.readFile(inputPath, "utf8");
     return parseJsonInput(payload, "--input-file");

@@ -42,7 +42,7 @@ Existing custom output-root directories keep their permissions. Snapshot writes
 publish complete files atomically and clean up failed staging writes. Event logs
 remain append-only and retain their existing ordering and size behavior.
 
-`--input-json` and `--input-file` are mutually exclusive ways to provide flow input. `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.
+`--input-json` and `--input-file` are mutually exclusive ways to provide flow input. Omitting both passes `{}`; an empty argument is rejected. `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.
 
 The CLI resolves `acpx/flows` in the entry module and its imported helpers without rewriting source text or creating files beside the flow. Flows can run from read-only directories. Global `--system-prompt` and `--append-system-prompt` flags are forwarded to every ACP node, including isolated sessions.
 

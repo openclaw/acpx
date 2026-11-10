@@ -20,6 +20,20 @@ Repo: https://github.com/openclaw/acpx
 
 - CLI: report invalid option values once in text output, and as a single `[acpx] error: USAGE` line in quiet output instead of the full help plus the raw error. Thanks @saariuslystoned.
 
+- Sessions/prune: fail with the filesystem error when a selected file cannot be deleted instead of reporting success and freed bytes. Thanks @saariuslystoned.
+
+- CLI: preserve the interrupted exit status while cancellation and connection cleanup settle an in-flight one-shot command. Thanks @saariuslystoned.
+
+- Output: keep agent stdout parse diagnostics off stderr in `--format json --json-strict` and `--format quiet`, so strict JSON pipelines and quiet scripts no longer get a stack trace when an adapter prints a non-JSON line. Thanks @saariuslystoned.
+
+- Flows: `flow run` now rejects an empty `--input-json` or `--input-file` argument (for example an unset shell variable) instead of silently running the flow with `{}`. Thanks @saariuslystoned.
+
+- ACP/terminals: identify missing executable paths and working directories in `terminal/create` startup errors while preserving the original `ENOENT` details. Thanks @KrasimirKralev.
+
+- Sessions/import: launch an imported session with the destination's configured agent command and arguments instead of the source machine's saved launch arguments when the two commands differ. Thanks @saariuslystoned.
+
+- Shared runtime: `ensureSession()` no longer applies a creation-time `sessionOptions.model` to an existing persistent session, so reuse keeps its model and provider session instead of reconnecting. Thanks @saariuslystoned.
+
 - CLI: `config show --format json` and `config init --format json` now print JSON errors for usage errors and malformed config files, matching the global `--format json`. Thanks @saariuslystoned.
 
 ## 0.22.0 - 2026-11-06

@@ -135,7 +135,7 @@ is unchanged. Event-log files must be regular files, not symlink or hardlink ali
 
 The archive is plain JSON. Paths are stored relative to home, so an imported session lands at `~/<original-cwd-relative>` on the destination machine without embedding the source machine's absolute cwd. Override with `--cwd`.
 
-Imports keep the archive's provider session id, reopen the copied session as an idle local record, and clear source-machine process metadata. Imported sessions must resume that provider session; if the destination agent cannot load it, prompts fail clearly instead of starting an empty conversation. If the destination already has an active session for the same `(agent, cwd, name)` scope, import fails; pass `--name` or `--cwd` to choose a different scope. If a local record already uses the same provider session id, prune or remove that record before importing.
+Imports keep the archive's provider session id, reopen the copied session as an idle local record, and clear source-machine process metadata. The imported session launches with the destination's resolved agent command and arguments, not the launch arguments saved on the source machine. Imported sessions must resume that provider session; if the destination agent cannot load it, prompts fail clearly instead of starting an empty conversation. If the destination already has an active session for the same `(agent, cwd, name)` scope, import fails; pass `--name` or `--cwd` to choose a different scope. If a local record already uses the same provider session id, prune or remove that record before importing.
 
 An imported session becomes discoverable after its complete history has been written. If writing the history fails, the import leaves no local session that blocks retrying the archive.
 
@@ -168,6 +168,8 @@ Output:
 - `text` — summary plus the pruned ids and close/last-used time
 - `json` — `{ action, dryRun, count, bytesFreed, pruned }`
 - `quiet` — one pruned session id per line
+
+If a selected file cannot be deleted, pruning fails with the filesystem error instead of printing a success summary. Files already deleted are not restored.
 
 ## Queue ownership
 
