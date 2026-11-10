@@ -8,7 +8,7 @@ import type {
   ToolCallUpdate,
   UsageUpdate,
 } from "@agentclientprotocol/sdk";
-import { compactionSummaryText, textPrompt } from "../prompt-content.js";
+import { compactionSummaryText, opaqueCompactionId, textPrompt } from "../prompt-content.js";
 import type {
   PromptInput,
   SessionAcpxState,
@@ -745,27 +745,31 @@ const SESSION_UPDATE_HANDLERS: Record<string, SessionUpdateHandler> = {
     }
     return undefined;
   },
-  compaction_update: (_conversation, acpx, update) => {
+  compaction_update: (conversation, acpx, update) => {
     if (update.sessionUpdate === "compaction_update") {
-      applyCompactionUpdate(acpx, update);
+      applyCompactionUpdate(conversation, acpx, update);
     }
     return undefined;
   },
-  compaction_summary_chunk: (_conversation, acpx, update) => {
+  compaction_summary_chunk: (conversation, acpx, update) => {
     if (update.sessionUpdate === "compaction_summary_chunk") {
-      applyCompactionSummaryChunk(acpx, update);
+      applyCompactionSummaryChunk(conversation, acpx, update);
     }
     return undefined;
   },
 };
 
-function applyCompactionUpdate(acpx: SessionAcpxState, update: CompactionUpdate): void {
-  const compactionId = trimmedString(update.compactionId);
+function applyCompactionUpdate(
+  conversation: SessionConversation,
+  acpx: SessionAcpxState,
+  update: CompactionUpdate,
+): void {
+  const compactionId = opaqueCompactionId(update.compactionId);
   const status = trimmedString(update.status);
   if (!compactionId || !status) {
     return;
   }
-  const compaction = ensureCompaction(acpx, compactionId, status);
+  const compaction = ensureCompaction(conversation, acpx, compactionId, status);
   compaction.status = status;
   applyCompactionSummaryPatch(compaction, update);
   applyCompactionErrorPatch(compaction, update);
@@ -806,21 +810,26 @@ function applyCompactionErrorPatch(
   }
 }
 
-function applyCompactionSummaryChunk(acpx: SessionAcpxState, update: CompactionSummaryChunk): void {
-  const compactionId = trimmedString(update.compactionId);
+function applyCompactionSummaryChunk(
+  conversation: SessionConversation,
+  acpx: SessionAcpxState,
+  update: CompactionSummaryChunk,
+): void {
+  const compactionId = opaqueCompactionId(update.compactionId);
   if (!compactionId) {
     return;
   }
+  // First-seen ID creates an in-progress compaction even when the chunk has no text.
+  const compaction = ensureCompaction(conversation, acpx, compactionId, "in_progress");
   const text = compactionSummaryText([update.content]);
   if (text === undefined) {
     return;
   }
-  // First-seen ID creates an in-progress compaction; chunks append in receive order.
-  const compaction = ensureCompaction(acpx, compactionId, "in_progress");
   compaction.summary = compaction.summary === undefined ? text : `${compaction.summary}${text}`;
 }
 
 function ensureCompaction(
+  conversation: SessionConversation,
   acpx: SessionAcpxState,
   compactionId: string,
   status: string,
@@ -830,7 +839,12 @@ function ensureCompaction(
   if (existing) {
     return existing;
   }
-  const created: SessionCompactionState = { compaction_id: compactionId, status };
+  // First notification fixes the timeline position: count of messages received so far.
+  const created: SessionCompactionState = {
+    compaction_id: compactionId,
+    status,
+    after_messages: conversation.messages.length,
+  };
   acpx.compactions.push(created);
   return created;
 }

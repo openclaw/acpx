@@ -78,3 +78,33 @@ test("client capabilities advertise the session compaction contract", () => {
     assert.deepEqual(capabilities.session, { compaction: {} });
   }
 });
+
+test("initialize handshake carries the session compaction advertisement", async () => {
+  await withTempDir("acpx-capabilities-", async (cwd) => {
+    let output = "";
+    const client = new AcpClient({
+      agentCommand: process.execPath,
+      agentArgv: [process.execPath, agent],
+      cwd,
+      permissionMode: "approve-all",
+      onSessionUpdate: ({ update }) => {
+        if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
+          output += update.content.text;
+        }
+      },
+    });
+    try {
+      await client.start();
+      const session = await client.createSession();
+      output = "";
+      assert.equal(
+        (await client.prompt(session.sessionId, "client-capabilities")).stopReason,
+        "end_turn",
+      );
+      const advertised = JSON.parse(output) as { session?: { compaction?: unknown } };
+      assert.deepEqual(advertised.session, { compaction: {} });
+    } finally {
+      await client.close();
+    }
+  });
+});

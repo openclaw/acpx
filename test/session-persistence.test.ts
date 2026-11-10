@@ -971,20 +971,23 @@ test("compaction state roundtrips through disk serialization and drops malformed
     ...serializeSessionRecordForDisk(record),
     acpx: {
       compactions: [
-        { compaction_id: "c1", status: "completed", summary: "done" },
+        { compaction_id: "c1", status: "completed", summary: "done", after_messages: 7 },
         { compaction_id: "c2", status: "failed", error: "boom" },
         { compaction_id: "c3", status: "in_progress", summary: "  indented\ntrailing  " },
+        { compaction_id: " c4", status: "completed", after_messages: 1.5 },
         { compaction_id: "", status: "completed" },
-        { compaction_id: "c4" },
+        { compaction_id: "c5" },
         "not-an-entry",
       ],
     },
   });
   assert.ok(parsed);
   assert.deepEqual(parsed.acpx?.compactions, [
-    { compaction_id: "c1", status: "completed", summary: "done" },
+    { compaction_id: "c1", status: "completed", summary: "done", after_messages: 7 },
     { compaction_id: "c2", status: "failed", error: "boom" },
     { compaction_id: "c3", status: "in_progress", summary: "  indented\ntrailing  " },
+    // Padded IDs stay verbatim; non-integer anchors are dropped.
+    { compaction_id: " c4", status: "completed" },
   ]);
   const reloaded = parseSessionRecord(
     JSON.parse(JSON.stringify(serializeSessionRecordForDisk(parsed))),

@@ -1,3 +1,4 @@
+import { opaqueCompactionId } from "../../prompt-content.js";
 import { advertisedModelState } from "../../session/model-state.js";
 import type { SessionAcpxState, SessionRecord, SessionTokenUsage } from "../../types.js";
 import type {
@@ -170,29 +171,54 @@ function buildCompactionsField(record: SessionRecord): {
 }
 
 function runtimeCompaction(compaction: unknown): AcpRuntimeCompaction | undefined {
-  if (!compaction || typeof compaction !== "object" || Array.isArray(compaction)) {
+  const record = compactionRecord(compaction);
+  if (!record) {
     return undefined;
   }
-  const record = compaction as {
-    compaction_id?: unknown;
-    status?: unknown;
-    summary?: unknown;
-    error?: unknown;
-  };
-  const compactionId = asOptionalString(record.compaction_id);
+  const compactionId = opaqueCompactionId(record.compaction_id);
   const status = asOptionalString(record.status);
   if (!compactionId || !status) {
     return undefined;
   }
-  // Summary is display content: surface it verbatim, matching the persisted state.
-  const summary = asVerbatimString(record.summary);
-  const error = asOptionalString(record.error);
   return {
     compactionId,
     status,
+    ...optionalCompactionFields(record),
+  };
+}
+
+type CompactionRecordShape = {
+  compaction_id?: unknown;
+  status?: unknown;
+  summary?: unknown;
+  error?: unknown;
+  after_messages?: unknown;
+};
+
+function compactionRecord(compaction: unknown): CompactionRecordShape | undefined {
+  if (!compaction || typeof compaction !== "object" || Array.isArray(compaction)) {
+    return undefined;
+  }
+  return compaction;
+}
+
+function optionalCompactionFields(record: CompactionRecordShape): Partial<AcpRuntimeCompaction> {
+  // Summary is display content: surface it verbatim, matching the persisted state.
+  const summary = asVerbatimString(record.summary);
+  const error = asOptionalString(record.error);
+  const afterMessages = asAfterMessages(record.after_messages);
+  return {
     ...(summary !== undefined ? { summary } : {}),
     ...(error ? { error } : {}),
+    ...(afterMessages !== undefined ? { afterMessages } : {}),
   };
+}
+
+function asAfterMessages(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    return undefined;
+  }
+  return value;
 }
 
 function asVerbatimString(value: unknown): string | undefined {

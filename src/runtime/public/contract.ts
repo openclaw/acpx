@@ -203,6 +203,13 @@ export type AcpRuntimeCompaction = {
   summary?: string;
   /** Human-readable error details on failed compactions. */
   error?: string;
+  /**
+   * Timeline placement: conversation messages received before this
+   * compaction's first notification. Populated on merged `getStatus()`
+   * entities only — wire-mirroring turn events omit it. Adjusted when
+   * message retention trims the head of the conversation.
+   */
+  afterMessages?: number;
 };
 
 /**

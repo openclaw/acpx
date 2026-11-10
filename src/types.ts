@@ -424,6 +424,8 @@ export type SessionCompactionState = {
   status: string;
   summary?: string;
   error?: string;
+  /** Messages received before this compaction's first notification; retention-adjusted. */
+  after_messages?: number;
 };
 
 export type SessionConversation = {

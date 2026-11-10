@@ -66,8 +66,9 @@ export function recordSessionUpdate(
     timestamp,
     userMessageId ?? randomUUID,
   );
+  const messagesBefore = conversation.messages.length;
   trimConversationForRuntime(conversation);
-  trimCompactionsForRuntime(acpx);
+  trimCompactionsForRuntime(acpx, messagesBefore - conversation.messages.length);
   return acpx;
 }
 

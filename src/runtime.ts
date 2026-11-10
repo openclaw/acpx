@@ -70,6 +70,7 @@ export type {
   AcpRuntime,
   AcpRuntimeAvailableCommand,
   AcpRuntimeCapabilities,
+  AcpRuntimeCompaction,
   AcpRuntimeDoctorReport,
   AcpRuntimeEnsureInput,
   AcpRuntimeEvent,

@@ -1,5 +1,5 @@
 import type { ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
-import { compactionSummaryText } from "../../prompt-content.js";
+import { compactionSummaryText, opaqueCompactionId } from "../../prompt-content.js";
 import type {
   AcpRuntimeAvailableCommand,
   AcpRuntimeCompaction,
@@ -644,7 +644,7 @@ function normalizeCompactionPayload(
   tag: AcpSessionUpdateTag,
   payload: Record<string, unknown>,
 ): AcpRuntimeCompaction | undefined {
-  const compactionId = asTrimmedString(payload.compactionId);
+  const compactionId = opaqueCompactionId(payload.compactionId);
   if (!compactionId) {
     return undefined;
   }

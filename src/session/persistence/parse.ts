@@ -4,6 +4,7 @@ import {
   resolveAgentArgvForCommand,
   type AgentLaunchIdentity,
 } from "../../acp/builtin-command-migration.js";
+import { opaqueCompactionId } from "../../prompt-content.js";
 import type {
   SessionAcpxState,
   SessionEventLog,
@@ -100,7 +101,7 @@ function parseCompaction(
   if (!record) {
     return undefined;
   }
-  const compactionId = parseNonEmptyString(record.compaction_id);
+  const compactionId = opaqueCompactionId(record.compaction_id);
   const status = parseNonEmptyString(record.status);
   if (!compactionId || !status) {
     return undefined;
@@ -108,12 +109,21 @@ function parseCompaction(
   // Summary is display content: keep it verbatim so later chunks append onto the same text.
   const summary = parseVerbatimString(record.summary);
   const error = parseNonEmptyString(record.error);
+  const afterMessages = parseAfterMessages(record.after_messages);
   return {
     compaction_id: compactionId,
     status,
     ...(summary !== undefined ? { summary } : {}),
     ...(error ? { error } : {}),
+    ...(afterMessages !== undefined ? { after_messages: afterMessages } : {}),
   };
+}
+
+function parseAfterMessages(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    return undefined;
+  }
+  return value;
 }
 
 function parseVerbatimString(value: unknown): string | undefined {

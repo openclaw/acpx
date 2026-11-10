@@ -211,7 +211,11 @@ each event mirrors its wire update only — absent fields mean "not in this
 update", not "cleared". Consumers tracking the entity across updates key on
 `compactionId`. The persisted session record merges updates per the ACP
 patch semantics, and `getStatus()` surfaces the merged entities as
-`compactions`.
+`compactions`. Summaries are normalized to text (non-text blocks are
+skipped, matching agent-message reduction); first-seen IDs initialize even
+when a chunk carries no text. Merged entities carry `afterMessages`, the
+count of conversation messages received before the first notification,
+adjusted when message retention trims the conversation head.
 
 ## Embedded runtime tool calls
 

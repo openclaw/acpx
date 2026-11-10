@@ -298,3 +298,16 @@ export function compactionSummaryText(blocks: readonly unknown[]): string | unde
   }
   return text.length > 0 ? text : undefined;
 }
+
+/**
+ * Validate an opaque agent-owned compaction ID: non-blank strings pass
+ * through verbatim, preserving identity (padded IDs stay distinct from
+ * their trimmed form). Shared by reduction, events, status, and reload
+ * so every layer keys the same entity.
+ */
+export function opaqueCompactionId(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.trim().length === 0) {
+    return undefined;
+  }
+  return value;
+}

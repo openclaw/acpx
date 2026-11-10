@@ -942,6 +942,22 @@ test("runtimeEventFromMessage handles compaction updates and summary chunks", ()
     eventFromSessionUpdate({ sessionUpdate: "compaction_update", compactionId: "c1" }),
     null,
   );
+  // Padded IDs stay verbatim; blank IDs are dropped.
+  const padded = eventFromSessionUpdate({
+    sessionUpdate: "compaction_update",
+    compactionId: " c1",
+    status: "completed",
+  });
+  assert.ok(padded?.type === "status");
+  assert.deepEqual(padded.compaction, { compactionId: " c1", status: "completed" });
+  assert.equal(
+    eventFromSessionUpdate({
+      sessionUpdate: "compaction_update",
+      compactionId: "   ",
+      status: "completed",
+    }),
+    null,
+  );
 });
 
 test("runtimeStatusFromRecord surfaces persisted compactions", () => {
@@ -955,12 +971,16 @@ test("runtimeStatusFromRecord surfaces persisted compactions", () => {
 
   record.acpx = {
     compactions: [
-      { compaction_id: "c1", status: "completed", summary: "done" },
+      { compaction_id: "c1", status: "completed", summary: "done", after_messages: 4 },
       { compaction_id: "c2", status: "paused_for_review", error: "waiting" },
+      { compaction_id: " c3", status: "in_progress", after_messages: -1 },
+      { compaction_id: "  ", status: "completed" },
     ],
   };
   assert.deepEqual(runtimeStatusFromRecord(record).compactions, [
-    { compactionId: "c1", status: "completed", summary: "done" },
+    { compactionId: "c1", status: "completed", summary: "done", afterMessages: 4 },
     { compactionId: "c2", status: "paused_for_review", error: "waiting" },
+    // Padded IDs stay verbatim; invalid anchors are dropped, blank IDs rejected.
+    { compactionId: " c3", status: "in_progress" },
   ]);
 });

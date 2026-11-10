@@ -1661,6 +1661,28 @@ class MockAgent implements Agent {
       return await this.runKillTerminalCommand(sessionId, rawCommand, signal);
     }
 
+    if (text === "compaction-demo") {
+      await this.sendAssistantMessage(sessionId, "before");
+      await this.connection.sessionUpdate({
+        sessionId,
+        update: { sessionUpdate: "compaction_update", compactionId: "demo", status: "in_progress" },
+      });
+      await this.connection.sessionUpdate({
+        sessionId,
+        update: {
+          sessionUpdate: "compaction_summary_chunk",
+          compactionId: "demo",
+          content: { type: "text", text: "Retained context" },
+        },
+      });
+      await this.connection.sessionUpdate({
+        sessionId,
+        update: { sessionUpdate: "compaction_update", compactionId: "demo", status: "completed" },
+      });
+      await this.sendAssistantMessage(sessionId, "after");
+      return "compaction-demo done";
+    }
+
     return `unrecognized prompt: ${text}`;
   }
 

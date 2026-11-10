@@ -2,6 +2,7 @@ import type {
   SessionAcpxState,
   SessionAgentContent,
   SessionAgentMessage,
+  SessionCompactionState,
   SessionConversation,
   SessionMessage,
   SessionToolResult,
@@ -46,7 +47,7 @@ export function trimConversationForRuntime(conversation: SessionConversation): v
   }
 }
 
-export function trimCompactionsForRuntime(state: SessionAcpxState): void {
+export function trimCompactionsForRuntime(state: SessionAcpxState, droppedMessages = 0): void {
   const compactions = state.compactions;
   if (!compactions || compactions.length === 0) {
     return;
@@ -55,12 +56,16 @@ export function trimCompactionsForRuntime(state: SessionAcpxState): void {
     state.compactions = compactions.slice(-MAX_RUNTIME_COMPACTIONS);
   }
   for (const compaction of state.compactions ?? []) {
-    if (compaction.summary !== undefined) {
-      compaction.summary = trimRuntimeText(
-        compaction.summary,
-        MAX_RUNTIME_COMPACTION_SUMMARY_CHARS,
-      );
-    }
+    trimRuntimeCompaction(compaction, droppedMessages);
+  }
+}
+
+function trimRuntimeCompaction(compaction: SessionCompactionState, droppedMessages: number): void {
+  if (compaction.summary !== undefined) {
+    compaction.summary = trimRuntimeText(compaction.summary, MAX_RUNTIME_COMPACTION_SUMMARY_CHARS);
+  }
+  if (compaction.after_messages !== undefined && droppedMessages > 0) {
+    compaction.after_messages = Math.max(0, compaction.after_messages - droppedMessages);
   }
 }
 
