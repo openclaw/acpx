@@ -8,8 +8,6 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
-- Sessions: preserve opaque pagination cursor bytes when listing agent sessions, so leading or trailing whitespace does not select a different page. Blank cursor arguments remain rejected.
-
 - Sessions: keep tool result text that agents report through ACP `content` blocks when they send no `rawOutput`, so saved sessions and the embedded runtime no longer record those results as empty. Thanks @saariuslystoned.
 
 - Runtime/embedding: keep cancellation of an already-settled turn from cancelling a later turn on the same reused session client. Thanks @saariuslystoned.
@@ -35,6 +33,8 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/import: launch an imported session with the destination's configured agent command and arguments instead of the source machine's saved launch arguments when the two commands differ. Thanks @saariuslystoned.
 
 - Shared runtime: `ensureSession()` no longer applies a creation-time `sessionOptions.model` to an existing persistent session, so reuse keeps its model and provider session instead of reconnecting. Thanks @saariuslystoned.
+
+- Sessions: preserve opaque pagination cursor bytes when listing agent sessions, so leading or trailing whitespace does not select a different page. Blank cursor arguments remain rejected.
 
 ## 0.22.0 - 2026-11-06
 
