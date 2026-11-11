@@ -420,6 +420,13 @@ async function unlinkCountingBytes(filePath: string): Promise<number> {
   } catch {
     // file already gone
   }
-  await fs.unlink(filePath).catch(() => undefined);
-  return bytes;
+  try {
+    await fs.unlink(filePath);
+    return bytes;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return 0;
+    }
+    throw error;
+  }
 }

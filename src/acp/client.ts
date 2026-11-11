@@ -684,6 +684,8 @@ export class AcpClient {
           this.rejectPendingConnectionRequests(error);
           connection?.close(error);
         },
+        // Read per line: shared queue clients change this option between turns.
+        () => this.options.suppressSdkConsoleErrors === true,
       ),
     );
 
@@ -2598,7 +2600,21 @@ export class AcpClient {
     exitCode: number | null,
     signal: NodeJS.Signals | null,
   ): void {
-    if (this.agent !== child || this.lastAgentExit) {
+    if (this.agent !== child) {
+      return;
+    }
+    const recorded = this.lastAgentExit;
+    if (recorded) {
+      // A crash usually closes the pipe before Node reports the exit status.
+      // Keep the first reason and add that status, but never a signal acpx
+      // sent while retiring the agent itself.
+      if (
+        recorded.unexpectedDuringPrompt &&
+        recorded.exitCode === null &&
+        recorded.signal === null
+      ) {
+        this.lastAgentExit = { ...recorded, exitCode, signal };
+      }
       return;
     }
 

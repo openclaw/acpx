@@ -543,7 +543,7 @@ When a prompt is already in flight for a session, `acpx` uses a per-session queu
 3. owner drains queued prompts one-by-one after each completed turn
 4. after the queue drains, owner waits for new work up to TTL (`--ttl`, default 300s)
 5. submitter either blocks until completion (default) or exits immediately with `--no-wait`
-6. if interrupted (`Ctrl+C`) during an active turn, `acpx` sends `session/cancel` first, waits briefly for cancelled completion, then force-kills only if needed
+6. foreground `Ctrl+C` cancels only that invocation's request: it removes a pending request or sends `session/cancel` for its active turn, without killing the shared owner (see [Session control](session-control.md))
 
 Slow submitters retain ordered live output in a temporary disk spool instead of
 an unbounded socket buffer. Each observer can retain up to 64 MiB of unread spool
@@ -752,6 +752,7 @@ Related runtime behavior:
 - child processes inherit the current environment by default
 - Windows shell commands keep stdout and stderr available through `terminal/output`. Terminal kill and release requests fail if process cleanup cannot finish after escalation. The terminal remains available for a cleanup retry; restore a working `taskkill` command before retrying.
 - ACP `terminal/create` honors agent `outputByteLimit`; `0` stores nothing and the default when omitted is 64 KiB. Hosts can opt into an additional per-terminal retention ceiling with `ACPX_TERMINAL_MAX_OUTPUT_BYTES` (for example, `16777216` for 16 MiB). Unset, empty, or zero disables only the host ceiling, preserving the agent limit and default. Positive values must be safe integers. The smaller limit applies to combined stdout and stderr, retaining the newest UTF-8 output and reporting `truncated: true` when exceeded. Truncation drops an incomplete leading code point across writes; the retained output can be empty if no complete code point fits. This bounds retained output per terminal, not total process memory. Each ACP client snapshots the setting at construction; restart warm queue owners to change it.
+- An ACP `terminal/create` whose command or `cwd` does not exist fails with the spawn error's `ENOENT` code; when acpx can tell which piece is missing, the error message names it: the working directory, the executable path, or a command that is not on the child `PATH`.
 
 ## Practical examples
 

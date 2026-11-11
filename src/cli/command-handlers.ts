@@ -48,6 +48,7 @@ import {
 } from "./invocation-options.js";
 import { emitJsonResult } from "./output/json-output.js";
 import { readPromptInput } from "./prompt-input.js";
+import { withPromptInterrupts, type ForegroundSubmission } from "./prompt-interruption.js";
 
 class NoSessionError extends Error {
   constructor(message: string) {
@@ -257,25 +258,37 @@ export async function handlePrompt(
   });
 
   await printPromptSessionBanner(record, agent.cwd, outputPolicy.format, outputPolicy.jsonStrict);
-  const result = await sendSession({
-    ...sessionConnectionOptions(globalFlags, config),
-    sessionId: record.acpxRecordId,
-    prompt,
-    mcpConfigPath: config.mcpConfigPath,
-    mcpConfigFingerprint: config.mcpConfigFingerprint,
-    permissionMode,
-    permissionPolicy,
-    outputFormatter,
-    errorEmissionPolicy: {
-      queueErrorAlreadyEmitted: outputPolicy.queueErrorAlreadyEmitted,
-    },
-    suppressSdkConsoleErrors: outputPolicy.suppressSdkConsoleErrors,
-    ttlMs: globalFlags.ttl,
-    maxQueueDepth: config.queueMaxDepth,
-    promptRetries: globalFlags.promptRetries,
-    waitForCompletion: promptFlags.wait,
-    sessionOptions: sessionOptionsFromGlobalFlags(globalFlags),
-  });
+  const send = (submission: ForegroundSubmission | undefined) =>
+    sendSession({
+      ...sessionConnectionOptions(globalFlags, config),
+      sessionId: record.acpxRecordId,
+      prompt,
+      mcpConfigPath: config.mcpConfigPath,
+      mcpConfigFingerprint: config.mcpConfigFingerprint,
+      permissionMode,
+      permissionPolicy,
+      outputFormatter,
+      errorEmissionPolicy: {
+        queueErrorAlreadyEmitted: outputPolicy.queueErrorAlreadyEmitted,
+      },
+      suppressSdkConsoleErrors: outputPolicy.suppressSdkConsoleErrors,
+      ttlMs: globalFlags.ttl,
+      maxQueueDepth: config.queueMaxDepth,
+      promptRetries: globalFlags.promptRetries,
+      waitForCompletion: promptFlags.wait,
+      sessionOptions: sessionOptionsFromGlobalFlags(globalFlags),
+      ...submission,
+    });
+  const result = promptFlags.wait
+    ? await withPromptInterrupts(send, async (targetRequestId) => {
+        const { tryCancelOnRunningOwner } = await import("../session/queue/ipc.js");
+        return await tryCancelOnRunningOwner({
+          sessionId: record.acpxRecordId,
+          targetRequestId,
+          verbose: globalFlags.verbose,
+        });
+      })
+    : await send(undefined);
 
   if ("queued" in result) {
     printQueuedPromptByFormat(result, outputPolicy.format);
@@ -1003,6 +1016,7 @@ export async function handleSessionsImport(
     newCwd: flags.destinationCwd ? path.resolve(globalFlags.cwd, flags.destinationCwd) : undefined,
     expectedAgentName: globalFlags.agent ? undefined : agent.agentName,
     expectedAgentCommand: agent.agentCommand,
+    expectedAgentArgv: agent.agentArgv,
   });
 
   if (

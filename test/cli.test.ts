@@ -783,7 +783,7 @@ for (const capability of ["--supports-load-session", "--supports-resume-session"
         assert.equal(stored.closed, false, `resume attempt ${attempt + 1}`);
         assert.equal(stored.acp_session_id, "same-resume");
       }
-      const prompted = await runCli([...base, "--ttl", "0", "prompt", "hello"], homeDir, {
+      const prompted = await runCli([...base, "--ttl", "0.01", "prompt", "hello"], homeDir, {
         timeoutMs: 10_000,
       });
       assert.equal(prompted.code, 0, prompted.stderr);
@@ -3320,6 +3320,37 @@ test("CLI rejects blank raw-agent overrides before reading input or launching it
     assert.equal(control.code, 0, control.stderr);
     assert.equal(control.stdout.trim(), "default-control");
     await fs.access(pidFile);
+  });
+});
+
+test("invalid option values are reported once in text and quiet output", async () => {
+  await withTempHome(async (homeDir) => {
+    for (const entry of [
+      { args: ["--timeout", "abc", "codex", "hello"], message: /argument 'abc' is invalid/ },
+      {
+        args: ["codex", "sessions", "history", "--limit", "0"],
+        message: /argument '0' is invalid/,
+      },
+    ]) {
+      const text = await runCli(["--cwd", homeDir, "--format", "text", ...entry.args], homeDir);
+      assert.equal(text.code, 2, text.stderr);
+      assert.equal(text.stderr.split("\n").filter((line) => entry.message.test(line)).length, 1);
+      assert.match(text.stderr, /Usage: acpx/);
+
+      const quiet = await runCli(["--cwd", homeDir, "--format", "quiet", ...entry.args], homeDir);
+      assert.equal(quiet.code, 2, quiet.stderr);
+      assert.equal(quiet.stdout, "");
+      assert.match(quiet.stderr, /^\[acpx\] error: USAGE [^\n]+\n$/u);
+      assert.match(quiet.stderr, entry.message);
+    }
+
+    // Usage errors thrown by command actions bypass Commander output and stay visible.
+    const action = await runCli(
+      ["--cwd", homeDir, "--format", "text", "compare", "codex"],
+      homeDir,
+    );
+    assert.equal(action.code, 2, action.stderr);
+    assert.equal(action.stderr, "Usage: acpx compare <agent>... '<prompt>'\n");
   });
 });
 

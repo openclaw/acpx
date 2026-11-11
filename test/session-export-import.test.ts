@@ -760,6 +760,55 @@ async function importArchiveSavedUnderCommand(
   });
 }
 
+for (const scenario of [
+  {
+    name: "launches the destination argv after built-in command drift",
+    target: "npm exec --package=pi-acp@0.0.2 -- pi-acp",
+    targetArgv: ["npm", "exec", "--package=pi-acp@0.0.2", "--", "pi-acp"],
+    expectedArgv: ["npm", "exec", "--package=pi-acp@0.0.2", "--", "pi-acp"],
+  },
+  {
+    name: "drops stale archived argv for a changed command-only destination",
+    target: "npm exec --package=pi-acp@0.0.2 -- pi-acp",
+    targetArgv: undefined,
+    expectedArgv: undefined,
+  },
+  {
+    name: "keeps archived argv when the destination command is unchanged",
+    target: "npx pi-acp@0.0.1",
+    targetArgv: undefined,
+    expectedArgv: ["npx", "pi-acp@0.0.1"],
+  },
+]) {
+  test(`importSession ${scenario.name}`, async () => {
+    await withTempHome("acpx-import-argv-", async (homeDir) => {
+      const source = makeSessionRecord({
+        acpxRecordId: "source-record",
+        acpSessionId: "provider-session",
+        agentCommand: "npx pi-acp@0.0.1",
+        agentArgv: ["npx", "pi-acp@0.0.1"],
+        cwd: homeDir,
+        name: "carry",
+      });
+      await writeSessionRecordFile(homeDir, source);
+      const archivePath = path.join(homeDir, "archive.json");
+      await exportSession(
+        { agentCommand: source.agentCommand, cwd: homeDir, name: "carry" },
+        archivePath,
+      );
+      await fs.rm(sessionFilePath(homeDir, source.acpxRecordId));
+      const imported = await importSession(archivePath, {
+        expectedAgentName: "pi",
+        expectedAgentCommand: scenario.target,
+        expectedAgentArgv: scenario.targetArgv,
+      });
+      const record = await resolveSessionRecord(imported.record_id);
+      assert.equal(record.agentCommand, scenario.target);
+      assert.deepEqual(record.agentArgv, scenario.expectedArgv);
+    });
+  });
+}
+
 test("importSession ignores stale agent_name when commands match exactly", async () => {
   await withTempHome("acpx-export-import-", async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");

@@ -33,7 +33,7 @@ Sends ACP `session/cancel` cooperatively:
 - If a native prompt is active, acpx asks the adapter to cancel it; the adapter's reply determines the final stop reason.
 - If nothing is running, `acpx` prints `nothing to cancel` and exits success.
 
-This is the same semantics as `Ctrl+C` during a foreground turn, but available without a TTY signal — useful from scripts and other agents.
+Foreground `Ctrl+C` cancels only the interrupted invocation's own prompt: a queued prompt is removed, an active one gets the cooperative cancellation above. Another client's turn is never cancelled and the shared owner is not killed. The command exits `130` once the cancel request settles; if the owner does not respond within a few seconds it reports that the outcome is unknown. `--no-wait` submissions and `sessions watch` only detach.
 
 Accepted cancellation stops remaining queued-turn attempts during retry backoff
 or before the next transport write. Cancellation during backoff records a

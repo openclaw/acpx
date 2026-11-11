@@ -1647,11 +1647,11 @@ export class AcpRuntimeManager {
     task: RuntimeTurnTask,
     turn: RunningRuntimeTurn,
   ): Promise<boolean> {
-    if (turn.client.hasActivePrompt()) {
-      return await turn.client.requestCancelActivePrompt();
-    }
     if (!task.state.turnActive) {
       return false;
+    }
+    if (turn.client.hasActivePrompt()) {
+      return await turn.client.requestCancelActivePrompt();
     }
     task.state.pendingCancel = true;
     return true;

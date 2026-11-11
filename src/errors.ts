@@ -72,6 +72,35 @@ export function spawnEnoentHint(context: SpawnPathContext): string {
   }
 }
 
+/**
+ * Prefixes a spawn ENOENT with the launch path that was missing.
+ * Other errors pass through unchanged.
+ */
+export function describeSpawnEnoent(
+  error: unknown,
+  prefix: string,
+  context: SpawnPathContext,
+): unknown {
+  const spawnError = error as NodeJS.ErrnoException;
+  if (
+    !(error instanceof Error) ||
+    spawnError.code !== "ENOENT" ||
+    !spawnError.syscall?.startsWith("spawn")
+  ) {
+    return error;
+  }
+  // Node records the executable it actually launched, including an explicit or default shell.
+  const hint = spawnEnoentHint({ ...context, command: spawnError.path ?? context.command });
+  const described = new Error(`${prefix}${hint}${error.message}`, { cause: error });
+  // Keep the errno fields so callers that branch on `code` see the same failure.
+  return Object.assign(described, {
+    code: spawnError.code,
+    errno: spawnError.errno,
+    syscall: spawnError.syscall,
+    path: spawnError.path,
+  });
+}
+
 export class AgentSpawnError extends AcpxOperationalError {
   readonly agentCommand: string;
 

@@ -10,6 +10,32 @@ Repo: https://github.com/openclaw/acpx
 
 - Sessions: preserve opaque pagination cursor bytes when listing agent sessions, so leading or trailing whitespace does not select a different page. Blank cursor arguments remain rejected.
 
+- Sessions: keep tool result text that agents report through ACP `content` blocks when they send no `rawOutput`, so saved sessions and the embedded runtime no longer record those results as empty. Thanks @saariuslystoned.
+
+- Runtime/embedding: keep cancellation of an already-settled turn from cancelling a later turn on the same reused session client. Thanks @saariuslystoned.
+
+- Sessions: keep the exit code or signal of an agent that crashes mid-turn when its stdout closes before the process exit is reported, so `status` reports the session as dead and `sessions show` lists the exit code. Thanks @saariuslystoned.
+
+- CLI: `Ctrl+C` on a foreground session prompt now cancels that prompt (dequeues it or sends `session/cancel`) instead of leaving it running in the queue owner. Thanks @saariuslystoned.
+
+- Sessions: wait up to 60 seconds for a newly started queue owner instead of about six, so the first prompt on a slow or heavily loaded host no longer fails with "Session queue owner failed to start". Thanks @saariuslystoned.
+
+- CLI: report invalid option values once in text output, and as a single `[acpx] error: USAGE` line in quiet output instead of the full help plus the raw error. Thanks @saariuslystoned.
+
+- Sessions/prune: fail with the filesystem error when a selected file cannot be deleted instead of reporting success and freed bytes. Thanks @saariuslystoned.
+
+- CLI: preserve the interrupted exit status while cancellation and connection cleanup settle an in-flight one-shot command. Thanks @saariuslystoned.
+
+- Output: keep agent stdout parse diagnostics off stderr in `--format json --json-strict` and `--format quiet`, so strict JSON pipelines and quiet scripts no longer get a stack trace when an adapter prints a non-JSON line. Thanks @saariuslystoned.
+
+- Flows: `flow run` now rejects an empty `--input-json` or `--input-file` argument (for example an unset shell variable) instead of silently running the flow with `{}`. Thanks @saariuslystoned.
+
+- ACP/terminals: identify missing executable paths and working directories in `terminal/create` startup errors while preserving the original `ENOENT` details. Thanks @KrasimirKralev.
+
+- Sessions/import: launch an imported session with the destination's configured agent command and arguments instead of the source machine's saved launch arguments when the two commands differ. Thanks @saariuslystoned.
+
+- Shared runtime: `ensureSession()` no longer applies a creation-time `sessionOptions.model` to an existing persistent session, so reuse keeps its model and provider session instead of reconnecting. Thanks @saariuslystoned.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.

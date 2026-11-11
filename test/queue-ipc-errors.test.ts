@@ -323,6 +323,57 @@ test(
   },
 );
 
+test(
+  "a queue owner that binds after several seconds still accepts the first prompt",
+  { timeout: 60_000 },
+  async () => {
+    await withTempHome(async (homeDir) => {
+      const sessionId = "slow-owner-startup";
+      await writeSessionRecordFile(
+        homeDir,
+        makeSessionRecord({
+          acpxRecordId: sessionId,
+          acpSessionId: "slow-owner-agent-session",
+          cwd: homeDir,
+          agentCommand: process.execPath,
+          agentArgv: [
+            process.execPath,
+            fileURLToPath(new URL("./mock-agent.js", import.meta.url)),
+            "--supports-load-session",
+          ],
+        }),
+      );
+      // Stand in for a loaded host: the owner process spends 8 s before it
+      // loads acpx and binds its socket.
+      const delay = `${homeDir}/slow-owner-boot.mjs`;
+      await fs.writeFile(
+        delay,
+        "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 8000);\n",
+      );
+      try {
+        const outcome = await sendSession({
+          sessionId,
+          prompt: [{ type: "text", text: "echo slow-owner-ok" }],
+          permissionMode: "deny-all",
+          outputFormatter: NOOP_OUTPUT_FORMATTER,
+          resumePolicy: "same-session-only",
+          ttlMs: 1,
+          queueOwnerArgs: [
+            "--import",
+            delay,
+            fileURLToPath(new URL("../src/cli.js", import.meta.url)),
+            "__queue-owner",
+          ],
+        });
+        assert(!("queued" in outcome));
+        assert.equal(outcome.stopReason, "end_turn");
+      } finally {
+        await terminateQueueOwnerForSession(sessionId);
+      }
+    });
+  },
+);
+
 test("legacy owners reject shared submission and targeted cancellation before receiving requests", async () => {
   await withTempHome(async (homeDir) => {
     const sessionId = "legacy-owner";

@@ -425,3 +425,53 @@ test("pruneSessions without agentCommand prunes all closed sessions across all a
     assert.ok(await fileExists(sessionFilePath(homeDir, "all-open")));
   });
 });
+
+async function writeClosedSessionWithHistory(homeDir: string, id: string): Promise<string> {
+  await writeSessionRecord(
+    homeDir,
+    makeSessionRecord({
+      acpxRecordId: id,
+      acpSessionId: id,
+      agentCommand: "agent-a",
+      cwd: path.join(homeDir, "workspace"),
+      closed: true,
+    }),
+  );
+  const record = sessionFilePath(homeDir, id);
+  await fs.writeFile(record.replace(/\.json$/, ".stream.ndjson"), "history\n");
+  return record;
+}
+
+test("pruneSessions propagates unlink failures instead of reporting success", async (t) => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const record = await writeClosedSessionWithHistory(homeDir, "failed-delete");
+    const failure = Object.assign(new Error("permission denied"), { code: "EACCES" });
+    t.mock.method(fs, "unlink", async () => {
+      throw failure;
+    });
+
+    await assert.rejects(session.pruneSessions({ includeHistory: true }), failure);
+    assert.ok(await fileExists(record));
+  });
+});
+
+test("pruneSessions does not count bytes for a file deleted concurrently", async (t) => {
+  await withTempHome(async (homeDir) => {
+    const session = await loadSessionModule();
+    const record = await writeClosedSessionWithHistory(homeDir, "concurrent-delete");
+    const historySize = (await fs.stat(record.replace(/\.json$/, ".stream.ndjson"))).size;
+    const unlink = fs.unlink.bind(fs);
+    t.mock.method(fs, "unlink", async (file: Parameters<typeof fs.unlink>[0]) => {
+      if (file === record) {
+        // Another remover wins between stat and unlink.
+        await unlink(file);
+      }
+      await unlink(file);
+    });
+
+    const result = await session.pruneSessions({ includeHistory: true });
+    assert.equal(result.pruned.length, 1);
+    assert.equal(result.bytesFreed, historySize);
+  });
+});
